@@ -91,6 +91,27 @@
   @keyframes mascot-blink{0%,90%,100%{transform:scaleY(1)}94%{transform:scaleY(.08)}97%{transform:scaleY(1)}}
   @keyframes mascot-blush{0%,100%{opacity:.5}50%{opacity:.72}}
   @media (prefers-reduced-motion:reduce){.mascot,.mascot-body,.mascot-eye,.mascot-blush{animation:none!important}}
+
+  /* —— 交互彩蛋演示 —— */
+  .egg-sec{margin:8px 0 4px}
+  .egg-stage{display:flex;justify-content:center;margin:10px 0 18px}
+  .egg-btns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+  .egg-btn{font-family:var(--serif);font-size:13px;cursor:pointer;color:var(--ink-2);
+    border:1px solid var(--line-strong);background:var(--card);border-radius:999px;padding:7px 16px;
+    transition:border-color .14s ease,background .14s ease,color .14s ease}
+  .egg-btn:hover{border-color:var(--gold);color:var(--gold-ink);background:rgba(200,137,42,.08)}
+  .egg-btn.on{border-color:var(--gold);color:var(--gold-ink);background:rgba(200,137,42,.12)}
+  /* 彩蛋动画补充（与前端 mascot.css 同款） */
+  .mascot-mouth-o{display:none}
+  .mascot.thinking .mascot-mouth-smile{display:none}
+  .mascot.thinking .mascot-mouth-o{display:block}
+  .mascot.thinking .mascot-body{animation-duration:.85s}
+  .mascot-tilt{transform-box:fill-box;transform-origin:50% 64%}
+  .mascot.tilt .mascot-tilt{animation:mascot-tilt .6s cubic-bezier(.34,1.45,.34,1)}
+  .mascot.happy .mascot-eye{animation:mascot-blink-once .7s ease}
+  @keyframes mascot-tilt{0%{transform:rotate(0)}35%{transform:rotate(-13deg)}62%{transform:rotate(-8deg)}100%{transform:rotate(0)}}
+  @keyframes mascot-blink-once{0%,38%{transform:scaleY(1)}52%{transform:scaleY(.08)}68%,100%{transform:scaleY(1)}}
+  @media (prefers-reduced-motion:reduce){.mascot-tilt{animation:none!important}}
 </style>
 </head>
 <body>
@@ -253,6 +274,67 @@
       </div>
     </div>
   </div>
+
+  <!-- ============ 交互彩蛋演示 ============ -->
+  <section class="egg-sec">
+    <h2 class="sec">交互彩蛋 · 点了试试</h2>
+    <p class="sec-note">
+      A 款吉祥物已经接进应用了——它会眨眼、漂浮、摇摆、腮红呼吸。下面三个按钮对应它在真实界面里的三个时机：
+      正在思考、回答完毕、切换模式。
+    </p>
+    <div class="egg-stage">
+      <div class="chip light" style="padding:34px">
+        <svg id="eggMascot" class="svgl mascot" width="170" height="170" viewBox="0 0 120 120" style="color:#3D2F1A">
+          <g class="mascot-tilt" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M52 22 C51 15 55 11 60 10 M60 22 C60 14 63 11 67 9 M67 22 C69 16 72 14 76 13" fill="none" stroke="#2A2014" stroke-width="4"/>
+            <g class="mascot-body">
+              <path d="M42 78 C28 80 19 92 17 106 C31 104 42 95 46 84 Z" fill="#7C9A54" stroke="#2A2014" stroke-width="5"/>
+              <path d="M78 78 C92 80 101 92 103 106 C89 104 78 95 74 84 Z" fill="#8FAF62" stroke="#2A2014" stroke-width="5"/>
+              <rect x="37" y="24" width="46" height="68" rx="23" fill="#F5B840" stroke="#2A2014" stroke-width="5"/>
+              <g class="mascot-blush">
+                <ellipse cx="44.5" cy="64" rx="4.2" ry="2.6" fill="#EF8A56" opacity=".55"/>
+                <ellipse cx="75.5" cy="64" rx="4.2" ry="2.6" fill="#EF8A56" opacity=".55"/>
+              </g>
+              <g class="mascot-eye">
+                <circle cx="52" cy="57" r="4.6" fill="#2A2014"/><circle cx="68" cy="57" r="4.6" fill="#2A2014"/>
+                <circle cx="53.6" cy="55.4" r="1.7" fill="#FFFDF6"/><circle cx="69.6" cy="55.4" r="1.7" fill="#FFFDF6"/>
+              </g>
+              <path class="mascot-mouth-smile" d="M53.5 67 Q60 73 66.5 67" fill="none" stroke="#2A2014" stroke-width="4"/>
+              <ellipse class="mascot-mouth-o" cx="60" cy="69" rx="3.4" ry="4" fill="none" stroke="#2A2014" stroke-width="4"/>
+              <path d="M45 31 C48 27 53 25 58 25" fill="none" stroke="#FFFFFF" stroke-width="4" opacity=".5"/>
+            </g>
+          </g>
+        </svg>
+      </div>
+    </div>
+    <div class="egg-btns">
+      <button id="btnThink" class="egg-btn" type="button">思考中（嘴变○）</button>
+      <button id="btnBlink" class="egg-btn" type="button">回答完 · 眨个眼</button>
+      <button id="btnTilt" class="egg-btn" type="button">切换模式 · 歪头</button>
+    </div>
+  </section>
+
+  <script>
+    (function () {
+      var m = document.getElementById('eggMascot');
+      var bT = document.getElementById('btnThink');
+      var thinkTimer;
+      bT.addEventListener('click', function () {
+        var on = m.classList.toggle('thinking');
+        bT.classList.toggle('on', on);
+        clearTimeout(thinkTimer);
+        if (on) { thinkTimer = setTimeout(function () { m.classList.remove('thinking'); bT.classList.remove('on'); }, 3200); }
+      });
+      document.getElementById('btnBlink').addEventListener('click', function () {
+        m.classList.remove('happy'); void m.offsetWidth; m.classList.add('happy');
+        setTimeout(function () { m.classList.remove('happy'); }, 800);
+      });
+      document.getElementById('btnTilt').addEventListener('click', function () {
+        m.classList.remove('tilt'); void m.offsetWidth; m.classList.add('tilt');
+        setTimeout(function () { m.classList.remove('tilt'); }, 700);
+      });
+    })();
+  </script>
 
   <footer>
     <p><b>怎么选</b>：回一句编号（比如「选 A」）即可；也可以说「A 但不要脸」这种混搭——都是矢量画的，改起来快。</p>
