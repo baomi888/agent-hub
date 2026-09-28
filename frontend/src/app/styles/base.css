@@ -1,0 +1,62 @@
+/* ============ 基础 ============ */
+html, body {
+  height: 100%;
+  /* 应用外壳固定视口：main 自带 14px 外边距会上边距塌陷顶出 14px 溢出，
+     干脆禁止整页滚动，滚动都发生在内部容器里 */
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body {
+  background:
+    radial-gradient(1100px 760px at 8% 4%, var(--canvas-light) 0%, rgba(255, 251, 240, 0) 52%),
+    radial-gradient(900px 700px at 96% 100%, rgba(150, 118, 70, 0.10) 0%, transparent 55%),
+    linear-gradient(135deg, var(--desk-0) 0%, var(--desk-1) 100%);
+  color: var(--text-1);
+  /* 走 --font-sans 令牌：过去这里硬写一串字体族，
+     与 @theme 里 --font-sans 的 fallback 链不一致，按钮/继承处会换一套 fallback */
+  font-family: var(--font-sans);
+  font-size: var(--fs-lg);
+  line-height: var(--lh-body);
+  font-weight: 400;
+  /* 关掉合成加粗：--font-serif 首选的 LXGW WenKai 官方大多只有 Regular 一档，
+     请求 700 时浏览器会用描边加粗糊出来，中文笔画密集，10-14px 处最明显。
+     关掉合成不影响真粗体——装了 Bold 或可变字体（本机是 NotoSerifSC-VF）时照常出真 700，
+     只有 Regular 时才退回常规字重，层级交给字号与颜色承担 */
+  font-synthesis-weight: none;
+  -webkit-font-smoothing: antialiased;
+  /* 不再对 background 做过渡：切主题时整页重绘 300ms，是最贵的一次动画 */
+  transition: color 0.2s ease;
+}
+
+.dark body {
+  background:
+    radial-gradient(1100px 760px at 8% 4%, rgba(255, 240, 210, 0.06) 0%, transparent 52%),
+    radial-gradient(900px 700px at 96% 100%, rgba(120, 90, 50, 0.12) 0%, transparent 55%),
+    linear-gradient(135deg, var(--desk-0) 0%, var(--desk-1) 100%);
+}
+
+button, input, textarea, select {
+  font-family: inherit;
+}
+
+main {
+  position: relative;
+  z-index: 1;
+  margin: 14px;
+  /* 关键修复：原来靠 h-screen + margin，比视口高 28px，底部被裁 */
+  height: calc(100vh - 28px);
+  height: calc(100dvh - 28px);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow:
+    0 6px 22px rgba(0, 0, 0, 0.32),
+    0 0 0 1px rgba(255, 255, 255, 0.07),
+    inset 16px 0 34px -26px rgba(61, 47, 26, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  /* 纸面左上受光 + 左侧书脊凹影，像翻开的一本笔记本 */
+  background:
+    linear-gradient(100deg, var(--canvas-light) 0%, rgba(255, 251, 240, 0) 46%),
+    var(--bg-canvas);
+}
+

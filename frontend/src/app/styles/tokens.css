@@ -1,0 +1,287 @@
+/* ============================================================
+   主题令牌：苞米地笔记本
+   暖米黄糙纸 / 暖墨 / 成熟玉米金；小圆角、极淡投影、纸张纹理
+   ============================================================ */
+:root {
+  /* ---- 明度三级阶梯：全站只有这三个纸面色值 ----
+     ΔL* = +4.2 / +3.5，相邻两档肉眼可分。
+     过去散着五个值（bg 93.8 → canvas 94.8 → panel 95.8 → card 98.3，sidebar 90.6），
+     相邻 ΔL* 只有 +1.0 / +1.0 / +2.5，人眼分辨不出，卡片只能靠 1px 描边硬撑出边界。
+     面板与画布同处一档：这一层的分界交给描边，不靠明度差 */
+  --step-0: #EDE4C8; /* L* 90.6  最底层的纸 / 侧栏 */
+  --step-1: #F5F0E1; /* L* 94.8  主画布 / 面板 */
+  --step-2: #FDFAF2; /* L* 98.3  抬起的卡片 */
+  /* 桌面：纸摊在它上面，只用于 body 底色，不参与组件 */
+  --desk-0: #F3EAD8;
+  --desk-1: #E7DCC2;
+
+  --bg: var(--step-0);
+  --bg-canvas: var(--step-1);
+  --bg-sidebar: var(--step-0);
+  /* 填充四级：全站所有「不是纸面、不是实色」的底色都从这里取。
+     全部用中性暖墨 alpha（浅）/ 暖白 alpha（深），不带金色——
+     金色留给「这一项是选中的 / 这是主操作」，不用来表示「鼠标在上面」。
+     过去 hover 淡底散着 --accent-soft(金.10) / --bg-subtle(金.08) / 各家自写的 rgba(61,47,26,.06)，
+     同一张纸上 hover 出来的颜色深浅不一，金底还会把纸染黄。
+     使用规则：fill-1 按下/最重，fill-2 hover，fill-3 静态淡底，fill-4 分隔与斑马纹 */
+  --fill-1: rgba(61, 47, 26, 0.12);
+  --fill-2: rgba(61, 47, 26, 0.07);
+  --fill-3: rgba(61, 47, 26, 0.035);
+  --fill-4: rgba(61, 47, 26, 0.018);
+  --bg-subtle: var(--fill-3);
+  /* 纸面与墨色只在这里写一次实际色值，其余全是 var() 别名。
+     过去 --panel/--surface/--paper、--ink/--text-1/--solid 是同值多名字，改一处会漏三处 */
+  --panel: var(--step-1);
+  --card-bg: var(--step-2);
+  --surface: var(--step-1);
+  --ink: #3D2F1A;
+  --paper: var(--panel);
+  --solid: var(--ink);
+  --solid-text: var(--panel);
+  --text-1: var(--ink);
+  /* 对比度收敛：次级 6.3:1、弱文字 4.9:1（对侧栏纸色 #EDE4C8），
+     原来的 #6B5D45 / #A89878 在纸底只有 5.6:1 / 2.46:1，弱文字基本看不清 */
+  --text-2: #5A4C33;
+  --text-3: #6F6044;
+  --accent: #C8892A;
+  /* 金色的可读版本：10-12px 的眉题/序号用它，#C8892A 在纸底只有 2.6:1。
+     #875B10 在最暗的侧栏纸 #EDE4C8 上仍有 4.68:1，三个明度层都过 AA */
+  --accent-ink: #875B10;
+  --accent-soft: rgba(200, 137, 42, 0.10);
+  --red: #B4472F;
+  /* 语义红的可读版本：浅底上的正文/警示文字用它。
+     与 --accent / --accent-ink 同一套分工 --red 只有 ~3.4:1，--red-ink 是 5.5:1 */
+  --red-ink: #A03E28;
+  /* 语义色补齐：过去只有 accent(金) 与 red 两个语义，success 直接硬写 rgba(30,122,70,.9)、
+     info 没有独立色、warning 与 accent 混用，改一次绿要翻三个文件。
+     每个语义两个令牌，与 accent / accent-ink 同一套分工：
+       本名 = 实心填充/图形（上面压白字），-ink = 纸底上的文字。
+     浅色三档文字对最暗的侧栏纸 #EDE4C8 分别是 5.03 / 4.66 / 5.65，均过 AA */
+  --success: #1E7A46; /* 白字 5.35:1 */
+  --success-ink: #2A6B45;
+  /* 红底白字专用：深色的 --red 是提亮过的 #D9705A，压白字只有 2.9:1。
+     描边/图标用 --red，纸底文字用 --red-ink，实心底 + 白字用 --red-solid（6.0:1） */
+  --red-solid: #B4472F;
+  --warning: #8A5A0A; /* 白字 5.92:1 */
+  --warning-ink: #7A4E08;
+  --info: #2A5A8A; /* 白字 7.17:1 */
+  --info-ink: #2A5A8A;
+  --line: rgba(61, 47, 26, 0.10);
+  --line-strong: rgba(61, 47, 26, 0.25);
+  --scrollbar: rgba(61, 47, 26, 0.20);
+  --input-border: #D8CCB0;
+
+  /* 复合令牌：把散落的硬编码纸面/描边/柔影收口 */
+  --veil: rgba(255, 253, 246, 0.72);
+  --veil-strong: rgba(255, 253, 246, 0.88);
+  --accent-line: rgba(200, 137, 42, 0.15);
+  --accent-line-soft: rgba(200, 137, 42, 0.12);
+  /* 阴影只留两级：一是贴在纸上的薄卡，二是抬起/浮层。
+     过去散落着 0 4px 12px rgba(30,26,18,.2)、0 8px 20px var(--glow) 这类重值，
+     纸会被压成塑料片；规范 2.6 要的是 0 2px 8px rgba(61,47,26,.06) 那一档 */
+  --shadow-1: 0 1px 2px rgba(80, 60, 30, 0.06);
+  --shadow-2: 0 2px 8px rgba(80, 60, 30, 0.10);
+  --glow: rgba(200, 137, 42, 0.18);
+
+  /* 过渡统一两档：颜色类只动真正会变的属性（140ms），位移类只留给两个主操作组件。
+     过去 21 处复制粘贴「transform + box-shadow + background + border + color + opacity」全包，
+     任何 hover 都是一段"什么都在一起糊"的中间态 */
+  --t-color: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease,
+    opacity 0.14s ease;
+  --t-move: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.22s ease;
+  /* 纸面左上受光：主画布的左上高光，营造"光从左边来" */
+  --canvas-light: rgba(255, 251, 240, 0.85);
+  color-scheme: light;
+
+  /* 纸张纤维噪点：书脊用暖褐、全页桌面上用中性白，均以 alpha 烘焙，无需 blend-mode */
+  --noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.04' numOctaves='2' seed='5'/%3E%3CfeColorMatrix values='0 0 0 0 0.55 0 0 0 0 0.45 0 0 0 0 0.28 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --grain-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' seed='9'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 0.96 0 0 0 0 0.88 0 0 0 0.055 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
+
+  /* 圆角四档：xs 角标 / sm 小控件 / md 卡片 / lg 大容器。
+     过去取值有 23 种（2/4/5/6/8/10/11/12/14/16/20px…），挨着的组件形态互相打架。
+     胶囊一律用 999px，正圆用 50%——这两个不受四档约束。
+     注意：Tailwind v4 自己也定义了 --radius-*（默认 2/4/6/8/12/16/24/32px），
+     tsx 里的 rounded-lg / rounded-xl / rounded 就解析到同名变量。
+     这里把 xl 以上一并接管过来，否则手写 CSS 与工具类会长成两套尺寸 */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: var(--radius-lg);
+  --radius-2xl: var(--radius-lg);
+  --radius-3xl: var(--radius-lg);
+  --radius-4xl: var(--radius-lg);
+
+  --ring-accent: 0 0 0 3px rgba(200, 137, 42, 0.35);
+
+  /* 行高三档。过去全文有 12 种取值（1 / 1.2 / 1.3 / 1.4 / 1.45 / 1.5 / 1.6 / 1.65 /
+     1.7 / 1.78 / 1.9 / 15px），同层级的文字只是"当初手写的那个数"。
+     tight 给标题与短标签，body 给说明文字，loose 给需要连续阅读的对话正文。
+     两处例外不进三档：角标/徽章的 line-height: 1 与 15px 是"行高即高度" */
+  --lh-tight: 1.4;
+  --lh-body: 1.65;
+  --lh-loose: 1.9;
+
+  /* 字距三档。过去 9 种（0.02 / 0.03 / 0.04 / 0.06 / 0.08 / 0.1 / 0.12 / 0.16 / 0.22em），
+     wide 只给中文眉题（字少、要撑开），mid 给按钮和标签，tight 给正文与链接 */
+  --ls-wide: 0.2em;
+  --ls-mid: 0.06em;
+  --ls-tight: 0.04em;
+
+  /* 字号阶梯：全站字号只有这五档，另有两个例外档。
+     过去 CSS 与 tsx 里散着 14 种值（10 / 10.5 / 11 / 11.5 / 12 / 12.5 / 13 / 13.5 /
+     14 / 14.5 / 15 / 16 / 20 / 34），相邻 0.5px 的差别纯属"当初手写的那个数"。
+     badge 10 是角标/序号的例外（字少、要挤进 18px 高的胶囊），
+     title 20 是面板标题的例外（衬线，需要比正文跳一档）。
+     两者都不参与五档递推，其余一律落在 xs~xl 上 */
+  --fs-badge: 10px; /* 角标、序号、徽章 */
+  --fs-xs: 11px; /* 元信息、时间戳、次要说明 */
+  --fs-sm: 12px; /* 工具条、按钮、标签 */
+  --fs-md: 13px; /* 列表项、卡片正文 */
+  --fs-lg: 14px; /* 正文基准、输入框 */
+  --fs-xl: 16px; /* 强调数字、空状态标题 */
+  --fs-title: 20px; /* 面板/浮层标题（衬线） */
+
+  /* 阅读栏宽：聊天区三处容器共用。宽屏下让栏宽随屏幕增长一点，
+     否则 2560px 屏上中间一条 720px 的细带，两侧全是空纸 */
+  --measure: 720px;
+
+  /* 聊天正文字号（用户可在侧边栏调节，档位写在 html[data-fs] 上）
+     欢迎页标题从它派生，保持标题/正文的比例关系 */
+  --msg-fs: 15px;
+  --hero-fs: calc(var(--msg-fs, 15px) * 2.2667); /* 34px @ 标准 */
+}
+
+/* 字号档位：跟随系统 / 小 / 标准(默认,不写属性) / 大
+   auto 用 rem：浏览器默认字号改变时（16px 基准），正文字号随之缩放 */
+html[data-fs="auto"] {
+  --msg-fs: 0.9375rem; /* 15px @ 16px 根字号 */
+}
+html[data-fs="s"] {
+  --msg-fs: 13.5px;
+}
+html[data-fs="l"] {
+  --msg-fs: 16.5px;
+}
+
+/* 宽屏：阅读栏随屏加宽一档，别让 2560px 屏上只剩中间一条细带 */
+@media (min-width: 1600px) {
+  :root {
+    --measure: 800px;
+  }
+}
+
+.dark {
+  /* 深色同样三级，ΔL* = +2.7 / +3.5（原先挤在 7.5 / 9.5 / 10.7 / 12.7） */
+  --step-0: #1A1610; /* L* 7.5   最底层的纸 / 侧栏 */
+  --step-1: #211B11; /* L* 10.2  主画布 / 面板 */
+  --step-2: #292217; /* L* 13.7  抬起的卡片 */
+  --desk-0: #211B12;
+  --desk-1: #181309;
+
+  --bg: var(--step-0);
+  --bg-canvas: var(--step-1);
+  --bg-sidebar: var(--step-0);
+  --bg-subtle: rgba(224, 160, 58, 0.09);
+  --panel: var(--step-1);
+  --card-bg: var(--step-2);
+  --surface: var(--step-1);
+  --ink: #EDE0C4;
+  --paper: var(--bg);
+  --solid: #2E2618;
+  --solid-text: var(--ink);
+  --text-1: var(--ink);
+  --text-2: #c9b58a;
+  /* 弱文字提亮一档：卡片提到 L*13.7 后，原来的 #9A8560 只剩 4.42:1，
+     低于 AA 的 4.5。#A08B66 在最亮的卡片底上有 4.78:1 */
+  --text-3: #A08B66;
+  --accent: #E0A03A;
+  --accent-ink: #E0A03A;
+  --accent-soft: rgba(224, 160, 58, 0.12);
+  --red: #D9705A;
+  --red-ink: #E08A6E;
+  /* 深色：实心色压白字分别 5.32 / 3.25 / 5.08。
+     warning 实心只用于极少见的警告条，白字场景改用 --warning-ink 更稳；
+     三个 -ink 对最亮的卡片 #292217 是 8.16 / 8.35 / 7.37 */
+  --success: #237A46;
+  --success-ink: #7ECB9B;
+  --red-solid: #A03E28;
+  --warning: #B8860B;
+  --warning-ink: #E8B54E;
+  --info: #3A72A6;
+  --info-ink: #8AB6E0;
+  --fill-1: rgba(237, 224, 196, 0.16);
+  --fill-2: rgba(237, 224, 196, 0.09);
+  --fill-3: rgba(237, 224, 196, 0.05);
+  --fill-4: rgba(237, 224, 196, 0.025);
+  --line: rgba(237, 224, 196, 0.10);
+  --line-strong: rgba(237, 224, 196, 0.30);
+  --scrollbar: rgba(237, 224, 196, 0.20);
+  --input-border: #4A3E2E;
+  --ring-accent: 0 0 0 3px rgba(224, 160, 58, 0.3);
+  --veil: rgba(60, 49, 35, 0.72);
+  --veil-strong: rgba(60, 49, 35, 0.88);
+  --accent-line: rgba(220, 190, 130, 0.15);
+  --accent-line-soft: rgba(220, 190, 130, 0.12);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.30);
+  --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.40);
+  --glow: rgba(224, 160, 58, 0.15);
+  --canvas-light: rgba(255, 240, 210, 0.05);
+  color-scheme: dark;
+  --noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.04' numOctaves='2' seed='5'/%3E%3CfeColorMatrix values='0 0 0 0 0.9 0 0 0 0 0.75 0 0 0 0 0.45 0 0 0 0.04 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+@theme inline {
+  /* 接管 Tailwind 自带的行高档位。tsx 里有 6 处 leading-relaxed / -snug / -tight，
+     不接管的话它们仍是 Tailwind 默认那套（1.625 / 1.375 / 1.25），与手写的三档并存 */
+  --leading-tight: var(--lh-tight);
+  --leading-snug: var(--lh-tight);
+  --leading-normal: var(--lh-body);
+  --leading-relaxed: var(--lh-body);
+  --leading-loose: var(--lh-loose);
+  --color-bg: var(--bg);
+  --color-canvas: var(--bg-canvas);
+  --color-sidebar: var(--bg-sidebar);
+  --color-subtle: var(--bg-subtle);
+  --color-panel: var(--panel);
+  --color-card-bg: var(--card-bg);
+  --color-surface: var(--surface);
+  --color-text: var(--text-1);
+  --color-muted: var(--text-2);
+  --color-faint: var(--text-3);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-ink: var(--ink);
+  --color-paper: var(--paper);
+  --color-solid: var(--solid);
+  --color-solid-text: var(--solid-text);
+  --color-red: var(--red);
+  --color-red-ink: var(--red-ink);
+  --color-success: var(--success);
+  --color-success-ink: var(--success-ink);
+  --color-warning: var(--warning);
+  --color-warning-ink: var(--warning-ink);
+  --color-info: var(--info);
+  --color-info-ink: var(--info-ink);
+  --color-fill-1: var(--fill-1);
+  --color-fill-2: var(--fill-2);
+  --color-fill-3: var(--fill-3);
+  --color-fill-4: var(--fill-4);
+  /* 正文字号走 --msg-fs，用户调档位时一起变；过去它写在 text-[15px] 里，
+     用户把字号调到大档，正文和输入框纹丝不动 */
+  --text-msg: var(--msg-fs);
+  --text-fs-badge: var(--fs-badge);
+  --text-fs-xs: var(--fs-xs);
+  --text-fs-sm: var(--fs-sm);
+  --text-fs-md: var(--fs-md);
+  --text-fs-lg: var(--fs-lg);
+  --text-fs-xl: var(--fs-xl);
+  --text-fs-title: var(--fs-title);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-input-border: var(--input-border);
+  --font-sans: "Noto Sans SC", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", system-ui, sans-serif;
+  --font-serif: "LXGW WenKai Screen", "Noto Serif SC", "Songti SC", "SimSun", serif;
+}
+

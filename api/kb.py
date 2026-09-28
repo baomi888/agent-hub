@@ -1,0 +1,399 @@
+# -*- coding: utf-8 -*-
+"""知识库管理路由。
+
+路由清单：
+  POST   /api/kb/{kb_id}/upload       上传文件 + 构建索引
+  POST   /api/kb/import-search        联网搜索预览（返回候选列表供勾选）
+  POST   /api/kb/{kb_id}/import-url   直接抓 URL 入库
+  POST   /api/kb/{kb_id}/import-batch 批量抓 URL 入库（搜索勾选结果）
+  GET    /api/kb/download             代理下载远程文档到浏览器
+  GET    /api/kb/{kb_id}/files         列出库内文件
+  GET    /api/kb/{kb_id}/file-content  预览单个文件正文
+  DELETE /api/kb/{kb_id}/files         删除单个文件
+  POST   /api/kb/{kb_id}/rebuild       按切片参数重建整库
+  GET    /api/kb/{kb_id}/              查看库状态
+  GET    /api/kb/                     列出所有知识库
+  DELETE /api/kb/{kb_id}/             删除知识库
+  POST   /api/kb/{kb_id}/query        同步问答
+"""
+
+import os
+import re
+import time
+
+from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi.responses import Response
+from pydantic import BaseModel, Field
+
+from api.schemas import KBQueryResponse
+from kb import pipelines
+from kb.importer import import_url, import_urls_batch, search_preview
+from kb.rag_core import describe_api_error, load_document
+
+router = APIRouter()
+
+MAX_UPLOAD_MB = 100
+
+
+# ==================== 上传 + 建库 ====================
+
+@router.post("/{kb_id}/upload")
+async def upload_and_build(
+    kb_id: str,
+    files: list[UploadFile],
+    chunk_size: int = 500,
+    chunk_overlap: int = 50,
+    mode: str = "append",
+):
+    """上传文档到指定知识库并入库。
+
+    mode=append（默认）：只对新文件做 embedding，已有片段不动。
+    mode=rebuild：清空整库后重建，仅在改了切片参数时用（会对全部文件重新计费）。
+
+    原始文件会留档到 data/kb_sources/{kb_id}/，否则换切片参数时无法重建。
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail="未上传任何文件")
+    if mode not in ("append", "rebuild"):
+        raise HTTPException(status_code=400, detail="mode 只能是 append 或 rebuild")
+
+    now = int(time.time())
+    saved: list[tuple[str, str]] = []  # (落盘路径, 原始文件名)
+    pipelines.ensure_source_dir(kb_id)
+
+    for f in files:
+        ext = os.path.splitext(f.filename or "")[1].lower()
+        if ext not in (".txt", ".md", ".pdf"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"不支持的文件格式：{ext}（当前支持 TXT / Markdown / PDF）",
+            )
+        content = await f.read()
+        if len(content) > MAX_UPLOAD_MB * 1024 * 1024:
+            raise HTTPException(status_code=400, detail=f"文件过大（>{MAX_UPLOAD_MB}MB）：{f.filename}")
+
+        name = f.filename or f"unnamed{ext}"
+        dest = pipelines.source_path(kb_id, name)
+        with open(dest, "wb") as out:
+            out.write(content)
+        saved.append((dest, name))
+
+    try:
+        pipe = pipelines.get_or_create(kb_id)
+        total = 0
+        for idx, (path, name) in enumerate(saved):
+            # 只有第一个文件在 rebuild 模式下清库，其余一律追加
+            n = pipe.build_index(
+                chunk_size,
+                chunk_overlap,
+                [path],
+                mode=(mode if idx == 0 else "append"),
+                source_names=[name],
+            )
+            total += n
+            pipelines.add_file_records(kb_id, [{"name": name, "chunks": n, "added_at": now, "origin": "upload"}])
+        if mode == "rebuild":
+            # 整库重建：本次没上传的旧记录要一并清掉
+            pipelines.retain_file_records(kb_id, {name for _, name in saved})
+        return {"kb_id": kb_id, "chunks": total, "files": pipelines.get_file_names(kb_id)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=describe_api_error(e))
+
+
+# ==================== 查询 ====================
+
+@router.post("/{kb_id}/query", response_model=KBQueryResponse)
+async def query_kb(kb_id: str, question: str, top_k: int = 3):
+    """同步问答：返回带 [1][2] 引用角标的答案。"""
+    pipe = pipelines.get_or_create(kb_id)
+    try:
+        answer, refs = pipe.answer(question, top_k)
+        return {"answer": answer, "refs": refs}
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=describe_api_error(e))
+
+
+# ==================== 列表 / 状态 / 删除 ====================
+
+@router.get("/")
+async def list_kbs():
+    """列出所有已知知识库。"""
+    return {"kbs": pipelines.list_all()}
+
+
+class CreateKbRequest(BaseModel):
+    name: str = Field(..., description="知识库名称（支持中文）")
+
+
+@router.post("/create")
+async def create_kb(req: CreateKbRequest):
+    """登记知识库（名称支持中文），返回内部安全 kb_id 与显示名。"""
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="知识库名称不能为空")
+    kb_id, display_name = pipelines.create_kb(name)
+    return {"kb_id": kb_id, "name": display_name}
+
+
+@router.get("/{kb_id}/")
+async def get_kb_status(kb_id: str):
+    """查看单个知识库状态。"""
+    status = pipelines.get_status(kb_id)
+    if status is None:
+        # 内存里没记录，但磁盘上可能存在
+        if pipelines.exists(kb_id):
+            return {"kb_id": kb_id, "chunks": 0, "chunk_size": None, "chunk_overlap": None, "files": []}
+        raise HTTPException(status_code=404, detail=f"知识库不存在：{kb_id}")
+    return status
+
+
+@router.delete("/{kb_id}/")
+async def delete_kb(kb_id: str):
+    """删除知识库。"""
+    if not pipelines.delete_kb(kb_id):
+        # 可能磁盘上有但内存里没注册
+        if pipelines.exists(kb_id):
+            # 强制删除
+            pipe = pipelines.get_or_create(kb_id)
+            pipe.delete()
+            return {"ok": True}
+        raise HTTPException(status_code=404, detail=f"知识库不存在：{kb_id}")
+    return {"ok": True}
+
+
+# ==================== 文件级管理 ====================
+
+
+@router.get("/{kb_id}/files")
+async def list_files(kb_id: str):
+    """列出库内文件（文件名 + 片段数）。记录缺失时用 Chroma 元数据兜底。"""
+    pipe = pipelines.get_or_create(kb_id)
+    records = pipelines.get_files(kb_id) or pipe.list_sources()
+    return {"kb_id": kb_id, "chunks": pipe.count(), "files": records}
+
+
+class DeleteFileRequest(BaseModel):
+    name: str = Field(..., description="要删除的文件名（与文件列表一致）")
+
+
+@router.delete("/{kb_id}/files")
+async def delete_file(kb_id: str, req: DeleteFileRequest):
+    """删除单个文件：从向量库移除它的片段 + 删掉原始文件 + 更新清单。"""
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="文件名不能为空")
+
+    pipe = pipelines.get_or_create(kb_id)
+    removed = pipe.delete_by_source(name)
+    pipelines.remove_file_record(kb_id, name)
+    try:
+        p = pipelines.source_path(kb_id, name)
+        if os.path.exists(p):
+            os.unlink(p)
+    except OSError:
+        pass
+    return {"ok": True, "removed": removed, "chunks": pipe.count()}
+
+
+class RebuildRequest(BaseModel):
+    chunk_size: int = 500
+    chunk_overlap: int = 50
+
+
+# 预览正文上限：预览不是全文阅读器，30K 字符足够判断内容，也避免一次拉爆内存
+PREVIEW_MAX_CHARS = 30_000
+
+
+def _resolve_source(pipe, kb_id: str, name: str) -> str:
+    """把调用方给的文件名对上库里真实记录的 source。
+
+    老库入库时用的是临时绝对路径（形如 C:\\Users\\...\\kb_up_xxxx.pdf），
+    界面上展示的只有文件名，直接拿去查会 404，所以做一次末段比对。
+    """
+    known = set(pipelines.get_file_names(kb_id))
+    if name in known:
+        return name
+    for src in pipe.list_sources():
+        if src.get("name") == name:
+            return src["name"]
+    base = os.path.basename(name.replace("\\", "/"))
+    if not base:
+        return name
+    for cand in known | {s.get("name", "") for s in pipe.list_sources()}:
+        if cand and os.path.basename(cand.replace("\\", "/")) == base:
+            return cand
+    return name
+
+
+@router.get("/{kb_id}/file-content")
+async def get_file_content(kb_id: str, name: str):
+    """预览库内文件正文。
+
+    优先读留档的原始文件（txt/md 直读，pdf 抽文字层）；
+    老库没有留档时，退回从向量库把该文件的片段按顺序拼回来。
+    """
+    name = (name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="文件名不能为空")
+
+    pipe = pipelines.get_or_create(kb_id)
+    truncated = False
+
+    # 名字可能对不上：老库把临时绝对路径写进了 source，调用方手里往往只有文件名。
+    # 先按原名找，找不到再拿末段去 Chroma 里比对。
+    name = _resolve_source(pipe, kb_id, name)
+
+    # 1) 留档的原始文件
+    path = pipelines.source_path(kb_id, name)
+    if os.path.exists(path):
+        try:
+            docs = load_document(path, source_name=name)
+            text = "\n\n".join((d.page_content or "") for d in docs)
+            truncated = len(text) > PREVIEW_MAX_CHARS
+            return {
+                "name": name,
+                "origin": "archive",
+                "truncated": truncated,
+                "content": text[:PREVIEW_MAX_CHARS],
+            }
+        except Exception:
+            pass  # 留档读不出来就走向量库兜底
+
+    # 2) 向量库兜底（老库 / 留档丢失）
+    chunks = pipe.get_source_chunks(name)
+    if not chunks:
+        raise HTTPException(status_code=404, detail=f"找不到文件内容：{name}")
+    text = "\n\n".join(c["text"] for c in chunks)
+    truncated = len(text) > PREVIEW_MAX_CHARS
+    return {
+        "name": name,
+        "origin": "chunks",
+        "truncated": truncated,
+        "content": text[:PREVIEW_MAX_CHARS],
+    }
+
+
+@router.post("/{kb_id}/rebuild")
+async def rebuild_kb(kb_id: str, req: RebuildRequest):
+    """按新切片参数重建整库（重读留档的原始文件，会对全部片段重新 embedding）。"""
+    names = pipelines.get_file_names(kb_id)
+    if not names:
+        raise HTTPException(status_code=400, detail="该知识库没有文件记录，无法重建")
+
+    pipe = pipelines.get_or_create(kb_id)
+    now = int(time.time())
+    total = 0
+    done: list[dict] = []
+    first = True
+    try:
+        for name in names:
+            path = pipelines.source_path(kb_id, name)
+            if not os.path.exists(path):
+                continue  # 原始文件已丢失的跳过，不中断整个重建
+            n = pipe.build_index(
+                req.chunk_size,
+                req.chunk_overlap,
+                [path],
+                mode=("rebuild" if first else "append"),
+                source_names=[name],
+            )
+            first = False
+            total += n
+            done.append({"name": name, "chunks": n, "added_at": now})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=describe_api_error(e))
+
+    if not done:
+        raise HTTPException(status_code=400, detail="原始文件已全部丢失，请重新上传文档")
+    pipelines.retain_file_records(kb_id, {d["name"] for d in done})
+    pipelines.add_file_records(kb_id, done)
+    return {"kb_id": kb_id, "chunks": total, "files": done}
+
+
+# ==================== 联网导入 ====================
+
+class ImportSearchRequest(BaseModel):
+    keyword: str = Field(..., description="联网搜索关键词")
+    max_results: int = Field(default=10, ge=1, le=20)
+
+
+class ImportURLRequest(BaseModel):
+    url: str
+    chunk_size: int = 500
+    chunk_overlap: int = 50
+
+
+class ImportBatchRequest(BaseModel):
+    urls: list[str]
+    chunk_size: int = 500
+    chunk_overlap: int = 50
+
+
+@router.post("/import-search")
+async def preview_search(req: ImportSearchRequest):
+    """Serper 联网搜索预览，返回候选列表供前端勾选后批量导入。"""
+    try:
+        results = search_preview(req.keyword, req.max_results)
+        return {"keyword": req.keyword, "results": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{kb_id}/import-url")
+async def import_single_url(kb_id: str, req: ImportURLRequest):
+    """直接抓一个 URL 正文追加到指定知识库。"""
+    try:
+        r = import_url(kb_id, req.url, req.chunk_size, req.chunk_overlap)
+        return r
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{kb_id}/import-batch")
+async def import_batch_urls(kb_id: str, req: ImportBatchRequest):
+    """批量抓多个 URL 追加入库（搜索勾选结果的落地接口）。"""
+    if not req.urls:
+        raise HTTPException(status_code=400, detail="URL 列表为空")
+    try:
+        results = import_urls_batch(kb_id, req.urls, req.chunk_size, req.chunk_overlap)
+        ok_count = sum(1 for r in results if r["ok"])
+        return {"total": len(results), "ok": ok_count, "failed": len(results) - ok_count, "details": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/download")
+async def download_remote(url: str):
+    """把远程文档文件代理下载到浏览器（作为附件保存到本机）。"""
+    import httpx
+    from urllib.parse import quote, unquote
+
+    if not url.lower().startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="仅支持 http/https 链接")
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/124.0 Agent/1.0",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            resp = await client.get(url, headers=headers)
+            resp.raise_for_status()
+    except Exception:
+        raise HTTPException(status_code=500, detail="下载失败：无法访问该链接或网络异常。")
+
+    # 文件名：优先 Content-Disposition，其次 URL 路径
+    cd = resp.headers.get("content-disposition", "")
+    m = re.search(r"filename\*?=(?:UTF-8'')?\"?([^\";]+)", cd)
+    filename = unquote(m.group(1)) if m else ""
+    if not filename:
+        filename = os.path.basename(url.split("?")[0].split("#")[0]) or "download"
+    content_type = resp.headers.get("content-type", "application/octet-stream").split(";")[0].strip()
+
+    return Response(
+        content=resp.content,
+        media_type=content_type or "application/octet-stream",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+    )

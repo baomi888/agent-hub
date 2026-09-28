@@ -1,0 +1,223 @@
+/* ============ 摊开笔记本质感 ============ */
+
+/* 阅读栏：聊天区三处容器（滚动区 / 提示条 / 输入区）共用，
+   过去各自硬写 max-w-[720px]，改栏宽要改三处且容易漏。宽屏档位写在 tokens.css */
+.chat-measure {
+  width: 100%;
+  max-width: var(--measure);
+}
+
+/* 左栏：偏黄的左页（选择器改用语义类，不再依赖 DOM 顺序） */
+.side-left {
+  width: 240px;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--line-strong);
+  box-shadow: inset -8px 0 16px rgba(94, 69, 39, 0.07);
+  position: relative;
+}
+.side-left::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 1px;
+  background: linear-gradient(180deg, transparent 0%, rgba(200, 137, 42, 0.3) 50%, transparent 100%);
+  pointer-events: none;
+}
+.dark .side-left {
+  box-shadow: inset -8px 0 16px rgba(0, 0, 0, 0.32);
+}
+
+/* 右栏：稍暗的右页 */
+.side-right {
+  width: 260px;
+  background: var(--bg-sidebar);
+  border-left: 1px solid var(--line-strong);
+  box-shadow: inset 8px 0 16px rgba(94, 69, 39, 0.07);
+  position: relative;
+}
+.side-right::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  background: linear-gradient(180deg, transparent 0%, rgba(200, 137, 42, 0.3) 50%, transparent 100%);
+  pointer-events: none;
+}
+.dark .side-right {
+  box-shadow: inset 8px 0 16px rgba(0, 0, 0, 0.32);
+}
+
+/* 宽屏：两页同步放宽一档，跟上阅读栏的 --measure。
+   窄屏不动——那里每一像素都要留给中间 */
+@media (min-width: 1600px) {
+  .side-left {
+    width: 272px;
+  }
+  .side-right {
+    width: 288px;
+  }
+}
+
+/* 中间聊天区：干净的纸面 + 噪点
+   原先的「书脊中缝」在桌面端呈现为一道贯穿上下的生硬竖带，
+   视觉上像渲染瑕疵而非纸张隐喻，已移除；只保留纸色与噪点纹理 */
+.book-spine {
+  position: relative;
+  background-color: var(--bg-canvas);
+  background-image: var(--noise);
+  background-size: 180px 180px;
+  background-position: left top;
+  background-repeat: repeat;
+}
+
+/* 消息正文：保留 pre-wrap，同时让内联链接可换行 */
+.message-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* 正文内联链接：改用 --accent-ink。--accent 在纸底只有 2.61:1，
+   13~15px 的链接读不清，hover 再压深一级 */
+.message-body .inline-link {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-decoration-color: var(--accent-line);
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+  transition: color 0.15s ease, text-decoration-color 0.15s ease;
+  word-break: break-all;
+}
+.message-body .inline-link:hover {
+  color: var(--ink);
+  text-decoration-color: var(--accent);
+}
+.bubble-user .message-body .inline-link {
+  color: #f5dca0;
+  text-decoration-color: rgba(245, 220, 160, 0.5);
+}
+.bubble-user .message-body .inline-link:hover {
+  color: #fff;
+  text-decoration-color: #fff;
+}
+
+/* 消息气泡 */
+/* 用户气泡：平涂墨块，不再叠渐变底 + 金色覆盖层 + 顶部白色高光线。
+   它是普通的一句提问，不需要 hover 抬起 —— 那两个伪元素和两个过渡一并删掉 */
+.bubble-user {
+  /* 字号跟 AI 消息共用 --msg-fs，三档调节同步生效 */
+  font-size: var(--msg-fs, 15px);
+  background: var(--solid);
+  color: var(--solid-text);
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-xs) var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+.bubble-ai {
+  /* Kimi 式排版：AI 回答用纯文本，不套满宽卡片 */
+  position: relative;
+  animation: bubbleFadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  font-size: var(--msg-fs, 15px);
+  line-height: var(--lh-loose);
+  color: var(--text-1);
+}
+.bubble-ai:hover {
+  /* 纯文本无卡片悬浮，保持安静 */
+}
+.dark .bubble-ai {
+  color: var(--text-1);
+}
+.dark .bubble-ai:hover {
+  /* 深色下同样纯文本 */
+}
+@keyframes bubbleFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* AI 头像金边 */
+.bubble-ai .corn-logo,
+.avatar .corn-logo {
+  filter: drop-shadow(0 1px 3px rgba(196, 154, 62, 0.3));
+}
+
+/* 消息删除：用户气泡下的轻量入口 */
+.msg-action-del {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  padding: 2px 8px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.18s ease, background-color 0.18s ease, border-color 0.18s ease;
+}
+.msg-action-del:hover {
+  color: var(--red-ink);
+  background: var(--fill-2);
+  border-color: var(--red);
+}
+
+/* 消息操作条：平时收起，悬停/键盘聚焦到消息内才浮现，
+   降低整条常显的视觉重量；触屏无 hover，始终显示 */
+.msg-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  opacity: 0;
+  transform: translateY(-3px);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.ai-msg:hover .msg-actions,
+.ai-msg:focus-within .msg-actions {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+@media (hover: none) {
+  .msg-actions {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .msg-actions { transition: none; }
+}
+
+/* 深色模式对比微调 */
+.dark .underline-input {
+  border-bottom-color: var(--line-strong);
+}
+.dark .warn {
+  background: var(--fill-3);
+  color: var(--red-ink);
+}
+/* 原来 .toast 在深色下仍是浅色底 → 白块 */
+.dark .toast,
+.dark .toast.info {
+  background: rgba(38, 31, 22, 0.94);
+  border-color: var(--line-strong);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.dark .toast.success {
+  background: var(--success);
+  border-color: var(--success);
+}
+.dark .toast.error {
+  background: var(--red-solid);
+  border-color: var(--red-solid);
+}
+

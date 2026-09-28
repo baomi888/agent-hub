@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>方案C · 内容优先对话</title>
+<style>
+  /* ============ 设计令牌：纯净聚焦 ============ */
+  :root {
+    --bg: #ffffff;
+    --bg-subtle: #f4f4f5;
+    --surface: #ffffff;
+    --text-1: #18181b;
+    --text-2: #71717a;
+    --text-3: #a1a1aa;
+    --accent: #7c3aed;
+    --accent-soft: #f3eefe;
+    --line: #e8e8eb;
+    --line-strong: #d4d4d8;
+    --shadow-1: 0 1px 2px rgba(17,17,26,.04), 0 1px 3px rgba(17,17,26,.06);
+    --shadow-2: 0 8px 24px rgba(17,17,26,.10);
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-xl: 20px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    font-size: 15px; line-height: 1.7;
+    color: var(--text-1); background: var(--bg);
+    height: 100vh; overflow: hidden; font-weight: 400;
+  }
+
+  .app { display: flex; height: 100vh; position: relative; }
+
+  /* ============ 主区（默认占满） ============ */
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar {
+    height: 52px; padding: 0 16px;
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 10px;
+    background: rgba(255,255,255,.9); backdrop-filter: blur(10px);
+  }
+  .menu-btn {
+    width: 36px; height: 36px; border-radius: 10px; border: none;
+    background: transparent; color: var(--text-2); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background .12s;
+  }
+  .menu-btn:hover { background: var(--bg-subtle); color: var(--text-1); }
+  .topbar-title { font-size: 15px; font-weight: 600; }
+  .topbar-right { margin-left: auto; display: flex; gap: 6px; }
+  .kb-btn {
+    display: flex; align-items: center; gap: 6px;
+    padding: 7px 12px; border: 1px solid var(--line);
+    background: var(--surface); border-radius: var(--radius-md);
+    font-size: 13px; color: var(--text-2); cursor: pointer;
+    transition: all .12s;
+  }
+  .kb-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .chat-scroll { flex: 1; overflow-y: auto; }
+  .chat-inner { max-width: 640px; margin: 0 auto; padding: 40px 24px 120px; }
+
+  /* 欢迎页：居中 + 单列推荐 */
+  .welcome { text-align: center; padding-top: 60px; }
+  .welcome-logo {
+    width: 56px; height: 56px; margin: 0 auto;
+    border-radius: 18px; background: var(--accent); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px; box-shadow: var(--shadow-2);
+  }
+  .welcome h1 { margin-top: 20px; font-size: 26px; font-weight: 700; letter-spacing: -0.02em; }
+  .welcome p { margin-top: 8px; font-size: 15px; color: var(--text-2); }
+  .suggestions { margin-top: 32px; display: flex; flex-direction: column; gap: 8px; }
+  .suggestion {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 18px; border: 1px solid var(--line);
+    border-radius: var(--radius-lg); background: var(--surface);
+    cursor: pointer; transition: all .15s; text-align: left;
+  }
+  .suggestion:hover { border-color: var(--accent); box-shadow: var(--shadow-1); transform: translateY(-1px); }
+  .suggestion .icon {
+    width: 36px; height: 36px; border-radius: 10px;
+    background: var(--accent-soft); color: var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .suggestion .s-text { flex: 1; }
+  .suggestion .s-title { font-size: 14px; font-weight: 600; }
+  .suggestion .s-desc { font-size: 12px; color: var(--text-2); margin-top: 2px; }
+  .suggestion .arrow { color: var(--text-3); transition: transform .15s; }
+  .suggestion:hover .arrow { color: var(--accent); transform: translateX(3px); }
+
+  /* 消息 */
+  .msg { margin-bottom: 28px; }
+  .msg.user { display: flex; justify-content: flex-end; }
+  .msg.user .bubble {
+    background: var(--accent-soft); border: 1px solid var(--line);
+    border-radius: 20px; padding: 11px 16px; max-width: 72%;
+    font-size: 15px; box-shadow: var(--shadow-1);
+  }
+  .msg.assistant { display: flex; gap: 12px; }
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: var(--accent); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; font-size: 15px;
+  }
+  .msg-body { min-width: 0; flex: 1; padding-top: 2px; }
+  .tool-call {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--bg-subtle); border-radius: 8px;
+    padding: 4px 10px; font-size: 12px; color: var(--text-2);
+    margin-bottom: 10px; cursor: pointer;
+  }
+  .msg-text { font-size: 15px; line-height: 1.75; }
+  .msg-text p { margin-bottom: 10px; }
+  .msg-text strong { font-weight: 600; }
+
+  /* 脚注引用 */
+  .ref-note {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 16px; height: 16px; padding: 0 4px; margin: 0 1px;
+    border-radius: 4px; background: var(--accent-soft); color: var(--accent);
+    font-size: 11px; font-weight: 600; cursor: pointer;
+    vertical-align: 1px; transition: all .12s;
+  }
+  .ref-note:hover { background: var(--accent); color: #fff; }
+
+  /* 底部输入框：模式下拉在输入框内 */
+  .input-wrap {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    padding: 12px 24px 24px;
+    background: linear-gradient(to top, var(--bg) 60%, transparent);
+  }
+  .input-inner { max-width: 640px; margin: 0 auto; }
+  .input-box {
+    display: flex; align-items: flex-end; gap: 8px;
+    background: var(--surface); border: 2px solid var(--line);
+    border-radius: var(--radius-xl); padding: 8px 8px 8px 12px;
+    box-shadow: var(--shadow-2); transition: border-color .15s;
+  }
+  .input-box:focus-within { border-color: var(--accent); }
+  .mode-dropdown {
+    display: flex; align-items: center; gap: 5px;
+    padding: 6px 10px; background: var(--bg-subtle);
+    border-radius: 8px; font-size: 12px; color: var(--text-2);
+    cursor: pointer; white-space: nowrap; border: none;
+    transition: background .12s;
+  }
+  .mode-dropdown:hover { background: var(--accent-soft); color: var(--accent); }
+  .mode-dropdown .caret { font-size: 10px; }
+  textarea {
+    flex: 1; resize: none; border: none; outline: none;
+    background: transparent; font-size: 15px; line-height: 1.6;
+    font-family: inherit; color: var(--text-1);
+    padding: 8px 4px; max-height: 120px;
+  }
+  .send-btn {
+    width: 38px; height: 38px; border-radius: 50%;
+    background: var(--accent); color: #fff; border: none;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; transition: opacity .15s;
+  }
+  .send-btn:hover { opacity: .9; }
+
+  /* ============ 抽屉（侧栏，默认隐藏） ============ */
+  .drawer-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.4);
+    z-index: 40; opacity: 0; pointer-events: none;
+    transition: opacity .2s;
+  }
+  .drawer-overlay.open { opacity: 1; pointer-events: auto; }
+  .drawer {
+    position: fixed; top: 0; bottom: 0; width: 280px;
+    background: var(--bg); z-index: 50;
+    box-shadow: var(--shadow-2);
+    transform: translateX(-100%); transition: transform .25s ease;
+    display: flex; flex-direction: column; padding: 16px 12px;
+  }
+  .drawer.open { transform: translateX(0); }
+  .drawer.right { right: 0; left: auto; transform: translateX(100%); }
+  .drawer.right.open { transform: translateX(0); }
+  .drawer-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 4px 12px; border-bottom: 1px solid var(--line);
+  }
+  .drawer-title { font-size: 15px; font-weight: 600; }
+  .close-btn {
+    width: 28px; height: 28px; border-radius: 7px; border: none;
+    background: transparent; color: var(--text-2); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .close-btn:hover { background: var(--bg-subtle); }
+  .drawer-body { flex: 1; overflow-y: auto; padding-top: 12px; }
+
+  .new-btn {
+    width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 10px; background: var(--accent); color: #fff;
+    border: none; border-radius: var(--radius-md); font-size: 14px;
+    font-weight: 500; cursor: pointer;
+  }
+  .session-item {
+    padding: 10px 12px; border-radius: 8px; cursor: pointer;
+    margin-top: 4px; transition: background .12s;
+  }
+  .session-item:hover { background: var(--bg-subtle); }
+  .session-item.active { background: var(--accent-soft); }
+  .session-item.active .s-title { color: var(--accent); font-weight: 600; }
+  .s-title { font-size: 14px; }
+  .s-kb { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+
+  /* 右抽屉 KB 列表 */
+  .kb-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px; border-bottom: 1px solid var(--line);
+    cursor: pointer;
+  }
+  .kb-row:hover { background: var(--bg-subtle); }
+  .kb-row.bound { background: var(--accent-soft); }
+  .kb-check {
+    width: 18px; height: 18px; border-radius: 5px;
+    border: 1.5px solid var(--line-strong); background: var(--surface);
+    flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  }
+  .kb-row.bound .kb-check { background: var(--accent); border-color: var(--accent); }
+  .kb-row.bound .kb-check::after { content: "✓"; color: #fff; font-size: 12px; font-weight: 700; }
+  .kb-name { font-size: 14px; font-weight: 500; }
+  .kb-row.bound .kb-name { color: var(--accent); font-weight: 600; }
+  .kb-meta { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-thumb { background: rgba(0,0,0,.12); border-radius: 999px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- ============ 主区 ============ -->
+  <main class="main">
+    <div class="topbar">
+      <button class="menu-btn" onclick="document.getElementById('leftDrawer').classList.add('open');document.getElementById('overlay').classList.add('open')" title="会话列表">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+      </button>
+      <span class="topbar-title">NBA 2024 总决赛分析</span>
+      <div class="topbar-right">
+        <button class="kb-btn" onclick="document.getElementById('rightDrawer').classList.add('open');document.getElementById('overlay').classList.add('open')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+          资料库 · nba
+        </button>
+      </div>
+    </div>
+
+    <div class="chat-scroll">
+      <div class="chat-inner">
+        <!-- 欢迎页（有消息时隐藏，此处展示对话态） -->
+        <div class="msg user">
+          <div class="bubble">帮我分析一下 2024 年 NBA 总决赛的关键球员表现</div>
+        </div>
+        <div class="msg assistant">
+          <div class="avatar">✦</div>
+          <div class="msg-body">
+            <div class="tool-call">
+              <span>▾ 思考过程：调用 kb_search</span>
+            </div>
+            <div class="msg-text">
+              <p>2024 年 NBA 总决赛由 <strong>波士顿凯尔特人</strong> 对阵 <strong>达拉斯独行侠</strong>，凯尔特人 4-1 夺冠<span class="ref-note" title="nba_finals_2024.pdf">1</span>。</p>
+              <p><strong>杰森·塔图姆</strong> 荣膺 FMVP，场均 26.4 分 9.4 篮板，第五场砍下 31 分带队捧杯<span class="ref-note" title="tatum_stats.txt">2</span>。</p>
+              <p><strong>卢卡·东契奇</strong> 场均 26.8 分 8.4 助攻，但球队深度不足，独木难支<span class="ref-note" title="luka_performance.pdf">3</span>。</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 输入框（模式下拉嵌入） -->
+    <div class="input-wrap">
+      <div class="input-inner">
+        <div class="input-box">
+          <button class="mode-dropdown">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+            自动
+            <span class="caret">▾</span>
+          </button>
+          <textarea placeholder="输入问题，Enter 发送，Shift+Enter 换行" rows="1">还有哪些角色球员表现出色？</textarea>
+          <button class="send-btn">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ============ 左抽屉（会话列表） ============ -->
+  <div class="drawer-overlay" id="overlay" onclick="this.classList.remove('open');document.getElementById('leftDrawer').classList.remove('open');document.getElementById('rightDrawer').classList.remove('open')"></div>
+  <aside class="drawer" id="leftDrawer">
+    <div class="drawer-head">
+      <span class="drawer-title">会话</span>
+      <button class="close-btn" onclick="document.getElementById('leftDrawer').classList.remove('open');document.getElementById('overlay').classList.remove('open')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="drawer-body">
+      <button class="new-btn">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        新建对话
+      </button>
+      <div style="margin-top:16px;">
+        <div class="session-item active">
+          <div class="s-title">NBA 2024 总决赛分析</div>
+          <div class="s-kb">已绑定 nba</div>
+        </div>
+        <div class="session-item">
+          <div class="s-title">量子计算入门</div>
+          <div class="s-kb">已绑定 science</div>
+        </div>
+        <div class="session-item">
+          <div class="s-title">Python 爬虫实践</div>
+        </div>
+        <div class="session-item">
+          <div class="s-title">电影推荐 2024</div>
+          <div class="s-kb">已绑定 movie</div>
+        </div>
+        <div class="session-item">
+          <div class="s-title">天气 API 接入文档</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ 右抽屉（资料库） ============ -->
+  <aside class="drawer right" id="rightDrawer">
+    <div class="drawer-head">
+      <span class="drawer-title">资料库</span>
+      <button class="close-btn" onclick="document.getElementById('rightDrawer').classList.remove('open');document.getElementById('overlay').classList.remove('open')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="drawer-body">
+      <button class="new-btn" style="background:var(--surface);color:var(--accent);border:1px dashed var(--line-strong);">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        导入资料
+      </button>
+      <div style="margin-top:12px;">
+        <div class="kb-row bound">
+          <div class="kb-check"></div>
+          <div>
+            <div class="kb-name">nba</div>
+            <div class="kb-meta">3 文件 · 128 片段</div>
+          </div>
+        </div>
+        <div class="kb-row">
+          <div class="kb-check"></div>
+          <div>
+            <div class="kb-name">science</div>
+            <div class="kb-meta">5 文件 · 210 片段</div>
+          </div>
+        </div>
+        <div class="kb-row">
+          <div class="kb-check"></div>
+          <div>
+            <div class="kb-name">movie</div>
+            <div class="kb-meta">2 文件 · 86 片段</div>
+          </div>
+        </div>
+        <div class="kb-row">
+          <div class="kb-check"></div>
+          <div>
+            <div class="kb-name">entertainment</div>
+            <div class="kb-meta">1 文件 · 42 片段</div>
+          </div>
+        </div>
+        <div class="kb-row">
+          <div class="kb-check"></div>
+          <div>
+            <div class="kb-name">tech-docs</div>
+            <div class="kb-meta">8 文件 · 356 片段</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </aside>
+</div>
+</body>
+</html>

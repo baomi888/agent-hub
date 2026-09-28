@@ -1,0 +1,284 @@
+/* ============ 工具调用条 ============ */
+.tool-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  background: var(--fill-3);
+  border: 1px solid var(--accent-line);
+  padding: 4px 11px;
+  border-radius: 999px;
+  margin-bottom: 8px;
+}
+.tool-spin {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent-line);
+  border-top-color: var(--accent);
+  animation: toolSpin 0.7s linear infinite;
+  will-change: transform;
+}
+@keyframes toolSpin {
+  to { transform: rotate(360deg); }
+}
+.tool-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.tool-chip svg {
+  width: 12px;
+  height: 12px;
+  stroke: var(--accent);
+  fill: none;
+  stroke-width: 1.7;
+}
+.tool-trace {
+  margin-bottom: 8px;
+  border: 1px solid var(--line);
+  background: var(--fill-3);
+  border-radius: var(--radius-md);
+  padding: 7px 11px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.tool-trace summary {
+  cursor: pointer;
+  list-style: none;
+}
+.tool-trace summary::-webkit-details-marker {
+  display: none;
+}
+.tool-trace summary::before {
+  content: "▸ ";
+  color: var(--accent);
+}
+.tool-trace[open] summary::before {
+  content: "▾ ";
+}
+
+/* 计划卡片：去掉顶部那道 3px 渐变扫描条和 inset 白线。
+   它叠了五层装饰（渐变条 + 白色顶描边 + 双层阴影 + 半透明底），
+   原本是想显得重要，实际只是把纸面搅浑 */
+.plan-card {
+  border: 1px solid var(--accent-line);
+  background: var(--veil);
+  padding: 18px 20px 14px;
+  border-radius: var(--radius-lg);
+  transition: var(--t-color);
+  animation: planSlideIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: var(--shadow-1);
+}
+.plan-card:hover {
+  border-color: var(--accent);
+}
+.dark .plan-card {
+  background: var(--panel);
+  border-color: var(--accent-line);
+}
+@keyframes planSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.plan-eyebrow {
+  font-size: var(--fs-badge);
+  letter-spacing: var(--ls-wide);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+.plan-title {
+  font-family: var(--font-serif);
+  font-size: var(--fs-title);
+  font-weight: 700;
+  color: var(--ink);
+  margin: 6px 0 12px;
+  line-height: var(--lh-tight);
+}
+.plan-timeline {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0;
+  padding: 6px 0 14px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 10px;
+}
+.plan-tl-node {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.plan-tl-node i {
+  width: 7px;
+  height: 7px;
+  background: var(--accent);
+  display: inline-block;
+  flex-shrink: 0;
+}
+.plan-tl-line {
+  flex: 1;
+  min-width: 24px;
+  height: 1px;
+  background: var(--line-strong);
+  margin: 0 10px;
+}
+.plan-phases {
+  display: flex;
+  flex-direction: column;
+}
+.plan-phase {
+  display: flex;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+.plan-phase:last-child {
+  border-bottom: none;
+}
+.plan-idx {
+  font-family: var(--font-serif);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--accent-ink);
+  letter-spacing: var(--ls-mid);
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+.plan-phase-title {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--ink);
+  line-height: var(--lh-tight);
+}
+.plan-phase-desc {
+  font-size: var(--fs-md);
+  color: var(--text-2);
+  margin-top: 2px;
+  line-height: var(--lh-body);
+}
+.plan-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  margin-top: 6px;
+}
+.plan-export {
+  border: 1px solid var(--ink);
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  letter-spacing: var(--ls-mid);
+  padding: 5px 14px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.plan-export:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
+  background: var(--fill-2);
+}
+.plan-hint {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+/* 深浅色切换小药丸 */
+.theme-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  padding: 5px 10px;
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  background: var(--veil);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+/* 字号选择器：侧边栏底部的三档分段控件，视觉与 theme-chip 同族 */
+.fs-picker {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 4px 3px 11px;
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  background: var(--veil);
+}
+.fs-picker-label {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  letter-spacing: var(--ls-tight);
+  flex: none;
+}
+.fs-picker-opts {
+  display: flex;
+  gap: 2px;
+}
+.fs-picker-opts button {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  padding: 4px 7px;
+  border-radius: 999px;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+.fs-picker-opts button:hover {
+  color: var(--text-1);
+  background: var(--fill-2);
+}
+.fs-picker-opts button.active {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+.fs-picker-opts button:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-accent);
+}
+.dark .fs-picker {
+  background: var(--panel);
+  border-color: var(--accent-line);
+}
+.theme-chip:hover {
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+.dark .theme-chip {
+  background: var(--panel);
+  border-color: var(--accent-line);
+}
+.theme-chip svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.7;
+}
+

@@ -1,0 +1,55 @@
+# ================= Python =================
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+build/
+dist/
+*.egg
+
+# ================= 虚拟环境 =================
+venv/
+.venv/
+env/
+
+# ================= 密钥（严禁提交）=================
+.env
+.env.local
+.env.*.local
+
+# ================= 向量库（运行时生成）=================
+chroma_db/
+*.chroma
+*.sqlite
+*.sqlite3
+
+# ================= 运行时数据（含用户会话与上传件，严禁提交）=================
+*.db
+data/sessions.db
+data/uploads/
+data/chat_uploads/
+data/kb_sources/
+data/kb_files.json
+data/kb_names.json
+
+# ================= 归档的未引用资源 =================
+frontend/_unused-public/
+
+# ================= IDE =================
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# ================= 本地工作区（不进仓库）=================
+.workbuddy/
+.trae/
+
+# ================= 日志 =================
+*.log
+
+# ================= Node =================
+node_modules/
+.next/
+out/

@@ -1,0 +1,376 @@
+/* ============ 编辑式组件类 ============ */
+
+.eyebrow {
+  font-size: var(--fs-badge);
+  letter-spacing: var(--ls-wide);
+  color: var(--accent-ink);
+  font-weight: 500;
+}
+
+/* 玉米穗 logo：保留 multiply —— 图本身线条偏淡，叠在纸色上才是目标里的成熟玉米金 */
+.corn-logo {
+  display: block;
+  mix-blend-mode: multiply;
+}
+.dark .corn-logo {
+  mix-blend-mode: normal;
+  filter: drop-shadow(0 2px 8px rgba(224, 160, 58, 0.3));
+}
+
+.brand-sub {
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+  letter-spacing: var(--ls-mid);
+  margin-top: 1px;
+}
+
+/* 主按钮：平涂深棕墨底。原来叠了渐变底 + 三重阴影 + 顶部白色高光线 +
+   hover 时的金色覆盖层，五层装饰换来一个塑料感的按钮；纸不该有玻璃质感 */
+.btn-new {
+  background: var(--solid);
+  color: var(--solid-text);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-lg);
+  font-weight: 500;
+  letter-spacing: var(--ls-tight);
+  padding: 10px 20px;
+  cursor: pointer;
+  transition: var(--t-color);
+  box-shadow: var(--shadow-1);
+}
+.btn-new:hover {
+  background: var(--accent);
+}
+.btn-new:active {
+  background: var(--accent-ink);
+}
+
+/* 描边按钮 */
+.btn-import {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-md);
+  font-family: inherit;
+  letter-spacing: var(--ls-tight);
+  cursor: pointer;
+  transition: var(--t-color);
+  position: relative;
+  overflow: hidden;
+}
+.btn-import::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--fill-1);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: -1;
+}
+/* 扫过的填充改中性：金色实心留给 .btn-new 这类主操作，这里是次要按钮，
+   只借一道金描边点出"可点"，底色调深一档就够 */
+.btn-import:hover {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+.btn-import:hover::before {
+  transform: scaleX(1);
+}
+.btn-import:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.btn-import:disabled:hover {
+  color: var(--ink);
+}
+.btn-import:disabled::before {
+  transform: scaleX(0);
+}
+
+/* 两种进料入口：我上传 / 它去搜 */
+.feed-btn {
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  padding: 10px 8px;
+  font-size: var(--fs-md);
+  font-family: inherit;
+  letter-spacing: var(--ls-tight);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.feed-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.feed-btn.on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* 联网建库逐条抓取进度条 */
+.import-progress-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--accent-line);
+  overflow: hidden;
+}
+.import-progress-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 搜索框：下划线式 */
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--line-strong);
+  padding-bottom: 6px;
+  transition: var(--t-color);
+  position: relative;
+}
+.search::after {
+  content: "";
+  position: absolute;
+  bottom: -1px;
+  left: 50%;
+  width: 0;
+  height: 2px;
+  background: var(--accent);
+  transition: var(--t-color);
+  transform: translateX(-50%);
+}
+.search svg {
+  width: 13px;
+  height: 13px;
+  stroke: var(--text-3);
+  fill: none;
+  stroke-width: 2;
+  flex-shrink: 0;
+  transition: stroke 0.3s ease;
+}
+.search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--fs-md);
+}
+.search input::placeholder {
+  color: var(--text-3);
+}
+.search:focus-within {
+  border-bottom-color: transparent;
+}
+.search:focus-within::after {
+  width: 100%;
+}
+.search:focus-within svg {
+  stroke: var(--accent);
+}
+
+/* 分组标题 */
+.group-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 4px;
+  animation: fadeSlideIn 0.4s ease-out;
+}
+.group-head .rule {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--line) 0%, transparent 100%);
+}
+
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* 会话行：纸面卡片 + 选中时"压进纸里"的凹痕，而非发光金条 */
+.session {
+  position: relative;
+  padding: 7px 2px 7px 26px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--line);
+  transition: var(--t-color);
+  border-radius: var(--radius-sm);
+  margin: 2px 0;
+}
+.session::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 9px;
+  bottom: 9px;
+  width: 2px;
+  border-radius: var(--radius-xs);
+  background: var(--text-3);
+  opacity: 0;
+  transform: scaleY(0.4);
+  transform-origin: center;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
+}
+.session::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: rgba(255, 253, 246, 0.5);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  z-index: -1;
+}
+.session:hover::after {
+  opacity: 1;
+}
+.session.active {
+  box-shadow: inset 3px 0 9px -5px rgba(61, 47, 26, 0.28);
+}
+.session.active::before {
+  opacity: 1;
+  transform: scaleY(1);
+}
+.session.active::after {
+  opacity: 1;
+  background: rgba(255, 253, 246, 0.62);
+}
+.dark .session::after {
+  background: rgba(68, 55, 40, 0.4);
+}
+.dark .session.active::after {
+  background: rgba(68, 55, 40, 0.6);
+}
+.session-name {
+  font-size: var(--fs-lg);
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session.active .session-name {
+  font-family: var(--font-serif);
+  font-weight: 700;
+}
+.session-kb {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  animation: sessionKbFadeIn 0.3s ease-out;
+}
+@keyframes sessionKbFadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* 在线状态 */
+.status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  border: 1px solid var(--line);
+  padding: 5px 9px;
+  border-radius: var(--radius-sm);
+  transition: var(--t-color);
+}
+.status:hover {
+  border-color: var(--accent);
+  background: var(--fill-2);
+}
+/* 状态点改为静默常亮：原来 2s 一轮的 opacity 脉冲，和页面上另外三处装饰动画
+   一起让侧栏永远在呼吸。"在线"是状态不是进度，不需要一直在动 */
+/* 在线/就绪是成功语义，用 --success；过去跟金色强调点同色，看不出「正常」与「强调」的区别 */
+.status .dot {
+  width: 6px;
+  height: 6px;
+  background: var(--success);
+  border-radius: 50%;
+}
+
+/* 顶栏知识库 chip：胶囊形 —— 原来没写 border-radius，渲染成直角矩形，
+   跟紧挨着的 .ability-trigger / .theme-chip（都是 999px）形态打架 */
+.kb-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  border: 1px solid var(--line-strong);
+  padding: 3px 9px;
+  border-radius: 999px;
+  transition: var(--t-color);
+}
+.kb-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.kb-chip .dot {
+  width: 5px;
+  height: 5px;
+  background: var(--success);
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+/* 顶栏「已绑定」长名截断，避免挤压右侧收起按钮 */
+.kb-chip-name { min-width: 0; }
+@media (max-width: 359px) {
+  /* 超窄屏（<360px）：长知识库名会挤压收起按钮，直接隐藏解绑 ✕，名字截断即可 */
+  .kb-unbind { display: none; }
+}
+
+/* 图标文字按钮 */
+.icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-2);
+  padding: 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  letter-spacing: var(--ls-tight);
+  transition: var(--t-color);
+  border-radius: var(--radius-sm);
+}
+.icon-btn:hover {
+  color: var(--accent-ink);
+  background: var(--fill-2);
+}
+.icon-btn svg {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.6;
+}
+

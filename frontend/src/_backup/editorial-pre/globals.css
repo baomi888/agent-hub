@@ -1,0 +1,345 @@
+@import "tailwindcss";
+
+/* ============================================================
+   主题令牌：新粗野主义（Neo-Brutalism）
+   米白 / 纸白 / 纯黑 / 荧光黄 / 橙红
+   规则：粗描边、硬投影（无模糊）、零圆角、无渐变、无紫蓝
+   ============================================================ */
+:root {
+  --bg: #F5F0E8;            /* 侧栏/面板底（米白） */
+  --bg-canvas: #F5F0E8;     /* 对话区底 */
+  --bg-subtle: #EAE3D5;     /* hover / 次级灰 */
+  --surface: #FFFDF7;       /* 卡片 / 输入框（纸白） */
+  --surface-hover: #FFFDF7;
+  --text-1: #111111;        /* 主文字（纯黑） */
+  --text-2: #6B655A;        /* 次级文字 */
+  --text-3: #8A8578;        /* 弱文字 */
+  --accent: #2E4BFF;        /* 钴蓝：主强调 / 选中 */
+  --accent-soft: rgba(46, 75, 255, 0.12);   /* 浅蓝底：选中态淡填充 */
+  --line: #111111;          /* 分隔线 / 描边 */
+  --line-strong: #111111;
+  --scrollbar: rgba(17, 17, 17, 0.28);
+
+  /* 硬投影：无模糊、无偏移衰减 */
+  --shadow-1: 3px 3px 0 0 #111111;
+  --shadow-2: 5px 5px 0 0 #111111;
+  --shadow-3: 7px 7px 0 0 #111111;
+
+  /* 聚焦：橙红外框，无光晕 */
+  --ring-accent: 0 0 0 3px rgba(255, 77, 46, 0.35);
+
+  /* 语义圆角：全部归零 */
+  --radius-xs: 0;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --radius-xl: 0;
+
+  /* 方案B扩展令牌 */
+  --cream: #F5F0E8;
+  --paper: #FFFDF7;
+  --ink: #111111;
+  --blue: #2E4BFF;
+  --orange: #FF4D2E;
+  --gray: #8A8578;
+}
+
+.dark {
+  --bg: #171512;
+  --bg-canvas: #12100D;
+  --bg-subtle: #241F18;
+  --surface: #1E1A14;
+  --surface-hover: #282218;
+  --text-1: #F5F0E8;
+  --text-2: #B3AC9C;
+  --text-3: #8A8578;
+  --accent: #2E4BFF;
+  --accent-soft: rgba(46, 75, 255, 0.2);
+  --line: #4A443A;
+  --line-strong: #B3AC9C;
+  --scrollbar: rgba(245, 240, 232, 0.25);
+  --shadow-1: 3px 3px 0 0 #000000;
+  --shadow-2: 5px 5px 0 0 #000000;
+  --shadow-3: 7px 7px 0 0 #000000;
+  --ring-accent: 0 0 0 3px rgba(232, 240, 76, 0.3);
+  --paper: var(--surface);
+  --gray: var(--text-3);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-canvas: var(--bg-canvas);
+  --color-surface: var(--surface);
+  --color-subtle: var(--bg-subtle);
+  --color-text: var(--text-1);
+  --color-muted: var(--text-2);
+  --color-faint: var(--text-3);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-paper: var(--paper);
+  --color-blue: var(--blue);
+  --color-orange: var(--orange);
+  --color-cream: var(--cream);
+  --font-sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    "Source Han Sans SC", system-ui, -apple-system, sans-serif;
+}
+
+/* ============ 基础 ============ */
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text-1);
+  font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    "Source Han Sans SC", system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  line-height: 1.7;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  -webkit-font-smoothing: antialiased;
+}
+
+main {
+  position: relative;
+  z-index: 1;
+}
+
+/* ============ 新粗野主义组件类 ============ */
+.brutal {
+  border: 2px solid var(--ink);
+  box-shadow: var(--shadow-2);
+}
+.brutal-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 2px solid var(--ink);
+  box-shadow: var(--shadow-1);
+  background: var(--paper);
+  color: var(--ink);
+  font-weight: 700;
+  transition: transform 0.06s ease, box-shadow 0.06s ease;
+}
+.brutal-btn:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: var(--shadow-2);
+}
+.brutal-btn:active {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 0 var(--ink);
+}
+.brutal-btn-primary {
+  background: var(--blue);
+  color: var(--cream);
+}
+.brutal-btn-dark {
+  background: var(--ink);
+  color: var(--cream);
+}
+.brutal-input {
+  width: 100%;
+  border: 2px solid var(--ink);
+  background: var(--paper);
+  outline: none;
+  box-shadow: 2px 2px 0 0 var(--ink);
+  font: inherit;
+  color: var(--ink);
+}
+.brutal-input::placeholder {
+  color: var(--gray);
+}
+.brutal-input:focus {
+  outline: 3px solid var(--orange);
+  outline-offset: 0;
+}
+.brutal-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 2px solid var(--ink);
+  padding: 2px 8px;
+  font-size: 12px;
+  background: var(--paper);
+  color: var(--ink);
+}
+.brutal-card {
+  border: 2px solid var(--ink);
+  box-shadow: var(--shadow-1);
+  background: var(--surface);
+  transition: transform 0.08s ease, box-shadow 0.08s ease;
+}
+.brutal-card:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: var(--shadow-2);
+}
+
+/* 顶栏：实心底 + 粗底边（去毛玻璃） */
+.glass-header {
+  background: var(--surface);
+  border-bottom: 2px solid var(--ink);
+}
+
+/* 对话区底：纯色（去氛围渐变） */
+.ambient-canvas {
+  background: var(--bg-canvas);
+}
+
+/* 输入容器聚焦 */
+.input-focus {
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.input-focus:focus-within {
+  border-color: var(--ink);
+  box-shadow: var(--shadow-2);
+}
+
+/* 消息气泡：仅描边 + 硬投影，背景交给组件 */
+.glass {
+  border: 2px solid var(--ink);
+  box-shadow: var(--shadow-2);
+  background-clip: padding-box;
+}
+
+/* 错误警示条 */
+.warn {
+  background: #FDF6D8;
+  color: #7A4A00;
+  border: 2px solid var(--ink);
+  box-shadow: 2px 2px 0 0 var(--ink);
+}
+.dark .warn {
+  background: rgba(46, 75, 255, 0.12);
+  color: #9DB4FF;
+}
+
+/* 语义字重工具类 */
+.font-body { font-weight: 400; }
+.font-medium { font-weight: 500; }
+.font-title { font-weight: 600; }
+
+/* elevation 工具类（硬投影） */
+.elev-1 { box-shadow: var(--shadow-1); }
+.elev-2 { box-shadow: var(--shadow-2); }
+.elev-3 { box-shadow: var(--shadow-3); }
+
+/* 统一微交互 */
+.tx { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
+.tx-color { transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease; }
+
+/* 按钮按压反馈 */
+.btn-press { transition: transform 0.12s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.2s ease, color 0.2s ease; }
+.btn-press:active { transform: scale(0.97); }
+
+/* 卡片悬浮：位移 + 硬投影加深 */
+.card-hover { transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease; }
+.card-hover:hover { transform: translate(-2px, -2px); box-shadow: var(--shadow-2); }
+
+/* ============ 滚动条 ============ */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  border-radius: 0;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ============ 打字光标动画 ============ */
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+.cursor::after {
+  content: "▍";
+  margin-left: 2px;
+  color: var(--ink);
+  animation: blink 0.9s infinite;
+}
+
+/* ============ 淡入 ============ */
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.fade-up {
+  animation: fadeUp 0.25s ease both;
+}
+
+/* ============ Toast 轻量提示 ============ */
+.toast-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--ink);
+  color: var(--cream);
+  border: 2px solid var(--ink);
+  box-shadow: 4px 4px 0 0 var(--ink);
+  font-size: 13px;
+  animation: toastIn 0.25s ease both;
+}
+.toast.success { background: #1E7A46; }
+.toast.error { background: #C0341E; }
+.toast.info { background: var(--ink); }
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ============ 引用脚注 ============ */
+.ref-note {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  background: var(--blue);
+  color: var(--cream);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  vertical-align: 1px;
+  border: 1.5px solid var(--ink);
+}
+.ref-note:hover {
+  background: var(--orange);
+  color: #fff;
+}

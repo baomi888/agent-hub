@@ -1,0 +1,254 @@
+/* ============ 思考中 loading 动画（圆形旋转） ============ */
+.thinking-loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 24px 0 32px;
+}
+.thinking-dots {
+  display: flex;
+  gap: 10px;
+}
+/* 等待指示器原来是六个渐变小玻璃珠：radial 高光 + 静态投影 + inset 阴影 +
+   左上角一颗白色高光点。这套拟物语言跟线描玉米完全不是一路，
+   改成六个平涂色点，只靠错峰的时间差表达「在想」 */
+.thinking-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  animation: thinkingPulse 1.5s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+.thinking-dot:nth-child(1) { animation-delay: 0s; }
+.thinking-dot:nth-child(2) { animation-delay: 0.15s; }
+.thinking-dot:nth-child(3) { animation-delay: 0.25s; }
+.thinking-dot:nth-child(4) { animation-delay: 0.35s; }
+.thinking-dot:nth-child(5) { animation-delay: 0.45s; }
+.thinking-dot:nth-child(6) { animation-delay: 0.55s; }
+
+.thinking-label {
+  font-size: var(--fs-lg);
+  font-weight: 300;
+  color: var(--text-3);
+  letter-spacing: var(--ls-mid);
+  animation: thinkingFade 1.5s ease-in-out infinite;
+}
+
+@keyframes thinkingPulse {
+  0%, 100% {
+    transform: translateY(0) scale(0.82);
+    opacity: 0.5;
+  }
+  50% {
+    transform: translateY(-4px) scale(1.05);
+    opacity: 1;
+  }
+}
+
+@keyframes thinkingFade {
+  0%, 100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 0.4;
+    transform: translateY(-2px);
+  }
+}
+
+
+/* ============ 纸纹质感层（原来只有 div 没有样式） ============ */
+.grain {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  pointer-events: none; /* 不拦截任何鼠标事件 */
+  opacity: 0.7;
+  background-image: var(--grain-noise);
+  background-size: 160px 160px;
+  background-repeat: repeat;
+}
+
+/* 汉堡按钮：只在左栏变抽屉的窄屏出现 */
+.hamburger {
+  display: none;
+}
+@media (max-width: 899px) {
+  .hamburger {
+    display: inline-flex;
+  }
+}
+
+/* 宽屏下右栏收起时不占位 */
+@media (min-width: 1280px) {
+  .side-right:not(.open) {
+    display: none;
+  }
+}
+
+/* ============ 抽屉浮层（中屏右栏 / 窄屏左栏） ============ */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(24, 17, 8, 0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+.drawer-backdrop.show {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* 中屏：右栏改为浮层抽屉，默认收起（由 React 控制 .open） */
+@media (max-width: 1279px) {
+  .side-right {
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    bottom: 12px;
+    height: auto;
+    z-index: 70;
+    width: 300px;
+    max-width: 86vw;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-lg);
+    transform: translateX(calc(100% + 24px));
+    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: -12px 0 32px rgba(0, 0, 0, 0.3);
+    overscroll-behavior: contain;
+  }
+  .side-right.open {
+    transform: translateX(0);
+  }
+  .side-right::after {
+    border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+  }
+}
+
+/* 窄屏：左栏也变浮层抽屉，主区几乎占满 */
+@media (max-width: 899px) {
+  main {
+    margin: 8px;
+    height: calc(100vh - 16px);
+    height: calc(100dvh - 16px);
+    border-radius: var(--radius-md);
+  }
+  .side-left {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    bottom: 12px;
+    height: auto;
+    z-index: 70;
+    width: 264px;
+    max-width: 84vw;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-lg);
+    transform: translateX(calc(-100% - 24px));
+    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 12px 0 32px rgba(0, 0, 0, 0.3);
+    overscroll-behavior: contain;
+  }
+  .side-left.open {
+    transform: translateX(0);
+  }
+  .side-left::after {
+    border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+  }
+  /* 窄屏收紧版面留白，避免内容被挤成一条 */
+  .book-spine {
+    background-image: var(--noise);
+    background-size: 180px 180px;
+  }
+}
+
+/* ============ 首屏骨架：别让空态先闪一下 ============ */
+.skel-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--card-bg);
+}
+.skel-line {
+  display: block;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  animation: skelPulse 1.4s ease-in-out infinite;
+}
+.skel-line.short {
+  width: 55%;
+  height: 8px;
+  opacity: 0.75;
+}
+/* 只动 opacity，不做位移：避免逐帧触发布局 */
+@keyframes skelPulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* 用户中断生成后的标记，别让半截答案看起来像答完了 */
+.stopped-tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-subtle);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  letter-spacing: var(--ls-tight);
+  vertical-align: middle;
+}
+
+/* ============ 回到最新：用户往上翻之后的归位入口 ============ */
+.scroll-down {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  box-shadow: var(--shadow-2);
+  animation: scrollDownIn 0.18s ease-out;
+}
+.scroll-down:hover {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.scroll-down svg {
+  width: 14px;
+  height: 14px;
+}
+@keyframes scrollDownIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+

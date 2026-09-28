@@ -1,0 +1,263 @@
+@import "tailwindcss";
+
+/* ============ 主题变量：极简白 / 深紫黑 ============ */
+:root {
+  --bg: #f2f2f5;          /* 侧栏/面板底（深一档，做层次） */
+  --bg-canvas: #fafafb;   /* 对话区底（亮一档，视觉中心） */
+  --bg-subtle: #ececf0;   /* 次级灰（hover / 工具条 / 淡填充） */
+  --surface: #ffffff;     /* 卡片 / 输入框白 */
+  --surface-hover: #fafafa;
+  --text-1: #18181b;      /* 主文字，近黑 */
+  --text-2: #71717a;      /* 次级文字 */
+  --text-3: #a1a1aa;      /* 弱文字 */
+  --accent: #8b5cf6;      /* 唯一粉紫强调色 */
+  --accent-soft: #f3eefe; /* 强调色浅底（选中态 / 用户气泡） */
+  --line: #e4e4e8;        /* 分隔线 / 描边 */
+  --line-strong: #d4d4d8;
+  --scrollbar: rgba(0, 0, 0, 0.16);
+
+  /* elevation：混入极淡紫调，浅色下有柔光感 */
+  --shadow-1: 0 1px 2px rgba(139, 92, 246, 0.04), 0 1px 3px rgba(17, 17, 26, 0.05);
+  --shadow-2: 0 4px 16px rgba(139, 92, 246, 0.07), 0 2px 4px rgba(17, 17, 26, 0.03);
+  --shadow-3: 0 12px 32px rgba(139, 92, 246, 0.12), 0 4px 8px rgba(17, 17, 26, 0.05);
+
+  /* focus 光晕 */
+  --ring-accent: 0 0 0 4px rgba(139, 92, 246, 0.14);
+
+  /* 语义圆角 */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 10px;   /* 按钮 / 输入 */
+  --radius-lg: 14px;   /* 卡片 / 面板 */
+  --radius-xl: 18px;   /* 大卡片 / 输入框 */
+}
+
+.dark {
+  --bg: #14101c;
+  --bg-canvas: #181322;
+  --bg-subtle: #1f1930;
+  --surface: #1c1729;
+  --surface-hover: #241e35;
+  --text-1: #ece9f4;
+  --text-2: #a5a0b5;
+  --text-3: #6f6a80;
+  --accent: #a78bfa;
+  --accent-soft: rgba(167, 139, 250, 0.14);
+  --line: #2a2238;
+  --line-strong: #3a2f4d;
+  --scrollbar: rgba(255, 255, 255, 0.18);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3);
+  --shadow-3: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --ring-accent: 0 0 0 4px rgba(167, 139, 250, 0.18);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-canvas: var(--bg-canvas);
+  --color-surface: var(--surface);
+  --color-subtle: var(--bg-subtle);
+  --color-text: var(--text-1);
+  --color-muted: var(--text-2);
+  --color-faint: var(--text-3);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-line: var(--line);
+  --font-sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    "Source Han Sans SC", system-ui, -apple-system, sans-serif;
+}
+
+/* ============ 基础 ============ */
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text-1);
+  font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    "Source Han Sans SC", system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  line-height: 1.7;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* 顶部氛围光：极淡紫调径向渐变，叠加在对话区顶部 */
+.ambient-canvas {
+  background:
+    radial-gradient(ellipse 80% 45% at 50% -5%, rgba(139, 92, 246, 0.07), transparent 65%),
+    var(--bg-canvas);
+}
+.dark .ambient-canvas {
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -5%, rgba(167, 139, 250, 0.10), transparent 65%),
+    var(--bg-canvas);
+}
+
+/* 语义字重工具类 */
+.font-body { font-weight: 400; }
+.font-medium { font-weight: 500; }
+.font-title { font-weight: 600; }
+
+/* elevation 工具类 */
+.elev-1 { box-shadow: var(--shadow-1); }
+.elev-2 { box-shadow: var(--shadow-2); }
+.elev-3 { box-shadow: var(--shadow-3); }
+
+/* 统一微交互：缓动曲线 */
+.tx { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
+.tx-color { transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease; }
+
+/* 按钮按压反馈 */
+.btn-press { transition: transform 0.12s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.2s ease, color 0.2s ease; }
+.btn-press:active { transform: scale(0.96); }
+
+/* 卡片悬浮：上浮 + 阴影加深 */
+.card-hover { transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s ease, border-color 0.25s ease; }
+.card-hover:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); }
+
+/* 输入框聚焦：边框变 accent + 紫光晕 */
+.input-focus { transition: border-color 0.2s ease, box-shadow 0.2s ease; }
+.input-focus:focus-within { border-color: var(--accent); box-shadow: var(--ring-accent), var(--shadow-2); }
+
+/* 语义圆角工具类 */
+.radius-xs { border-radius: var(--radius-xs); }
+.radius-sm { border-radius: var(--radius-sm); }
+.radius-md { border-radius: var(--radius-md); }
+.radius-lg { border-radius: var(--radius-lg); }
+.radius-xl { border-radius: var(--radius-xl); }
+
+/* ============ 消息气泡（仅允许气泡使用：只描边/圆角/阴影，不设背景色） ============ */
+.glass {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: var(--shadow-1);
+  background-clip: padding-box;
+}
+
+/* 顶栏毛玻璃：滚动时内容从下方透出 */
+.glass-header {
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border-bottom: 1px solid var(--line);
+}
+.dark .glass-header {
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+}
+
+/* 主内容置于氛围光之上 */
+main { position: relative; z-index: 1; }
+
+/* ============ 错误警示条（浅黄底，非紫） ============ */
+.warn {
+  background: #fefce8;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+.dark .warn {
+  background: rgba(245, 158, 11, 0.12);
+  color: #fcd34d;
+  border-color: rgba(245, 158, 11, 0.25);
+}
+
+/* ============ 滚动条 ============ */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ============ 打字光标动画 ============ */
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+.cursor::after {
+  content: "▍";
+  margin-left: 2px;
+  color: var(--accent);
+  animation: blink 0.9s infinite;
+}
+
+/* ============ 淡入 ============ */
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.fade-up {
+  animation: fadeUp 0.25s ease both;
+}
+
+/* ============ Toast 轻量提示 ============ */
+.toast-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-2);
+  font-size: 13px;
+  color: var(--text-1);
+  animation: toastIn 0.25s ease both;
+}
+.toast.success { border-left: 3px solid #16a34a; }
+.toast.error { border-left: 3px solid #e11d48; }
+.toast.info { border-left: 3px solid var(--accent); }
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ============ 引用脚注 ============ */
+.ref-note {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  margin: 0 2px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  vertical-align: 1px;
+}
+.ref-note:hover { background: var(--accent); color: #fff; }

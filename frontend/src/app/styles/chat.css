@@ -1,0 +1,320 @@
+/* 模式切换：分段控件（参考 LobeChat / vercel ai-chatbot 的常见样式），
+   active 项浮起为纸卡，比下划线 tab 层级更清晰 */
+.mode-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+.mode {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: var(--fs-md);
+  color: var(--text-2);
+  padding: 5px 12px;
+  letter-spacing: var(--ls-tight);
+  border-radius: var(--radius-sm);
+  transition: background-color 0.18s ease, box-shadow 0.2s ease, color 0.18s ease;
+}
+.mode:hover {
+  color: var(--ink);
+}
+.mode.active {
+  background: var(--card-bg);
+  color: var(--accent-ink);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(80, 60, 30, 0.14), 0 0 0 1px var(--line);
+}
+.dark .mode.active {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--line-strong);
+}
+
+/* 参数齿轮 */
+.gear {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-3);
+  padding: 5px;
+  display: inline-flex;
+  transition: var(--t-color);
+}
+.gear:hover {
+  color: var(--accent);
+  transform: rotate(90deg);
+}
+.gear svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.6;
+}
+
+/* 输入行：纸上的一封信笺 */
+.input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  /* 规范 2.4：输入框底色 #FDFAF2（= --card-bg），圆角 16px；
+     不用 backdrop-filter —— 全宽毛玻璃每帧重算模糊，规范 2.7 也禁用玻璃拟态 */
+  background: var(--card-bg);
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius-lg);
+  padding: 12px 16px;
+  box-shadow: var(--shadow-1);
+  transition: border-color 0.14s ease;
+}
+/* 聚焦只换一道 2px 实线：原来的 3px 金色光环 + 外发光 + 上浮，
+   本质是浏览器默认焦点环的彩色翻版，在纸上很突兀 */
+.input-row:focus-within {
+  border-color: var(--accent);
+}
+.dark .input-row {
+  box-shadow: var(--shadow-1);
+}
+.attach {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-3);
+  padding: 5px 2px;
+  display: inline-flex;
+  transition: color 0.12s ease;
+}
+.attach:hover {
+  color: var(--accent);
+}
+.attach svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.6;
+}
+
+/* 发送：圆 40px 金色按钮。全站另一个保留 hover 位移的组件 —— 它是唯一的主操作。
+   改用平涂色，去掉 radial 高光球和右下角的反向高光伪元素 */
+.send {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--shadow-1);
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+/* 停止生成：走语义红（--red 原来被误设成金色） */
+.send.stop {
+  background: var(--red);
+}
+.send:hover {
+  transform: scale(1.06);
+}
+.send:active {
+  transform: scale(1.02);
+}
+.send svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2.2;
+  color: #fff;
+}
+.send:disabled {
+  opacity: 0.3;
+  cursor: default;
+  transform: none;
+}
+
+/* 资料库行：玻璃态便签 */
+.kb-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 12px 10px 36px;
+  background: var(--card-bg);
+  border: 1px solid var(--accent-line-soft);
+  border-radius: var(--radius-md);
+  margin: 4px 0;
+  box-shadow: var(--shadow-1);
+  transform: rotate(-0.5deg);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+.kb-row:nth-child(even) {
+  transform: rotate(0.4deg);
+}
+/* 便签 hover 只摆正 + 换色：保留「贴歪的纸被扶正」的隐喻，去掉上浮和白色高光线 */
+.kb-row:hover {
+  transform: rotate(0deg);
+  border-color: var(--accent);
+  background: var(--veil-strong);
+}
+.kb-row::before {
+  content: "";
+  position: absolute;
+  left: 12px; top: -7px;
+  width: 26px; height: 16px;
+  background: rgba(230, 210, 160, 0.7);
+  border-left: 1px dashed rgba(150, 120, 70, 0.3);
+  border-right: 1px dashed rgba(150, 120, 70, 0.3);
+  transform: rotate(-4deg);
+  transition: var(--t-color);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+.kb-row:hover::before {
+  transform: rotate(0deg);
+  background: rgba(200, 137, 42, 0.85);
+  box-shadow: 0 2px 6px rgba(200, 137, 42, 0.3);
+}
+.kb-row.bound {
+  border-left: 3px solid var(--accent);
+}
+/* 绑定标记改为静态竖条：原来 2s 一轮的 opacity 呼吸，
+   让资料库面板在没有任何操作时也一直在闪 */
+.kb-row.bound::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent);
+}
+.kb-row .kb-name {
+  font-size: var(--fs-md);
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+.kb-row.bound .kb-name {
+  font-weight: 700;
+}
+.dark .kb-row {
+  background: var(--card-bg);
+  border-color: var(--accent-line);
+  box-shadow: var(--shadow-1);
+}
+.dark .kb-row:hover {
+  background: var(--veil-strong);
+}
+.dark .kb-row::before {
+  background: rgba(120, 95, 55, 0.5);
+}
+
+/* 复选框：补 4px 圆角（原来直角，邻组件全是 6~10px 小圆角）；
+   ::before 的金色填充层与 .on 的 background 重复，删掉 */
+.check {
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  border-radius: var(--radius-xs);
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: var(--t-color);
+  padding: 0;
+  position: relative;
+}
+.check:hover {
+  border-color: var(--accent);
+}
+.check.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.check.on svg {
+  width: 9px;
+  height: 9px;
+  stroke: var(--paper);
+  fill: none;
+  stroke-width: 3;
+  position: relative;
+  z-index: 1;
+  animation: checkDraw 0.25s ease-out;
+}
+@keyframes checkDraw {
+  from {
+    stroke-dasharray: 20;
+    stroke-dashoffset: 20;
+  }
+  to {
+    stroke-dasharray: 20;
+    stroke-dashoffset: 0;
+  }
+}
+.kb-meta {
+  display: flex;
+  gap: 6px;
+  margin-top: 3px;
+}
+.tag {
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+}
+/* 资料来源标记：上传 / 网上抓取 */
+.tag.up {
+  color: var(--accent-ink);
+}
+.tag.web {
+  color: var(--text-2, var(--text-3));
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  padding: 0 5px;
+  /* 行高即高度：这枚徽章的高度就由它定，不进三档 */
+  line-height: 15px;
+}
+.kb-del {
+  border: none;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 3px;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease;
+  display: inline-flex;
+}
+.kb-row:hover .kb-del {
+  opacity: 1;
+}
+.kb-del:hover {
+  color: var(--red);
+}
+.kb-del svg {
+  width: 13px;
+  height: 13px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.6;
+}
+/* 确认态的一对按钮要常显，否则鼠标一移开 row 就消失，等于没有二次确认 */
+.kb-del.confirm {
+  opacity: 1;
+  color: var(--red);
+  border: 1px solid var(--red);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+}
+.kb-del.confirm:hover {
+  background: var(--red);
+  color: #FFF9EE;
+}
+

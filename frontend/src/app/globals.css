@@ -1,0 +1,17 @@
+/* ============================================================
+   样式入口：苞米地笔记本
+   2026-09 重构：按域拆分到 ./styles/*，本文件只负责按序引入。
+   顺序即原文件的物理顺序，编译产物与拆分前逐字节一致。
+   ============================================================ */
+@import "tailwindcss";
+@import "./styles/tokens.css";
+@import "./styles/base.css";
+@import "./styles/components.css";
+@import "./styles/welcome.css";
+@import "./styles/chat.css";
+@import "./styles/kb.css";
+@import "./styles/refs.css";
+@import "./styles/interactions.css";
+@import "./styles/layout.css";
+@import "./styles/fx.css";
+@import "./styles/a11y.css";

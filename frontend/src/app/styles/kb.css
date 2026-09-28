@@ -1,0 +1,551 @@
+/* ============ 知识库文件级管理 ============ */
+.kb-manage {
+  margin-left: auto;
+  font-size: var(--fs-badge);
+  color: var(--accent-ink);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+}
+.kb-manage:hover {
+  opacity: 0.7;
+}
+.kb-files {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-top: 1px dashed var(--line-strong);
+  padding-top: 6px;
+}
+.kb-file {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  padding: 2px 0;
+}
+.kb-file > svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  stroke: currentColor;
+  fill: none;
+}
+/* 文件名即预览入口：点线下划线常显，让"能预览"这件事不用靠 hover 猜 */
+.kb-file-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline dotted var(--line-strong);
+  text-underline-offset: 2px;
+  transition: color 0.15s ease, text-decoration-color 0.15s ease;
+}
+.kb-file-name:hover,
+.kb-file-name:focus-visible {
+  color: var(--accent-ink);
+  text-decoration-color: var(--accent);
+}
+.kb-file-meta {
+  flex-shrink: 0;
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+}
+.kb-file-confirm {
+  display: inline-flex;
+  gap: 3px;
+  flex-shrink: 0;
+}
+.kb-file-foot {
+  margin-top: 4px;
+}
+.kb-rebuild {
+  width: 100%;
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+  background: none;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 3px 6px;
+  cursor: pointer;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+.kb-rebuild:hover {
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+
+/* ============ 文件正文预览弹层 ============ */
+/* 不用 backdrop-filter：本设计禁用玻璃拟态，遮罩只用纸色薄纱 */
+.pv-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--veil);
+  animation: pvFade 0.16s ease;
+}
+@keyframes pvFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.pv-card {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 100%);
+  max-height: min(78vh, 720px);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 18px 48px rgba(60, 42, 18, 0.28);
+  overflow: hidden;
+}
+.pv-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.pv-title {
+  font-family: var(--font-serif);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pv-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.pv-badge {
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+.pv-close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: color 0.18s ease, border-color 0.18s ease;
+}
+.pv-close:hover {
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+.pv-close svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.7;
+}
+.pv-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pv-text {
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: var(--lh-body);
+  color: var(--text-1);
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+}
+.pv-note {
+  font-size: var(--fs-xs);
+  line-height: var(--lh-body);
+  color: var(--text-3);
+  background: var(--bg-subtle);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding: 5px 8px;
+}
+.pv-error {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+  color: var(--red-ink);
+}
+.pv-empty {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+  color: var(--text-3);
+}
+.pv-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--line);
+}
+.pv-btn {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  background: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 5px 14px;
+  cursor: pointer;
+  transition: color 0.18s ease, border-color 0.18s ease, background-color 0.18s ease;
+}
+.pv-btn:hover:not(:disabled) {
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+.pv-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.pv-btn.primary {
+  background: var(--solid);
+  color: var(--solid-text);
+  border-color: var(--solid);
+}
+.pv-btn.primary:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #FFF9EE;
+}
+.pv-btn:focus-visible,
+.pv-close:focus-visible {
+  box-shadow: var(--ring-accent);
+  outline: none;
+}
+@media (max-width: 640px) {
+  .pv-mask { padding: 10px; }
+  .pv-card { max-height: 88vh; }
+}
+
+/* 聊天附件 */
+.attach-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 0 10px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 10px;
+}
+/* 附件能力边界：后端当前不消费附件，必须当场说清楚，否则用户以为图片被理解了 */
+.attach-note {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-body);
+  color: var(--text-3);
+}
+.attach-note svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.7;
+}
+.attach-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  padding: 3px 6px 3px 3px;
+  font-size: var(--fs-sm);
+  color: var(--ink);
+  max-width: 260px;
+  border-radius: var(--radius-sm);
+  transition: var(--t-color);
+}
+/* 附件条 hover 只换行色，不再上浮 + 打斜向渐变光 */
+.attach-item:hover {
+  border-color: var(--accent);
+}
+.attach-item img {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  display: block;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.attach-file-badge {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-2);
+  border: 1px solid var(--line);
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  transition: var(--t-color);
+}
+.attach-item:hover .attach-file-badge {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--fill-2);
+}
+.attach-file-badge svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.6;
+}
+.attach-rm {
+  border: none;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 2px;
+  display: inline-flex;
+  flex-shrink: 0;
+  transition: var(--t-color);
+  border-radius: var(--radius-xs);
+}
+.attach-rm:hover {
+  color: var(--red);
+  background: var(--fill-2);
+}
+.attach-rm svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  fill: none;
+}
+
+/* 消息内附件 */
+.msg-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.msg-img {
+  max-width: 280px;
+  max-height: 240px;
+  width: auto;
+  height: auto;
+  display: block;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  border-radius: var(--radius-md);
+  transition: var(--t-color);
+  cursor: pointer;
+}
+.msg-img:hover {
+  border-color: var(--accent);
+}
+.msg-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  padding: 6px 12px;
+  font-size: var(--fs-md);
+  color: var(--ink);
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+  transition: var(--t-color);
+  cursor: pointer;
+}
+.msg-file:hover {
+  border-color: var(--accent);
+  background: var(--fill-2);
+}
+.msg-file svg {
+  flex-shrink: 0;
+  color: var(--text-2);
+  transition: color 0.2s ease;
+}
+.msg-file:hover svg {
+  color: var(--accent);
+}
+
+/* 错误警示条：原来用 --accent 金配浅米底，实测对比度只有 2.80:1 ——
+   这是全应用语义权重最高的一行文字，却比正文还难读。改用语义红 + 淡红底，
+   浅色 5.49:1 / 深色 5.57:1，都过 AA */
+.warn {
+  background: rgba(160, 62, 40, 0.05);
+  color: var(--red-ink);
+  border: 1px solid var(--red);
+  border-radius: var(--radius-md);
+  animation: warnSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@keyframes warnSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.warn summary {
+  color: inherit;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+.warn summary:hover {
+  color: var(--ink);
+}
+
+/* 下划线输入 */
+.underline-input {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--ink);
+  background: transparent;
+  outline: none;
+  color: var(--ink);
+  transition: var(--t-color);
+  position: relative;
+}
+.underline-input::placeholder {
+  color: var(--text-3);
+  transition: color 0.2s ease;
+}
+.underline-input:focus {
+  border-bottom-color: var(--accent);
+  border-bottom-width: 2px;
+}
+.underline-input:focus::placeholder {
+  color: var(--text-2);
+}
+
+/* 滚动条 */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+/* 滚动条：改成一道平实的纸边细线。
+   原来是 linear-gradient 到玉米金的渐变小滑条，高饱和的渐变在这张纸上很跳 */
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  border-radius: var(--radius-xs);
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--line-strong);
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 打字光标 */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.cursor::after {
+  content: "▍";
+  margin-left: 2px;
+  color: var(--accent);
+  animation: blink 0.9s infinite;
+}
+
+/* 淡入 */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-up {
+  animation: fadeUp 0.25s ease both;
+}
+
+/* Toast */
+.toast-container {
+  position: fixed;
+  bottom: 34px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+.toast {
+  pointer-events: none;
+  display: inline-block;
+  background: rgba(255, 253, 246, 0.92);
+  color: var(--ink);
+  border: 1px solid var(--accent-line);
+  font-size: var(--fs-md);
+  letter-spacing: var(--ls-tight);
+  padding: 9px 18px;
+  border-radius: var(--radius-md);
+  animation: toastIn 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
+  white-space: nowrap;
+  box-shadow: var(--shadow-2);
+}
+/* 三种 toast 全部走语义令牌：过去绿/红是硬写的 rgba(30,122,70,.9) / rgba(180,71,47,.92)，
+   改一次绿要同时翻 kb.css 与 layout.css 两套值 */
+.toast.success {
+  background: var(--success);
+  border-color: var(--success);
+  color: #fff;
+}
+.toast.error {
+  background: var(--red-solid);
+  border-color: var(--red-solid);
+  color: #fff;
+}
+.toast.info {
+  background: var(--veil-strong);
+}
+@keyframes toastIn {
+  from { 
+    opacity: 0; 
+    transform: translateY(12px) scale(0.95);
+  }
+  to { 
+    opacity: 1; 
+    transform: translateY(0) scale(1);
+  }
+}
+

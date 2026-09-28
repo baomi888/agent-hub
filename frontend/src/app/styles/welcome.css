@@ -1,0 +1,373 @@
+/* ============ 首屏欢迎页 ============
+   主路径是"直接问"，所以视觉重心在输入框，示例只是三句能立刻点的话；
+   进料（让它研究 / 上传资料）压成一行弱化文字，不跟主路径抢注意力 */
+.welcome {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 0;
+  text-align: center;
+  /* Logo 与标题后方一层极淡的暖金光晕，让首屏有个柔和的视觉锚点
+     （大半径 + 晚收尾，避免出现边缘可辨的"云块"） */
+  background: radial-gradient(640px 380px at 50% 16%, var(--accent-soft) 0%, transparent 72%);
+  /* 一次协调的首屏入场：整块一起上浮淡入，不做错峰 */
+  animation: fadeUp 0.5s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+/* ============ 首屏 Hero 签名区 ============ */
+/* logo 不再做慢速浮息：无事发生时页面应该是静止的。
+   和首屏同时存在的 status 状态点、kb-chip 闪光点、绑定呼吸线一起，
+   构成了「页面永远在动」的廉价感 —— 四组装饰性 infinite 动画一并删掉 */
+
+/* 眉题两侧的金色细线：像笔记本的页眉装饰 */
+.welcome .eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.welcome .eyebrow::before,
+.welcome .eyebrow::after {
+  content: "";
+  width: 26px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent));
+}
+.welcome .eyebrow::after {
+  background: linear-gradient(90deg, var(--accent), transparent);
+}
+
+/* 欢迎页主标题：字号从 --hero-fs 派生（随字号档位缩放，保持标题/正文比例） */
+.hero-title {
+  font-size: var(--hero-fs, 34px);
+}
+
+/* 名字做成金墨渐变 + 手绘下划线：整个首屏唯一一处"显眼金"，是品牌签名。
+   渐变两端压深（#9C6A16），保证大字号下 ≥3:1 的可读性 */
+.hero-name {
+  position: relative;
+  background: linear-gradient(115deg, #9c6a16 0%, #c8892a 55%, #a5751f 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.dark .hero-name {
+  background: linear-gradient(115deg, #e8b54e 0%, #f0c470 55%, #dfa13c 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+.hero-name::after {
+  content: "";
+  position: absolute;
+  left: 1%;
+  right: 1%;
+  bottom: -5px;
+  height: 7px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 8' preserveAspectRatio='none'%3E%3Cpath d='M2 6 Q 22 1.5 46 4.5 T 74 4 T 98 3' fill='none' stroke='%23C8892A' stroke-width='2.2' stroke-linecap='round' opacity='.7'/%3E%3C/svg%3E") no-repeat center / 100% 100%;
+}
+.dark .hero-name::after {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 8' preserveAspectRatio='none'%3E%3Cpath d='M2 6 Q 22 1.5 46 4.5 T 74 4 T 98 3' fill='none' stroke='%23E0A03A' stroke-width='2.2' stroke-linecap='round' opacity='.75'/%3E%3C/svg%3E");
+}
+
+/* 示例句：像贴在纸边上的便签条（眉题在上、问题在下，三列等宽对齐） */
+.welcome-eg {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 100%;
+  padding: 10px 13px;
+  font-size: var(--fs-md);
+  line-height: var(--lh-body);
+  color: var(--text-1);
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: 0 1px 2px rgba(80, 60, 30, 0.05);
+  cursor: pointer;
+  text-align: center;
+  transition: var(--t-color);
+}
+/* 便签条 hover 不再上浮：纸不会被鼠标顶起来。只换边框与底色 */
+.welcome-eg:hover {
+  border-color: var(--accent);
+  background: var(--fill-2);
+}
+/* 长句在便签内截断：纵向 flex 里必须显式 min-width:0，否则 flex 子项
+   默认 min-width:auto 不收缩，文字会顶破卡片边界 */
+.welcome-eg .q {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.welcome-eg-hint {
+  flex: none;
+  font-family: var(--font-serif);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: var(--ls-wide);
+  color: var(--accent-ink);
+}
+
+/* 弱化的第二行：进料入口 */
+.welcome-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+  font-family: inherit;
+  color: var(--text-2);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+  transition: color 0.18s ease, text-decoration-color 0.18s ease;
+}
+.welcome-link:hover {
+  color: var(--accent-ink);
+  text-decoration-style: solid;
+}
+.welcome-sep {
+  margin: 0 6px;
+  color: var(--line-strong);
+}
+.welcome-foot {
+  margin-top: 26px;
+  font-size: var(--fs-md);
+  letter-spacing: var(--ls-mid);
+  color: var(--text-3);
+}
+
+/* 首屏四宫格能力卡：呼应设计稿「四个等大的圆角白色卡片」，像贴在纸上的功能便签 */
+.ability-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  text-align: center;
+  padding: 16px 12px 14px;
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 1px 2px rgba(80, 60, 30, 0.05);
+  cursor: pointer;
+  transition: var(--t-color), var(--t-move);
+  position: relative;
+  overflow: hidden;
+}
+/* hover / 键盘聚焦时顶端扫进一道金线：低调的"被点亮"反馈 */
+.ability-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 14%;
+  right: 14%;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0;
+  transform: scaleX(0.35);
+  transition: opacity 0.25s ease, transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.ability-card:hover::before,
+.ability-card:focus-visible::before {
+  opacity: 1;
+  transform: scaleX(1);
+}
+/* 能力卡是全站唯一保留位移 hover 的两个组件之一（另一个是发送按钮）：
+   它是首屏的主转化入口，值得用一次"被拿起来"的动作来宣告可点。
+   斜向渐变覆盖层与 hover 时的底色变换重复，删掉 */
+.ability-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+  background: var(--fill-2);
+  box-shadow: var(--shadow-2);
+}
+.ability-card:active {
+  transform: translateY(0);
+}
+.ability-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.ability-card .ab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  transition: var(--t-color);
+}
+.ability-card:hover .ab-icon {
+  background: var(--fill-1);
+  color: var(--accent-ink);
+}
+.ability-card .ab-icon svg {
+  width: 17px;
+  height: 17px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.7;
+}
+.ability-card .ab-label {
+  font-family: var(--font-serif);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  color: var(--ink);
+  line-height: var(--lh-tight);
+}
+.ability-card .ab-hint {
+  font-size: var(--fs-xs);
+  line-height: var(--lh-tight);
+  color: var(--text-3);
+}
+
+/* 顶栏「能力」快捷入口：对话进行中也能一键切模式 + 预填示例 */
+.ability-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  position: relative;
+  border: 1px solid var(--line);
+  background: var(--card-bg);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  letter-spacing: var(--ls-tight);
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color 0.18s ease, color 0.18s ease, background-color 0.18s ease;
+}
+.ability-trigger:hover {
+  border-color: var(--accent-line);
+  color: var(--accent-ink);
+  background: var(--fill-2);
+}
+.ability-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.ability-trigger svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+  stroke: none;
+}
+/* 透明遮罩：点弹层以外任意处关闭，触屏也友好 */
+.pop-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: transparent;
+}
+.ability-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 50;
+  width: 244px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  animation: fadeUp 0.16s ease both;
+}
+.ability-pop-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  background: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background-color 0.16s ease;
+}
+.ability-pop-item:hover {
+  background: var(--fill-2);
+}
+.ability-pop-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.ab-pop-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--fill-3);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.ab-pop-icon svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.7;
+}
+.ab-pop-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ab-pop-label {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--ink);
+  line-height: var(--lh-tight);
+}
+.ab-pop-hint {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  line-height: var(--lh-tight);
+}
+
+/* 资料库空态玉米线描插画：暖金底圆角块，呼应笔记本氛围 */
+.kb-empty-illus {
+  width: 76px;
+  height: 76px;
+  margin: 0 auto 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-lg);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.kb-empty-illus svg {
+  width: 54px;
+  height: 54px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* 输入框下方提示：模式说明 + 键盘快捷键 */
+.input-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 0 4px;
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+

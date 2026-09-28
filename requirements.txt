@@ -1,0 +1,35 @@
+# -*- coding: utf-8 -*-
+"""集合式 Agent 后端依赖（LangChain v1.x）
+版本固定，避免 pip 自动升级导致 API 不兼容。
+"""
+
+# ---------- LangChain 生态 ----------
+langchain==1.4.1
+langchain-core==1.6.3
+langchain-openai==1.6.2
+langchain-community==0.4.2
+langchain-text-splitters==1.1.2
+# 注意：langchain-chroma 1.x 要 chromadb 1.x（沙箱限制无法安装），
+# 先用 0.2.3 + chromadb 0.5.23 组合，两者互相兼容
+langchain-chroma==0.2.3
+langgraph==1.2.11
+langgraph-checkpoint>=2.0
+langgraph-prebuilt>=0.2
+
+# ---------- 向量库 ----------
+chromadb==0.5.23
+
+# ---------- Web ----------
+fastapi>=0.115
+uvicorn[standard]>=0.30
+sse-starlette>=2.0
+
+# ---------- 文档加载 ----------
+pypdf>=4.0
+
+# ---------- 联网搜索 ----------
+duckduckgo-search>=6.0
+
+# ---------- 工具库 ----------
+python-dotenv>=1.0
+pydantic>=2.0
