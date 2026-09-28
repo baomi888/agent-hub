@@ -11,6 +11,7 @@ import { api } from "@/lib/api";
 import { streamChat } from "@/lib/sse";
 import { uid } from "@/lib/id";
 import { useToast } from "@/lib/hooks/useToast";
+import { getSendGeo, isGeoEnabled, requestGeo, setGeoEnabled } from "@/lib/geo";
 import { usePrefs } from "@/lib/hooks/usePrefs";
 import { useSessions } from "@/lib/hooks/useSessions";
 import { useKnowledge } from "@/lib/hooks/useKnowledge";
@@ -83,6 +84,8 @@ export default function Home() {
   } = useKnowledge(showToast, chunkSize, chunkOverlap);
 
   const [sending, setSending] = useState(false);
+  // 地理定位开关：开启后发送消息自动附带坐标，天气/本地问答免手输城市
+  const [geoEnabled, setGeoEnabledState] = useState(isGeoEnabled());
   // 联网建库后把建议问题预填进输入框（不自动发送），让用户确认/补充
   const [prefill, setPrefill] = useState<{ text: string; ts: number } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -179,7 +182,7 @@ export default function Home() {
         }
       }
       const gen = streamChat(
-        { sid, question, top_k: topK, mode, attachments: sentAttachments },
+        { sid, question, top_k: topK, mode, attachments: sentAttachments, location: getSendGeo() },
         controller.signal
       );
       let finalRefs = "";
@@ -299,6 +302,23 @@ export default function Home() {
   // 停止当前流式生成（中断 SSE 请求）
   const stopSending = () => {
     abortRef.current?.abort();
+  };
+
+  // 定位开关：开 → 请求一次权限并缓存坐标；关 → 仅关闭开关（保留缓存）
+  const toggleGeo = async () => {
+    if (geoEnabled) {
+      setGeoEnabled(false);
+      setGeoEnabledState(false);
+      return;
+    }
+    const g = await requestGeo();
+    if (!g) {
+      showToast("error", "定位被拒绝或当前环境不支持（需 https/localhost）");
+      return;
+    }
+    setGeoEnabled(true);
+    setGeoEnabledState(true);
+    showToast("success", "定位已开启，问天气无需再输城市");
   };
 
   // 绑定/解绑知识库（跨域：改会话，所以留在编排层）
@@ -428,6 +448,8 @@ export default function Home() {
           onOpenSidebar={viewport === "narrow" ? () => setSidebarOpen(true) : undefined}
           prefill={prefill ?? undefined}
           onDeleteTurn={deleteTurn}
+          geoEnabled={geoEnabled}
+          onToggleGeo={toggleGeo}
         />
       </div>
 

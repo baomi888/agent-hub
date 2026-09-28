@@ -53,6 +53,10 @@ interface Props {
   prefill?: { text: string; ts: number };
   /** 删除某条消息及其所在的一轮对话（user + 后续 assistant） */
   onDeleteTurn?: (msgDbId: number) => void;
+  /** 地理定位开关状态（开启后发送消息自动带坐标） */
+  geoEnabled?: boolean;
+  /** 切换定位开关（请求权限 / 关闭），由页面层处理权限与缓存 */
+  onToggleGeo?: () => void;
 }
 
 export default function ChatArea({
@@ -77,6 +81,8 @@ export default function ChatArea({
   onOpenSidebar,
   prefill,
   onDeleteTurn,
+  geoEnabled = false,
+  onToggleGeo,
 }: Props) {
   const [input, setInput] = useState("");
   const [showParams, setShowParams] = useState(false);
@@ -683,13 +689,27 @@ export default function ChatArea({
 
         <div className="input-row">
           <button
+            onClick={onToggleGeo}
+            title={geoEnabled ? "定位已开启：发送时附带你的位置" : "开启定位：问天气无需手输城市"}
+            aria-label={geoEnabled ? "关闭定位" : "开启定位"}
+            aria-pressed={geoEnabled}
+            className={`geo-btn ${geoEnabled ? "on" : ""}`}
+          >
+            {/* 定位针：开启时填充实心，关闭时空心，与「＋ 我的文件」同一套线条语言 */}
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 21s7-6.4 7-11a7 7 0 1 0-14 0c0 4.6 7 11 7 11z" />
+              <circle cx="12" cy="10" r="2.6" />
+            </svg>
+          </button>
+          <button
             onClick={() => attachRef.current?.click()}
             title="上传附件（图片会由视觉模型分析）"
             aria-label="上传附件，图片会由视觉模型分析"
             className="attach"
           >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M21.4 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+            {/* 加号：与「＋ 新建对话 / ＋ 我的文件」同一套进料语义，替代原回形针 */}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" />
             </svg>
           </button>
           <input

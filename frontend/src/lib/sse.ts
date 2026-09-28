@@ -29,6 +29,7 @@ export async function* streamChat(
     mode?: string;
     kb_id_override?: string;
     attachments?: { path: string; type: string; filename?: string }[];
+    location?: { lat: number; lon: number } | null;
   },
   signal?: AbortSignal
 ): AsyncGenerator<StreamEvent> {

@@ -58,6 +58,10 @@ class ChatRequest(BaseModel):
     kb_id_override: str | None = Field(default=None)
     mode: str = Field(default="auto", description="auto / rag / agent / llm")
     attachments: list[dict] = Field(default_factory=list, description="附件列表（图片理解用）")
+    location: dict | None = Field(
+        default=None,
+        description="用户地理定位：{ lat: float, lon: float }，由前端地理定位得到，用于天气/本地问答免手输城市",
+    )
 
 
 # ==================== SSE 帧 ====================
@@ -216,6 +220,24 @@ async def chat_stream(req: ChatRequest, request: Request):
     if mode == "rag" and not kb_exists:
         mode = "agent"
 
+    # 解析用户地理定位：坐标 -> 逆地理城市名（天气/本地问答免手输城市）。
+    # 后端无高德 Key 时 reverse_geocode_city 返回 None，前端仍传了坐标，
+    # 天气工具会用 Open-Meteo 按坐标查，只是展示名退化为「你所在位置」。
+    location_ctx: dict | None = None
+    if isinstance(req.location, dict):
+        try:
+            flat = float(req.location.get("lat"))
+            flon = float(req.location.get("lon"))
+            city = None
+            try:
+                from agent.tools import reverse_geocode_city
+                city = reverse_geocode_city(flat, flon)
+            except Exception:
+                city = None
+            location_ctx = {"lat": flat, "lon": flon, "city": city}
+        except (TypeError, ValueError):
+            location_ctx = None
+
     store.add_message(req.sid, "user", req.question)
     should_gen_title = store.count_messages(req.sid) <= 2
 
@@ -283,7 +305,7 @@ async def chat_stream(req: ChatRequest, request: Request):
             try:
                 from agent.builder import build_agent
                 # 把当前会话绑定的知识库告诉模型，否则 kb_search 只能瞎猜 kb_id
-                agent = await asyncio.to_thread(build_agent, kb_id)
+                agent = await asyncio.to_thread(build_agent, kb_id, location_ctx)
 
                 # 组装历史 + 当前问题
                 history = store.get_messages(req.sid, include_system=False)[:-1]

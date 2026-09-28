@@ -173,21 +173,60 @@ def _get_amap_key() -> str:
     return config.AMAP_API_KEY
 
 
+def reverse_geocode_city(lat: float, lon: float) -> str | None:
+    """高德逆地理：坐标 -> 中文城市/区县名（用于展示）。无 Key 或失败返回 None。
+
+    调用方（api/chat.py）应自行吞掉异常，失败时回退到 "你所在位置"。
+    """
+    import json
+    import urllib.parse
+    import urllib.request
+
+    key = _get_amap_key()
+    if not key:
+        return None
+    try:
+        url = (
+            "https://restapi.amap.com/v3/geocode/regeo?"
+            + urllib.parse.urlencode({
+                "location": f"{lon},{lat}", "radius": "1000",
+                "extensions": "base", "key": key,
+            })
+        )
+        req = urllib.request.Request(url, headers={"User-Agent": "agent/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        if str(data.get("status")) != "1":
+            return None
+        ac = (data.get("regeocode") or {}).get("addressComponent") or {}
+        city_v = ac.get("city") or ""
+        dist = ac.get("district") or ""
+        return (dist or city_v or "").replace("市", "") or None
+    except Exception:
+        return None
+
+
 # 城市解析缓存：必须放在模块级。写在函数里的话每次调用都重建，等于没缓存
 _AMAP_CACHE: dict[str, tuple[str, str, str]] = {}
 
 
 @tool
-def get_weather(city: str, days: int = 1) -> str:
+def get_weather(city: str = "", days: int = 1, lat: float = None, lon: float = None) -> str:
     """查询中国城市天气（实时 + 未来预报，高德 + Open-Meteo 双数据源）。
 
     适用场景：用户问"今天/明天/后天 N 天的天气怎么样、会不会下雨、温度多少"等。
     支持全国所有省/市/区县（中文或拼音均可，如 北京、杭州、义乌、beijing、maoming）。
     1~4 天来自高德地图；5~7 天自动走 Open-Meteo 国际气象模型。
 
+    定位场景：前端获取到用户经纬度后，可只传 lat/lon（city 留空），
+    工具会用 Open-Meteo（无需 Key）直接按坐标返回实时天气 + 预报，
+    并尽力用高德逆地理把坐标反查成中文城市名用于展示。
+
     Args:
         city: 城市/区县中文名或拼音，如 "北京"、"杭州市"、"beijing"。
         days: 预报天数，1~7 的整数，默认 1（今天）。
+        lat: 可选，纬度（前端地理定位得到）。
+        lon: 可选，经度（前端地理定位得到）。
 
     Returns:
         天气文本（含数据来源）；地名不存在或天数非法时返回中文错误说明。
@@ -196,19 +235,13 @@ def get_weather(city: str, days: int = 1) -> str:
     import datetime as dt
     import json
     import re
-    import time
     import urllib.parse
     import urllib.request
 
-    # ---- 内嵌精简版天气数据层（从 llm-agent-demo 迁移，去冗余） ----
-    AMAP_KEY = _get_amap_key()
-    if not AMAP_KEY:
-        return "缺少 AMAP_API_KEY，无法查询天气。请在 .env 中配置高德地图 Web 服务 Key。"
-
     WEATHER_HTTP_TIMEOUT = 10
+    AMAP_KEY = _get_amap_key()
     AMAP_GEO = "https://restapi.amap.com/v3/geocode/geo"
     AMAP_WEATHER = "https://restapi.amap.com/v3/weather/weatherInfo"
-    AMAP_DISTRICT = "https://restapi.amap.com/v3/config/district"
     OPEN_METEO = "https://api.open-meteo.com/v1/forecast"
 
     CITY_ALIASES = {
@@ -233,6 +266,66 @@ def get_weather(city: str, days: int = 1) -> str:
         if amap and str(data.get("status")) != "1":
             raise RuntimeError(data.get("info", "unknown error"))
         return data
+
+    WMO_CN = {0: "晴", 1: "基本晴", 2: "局部多云", 3: "阴", 45: "雾",
+              48: "雾凇", 51: "毛毛雨", 53: "小雨", 55: "中雨", 56: "冻毛毛雨",
+              61: "小雨", 63: "中雨", 65: "大雨", 66: "冻雨", 71: "小雪",
+              73: "中雪", 75: "大雪", 80: "阵雨", 81: "阵雨", 82: "强阵雨",
+              85: "阵雪", 95: "雷阵雨", 96: "雷阵雨伴冰雹", 99: "强雷暴冰雹"}
+
+    # ---- 参数校验 ----
+    if not isinstance(days, int) or isinstance(days, bool) or days < 1 or days > 7:
+        return f"天数必须是 1~7 的整数，收到的是 {days!r}。"
+
+    # ---- 坐标优先：Open-Meteo 免 Key 路径（实时 + 预报）----
+    if lat is not None and lon is not None:
+        # 用高德逆地理把坐标反查成中文城市名（有 Key 才做，失败不影响天气本身）
+        label = "你所在位置"
+        try:
+            city = reverse_geocode_city(lat, lon)
+            if city:
+                label = city
+        except Exception:
+            pass
+        try:
+            data = _http_get(OPEN_METEO, {
+                "latitude": lat, "longitude": lon,
+                "current": "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m",
+                "daily": "weather_code,temperature_2m_max,temperature_2m_min",
+                "timezone": "auto", "forecast_days": days,
+            }, amap=False)
+            lines = [f"{label}（{lat:.2f},{lon:.2f}）未来 {days} 天天气（Open-Meteo）："]
+            if days == 1:
+                cur = data.get("current") or {}
+                code = cur.get("weather_code")
+                desc = WMO_CN.get(code, "未知")
+                wd = cur.get("wind_direction_10m")
+                lines = [
+                    f"{label}当前{desc}，气温 {cur.get('temperature_2m', '?')}℃"
+                    f"（体感 {cur.get('apparent_temperature', '?')}℃），"
+                    f"湿度 {cur.get('relative_humidity_2m', '?')}%，"
+                    f"{wd}风约 {cur.get('wind_speed_10m', '?')} km/h。"
+                ]
+            else:
+                daily = data.get("daily") or {}
+                times = daily.get("time") or []
+                tmax = daily.get("temperature_2m_max") or []
+                tmin = daily.get("temperature_2m_min") or []
+                codes = daily.get("weather_code") or []
+                for i in range(min(days, len(times))):
+                    y, m, d = map(int, times[i].split("-"))
+                    weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][dt.date(y, m, d).weekday()]
+                    desc = WMO_CN.get(codes[i], "未知") if codes else "?"
+                    lines.append(f"{m}月{d}日 {weekday}：{desc}，{tmin[i]}~{tmax[i]}℃。")
+            return "\n".join(lines)
+        except Exception:
+            return "天气查询暂时不可用，请稍后再试。"
+
+    # ---- 城市路径：需要高德 Key ----
+    if not city:
+        return "缺少城市名或经纬度，无法查询天气。请指明城市，或在支持定位的环境开启定位。"
+    if not AMAP_KEY:
+        return "缺少 AMAP_API_KEY，无法查询天气。请在 .env 中配置高德地图 Web 服务 Key。"
 
     def _resolve(city_name):
         raw = str(city_name).strip()
@@ -261,10 +354,6 @@ def get_weather(city: str, days: int = 1) -> str:
         std = dist or city_val or prov or query
         _AMAP_CACHE[query] = (std, adcode, str(g.get("location") or ""))
         return _AMAP_CACHE[query]
-
-    # ---- 参数校验 ----
-    if not isinstance(days, int) or isinstance(days, bool) or days < 1 or days > 7:
-        return f"天数必须是 1~7 的整数，收到的是 {days!r}。"
 
     resolved = _resolve(city)
     if resolved is None:
@@ -308,9 +397,9 @@ def get_weather(city: str, days: int = 1) -> str:
 
     # ---- 5~7 天：Open-Meteo ----
     try:
-        lon, lat = location.split(",")
+        lon_s, lat_s = location.split(",")
         data = _http_get(OPEN_METEO, {
-            "latitude": lat.strip(), "longitude": lon.strip(),
+            "latitude": lat_s.strip(), "longitude": lon_s.strip(),
             "daily": "weather_code,temperature_2m_max,temperature_2m_min",
             "timezone": "Asia/Shanghai", "forecast_days": days,
         }, amap=False)
@@ -319,9 +408,6 @@ def get_weather(city: str, days: int = 1) -> str:
         tmax = daily.get("temperature_2m_max") or []
         tmin = daily.get("temperature_2m_min") or []
         if times:
-            WMO_CN = {0: "晴", 1: "基本晴", 2: "局部多云", 3: "阴", 45: "雾",
-                      51: "毛毛雨", 61: "小雨", 63: "中雨", 65: "大雨",
-                      71: "小雪", 73: "中雪", 80: "阵雨", 95: "雷阵雨"}
             codes = daily.get("weather_code") or []
             lines = [f"{std}未来 {days} 天天气预报（Open-Meteo）："]
             for i in range(min(days, len(times))):

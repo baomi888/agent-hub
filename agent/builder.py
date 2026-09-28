@@ -38,6 +38,32 @@ SYSTEM_PROMPT = """你是一个智能问答助手，拥有以下能力：
   9. 闲聊、身份、常识等无需工具的问题直接回答。"""
 
 
+def location_note(location: dict | None) -> str:
+    """把用户地理定位信息整理成 system prompt 片段（无则空串）。
+
+    location 形如 {"city": "上海", "lat": 31.23, "lon": 121.47}。
+    城市名优先用后端逆地理反查的结果；若只有坐标也行，提示模型用坐标查天气。
+    """
+    if not location:
+        return ""
+    city = location.get("city")
+    lat = location.get("lat")
+    lon = location.get("lon")
+    if not (lat is not None and lon is not None):
+        return ""
+    if city:
+        return (
+            f"\n\n【用户当前位置】{city}（经纬度 {lat}, {lon}）。"
+            "当用户询问天气、气温、空气质量、穿衣指数、本地生活等且未明确指定城市时，"
+            f"优先调用 get_weather(city='{city}')，无需追问用户所在城市。"
+        )
+    return (
+        f"\n\n【用户当前位置】经纬度 {lat}, {lon}（前端地理定位得到，未反查出城市名）。"
+        "当用户询问天气且未指定城市时，调用 get_weather(lat=" + str(lat) +
+        f", lon={lon}) 用坐标直接查询。"
+    )
+
+
 def _make_checkpointer():
     """优先用 SQLite 落盘（重启不丢、可控），装了依赖才生效，否则退回内存版。
 
@@ -58,11 +84,12 @@ def _make_checkpointer():
 _CHECKPOINTER = _make_checkpointer()
 
 
-def build_agent(kb_id: str | None = None):
+def build_agent(kb_id: str | None = None, location: dict | None = None):
     """构建集合式 Agent（带 5 个工具 + 多轮记忆）。
 
     kb_id 会被写进系统提示词：否则模型调用 kb_search 时只能凭空猜库名，
     绑定了知识库却在 Agent 模式下用不上。
+    location 是用户地理定位（前端传来的经纬度 + 逆地理城市名），让用户问天气时免手输城市。
     """
     llm = get_llm(temperature=0.1)
     system_prompt = SYSTEM_PROMPT
@@ -77,6 +104,7 @@ def build_agent(kb_id: str | None = None):
             "\n\n【当前会话没有绑定知识库】\n"
             "不要凭空猜测 kb_id 调用 kb_search；需要外部信息时用 web_search。"
         )
+    system_prompt += location_note(location)
 
     agent = create_agent(
         model=llm,
