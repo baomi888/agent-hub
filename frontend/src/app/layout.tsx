@@ -7,10 +7,10 @@ const DESC = "支持知识库检索、联网搜索、计算、天气的 AI 智�
 export const metadata: Metadata = {
   title: TITLE,
   description: DESC,
-  // 标签页图标：用 public 里唯一那份 corn-logo.webp（32KB），不再额外放图
+  // 标签页图标：漫画风苞米吉祥物（矢量 SVG，缩放不糊）
   icons: {
-    icon: [{ url: "/corn-logo.webp", type: "image/webp" }],
-    apple: "/corn-logo.webp",
+    icon: [{ url: "/mascot.svg", type: "image/svg+xml" }],
+    apple: "/mascot.svg",
   },
   openGraph: {
     title: TITLE,

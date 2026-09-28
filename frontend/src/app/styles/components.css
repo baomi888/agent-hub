@@ -7,13 +7,12 @@
   font-weight: 500;
 }
 
-/* 玉米穗 logo：保留 multiply —— 图本身线条偏淡，叠在纸色上才是目标里的成熟玉米金 */
+/* 苞米吉祥物：内联 SVG，颜色由 currentColor / --ink 驱动，不再需要 multiply。
+   深色下保留一点金色光晕，让它从深纸里浮出来 */
 .corn-logo {
   display: block;
-  mix-blend-mode: multiply;
 }
 .dark .corn-logo {
-  mix-blend-mode: normal;
   filter: drop-shadow(0 2px 8px rgba(224, 160, 58, 0.3));
 }
 

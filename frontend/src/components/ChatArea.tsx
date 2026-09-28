@@ -6,6 +6,7 @@
 // 2026-09 重构：消息类型/常量/正文渲染/计划卡片/Bubble/Field 拆到 ./chat/*，
 // 本文件只保留主组件（顶栏 + 欢迎页 + 消息区 + 输入区）。
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import MascotLogo from "./chat/MascotLogo";
 import type { ChatMode, RefSource } from "@/lib/types";
 import { ABILITIES, EXAMPLES, MODE_LABELS } from "./chat/constants";
 import { buildPlanPrompt, detectPlanTopic, isPlanRequest, stripPlanHint } from "./chat/plan";
@@ -460,13 +461,8 @@ export default function ChatArea({
           {messages.length === 0 ? (
             // 欢迎页：主路径是「直接问」，进料（研究/上传）只做被弱化的第二行
             <div className="welcome">
-              <img
-                src="/corn-logo.webp"
-                alt=""
-                width={72}
-                height={72}
-                decoding="async"
-                className="corn-logo hero-logo mx-auto mb-4 h-[72px] w-[72px] object-contain"
+              <MascotLogo
+                className="hero-logo mx-auto mb-4 h-[72px] w-[72px] object-contain"
               />
               <div className="eyebrow mb-2">苞米地 · 智能体工作台</div>
               <h1 className="hero-title font-serif font-bold leading-snug text-ink">

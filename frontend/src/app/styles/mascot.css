@@ -1,0 +1,68 @@
+/* ============================================================
+   苞米吉祥物动画（MascotLogo 组件）
+   克制版 idle：漂浮 + 眨眼 + 腮红呼吸 + 轻微摇摆，hover 时弹一下。
+   系统开启「减弱动效」时全部关闭。
+   ============================================================ */
+.mascot {
+  display: inline-block;
+  animation: mascot-float 5s ease-in-out infinite;
+}
+.mascot > svg {
+  display: block;
+  overflow: visible;
+  transform-origin: 50% 50%;
+  transition: transform 220ms cubic-bezier(0.34, 1.3, 0.34, 1);
+}
+.mascot:hover > svg {
+  transform: scale(1.06) translateY(-2px);
+}
+
+/* 整体轻微摇摆：绕底部，像站在纸上晃脑袋 */
+.mascot-body {
+  transform-box: fill-box;
+  transform-origin: 50% 88%;
+  animation: mascot-rock 6s ease-in-out infinite;
+}
+/* 眨眼：双眼一起压扁再弹开 */
+.mascot-eye {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: mascot-blink 5.2s infinite;
+}
+/* 腮红呼吸 */
+.mascot-blush {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: mascot-blush 3.4s ease-in-out infinite;
+}
+
+@keyframes mascot-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+@keyframes mascot-rock {
+  0%, 100% { transform: rotate(0deg); }
+  30% { transform: rotate(1.6deg); }
+  70% { transform: rotate(-1.6deg); }
+}
+@keyframes mascot-blink {
+  0%, 90%, 100% { transform: scaleY(1); }
+  94% { transform: scaleY(0.08); }
+  97% { transform: scaleY(1); }
+}
+@keyframes mascot-blush {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.72; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mascot,
+  .mascot-body,
+  .mascot-eye,
+  .mascot-blush {
+    animation: none !important;
+  }
+  .mascot:hover > svg {
+    transform: none;
+  }
+}

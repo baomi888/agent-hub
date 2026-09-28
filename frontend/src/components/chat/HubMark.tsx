@@ -1,13 +1,5 @@
-// 品牌 icon：玉米穗 logo（消息头像等小尺寸场景）
+// 品牌 icon：漫画风苞米吉祥物（消息头像等小尺寸场景）
+import MascotLogo from "./MascotLogo";
 export default function HubMark({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <img
-      src="/corn-logo.webp"
-      alt=""
-      width={28}
-      height={28}
-      decoding="async"
-      className={`${className} corn-logo object-contain`}
-    />
-  );
+  return <MascotLogo className={className} title="苞米" />;
 }

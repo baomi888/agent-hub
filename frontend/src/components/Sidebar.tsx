@@ -3,6 +3,7 @@
 // 左侧会话列表栏：品牌区 + 新建对话 + 搜索框 + 按时间分组的会话 + 深色模式开关
 // 视觉：暖米黄书本风格 · 大圆角 · 柔阴影 · 金色点缀
 import { useMemo, useState, type RefObject } from "react";
+import MascotLogo from "./chat/MascotLogo";
 import type { Conversation } from "@/lib/types";
 import type { FontScale } from "@/lib/hooks/usePrefs";
 
@@ -107,14 +108,7 @@ export default function Sidebar({
     >
       {/* 品牌区：玉米穗 + 衬线标题 */}
       <div className="flex items-center gap-2.5 px-1">
-        <img
-          src="/corn-logo.webp"
-          alt=""
-          width={36}
-          height={36}
-          decoding="async"
-          className="corn-logo h-9 w-9 shrink-0 object-contain"
-        />
+        <MascotLogo className="h-9 w-9 shrink-0 object-contain" />
         <div className="min-w-0">
           <h1 className="truncate font-serif text-fs-xl font-bold leading-tight text-ink">
             苞米Agent
