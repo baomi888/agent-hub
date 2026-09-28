@@ -5,7 +5,7 @@
 //
 // 2026-09 重构：消息类型/常量/正文渲染/计划卡片/Bubble/Field 拆到 ./chat/*，
 // 本文件只保留主组件（顶栏 + 欢迎页 + 消息区 + 输入区）。
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ChatMode, RefSource } from "@/lib/types";
 import { ABILITIES, EXAMPLES, MODE_LABELS } from "./chat/constants";
 import { buildPlanPrompt, detectPlanTopic, isPlanRequest, stripPlanHint } from "./chat/plan";
@@ -154,6 +154,27 @@ export default function ChatArea({
   const pendingOtherCount = pending.length - pendingImageCount;
 
   const currentMode = MODE_LABELS.find((m) => m.value === mode);
+
+  // Codex 式分段滑块：量出 active 按钮的位置，让 .mode-thumb 滑过去
+  const modeTabsRef = useRef<HTMLDivElement | null>(null);
+  const modeBtnRefs = useRef<Partial<Record<ChatMode, HTMLButtonElement | null>>>({});
+  const [thumb, setThumb] = useState({ x: 0, w: 0, ready: false });
+  useLayoutEffect(() => {
+    const update = () => {
+      const el = modeBtnRefs.current[mode];
+      if (!el) return;
+      setThumb({ x: el.offsetLeft, w: el.offsetWidth, ready: true });
+    };
+    update();
+    // 字体加载、窗口缩放都会改变按钮宽度，跟着重算
+    const ro = new ResizeObserver(update);
+    if (modeTabsRef.current) ro.observe(modeTabsRef.current);
+    window.addEventListener("resize", update);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [mode]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -583,10 +604,22 @@ export default function ChatArea({
       {/* 底部：模式切换 + 输入框 */}
       <div className="chat-measure mx-auto px-6 pb-5">
         <div className="mb-2 flex items-center gap-3">
-          <div className="mode-tabs" role="group" aria-label="对话模式">
+          <div className="mode-tabs" role="group" aria-label="对话模式" ref={modeTabsRef}>
+            <span
+              className="mode-thumb"
+              aria-hidden="true"
+              style={{
+                transform: `translateX(${thumb.x}px)`,
+                width: thumb.w,
+                opacity: thumb.ready ? 1 : 0,
+              }}
+            />
             {MODE_LABELS.map((m) => (
               <button
                 key={m.value}
+                ref={(el) => {
+                  modeBtnRefs.current[m.value] = el;
+                }}
                 onClick={() => onModeChange(m.value)}
                 title={m.hint}
                 aria-pressed={mode === m.value}
