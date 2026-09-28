@@ -80,3 +80,41 @@ export function getSendGeo(): { lat: number; lon: number } | null {
   if (!g) return null;
   return { lat: g.lat, lon: g.lon };
 }
+
+/** 把解析到的城市名写回本地缓存（让角标/提示能显示当前城市）。 */
+export function updateCachedCity(city: string): void {
+  const g = getCachedGeo();
+  if (!g) return;
+  g.city = city;
+  cacheGeo(g);
+}
+
+// 免 Key、支持 CORS 的客户端逆地理服务（高德逆地理只在后端用，不回传前端）。
+// 仅用于界面角标展示当前城市，失败不影响定位本身。
+const REVERSE_URL = "https://api.bigdatacloud.net/data/reverse-geocode-client";
+
+/** 坐标 -> 中文城市名（如「杭州市」），网络失败返回 null。 */
+export async function reverseGeocodeCity(
+  lat: number,
+  lon: number
+): Promise<string | null> {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    const res = await fetch(
+      `${REVERSE_URL}?latitude=${lat}&longitude=${lon}&localityLanguage=zh`,
+      { signal: ctrl.signal }
+    );
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      city?: string;
+      locality?: string;
+      principalSubdivision?: string;
+    };
+    const raw = data.city || data.locality || data.principalSubdivision || "";
+    return raw ? raw.replace(/市$/, "") : null;
+  } catch {
+    return null;
+  }
+}

@@ -108,11 +108,11 @@
   color: var(--accent);
 }
 .attach svg {
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   stroke: currentColor;
   fill: none;
-  stroke-width: 1.6;
+  stroke-width: 1.8;
 }
 
 /* 定位按钮：与附件按钮同款线条语言；开启后填充实心 + 金色，提示已接管位置 */
@@ -129,11 +129,11 @@
   color: var(--accent);
 }
 .geo-btn svg {
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   stroke: currentColor;
   fill: none;
-  stroke-width: 1.6;
+  stroke-width: 1.8;
 }
 .geo-btn.on {
   color: var(--accent);
@@ -141,6 +141,29 @@
 .geo-btn.on svg {
   fill: var(--accent);
   stroke: var(--accent);
+}
+
+/* 输入框上方的定位状态角标：开启后才出现，提示当前城市 */
+.geo-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 3px 10px 3px 8px;
+  border-radius: 999px;
+  background: var(--fill-2);
+  color: var(--accent-ink);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  letter-spacing: var(--ls-mid);
+  border: 1px solid var(--fill-3);
+}
+.geo-badge svg {
+  width: 13px;
+  height: 13px;
+  stroke: var(--accent);
+  fill: var(--accent);
+  stroke-width: 1.6;
 }
 
 /* 发送：圆 40px 金色按钮。全站另一个保留 hover 位移的组件 —— 它是唯一的主操作。

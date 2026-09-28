@@ -55,6 +55,8 @@ interface Props {
   onDeleteTurn?: (msgDbId: number) => void;
   /** 地理定位开关状态（开启后发送消息自动带坐标） */
   geoEnabled?: boolean;
+  /** 当前定位城市（角标展示用，可能为 null） */
+  geoCity?: string | null;
   /** 切换定位开关（请求权限 / 关闭），由页面层处理权限与缓存 */
   onToggleGeo?: () => void;
 }
@@ -82,6 +84,7 @@ export default function ChatArea({
   prefill,
   onDeleteTurn,
   geoEnabled = false,
+  geoCity = null,
   onToggleGeo,
 }: Props) {
   const [input, setInput] = useState("");
@@ -684,6 +687,18 @@ export default function ChatArea({
                 ? `仅图片会参与回答（${pendingImageCount} 张）；其余 ${pendingOtherCount} 个文件暂不支持解析`
                 : `${pendingImageCount} 张图片将上传，由视觉模型结合问题一起分析`}
             </p>
+          </div>
+        )}
+
+        {geoEnabled && (
+          <div className="geo-badge" role="status" aria-live="polite">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 21s7-6.4 7-11a7 7 0 1 0-14 0c0 4.6 7 11 7 11z" />
+              <circle cx="12" cy="10" r="2.6" />
+            </svg>
+            <span>
+              {geoCity ? `定位已开启 · 当前 ${geoCity}` : "定位已开启"}
+            </span>
           </div>
         )}
 

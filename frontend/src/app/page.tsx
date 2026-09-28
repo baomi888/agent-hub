@@ -11,7 +11,7 @@ import { api } from "@/lib/api";
 import { streamChat } from "@/lib/sse";
 import { uid } from "@/lib/id";
 import { useToast } from "@/lib/hooks/useToast";
-import { getSendGeo, isGeoEnabled, requestGeo, setGeoEnabled } from "@/lib/geo";
+import { getSendGeo, getCachedGeo, isGeoEnabled, requestGeo, reverseGeocodeCity, setGeoEnabled, updateCachedCity } from "@/lib/geo";
 import { usePrefs } from "@/lib/hooks/usePrefs";
 import { useSessions } from "@/lib/hooks/useSessions";
 import { useKnowledge } from "@/lib/hooks/useKnowledge";
@@ -86,6 +86,8 @@ export default function Home() {
   const [sending, setSending] = useState(false);
   // 地理定位开关：开启后发送消息自动附带坐标，天气/本地问答免手输城市
   const [geoEnabled, setGeoEnabledState] = useState(isGeoEnabled());
+  // 当前定位城市（角标展示用）；从缓存里读出，避免刷新后角标丢失城市名
+  const [geoCity, setGeoCity] = useState<string | null>(() => getCachedGeo()?.city ?? null);
   // 联网建库后把建议问题预填进输入框（不自动发送），让用户确认/补充
   const [prefill, setPrefill] = useState<{ text: string; ts: number } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -316,9 +318,23 @@ export default function Home() {
       showToast("error", "定位被拒绝或当前环境不支持（需 https/localhost）");
       return;
     }
+    // 并行解析城市名（仅用于角标展示，失败不影响定位本身）
+    let city: string | null = null;
+    try {
+      city = await reverseGeocodeCity(g.lat, g.lon);
+    } catch {
+      city = null;
+    }
+    if (city) {
+      updateCachedCity(city);
+      setGeoCity(city);
+    }
     setGeoEnabled(true);
     setGeoEnabledState(true);
-    showToast("success", "定位已开启，问天气无需再输城市");
+    showToast(
+      "success",
+      city ? `定位已开启（${city}），问天气无需再输城市` : "定位已开启，问天气无需再输城市"
+    );
   };
 
   // 绑定/解绑知识库（跨域：改会话，所以留在编排层）
@@ -449,6 +465,7 @@ export default function Home() {
           prefill={prefill ?? undefined}
           onDeleteTurn={deleteTurn}
           geoEnabled={geoEnabled}
+          geoCity={geoCity}
           onToggleGeo={toggleGeo}
         />
       </div>
