@@ -463,6 +463,8 @@ export default function ChatArea({
             <div className="welcome">
               <MascotLogo
                 className="hero-logo mx-auto mb-4 h-[72px] w-[72px] object-contain"
+                mood={messages.some((m) => m.streaming) ? "thinking" : "idle"}
+                tiltKey={mode}
               />
               <div className="eyebrow mb-2">苞米地 · 智能体工作台</div>
               <h1 className="hero-title font-serif font-bold leading-snug text-ink">

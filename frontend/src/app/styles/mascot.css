@@ -55,11 +55,44 @@
   50% { opacity: 0.72; }
 }
 
+/* 嘴：默认微笑，思考态换成○ */
+.mascot-mouth-o { display: none; }
+.mascot.thinking .mascot-mouth-smile { display: none; }
+.mascot.thinking .mascot-mouth-o { display: block; }
+/* 思考态：摇摆加快，像在使劲想 */
+.mascot.thinking .mascot-body { animation-duration: 0.85s; }
+
+/* 歪头层：平时不动，tilt 时一次性歪一下（切模式等） */
+.mascot-tilt {
+  transform-box: fill-box;
+  transform-origin: 50% 64%;
+}
+.mascot.tilt .mascot-tilt {
+  animation: mascot-tilt 0.6s cubic-bezier(0.34, 1.45, 0.34, 1);
+}
+/* 完成眨眼：happy 时临时覆盖无限 blink，一次性 */
+.mascot.happy .mascot-eye {
+  animation: mascot-blink-once 0.7s ease;
+}
+
+@keyframes mascot-blink-once {
+  0%, 38% { transform: scaleY(1); }
+  52% { transform: scaleY(0.08); }
+  68%, 100% { transform: scaleY(1); }
+}
+@keyframes mascot-tilt {
+  0% { transform: rotate(0deg); }
+  35% { transform: rotate(-13deg); }
+  62% { transform: rotate(-8deg); }
+  100% { transform: rotate(0deg); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .mascot,
   .mascot-body,
   .mascot-eye,
-  .mascot-blush {
+  .mascot-blush,
+  .mascot-tilt {
     animation: none !important;
   }
   .mascot:hover > svg {

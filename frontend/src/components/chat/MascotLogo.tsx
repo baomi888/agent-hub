@@ -1,28 +1,67 @@
 "use client";
-import React from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 type Props = {
   className?: string;
   title?: string;
+  /** 思考态：嘴变○、摇摆加快；AI 正在生成时传入 */
+  mood?: "idle" | "thinking";
+  /** 变化时歪一下头（如切换对话模式）；传会变的标识即可 */
+  tiltKey?: string | number;
 };
 
 /**
  * 苞米吉祥物（漫画 Q 版）：会眨眼、会呼吸漂浮、hover 时弹一下。
- * 描边走 currentColor，外层 color 取 --ink，明暗主题自动适配；
- * 脸 / 叶 / 腮红为固定色，在浅纸与深夜两底都站得住。
+ * 描边走 currentColor，外层 color 取 --ink，明暗主题自动适配。
+ * 交互彩蛋：
+ *  - mood="thinking" 时嘴变成○、整体摇摆加快（AI 正在生成）
+ *  - mood 从 thinking 回落 idle（生成完成）时自动眨一次眼
+ *  - tiltKey 变化时歪一下头（如切换对话模式）
  */
-export default function MascotLogo({ className = "", title }: Props) {
-  const raw = React.useId();
+export default function MascotLogo({ className = "", title, mood = "idle", tiltKey }: Props) {
+  const raw = useId();
   const clip = `cob${raw.replace(/[:]/g, "")}`;
+  const [happy, setHappy] = useState(false);
+  const [tilt, setTilt] = useState(false);
+  const prevMood = useRef(mood);
+  const prevTilt = useRef(tiltKey);
+
+  // 思考态回落（生成完成）→ 眨一次眼
+  useEffect(() => {
+    if (prevMood.current === "thinking" && mood !== "thinking") {
+      setHappy(true);
+      const t = setTimeout(() => setHappy(false), 750);
+      prevMood.current = mood;
+      return () => clearTimeout(t);
+    }
+    prevMood.current = mood;
+  }, [mood]);
+
+  // 标识变化（如模式切换）→ 歪一下头
+  useEffect(() => {
+    if (tiltKey !== undefined && prevTilt.current !== tiltKey) {
+      prevTilt.current = tiltKey;
+      setTilt(true);
+      const t = setTimeout(() => setTilt(false), 600);
+      return () => clearTimeout(t);
+    }
+  }, [tiltKey]);
+
+  const cls = [
+    "mascot",
+    "corn-logo",
+    mood === "thinking" ? "thinking" : "",
+    happy ? "happy" : "",
+    tilt ? "tilt" : "",
+    className,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <div
-      className={`mascot corn-logo ${className}`}
-      role="img"
-      aria-label={title ?? "苞米吉祥物"}
-      style={{ color: "var(--ink)" }}
-    >
+    <div className={cls} role="img" aria-label={title ?? "苞米吉祥物"} style={{ color: "var(--ink)" }}>
       <svg viewBox="0 0 120 120" width="100%" height="100%" style={{ display: "block", overflow: "visible" }}>
-        <g strokeLinecap="round" strokeLinejoin="round">
+        <g className="mascot-tilt" strokeLinecap="round" strokeLinejoin="round">
           {/* 玉米须 */}
           <path
             d="M52 22 C51 15 55 11 60 10 M60 22 C60 14 63 11 67 9 M67 22 C69 16 72 14 76 13"
@@ -60,8 +99,9 @@ export default function MascotLogo({ className = "", title }: Props) {
               <circle cx="53.6" cy="55.4" r="1.7" fill="#FFFDF6" />
               <circle cx="69.6" cy="55.4" r="1.7" fill="#FFFDF6" />
             </g>
-            {/* 嘴 */}
-            <path d="M53.5 67 Q60 73 66.5 67" fill="none" stroke="currentColor" strokeWidth={4} />
+            {/* 嘴：默认微笑；思考态换成○ */}
+            <path className="mascot-mouth-smile" d="M53.5 67 Q60 73 66.5 67" fill="none" stroke="currentColor" strokeWidth={4} />
+            <ellipse className="mascot-mouth-o" cx="60" cy="69" rx="3.4" ry="4" fill="none" stroke="currentColor" strokeWidth={4} />
             {/* 脸高光 */}
             <path d="M45 31 C48 27 53 25 58 25" fill="none" stroke="#FFFFFF" strokeWidth={4} opacity={0.5} />
           </g>

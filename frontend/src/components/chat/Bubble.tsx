@@ -113,7 +113,7 @@ const Bubble = memo(function Bubble({
 
   return (
     <div className="ai-msg flex gap-3">
-      <HubMark className="h-7 w-7 flex-shrink-0 mt-0.5" />
+      <HubMark className="h-7 w-7 flex-shrink-0 mt-0.5" thinking={m.streaming} />
       <div className="min-w-0 flex-1 pt-0.5">
         {/* 工具调用条：进行中显形（转圈 + 已用工具），结束后收成可展开记录 */}
         {m.toolCalls && m.toolCalls.length > 0 && (
