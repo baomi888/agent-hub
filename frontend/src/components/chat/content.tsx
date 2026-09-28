@@ -2,7 +2,17 @@
 // 从 ChatArea.tsx 拆出（2026-09 重构），全部是纯函数，适合单测
 import type { ReactNode } from "react";
 
-const URL_RE = /https?:\/\/[^\s<>"{}|\\^`\[\]]+/gi;
+// 排除空白与常见分隔符；中文标点也要排除，否则「https://xxx。」会把句号吞进链接
+const URL_RE = /https?:\/\/[^\s<>"{}|\\^`\[\]。，、；：！？（）【】《》「」『』]+/gi;
+
+/** 展示用 URL：把百分号编码解码回中文/原文，href 仍用原始值，跳转不受影响 */
+function displayUrl(url: string): string {
+  try {
+    return decodeURI(url);
+  } catch {
+    return url; // 含非法 % 序列时保持原文
+  }
+}
 
 export function splitByUrl(text: string): Array<{ type: "text" | "url"; value: string }> {
   const out: Array<{ type: "text" | "url"; value: string }> = [];
@@ -33,9 +43,9 @@ export function renderContent(text: string): ReactNode {
             target="_blank"
             rel="noopener noreferrer"
             className="inline-link"
-            title={seg.value}
+            title={displayUrl(seg.value)}
           >
-            {seg.value}
+            {displayUrl(seg.value)}
           </a>
         );
       }
