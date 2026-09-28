@@ -3,12 +3,12 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
+  gap: var(--space-14);
   padding: 24px 0 32px;
 }
 .thinking-dots {
   display: flex;
-  gap: 10px;
+  gap: var(--space-10);
 }
 /* 等待指示器原来是六个渐变小玻璃珠：radial 高光 + 静态投影 + inset 阴影 +
    左上角一颗白色高光点。这套拟物语言跟线描玉米完全不是一路，
@@ -170,7 +170,7 @@
 .skel-block {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-6);
   padding: 8px 10px;
   border-radius: var(--radius-md);
   border: 1px solid var(--line);
@@ -222,7 +222,7 @@
   z-index: 5;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   padding: 6px 14px;
   border-radius: 999px;
   border: 1px solid var(--line-strong);

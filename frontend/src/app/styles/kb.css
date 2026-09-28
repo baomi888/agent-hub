@@ -16,14 +16,14 @@
   margin-top: 8px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-2);
   border-top: 1px dashed var(--line-strong);
   padding-top: 6px;
 }
 .kb-file {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-5);
   font-size: var(--fs-xs);
   color: var(--text-2);
   padding: 2px 0;
@@ -65,7 +65,7 @@
 }
 .kb-file-confirm {
   display: inline-flex;
-  gap: 3px;
+  gap: var(--space-3);
   flex-shrink: 0;
 }
 .kb-file-foot {
@@ -118,7 +118,7 @@
 .pv-head {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: var(--space-12);
   padding: 14px 16px 10px;
   border-bottom: 1px solid var(--line);
 }
@@ -135,7 +135,7 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-8);
   margin-top: 4px;
   font-size: var(--fs-xs);
   color: var(--text-3);
@@ -179,7 +179,7 @@
   padding: 14px 16px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-8);
 }
 .pv-text {
   margin: 0;
@@ -215,7 +215,7 @@
 .pv-foot {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--space-8);
   padding: 10px 16px 14px;
   border-top: 1px solid var(--line);
 }
@@ -261,7 +261,7 @@
 .attach-strip {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-8);
   padding: 0 0 10px;
   border-bottom: 1px solid var(--line);
   margin-bottom: 10px;
@@ -270,7 +270,7 @@
 .attach-note {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-5);
   width: 100%;
   font-size: var(--fs-xs);
   line-height: var(--lh-body);
@@ -287,7 +287,7 @@
 .attach-item {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-7);
   border: 1px solid var(--line-strong);
   background: var(--panel);
   padding: 3px 6px 3px 3px;
@@ -360,7 +360,7 @@
 .msg-attachments {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-8);
   justify-content: flex-end;
 }
 .msg-img {
@@ -381,7 +381,7 @@
 .msg-file {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-7);
   border: 1px solid var(--line-strong);
   background: var(--panel);
   padding: 6px 12px;
@@ -506,7 +506,7 @@
   pointer-events: none;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-8);
   align-items: center;
 }
 .toast {

@@ -2,7 +2,7 @@
 .tool-bar {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   font-size: var(--fs-sm);
   color: var(--text-2);
   background: var(--fill-3);
@@ -27,7 +27,7 @@
 .tool-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-5);
   font-size: var(--fs-sm);
   color: var(--text-2);
   background: var(--card-bg);
@@ -121,7 +121,7 @@
 .plan-tl-node {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   font-size: var(--fs-sm);
   color: var(--text-2);
   white-space: nowrap;
@@ -146,7 +146,7 @@
 }
 .plan-phase {
   display: flex;
-  gap: 12px;
+  gap: var(--space-12);
   padding: 9px 0;
   border-bottom: 1px solid var(--line);
 }
@@ -177,7 +177,7 @@
 .plan-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-12);
   padding-top: 12px;
   border-top: 1px solid var(--line);
   margin-top: 6px;
@@ -207,7 +207,7 @@
 .theme-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-5);
   font-size: var(--fs-sm);
   color: var(--text-2);
   padding: 5px 10px;
@@ -223,7 +223,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-8);
   padding: 3px 4px 3px 11px;
   border: 1px solid var(--accent-line);
   border-radius: 999px;
@@ -237,7 +237,7 @@
 }
 .fs-picker-opts {
   display: flex;
-  gap: 2px;
+  gap: var(--space-2);
 }
 .fs-picker-opts button {
   border: none;

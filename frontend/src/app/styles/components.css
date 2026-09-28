@@ -132,7 +132,7 @@
 .search {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   border-bottom: 1px solid var(--line-strong);
   padding-bottom: 6px;
   transition: var(--t-color);
@@ -184,7 +184,7 @@
 .group-head {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-10);
   margin: 14px 0 4px;
   animation: fadeSlideIn 0.4s ease-out;
 }
@@ -294,7 +294,7 @@
 .status {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-7);
   font-size: var(--fs-sm);
   color: var(--text-2);
   border: 1px solid var(--line);
@@ -321,7 +321,7 @@
 .kb-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   font-size: var(--fs-xs);
   color: var(--text-2);
   border: 1px solid var(--line-strong);
@@ -356,7 +356,7 @@
   padding: 5px;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   font-size: var(--fs-sm);
   letter-spacing: var(--ls-tight);
   transition: var(--t-color);

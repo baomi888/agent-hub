@@ -3,7 +3,7 @@
 .mode-tabs {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-2);
   padding: 3px;
   background: var(--bg-subtle);
   border: 1px solid var(--line);
@@ -59,7 +59,7 @@
 .input-row {
   display: flex;
   align-items: flex-end;
-  gap: 12px;
+  gap: var(--space-12);
   /* 规范 2.4：输入框底色 #FDFAF2（= --card-bg），圆角 16px；
      不用 backdrop-filter —— 全宽毛玻璃每帧重算模糊，规范 2.7 也禁用玻璃拟态 */
   background: var(--card-bg);
@@ -143,7 +143,7 @@
   position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-10);
   padding: 12px 12px 10px 36px;
   background: var(--card-bg);
   border: 1px solid var(--accent-line-soft);
@@ -263,7 +263,7 @@
 }
 .kb-meta {
   display: flex;
-  gap: 6px;
+  gap: var(--space-6);
   margin-top: 3px;
 }
 .tag {

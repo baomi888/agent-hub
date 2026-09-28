@@ -142,6 +142,24 @@
   --fs-xl: 16px; /* 强调数字、空状态标题 */
   --fs-title: 20px; /* 面板/浮层标题（衬线） */
 
+  /* 间距刻度：把散落的 gap 像素值收口成令牌，防止间距再度发散。
+     保留 2/3 半档与 6/10 高频值（它们落在 4px 阶梯外，硬套 4/8/12/16 会让卡片变糙）。
+     目前只接管手写 CSS 的 gap；margin / padding 语义化（xs~xl）留第二阶段，需逐组件定档 */
+  --space-2: 2px;
+  --space-3: 3px;
+  --space-4: 4px;
+  --space-5: 5px;
+  --space-6: 6px;
+  --space-7: 7px;
+  --space-8: 8px;
+  --space-10: 10px;
+  --space-12: 12px;
+  --space-14: 14px;
+  --space-16: 16px;
+  --space-20: 20px;
+  --space-24: 24px;
+  --space-32: 32px;
+
   /* 阅读栏宽：聊天区三处容器共用。宽屏下让栏宽随屏幕增长一点，
      否则 2560px 屏上中间一条 720px 的细带，两侧全是空纸 */
   --measure: 720px;

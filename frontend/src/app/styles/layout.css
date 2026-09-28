@@ -152,7 +152,7 @@
 .msg-action-del {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-4);
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
   padding: 2px 8px;
@@ -173,7 +173,7 @@
 .msg-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-4);
   margin-top: 8px;
   opacity: 0;
   transform: translateY(-3px);

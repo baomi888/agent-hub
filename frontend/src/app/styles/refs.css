@@ -39,7 +39,7 @@
 .ref-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   font-size: var(--fs-xs);
   letter-spacing: var(--ls-wide);
   color: var(--text-3);
@@ -53,7 +53,7 @@
 }
 .ref-item {
   display: flex;
-  gap: 10px;
+  gap: var(--space-10);
   padding: 8px 10px;
   border: 1px solid transparent;
   border-radius: var(--radius-md);
@@ -91,7 +91,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--space-3);
 }
 .ref-src {
   font-size: var(--fs-md);
@@ -137,7 +137,7 @@
 .ref-more {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: var(--space-3);
   margin-top: 4px;
   padding: 0;
   font-size: var(--fs-xs);
@@ -152,7 +152,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-10);
   margin-top: 4px;
 }
 .ref-actions .ref-more {
