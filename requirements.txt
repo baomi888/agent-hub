@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
-"""集合式 Agent 后端依赖（LangChain v1.x）
-版本固定，避免 pip 自动升级导致 API 不兼容。
-"""
+# 集合式 Agent 后端依赖（LangChain v1.x）
+# 版本固定，避免 pip 自动升级导致 API 不兼容。
+#
+# ⚠️ 本文件是 pip 的 requirements 格式，注释只能用「#」开头。
+#    不要写成 Python 文档字符串（三引号），否则 pip 会报
+#    "Invalid requirement" 并让 deploy.sh 第 5 步「后端依赖安装」直接中止。
+#    2026-10-03 线上踩过一次：这几行原本是三引号，导致整次部署卡死。
 
 # ---------- LangChain 生态 ----------
 langchain==1.4.1
