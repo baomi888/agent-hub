@@ -53,7 +53,8 @@ export interface RefSource {
   id: number;
   source: string;
   page: number | null;
-  score: number;
+  // 余弦相似度（越大越相关）。后端换算不了时给 null，此时前端不显示这一项
+  score: number | null;
   preview: string;
   text: string;
 }

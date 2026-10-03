@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from langchain_core.documents import Document
 
-from kb.rag_core import select_diverse, _to_similarity
+from kb.rag_core import RagPipeline, select_diverse, _to_similarity
 
 BASE = "苞米是一种在东北广泛种植的作物，秋天收割后可以直接煮着吃，也可以磨成玉米面。"
 
@@ -50,15 +50,48 @@ picked2 = select_diverse(cands2, 3)
 show("离群过滤", picked2)
 assert all("不相关" not in doc.page_content for doc, _ in picked2), "离群片段应被过滤"
 
-# 3) 距离 > 2（向量未归一化，余弦换算不成立）→ 跳过过滤，只做去重
+# 3) 距离 > 4（平方 L2 的值域上界，超出说明向量没归一化）→ 换算不了，跳过过滤只做去重
 cands3 = [
-    d("片段一：关于苞米的储存方式。", 3.1),
-    d("片段二：关于苞米的储存方式补充。", 3.3),
-    d("片段三：讲天气接口怎么申请。", 5.0),
+    d("片段一：关于苞米的储存方式。", 3.1),                      # cos = -0.55，合法但会被阈值砍掉
+    d("片段二：关于苞米的储存方式补充。", 3.3),                  # cos = -0.65
+    d("片段三：讲天气接口怎么申请。", 5.0),                      # 越界 -> None
 ]
 picked3 = select_diverse(cands3, 2)
 show("不可换算时跳过过滤", picked3)
 assert len(picked3) == 2, "换不了余弦就不该乱砍"
+# 关键：正因为第 3 条越界，离群过滤整批被跳过 —— 哪怕 cos 为负的片段也必须留着
+assert any("天气接口" in doc.page_content for doc, _ in picked3), "越界时不应触发离群过滤"
+
+# 3b) 回归：d 落在 (2, 4]（即 cos < 0）**不能**再让整条过滤短路。
+# 这正是线上 2026-10-03 查到的真 bug —— 守卫按 [0,2] 判定，导致 cos 为负的
+# 离群片段（实测 d=2.237 -> cos≈-0.12）既没被过滤、还把整个阈值旁路掉。
+cands3b = [
+    d("相关内容 A：苞米的种植密度与产量关系密切。", 0.30),        # cos 0.85
+    d("相关内容 B：玉米螟是苞米的主要虫害之一。", 0.36),          # cos 0.82
+    d("明显不相关：讲的是高德接口怎么申请。", 2.237),            # cos -0.12，应被砍
+]
+picked3b = select_diverse(cands3b, 3)
+show("(2,4] 不再短路过滤", picked3b)
+assert all("不相关" not in doc.page_content for doc, _ in picked3b), \
+    "cos 为负的离群片段应被过滤掉（守卫值域应为 [0,4]）"
+assert len(picked3b) == 2
+
+# 3c) 换算边界：cos = 1 - d/2，d=0 -> 1.0，d=4 -> -1.0
+assert abs(_to_similarity(0.0) - 1.0) < 1e-9
+assert abs(_to_similarity(2.0) - 0.0) < 1e-9
+assert abs(_to_similarity(4.0) + 1.0) < 1e-9
+assert _to_similarity(4.2) is None, "超出 [0,4] 应判定为不可换算"
+assert _to_similarity(-0.1) is None
+
+# 3d) build_sources 暴露给前端的 score 必须是相似度而不是距离
+_srcs = RagPipeline.build_sources([
+    (Document(page_content="片段一", metadata={"source": "a.pdf", "page": 0}), 1.089),
+    (Document(page_content="片段二", metadata={"source": "a.pdf", "page": 1}), 2.237),
+])
+assert abs(_srcs[0]["score"] - 0.4555) < 1e-4, f"期望 0.4555 got {_srcs[0]['score']}"
+assert _srcs[1]["score"] < 0, "cos 为负应如实给负值，而不是把距离 2.237 直接透出"
+_refs_md = RagPipeline._format_refs([(Document(page_content="片段一", metadata={"source": "a.pdf", "page": 0}), 1.089)])
+assert "score=0.456" in _refs_md, f"参考片段里应写相似度：{_refs_md}"
 
 # 4) 候选不足 → 原样返回，不多不少
 short = [d("只有一条", 0.1), d("只有两条", 0.2)]

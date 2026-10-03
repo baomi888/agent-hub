@@ -100,11 +100,22 @@ def _overlap(a: set[str], b: set[str]) -> float:
 def _to_similarity(distance: float) -> float | None:
     """Chroma 的距离换算成余弦相似度。
 
-    Chroma 默认返回平方 L2 距离。向量做过归一化时（百炼/OpenAI 的 embedding 都是）
-    d = 2 - 2cos，于是 cos = 1 - d/2；向量没归一化时这个换算不成立，返回 None 让调用方跳过过滤，
-    宁可少滤几个，也不能把相关片段误杀。
+    距离口径（已实测确认，2026-10-03）：集合创建时没有指定 hnsw:space，
+    走的是 Chroma 默认的**平方 L2**；而百炼 text-embedding-v3 返回的向量
+    **已经是单位向量**（本地库 11 条实测 L2 范数全为 1.0000）。
+    平方 L2 在单位向量上有 d = ||a-b||^2 = 2 - 2cos，因此 cos = 1 - d/2，
+    **d 的合法值域是 [0, 4]**，对应 cos ∈ [-1, 1]。
+
+    ⚠️ 此前这里按余弦距离的 [0, 2] 判定，导致 d ∈ (2, 4]（即 cos < 0，
+    明显不相关的片段）被当成"换算不了"，进而让 select_diverse 里
+    `all(...)` 短路、**整条离群过滤被跳过**——阈值形同虚设。
+    实测线上一次检索返回 1.089 / 1.160 / 2.237 三条，其中 2.237 对应
+    cos ≈ -0.12，本该被过滤掉却进了参考资料。
+
+    换算不成立时（例如换了没归一化的 embedding 模型）仍返回 None 让调用方
+    跳过过滤——宁可少滤几个，也不能把相关片段误杀。
     """
-    if distance is None or distance < 0 or distance > 2:
+    if distance is None or distance < 0 or distance > 4:
         return None
     return 1 - distance / 2
 
@@ -428,14 +439,17 @@ class RagPipeline:
     def build_sources(docs_scores) -> list[dict]:
         """把检索结果整理成前端可展开的引用条目（含原文，供溯源查看）。"""
         out = []
-        for i, (d, score) in enumerate(docs_scores):
+        for i, (d, distance) in enumerate(docs_scores):
             src = os.path.basename(d.metadata.get("source", "?"))
             page = d.metadata.get("page")
+            # 前端那个位置的标签是「相似度」，所以这里必须给真相似度（越大越相关），
+            # 不能直接把距离丢过去。距离越界导致换算不了时给 None，前端会隐藏这一项。
+            sim = _to_similarity(distance)
             out.append({
                 "id": i + 1,
                 "source": src,
                 "page": (page + 1) if isinstance(page, int) else None,
-                "score": round(float(score), 4),
+                "score": round(sim, 4) if sim is not None else None,
                 "preview": d.page_content.replace("\n", " ")[:80],
                 "text": d.page_content[:1500],
             })
@@ -445,12 +459,17 @@ class RagPipeline:
     def _format_refs(docs_scores) -> str:
         """参考片段格式化：来源文件名 + 页码 + 相似度 + 60 字预览。"""
         lines = []
-        for i, (d, score) in enumerate(docs_scores):
+        for i, (d, distance) in enumerate(docs_scores):
             src = os.path.basename(d.metadata.get("source", "?"))
             page = d.metadata.get("page")
             loc = f" 第{page + 1}页" if page is not None else ""
             preview = d.page_content.replace("\n", " ")[:60]
-            lines.append(f"**[{i + 1}]** {src}{loc} ｜ score={score:.3f} ｜ {preview}...")
+            # 同 build_sources：给相似度而不是距离；换算不了就整段省掉，避免显示错标签
+            sim = _to_similarity(distance)
+            head = f"**[{i + 1}]** {src}{loc}"
+            if sim is not None:
+                head += f" ｜ score={sim:.3f}"
+            lines.append(f"{head} ｜ {preview}...")
         return "\n\n".join(lines) if lines else "（无检索结果）"
 
     def answer(self, question: str, top_k: int) -> tuple[str, str]:

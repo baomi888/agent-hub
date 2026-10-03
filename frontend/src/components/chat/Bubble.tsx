@@ -212,7 +212,7 @@ const Bubble = memo(function Bubble({
               {(refItems.length > 0 ? refItems : (m.sources ?? []).map((s) => ({
                 idx: String(s.id),
                 source: s.source + (s.page ? ` 第${s.page}页` : ""),
-                score: s.score.toFixed(3),
+                score: typeof s.score === "number" ? s.score.toFixed(3) : "",
                 preview: s.preview,
               }))).map((r) => {
                 const idxNum = Number(r.idx);
