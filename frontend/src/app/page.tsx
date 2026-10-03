@@ -11,7 +11,7 @@ import { api } from "@/lib/api";
 import { streamChat } from "@/lib/sse";
 import { uid } from "@/lib/id";
 import { useToast } from "@/lib/hooks/useToast";
-import { getSendGeo, getCachedGeo, isGeoEnabled, requestGeo, reverseGeocodeCity, setGeoEnabled, updateCachedCity } from "@/lib/geo";
+import { getSendGeo, getCachedGeo, isGeoEnabled, acquireGeo, reverseGeocodeCity, setGeoEnabled, updateCachedCity } from "@/lib/geo";
 import { usePrefs } from "@/lib/hooks/usePrefs";
 import { useSessions } from "@/lib/hooks/useSessions";
 import { useKnowledge } from "@/lib/hooks/useKnowledge";
@@ -88,6 +88,8 @@ export default function Home() {
   const [geoEnabled, setGeoEnabledState] = useState(isGeoEnabled());
   // 当前定位城市（角标展示用）；从缓存里读出，避免刷新后角标丢失城市名
   const [geoCity, setGeoCity] = useState<string | null>(() => getCachedGeo()?.city ?? null);
+  // 定位请求进行中：授权弹窗 + IP 兜底最长 18s，期间按钮转圈，否则看着像没反应
+  const [geoPending, setGeoPending] = useState(false);
   // 联网建库后把建议问题预填进输入框（不自动发送），让用户确认/补充
   const [prefill, setPrefill] = useState<{ text: string; ts: number } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -235,9 +237,14 @@ export default function Home() {
           }
           case "done": {
             const refs = String(ev.data.refs ?? "");
+            // 后端回传的 messages 表 id：赞踩要按它落库，
+            // 前端自己生成的 uid 后端不认，只能在这里补挂
+            const dbId = Number(ev.data.message_id ?? 0) || undefined;
             setMessages((prev) =>
               prev.map((m) =>
-                m.id === asstId ? { ...m, streaming: false, refs: refs || m.refs } : m
+                m.id === asstId
+                  ? { ...m, streaming: false, refs: refs || m.refs, dbId: dbId ?? m.dbId }
+                  : m
               )
             );
             break;
@@ -306,24 +313,33 @@ export default function Home() {
     abortRef.current?.abort();
   };
 
-  // 定位开关：开 → 请求一次权限并缓存坐标；关 → 仅关闭开关（保留缓存）
+  // 定位开关：开 → 先试浏览器定位，公网 http 下自动退到服务端 IP 定位；关 → 仅关闭开关（保留缓存）
   const toggleGeo = async () => {
     if (geoEnabled) {
       setGeoEnabled(false);
       setGeoEnabledState(false);
       return;
     }
-    const g = await requestGeo();
-    if (!g) {
-      showToast("error", "定位被拒绝或当前环境不支持（需 https/localhost）");
+    // 这一段最长要 18 秒：等浏览器授权弹窗 10s（用户不点允许/拒绝就一直等到超时），
+    // 拿不到再退服务端 IP 定位 8s。不给 pending 反馈的话，用户会以为按钮坏了。
+    setGeoPending(true);
+    const r = await acquireGeo();
+    if (!r) {
+      setGeoPending(false);
+      showToast(
+        "error",
+        "定位失败：当前环境不支持浏览器定位，后端也未能按 IP 推断城市（需 AMAP_API_KEY）"
+      );
       return;
     }
-    // 并行解析城市名（仅用于角标展示，失败不影响定位本身）
-    let city: string | null = null;
-    try {
-      city = await reverseGeocodeCity(g.lat, g.lon);
-    } catch {
-      city = null;
+    // IP 定位直接带城市名；浏览器定位只有坐标，要逆地理补一下（仅角标展示用，失败不影响）
+    let city: string | null = r.geo.city ?? null;
+    if (!city && typeof r.geo.lat === "number" && typeof r.geo.lon === "number") {
+      try {
+        city = await reverseGeocodeCity(r.geo.lat, r.geo.lon);
+      } catch {
+        city = null;
+      }
     }
     if (city) {
       updateCachedCity(city);
@@ -331,9 +347,14 @@ export default function Home() {
     }
     setGeoEnabled(true);
     setGeoEnabledState(true);
+    setGeoPending(false);
     showToast(
       "success",
-      city ? `定位已开启（${city}），问天气无需再输城市` : "定位已开启，问天气无需再输城市"
+      city
+        ? r.source === "ip"
+          ? `已按 IP 定位到${city}（城市级），问天气无需再输城市`
+          : `定位已开启（${city}），问天气无需再输城市`
+        : "定位已开启，问天气无需再输城市"
     );
   };
 
@@ -466,7 +487,9 @@ export default function Home() {
           onDeleteTurn={deleteTurn}
           geoEnabled={geoEnabled}
           geoCity={geoCity}
+          geoPending={geoPending}
           onToggleGeo={toggleGeo}
+          sessionId={activeSid}
         />
       </div>
 

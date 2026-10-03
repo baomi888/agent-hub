@@ -29,8 +29,8 @@ const Bubble = memo(function Bubble({
   onRetry?: (assistantId: string, question: string) => void;
   /** 剪贴板不可用等静默失败，交给上层出 toast */
   onCopyFail?: () => void;
-  /** 赞/踩：后端还没有反馈接口，先在前端给一次可见回应 */
-  onFeedback?: () => void;
+  /** 赞/踩：按后端 messages 表的 id 落库，刷新后仍在（id 缺失时上层会静默跳过） */
+  onFeedback?: (msgDbId: number, rating: "up" | "down") => void;
   /** 打开该文件全文预览（未绑定资料库时不传，入口就不显示） */
   onPreviewFile?: (source: string) => void;
   /** 删除该消息及其所在的一轮对话 */
@@ -347,7 +347,7 @@ const Bubble = memo(function Bubble({
               onClick={() => {
                 const next = feedback === "like" ? null : "like";
                 setFeedback(next);
-                if (next) onFeedback?.();
+                if (next && m.dbId) onFeedback?.(m.dbId, "up");
               }}
               title="赞"
               className={`flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs transition hover:bg-fill-2 ${
@@ -366,7 +366,7 @@ const Bubble = memo(function Bubble({
               onClick={() => {
                 const next = feedback === "dislike" ? null : "dislike";
                 setFeedback(next);
-                if (next) onFeedback?.();
+                if (next && m.dbId) onFeedback?.(m.dbId, "down");
               }}
               title="踩"
               className={`flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs transition hover:bg-fill-2 ${

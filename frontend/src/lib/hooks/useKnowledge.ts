@@ -17,8 +17,11 @@ export function useKnowledge(showToast: ShowToast, chunkSize: number, chunkOverl
       setKbs(list);
     } catch (e) {
       console.error(e);
+      // 同文件里 deleteKb / rebuildKb / deleteKbFile 失败都会 toast，只有这里静默：
+      // 删完库再刷新失败的话，右栏还挂着已经删掉的库，用户会以为没删掉、再点一次。
+      showToast("error", "知识库列表刷新失败，请稍后重试");
     }
-  }, []);
+  }, [showToast]);
 
   // 初始化：拉知识库列表（与 sessions/defaults 的请求并发）
   useEffect(() => {

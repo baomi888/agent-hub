@@ -28,7 +28,15 @@ sse-starlette>=2.0
 pypdf>=4.0
 
 # ---------- 联网搜索 ----------
-duckduckgo-search>=6.0
+# 注意：duckduckgo-search 是死依赖（全项目零引用），已于 2026-10-02 移除。
+# 它原先只是“顺带”提供 httpx，现在改为显式声明，避免摘掉后 import httpx 失败
+# （agent/tools.py:82、api/kb.py:403、kb/importer.py:9 都依赖 httpx）。
+httpx>=0.27
+
+# ---------- LangGraph 检查点（Agent 多轮记忆落盘，必须装！）----------
+# 不装的话，builder.py 会静默退化为 MemorySaver，重启服务记忆全丢。
+# 详见 docs/前后端可更新点_2026-10-01.md 后端第 1 条。
+langgraph-checkpoint-sqlite>=3.1
 
 # ---------- 工具库 ----------
 python-dotenv>=1.0

@@ -12,7 +12,8 @@ SSE 事件协议：
   event: tool       { name: "...", input: "...", output: "..." }  Agent 工具调用
   event: token      { text: "...", refs: "" }  增量 token
   event: title      { title: "..." }          自动生成的会话标题（仅首轮）
-  event: done       { answer: "...", refs: "", title: "", mode: "" }
+  event: done       { answer: "...", refs: "", title: "", mode: "", message_id: 123 }
+                    message_id 是 assistant 消息在 messages 表里的 id，赞踩按它落库
   event: error      { detail: "..." }
 """
 
@@ -29,7 +30,7 @@ from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from pydantic import BaseModel, Field
 
-from core import config, session as store
+from core import config, session as store, upload
 from core.llm import get_llm, get_vision_llm
 from kb import pipelines
 from kb.rag_core import SYSTEM_PROMPT, describe_api_error
@@ -60,7 +61,9 @@ class ChatRequest(BaseModel):
     attachments: list[dict] = Field(default_factory=list, description="附件列表（图片理解用）")
     location: dict | None = Field(
         default=None,
-        description="用户地理定位：{ lat: float, lon: float }，由前端地理定位得到，用于天气/本地问答免手输城市",
+        description="用户地理定位。两种形态：{ lat, lon }（浏览器定位，精度高）或 "
+        "{ city }（公网 http 下浏览器定位不可用，由后端按来源 IP 推断）。"
+        "有坐标时后端会逆地理补 city，用于天气/本地问答免手输城市",
     )
 
 
@@ -114,17 +117,13 @@ async def upload_attachments(files: list[UploadFile] = File(...)):
         ext = os.path.splitext(f.filename or "")[1] or ".bin"
         safe_name = f"{uuid.uuid4().hex}{ext}"
         path = os.path.join(CHAT_UPLOAD_DIR, safe_name)
-        content = await f.read()
-        if len(content) > MAX_CHAT_UPLOAD_MB * 1024 * 1024:
-            raise HTTPException(
-                status_code=400, detail=f"附件过大（>{MAX_CHAT_UPLOAD_MB}MB）：{f.filename}"
-            )
-        with open(path, "wb") as out:
-            out.write(content)
+        # 分块写盘：以前是 await f.read() 整份读进内存再判大小，
+        # 1GB 的附件在 2G 内存的机器上等判出来时进程已经被 OOM killer 带走了
+        size = await upload.save_stream(f, path, MAX_CHAT_UPLOAD_MB * 1024 * 1024)
         results.append({
             "filename": f.filename,
             "path": path,
-            "size": len(content),
+            "size": size,
             "type": f.content_type or "application/octet-stream",
         })
     return {"files": results}
@@ -213,30 +212,45 @@ async def chat_stream(req: ChatRequest, request: Request):
         raise HTTPException(status_code=404, detail=f"会话不存在：{req.sid}")
 
     kb_id = req.kb_id_override or conv.get("kb_id")
-    kb_exists = bool(kb_id and pipelines.exists(kb_id))
+    # exists() → peek() 要读 sqlite，是同步 I/O，别卡住事件循环
+    kb_exists = bool(kb_id and await asyncio.to_thread(pipelines.exists, kb_id))
     mode = _pick_mode(req.mode, kb_id, kb_exists)
 
     # RAG 模式如果知识库不存在 → 降级为 agent
     if mode == "rag" and not kb_exists:
         mode = "agent"
 
-    # 解析用户地理定位：坐标 -> 逆地理城市名（天气/本地问答免手输城市）。
-    # 后端无高德 Key 时 reverse_geocode_city 返回 None，前端仍传了坐标，
-    # 天气工具会用 Open-Meteo 按坐标查，只是展示名退化为「你所在位置」。
+    # 解析用户地理定位，两种来源都要接住（天气/本地问答免手输城市）：
+    #   ① 浏览器定位（HTTPS / localhost 才可用）→ 带 lat/lon，精度最高
+    #   ② 公网 http 下浏览器 geolocation 不可用 → 前端改调 /api/geo/locate
+    #      由服务端按来源 IP 兜底，只有 city、没有坐标
+    # 以前只认 ①：拿不到 lat/lon 就整条置 None，② 的结果会被白白丢掉。
     location_ctx: dict | None = None
     if isinstance(req.location, dict):
+        raw_city = req.location.get("city")
+        city = raw_city.strip() if isinstance(raw_city, str) else ""
         try:
             flat = float(req.location.get("lat"))
             flon = float(req.location.get("lon"))
-            city = None
-            try:
-                from agent.tools import reverse_geocode_city
-                city = reverse_geocode_city(flat, flon)
-            except Exception:
-                city = None
-            location_ctx = {"lat": flat, "lon": flon, "city": city}
+            have_xy = True
         except (TypeError, ValueError):
-            location_ctx = None
+            flat = flon = 0.0
+            have_xy = False
+
+        if have_xy:
+            # 有坐标：逆地理补城市名。后端没高德 Key 时返回 None，
+            # 天气工具会退到 Open-Meteo 按坐标查，只是展示名变成「你所在位置」。
+            if not city:
+                try:
+                    from agent.tools import reverse_geocode_city
+
+                    rg = reverse_geocode_city(flat, flon)
+                    city = rg.strip() if isinstance(rg, str) else ""
+                except Exception:
+                    city = ""
+            location_ctx = {"lat": flat, "lon": flon, "city": city}
+        elif city:
+            location_ctx = {"city": city}
 
     store.add_message(req.sid, "user", req.question)
     should_gen_title = store.count_messages(req.sid) <= 2
@@ -286,7 +300,7 @@ async def chat_stream(req: ChatRequest, request: Request):
             acc_text = acc.text
 
             # 收尾
-            store.add_message(req.sid, "assistant", acc_text, refs=refs_md)
+            msg_id = store.add_message(req.sid, "assistant", acc_text, refs=refs_md)
             gen_title = ""
             if should_gen_title and acc_text:
                 try:
@@ -296,7 +310,14 @@ async def chat_stream(req: ChatRequest, request: Request):
                         yield _sse("title", {"title": gen_title})
                 except Exception:
                     pass
-            yield _sse("done", {"answer": acc_text, "refs": refs_md, "title": gen_title, "mode": "vision"})
+            # message_id 回给前端：赞踩要按消息 id 落库，前端自己生成的 uid 后端不认
+            yield _sse("done", {
+                "answer": acc_text,
+                "refs": refs_md,
+                "title": gen_title,
+                "mode": "vision",
+                "message_id": msg_id,
+            })
             return
 
         # ---- 1. Agent 模式 ----
@@ -322,7 +343,9 @@ async def chat_stream(req: ChatRequest, request: Request):
                 full_text = ""
 
                 # stream_mode=["updates","messages"] 事件为 (mode字符串, payload)
-                for event in agent.stream(
+                # 必须走 astream：同步 stream() 会把整个事件循环堵住，
+                # 一次 Agent 回答十几秒，期间建库/上传/切会话全部排队
+                async for event in agent.astream(
                     {"messages": messages},
                     config=config_,
                     stream_mode=["updates", "messages"],
@@ -438,7 +461,7 @@ async def chat_stream(req: ChatRequest, request: Request):
             acc_text = acc.text
 
         # ---- 收尾：存 assistant 消息 + 生成标题 ----
-        store.add_message(req.sid, "assistant", acc_text, refs=refs_md)
+        msg_id = store.add_message(req.sid, "assistant", acc_text, refs=refs_md)
 
         gen_title = ""
         if should_gen_title and acc_text:
@@ -450,11 +473,13 @@ async def chat_stream(req: ChatRequest, request: Request):
             except Exception:
                 pass
 
+        # message_id 回给前端：赞踩要按消息 id 落库，前端自己生成的 uid 后端不认
         yield _sse("done", {
             "answer": acc_text,
             "refs": refs_md,
             "title": gen_title,
             "mode": mode,
+            "message_id": msg_id,
         })
 
     return StreamingResponse(event_generator(), media_type="text/event-stream", headers=SSE_HEADERS)

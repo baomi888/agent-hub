@@ -17,6 +17,7 @@
   POST   /api/kb/{kb_id}/query        同步问答
 """
 
+import asyncio
 import os
 import re
 import time
@@ -26,6 +27,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from api.schemas import KBQueryResponse
+from core import upload
 from kb import pipelines
 from kb.importer import import_url, import_urls_batch, search_preview
 from kb.rag_core import describe_api_error, load_document
@@ -58,9 +60,13 @@ async def upload_and_build(
         raise HTTPException(status_code=400, detail="mode 只能是 append 或 rebuild")
 
     now = int(time.time())
+    limit = MAX_UPLOAD_MB * 1024 * 1024
     saved: list[tuple[str, str]] = []  # (落盘路径, 原始文件名)
     pipelines.ensure_source_dir(kb_id)
 
+    # 第一趟只校验：扩展名 / 大小。
+    # 以前校验和写盘混在一个循环里——第 3 个文件格式不合法时，前两个已经躺在磁盘上了，
+    # 而它们既没登记进 kb_files.json 也没进 Chroma，只有删整个库才清得掉。
     for f in files:
         ext = os.path.splitext(f.filename or "")[1].lower()
         if ext not in (".txt", ".md", ".pdf"):
@@ -68,36 +74,58 @@ async def upload_and_build(
                 status_code=400,
                 detail=f"不支持的文件格式：{ext}（当前支持 TXT / Markdown / PDF）",
             )
-        content = await f.read()
-        if len(content) > MAX_UPLOAD_MB * 1024 * 1024:
-            raise HTTPException(status_code=400, detail=f"文件过大（>{MAX_UPLOAD_MB}MB）：{f.filename}")
+        upload.check_declared_size(f, limit)
 
-        name = f.filename or f"unnamed{ext}"
-        dest = pipelines.source_path(kb_id, name)
-        with open(dest, "wb") as out:
-            out.write(content)
-        saved.append((dest, name))
+    # 第二趟才落盘：分块读，超限立刻停手
+    try:
+        for f in files:
+            ext = os.path.splitext(f.filename or "")[1].lower()
+            # 原始文件名只用来登记和展示，落盘位置由 source_path 重算；
+            # 这里先收一次，避免超长名/带路径的名把后续流程搞乱
+            name = pipelines.safe_source_name(f.filename or "", fallback_ext=ext)
+            dest = pipelines.source_path(kb_id, name)
+            await upload.save_stream(f, dest, limit)
+            saved.append((dest, name))
+    except Exception:
+        # 一个都还没入库，已落盘的必须清掉，否则它们成了没人认领的孤儿文件
+        upload.cleanup(p for p, _ in saved)
+        raise
+
+    def _build() -> tuple[int, list[str]]:
+        """切片 + embedding + 写 Chroma，全程可能几十秒。
+
+        两件事必须同时成立：
+          1. 拿 kb_lock —— 同库的入库 / 重建 / 删文件串行，否则两个上传并发写
+             同一个 collection，后一个的 rebuild 会清掉前一个刚写进去的片段；
+          2. 跑在线程里 —— 这段是纯同步阻塞代码，留在 async def 里会把
+             uvicorn 的事件循环占死，期间切会话、看列表全在排队。
+        """
+        with pipelines.kb_lock(kb_id):
+            pipe = pipelines.get_or_create(kb_id)
+            total = 0
+            for idx, (path, name) in enumerate(saved):
+                # 只有第一个文件在 rebuild 模式下清库，其余一律追加
+                n = pipe.build_index(
+                    chunk_size,
+                    chunk_overlap,
+                    [path],
+                    mode=(mode if idx == 0 else "append"),
+                    source_names=[name],
+                )
+                total += n
+                pipelines.add_file_records(
+                    kb_id, [{"name": name, "chunks": n, "added_at": now, "origin": "upload"}]
+                )
+            if mode == "rebuild":
+                # 整库重建：本次没上传的旧记录要一并清掉
+                pipelines.retain_file_records(kb_id, {name for _, name in saved})
+            return total, pipelines.get_file_names(kb_id)
 
     try:
-        pipe = pipelines.get_or_create(kb_id)
-        total = 0
-        for idx, (path, name) in enumerate(saved):
-            # 只有第一个文件在 rebuild 模式下清库，其余一律追加
-            n = pipe.build_index(
-                chunk_size,
-                chunk_overlap,
-                [path],
-                mode=(mode if idx == 0 else "append"),
-                source_names=[name],
-            )
-            total += n
-            pipelines.add_file_records(kb_id, [{"name": name, "chunks": n, "added_at": now, "origin": "upload"}])
-        if mode == "rebuild":
-            # 整库重建：本次没上传的旧记录要一并清掉
-            pipelines.retain_file_records(kb_id, {name for _, name in saved})
-        return {"kb_id": kb_id, "chunks": total, "files": pipelines.get_file_names(kb_id)}
+        total, names = await asyncio.to_thread(_build)
     except Exception as e:
         raise HTTPException(status_code=500, detail=describe_api_error(e))
+    return {"kb_id": kb_id, "chunks": total, "files": names}
 
 
 # ==================== 查询 ====================
@@ -107,7 +135,8 @@ async def query_kb(kb_id: str, question: str, top_k: int = 3):
     """同步问答：返回带 [1][2] 引用角标的答案。"""
     pipe = pipelines.get_or_create(kb_id)
     try:
-        answer, refs = pipe.answer(question, top_k)
+        # 检索 + LLM 都是同步阻塞调用，丢到线程里跑，别占着事件循环
+        answer, refs = await asyncio.to_thread(pipe.answer, question, top_k)
         return {"answer": answer, "refs": refs}
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -120,7 +149,8 @@ async def query_kb(kb_id: str, question: str, top_k: int = 3):
 @router.get("/")
 async def list_kbs():
     """列出所有已知知识库。"""
-    return {"kbs": pipelines.list_all()}
+    # 扫磁盘 + 逐个打开 collection，全是同步 I/O，不能留在事件循环里
+    return {"kbs": await asyncio.to_thread(pipelines.list_all)}
 
 
 class CreateKbRequest(BaseModel):
@@ -140,10 +170,10 @@ async def create_kb(req: CreateKbRequest):
 @router.get("/{kb_id}/")
 async def get_kb_status(kb_id: str):
     """查看单个知识库状态。"""
-    status = pipelines.get_status(kb_id)
+    status = await asyncio.to_thread(pipelines.get_status, kb_id)
     if status is None:
         # 内存里没记录，但磁盘上可能存在
-        if pipelines.exists(kb_id):
+        if await asyncio.to_thread(pipelines.exists, kb_id):
             return {"kb_id": kb_id, "chunks": 0, "chunk_size": None, "chunk_overlap": None, "files": []}
         raise HTTPException(status_code=404, detail=f"知识库不存在：{kb_id}")
     return status
@@ -152,12 +182,15 @@ async def get_kb_status(kb_id: str):
 @router.delete("/{kb_id}/")
 async def delete_kb(kb_id: str):
     """删除知识库。"""
-    if not pipelines.delete_kb(kb_id):
+    # 删 collection + rmtree 原始文件，都是同步 I/O
+    if not await asyncio.to_thread(pipelines.delete_kb, kb_id):
         # 可能磁盘上有但内存里没注册
-        if pipelines.exists(kb_id):
+        if await asyncio.to_thread(pipelines.exists, kb_id):
             # 强制删除
-            pipe = pipelines.get_or_create(kb_id)
-            pipe.delete()
+            def _force_delete():
+                pipelines.get_or_create(kb_id).delete()
+
+            await asyncio.to_thread(_force_delete)
             return {"ok": True}
         raise HTTPException(status_code=404, detail=f"知识库不存在：{kb_id}")
     return {"ok": True}
@@ -169,9 +202,14 @@ async def delete_kb(kb_id: str):
 @router.get("/{kb_id}/files")
 async def list_files(kb_id: str):
     """列出库内文件（文件名 + 片段数）。记录缺失时用 Chroma 元数据兜底。"""
-    pipe = pipelines.get_or_create(kb_id)
-    records = pipelines.get_files(kb_id) or pipe.list_sources()
-    return {"kb_id": kb_id, "chunks": pipe.count(), "files": records}
+
+    def _list():
+        # list_sources → get_or_open → peek，要读 sqlite，别在事件循环里做
+        pipe = pipelines.get_or_create(kb_id)
+        records = pipelines.get_files(kb_id) or pipe.list_sources()
+        return {"kb_id": kb_id, "chunks": pipe.count(), "files": records}
+
+    return await asyncio.to_thread(_list)
 
 
 class DeleteFileRequest(BaseModel):
@@ -185,16 +223,22 @@ async def delete_file(kb_id: str, req: DeleteFileRequest):
     if not name:
         raise HTTPException(status_code=400, detail="文件名不能为空")
 
-    pipe = pipelines.get_or_create(kb_id)
-    removed = pipe.delete_by_source(name)
-    pipelines.remove_file_record(kb_id, name)
-    try:
-        p = pipelines.source_path(kb_id, name)
-        if os.path.exists(p):
-            os.unlink(p)
-    except OSError:
-        pass
-    return {"ok": True, "removed": removed, "chunks": pipe.count()}
+    def _remove() -> tuple[int, int]:
+        # 与入库 / 重建互斥：删的那一刻若有人正在重建，会把删掉的片段又写回来
+        with pipelines.kb_lock(kb_id):
+            pipe = pipelines.get_or_create(kb_id)
+            removed = pipe.delete_by_source(name)
+            pipelines.remove_file_record(kb_id, name)
+            try:
+                p = pipelines.source_path(kb_id, name)
+                if os.path.exists(p):
+                    os.unlink(p)
+            except OSError:
+                pass
+            return removed, pipe.count()
+
+    removed, chunks = await asyncio.to_thread(_remove)
+    return {"ok": True, "removed": removed, "chunks": chunks}
 
 
 class RebuildRequest(BaseModel):
@@ -238,41 +282,41 @@ async def get_file_content(kb_id: str, name: str):
     if not name:
         raise HTTPException(status_code=400, detail="文件名不能为空")
 
-    pipe = pipelines.get_or_create(kb_id)
-    truncated = False
+    def _read() -> dict:
+        # 读原始文件 / 从向量库拼片段都是同步 I/O，PDF 抽文字层尤其慢
+        pipe = pipelines.get_or_create(kb_id)
+        # 名字可能对不上：老库把临时绝对路径写进了 source，调用方手里往往只有文件名。
+        # 先按原名找，找不到再拿末段去 Chroma 里比对。
+        resolved = _resolve_source(pipe, kb_id, name)
 
-    # 名字可能对不上：老库把临时绝对路径写进了 source，调用方手里往往只有文件名。
-    # 先按原名找，找不到再拿末段去 Chroma 里比对。
-    name = _resolve_source(pipe, kb_id, name)
+        # 1) 留档的原始文件
+        path = pipelines.source_path(kb_id, resolved)
+        if os.path.exists(path):
+            try:
+                docs = load_document(path, source_name=resolved)
+                text = "\n\n".join((d.page_content or "") for d in docs)
+                return {
+                    "name": resolved,
+                    "origin": "archive",
+                    "truncated": len(text) > PREVIEW_MAX_CHARS,
+                    "content": text[:PREVIEW_MAX_CHARS],
+                }
+            except Exception:
+                pass  # 留档读不出来就走向量库兜底
 
-    # 1) 留档的原始文件
-    path = pipelines.source_path(kb_id, name)
-    if os.path.exists(path):
-        try:
-            docs = load_document(path, source_name=name)
-            text = "\n\n".join((d.page_content or "") for d in docs)
-            truncated = len(text) > PREVIEW_MAX_CHARS
-            return {
-                "name": name,
-                "origin": "archive",
-                "truncated": truncated,
-                "content": text[:PREVIEW_MAX_CHARS],
-            }
-        except Exception:
-            pass  # 留档读不出来就走向量库兜底
+        # 2) 向量库兜底（老库 / 留档丢失）
+        chunks = pipe.get_source_chunks(resolved)
+        if not chunks:
+            raise HTTPException(status_code=404, detail=f"找不到文件内容：{resolved}")
+        text = "\n\n".join(c["text"] for c in chunks)
+        return {
+            "name": resolved,
+            "origin": "chunks",
+            "truncated": len(text) > PREVIEW_MAX_CHARS,
+            "content": text[:PREVIEW_MAX_CHARS],
+        }
 
-    # 2) 向量库兜底（老库 / 留档丢失）
-    chunks = pipe.get_source_chunks(name)
-    if not chunks:
-        raise HTTPException(status_code=404, detail=f"找不到文件内容：{name}")
-    text = "\n\n".join(c["text"] for c in chunks)
-    truncated = len(text) > PREVIEW_MAX_CHARS
-    return {
-        "name": name,
-        "origin": "chunks",
-        "truncated": truncated,
-        "content": text[:PREVIEW_MAX_CHARS],
-    }
+    return await asyncio.to_thread(_read)
 
 
 @router.post("/{kb_id}/rebuild")
@@ -282,26 +326,32 @@ async def rebuild_kb(kb_id: str, req: RebuildRequest):
     if not names:
         raise HTTPException(status_code=400, detail="该知识库没有文件记录，无法重建")
 
-    pipe = pipelines.get_or_create(kb_id)
     now = int(time.time())
-    total = 0
-    done: list[dict] = []
-    first = True
+
+    def _rebuild() -> tuple[int, list[dict]]:
+        with pipelines.kb_lock(kb_id):
+            pipe = pipelines.get_or_create(kb_id)
+            total = 0
+            done: list[dict] = []
+            first = True
+            for name in names:
+                path = pipelines.source_path(kb_id, name)
+                if not os.path.exists(path):
+                    continue  # 原始文件已丢失的跳过，不中断整个重建
+                n = pipe.build_index(
+                    req.chunk_size,
+                    req.chunk_overlap,
+                    [path],
+                    mode=("rebuild" if first else "append"),
+                    source_names=[name],
+                )
+                first = False
+                total += n
+                done.append({"name": name, "chunks": n, "added_at": now})
+            return total, done
+
     try:
-        for name in names:
-            path = pipelines.source_path(kb_id, name)
-            if not os.path.exists(path):
-                continue  # 原始文件已丢失的跳过，不中断整个重建
-            n = pipe.build_index(
-                req.chunk_size,
-                req.chunk_overlap,
-                [path],
-                mode=("rebuild" if first else "append"),
-                source_names=[name],
-            )
-            first = False
-            total += n
-            done.append({"name": name, "chunks": n, "added_at": now})
+        total, done = await asyncio.to_thread(_rebuild)
     except Exception as e:
         raise HTTPException(status_code=500, detail=describe_api_error(e))
 
@@ -335,7 +385,7 @@ class ImportBatchRequest(BaseModel):
 async def preview_search(req: ImportSearchRequest):
     """Serper 联网搜索预览，返回候选列表供前端勾选后批量导入。"""
     try:
-        results = search_preview(req.keyword, req.max_results)
+        results = await asyncio.to_thread(search_preview, req.keyword, req.max_results)
         return {"keyword": req.keyword, "results": results}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -345,7 +395,7 @@ async def preview_search(req: ImportSearchRequest):
 async def import_single_url(kb_id: str, req: ImportURLRequest):
     """直接抓一个 URL 正文追加到指定知识库。"""
     try:
-        r = import_url(kb_id, req.url, req.chunk_size, req.chunk_overlap)
+        r = await asyncio.to_thread(import_url, kb_id, req.url, req.chunk_size, req.chunk_overlap)
         return r
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -357,7 +407,9 @@ async def import_batch_urls(kb_id: str, req: ImportBatchRequest):
     if not req.urls:
         raise HTTPException(status_code=400, detail="URL 列表为空")
     try:
-        results = import_urls_batch(kb_id, req.urls, req.chunk_size, req.chunk_overlap)
+        results = await asyncio.to_thread(
+            import_urls_batch, kb_id, req.urls, req.chunk_size, req.chunk_overlap
+        )
         ok_count = sum(1 for r in results if r["ok"])
         return {"total": len(results), "ok": ok_count, "failed": len(results) - ok_count, "details": results}
     except Exception as e:

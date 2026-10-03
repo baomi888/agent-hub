@@ -55,19 +55,22 @@ def import_url(kb_id: str, url: str, chunk_size: int = 500, chunk_overlap: int =
     with open(dest, "w", encoding="utf-8") as f:
         f.write(f"来源URL: {url}\n标题: {title}\n\n{text}")
 
-    pipe = pipelines.get_or_create(kb_id)
-    docs = load_document(dest, source_name=name)
-    chunks = split_documents(docs, chunk_size, chunk_overlap)
-    if not chunks:
-        raise ValueError("URL 内容切片为空")
-    pipe.get_or_open()
-    pipe._vs.add_documents(chunks)
-    pipelines.add_file_records(kb_id, [{
-        "name": name,
-        "chunks": len(chunks),
-        "added_at": int(time.time()),
-        "origin": "web",
-    }])
+    # 只锁「写库」这一段：抓网页那几秒不该占着锁，
+    # 但 embedding + add_documents + 改文件清单必须和同库的入库 / 重建 / 删除互斥
+    with pipelines.kb_lock(kb_id):
+        pipe = pipelines.get_or_create(kb_id)
+        docs = load_document(dest, source_name=name)
+        chunks = split_documents(docs, chunk_size, chunk_overlap)
+        if not chunks:
+            raise ValueError("URL 内容切片为空")
+        pipe.get_or_open()
+        pipe._vs.add_documents(chunks)
+        pipelines.add_file_records(kb_id, [{
+            "name": name,
+            "chunks": len(chunks),
+            "added_at": int(time.time()),
+            "origin": "web",
+        }])
     return {"url": url, "title": title, "chunks": len(chunks), "file": name}
 
 
@@ -211,20 +214,21 @@ def download_and_index(kb_id: str, url: str, chunk_size: int = 500, chunk_overla
     with open(dest, "wb") as out:
         out.write(Path(info["path"]).read_bytes())
 
-    docs = load_document(dest, source_name=info["filename"])
-    chunks = split_documents(docs, chunk_size, chunk_overlap)
-    if not chunks:
-        raise ValueError("文档内容切片为空，无法入库")
-    pipe = pipelines.get_or_create(kb_id)
-    pipe.get_or_open()
-    pipe._vs.add_documents(chunks)
-    info["chunks"] = len(chunks)
-    pipelines.add_file_records(kb_id, [{
-        "name": info["filename"],
-        "chunks": len(chunks),
-        "added_at": int(time.time()),
-        "origin": "web",
-    }])
+    with pipelines.kb_lock(kb_id):
+        docs = load_document(dest, source_name=info["filename"])
+        chunks = split_documents(docs, chunk_size, chunk_overlap)
+        if not chunks:
+            raise ValueError("文档内容切片为空，无法入库")
+        pipe = pipelines.get_or_create(kb_id)
+        pipe.get_or_open()
+        pipe._vs.add_documents(chunks)
+        info["chunks"] = len(chunks)
+        pipelines.add_file_records(kb_id, [{
+            "name": info["filename"],
+            "chunks": len(chunks),
+            "added_at": int(time.time()),
+            "origin": "web",
+        }])
     return info
 
 

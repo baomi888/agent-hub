@@ -49,6 +49,11 @@ frontend/_unused-public/
 # ================= 日志 =================
 *.log
 
+# ================= 部署打包产物 =================
+# baomi-deploy-with-env.tar.gz 里带 .env 密钥，绝不能进仓库；
+# baomi-deploy.tar.gz 是 2.7MB 的中间产物，用完就该删。
+*.tar.gz
+
 # ================= Node =================
 node_modules/
 .next/

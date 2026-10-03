@@ -7,6 +7,7 @@
 // 本文件只保留主组件（顶栏 + 欢迎页 + 消息区 + 输入区）。
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import MascotLogo from "./chat/MascotLogo";
+import { api } from "@/lib/api";
 import type { ChatMode, RefSource } from "@/lib/types";
 import { ABILITIES, EXAMPLES, MODE_LABELS } from "./chat/constants";
 import { buildPlanPrompt, detectPlanTopic, isPlanRequest, stripPlanHint } from "./chat/plan";
@@ -57,8 +58,12 @@ interface Props {
   geoEnabled?: boolean;
   /** 当前定位城市（角标展示用，可能为 null） */
   geoCity?: string | null;
+  /** 定位请求进行中：等授权 + IP 兜底最长要 18 秒，期间按钮禁用并转圈 */
+  geoPending?: boolean;
   /** 切换定位开关（请求权限 / 关闭），由页面层处理权限与缓存 */
   onToggleGeo?: () => void;
+  /** 当前会话 id：赞踩要按「会话 + 消息 id」落库，否则后端无从归档 */
+  sessionId?: string | null;
 }
 
 export default function ChatArea({
@@ -85,7 +90,9 @@ export default function ChatArea({
   onDeleteTurn,
   geoEnabled = false,
   geoCity = null,
+  geoPending = false,
   onToggleGeo,
+  sessionId = null,
 }: Props) {
   const [input, setInput] = useState("");
   const [showParams, setShowParams] = useState(false);
@@ -346,9 +353,21 @@ export default function ChatArea({
     () => onNotice?.("error", "复制失败，请手动选择文本"),
     [onNotice]
   );
+  // 赞踩落库：失败不影响界面（本地高亮已经点了），只提示一声让用户知道没存上
   const handleFeedback = useCallback(
-    () => onNotice?.("success", "已记录你的反馈"),
-    [onNotice]
+    async (msgDbId: number, rating: "up" | "down") => {
+      if (!sessionId) return;
+      try {
+        await api.sendFeedback(sessionId, msgDbId, rating);
+        onNotice?.(
+          "success",
+          rating === "up" ? "已记录：这条回答有帮助" : "已记录：这条回答不太行"
+        );
+      } catch {
+        onNotice?.("error", "反馈没能保存，稍后可再点一次");
+      }
+    },
+    [sessionId, onNotice]
   );
   // 从引用角标跳到全文预览：引用块只给文件名，kb 用当前会话绑定的那个
   const openPreviewFile = useCallback((source: string) => setPreviewFile(source), []);
@@ -705,10 +724,18 @@ export default function ChatArea({
         <div className="input-row">
           <button
             onClick={onToggleGeo}
-            title={geoEnabled ? "定位已开启：发送时附带你的位置" : "开启定位：问天气无需手输城市"}
-            aria-label={geoEnabled ? "关闭定位" : "开启定位"}
+            disabled={geoPending}
+            title={
+              geoPending
+                ? "正在获取定位…"
+                : geoEnabled
+                  ? "定位已开启：发送时附带你的位置"
+                  : "开启定位：问天气无需手输城市"
+            }
+            aria-label={geoPending ? "正在获取定位" : geoEnabled ? "关闭定位" : "开启定位"}
             aria-pressed={geoEnabled}
-            className={`geo-btn ${geoEnabled ? "on" : ""}`}
+            aria-busy={geoPending}
+            className={`geo-btn ${geoEnabled ? "on" : ""} ${geoPending ? "busy" : ""}`}
           >
             {/* 定位针：开启时填充实心，关闭时空心，与「＋ 我的文件」同一套线条语言 */}
             <svg viewBox="0 0 24 24" aria-hidden="true">

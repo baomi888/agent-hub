@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
 import type { FilePreview } from "@/lib/types";
+import { copyText } from "@/lib/useCopy";
 
 interface Props {
   kbId: string;
@@ -106,13 +107,16 @@ export default function FilePreviewModal({ kbId, name, chunks, onClose }: Props)
 
   const doCopy = useCallback(async () => {
     if (state.status !== "ok") return;
-    try {
-      await navigator.clipboard.writeText(state.data.content);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
-    } catch {
-      setCopyError("复制失败：浏览器拒绝了剪贴板权限，请手动选中文本复制");
+    // 走 useCopy 里那份共用实现：公网 http 下 navigator.clipboard 不存在，
+    // 内部会自动降级到 execCommand（安全上下文下才用现代 API）
+    const ok = await copyText(state.data.content);
+    if (!ok) {
+      setCopyError("复制失败：当前环境不允许写入剪贴板，请手动选中文本复制");
+      return;
     }
+    setCopyError(null);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
   }, [state]);
 
   if (!mounted) return null;

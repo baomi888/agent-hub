@@ -40,8 +40,11 @@ export function useSessions(showToast: ShowToast) {
       setSessions(list);
     } catch (e) {
       console.error(e);
+      // 同文件里 rename / delete 失败都会 toast，只有这里静默：
+      // 改完名刷新失败，侧栏还显示旧名，用户会以为改名没生效。
+      showToast("error", "会话列表刷新失败，请稍后重试");
     }
-  }, []);
+  }, [showToast]);
 
   // 初始化：拉会话列表（与知识库/defaults 的请求由各自 hook 并发发起）
   useEffect(() => {
@@ -79,6 +82,8 @@ export function useSessions(showToast: ShowToast) {
       setMessages(toUiList(detail.messages));
     } catch (e) {
       console.error(e);
+      // 历史加载失败时主区是空的，不说一声用户只会以为这个会话本来就没聊过
+      showToast("error", "会话历史加载失败，请稍后重试");
     }
   };
 

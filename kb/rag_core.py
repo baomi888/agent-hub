@@ -10,6 +10,8 @@
 """
 
 import os
+import re
+import threading
 
 import chromadb
 from langchain_chroma import Chroma
@@ -21,6 +23,31 @@ from core import config
 from core.llm import get_embeddings, get_llm
 
 SUPPORTED_EXT = (".txt", ".md", ".pdf")  # .md 按纯文本加载，Markdown 语法不影响切片
+
+
+# ==================== Chroma 客户端单例 ====================
+
+_CHROMA_LOCK = threading.Lock()
+_CHROMA_CLIENT = None
+
+
+def chroma_client():
+    """全局共用一个 PersistentClient。
+
+    实测：new 一个 PersistentClient 首次 0.588s、之后稳定 0.098s/次（重开 sqlite +
+    重建内部缓存）。而 exists / list_all / get_status / peek 这几个"只读一下"的接口
+    每次调用都新建了一个——它们还全在 async 端点里，等于每条请求都要卡住事件循环
+    几十到几百毫秒。
+
+    进程级单例足够：config.PERSIST_DIR 是常量，运行期不会变。
+    副产品：多个 client 指向同一个 sqlite 文件的锁竞争隐患也一并消掉。
+    """
+    global _CHROMA_CLIENT
+    if _CHROMA_CLIENT is None:
+        with _CHROMA_LOCK:
+            if _CHROMA_CLIENT is None:
+                _CHROMA_CLIENT = chromadb.PersistentClient(path=config.PERSIST_DIR)
+    return _CHROMA_CLIENT
 
 # RAG 系统提示词：仅依据参考资料回答；资料不足时说明情况并给出下一步，不做冷拒答
 SYSTEM_PROMPT = """你是一个严谨的问答助手，必须遵守以下规则：
@@ -46,6 +73,114 @@ def describe_api_error(e: Exception) -> str:
     if cls_name == "NotFoundError" or "404" in str(e):
         return "404 模型不存在：请检查 EMBEDDING_MODEL / DEEPSEEK_MODEL 名称"
     return f"{cls_name}: {e}"
+
+
+# ==================== 检索结果挑选 ====================
+
+
+def _shingles(text: str) -> set[str]:
+    """文本转字符 2-gram 集合。
+
+    中文没有空格可分词，用字符 bigram 近似"两段话有多大重合"够用了——
+    切片重叠 50 字时，相邻片段的 bigram 重合度会非常高，正好是我们要去重的对象。
+    """
+    t = re.sub(r"\s+", "", text or "")
+    if len(t) < 2:
+        return {t} if t else set()
+    return {t[i : i + 2] for i in range(len(t) - 1)}
+
+
+def _overlap(a: set[str], b: set[str]) -> float:
+    """两段文本的重合度（Jaccard），0 = 完全不像，1 = 基本同一段。"""
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def _to_similarity(distance: float) -> float | None:
+    """Chroma 的距离换算成余弦相似度。
+
+    Chroma 默认返回平方 L2 距离。向量做过归一化时（百炼/OpenAI 的 embedding 都是）
+    d = 2 - 2cos，于是 cos = 1 - d/2；向量没归一化时这个换算不成立，返回 None 让调用方跳过过滤，
+    宁可少滤几个，也不能把相关片段误杀。
+    """
+    if distance is None or distance < 0 or distance > 2:
+        return None
+    return 1 - distance / 2
+
+
+def select_diverse(docs_scores, top_k: int, lambda_mult: float | None = None):
+    """从候选里挑出 top_k 条：先丢明显不相关的，再按 MMR 去掉互相重复的。
+
+    原来直接取 top-k 有两个毛病：相似度再低的片段也照样进 prompt（模型被迫硬答），
+    以及相邻切片的重叠部分会把名额占满（三条里两条是同一段话）。
+
+    Args:
+        docs_scores: [(Document, distance), ...]，distance 越小越相关
+        top_k: 最终要几条
+        lambda_mult: 相关度权重，默认取 config；1 = 退化为纯相关度排序
+
+    Returns:
+        挑选后的 [(Document, distance), ...]，顺序按"先选中的在前"
+    """
+    cands = list(docs_scores or [])
+    if top_k <= 0 or not cands:
+        return []
+    lam = config.RETRIEVE_MMR_LAMBDA if lambda_mult is None else lambda_mult
+    lam = min(max(lam, 0.0), 1.0)
+
+    # ---- 1. 离群过滤：把明显不相关的尾巴砍掉 ----
+    min_sim = config.RETRIEVE_MIN_SIM
+    if min_sim > 0:
+        scored = [(c, _to_similarity(c[1])) for c in cands]
+        # 只有在距离能换算成余弦时才过滤；换不了就整批保留
+        if all(s is not None for _, s in scored):
+            kept = [c for c, s in scored if s >= min_sim]
+            # 别把结果砍空：一条不剩时至少留最相关的那条，让模型自己说"资料里没有"
+            cands = kept or [min(cands, key=lambda c: c[1])]
+
+    # 候选还不够挑，MMR 没意义（离群过滤已经在上面做过了）
+    if len(cands) <= top_k:
+        return cands
+
+    # ---- 2. MMR 贪心：相关度高、且和已选内容重复度低的优先 ----
+    scores = [s for _, s in cands]
+    lo, hi = min(scores), max(scores)
+    span = hi - lo
+
+    def relevance(d: float) -> float:
+        """相关度（0~1，越大越相关）。
+
+        优先用绝对余弦相似度，而不是批次内 min-max 归一化——
+        被重叠切片塞满时，几条候选的距离往往只差 0.0x，归一化会把这点差距放大成
+        "最相关 vs 最不相关"，结果重复片段靠微弱优势把名额全占了。
+        """
+        sim = _to_similarity(d)
+        if sim is not None:
+            return sim
+        # 距离换不成余弦（向量未归一化）时，退回批次内相对排序
+        return 1.0 if span < 1e-9 else 1 - (d - lo) / span
+
+    shingles = [_shingles(d.page_content) for d, _ in cands]
+    order: list[int] = []
+    remaining = list(range(len(cands)))
+    # 第一条固定取最相关的，给后面的多样性比较一个基准
+    first = min(remaining, key=lambda i: scores[i])
+    order.append(first)
+    remaining.remove(first)
+
+    while remaining and len(order) < top_k:
+        best_i, best_val = -1, -1e9
+        for i in remaining:
+            rel = relevance(scores[i])
+            dup = max(_overlap(shingles[i], shingles[j]) for j in order)
+            val = lam * rel - (1 - lam) * dup
+            if val > best_val:
+                best_i, best_val = i, val
+        order.append(best_i)
+        remaining.remove(best_i)
+
+    return [cands[i] for i in order]
 
 
 # ==================== 文档加载 ====================
@@ -157,7 +292,7 @@ class RagPipeline:
 
         if mode == "rebuild":
             # 只有换切片参数才需要全量重建：删旧 collection，保证参数变更后完全重建
-            client = chromadb.PersistentClient(path=config.PERSIST_DIR)
+            client = chroma_client()
             try:
                 client.delete_collection(self.collection_name)
             except Exception:
@@ -243,8 +378,7 @@ class RagPipeline:
     def peek(self) -> int:
         """不建库的前提下查看磁盘上已有库的片段数。"""
         try:
-            client = chromadb.PersistentClient(path=config.PERSIST_DIR)
-            col = client.get_collection(self.collection_name)
+            col = chroma_client().get_collection(self.collection_name)
             return col.count()
         except Exception:
             return 0  # 库不存在
@@ -252,8 +386,7 @@ class RagPipeline:
     def delete(self) -> None:
         """彻底删除这个知识库（磁盘 + 内存缓存）。"""
         try:
-            client = chromadb.PersistentClient(path=config.PERSIST_DIR)
-            client.delete_collection(self.collection_name)
+            chroma_client().delete_collection(self.collection_name)
         except Exception:
             pass
         self._vs = None
@@ -270,13 +403,26 @@ class RagPipeline:
 
     # ---------- 检索 + 问答 ----------
     def retrieve_with_score(self, question: str, top_k: int):
-        """top-k 相似度检索，返回 [(Document, distance), ...]。distance 越小越相关。"""
+        """检索 top_k 条相关片段，返回 [(Document, distance), ...]。distance 越小越相关。
+
+        不是直接取 top-k：先多捞几倍候选（默认 3 倍），丢掉明显不相关的，
+        再用 MMR 去掉互相重复的，最后截到 top_k。详见 select_diverse。
+        """
         if not self._vs:
             # 尝试从磁盘打开
             self.get_or_open()
         if not self._vs or self.count() == 0:
             raise RuntimeError("知识库为空，请先上传文档构建索引")
-        return self._vs.similarity_search_with_score(question, k=top_k)
+
+        mult = config.RETRIEVE_FETCH_MULT
+        if top_k <= 1 or mult <= 1:
+            # 只要一条（或关掉了候选池）时，多捞没有意义
+            return self._vs.similarity_search_with_score(question, k=top_k)
+
+        total = self.count()
+        fetch_k = max(top_k * mult, top_k + 6, config.RETRIEVE_MIN_FETCH)
+        cands = self._vs.similarity_search_with_score(question, k=min(fetch_k, total))
+        return select_diverse(cands, top_k)
 
     @staticmethod
     def build_sources(docs_scores) -> list[dict]:

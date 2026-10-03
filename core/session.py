@@ -72,6 +72,20 @@ def _init_db() -> None:
                 FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_msg_conv ON messages(conversation_id, id);
+
+            CREATE TABLE IF NOT EXISTS feedbacks (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id TEXT NOT NULL,
+                message_id      INTEGER,
+                rating          TEXT NOT NULL CHECK(rating IN ('up','down')),
+                comment         TEXT,
+                created_at      INTEGER NOT NULL
+            );
+            -- 一条消息只保留最后一次反馈（点赞再点踩就是改，不是追加）
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_fb_msg
+                ON feedbacks(conversation_id, message_id)
+                WHERE message_id IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_fb_conv ON feedbacks(conversation_id);
         """)
 
         # 迁移：老库补 refs 列（已存在则忽略）
@@ -267,6 +281,55 @@ def find_turn_ids(sid: str, msg_id: int) -> list[int]:
     return ids
 
 
+# ==================== 消息反馈（赞 / 踩）====================
+
+def add_feedback(
+    sid: str,
+    msg_id: int | None,
+    rating: str,
+    comment: str = "",
+) -> bool:
+    """记录一条消息反馈，同一条消息以最后一次为准（覆盖写）。
+
+    Args:
+        sid: 会话 id
+        msg_id: messages 表自增 id；None 表示前端还没拿到 id（流式未结束）
+        rating: "up" 赞 / "down" 踩
+        comment: 可选文字补充（踩的时候前端可以追问）
+
+    Returns:
+        是否写入成功
+    """
+    if rating not in ("up", "down"):
+        return False
+    now = int(time.time())
+    with _get_conn() as conn:
+        # 先撤掉这条消息上的旧反馈，再插新的：SQLITE 的 upsert 对
+        # 部分唯一索引（message_id IS NOT NULL）支持不好，两步写最稳
+        if msg_id is not None:
+            conn.execute(
+                "DELETE FROM feedbacks WHERE conversation_id = ? AND message_id = ?",
+                (sid, msg_id),
+            )
+        conn.execute(
+            "INSERT INTO feedbacks (conversation_id, message_id, rating, comment, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (sid, msg_id, rating, comment or None, now),
+        )
+        return True
+
+
+def list_feedbacks(sid: str) -> list[dict]:
+    """取某会话的全部反馈（供日后复盘/导出用）。"""
+    with _get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, message_id, rating, comment, created_at FROM feedbacks "
+            "WHERE conversation_id = ? ORDER BY id ASC",
+            (sid,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
 def delete_messages(sid: str, msg_ids: list[int]) -> bool:
     """批量删除消息，返回是否实际删到了。同时更新会话 updated_at。"""
     if not msg_ids:
@@ -276,6 +339,11 @@ def delete_messages(sid: str, msg_ids: list[int]) -> bool:
         placeholders = ",".join("?" * len(msg_ids))
         cur = conn.execute(
             f"DELETE FROM messages WHERE conversation_id = ? AND id IN ({placeholders})",
+            (sid, *msg_ids),
+        )
+        # 消息没了，挂在它上面的赞踩也一起走，否则 feedbacks 会攒下悬空的 message_id
+        conn.execute(
+            f"DELETE FROM feedbacks WHERE conversation_id = ? AND message_id IN ({placeholders})",
             (sid, *msg_ids),
         )
         if cur.rowcount > 0:

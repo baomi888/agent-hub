@@ -1,22 +1,19 @@
 # -*- coding: utf-8 -*-
 """Agent 构建（LangChain v1 create_agent）。
 
-核心：create_agent(model, tools, system_prompt, checkpointer)
+核心：create_agent(model, tools, system_prompt)
   - 底层 LangGraph，自动处理 ReAct 循环 / 工具路由 / 流式输出
-  - checkpointer 注入 MemorySaver，天然支持多轮对话记忆
+  - **不注入 checkpointer**：会话记忆由 SQLite 会话库（core/session.py）承载，
+    api/chat.py 每轮会把完整历史重建成 messages 一起喂进来（原因见 _make_checkpointer）
   - 比旧版 AgentExecutor 更稳定，流式事件更丰富
 
 注意：SummarizationMiddleware 在 langgraph 1.2.x 不存在。
-当前用 MemorySaver + 窗口截断（api/chat.py 层）组合处理长会话。
+当前用 SQLite 会话库 + 窗口截断（api/chat.py 的 MAX_HISTORY_TURNS）处理长会话。
 """
 
-import os
-
 from langchain.agents import create_agent
-from langgraph.checkpoint.memory import MemorySaver
 
 from agent.tools import AGENT_TOOLS
-from core import config
 from core.llm import get_llm
 
 SYSTEM_PROMPT = """你是一个智能问答助手，拥有以下能力：
@@ -42,45 +39,69 @@ def location_note(location: dict | None) -> str:
     """把用户地理定位信息整理成 system prompt 片段（无则空串）。
 
     location 形如 {"city": "上海", "lat": 31.23, "lon": 121.47}。
-    城市名优先用后端逆地理反查的结果；若只有坐标也行，提示模型用坐标查天气。
+
+    三种来源都要支持（以前只认第一种，缺 lat/lon 就整条丢弃，
+    导致公网 http 下走服务端 IP 定位拿到的城市名白白作废）：
+      1. 浏览器定位（HTTPS / localhost 才可用）→ city + 经纬度，精度最高
+      2. 公网 http 下浏览器定位不可用 → 服务端按来源 IP 兜底，**只有 city 没有坐标**
+      3. 有坐标但后端没高德 Key、逆地理失败 → 只有经纬度，让模型按坐标查
     """
     if not location:
         return ""
-    city = location.get("city")
+    raw_city = location.get("city")
+    city = raw_city.strip() if isinstance(raw_city, str) else ""
     lat = location.get("lat")
     lon = location.get("lon")
-    if not (lat is not None and lon is not None):
-        return ""
-    if city:
+    has_xy = lat is not None and lon is not None
+
+    if city and has_xy:
         return (
             f"\n\n【用户当前位置】{city}（经纬度 {lat}, {lon}）。"
             "当用户询问天气、气温、空气质量、穿衣指数、本地生活等且未明确指定城市时，"
             f"优先调用 get_weather(city='{city}')，无需追问用户所在城市。"
         )
-    return (
-        f"\n\n【用户当前位置】经纬度 {lat}, {lon}（前端地理定位得到，未反查出城市名）。"
-        "当用户询问天气且未指定城市时，调用 get_weather(lat=" + str(lat) +
-        f", lon={lon}) 用坐标直接查询。"
-    )
+    if city:
+        # 只有城市名：服务端 IP 定位的兜底结果，城市级精度，回答天气够用
+        return (
+            f"\n\n【用户当前位置】{city}（按访问 IP 推断，城市级精度）。"
+            "当用户询问天气、气温、穿衣指数等且未明确指定城市时，"
+            f"优先调用 get_weather(city='{city}')，无需追问用户所在城市。"
+        )
+    if has_xy:
+        return (
+            f"\n\n【用户当前位置】经纬度 {lat}, {lon}（前端地理定位得到，未反查出城市名）。"
+            "当用户询问天气且未指定城市时，调用 get_weather(lat=" + str(lat) +
+            f", lon={lon}) 用坐标直接查询。"
+        )
+    return ""
 
 
 def _make_checkpointer():
-    """优先用 SQLite 落盘（重启不丢、可控），装了依赖才生效，否则退回内存版。
+    """Agent 的 checkpointer —— 这里**故意返回 None**，即不用 LangGraph 检查点。
 
-    MemorySaver 只在进程内有效：服务一重启 Agent 的多轮记忆就全没了，
-    而且会话越攒越多没有上限。
+    三条都是实测结论，别照着直觉改回去：
+
+    1. 会话历史本来就存在 SQLite 会话库（core/session.py），api/chat.py 每轮都会把
+       完整历史重建成 messages 一起喂给 agent。再挂一个 checkpointer 等于**记两份**，
+       而且这份还只在进程内存里。
+    2. 两份同时用会**重复累积**（已实测）：第 2 轮状态里第 1 轮的消息出现 2 次、
+       第 3 轮出现 3 次，3 轮后状态 12 条（本应 6 条）。上下文平方级膨胀，
+       白烧 token，还会让模型看到重复提问。
+    3. 原实现 `SqliteSaver.from_conn_string(path)` 是**错的**：它是 @contextmanager，
+       返回上下文管理器而不是 saver 实例，于是每次对话直接抛
+       `TypeError: Invalid checkpointer provided ... Received _GeneratorContextManager`。
+       注意改成 `SqliteSaver(sqlite3.connect(path))` 也不行 —— 同步 saver 不支持
+       astream（会换成 NotImplementedError），必须用 AsyncSqliteSaver，
+       而它要在 lifespan 里 async 打开。为了这点收益不值得，见下条。
+
+    用 DB 当唯一事实来源反而更稳：重启不丢（比 MemorySaver 强）、受 MAX_HISTORY_TURNS
+    截断保护、不用额外依赖。真要用检查点，必须同时让 api/chat.py 只发当前这一条，
+    不要再重放历史 —— 否则就会踩第 2 条。
     """
-    try:
-        from langgraph.checkpoint.sqlite import SqliteSaver
-
-        path = os.path.join(config.DATA_DIR, "agent_memory.sqlite")
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        return SqliteSaver.from_conn_string(path)
-    except Exception:
-        return MemorySaver()
+    return None
 
 
-# 模块级单例：checkpointer 全局共享，进程内记忆
+# 模块级单例：目前是 None（不用 LangGraph 检查点，记忆交给 SQLite 会话库）
 _CHECKPOINTER = _make_checkpointer()
 
 
@@ -115,6 +136,12 @@ def build_agent(kb_id: str | None = None, location: dict | None = None):
     return agent
 
 
-def get_checkpointer() -> MemorySaver:
-    """暴露 checkpointer 供 API 层调用（流式对话用 thread_id 隔离会话）。"""
+def get_checkpointer():
+    """当前 checkpointer（默认 None）。
+
+    保留这个入口，是为了将来真要换落盘版时不用改调用方。换的时候记住两条：
+    ① 同步的 SqliteSaver 不支持 astream，必须用
+       `langgraph.checkpoint.sqlite.aio.AsyncSqliteSaver`，并在 lifespan 里 async 打开；
+    ② 必须同时让 api/chat.py 只发当前这一条消息，别再重放历史，否则消息会重复累积。
+    """
     return _CHECKPOINTER

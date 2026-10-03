@@ -115,6 +115,14 @@ export const api = {
       }
     ),
 
+  // ---------- 消息反馈（赞 / 踩）----------
+  // 同一条消息重复提交是"改"不是"追加"：点赞再点踩后端只留最后一次
+  sendFeedback: (sid: string, messageId: number, rating: "up" | "down") =>
+    request<{ ok: boolean; rating: string }>("/api/feedback/", {
+      method: "POST",
+      body: JSON.stringify({ sid, message_id: messageId, rating }),
+    }),
+
   // ---------- 配置 ----------
   defaults: () => request<Defaults>("/api/config/defaults"),
 

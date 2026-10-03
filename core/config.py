@@ -47,6 +47,18 @@ TOP_K_DEFAULT = int(os.getenv("TOP_K", "3"))
 # Embedding 接口单次批量上限（阿里百炼为 10）
 EMBED_BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", "10"))
 
+# ---------- 检索策略（候选池 → 离群过滤 → 多样性挑选）----------
+# 先多取几倍候选再挑，否则 top_k 名额会被相邻重复切片占满
+RETRIEVE_FETCH_MULT = int(os.getenv("RETRIEVE_FETCH_MULT", "3"))
+# 候选池下限：top_k 设得小时也保证有得挑
+RETRIEVE_MIN_FETCH = int(os.getenv("RETRIEVE_MIN_FETCH", "12"))
+# MMR 相关度权重：1 = 完全按相关度排（等同旧行为），越小越强调多样性
+RETRIEVE_MMR_LAMBDA = float(os.getenv("RETRIEVE_MMR_LAMBDA", "0.65"))
+# 余弦相似度下限：低于它当不相关直接丢。0 = 不做离群过滤
+# 0.25 是刻意留宽的：宁可多带一条弱的，也别把能用的片段误杀。
+# 觉得回答还是太"硬答"就往 0.4 调；觉得资料太少就调回 0.2 或 0。
+RETRIEVE_MIN_SIM = float(os.getenv("RETRIEVE_MIN_SIM", "0.25"))
+
 # ---------- 可选：天气工具 ----------
 AMAP_API_KEY = os.getenv("AMAP_API_KEY", "")
 
