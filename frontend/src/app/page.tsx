@@ -360,10 +360,23 @@ export default function Home() {
 
   // 绑定/解绑知识库（跨域：改会话，所以留在编排层）
   const bindKb = async (kbId: string | null) => {
-    if (!activeSid) return;
+    let sid = activeSid;
+    // 绑定是「按会话生效」的，一个会话都没有时先自动建一个（与 sendMessage 的做法一致）。
+    // 不能像之前那样直接 return：静默失败等于让用户对着一个看起来坏掉的勾选框反复点。
+    if (!sid) {
+      try {
+        const conv = await api.createSession();
+        sid = conv.id;
+        setSessions((prev) => [conv, ...prev]);
+        setActiveSid(conv.id);
+      } catch {
+        showToast("error", "绑定失败：无法新建会话，请稍后重试");
+        return;
+      }
+    }
     try {
-      const conv = await api.bindKb(activeSid, kbId);
-      setSessions((prev) => prev.map((c) => (c.id === activeSid ? conv : c)));
+      const conv = await api.bindKb(sid, kbId);
+      setSessions((prev) => prev.map((c) => (c.id === sid ? conv : c)));
       showToast(kbId ? "success" : "info", kbId ? "已绑定知识库" : "已解绑知识库");
     } catch (e) {
       showToast("error", "绑定失败，请稍后重试");
@@ -390,7 +403,9 @@ export default function Home() {
         }
       }
       await refreshKbs();
-      if (activeSid) await bindKb(kb_id);
+      // 不再用 if (activeSid) 挡一道：bindKb 自己会在没有会话时建一个，
+      // 否则「联网建库成功但没绑上」会让人以为是导入失败了。
+      await bindKb(kb_id);
       const suggested = `根据「${kbName}」里刚导入的 ${ok} 篇资料，帮我做个要点总结`;
       setPrefill({ text: suggested, ts: Date.now() });
       showToast("success", `联网建库完成：成功 ${ok} / ${urls.length}`);

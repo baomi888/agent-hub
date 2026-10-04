@@ -55,11 +55,24 @@ export function useSessions(showToast: ShowToast) {
       if (s) setSessions(s.sessions);
       setLoadError(s ? null : "会话列表加载失败");
       setLoading(false);
+      // 自动落进最近一个会话。少了这一步 activeSid 会一直是 null，
+      // 而「绑定资料库」这类按会话生效的操作会静默失败——点了没反应，
+      // 用户只会以为那个勾选框是坏的（10-04 实测：不点会话直接勾，一个请求都不发）。
+      const recent = s?.sessions?.[0];
+      if (!recent) return;
+      setActiveSid(recent.id);
+      try {
+        const detail = await api.getSession(recent.id);
+        if (alive) setMessages(toUiList(detail.messages));
+      } catch (e) {
+        console.error(e);
+        if (alive) showToast("error", "会话历史加载失败，请稍后重试");
+      }
     })();
     return () => {
       alive = false;
     };
-  }, []);
+  }, [showToast]);
 
   // 新建会话
   const createSession = async () => {
