@@ -63,8 +63,10 @@ def import_url(kb_id: str, url: str, chunk_size: int = 500, chunk_overlap: int =
         chunks = split_documents(docs, chunk_size, chunk_overlap)
         if not chunks:
             raise ValueError("URL 内容切片为空")
-        pipe.get_or_open()
-        pipe._vs.add_documents(chunks)
+        # 空库也要能写进去：add_chunks 内部走 _ensure_vs()（没有 collection 就先建），
+        # 换成 get_or_open() 会在 _vs=None 上 add_documents ⇒ AttributeError，
+        # 而且失败在建 collection 之前，重试永远不可能成功。
+        pipe.add_chunks(chunks)
         pipelines.add_file_records(kb_id, [{
             "name": name,
             "chunks": len(chunks),
@@ -220,8 +222,8 @@ def download_and_index(kb_id: str, url: str, chunk_size: int = 500, chunk_overla
         if not chunks:
             raise ValueError("文档内容切片为空，无法入库")
         pipe = pipelines.get_or_create(kb_id)
-        pipe.get_or_open()
-        pipe._vs.add_documents(chunks)
+        # 同 import_url：空库入库走 add_chunks，不能用 get_or_open()
+        pipe.add_chunks(chunks)
         info["chunks"] = len(chunks)
         pipelines.add_file_records(kb_id, [{
             "name": info["filename"],

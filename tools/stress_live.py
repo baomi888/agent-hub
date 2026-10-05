@@ -144,8 +144,8 @@ def main():
     ap.add_argument("--with-upload", action="store_true", help="额外演示上传链路")
     args = ap.parse_args()
 
+    # 全部走前端 :3000：后端 :8000 已改为只监听 127.0.0.1（不对外暴露）
     FE = f"http://{args.host}:3000"
-    BE = f"http://{args.host}:8000"
 
     print("=" * 66, flush=True)
     print(" 苞米agent · 现场性能测试", flush=True)
@@ -155,14 +155,15 @@ def main():
     print(flush=True)
 
     # ---------- 0. 健康检查 ----------
+    # 后端已改为只监听 127.0.0.1（无鉴权，不对外暴露），公网直连 :8000 一律不通。
+    # 所以这里全部走前端 :3000 —— 它本来就是用户的真实入口，测的也是真实链路。
     print("[0/3] 健康检查", flush=True)
-    r = http_get(f"{BE}/health")
-    if r[1] != 200:
-        print(f"      ✗ 后端不可达（HTTP {r[1]}）。改用兜底方案：展示已跑好的数据。", flush=True)
-        return
-    print(f"      ✓ /health  HTTP {r[1]}  {ms(r[0]):.0f}ms", flush=True)
     r2 = http_get(f"{FE}/api/kb/")
+    if r2[1] != 200:
+        print(f"      ✗ 服务不可达（HTTP {r2[1]}）。改用兜底方案：展示已跑好的数据。", flush=True)
+        return
     print(f"      ✓ 前端代理 /api/kb/  HTTP {r2[1]}  {ms(r2[0]):.0f}ms", flush=True)
+    print("      ✓ （后端 :8000 已只监听回环，公网测不到属正常）", flush=True)
     print(flush=True)
 
     # ---------- 1. 只读阶梯 ----------

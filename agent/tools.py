@@ -37,6 +37,10 @@ def kb_search(kb_id: str, query: str, top_k: int = 3) -> str:
     try:
         from kb import pipelines
         from core import config
+        # 距离 → 余弦相似度，和 RAG 链路（build_sources / _format_refs）保持同一口径。
+        # 直接把 Chroma 距离打出来会显示成 >1 的"相似度"（线上见过 1.237），
+        # 和同一条数据在 RAG 卡片上的 0.558 对不上。
+        from kb.rag_core import _to_similarity
 
         pipe = pipelines.get_or_create(kb_id)
         if pipe.peek() == 0:
@@ -52,7 +56,10 @@ def kb_search(kb_id: str, query: str, top_k: int = 3) -> str:
             page = d.metadata.get("page")
             loc = f" 第{page + 1}页" if page is not None else ""
             preview = d.page_content.replace("\n", " ")[:120]
-            lines.append(f"**[{i + 1}]** {src}{loc} | score={score:.3f} | {preview}...")
+            sim = _to_similarity(score)
+            # 换不了就整段省掉，绝不把原始距离当相似度透出去
+            score_txt = f" | score={sim:.3f}" if sim is not None else ""
+            lines.append(f"**[{i + 1}]** {src}{loc}{score_txt} | {preview}...")
 
         return "\n\n".join(lines)
     except Exception:

@@ -264,14 +264,39 @@ class RagPipeline:
 
     # ---------- 建库 ----------
     def _ensure_vs(self):
-        """拿到可用的 Chroma 实例（不存在则创建，不删旧数据）。"""
+        """拿到可用的 Chroma 实例（不存在则创建，不删旧数据）。
+
+        ⚠️ 必须传 client=chroma_client()。不传的话 langchain 会按 persist_directory
+        自己 new 一个 PersistentClient —— 单例就白做了（实测 163.5ms vs 73.1ms，
+        `client is 单例` 判 False），而且多个 client 指向同一个 sqlite 文件还有锁竞争隐患。
+        传了 client 时 langchain 直接复用它，persist_directory 只作为元信息保留。
+
+        写入路径（建库 / 追加）一律走这里；只想"打开已有库"的用 get_or_open()。
+        """
         if self._vs is None:
             self._vs = Chroma(
+                client=chroma_client(),
                 persist_directory=config.PERSIST_DIR,
                 embedding_function=get_embeddings(),
                 collection_name=self.collection_name,
             )
         return self._vs
+
+    def add_chunks(self, chunks) -> int:
+        """把切片追加入库（库还不存在就先建），返回入库条数。
+
+        联网导入必须走这里：它做的事是"往一个可能还是空的库里追加"，
+        而 get_or_open() 只在磁盘上已有片段时才构造 Chroma 实例，
+        空库拿到的是 None，add_documents 直接 AttributeError。
+        更要命的是失败发生在建 collection 之前，所以重试多少次都一样。
+        """
+        if not chunks:
+            return 0
+        vs = self._ensure_vs()
+        # 分批入库，避免超出 Embedding 接口单次批量限制（百炼为 10）
+        for i in range(0, len(chunks), config.EMBED_BATCH_SIZE):
+            vs.add_documents(chunks[i : i + config.EMBED_BATCH_SIZE])
+        return len(chunks)
 
     def build_index(
         self,
@@ -407,13 +432,14 @@ class RagPipeline:
         self._params = None
 
     def get_or_open(self) -> None:
-        """打开已有库（磁盘存在则加载，否则 self._vs 保持 None）。"""
+        """打开已有库（磁盘存在则加载，否则 self._vs 保持 None）。
+
+        只打开、不创建 —— exists() / peek() 这类"这个库到底建过没有"的判定靠的就是
+        「空库时 _vs 仍为 None」这个语义，别顺手改成 _ensure_vs()。
+        需要"没有就建"的写入路径请直接用 _ensure_vs() 或 add_chunks()。
+        """
         if self.peek() > 0:
-            self._vs = Chroma(
-                persist_directory=config.PERSIST_DIR,
-                embedding_function=get_embeddings(),
-                collection_name=self.collection_name,
-            )
+            self._vs = self._ensure_vs()
 
     # ---------- 检索 + 问答 ----------
     def retrieve_with_score(self, question: str, top_k: int):

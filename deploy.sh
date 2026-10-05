@@ -293,8 +293,11 @@ log "7. 启动服务"
 do_stop >/dev/null 2>&1 || true
 
 cd "$ROOT"
+# --host 127.0.0.1：后端没有任何鉴权，不对外暴露。
+# 前端靠 next.config.ts 的 /api/* rewrite 从本机访问它，功能不受影响；
+# 需要临时对外调试时用 `venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000` 手动起。
 PYTHONUTF8=1 PYTHONDONTWRITEBYTECODE=1 \
-  nohup venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port "$BACK_PORT" \
+  nohup venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port "$BACK_PORT" \
   > /tmp/baomi-back.log 2>&1 &
 echo $! > /tmp/baomi-back.pid
 ok "后端已启动（pid $(cat /tmp/baomi-back.pid)）"
@@ -345,7 +348,8 @@ cat <<EOF
 ============================================================
  访问地址
    前端： http://${IP}:${FRONT_PORT}
-   后端： http://${IP}:${BACK_PORT}/health
+   后端： 只监听 127.0.0.1:${BACK_PORT}（不对外，前端经 /api/* 转发访问）
+         服务器上自测： curl -s http://127.0.0.1:${BACK_PORT}/health
 
  常用命令
    bash deploy.sh status    看状态
@@ -354,7 +358,8 @@ cat <<EOF
    bash deploy.sh stop      停止
 
  还打不开？按顺序查这三件事
-   1) 阿里云控制台 -> 安全组 -> 入方向，放行 ${FRONT_PORT} 和 ${BACK_PORT}（授权对象 0.0.0.0/0）
+   1) 阿里云控制台 -> 安全组 -> 入方向，只放行 ${FRONT_PORT} 即可（授权对象 0.0.0.0/0）
+      ${BACK_PORT} 不需要放行：后端已改为只监听回环，公网访问不到它
    2) 确认实例有公网带宽 / 已绑定弹性公网 IP
    3) 看日志：tail -50 /tmp/baomi-front.log
 ============================================================

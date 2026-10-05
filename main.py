@@ -166,4 +166,8 @@ def health():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
+    # 只监听回环：后端没有任何鉴权（任何人拿到 IP 就能建库 / 删库 / 查会话），
+    # 而前端本来就是靠 Next 的 /api/* rewrite 访问它（next.config.ts 指向
+    # http://localhost:8000），后端不需要对公网开放。
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)

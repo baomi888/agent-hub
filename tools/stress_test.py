@@ -6,7 +6,8 @@
 目标机器是阿里云 ECS 2 核 2G，不做破坏性压测，只测「真实用户路径的响应能力」。
 
 测试项：
-  A. 只读接口并发（前端 :3000 代理链路 vs 后端 :8000 直连，差值即代理开销）
+  A. 只读接口并发（全部经前端 :3000 代理链路 —— 后端 :8000 已只监听 127.0.0.1，
+     公网直连不通，A 项里的「后端直连」那一档相应改成打前端）
   B. 文档上传链路（并发上传，验证 kb_lock 串行保护与流式写盘）
   C. 真实问答链路（SSE，测首字节 TTFB 与整轮耗时）
 
@@ -22,8 +23,9 @@ import time
 
 import aiohttp
 
-FE = "http://8.163.62.25:3000"   # 前端（用户真实入口，Next 反代到后端）
-BE = "http://8.163.62.25:8000"   # 后端直连
+FE = "http://8.163.62.25:3000"   # 前端（用户真实入口，Next 反代到后端 :8000）
+# 后端 :8000 已改为只监听 127.0.0.1（无鉴权，不对外暴露），公网直连测不到。
+# 要测后端裸性能，请在服务器上跑： curl -s http://127.0.0.1:8000/health
 TIMEOUT = 30                     # 单次请求硬超时，超过即记失败，不重试
 
 
@@ -91,8 +93,9 @@ async def main():
     async with aiohttp.ClientSession() as sess:
         # ---------- 先确认服务活着 ----------
         print("\n[0] 健康检查")
-        h = await timed_get(sess, f"{BE}/health")
-        print(f"  /health -> HTTP {h[1]}  {h[0]*1000:.0f}ms")
+        # 后端 :8000 只监听回环，公网测不到 —— 探前端代理链路代替
+        h = await timed_get(sess, f"{FE}/api/kb/")
+        print(f"  /api/kb/ -> HTTP {h[1]}  {h[0]*1000:.0f}ms")
         if h[1] != 200:
             print("  服务不可达，终止测试")
             return
@@ -123,7 +126,6 @@ async def main():
         print("\n[A] 只读接口并发（每档 20 次请求）")
         result["只读接口"] = []
         for label, url in [
-            ("后端直连 /health (:8000)", f"{BE}/health"),
             ("经前端代理 /api/kb/ (:3000)", f"{FE}/api/kb/"),
             ("经前端代理 /api/sessions (:3000)", f"{FE}/api/sessions"),
         ]:
