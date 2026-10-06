@@ -78,11 +78,11 @@ LEGACY_OWNER = "legacy"
 
 # ---------- 配额（防止别人用你的界面烧你的额度）----------
 # 每个用户每分钟最多多少次问答 / 建库类写操作；0 = 不限
-RATE_PER_MINUTE = int(os.getenv("RATE_PER_MINUTE", "20"))
+RATE_PER_MINUTE = int(os.getenv("RATE_PER_MINUTE", "10"))
 # 每个用户每日 slices（embedding 条数）上限；0 = 不限
-DAILY_EMBED_LIMIT = int(os.getenv("DAILY_EMBED_LIMIT", "3000"))
+DAILY_EMBED_LIMIT = int(os.getenv("DAILY_EMBED_LIMIT", "1000"))
 # 每个用户每日问答次数上限；0 = 不限
-DAILY_ASK_LIMIT = int(os.getenv("DAILY_ASK_LIMIT", "200"))
+DAILY_ASK_LIMIT = int(os.getenv("DAILY_ASK_LIMIT", "60"))
 
 # 管理员用户名（逗号分隔）。管理员不受配额与每分钟限流约束，相当于主账号。
 # 默认把项目作者账号设为管理员；其他部署在 .env 里改成自己的用户名即可
