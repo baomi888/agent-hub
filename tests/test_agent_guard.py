@@ -139,6 +139,54 @@ try:
 finally:
     core.config.DAILY_ASK_LIMIT = saved_ask
 
+# ---------------------------------------------------------------- [3.5] 管理员无限制
+print("\n[3.5] 管理员（config.ADMIN_USERNAMES）不受配额/限流约束")
+from core import account  # noqa: E402
+
+saved_admins = core.config.ADMIN_USERNAMES
+core.config.ADMIN_USERNAMES = ["admin_probe"]
+try:
+    account._ensure_tables()
+    admin = account.create_user("admin_probe", "admin12345")
+    aid = admin["id"]
+    # 每分钟限流对管理员放行：连打 50 次也不该抛
+    quota._HITS.clear()
+    for _ in range(50):
+        quota.hit(aid)
+    check("管理员每分钟限流放行（不抛）", True)
+
+    core.config.DAILY_ASK_LIMIT = 1  # 普通用户 1 次就满
+    try:
+        quota.consume(aid, "ask")
+        check("管理员每日问答不受限（不抛）", True)
+    except quota.QuotaExceeded:
+        check("管理员每日问答不受限（不抛）", False, "抛了 QuotaExceeded")
+    try:
+        quota.ensure(aid, "ask")
+        check("管理员 ensure 放行", True)
+    except quota.QuotaExceeded:
+        check("管理员 ensure 放行", False, "抛了")
+    try:
+        quota.guard(aid, "embed")
+        check("管理员 guard 放行（限流+额度都不拦）", True)
+    except (quota.RateLimited, quota.QuotaExceeded):
+        check("管理员 guard 放行（限流+额度都不拦）", False, "抛了")
+
+    snap = quota.snapshot(aid)
+    check("snapshot 标记 unlimited", snap["ask"].get("unlimited") is True, str(snap))
+
+    # 反例：非管理员仍受 1 次限制
+    normal = account.create_user("normal_probe", "normal12345")
+    try:
+        quota.consume(normal["id"], "ask")
+        quota.consume(normal["id"], "ask")
+        check("非管理员仍受限额（第2次抛）", False, "没抛")
+    except quota.QuotaExceeded:
+        check("非管理员仍受限额（第2次抛）", True)
+finally:
+    core.config.ADMIN_USERNAMES = saved_admins
+    core.config.DAILY_ASK_LIMIT = saved_ask
+
 # ---------------------------------------------------------------- [4] SSRF
 print("\n[4] SSRF：内网一律拒（DNS 用打桩，不联网）")
 

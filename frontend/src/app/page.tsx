@@ -506,6 +506,7 @@ export default function Home() {
         overlay={viewport === "narrow"}
         open={sidebarOpen}
         username={auth.me?.user.username}
+        quota={auth.me?.quota}
         onLogout={() => void auth.logout()}
       />
 

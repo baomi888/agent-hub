@@ -79,6 +79,8 @@ export interface QuotaInfo {
   used: number;
   /** 0 表示不限 */
   limit: number;
+  /** 管理员标记：为 true 时该维度无配额约束 */
+  unlimited?: boolean;
 }
 
 // 与后端 api/auth.py 的 UserOut / MeOut 对齐

@@ -4,7 +4,7 @@
 // 视觉：暖米黄书本风格 · 大圆角 · 柔阴影 · 金色点缀
 import { useMemo, useState, type RefObject } from "react";
 import MascotLogo from "./chat/MascotLogo";
-import type { Conversation } from "@/lib/types";
+import type { Conversation, QuotaInfo } from "@/lib/types";
 import type { FontScale } from "@/lib/hooks/usePrefs";
 
 interface Props {
@@ -34,10 +34,20 @@ interface Props {
   onRetryLoad?: () => void;
   /** 当前登录用户名（登录门放进来之后才有值） */
   username?: string;
+  /** 当前账号配额概览（含 unlimited 标记）；不传则不显示额度 */
+  quota?: Record<string, QuotaInfo>;
   onLogout?: () => void;
 }
 
 const toMs = (ts: number) => (ts < 1e12 ? ts * 1000 : ts);
+
+function quotaLine(q: Record<string, QuotaInfo>): string {
+  const fmt = (n: number) => (n === 0 ? "∞" : String(n));
+  const parts: string[] = [];
+  if (q["ask"]) parts.push(`今日问答 ${q["ask"].used}/${fmt(q["ask"].limit)}`);
+  if (q["embed"]) parts.push(`向量化 ${q["embed"].used}/${fmt(q["embed"].limit)}`);
+  return parts.join(" · ");
+}
 
 function groupSessions(list: Conversation[]) {
   const now = new Date();
@@ -78,6 +88,7 @@ export default function Sidebar({
   loadError = null,
   onRetryLoad,
   username,
+  quota,
   onLogout,
 }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -342,9 +353,18 @@ export default function Sidebar({
             >
               {username.slice(0, 1).toUpperCase()}
             </span>
-            <span className="min-w-0 flex-1 truncate text-fs-sm text-ink" title={username}>
-              {username}
-            </span>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-fs-sm text-ink" title={username}>
+                {username}
+              </div>
+              {quota && (
+                <div className="truncate text-fs-xs text-muted">
+                  {Object.values(quota).some((q) => q.unlimited)
+                    ? "无限额 · 管理员"
+                    : quotaLine(quota)}
+                </div>
+              )}
+            </div>
             {onLogout && (
               <button
                 onClick={onLogout}

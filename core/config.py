@@ -84,6 +84,11 @@ DAILY_EMBED_LIMIT = int(os.getenv("DAILY_EMBED_LIMIT", "3000"))
 # 每个用户每日问答次数上限；0 = 不限
 DAILY_ASK_LIMIT = int(os.getenv("DAILY_ASK_LIMIT", "200"))
 
+# 管理员用户名（逗号分隔）。管理员不受配额与每分钟限流约束，相当于主账号。
+# 默认把项目作者账号设为管理员；其他部署在 .env 里改成自己的用户名即可
+# （例如 ADMIN_USERNAMES=admin,alice）。名单为空则没有管理员。
+ADMIN_USERNAMES = [x.strip() for x in os.getenv("ADMIN_USERNAMES", "苞米呀").split(",") if x.strip()]
+
 # ---------- 可选：天气工具 ----------
 AMAP_API_KEY = os.getenv("AMAP_API_KEY", "")
 

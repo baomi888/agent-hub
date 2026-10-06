@@ -55,7 +55,10 @@ def hit(uid: str, limit: int | None = None) -> int:
     """记一次请求，超限抛 RateLimited，否则返回本窗口内已用次数。
 
     limit=0 或 None 表示不限（沿用 config.RATE_PER_MINUTE）。
+    管理员（config.ADMIN_USERNAMES）直接放行，不计数。
     """
+    if _is_admin(uid):
+        return 0
     n = config.RATE_PER_MINUTE if limit is None else limit
     now = time.monotonic()
     with _lock:
@@ -126,16 +129,34 @@ _LIMITS = {
 }
 
 
+def _is_admin(uid: str) -> bool:
+    """管理员（config.ADMIN_USERNAMES）不受配额与每分钟限流约束。
+
+    按 uid 反查用户名再比对：名单写的是人能读懂的名字，
+    而配额系统全程只拿得到 uid。每次多一次 users 表点查，
+    频率极低（仅建库/问答这类用户主动操作），可接受。
+    """
+    names = getattr(config, "ADMIN_USERNAMES", None)
+    if not names:
+        return False
+    from core import account
+
+    u = account.get_user(uid)
+    return bool(u) and u["username"] in names
+
+
 def _limit_of(kind: str) -> int:
     return int(getattr(config, _LIMITS.get(kind, ""), 0) or 0)
 
 
 def ensure(uid: str, kind: str) -> None:
-    """只检查不记账：已经触顶就抛 QuotaExceeded。
+    """只检查不记账：已经触顶就抛 QuotaExceeded。管理员直接放行。
 
     建库这类操作在动手前算不出会切出多少片段，没法先扣；
     所以用 ensure 在入口卡一道，建完再用 bump_usage 记真实数量。
     """
+    if _is_admin(uid):
+        return
     limit = _limit_of(kind)
     if not limit:
         return
@@ -156,9 +177,12 @@ def guard(uid: str, kind: str) -> None:
 def consume(uid: str, kind: str, n: int = 1) -> int:
     """扣一次配额，超限抛 QuotaExceeded（不实际扣），否则返回扣后的当日用量。
 
+    管理员直接放行（返回 0，不记账）。
     "超限时不扣"很重要：否则重试的请求会继续把计数推高，
     用户等到第二天零点还是解不开。
     """
+    if _is_admin(uid):
+        return 0
     limit = _limit_of(kind)
     if not limit:
         return bump_usage(uid, kind, n)
@@ -169,10 +193,17 @@ def consume(uid: str, kind: str, n: int = 1) -> int:
 
 
 def snapshot(uid: str) -> dict:
-    """给前端看的一日用量概览（额度用掉多少 / 还剩多少）。"""
+    """给前端看的一日用量概览（额度用掉多少 / 还剩多少）。
+
+    管理员附 unlimited=True，前端据此显示"无限制"。
+    """
     out = {}
+    unlimited = _is_admin(uid)
     for kind in _LIMITS:
         limit = _limit_of(kind)
         used = usage_today(uid, kind) if limit else 0
-        out[kind] = {"used": used, "limit": limit}
+        d = {"used": used, "limit": limit}
+        if unlimited:
+            d["unlimited"] = True
+        out[kind] = d
     return out
