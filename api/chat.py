@@ -25,17 +25,19 @@ import os
 import time
 import uuid
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from pydantic import BaseModel, Field
 
-from core import config, session as store, upload
+from core import config, quota, session as store, upload
+from core.auth import get_current_user
 from core.llm import get_llm, get_vision_llm
 from kb import pipelines
 from kb.rag_core import SYSTEM_PROMPT, describe_api_error
 
-router = APIRouter()
+# 默认要登录：整组路由统一挂鉴权，新增端点时不会漏
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 # 聊天附件上传目录（图片理解用）
 CHAT_UPLOAD_DIR = os.path.join(config.DATA_DIR, "chat_uploads")
@@ -206,14 +208,23 @@ async def _stream_llm(llm, messages, request: Request, acc: _Acc):
 # ==================== 主路由 ====================
 
 @router.post("/stream")
-async def chat_stream(req: ChatRequest, request: Request):
-    conv = store.get_conversation(req.sid)
+async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get_current_user)):
+    # 限流 + 每日问答额度。放在 event_generator 外面是对的：
+    # 流一旦开始，响应头（200）就发出去了，那时候再想回 429 已经来不及，
+    # 只会变成一条断掉的 SSE 流，前端读不出任何提示。
+    await asyncio.to_thread(quota.consume, uid, "ask")
+
+    conv = store.get_conversation(uid, req.sid)
     if not conv:
         raise HTTPException(status_code=404, detail=f"会话不存在：{req.sid}")
 
     kb_id = req.kb_id_override or conv.get("kb_id")
+    # 前端可以塞任意 kb_id（kb_id_override），这里必须认一次主。
+    # 不是自己的库按"没绑"处理：题照答，但不带别人的资料。
+    if kb_id and pipelines.owner_of(kb_id) != uid:
+        kb_id = None
     # exists() → peek() 要读 sqlite，是同步 I/O，别卡住事件循环
-    kb_exists = bool(kb_id and await asyncio.to_thread(pipelines.exists, kb_id))
+    kb_exists = bool(kb_id and await asyncio.to_thread(pipelines.exists, uid, kb_id))
     mode = _pick_mode(req.mode, kb_id, kb_exists)
 
     # RAG 模式如果知识库不存在 → 降级为 agent
@@ -252,8 +263,8 @@ async def chat_stream(req: ChatRequest, request: Request):
         elif city:
             location_ctx = {"city": city}
 
-    store.add_message(req.sid, "user", req.question)
-    should_gen_title = store.count_messages(req.sid) <= 2
+    store.add_message(uid, req.sid, "user", req.question)
+    should_gen_title = store.count_messages(uid, req.sid) <= 2
 
     async def event_generator():
         refs_md = ""
@@ -265,8 +276,11 @@ async def chat_stream(req: ChatRequest, request: Request):
             vision_question = req.question
             if kb_id and kb_exists:
                 try:
-                    pipe = pipelines.get_or_create(kb_id)
-                    docs_scores = pipe.retrieve_with_score(req.question, req.top_k)
+                    # 同步检索会堵事件循环（embed_query 实测约 250ms），必须丢线程
+                    pipe = await asyncio.to_thread(pipelines.get_or_create, uid, kb_id)
+                    docs_scores = await asyncio.to_thread(
+                        pipe.retrieve_with_score, req.question, req.top_k
+                    )
                     if docs_scores:
                         refs_md = pipe._format_refs(docs_scores)
                         sources = pipe.build_sources(docs_scores)
@@ -279,7 +293,7 @@ async def chat_stream(req: ChatRequest, request: Request):
                 except Exception:
                     pass
 
-            history = store.get_messages(req.sid, include_system=False)[:-1]
+            history = store.get_messages(uid, req.sid, include_system=False)[:-1]
             messages = [SystemMessage(content="你是一个能理解图片的 AI 助手。请结合图片内容用中文简洁作答。")]
             for m in history:
                 if m["role"] == "user":
@@ -300,13 +314,13 @@ async def chat_stream(req: ChatRequest, request: Request):
             acc_text = acc.text
 
             # 收尾
-            msg_id = store.add_message(req.sid, "assistant", acc_text, refs=refs_md)
+            msg_id = store.add_message(uid, req.sid, "assistant", acc_text, refs=refs_md)
             gen_title = ""
             if should_gen_title and acc_text:
                 try:
                     gen_title = await asyncio.to_thread(_generate_title, req.question, acc_text)
                     if gen_title:
-                        store.rename_conversation(req.sid, gen_title)
+                        store.rename_conversation(uid, req.sid, gen_title)
                         yield _sse("title", {"title": gen_title})
                 except Exception:
                     pass
@@ -325,11 +339,12 @@ async def chat_stream(req: ChatRequest, request: Request):
             yield _sse("status", {"text": "Agent 模式，正在规划任务..."})
             try:
                 from agent.builder import build_agent
-                # 把当前会话绑定的知识库告诉模型，否则 kb_search 只能瞎猜 kb_id
-                agent = await asyncio.to_thread(build_agent, kb_id, location_ctx)
+                # 只告诉模型"有没有绑库"，不告诉它是哪个库：
+                # kb_id 走下面的 configurable 注入，模型没有机会改写它
+                agent = await asyncio.to_thread(build_agent, bool(kb_id and kb_exists), location_ctx)
 
                 # 组装历史 + 当前问题
-                history = store.get_messages(req.sid, include_system=False)[:-1]
+                history = store.get_messages(uid, req.sid, include_system=False)[:-1]
                 messages = []
                 for m in history:
                     if m["role"] == "user":
@@ -338,8 +353,14 @@ async def chat_stream(req: ChatRequest, request: Request):
                         messages.append(AIMessage(content=m["content"]))
                 messages.append(HumanMessage(content=req.question))
 
-                # LangGraph checkpoint thread_id = 会话 id，天然多轮记忆
-                config_ = {"configurable": {"thread_id": req.sid}}
+                # LangGraph checkpoint thread_id = 会话 id，天然多轮记忆。
+                # owner_id / kb_id 一并注入：工具内部只认这里的值，
+                # 模型在参数里怎么编 kb_id 都影响不到真实检索目标。
+                config_ = {"configurable": {
+                    "thread_id": req.sid,
+                    "owner_id": uid,
+                    "kb_id": kb_id if (kb_id and kb_exists) else None,
+                }}
                 full_text = ""
 
                 # stream_mode=["updates","messages"] 事件为 (mode字符串, payload)
@@ -407,8 +428,8 @@ async def chat_stream(req: ChatRequest, request: Request):
         elif mode == "rag":
             yield _sse("status", {"text": f"RAG 模式，正在检索知识库（{kb_id}）..."})
             try:
-                pipe = pipelines.get_or_create(kb_id)
-                docs_scores = pipe.retrieve_with_score(req.question, req.top_k)
+                pipe = await asyncio.to_thread(pipelines.get_or_create, uid, kb_id)
+                docs_scores = await asyncio.to_thread(pipe.retrieve_with_score, req.question, req.top_k)
             except Exception as e:
                 yield _sse("error", {"detail": describe_api_error(e)})
                 return
@@ -424,7 +445,7 @@ async def chat_stream(req: ChatRequest, request: Request):
             yield _sse("status", {"text": "正在生成答案..."})
             # 复用上面已经检索到的结果，不重复检索（早期实现在这里又检了一次，
             # 而且用的是默认 top_k，等于前端调的检索条数被悄悄忽略）
-            messages = _build_messages(req.sid, req.question, kb_id, docs_scores)
+            messages = _build_messages(uid, req.sid, req.question, kb_id, docs_scores)
 
             acc = _Acc()
             try:
@@ -440,7 +461,7 @@ async def chat_stream(req: ChatRequest, request: Request):
         # ---- 3. 纯 LLM 模式 ----
         else:
             yield _sse("status", {"text": "纯 LLM 模式..."})
-            history = store.get_messages(req.sid, include_system=False)[:-1]
+            history = store.get_messages(uid, req.sid, include_system=False)[:-1]
             messages = [SystemMessage(content="你是一个友好、专业的 AI 助手。用中文简洁作答。")]
             for m in history:
                 if m["role"] == "user":
@@ -461,14 +482,14 @@ async def chat_stream(req: ChatRequest, request: Request):
             acc_text = acc.text
 
         # ---- 收尾：存 assistant 消息 + 生成标题 ----
-        msg_id = store.add_message(req.sid, "assistant", acc_text, refs=refs_md)
+        msg_id = store.add_message(uid, req.sid, "assistant", acc_text, refs=refs_md)
 
         gen_title = ""
         if should_gen_title and acc_text:
             try:
                 gen_title = await asyncio.to_thread(_generate_title, req.question, acc_text)
                 if gen_title:
-                    store.rename_conversation(req.sid, gen_title)
+                    store.rename_conversation(uid, req.sid, gen_title)
                     yield _sse("title", {"title": gen_title})
             except Exception:
                 pass
@@ -487,13 +508,13 @@ async def chat_stream(req: ChatRequest, request: Request):
 
 # ==================== 辅助 ====================
 
-def _build_messages(sid: str, question: str, kb_id: str | None, docs_scores) -> list:
+def _build_messages(owner: str, sid: str, question: str, kb_id: str | None, docs_scores) -> list:
     """组装 LLM 输入：历史 + 已检索到的参考资料。
 
     docs_scores 由调用方检索一次后传入，这里不再重复检索，
     避免用户设置的 top_k 被默认值覆盖、也省掉一次 embedding 请求。
     """
-    history_raw = store.get_messages(sid, include_system=False)[:-1]
+    history_raw = store.get_messages(owner, sid, include_system=False)[:-1]
     messages = []
     references = ""
     if kb_id and docs_scores:

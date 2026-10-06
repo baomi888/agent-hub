@@ -32,6 +32,9 @@ interface Props {
   loadError?: string | null;
   /** 失败后手动重试 */
   onRetryLoad?: () => void;
+  /** 当前登录用户名（登录门放进来之后才有值） */
+  username?: string;
+  onLogout?: () => void;
 }
 
 const toMs = (ts: number) => (ts < 1e12 ? ts * 1000 : ts);
@@ -74,6 +77,8 @@ export default function Sidebar({
   loading = false,
   loadError = null,
   onRetryLoad,
+  username,
+  onLogout,
 }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -327,6 +332,30 @@ export default function Sidebar({
           <span className="dot" />
           <span className="truncate">在线 · deepseek-chat</span>
         </div>
+
+        {/* 当前账号 + 退出：多用户之后，知道自己"现在是誰"能省掉很多困惑 */}
+        {username && (
+          <div className="mt-2 flex items-center gap-2 rounded-sm bg-fill-3 px-2.5 py-2">
+            <span
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-fill-1 text-fs-xs text-accent-ink"
+              aria-hidden="true"
+            >
+              {username.slice(0, 1).toUpperCase()}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-fs-sm text-ink" title={username}>
+              {username}
+            </span>
+            {onLogout && (
+              <button
+                onClick={onLogout}
+                className="shrink-0 rounded-xs border border-line px-1.5 py-0.5 text-fs-xs text-muted transition hover:bg-fill-2 hover:text-ink"
+                title="退出登录"
+              >
+                退出
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </aside>
   );

@@ -137,6 +137,19 @@ export function useSessions(showToast: ShowToast) {
     }
   };
 
+  // 列表有内容但还没选中任何会话时，自动落进最近一个。
+  // 覆盖的是 init effect 管不到的场景：登录门后面请求被 401 挡掉，
+  // 登录成功后补拉的列表如果不选一个，activeSid 就一直是 null，
+  // 「绑定知识库」这类按会话生效的操作又会变成"点了没反应"（10-04 的老坑）。
+  useEffect(() => {
+    if (activeSid || !sessions.length) return;
+    // 推迟到下一个宏任务：effect 体里同步 setState 会被判成级联渲染
+    const t = window.setTimeout(() => void selectSession(sessions[0].id), 0);
+    return () => window.clearTimeout(t);
+    // selectSession 每次渲染都是新引用，进 deps 会让这个 effect 反复触发
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessions, activeSid]);
+
   // 首屏加载失败后手动重试：清掉错误态并重新拉一次
   const reloadSessions = useCallback(async () => {
     setLoadError(null);

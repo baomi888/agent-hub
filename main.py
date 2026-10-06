@@ -11,15 +11,17 @@
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
+from api.auth import router as auth_router
 from api.chat import router as chat_router
 from api.feedback import router as feedback_router
 from api.geo import router as geo_router
 from api.kb import router as kb_router
 from api.sessions import router as sessions_router
-from core import config
+from core import config, quota
 from kb import pipelines
 
 
@@ -61,6 +63,10 @@ app.add_middleware(
 )
 
 # ---------- 路由挂载 ----------
+# 认证路由放最前面：它是唯一不带全局鉴权的（登录页总得能打开）。
+# 其余四个业务 router 都在各自文件里挂了 dependencies=[Depends(get_current_user)]，
+# 做成"默认要登录"——新增端点时忘了写鉴权，默认也是安全的那一侧。
+app.include_router(auth_router, prefix="/api/auth", tags=["认证"])
 app.include_router(kb_router, prefix="/api/kb", tags=["知识库"])
 app.include_router(sessions_router, prefix="/api/sessions", tags=["会话"])
 app.include_router(chat_router, prefix="/api/chat", tags=["问答"])
@@ -147,6 +153,26 @@ async def normalize_api_slash(request, call_next):
     return await call_next(request)
 
 
+# ---------- 配额 / 限流 → 429 ----------
+# 注册成全局异常处理器，而不是在每个端点里 try/except：
+# 端点自己 catch 容易顺手把它转成 500，前端就分不清"系统出错"和"你今天用超了"。
+@app.exception_handler(quota.RateLimited)
+async def _on_rate_limited(request: Request, exc: quota.RateLimited):
+    return JSONResponse(
+        status_code=429,
+        content={"detail": str(exc), "retry_after": round(exc.retry_after, 1)},
+        headers={"Retry-After": str(int(exc.retry_after) + 1)},
+    )
+
+
+@app.exception_handler(quota.QuotaExceeded)
+async def _on_quota_exceeded(request: Request, exc: quota.QuotaExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={"detail": str(exc), "kind": exc.kind, "limit": exc.limit},
+    )
+
+
 @app.get("/api/config/defaults")
 def get_defaults():
     """返回前端初始表单所需的默认参数。"""
@@ -167,7 +193,8 @@ def health():
 if __name__ == "__main__":
     import uvicorn
 
-    # 只监听回环：后端没有任何鉴权（任何人拿到 IP 就能建库 / 删库 / 查会话），
-    # 而前端本来就是靠 Next 的 /api/* rewrite 访问它（next.config.ts 指向
-    # http://localhost:8000），后端不需要对公网开放。
+    # 只监听回环：前端本来就是靠 Next 的 /api/* rewrite 访问它（next.config.ts
+    # 指向 http://localhost:8000），后端不需要对公网开放。
+    # 现在虽然已经加了登录鉴权，仍然保持回环——少一层暴露面就少一层风险，
+    # 而且 8000 端口直连绕过了 Next 的 Cookie 域设置，容易踩登录态丢失的坑。
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)

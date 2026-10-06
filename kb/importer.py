@@ -7,11 +7,14 @@ import time
 from pathlib import Path
 
 import httpx
+from urllib.parse import urljoin
 
+from core.netsafe import assert_safe_url
 from kb import pipelines
 from kb.rag_core import load_document, split_documents
 
 _HTTP_TIMEOUT = 15
+_MAX_REDIRECTS = 5
 _HTTP_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/124.0 Agent/1.0",
@@ -28,9 +31,29 @@ def _strip_html(html: str) -> str:
     return text
 
 
+def _safe_get(url: str, timeout: int) -> httpx.Response:
+    """带 SSRF 校验的 GET，**每一跳重定向都要重新校验**。
+
+    follow_redirects=False 是刻意的：交给 httpx 自动跟随时，
+    一个公网 URL 只要 302 到 http://169.254.169.254/latest/meta-data/，
+    入口那次校验就成了摆设。多用户之后这是别人能打进内网的口子。
+    """
+    target = assert_safe_url(url)
+    for _ in range(_MAX_REDIRECTS + 1):
+        resp = httpx.get(target, headers=_HTTP_HEADERS, timeout=timeout, follow_redirects=False)
+        if resp.status_code in (301, 302, 303, 307, 308):
+            loc = resp.headers.get("location")
+            if not loc:
+                return resp
+            target = assert_safe_url(urljoin(target, loc))
+            continue
+        return resp
+    raise ValueError(f"重定向次数超过 {_MAX_REDIRECTS} 次，已放弃：{url}")
+
+
 def fetch_url_text(url: str) -> tuple[str, str]:
     """抓 URL 正文，返回 (纯文本, 标题)。"""
-    resp = httpx.get(url, headers=_HTTP_HEADERS, timeout=_HTTP_TIMEOUT, follow_redirects=True)
+    resp = _safe_get(url, _HTTP_TIMEOUT)
     resp.raise_for_status()
     content_type = resp.headers.get("content-type", "")
     if "charset=" in content_type:
@@ -46,8 +69,11 @@ def fetch_url_text(url: str) -> tuple[str, str]:
     return _strip_html(html), title
 
 
-def import_url(kb_id: str, url: str, chunk_size: int = 500, chunk_overlap: int = 50) -> dict:
-    """抓 URL 正文追加到指定知识库（正文留档 + 登记文件，便于后续单条删除/重建）。"""
+def import_url(owner: str, kb_id: str, url: str, chunk_size: int = 500, chunk_overlap: int = 50) -> dict:
+    """抓 URL 正文追加到指定知识库（正文留档 + 登记文件，便于后续单条删除/重建）。
+
+    归属在 pipelines 层校验，这里只是把 owner 透传下去。
+    """
     text, title = fetch_url_text(url)
     name = _safe_name(title or url, ".txt")
     dest = pipelines.source_path(kb_id, name)
@@ -58,7 +84,7 @@ def import_url(kb_id: str, url: str, chunk_size: int = 500, chunk_overlap: int =
     # 只锁「写库」这一段：抓网页那几秒不该占着锁，
     # 但 embedding + add_documents + 改文件清单必须和同库的入库 / 重建 / 删除互斥
     with pipelines.kb_lock(kb_id):
-        pipe = pipelines.get_or_create(kb_id)
+        pipe = pipelines.get_or_create(owner, kb_id)
         docs = load_document(dest, source_name=name)
         chunks = split_documents(docs, chunk_size, chunk_overlap)
         if not chunks:
@@ -67,7 +93,7 @@ def import_url(kb_id: str, url: str, chunk_size: int = 500, chunk_overlap: int =
         # 换成 get_or_open() 会在 _vs=None 上 add_documents ⇒ AttributeError，
         # 而且失败在建 collection 之前，重试永远不可能成功。
         pipe.add_chunks(chunks)
-        pipelines.add_file_records(kb_id, [{
+        pipelines.add_file_records(owner, kb_id, [{
             "name": name,
             "chunks": len(chunks),
             "added_at": int(time.time()),
@@ -171,13 +197,17 @@ _CONTENT_TYPE_EXT = {
 
 
 def download_file(url: str, save_dir: str | None = None) -> dict:
-    """下载文档类文件到本地，返回 {url, filename, path, ext, size}。"""
+    """下载文档类文件到本地，返回 {url, filename, path, ext, size}。
+
+    save_dir 由调用方给：多用户后下载件必须落到各自目录，
+    否则 A 下载的东西可能被 B 的 /download 顺手取走。
+    """
     from core import config
 
     save_dir = save_dir or config.DOWNLOAD_DIR
     os.makedirs(save_dir, exist_ok=True)
 
-    resp = httpx.get(url, headers=_HTTP_HEADERS, timeout=30, follow_redirects=True)
+    resp = _safe_get(url, 30)
     resp.raise_for_status()
 
     content_type = (resp.headers.get("content-type") or "").lower().split(";")[0].strip()
@@ -203,9 +233,12 @@ def download_file(url: str, save_dir: str | None = None) -> dict:
             "ext": ext, "size": len(resp.content)}
 
 
-def download_and_index(kb_id: str, url: str, chunk_size: int = 500, chunk_overlap: int = 50) -> dict:
+def download_and_index(owner: str, kb_id: str, url: str, chunk_size: int = 500, chunk_overlap: int = 50) -> dict:
     """下载文档类文件，若为 pdf/txt/md 则一并索引入库。"""
-    info = download_file(url)
+    from core import config
+
+    # 下载件按用户分目录：共用目录的话，别人猜到文件名就能把你下载的东西取走
+    info = download_file(url, save_dir=os.path.join(config.DOWNLOAD_DIR, owner))
     if info["ext"] not in (".txt", ".md", ".pdf"):
         info["chunks"] = 0
         return info
@@ -221,11 +254,11 @@ def download_and_index(kb_id: str, url: str, chunk_size: int = 500, chunk_overla
         chunks = split_documents(docs, chunk_size, chunk_overlap)
         if not chunks:
             raise ValueError("文档内容切片为空，无法入库")
-        pipe = pipelines.get_or_create(kb_id)
+        pipe = pipelines.get_or_create(owner, kb_id)
         # 同 import_url：空库入库走 add_chunks，不能用 get_or_open()
         pipe.add_chunks(chunks)
         info["chunks"] = len(chunks)
-        pipelines.add_file_records(kb_id, [{
+        pipelines.add_file_records(owner, kb_id, [{
             "name": info["filename"],
             "chunks": len(chunks),
             "added_at": int(time.time()),
@@ -234,12 +267,12 @@ def download_and_index(kb_id: str, url: str, chunk_size: int = 500, chunk_overla
     return info
 
 
-def import_urls_batch(kb_id: str, urls: list[str], chunk_size: int = 500, chunk_overlap: int = 50) -> list[dict]:
+def import_urls_batch(owner: str, kb_id: str, urls: list[str], chunk_size: int = 500, chunk_overlap: int = 50) -> list[dict]:
     """批量抓 URL 追加入库。"""
     results = []
     for url in urls:
         try:
-            r = import_url(kb_id, url, chunk_size, chunk_overlap)
+            r = import_url(owner, kb_id, url, chunk_size, chunk_overlap)
             results.append({"url": url, "ok": True, **r})
         except Exception as e:
             results.append({"url": url, "ok": False, "error": str(e)})

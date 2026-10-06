@@ -59,6 +59,31 @@ RETRIEVE_MMR_LAMBDA = float(os.getenv("RETRIEVE_MMR_LAMBDA", "0.65"))
 # 觉得回答还是太"硬答"就往 0.4 调；觉得资料太少就调回 0.2 或 0。
 RETRIEVE_MIN_SIM = float(os.getenv("RETRIEVE_MIN_SIM", "0.25"))
 
+# ---------- 多用户 / 认证 ----------
+# 会话 token 的签发密钥。不配的话会自动在 data/.auth_secret 生成并持久化，
+# 好处是重启不丢登录态；坏处是迁移机器时要把这个文件一起带走，否则所有人掉线一次。
+AUTH_SECRET = os.getenv("AUTH_SECRET", "")
+_AUTH_SECRET_FILE = os.path.join(DATA_DIR, ".auth_secret")
+# 登录态有效期（天）
+AUTH_TTL_DAYS = int(os.getenv("AUTH_TTL_DAYS", "7"))
+# 是否开放自助注册。演示期默认开着；正式用建议关掉并改成邀请码
+ALLOW_SIGNUP = os.getenv("ALLOW_SIGNUP", "1").strip().lower() in ("1", "true", "yes")
+# 口令散列轮数（PBKDF2-SHA256）。机器好可以调高，反之别低于 10 万
+AUTH_PBKDF2_ROUNDS = int(os.getenv("AUTH_PBKDF2_ROUNDS", "200000"))
+
+# 迁移账号：历史数据（改造前建的会话 / 知识库）先锁在这个名下，谁都看不到，
+# 由 tools/migrate_owner.py 明确指派给某个真人账号后才恢复可用。
+# 这是刻意的"默认拒绝"——宁可暂时看不见，也不能让第一个登录的人顺手认领别人的数据。
+LEGACY_OWNER = "legacy"
+
+# ---------- 配额（防止别人用你的界面烧你的额度）----------
+# 每个用户每分钟最多多少次问答 / 建库类写操作；0 = 不限
+RATE_PER_MINUTE = int(os.getenv("RATE_PER_MINUTE", "20"))
+# 每个用户每日 slices（embedding 条数）上限；0 = 不限
+DAILY_EMBED_LIMIT = int(os.getenv("DAILY_EMBED_LIMIT", "3000"))
+# 每个用户每日问答次数上限；0 = 不限
+DAILY_ASK_LIMIT = int(os.getenv("DAILY_ASK_LIMIT", "200"))
+
 # ---------- 可选：天气工具 ----------
 AMAP_API_KEY = os.getenv("AMAP_API_KEY", "")
 

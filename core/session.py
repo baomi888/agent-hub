@@ -2,14 +2,25 @@
 """SQLite 多会话管理。
 
 设计：
-  两张表：
-    conversations  —— 会话元数据（标题 / 绑定知识库 / 创建时间）
+  三张表：
+    conversations  —— 会话元数据（归属 / 标题 / 绑定知识库 / 创建时间）
     messages       —— 消息历史（role / content / 时间）
+    feedbacks      —— 消息赞踩
 
   所有 SQL 用参数化查询防注入；窗口截断：加载历史时只取最近
   MAX_HISTORY_TURNS 轮（默认 10 轮 = 20 条消息），避免长会话爆 token。
-  后续 W3 Agent 集成时会升级到 LangGraph checkpoint，
-  这里先做轻量但够用的 SQLite 实现。
+
+归属隔离（多用户改造 P1）
+------------------------
+**每一个函数都把 owner 作为第一个参数**，没有默认值。
+
+这是刻意的：宁可让漏改的调用点抛 TypeError，也不要让它悄悄查到别人的数据。
+如果给 owner 一个默认 None 再在 SQL 里写 `WHERE owner_id = ?`，漏传的场景
+会退化成"查不到"（看起来正常）；写成必需参数，漏传直接启动失败。
+
+老数据的 owner_id 是 NULL，`owner_id = ?` 对 NULL 永远不成立，
+所以改造前的历史会话对任何账号都不可见——这是"默认拒绝"，
+由 tools/migrate_owner.py 明确指派后才归某个真人所有。
 """
 
 import os
@@ -50,11 +61,16 @@ def _get_conn():
 
 
 def _init_db() -> None:
-    """首次运行时创建表（幂等）。"""
+    """首次运行时创建表（幂等）。
+
+    新建库直接带 owner_id；老库靠后面的 ALTER 补列。
+    两种路径得到同一套结构，省得迁移脚本和建表语句各写一遍。
+    """
     with _get_conn() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS conversations (
                 id          TEXT PRIMARY KEY,
+                owner_id    TEXT,
                 title       TEXT NOT NULL,
                 kb_id       TEXT,
                 created_at  INTEGER NOT NULL,
@@ -94,84 +110,138 @@ def _init_db() -> None:
         except Exception:
             pass
 
+        # 迁移：老库补 owner_id 列。旧行留 NULL = 谁都不属于，默认不可见
+        try:
+            conn.execute("ALTER TABLE conversations ADD COLUMN owner_id TEXT")
+        except Exception:
+            pass
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_conv_owner ON conversations(owner_id, updated_at DESC)"
+        )
+
 
 # 模块加载时自动建表
 _init_db()
 
 
+def _owned(owner: str, sid: str) -> bool:
+    """会话 sid 是否属于 owner。老数据 owner_id 为 NULL，一律判 False。"""
+    with _get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM conversations WHERE id = ? AND owner_id = ?", (sid, owner)
+        ).fetchone()
+        return row is not None
+
+
 # ==================== 会话 CRUD ====================
 
-def create_conversation(title: str = "新对话", kb_id: str | None = None) -> dict:
+def create_conversation(owner: str, title: str = "新对话", kb_id: str | None = None) -> dict:
     """新建会话，返回会话 dict。"""
     sid = uuid.uuid4().hex[:12]  # 短 ID，前端好展示
     now = int(time.time())
     with _get_conn() as conn:
         conn.execute(
-            "INSERT INTO conversations (id, title, kb_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            (sid, title, kb_id, now, now),
+            "INSERT INTO conversations (id, owner_id, title, kb_id, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (sid, owner, title, kb_id, now, now),
         )
-    return get_conversation(sid)
+    return get_conversation(owner, sid)
 
 
-def get_conversation(sid: str) -> dict | None:
-    """按 id 取会话，不存在返回 None。"""
+def get_conversation(owner: str, sid: str) -> dict | None:
+    """按 id 取会话；不存在**或不属于该用户**都返回 None。
+
+    刻意不区分这两种情况：区分了就等于告诉调用方"这个 id 存在但没权限"，
+    那是一条可以用来枚举别人会话 id 的信息。
+    """
     with _get_conn() as conn:
         row = conn.execute(
-            "SELECT id, title, kb_id, created_at, updated_at FROM conversations WHERE id = ?",
-            (sid,),
+            "SELECT id, title, kb_id, created_at, updated_at FROM conversations "
+            "WHERE id = ? AND owner_id = ?",
+            (sid, owner),
         ).fetchone()
         return dict(row) if row else None
 
 
-def list_conversations() -> list[dict]:
-    """列出所有会话（按 updated_at 倒序）。"""
+def list_conversations(owner: str) -> list[dict]:
+    """列出该用户的会话（按 updated_at 倒序）。老数据 owner_id 为 NULL，不会混进来。"""
     with _get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, title, kb_id, created_at, updated_at FROM conversations ORDER BY updated_at DESC"
+            "SELECT id, title, kb_id, created_at, updated_at FROM conversations "
+            "WHERE owner_id = ? ORDER BY updated_at DESC",
+            (owner,),
         ).fetchall()
         return [dict(r) for r in rows]
 
 
-def rename_conversation(sid: str, title: str) -> bool:
+def rename_conversation(owner: str, sid: str, title: str) -> bool:
     """重命名会话，返回是否成功。"""
     now = int(time.time())
     with _get_conn() as conn:
         cur = conn.execute(
-            "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?",
-            (title, now, sid),
+            "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ? AND owner_id = ?",
+            (title, now, sid, owner),
         )
         return cur.rowcount > 0
 
 
-def bind_kb(sid: str, kb_id: str | None) -> bool:
+def bind_kb(owner: str, sid: str, kb_id: str | None) -> bool:
     """绑定或解绑知识库（kb_id=None 表示解绑），返回是否成功。"""
     now = int(time.time())
     with _get_conn() as conn:
         cur = conn.execute(
-            "UPDATE conversations SET kb_id = ?, updated_at = ? WHERE id = ?",
-            (kb_id, now, sid),
+            "UPDATE conversations SET kb_id = ?, updated_at = ? WHERE id = ? AND owner_id = ?",
+            (kb_id, now, sid, owner),
         )
         return cur.rowcount > 0
 
 
-def delete_conversation(sid: str) -> bool:
+def delete_conversation(owner: str, sid: str) -> bool:
     """删除会话及其全部消息，返回是否成功。"""
     with _get_conn() as conn:
         # ON DELETE CASCADE 会自动删 messages，但保险起见先删消息
         conn.execute("DELETE FROM messages WHERE conversation_id = ?", (sid,))
-        cur = conn.execute("DELETE FROM conversations WHERE id = ?", (sid,))
+        conn.execute("DELETE FROM feedbacks WHERE conversation_id = ?", (sid,))
+        cur = conn.execute(
+            "DELETE FROM conversations WHERE id = ? AND owner_id = ?", (sid, owner)
+        )
         return cur.rowcount > 0
+
+
+def claim_orphan_conversations(owner: str) -> int:
+    """把改造前遗留的（owner_id 为 NULL 的）会话指派给某个账号。
+
+    必须显式调用（tools/migrate_owner.py），不能自动执行：
+    否则第一个注册的人就把别人的历史数据认领走了。返回实际认领条数。
+    """
+    with _get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE conversations SET owner_id = ? WHERE owner_id IS NULL", (owner,)
+        )
+        return cur.rowcount
 
 
 # ==================== 消息管理 ====================
 
+class NotOwned(Exception):
+    """会话不属于当前用户。
+
+    正常流程下 API 层已经用 get_conversation(owner, sid) 验过一次，
+    这里再验一遍是"纵深防御"：消息写入比读取更危险，
+    宁可多跑一次带索引的 EXISTS（约 0.1ms），也不要把写权限寄托在调用方记得校验。
+    """
+
+
 def add_message(
+    owner: str,
     sid: str,
     role: Literal["user", "assistant", "system"],
     content: str,
     refs: str = "",
 ) -> int:
     """追加一条消息，返回 message id。同时更新会话的 updated_at。"""
+    if not _owned(owner, sid):
+        raise NotOwned(sid)
     now = int(time.time())
     with _get_conn() as conn:
         conn.execute(
@@ -188,13 +258,15 @@ def add_message(
 
 
 def get_messages(
+    owner: str,
     sid: str,
     limit_turns: int = MAX_HISTORY_TURNS,
     include_system: bool = True,
 ) -> list[dict]:
-    """取会话消息历史（按时间正序）。
+    """取会话消息历史（按时间正序）。不是自己的会话直接返回空列表。
 
     Args:
+        owner: 会话归属用户 id
         sid: 会话 id
         limit_turns: 最多保留的对话轮数（每轮 = user + assistant），None 表示不限
         include_system: 是否包含 system 消息
@@ -202,6 +274,8 @@ def get_messages(
     Returns:
         [{role, content, created_at}, ...]
     """
+    if not _owned(owner, sid):
+        return []
     with _get_conn() as conn:
         rows = conn.execute(
             "SELECT id, role, content, refs, created_at FROM messages WHERE conversation_id = ? ORDER BY id ASC",
@@ -227,8 +301,10 @@ def get_messages(
     return msgs
 
 
-def count_messages(sid: str) -> int:
-    """会话消息总数。"""
+def count_messages(owner: str, sid: str) -> int:
+    """会话消息总数。不是自己的会话返回 0。"""
+    if not _owned(owner, sid):
+        return 0
     with _get_conn() as conn:
         row = conn.execute(
             "SELECT COUNT(*) AS c FROM messages WHERE conversation_id = ?", (sid,)
@@ -236,8 +312,10 @@ def count_messages(sid: str) -> int:
         return row["c"]
 
 
-def get_message(sid: str, msg_id: int) -> dict | None:
-    """按 id 取单条消息。"""
+def get_message(owner: str, sid: str, msg_id: int) -> dict | None:
+    """按 id 取单条消息。不是自己的会话返回 None。"""
+    if not _owned(owner, sid):
+        return None
     with _get_conn() as conn:
         row = conn.execute(
             "SELECT id, role, content, refs, created_at FROM messages WHERE conversation_id = ? AND id = ?",
@@ -246,7 +324,7 @@ def get_message(sid: str, msg_id: int) -> dict | None:
         return dict(row) if row else None
 
 
-def find_turn_ids(sid: str, msg_id: int) -> list[int]:
+def find_turn_ids(owner: str, sid: str, msg_id: int) -> list[int]:
     """找到某条消息所在的完整「一轮对话」包含的所有消息 id。
 
     规则：
@@ -254,6 +332,8 @@ def find_turn_ids(sid: str, msg_id: int) -> list[int]:
       - 若目标是 assistant 消息：包含其前最近一条 user 消息，以及该 user 与目标之间的所有 assistant。
     这样前端点 user 或 assistant 的删除，都能整轮移除。
     """
+    if not _owned(owner, sid):
+        return []
     with _get_conn() as conn:
         rows = conn.execute(
             "SELECT id, role FROM messages WHERE conversation_id = ? ORDER BY id ASC",
@@ -284,6 +364,7 @@ def find_turn_ids(sid: str, msg_id: int) -> list[int]:
 # ==================== 消息反馈（赞 / 踩）====================
 
 def add_feedback(
+    owner: str,
     sid: str,
     msg_id: int | None,
     rating: str,
@@ -292,6 +373,7 @@ def add_feedback(
     """记录一条消息反馈，同一条消息以最后一次为准（覆盖写）。
 
     Args:
+        owner: 会话归属用户 id（不是自己的会话写不进去）
         sid: 会话 id
         msg_id: messages 表自增 id；None 表示前端还没拿到 id（流式未结束）
         rating: "up" 赞 / "down" 踩
@@ -301,6 +383,8 @@ def add_feedback(
         是否写入成功
     """
     if rating not in ("up", "down"):
+        return False
+    if not _owned(owner, sid):
         return False
     now = int(time.time())
     with _get_conn() as conn:
@@ -319,8 +403,10 @@ def add_feedback(
         return True
 
 
-def list_feedbacks(sid: str) -> list[dict]:
-    """取某会话的全部反馈（供日后复盘/导出用）。"""
+def list_feedbacks(owner: str, sid: str) -> list[dict]:
+    """取某会话的全部反馈（供日后复盘/导出用）。不是自己的会话返回空列表。"""
+    if not _owned(owner, sid):
+        return []
     with _get_conn() as conn:
         rows = conn.execute(
             "SELECT id, message_id, rating, comment, created_at FROM feedbacks "
@@ -330,9 +416,11 @@ def list_feedbacks(sid: str) -> list[dict]:
         return [dict(r) for r in rows]
 
 
-def delete_messages(sid: str, msg_ids: list[int]) -> bool:
+def delete_messages(owner: str, sid: str, msg_ids: list[int]) -> bool:
     """批量删除消息，返回是否实际删到了。同时更新会话 updated_at。"""
     if not msg_ids:
+        return False
+    if not _owned(owner, sid):
         return False
     now = int(time.time())
     with _get_conn() as conn:

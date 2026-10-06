@@ -1,9 +1,29 @@
 // 后端 API 封装：统一错误处理 + 类型化（相对路径走 rewrites 代理）
 import type { Conversation, KbInfo, KbFile, FilePreview, SearchResult, Defaults, Message } from "./types";
+import type { MeOut, UserOut } from "./types";
+
+/**
+ * 登录态失效的广播事件名。
+ *
+ * 后端现在默认对所有业务接口鉴权，过期 / 未登录一律 401。API 层自己不该
+ * 跳页面（那是 UI 的事），所以统一在这里广播，由 useAuth 收听并把界面
+ * 切回登录门 —— 否则用户看到的就是"点什么都没反应"。
+ */
+export const UNAUTHORIZED_EVENT = "baomi:unauthorized";
+
+function notifyUnauthorized() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+  }
+}
 
 /** 统一解析后端错误体（FastAPI 返回 { detail: string }），非 JSON 时回落状态码 */
 async function httpError(res: Response): Promise<Error> {
   let detail = `HTTP ${res.status}`;
+  if (res.status === 401) {
+    notifyUnauthorized();
+    return new Error("未登录或登录已过期，请重新登录");
+  }
   try {
     const body = (await res.json()) as { detail?: string };
     detail = body.detail || detail;
@@ -15,6 +35,8 @@ async function httpError(res: Response): Promise<Error> {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
+    // 登录态在 HttpOnly Cookie 里，同源也要显式带；不写这行浏览器会丢弃
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     ...init,
   });
@@ -67,7 +89,9 @@ export const api = {
     Array.from(files).forEach((f) => fd.append("files", f));
     return fetch(
       `/api/kb/${kbId}/upload?chunk_size=${chunkSize}&chunk_overlap=${chunkOverlap}`,
-      { method: "POST", body: fd }
+      // FormData 请求不能手动设 Content-Type（boundary 会被覆盖），
+      // 但 credentials 必须带上，否则上传会被当成未登录
+      { method: "POST", body: fd, credentials: "include" }
     ).then(async (res) => {
       if (!res.ok) throw await httpError(res);
       return res.json() as Promise<{ kb_id: string; chunks: number; files: string[] }>;
@@ -133,6 +157,7 @@ export const api = {
     return fetch("/api/chat/upload", {
       method: "POST",
       body: fd,
+      credentials: "include",
     }).then(async (res) => {
       if (!res.ok) throw await httpError(res);
       return res.json() as Promise<{
@@ -140,4 +165,19 @@ export const api = {
       }>;
     });
   },
+
+  // ---------- 登录 ----------
+  authConfig: () => request<{ allow_signup: boolean }>("/api/auth/config/"),
+  login: (username: string, password: string) =>
+    request<UserOut>("/api/auth/login/", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    }),
+  register: (username: string, password: string) =>
+    request<UserOut>("/api/auth/register/", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    }),
+  logout: () => request<{ ok: boolean }>("/api/auth/logout/", { method: "POST" }),
+  me: () => request<MeOut>("/api/auth/me/"),
 };

@@ -91,7 +91,11 @@ export async function requestIpGeo(): Promise<GeoPoint | null> {
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 8000);
-    const res = await fetch("/api/geo/locate", { signal: ctrl.signal });
+    // 定位接口也已鉴权，同源也要显式带 Cookie
+    const res = await fetch("/api/geo/locate", {
+      signal: ctrl.signal,
+      credentials: "include",
+    });
     clearTimeout(timer);
     if (!res.ok) return null;
     const d = (await res.json()) as {

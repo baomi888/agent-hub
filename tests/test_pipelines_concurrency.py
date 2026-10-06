@@ -33,6 +33,20 @@ def check(cond: bool, msg: str) -> None:
         FAILED.append(msg)
 
 
+# 多用户改造后 pipelines 的每个函数都要 owner。本文件只测并发与原子写，
+# 归属逻辑另见 test_owner_isolation.py，这里统一用一个假 owner 把门禁放行。
+OWNER = "conc_owner"
+
+
+def _own(kb: str) -> str:
+    """把 kb_id 登记到测试账号名下，免得每个用例都先建个真库。"""
+    with pipelines._REGISTRY_LOCK:
+        pipelines._load_owners()
+        pipelines._KB_OWNERS[kb] = OWNER
+        pipelines._save_owners()
+    return kb
+
+
 def test_1_concurrent_records() -> None:
     """10 个线程同时往同一个库登记不同文件，一条都不能丢。
 
@@ -40,12 +54,12 @@ def test_1_concurrent_records() -> None:
     最后写的人把前面 9 个人全冲掉。
     """
     print("\n[1] 并发登记文件记录")
-    kb = "conc_kb"
+    kb = _own("conc_kb")
     n_threads, per_thread = 10, 5
 
     def worker(tid: int) -> None:
         for j in range(per_thread):
-            pipelines.add_file_records(kb, [{
+            pipelines.add_file_records(OWNER, kb, [{
                 "name": f"t{tid}_f{j}.txt",
                 "chunks": 1,
                 "added_at": 0,
@@ -58,7 +72,7 @@ def test_1_concurrent_records() -> None:
     for t in ts:
         t.join()
 
-    names = pipelines.get_file_names(kb)
+    names = pipelines.get_file_names(OWNER, kb)
     check(len(names) == n_threads * per_thread,
           f"{n_threads}x{per_thread} 条记录全在（实际 {len(names)}）")
 
@@ -75,7 +89,7 @@ def test_2_never_read_partial() -> None:
     另一个线程持续读，一旦读到截断的 JSON（JSONDecodeError）就说明不是原子写。
     """
     print("\n[2] 写入过程中读不到半截内容")
-    kb = "atomic_kb"
+    kb = _own("atomic_kb")
     stop = threading.Event()
     broken: list[str] = []
 
@@ -102,7 +116,7 @@ def test_2_never_read_partial() -> None:
     r = threading.Thread(target=reader, daemon=True)
     r.start()
     for i in range(40):
-        pipelines.add_file_records(kb, [{"name": f"a{i}.txt", "chunks": 1, "added_at": 0}])
+        pipelines.add_file_records(OWNER, kb, [{"name": f"a{i}.txt", "chunks": 1, "added_at": 0}])
     stop.set()
     r.join(timeout=2)
     check(not broken, f"40 次写入期间持续读取，未遇到半截文件（异常：{broken[:2]}）")
@@ -117,15 +131,15 @@ def test_3_transient_lock_recovers() -> None:
     不重试的话这次登记就静默丢了：界面上文件在（内存里有），重启后消失。
     """
     print("\n[3] 瞬时占用后重试能落盘")
-    kb = "transient_kb"
+    kb = _own("transient_kb")
     p = pipelines._files_path()
-    pipelines.add_file_records(kb, [{"name": "first.txt", "chunks": 1, "added_at": 0}])
+    pipelines.add_file_records(OWNER, kb, [{"name": "first.txt", "chunks": 1, "added_at": 0}])
 
     blocker = open(p, "r", encoding="utf-8")  # 占住句柄
     done = threading.Event()
 
     def writer() -> None:
-        pipelines.add_file_records(kb, [{"name": "second.txt", "chunks": 1, "added_at": 0}])
+        pipelines.add_file_records(OWNER, kb, [{"name": "second.txt", "chunks": 1, "added_at": 0}])
         done.set()
 
     t = threading.Thread(target=writer, daemon=True)
@@ -134,7 +148,7 @@ def test_3_transient_lock_recovers() -> None:
     blocker.close()
     t.join(timeout=5)
 
-    names = pipelines.get_file_names(kb)
+    names = pipelines.get_file_names(OWNER, kb)
     check(done.is_set(), "写线程未被卡死")
     check("second.txt" in names, f"被占用 80ms 后仍成功落盘（实际 {names}）")
 
@@ -145,14 +159,14 @@ def test_4_old_file_survives() -> None:
     这是原子写最关键的兜底：宁可丢一次登记，也不能让整个清单读不出来。
     """
     print("\n[4] 持续占用下旧文件完好")
-    kb = "blocked_kb"
+    kb = _own("blocked_kb")
     p = pipelines._files_path()
-    pipelines.add_file_records(kb, [{"name": "keep.txt", "chunks": 1, "added_at": 0}])
+    pipelines.add_file_records(OWNER, kb, [{"name": "keep.txt", "chunks": 1, "added_at": 0}])
     good = open(p, encoding="utf-8").read()
 
     blocker = open(p, "r", encoding="utf-8")
     try:
-        pipelines.add_file_records(kb, [{"name": "lost.txt", "chunks": 1, "added_at": 0}])
+        pipelines.add_file_records(OWNER, kb, [{"name": "lost.txt", "chunks": 1, "added_at": 0}])
     finally:
         blocker.close()
 
@@ -165,7 +179,7 @@ def test_4_old_file_survives() -> None:
     except Exception:
         ok = False
     check(ok, "仍是合法 JSON，下次启动能正常读回")
-    check("keep.txt" in pipelines.get_files(kb).__str__(), "旧记录完好")
+    check("keep.txt" in pipelines.get_files(OWNER, kb).__str__(), "旧记录完好")
 
 
 def test_5_kb_lock() -> None:
@@ -208,7 +222,7 @@ def test_6_reentrant() -> None:
 
     def worker() -> None:
         with pipelines._REGISTRY_LOCK:
-            pipelines.add_file_records("re_kb", [{"name": "x.txt", "chunks": 1, "added_at": 0}])
+            pipelines.add_file_records(OWNER, _own("re_kb"), [{"name": "x.txt", "chunks": 1, "added_at": 0}])
         done.set()
 
     t = threading.Thread(target=worker, daemon=True)
@@ -228,7 +242,9 @@ def main() -> int:
         test_6_reentrant()
     finally:
         config.PROJECT_ROOT = _OLD_ROOT
-        pipelines._load_files()  # 还原到真实清单，别让临时数据留在内存里
+        # 还原到真实清单，别让临时数据留在内存里
+        pipelines._load_files()
+        pipelines._load_owners()
 
     print("\n" + ("全部通过" if not FAILED else f"失败 {len(FAILED)} 项：{FAILED}"))
     return 1 if FAILED else 0

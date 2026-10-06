@@ -15,6 +15,8 @@ import { getSendGeo, getCachedGeo, isGeoEnabled, acquireGeo, reverseGeocodeCity,
 import { usePrefs } from "@/lib/hooks/usePrefs";
 import { useSessions } from "@/lib/hooks/useSessions";
 import { useKnowledge } from "@/lib/hooks/useKnowledge";
+import { useAuth } from "@/lib/hooks/useAuth";
+import AuthGate from "@/components/AuthGate";
 import type { UiMessage } from "@/components/chat/types";
 import type { ChatMode, RefSource, ToolEvent } from "@/lib/types";
 
@@ -65,6 +67,7 @@ function subscribeTheme(cb: () => void) {
 export default function Home() {
   // ---- 各域 hooks ----
   const { toasts, showToast } = useToast();
+  const auth = useAuth();
   const prefs = usePrefs();
   const {
     mode, setMode, topK, setTopK, chunkSize, setChunkSize,
@@ -82,6 +85,17 @@ export default function Home() {
     kbs, kbNameMap, loading: kbsLoading,
     refreshKbs, uploadFiles, deleteKbFile, rebuildKb, searchPreview, deleteKb,
   } = useKnowledge(showToast, chunkSize, chunkOverlap);
+
+  // 登录成功后要重新拉一次：门后面的首屏请求是被 401 挡掉的，
+  // 两个 hook 的 init effect 已经跑过了，不补这一次就是空列表。
+  const authedId = auth.me?.user.id ?? null;
+  useEffect(() => {
+    if (!authedId) return;
+    void reloadSessions();
+    void refreshKbs();
+    // 只在"换人/刚登录"时补拉，不跟着这两个函数的新引用反复跑
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authedId]);
 
   const [sending, setSending] = useState(false);
   // 地理定位开关：开启后发送消息自动附带坐标，天气/本地问答免手输城市
@@ -448,6 +462,26 @@ export default function Home() {
     };
   }, [overlayOpen, sidebarOpen, closeOverlays]);
 
+  // ---- 登录门 ----
+  // 必须放在所有 hooks 之后：React 不允许条件调用 hook，但允许提前 return。
+  // 身份没确认完先不给工作台，免得空列表闪一下又跳回登录页。
+  if (auth.loading) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-canvas">
+        <p className="text-fs-sm text-faint">正在确认登录状态...</p>
+      </div>
+    );
+  }
+  if (!auth.me) {
+    return (
+      <AuthGate
+        allowSignup={auth.allowSignup}
+        onLogin={auth.login}
+        onRegister={auth.register}
+      />
+    );
+  }
+
   return (
     <main className="flex overflow-hidden">
       <Sidebar
@@ -471,6 +505,8 @@ export default function Home() {
         onToggleDark={toggleDark}
         overlay={viewport === "narrow"}
         open={sidebarOpen}
+        username={auth.me?.user.username}
+        onLogout={() => void auth.logout()}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">

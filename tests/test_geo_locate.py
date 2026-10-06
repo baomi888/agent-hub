@@ -64,6 +64,11 @@ print("PASS: 只有 X-Real-IP 时也能取到")
 from main import app  # noqa: E402
 
 client = TestClient(app)
+# 定位接口现在也要登录（多用户隔离后所有业务路由默认鉴权），先注册再拿 Cookie
+client.post("/api/auth/register/", json={"username": "geotester", "password": "test12345"})
+_lg = client.post("/api/auth/login/", json={"username": "geotester", "password": "test12345"})
+assert _lg.status_code == 200, (_lg.status_code, _lg.text)
+
 orig = config.AMAP_API_KEY
 try:
     config.AMAP_API_KEY = ""

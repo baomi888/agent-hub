@@ -30,11 +30,13 @@ print(f"  data_dir = {data_dir}")
 os.makedirs(data_dir, exist_ok=True)
 
 files = []
+# 只挑支持的格式：data/ 下还放着 kb_files.json / sessions.db 之类的元数据，
+# 一股脑喂给 build_index 会直接卡在第一个 .json 上，看起来像"链路坏了"
 for f in os.listdir(data_dir):
     p = os.path.join(data_dir, f)
-    if os.path.isfile(p):
+    if os.path.isfile(p) and os.path.splitext(f)[1].lower() in (".txt", ".md", ".pdf"):
         files.append(p)
-print(f"  existing files = {len(files)}")
+print(f"  usable docs = {len(files)}（仅 txt/md/pdf）")
 
 # 没有文件就造一个
 if not files:
@@ -54,8 +56,10 @@ for f in files:
 
 # ====== 3. 构建向量库 ======
 print("\n=== Step 3: Build Index ===")
-kb_id = "test_w1"
-pipe = pipelines.get_or_create(kb_id)
+# 多用户改造后 pipelines 需要 owner：这个文件是早期联网烟测，用固定假 owner 放行
+_OWNER = "w1_test_owner"
+kb_id, _ = pipelines.create_kb(_OWNER, "test_w1")
+pipe = pipelines.get_or_create(_OWNER, kb_id)
 print(f"  collection = {pipe.collection_name}")
 try:
     chunks = pipe.build_index(500, 50, files)

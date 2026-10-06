@@ -9,12 +9,14 @@
 数据攒下来日后可以做回答质量复盘（哪些检索条数/模式容易被踩）。
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from core import session as store
+from core.auth import get_current_user
 
-router = APIRouter()
+# 默认要登录：反馈挂在别人的会话 id 上，没有归属校验就等于能往别人会话里写东西
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 class FeedbackRequest(BaseModel):
@@ -30,22 +32,23 @@ class FeedbackResponse(BaseModel):
 
 
 @router.post("/", response_model=FeedbackResponse)
-def add_feedback(req: FeedbackRequest):
+def add_feedback(req: FeedbackRequest, uid: str = Depends(get_current_user)):
     """记录反馈。同一条消息重复提交会覆盖旧值（点赞再点踩算改，不算追加两条）。"""
-    if not store.get_conversation(req.sid):
+    # 先验归属，再验其它：不存在和不属于你都走同一个 404，不给枚举空间
+    if not store.get_conversation(uid, req.sid):
         raise HTTPException(status_code=404, detail=f"会话不存在：{req.sid}")
     if req.rating not in ("up", "down"):
         raise HTTPException(status_code=400, detail="rating 只能是 up 或 down")
-    if req.message_id is not None and not store.get_message(req.sid, req.message_id):
+    if req.message_id is not None and not store.get_message(uid, req.sid, req.message_id):
         raise HTTPException(status_code=404, detail=f"消息不存在：{req.message_id}")
 
-    ok = store.add_feedback(req.sid, req.message_id, req.rating, req.comment)
+    ok = store.add_feedback(uid, req.sid, req.message_id, req.rating, req.comment)
     return {"ok": ok, "rating": req.rating}
 
 
 @router.get("/{sid}/")
-def list_feedback(sid: str):
+def list_feedback(sid: str, uid: str = Depends(get_current_user)):
     """列出某会话的全部反馈。"""
-    if not store.get_conversation(sid):
+    if not store.get_conversation(uid, sid):
         raise HTTPException(status_code=404, detail=f"会话不存在：{sid}")
-    return {"sid": sid, "items": store.list_feedbacks(sid)}
+    return {"sid": sid, "items": store.list_feedbacks(uid, sid)}

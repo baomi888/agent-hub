@@ -9,6 +9,21 @@
   - 维护每个库的文件列表状态
   - 支持遍历所有已有库（用于前端列表展示）
   - 中文名 → 安全 ASCII ID 映射（Chroma collection 名只允许 ASCII）
+  - **归属隔离**：每个 kb_id 记一个 owner，任何访问都先验归属
+
+归属隔离怎么做的（多用户改造 P2）
+--------------------------------
+kb_id 在**创建时**就带上 owner 的哈希：`md5(owner|名称)[:12]`。
+于是两个用户各建一个「我的库」不会撞车，collection 名也天然分开。
+
+但光靠 id 不可猜是不够的——只要接口还接受调用方传 kb_id，
+"猜不到"就不是安全边界。所以另外维护一张 **kb_owners 表**（data/kb_owners.json），
+每个读写函数第一件事就是 `owner_of(kb_id) == 当前用户`，否则拒绝。
+
+改造前建的老库在这张表里没有记录 ⇒ 谁都访问不到（默认拒绝），
+由 tools/migrate_owner.py 显式指派给某个账号后才恢复。
+好处是完全不用动 Chroma 里的 collection（没法改名，硬改要重算），
+也不会出现"先登录的人顺手认领了别人的库"。
 """
 
 import hashlib
@@ -31,13 +46,22 @@ _KB_FILES: dict[str, list[dict]] = {}
 _KB_NAMES: dict[str, str] = {}
 # { kb_id: RLock }  —— 建库 / 重建按库串行，避免两个上传同时往一个 collection 里写
 _KB_LOCKS: dict[str, threading.RLock] = {}
+# { kb_id: owner_id }  —— 归属表。没有记录 = 无主（改造前的老库），谁都访问不到
+_KB_OWNERS: dict[str, str] = {}
 
-# 保护上面四个全局容器。用 RLock：内部函数会互相调用（add_file_records → get_or_create），
+# 保护上面五个全局容器。用 RLock：内部函数会互相调用（add_file_records → get_or_create），
 # 普通 Lock 会在第二次 acquire 时把自己锁死
 _REGISTRY_LOCK = threading.RLock()
 
 # Chroma collection 合法字符：字母数字 . _ -，首尾必须字母数字，长度 3-63
 _SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{1,61}[a-zA-Z0-9]$")
+
+
+class NotOwned(Exception):
+    """知识库不属于当前用户（或根本无主）。
+
+    和"不存在"对外表现一致，不区分——区分就等于告诉调用方这个 id 是真的。
+    """
 
 
 def _names_path() -> str:
@@ -48,6 +72,11 @@ def _names_path() -> str:
 def _files_path() -> str:
     """文件清单持久化路径（存原始文件名 + 片段数，不再存临时的绝对路径）。"""
     return os.path.join(config.PROJECT_ROOT, "data", "kb_files.json")
+
+
+def _owners_path() -> str:
+    """归属表持久化路径。"""
+    return os.path.join(config.PROJECT_ROOT, "data", "kb_owners.json")
 
 
 # os.replace 在 Windows 上撞见"有人正开着目标文件"会抛 PermissionError
@@ -149,6 +178,67 @@ def _save_names() -> None:
         logging.getLogger(__name__).warning("知识库名映射落盘失败：%s", e)
 
 
+def _load_owners() -> None:
+    """从磁盘加载归属表。调用方需持有 _REGISTRY_LOCK。"""
+    global _KB_OWNERS
+    try:
+        with open(_owners_path(), "r", encoding="utf-8") as f:
+            data = json.load(f)
+        _KB_OWNERS = {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)} \
+            if isinstance(data, dict) else {}
+    except Exception:
+        _KB_OWNERS = {}
+
+
+def _save_owners() -> None:
+    """持久化归属表（原子写）。调用方需持有 _REGISTRY_LOCK。"""
+    try:
+        _atomic_write_json(_owners_path(), _KB_OWNERS)
+    except Exception as e:
+        logging.getLogger(__name__).warning("知识库归属表落盘失败：%s", e)
+
+
+def owner_of(kb_id: str) -> str | None:
+    """该知识库属于谁；无主返回 None。"""
+    with _REGISTRY_LOCK:
+        if not _KB_OWNERS:
+            _load_owners()
+        return _KB_OWNERS.get(kb_id)
+
+
+def owned_kb_ids(owner: str) -> set[str]:
+    """该用户拥有的全部 kb_id。"""
+    with _REGISTRY_LOCK:
+        if not _KB_OWNERS:
+            _load_owners()
+        return {k for k, v in _KB_OWNERS.items() if v == owner}
+
+
+def claim_orphan_kbs(owner: str) -> int:
+    """把改造前遗留的（无主）知识库指派给某个账号。
+
+    必须显式调用（tools/migrate_owner.py）。扫描磁盘上所有 kb_* collection，
+    把归属表里还没有主人的一并认领，返回认领个数。
+    """
+    try:
+        cols = [c.name for c in chroma_client().list_collections()]
+    except Exception:
+        cols = []
+    n = 0
+    with _REGISTRY_LOCK:
+        _load_owners()
+        for col in cols:
+            if not col.startswith("kb_"):
+                continue
+            kb_id = col[3:]
+            if kb_id not in _KB_OWNERS:
+                _KB_OWNERS[kb_id] = owner
+                n += 1
+        if n:
+            _save_owners()
+    return n
+
+
 def kb_lock(kb_id: str) -> threading.RLock:
     """取某个库的建库锁：同一库的入库 / 重建串行，不同库之间互不影响。
 
@@ -176,23 +266,36 @@ def safe_kb_id(name: str) -> str:
     return h
 
 
+def new_kb_id(owner: str, name: str) -> str:
+    """为一个新库生成 kb_id：**把 owner 混进哈希**。
+
+    不混的话，两个人各建一个「我的库」会算出同一个 id，
+    后一个直接写进前一个的 collection 里。混了之后同名不同主也是两个库。
+    """
+    raw = "%s|%s" % (owner, (name or "").strip())
+    return hashlib.md5(raw.encode("utf-8")).hexdigest()[:12]
+
+
 # ==================== CRUD ====================
 
-def create_kb(name: str) -> tuple[str, str]:
-    """登记一个知识库（中文名亦可），返回 (safe_kb_id, display_name)。"""
+def create_kb(owner: str, name: str) -> tuple[str, str]:
+    """登记一个知识库（中文名亦可），返回 (kb_id, display_name)。"""
     name = (name or "").strip()
-    kb_id = safe_kb_id(name)
+    kb_id = new_kb_id(owner, name)
     with _REGISTRY_LOCK:
         # 先重读磁盘：同名库可能刚被另一个进程/线程建过，直接覆盖会把它的记录冲掉
         _load_names()
+        _load_owners()
         _KB_NAMES[kb_id] = name
+        _KB_OWNERS[kb_id] = owner
         _save_names()
-        get_or_create(kb_id)  # 确保注册表有记录
+        _save_owners()
+        _get_or_create_raw(kb_id)  # 确保注册表有记录
     return kb_id, name
 
 
-def get_or_create(kb_id: str) -> RagPipeline:
-    """按 kb_id 获取 RagPipeline，不存在则新建。"""
+def _get_or_create_raw(kb_id: str) -> RagPipeline:
+    """不验归属的实例工厂。只给 warmup / create_kb 这类内部路径用。"""
     with _REGISTRY_LOCK:
         if kb_id not in _PIPELINES:
             # 锁内建实例：两个并发上传同时打进来时不会各建一个，
@@ -202,16 +305,31 @@ def get_or_create(kb_id: str) -> RagPipeline:
         return _PIPELINES[kb_id]
 
 
-def exists(kb_id: str) -> bool:
-    """磁盘上是否存在这个知识库。"""
+def get_or_create(owner: str, kb_id: str) -> RagPipeline:
+    """按 kb_id 获取 RagPipeline，不存在则新建。**不是自己的库直接抛 NotOwned**。
+
+    owner 放在第一个位置、没有默认值，和 core.session 一个道理：
+    漏改的调用点会直接 TypeError，而不是悄悄拿到别人的库。
+    """
+    if owner_of(kb_id) != owner:
+        raise NotOwned(kb_id)
+    return _get_or_create_raw(kb_id)
+
+
+def exists(owner: str, kb_id: str) -> bool:
+    """磁盘上是否存在这个知识库（且属于该用户）。"""
+    if owner_of(kb_id) != owner:
+        return False
     with _REGISTRY_LOCK:
         if kb_id not in _PIPELINES:
             return False
         return _PIPELINES[kb_id].peek() > 0
 
 
-def delete_kb(kb_id: str) -> bool:
+def delete_kb(owner: str, kb_id: str) -> bool:
     """删除知识库（磁盘 + 内存 + 原始文件）。返回是否成功。"""
+    if owner_of(kb_id) != owner:
+        return False
     with _REGISTRY_LOCK:
         if kb_id not in _PIPELINES:
             return False
@@ -220,9 +338,11 @@ def delete_kb(kb_id: str) -> bool:
         _PIPELINES.pop(kb_id, None)
         _KB_FILES.pop(kb_id, None)
         _KB_NAMES.pop(kb_id, None)
+        _KB_OWNERS.pop(kb_id, None)
         _KB_LOCKS.pop(kb_id, None)
         _save_files()
         _save_names()
+        _save_owners()
     # 原始文件一起清掉，否则删库后磁盘上还留着副本
     try:
         import shutil
@@ -233,8 +353,11 @@ def delete_kb(kb_id: str) -> bool:
     return True
 
 
-def list_all() -> list[dict]:
-    """列出所有已知知识库的状态（内存注册表 + 磁盘扫描）。"""
+def list_all(owner: str) -> list[dict]:
+    """列出**该用户**的知识库状态（归属表 + 磁盘扫描）。
+
+    别人的库、以及改造前留下的无主库，都不出现在这里。
+    """
     result = []
     # 先看磁盘上有哪些 collection
     try:
@@ -242,24 +365,42 @@ def list_all() -> list[dict]:
     except Exception:
         all_collections = []
 
-    # 整段加锁：循环里会 get_or_create 往注册表塞东西，
+    mine = owned_kb_ids(owner)
+    seen: set[str] = set()
+    seen: set[str] = set()
+
+    # 整段加锁：循环里会 _get_or_create_raw 往注册表塞东西，
     # 不加锁的话并发遍历时 dict 被改动会直接抛 RuntimeError
     with _REGISTRY_LOCK:
         for col_name in all_collections:
             if not col_name.startswith("kb_"):
                 continue
             kb_id = col_name[3:]  # 去掉 kb_ 前缀
-            pipe = get_or_create(kb_id)
+            if kb_id not in mine:
+                continue  # 不属于本次调用者，跳过
+            pipe = _get_or_create_raw(kb_id)
+            seen.add(kb_id)
             # 确保 Chroma 实例已打开
             if pipe._vs is None:
                 pipe.get_or_open()
             # 文件清单以落盘记录为准，库里真有片段但没记录时用 Chroma 元数据兜底
-            files = get_files(kb_id) or pipe.list_sources()
+            files = get_files(owner, kb_id) or pipe.list_sources()
             result.append({
                 "kb_id": kb_id,
                 "name": _KB_NAMES.get(kb_id, kb_id),  # 无映射时回退到 kb_id
                 "chunks": pipe.count(),
                 "files": files,
+            })
+
+        # 刚建好、还没传过文件的空库：Chroma 上的 collection 是第一次写入时才建的，
+        # 所以扫磁盘扫不到它。但用户已经在界面上看到这个库名了，
+        # 列表里凭空少一项会让人以为"建库失败了"。
+        for kb_id in mine - seen:
+            result.append({
+                "kb_id": kb_id,
+                "name": _KB_NAMES.get(kb_id, kb_id),
+                "chunks": 0,
+                "files": get_files(owner, kb_id),
             })
     return result
 
@@ -323,12 +464,14 @@ def safe_source_name(name: str, fallback_ext: str = "") -> str:
 
 # ==================== 文件管理 ====================
 
-def add_file_records(kb_id: str, records: list[dict]) -> None:
+def add_file_records(owner: str, kb_id: str, records: list[dict]) -> None:
     """登记文件（同名覆盖），并落盘。record: {name, chunks, added_at}"""
+    if owner_of(kb_id) != owner:
+        raise NotOwned(kb_id)
     with _REGISTRY_LOCK:
         # 重读磁盘再改：落盘是全量覆盖写，不重读就会把别人刚写进去的记录冲掉
         _load_files()
-        get_or_create(kb_id)  # 确保注册表有记录
+        _get_or_create_raw(kb_id)  # 确保注册表有记录
         cur = _KB_FILES.setdefault(kb_id, [])
         for r in records:
             cur[:] = [x for x in cur if x.get("name") != r.get("name")]
@@ -336,8 +479,10 @@ def add_file_records(kb_id: str, records: list[dict]) -> None:
         _save_files()
 
 
-def retain_file_records(kb_id: str, names) -> None:
+def retain_file_records(owner: str, kb_id: str, names) -> None:
     """只保留给定文件名（整库重建后清理陈旧记录）。"""
+    if owner_of(kb_id) != owner:
+        raise NotOwned(kb_id)
     keep = set(names)
     with _REGISTRY_LOCK:
         _load_files()
@@ -348,8 +493,10 @@ def retain_file_records(kb_id: str, names) -> None:
         _save_files()
 
 
-def remove_file_record(kb_id: str, name: str) -> bool:
+def remove_file_record(owner: str, kb_id: str, name: str) -> bool:
     """移除单个文件记录，返回是否真的删掉了。"""
+    if owner_of(kb_id) != owner:
+        return False
     with _REGISTRY_LOCK:
         _load_files()
         cur = _KB_FILES.get(kb_id)
@@ -363,12 +510,14 @@ def remove_file_record(kb_id: str, name: str) -> bool:
         return False
 
 
-def get_files(kb_id: str) -> list[dict]:
-    """返回该库的文件记录副本。
+def get_files(owner: str, kb_id: str) -> list[dict]:
+    """返回该库的文件记录副本。不是自己的库返回空列表。
 
     origin 标记这条资料是怎么进库的：upload=用户上传，web=联网抓的。
     早期记录没有这个字段，统一按 upload 兜底，前端才能直接读。
     """
+    if owner_of(kb_id) != owner:
+        return []
     with _REGISTRY_LOCK:
         out = []
         for x in _KB_FILES.get(kb_id, []):
@@ -378,16 +527,20 @@ def get_files(kb_id: str) -> list[dict]:
         return out
 
 
-def get_file_names(kb_id: str) -> list[str]:
-    """该库已登记的文件名列表。"""
+def get_file_names(owner: str, kb_id: str) -> list[str]:
+    """该库已登记的文件名列表。不是自己的库返回空列表。"""
+    if owner_of(kb_id) != owner:
+        return []
     with _REGISTRY_LOCK:
         return [x.get("name", "") for x in _KB_FILES.get(kb_id, [])]
 
 
 # ==================== 状态查询 ====================
 
-def get_status(kb_id: str) -> dict | None:
-    """汇总单个库状态，不存在返回 None。"""
+def get_status(owner: str, kb_id: str) -> dict | None:
+    """汇总单个库状态，不存在或不属于该用户都返回 None。"""
+    if owner_of(kb_id) != owner:
+        return None
     with _REGISTRY_LOCK:
         if kb_id not in _PIPELINES:
             return None
@@ -399,23 +552,28 @@ def get_status(kb_id: str) -> dict | None:
         "chunks": chunks,
         "chunk_size": params[0] if params else None,
         "chunk_overlap": params[1] if params else None,
-        "files": get_files(kb_id) or pipe.list_sources(),
+        "files": get_files(owner, kb_id) or pipe.list_sources(),
     }
 
 
 # ==================== 启动预热 ====================
 
 def warmup() -> None:
-    """启动时扫描磁盘，把已有 collection 加载进注册表。"""
+    """启动时扫描磁盘，把已有 collection 加载进注册表。
+
+    这里不验归属：预热只是把 Chroma 打开，不涉及任何用户数据读写，
+    而且启动阶段根本没有"当前用户"这个概念。真正的门禁在每次访问时。
+    """
     _load_names()
     _load_files()
+    _load_owners()
     try:
         for col in chroma_client().list_collections():
             col_name = col.name
             if not col_name.startswith("kb_"):
                 continue
             kb_id = col_name[3:]
-            pipe = get_or_create(kb_id)
+            pipe = _get_or_create_raw(kb_id)
             pipe.get_or_open()
     except Exception:
         # chroma_db 目录不存在或为空时忽略

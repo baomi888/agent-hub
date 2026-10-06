@@ -73,3 +73,21 @@ export interface ToolEvent {
   input?: string;
   output?: string;
 }
+
+// ---------- 登录 ----------
+export interface QuotaInfo {
+  used: number;
+  /** 0 表示不限 */
+  limit: number;
+}
+
+// 与后端 api/auth.py 的 UserOut / MeOut 对齐
+export interface UserOut {
+  id: string;
+  username: string;
+}
+
+export interface MeOut {
+  user: UserOut;
+  quota: Record<string, QuotaInfo>;
+}

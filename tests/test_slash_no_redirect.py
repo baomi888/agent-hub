@@ -16,9 +16,26 @@ http://localhost:8000/...（代理把 Host 改成了 localhost:8000），浏览�
 """
 import os
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("DEEPSEEK_API_KEY", "sk-dummy-for-import")
+
+# 业务接口现在默认要登录（多用户隔离改造），所以先造一个临时账号再探测路由。
+# 落盘位置一并挪到临时目录，别把测试账号写进真实 data/。
+import core.config  # noqa: E402
+
+_TMP = tempfile.mkdtemp(prefix="baomi_slash_")
+core.config.PROJECT_ROOT = os.path.join(_TMP, "proj")
+core.config.PERSIST_DIR = os.path.join(_TMP, "proj", "chroma_db")
+core.config.DATA_DIR = os.path.join(_TMP, "proj", "data")
+core.config.DOWNLOAD_DIR = os.path.join(_TMP, "proj", "downloads")
+os.makedirs(core.config.DATA_DIR, exist_ok=True)
+
+import core.session  # noqa: E402
+
+core.session._db_path = lambda: os.path.join(_TMP, "sessions.db")
+core.session._init_db()
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -77,8 +94,17 @@ check(not bad, f"{probes} 次探测中 0 次重定向（实际 {len(bad)} 次）
 for b in bad[:10]:
     print("      ", b)
 
-print("\n=== 3. 前端真正会调的几条路径 ===")
+def _login(c):
+    """注册 + 登录，把 Cookie 挂到 client 上，之后请求就是"已登录用户"。"""
+    c.post("/api/auth/register/", json={"username": "slashtester", "password": "test12345"})
+    r = c.post("/api/auth/login/", json={"username": "slashtester", "password": "test12345"})
+    assert r.status_code == 200, (r.status_code, r.text)
+    return r
+
+
+print("\n=== 3. 前端真正会调的几条路径（登录后）===")
 with TestClient(m.app) as c:
+    _login(c)
     for meth, path in (("GET", "/api/sessions/"), ("GET", "/api/sessions"),
                        ("POST", "/api/sessions/"), ("GET", "/api/kb")):
         r = c.request(meth, path, follow_redirects=False)

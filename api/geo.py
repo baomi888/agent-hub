@@ -14,14 +14,16 @@
 import ipaddress
 import logging
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from core import config
+from core.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+# 默认要登录：IP 定位会把访客的城市暴露给调用方，不能公网裸奔
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 AMAP_IP_URL = "https://restapi.amap.com/v3/ip"
 _TIMEOUT = 6.0

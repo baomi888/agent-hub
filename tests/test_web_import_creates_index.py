@@ -83,13 +83,21 @@ def main() -> int:
     httpd, base = _serve(tmp)
     url = f"{base}/long.txt"
 
+    # 本用例的"网站"就是本机 127.0.0.1 上的临时 http.server，而 SSRF 防护
+    # （core/netsafe.py）正是禁止服务端访问回环地址的 —— 这里放行它，
+    # 是为了能离线测"导入链路"，与防护本身无关；防护由 test_agent_guard 单独验。
+    importer.assert_safe_url = lambda u: u
+
     # 假 embedding：不联网、不花钱，维度固定 32
     rag_core.get_embeddings = lambda: _fake
 
+    # 多用户改造后需要 owner：这里用一个固定的测试账号
+    OWNER = "web_import_test"
+
     kb_id = None
     try:
-        kb_id, _ = pipelines.create_kb("离线自测_联网导入")
-        pipe = pipelines.get_or_create(kb_id)
+        kb_id, _ = pipelines.create_kb(OWNER, "离线自测_联网导入")
+        pipe = pipelines.get_or_create(OWNER, kb_id)
 
         # ---- 1. 根因：空库 get_or_open() 拿不到实例 ----
         print("\n[1] 空库语义")
@@ -101,26 +109,26 @@ def main() -> int:
         # ---- 2. import_url 能写进空库 ----
         print("\n[2] import_url 入库")
         try:
-            r = importer.import_url(kb_id, url, chunk_size=300, chunk_overlap=30)
+            r = importer.import_url(OWNER, kb_id, url, chunk_size=300, chunk_overlap=30)
             check(r["chunks"] > 0, f"import_url 返回片段数 {r['chunks']} > 0")
         except Exception as e:
             check(False, f"import_url 抛异常：{type(e).__name__}: {e}")
             raise SystemExit(1)
-        c1 = pipelines.get_or_create(kb_id).peek()
+        c1 = pipelines.get_or_create(OWNER, kb_id).peek()
         check(c1 > 0, f"库内真的有片段：count = {c1}")
-        check(pipelines.exists(kb_id) is True, "exists() 由 False 变为 True")
-        check(any(f["name"] == r["file"] for f in pipelines.get_files(kb_id)),
+        check(pipelines.exists(OWNER, kb_id) is True, "exists() 由 False 变为 True")
+        check(any(f["name"] == r["file"] for f in pipelines.get_files(OWNER, kb_id)),
               "文件清单里登记了这份联网资料")
 
         # ---- 3. download_and_index 追加 ----
         print("\n[3] download_and_index 追加")
         try:
-            r2 = importer.download_and_index(kb_id, url, chunk_size=300, chunk_overlap=30)
+            r2 = importer.download_and_index(OWNER, kb_id, url, chunk_size=300, chunk_overlap=30)
             check(r2.get("chunks", 0) > 0, f"download_and_index 返回片段数 {r2.get('chunks')} > 0")
         except Exception as e:
             check(False, f"download_and_index 抛异常：{type(e).__name__}: {e}")
             raise SystemExit(1)
-        c2 = pipelines.get_or_create(kb_id).peek()
+        c2 = pipelines.get_or_create(OWNER, kb_id).peek()
         check(c2 > c1, f"追加生效：{c1} → {c2}")
 
         # ---- 4. 静态约束：导入路径不许再退回 get_or_open() ----
@@ -132,7 +140,7 @@ def main() -> int:
         check("add_chunks(" in src, "kb/importer.py 走的是 pipe.add_chunks()")
     finally:
         if kb_id:
-            pipelines.delete_kb(kb_id)
+            pipelines.delete_kb(OWNER, kb_id)
         httpd.shutdown()
         try:
             os.remove(os.path.join(tmp, "long.txt"))

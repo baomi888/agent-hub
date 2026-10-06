@@ -77,7 +77,9 @@ def test_3_read_paths_use_singleton() -> None:
 
     # 功能验证：列表能正常返回，且不存在的库不炸
     try:
-        rows = pipelines.list_all()
+        # 多用户改造后 list_all 要带 owner。这里只验"不炸 + 字段完整"，
+        # 归属过滤本身由 test_owner_isolation.py 覆盖。
+        rows = pipelines.list_all("__singleton_test__")
         check(isinstance(rows, list), "list_all() 返回列表")
         if rows:
             keys = set(rows[0].keys())
@@ -87,8 +89,10 @@ def test_3_read_paths_use_singleton() -> None:
     except Exception as e:
         check(False, f"list_all() 抛异常：{e}")
 
-    check(pipelines.exists("__no_such_kb__") is False, "不存在的库 exists() 返回 False 而非抛错")
-    check(pipelines.get_status("__no_such_kb__") is None, "不存在的库 get_status() 返回 None")
+    check(pipelines.exists("__no_such_owner__", "__no_such_kb__") is False,
+          "不存在的库 exists() 返回 False 而非抛错")
+    check(pipelines.get_status("__no_such_owner__", "__no_such_kb__") is None,
+          "不存在的库 get_status() 返回 None")
 
 
 def test_4_thread_safe_first_call() -> None:
