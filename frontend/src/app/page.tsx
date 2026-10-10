@@ -107,6 +107,30 @@ export default function Home() {
   // 联网建库后把建议问题预填进输入框（不自动发送），让用户确认/补充
   const [prefill, setPrefill] = useState<{ text: string; ts: number } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  // 模板广场套用后跳回：?sid 自动选中新建会话，?q 预填引导问题
+  // 放在 setPrefill 声明之后；依赖 sessions 列表先回来，列表没回来时这个
+  // sid 还不在里面，过早 select 会选空。
+  const applyRef = useRef<{ sid: string; q: string | null } | null>(null);
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const sid = sp.get("sid");
+    if (sid) applyRef.current = { sid, q: sp.get("q") };
+    // 只跑一次：读 query 是幂等的，无需进 deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    const a = applyRef.current;
+    if (!a) return;
+    if (sessions.length === 0) return; // 列表还没回来
+    if (!sessions.some((s) => s.id === a.sid)) return; // 这个会话还没进列表
+    if (a.q) setPrefill({ text: a.q, ts: Date.now() });
+    if (activeSid !== a.sid) void selectSession(a.sid);
+    void refreshKbs();
+    applyRef.current = null;
+    // 清掉 query，避免刷新又跳一次
+    window.history.replaceState({}, "", "/");
+  }, [sessions, activeSid, selectSession, refreshKbs, setPrefill]);
   // 抽屉容器：打开时把焦点送进去，关闭后还给触发按钮
   const sidebarRef = useRef<HTMLElement | null>(null);
   const kbRef = useRef<HTMLElement | null>(null);
@@ -492,6 +516,9 @@ export default function Home() {
           setSidebarOpen(false); // 窄屏抽屉里点完会话就收起来
         }}
         onCreate={createSession}
+        onOpenTemplates={() => {
+          window.location.href = "/templates";
+        }}
         onRename={renameSession}
         onDelete={deleteSession}
         kbNameMap={kbNameMap}

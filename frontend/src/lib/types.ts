@@ -93,3 +93,27 @@ export interface MeOut {
   user: UserOut;
   quota: Record<string, QuotaInfo>;
 }
+
+// ---------- 模板广场 ----------
+export interface Template {
+  id: string;
+  name: string;
+  category: string;
+  icon: string;
+  tagline: string;
+  description: string;
+  tags: string[];
+  suggested_kb_name?: string | null;
+  session_title?: string;
+  starter_prompt?: string | null;
+  recommended_mode?: string;
+  philosophy?: string;
+}
+
+export interface ApplyTemplateResult {
+  session_id: string;
+  kb_id: string | null;
+  title: string;
+  starter_prompt?: string | null;
+  recommended_mode?: string;
+}

@@ -26,6 +26,7 @@ from api.feedback import router as feedback_router
 from api.geo import router as geo_router
 from api.kb import router as kb_router
 from api.sessions import router as sessions_router
+from api.templates import router as templates_router
 from core import config, quota
 from kb import pipelines
 
@@ -78,6 +79,7 @@ app.include_router(chat_router, prefix="/api/chat", tags=["问答"])
 app.include_router(feedback_router, prefix="/api/feedback", tags=["反馈"])
 # 公网 http 下浏览器 geolocation 不可用，由服务端按来源 IP 兜底定位（api/geo.py 有说明）
 app.include_router(geo_router, prefix="/api/geo", tags=["定位"])
+app.include_router(templates_router, prefix="/api/templates", tags=["模板广场"])
 
 
 # ---------- 修复：前后端尾部斜杠不一致导致的重定向黑洞 ----------

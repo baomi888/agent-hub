@@ -12,6 +12,7 @@ interface Props {
   activeSid: string | null;
   onSelect: (sid: string) => void;
   onCreate: () => void;
+  onOpenTemplates?: () => void;
   onRename: (sid: string, title: string) => void;
   onDelete: (sid: string) => void;
   kbNameMap?: Record<string, string>;
@@ -74,6 +75,7 @@ export default function Sidebar({
   activeSid,
   onSelect,
   onCreate,
+  onOpenTemplates,
   onRename,
   onDelete,
   kbNameMap,
@@ -137,6 +139,13 @@ export default function Sidebar({
       <button onClick={onCreate} className="btn-new mt-5 w-full">
         ＋ 新建对话
       </button>
+
+      {/* 模板广场：平台化入口（描边次按钮，与新建对话形成主次） */}
+      {onOpenTemplates && (
+        <button onClick={onOpenTemplates} className="btn-import mt-2 w-full">
+          🏪 模板广场
+        </button>
+      )}
 
       {/* 搜索框：大圆角 */}
       <div className="search mt-4">

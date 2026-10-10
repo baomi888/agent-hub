@@ -1,6 +1,6 @@
 // 后端 API 封装：统一错误处理 + 类型化（相对路径走 rewrites 代理）
 import type { Conversation, KbInfo, KbFile, FilePreview, SearchResult, Defaults, Message } from "./types";
-import type { MeOut, UserOut } from "./types";
+import type { MeOut, UserOut, Template, ApplyTemplateResult } from "./types";
 
 /**
  * 登录态失效的广播事件名。
@@ -180,4 +180,12 @@ export const api = {
     }),
   logout: () => request<{ ok: boolean }>("/api/auth/logout/", { method: "POST" }),
   me: () => request<MeOut>("/api/auth/me/"),
+
+  // ---------- 模板广场 ----------
+  templates: () =>
+    request<{ templates: Template[] }>("/api/templates/"),
+  applyTemplate: (id: string) =>
+    request<ApplyTemplateResult>(`/api/templates/${id}/apply`, {
+      method: "POST",
+    }),
 };
