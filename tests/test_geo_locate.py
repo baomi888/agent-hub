@@ -20,12 +20,12 @@ from core import config
 
 # ---------- 1. 纯函数：公网 IP 判定 ----------
 cases = [
-    ("8.163.62.25", True),        # 用户 ECS 真实公网 IP
+    ("203.0.113.25", True),       # 示例公网 IP（RFC 5737 TEST-NET-3，仅作演示）
     ("114.114.114.114", True),    # 南京 DNS
     ("223.5.5.5", True),          # 阿里 DNS
     ("127.0.0.1", False),
     ("192.168.1.5", False),
-    ("172.17.233.143", False),    # 服务器内网 IP
+    ("172.16.0.10", False),       # 示例内网 IP（RFC 1918 私有段）
     ("10.0.0.1", False),
     ("198.51.100.7", False),       # TEST-NET-2，ipaddress 判为 reserved
     ("::1", False),

@@ -66,3 +66,28 @@ frontend/_unused-public/
 node_modules/
 .next/
 out/
+
+# ================= 历史方案 / 探索原型（不进产品仓库）=================
+baomi-agent/
+ui-redesign/
+
+# ================= 已应用的历史补丁脚本（本地保留，不入仓库）=================
+patch_checkpointer.py
+patch_copy.py
+patch_geo.py
+patch_main.py
+
+# ================= 设计探索笔记 / 杂项图片（非项目文档）=================
+苞米地笔记本_设计提示词.md
+TRAE_设计提示词.md
+DeepSeek_Harness_审查提示词.md
+preview_small.jpg
+ref_corn.jpg
+
+# ================= 用户知识库源文档（运行时数据，不入仓库）=================
+# sample.txt 是 test_w1 的兜底 fixture，保留；其余为个人知识库内容，不公开
+data/nba.txt
+data/nba_extra.txt
+data/science.txt
+data/entertainment.txt
+data/test.pdf

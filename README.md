@@ -11,6 +11,7 @@
 ![Next.js](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind-v4-38BDF8?logo=tailwindcss&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green.svg)
 
 | 浅色 · 暖米黄糙纸 | 深色 · 深棕木桌 |
 |:---:|:---:|
@@ -101,6 +102,32 @@ bash deploy.sh logs       # 看日志
 ```
 
 详细流程、踩坑记录和报错对照表见 [`部署说明.md`](部署说明.md)。
+
+## 🏛️ 系统架构
+
+```mermaid
+flowchart TB
+    U([用户]) --> FE[前端 · Next.js 16<br/>苞米地笔记本主题 / 明暗双态]
+    FE -. "Next.js rewrite 代理 /api/*" .-> BE[后端 · FastAPI<br/>全链路 SSE 流式]
+
+    BE --> GW[安全网关<br/>默认拒绝 · 归属隔离<br/>配额 / 限流 / SSRF 收口]
+    BE --> CHAT[流式问答 /api/chat/stream]
+
+    CHAT --> ROUTE{auto 模式路由}
+    ROUTE -->|rag| RAG[RAG 检索增强<br/>候选池 → 离群过滤 → MMR 去重]
+    ROUTE -->|agent| AGENT[LangGraph Agent<br/>工具调度 · 多轮记忆]
+    ROUTE -->|vision| VISION[视觉模型看图理解]
+    ROUTE -->|llm| LLM[纯对话]
+
+    RAG --> VS[("Chroma 向量库<br/>多库进程级单例")]
+    AGENT --> TOOLS[工具集<br/>知识库检索 · 联网搜索<br/>计算器 · 天气 · 下载入库]
+    TOOLS --> EXT[外部服务<br/>DeepSeek · 高德 · Serper · Open-Meteo]
+    VS --> EMB[Embedding 向量化]
+
+    BE --> STORE[("SQLite<br/>会话 / 消息 / 赞踩<br/>参数化 · WAL · 窗口截断")]
+```
+
+> 设计要点：前端只跟后端说话（同源代理，无需配 CORS）；后端**默认要登录**，每个业务端点都挂了鉴权依赖；多用户数据按 `owner` 强制隔离，归属校验失败返回 404 而非 403，避免 id 可枚举。
 
 ## 🏗️ 技术栈
 
