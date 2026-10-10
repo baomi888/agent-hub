@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  offline-tests:
+    name: Offline tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run offline test subset
+        # 仅跑不依赖网络 / 外部服务 / 登录态的用例，保证构建稳定绿色。
+        # 集成测试（auth/kb/owner 隔离、geo、web 导入、w2/w3 端到端）需本地服务，
+        # 在 CONTRIBUTING.md 说明的本地环境手动验证，CI 不跑。
+        run: |
+          pytest tests/test_chroma_singleton.py \
+                 tests/test_upload_stream.py \
+                 tests/test_retrieve_select.py \
+                 tests/test_pipelines_concurrency.py \
+                 tests/test_agent_checkpointer.py \
+                 tests/test_agent_guard.py -q

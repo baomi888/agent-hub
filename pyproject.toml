@@ -1,0 +1,46 @@
+# -*- coding: utf-8 -*-
+#
+# 现代 Python 项目元数据与工具配置。
+#
+# ⚠️ 运行时依赖的「唯一真相源」仍是根目录的 requirements.txt
+#    （deploy.sh 用它装生产依赖，格式受限只能 `#` 注释）。
+#    本文件仅承载：项目元数据（PyPI/工具可读）、开发期工具链（ruff/black）、
+#    以及可选的 dev 依赖。不要在这里重复列运行时依赖，避免两份漂移。
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "baomi-agent"
+version = "0.1.0"
+description = "苞米 Agent —— 基于 RAG 知识库与 LangChain Agent 的个人知识助手"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Jinghao Feng", email = "fenjinghao@example.com" }]
+keywords = ["rag", "agent", "langchain", "knowledge-base", "chatbot", "llm"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# E/F: pycodestyle + pyflakes（基础）；I: isort；UP: pyupgrade；B: flake8-bugbear
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E402"]  # 测试文件在 import 后做 sys.path 注入，允许后导入
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]

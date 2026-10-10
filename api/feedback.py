@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from __future__ import annotations
 """消息反馈路由（赞 / 踩）。
 
 路由清单：
@@ -32,7 +33,7 @@ class FeedbackResponse(BaseModel):
 
 
 @router.post("/", response_model=FeedbackResponse)
-def add_feedback(req: FeedbackRequest, uid: str = Depends(get_current_user)):
+def add_feedback(req: FeedbackRequest, uid: str = Depends(get_current_user)) -> dict:
     """记录反馈。同一条消息重复提交会覆盖旧值（点赞再点踩算改，不算追加两条）。"""
     # 先验归属，再验其它：不存在和不属于你都走同一个 404，不给枚举空间
     if not store.get_conversation(uid, req.sid):
@@ -47,7 +48,7 @@ def add_feedback(req: FeedbackRequest, uid: str = Depends(get_current_user)):
 
 
 @router.get("/{sid}/")
-def list_feedback(sid: str, uid: str = Depends(get_current_user)):
+def list_feedback(sid: str, uid: str = Depends(get_current_user)) -> dict:
     """列出某会话的全部反馈。"""
     if not store.get_conversation(uid, sid):
         raise HTTPException(status_code=404, detail=f"会话不存在：{sid}")

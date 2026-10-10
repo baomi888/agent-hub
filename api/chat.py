@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from __future__ import annotations
 """流式问答接口（SSE）。
 
 三条路径（由 req.mode 决定，默认 auto 自动判断）：
@@ -103,7 +104,7 @@ def _cleanup_old_uploads() -> None:
 
 
 @router.post("/upload")
-async def upload_attachments(files: list[UploadFile] = File(...)):
+async def upload_attachments(files: list[UploadFile] = File(...)) -> dict:
     """上传聊天附件（图片），返回服务端路径供图片理解使用。
 
     只有图片会被视觉模型消费；其他格式即使上传成功也不会参与回答。
@@ -178,7 +179,7 @@ class _Acc:
         self.error: str | None = None
 
 
-async def _stream_llm(llm, messages, request: Request, acc: _Acc):
+async def _stream_llm(llm, messages, request: Request, acc: _Acc) -> None:
     """逐 token 产出增量 SSE。
 
     早期实现每帧回传"累计全文"，千 token 的回答会产生 O(n²) 的传输量；
@@ -208,7 +209,7 @@ async def _stream_llm(llm, messages, request: Request, acc: _Acc):
 # ==================== 主路由 ====================
 
 @router.post("/stream")
-async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get_current_user)):
+async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get_current_user)) -> StreamingResponse:
     # 限流 + 每日问答额度。放在 event_generator 外面是对的：
     # 流一旦开始，响应头（200）就发出去了，那时候再想回 429 已经来不及，
     # 只会变成一条断掉的 SSE 流，前端读不出任何提示。
@@ -266,7 +267,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
     store.add_message(uid, req.sid, "user", req.question)
     should_gen_title = store.count_messages(uid, req.sid) <= 2
 
-    async def event_generator():
+    async def event_generator() -> None:
         refs_md = ""
 
         # ---- 0. 图片理解模式：有图片附件时用视觉模型直接回答 ----

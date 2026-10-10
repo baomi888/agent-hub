@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from __future__ import annotations
 """登录注册路由。
 
 这是全站**唯一**的公开路由组（其它业务路由都在 main.py 里挂了
@@ -45,7 +46,7 @@ class MeOut(BaseModel):
     quota: dict
 
 
-def _reject(msg: str, status: int = 400):
+def _reject(msg: str, status: int = 400) -> None:
     raise HTTPException(status_code=status, detail=msg)
 
 
@@ -57,7 +58,7 @@ def _auth_rate_bucket(name: str) -> str:
 # ==================== 公开端点 ====================
 
 @router.get("/config/")
-def auth_config():
+def auth_config() -> dict:
     """前端登录页要用的开关：这站还开不开自助注册。"""
     return {"allow_signup": config.ALLOW_SIGNUP}
 
@@ -105,7 +106,7 @@ def login(body: Credentials, response: Response):
 
 
 @router.post("/logout/")
-def logout(response: Response):
+def logout(response: Response) -> dict:
     clear_session_cookie(response)
     return {"ok": True}
 

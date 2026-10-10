@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from __future__ import annotations
 """知识库管理路由。
 
 路由清单：
@@ -60,7 +61,7 @@ async def upload_and_build(
     chunk_overlap: int = 50,
     mode: str = "append",
     uid: str = Depends(get_current_user),
-):
+) -> dict:
     """上传文档到指定知识库并入库。
 
     mode=append（默认）：只对新文件做 embedding，已有片段不动。
@@ -151,7 +152,7 @@ async def upload_and_build(
 # ==================== 查询 ====================
 
 @router.post("/{kb_id}/query", response_model=KBQueryResponse)
-async def query_kb(kb_id: str, question: str, top_k: int = 3, uid: str = Depends(get_current_user)):
+async def query_kb(kb_id: str, question: str, top_k: int = 3, uid: str = Depends(get_current_user)) -> dict:
     """同步问答：返回带 [1][2] 引用角标的答案。"""
     _must_own(uid, kb_id)
     # 一次问答 = 一次检索 + 一次 LLM，落到每日问答额度里
@@ -170,7 +171,7 @@ async def query_kb(kb_id: str, question: str, top_k: int = 3, uid: str = Depends
 # ==================== 列表 / 状态 / 删除 ====================
 
 @router.get("/")
-async def list_kbs(uid: str = Depends(get_current_user)):
+async def list_kbs(uid: str = Depends(get_current_user)) -> dict:
     """列出**当前用户**的知识库。别人的库（含改造前的无主库）不出现。"""
     # 扫磁盘 + 逐个打开 collection，全是同步 I/O，不能留在事件循环里
     return {"kbs": await asyncio.to_thread(pipelines.list_all, uid)}
@@ -181,7 +182,7 @@ class CreateKbRequest(BaseModel):
 
 
 @router.post("/create")
-async def create_kb(req: CreateKbRequest, uid: str = Depends(get_current_user)):
+async def create_kb(req: CreateKbRequest, uid: str = Depends(get_current_user)) -> dict:
     """登记知识库（名称支持中文），返回内部安全 kb_id 与显示名。
 
     kb_id 里混进了 owner，两人建同名库也各是各的。
@@ -194,7 +195,7 @@ async def create_kb(req: CreateKbRequest, uid: str = Depends(get_current_user)):
 
 
 @router.get("/{kb_id}/")
-async def get_kb_status(kb_id: str, uid: str = Depends(get_current_user)):
+async def get_kb_status(kb_id: str, uid: str = Depends(get_current_user)) -> dict:
     """查看单个知识库状态。"""
     _must_own(uid, kb_id)
     status = await asyncio.to_thread(pipelines.get_status, uid, kb_id)
@@ -207,7 +208,7 @@ async def get_kb_status(kb_id: str, uid: str = Depends(get_current_user)):
 
 
 @router.delete("/{kb_id}/")
-async def delete_kb(kb_id: str, uid: str = Depends(get_current_user)):
+async def delete_kb(kb_id: str, uid: str = Depends(get_current_user)) -> dict:
     """删除知识库。"""
     _must_own(uid, kb_id)
     # 删 collection + rmtree 原始文件，都是同步 I/O
@@ -215,7 +216,7 @@ async def delete_kb(kb_id: str, uid: str = Depends(get_current_user)):
         # 可能磁盘上有但内存里没注册
         if await asyncio.to_thread(pipelines.exists, uid, kb_id):
             # 强制删除
-            def _force_delete():
+            def _force_delete() -> None:
                 pipelines.get_or_create(uid, kb_id).delete()
 
             await asyncio.to_thread(_force_delete)
@@ -232,7 +233,7 @@ async def list_files(kb_id: str, uid: str = Depends(get_current_user)):
     """列出库内文件（文件名 + 片段数）。记录缺失时用 Chroma 元数据兜底。"""
     _must_own(uid, kb_id)
 
-    def _list():
+    def _list() -> dict:
         # list_sources → get_or_open → peek，要读 sqlite，别在事件循环里做
         pipe = pipelines.get_or_create(uid, kb_id)
         records = pipelines.get_files(uid, kb_id) or pipe.list_sources()
@@ -246,7 +247,7 @@ class DeleteFileRequest(BaseModel):
 
 
 @router.delete("/{kb_id}/files")
-async def delete_file(kb_id: str, req: DeleteFileRequest, uid: str = Depends(get_current_user)):
+async def delete_file(kb_id: str, req: DeleteFileRequest, uid: str = Depends(get_current_user)) -> dict:
     """删除单个文件：从向量库移除它的片段 + 删掉原始文件 + 更新清单。"""
     _must_own(uid, kb_id)
     name = req.name.strip()
@@ -351,7 +352,7 @@ async def get_file_content(kb_id: str, name: str, uid: str = Depends(get_current
 
 
 @router.post("/{kb_id}/rebuild")
-async def rebuild_kb(kb_id: str, req: RebuildRequest, uid: str = Depends(get_current_user)):
+async def rebuild_kb(kb_id: str, req: RebuildRequest, uid: str = Depends(get_current_user)) -> dict:
     """按新切片参数重建整库（重读留档的原始文件，会对全部片段重新 embedding）。"""
     _must_own(uid, kb_id)
     await asyncio.to_thread(quota.guard, uid, "embed")
@@ -417,7 +418,7 @@ class ImportBatchRequest(BaseModel):
 
 
 @router.post("/import-search")
-async def preview_search(req: ImportSearchRequest, uid: str = Depends(get_current_user)):
+async def preview_search(req: ImportSearchRequest, uid: str = Depends(get_current_user)) -> dict:
     """Serper 联网搜索预览，返回候选列表供前端勾选后批量导入。"""
     # 每次预览都要花钱调搜索 API，限流是必要的；这里不占 embed 额度（还没入库）
     await asyncio.to_thread(quota.hit, uid)
@@ -443,7 +444,7 @@ async def import_single_url(kb_id: str, req: ImportURLRequest, uid: str = Depend
 
 
 @router.post("/{kb_id}/import-batch")
-async def import_batch_urls(kb_id: str, req: ImportBatchRequest, uid: str = Depends(get_current_user)):
+async def import_batch_urls(kb_id: str, req: ImportBatchRequest, uid: str = Depends(get_current_user)) -> dict:
     """批量抓多个 URL 追加入库（搜索勾选结果的落地接口）。"""
     _must_own(uid, kb_id)
     if not req.urls:
@@ -463,7 +464,7 @@ async def import_batch_urls(kb_id: str, req: ImportBatchRequest, uid: str = Depe
 
 
 @router.get("/download")
-async def download_remote(url: str, uid: str = Depends(get_current_user)):
+async def download_remote(url: str, uid: str = Depends(get_current_user)) -> Response:
     """把远程文档文件代理下载到浏览器（作为附件保存到本机）。"""
     import httpx
 

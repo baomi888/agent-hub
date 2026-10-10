@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from __future__ import annotations
 """会话管理路由。
 
 路由清单：
@@ -43,7 +44,7 @@ def create(body: SessionCreate, uid: str = Depends(get_current_user)):
 
 
 @router.get("/")
-def list_all(uid: str = Depends(get_current_user)):
+def list_all(uid: str = Depends(get_current_user)) -> dict:
     return {"sessions": store.list_conversations(uid)}
 
 
@@ -73,14 +74,14 @@ def update(sid: str, body: SessionUpdate, uid: str = Depends(get_current_user)):
 
 
 @router.delete("/{sid}/")
-def delete(sid: str, uid: str = Depends(get_current_user)):
+def delete(sid: str, uid: str = Depends(get_current_user)) -> dict:
     if not store.delete_conversation(uid, sid):
         raise HTTPException(status_code=404, detail=f"会话不存在：{sid}")
     return {"ok": True}
 
 
 @router.delete("/{sid}/messages/{msg_id}/", response_model=MessageDeleteResponse)
-def delete_message_turn(sid: str, msg_id: int, uid: str = Depends(get_current_user)):
+def delete_message_turn(sid: str, msg_id: int, uid: str = Depends(get_current_user)) -> dict:
     """删除某条消息及其所在的完整一轮对话（user + 后续连续 assistant）。"""
     conv = store.get_conversation(uid, sid)
     if not conv:

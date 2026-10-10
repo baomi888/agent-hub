@@ -9,6 +9,11 @@
   uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 """
 
+from __future__ import annotations
+
+from collections.abc import AsyncIterator, Callable
+from typing import Any
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -26,7 +31,7 @@ from kb import pipelines
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """启动事件：预热 + 配置检查。"""
     pipelines.warmup()
     missing = config.validate()
@@ -86,7 +91,7 @@ app.include_router(geo_router, prefix="/api/geo", tags=["定位"])
 # 本项目前端发起的路径与后端路由的斜杠约定其实完全一致（有斜杠的对有斜杠、无斜杠的
 # 对无斜杠）。所以只要后端不再自作主张重定向（redirect_slashes=False），并在进入
 # 路由前把路径归一到「已注册的那种」，无论 Next 是否先去尾斜杠，后端都能直接命中路由。
-def _collect_api_paths(routes):
+def _collect_api_paths(routes: list) -> set[str]:
     """收集所有已注册路由的完整路径（含 /api 前缀）。
 
     注意：include_router 进来的路由是 _IncludedRouter，其 .path 为 None，
@@ -95,7 +100,7 @@ def _collect_api_paths(routes):
     """
     acc: set[str] = set()
 
-    def walk(rs):
+    def walk(rs: list) -> None:
         for r in rs:
             p = getattr(r, "route_path", None) or getattr(r, "path", None)
             if p:
@@ -131,7 +136,7 @@ def _exact_matches(template: str, path: str) -> bool:
 
 
 @app.middleware("http")
-async def normalize_api_slash(request, call_next):
+async def normalize_api_slash(request: Request, call_next: Callable[[Request], Any]) -> Response:
     path = request.scope.get("path", "")
     if path.startswith("/api/") and path != "/api/":
         has_slash = path.endswith("/")
@@ -157,7 +162,7 @@ async def normalize_api_slash(request, call_next):
 # 注册成全局异常处理器，而不是在每个端点里 try/except：
 # 端点自己 catch 容易顺手把它转成 500，前端就分不清"系统出错"和"你今天用超了"。
 @app.exception_handler(quota.RateLimited)
-async def _on_rate_limited(request: Request, exc: quota.RateLimited):
+async def _on_rate_limited(request: Request, exc: quota.RateLimited) -> JSONResponse:
     return JSONResponse(
         status_code=429,
         content={"detail": str(exc), "retry_after": round(exc.retry_after, 1)},
@@ -166,7 +171,7 @@ async def _on_rate_limited(request: Request, exc: quota.RateLimited):
 
 
 @app.exception_handler(quota.QuotaExceeded)
-async def _on_quota_exceeded(request: Request, exc: quota.QuotaExceeded):
+async def _on_quota_exceeded(request: Request, exc: quota.QuotaExceeded) -> JSONResponse:
     return JSONResponse(
         status_code=429,
         content={"detail": str(exc), "kind": exc.kind, "limit": exc.limit},
@@ -174,7 +179,7 @@ async def _on_quota_exceeded(request: Request, exc: quota.QuotaExceeded):
 
 
 @app.get("/api/config/defaults")
-def get_defaults():
+def get_defaults() -> dict:
     """返回前端初始表单所需的默认参数。"""
     return {
         "chunk_size": config.CHUNK_SIZE_DEFAULT,
@@ -185,7 +190,7 @@ def get_defaults():
 
 
 @app.get("/health")
-def health():
+def health() -> dict:
     """健康检查端点。"""
     return {"status": "ok", "version": "0.3.0 (W3)"}
 

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from __future__ import annotations
 """Agent 构建（LangChain v1 create_agent）。
 
 核心：create_agent(model, tools, system_prompt)
@@ -76,7 +77,7 @@ def location_note(location: dict | None) -> str:
     return ""
 
 
-def _make_checkpointer():
+def _make_checkpointer() -> None:
     """Agent 的 checkpointer —— 这里**故意返回 None**，即不用 LangGraph 检查点。
 
     三条都是实测结论，别照着直觉改回去：

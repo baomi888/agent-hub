@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from __future__ import annotations
 """SQLite 多会话管理。
 
 设计：
@@ -45,7 +46,7 @@ def _db_path() -> str:
 
 # ---------- 连接管理 ----------
 @contextmanager
-def _get_conn():
+def _get_conn() -> None:
     """获取 SQLite 连接（context manager）。"""
     conn = sqlite3.connect(_db_path())
     conn.row_factory = sqlite3.Row  # 让 cursor 返回 dict-like 对象

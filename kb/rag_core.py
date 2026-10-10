@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from __future__ import annotations
 """RAG 核心逻辑（文档加载 → 切片 → Embedding → Chroma → 检索 → 提示词组装 → LLM 生成）
 
 与界面完全分离，可被 Agent / FastAPI / 后续前端复用。
@@ -123,7 +124,7 @@ def _to_similarity(distance: float) -> float | None:
     return 1 - distance / 2
 
 
-def select_diverse(docs_scores, top_k: int, lambda_mult: float | None = None):
+def select_diverse(docs_scores, top_k: int, lambda_mult: float | None = None) -> list:
     """从候选里挑出 top_k 条：先丢明显不相关的，再按 MMR 去掉互相重复的。
 
     原来直接取 top-k 有两个毛病：相似度再低的片段也照样进 prompt（模型被迫硬答），
@@ -257,7 +258,7 @@ def split_documents(docs, chunk_size: int, chunk_overlap: int):
 class RagPipeline:
     """单条 RAG 链路。每个知识库一个实例，用不同 collection 名隔离向量库。"""
 
-    def __init__(self, collection_name: str):
+    def __init__(self, collection_name: str) -> None:
         self.collection_name = collection_name  # 如 kb_001 / kb_nba
         self._vs = None          # Chroma 实例缓存
         self._params = None      # 当前库对应的 (chunk_size, chunk_overlap)
@@ -519,7 +520,7 @@ class RagPipeline:
         )
         return response.content, refs_md
 
-    def answer_stream(self, question: str, top_k: int):
+    def answer_stream(self, question: str, top_k: int) -> None:
         """流式问答生成器：yield (累计答案文本, 参考片段Markdown)。
 
         第一个 yield 的 text 为空字符串（先展示检索来源），

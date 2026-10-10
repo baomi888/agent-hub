@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from __future__ import annotations
 """配额与限流：别让别人用你的界面烧你的额度。
 
 两件事，尺度不同所以实现也不同：
@@ -34,7 +35,7 @@ _WINDOW = 60.0
 class RateLimited(Exception):
     """超过每分钟上限。"""
 
-    def __init__(self, retry_after: float):
+    def __init__(self, retry_after: float) -> None:
         super().__init__(f"操作过于频繁，请 {retry_after:.0f} 秒后再试")
         self.retry_after = retry_after
 
@@ -42,7 +43,7 @@ class RateLimited(Exception):
 class QuotaExceeded(Exception):
     """超过每日上限。"""
 
-    def __init__(self, kind: str, limit: int):
+    def __init__(self, kind: str, limit: int) -> None:
         label = {"ask": "每日问答", "embed": "每日向量化分片"}.get(kind, kind)
         super().__init__(f"{label}已达上限（{limit}），明天再试或联系管理员调整配额")
         self.kind = kind
