@@ -11,6 +11,10 @@ from __future__ import annotations
 SSE 事件协议：
   event: status     { text: "..." }           状态提示
   event: tool       { name: "...", input: "...", output: "..." }  Agent 工具调用
+  event: sources    { items: [...] }           引用溯源条目（含每条 strength）
+  event: grounding  { strength: "...", best: 0.31, weak: true }
+                   检索依据强度。weak=true 时前端在回答上方挂「依据较弱」提示条，
+                   数据来源是 kb/rag_core.py::assess_grounding()
   event: token      { text: "...", refs: "" }  增量 token
   event: title      { title: "..." }          自动生成的会话标题（仅首轮）
   event: done       { answer: "...", refs: "", title: "", mode: "", message_id: 123 }
@@ -35,7 +39,7 @@ from core import config, quota, session as store, upload
 from core.auth import get_current_user
 from core.llm import get_llm, get_vision_llm
 from kb import pipelines
-from kb.rag_core import SYSTEM_PROMPT, describe_api_error
+from kb.rag_core import SYSTEM_PROMPT, assess_grounding, describe_api_error, grounding_note
 
 # 默认要登录：整组路由统一挂鉴权，新增端点时不会漏
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -337,6 +341,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             yield _sse("status", {"text": "图片理解模式，正在分析图片..."})
             # RAG 模式下顺带检索知识库，拼入文本
             vision_question = req.question
+            vision_system = "你是一个能理解图片的 AI 助手。请结合图片内容用中文简洁作答。"
             if kb_id and kb_exists:
                 try:
                     # 同步检索会堵事件循环（embed_query 实测约 250ms），必须丢线程
@@ -348,16 +353,20 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                         refs_md = pipe._format_refs(docs_scores)
                         sources = pipe.build_sources(docs_scores)
                         yield _sse("sources", {"items": sources})
+                        # 图片理解也走同一套依据判定，提示条口径保持一致
+                        g = assess_grounding(docs_scores)
+                        yield _sse("grounding", g)
                         references = "\n\n".join(
                             f"[{i + 1}] （来源：{d.metadata.get('source', '?')}）\n{d.page_content}"
                             for i, (d, _) in enumerate(docs_scores)
                         )
                         vision_question = f"【参考资料】\n{references}\n\n【用户问题】\n{req.question}"
+                        vision_system += grounding_note(g)
                 except Exception:
                     yield _sse("status", {"text": "知识库检索失败，已仅按图片作答"})
 
             history = store.get_messages(uid, req.sid, include_system=False)[:-1]
-            messages = [SystemMessage(content="你是一个能理解图片的 AI 助手。请结合图片内容用中文简洁作答。")]
+            messages = [SystemMessage(content=vision_system)]
             for m in history:
                 if m["role"] == "user":
                     messages.append(HumanMessage(content=m["content"]))
@@ -502,18 +511,26 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 yield _sse("error", {"detail": describe_api_error(e)})
                 return
 
+            grounding: dict | None = None
             if docs_scores:
                 refs_md = pipe._format_refs(docs_scores)
                 sources = pipe.build_sources(docs_scores)
                 yield _sse("sources", {"items": sources})
-                yield _sse("status", {"text": f"检索到 {len(docs_scores)} 条片段"})
+                # 依据强度单独发一帧：前端要在回答上方挂"依据较弱"的提示条，
+                # 不能等 done——用户是边流边读的，提示必须赶在正文前面出现。
+                grounding = assess_grounding(docs_scores)
+                yield _sse("grounding", grounding)
+                if grounding.get("weak"):
+                    yield _sse("status", {"text": "检索相似度偏低，已提醒模型不要硬答"})
+                else:
+                    yield _sse("status", {"text": f"检索到 {len(docs_scores)} 条片段"})
             else:
                 yield _sse("status", {"text": "知识库未命中"})
 
             yield _sse("status", {"text": "正在生成答案..."})
             # 复用上面已经检索到的结果，不重复检索（早期实现在这里又检了一次，
             # 而且用的是默认 top_k，等于前端调的检索条数被悄悄忽略）
-            messages = _build_messages(uid, req.sid, req.question, kb_id, docs_scores)
+            messages = _build_messages(uid, req.sid, req.question, kb_id, docs_scores, grounding)
 
             acc = _Acc()
             try:
@@ -576,11 +593,17 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
 
 # ==================== 辅助 ====================
 
-def _build_messages(owner: str, sid: str, question: str, kb_id: str | None, docs_scores) -> list:
+def _build_messages(
+    owner: str, sid: str, question: str, kb_id: str | None, docs_scores, grounding: dict | None = None
+) -> list:
     """组装 LLM 输入：历史 + 已检索到的参考资料。
 
     docs_scores 由调用方检索一次后传入，这里不再重复检索，
     避免用户设置的 top_k 被默认值覆盖、也省掉一次 embedding 请求。
+
+    grounding 是调用方算好的依据强度判定。weak=true 时追加一段"别硬答"的约束——
+    系统提示词里的通用规则太软，模型看到 prompt 里真有几段资料，
+    哪怕相似度只有 0.3 也会顺着往下编；单独再压一遍才压得住。
     """
     history_raw = store.get_messages(owner, sid, include_system=False)[:-1]
     messages = []
@@ -590,9 +613,11 @@ def _build_messages(owner: str, sid: str, question: str, kb_id: str | None, docs
             f"[{i + 1}] （来源：{d.metadata.get('source', '?')}）\n{d.page_content}"
             for i, (d, _) in enumerate(docs_scores)
         )
-    messages.append(
-        SystemMessage(content=SYSTEM_PROMPT if references else "你是一个友好、专业的 AI 助手。用中文简洁作答。")
-    )
+    if references:
+        system = SYSTEM_PROMPT + grounding_note(grounding or {})
+    else:
+        system = "你是一个友好、专业的 AI 助手。用中文简洁作答。"
+    messages.append(SystemMessage(content=system))
     for m in history_raw:
         if m["role"] == "user":
             messages.append(HumanMessage(content=m["content"]))

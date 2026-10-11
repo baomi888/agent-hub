@@ -55,8 +55,21 @@ export interface RefSource {
   page: number | null;
   // 余弦相似度（越大越相关）。后端换算不了时给 null，此时前端不显示这一项
   score: number | null;
+  // 依据强度分级，由后端按 RETRIEVE_LOW_SIM 判定。
+  // 只给数字的话用户看不出 0.31 算不算数，所以要和百分比一起显示。
+  strength?: "high" | "medium" | "low" | null;
   preview: string;
   text: string;
+}
+
+// 依据强度（SSE grounding 事件）：weak=true 时回答上方挂「依据较弱」提示条
+export interface Grounding {
+  strength: "high" | "medium" | "low" | "none";
+  /** top1 余弦相似度，换算不出来时为 null */
+  best: number | null;
+  count: number;
+  /** 检索到了，但全部不够格当依据 */
+  weak: boolean;
 }
 
 // 库内文件正文预览：origin=archive 读原始留档，chunks 表示老库从向量片段拼回

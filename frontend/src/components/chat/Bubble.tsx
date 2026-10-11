@@ -145,6 +145,36 @@ const Bubble = memo(function Bubble({
         )}
 
         <div className="bubble-ai whitespace-pre-wrap text-text">
+          {/* 依据不足提示条：没有一条片段达到"可以直接当依据"的水平。
+              放在正文之前——用户是边流边读的，提示必须比答案先出现，
+              否则等读完一段"看起来很自信"的回答才看到提示就晚了。
+              两档话术不同：low=完全没找到，medium=只找到沾边内容。 */}
+          {m.grounding?.weak && !m.error && (
+            <div className="grounding-alert" role="status">
+              <svg className="ga-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 9v4" />
+                <path d="M12 17h.01" />
+                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+              </svg>
+              <div className="ga-body">
+                <span className="ga-title">
+                  {m.grounding.strength === "medium"
+                    ? "只找到内容沾边的资料"
+                    : "知识库里没有找到直接依据"}
+                </span>
+                {m.grounding.strength === "low"
+                  ? `已检索到 ${m.grounding.count} 条片段，但相似度都低于 0.45${
+                      m.grounding.best !== null ? `（最高 ${m.grounding.best.toFixed(2)}）` : ""
+                    }，下面的回答不构成资料依据。`
+                  : `检索到 ${m.grounding.count} 条片段${
+                      m.grounding.best !== null ? `（最高相似度 ${m.grounding.best.toFixed(2)}）` : ""
+                    }，只是沾边、不够构成直接依据，请以你自己的判断为准。`}
+                <span className="ga-hint">
+                  补一份对口文档进这个知识库，或直接改用联网搜索，会更准。
+                </span>
+              </div>
+            </div>
+          )}
           {m.error ? (
             <div className="warn px-3 py-2 text-sm">
               <div className="font-semibold">⚠ 暂时无法完成请求</div>
@@ -221,6 +251,26 @@ const Bubble = memo(function Bubble({
                 // 取不带页码的纯文件名：老消息只有 refs 文本，里面的 source 带着「 第N页」
                 const fileSource =
                   srcMap.get(idxNum)?.source ?? r.source.replace(/\s*第\d+页\s*$/, "");
+                // 依据强度：后端判定为准。老消息（改造前存的）没有这个字段，
+                // 退化成按相似度数值本地分级，避免历史记录里一片空白。
+                // 0.45 这个线要和后端 RETRIEVE_LOW_SIM 保持一致。
+                const strength =
+                  srcMap.get(idxNum)?.strength ??
+                  (r.score === ""
+                    ? null
+                    : Number(r.score) >= 0.45
+                      ? "high"
+                      : Number(r.score) > 0.25
+                        ? "medium"
+                        : "low");
+                const strengthText =
+                  strength === "high" ? "强" : strength === "medium" ? "中" : strength ? "弱" : "";
+                const strengthTip =
+                  strength === "high"
+                    ? "这条相似度较高，可作为回答依据"
+                    : strength === "medium"
+                      ? "这条只是沾边，不足以独立支撑回答"
+                      : "这条相似度过低，不足以作为回答依据";
                 return (
                   <div key={r.idx} id={refId(r.idx)} className="ref-item">
                     <span className="ref-idx">{r.idx}</span>
@@ -228,6 +278,14 @@ const Bubble = memo(function Bubble({
                       <div className="ref-src">
                         {renderContent(r.source)}
                         {r.score && <span className="ref-meta">相似度 {r.score}</span>}
+                        {strengthText && (
+                          <span
+                            className={`ref-strength${strength === "high" ? "" : " is-weak"}`}
+                            title={strengthTip}
+                          >
+                            {strengthText}
+                          </span>
+                        )}
                       </div>
                       {r.preview && <div className="ref-preview">{renderContent(r.preview)}</div>}
                       {(full || (onPreviewFile && fileSource)) && (

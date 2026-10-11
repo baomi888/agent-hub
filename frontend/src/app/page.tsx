@@ -18,7 +18,7 @@ import { useKnowledge } from "@/lib/hooks/useKnowledge";
 import { useAuth } from "@/lib/hooks/useAuth";
 import AuthGate from "@/components/AuthGate";
 import type { UiMessage } from "@/components/chat/types";
-import type { ChatMode, RefSource, ToolEvent } from "@/lib/types";
+import type { ChatMode, Grounding, RefSource, ToolEvent } from "@/lib/types";
 
 // ---- 断点订阅（matchMedia 作为外部数据源） ----
 type Viewport = "wide" | "medium" | "narrow";
@@ -251,6 +251,16 @@ export default function Home() {
                 prev.map((m) => (m.id === asstId ? { ...m, sources: items } : m))
               );
             }
+            break;
+          }
+          case "grounding": {
+            // 依据强度：后端判定本轮检索够不够格当依据。
+            // 单独发一帧而不是塞进 done，是因为用户边流边读，
+            // 「依据较弱」这个提示必须赶在正文之前出现在气泡里。
+            const g = ev.data as unknown as Grounding;
+            setMessages((prev) =>
+              prev.map((m) => (m.id === asstId ? { ...m, grounding: g } : m))
+            );
             break;
           }
           case "tool": {
