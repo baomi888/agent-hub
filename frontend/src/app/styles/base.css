@@ -40,7 +40,10 @@ button, input, textarea, select {
   font-family: inherit;
 }
 
-main {
+/* 只作用于工作台中央面板（page.tsx 里带 .workbench-main 的 main）。
+   裸 main 选择器曾把模板广场等独立页面的 main 也命中：
+   overflow:hidden + 固定高度 → 内容被裁、滚动失灵（10-11 修复） */
+main.workbench-main {
   position: relative;
   z-index: 1;
   margin: 14px;

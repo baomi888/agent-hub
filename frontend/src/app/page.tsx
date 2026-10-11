@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import Sidebar from "@/components/Sidebar";
 import ChatArea, { type ChatAttachment } from "@/components/ChatArea";
 import KnowledgePanel from "@/components/KnowledgePanel";
+import UsagePanel from "@/components/UsagePanel";
 import { api } from "@/lib/api";
 import { streamChat } from "@/lib/sse";
 import { uid } from "@/lib/id";
@@ -162,6 +163,8 @@ export default function Home() {
   // 用 useSyncExternalStore 订阅 matchMedia，避免 effect 里 setState 造成的二次渲染
   const viewport = useSyncExternalStore(subscribeViewport, getViewport, () => "wide" as const);
   const [sidebarPref, setSidebarPref] = useState(false);
+  // 用量与反馈看板（P2）：侧栏账号块点开
+  const [usageOpen, setUsageOpen] = useState(false);
   const kbPanelOpen = kbPanelPref ?? viewport === "wide";
   const sidebarOpen = sidebarPref && viewport === "narrow";
 
@@ -540,7 +543,7 @@ export default function Home() {
   }
 
   return (
-    <main className="flex overflow-hidden">
+    <main className="workbench-main flex overflow-hidden">
       <Sidebar
         sessions={sessions}
         activeSid={activeSid}
@@ -567,6 +570,7 @@ export default function Home() {
         open={sidebarOpen}
         username={auth.me?.user.username}
         quota={auth.me?.quota}
+        onOpenUsage={() => setUsageOpen(true)}
         onLogout={() => void auth.logout()}
       />
 
@@ -604,6 +608,8 @@ export default function Home() {
           geoPending={geoPending}
           onToggleGeo={toggleGeo}
           sessionId={activeSid}
+          quota={auth.me?.quota}
+          onOpenUsage={() => setUsageOpen(true)}
         />
       </div>
 
@@ -641,6 +647,9 @@ export default function Home() {
           </div>
         ))}
       </div>
+
+      {/* 用量与反馈看板（portal 到 body，不受三栏布局裁切） */}
+      {usageOpen && <UsagePanel onClose={() => setUsageOpen(false)} />}
     </main>
   );
 }

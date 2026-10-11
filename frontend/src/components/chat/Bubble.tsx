@@ -7,6 +7,7 @@ import { memo, useMemo, useState } from "react";
 import type { UiMessage } from "./types";
 import { TOOL_META, toolLabel } from "./constants";
 import { parseRefs, renderContent } from "./content";
+import CornIcon from "../CornIcon";
 import PlanCard, { detectPlanTopic, isPlanRequest, parsePlan } from "./plan";
 import { useCopy } from "@/lib/useCopy";
 import HubMark from "./HubMark";
@@ -177,7 +178,10 @@ const Bubble = memo(function Bubble({
           )}
           {m.error ? (
             <div className="warn px-3 py-2 text-sm">
-              <div className="font-semibold">⚠ 暂时无法完成请求</div>
+              <div className="flex items-center gap-1.5 font-semibold">
+                <CornIcon name="warn" className="h-4 w-4 shrink-0" />
+                暂时无法完成请求
+              </div>
               <details className="mt-1">
                 <summary className="cursor-pointer text-xs opacity-80">查看详情</summary>
                 <div className="message-body text-xs">{renderContent(m.error)}</div>

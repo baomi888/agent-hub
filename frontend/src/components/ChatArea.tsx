@@ -7,8 +7,9 @@
 // 本文件只保留主组件（顶栏 + 欢迎页 + 消息区 + 输入区）。
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import MascotLogo from "./chat/MascotLogo";
+import CornIcon from "./CornIcon";
 import { api } from "@/lib/api";
-import type { ChatMode, RefSource } from "@/lib/types";
+import type { ChatMode, RefSource, QuotaInfo } from "@/lib/types";
 import { ABILITIES, EXAMPLES, MODE_LABELS, SCENARIOS } from "./chat/constants";
 import { buildPlanPrompt, detectPlanTopic, isPlanRequest, stripPlanHint } from "./chat/plan";
 import Bubble from "./chat/Bubble";
@@ -22,6 +23,16 @@ export type { UiMessage, ChatAttachment } from "./chat/types";
 export { stripPlanHint } from "./chat/plan";
 
 const aid = () => Math.random().toString(36).slice(2, 10);
+
+/** 顶栏胶囊文案：管理员显示「无限额」，否则「问答 x/y · 向量化 a/b」 */
+function quotaLine(q: Record<string, QuotaInfo>): string {
+  if (Object.values(q).some((x) => x.unlimited)) return "无限额 · 管理员";
+  const fmt = (n: number) => (n === 0 ? "∞" : String(n));
+  const parts: string[] = [];
+  if (q["ask"]) parts.push(`问答 ${q["ask"].used}/${fmt(q["ask"].limit)}`);
+  if (q["embed"]) parts.push(`向量化 ${q["embed"].used}/${fmt(q["embed"].limit)}`);
+  return parts.join(" · ") || "用量";
+}
 
 interface Props {
   messages: UiMessage[];
@@ -68,6 +79,10 @@ interface Props {
   onToggleGeo?: () => void;
   /** 当前会话 id：赞踩要按「会话 + 消息 id」落库，否则后端无从归档 */
   sessionId?: string | null;
+  /** 当前账号配额概览：顶栏常驻胶囊用它显示今日用量 */
+  quota?: Record<string, QuotaInfo>;
+  /** 打开「用量与反馈」看板；不传则不显示顶栏胶囊 */
+  onOpenUsage?: () => void;
 }
 
 export default function ChatArea({
@@ -99,6 +114,8 @@ export default function ChatArea({
   sessionId = null,
   scenario = null,
   onScenarioChange,
+  quota,
+  onOpenUsage,
 }: Props) {
   const [input, setInput] = useState("");
   const [showParams, setShowParams] = useState(false);
@@ -421,6 +438,20 @@ export default function ChatArea({
           </span>
         )}
         <div className="flex-1" />
+        {/* 顶栏用量入口：常驻显示今日额度，点开看板。
+            侧栏那个入口太折叠，用户找不到——这里给一个一眼可见的。 */}
+        {onOpenUsage && (
+          <button
+            type="button"
+            onClick={onOpenUsage}
+            className="usage-chip"
+            title="查看用量与反馈"
+            aria-label="查看用量与反馈"
+          >
+            <CornIcon name="target" className="h-3.5 w-3.5 shrink-0" title="用量" />
+            <span className="usage-chip-text">{quota ? quotaLine(quota) : "用量"}</span>
+          </button>
+        )}
         {/* 顶栏能力快捷入口：对话进行中不用滚回欢迎页，点一下就切模式 + 预填示例 */}
         <button
           type="button"

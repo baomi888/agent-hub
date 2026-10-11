@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import MascotLogo from "@/components/chat/MascotLogo";
+import CornIcon from "@/components/CornIcon";
 import { api } from "@/lib/api";
 import type { Template } from "@/lib/types";
 
@@ -80,16 +81,18 @@ export default function TemplatesPage() {
   };
 
   return (
-    <div className="min-h-dvh bg-canvas">
-      {/* 顶栏：品牌 + 返回工作台 */}
+    <div className="h-dvh overflow-y-auto overscroll-contain bg-canvas">
+      {/* 顶栏：品牌 + 返回工作台（窄屏收起副标题） */}
       <header className="sticky top-0 z-10 border-b border-line bg-canvas/85 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center gap-3 px-5 py-3.5">
+        <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3.5 sm:px-5">
           <MascotLogo className="h-8 w-8 shrink-0 object-contain" />
           <div className="min-w-0 flex-1">
-            <h1 className="font-serif text-fs-xl font-bold leading-tight text-ink">
+            <h1 className="truncate font-serif text-fs-xl font-bold leading-tight text-ink">
               模板广场
             </h1>
-            <p className="brand-sub truncate">挑一个场景，30 秒拥有一个为你定制的智能体</p>
+            <p className="brand-sub hidden truncate sm:block">
+              挑一个场景，30 秒拥有一个为你定制的智能体
+            </p>
           </div>
           <Link
             href="/"
@@ -101,11 +104,14 @@ export default function TemplatesPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-5 pb-16 pt-6">
+      <main className="mx-auto max-w-6xl px-4 pb-10 pt-5 sm:px-5 sm:pb-16 sm:pt-6">
         {/* 理念横幅：把差异化（教搭建而非代做）摆在最前 */}
-        <div className="mb-7 rounded-lg border border-accent bg-accent-soft px-4 py-3 text-fs-md text-ink">
-          💡 这里每个模板都帮你快速上手，但<strong>答案要你自己来</strong>——
-          我们做的是为学习而生的 AI 素养平台，不是替你写答案的工具。
+        <div className="mb-6 flex items-center gap-2.5 rounded-lg border border-accent bg-accent-soft px-4 py-3 text-fs-sm text-ink sm:mb-7 sm:text-fs-md">
+          <CornIcon name="bulb" className="h-5 w-5 shrink-0" title="提示" />
+          <p>
+            这里每个模板都帮你快速上手，但<strong>答案要你自己来</strong>——
+            我们做的是为学习而生的 AI 素养平台，不是替你写答案的工具。
+          </p>
         </div>
 
         {loading && (
@@ -123,29 +129,27 @@ export default function TemplatesPage() {
         {!loading &&
           !error &&
           grouped.map(({ cat, items }) => (
-            <section key={cat} className="mb-8">
+            <section key={cat} className="mb-8 last:mb-0">
               <div className="group-head">
                 <span className={`eyebrow ${catColor(cat)}`}>{cat}</span>
                 <span className="rule" />
+                <span className="shrink-0 text-fs-xs text-muted">
+                  {items.length} 个
+                </span>
               </div>
-              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3">
                 {items.map((t) => (
                   <article
                     key={t.id}
                     className="group flex flex-col rounded-lg border border-line bg-card-bg p-5 shadow-1 transition duration-200 hover:border-accent hover:shadow-2"
                   >
                     <div className="flex items-start gap-3">
-                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-fill-2 text-2xl">
-                        {t.icon}
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-fill-2 text-ink">
+                        <CornIcon name={t.icon} className="h-7 w-7" title={t.name} />
                       </div>
-                      <div className="min-w-0">
-                        <div className={`eyebrow ${catColor(t.category)}`}>
-                          {t.category}
-                        </div>
-                        <h3 className="mt-0.5 font-serif text-fs-xl font-bold leading-tight text-ink">
-                          {t.name}
-                        </h3>
-                      </div>
+                      <h3 className="mt-1 min-w-0 font-serif text-fs-xl font-bold leading-tight text-ink">
+                        {t.name}
+                      </h3>
                     </div>
 
                     <p className="mt-3 text-fs-md font-medium text-ink">{t.tagline}</p>
@@ -170,13 +174,16 @@ export default function TemplatesPage() {
                       </p>
                     )}
 
-                    <button
-                      onClick={() => onUse(t)}
-                      disabled={usingId === t.id}
-                      className="btn-new mt-4 w-full disabled:opacity-50"
-                    >
-                      {usingId === t.id ? "正在创建…" : "使用模板"}
-                    </button>
+                    {/* flex-1 + items-end：同一行卡片不论文字长短，按钮都贴底对齐 */}
+                    <div className="mt-4 flex flex-1 items-end">
+                      <button
+                        onClick={() => onUse(t)}
+                        disabled={usingId === t.id}
+                        className="btn-new w-full disabled:opacity-50"
+                      >
+                        {usingId === t.id ? "正在创建…" : "使用模板"}
+                      </button>
+                    </div>
                   </article>
                 ))}
               </div>

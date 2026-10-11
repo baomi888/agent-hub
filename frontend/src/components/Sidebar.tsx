@@ -4,6 +4,7 @@
 // 视觉：暖米黄书本风格 · 大圆角 · 柔阴影 · 金色点缀
 import { useMemo, useState, type RefObject } from "react";
 import MascotLogo from "./chat/MascotLogo";
+import CornIcon from "./CornIcon";
 import type { Conversation, QuotaInfo } from "@/lib/types";
 import type { FontScale } from "@/lib/hooks/usePrefs";
 
@@ -37,6 +38,8 @@ interface Props {
   username?: string;
   /** 当前账号配额概览（含 unlimited 标记）；不传则不显示额度 */
   quota?: Record<string, QuotaInfo>;
+  /** 打开「用量与反馈」看板（P2）。不传则账号块不可点 */
+  onOpenUsage?: () => void;
   onLogout?: () => void;
 }
 
@@ -91,6 +94,7 @@ export default function Sidebar({
   onRetryLoad,
   username,
   quota,
+  onOpenUsage,
   onLogout,
 }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -143,7 +147,10 @@ export default function Sidebar({
       {/* 模板广场：平台化入口（描边次按钮，与新建对话形成主次） */}
       {onOpenTemplates && (
         <button onClick={onOpenTemplates} className="btn-import mt-2 w-full">
-          🏪 模板广场
+          <span className="inline-flex items-center justify-center gap-1.5">
+            <CornIcon name="store" className="h-4 w-4" title="模板广场" />
+            模板广场
+          </span>
         </button>
       )}
 
@@ -363,15 +370,31 @@ export default function Sidebar({
               {username.slice(0, 1).toUpperCase()}
             </span>
             <div className="min-w-0 flex-1">
-              <div className="truncate text-fs-sm text-ink" title={username}>
-                {username}
-              </div>
+              {/* 账号块可点开看板：额度不该只在超限时才被看见 */}
+              {onOpenUsage ? (
+                <button
+                  onClick={onOpenUsage}
+                  className="block w-full truncate rounded-xs text-left text-fs-sm text-ink transition hover:text-accent-ink"
+                  title={`${username} · 查看用量与反馈`}
+                >
+                  {username}
+                </button>
+              ) : (
+                <div className="truncate text-fs-sm text-ink" title={username}>
+                  {username}
+                </div>
+              )}
               {quota && (
-                <div className="truncate text-fs-xs text-muted">
+                <button
+                  onClick={onOpenUsage}
+                  disabled={!onOpenUsage}
+                  className="block w-full truncate rounded-xs text-left text-fs-xs text-muted transition enabled:hover:text-accent-ink disabled:cursor-default"
+                  title={onOpenUsage ? "查看用量与反馈" : undefined}
+                >
                   {Object.values(quota).some((q) => q.unlimited)
                     ? "无限额 · 管理员"
                     : quotaLine(quota)}
-                </div>
+                </button>
               )}
             </div>
             {onLogout && (

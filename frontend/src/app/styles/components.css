@@ -346,6 +346,43 @@
   .kb-unbind { display: none; }
 }
 
+/* 顶栏用量胶囊：常驻把「今天用了多少」摆在明面上，点开看板。
+   形态与 .kb-chip / .ability-trigger 一致（999px），金只用于图标点缀。 */
+.usage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  max-width: 46vw;
+  padding: 4px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.usage-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.usage-chip:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 1px;
+}
+.usage-chip .usage-chip-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+/* 窄屏只留图表图标，省出横向空间给会话标题与能力入口 */
+@media (max-width: 640px) {
+  .usage-chip .usage-chip-text { display: none; }
+  .usage-chip { padding: 4px 7px; }
+}
+
 /* 图标文字按钮 */
 .icon-btn {
   background: none;
@@ -373,3 +410,87 @@
   stroke-width: 1.6;
 }
 
+
+/* ==================== 用量与反馈看板（UsagePanel）====================
+   复用 pv-mask/pv-card 弹层骨架，这里只加看板自己的窄卡宽度与图表。
+   颜色一律走令牌：金色只做点缀，进度条超 90% 才点红。 */
+.up-card {
+  width: min(560px, 100%);
+  max-height: min(82vh, 760px);
+}
+
+/* 横向进度条（今日额度） */
+.up-bar {
+  height: 7px;
+  border-radius: 999px;
+  background: var(--fill-1);
+  overflow: hidden;
+}
+.up-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.up-bar-fill.danger {
+  background: var(--red);
+}
+
+/* 近 7 日迷你柱状：两根并排，按各自峰值归一 */
+.up-chart {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-8);
+  height: 96px;
+  padding: 8px 4px 0;
+  border-bottom: 1px solid var(--line);
+}
+.up-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+.up-col-bars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3px;
+  width: 100%;
+  height: 68px;
+}
+.up-bar-v {
+  width: 9px;
+  min-height: 2px;
+  border-radius: 2px 2px 0 0;
+  transition: height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.up-bar-v.ask {
+  background: var(--accent);
+}
+.up-bar-v.embed {
+  background: var(--accent-ink);
+  opacity: 0.45;
+}
+.up-col-label {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.up-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.up-dot.ask {
+  background: var(--accent);
+}
+.up-dot.embed {
+  background: var(--accent-ink);
+  opacity: 0.45;
+}

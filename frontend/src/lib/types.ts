@@ -110,11 +110,43 @@ export interface MeOut {
   quota: Record<string, QuotaInfo>;
 }
 
+// ---------- 用量与反馈看板（P2）----------
+export interface UsageDay {
+  /** YYYY-MM-DD */
+  day: string;
+  ask: number;
+  embed: number;
+}
+
+export interface FeedbackItem {
+  rating: "up" | "down";
+  comment: string;
+  title: string;
+  sid: string;
+  created_at: number;
+}
+
+export interface FeedbackStats {
+  up: number;
+  down: number;
+  total: number;
+  recent: FeedbackItem[];
+}
+
+export interface UsageSummary {
+  quota: Record<string, QuotaInfo>;
+  history: UsageDay[];
+  /** 0 表示未启用每分钟限流 */
+  rate_per_minute: number;
+  feedback: FeedbackStats;
+}
+
 // ---------- 模板广场 ----------
 export interface Template {
   id: string;
   name: string;
   category: string;
+  /** 卡片图标语义 key（CornIcon 组件按苞米吉祥物风格渲染；历史 emoji 值回退 mini 苞米） */
   icon: string;
   tagline: string;
   description: string;

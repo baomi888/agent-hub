@@ -193,6 +193,30 @@ def consume(uid: str, kind: str, n: int = 1) -> int:
     return bump_usage(uid, kind, n)
 
 
+def history(uid: str, days: int = 7) -> list[dict]:
+    """近 N 天逐日用量（缺失日零填充），给前端画趋势条。
+
+    管理员不记账，这里自然返回全 0——语义上「管理员没额度」也说得通。
+    """
+    days = max(1, min(int(days), 31))
+    since = day_key(time.time() - (days - 1) * 86400)
+    with _get_conn() as conn:
+        rows = conn.execute(
+            "SELECT day, kind, count FROM usage WHERE user_id = ? AND day >= ?",
+            (uid, since),
+        ).fetchall()
+    out: list[dict[str, int]] = []
+    for i in range(days):
+        d = day_key(time.time() - (days - 1 - i) * 86400)
+        out.append({"day": d, "ask": 0, "embed": 0})
+    by_day = {row["day"]: row for row in out}
+    for r in rows:
+        slot = by_day.get(r["day"])
+        if slot is not None and r["kind"] in ("ask", "embed"):
+            slot[r["kind"]] = int(r["count"])
+    return out
+
+
 def snapshot(uid: str) -> dict:
     """给前端看的一日用量概览（额度用掉多少 / 还剩多少）。
 
