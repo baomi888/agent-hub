@@ -50,6 +50,8 @@ def get_llm(temperature: float = 0.1, max_tokens: int | None = None) -> ChatOpen
                 model=config.DEEPSEEK_MODEL,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                request_timeout=config.LLM_TIMEOUT,
+                max_retries=config.LLM_MAX_RETRIES,
             )
             _LLM_CACHE[key] = llm
     return llm
@@ -72,6 +74,8 @@ def get_embeddings() -> OpenAIEmbeddings:
                     base_url=config.EMBEDDING_BASE_URL,
                     model=config.EMBEDDING_MODEL,
                     check_embedding_ctx_length=False,  # 第三方兼容接口关闭 token 长度检查
+                    request_timeout=config.EMBED_TIMEOUT,
+                    max_retries=config.EMBED_MAX_RETRIES,
                 )
     return _EMBEDDINGS
 
@@ -93,6 +97,8 @@ def get_vision_llm(temperature: float = 0.1, max_tokens: int | None = None) -> C
                 model=config.VISION_MODEL,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                request_timeout=config.LLM_TIMEOUT,
+                max_retries=config.LLM_MAX_RETRIES,
             )
             _VISION_CACHE[key] = llm
     return llm

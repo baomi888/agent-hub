@@ -24,7 +24,7 @@ import re
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.schemas import KBQueryResponse
@@ -39,6 +39,9 @@ from kb.rag_core import describe_api_error, load_document
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
 MAX_UPLOAD_MB = 100
+# 代理下载上限：与 Agent 工具通道（kb.importer）保持一致，防大文件 OOM
+_DOWNLOAD_MAX_MB = 200
+_DOWNLOAD_CHUNK = 256 * 1024
 
 
 def _must_own(uid: str, kb_id: str) -> None:
@@ -465,13 +468,31 @@ async def import_batch_urls(kb_id: str, req: ImportBatchRequest, uid: str = Depe
     return {"total": len(results), "ok": ok_count, "failed": len(results) - ok_count, "details": results}
 
 
+async def _close_download(client, resp) -> None:
+    """关掉下载用的流式响应与客户端；任一为 None 都安全，异常也不外抛。"""
+    if resp is not None:
+        try:
+            await resp.aclose()
+        except Exception:
+            pass
+    try:
+        await client.aclose()
+    except Exception:
+        pass
+
+
 @router.get("/download")
 async def download_remote(url: str, uid: str = Depends(get_current_user)) -> Response:
-    """把远程文档文件代理下载到浏览器（作为附件保存到本机）。"""
+    """把远程文档文件代理下载到浏览器（作为附件保存到本机）。
+
+    流式转发：旧实现 `Response(content=resp.content)` 会把整个文件先读进内存再吐给
+    浏览器，一个 ISO 级文件就能把进程打爆。这里改成边收边发（256KB 一块），
+    并加 200MB 上限（优先看 Content-Length，缺失时在流式过程中兜底拦截）。
+    """
     import httpx
+    from urllib.parse import quote, unquote, urljoin
 
     await asyncio.to_thread(quota.hit, uid)
-    from urllib.parse import quote, unquote
 
     if not url.lower().startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="仅支持 http/https 链接")
@@ -485,27 +506,38 @@ async def download_remote(url: str, uid: str = Depends(get_current_user)) -> Res
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                       "(KHTML, like Gecko) Chrome/124.0 Agent/1.0",
     }
+    # 不用 async with：流式响应要在函数返回后才消费，客户端必须活到生成器结束
+    client = httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=300.0), follow_redirects=False)
+    resp = None
     try:
         # follow_redirects=False：跳一次就要重新校验一次，否则公网链接
         # 302 到 169.254.169.254 就能绕开上面那道检查
-        async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
-            resp = await client.get(url, headers=headers)
-            if resp.status_code in (301, 302, 303, 307, 308):
-                loc = resp.headers.get("location")
-                if loc:
-                    from urllib.parse import urljoin
-
-                    nxt = urljoin(url, loc)
-                    try:
-                        assert_safe_url(nxt)
-                    except ValueError as e:
-                        raise HTTPException(status_code=400, detail=str(e))
-                    resp = await client.get(nxt, headers=headers)
-            resp.raise_for_status()
+        req = client.build_request("GET", url, headers=headers)
+        resp = await client.send(req, stream=True)
+        if resp.status_code in (301, 302, 303, 307, 308):
+            loc = resp.headers.get("location")
+            await resp.aclose()
+            if loc:
+                nxt = urljoin(url, loc)
+                try:
+                    assert_safe_url(nxt)
+                except ValueError as e:
+                    raise HTTPException(status_code=400, detail=str(e))
+                req = client.build_request("GET", nxt, headers=headers)
+                resp = await client.send(req, stream=True)
+        resp.raise_for_status()
     except HTTPException:
+        await _close_download(client, resp)
         raise
     except Exception:
+        await _close_download(client, resp)
         raise HTTPException(status_code=500, detail="下载失败：无法访问该链接或网络异常。")
+
+    # 先看 Content-Length，超限直接拒（能拿到时是最干净的一刀）
+    cl = resp.headers.get("content-length")
+    if cl and cl.isdigit() and int(cl) > _DOWNLOAD_MAX_MB * 1024 * 1024:
+        await _close_download(client, resp)
+        raise HTTPException(status_code=413, detail=f"文件超过 {_DOWNLOAD_MAX_MB}MB 上限，已拒绝下载")
 
     # 文件名：优先 Content-Disposition，其次 URL 路径
     cd = resp.headers.get("content-disposition", "")
@@ -515,8 +547,21 @@ async def download_remote(url: str, uid: str = Depends(get_current_user)) -> Res
         filename = os.path.basename(url.split("?")[0].split("#")[0]) or "download"
     content_type = resp.headers.get("content-type", "application/octet-stream").split(";")[0].strip()
 
-    return Response(
-        content=resp.content,
+    async def _body():
+        total = 0
+        try:
+            async for chunk in resp.aiter_bytes(chunk_size=_DOWNLOAD_CHUNK):
+                total += len(chunk)
+                # 兜底：Content-Length 缺失或说谎时，在流式中途拦截（响应头已发，
+                # 只能中断连接，浏览器会看到下载失败，好过悄悄给一个截断的文件）
+                if total > _DOWNLOAD_MAX_MB * 1024 * 1024:
+                    raise ValueError(f"文件超过 {_DOWNLOAD_MAX_MB}MB 上限，下载已中止")
+                yield chunk
+        finally:
+            await _close_download(client, resp)
+
+    return StreamingResponse(
+        _body(),
         media_type=content_type or "application/octet-stream",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
     )

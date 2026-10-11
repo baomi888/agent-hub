@@ -11,6 +11,12 @@
 
 ## [2026-10-11]
 
+### 修复（超时与下载收口）
+- LLM / 视觉 / Embedding 客户端补 `request_timeout` 与 `max_retries`（新增 `LLM_TIMEOUT`、
+  `LLM_MAX_RETRIES`、`EMBED_TIMEOUT`、`EMBED_MAX_RETRIES`），消除单次请求无限挂起的隐患。
+- `/api/kb/download` 由「整包读内存」改为**流式转发**（256KB 一块）+ 200MB 上限
+  （优先按 `Content-Length` 拒收，缺失时流式兜底拦截），与 Agent 工具通道下载对齐。
+
 ### 性能（后端第二轮 · 第一/第二梯队）
 - **第一梯队**：SQLite 连接按线程复用、归属校验并入 JOIN、历史查询尾部 LIMIT、
   LLM/Embedding 客户端记忆化、查询向量独立缓存 + 按向量检索 + `count` 合并。`0a2d72e`

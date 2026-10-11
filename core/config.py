@@ -51,6 +51,16 @@ EMBED_BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", "10"))
 # 调太高会撞服务端限流（429），一般 3~4 足够；1 = 退回串行。
 EMBED_CONCURRENCY = int(os.getenv("EMBED_CONCURRENCY", "4"))
 
+# ---------- 网络超时与重试（防单次请求无限挂起）----------
+# 单次 LLM 请求的超时秒数。流式下这是「字节间隔」超时：只要还在出字就不会触发，
+# 只有整段卡死（服务端长时间不吐字节）才中断。默认 60s 够宽松，不会误杀长回答。
+LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT", "60"))
+# 失败自动重试次数（含 429 / 5xx / 超时）。重试会重复计费，别调太大。
+LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "2"))
+# 向量化请求超时：embedding 是批量小请求，短超时即可。
+EMBED_TIMEOUT = float(os.getenv("EMBED_TIMEOUT", "30"))
+EMBED_MAX_RETRIES = int(os.getenv("EMBED_MAX_RETRIES", "2"))
+
 # ---------- 检索策略（候选池 → 离群过滤 → 多样性挑选）----------
 # 先多取几倍候选再挑，否则 top_k 名额会被相邻重复切片占满
 RETRIEVE_FETCH_MULT = int(os.getenv("RETRIEVE_FETCH_MULT", "3"))
