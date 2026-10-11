@@ -342,6 +342,17 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
     async def event_generator() -> None:
         refs_md = ""
 
+        # 标题只依赖用户问题（提示词里答案根本没用到），所以一开始就和答案流式
+        # 生成并行跑：收尾时它多半已经算完，省掉原来在 done 之前干等的一次
+        # LLM 往返（约 1~2s）。错误/中断提前 return 时结果丢弃，标题保持默认。
+        title_task: asyncio.Task | None = None
+        if should_gen_title:
+            title_task = asyncio.create_task(
+                asyncio.to_thread(_generate_title, req.question)
+            )
+            _BG_TASKS.add(title_task)
+            title_task.add_done_callback(_BG_TASKS.discard)
+
         # ---- 0. 图片理解模式：有图片附件时用视觉模型直接回答 ----
         if _has_image(req.attachments):
             yield _sse("status", {"text": "图片理解模式，正在分析图片..."})
@@ -392,17 +403,12 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 return
             acc_text = acc.text
 
-            # 收尾
+            # 收尾：标题并行任务多半已完成，这里 await 基本零等待
             msg_id = store.add_message(uid, req.sid, "assistant", acc_text, refs=refs_md)
-            gen_title = ""
-            if should_gen_title and acc_text:
-                try:
-                    gen_title = await asyncio.to_thread(_generate_title, req.question, acc_text)
-                    if gen_title:
-                        store.rename_conversation(uid, req.sid, gen_title)
-                        yield _sse("title", {"title": gen_title})
-                except Exception:
-                    pass
+            gen_title = await _take_title(title_task, acc_text)
+            if gen_title:
+                store.rename_conversation(uid, req.sid, gen_title)
+                yield _sse("title", {"title": gen_title})
             # message_id 回给前端：赞踩要按消息 id 落库，前端自己生成的 uid 后端不认
             yield _sse("done", {
                 "answer": acc_text,
@@ -573,18 +579,13 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 return
             acc_text = acc.text
 
-        # ---- 收尾：存 assistant 消息 + 生成标题 ----
+        # ---- 收尾：存 assistant 消息 + 取回并行生成的标题 ----
         msg_id = store.add_message(uid, req.sid, "assistant", acc_text, refs=refs_md)
 
-        gen_title = ""
-        if should_gen_title and acc_text:
-            try:
-                gen_title = await asyncio.to_thread(_generate_title, req.question, acc_text)
-                if gen_title:
-                    store.rename_conversation(uid, req.sid, gen_title)
-                    yield _sse("title", {"title": gen_title})
-            except Exception:
-                pass
+        gen_title = await _take_title(title_task, acc_text)
+        if gen_title:
+            store.rename_conversation(uid, req.sid, gen_title)
+            yield _sse("title", {"title": gen_title})
 
         # message_id 回给前端：赞踩要按消息 id 落库，前端自己生成的 uid 后端不认
         yield _sse("done", {
@@ -638,7 +639,13 @@ def _build_messages(
     return messages
 
 
-def _generate_title(question: str, answer: str) -> str:
+def _generate_title(question: str) -> str:
+    """用用户问题生成一个 ≤15 字的会话标题。
+
+    只看问题、不看答案：提示词里本来就没用到答案。去掉答案参数后，标题生成
+    就能和答案流式生成**并行**跑（见 chat_stream 里的 title_task），
+    收尾时基本零等待，不必再在 done 之前干等一次 LLM 往返。
+    """
     llm = get_llm(temperature=0)
     try:
         resp = llm.invoke([HumanMessage(content=f"请为以下对话生成简短中文标题（≤15字），直接输出：用户提问：{question}")])
@@ -648,3 +655,18 @@ def _generate_title(question: str, answer: str) -> str:
         return title or question[:15]
     except Exception:
         return question[:15] if len(question) > 15 else question
+
+
+async def _take_title(task: "asyncio.Task | None", acc_text: str) -> str:
+    """取回并行生成的标题；无任务 / 无答案 / 失败都返回空串。"""
+    if task is None or not acc_text:
+        return ""
+    try:
+        return await task
+    except Exception:
+        return ""
+
+
+# 后台任务强引用：任务完成前被 GC 会报 "Task was destroyed but it is pending"。
+# 完成后自动移除，避免集合无限增长。
+_BG_TASKS: set = set()
