@@ -15,17 +15,20 @@ from core import config
 
 # ---------- 大模型（DeepSeek Chat）----------
 
-def get_llm(temperature: float = 0.1) -> ChatOpenAI:
+def get_llm(temperature: float = 0.1, max_tokens: int | None = None) -> ChatOpenAI:
     """返回 DeepSeek Chat 客户端（OpenAI 兼容）。
 
     Args:
         temperature: 生成温度，RAG 场景建议 0.1，Agent 场景可调高
+        max_tokens: 单次回答的 token 上限。不传时用平台默认；
+            传了就给回答长度兜底，防止失控长文烧 token
     """
     return ChatOpenAI(
         api_key=config.DEEPSEEK_API_KEY,
         base_url=config.DEEPSEEK_BASE_URL,
         model=config.DEEPSEEK_MODEL,
         temperature=temperature,
+        max_tokens=max_tokens,
     )
 
 
@@ -47,7 +50,7 @@ def get_embeddings() -> OpenAIEmbeddings:
 
 # ---------- 视觉多模态模型（阿里百炼 qwen-vl-plus）----------
 
-def get_vision_llm(temperature: float = 0.1) -> ChatOpenAI:
+def get_vision_llm(temperature: float = 0.1, max_tokens: int | None = None) -> ChatOpenAI:
     """返回视觉多模态模型客户端，用于图片理解。
 
     使用阿里百炼 qwen-vl-plus（OpenAI 兼容接口），支持传入图片 content。
@@ -57,4 +60,5 @@ def get_vision_llm(temperature: float = 0.1) -> ChatOpenAI:
         base_url=config.VISION_BASE_URL,
         model=config.VISION_MODEL,
         temperature=temperature,
+        max_tokens=max_tokens,
     )

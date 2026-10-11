@@ -45,6 +45,8 @@ CHAT_UPLOAD_DIR = os.path.join(config.DATA_DIR, "chat_uploads")
 # 附件限制：视觉模型只吃图片，单张 20MB / 单次 9 张足够，超了直接拒
 MAX_CHAT_UPLOAD_MB = 20
 MAX_CHAT_FILES = 9
+# 只收这些扩展名的图片：视觉模型只消费图片，别的格式传进来也是白传（还占磁盘）
+_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 # 上传件保留时长：图片理解完就不需要了，超时自动清，避免目录无限增长
 UPLOAD_TTL_HOURS = 24
 
@@ -107,17 +109,26 @@ def _cleanup_old_uploads() -> None:
 async def upload_attachments(files: list[UploadFile] = File(...)) -> dict:
     """上传聊天附件（图片），返回服务端路径供图片理解使用。
 
-    只有图片会被视觉模型消费；其他格式即使上传成功也不会参与回答。
+    只收图片；其他格式即使上传成功也不会参与回答，直接拒绝省磁盘省流量。
     """
     if len(files) > MAX_CHAT_FILES:
         raise HTTPException(status_code=400, detail=f"一次最多上传 {MAX_CHAT_FILES} 个附件")
+
+    # 整批先校验再落盘：有一张不合格就整个拒绝，
+    # 否则前面几张写好了、后面报错，会留下一半的孤儿文件
+    rejected = [f.filename for f in files if not _is_supported_image(f.filename, f.content_type)]
+    if rejected:
+        raise HTTPException(
+            status_code=400,
+            detail=f"仅支持图片附件（jpg/jpeg/png/gif/webp/bmp），已拒绝：{rejected[0]}",
+        )
 
     os.makedirs(CHAT_UPLOAD_DIR, exist_ok=True)
     _cleanup_old_uploads()
 
     results = []
     for f in files:
-        ext = os.path.splitext(f.filename or "")[1] or ".bin"
+        ext = os.path.splitext(f.filename or "")[1].lower() or ".jpg"
         safe_name = f"{uuid.uuid4().hex}{ext}"
         path = os.path.join(CHAT_UPLOAD_DIR, safe_name)
         # 分块写盘：以前是 await f.read() 整份读进内存再判大小，
@@ -132,6 +143,16 @@ async def upload_attachments(files: list[UploadFile] = File(...)) -> dict:
     return {"files": results}
 
 
+def _is_supported_image(filename: str | None, content_type: str | None) -> bool:
+    """扩展名 + content-type 双保险判断是否为可接受的图片。"""
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext not in _IMAGE_EXTS:
+        return False
+    if content_type:
+        return content_type.lower().startswith("image/")
+    return True
+
+
 # ==================== 图片理解辅助 ====================
 
 def _has_image(attachments: list[dict]) -> bool:
@@ -143,13 +164,52 @@ def _has_image(attachments: list[dict]) -> bool:
     return False
 
 
+def _resolve_upload_path(path: str) -> str | None:
+    """只允许读取聊天上传目录内的文件。
+
+    attachments[].path 完全由客户端提供，直接 open() 等于开放任意本地文件读取
+    （甚至可以把 .env / sessions.db 喂给第三方视觉模型）。上传时返回的 path
+    都在 CHAT_UPLOAD_DIR 下，realpath 前缀校验足以挡住目录穿越。
+    """
+    try:
+        root = os.path.realpath(CHAT_UPLOAD_DIR)
+        real = os.path.realpath(path)
+        if real == root or real.startswith(root + os.sep):
+            return real
+    except (TypeError, ValueError, OSError):
+        return None
+    return None
+
+
 def _image_to_data_url(path: str) -> str:
-    """把本地图片转为 base64 data URL（供视觉模型读取）。"""
+    """把本地图片转为 base64 data URL（供视觉模型读取）。
+
+    大图先压到长边 1024 再编码：20MB 原图直接 base64 发 qwen-vl-plus
+    既慢又易被拒收。Pillow 不可用时退回原图，不引入硬依赖。
+    """
+    data, mime = _load_image_bytes(path)
+    return f"data:{mime};base64,{base64.b64encode(data).decode()}"
+
+
+def _load_image_bytes(path: str) -> tuple[bytes, str]:
+    """读取图片字节；Pillow 可用时压缩（长边 ≤1024，JPEG q85）。"""
+    try:
+        import io
+
+        from PIL import Image
+
+        with Image.open(path) as im:
+            if im.mode in ("RGBA", "P", "LA"):
+                im = im.convert("RGB")
+            im.thumbnail((1024, 1024))
+            buf = io.BytesIO()
+            im.save(buf, format="JPEG", quality=85)
+            return buf.getvalue(), "image/jpeg"
+    except Exception:
+        pass
     mime, _ = mimetypes.guess_type(path)
-    mime = mime or "image/png"
     with open(path, "rb") as f:
-        b64 = base64.b64encode(f.read()).decode()
-    return f"data:{mime};base64,{b64}"
+        return f.read(), mime or "image/png"
 
 
 def _build_vision_user_message(question: str, attachments: list[dict]) -> HumanMessage:
@@ -160,11 +220,12 @@ def _build_vision_user_message(question: str, attachments: list[dict]) -> HumanM
         if not t.startswith("image/"):
             continue
         path = a.get("path")
-        if not path or not os.path.exists(path):
+        resolved = _resolve_upload_path(path) if isinstance(path, str) else None
+        if not resolved or not os.path.exists(resolved):
             continue
         content.append({
             "type": "image_url",
-            "image_url": {"url": _image_to_data_url(path)},
+            "image_url": {"url": _image_to_data_url(resolved)},
         })
     return HumanMessage(content=content)
 
@@ -213,11 +274,12 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
     # 限流 + 每日问答额度。放在 event_generator 外面是对的：
     # 流一旦开始，响应头（200）就发出去了，那时候再想回 429 已经来不及，
     # 只会变成一条断掉的 SSE 流，前端读不出任何提示。
-    await asyncio.to_thread(quota.consume, uid, "ask")
-
+    # 先验会话再扣费：无效请求（会话不存在）不该消耗每日问答额度
     conv = store.get_conversation(uid, req.sid)
     if not conv:
         raise HTTPException(status_code=404, detail=f"会话不存在：{req.sid}")
+
+    await asyncio.to_thread(quota.consume, uid, "ask")
 
     kb_id = req.kb_id_override or conv.get("kb_id")
     # 前端可以塞任意 kb_id（kb_id_override），这里必须认一次主。
@@ -256,7 +318,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 try:
                     from agent.tools import reverse_geocode_city
 
-                    rg = reverse_geocode_city(flat, flon)
+                    rg = await asyncio.to_thread(reverse_geocode_city, flat, flon)
                     city = rg.strip() if isinstance(rg, str) else ""
                 except Exception:
                     city = ""
@@ -292,7 +354,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                         )
                         vision_question = f"【参考资料】\n{references}\n\n【用户问题】\n{req.question}"
                 except Exception:
-                    pass
+                    yield _sse("status", {"text": "知识库检索失败，已仅按图片作答"})
 
             history = store.get_messages(uid, req.sid, include_system=False)[:-1]
             messages = [SystemMessage(content="你是一个能理解图片的 AI 助手。请结合图片内容用中文简洁作答。")]
@@ -305,7 +367,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
 
             acc = _Acc()
             try:
-                async for frame in _stream_llm(get_vision_llm(), messages, request, acc):
+                async for frame in _stream_llm(get_vision_llm(max_tokens=2048), messages, request, acc):
                     yield frame
             except Exception as e:
                 yield _sse("error", {"detail": describe_api_error(e)})
@@ -357,11 +419,16 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 # LangGraph checkpoint thread_id = 会话 id，天然多轮记忆。
                 # owner_id / kb_id 一并注入：工具内部只认这里的值，
                 # 模型在参数里怎么编 kb_id 都影响不到真实检索目标。
-                config_ = {"configurable": {
-                    "thread_id": req.sid,
-                    "owner_id": uid,
-                    "kb_id": kb_id if (kb_id and kb_exists) else None,
-                }}
+                # recursion_limit 兜底：工具返回"不可用"时模型反复重试是纯烧钱，
+                # 硬限制整轮的工具步数（LLM 往返 + 工具执行都占步数）
+                config_ = {
+                    "recursion_limit": 10,
+                    "configurable": {
+                        "thread_id": req.sid,
+                        "owner_id": uid,
+                        "kb_id": kb_id if (kb_id and kb_exists) else None,
+                    },
+                }
                 full_text = ""
 
                 # stream_mode=["updates","messages"] 事件为 (mode字符串, payload)
@@ -450,7 +517,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
 
             acc = _Acc()
             try:
-                async for frame in _stream_llm(get_llm(), messages, request, acc):
+                async for frame in _stream_llm(get_llm(max_tokens=2048), messages, request, acc):
                     yield frame
             except Exception as e:
                 yield _sse("error", {"detail": describe_api_error(e)})
@@ -473,7 +540,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
 
             acc = _Acc()
             try:
-                async for frame in _stream_llm(get_llm(), messages, request, acc):
+                async for frame in _stream_llm(get_llm(max_tokens=2048), messages, request, acc):
                     yield frame
             except Exception as e:
                 yield _sse("error", {"detail": describe_api_error(e)})

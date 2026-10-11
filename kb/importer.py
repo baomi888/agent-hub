@@ -85,6 +85,9 @@ def import_url(owner: str, kb_id: str, url: str, chunk_size: int = 500, chunk_ov
     # 但 embedding + add_documents + 改文件清单必须和同库的入库 / 重建 / 删除互斥
     with pipelines.kb_lock(kb_id):
         pipe = pipelines.get_or_create(owner, kb_id)
+        # 去重：同名来源已入库时跳过，避免重复切片 + 重复付 embedding 费
+        if pipe.get_source_chunks(name):
+            return {"url": url, "title": title, "chunks": 0, "file": name, "skipped": True}
         docs = load_document(dest, source_name=name)
         chunks = split_documents(docs, chunk_size, chunk_overlap)
         if not chunks:
@@ -186,6 +189,8 @@ def search_preview(keyword: str, max_results: int = 10) -> list[dict]:
 _DOWNLOAD_EXTS = {".pdf", ".doc", ".docx", ".txt", ".md", ".pptx", ".xlsx",
                   ".apk", ".zip", ".exe", ".dmg", ".msi", ".iso"}
 
+_MAX_DOWNLOAD_MB = 200  # 下载大小上限：防 OOM，超限删半成品
+
 _CONTENT_TYPE_EXT = {
     "application/pdf": ".pdf",
     "application/msword": ".doc",
@@ -227,10 +232,24 @@ def download_file(url: str, save_dir: str | None = None) -> dict:
         path = os.path.join(save_dir, f"{os.path.splitext(stem)[0]}_{n}{ext}")
         n += 1
 
-    with open(path, "wb") as f:
-        f.write(resp.content)
+    # 流式写盘：resp.content 会把整个文件读进内存（ISO 级文件直接 OOM），
+    # 分块写 + 累计大小上限，超限删掉半成品再报错
+    size = 0
+    try:
+        with open(path, "wb") as f:
+            for chunk in resp.iter_bytes(chunk_size=256 * 1024):
+                size += len(chunk)
+                if size > _MAX_DOWNLOAD_MB * 1024 * 1024:
+                    raise ValueError(f"文件超过 {_MAX_DOWNLOAD_MB}MB 上限，下载已中止")
+                f.write(chunk)
+    except ValueError:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        raise
     return {"url": url, "filename": os.path.basename(path), "path": path,
-            "ext": ext, "size": len(resp.content)}
+            "ext": ext, "size": size}
 
 
 def download_and_index(owner: str, kb_id: str, url: str, chunk_size: int = 500, chunk_overlap: int = 50) -> dict:
@@ -250,11 +269,16 @@ def download_and_index(owner: str, kb_id: str, url: str, chunk_size: int = 500, 
         out.write(Path(info["path"]).read_bytes())
 
     with pipelines.kb_lock(kb_id):
+        pipe = pipelines.get_or_create(owner, kb_id)
+        # 去重：同名来源已入库时跳过，不再重复切片与 embedding
+        if pipe.get_source_chunks(info["filename"]):
+            info["chunks"] = 0
+            info["skipped"] = True
+            return info
         docs = load_document(dest, source_name=info["filename"])
         chunks = split_documents(docs, chunk_size, chunk_overlap)
         if not chunks:
             raise ValueError("文档内容切片为空，无法入库")
-        pipe = pipelines.get_or_create(owner, kb_id)
         # 同 import_url：空库入库走 add_chunks，不能用 get_or_open()
         pipe.add_chunks(chunks)
         info["chunks"] = len(chunks)

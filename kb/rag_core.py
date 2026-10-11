@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import re
 import threading
+from collections import OrderedDict
 
 import chromadb
 from langchain_chroma import Chroma
@@ -198,6 +199,43 @@ def select_diverse(docs_scores, top_k: int, lambda_mult: float | None = None) ->
     return [cands[i] for i in order]
 
 
+# ==================== 检索结果缓存 ====================
+# 相同 (库, 问题, top_k) 在知识库内容不变时结果确定，直接复用能跳过
+# 重复的 embedding + 向量查询——省的是真实 API 费用和用户等待时间。
+# 知识库内容变更（导入/删除/重建）必须清掉对应库的缓存，见 _cache_invalidate。
+
+_RETRIEVE_CACHE: OrderedDict[tuple, list] = OrderedDict()
+_RETRIEVE_CACHE_MAX = 200
+_RETRIEVE_CACHE_LOCK = threading.Lock()
+
+
+def _cache_invalidate(collection_name: str) -> None:
+    """知识库内容变更后清掉该库的检索缓存，避免读到旧片段。"""
+    with _RETRIEVE_CACHE_LOCK:
+        for key in [k for k in _RETRIEVE_CACHE if k[0] == collection_name]:
+            _RETRIEVE_CACHE.pop(key, None)
+
+
+def _cache_get(collection_name: str, question: str, top_k: int):
+    """命中返回结果的浅拷贝，防止调用方误改污染缓存。"""
+    key = (collection_name, question, top_k)
+    with _RETRIEVE_CACHE_LOCK:
+        hit = _RETRIEVE_CACHE.get(key)
+        if hit is not None:
+            _RETRIEVE_CACHE.move_to_end(key)
+            return list(hit)
+    return None
+
+
+def _cache_set(collection_name: str, question: str, top_k: int, result) -> None:
+    key = (collection_name, question, top_k)
+    with _RETRIEVE_CACHE_LOCK:
+        _RETRIEVE_CACHE[key] = list(result)
+        _RETRIEVE_CACHE.move_to_end(key)
+        while len(_RETRIEVE_CACHE) > _RETRIEVE_CACHE_MAX:
+            _RETRIEVE_CACHE.popitem(last=False)
+
+
 # ==================== 文档加载 ====================
 
 def load_document(file_path: str, source_name: str | None = None):
@@ -297,6 +335,7 @@ class RagPipeline:
         # 分批入库，避免超出 Embedding 接口单次批量限制（百炼为 10）
         for i in range(0, len(chunks), config.EMBED_BATCH_SIZE):
             vs.add_documents(chunks[i : i + config.EMBED_BATCH_SIZE])
+        _cache_invalidate(self.collection_name)
         return len(chunks)
 
     def build_index(
@@ -345,6 +384,7 @@ class RagPipeline:
             vs.add_documents(chunks[i : i + config.EMBED_BATCH_SIZE])
 
         self._params = (chunk_size, chunk_overlap)
+        _cache_invalidate(self.collection_name)
         return len(chunks)
 
     def delete_by_source(self, source: str) -> int:
@@ -361,6 +401,7 @@ class RagPipeline:
         if not ids:
             return 0
         self._vs._collection.delete(ids=ids)
+        _cache_invalidate(self.collection_name)
         return len(ids)
 
     def get_source_chunks(self, source: str) -> list[dict]:
@@ -429,6 +470,7 @@ class RagPipeline:
             chroma_client().delete_collection(self.collection_name)
         except Exception:
             pass
+        _cache_invalidate(self.collection_name)
         self._vs = None
         self._params = None
 
@@ -448,7 +490,12 @@ class RagPipeline:
 
         不是直接取 top-k：先多捞几倍候选（默认 3 倍），丢掉明显不相关的，
         再用 MMR 去掉互相重复的，最后截到 top_k。详见 select_diverse。
+        相同 (问题, top_k) 的检索结果按库缓存，命中时省掉一次 embedding + 向量查询。
         """
+        cached = _cache_get(self.collection_name, question, top_k)
+        if cached is not None:
+            return cached
+
         if not self._vs:
             # 尝试从磁盘打开
             self.get_or_open()
@@ -458,12 +505,15 @@ class RagPipeline:
         mult = config.RETRIEVE_FETCH_MULT
         if top_k <= 1 or mult <= 1:
             # 只要一条（或关掉了候选池）时，多捞没有意义
-            return self._vs.similarity_search_with_score(question, k=top_k)
+            result = self._vs.similarity_search_with_score(question, k=top_k)
+        else:
+            total = self.count()
+            fetch_k = max(top_k * mult, top_k + 6, config.RETRIEVE_MIN_FETCH)
+            cands = self._vs.similarity_search_with_score(question, k=min(fetch_k, total))
+            result = select_diverse(cands, top_k)
 
-        total = self.count()
-        fetch_k = max(top_k * mult, top_k + 6, config.RETRIEVE_MIN_FETCH)
-        cands = self._vs.similarity_search_with_score(question, k=min(fetch_k, total))
-        return select_diverse(cands, top_k)
+        _cache_set(self.collection_name, question, top_k, result)
+        return result
 
     @staticmethod
     def build_sources(docs_scores) -> list[dict]:

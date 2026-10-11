@@ -66,6 +66,7 @@ frontend/_unused-public/
 node_modules/
 .next/
 out/
+.npm-cache/
 
 # ================= 历史方案 / 探索原型（不进产品仓库）=================
 baomi-agent/

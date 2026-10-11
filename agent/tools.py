@@ -157,6 +157,8 @@ def web_search(query: str, max_results: int = 5) -> str:
 _CALC_ALLOWED = set("0123456789+-*/%()., **")  # 白名单字符
 _CALC_MAX_LEN = 64          # 表达式长度上限
 _CALC_MAX_DIGITS = 12       # 单个数字字面量的最大位数
+_CALC_MAX_EXPONENT = 10000  # ** 右侧指数上限：2**999999999999 会 OOM
+_CALC_MAX_RESULT_BITS = 14000  # ≈4215 位十进制；低于 Python 3.11+ int→str 的 4300 位硬限制
 
 
 @tool
@@ -185,10 +187,20 @@ def calculator(expression: str) -> str:
     # 超大字面量同样会把内存吃光
     if any(len(n) > _CALC_MAX_DIGITS for n in re.findall(r"\d+", expr)):
         return f"数字过大（单个数字不能超过 {_CALC_MAX_DIGITS} 位）。"
+    # 指数上限：12 位字面量 + ** 组合（如 2**999999999999）会让 eval
+    # 试图生成约 10^12 位的整数直接 OOM，白名单和字面量检查都挡不住它
+    for exp_part in re.findall(r"\*\*\s*(\d+)", expr):
+        if int(exp_part) > _CALC_MAX_EXPONENT:
+            return f"指数过大（不能超过 {_CALC_MAX_EXPONENT}），请分步计算。"
 
     try:
         # 用 eval 但在受限 __builtins__ 下执行，防止注入
         result = eval(expr, {"__builtins__": {}}, {})
+        # 结果位数守卫：999999999999**10000 这类字面量组合合法但会算出
+        # 几十万位的整数，展示不了也没意义。用 bit_length 估算位数——
+        # len(str(int)) 在 Python 3.11+ 超过 4300 位会直接抛 ValueError
+        if isinstance(result, int) and result.bit_length() > _CALC_MAX_RESULT_BITS:
+            return "结果过大，无法展示，请拆分计算。"
         # 格式化：大数加千分位，浮点数保留 4 位小数
         if isinstance(result, float):
             result = round(result, 4)

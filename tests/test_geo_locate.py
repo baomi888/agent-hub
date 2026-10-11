@@ -20,14 +20,16 @@ from core import config
 
 # ---------- 1. 纯函数：公网 IP 判定 ----------
 cases = [
-    ("203.0.113.25", True),       # 示例公网 IP（RFC 5737 TEST-NET-3，仅作演示）
+    # TEST-NET-1/2/3（RFC 5737 文档段）在 Python 3.10+ 归入 is_private，
+    # 永远不会是真实用户 IP，判非公网直接跳过 AMAP 查询是预期行为
+    ("203.0.113.25", False),
     ("114.114.114.114", True),    # 南京 DNS
     ("223.5.5.5", True),          # 阿里 DNS
     ("127.0.0.1", False),
     ("192.168.1.5", False),
     ("172.16.0.10", False),       # 示例内网 IP（RFC 1918 私有段）
     ("10.0.0.1", False),
-    ("198.51.100.7", False),       # TEST-NET-2，ipaddress 判为 reserved
+    ("198.51.100.7", False),      # TEST-NET-2，同样是文档段
     ("::1", False),
     ("不是IP", False),
 ]

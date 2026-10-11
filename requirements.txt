@@ -27,6 +27,8 @@ chromadb==0.5.23
 fastapi>=0.115
 uvicorn[standard]>=0.30
 sse-starlette>=2.0
+# FastAPI 的 File/Form 上传（api/kb.py 等）必需；fastapi 本身不自带
+python-multipart>=0.0.7
 
 # ---------- 文档加载 ----------
 pypdf>=4.0
@@ -45,3 +47,6 @@ langgraph-checkpoint-sqlite>=3.1
 # ---------- 工具库 ----------
 python-dotenv>=1.0
 pydantic>=2.0
+
+# ---------- 图片处理（聊天附件压缩；缺失时自动降级原图，不硬依赖）----------
+pillow>=10.0

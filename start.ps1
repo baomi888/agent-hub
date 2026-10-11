@@ -11,6 +11,10 @@ $FRONTEND_PORT = 3000
 $BACKEND_URL = "http://localhost:$BACKEND_PORT"
 $FRONTEND_URL = "http://localhost:$FRONTEND_PORT"
 
+# 优先用项目自带虚拟环境，避免 PATH 里找不到 / 版本不符的 Python
+$PYTHON = Join-Path $ROOT ".venv\Scripts\python.exe"
+if (-not (Test-Path $PYTHON)) { $PYTHON = "python" }
+
 function Write-Step($msg) { Write-Host "[*] $msg" -ForegroundColor Cyan }
 function Write-Ok($msg)   { Write-Host "[OK] $msg" -ForegroundColor Green }
 function Write-Warn($msg) { Write-Host "[!] $msg" -ForegroundColor Yellow }
@@ -23,20 +27,20 @@ Write-Host "============================================" -ForegroundColor Magen
 Write-Host ""
 
 # ============ 1. 检查 Python ============
-$pyCheck = python --version 2>&1
+$pyCheck = & $PYTHON --version 2>&1
 if ($LASTEXITCODE -ne 0) {
-    Write-Err "未检测到 Python，请先安装 Python 3.10+"
+    Write-Err "未检测到 Python，请先安装 Python 3.10+（或先执行 python -m virtualenv .venv）"
     Read-Host "按回车键退出"
     exit 1
 }
 Write-Ok "Python: $pyCheck"
 
 # ============ 2. 检查后端依赖，缺失则自动安装 ============
-python -c "import uvicorn" 2>$null
+& $PYTHON -c "import uvicorn" 2>$null
 if ($LASTEXITCODE -ne 0) {
     Write-Step "后端依赖未安装，正在执行 pip install -r requirements.txt ..."
     Push-Location $ROOT
-    python -m pip install -r requirements.txt
+    & $PYTHON -m pip install -r requirements.txt
     $pipOk = $LASTEXITCODE
     Pop-Location
     if ($pipOk -ne 0) {
@@ -76,13 +80,13 @@ Write-Step "启动后端服务  uvicorn main:app --port $BACKEND_PORT"
 # chcp 65001 + PYTHONUTF8=1：强制新窗口用 UTF-8 代码页，避免 Python 中文日志在终端显示乱码
 # 注意：set 必须用引号包住 "VAR=1"，否则 && 前的空格会存进变量值（PYTHONUTF8 变 "1 " 会导致 Python 启动失败）
 # PYTHONDONTWRITEBYTECODE=1 避免在受限环境下写 .pyc 导致启动失败
-$backendCmd = "chcp 65001 >nul && cd /d `"$ROOT`" && set `"PYTHONDONTWRITEBYTECODE=1`" && set `"PYTHONUTF8=1`" && set `"PYTHONIOENCODING=utf-8`" && python -m uvicorn main:app --host 0.0.0.0 --port $BACKEND_PORT --reload"
-Start-Process cmd -ArgumentList "/k", $backendCmd -WindowStyle Normal
+$backendCmd = "chcp 65001 >nul && cd /d `"$ROOT`" && set `"PYTHONDONTWRITEBYTECODE=1`" && set `"PYTHONUTF8=1`" && set `"PYTHONIOENCODING=utf-8`" && `"$PYTHON`" -m uvicorn main:app --host 0.0.0.0 --port $BACKEND_PORT --reload"
+Start-Process "$env:SystemRoot\System32\cmd.exe" -ArgumentList "/k", $backendCmd -WindowStyle Normal
 
 # ============ 6. 启动前端（独立窗口） ============
 Write-Step "启动前端服务  next dev --port $FRONTEND_PORT"
 $frontendCmd = "chcp 65001 >nul && cd /d `"$FRONTEND`" && npx next dev -p $FRONTEND_PORT"
-Start-Process cmd -ArgumentList "/k", $frontendCmd -WindowStyle Normal
+Start-Process "$env:SystemRoot\System32\cmd.exe" -ArgumentList "/k", $frontendCmd -WindowStyle Normal
 
 # ============ 7. 等待就绪并打开浏览器 ============
 Write-Host ""

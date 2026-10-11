@@ -1,7 +1,9 @@
 @echo off
-REM 集合式 Agent 一键启动入口
-REM 双击此文件即可启动前后端服务
-REM 实际逻辑在 start.ps1 中（PowerShell，避免编码与执行策略问题）
-
+REM === One-click launcher (ASCII only) ===
 cd /d "%~dp0"
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1"
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1"
+if errorlevel 1 (
+  echo.
+  echo [ERROR] Startup script failed. See messages above.
+  pause
+)
