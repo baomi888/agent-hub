@@ -60,7 +60,7 @@ SSE_HEADERS = {
 class ChatRequest(BaseModel):
     sid: str = Field(...)
     question: str = Field(...)
-    top_k: int = Field(default=config.TOP_K_DEFAULT, gt=0)
+    top_k: int = Field(default=config.TOP_K_DEFAULT, gt=0, le=config.TOP_K_MAX)
     kb_id_override: str | None = Field(default=None)
     mode: str = Field(default="auto", description="auto / rag / agent / llm")
     attachments: list[dict] = Field(default_factory=list, description="附件列表（图片理解用）")

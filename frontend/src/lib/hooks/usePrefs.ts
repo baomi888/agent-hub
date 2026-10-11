@@ -55,6 +55,11 @@ export function usePrefs() {
     if (saved.mode) setMode(saved.mode);
     if (typeof saved.kbPanel === "boolean") setKbPanelPref(saved.kbPanel);
     if (FONT_SCALES.includes(saved.fontScale as FontScale)) setFontScale(saved.fontScale as FontScale);
+    // 检索参数必须一并读回：否则状态停在默认值，prefsReady 后的落盘会把用户
+    // 改过的条数/分段/重叠写回默认，等于每次刷新都把设置抹掉。
+    if (typeof saved.topK === "number") setTopK(saved.topK);
+    if (typeof saved.chunkSize === "number") setChunkSize(saved.chunkSize);
+    if (typeof saved.chunkOverlap === "number") setChunkOverlap(saved.chunkOverlap);
     setPrefsReady(true);
   }, []);
 

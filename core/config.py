@@ -43,6 +43,8 @@ DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", os.path.join(PROJECT_ROOT, "downloads")
 CHUNK_SIZE_DEFAULT = int(os.getenv("CHUNK_SIZE", "500"))
 CHUNK_OVERLAP_DEFAULT = int(os.getenv("CHUNK_OVERLAP", "50"))
 TOP_K_DEFAULT = int(os.getenv("TOP_K", "3"))
+# 检索条数上界：前端 UI 已限 1~10，服务端再兜一道，避免请求塞超大 top_k 拉爆检索与费用
+TOP_K_MAX = int(os.getenv("TOP_K_MAX", "20"))
 
 # Embedding 接口单次批量上限（阿里百炼为 10）
 EMBED_BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", "10"))
