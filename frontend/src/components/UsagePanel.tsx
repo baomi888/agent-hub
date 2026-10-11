@@ -299,11 +299,11 @@ function UsageBars({ history }: { history: UsageDay[] }) {
           <div key={d.day} className="up-col" title={`${d.day} · 问答 ${d.ask} · 向量化 ${d.embed}`}>
             <div className="up-col-bars">
               <span
-                className="up-bar-v ask"
+                className={`up-bar-v ask${d.ask === 0 ? " empty" : ""}`}
                 style={{ height: `${Math.round((d.ask / maxAsk) * 100)}%` }}
               />
               <span
-                className="up-bar-v embed"
+                className={`up-bar-v embed${d.embed === 0 ? " empty" : ""}`}
                 style={{ height: `${Math.round((d.embed / maxEmbed) * 100)}%` }}
               />
             </div>

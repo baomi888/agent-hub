@@ -141,7 +141,16 @@ export default function TemplatesPage() {
                   {items.length} 个
                 </span>
               </div>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3">
+              {/* 列数随模板数量自适应：1 个不拉满、2 个双列、3+ 三列，避免宽屏右侧大片留白 */}
+              <div
+                className={
+                  items.length === 1
+                    ? "grid grid-cols-1 max-w-md"
+                    : items.length === 2
+                    ? "grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5"
+                    : "grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3"
+                }
+              >
                 {items.map((t) => (
                   <article
                     key={t.id}

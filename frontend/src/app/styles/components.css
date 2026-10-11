@@ -476,6 +476,11 @@
   background: var(--accent-ink);
   opacity: 0.45;
 }
+/* 零值列：中性灰基线点，明确表示「空槽」而非「有数据」（金色会误导） */
+.up-bar-v.empty {
+  background: var(--line);
+  opacity: 1;
+}
 .up-col-label {
   font-size: var(--fs-xs);
   color: var(--text-3);
