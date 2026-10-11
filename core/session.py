@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import threading
 import time
 import uuid
 from contextlib import contextmanager
@@ -45,20 +46,44 @@ def _db_path() -> str:
 
 
 # ---------- 连接管理 ----------
+# 每次操作都新建 sqlite 连接，等于每次重开文件 + 重设 WAL；一次问答会开 6~7 个，
+# 累计几毫秒、还都在请求线程里。改成按线程复用：连接只建一次、pragma 只设一次。
+# 路径参与判断是因为测试会 monkeypatch _db_path 到临时目录——路径一变必须换连接，
+# 否则会继续读写上一个库。
+_LOCAL = threading.local()
+
+
+def _conn() -> sqlite3.Connection:
+    """取当前线程复用的 SQLite 连接（路径变了就重建）。"""
+    path = _db_path()
+    conn = getattr(_LOCAL, "conn", None)
+    if conn is not None and getattr(_LOCAL, "path", None) == path:
+        return conn
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row  # 让 cursor 返回 dict-like 对象
+    conn.execute("PRAGMA journal_mode=WAL")    # 写前日志，提升并发读性能
+    conn.execute("PRAGMA synchronous=NORMAL")  # WAL 下不必每次 fsync，写更快
+    conn.execute("PRAGMA busy_timeout=5000")   # 撞上并发写时等待而不是立刻报错
+    _LOCAL.conn = conn
+    _LOCAL.path = path
+    return conn
+
+
 @contextmanager
 def _get_conn() -> None:
-    """获取 SQLite 连接（context manager）。"""
-    conn = sqlite3.connect(_db_path())
-    conn.row_factory = sqlite3.Row  # 让 cursor 返回 dict-like 对象
-    conn.execute("PRAGMA journal_mode=WAL")  # 写前日志，提升并发读性能
+    """获取当前线程复用的 SQLite 连接（context manager）。"""
+    conn = _conn()
     try:
         yield conn
         conn.commit()
     except Exception:
         conn.rollback()
         raise
-    finally:
-        conn.close()
 
 
 def _init_db() -> None:
@@ -266,6 +291,9 @@ def get_messages(
 ) -> list[dict]:
     """取会话消息历史（按时间正序）。不是自己的会话直接返回空列表。
 
+    归属校验并进查询：JOIN conversations 后按 owner 过滤，一次查询同时完成
+    "验归属 + 取消息"，省掉一次独立的 EXISTS。
+
     Args:
         owner: 会话归属用户 id
         sid: 会话 id
@@ -275,13 +303,26 @@ def get_messages(
     Returns:
         [{role, content, created_at}, ...]
     """
-    if not _owned(owner, sid):
-        return []
+    cols = "m.id, m.role, m.content, m.refs, m.created_at"
+    join = (
+        "FROM messages m JOIN conversations c ON m.conversation_id = c.id "
+        "WHERE m.conversation_id = ? AND c.owner_id = ?"
+    )
     with _get_conn() as conn:
-        rows = conn.execute(
-            "SELECT id, role, content, refs, created_at FROM messages WHERE conversation_id = ? ORDER BY id ASC",
-            (sid,),
-        ).fetchall()
+        if limit_turns and limit_turns > 0:
+            # 只取尾部：长会话全量载入既慢又占内存，而窗口截断只要最近
+            # limit_turns 轮。多留 10 行缓冲，避免 Agent 一轮产出多段 assistant
+            # 时把窗口起点切掉；倒序取再翻转，等价于"全量后截断"。
+            cap = limit_turns * 2 + 10
+            rows = conn.execute(
+                f"SELECT * FROM (SELECT {cols} {join} ORDER BY m.id DESC LIMIT ?) ORDER BY id ASC",
+                (sid, owner, cap),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                f"SELECT {cols} {join} ORDER BY m.id ASC",
+                (sid, owner),
+            ).fetchall()
 
     msgs = [dict(r) for r in rows]
     if not msgs:
@@ -303,12 +344,16 @@ def get_messages(
 
 
 def count_messages(owner: str, sid: str) -> int:
-    """会话消息总数。不是自己的会话返回 0。"""
-    if not _owned(owner, sid):
-        return 0
+    """会话消息总数。不是自己的会话返回 0。
+
+    同 get_messages：归属校验并进 JOIN，省一次独立 EXISTS。
+    """
     with _get_conn() as conn:
         row = conn.execute(
-            "SELECT COUNT(*) AS c FROM messages WHERE conversation_id = ?", (sid,)
+            "SELECT COUNT(*) AS c FROM messages m "
+            "JOIN conversations c ON m.conversation_id = c.id "
+            "WHERE m.conversation_id = ? AND c.owner_id = ?",
+            (sid, owner),
         ).fetchone()
         return row["c"]
 

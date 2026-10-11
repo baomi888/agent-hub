@@ -33,6 +33,8 @@ chroma_db/
 
 # ================= 运行时数据（含用户会话与上传件，严禁提交）=================
 *.db
+*.db-wal
+*.db-shm
 data/sessions.db
 data/uploads/
 data/chat_uploads/

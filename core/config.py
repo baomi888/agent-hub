@@ -46,6 +46,10 @@ TOP_K_DEFAULT = int(os.getenv("TOP_K", "3"))
 
 # Embedding 接口单次批量上限（阿里百炼为 10）
 EMBED_BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", "10"))
+# 入库时并发发出的 embedding 批次数（每批仍是 EMBED_BATCH_SIZE 条）。
+# 瓶颈在网络往返，串行等 N 批 = N 个 RTT 叠加；并发 4 基本能把 RTT 藏起来。
+# 调太高会撞服务端限流（429），一般 3~4 足够；1 = 退回串行。
+EMBED_CONCURRENCY = int(os.getenv("EMBED_CONCURRENCY", "4"))
 
 # ---------- 检索策略（候选池 → 离群过滤 → 多样性挑选）----------
 # 先多取几倍候选再挑，否则 top_k 名额会被相邻重复切片占满

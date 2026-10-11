@@ -12,6 +12,9 @@ from __future__ import annotations
 当前用 SQLite 会话库 + 窗口截断（api/chat.py 的 MAX_HISTORY_TURNS）处理长会话。
 """
 
+import threading
+from collections import OrderedDict
+
 from langchain.agents import create_agent
 
 from agent.tools import AGENT_TOOLS
@@ -106,6 +109,16 @@ def _make_checkpointer() -> None:
 _CHECKPOINTER = _make_checkpointer()
 
 
+# ---------- 已编译 Agent 图缓存 ----------
+# create_agent 每次都要编译一遍 LangGraph 状态图（节点/边/路由），是纯 CPU 开销，
+# 而图结构只由 (has_kb, 定位片段) 决定 —— 同一用户定位固定、多数请求还没有定位，
+# 命中率很高。编译好的图无会话状态（checkpointer=None，状态每次 invoke 单独传），
+# 可跨请求、跨线程复用。用 LRU 兜底，避免按城市无限增长。
+_AGENT_CACHE: "OrderedDict[tuple[bool, str], object]" = OrderedDict()
+_AGENT_CACHE_MAX = 32
+_AGENT_LOCK = threading.Lock()
+
+
 def build_agent(has_kb: bool = False, location: dict | None = None):
     """构建集合式 Agent（带 5 个工具 + 多轮记忆）。
 
@@ -117,30 +130,48 @@ def build_agent(has_kb: bool = False, location: dict | None = None):
 
     has_kb 只用来告诉模型"当前会话有没有绑库"，好让它决定要不要调 kb_search。
     location 是用户地理定位（前端传来的经纬度 + 逆地理城市名），让用户问天气时免手输城市。
-    """
-    llm = get_llm(temperature=0.1)
-    system_prompt = SYSTEM_PROMPT
-    if has_kb:
-        system_prompt += (
-            "\n\n【当前会话已绑定知识库】\n"
-            "需要查资料时调用 kb_search（不需要也不接受 kb_id 参数，"
-            "系统会自动检索本会话绑定的库）。\n"
-            "需要把网页 / 文件存进库时用 download_file。"
-        )
-    else:
-        system_prompt += (
-            "\n\n【当前会话没有绑定知识库】\n"
-            "不要凭空猜测 kb_id 调用 kb_search；需要外部信息时用 web_search。"
-        )
-    system_prompt += location_note(location)
 
-    agent = create_agent(
-        model=llm,
-        tools=AGENT_TOOLS,
-        system_prompt=system_prompt,
-        checkpointer=_CHECKPOINTER,
-    )
-    return agent
+    结果按 (has_kb, 定位片段) 缓存：图编译是纯 CPU 开销，同参数直接复用已编译的图。
+    """
+    note = location_note(location)
+    key = (bool(has_kb), note)
+
+    with _AGENT_LOCK:
+        cached = _AGENT_CACHE.get(key)
+        if cached is not None:
+            _AGENT_CACHE.move_to_end(key)
+            return cached
+
+        # 在锁内编译：并发首请求只编译一次，其余等锁后直接命中缓存。
+        # 键的种类极少（has_kb 两种 × 少量定位片段），锁竞争可忽略。
+        llm = get_llm(temperature=0.1)
+        system_prompt = SYSTEM_PROMPT
+        if has_kb:
+            system_prompt += (
+                "\n\n【当前会话已绑定知识库】\n"
+                "需要查资料时调用 kb_search（不需要也不接受 kb_id 参数，"
+                "系统会自动检索本会话绑定的库）。\n"
+                "需要把网页 / 文件存进库时用 download_file。"
+            )
+        else:
+            system_prompt += (
+                "\n\n【当前会话没有绑定知识库】\n"
+                "不要凭空猜测 kb_id 调用 kb_search；需要外部信息时用 web_search。"
+            )
+        system_prompt += note
+
+        agent = create_agent(
+            model=llm,
+            tools=AGENT_TOOLS,
+            system_prompt=system_prompt,
+            checkpointer=_CHECKPOINTER,
+        )
+
+        _AGENT_CACHE[key] = agent
+        _AGENT_CACHE.move_to_end(key)
+        while len(_AGENT_CACHE) > _AGENT_CACHE_MAX:
+            _AGENT_CACHE.popitem(last=False)
+        return agent
 
 
 def get_checkpointer():

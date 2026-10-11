@@ -290,13 +290,15 @@ def _resolve_source(pipe, owner: str, kb_id: str, name: str) -> str:
     known = set(pipelines.get_file_names(owner, kb_id))
     if name in known:
         return name
-    for src in pipe.list_sources():
+    # 落盘记录里对不上时才需要看 Chroma 元数据；取一次复用，别为同一件事扫两遍
+    sources = pipe.list_sources()
+    for src in sources:
         if src.get("name") == name:
             return src["name"]
     base = os.path.basename(name.replace("\\", "/"))
     if not base:
         return name
-    for cand in known | {s.get("name", "") for s in pipe.list_sources()}:
+    for cand in known | {s.get("name", "") for s in sources}:
         if cand and os.path.basename(cand.replace("\\", "/")) == base:
             return cand
     return name

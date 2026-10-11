@@ -13,7 +13,9 @@ from __future__ import annotations
 import os
 import re
 import threading
+import uuid
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 
 import chromadb
 from langchain_chroma import Chroma
@@ -208,12 +210,24 @@ _RETRIEVE_CACHE: OrderedDict[tuple, list] = OrderedDict()
 _RETRIEVE_CACHE_MAX = 200
 _RETRIEVE_CACHE_LOCK = threading.Lock()
 
+# 来源清单缓存：list_sources 要遍历整库元数据做聚合，Chroma 没有 distinct/GROUP BY，
+# 无法免扫描。但同一份内容重复调用（列表页轮询、_resolve_source 多次解析）结果不变，
+# 缓存下来即可省掉重复的整库遍历；库内容变更时随检索缓存一起失效。
+_SOURCES_CACHE: OrderedDict[str, list] = OrderedDict()
+_SOURCES_CACHE_MAX = 64
+_SOURCES_CACHE_LOCK = threading.Lock()
+
+# list_sources 分页大小：每页只物化这么多条 metadatas，峰值内存与库大小解耦
+SOURCES_PAGE = 1000
+
 
 def _cache_invalidate(collection_name: str) -> None:
-    """知识库内容变更后清掉该库的检索缓存，避免读到旧片段。"""
+    """知识库内容变更后清掉该库的检索缓存与来源清单缓存，避免读到旧片段。"""
     with _RETRIEVE_CACHE_LOCK:
         for key in [k for k in _RETRIEVE_CACHE if k[0] == collection_name]:
             _RETRIEVE_CACHE.pop(key, None)
+    with _SOURCES_CACHE_LOCK:
+        _SOURCES_CACHE.pop(collection_name, None)
 
 
 def _cache_get(collection_name: str, question: str, top_k: int):
@@ -234,6 +248,51 @@ def _cache_set(collection_name: str, question: str, top_k: int, result) -> None:
         _RETRIEVE_CACHE.move_to_end(key)
         while len(_RETRIEVE_CACHE) > _RETRIEVE_CACHE_MAX:
             _RETRIEVE_CACHE.popitem(last=False)
+
+
+def _sources_cache_get(collection_name: str):
+    """命中返回逐条浅拷贝，调用方改动不会污染缓存。"""
+    with _SOURCES_CACHE_LOCK:
+        hit = _SOURCES_CACHE.get(collection_name)
+        if hit is not None:
+            _SOURCES_CACHE.move_to_end(collection_name)
+            return [dict(x) for x in hit]
+    return None
+
+
+def _sources_cache_set(collection_name: str, result: list) -> None:
+    with _SOURCES_CACHE_LOCK:
+        _SOURCES_CACHE[collection_name] = [dict(x) for x in result]
+        _SOURCES_CACHE.move_to_end(collection_name)
+        while len(_SOURCES_CACHE) > _SOURCES_CACHE_MAX:
+            _SOURCES_CACHE.popitem(last=False)
+
+
+# ==================== 查询向量缓存 ====================
+# embedding 只取决于查询文本（与库内容无关），因此不随库内容失效。
+# 检索结果缓存命中时根本走不到这里；这里是给"同一问题、不同 top_k"准备的——
+# 那种情况结果缓存键不同会 miss，但查询向量可复用，省掉一次约 250ms 的
+# embedding 网络请求（也是省真实 API 费用）。
+
+_EMBED_CACHE: OrderedDict[str, list[float]] = OrderedDict()
+_EMBED_CACHE_MAX = 500
+_EMBED_CACHE_LOCK = threading.Lock()
+
+
+def _embed_query(question: str) -> list[float]:
+    """取查询向量（带 LRU 缓存）。"""
+    with _EMBED_CACHE_LOCK:
+        hit = _EMBED_CACHE.get(question)
+        if hit is not None:
+            _EMBED_CACHE.move_to_end(question)
+            return hit
+    vec = get_embeddings().embed_query(question)
+    with _EMBED_CACHE_LOCK:
+        _EMBED_CACHE[question] = vec
+        _EMBED_CACHE.move_to_end(question)
+        while len(_EMBED_CACHE) > _EMBED_CACHE_MAX:
+            _EMBED_CACHE.popitem(last=False)
+    return vec
 
 
 # ==================== 文档加载 ====================
@@ -293,6 +352,58 @@ def split_documents(docs, chunk_size: int, chunk_overlap: int):
 
 # ==================== RAG 链路 ====================
 
+
+def _embed_and_store(vs, chunks) -> None:
+    """并发 embedding + 串行 upsert（分窗，峰值内存受限）。
+
+    入库的真正瓶颈是 embedding 的网络往返：每批 EMBED_BATCH_SIZE 条一次请求，
+    原实现一批批串行等待，N 批就是 N 个 RTT 首尾相接。这里把各批的
+    embed_documents 丢进线程池同时发出，等向量回来后再**串行** upsert。
+
+    为什么写入不并发：多个线程同时往同一个 Chroma collection 写，会竞争
+    hnsw 索引与底层 sqlite，结果不确定。embedding 是纯网络调用，天然可并发；
+    写入留单线程既安全，又不构成瓶颈（本地磁盘写很快）。
+
+    为什么分窗：一次把全部批都发出去虽然最快，但要把整份文档的向量都留在
+    内存里（几千片 × 上千维就是几十 MB）。按"窗口 = 并发度"逐窗处理，在途
+    向量最多 EMBED_CONCURRENCY × EMBED_BATCH_SIZE 条，并发不变、峰值内存钉死。
+
+    EMBED_BATCH_SIZE 语义不变：每批仍按该大小切，只是批与批之间不再排队。
+    """
+    if not chunks:
+        return
+    bs = max(1, config.EMBED_BATCH_SIZE)
+    # 每批打包成 (文本, 元数据, id)，窗口内并发 embedding、窗口内按序写出
+    batches = []
+    for i in range(0, len(chunks), bs):
+        part = chunks[i : i + bs]
+        batches.append((
+            [c.page_content for c in part],
+            [c.metadata for c in part],
+            [str(uuid.uuid4()) for _ in part],
+        ))
+    emb = vs._embedding_function
+    workers = max(1, min(config.EMBED_CONCURRENCY, len(batches)))
+
+    pool = ThreadPoolExecutor(max_workers=workers) if workers > 1 else None
+    try:
+        for w in range(0, len(batches), workers):
+            window = batches[w : w + workers]
+            if pool is None:
+                # 单批或显式关并发：退回串行，行为与旧实现一致
+                vectors = [emb.embed_documents(texts) for texts, _md, _ids in window]
+            else:
+                # 同一窗口内的各批并发发出；list() 会等齐并按提交顺序返回
+                vectors = list(pool.map(lambda b: emb.embed_documents(b[0]), window))
+            for (texts, metadatas, ids), vecs in zip(window, vectors):
+                vs._collection.upsert(
+                    ids=ids, embeddings=vecs, documents=texts, metadatas=metadatas
+                )
+    finally:
+        if pool is not None:
+            pool.shutdown()
+
+
 class RagPipeline:
     """单条 RAG 链路。每个知识库一个实例，用不同 collection 名隔离向量库。"""
 
@@ -332,9 +443,8 @@ class RagPipeline:
         if not chunks:
             return 0
         vs = self._ensure_vs()
-        # 分批入库，避免超出 Embedding 接口单次批量限制（百炼为 10）
-        for i in range(0, len(chunks), config.EMBED_BATCH_SIZE):
-            vs.add_documents(chunks[i : i + config.EMBED_BATCH_SIZE])
+        # 并发 embedding、串行写入，避免超出单次批量限制（百炼为 10）
+        _embed_and_store(vs, chunks)
         _cache_invalidate(self.collection_name)
         return len(chunks)
 
@@ -379,9 +489,8 @@ class RagPipeline:
             self._vs = None
 
         vs = self._ensure_vs()
-        # 分批入库，避免超出 Embedding 接口单次批量限制（百炼为 10）
-        for i in range(0, len(chunks), config.EMBED_BATCH_SIZE):
-            vs.add_documents(chunks[i : i + config.EMBED_BATCH_SIZE])
+        # 并发 embedding、串行写入，避免超出单次批量限制（百炼为 10）
+        _embed_and_store(vs, chunks)
 
         self._params = (chunk_size, chunk_overlap)
         _cache_invalidate(self.collection_name)
@@ -434,23 +543,48 @@ class RagPipeline:
         return items
 
     def list_sources(self) -> list[dict]:
-        """统计库内每个来源文件的片段数（文件列表记录的兜底数据源）。"""
+        """统计库内每个来源文件的片段数（文件列表记录的兜底数据源）。
+
+        Chroma 没有 distinct/GROUP BY，只能遍历元数据做聚合，无法真正免扫描；
+        因此这里做两件事把代价压下来：
+          1) 分页拉取（每页 SOURCES_PAGE 条）——峰值内存只跟页大小有关，
+             不再一次性把整库 metadatas 物化进内存，大库不会瞬间吃掉几十 MB；
+          2) 结果按库缓存——列表页轮询、_resolve_source 多次解析这类重复调用
+             直接命中缓存，不再重复遍历；库内容变更时由 _cache_invalidate 清掉。
+        """
+        cached = _sources_cache_get(self.collection_name)
+        if cached is not None:
+            return cached
         if self._vs is None:
             self.get_or_open()
         if self._vs is None:
             return []
+
+        counter: dict[str, int] = {}
         try:
-            got = self._vs._collection.get(include=["metadatas"])
+            offset = 0
+            while True:
+                got = self._vs._collection.get(
+                    include=["metadatas"], limit=SOURCES_PAGE, offset=offset
+                )
+                metas = got.get("metadatas") or []
+                if not metas:
+                    break
+                for md in metas:
+                    src = (md or {}).get("source") or "未知来源"
+                    counter[src] = counter.get(src, 0) + 1
+                if len(metas) < SOURCES_PAGE:
+                    break
+                offset += len(metas)
         except Exception:
             return []
-        counter: dict[str, int] = {}
-        for md in got.get("metadatas") or []:
-            src = (md or {}).get("source") or "未知来源"
-            counter[src] = counter.get(src, 0) + 1
-        return [
+
+        result = [
             {"name": k, "chunks": v, "added_at": None}
             for k, v in sorted(counter.items(), key=lambda x: -x[1])
         ]
+        _sources_cache_set(self.collection_name, result)
+        return result
 
     def count(self) -> int:
         """当前库内片段数。"""
@@ -499,17 +633,23 @@ class RagPipeline:
         if not self._vs:
             # 尝试从磁盘打开
             self.get_or_open()
-        if not self._vs or self.count() == 0:
+        total = self.count()  # 只查一次（原来判空与算 fetch_k 各查一次）
+        if total == 0:
             raise RuntimeError("知识库为空，请先上传文档构建索引")
 
+        # 先算查询向量（带缓存）再按向量检索：结果缓存 miss 但向量命中时，
+        # 省掉一次 embedding 网络请求。用 by_vector 而非 by_text，
+        # 就是为了让我们自己控制这层缓存。
+        vec = _embed_query(question)
         mult = config.RETRIEVE_FETCH_MULT
         if top_k <= 1 or mult <= 1:
             # 只要一条（或关掉了候选池）时，多捞没有意义
-            result = self._vs.similarity_search_with_score(question, k=top_k)
+            result = self._vs.similarity_search_by_vector_with_relevance_scores(vec, k=top_k)
         else:
-            total = self.count()
             fetch_k = max(top_k * mult, top_k + 6, config.RETRIEVE_MIN_FETCH)
-            cands = self._vs.similarity_search_with_score(question, k=min(fetch_k, total))
+            cands = self._vs.similarity_search_by_vector_with_relevance_scores(
+                vec, k=min(fetch_k, total)
+            )
             result = select_diverse(cands, top_k)
 
         _cache_set(self.collection_name, question, top_k, result)
