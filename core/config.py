@@ -73,6 +73,17 @@ RETRIEVE_MMR_LAMBDA = float(os.getenv("RETRIEVE_MMR_LAMBDA", "0.65"))
 # 觉得回答还是太"硬答"就往 0.4 调；觉得资料太少就调回 0.2 或 0。
 RETRIEVE_MIN_SIM = float(os.getenv("RETRIEVE_MIN_SIM", "0.25"))
 
+# ---------- 混合检索（向量 + BM25 关键词，RRF 融合）----------
+# 纯向量对专有名词 / 缩写 / 编号（"第 3 条""CUDA 12.4"）召回差，关键词通道能补上。
+# 置 0 即退回纯向量，无需改代码。
+HYBRID_ENABLED = bool(int(os.getenv("HYBRID_ENABLED", "1")))
+# RRF 融合常数：score = Σ 1/(K + rank)，K 越大越弱化头部名次差异（业界惯用 60）
+HYBRID_RRF_K = int(os.getenv("HYBRID_RRF_K", "60"))
+# 关键词通道取前几条参与融合
+HYBRID_KEYWORD_TOP = int(os.getenv("HYBRID_KEYWORD_TOP", "20"))
+# 库内片段数超过它就放弃关键词通道（BM25 需要把全文载入内存，给大库留个闸）
+HYBRID_MAX_DOCS = int(os.getenv("HYBRID_MAX_DOCS", "20000"))
+
 # ---------- 多用户 / 认证 ----------
 # 会话 token 的签发密钥。不配的话会自动在 data/.auth_secret 生成并持久化，
 # 好处是重启不丢登录态；坏处是迁移机器时要把这个文件一起带走，否则所有人掉线一次。

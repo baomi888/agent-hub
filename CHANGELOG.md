@@ -11,6 +11,15 @@
 
 ## [2026-10-11]
 
+### 新增（混合检索：向量 + BM25 · RRF）
+- 检索从纯向量升级为**混合检索**：新增 BM25 关键词通道（自实现，仅标准库，无新依赖），
+  两条通道用 RRF 融合。补上纯向量对专有名词 / 缩写 / 编号（"CUDA 12.4""第 3 条"）的召回短板。
+- 新增配置：`HYBRID_ENABLED`（默认 1，置 0 退回纯向量）、`HYBRID_RRF_K`(60)、
+  `HYBRID_KEYWORD_TOP`(20)、`HYBRID_MAX_DOCS`(20000，超限自动退回纯向量)。
+- `select_diverse` 兼容 `(doc, distance)` 与 `(doc, distance, rank)` 两种候选；
+  **关键词独有片段距离为 None，前端不显示相似度——绝不伪造分数**。现有调用方与回归用例零改动。
+- 关键词索引按库缓存，随 `_cache_invalidate`（导入 / 删除 / 重建）失效并懒加载重建。
+
 ### 修复（超时与下载收口）
 - LLM / 视觉 / Embedding 客户端补 `request_timeout` 与 `max_retries`（新增 `LLM_TIMEOUT`、
   `LLM_MAX_RETRIES`、`EMBED_TIMEOUT`、`EMBED_MAX_RETRIES`），消除单次请求无限挂起的隐患。
