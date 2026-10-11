@@ -104,6 +104,29 @@ export default function Home() {
   const [geoCity, setGeoCity] = useState<string | null>(() => getCachedGeo()?.city ?? null);
   // 定位请求进行中：授权弹窗 + IP 兜底最长 18s，期间按钮转圈，否则看着像没反应
   const [geoPending, setGeoPending] = useState(false);
+  // 场景预设：随会话保存（localStorage），发送时带入请求；切换会话时恢复
+  const [scenario, setScenario] = useState<string | null>(null);
+  const scenarioBySid = useRef<Record<string, string>>({});
+  const onScenarioChange = useCallback((id: string | null) => {
+    setScenario(id);
+    const sid = activeSid;
+    if (!sid) return;
+    if (id) {
+      scenarioBySid.current[sid] = id;
+      localStorage.setItem(`baomi:scenario:${sid}`, id);
+    } else {
+      delete scenarioBySid.current[sid];
+      localStorage.removeItem(`baomi:scenario:${sid}`);
+    }
+  }, [activeSid]);
+  useEffect(() => {
+    if (!activeSid) { setScenario(null); return; }
+    const saved =
+      localStorage.getItem(`baomi:scenario:${activeSid}`) ??
+      scenarioBySid.current[activeSid] ??
+      null;
+    setScenario(saved);
+  }, [activeSid]);
   // 联网建库后把建议问题预填进输入框（不自动发送），让用户确认/补充
   const [prefill, setPrefill] = useState<{ text: string; ts: number } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -224,7 +247,7 @@ export default function Home() {
         }
       }
       const gen = streamChat(
-        { sid, question, top_k: topK, mode, attachments: sentAttachments, location: getSendGeo() },
+        { sid, question, top_k: topK, mode, scenario, attachments: sentAttachments, location: getSendGeo() },
         controller.signal
       );
       let finalRefs = "";
@@ -552,6 +575,8 @@ export default function Home() {
           messages={messages}
           mode={mode}
           sending={sending}
+          scenario={scenario}
+          onScenarioChange={onScenarioChange}
           onModeChange={setMode}
           onSend={sendMessage}
           onStop={stopSending}

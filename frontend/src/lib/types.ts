@@ -35,6 +35,9 @@ export interface Message {
 // 聊天模式：auto 自动 / rag 强制检索 / agent 强制工具 / llm 纯对话
 export type ChatMode = "auto" | "rag" | "agent" | "llm";
 
+// 场景预设：kaoyan 考研复习 / notes 课程笔记 / paper 论文写作（轻量版只做提示词 + 选择器）
+export type ScenarioId = "kaoyan" | "notes" | "paper";
+
 export interface SearchResult {
   title: string;
   body: string;

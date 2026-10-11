@@ -59,6 +59,18 @@ export const TOOL_META: Record<string, { label: string; icon: ReactNode }> = {
 
 export const toolLabel = (name: string) => TOOL_META[name]?.label ?? name;
 
+// ============ 场景预设：考研复习 / 课程笔记 / 论文写作 ============
+import type { ScenarioId } from "@/lib/types";
+
+export const SCENARIOS: { id: ScenarioId; label: string; desc: string }[] = [
+  { id: "kaoyan", label: "考研复习", desc: "知识点讲解 · 真题自测 · 错题复盘" },
+  { id: "notes", label: "课程笔记", desc: "笔记整理 · 要点提炼 · 自动出题" },
+  { id: "paper", label: "论文写作", desc: "学术规范 · 结构搭建 · 文献引用" },
+];
+
+export const scenarioLabel = (id: string | null | undefined) =>
+  SCENARIOS.find((s) => s.id === id)?.label ?? null;
+
 // 首屏四宫格：呼应设计稿「查资料 / 联网搜索 / 数学计算 / 查天气」，
 // 点一下直接切到对应模式并预填一句能立刻发的问题（不用先去顶部切模式）
 export const ABILITIES: {

@@ -29,6 +29,8 @@ export async function* streamChat(
     mode?: string;
     kb_id_override?: string;
     attachments?: { path: string; type: string; filename?: string }[];
+    // 场景预设：kaoyan / notes / paper（后端按此拼 system prompt）
+    scenario?: string | null;
     // 两种形态：{ lat, lon }（浏览器定位）或 { city }（公网 http 下由服务端按 IP 推断）。
     // 字段都可选 —— 只有 city 没有坐标是合法的。
     location?: { lat?: number; lon?: number; city?: string } | null;

@@ -16,6 +16,7 @@ from langchain.agents import create_agent
 
 from agent.tools import AGENT_TOOLS
 from core.llm import get_llm
+from core import scenarios as scenarios_mod
 
 SYSTEM_PROMPT = """你是一个智能问答助手，拥有以下能力：
   - 从知识库中检索资料（kb_search）
@@ -109,7 +110,7 @@ def _make_checkpointer() -> None:
 _CHECKPOINTER = _make_checkpointer()
 
 
-def build_agent(has_kb: bool = False, location: dict | None = None):
+def build_agent(has_kb: bool = False, location: dict | None = None, scenario: str | None = None):
     """构建集合式 Agent（带 5 个工具 + 多轮记忆）。
 
     这里刻意**不再把 kb_id 写进提示词**。旧版会把 "kb_id = xxx" 塞给模型、
@@ -136,6 +137,8 @@ def build_agent(has_kb: bool = False, location: dict | None = None):
             "不要凭空猜测 kb_id 调用 kb_search；需要外部信息时用 web_search。"
         )
     system_prompt += location_note(location)
+    # 场景预设：拼在末尾，让场景专属话术（如"考研先给作答空间再给答案"）压过通用默认
+    system_prompt += scenarios_mod.get_scenario_prompt(scenario)
 
     agent = create_agent(
         model=llm,

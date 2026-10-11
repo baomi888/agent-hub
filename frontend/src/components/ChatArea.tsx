@@ -9,7 +9,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import MascotLogo from "./chat/MascotLogo";
 import { api } from "@/lib/api";
 import type { ChatMode, RefSource } from "@/lib/types";
-import { ABILITIES, EXAMPLES, MODE_LABELS } from "./chat/constants";
+import { ABILITIES, EXAMPLES, MODE_LABELS, SCENARIOS } from "./chat/constants";
 import { buildPlanPrompt, detectPlanTopic, isPlanRequest, stripPlanHint } from "./chat/plan";
 import Bubble from "./chat/Bubble";
 import BubbleErrorBoundary from "./chat/BubbleErrorBoundary";
@@ -58,6 +58,10 @@ interface Props {
   geoEnabled?: boolean;
   /** 当前定位城市（角标展示用，可能为 null） */
   geoCity?: string | null;
+  /** 当前会话选中的场景预设（null 表示未选）；轻量版仅前端保存 */
+  scenario?: string | null;
+  /** 切换场景预设，传 null 表示取消选择 */
+  onScenarioChange?: (id: string | null) => void;
   /** 定位请求进行中：等授权 + IP 兜底最长要 18 秒，期间按钮禁用并转圈 */
   geoPending?: boolean;
   /** 切换定位开关（请求权限 / 关闭），由页面层处理权限与缓存 */
@@ -93,6 +97,8 @@ export default function ChatArea({
   geoPending = false,
   onToggleGeo,
   sessionId = null,
+  scenario = null,
+  onScenarioChange,
 }: Props) {
   const [input, setInput] = useState("");
   const [showParams, setShowParams] = useState(false);
@@ -627,8 +633,24 @@ export default function ChatArea({
         </div>
       )}
 
-      {/* 底部：模式切换 + 输入框 */}
+      {/* 底部：场景预设 + 模式切换 + 输入框 */}
       <div className="chat-measure mx-auto px-6 pb-5">
+        {/* 场景预设：考研复习 / 课程笔记 / 论文写作（轻量版仅前端保存，发送时带入请求） */}
+        <div className="mb-2 flex items-center gap-2 flex-wrap">
+          <span className="scenario-label">场景</span>
+          {SCENARIOS.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => onScenarioChange?.(scenario === s.id ? null : s.id)}
+              aria-pressed={scenario === s.id}
+              title={s.desc}
+              className={`scenario ${scenario === s.id ? "active" : ""}`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
         <div className="mb-2 flex items-center gap-3">
           <div className="mode-tabs" role="group" aria-label="对话模式" ref={modeTabsRef}>
             <span

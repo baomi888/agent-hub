@@ -38,6 +38,7 @@ from pydantic import BaseModel, Field
 from core import config, quota, session as store, upload
 from core.auth import get_current_user
 from core.llm import get_llm, get_vision_llm
+from core import scenarios as scenarios_mod
 from kb import pipelines
 from kb.rag_core import SYSTEM_PROMPT, assess_grounding, describe_api_error, grounding_note
 
@@ -67,6 +68,11 @@ class ChatRequest(BaseModel):
     top_k: int = Field(default=config.TOP_K_DEFAULT, gt=0)
     kb_id_override: str | None = Field(default=None)
     mode: str = Field(default="auto", description="auto / rag / agent / llm")
+    scenario: str | None = Field(
+        default=None,
+        description="场景预设：kaoyan(考研复习) / notes(课程笔记) / paper(论文写作)。"
+        "非空时拼进 system prompt，非白名单值按未选处理。",
+    )
     attachments: list[dict] = Field(default_factory=list, description="附件列表（图片理解用）")
     location: dict | None = Field(
         default=None,
@@ -342,6 +348,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             # RAG 模式下顺带检索知识库，拼入文本
             vision_question = req.question
             vision_system = "你是一个能理解图片的 AI 助手。请结合图片内容用中文简洁作答。"
+            vision_system += scenarios_mod.get_scenario_prompt(req.scenario)
             if kb_id and kb_exists:
                 try:
                     # 同步检索会堵事件循环（embed_query 实测约 250ms），必须丢线程
@@ -413,7 +420,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 from agent.builder import build_agent
                 # 只告诉模型"有没有绑库"，不告诉它是哪个库：
                 # kb_id 走下面的 configurable 注入，模型没有机会改写它
-                agent = await asyncio.to_thread(build_agent, bool(kb_id and kb_exists), location_ctx)
+                agent = await asyncio.to_thread(build_agent, bool(kb_id and kb_exists), location_ctx, req.scenario)
 
                 # 组装历史 + 当前问题
                 history = store.get_messages(uid, req.sid, include_system=False)[:-1]
@@ -530,7 +537,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             yield _sse("status", {"text": "正在生成答案..."})
             # 复用上面已经检索到的结果，不重复检索（早期实现在这里又检了一次，
             # 而且用的是默认 top_k，等于前端调的检索条数被悄悄忽略）
-            messages = _build_messages(uid, req.sid, req.question, kb_id, docs_scores, grounding)
+            messages = _build_messages(uid, req.sid, req.question, kb_id, docs_scores, grounding, req.scenario)
 
             acc = _Acc()
             try:
@@ -547,7 +554,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
         else:
             yield _sse("status", {"text": "纯 LLM 模式..."})
             history = store.get_messages(uid, req.sid, include_system=False)[:-1]
-            messages = [SystemMessage(content="你是一个友好、专业的 AI 助手。用中文简洁作答。")]
+            messages = [SystemMessage(content="你是一个友好、专业的 AI 助手。用中文简洁作答。" + scenarios_mod.get_scenario_prompt(req.scenario))]
             for m in history:
                 if m["role"] == "user":
                     messages.append(HumanMessage(content=m["content"]))
@@ -594,7 +601,8 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
 # ==================== 辅助 ====================
 
 def _build_messages(
-    owner: str, sid: str, question: str, kb_id: str | None, docs_scores, grounding: dict | None = None
+    owner: str, sid: str, question: str, kb_id: str | None, docs_scores, grounding: dict | None = None,
+    scenario: str | None = None,
 ) -> list:
     """组装 LLM 输入：历史 + 已检索到的参考资料。
 
@@ -614,9 +622,9 @@ def _build_messages(
             for i, (d, _) in enumerate(docs_scores)
         )
     if references:
-        system = SYSTEM_PROMPT + grounding_note(grounding or {})
+        system = SYSTEM_PROMPT + grounding_note(grounding or {}) + scenarios_mod.get_scenario_prompt(scenario)
     else:
-        system = "你是一个友好、专业的 AI 助手。用中文简洁作答。"
+        system = "你是一个友好、专业的 AI 助手。用中文简洁作答。" + scenarios_mod.get_scenario_prompt(scenario)
     messages.append(SystemMessage(content=system))
     for m in history_raw:
         if m["role"] == "user":
