@@ -378,13 +378,17 @@ export default function ChatArea({
   );
   // 赞踩落库：失败不影响界面（本地高亮已经点了），只提示一声让用户知道没存上
   const handleFeedback = useCallback(
-    async (msgDbId: number, rating: "up" | "down") => {
+    async (msgDbId: number, rating: "up" | "down", comment?: string) => {
       if (!sessionId) return;
       try {
-        await api.sendFeedback(sessionId, msgDbId, rating);
+        await api.sendFeedback(sessionId, msgDbId, rating, comment);
         onNotice?.(
           "success",
-          rating === "up" ? "已记录：这条回答有帮助" : "已记录：这条回答不太行"
+          rating === "up"
+            ? "已记录：这条回答有帮助"
+            : comment
+              ? "已记录：谢谢你的补充，我会用来看板里复盘"
+              : "已记录：这条回答不太行"
         );
       } catch {
         onNotice?.("error", "反馈没能保存，稍后可再点一次");

@@ -494,3 +494,65 @@
   background: var(--accent-ink);
   opacity: 0.45;
 }
+
+/* ==================== 踩后改进原因输入框（Bubble 内联）====================
+   浅纸底卡片，金描边只在聚焦时出现——克制用金，符合苞米设计令牌约束。 */
+.fb-comment {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--fill-3);
+}
+.fb-comment-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.fb-comment-input {
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--card-bg);
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  font-family: inherit;
+  resize: vertical;
+}
+.fb-comment-input::placeholder {
+  color: var(--text-3);
+}
+.fb-comment-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.fb-comment-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+/* 次要操作：中性文字按钮，借 hover 点出金，不占主操作视觉权重 */
+.fb-comment-skip {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 10px;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  border-radius: var(--radius-sm);
+}
+.fb-comment-skip:hover {
+  color: var(--accent-ink);
+  background: var(--fill-2);
+}
+.fb-comment-submit {
+  font-size: var(--fs-sm);
+  padding: 4px 14px;
+  border-radius: var(--radius-sm);
+}

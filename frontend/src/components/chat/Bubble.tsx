@@ -30,14 +30,18 @@ const Bubble = memo(function Bubble({
   onRetry?: (assistantId: string, question: string) => void;
   /** 剪贴板不可用等静默失败，交给上层出 toast */
   onCopyFail?: () => void;
-  /** 赞/踩：按后端 messages 表的 id 落库，刷新后仍在（id 缺失时上层会静默跳过） */
-  onFeedback?: (msgDbId: number, rating: "up" | "down") => void;
+  /** 赞/踩：按后端 messages 表的 id 落库，刷新后仍在（id 缺失时上层会静默跳过）。
+   *  comment 是「踩」时可选的改进原因，留空则只记评分。 */
+  onFeedback?: (msgDbId: number, rating: "up" | "down", comment?: string) => void;
   /** 打开该文件全文预览（未绑定资料库时不传，入口就不显示） */
   onPreviewFile?: (source: string) => void;
   /** 删除该消息及其所在的一轮对话 */
   onDeleteTurn?: (msgDbId: number) => void;
 }) {
   const [feedback, setFeedback] = useState<"like" | "dislike" | null>(null);
+  // 「踩」后展开的改进原因输入框：点踩即记一票，这里只收集可选的文字补充
+  const [comment, setComment] = useState("");
+  const [showComment, setShowComment] = useState(false);
   const { copied, copy } = useCopy();
   // 溯源展开状态：同一时刻只展开一条，避免长回答把页面撑得太长
   const [openSrc, setOpenSrc] = useState<number | null>(null);
@@ -56,6 +60,13 @@ const Bubble = memo(function Bubble({
       // 非 HTTPS / 无剪贴板权限时会走到这里，原来是完全静默的
       onCopyFail?.();
     }
+  };
+
+  // 踩后提交改进原因：投票已在点击时记录，这里只把 comment 覆盖写回同一条反馈
+  const submitComment = () => {
+    const text = comment.trim();
+    if (m.dbId && text) onFeedback?.(m.dbId, "down", text);
+    setShowComment(false);
   };
 
   if (m.role === "user") {
@@ -347,7 +358,8 @@ const Bubble = memo(function Bubble({
         )}
 
         {!m.streaming && !m.error && (
-          <div className="msg-actions text-faint">
+          <>
+            <div className="msg-actions text-faint">
             <button
               onClick={handleCopy}
               title={copied ? "已复制" : "复制"}
@@ -428,7 +440,13 @@ const Bubble = memo(function Bubble({
               onClick={() => {
                 const next = feedback === "dislike" ? null : "dislike";
                 setFeedback(next);
-                if (next && m.dbId) onFeedback?.(m.dbId, "down");
+                if (next && m.dbId) {
+                  // 先记一票：原因框只是可选的补充，不能因为没填就不计数
+                  onFeedback?.(m.dbId, "down");
+                  setShowComment(true);
+                } else {
+                  setShowComment(false);
+                }
               }}
               title="踩"
               className={`flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs transition hover:bg-fill-2 ${
@@ -445,6 +463,46 @@ const Bubble = memo(function Bubble({
 
             <span className="ml-auto text-fs-xs text-faint">{m.content.length} 字</span>
           </div>
+
+          {/* 踩后的改进原因：投票已记录，这里只收可选文字。提交会按同一条消息覆盖写入，
+              看板「最近反馈」就能直接显示用户踩的理由。 */}
+          {showComment && feedback === "dislike" && m.dbId && (
+            <div className="fb-comment">
+              <label className="fb-comment-label" htmlFor={`fb-c-${m.dbId}`}>
+                这条回答哪里不太对？（可选，帮你我复盘改进）
+              </label>
+              <textarea
+                id={`fb-c-${m.dbId}`}
+                className="fb-comment-input"
+                value={comment}
+                autoFocus
+                rows={2}
+                maxLength={300}
+                placeholder="例如：引用来源不清晰 / 步骤有跳步 / 和我的资料矛盾 / 语气太绝对…"
+                onChange={(e) => setComment(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submitComment();
+                }}
+              />
+              <div className="fb-comment-actions">
+                <button
+                  type="button"
+                  className="fb-comment-skip"
+                  onClick={() => setShowComment(false)}
+                >
+                  跳过
+                </button>
+                <button
+                  type="button"
+                  className="btn-new fb-comment-submit"
+                  onClick={submitComment}
+                >
+                  提交反馈
+                </button>
+              </div>
+            </div>
+          )}
+          </>
         )}
       </div>
     </div>
