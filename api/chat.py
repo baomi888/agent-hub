@@ -35,7 +35,7 @@ from core import config, quota, session as store, upload
 from core.auth import get_current_user
 from core.llm import get_llm, get_vision_llm
 from kb import pipelines
-from kb.rag_core import SYSTEM_PROMPT, describe_api_error
+from kb.rag_core import SYSTEM_PROMPT, describe_api_error, rewrite_query
 
 # 默认要登录：整组路由统一挂鉴权，新增端点时不会漏
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -346,14 +346,16 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
         # ---- 0. 图片理解模式：有图片附件时用视觉模型直接回答 ----
         if _has_image(req.attachments):
             yield _sse("status", {"text": "图片理解模式，正在分析图片..."})
+            history = store.get_messages(uid, req.sid, include_system=False)[:-1]
             # RAG 模式下顺带检索知识库，拼入文本
             vision_question = req.question
             if kb_id and kb_exists:
                 try:
                     # 同步检索会堵事件循环（embed_query 实测约 250ms），必须丢线程
                     pipe = await asyncio.to_thread(pipelines.get_or_create, uid, kb_id)
+                    query = await asyncio.to_thread(rewrite_query, req.question, history)
                     docs_scores = await asyncio.to_thread(
-                        pipe.retrieve_with_score, req.question, req.top_k
+                        pipe.retrieve_with_score, query, req.top_k
                     )
                     if docs_scores:
                         refs_md = pipe._format_refs(docs_scores)
@@ -367,7 +369,6 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 except Exception:
                     yield _sse("status", {"text": "知识库检索失败，已仅按图片作答"})
 
-            history = store.get_messages(uid, req.sid, include_system=False)[:-1]
             messages = [SystemMessage(content="你是一个能理解图片的 AI 助手。请结合图片内容用中文简洁作答。")]
             for m in history:
                 if m["role"] == "user":
@@ -501,9 +502,15 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
         # ---- 2. RAG 模式 ----
         elif mode == "rag":
             yield _sse("status", {"text": f"RAG 模式，正在检索知识库（{kb_id}）..."})
+            # 追问（"那它呢"）先结合上下文改写成独立问题再检索；不需要/失败时原样返回。
+            # 用改写后的问题当检索词，检索结果缓存的键也随之正确，不会跨上下文串结果。
+            history = store.get_messages(uid, req.sid, include_system=False)[:-1]
+            query = await asyncio.to_thread(rewrite_query, req.question, history)
+            if query != req.question:
+                yield _sse("status", {"text": f"已结合上下文改写检索词：{query}"})
             try:
                 pipe = await asyncio.to_thread(pipelines.get_or_create, uid, kb_id)
-                docs_scores = await asyncio.to_thread(pipe.retrieve_with_score, req.question, req.top_k)
+                docs_scores = await asyncio.to_thread(pipe.retrieve_with_score, query, req.top_k)
             except Exception as e:
                 yield _sse("error", {"detail": describe_api_error(e)})
                 return
@@ -519,7 +526,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             yield _sse("status", {"text": "正在生成答案..."})
             # 复用上面已经检索到的结果，不重复检索（早期实现在这里又检了一次，
             # 而且用的是默认 top_k，等于前端调的检索条数被悄悄忽略）
-            messages = _build_messages(uid, req.sid, req.question, kb_id, docs_scores)
+            messages = _build_messages(uid, req.sid, req.question, kb_id, docs_scores, history)
 
             acc = _Acc()
             try:
@@ -577,13 +584,19 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
 
 # ==================== 辅助 ====================
 
-def _build_messages(owner: str, sid: str, question: str, kb_id: str | None, docs_scores) -> list:
+def _build_messages(
+    owner: str, sid: str, question: str, kb_id: str | None, docs_scores, history=None
+) -> list:
     """组装 LLM 输入：历史 + 已检索到的参考资料。
 
     docs_scores 由调用方检索一次后传入，这里不再重复检索，
     避免用户设置的 top_k 被默认值覆盖、也省掉一次 embedding 请求。
+    history 同理：调用方（RAG 路径做查询改写时）已取过就直接复用，不再重复查库。
     """
-    history_raw = store.get_messages(owner, sid, include_system=False)[:-1]
+    history_raw = (
+        history if history is not None
+        else store.get_messages(owner, sid, include_system=False)[:-1]
+    )
     messages = []
     references = ""
     if kb_id and docs_scores:

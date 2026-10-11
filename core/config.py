@@ -84,6 +84,17 @@ HYBRID_KEYWORD_TOP = int(os.getenv("HYBRID_KEYWORD_TOP", "20"))
 # 库内片段数超过它就放弃关键词通道（BM25 需要把全文载入内存，给大库留个闸）
 HYBRID_MAX_DOCS = int(os.getenv("HYBRID_MAX_DOCS", "20000"))
 
+# ---------- 查询改写（多轮追问 → 独立检索问题）----------
+# 追问（"那它呢""第二个呢"）单独看检索不到东西。只在"看起来像追问"时才用对话
+# 历史改写，其余问题零额外开销。置 0 完全关闭。
+QUERY_REWRITE_ENABLED = bool(int(os.getenv("QUERY_REWRITE_ENABLED", "1")))
+# 问题长度 ≤ 它且存在对话历史时，判定为追问（中文字符数）
+QUERY_REWRITE_MAX_LEN = int(os.getenv("QUERY_REWRITE_MAX_LEN", "8"))
+# 改写时喂给模型的历史消息条数（从最近往前取）
+QUERY_REWRITE_HISTORY = int(os.getenv("QUERY_REWRITE_HISTORY", "4"))
+# 改写输出的 token 上限：只输出一条问题，给小值即可，防跑偏也防费用
+QUERY_REWRITE_MAX_TOKENS = int(os.getenv("QUERY_REWRITE_MAX_TOKENS", "64"))
+
 # ---------- 多用户 / 认证 ----------
 # 会话 token 的签发密钥。不配的话会自动在 data/.auth_secret 生成并持久化，
 # 好处是重启不丢登录态；坏处是迁移机器时要把这个文件一起带走，否则所有人掉线一次。

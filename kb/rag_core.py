@@ -466,6 +466,63 @@ def _embed_query(question: str) -> list[float]:
     return vec
 
 
+# ==================== 查询改写（多轮追问 → 独立检索问题）====================
+# 多轮里的追问（"那它呢""第二个呢"）单独看没有检索价值：向量与 BM25 都抓不到
+# 指代对象。用对话历史把它补全成可独立检索的问题。只在"看起来像追问"时才多花
+# 一次 LLM 调用，其余问题零额外开销（这是它跟"每题都改写"的关键区别）。
+
+_REWRITE_CUES = (
+    "它", "他", "她", "这个", "那个", "这些", "那些", "该", "此", "其",
+    "上述", "前者", "后者", "这样", "那样", "这里", "那里",
+)
+
+
+def needs_rewrite(question: str, history) -> bool:
+    """判断问题是否依赖上下文、值得改写。没有历史时一律不改写。"""
+    if not history:
+        return False
+    q = (question or "").strip()
+    if not q:
+        return False
+    if len(q) <= config.QUERY_REWRITE_MAX_LEN:
+        return True
+    return any(cue in q for cue in _REWRITE_CUES)
+
+
+def rewrite_query(question: str, history) -> str:
+    """把依赖上下文的追问改写成可独立检索的问题；不需要或失败时原样返回。
+
+    history: [{"role": "user"/"assistant", "content": "..."}]，按时间升序。
+    失败一律退回原问题——改写是增益不是必需，绝不能因为它把检索搞挂。
+    """
+    if not config.QUERY_REWRITE_ENABLED or not needs_rewrite(question, history):
+        return question
+    recent = history[-config.QUERY_REWRITE_HISTORY :]
+    convo = "\n".join(
+        f"{'用户' if m.get('role') == 'user' else '助手'}：{(m.get('content') or '')[:200]}"
+        for m in recent
+    )
+    prompt = (
+        "你是检索查询改写器。根据下面的对话历史，把用户的最新问题改写成一条"
+        "可以脱离上下文独立检索的完整问题。\n"
+        "规则：只补全指代和省略，不回答问题，不添加历史中没有的信息；"
+        "若最新问题本身已经完整，就原样输出。\n"
+        "只输出改写后的问题本身，不要解释，不要引号。\n\n"
+        f"【对话历史】\n{convo}\n\n【最新问题】\n{question}"
+    )
+    try:
+        resp = get_llm(temperature=0, max_tokens=config.QUERY_REWRITE_MAX_TOKENS).invoke(
+            [HumanMessage(content=prompt)]
+        )
+        out = (resp.content or "").strip().strip('"').strip("'").splitlines()[0].strip()
+    except Exception:
+        return question
+    # 结果不可信就退回原问题：空、过长（模型跑偏成回答）都算
+    if not out or len(out) > 200:
+        return question
+    return out
+
+
 # ==================== 文档加载 ====================
 
 def load_document(file_path: str, source_name: str | None = None):
