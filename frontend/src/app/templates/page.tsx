@@ -69,11 +69,15 @@ export default function TemplatesPage() {
     setUsingId(t.id);
     try {
       const r = await api.applyTemplate(t.id);
-      // 跳回工作台：?sid 让首页自动选中新建会话，?q 预填首个引导问题
+      // 跳回工作台：?sid 让首页自动选中新建会话，?q 预填首个引导问题，
+      // ?mode 把模板推荐的对话模式带过去（白名单之外的值后端会回落 auto）
       const q = r.starter_prompt
         ? `&q=${encodeURIComponent(r.starter_prompt)}`
         : "";
-      router.push(`/?sid=${encodeURIComponent(r.session_id)}${q}`);
+      const m = r.recommended_mode
+        ? `&mode=${encodeURIComponent(r.recommended_mode)}`
+        : "";
+      router.push(`/?sid=${encodeURIComponent(r.session_id)}${q}${m}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setUsingId(null);

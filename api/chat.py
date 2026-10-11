@@ -88,9 +88,14 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+# 允许进入路由表的对话模式。白名单之外一律按 auto 自动路由，
+# 避免模板目录 / 前端误带脏值直接穿透到下游分支。
+VALID_MODES = ("auto", "rag", "agent", "llm")
+
+
 def _pick_mode(req_mode: str, kb_id: str | None, kb_exists: bool) -> str:
-    """auto → rag / agent 自动路由。"""
-    if req_mode != "auto":
+    """auto → rag / agent 自动路由；其它值先过白名单再放行。"""
+    if req_mode in VALID_MODES and req_mode != "auto":
         return req_mode
     if kb_id and kb_exists:
         return "rag"
@@ -285,7 +290,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
     # 流一旦开始，响应头（200）就发出去了，那时候再想回 429 已经来不及，
     # 只会变成一条断掉的 SSE 流，前端读不出任何提示。
     # 先验会话再扣费：无效请求（会话不存在）不该消耗每日问答额度
-    conv = store.get_conversation(uid, req.sid)
+    conv = await asyncio.to_thread(store.get_conversation, uid, req.sid)
     if not conv:
         raise HTTPException(status_code=404, detail=f"会话不存在：{req.sid}")
 
@@ -336,8 +341,8 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
         elif city:
             location_ctx = {"city": city}
 
-    store.add_message(uid, req.sid, "user", req.question)
-    should_gen_title = store.count_messages(uid, req.sid) <= 2
+    await asyncio.to_thread(store.add_message, uid, req.sid, "user", req.question)
+    should_gen_title = (await asyncio.to_thread(store.count_messages, uid, req.sid)) <= 2
 
     async def event_generator() -> None:
         refs_md = ""
@@ -383,7 +388,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 except Exception:
                     yield _sse("status", {"text": "知识库检索失败，已仅按图片作答"})
 
-            history = store.get_messages(uid, req.sid, include_system=False)[:-1]
+            history = (await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False))[:-1]
             messages = [SystemMessage(content=vision_system)]
             for m in history:
                 if m["role"] == "user":
@@ -404,10 +409,10 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             acc_text = acc.text
 
             # 收尾：标题并行任务多半已完成，这里 await 基本零等待
-            msg_id = store.add_message(uid, req.sid, "assistant", acc_text, refs=refs_md)
+            msg_id = await asyncio.to_thread(store.add_message, uid, req.sid, "assistant", acc_text, refs=refs_md)
             gen_title = await _take_title(title_task, acc_text)
             if gen_title:
-                store.rename_conversation(uid, req.sid, gen_title)
+                await asyncio.to_thread(store.rename_conversation, uid, req.sid, gen_title)
                 yield _sse("title", {"title": gen_title})
             # message_id 回给前端：赞踩要按消息 id 落库，前端自己生成的 uid 后端不认
             yield _sse("done", {
@@ -429,7 +434,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 agent = await asyncio.to_thread(build_agent, bool(kb_id and kb_exists), location_ctx, req.scenario)
 
                 # 组装历史 + 当前问题
-                history = store.get_messages(uid, req.sid, include_system=False)[:-1]
+                history = (await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False))[:-1]
                 messages = []
                 for m in history:
                     if m["role"] == "user":
@@ -543,7 +548,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             yield _sse("status", {"text": "正在生成答案..."})
             # 复用上面已经检索到的结果，不重复检索（早期实现在这里又检了一次，
             # 而且用的是默认 top_k，等于前端调的检索条数被悄悄忽略）
-            messages = _build_messages(uid, req.sid, req.question, kb_id, docs_scores, grounding, req.scenario)
+            messages = await _build_messages(uid, req.sid, req.question, kb_id, docs_scores, grounding, req.scenario)
 
             acc = _Acc()
             try:
@@ -559,7 +564,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
         # ---- 3. 纯 LLM 模式 ----
         else:
             yield _sse("status", {"text": "纯 LLM 模式..."})
-            history = store.get_messages(uid, req.sid, include_system=False)[:-1]
+            history = (await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False))[:-1]
             messages = [SystemMessage(content="你是一个友好、专业的 AI 助手。用中文简洁作答。" + scenarios_mod.get_scenario_prompt(req.scenario))]
             for m in history:
                 if m["role"] == "user":
@@ -580,11 +585,11 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             acc_text = acc.text
 
         # ---- 收尾：存 assistant 消息 + 取回并行生成的标题 ----
-        msg_id = store.add_message(uid, req.sid, "assistant", acc_text, refs=refs_md)
+        msg_id = await asyncio.to_thread(store.add_message, uid, req.sid, "assistant", acc_text, refs=refs_md)
 
         gen_title = await _take_title(title_task, acc_text)
         if gen_title:
-            store.rename_conversation(uid, req.sid, gen_title)
+            await asyncio.to_thread(store.rename_conversation, uid, req.sid, gen_title)
             yield _sse("title", {"title": gen_title})
 
         # message_id 回给前端：赞踩要按消息 id 落库，前端自己生成的 uid 后端不认
@@ -601,7 +606,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
 
 # ==================== 辅助 ====================
 
-def _build_messages(
+async def _build_messages(
     owner: str, sid: str, question: str, kb_id: str | None, docs_scores, grounding: dict | None = None,
     scenario: str | None = None,
 ) -> list:
@@ -614,7 +619,7 @@ def _build_messages(
     系统提示词里的通用规则太软，模型看到 prompt 里真有几段资料，
     哪怕相似度只有 0.3 也会顺着往下编；单独再压一遍才压得住。
     """
-    history_raw = store.get_messages(owner, sid, include_system=False)[:-1]
+    history_raw = (await asyncio.to_thread(store.get_messages, owner, sid, include_system=False))[:-1]
     messages = []
     references = ""
     if kb_id and docs_scores:

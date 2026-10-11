@@ -135,11 +135,11 @@ export default function Home() {
   // 模板广场套用后跳回：?sid 自动选中新建会话，?q 预填引导问题
   // 放在 setPrefill 声明之后；依赖 sessions 列表先回来，列表没回来时这个
   // sid 还不在里面，过早 select 会选空。
-  const applyRef = useRef<{ sid: string; q: string | null } | null>(null);
+  const applyRef = useRef<{ sid: string; q: string | null; mode?: string } | null>(null);
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
     const sid = sp.get("sid");
-    if (sid) applyRef.current = { sid, q: sp.get("q") };
+    if (sid) applyRef.current = { sid, q: sp.get("q"), mode: sp.get("mode") ?? undefined };
     // 只跑一次：读 query 是幂等的，无需进 deps
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -149,6 +149,10 @@ export default function Home() {
     if (sessions.length === 0) return; // 列表还没回来
     if (!sessions.some((s) => s.id === a.sid)) return; // 这个会话还没进列表
     if (a.q) setPrefill({ text: a.q, ts: Date.now() });
+    // 模板推荐的对话模式：落进偏好，让新建会话默认走该模式
+    if (a.mode && (["auto", "rag", "agent", "llm"] as const).includes(a.mode as ChatMode)) {
+      setMode(a.mode as ChatMode);
+    }
     if (activeSid !== a.sid) void selectSession(a.sid);
     void refreshKbs();
     applyRef.current = null;
