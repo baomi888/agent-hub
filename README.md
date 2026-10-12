@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🌽 知慧 Agent
+# 🌽 知穗 Agent
 
 **把 RAG 知识库、多会话和工具调用，装进一本摊开的纸质笔记本。**
 
@@ -154,7 +154,7 @@ flowchart TB
 ## 📁 目录结构
 
 ```
-知慧agent/
+知穗agent/
 ├── main.py                # FastAPI 入口（路由挂载 / CORS / 尾斜杠归一中间件）
 ├── core/
 │   ├── config.py          # 集中配置（密钥 / 路径 / 检索策略参数）
@@ -305,6 +305,6 @@ python tests/test_geo_locate.py           # IP 定位三级降级
 
 <div align="center">
 
-🌽 知慧 Agent · 知识库 · 多会话 · 智能体
+🌽 知穗 Agent · 知识库 · 多会话 · 智能体
 
 </div>

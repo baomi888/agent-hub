@@ -34,7 +34,7 @@ export const INTRO_ENTRIES: {
 }[] = [
   { key: "template", label: "模板广场", hint: "挑一个场景化智能体", icon: "store" },
   { key: "tools", label: "校园工具集", hint: "GPA · 番茄钟 · 课表…", icon: "tools" },
-  { key: "upload", label: "上传资料建库", hint: "让知慧读你的文件", icon: "notes" },
+  { key: "upload", label: "上传资料建库", hint: "让知穗读你的文件", icon: "notes" },
   { key: "research", label: "让它去研究", hint: "带题目去联网深挖", icon: "bulb" },
 ];
 

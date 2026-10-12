@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-知慧agent · 现场性能测试（零第三方依赖版）
+知穗agent · 现场性能测试（零第三方依赖版）
 ==========================================
 只用 Python 标准库，不需要 pip install 任何东西 —— 这是为现场演示准备的硬要求。
 
@@ -148,7 +148,7 @@ def main():
     FE = f"http://{args.host}:3000"
 
     print("=" * 66, flush=True)
-    print(" 知慧agent · 现场性能测试", flush=True)
+    print(" 知穗agent · 现场性能测试", flush=True)
     print(f" 目标 {args.host}  ·  阿里云 ECS 2核2G  ·  经公网访问", flush=True)
     print(" 说明：延迟含公网往返，只做低并发验证，不做极限压测", flush=True)
     print("=" * 66, flush=True)

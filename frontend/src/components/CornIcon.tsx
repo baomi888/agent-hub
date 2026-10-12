@@ -1,14 +1,14 @@
 /**
- * 知慧风格图标集：替代全站 emoji。
+ * 知穗风格图标集：替代全站 emoji。
  *
- * 设计语言与 MascotLogo（知慧吉祥物）完全一致：
+ * 设计语言与 MascotLogo（知穗吉祥物）完全一致：
  *  - 描边走 currentColor（外层 color = --ink），圆头圆角（round cap/join）
  *  - 玉米金 #F5B840 作主填充点缀，叶绿 #7C9A54/#8FAF62、陶橙 #EF8A56、纸白 #FFFDF6 辅助
  *  - Q 版手绘感：粗描边、大圆角、不出现直角锐利形状
  * 明暗主题自动适配（描边随主题墨色，填充为固定品牌色）。
  *
  * 用法：<CornIcon name="book" className="h-7 w-7" />
- * 未知 name（含历史残留 emoji）一律回退到 mini 知慧，保证永不显示成系统 emoji。
+ * 未知 name（含历史残留 emoji）一律回退到 mini 知穗，保证永不显示成系统 emoji。
  */
 export type CornIconName =
   | "book" // 考研复习
@@ -23,7 +23,7 @@ export type CornIconName =
   | "warn" // 警告/出错
   | "store" // 模板广场
   | "tools" // 校园工具集（扳手）
-  | "corn"; // 兜底：mini 知慧
+  | "corn"; // 兜底：mini 知穗
 
 const INK_STROKE = { strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -222,7 +222,7 @@ function Tools() {
   );
 }
 
-/** 兜底：mini 知慧（复用吉祥物造型语言） */
+/** 兜底：mini 知穗（复用吉祥物造型语言） */
 function Corn() {
   return (
     <g {...INK_STROKE}>
