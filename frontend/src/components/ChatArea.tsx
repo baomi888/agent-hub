@@ -569,7 +569,7 @@ export default function ChatArea({
               />
               <div className="eyebrow mb-1.5">苞米地 · 智能体工作台</div>
               <h1 className="hero-title font-serif font-bold leading-snug text-ink">
-                {greeting}，我是<span className="hero-name">苞米</span>
+                {greeting}，我是<span className="hero-name">知慧</span>
               </h1>
               <p className="mt-1.5 max-w-[30rem] text-msg leading-relaxed text-muted">
                 一句话就行。选个场景，或直接问我——我会自己决定怎么帮你。

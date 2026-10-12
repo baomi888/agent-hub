@@ -137,7 +137,7 @@ export default function Sidebar({
         <MascotLogo className="h-9 w-9 shrink-0 object-contain" />
         <div className="min-w-0">
           <h1 className="truncate font-serif text-fs-xl font-bold leading-tight text-ink">
-            苞米Agent
+            知慧Agent
           </h1>
           <p className="brand-sub truncate">知识库 · 多对话 · 智能体</p>
         </div>

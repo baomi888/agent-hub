@@ -56,7 +56,7 @@ export default function AuthGate({ allowSignup, checking, onLogin, onRegister }:
         {/* 品牌区：与侧栏同一套（玉米穗 + 衬线标题） */}
         <div className="flex flex-col items-center gap-2 text-center">
           <MascotLogo className="h-12 w-12 object-contain" />
-          <h1 className="font-serif text-fs-title font-bold leading-tight text-ink">苞米Agent</h1>
+          <h1 className="font-serif text-fs-title font-bold leading-tight text-ink">知慧Agent</h1>
           <p className="brand-sub">登录后使用你自己的会话与知识库</p>
         </div>
 

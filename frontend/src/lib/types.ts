@@ -146,7 +146,7 @@ export interface Template {
   id: string;
   name: string;
   category: string;
-  /** 卡片图标语义 key（CornIcon 组件按苞米吉祥物风格渲染；历史 emoji 值回退 mini 苞米） */
+  /** 卡片图标语义 key（CornIcon 组件按知慧吉祥物风格渲染；历史 emoji 值回退 mini 知慧） */
   icon: string;
   tagline: string;
   description: string;

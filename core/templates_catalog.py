@@ -11,7 +11,7 @@
   id               模板唯一 slug
   name             展示名
   category         分类（前端按分类着色）
-  icon             卡片图标语义 key（前端 CornIcon 组件按苞米吉祥物风格渲染；未知值回退 mini 苞米）
+  icon             卡片图标语义 key（前端 CornIcon 组件按知慧吉祥物风格渲染；未知值回退 mini 知慧）
   tagline          一句话卖点
   description      2-3 句场景描述
   tags             标签（卡片上以 chip 展示）

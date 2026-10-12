@@ -7,7 +7,7 @@
   font-weight: 500;
 }
 
-/* 苞米吉祥物：内联 SVG，颜色由 currentColor / --ink 驱动，不再需要 multiply。
+/* 知慧吉祥物：内联 SVG，颜色由 currentColor / --ink 驱动，不再需要 multiply。
    深色下保留一点金色光晕，让它从深纸里浮出来 */
 .corn-logo {
   display: block;
@@ -501,7 +501,7 @@
 }
 
 /* ==================== 踩后改进原因输入框（Bubble 内联）====================
-   浅纸底卡片，金描边只在聚焦时出现——克制用金，符合苞米设计令牌约束。 */
+   浅纸底卡片，金描边只在聚焦时出现——克制用金，符合知慧设计令牌约束。 */
 .fb-comment {
   margin-top: 8px;
   padding: 10px 12px;

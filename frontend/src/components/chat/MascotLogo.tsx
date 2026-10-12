@@ -11,7 +11,7 @@ type Props = {
 };
 
 /**
- * 苞米吉祥物（漫画 Q 版）：会眨眼、会呼吸漂浮、hover 时弹一下。
+ * 知慧吉祥物（漫画 Q 版）：会眨眼、会呼吸漂浮、hover 时弹一下。
  * 描边走 currentColor，外层 color 取 --ink，明暗主题自动适配。
  * 交互彩蛋：
  *  - mood="thinking" 时嘴变成○、整体摇摆加快（AI 正在生成）
@@ -59,7 +59,7 @@ export default function MascotLogo({ className = "", title, mood = "idle", tiltK
     .join(" ");
 
   return (
-    <div className={cls} role="img" aria-label={title ?? "苞米吉祥物"} style={{ color: "var(--ink)" }}>
+    <div className={cls} role="img" aria-label={title ?? "知慧吉祥物"} style={{ color: "var(--ink)" }}>
       <svg viewBox="0 0 120 120" width="100%" height="100%" style={{ display: "block", overflow: "visible" }}>
         <g className="mascot-tilt" strokeLinecap="round" strokeLinejoin="round">
           {/* 玉米须 */}

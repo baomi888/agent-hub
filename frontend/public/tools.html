@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>苞米 · 校园工具集</title>
+<title>知慧 · 校园工具集</title>
 <style>
   /* ============ 设计令牌：严格对齐主工作台 tokens.css（苞米地笔记本） ============ */
   :root{
@@ -190,7 +190,7 @@
 
   footer{text-align:center;color:var(--text-3);font-size:var(--fs-xs);margin-top:30px;line-height:1.9;}
 
-  /* 苞米吉祥物动画（对齐 mascot.css 的 idle） */
+  /* 知慧吉祥物动画（对齐 mascot.css 的 idle） */
   .mascot{display:inline-block;width:44px;height:44px;animation:mascot-float 5s ease-in-out infinite;color:var(--ink);}
   .mascot>svg{display:block;overflow:visible;transform-origin:50% 50%;transition:transform 220ms cubic-bezier(.34,1.3,.34,1);}
   .mascot:hover>svg{transform:scale(1.06) translateY(-2px);}
@@ -218,7 +218,7 @@
 <div class="wrap">
   <header class="topbar">
     <div class="topbar-in">
-      <div class="mascot" role="img" aria-label="苞米吉祥物">
+      <div class="mascot" role="img" aria-label="知慧吉祥物">
         <svg viewBox="0 0 120 120" width="100%" height="100%" style="display:block;overflow:visible">
           <g stroke-linecap="round" stroke-linejoin="round">
             <path d="M52 22 C51 15 55 11 60 10 M60 22 C60 14 63 11 67 9 M67 22 C69 16 72 14 76 13" fill="none" stroke="currentColor" stroke-width="4"/>
@@ -256,7 +256,7 @@
 
   <div class="banner">
     <svg class="tool-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent-ink)"><path d="M9 17h6M10 20h4"/><path d="M12 3a6 6 0 0 1 3.8 10.7c-.7.6-1.1 1.3-1.2 2.3H9.4c-.1-1-.5-1.7-1.2-2.3A6 6 0 0 1 12 3Z" fill="#F5B840" fill-opacity=".22"/></svg>
-    <div>这些都是<strong>本地就能跑</strong>的校园小工具，不依赖任何外部系统。空教室查询、课表解析需要对接各校教务，暂未纳入。答案要你自己来，但算分这类重复活交给苞米。</div>
+    <div>这些都是<strong>本地就能跑</strong>的校园小工具，不依赖任何外部系统。空教室查询、课表解析需要对接各校教务，暂未纳入。答案要你自己来，但算分这类重复活交给知慧。</div>
   </div>
 
   <nav class="tabs" id="tabs">
@@ -319,7 +319,7 @@
         <svg class="tool-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)"><circle cx="12" cy="14.5" r="7" fill="#EF8A56" fill-opacity=".85"/><path d="M12 7.5c0-2 1.6-3 3.2-3" stroke="#7C9A54"/><path d="M12 7.5c-1.4-1-3-1-4 0" stroke="#7C9A54"/></svg>
         <b id="pomoDone">0</b> 个
       </div>
-      <p class="note">25 分钟专注 + 5 分钟休息是经典节奏。专注时建议关掉其他标签页，让苞米陪你啃完这一段。</p>
+      <p class="note">25 分钟专注 + 5 分钟休息是经典节奏。专注时建议关掉其他标签页，让知慧陪你啃完这一段。</p>
     </div>
   </section>
 
@@ -327,7 +327,7 @@
   <section class="tool" id="conflict">
     <div class="card">
       <div class="row-head"><div><div class="eyebrow">课表</div><h2 class="serif">我的课程表</h2></div></div>
-      <p class="note" style="margin-top:0">仿小律课程的极简周视图。两种录入方式：① 把教务导出的课表文本丢给 <b>苞米 AI</b>，让它生成标准 JSON 粘进来一键导入（见下方教程）；② 在「添加一门课」里手动填。</p>
+      <p class="note" style="margin-top:0">仿小律课程的极简周视图。两种录入方式：① 把教务导出的课表文本丢给 <b>知慧 AI</b>，让它生成标准 JSON 粘进来一键导入（见下方教程）；② 在「添加一门课」里手动填。</p>
 
       <!-- 教程：用 AI 生成课表 JSON -->
       <div class="guide">
@@ -336,7 +336,7 @@
           <span style="flex:1"></span>
           <button class="btn-import btn-sm" id="copyPrompt">复制提示词</button>
         </div>
-        <p class="note" style="margin:0 0 8px">把下面这段提示词，连同一份你的课表（教务导出文字 / 截图转文字 / 手写都行）一起发给苞米 AI，它会返回标准 JSON；再把 JSON 粘到「导入」框即可。</p>
+        <p class="note" style="margin:0 0 8px">把下面这段提示词，连同一份你的课表（教务导出文字 / 截图转文字 / 手写都行）一起发给知慧 AI，它会返回标准 JSON；再把 JSON 粘到「导入」框即可。</p>
         <pre class="prompt" id="promptBox">你是一个课程表整理助手。请把我给的课表整理成如下 JSON，只输出 JSON、不要解释：
 
 {
