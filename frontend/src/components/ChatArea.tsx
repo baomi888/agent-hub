@@ -563,25 +563,25 @@ export default function ChatArea({
             // ① 场景快选（考研/笔记/论文）② 功能入口（模板/工具集/建库/研究）③ 三句示例
             <div className="welcome">
               <MascotLogo
-                className="hero-logo mx-auto mb-4 h-[72px] w-[72px] object-contain"
+                className="hero-logo mx-auto mb-2 h-[52px] w-[52px] object-contain"
                 mood={messages.some((m) => m.streaming) ? "thinking" : "idle"}
                 tiltKey={mode}
               />
-              <div className="eyebrow mb-2">苞米地 · 智能体工作台</div>
+              <div className="eyebrow mb-1.5">苞米地 · 智能体工作台</div>
               <h1 className="hero-title font-serif font-bold leading-snug text-ink">
                 {greeting}，我是<span className="hero-name">苞米</span>
               </h1>
-              <p className="mt-3 max-w-[30rem] text-msg leading-relaxed text-muted">
+              <p className="mt-1.5 max-w-[30rem] text-msg leading-relaxed text-muted">
                 一句话就行。选个场景，或直接问我——我会自己决定怎么帮你。
               </p>
 
               {/* ① 场景快选：当前主打能力，点一下进对应场景并预填开场白 */}
-              <div className="mt-6 w-full">
+              <div className="mt-4 w-full">
                 <div className="welcome-section-head">
                   <span className="eyebrow">选个场景开始</span>
                   <span className="rule" />
                 </div>
-                <div className="mt-3 flex w-full flex-wrap justify-center gap-2">
+                <div className="mt-2.5 flex w-full flex-wrap justify-center gap-2">
                   {SCENARIOS.map((s) => (
                     <button
                       key={s.id}
@@ -599,7 +599,7 @@ export default function ChatArea({
               </div>
 
               {/* ② 功能入口：替代旧四能力卡，反映当前真实功能 */}
-              <div className="mt-5 w-full grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+              <div className="mt-4 w-full grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                 {INTRO_ENTRIES.map((e) => (
                   <button
                     key={e.key}
@@ -620,7 +620,7 @@ export default function ChatArea({
               </div>
 
               {/* ③ 次级示例：三句能立刻点的话，三列等宽便签；min-w-0 让长句在卡内截断不溢出 */}
-              <div className="mt-4 grid w-full grid-cols-1 gap-2 sm:grid-cols-3">
+              <div className="mt-3 grid w-full grid-cols-1 gap-2 sm:grid-cols-3">
                 {EXAMPLES.map((e) => (
                   <button
                     key={e.q}
@@ -633,17 +633,6 @@ export default function ChatArea({
                   </button>
                 ))}
               </div>
-
-              <p className="mt-4 text-fs-md text-faint">
-                或者：
-                <button type="button" onClick={startResearch} className="welcome-link">
-                  让它研究一个题目
-                </button>
-                <span className="welcome-sep">·</span>
-                <button type="button" onClick={openUpload} className="welcome-link">
-                  上传你的资料
-                </button>
-              </p>
 
               <p className="welcome-foot">问完的每一句，都能翻回原文。</p>
             </div>

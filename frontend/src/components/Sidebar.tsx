@@ -2,7 +2,7 @@
 
 // 左侧会话列表栏：品牌区 + 新建对话 + 搜索框 + 按时间分组的会话 + 深色模式开关
 // 视觉：暖米黄书本风格 · 大圆角 · 柔阴影 · 金色点缀
-import { useMemo, useState, type RefObject } from "react";
+import { useMemo, useRef, useState, type RefObject } from "react";
 import MascotLogo from "./chat/MascotLogo";
 import CornIcon from "./CornIcon";
 import type { Conversation, QuotaInfo } from "@/lib/types";
@@ -102,6 +102,10 @@ export default function Sidebar({
   const [query, setQuery] = useState("");
   // 删除是破坏性操作，点一下先进确认态，避免误删整段对话
   const [confirmDelId, setConfirmDelId] = useState<string | null>(null);
+  // 手机左滑删除：swipedId = 当前左滑露出删除钮的会话；touch 存进行中的手势（不进 state，避免逐帧重渲染）
+  const [swipedId, setSwipedId] = useState<string | null>(null);
+  const swipeTouch = useRef<{ id: string; x0: number; y0: number; el: HTMLElement; horizontal: boolean | null } | null>(null);
+  const SWIPE_W = 76; // 与 .session-swipe-del 宽度一致
 
   const startEdit = (c: Conversation) => {
     setEditingId(c.id);
@@ -214,13 +218,38 @@ export default function Sidebar({
             </div>
             {g.items.map((c) => {
               const active = c.id === activeSid;
+              const swiped = swipedId === c.id;
               return (
+                <div key={c.id} className="session-swipe-wrap">
+                  {/* 底层删除钮：左滑后露出；点击进确认态（复用 confirmDelId 流程） */}
+                  <button
+                    type="button"
+                    className={`session-swipe-del${swiped ? " open" : ""}`}
+                    aria-label={`删除会话：${c.title}`}
+                    tabIndex={swiped ? 0 : -1}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setConfirmDelId(c.id);
+                      setSwipedId(null);
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                    </svg>
+                    删除
+                  </button>
                 <div
-                  key={c.id}
                   role="button"
                   tabIndex={0}
                   aria-current={active ? "true" : undefined}
-                  onClick={() => onSelect(c.id)}
+                  onClick={() => {
+                    // 已左滑的行：第一下点按只收回滑出，不误触选择
+                    if (swiped) {
+                      setSwipedId(null);
+                      return;
+                    }
+                    onSelect(c.id);
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
@@ -228,6 +257,51 @@ export default function Sidebar({
                     }
                   }}
                   className={`session group ${active ? "active" : ""}`}
+                  style={swiped ? { transform: `translateX(-${SWIPE_W}px)` } : undefined}
+                  onTouchStart={(e) => {
+                    const t = e.touches[0];
+                    swipeTouch.current = {
+                      id: c.id,
+                      x0: t.clientX,
+                      y0: t.clientY,
+                      el: e.currentTarget,
+                      horizontal: null,
+                    };
+                    if (swipedId && swipedId !== c.id) setSwipedId(null);
+                  }}
+                  onTouchMove={(e) => {
+                    const st = swipeTouch.current;
+                    if (!st || st.id !== c.id) return;
+                    const t = e.touches[0];
+                    const dx = t.clientX - st.x0;
+                    const dy = t.clientY - st.y0;
+                    if (st.horizontal === null) {
+                      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+                      st.horizontal = Math.abs(dx) > Math.abs(dy);
+                      if (!st.horizontal) {
+                        swipeTouch.current = null;
+                        return;
+                      }
+                    }
+                    if (!st.horizontal) return;
+                    // 从已滑开位置回拖也要连贯：起点补偿 -SWIPE_W
+                    const base = swiped ? -SWIPE_W : 0;
+                    const off = Math.max(-SWIPE_W, Math.min(0, base + dx));
+                    st.el.style.transition = "none";
+                    st.el.style.transform = `translateX(${off}px)`;
+                  }}
+                  onTouchEnd={() => {
+                    const st = swipeTouch.current;
+                    if (!st || st.id !== c.id) return;
+                    const m = /translateX\((-?[\d.]+)px\)/.exec(st.el.style.transform);
+                    const off = m ? parseFloat(m[1]) : 0;
+                    st.el.style.transition = "";
+                    st.el.style.transform = "";
+                    swipeTouch.current = null;
+                    // 滑过 1/3 阈值就吸附展开；几乎没动则视作点按回收
+                    if (off < -SWIPE_W / 3) setSwipedId(c.id);
+                    else if (swiped) setSwipedId(null);
+                  }}
                 >
                   {editingId === c.id ? (
                     <input
@@ -310,6 +384,7 @@ export default function Sidebar({
                       )}
                     </>
                   )}
+                </div>
                 </div>
               );
             })}

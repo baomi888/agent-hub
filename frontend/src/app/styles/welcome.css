@@ -7,13 +7,21 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 32px 0;
+  padding: 20px 0;
   text-align: center;
   /* Logo 与标题后方一层极淡的暖金光晕，让首屏有个柔和的视觉锚点
      （大半径 + 晚收尾，避免出现边缘可辨的"云块"） */
   background: radial-gradient(640px 380px at 50% 16%, var(--accent-soft) 0%, transparent 72%);
   /* 一次协调的首屏入场：整块一起上浮淡入，不做错峰 */
   animation: fadeUp 0.5s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+/* 一屏放全：欢迎页 + 输入框要在一屏内完整可见。
+   矮视口（小笔记本 / 手机横屏）进一步压缩呼吸感，内容优先 */
+@media (max-height: 800px) {
+  .welcome { padding: 12px 0; }
+  .hero-title { font-size: calc(var(--hero-fs, 34px) * 0.88); }
+  .welcome-foot { margin-top: 10px; }
 }
 
 /* ============ 首屏 Hero 签名区 ============ */
@@ -135,7 +143,7 @@
   color: var(--line-strong);
 }
 .welcome-foot {
-  margin-top: 26px;
+  margin-top: 16px;
   font-size: var(--fs-md);
   letter-spacing: var(--ls-mid);
   color: var(--text-3);
@@ -156,16 +164,18 @@
   background: linear-gradient(90deg, var(--line-strong), transparent);
 }
 
-/* ① 场景快选：三枚可点卡片，选中态用玉米金（仅持久/选中态用金） */
+/* ① 场景快选：三枚可点卡片，选中态用玉米金（仅持久/选中态用金）
+   手机端（<560px）压成横排单行：只留图标+标题，描述藏进 title，
+   保证三张卡一行放下、不把首屏顶出滚动 */
 .scenario-pick {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: var(--space-3);
   flex: 1 1 0;
-  min-width: 140px;
+  min-width: 0;
   text-align: left;
-  padding: 12px 14px;
+  padding: 10px 13px;
   background: var(--card-bg);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
@@ -173,6 +183,20 @@
   cursor: pointer;
   color: var(--accent-ink);
   transition: var(--t-color), var(--t-move);
+}
+@media (max-width: 560px) {
+  .scenario-pick {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-5);
+    padding: 9px 11px;
+  }
+  .scenario-pick .sp-desc {
+    display: none;
+  }
+  .scenario-pick .sp-label {
+    font-size: var(--fs-md);
+  }
 }
 .scenario-pick:hover,
 .scenario-pick:focus-visible {
@@ -206,7 +230,7 @@
   gap: var(--space-10);
   width: 100%;
   text-align: left;
-  padding: 12px 14px;
+  padding: 10px 13px;
   background: var(--card-bg);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
@@ -230,8 +254,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   flex-shrink: 0;
   border-radius: var(--radius-sm);
   background: var(--accent-soft);

@@ -6,7 +6,7 @@
 import { memo, useMemo, useState } from "react";
 import type { UiMessage } from "./types";
 import { TOOL_META, toolLabel } from "./constants";
-import { parseRefs, renderContent } from "./content";
+import { parseRefs, renderContent, renderMarkdown } from "./content";
 import CornIcon from "../CornIcon";
 import PlanCard, { detectPlanTopic, isPlanRequest, parsePlan } from "./plan";
 import { useCopy } from "@/lib/useCopy";
@@ -201,7 +201,7 @@ const Bubble = memo(function Bubble({
           ) : !m.streaming && isPlanRequest(userQuestion) ? (
             (() => {
               const plan = parsePlan(m.content);
-              if (!plan) return renderContent(m.content);
+              if (!plan) return renderMarkdown(m.content);
               const topic = detectPlanTopic(userQuestion);
               return <PlanCard data={plan} content={m.content} topic={topic} onCopy={handleCopy} />;
             })()
@@ -219,7 +219,8 @@ const Bubble = memo(function Bubble({
             </div>
           ) : (
             <>
-              {renderContent(m.content)}
+              {/* AI 正文走 markdown 渲染：标题/列表/表格/代码块/链接都排出来 */}
+              {renderMarkdown(m.content)}
               {m.stopped && <span className="stopped-tag">已停止生成</span>}
               {m.streaming && <span className="cursor" />}
               {/* 引用角标：点一下跳到下面第 N 条参考片段 */}

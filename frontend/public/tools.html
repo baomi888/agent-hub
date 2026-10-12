@@ -431,7 +431,7 @@
         <button class="btn-new btn-sm" id="dlAdd">添加</button>
       </div>
       <div id="dlList" style="margin-top:14px"></div>
-      <p class="note">剩余 ≤7 天标红提醒，过期显示「已逾期」。临近的自动排前面。</p>
+      <p class="note">点 ✎ 可随时改名称/日期（编辑完还能再编辑）；剩余 ≤7 天标红提醒，过期显示「已逾期」；临近的自动排前面。数据保存在本机浏览器，下次打开还在。</p>
     </div>
   </section>
 
@@ -715,6 +715,33 @@ wShow();
 
 /* ---------- 倒计时 ---------- */
 const dlList=document.getElementById('dlList'); let dls=[];
+let dlEdit=-1; // 正在行内编辑的卡片下标（-1 = 无）；编辑完保存后还能再点 ✎ 再改
+const DL_KEY='baomi_deadline_v1';
+function dlSave(){
+  try{ localStorage.setItem(DL_KEY, JSON.stringify(dls.map(d=>({name:d.name, date:d.date.getTime()})))); }catch(e){}
+}
+function dlLoad(){
+  try{
+    const raw=localStorage.getItem(DL_KEY);
+    if(raw){
+      const arr=JSON.parse(raw);
+      if(Array.isArray(arr)) return arr
+        .map(d=>({name:String(d.name||'').slice(0,30), date:new Date(d.date)}))
+        .filter(d=>d.name && !isNaN(d.date.getTime()));
+    }
+  }catch(e){}
+  return null; // 没存过 → 播种三条示例
+}
+(function(){
+  const saved=dlLoad();
+  if(saved){ dls=saved; return; }
+  [['期末考试',30],['课程论文提交',14],['四六级考试',60]].forEach(([n,days])=>{
+    const d=new Date();d.setHours(0,0,0,0);d.setDate(d.getDate()+days);
+    dls.push({name:n,date:d});
+  });
+  dlSave();
+})();
+const dlDateStr=d=>{ const x=new Date(d.getTime()-d.getTimezoneOffset()*60000); return x.toISOString().slice(0,10); };
 function dlRender(){
   const today=new Date(); today.setHours(0,0,0,0);
   dls.sort((a,b)=>a.date-b.date);
@@ -726,24 +753,42 @@ function dlRender(){
     else if(days===0){cls='urgent';txt='就是今天!';}
     else if(days<=7){cls='urgent';txt='剩 '+days+' 天';}
     else txt='剩 '+days+' 天';
-    return `<div class="dl-item"><span class="dl-name">${d.name}</span>
-      <span style="color:var(--text-3);font-size:var(--fs-xs)">${d.date.toISOString().slice(0,10)}</span>
+    if(i===dlEdit){
+      return `<div class="dl-item" style="flex-wrap:wrap;gap:6px">
+        <input class="dl-ed-name" value="${esc(d.name)}" maxlength="30" style="flex:1;min-width:110px;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:6px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" />
+        <input class="dl-ed-date" type="date" value="${dlDateStr(d.date)}" style="border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:6px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" />
+        <button class="btn-import btn-sm dl-ok" data-i="${i}">保存</button>
+        <button class="del" data-cancel="${i}">✕</button>
+      </div>`;
+    }
+    return `<div class="dl-item"><span class="dl-name">${esc(d.name)}</span>
+      <span style="color:var(--text-3);font-size:var(--fs-xs)">${dlDateStr(d.date)}</span>
       <span class="dl-days ${cls}">${txt}</span>
+      <button class="dl-edit" data-i="${i}" title="编辑（改完还能再改）">✎</button>
       <button class="del" data-i="${i}">✕</button></div>`;
   }).join('');
-  dlList.querySelectorAll('.del').forEach(b=>b.onclick=()=>{dls.splice(+b.dataset.i,1);dlRender();});
+  dlList.querySelectorAll('.del[data-i]').forEach(b=>b.onclick=()=>{dls.splice(+b.dataset.i,1);dlEdit=-1;dlSave();dlRender();});
+  dlList.querySelectorAll('.dl-edit').forEach(b=>b.onclick=()=>{dlEdit=+b.dataset.i;dlRender();const inp=dlList.querySelector('.dl-ed-name');if(inp)inp.focus();});
+  dlList.querySelectorAll('.del[data-cancel]').forEach(b=>b.onclick=()=>{dlEdit=-1;dlRender();});
+  dlList.querySelectorAll('.dl-ok').forEach(b=>b.onclick=()=>{
+    const row=b.closest('.dl-item');
+    const n=row.querySelector('.dl-ed-name').value.trim();
+    const dt=row.querySelector('.dl-ed-date').value;
+    if(!n||!dt){alert('名称和日期都要填好');return;}
+    dls[+b.dataset.i]={name:n,date:new Date(dt+'T00:00:00')};
+    dlEdit=-1; dlSave(); dlRender();
+  });
+  // 编辑态里按回车直接保存
+  const nameInp=dlList.querySelector('.dl-ed-name');
+  if(nameInp){ nameInp.onkeydown=e=>{ if(e.key==='Enter') dlList.querySelector('.dl-ok').click(); }; }
 }
 document.getElementById('dlAdd').onclick=()=>{
   const n=document.getElementById('dlName').value.trim(),dt=document.getElementById('dlDate').value;
   if(!n||!dt){alert('请填好事项和日期');return;}
   dls.push({name:n,date:new Date(dt+'T00:00:00')});
   document.getElementById('dlName').value=''; document.getElementById('dlDate').value='';
-  dlRender();
+  dlSave(); dlRender();
 };
-[['期末考试',30],['课程论文提交',14],['四六级考试',60]].forEach(([n,days])=>{
-  const d=new Date();d.setHours(0,0,0,0);d.setDate(d.getDate()+days);
-  dls.push({name:n,date:d});
-});
 dlRender();
 
 /* ---------- 群抽签（仿微信） ---------- */
