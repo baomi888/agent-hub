@@ -141,6 +141,125 @@
   color: var(--text-3);
 }
 
+/* 首屏分区小标题：眉题 + 金色细分隔线，呼应笔记本页眉 */
+.welcome-section-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+.welcome-section-head .eyebrow {
+  flex: none;
+}
+.welcome-section-head .rule {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--line-strong), transparent);
+}
+
+/* ① 场景快选：三枚可点卡片，选中态用玉米金（仅持久/选中态用金） */
+.scenario-pick {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  flex: 1 1 0;
+  min-width: 140px;
+  text-align: left;
+  padding: 12px 14px;
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 1px 2px rgba(80, 60, 30, 0.05);
+  cursor: pointer;
+  color: var(--accent-ink);
+  transition: var(--t-color), var(--t-move);
+}
+.scenario-pick:hover,
+.scenario-pick:focus-visible {
+  border-color: var(--accent);
+  background: var(--fill-2);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-2);
+  outline: none;
+}
+.scenario-pick:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.scenario-pick .sp-label {
+  font-family: var(--font-serif);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  color: var(--ink);
+  line-height: var(--lh-tight);
+}
+.scenario-pick .sp-desc {
+  font-size: var(--fs-xs);
+  line-height: var(--lh-tight);
+  color: var(--text-3);
+}
+
+/* ② 功能入口：图标 + 文字横排，hover 换金边与浅底（金只做选中/主操作/边框反馈） */
+.intro-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  width: 100%;
+  text-align: left;
+  padding: 12px 14px;
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 1px 2px rgba(80, 60, 30, 0.05);
+  cursor: pointer;
+  transition: var(--t-color), var(--t-move);
+}
+.intro-entry:hover,
+.intro-entry:focus-visible {
+  border-color: var(--accent);
+  background: var(--fill-2);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-2);
+  outline: none;
+}
+.intro-entry:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.intro-entry .ie-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  transition: var(--t-color);
+}
+.intro-entry:hover .ie-icon {
+  background: var(--fill-1);
+  color: var(--accent-ink);
+}
+.intro-entry .ie-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.intro-entry .ie-label {
+  font-family: var(--font-serif);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  color: var(--ink);
+  line-height: var(--lh-tight);
+}
+.intro-entry .ie-hint {
+  font-size: var(--fs-xs);
+  line-height: var(--lh-tight);
+  color: var(--text-3);
+}
+
 /* 首屏四宫格能力卡：呼应设计稿「四个等大的圆角白色卡片」，像贴在纸上的功能便签 */
 .ability-card {
   display: flex;

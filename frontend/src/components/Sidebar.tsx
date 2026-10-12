@@ -153,6 +153,16 @@ export default function Sidebar({
           </span>
         </button>
       )}
+      {/* 校园工具集：纯前端工具，无需登录即可用，独立静态页新标签打开 */}
+      <a
+        href="/tools.html"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="btn-import mt-2 flex w-full items-center justify-center gap-1.5"
+      >
+        <CornIcon name="tools" className="h-4 w-4" title="校园工具集" />
+        校园工具集
+      </a>
 
       {/* 搜索框：大圆角 */}
       <div className="search mt-4">

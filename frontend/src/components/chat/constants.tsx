@@ -2,6 +2,7 @@
 // 从 ChatArea.tsx 拆出（2026-09 重构），纯数据 + 图标，无逻辑
 import type { ReactNode } from "react";
 import type { ChatMode } from "@/lib/types";
+import type { CornIconName } from "@/components/CornIcon";
 
 export const MODE_LABELS: { value: ChatMode; label: string; hint: string }[] = [
   { value: "auto", label: "自动", hint: "绑定知识库后自动优先检索" },
@@ -10,13 +11,39 @@ export const MODE_LABELS: { value: ChatMode; label: string; hint: string }[] = [
   { value: "llm", label: "纯对话", hint: "纯大模型对话，不检索" },
 ];
 
-// 首屏示例：三条都是「不用先准备任何东西」的问题——
-// 用户第一次来手上没有知识库，示例必须现在就能点、点了就有结果
+// 首屏示例：三条都是「现在就能点、点了就有结果」的问题，
+// 反映当前主力能力（资料库 / 场景化写作 / 出题），不再强调旧的四类工具
 export const EXAMPLES: { hint: string; q: string }[] = [
-  { hint: "问天气", q: "北京今天天气怎么样？" },
-  { hint: "算一算", q: "帮我算一下 (12 + 34) × 5" },
-  { hint: "改文案", q: "把这句话改得更客气一点：你发的邮件我没收到" },
+  { hint: "理资料", q: "帮我把这份笔记整理成知识卡片" },
+  { hint: "写论文", q: "给我搭一个论文的三级提纲" },
+  { hint: "出题目", q: "根据课程笔记，给我出 3 道自测题" },
 ];
+
+// 校园工具集静态页地址（frontend/public/tools.html，无需登录即可用）
+export const TOOLS_URL = "/tools.html";
+
+// 首屏功能入口：替代旧「查资料/联网搜索/数学计算/查天气」四能力卡，
+// 改为反映当前真实功能（模板广场 / 校园工具集 / 上传建库 / 研究）
+// action 由 ChatArea 接管：template→开模板广场、tools→开工具集页、
+// upload→开资料库面板、research→预填研究引导
+export const INTRO_ENTRIES: {
+  key: "template" | "tools" | "upload" | "research";
+  label: string;
+  hint: string;
+  icon: CornIconName;
+}[] = [
+  { key: "template", label: "模板广场", hint: "挑一个场景化智能体", icon: "store" },
+  { key: "tools", label: "校园工具集", hint: "GPA · 番茄钟 · 课表…", icon: "tools" },
+  { key: "upload", label: "上传资料建库", hint: "让苞米读你的文件", icon: "notes" },
+  { key: "research", label: "让它去研究", hint: "带题目去联网深挖", icon: "bulb" },
+];
+
+// 场景快选：首屏点一下进入对应场景并预填一句开场白（轻量版仅前端保存）
+export const SCENARIO_STARTERS: Record<string, string> = {
+  kaoyan: "帮我梳理这一章的考点和易错点",
+  notes: "把我的笔记提炼成要点清单",
+  paper: "给我一个论文的论证结构大纲",
+};
 
 // ============ 工具调用：名称 → 中文标签 + 图标 ============
 export const TOOL_META: Record<string, { label: string; icon: ReactNode }> = {

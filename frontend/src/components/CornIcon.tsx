@@ -22,6 +22,7 @@ export type CornIconName =
   | "bulb" // 理念提示
   | "warn" // 警告/出错
   | "store" // 模板广场
+  | "tools" // 校园工具集（扳手）
   | "corn"; // 兜底：mini 苞米
 
 const INK_STROKE = { strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -205,6 +206,22 @@ function Store() {
   );
 }
 
+/** 校园工具集：扳手（Q 版圆角手绘，金填充） */
+function Tools() {
+  return (
+    <g {...INK_STROKE}>
+      {/* 扳手头 */}
+      <path
+        d="M33.5 12.5a6 6 0 0 0-7.9 7.1L11.5 33.8a3.6 3.6 0 0 0 5.1 5.1l13.9-14.1a6 6 0 0 0 7.1-7.9l-3.4 3.4-2.9-2.9 3.4-3.4Z"
+        fill="#F5B840"
+        strokeWidth={3}
+      />
+      {/* 开口高光 */}
+      <path d="M29 16.5 C30.2 14.6 32.8 14.4 34.4 16 C36 17.6 36.2 20.2 34.4 21.4" fill="none" strokeWidth={2.2} opacity={0.45} />
+    </g>
+  );
+}
+
 /** 兜底：mini 苞米（复用吉祥物造型语言） */
 function Corn() {
   return (
@@ -248,6 +265,7 @@ const ICONS: Record<string, () => React.JSX.Element> = {
   bulb: Bulb,
   warn: Warn,
   store: Store,
+  tools: Tools,
   corn: Corn,
 };
 

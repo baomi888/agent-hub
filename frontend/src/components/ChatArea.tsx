@@ -10,7 +10,7 @@ import MascotLogo from "./chat/MascotLogo";
 import CornIcon from "./CornIcon";
 import { api } from "@/lib/api";
 import type { ChatMode, RefSource, QuotaInfo } from "@/lib/types";
-import { ABILITIES, EXAMPLES, MODE_LABELS, SCENARIOS } from "./chat/constants";
+import { ABILITIES, EXAMPLES, MODE_LABELS, SCENARIOS, INTRO_ENTRIES, TOOLS_URL, SCENARIO_STARTERS } from "./chat/constants";
 import { buildPlanPrompt, detectPlanTopic, isPlanRequest, stripPlanHint } from "./chat/plan";
 import Bubble from "./chat/Bubble";
 import BubbleErrorBoundary from "./chat/BubbleErrorBoundary";
@@ -366,6 +366,37 @@ export default function ChatArea({
     onToggleKbPanel?.();
   };
 
+  // 首屏场景快选：选中场景预设 + 预填一句开场白（轻量版场景仅前端保存）
+  const startScenario = (id: string) => {
+    onScenarioChange?.(id);
+    const starter = SCENARIO_STARTERS[id] ?? "";
+    setInput(starter);
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    });
+  };
+
+  // 首屏功能入口：模板广场 / 校园工具集 / 上传建库 / 让它研究
+  const handleIntroEntry = (key: string) => {
+    switch (key) {
+      case "template":
+        window.location.href = "/templates";
+        break;
+      case "tools":
+        window.open(TOOLS_URL, "_blank", "noopener,noreferrer");
+        break;
+      case "upload":
+        openUpload();
+        break;
+      case "research":
+        startResearch();
+        break;
+    }
+  };
+
   const handleForward = useCallback((text: string) => {
     setInput(text);
     inputRef.current?.focus();
@@ -528,7 +559,8 @@ export default function ChatArea({
         <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto">
           <div className="chat-measure mx-auto flex min-h-full flex-col px-6 pb-4 pt-6">
           {messages.length === 0 ? (
-            // 欢迎页：主路径是「直接问」，进料（研究/上传）只做被弱化的第二行
+            // 欢迎页：主路径是「直接问」，但首屏先把当前主打能力摆出来——
+            // ① 场景快选（考研/笔记/论文）② 功能入口（模板/工具集/建库/研究）③ 三句示例
             <div className="welcome">
               <MascotLogo
                 className="hero-logo mx-auto mb-4 h-[72px] w-[72px] object-contain"
@@ -540,27 +572,54 @@ export default function ChatArea({
                 {greeting}，我是<span className="hero-name">苞米</span>
               </h1>
               <p className="mt-3 max-w-[30rem] text-msg leading-relaxed text-muted">
-                一句话就行。我会自己决定——是查你的资料、上网搜，还是算一下。
+                一句话就行。选个场景，或直接问我——我会自己决定怎么帮你。
               </p>
 
-              {/* 四宫格能力卡片：呼应设计稿，点一下直接进对应模式并预填一句能立刻发的话 */}
-              <div className="mt-6 grid w-full grid-cols-2 gap-2.5 sm:grid-cols-4">
-                {ABILITIES.map((a) => (
+              {/* ① 场景快选：当前主打能力，点一下进对应场景并预填开场白 */}
+              <div className="mt-6 w-full">
+                <div className="welcome-section-head">
+                  <span className="eyebrow">选个场景开始</span>
+                  <span className="rule" />
+                </div>
+                <div className="mt-3 flex w-full flex-wrap justify-center gap-2">
+                  {SCENARIOS.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => startScenario(s.id)}
+                      className="scenario-pick"
+                      title={s.desc}
+                    >
+                      <CornIcon name={s.id === "kaoyan" ? "book" : s.id === "notes" ? "notes" : "pen"} className="h-5 w-5" title={s.label} />
+                      <span className="sp-label">{s.label}</span>
+                      <span className="sp-desc">{s.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* ② 功能入口：替代旧四能力卡，反映当前真实功能 */}
+              <div className="mt-5 w-full grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                {INTRO_ENTRIES.map((e) => (
                   <button
-                    key={a.label}
+                    key={e.key}
                     type="button"
-                    onClick={() => startAbility(a.mode, a.example)}
-                    className="ability-card"
-                    aria-label={`${a.label}：${a.hint}`}
+                    onClick={() => handleIntroEntry(e.key)}
+                    className="intro-entry"
+                    aria-label={`${e.label}：${e.hint}`}
                   >
-                    <span className="ab-icon">{a.icon}</span>
-                    <span className="ab-label">{a.label}</span>
-                    <span className="ab-hint">{a.hint}</span>
+                    <span className="ie-icon">
+                      <CornIcon name={e.icon} className="h-6 w-6" title={e.label} />
+                    </span>
+                    <span className="ie-text">
+                      <span className="ie-label">{e.label}</span>
+                      <span className="ie-hint">{e.hint}</span>
+                    </span>
                   </button>
                 ))}
               </div>
 
-              {/* 次级示例：三句能立刻点的话，三列等宽便签；min-w-0 让长句在卡内截断不溢出 */}
+              {/* ③ 次级示例：三句能立刻点的话，三列等宽便签；min-w-0 让长句在卡内截断不溢出 */}
               <div className="mt-4 grid w-full grid-cols-1 gap-2 sm:grid-cols-3">
                 {EXAMPLES.map((e) => (
                   <button
