@@ -47,7 +47,10 @@ export function useKnowledge(showToast: ShowToast, chunkSize: number, chunkOverl
   // 上传文档建库：先把中文名解析为安全 kb_id，再上传（切片参数用当前设置）
   const uploadFiles = async (kbName: string, files: File[]) => {
     try {
-      const { kb_id } = await api.createKb(kbName);
+      // 名字对上已有库则复用，避免手打差一点就新建同名库
+      const norm = kbName.trim().toLowerCase();
+      const existing = kbs.find((k) => (k.name || "").trim().toLowerCase() === norm);
+      const kb_id = existing ? existing.kb_id : (await api.createKb(kbName)).kb_id;
       const r = await api.uploadFiles(kb_id, files, chunkSize, chunkOverlap);
       showToast("success", `已导入 ${r.chunks} 个片段到「${kbName}」`);
       refreshKbs();

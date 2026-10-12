@@ -169,10 +169,11 @@ def search_preview(keyword: str, max_results: int = 10) -> list[dict]:
 
     try:
         q = boost_app_query(keyword)
+        # gl/hl 锚定中国区 + 中文，减少国外结果（国内打不开的外站链接）。
         resp = httpx.post(
             "https://google.serper.dev/search",
             headers={"X-API-KEY": config.SERPER_API_KEY, "Content-Type": "application/json"},
-            json={"q": q, "num": max_results},
+            json={"q": q, "num": max_results, "gl": "cn", "hl": "zh-cn"},
             timeout=15,
         )
         resp.raise_for_status()

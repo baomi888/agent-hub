@@ -468,7 +468,11 @@ export default function Home() {
     onProgress: (i: number, total: number, title: string) => void
   ): Promise<string> => {
     try {
-      const { kb_id } = await api.createKb(kbName);
+      // 先把名字对上当前用户已有的库：手打的名字只要大小写/首尾空格略有出入，
+      // 直连 createKb 就会用不同 kb_id 再建一个同名库。命中则复用，不新建。
+      const norm = kbName.trim().toLowerCase();
+      const existing = kbs.find((k) => (k.name || "").trim().toLowerCase() === norm);
+      const kb_id = existing ? existing.kb_id : (await api.createKb(kbName)).kb_id;
       let ok = 0;
       for (let i = 0; i < urls.length; i++) {
         const url = urls[i];
