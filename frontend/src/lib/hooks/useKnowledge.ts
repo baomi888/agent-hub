@@ -72,7 +72,13 @@ export function useKnowledge(showToast: ShowToast, chunkSize: number, chunkOverl
 
   // 上传文档建库：先把中文名解析为安全 kb_id，再上传。
   // size/overlap 由面板按「处理方式」档位传入；没传则用全局兜底值。
-  const uploadFiles = async (kbName: string, files: File[], size?: number, overlap?: number) => {
+  // 成功时返回落到哪个库，交给编排层决定要不要顺手绑定（失败返回 null，错误已 toast）。
+  const uploadFiles = async (
+    kbName: string,
+    files: File[],
+    size?: number,
+    overlap?: number
+  ): Promise<string | null> => {
     const params: ChunkParams = {
       size: size ?? chunkSize,
       overlap: overlap ?? chunkOverlap,
@@ -94,6 +100,7 @@ export function useKnowledge(showToast: ShowToast, chunkSize: number, chunkOverl
       // 建库/追加成功才记档位：失败回滚的库不该留下记录
       rememberChunk(kb_id, params);
       showToast("success", `已导入 ${r.chunks} 个片段到「${kbName}」`);
+      return kb_id;
     } catch (e) {
       // 回滚空壳库（复用已有库时不删，那里面可能有别的文件）
       if (createdId) {
@@ -102,6 +109,7 @@ export function useKnowledge(showToast: ShowToast, chunkSize: number, chunkOverl
       }
       const msg = e instanceof Error ? e.message : "上传失败，请稍后重试";
       showToast("error", msg);
+      return null;
     } finally {
       refreshKbs();
     }

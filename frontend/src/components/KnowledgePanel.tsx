@@ -604,11 +604,11 @@ export default function KnowledgePanel({
       {/* 建完库后的下一步：不少用户卡在「建好了，然后呢」 */}
       {justBuilt && (
         <div className="fade-up mt-3 flex items-start gap-2 rounded-xl border border-line bg-accent-soft px-3 py-2.5">
-          <span className="mt-0.5 shrink-0" style={{ color: "var(--accent-ink)" }}>
+          <span className="mt-0.5 shrink-0 text-accent-ink">
             <CornIcon name="info" className="h-4 w-4" />
           </span>
           <p className="min-w-0 flex-1 text-fs-xs text-ink">
-            「{justBuilt}」已建好。勾上它在列表左边的方框，回到对话框就能直接问里面的内容。
+            「{justBuilt}」已就绪，并已设为当前资料库。回到对话框直接问里面的内容就行。
           </p>
           <button
             type="button"

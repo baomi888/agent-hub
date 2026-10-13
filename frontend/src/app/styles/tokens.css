@@ -269,6 +269,9 @@ html[data-fs="l"] {
   --color-faint: var(--text-3);
   --color-accent: var(--accent);
   --color-accent-soft: var(--accent-soft);
+  /* 和 --color-red-ink / --color-success-ink 同一套分工：浅底上的金字用它。
+     之前漏了这条映射，tsx 里的 text-accent-ink 一直在静默失效（CSS 层却正常用了 var(--accent-ink)） */
+  --color-accent-ink: var(--accent-ink);
   --color-ink: var(--ink);
   --color-paper: var(--paper);
   --color-solid: var(--solid);

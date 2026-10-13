@@ -51,6 +51,10 @@ async function clickByText(page, text, tag = "button") {
       const q = u.includes("?") ? u.slice(u.indexOf("?")) : "";
       log("  → 请求", r.method(), u.split("/api")[1].split("?")[0], q);
     }
+    // 上传成功后应自动带一条绑定请求 PATCH /api/sessions/{id} {kb_id}
+    if (u.includes("/api/sessions/") && r.method() === "PATCH") {
+      log("  → 绑定请求 PATCH /api/sessions/…", (r.postData() || "").slice(0, 120));
+    }
   });
 
   await page.goto(BASE, { waitUntil: "networkidle2", timeout: 60000 });
@@ -115,10 +119,24 @@ async function clickByText(page, text, tag = "button") {
     await sleep(2500);
     if (panel) await panel.screenshot({ path: path.join(OUT, "ui-4-built.png") });
     const built = await page.evaluate(() => {
-      const rows = [...document.querySelectorAll(".kb-row")];
-      return rows.map((r) => (r.querySelector(".kb-meta") || r).innerText.replace(/\s+/g, " "));
+      const r = document.querySelector(".kb-row");
+      if (!r) return null;
+      const aside = document.querySelector('aside[aria-label="资料库"]');
+      const tip = (aside ? aside.innerText : "").match(/「[^」]+」已就绪[^\n]*/);
+      return {
+        行文本: (r.querySelector(".kb-meta") || r).innerText.replace(/\s+/g, " "),
+        已绑定: r.classList.contains("bound"),
+        ariaPressed: (r.querySelector("button[aria-pressed]") || {}).getAttribute?.("aria-pressed") ?? null,
+        引导: tip ? tip[0] : null,
+      };
     });
-    log("截图 4：建库后。列表行 =", JSON.stringify(built));
+    log("截图 4：建库后 →", JSON.stringify(built, null, 0), "（已绑定 true = 自动绑定生效）");
+    // 补 token 前这里是空的（类名静默失效），现在应有实际色值
+    const tokenColor = await page.evaluate(() => {
+      const s = document.querySelector("aside[aria-label='资料库'] .text-accent-ink");
+      return s ? getComputedStyle(s).color : "（找不到该元素）";
+    });
+    log("  text-accent-ink 计算色 =", tokenColor, "｜期望 rgb(135, 91, 16) = #875B10");
   } else {
     log("跳过上传：找不到 file input 或样例文件");
   }
@@ -144,6 +162,13 @@ async function clickByText(page, text, tag = "button") {
   const panel2 = await page.$('aside[aria-label="资料库"]');
   if (panel2) await panel2.screenshot({ path: path.join(OUT, "ui-7-light-panel.png") });
   log("截图 6/7：浅色模式 + 库内文件与「重新整理」");
+
+  // 浅底上金色必须走可读版 #875B10（--accent 只有 2.6:1），这条是设计硬约束
+  const tokenLight = await page.evaluate(() => {
+    const s = document.querySelector(".text-accent-ink");
+    return s ? getComputedStyle(s).color : "（找不到）";
+  });
+  log("浅色下 text-accent-ink 计算色 =", tokenLight, "｜期望 rgb(135, 91, 16)");
 
   await browser.close();
 })().catch((e) => {

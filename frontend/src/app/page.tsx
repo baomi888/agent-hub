@@ -650,7 +650,12 @@ export default function Home() {
       <KnowledgePanel
         kbs={kbs}
         boundKb={boundKb}
-        onUpload={uploadFiles}
+        onUpload={async (kbName, files, size, overlap) => {
+          const kbId = await uploadFiles(kbName, files, size, overlap);
+          // 导入成功就顺手绑上：建库的意图本来就是「要用它」，
+          // 之前让用户自己去勾方框，等于把系统分内事推给用户。
+          if (kbId) await bindKb(kbId);
+        }}
         onSearch={searchPreview}
         onWebImport={webImport}
         onDeleteKb={deleteKb}
