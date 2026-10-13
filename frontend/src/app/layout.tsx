@@ -1,13 +1,13 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
-const TITLE = "苞米Agent · 知识库 · 多对话 · 智能体";
-const DESC = "支持知识库检索、联网搜索、计算、天气的 AI 智能体";
+const TITLE = "知穗Agent · 知识库 · 场景智能体 · 校园工具集";
+const DESC = "为大学生的 AI 素养平台：考研复习/课程笔记/论文写作场景智能体，知识库问答，附 GPA 分析、番茄钟等校园工具集";
 
 export const metadata: Metadata = {
   title: TITLE,
   description: DESC,
-  // 标签页图标：漫画风苞米吉祥物（矢量 SVG，缩放不糊）
+  // 标签页图标：漫画风知穗吉祥物（矢量 SVG，缩放不糊）
   icons: {
     icon: [{ url: "/mascot.svg", type: "image/svg+xml" }],
     apple: "/mascot.svg",

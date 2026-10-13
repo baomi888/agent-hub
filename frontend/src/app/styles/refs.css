@@ -185,3 +185,66 @@
   color: var(--text-3);
 }
 
+/* ============ 依据强度（P0 可信度）============ */
+/* 相似度只给数字，用户看不出 0.31 算不算数，所以补一个文字强度标签。
+   色只用中性色 + 红系两级：强=中性墨色（不抢眼，正常状态不需要强调），
+   弱=红（提示"这条其实帮不上忙"）。金只留给主操作，这里不用。 */
+.ref-strength {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--fs-badge);
+  font-weight: 500;
+  padding: 0 5px;
+  margin-left: 6px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--line-strong);
+  color: var(--text-2);
+  background: var(--fill-3);
+  letter-spacing: var(--ls-tight);
+}
+.ref-strength.is-weak {
+  border-color: color-mix(in srgb, var(--red) 45%, transparent);
+  color: var(--red-ink);
+  background: color-mix(in srgb, var(--red) 8%, transparent);
+}
+
+/* 低置信提示条：贴在回答正文上方。
+   用左侧竖线而不是整块实心底——实心红底在糙纸质感上太冲，也不符合"金只做点缀、
+   大面积给底色"的既有约定。 */
+.grounding-alert {
+  display: flex;
+  gap: var(--space-10);
+  align-items: flex-start;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--red);
+  border-radius: var(--radius-sm);
+}
+.grounding-alert .ga-icon {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  color: var(--red-ink);
+}
+.grounding-alert .ga-body {
+  min-width: 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+  color: var(--text-2);
+}
+.grounding-alert .ga-title {
+  display: block;
+  font-weight: 600;
+  color: var(--red-ink);
+  margin-bottom: 2px;
+}
+.grounding-alert .ga-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+

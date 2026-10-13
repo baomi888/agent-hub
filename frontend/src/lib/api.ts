@@ -1,6 +1,6 @@
 // 后端 API 封装：统一错误处理 + 类型化（相对路径走 rewrites 代理）
 import type { Conversation, KbInfo, KbFile, FilePreview, SearchResult, Defaults, Message } from "./types";
-import type { MeOut, UserOut, Template, ApplyTemplateResult } from "./types";
+import type { MeOut, UserOut, Template, ApplyTemplateResult, UsageSummary } from "./types";
 
 /**
  * 登录态失效的广播事件名。
@@ -34,7 +34,10 @@ async function httpError(res: Response): Promise<Error> {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
+  // Next dev 对带尾斜杠的 /api/* 会 308 重定向，浏览器 fetch 跟随时偶尔丢 body/cookie，
+  // 直接把尾斜杠去掉，请求落到 rewrite 目标，彻底绕开重定向。
+  const cleanPath = path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+  const res = await fetch(cleanPath, {
     // 登录态在 HttpOnly Cookie 里，同源也要显式带；不写这行浏览器会丢弃
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -140,11 +143,17 @@ export const api = {
     ),
 
   // ---------- 消息反馈（赞 / 踩）----------
-  // 同一条消息重复提交是"改"不是"追加"：点赞再点踩后端只留最后一次
-  sendFeedback: (sid: string, messageId: number, rating: "up" | "down") =>
+  // 同一条消息重复提交是"改"不是"追加"：点赞再点踩后端只留最后一次。
+  // comment 是「踩」时可选的改进原因，后端覆盖写入同一行。
+  sendFeedback: (
+    sid: string,
+    messageId: number,
+    rating: "up" | "down",
+    comment?: string,
+  ) =>
     request<{ ok: boolean; rating: string }>("/api/feedback/", {
       method: "POST",
-      body: JSON.stringify({ sid, message_id: messageId, rating }),
+      body: JSON.stringify({ sid, message_id: messageId, rating, comment: comment ?? "" }),
     }),
 
   // ---------- 配置 ----------
@@ -180,6 +189,9 @@ export const api = {
     }),
   logout: () => request<{ ok: boolean }>("/api/auth/logout/", { method: "POST" }),
   me: () => request<MeOut>("/api/auth/me/"),
+
+  // ---------- 用量与反馈看板 ----------
+  usageSummary: () => request<UsageSummary>("/api/usage/summary"),
 
   // ---------- 模板广场 ----------
   templates: () =>

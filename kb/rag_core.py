@@ -292,6 +292,107 @@ def _rrf_merge(vec_cands, kw_pairs, kw_docs, rrf_k: int) -> list:
     return [(by_id[did], dist.get(did), score / top) for did, score in order]
 
 
+# ==================== 可信度判定（P0）====================
+
+# 依据强度分级。前端按这个字段决定要不要给回答加"依据较弱"的提示条。
+STRENGTH_HIGH = "high"      # 至少一条强相关：可以正常回答
+STRENGTH_MEDIUM = "medium"  # 有相关但不强：正常回答，但标注依据强度
+STRENGTH_LOW = "low"        # 全都不够格：必须示弱，不许硬答
+STRENGTH_NONE = "none"      # 什么都没检索到
+
+
+def assess_grounding(docs_scores) -> dict:
+    """判定这批检索结果够不够格当依据。
+
+    只吃"已换算的余弦相似度"，换不出来的（换了没归一化的 embedding 模型）
+    一律按 None 处理 → 视为无法判定 → **判为 high**。
+    这个方向是刻意选的：判定不了时宁可让模型正常回答，也不要凭空说
+    "我找不到依据"——后者会把一个配置问题伪装成数据问题，更难排查。
+
+    ⚠️ **判定只看 top1，且和 build_sources 用同一个阈值**。这两条都是踩过的坑：
+      · 用平均分/最低分判定 → 一条强相关配几条噪声也会被拖成"检索质量差"，
+        正常回答被平白加上示弱提示；
+      · 和 build_sources 用不同阈值 → 引用卡片上标着「弱」，回答侧却认为够格，
+        用户看到的就是"卡片说这条没用、正文却在用它答"。
+    改这里的阈值，必须同步改 build_sources 里的分级。
+
+    返回 dict：
+      strength   high / medium / low / none
+      best       top1 余弦相似度（换不出来则 None）
+      count      有效片段数
+      weak       True 表示"没找到硬证据"——**medium 也算**，见下
+    """
+    items = list(docs_scores or [])
+    if not items:
+        return {"strength": STRENGTH_NONE, "best": None, "count": 0, "weak": False}
+
+    sims = [_to_similarity(d) for _, d in items]
+    known = [s for s in sims if s is not None]
+    if not known:
+        # 相似度换算不出来：不做判定，放行（见上面的方向说明）
+        return {"strength": STRENGTH_HIGH, "best": None, "count": len(items), "weak": False}
+
+    best = max(known)
+    if best >= config.RETRIEVE_LOW_SIM:
+        strength = STRENGTH_HIGH
+    elif best > config.RETRIEVE_MIN_SIM:
+        strength = STRENGTH_MEDIUM
+    else:
+        strength = STRENGTH_LOW
+
+    # ★ medium 也算"没找到硬证据"，必须一起 weak。
+    # medium 的语义是"留下了，但都不够格"——它和 low 的区别只是"有没有沾点边"，
+    # 不是"能不能当依据"。只让 low 示弱的话，0.26~0.44 这段最常见的灰色地带
+    # 反而会被正常作答，恰好漏掉最容易硬答的那一档。
+    # 两者对用户的话术由前端按 strength 区分：low 说"没找到依据"，
+    # medium 说"只找到沾边内容"。
+    return {
+        "strength": strength,
+        "best": best,
+        "count": len(items),
+        "weak": strength in (STRENGTH_LOW, STRENGTH_MEDIUM),
+    }
+
+
+# 没找到硬证据时追加给模型的约束（放在系统提示词里，不改动原有 SYSTEM_PROMPT）
+LOW_CONFIDENCE_NOTE = """
+【本轮检索质量偏低，必须遵守】
+这一轮检索到的片段相似度都很低，**没有一条达到"可以直接当依据"的水平**。
+不要把这些片段当成确凿答案，也不要顺着它们的边角内容拼凑一个看起来很像答案的回答。
+请按下面的方式作答：
+1. 第一句就要点明"这个知识库里没有和这个问题直接相关的资料"；
+2. 如果片段里确实沾到了一点相关线索，可以补一句"最接近的一段讲的是……，
+   但它和你的问题并不完全对应"，并明确这是在转述线索、不是依据；
+3. 给出下一步：把相关文档补进这个知识库，或者改用联网搜索。
+宁可说"不知道"，也不要编。"""
+
+# 灰色地带（medium）专用：沾边但不够格，语气比 LOW 缓和，但同样不许当依据
+MARGINAL_CONFIDENCE_NOTE = """
+【本轮检索只找到沾边内容，必须遵守】
+检索到的片段和问题沾边，但相似度都不够高，**不构成直接依据**。
+不要顺着它们推测成一个确定答案。请：
+1. 先说明"知识库里没有直接讲这个问题的资料，只找到内容沾边的几段"；
+2. 把沾边的那部分如实概括出来，并标明这是相近内容、不是问题的答案；
+3. 建议用户补充更对口的文档，或改用联网搜索。
+宁可说"只能找到沾边的"，也不要编。"""
+
+
+def grounding_note(assessment: dict) -> str:
+    """根据判定结果产出要追加给模型的提示（不需要追加时返回空串）。
+
+    medium 和 low 都要追加，只是话术不同——两者都表示"没有硬证据"。
+    见 assess_grounding 里对 medium 为什么也算 weak 的说明。
+    """
+    if not config.GROUNDING_NOTICE:
+        return ""
+    strength = (assessment or {}).get("strength")
+    if strength == STRENGTH_LOW:
+        return LOW_CONFIDENCE_NOTE
+    if strength == STRENGTH_MEDIUM:
+        return MARGINAL_CONFIDENCE_NOTE
+    return ""
+
+
 def select_diverse(docs_scores, top_k: int, lambda_mult: float | None = None) -> list:
     """从候选里挑出 top_k 条：先丢明显不相关的，再按 MMR 去掉互相重复的。
 
@@ -969,19 +1070,33 @@ class RagPipeline:
 
     @staticmethod
     def build_sources(docs_scores) -> list[dict]:
-        """把检索结果整理成前端可展开的引用条目（含原文，供溯源查看）。"""
+        """把检索结果整理成前端可展开的引用条目（含原文，供溯源查看）。
+
+        每条额外带 strength（high/medium/low），前端据此把"相似度"标成
+        「强 / 中 / 弱」——只给数字的话，用户看不出 0.31 到底算不算数。
+        """
         out = []
+        low = config.RETRIEVE_LOW_SIM
         for i, (d, distance) in enumerate(docs_scores):
             src = os.path.basename(d.metadata.get("source", "?"))
             page = d.metadata.get("page")
             # 前端那个位置的标签是「相似度」，所以这里必须给真相似度（越大越相关），
             # 不能直接把距离丢过去。距离越界导致换算不了时给 None，前端会隐藏这一项。
             sim = _to_similarity(distance)
+            if sim is None:
+                strength = None
+            elif sim >= low:
+                strength = STRENGTH_HIGH
+            elif sim > config.RETRIEVE_MIN_SIM:
+                strength = STRENGTH_MEDIUM
+            else:
+                strength = STRENGTH_LOW
             out.append({
                 "id": i + 1,
                 "source": src,
                 "page": (page + 1) if isinstance(page, int) else None,
                 "score": round(sim, 4) if sim is not None else None,
+                "strength": strength,
                 "preview": d.page_content.replace("\n", " ")[:80],
                 "text": d.page_content[:1500],
             })
@@ -1017,8 +1132,9 @@ class RagPipeline:
         )
         user_prompt = f"【参考资料】\n{references}\n\n【用户问题】\n{question}"
 
+        system = SYSTEM_PROMPT + grounding_note(assess_grounding(docs_scores))
         response = get_llm().invoke(
-            [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=user_prompt)]
+            [SystemMessage(content=system), HumanMessage(content=user_prompt)]
         )
         return response.content, refs_md
 
@@ -1041,9 +1157,10 @@ class RagPipeline:
         )
         user_prompt = f"【参考资料】\n{references}\n\n【用户问题】\n{question}"
 
+        system = SYSTEM_PROMPT + grounding_note(assess_grounding(docs_scores))
         acc = ""
         for chunk in get_llm().stream(
-            [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=user_prompt)]
+            [SystemMessage(content=system), HumanMessage(content=user_prompt)]
         ):
             acc += chunk.content or ""
             yield acc, refs_md

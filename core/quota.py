@@ -44,7 +44,7 @@ class QuotaExceeded(Exception):
     """超过每日上限。"""
 
     def __init__(self, kind: str, limit: int) -> None:
-        label = {"ask": "每日问答", "embed": "每日向量化分片"}.get(kind, kind)
+        label = {"ask": "每日问答", "embed": "每日向量化分片", "auto": "每日自动任务"}.get(kind, kind)
         super().__init__(f"{label}已达上限（{limit}），明天再试或联系管理员调整配额")
         self.kind = kind
         self.limit = limit
@@ -127,6 +127,9 @@ def bump_usage(uid: str, kind: str, n: int = 1) -> int:
 _LIMITS = {
     "ask": "DAILY_ASK_LIMIT",
     "embed": "DAILY_EMBED_LIMIT",
+    # 定时任务（委托投递 / 每日总结）烧的 token 原本不在任何配额里：
+    # 那条链路无人值守，必须单独卡一道，否则写错就是静默烧钱。
+    "auto": "DAILY_AUTO_LIMIT",
 }
 
 
@@ -191,6 +194,30 @@ def consume(uid: str, kind: str, n: int = 1) -> int:
     if used + n > limit:
         raise QuotaExceeded(kind, limit)
     return bump_usage(uid, kind, n)
+
+
+def history(uid: str, days: int = 7) -> list[dict]:
+    """近 N 天逐日用量（缺失日零填充），给前端画趋势条。
+
+    管理员不记账，这里自然返回全 0——语义上「管理员没额度」也说得通。
+    """
+    days = max(1, min(int(days), 31))
+    since = day_key(time.time() - (days - 1) * 86400)
+    with _get_conn() as conn:
+        rows = conn.execute(
+            "SELECT day, kind, count FROM usage WHERE user_id = ? AND day >= ?",
+            (uid, since),
+        ).fetchall()
+    out: list[dict[str, int]] = []
+    for i in range(days):
+        d = day_key(time.time() - (days - 1 - i) * 86400)
+        out.append({"day": d, "ask": 0, "embed": 0})
+    by_day = {row["day"]: row for row in out}
+    for r in rows:
+        slot = by_day.get(r["day"])
+        if slot is not None and r["kind"] in ("ask", "embed"):
+            slot[r["kind"]] = int(r["count"])
+    return out
 
 
 def snapshot(uid: str) -> dict:

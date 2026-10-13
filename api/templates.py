@@ -17,10 +17,11 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from core import session as store
+from core import session as store, quota
 from core.auth import get_current_user
 from core.templates_catalog import get_catalog, get_template
 from kb import pipelines
+from .chat import VALID_MODES
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
@@ -37,7 +38,11 @@ async def apply_template(tid: str, uid: str = Depends(get_current_user)) -> dict
 
     流程：校验模板存在 →（可选）建建议知识库 → 建已绑定的会话 → 返回跳转信息。
     两个写操作都是同步阻塞（SQLite / JSON 注册表），按本项目约定丢进线程跑。
+    套用是「一键建库+建会话」的批量资源操作，先过每分钟限流，避免连点刷爆。
     """
+    # 每分钟限流（非管理员）。击中上限会抛 RateLimited，由 main.py 统一转 429。
+    await asyncio.to_thread(quota.hit, uid)
+
     t = get_template(tid)
     if not t:
         raise HTTPException(status_code=404, detail=f"模板不存在：{tid}")
@@ -50,10 +55,15 @@ async def apply_template(tid: str, uid: str = Depends(get_current_user)) -> dict
 
     title = t.get("session_title") or t["name"]
     conv = await asyncio.to_thread(store.create_conversation, uid, title, kb_id)
+
+    # 推荐模式先过白名单，脏值一律回落 auto，绝不让它穿透到下游路由分支
+    raw_mode = t.get("recommended_mode", "auto")
+    mode = raw_mode if raw_mode in VALID_MODES else "auto"
+
     return {
         "session_id": conv["id"],
         "kb_id": kb_id,
         "title": title,
         "starter_prompt": t.get("starter_prompt") or None,
-        "recommended_mode": t.get("recommended_mode", "auto"),
+        "recommended_mode": mode,
     }

@@ -97,6 +97,22 @@ QUERY_REWRITE_HISTORY = int(os.getenv("QUERY_REWRITE_HISTORY", "4"))
 # 改写输出的 token 上限：只输出一条问题，给小值即可，防跑偏也防费用
 QUERY_REWRITE_MAX_TOKENS = int(os.getenv("QUERY_REWRITE_MAX_TOKENS", "64"))
 
+# ---------- 可信度（P0：让模型"敢说知识库里没有"）----------
+# ⚠️ 和上面的 RETRIEVE_MIN_SIM 是**两件事**，别合并成一个：
+#   RETRIEVE_MIN_SIM 决定「这段资料丢不丢」——丢完一条不剩时会强留最相关那条；
+#   RETRIEVE_LOW_SIM 决定「留下来的这段够不够格当依据」——不丢，但要在回答里示弱。
+# 用户调研（56 份）里「答案不准还装自信」占 83.9%，是压倒性第一担忧，
+# 这个阈值就是拿来对冲它的：相似度低于它 = 没找到足够依据。
+#
+# 为什么 0.45：同一份资料里的原文提问通常能到 0.6+，换个说法问大约 0.5，
+# 只是"用词沾边但讲的是另一件事"落在 0.3 附近。0.45 卡在中间，
+# 会漏判一部分边缘情况，但宁可多示弱一次，也别再装一次自信。
+RETRIEVE_LOW_SIM = float(os.getenv("RETRIEVE_LOW_SIM", "0.45"))
+
+# 低置信提示开关。关掉后检索链路行为完全回到改造前（不示弱、不追加提示），
+# 留着它是为了出问题时能一键回退，不用回滚代码。
+GROUNDING_NOTICE = os.getenv("GROUNDING_NOTICE", "1") not in ("0", "false", "False")
+
 # ---------- 多用户 / 认证 ----------
 # 会话 token 的签发密钥。不配的话会自动在 data/.auth_secret 生成并持久化，
 # 好处是重启不丢登录态；坏处是迁移机器时要把这个文件一起带走，否则所有人掉线一次。
@@ -121,6 +137,21 @@ RATE_PER_MINUTE = int(os.getenv("RATE_PER_MINUTE", "10"))
 DAILY_EMBED_LIMIT = int(os.getenv("DAILY_EMBED_LIMIT", "1000"))
 # 每个用户每日问答次数上限；0 = 不限
 DAILY_ASK_LIMIT = int(os.getenv("DAILY_ASK_LIMIT", "60"))
+# 每个用户每日「自动调用」次数上限（定时委托投递 + 每日总结生成，kind="auto"）；0 = 不限。
+# DAILY_ASK_LIMIT 挡的是用户主动提问，无人值守的定时任务完全在它之外——
+# 那条链路没人盯着，一旦写错（比如 is_due 判断反了）就是静默烧钱，所以单独卡一道。
+# 默认 120 = 3 人 ×（5 委托 + 1 总结）× 重试与手动补生成余量（见 docs/接口文档.html 调度节）。
+DAILY_AUTO_LIMIT = int(os.getenv("DAILY_AUTO_LIMIT", "120"))
+
+# ---------- 定时任务（独立 worker 进程）----------
+# 调度与解释统一用这个时区。禁止裸 datetime.now()——容器镜像的 TZ 常常是 UTC，
+# 一旦漏带时区，「早上七点」会整体偏移 8 小时且不报错，只会安静地错。
+SCHEDULER_TZ = os.getenv("SCHEDULER_TZ", "Asia/Shanghai")
+# 每日总结的生成时刻（北京时间）。默认 23:30：留出当晚补记的时间，
+# 次日跑到点时昨天的会话已经全部落盘。写进 schedule_jobs.cron 的初始值，
+# 之后改周期以表为准（改表不用改代码、不用发版）。
+REPORT_HOUR = int(os.getenv("REPORT_HOUR", "23"))
+REPORT_MINUTE = int(os.getenv("REPORT_MINUTE", "30"))
 
 # 管理员用户名（逗号分隔）。管理员不受配额与每分钟限流约束，相当于主账号。
 # 默认把项目作者账号设为管理员；其他部署在 .env 里改成自己的用户名即可

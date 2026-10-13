@@ -14,7 +14,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "baomi-agent"
 version = "0.1.0"
-description = "苞米 Agent —— 基于 RAG 知识库与 LangChain Agent 的个人知识助手"
+description = "知穗 Agent —— 基于 RAG 知识库与 LangChain Agent 的个人知识助手"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

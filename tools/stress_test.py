@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-苞米agent 线上轻量压力测试
+知穗agent 线上轻量压力测试
 =========================
 设计原则：**低并发、可熔断、不留脏数据**。
 目标机器是阿里云 ECS 2 核 2G，不做破坏性压测，只测「真实用户路径的响应能力」。
@@ -85,7 +85,7 @@ async def bench_get(sess, url, conc, n):
 async def main():
     result = {"测试时间": time.strftime("%Y-%m-%d %H:%M:%S"), "样例": []}
     print("=" * 100)
-    print(f"苞米agent 线上轻量压力测试   {result['测试时间']}")
+    print(f"知穗agent 线上轻量压力测试   {result['测试时间']}")
     print("目标: 阿里云 ECS 2核2G  |  链路: 本机(沙箱) -> 公网 -> 8.163.62.25")
     print("说明: 延迟含公网往返 RTT，不代表服务器纯处理耗时")
     print("=" * 100)

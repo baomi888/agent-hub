@@ -11,6 +11,10 @@ from __future__ import annotations
 SSE 事件协议：
   event: status     { text: "..." }           状态提示
   event: tool       { name: "...", input: "...", output: "..." }  Agent 工具调用
+  event: sources    { items: [...] }           引用溯源条目（含每条 strength）
+  event: grounding  { strength: "...", best: 0.31, weak: true }
+                   检索依据强度。weak=true 时前端在回答上方挂「依据较弱」提示条，
+                   数据来源是 kb/rag_core.py::assess_grounding()
   event: token      { text: "...", refs: "" }  增量 token
   event: title      { title: "..." }          自动生成的会话标题（仅首轮）
   event: done       { answer: "...", refs: "", title: "", mode: "", message_id: 123 }
@@ -34,8 +38,9 @@ from pydantic import BaseModel, Field
 from core import config, quota, session as store, upload
 from core.auth import get_current_user
 from core.llm import get_llm, get_vision_llm
+from core import scenarios as scenarios_mod
 from kb import pipelines
-from kb.rag_core import SYSTEM_PROMPT, describe_api_error, rewrite_query
+from kb.rag_core import SYSTEM_PROMPT, assess_grounding, describe_api_error, grounding_note, rewrite_query
 
 # 默认要登录：整组路由统一挂鉴权，新增端点时不会漏
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -63,6 +68,11 @@ class ChatRequest(BaseModel):
     top_k: int = Field(default=config.TOP_K_DEFAULT, gt=0, le=config.TOP_K_MAX)
     kb_id_override: str | None = Field(default=None)
     mode: str = Field(default="auto", description="auto / rag / agent / llm")
+    scenario: str | None = Field(
+        default=None,
+        description="场景预设：kaoyan(考研复习) / notes(课程笔记) / paper(论文写作)。"
+        "非空时拼进 system prompt，非白名单值按未选处理。",
+    )
     attachments: list[dict] = Field(default_factory=list, description="附件列表（图片理解用）")
     location: dict | None = Field(
         default=None,
@@ -78,9 +88,14 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+# 允许进入路由表的对话模式。白名单之外一律按 auto 自动路由，
+# 避免模板目录 / 前端误带脏值直接穿透到下游分支。
+VALID_MODES = ("auto", "rag", "agent", "llm")
+
+
 def _pick_mode(req_mode: str, kb_id: str | None, kb_exists: bool) -> str:
-    """auto → rag / agent 自动路由。"""
-    if req_mode != "auto":
+    """auto → rag / agent 自动路由；其它值先过白名单再放行。"""
+    if req_mode in VALID_MODES and req_mode != "auto":
         return req_mode
     if kb_id and kb_exists:
         return "rag"
@@ -275,7 +290,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
     # 流一旦开始，响应头（200）就发出去了，那时候再想回 429 已经来不及，
     # 只会变成一条断掉的 SSE 流，前端读不出任何提示。
     # 先验会话再扣费：无效请求（会话不存在）不该消耗每日问答额度
-    conv = store.get_conversation(uid, req.sid)
+    conv = await asyncio.to_thread(store.get_conversation, uid, req.sid)
     if not conv:
         raise HTTPException(status_code=404, detail=f"会话不存在：{req.sid}")
 
@@ -326,8 +341,8 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
         elif city:
             location_ctx = {"city": city}
 
-    store.add_message(uid, req.sid, "user", req.question)
-    should_gen_title = store.count_messages(uid, req.sid) <= 2
+    await asyncio.to_thread(store.add_message, uid, req.sid, "user", req.question)
+    should_gen_title = (await asyncio.to_thread(store.count_messages, uid, req.sid)) <= 2
 
     async def event_generator() -> None:
         refs_md = ""
@@ -349,6 +364,8 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             history = store.get_messages(uid, req.sid, include_system=False)[:-1]
             # RAG 模式下顺带检索知识库，拼入文本
             vision_question = req.question
+            vision_system = "你是一个能理解图片的 AI 助手。请结合图片内容用中文简洁作答。"
+            vision_system += scenarios_mod.get_scenario_prompt(req.scenario)
             if kb_id and kb_exists:
                 try:
                     # 同步检索会堵事件循环（embed_query 实测约 250ms），必须丢线程
@@ -361,15 +378,19 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                         refs_md = pipe._format_refs(docs_scores)
                         sources = pipe.build_sources(docs_scores)
                         yield _sse("sources", {"items": sources})
+                        # 图片理解也走同一套依据判定，提示条口径保持一致
+                        g = assess_grounding(docs_scores)
+                        yield _sse("grounding", g)
                         references = "\n\n".join(
                             f"[{i + 1}] （来源：{d.metadata.get('source', '?')}）\n{d.page_content}"
                             for i, (d, _) in enumerate(docs_scores)
                         )
                         vision_question = f"【参考资料】\n{references}\n\n【用户问题】\n{req.question}"
+                        vision_system += grounding_note(g)
                 except Exception:
                     yield _sse("status", {"text": "知识库检索失败，已仅按图片作答"})
 
-            messages = [SystemMessage(content="你是一个能理解图片的 AI 助手。请结合图片内容用中文简洁作答。")]
+            messages = [SystemMessage(content=vision_system)]
             for m in history:
                 if m["role"] == "user":
                     messages.append(HumanMessage(content=m["content"]))
@@ -389,10 +410,10 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             acc_text = acc.text
 
             # 收尾：标题并行任务多半已完成，这里 await 基本零等待
-            msg_id = store.add_message(uid, req.sid, "assistant", acc_text, refs=refs_md)
+            msg_id = await asyncio.to_thread(store.add_message, uid, req.sid, "assistant", acc_text, refs=refs_md)
             gen_title = await _take_title(title_task, acc_text)
             if gen_title:
-                store.rename_conversation(uid, req.sid, gen_title)
+                await asyncio.to_thread(store.rename_conversation, uid, req.sid, gen_title)
                 yield _sse("title", {"title": gen_title})
             # message_id 回给前端：赞踩要按消息 id 落库，前端自己生成的 uid 后端不认
             yield _sse("done", {
@@ -411,10 +432,10 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 from agent.builder import build_agent
                 # 只告诉模型"有没有绑库"，不告诉它是哪个库：
                 # kb_id 走下面的 configurable 注入，模型没有机会改写它
-                agent = await asyncio.to_thread(build_agent, bool(kb_id and kb_exists), location_ctx)
+                agent = await asyncio.to_thread(build_agent, bool(kb_id and kb_exists), location_ctx, req.scenario)
 
                 # 组装历史 + 当前问题
-                history = store.get_messages(uid, req.sid, include_system=False)[:-1]
+                history = (await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False))[:-1]
                 messages = []
                 for m in history:
                     if m["role"] == "user":
@@ -515,18 +536,26 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 yield _sse("error", {"detail": describe_api_error(e)})
                 return
 
+            grounding: dict | None = None
             if docs_scores:
                 refs_md = pipe._format_refs(docs_scores)
                 sources = pipe.build_sources(docs_scores)
                 yield _sse("sources", {"items": sources})
-                yield _sse("status", {"text": f"检索到 {len(docs_scores)} 条片段"})
+                # 依据强度单独发一帧：前端要在回答上方挂"依据较弱"的提示条，
+                # 不能等 done——用户是边流边读的，提示必须赶在正文前面出现。
+                grounding = assess_grounding(docs_scores)
+                yield _sse("grounding", grounding)
+                if grounding.get("weak"):
+                    yield _sse("status", {"text": "检索相似度偏低，已提醒模型不要硬答"})
+                else:
+                    yield _sse("status", {"text": f"检索到 {len(docs_scores)} 条片段"})
             else:
                 yield _sse("status", {"text": "知识库未命中"})
 
             yield _sse("status", {"text": "正在生成答案..."})
             # 复用上面已经检索到的结果，不重复检索（早期实现在这里又检了一次，
             # 而且用的是默认 top_k，等于前端调的检索条数被悄悄忽略）
-            messages = _build_messages(uid, req.sid, req.question, kb_id, docs_scores, history)
+            messages = await _build_messages(uid, req.sid, req.question, kb_id, docs_scores, grounding, req.scenario, history)
 
             acc = _Acc()
             try:
@@ -542,8 +571,8 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
         # ---- 3. 纯 LLM 模式 ----
         else:
             yield _sse("status", {"text": "纯 LLM 模式..."})
-            history = store.get_messages(uid, req.sid, include_system=False)[:-1]
-            messages = [SystemMessage(content="你是一个友好、专业的 AI 助手。用中文简洁作答。")]
+            history = (await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False))[:-1]
+            messages = [SystemMessage(content="你是一个友好、专业的 AI 助手。用中文简洁作答。" + scenarios_mod.get_scenario_prompt(req.scenario))]
             for m in history:
                 if m["role"] == "user":
                     messages.append(HumanMessage(content=m["content"]))
@@ -563,11 +592,11 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             acc_text = acc.text
 
         # ---- 收尾：存 assistant 消息 + 取回并行生成的标题 ----
-        msg_id = store.add_message(uid, req.sid, "assistant", acc_text, refs=refs_md)
+        msg_id = await asyncio.to_thread(store.add_message, uid, req.sid, "assistant", acc_text, refs=refs_md)
 
         gen_title = await _take_title(title_task, acc_text)
         if gen_title:
-            store.rename_conversation(uid, req.sid, gen_title)
+            await asyncio.to_thread(store.rename_conversation, uid, req.sid, gen_title)
             yield _sse("title", {"title": gen_title})
 
         # message_id 回给前端：赞踩要按消息 id 落库，前端自己生成的 uid 后端不认
@@ -584,18 +613,23 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
 
 # ==================== 辅助 ====================
 
-def _build_messages(
-    owner: str, sid: str, question: str, kb_id: str | None, docs_scores, history=None
+async def _build_messages(
+    owner: str, sid: str, question: str, kb_id: str | None, docs_scores,
+    grounding: dict | None = None, scenario: str | None = None, history=None
 ) -> list:
     """组装 LLM 输入：历史 + 已检索到的参考资料。
 
     docs_scores 由调用方检索一次后传入，这里不再重复检索，
     避免用户设置的 top_k 被默认值覆盖、也省掉一次 embedding 请求。
+
+    grounding 是调用方算好的依据强度判定。weak=true 时追加一段"别硬答"的约束——
+    系统提示词里的通用规则太软，模型看到 prompt 里真有几段资料，
+    哪怕相似度只有 0.3 也会顺着往下编；单独再压一遍才压得住。
     history 同理：调用方（RAG 路径做查询改写时）已取过就直接复用，不再重复查库。
     """
     history_raw = (
         history if history is not None
-        else store.get_messages(owner, sid, include_system=False)[:-1]
+        else (await asyncio.to_thread(store.get_messages, owner, sid, include_system=False))[:-1]
     )
     messages = []
     references = ""
@@ -604,9 +638,11 @@ def _build_messages(
             f"[{i + 1}] （来源：{d.metadata.get('source', '?')}）\n{d.page_content}"
             for i, (d, _) in enumerate(docs_scores)
         )
-    messages.append(
-        SystemMessage(content=SYSTEM_PROMPT if references else "你是一个友好、专业的 AI 助手。用中文简洁作答。")
-    )
+    if references:
+        system = SYSTEM_PROMPT + grounding_note(grounding or {}) + scenarios_mod.get_scenario_prompt(scenario)
+    else:
+        system = "你是一个友好、专业的 AI 助手。用中文简洁作答。" + scenarios_mod.get_scenario_prompt(scenario)
+    messages.append(SystemMessage(content=system))
     for m in history_raw:
         if m["role"] == "user":
             messages.append(HumanMessage(content=m["content"]))

@@ -6,7 +6,8 @@
 import { memo, useMemo, useState } from "react";
 import type { UiMessage } from "./types";
 import { TOOL_META, toolLabel } from "./constants";
-import { parseRefs, renderContent } from "./content";
+import { parseRefs, renderContent, renderMarkdown } from "./content";
+import CornIcon from "../CornIcon";
 import PlanCard, { detectPlanTopic, isPlanRequest, parsePlan } from "./plan";
 import { useCopy } from "@/lib/useCopy";
 import HubMark from "./HubMark";
@@ -29,14 +30,18 @@ const Bubble = memo(function Bubble({
   onRetry?: (assistantId: string, question: string) => void;
   /** 剪贴板不可用等静默失败，交给上层出 toast */
   onCopyFail?: () => void;
-  /** 赞/踩：按后端 messages 表的 id 落库，刷新后仍在（id 缺失时上层会静默跳过） */
-  onFeedback?: (msgDbId: number, rating: "up" | "down") => void;
+  /** 赞/踩：按后端 messages 表的 id 落库，刷新后仍在（id 缺失时上层会静默跳过）。
+   *  comment 是「踩」时可选的改进原因，留空则只记评分。 */
+  onFeedback?: (msgDbId: number, rating: "up" | "down", comment?: string) => void;
   /** 打开该文件全文预览（未绑定资料库时不传，入口就不显示） */
   onPreviewFile?: (source: string) => void;
   /** 删除该消息及其所在的一轮对话 */
   onDeleteTurn?: (msgDbId: number) => void;
 }) {
   const [feedback, setFeedback] = useState<"like" | "dislike" | null>(null);
+  // 「踩」后展开的改进原因输入框：点踩即记一票，这里只收集可选的文字补充
+  const [comment, setComment] = useState("");
+  const [showComment, setShowComment] = useState(false);
   const { copied, copy } = useCopy();
   // 溯源展开状态：同一时刻只展开一条，避免长回答把页面撑得太长
   const [openSrc, setOpenSrc] = useState<number | null>(null);
@@ -55,6 +60,13 @@ const Bubble = memo(function Bubble({
       // 非 HTTPS / 无剪贴板权限时会走到这里，原来是完全静默的
       onCopyFail?.();
     }
+  };
+
+  // 踩后提交改进原因：投票已在点击时记录，这里只把 comment 覆盖写回同一条反馈
+  const submitComment = () => {
+    const text = comment.trim();
+    if (m.dbId && text) onFeedback?.(m.dbId, "down", text);
+    setShowComment(false);
   };
 
   if (m.role === "user") {
@@ -145,9 +157,42 @@ const Bubble = memo(function Bubble({
         )}
 
         <div className="bubble-ai whitespace-pre-wrap text-text">
+          {/* 依据不足提示条：没有一条片段达到"可以直接当依据"的水平。
+              放在正文之前——用户是边流边读的，提示必须比答案先出现，
+              否则等读完一段"看起来很自信"的回答才看到提示就晚了。
+              两档话术不同：low=完全没找到，medium=只找到沾边内容。 */}
+          {m.grounding?.weak && !m.error && (
+            <div className="grounding-alert" role="status">
+              <svg className="ga-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 9v4" />
+                <path d="M12 17h.01" />
+                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+              </svg>
+              <div className="ga-body">
+                <span className="ga-title">
+                  {m.grounding.strength === "medium"
+                    ? "只找到内容沾边的资料"
+                    : "知识库里没有找到直接依据"}
+                </span>
+                {m.grounding.strength === "low"
+                  ? `已检索到 ${m.grounding.count} 条片段，但相似度都低于 0.45${
+                      m.grounding.best !== null ? `（最高 ${m.grounding.best.toFixed(2)}）` : ""
+                    }，下面的回答不构成资料依据。`
+                  : `检索到 ${m.grounding.count} 条片段${
+                      m.grounding.best !== null ? `（最高相似度 ${m.grounding.best.toFixed(2)}）` : ""
+                    }，只是沾边、不够构成直接依据，请以你自己的判断为准。`}
+                <span className="ga-hint">
+                  补一份对口文档进这个知识库，或直接改用联网搜索，会更准。
+                </span>
+              </div>
+            </div>
+          )}
           {m.error ? (
             <div className="warn px-3 py-2 text-sm">
-              <div className="font-semibold">⚠ 暂时无法完成请求</div>
+              <div className="flex items-center gap-1.5 font-semibold">
+                <CornIcon name="warn" className="h-4 w-4 shrink-0" />
+                暂时无法完成请求
+              </div>
               <details className="mt-1">
                 <summary className="cursor-pointer text-xs opacity-80">查看详情</summary>
                 <div className="message-body text-xs">{renderContent(m.error)}</div>
@@ -156,7 +201,7 @@ const Bubble = memo(function Bubble({
           ) : !m.streaming && isPlanRequest(userQuestion) ? (
             (() => {
               const plan = parsePlan(m.content);
-              if (!plan) return renderContent(m.content);
+              if (!plan) return renderMarkdown(m.content);
               const topic = detectPlanTopic(userQuestion);
               return <PlanCard data={plan} content={m.content} topic={topic} onCopy={handleCopy} />;
             })()
@@ -174,7 +219,8 @@ const Bubble = memo(function Bubble({
             </div>
           ) : (
             <>
-              {renderContent(m.content)}
+              {/* AI 正文走 markdown 渲染：标题/列表/表格/代码块/链接都排出来 */}
+              {renderMarkdown(m.content)}
               {m.stopped && <span className="stopped-tag">已停止生成</span>}
               {m.streaming && <span className="cursor" />}
               {/* 引用角标：点一下跳到下面第 N 条参考片段 */}
@@ -221,6 +267,26 @@ const Bubble = memo(function Bubble({
                 // 取不带页码的纯文件名：老消息只有 refs 文本，里面的 source 带着「 第N页」
                 const fileSource =
                   srcMap.get(idxNum)?.source ?? r.source.replace(/\s*第\d+页\s*$/, "");
+                // 依据强度：后端判定为准。老消息（改造前存的）没有这个字段，
+                // 退化成按相似度数值本地分级，避免历史记录里一片空白。
+                // 0.45 这个线要和后端 RETRIEVE_LOW_SIM 保持一致。
+                const strength =
+                  srcMap.get(idxNum)?.strength ??
+                  (r.score === ""
+                    ? null
+                    : Number(r.score) >= 0.45
+                      ? "high"
+                      : Number(r.score) > 0.25
+                        ? "medium"
+                        : "low");
+                const strengthText =
+                  strength === "high" ? "强" : strength === "medium" ? "中" : strength ? "弱" : "";
+                const strengthTip =
+                  strength === "high"
+                    ? "这条相似度较高，可作为回答依据"
+                    : strength === "medium"
+                      ? "这条只是沾边，不足以独立支撑回答"
+                      : "这条相似度过低，不足以作为回答依据";
                 return (
                   <div key={r.idx} id={refId(r.idx)} className="ref-item">
                     <span className="ref-idx">{r.idx}</span>
@@ -228,6 +294,14 @@ const Bubble = memo(function Bubble({
                       <div className="ref-src">
                         {renderContent(r.source)}
                         {r.score && <span className="ref-meta">相似度 {r.score}</span>}
+                        {strengthText && (
+                          <span
+                            className={`ref-strength${strength === "high" ? "" : " is-weak"}`}
+                            title={strengthTip}
+                          >
+                            {strengthText}
+                          </span>
+                        )}
                       </div>
                       {r.preview && <div className="ref-preview">{renderContent(r.preview)}</div>}
                       {(full || (onPreviewFile && fileSource)) && (
@@ -285,7 +359,8 @@ const Bubble = memo(function Bubble({
         )}
 
         {!m.streaming && !m.error && (
-          <div className="msg-actions text-faint">
+          <>
+            <div className="msg-actions text-faint">
             <button
               onClick={handleCopy}
               title={copied ? "已复制" : "复制"}
@@ -366,7 +441,13 @@ const Bubble = memo(function Bubble({
               onClick={() => {
                 const next = feedback === "dislike" ? null : "dislike";
                 setFeedback(next);
-                if (next && m.dbId) onFeedback?.(m.dbId, "down");
+                if (next && m.dbId) {
+                  // 先记一票：原因框只是可选的补充，不能因为没填就不计数
+                  onFeedback?.(m.dbId, "down");
+                  setShowComment(true);
+                } else {
+                  setShowComment(false);
+                }
               }}
               title="踩"
               className={`flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs transition hover:bg-fill-2 ${
@@ -383,6 +464,46 @@ const Bubble = memo(function Bubble({
 
             <span className="ml-auto text-fs-xs text-faint">{m.content.length} 字</span>
           </div>
+
+          {/* 踩后的改进原因：投票已记录，这里只收可选文字。提交会按同一条消息覆盖写入，
+              看板「最近反馈」就能直接显示用户踩的理由。 */}
+          {showComment && feedback === "dislike" && m.dbId && (
+            <div className="fb-comment">
+              <label className="fb-comment-label" htmlFor={`fb-c-${m.dbId}`}>
+                这条回答哪里不太对？（可选，帮你我复盘改进）
+              </label>
+              <textarea
+                id={`fb-c-${m.dbId}`}
+                className="fb-comment-input"
+                value={comment}
+                autoFocus
+                rows={2}
+                maxLength={300}
+                placeholder="例如：引用来源不清晰 / 步骤有跳步 / 和我的资料矛盾 / 语气太绝对…"
+                onChange={(e) => setComment(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submitComment();
+                }}
+              />
+              <div className="fb-comment-actions">
+                <button
+                  type="button"
+                  className="fb-comment-skip"
+                  onClick={() => setShowComment(false)}
+                >
+                  跳过
+                </button>
+                <button
+                  type="button"
+                  className="btn-new fb-comment-submit"
+                  onClick={submitComment}
+                >
+                  提交反馈
+                </button>
+              </div>
+            </div>
+          )}
+          </>
         )}
       </div>
     </div>

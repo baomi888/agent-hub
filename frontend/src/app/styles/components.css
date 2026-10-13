@@ -7,7 +7,7 @@
   font-weight: 500;
 }
 
-/* 苞米吉祥物：内联 SVG，颜色由 currentColor / --ink 驱动，不再需要 multiply。
+/* 知穗吉祥物：内联 SVG，颜色由 currentColor / --ink 驱动，不再需要 multiply。
    深色下保留一点金色光晕，让它从深纸里浮出来 */
 .corn-logo {
   display: block;
@@ -346,6 +346,43 @@
   .kb-unbind { display: none; }
 }
 
+/* 顶栏用量胶囊：常驻把「今天用了多少」摆在明面上，点开看板。
+   形态与 .kb-chip / .ability-trigger 一致（999px），金只用于图标点缀。 */
+.usage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  max-width: 46vw;
+  padding: 4px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.usage-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.usage-chip:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 1px;
+}
+.usage-chip .usage-chip-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+/* 窄屏只留图表图标，省出横向空间给会话标题与能力入口 */
+@media (max-width: 640px) {
+  .usage-chip .usage-chip-text { display: none; }
+  .usage-chip { padding: 4px 7px; }
+}
+
 /* 图标文字按钮 */
 .icon-btn {
   background: none;
@@ -373,3 +410,314 @@
   stroke-width: 1.6;
 }
 
+
+/* ==================== 用量与反馈看板（UsagePanel）====================
+   复用 pv-mask/pv-card 弹层骨架，这里只加看板自己的窄卡宽度与图表。
+   颜色一律走令牌：金色只做点缀，进度条超 90% 才点红。 */
+.up-card {
+  width: min(560px, 100%);
+  max-height: min(82vh, 760px);
+}
+
+/* 横向进度条（今日额度） */
+.up-bar {
+  height: 7px;
+  border-radius: 999px;
+  background: var(--fill-1);
+  overflow: hidden;
+}
+.up-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.up-bar-fill.danger {
+  background: var(--red);
+}
+
+/* 近 7 日迷你柱状：两根并排，按各自峰值归一 */
+.up-chart {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-8);
+  height: 96px;
+  padding: 8px 4px 0;
+  border-bottom: 1px solid var(--line);
+}
+.up-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+.up-col-bars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3px;
+  width: 100%;
+  height: 68px;
+}
+.up-bar-v {
+  width: 9px;
+  min-height: 2px;
+  border-radius: 2px 2px 0 0;
+  transition: height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.up-bar-v.ask {
+  background: var(--accent);
+}
+.up-bar-v.embed {
+  background: var(--accent-ink);
+  opacity: 0.45;
+}
+/* 零值列：中性灰基线点，明确表示「空槽」而非「有数据」（金色会误导） */
+.up-bar-v.empty {
+  background: var(--line);
+  opacity: 1;
+}
+.up-col-label {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.up-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.up-dot.ask {
+  background: var(--accent);
+}
+.up-dot.embed {
+  background: var(--accent-ink);
+  opacity: 0.45;
+}
+
+/* ==================== 踩后改进原因输入框（Bubble 内联）====================
+   浅纸底卡片，金描边只在聚焦时出现——克制用金，符合知穗设计令牌约束。 */
+.fb-comment {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--fill-3);
+}
+.fb-comment-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.fb-comment-input {
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--card-bg);
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  font-family: inherit;
+  resize: vertical;
+}
+.fb-comment-input::placeholder {
+  color: var(--text-3);
+}
+.fb-comment-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.fb-comment-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+/* 次要操作：中性文字按钮，借 hover 点出金，不占主操作视觉权重 */
+.fb-comment-skip {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 10px;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  border-radius: var(--radius-sm);
+}
+.fb-comment-skip:hover {
+  color: var(--accent-ink);
+  background: var(--fill-2);
+}
+.fb-comment-submit {
+  font-size: var(--fs-sm);
+  padding: 4px 14px;
+  border-radius: var(--radius-sm);
+}
+
+/* ============ AI 回答 Markdown 排版 ============
+   .md 由 renderMarkdown 输出；白纸排版：标题用衬线、列表贴近笔记、
+   表格像手绘表格线、代码块像贴上去的深色便签 */
+.md {
+  white-space: normal; /* 覆盖外层 whitespace-pre-wrap：分块后换行已由块级处理 */
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md-p { margin: 0; line-height: var(--lh-body); }
+.md-h {
+  margin: 6px 0 0;
+  font-family: var(--font-serif);
+  font-weight: 700;
+  color: var(--ink);
+  line-height: var(--lh-tight);
+}
+.md-h1 { font-size: 1.25em; padding-bottom: 2px; border-bottom: 1px solid var(--line); }
+.md-h2 { font-size: 1.12em; }
+.md-h3 { font-size: 1em; color: var(--text-1); }
+.md-hr {
+  border: none;
+  border-top: 1px dashed var(--line-strong);
+  margin: 4px 0;
+}
+.md-ul,
+.md-ol {
+  margin: 0;
+  padding-left: 1.35em;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  line-height: var(--lh-body);
+}
+.md-ul { list-style: disc; }
+.md-ol { list-style: decimal; }
+.md-li::marker { color: var(--accent-ink); }
+.md-li > ul,
+.md-li > ol { margin-top: 4px; }
+.md-quote {
+  margin: 0;
+  padding: 6px 12px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--text-1);
+  line-height: var(--lh-body);
+}
+.md-code {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 0.92em;
+  padding: 1px 5px;
+  border-radius: var(--radius-xs);
+  background: var(--fill-2);
+  border: 1px solid var(--line);
+  color: var(--red-ink);
+}
+.md-pre {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--ink);
+  color: var(--panel);
+  overflow-x: auto;
+  line-height: 1.5;
+}
+.dark .md-pre {
+  background: var(--fill-3);
+  color: var(--text-1);
+  border: 1px solid var(--line);
+}
+.md-pre code {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 0.9em;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  white-space: pre;
+}
+.md-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+}
+.md-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.95em;
+  line-height: var(--lh-body);
+}
+.md-table th,
+.md-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+.md-table th {
+  font-family: var(--font-serif);
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--fill-2);
+  white-space: nowrap;
+}
+.md-table tr:last-child td { border-bottom: none; }
+.md-table td + td,
+.md-table th + th { border-left: 1px solid var(--line); }
+
+/* ============ 侧栏会话：手机左滑删除 ============
+   结构：wrap(relative,overflow:hidden) > [删除按钮(底层) + .session(上层滑动)]
+   touch-action: pan-y 让浏览器只管竖向滚动，横向手势归我们 */
+.session-swipe-wrap {
+  position: relative;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  touch-action: pan-y;
+}
+.session-swipe-wrap .session {
+  background: var(--panel); /* 盖住底下的红色删除钮 */
+  transition: transform 0.22s ease, var(--t-color);
+  margin: 0; /* 原来的上下 margin 移到 wrap 上，避免露底 */
+}
+.session-swipe-wrap + .session-swipe-wrap { margin-top: 2px; }
+.session-swipe-wrap .session-swipe-del {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 76px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: none;
+  background: var(--red-solid);
+  color: #fff;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+.session-swipe-wrap .session-swipe-del svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.session-swipe-wrap .session-swipe-del.open {
+  opacity: 1;
+  pointer-events: auto;
+}
