@@ -105,3 +105,6 @@ data/nba_extra.txt
 data/science.txt
 data/entertainment.txt
 data/test.pdf
+
+# ================= 冲突分析临时目录（tools/analyze_merge_conflicts.py 用）=================
+.merge_probe_tmp/
