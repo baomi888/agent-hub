@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>知穗 · 新四屏 UI 设计稿 v0.1</title>
+<style>
+/* ============================================================
+   令牌：全部照抄 frontend/src/app/styles/tokens.css 的真实值，不凭记忆硬写
+   ============================================================ */
+:root{
+  --step-0:#EDE4C8; --step-1:#F5F0E1; --step-2:#FDFAF2;
+  --desk-0:#F3EAD8; --desk-1:#E7DCC2;
+  --bg:var(--step-0); --bg-canvas:var(--step-1); --bg-sidebar:var(--step-0);
+  --panel:var(--step-1); --card-bg:var(--step-2); --surface:var(--step-1);
+  --ink:#3D2F1A; --text-1:var(--ink); --text-2:#5A4C33; --text-3:#6F6044;
+  --accent:#C8892A; --accent-ink:#875B10; --accent-soft:rgba(200,137,42,.10);
+  --gold:#F5B840; --leaf:#7C9A54; --leaf2:#8FAF62; --clay:#EF8A56; --paper:#FFFDF6;
+  --red:#B4472F; --red-ink:#A03E28; --red-solid:#B4472F;
+  --success:#1E7A46; --success-ink:#2A6B45;
+  --warning:#8A5A0A; --warning-ink:#7A4E08;
+  --info:#2A5A8A; --info-ink:#2A5A8A;
+  --line:rgba(61,47,26,.10); --line-strong:rgba(61,47,26,.25); --input-border:#D8CCB0;
+  --fill-1:rgba(61,47,26,.12); --fill-2:rgba(61,47,26,.07); --fill-3:rgba(61,47,26,.035); --fill-4:rgba(61,47,26,.018);
+  --shadow-1:0 1px 2px rgba(80,60,30,.06); --shadow-2:0 2px 8px rgba(80,60,30,.10);
+  --radius-xs:4px; --radius-sm:8px; --radius-md:12px; --radius-lg:16px;
+  --fs-badge:10px; --fs-xs:11px; --fs-sm:12px; --fs-md:13px; --fs-lg:14px; --fs-xl:16px; --fs-title:20px;
+  --lh-tight:1.4; --lh-body:1.65; --lh-loose:1.9;
+  --ls-wide:.2em; --ls-mid:.06em; --ls-tight:.04em;
+  --t-color:background-color .14s ease,border-color .14s ease,color .14s ease,opacity .14s ease;
+  --serif:"LXGW WenKai Screen","Noto Serif SC","Songti SC",serif;
+  --sans:"Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  color-scheme:light;
+}
+.dark{
+  --step-0:#1A1610; --step-1:#211B11; --step-2:#292217;
+  --desk-0:#211B12; --desk-1:#181309;
+  --ink:#EDE0C4; --text-2:#c9b58a; --text-3:#A08B66;
+  --accent:#E0A03A; --accent-ink:#E0A03A; --accent-soft:rgba(224,160,58,.12);
+  --red:#D9705A; --red-ink:#E08A6E; --red-solid:#A03E28;
+  --success:#237A46; --success-ink:#7ECB9B;
+  --warning:#B8860B; --warning-ink:#E8B54E;
+  --info:#3A72A6; --info-ink:#8AB6E0;
+  --line:rgba(237,224,196,.10); --line-strong:rgba(237,224,196,.30); --input-border:#4A3E2E;
+  --fill-1:rgba(237,224,196,.16); --fill-2:rgba(237,224,196,.09); --fill-3:rgba(237,224,196,.05); --fill-4:rgba(237,224,196,.025);
+  --shadow-1:0 1px 2px rgba(0,0,0,.30); --shadow-2:0 2px 8px rgba(0,0,0,.40);
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  font-family:var(--sans); font-size:var(--fs-lg); line-height:var(--lh-body);
+  color:var(--text-1); background:var(--desk-0);
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4{margin:0;font-weight:600;line-height:var(--lh-tight)}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+ul,ol{margin:0;padding:0;list-style:none}
+table{border-collapse:collapse;width:100%}
+/* 图标基准尺寸：所有 .ic 都有默认档，具体场景再覆盖（避免裸 .ic 撑满父容器） */
+.ic{width:18px;height:18px;flex:none}
+
+/* ---------- 顶部说明区 ---------- */
+.board{max-width:1220px;margin:0 auto;padding:38px 24px 10px;display:flex;gap:24px;align-items:flex-start;justify-content:space-between}
+.eyebrow{font-size:var(--fs-xs);letter-spacing:var(--ls-wide);color:var(--accent-ink);margin:0 0 8px;font-weight:600}
+.board h1{font-family:var(--serif);font-size:26px;letter-spacing:var(--ls-tight)}
+.board-sub{margin:10px 0 0;max-width:74ch;font-size:var(--fs-md);color:var(--text-2)}
+.board-sub b{color:var(--text-1);font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}
+.chip{font-size:var(--fs-xs);padding:4px 9px;border-radius:999px;border:1px solid var(--line);background:var(--card-bg);color:var(--text-2)}
+.chip.gold{border-color:rgba(200,137,42,.35);color:var(--accent-ink);background:var(--accent-soft)}
+
+/* ---------- 页签 ---------- */
+.tabs{max-width:1220px;margin:22px auto 0;padding:0 24px;display:flex;gap:6px;flex-wrap:wrap}
+.tab{padding:8px 16px;border-radius:999px;font-size:var(--fs-md);color:var(--text-2);border:1px solid transparent;transition:var(--t-color)}
+.tab:hover{background:var(--fill-2);color:var(--text-1)}
+.tab[aria-selected="true"]{background:var(--solid,var(--ink));color:var(--panel);border-color:transparent}
+.dark .tab[aria-selected="true"]{background:#2E2618;color:var(--ink)}
+
+main{max-width:1220px;margin:0 auto;padding:18px 24px 72px}
+.screen{display:none}
+.screen[data-open]{display:block;animation:fade .22s ease}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+/* ---------- 应用外壳（侧栏 + 页面） ---------- */
+.shell{
+  display:grid;grid-template-columns:196px 1fr;gap:0;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-lg);
+  box-shadow:var(--shadow-1);overflow:hidden;
+}
+.mini-nav{background:var(--bg-sidebar);border-right:1px solid var(--line);padding:16px 12px}
+.brand{display:flex;align-items:center;gap:8px;padding:6px 6px 16px}
+.brand .logo{width:26px;height:26px;color:var(--ink)}
+.brand b{font-family:var(--serif);font-size:var(--fs-lg)}
+.nav-item{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:var(--radius-sm);font-size:var(--fs-md);color:var(--text-2);width:100%;transition:var(--t-color)}
+.nav-item .ic{width:18px;height:18px;flex:none;color:var(--text-3)}
+.nav-item:hover{background:var(--fill-2);color:var(--text-1)}
+.nav-item[aria-current="page"]{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
+.nav-item[aria-current="page"] .ic{color:var(--accent-ink)}
+.nav-sec{font-size:var(--fs-badge);letter-spacing:var(--ls-wide);color:var(--text-3);padding:16px 10px 6px;font-weight:600}
+
+.page{padding:22px 26px 30px;min-height:520px}
+
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;padding-bottom:16px;border-bottom:1px solid var(--line)}
+.page-head .eyebrow{margin-bottom:6px}
+.page-head h2{font-family:var(--serif);font-size:var(--fs-title)}
+.page-head p.sub{margin:8px 0 0;font-size:var(--fs-md);color:var(--text-2);max-width:62ch}
+
+/* ---------- 按钮 ---------- */
+.btn{display:inline-flex;align-items:center;gap:7px;padding:8px 15px;border-radius:var(--radius-sm);
+  font-size:var(--fs-md);font-weight:500;transition:var(--t-color);border:1px solid transparent}
+.btn .ic{width:16px;height:16px;flex:none}
+.btn-primary{background:var(--ink);color:var(--panel)}
+.btn-primary:hover{background:var(--accent);color:#2A1F0C}
+.dark .btn-primary{background:#2E2618;color:var(--ink)}
+.dark .btn-primary:hover{background:var(--accent);color:#22190A}
+.btn-ghost{border-color:var(--line-strong);color:var(--text-2)}
+.btn-ghost:hover{background:var(--fill-2);color:var(--text-1)}
+.btn-quiet{color:var(--text-2);padding:6px 10px}
+.btn-quiet:hover{background:var(--fill-2);color:var(--text-1)}
+.btn-sm{padding:5px 11px;font-size:var(--fs-sm)}
+.icon-btn{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:var(--radius-sm);color:var(--text-2);transition:var(--t-color)}
+.icon-btn .ic{width:17px;height:17px}
+.icon-btn:hover{background:var(--fill-2);color:var(--text-1)}
+.icon-btn.danger:hover{background:rgba(180,71,47,.12);color:var(--red-ink)}
+.icon-btn.gold{color:var(--accent-ink)}
+.pos-actions{display:flex;gap:4px;align-items:center}
+
+/* ---------- 卡片 / 通用块 ---------- */
+.card{background:var(--card-bg);border:1px solid var(--line);border-radius:var(--radius-md);box-shadow:var(--shadow-1)}
+.card + .card{margin-top:12px}
+.card-pad{padding:16px 18px}
+.card-head{display:flex;align-items:center;justify-content:space-between;gap:14px}
+.card-title{font-size:var(--fs-lg);font-weight:600}
+.meta{font-size:var(--fs-xs);color:var(--text-3)}
+.kv{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:12px;font-size:var(--fs-sm);color:var(--text-2)}
+.kv b{font-weight:600;color:var(--text-1)}
+.tag{display:inline-flex;align-items:center;gap:5px;font-size:var(--fs-xs);padding:3px 8px;border-radius:999px;background:var(--fill-3);color:var(--text-2)}
+.tag.gold{background:var(--accent-soft);color:var(--accent-ink)}
+.tag.ok{background:rgba(30,122,70,.12);color:var(--success-ink)}
+.tag.warn{background:rgba(138,90,10,.13);color:var(--warning-ink)}
+.tag.bad{background:rgba(180,71,47,.12);color:var(--red-ink)}
+.tag.info{background:rgba(42,90,138,.12);color:var(--info-ink)}
+.grid2{display:grid;grid-template-columns:1.35fr 1fr;gap:16px;align-items:start}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.sec-label{font-size:var(--fs-xs);letter-spacing:var(--ls-wide);color:var(--accent-ink);font-weight:600;margin:0 0 10px}
+.hint{font-size:var(--fs-xs);color:var(--text-3);margin:10px 0 0}
+.divide{height:1px;background:var(--line);margin:16px 0}
+
+/* 开关 */
+.switch{width:38px;height:22px;border-radius:999px;background:var(--fill-1);position:relative;flex:none;transition:var(--t-color);border:1px solid var(--line)}
+.switch::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--paper);box-shadow:var(--shadow-1);transition:transform .18s ease}
+.switch[aria-checked="true"]{background:var(--accent);border-color:transparent}
+.switch[aria-checked="true"]::after{transform:translateX(16px)}
+
+/* 表单 */
+label.f{display:block;font-size:var(--fs-sm);color:var(--text-2);margin:0 0 5px;font-weight:500}
+.input,select.input,textarea.input{
+  width:100%;padding:8px 11px;border-radius:var(--radius-sm);border:1px solid var(--input-border);
+  background:var(--step-2);color:var(--text-1);font:inherit;font-size:var(--fs-md);transition:var(--t-color)}
+.dark .input{background:var(--step-1)}
+.input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(200,137,42,.35)}
+textarea.input{min-height:74px;resize:vertical;line-height:var(--lh-body)}
+.field + .field{margin-top:13px}
+.row{display:flex;gap:10px;align-items:flex-end}
+.seg{display:inline-flex;border:1px solid var(--line-strong);border-radius:var(--radius-sm);overflow:hidden}
+.seg button{padding:6px 12px;font-size:var(--fs-sm);color:var(--text-2);transition:var(--t-color)}
+.seg button:hover{background:var(--fill-2)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--panel)}
+.dark .seg button[aria-pressed="true"]{background:#2E2618;color:var(--ink)}
+
+/* 骨架 */
+.skel{background:var(--fill-3);border-radius:var(--radius-sm);height:12px}
+.skel.w60{width:60%}.skel.w40{width:40%}.skel.w80{width:80%}
+
+/* ---------- 委托卡 ---------- */
+.dele{display:flex;gap:14px;align-items:flex-start}
+.dele-main{flex:1;min-width:0}
+.dele-name{font-size:var(--fs-lg);font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sched{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-sm);color:var(--text-2)}
+.sched .ic{width:15px;height:15px;color:var(--accent-ink)}
+.next{font-size:var(--fs-sm);color:var(--accent-ink);font-weight:600}
+
+/* 执行历史 */
+.run{display:grid;grid-template-columns:112px 1fr auto;gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--line);font-size:var(--fs-sm)}
+.run:first-child{border-top:none}
+.run .when{color:var(--text-3);font-variant-numeric:tabular-nums}
+
+/* ---------- 总结：统计条 ---------- */
+.stat{background:var(--card-bg);border:1px solid var(--line);border-radius:var(--radius-md);padding:12px 14px}
+.stat .n{font-size:22px;font-weight:600;font-family:var(--serif);line-height:1.2}
+.stat .l{font-size:var(--fs-xs);color:var(--text-3);margin-top:2px}
+.hours{display:flex;align-items:flex-end;gap:3px;height:46px;margin-top:12px}
+.hours i{flex:1;background:var(--gold);border-radius:3px 3px 1px 1px;min-height:2px;opacity:.85}
+.hours i.zero{background:var(--fill-1);opacity:1}
+.hours-x{display:flex;gap:3px;margin-top:5px;font-size:9px;color:var(--text-3)}
+.hours-x span{flex:1;text-align:center}
+
+/* 结论 + 溯源角标 */
+.concl{display:flex;gap:11px;align-items:flex-start;padding:12px 0;border-top:1px solid var(--line)}
+.concl:first-child{border-top:none}
+.concl .idx{width:20px;height:20px;flex:none;border-radius:50%;background:var(--accent-soft);color:var(--accent-ink);
+  font-size:var(--fs-badge);font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:2px}
+.concl p{margin:0;font-size:var(--fs-lg);line-height:var(--lh-loose)}
+.refs{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
+.ref{display:inline-flex;align-items:center;gap:4px;font-size:var(--fs-xs);padding:2px 7px;border-radius:999px;
+  border:1px solid var(--accent-line,rgba(200,137,42,.35));color:var(--accent-ink);background:var(--accent-soft);transition:var(--t-color)}
+.ref:hover{background:rgba(200,137,42,.2)}
+.ref .ic{width:12px;height:12px}
+.callout{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:var(--radius-md);
+  background:var(--fill-3);font-size:var(--fs-sm);color:var(--text-2);border:1px solid var(--line)}
+.callout .ic{width:17px;height:17px;flex:none;color:var(--accent-ink);margin-top:2px}
+
+/* ---------- 打卡：分享卡 ---------- */
+.share{background:var(--step-2);border:1px solid var(--line);border-radius:var(--radius-lg);padding:22px;box-shadow:var(--shadow-2);max-width:420px}
+.share-top{display:flex;align-items:center;gap:10px;padding-bottom:14px;border-bottom:1px dashed var(--line-strong)}
+.share-top .logo{width:30px;height:30px;color:var(--ink)}
+.share-top b{font-family:var(--serif);font-size:var(--fs-xl)}
+.share-top .meta{margin-left:auto;text-align:right}
+.tree{margin-top:16px;font-size:var(--fs-md)}
+.tree .root{font-weight:600;color:var(--accent-ink);margin-bottom:10px;display:flex;align-items:center;gap:7px}
+.tree .root .ic{width:16px;height:16px}
+.tree ul{margin-left:12px;border-left:1px solid var(--line-strong);padding-left:14px}
+.tree li{position:relative;padding:5px 0 5px 0;color:var(--text-1)}
+.tree li::before{content:"";position:absolute;left:-14px;top:15px;width:9px;height:1px;background:var(--line-strong)}
+.tree li b{font-weight:600}
+.tree .tag{margin-left:6px}
+.share-foot{margin-top:16px;padding-top:12px;border-top:1px dashed var(--line-strong);display:flex;align-items:center;justify-content:space-between;font-size:var(--fs-xs);color:var(--text-3)}
+.streak{display:flex;align-items:baseline;gap:6px}
+.streak .n{font-family:var(--serif);font-size:32px;font-weight:600;color:var(--accent-ink)}
+.dots{display:flex;gap:5px;margin-top:10px;flex-wrap:wrap}
+.dots i{width:16px;height:16px;border-radius:5px;background:var(--fill-2);border:1px solid var(--line)}
+.dots i.on{background:var(--gold);border-color:transparent}
+.dots i.today{background:var(--accent);border-color:transparent;box-shadow:0 0 0 2px var(--accent-soft)}
+
+/* ---------- 工具 / 调度表 ---------- */
+.tr{display:grid;gap:10px;align-items:center;padding:9px 0;border-top:1px solid var(--line);font-size:var(--fs-sm)}
+.tr:first-child{border-top:none}
+.tr.tool{grid-template-columns:1.2fr .8fr .7fr .7fr .8fr}
+.tr.job{grid-template-columns:1.1fr 1.3fr .7fr .8fr}
+.th{font-size:var(--fs-badge);letter-spacing:var(--ls-mid);color:var(--text-3);font-weight:600;padding-bottom:2px;border-top:none}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:var(--fs-xs);color:var(--text-2)}
+.bar{height:7px;border-radius:999px;background:var(--fill-2);overflow:hidden;margin-top:7px}
+.bar i{display:block;height:100%;background:var(--gold);border-radius:999px}
+.bar i.hot{background:var(--red)}
+
+/* ---------- 设计说明 ---------- */
+.spec{margin-top:16px;background:var(--card-bg);border:1px solid var(--line);border-radius:var(--radius-md);padding:16px 18px}
+.spec h3{font-size:var(--fs-md);letter-spacing:var(--ls-mid);color:var(--accent-ink);font-weight:600;margin-bottom:10px}
+.spec table{font-size:var(--fs-sm)}
+.spec td{padding:6px 10px 6px 0;vertical-align:top;border-top:1px solid var(--line)}
+.spec tr:first-child td{border-top:none}
+.spec td:first-child{width:118px;color:var(--text-3);white-space:nowrap}
+.spec code{font-family:ui-monospace,Menlo,monospace;font-size:var(--fs-xs);background:var(--fill-3);padding:1px 5px;border-radius:4px}
+
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr}
+  .mini-nav{display:none}
+  .grid2,.grid3,.grid4{grid-template-columns:1fr}
+  .board{flex-direction:column}
+}
+</style>
+</head>
+<body>
+
+<header class="board">
+  <div>
+    <p class="eyebrow">知穗 · UI 设计稿 v0.1 · 2026-10-13</p>
+    <h1>新四屏：每日委托 · 每日总结 · 打卡 · 设置</h1>
+    <p class="board-sub">
+      按 <b>oil-ui</b> 做基准，配 <b>「苞米地笔记本」</b> 令牌（数值照抄 <code>tokens.css</code>，不凭记忆）；
+      全站 <b>不用 emoji</b>，图标一律走 <b>CornIcon</b> 手绘语言（currentColor 粗描边 + 圆头圆角 + 玉米金点缀），与吉祥物同源；
+      页面字段严格对齐 <b>feat/ai-module-20261013</b> 上的真实实现，不是凭空画的。
+    </p>
+    <div class="chips">
+      <span class="chip gold">金只做选中与主操作</span>
+      <span class="chip">一屏一个主操作</span>
+      <span class="chip">溯源角标为硬要求</span>
+      <span class="chip">先生成后确认，不让用户填表</span>
+      <span class="chip">分享自动脱敏</span>
+    </div>
+  </div>
+  <button class="icon-btn" id="themeBtn" title="切换明暗（验证 .dark 链路）" aria-label="切换明暗主题">
+    <span class="ic" data-i="settings"></span>
+  </button>
+</header>
+
+<nav class="tabs" role="tablist">
+  <button class="tab" role="tab" aria-selected="true"  data-go="s-delegate">每日委托</button>
+  <button class="tab" role="tab" aria-selected="false" data-go="s-report">每日总结</button>
+  <button class="tab" role="tab" aria-selected="false" data-go="s-checkin">打卡</button>
+  <button class="tab" role="tab" aria-selected="false" data-go="s-settings">设置</button>
+</nav>
+
+<main>
+
+<!-- ============================ 1 每日委托 ============================ -->
+<section class="screen" id="s-delegate" data-open>
+  <div class="shell">
+    <aside class="mini-nav">
+      <div class="brand"><span class="logo ic" data-i="corn"></span><b>知穗</b></div>
+      <button class="nav-item"><span class="ic" data-i="notes"></span>对话</button>
+      <button class="nav-item"><span class="ic" data-i="book"></span>知识库</button>
+      <button class="nav-item" aria-current="page"><span class="ic" data-i="clock"></span>每日委托</button>
+      <button class="nav-item"><span class="ic" data-i="calendar"></span>总结</button>
+      <button class="nav-item"><span class="ic" data-i="star"></span>打卡</button>
+      <button class="nav-item"><span class="ic" data-i="settings"></span>设置</button>
+    </aside>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <p class="eyebrow">P4 · /delegate</p>
+          <h2>每日委托</h2>
+          <p class="sub">让知穗在固定时间替你复盘、提醒、打招呼。触发后它会把内容<b>投递到你指定的会话里</b>，你打开对话就能看到。</p>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <span class="tag">启用中 <b style="font-weight:700">3</b> / 5</span>
+          <button class="btn btn-primary"><span class="ic" data-i="plus"></span>新建委托</button>
+        </div>
+      </div>
+
+      <div class="grid2" style="margin-top:18px">
+        <!-- 左：委托列表 -->
+        <div>
+          <p class="sec-label">我的委托</p>
+
+          <div class="card card-pad">
+            <div class="dele">
+              <div class="dele-main">
+                <div class="dele-name">每日学习复盘 <span class="tag gold">复盘</span></div>
+                <div class="kv">
+                  <span class="sched"><span class="ic" data-i="clock"></span>每天 21:00 · Asia/Shanghai</span>
+                  <span>投递到：<b>数据结构期末复习</b></span>
+                  <span>知识库：<b>数据结构讲义</b></span>
+                </div>
+                <p class="hint">下次触发 <span class="next">今天 21:00（还有 2 小时 14 分）</span></p>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+                <span class="switch" role="switch" aria-checked="true" aria-label="启用"></span>
+                <div class="pos-actions">
+                  <button class="btn btn-ghost btn-sm">预览</button>
+                  <button class="icon-btn" data-i-wrap><span class="ic" data-i="pencil"></span></button>
+                  <button class="icon-btn danger"><span class="ic" data-i="trash"></span></button>
+                </div>
+              </div>
+            </div>
+
+            <div class="divide"></div>
+
+            <div class="dele">
+              <div class="dele-main">
+                <div class="dele-name">早八前打个气 <span class="tag">鼓励</span></div>
+                <div class="kv">
+                  <span class="sched"><span class="ic" data-i="clock"></span>工作日 07:30 · Asia/Shanghai</span>
+                  <span>投递到：<b>默认会话</b></span>
+                </div>
+                <p class="hint">下次触发 <span class="next">明天 07:30</span></p>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+                <span class="switch" role="switch" aria-checked="true" aria-label="启用"></span>
+                <div class="pos-actions">
+                  <button class="btn btn-ghost btn-sm">预览</button>
+                  <button class="icon-btn"><span class="ic" data-i="pencil"></span></button>
+                  <button class="icon-btn danger"><span class="ic" data-i="trash"></span></button>
+                </div>
+              </div>
+            </div>
+
+            <div class="divide"></div>
+
+            <div class="dele">
+              <div class="dele-main">
+                <div class="dele-name">每周错题回炉 <span class="tag">学习计划</span></div>
+                <div class="kv">
+                  <span class="sched"><span class="ic" data-i="calendar"></span>每周日 20:00</span>
+                  <span>知识库：<b>错题本</b></span>
+                </div>
+                <p class="hint">已暂停 · next_run_at = null</p>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+                <span class="switch" role="switch" aria-checked="false" aria-label="启用"></span>
+                <div class="pos-actions">
+                  <button class="btn btn-ghost btn-sm">预览</button>
+                  <button class="icon-btn"><span class="ic" data-i="pencil"></span></button>
+                  <button class="icon-btn danger"><span class="ic" data-i="trash"></span></button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="callout" style="margin-top:12px">
+            <span class="ic" data-i="info"></span>
+            <div><b>「预览」不投递。</b>它走 <code>POST /api/delegate/{id}/run?dry_run=true</code>，只生成内容给你看一遍；
+              「立即执行」才真的投递到会话，并消耗一次 <code>auto</code> 自动额度。</div>
+          </div>
+
+          <!-- 执行历史 -->
+          <p class="sec-label" style="margin-top:22px">执行历史</p>
+          <div class="card card-pad">
+            <div class="run">
+              <span class="when">今天 21:00</span>
+              <span><span class="tag ok">成功</span> <span class="meta">定时触发 · 672 ms · 已投递</span></span>
+              <span class="meta">1,204 tok</span>
+            </div>
+            <div class="run">
+              <span class="when">昨天 21:00</span>
+              <span><span class="tag ok">成功</span> <span class="meta">定时触发 · 588 ms · 已投递</span></span>
+              <span class="meta">1,057 tok</span>
+            </div>
+            <div class="run">
+              <span class="when">10-11 21:00</span>
+              <span><span class="tag bad">失败</span> <span class="meta">定时触发 · 第 2 次重试 · 上游超时</span></span>
+              <span class="meta">0 tok</span>
+            </div>
+            <div class="run">
+              <span class="when">10-10 21:00</span>
+              <span><span class="tag info">手动</span> <span class="meta">你点了「立即执行」 · 已投递</span></span>
+              <span class="meta">998 tok</span>
+            </div>
+          </div>
+          <p class="hint">历史按 <code>trigger</code> 区分「定时」与「手动」——排查「今天为什么没收到」先看这一列。</p>
+        </div>
+
+        <!-- 右：新建 / 编辑抽屉 -->
+        <div>
+          <p class="sec-label">新建委托</p>
+          <div class="card card-pad">
+            <div class="field">
+              <label class="f" for="d-name">名称（3–32 字，建后不可改）</label>
+              <input class="input" id="d-name" value="每日学习复盘">
+            </div>
+            <div class="field">
+              <label class="f">类型</label>
+              <div class="seg">
+                <button aria-pressed="false">学习计划</button>
+                <button aria-pressed="true">复盘</button>
+                <button aria-pressed="false">鼓励</button>
+                <button aria-pressed="false">自定义</button>
+              </div>
+            </div>
+            <div class="field">
+              <label class="f">频率</label>
+              <div class="seg" style="width:100%">
+                <button aria-pressed="true" style="flex:1">每天</button>
+                <button aria-pressed="false" style="flex:1">工作日</button>
+                <button aria-pressed="false" style="flex:1">每周</button>
+                <button aria-pressed="false" style="flex:1">间隔</button>
+              </div>
+            </div>
+            <div class="row field">
+              <div style="flex:1"><label class="f">触发时间</label><input class="input" value="21:00"></div>
+              <div style="flex:1"><label class="f">时区</label><input class="input" value="Asia/Shanghai" disabled style="opacity:.6"></div>
+            </div>
+            <div class="field">
+              <label class="f">投递到会话</label>
+              <select class="input"><option>数据结构期末复习</option><option>论文提纲讨论</option></select>
+            </div>
+            <div class="field">
+              <label class="f">绑定知识库（可选）</label>
+              <select class="input"><option>数据结构讲义</option><option>不绑定</option></select>
+            </div>
+            <div class="field">
+              <label class="f">生成指令</label>
+              <textarea class="input">根据我今天的学习产出给一段复盘：先说清我今天掌握了什么，再指出一个最该补的漏洞，最后给明天一条具体到动作的建议。</textarea>
+            </div>
+            <div class="row field">
+              <div style="flex:1"><label class="f">语气</label><input class="input" value="neutral"></div>
+              <div style="flex:1"><label class="f">长度上限</label><input class="input" value="600 字"></div>
+            </div>
+            <div class="field" style="display:flex;align-items:center;justify-content:space-between">
+              <span style="font-size:var(--fs-sm);color:var(--text-2)">创建后立即启用</span>
+              <span class="switch" role="switch" aria-checked="true" aria-label="创建后立即启用"></span>
+            </div>
+            <div class="row" style="margin-top:16px">
+              <button class="btn btn-primary" style="flex:1;justify-content:center"><span class="ic" data-i="check"></span>创建</button>
+              <button class="btn btn-ghost">取消</button>
+            </div>
+            <p class="hint">启用中的委托上限 5 条；同名会返回 409「同名委托已存在」。</p>
+          </div>
+
+          <div class="spec">
+            <h3>设计说明</h3>
+            <table>
+              <tr><td>页面任务</td><td>让「知穗主动来找你」这件事可配置、可预期、可追溯</td></tr>
+              <tr><td>主操作</td><td>新建委托（深棕墨底实心；hover 才转金）</td></tr>
+              <tr><td>次操作</td><td>预览 / 编辑 / 删除。删除与关闭用中性色，只有删除 hover 才转红</td></tr>
+              <tr><td>视觉关系</td><td>卡片列表是「对象」，右侧表单是「动作」——左宽右窄，表单常驻不弹窗（不遮挡列表）</td></tr>
+              <tr><td>关键状态</td><td>启用/暂停（开关）、下次触发时刻（金色强调）、运行成功/失败/重试（绿/红/黄）、空列表、加载骨架</td></tr>
+              <tr><td>空状态</td><td>无委托时整块换成引导卡：一句「让知穗每天主动找你一次」+ 一个示例委托可一键填入</td></tr>
+              <tr><td>接口</td><td><code>GET|POST /api/delegate/</code>、<code>GET|PATCH|DELETE /{id}/</code>、<code>POST /{id}/run</code>、<code>GET /{id}/runs</code></td></tr>
+              <tr><td>字段</td><td>名称/类型/频率/时间/投递会话/知识库/指令/语气/长度/启用/next_run_at；历史读 <code>job_runs</code>（status、trigger、planned_at、error、tokens_out）</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 2 每日总结 ============================ -->
+<section class="screen" id="s-report">
+  <div class="shell">
+    <aside class="mini-nav">
+      <div class="brand"><span class="logo ic" data-i="corn"></span><b>知穗</b></div>
+      <button class="nav-item"><span class="ic" data-i="notes"></span>对话</button>
+      <button class="nav-item"><span class="ic" data-i="book"></span>知识库</button>
+      <button class="nav-item"><span class="ic" data-i="clock"></span>每日委托</button>
+      <button class="nav-item" aria-current="page"><span class="ic" data-i="calendar"></span>总结</button>
+      <button class="nav-item"><span class="ic" data-i="star"></span>打卡</button>
+      <button class="nav-item"><span class="ic" data-i="settings"></span>设置</button>
+    </aside>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <p class="eyebrow">P5 · /report</p>
+          <h2>每日总结</h2>
+          <p class="sub">把今天问过的问题压成几条结论。<b>每条结论都能点回它来自哪一句对话</b>——指不回原文的，系统直接丢掉不显示。</p>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <span class="sched"><span class="ic" data-i="calendar"></span>2026-10-13</span>
+          <button class="btn btn-primary"><span class="ic" data-i="refresh"></span>生成今天的总结</button>
+        </div>
+      </div>
+
+      <div class="grid2" style="margin-top:18px">
+        <div>
+          <!-- 统计 -->
+          <div class="grid4">
+            <div class="stat"><div class="n">4</div><div class="l">对话</div></div>
+            <div class="stat"><div class="n">37</div><div class="l">消息</div></div>
+            <div class="stat"><div class="n">18 / 19</div><div class="l">提问 / 回答</div></div>
+            <div class="stat"><div class="n">19</div><div class="l">工具调用</div></div>
+          </div>
+
+          <div class="card card-pad" style="margin-top:12px">
+            <div class="card-head">
+              <span class="card-title">活跃时段</span>
+              <span class="meta">集中在 14:00 与 21:00 两段</span>
+            </div>
+            <div class="hours">
+              <i style="height:12%"></i><i class="zero" style="height:4%"></i><i class="zero" style="height:4%"></i>
+              <i style="height:46%"></i><i style="height:30%"></i><i style="height:8%"></i>
+              <i style="height:20%"></i><i style="height:14%"></i><i style="height:62%"></i>
+              <i style="height:88%"></i><i style="height:34%"></i><i style="height:10%"></i>
+            </div>
+            <div class="hours-x"><span>10</span><span>11</span><span>12</span><span>13</span><span>14</span><span>15</span><span>16</span><span>17</span><span>18</span><span>19</span><span>20</span><span>21</span></div>
+          </div>
+
+          <!-- 结论 -->
+          <p class="sec-label" style="margin-top:22px">今天的结论 <span class="tag" style="margin-left:6px">3 条 · 已全部可溯源</span></p>
+          <div class="card card-pad">
+            <div class="concl">
+              <span class="idx">1</span>
+              <div>
+                <p>今天真正被消化的是<b>二叉树三种遍历</b>：能自己写出前/中/后序的递归实现，也说清了「中序 = 左根右」为什么能拿到有序序列。</p>
+                <div class="refs">
+                  <button class="ref"><span class="ic" data-i="link"></span>数据结构期末复习 · 第 231 句</button>
+                  <button class="ref"><span class="ic" data-i="link"></span>第 244 句</button>
+                </div>
+              </div>
+            </div>
+            <div class="concl">
+              <span class="idx">2</span>
+              <div>
+                <p><b>线索二叉树</b>的动机还没落地——你知道它「省了栈」，但说不出它到底在哪种场景下比递归更划算。</p>
+                <div class="refs">
+                  <button class="ref"><span class="ic" data-i="link"></span>第 258 句</button>
+                </div>
+              </div>
+            </div>
+            <div class="concl">
+              <span class="idx">3</span>
+              <div>
+                <p>今天有 <b>2 次联网搜索</b>，都用在核对「平衡因子取值范围」，没有把外部资料直接当成结论。</p>
+                <div class="refs">
+                  <button class="ref"><span class="ic" data-i="link"></span>第 302 句</button>
+                  <button class="ref"><span class="ic" data-i="link"></span>第 310 句</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="callout" style="margin-top:12px">
+            <span class="ic" data-i="info"></span>
+            <div><b>为什么有的结论不见了？</b>后端对每条结论做<b>强制溯源</b>：<code>source_refs</code> 指不到真实消息的，直接丢弃并记 warning。
+              所以这里的条数可能少于模型自己说的条数——这是「宁可少说，不许瞎说」。</div>
+          </div>
+        </div>
+
+        <div>
+          <p class="sec-label">其他日期</p>
+          <div class="card card-pad">
+            <div class="run"><span class="when">2026-10-13</span><span><span class="tag gold">今天</span> <span class="meta">3 条结论</span></span><span class="meta">已读</span></div>
+            <div class="run"><span class="when">2026-10-12</span><span><span class="tag">2 条结论</span></span><span class="meta">已读</span></div>
+            <div class="run"><span class="when">2026-10-11</span><span><span class="tag">5 条结论</span></span><span class="meta">已读</span></div>
+            <div class="run"><span class="when">2026-10-10</span><span><span class="tag warn">当天没有对话</span></span><span class="meta">empty</span></div>
+          </div>
+          <p class="hint">空的一天也会留一条 <code>status=empty</code> 记录，不调模型、不烧额度。</p>
+
+          <div class="card card-pad" style="margin-top:16px">
+            <div class="card-title">生成中</div>
+            <p class="hint">点了「生成」之后是<b>同步等待</b>（当前实现约 20–40 秒），状态先落 <code>generating</code> 再落 <code>ready</code>。</p>
+            <div style="margin-top:12px">
+              <div class="skel w80" style="height:14px"></div>
+              <div class="skel" style="height:14px;margin-top:8px"></div>
+              <div class="skel w60" style="height:14px;margin-top:8px"></div>
+            </div>
+            <p class="hint" style="color:var(--accent-ink)">正在生成今天的总结（约 30 秒）…</p>
+          </div>
+
+          <div class="spec">
+            <h3>设计说明</h3>
+            <table>
+              <tr><td>页面任务</td><td>一天结束时，用 30 秒看懂「今天学了什么、哪里还虚」</td></tr>
+              <tr><td>主操作</td><td>生成今天的总结</td></tr>
+              <tr><td>次操作</td><td>切换日期（左下方列表）</td></tr>
+              <tr><td>核心约束</td><td>每条结论必须带可点的溯源角标——这是产品方向文档里的硬要求，也正好是后端已在执行的强制项</td></tr>
+              <tr><td>关键状态</td><td>ready（有结论）/ empty（当天无对话）/ generating（同步等待，约 30 秒）/ 404「今日总结尚未生成」</td></tr>
+              <tr><td>空状态</td><td>404 时不报错，给「今天还没有总结」+ 生成按钮；empty 时说明「今天没对话，明天再来」</td></tr>
+              <tr><td>接口</td><td><code>GET /api/report/today</code> · <code>GET /api/report/{date}</code> · <code>POST /api/report/generate</code></td></tr>
+              <tr><td>待补</td><td>目前<b>没有</b>「历史列表」「未读计数」「标记已读」三个端点；本屏日期列表暂由前端缓存/本地记录，或等后端认领</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 3 打卡 ============================ -->
+<section class="screen" id="s-checkin">
+  <div class="shell">
+    <aside class="mini-nav">
+      <div class="brand"><span class="logo ic" data-i="corn"></span><b>知穗</b></div>
+      <button class="nav-item"><span class="ic" data-i="notes"></span>对话</button>
+      <button class="nav-item"><span class="ic" data-i="book"></span>知识库</button>
+      <button class="nav-item"><span class="ic" data-i="clock"></span>每日委托</button>
+      <button class="nav-item"><span class="ic" data-i="calendar"></span>总结</button>
+      <button class="nav-item" aria-current="page"><span class="ic" data-i="star"></span>打卡</button>
+      <button class="nav-item"><span class="ic" data-i="settings"></span>设置</button>
+    </aside>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <p class="eyebrow">P6 · /checkin</p>
+          <h2>打卡</h2>
+          <p class="sub">把今天的总结变成一张<b>只讲知识结构、不露个人内容</b>的图。分享出去的是「学习笔记」，不是「代做产物」。</p>
+        </div>
+        <button class="btn btn-primary"><span class="ic" data-i="download"></span>保存 / 分享这张图</button>
+      </div>
+
+      <div class="grid2" style="margin-top:18px">
+        <div>
+          <p class="sec-label">今日打卡卡</p>
+          <div class="share">
+            <div class="share-top">
+              <span class="logo ic" data-i="corn"></span>
+              <b>今日所学</b>
+              <span class="meta">2026-10-13<br>知穗 · 知穗Agent</span>
+            </div>
+
+            <div class="tree">
+              <div class="root"><span class="ic" data-i="book"></span>数据结构 · 树与二叉树</div>
+              <ul>
+                <li><b>遍历</b><span class="tag ok">已掌握</span>
+                  <ul>
+                    <li>前序 / 中序 / 后序的递归实现</li>
+                    <li>中序为什么能得到有序序列</li>
+                  </ul>
+                </li>
+                <li><b>平衡</b><span class="tag ok">已掌握</span>
+                  <ul><li>平衡因子的取值范围</li></ul>
+                </li>
+                <li><b>线索化</b><span class="tag warn">待加强</span>
+                  <ul><li>应用场景还不清楚</li></ul>
+                </li>
+              </ul>
+            </div>
+
+            <div class="share-foot">
+              <span>共 6 个知识点 · 2 个待加强</span>
+              <span>知穗 · 每天进步一点点</span>
+            </div>
+          </div>
+
+          <div class="callout" style="margin-top:12px">
+            <span class="ic" data-i="info"></span>
+            <div><b>分享前自动脱敏</b>：这张图只保留<b>知识结构</b>（概念、章节、掌握度），
+              自动剥离姓名 / 学号 / 手机号 / 身份证，以及你自己的原话与做错的题。</div>
+          </div>
+        </div>
+
+        <div>
+          <p class="sec-label">连续打卡</p>
+          <div class="card card-pad">
+            <div class="streak"><span class="n">5</span><span class="meta">天连续 · 最长 12 天</span></div>
+            <div class="dots">
+              <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on today"></i>
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            </div>
+            <p class="hint">近 12 天。金色 = 已打卡，深金+描边 = 今天。</p>
+          </div>
+
+          <p class="sec-label" style="margin-top:20px">历史</p>
+          <div class="card card-pad">
+            <div class="run"><span class="when">2026-10-13</span><span><span class="tag gold">今天</span> <span class="meta">6 个知识点</span></span><span class="meta">未分享</span></div>
+            <div class="run"><span class="when">2026-10-12</span><span><span class="tag">4 个知识点</span></span><span class="meta">已分享</span></div>
+            <div class="run"><span class="when">2026-10-11</span><span><span class="tag">7 个知识点</span></span><span class="meta">已分享</span></div>
+          </div>
+
+          <div class="callout" style="margin-top:12px">
+            <span class="ic" data-i="warn"></span>
+            <div><b>后端还没有打卡接口。</b>本页的图可由 <code>/api/report/{date}</code> 的结论直接渲染；
+              但 <code>streak</code>、历史打卡、成品图导出三块<b>没有对应端点</b>（无 <code>/api/checkin/*</code>，<code>stats</code> 里也没有 streak 字段）。
+              要么前端本地推算先上，要么请后端认领这三个端点。</div>
+          </div>
+
+          <div class="spec">
+            <h3>设计说明</h3>
+            <table>
+              <tr><td>页面任务</td><td>把「我今天学了」变成一件值得发出去的事</td></tr>
+              <tr><td>主操作</td><td>保存 / 分享这张图</td></tr>
+              <tr><td>为什么克制</td><td>不做奖惩、不做排行榜——参考作业帮的教训，竞争性激励带来的是负体验</td></tr>
+              <tr><td>视觉关系</td><td>分享卡是全屏视觉重心（纸张 + 虚线分隔），其余信息降为辅助</td></tr>
+              <tr><td>关键状态</td><td>已打卡 / 未打卡（今天还没完成委托或总结）/ 图生成中 / 分享失败</td></tr>
+              <tr><td>空状态</td><td>「今天还没完成委托或总结，去补上」+ 跳转按钮；无历史时「完成第一次打卡后，这里会有记录」</td></tr>
+              <tr><td>分享兜底</td><td>公网 http 下 <code>navigator.clipboard</code> 不可用，统一走项目里的 <code>copyText()</code>；再失败给「长按图片保存」</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 4 设置 ============================ -->
+<section class="screen" id="s-settings">
+  <div class="shell">
+    <aside class="mini-nav">
+      <div class="brand"><span class="logo ic" data-i="corn"></span><b>知穗</b></div>
+      <button class="nav-item"><span class="ic" data-i="notes"></span>对话</button>
+      <button class="nav-item"><span class="ic" data-i="book"></span>知识库</button>
+      <button class="nav-item"><span class="ic" data-i="clock"></span>每日委托</button>
+      <button class="nav-item"><span class="ic" data-i="calendar"></span>总结</button>
+      <button class="nav-item"><span class="ic" data-i="star"></span>打卡</button>
+      <button class="nav-item" aria-current="page"><span class="ic" data-i="settings"></span>设置</button>
+    </aside>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <p class="eyebrow">P7 · /settings</p>
+          <h2>设置</h2>
+          <p class="sub">账号、外观、检索参数、隐私、用量，以及<b>知穗当前能调用哪些工具、调度进程活着没有</b>。</p>
+        </div>
+      </div>
+
+      <div class="grid2" style="margin-top:18px">
+        <div>
+          <p class="sec-label">账号</p>
+          <div class="card card-pad" style="display:flex;align-items:center;gap:14px">
+            <span class="ic" style="width:38px;height:38px;color:var(--ink)" data-i="user"></span>
+            <div style="flex:1">
+              <div class="card-title">冯靖豪</div>
+              <div class="meta">普通用户 · 非管理员</div>
+            </div>
+            <button class="btn btn-ghost btn-sm">修改密码</button>
+            <button class="btn btn-ghost btn-sm">退出登录</button>
+          </div>
+
+          <p class="sec-label" style="margin-top:22px">外观</p>
+          <div class="card card-pad">
+            <div class="row" style="justify-content:space-between">
+              <span style="font-size:var(--fs-md)">正文字号</span>
+              <div class="seg"><button aria-pressed="false">跟随系统</button><button aria-pressed="false">小</button><button aria-pressed="true">标准</button><button aria-pressed="false">大</button></div>
+            </div>
+            <div class="row" style="justify-content:space-between;margin-top:14px">
+              <span style="font-size:var(--fs-md)">深色纸面</span>
+              <span class="switch" role="switch" aria-checked="false" aria-label="深色主题"></span>
+            </div>
+            <p class="hint">字号档位存本地，正文与标题按比例联动（由 <code>--msg-fs</code> 派生出 <code>--hero-fs</code>）。</p>
+          </div>
+
+          <p class="sec-label" style="margin-top:22px">检索与索引</p>
+          <div class="card card-pad">
+            <div class="row" style="gap:20px">
+              <div style="flex:1"><label class="f">召回条数 top_k</label><input class="input" value="4"></div>
+              <div style="flex:1"><label class="f">切片长度</label><input class="input" value="500"></div>
+              <div style="flex:1"><label class="f">切片重叠</label><input class="input" value="60"></div>
+            </div>
+            <div class="divide"></div>
+            <div class="row" style="justify-content:space-between">
+              <div>
+                <div style="font-size:var(--fs-md)">选择性索引</div>
+                <div class="meta">只有勾选的资料会被向量化。不勾的不进索引、也不参与检索。</div>
+              </div>
+            </div>
+            <div style="margin-top:10px">
+              <label style="display:flex;align-items:center;gap:9px;font-size:var(--fs-md);padding:7px 0">
+                <span class="switch" role="switch" aria-checked="true" style="transform:scale(.85)"></span>数据结构讲义（128 片段）
+              </label>
+              <label style="display:flex;align-items:center;gap:9px;font-size:var(--fs-md);padding:7px 0">
+                <span class="switch" role="switch" aria-checked="true" style="transform:scale(.85)"></span>错题本（42 片段）
+              </label>
+              <label style="display:flex;align-items:center;gap:9px;font-size:var(--fs-md);padding:7px 0">
+                <span class="switch" role="switch" aria-checked="false" style="transform:scale(.85)"></span>个人简历（36 片段）
+              </label>
+            </div>
+            <div class="divide"></div>
+            <div class="row" style="justify-content:space-between">
+              <div>
+                <div style="font-size:var(--fs-md)">数据留存</div>
+                <div class="meta">对话会发给模型服务做推理；知识库与索引留在本机。</div>
+              </div>
+              <button class="btn btn-ghost btn-sm" style="color:var(--red-ink);border-color:rgba(180,71,47,.35)">清空我的数据</button>
+            </div>
+          </div>
+
+          <p class="sec-label" style="margin-top:22px">用量与反馈</p>
+          <div class="card card-pad">
+            <div class="grid3">
+              <div>
+                <div class="row" style="justify-content:space-between"><span style="font-size:var(--fs-md)">问答</span><span class="meta">12 / 60</span></div>
+                <div class="bar"><i style="width:20%"></i></div>
+              </div>
+              <div>
+                <div class="row" style="justify-content:space-between"><span style="font-size:var(--fs-md)">向量化</span><span class="meta">3 / 20</span></div>
+                <div class="bar"><i style="width:15%"></i></div>
+              </div>
+              <div>
+                <div class="row" style="justify-content:space-between"><span style="font-size:var(--fs-md)">自动（定时）</span><span class="meta">2 / 120</span></div>
+                <div class="bar"><i style="width:2%"></i></div>
+              </div>
+            </div>
+            <p class="hint">管理员显示「无限额」而非进度条；超限一律 429，前端要解析 <code>retry_after</code> 说人话，不能只转圈。</p>
+          </div>
+        </div>
+
+        <div>
+          <p class="sec-label">知穗能调用哪些工具</p>
+          <div class="card card-pad">
+            <div class="tr tool th"><span>工具</span><span>类别</span><span>可重试</span><span>需确认</span><span>输出上限 / 成本</span></div>
+            <div class="tr tool"><span class="mono">kb_search</span><span><span class="tag info">读</span></span><span>否</span><span>否</span><span class="meta">4000 · 常规</span></div>
+            <div class="tr tool"><span class="mono">web_search</span><span><span class="tag info">读</span></span><span>是</span><span>否</span><span class="meta">4000 · 常规</span></div>
+            <div class="tr tool"><span class="mono">calculator</span><span><span class="tag info">读</span></span><span>否</span><span>否</span><span class="meta">1000 · 常规</span></div>
+            <div class="tr tool"><span class="mono">get_weather</span><span><span class="tag info">读</span></span><span>是</span><span>否</span><span class="meta">1000 · 常规</span></div>
+            <div class="tr tool"><span class="mono">download_file</span><span><span class="tag warn">写</span></span><span>是</span><span>是</span><span class="meta">2000 · 偏高</span></div>
+            <p class="hint">当前 5 个工具全部是「直接工具」（<code>defer=false</code>），每轮全量下发；延迟发现机制已建好，留给以后的打卡 / 导图 / 定时投递类工具。</p>
+          </div>
+
+          <p class="sec-label" style="margin-top:20px">调度进程 <span class="tag ok" style="margin-left:6px">运行中</span></p>
+          <div class="card card-pad">
+            <div class="row" style="justify-content:space-between;align-items:center">
+              <div>
+                <div style="font-size:var(--fs-md)">worker 心跳</div>
+                <div class="meta">最后心跳 12 秒前 · pid 28461</div>
+              </div>
+              <span class="tag ok">up</span>
+            </div>
+            <div class="divide"></div>
+            <div class="tr job th"><span>任务</span><span>周期</span><span>启用</span><span>上次</span></div>
+            <div class="tr job"><span class="mono">delegate.dispatch</span><span class="mono">*/5 * * * *</span><span>开</span><span class="meta">1 分钟前 · 成功</span></div>
+            <div class="tr job"><span class="mono">delegate.retry</span><span class="mono">7,22,37,52 * * * *</span><span>开</span><span class="meta">7 分钟前 · 成功</span></div>
+            <div class="tr job"><span class="mono">report.daily</span><span class="mono">0 21 * * *</span><span>开</span><span class="meta">昨天 21:00 · 成功</span></div>
+            <p class="hint">健康判定只看<b>心跳年龄</b>：超过 300 秒 <code>stalled</code>、600 秒 <code>down</code>。
+              进程在但被卡死同样会被抓到——这是「静默故障」唯一的抓手。</p>
+            <div class="callout" style="margin-top:12px">
+              <span class="ic" data-i="warn"></span>
+              <div>手动触发（<code>run-now</code>）与重排（<code>retry</code>）<b>仅管理员可用</b>，普通用户这一块只看状态。</div>
+            </div>
+          </div>
+
+          <div class="spec">
+            <h3>设计说明</h3>
+            <table>
+              <tr><td>页面任务</td><td>把「我用掉多少、还剩多少、系统在替我跑什么、我的数据去哪了」一次讲清楚</td></tr>
+              <tr><td>主操作</td><td>无单一主操作（设置页刻意不设主角）；危险操作（清空数据）单独用红色描边</td></tr>
+              <tr><td>为什么加工具/调度两块</td><td>后端新开了 <code>/api/agent/tools</code> 与 <code>/api/schedule/*</code>，本来就是给「面板」用的；不给它一个入口，这两个端点就没有消费者</td></tr>
+              <tr><td>视觉关系</td><td>左列是可改的设置，右列是只读的系统状态——用「可编辑 vs 只读」分开，避免用户去点不该点的</td></tr>
+              <tr><td>关键状态</td><td>用量为 0 不画空进度条；用量拉取失败只影响该卡；worker <code>up / stalled / down</code> 三色</td></tr>
+              <tr><td>接口</td><td><code>GET /api/auth/me</code> · <code>GET /api/usage/summary</code> · <code>GET /api/agent/tools</code> · <code>GET /api/schedule/health</code> · <code>GET /api/schedule/jobs</code></td></tr>
+              <tr><td>待补</td><td>改密码端点 <code>/auth/password</code> 仍缺（跨 3 轮未修）</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<script>
+/* 图标：路径与 frontend/src/components/CornIcon.tsx 逐字一致，保证同一套手绘语言 */
+const ICON = {
+  corn:'<path d="M21 10.5 C21 7.5 22.3 5.5 24 4.5 M24.5 10.5 C24.7 8 25.8 6.3 27.5 5.5" fill="none" stroke-width="2.2"/><path d="M18.5 27 C13 28.5 9.5 33 8.5 38.5 C14 37.5 17.8 34 19 29.5 Z" fill="#7C9A54" stroke-width="2.4"/><path d="M29.5 27 C35 28.5 38.5 33 39.5 38.5 C34 37.5 30.2 34 29 29.5 Z" fill="#8FAF62" stroke-width="2.4"/><rect x="18" y="11" width="12" height="21" rx="6" fill="#F5B840" stroke-width="2.8"/><g fill="none" stroke-width="1.8" opacity=".3"><path d="M21.8 13.5 C21 19 21 25 21.8 29.5"/><path d="M26.2 13.5 C27 19 27 25 26.2 29.5"/></g>',
+  notes:'<rect x="11" y="10" width="26" height="31" rx="4.5" fill="#FFFDF6" stroke-width="3"/><g stroke-width="2.4"><path d="M16.5 10 V5.5"/><path d="M24 10 V5.5"/><path d="M31.5 10 V5.5"/></g><path d="M16.5 21 H31.5" stroke="#F5B840" stroke-width="3"/><g stroke-width="2.2" opacity=".32"><path d="M16.5 27 H31.5"/><path d="M16.5 33 H26.5"/></g>',
+  book:'<path d="M24 13 C20 9.5 13.5 8.5 8 10.5 V35 C13.5 33 20 34 24 37.5 C28 34 34.5 33 40 35 V10.5 C34.5 8.5 28 9.5 24 13 Z" fill="#FFFDF6" stroke-width="3"/><path d="M24 13 V37.5" stroke-width="2.6"/><g stroke-width="2.2" opacity=".32"><path d="M12 18 C15 17 18 17.5 20.5 19" fill="none"/><path d="M27.5 19 C30 17.5 33 17 36 18" fill="none"/><path d="M12 24 C15 23 18 23.5 20.5 25" fill="none"/><path d="M27.5 25 C30 23.5 33 23 36 24" fill="none"/></g><path d="M30.5 9.3 V19 L34 15.8 L37.5 19 V8.6 Z" fill="#F5B840" stroke-width="2.4"/>',
+  clock:'<circle cx="24" cy="25.5" r="15" fill="#FFFDF6" stroke-width="3"/><path d="M24 25.5 V17" stroke="#F5B840" stroke-width="2.8"/><path d="M24 25.5 L31 29.5" stroke="#F5B840" stroke-width="2.8"/><circle cx="24" cy="25.5" r="1.9" fill="currentColor" stroke="none"/><path d="M24 10.5 V7.5" stroke-width="2.6"/><path d="M20.5 7.5 h7" stroke-width="2.6"/>',
+  calendar:'<rect x="9" y="14" width="30" height="25" rx="4.5" fill="#FFFDF6" stroke-width="3"/><path d="M9.5 22 h29" stroke="#F5B840" stroke-width="3"/><g stroke-width="2.6"><path d="M16 10 v6"/><path d="M32 10 v6"/></g><g fill="#F5B840" stroke="none"><circle cx="16.5" cy="28" r="1.9"/><circle cx="24" cy="28" r="1.9"/><circle cx="31.5" cy="28" r="1.9"/><circle cx="16.5" cy="34" r="1.9"/><circle cx="24" cy="34" r="1.9"/></g>',
+  star:'<path d="M24 7 l4.7 11.3 12.3 1 -9.3 8.1 2.8 12 -10.5-6.4 -10.5 6.4 2.8-12 -9.3-8.1 12.3-1 Z" fill="#F5B840" stroke-width="2.8"/>',
+  settings:'<circle cx="24" cy="24" r="10.5" fill="#FFFDF6" stroke-width="3"/><circle cx="24" cy="24" r="3.8" fill="#F5B840" stroke-width="2.4"/><g stroke-width="3"><path d="M24 6.5 v4"/><path d="M24 37.5 v4"/><path d="M6.5 24 h4"/><path d="M37.5 24 h4"/><path d="M11.6 11.6 l2.9 2.9"/><path d="M33.5 33.5 l2.9 2.9"/><path d="M36.4 11.6 l-2.9 2.9"/><path d="M14.5 33.5 L11.6 36.4"/></g>',
+  user:'<circle cx="24" cy="18.5" r="7.5" fill="#F5B840" stroke-width="3"/><path d="M11.5 39.5 a12.5 12.5 0 0 1 25 0" fill="#FFFDF6" stroke-width="3"/>',
+  plus:'<path d="M24 13 V35 M13 24 H35" fill="none" stroke-width="4.6"/>',
+  pencil:'<path d="M15.5 29.2 L31.8 12.9 a3.4 3.4 0 0 1 4.8 4.8 L20.3 34 Z" fill="#F5B840" stroke-width="3"/><path d="M15.5 29.2 L20.3 34 L11.5 36.5 Z" fill="#FFFDF6" stroke-width="2.6"/><path d="M31.8 12.9 a3.4 3.4 0 0 1 4.8 4.8 l2.6-2.6 a3.4 3.4 0 0 0 -4.8-4.8 Z" fill="#EF8A56" stroke-width="2.4"/>',
+  trash:'<path d="M14 17 h20 l-1.6 21.4 a3.4 3.4 0 0 1 -3.4 3.1 h-10 a3.4 3.4 0 0 1 -3.4-3.1 Z" fill="#FFFDF6" stroke-width="3"/><path d="M11 17 h26" stroke-width="3"/><path d="M19.5 17 v-2.8 a2.5 2.5 0 0 1 2.5-2.5 h4 a2.5 2.5 0 0 1 2.5 2.5 V17" fill="none" stroke-width="2.6"/><g stroke-width="2.2" opacity=".4"><path d="M21 24 v9.5"/><path d="M27 24 v9.5"/></g>',
+  check:'<path d="M13 25 L21 33 L35 15" fill="none" stroke-width="4"/>',
+  close:'<path d="M15 15 L33 33 M33 15 L15 33" stroke-width="3.6"/>',
+  refresh:'<path d="M33.6 16 a13 13 0 1 0 3.1 11.5" fill="none" stroke-width="3"/><path d="M34.5 9.5 v7 h-7" fill="none" stroke="#F5B840" stroke-width="3"/>',
+  link:'<path d="M21 27 L27 21" stroke="#F5B840" stroke-width="3.2"/><path d="M18.6 25.4 l-2.4 2.4 a6.4 6.4 0 0 0 9 9 l2.4-2.4" fill="none" stroke-width="3"/><path d="M29.4 22.6 l2.4-2.4 a6.4 6.4 0 0 0 -9-9 l-2.4 2.4" fill="none" stroke-width="3"/>',
+  download:'<path d="M24 9 V26.5" fill="none" stroke-width="3"/><path d="M16.5 19.5 L24 27 L31.5 19.5" fill="none" stroke="#F5B840" stroke-width="3"/><path d="M11 31 v4 a4 4 0 0 0 4 4 h18 a4 4 0 0 0 4-4 v-4" fill="none" stroke-width="3"/>',
+  info:'<circle cx="24" cy="24" r="16" fill="#F5B840" stroke-width="3"/><circle cx="24" cy="16.5" r="2" fill="currentColor" stroke="none"/><path d="M24 22.5 V33" stroke="#FFFDF6" stroke-width="3.6"/>',
+  warn:'<path d="M24 7.5 L42.5 38.5 C43.4 40 42.3 42 40.5 42 H7.5 C5.7 42 4.6 40 5.5 38.5 Z" fill="#F5B840" stroke-width="3"/><path d="M24 18.5 V27.5" stroke-width="2.8"/><circle cx="24" cy="33.5" r="1.8" fill="currentColor" stroke="none"/>',
+  arrow:'<path d="M10 24 H36" fill="none" stroke-width="3.4"/><path d="M26.5 14 L37 24 L26.5 34" fill="none" stroke="#F5B840" stroke-width="3.4"/>'
+};
+document.querySelectorAll('[data-i]').forEach(el=>{
+  const name = el.getAttribute('data-i');
+  const body = ICON[name] || ICON.corn;
+  const keep = el.className;                       /* 保留原有尺寸类 */
+  const sty  = el.getAttribute('style') || '';     /* 保留内联尺寸（否则裸 .ic 会撑满父容器） */
+  el.outerHTML = '<svg class="'+keep+'" viewBox="0 0 48 48" fill="none" stroke="currentColor" '
+    + 'stroke-linecap="round" stroke-linejoin="round" style="display:block;overflow:visible;'+sty+'" '
+    + 'width="100%" height="100%" aria-hidden="true"><g>'+body+'</g></svg>';
+});
+
+/* 页签 */
+const tabs=[...document.querySelectorAll('.tab')];
+tabs.forEach(t=>t.addEventListener('click',()=>{
+  tabs.forEach(x=>x.setAttribute('aria-selected', String(x===t)));
+  document.querySelectorAll('.screen').forEach(s=>s.removeAttribute('data-open'));
+  document.getElementById(t.dataset.go).setAttribute('data-open','');
+}));
+
+/* 明暗：验证 .dark 令牌链路 */
+document.getElementById('themeBtn').addEventListener('click',()=>{
+  document.documentElement.classList.toggle('dark');
+});
+</script>
+</body>
+</html>

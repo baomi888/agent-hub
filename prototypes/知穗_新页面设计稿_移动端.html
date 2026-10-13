@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>知穗 · 新四屏移动端设计稿 v0.1</title>
+<style>
+/* ============================================================
+   令牌：全部照抄 frontend/src/app/styles/tokens.css 的真实值，不凭记忆硬写
+   ============================================================ */
+:root{
+  --step-0:#EDE4C8; --step-1:#F5F0E1; --step-2:#FDFAF2;
+  --desk-0:#F3EAD8; --desk-1:#E7DCC2;
+  --bg:var(--step-0); --bg-canvas:var(--step-1); --bg-sidebar:var(--step-0);
+  --panel:var(--step-1); --card-bg:var(--step-2); --surface:var(--step-1);
+  --ink:#3D2F1A; --text-1:var(--ink); --text-2:#5A4C33; --text-3:#6F6044;
+  --accent:#C8892A; --accent-ink:#875B10; --accent-soft:rgba(200,137,42,.10);
+  --gold:#F5B840; --leaf:#7C9A54; --leaf2:#8FAF62; --clay:#EF8A56; --paper:#FFFDF6;
+  --red:#B4472F; --red-ink:#A03E28; --red-solid:#B4472F;
+  --success:#1E7A46; --success-ink:#2A6B45;
+  --warning:#8A5A0A; --warning-ink:#7A4E08;
+  --info:#2A5A8A; --info-ink:#2A5A8A;
+  --line:rgba(61,47,26,.10); --line-strong:rgba(61,47,26,.25); --input-border:#D8CCB0;
+  --fill-1:rgba(61,47,26,.12); --fill-2:rgba(61,47,26,.07); --fill-3:rgba(61,47,26,.035); --fill-4:rgba(61,47,26,.018);
+  --shadow-1:0 1px 2px rgba(80,60,30,.06); --shadow-2:0 2px 8px rgba(80,60,30,.10);
+  --radius-xs:4px; --radius-sm:8px; --radius-md:12px; --radius-lg:16px;
+  --fs-badge:10px; --fs-xs:11px; --fs-sm:12px; --fs-md:13px; --fs-lg:14px; --fs-xl:16px; --fs-title:20px;
+  --lh-tight:1.4; --lh-body:1.65; --lh-loose:1.9;
+  --ls-wide:.2em; --ls-mid:.06em; --ls-tight:.04em;
+  --t-color:background-color .14s ease,border-color .14s ease,color .14s ease,opacity .14s ease;
+  --serif:"LXGW WenKai Screen","Noto Serif SC","Songti SC",serif;
+  --sans:"Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  color-scheme:light;
+}
+.dark{
+  --step-0:#1A1610; --step-1:#211B11; --step-2:#292217;
+  --desk-0:#211B12; --desk-1:#181309;
+  --bg:var(--step-0); --panel:var(--step-0);
+  --ink:#EDE0C4; --text-2:#c9b58a; --text-3:#A08B66;
+  --accent:#E0A03A; --accent-ink:#E0A03A; --accent-soft:rgba(224,160,58,.12);
+  --red:#D9705A; --red-ink:#E08A6E; --red-solid:#A03E28;
+  --success:#237A46; --success-ink:#7ECB9B;
+  --warning:#B8860B; --warning-ink:#E8B54E;
+  --info:#3A72A6; --info-ink:#8AB6E0;
+  --line:rgba(237,224,196,.10); --line-strong:rgba(237,224,196,.30); --input-border:#4A3E2E;
+  --fill-1:rgba(237,224,196,.16); --fill-2:rgba(237,224,196,.09); --fill-3:rgba(237,224,196,.05); --fill-4:rgba(237,224,196,.025);
+  --shadow-1:0 1px 2px rgba(0,0,0,.30); --shadow-2:0 2px 8px rgba(0,0,0,.40);
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  font-family:var(--sans); font-size:var(--fs-lg); line-height:var(--lh-body);
+  color:var(--text-1); background:var(--desk-0);
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4{margin:0;font-weight:600;line-height:var(--lh-tight)}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;text-align:left}
+ul,ol{margin:0;padding:0;list-style:none}
+code{font-family:ui-monospace,Menlo,monospace;font-size:.92em;background:var(--fill-3);padding:1px 5px;border-radius:4px}
+/* 图标基准尺寸：所有 .ic 都有默认档（避免裸 .ic 撑满父容器） */
+.ic{width:18px;height:18px;flex:none}
+
+/* ---------- 顶部说明区 ---------- */
+.board{max-width:1400px;margin:0 auto;padding:38px 24px 10px;display:flex;gap:24px;align-items:flex-start;justify-content:space-between}
+.eyebrow{font-size:var(--fs-xs);letter-spacing:var(--ls-wide);color:var(--accent-ink);margin:0 0 8px;font-weight:600}
+.board h1{font-family:var(--serif);font-size:26px;letter-spacing:var(--ls-tight)}
+.board-sub{margin:10px 0 0;max-width:78ch;font-size:var(--fs-md);color:var(--text-2)}
+.board-sub b{color:var(--text-1);font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}
+.chip{font-size:var(--fs-xs);padding:4px 9px;border-radius:999px;border:1px solid var(--line);background:var(--card-bg);color:var(--text-2)}
+.chip.gold{border-color:rgba(200,137,42,.35);color:var(--accent-ink);background:var(--accent-soft)}
+
+/* ---------- 六条约定 ---------- */
+.rules{max-width:1400px;margin:24px auto 6px;padding:0 24px}
+.rules-h{font-family:var(--serif);font-size:var(--fs-title);margin-bottom:14px}
+.rules-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+.rule{background:var(--card-bg);border:1px solid var(--line);border-radius:var(--radius-md);padding:14px 16px;box-shadow:var(--shadow-1)}
+.rule-n{display:block;font-size:var(--fs-badge);letter-spacing:var(--ls-wide);color:var(--accent-ink);font-weight:700;margin-bottom:5px}
+.rule b{display:block;font-size:var(--fs-lg);margin-bottom:6px}
+.rule p{margin:0;font-size:var(--fs-md);color:var(--text-2)}
+
+/* ---------- 手机框 ---------- */
+.phones{display:flex;flex-wrap:wrap;gap:36px;max-width:1400px;margin:0 auto;padding:26px 24px 72px;align-items:flex-start}
+.phone-wrap{width:392px;flex:none}
+.phone{
+  width:392px;height:848px;border-radius:46px;border:11px solid #2B2116;background:var(--bg);
+  overflow:hidden;position:relative;display:flex;flex-direction:column;
+  box-shadow:0 20px 44px rgba(60,44,20,.26);
+}
+.dark .phone{border-color:#0D0A05;box-shadow:0 20px 44px rgba(0,0,0,.6)}
+.cap{margin:14px 0 0;font-size:var(--fs-sm);color:var(--text-2);display:flex;align-items:center;gap:8px}
+.cap b{color:var(--text-1);font-size:var(--fs-md)}
+
+/* 状态栏（假，只为说明安全区） */
+.sbar{flex:none;height:46px;display:flex;align-items:center;justify-content:space-between;
+  padding:0 26px 0 30px;font-size:var(--fs-xs);color:var(--text-2);background:var(--bg);font-variant-numeric:tabular-nums}
+.sbar .sig{display:flex;gap:3px;align-items:center}
+.sbar .sig i{width:3px;height:3px;border-radius:50%;background:var(--text-3)}
+.sbar .batt{width:20px;height:10px;border:1px solid var(--text-3);border-radius:3px;position:relative;margin-left:5px}
+.sbar .batt::after{content:"";position:absolute;inset:1.5px;background:var(--text-3);border-radius:1px}
+
+/* 顶栏 */
+.abar{flex:none;min-height:54px;display:flex;align-items:center;gap:8px;padding:4px 8px 4px 6px;
+  background:var(--bg);border-bottom:1px solid var(--line)}
+.abar h2{font-family:var(--serif);font-size:18px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.abar .who{display:flex;align-items:center;gap:5px;font-size:var(--fs-sm);color:var(--text-2);min-height:44px}
+
+/* 正文滚动区 */
+.abody{flex:1;overflow-y:auto;padding:14px 16px 20px;background:var(--bg)}
+.abody::-webkit-scrollbar{width:0}
+
+/* 底部 Tab Bar */
+.tabbar{flex:none;display:grid;grid-template-columns:repeat(5,1fr);
+  border-top:1px solid var(--line);background:var(--panel);padding-bottom:env(safe-area-inset-bottom)}
+.tabbar button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  min-height:58px;color:var(--text-3);font-size:10px;letter-spacing:var(--ls-tight);transition:var(--t-color)}
+.tabbar button .ic{width:23px;height:23px}
+.tabbar button[aria-current="page"]{color:var(--accent-ink);font-weight:600}
+.tabbar button[aria-current="page"] .ic{color:var(--accent-ink)}
+
+/* ---------- 通用小件（触控目标一律 ≥44） ---------- */
+.icon-btn{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;
+  border-radius:var(--radius-sm);color:var(--text-2);transition:var(--t-color)}
+.icon-btn .ic{width:20px;height:20px}
+.icon-btn:hover{background:var(--fill-2);color:var(--text-1)}
+.icon-btn.danger:hover{background:rgba(180,71,47,.12);color:var(--red-ink)}
+.icon-btn.gold{color:var(--accent-ink)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:44px;padding:0 16px;
+  border-radius:var(--radius-sm);font-size:var(--fs-lg);font-weight:500;transition:var(--t-color);border:1px solid transparent}
+.btn .ic{width:18px;height:18px}
+.btn-primary{background:var(--ink);color:var(--panel)}
+.btn-primary:hover{background:var(--accent);color:#2A1F0C}
+.dark .btn-primary{background:#2E2618;color:var(--ink)}
+.dark .btn-primary:hover{background:var(--accent);color:#22190A}
+.btn-ghost{border-color:var(--line-strong);color:var(--text-2)}
+.btn-ghost:hover{background:var(--fill-2);color:var(--text-1)}
+.btn-sm{min-height:36px;padding:0 12px;font-size:var(--fs-sm)}
+.btn-block{display:flex;width:100%}
+.tag{display:inline-flex;align-items:center;gap:5px;font-size:var(--fs-xs);padding:3px 8px;border-radius:999px;background:var(--fill-3);color:var(--text-2);white-space:nowrap}
+.tag.gold{background:var(--accent-soft);color:var(--accent-ink)}
+.tag.ok{background:rgba(30,122,70,.12);color:var(--success-ink)}
+.tag.warn{background:rgba(138,90,10,.13);color:var(--warning-ink)}
+.tag.bad{background:rgba(180,71,47,.12);color:var(--red-ink)}
+.tag.info{background:rgba(42,90,138,.12);color:var(--info-ink)}
+.meta{font-size:var(--fs-xs);color:var(--text-3)}
+.hint{font-size:var(--fs-xs);color:var(--text-3);margin:10px 0 0}
+.sec-label{font-size:var(--fs-xs);letter-spacing:var(--ls-wide);color:var(--accent-ink);font-weight:600;margin:20px 0 9px}
+.sec-label:first-child{margin-top:2px}
+.divide{height:1px;background:var(--line);margin:14px 0}
+.card{background:var(--card-bg);border:1px solid var(--line);border-radius:var(--radius-md);box-shadow:var(--shadow-1);padding:14px 15px}
+.card + .card{margin-top:10px}
+.card-title{font-size:var(--fs-lg);font-weight:600}
+.rowline{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.grow{flex:1}
+.skel{background:var(--fill-3);border-radius:var(--radius-sm);height:12px}
+/* 开关：元素本身就是 44×44 的热区，轨道用伪元素画成 44×26 —— 视觉不变、可点区达标 */
+.switch{position:relative;display:inline-block;width:44px;height:44px;flex:none;align-self:center}
+.switch::before{content:"";position:absolute;left:0;top:9px;width:44px;height:26px;border-radius:999px;
+  background:var(--fill-1);border:1px solid var(--line);transition:var(--t-color)}
+.switch::after{content:"";position:absolute;left:2px;top:11px;width:20px;height:20px;border-radius:50%;
+  background:var(--paper);box-shadow:var(--shadow-1);transition:transform .18s ease}
+.switch[aria-checked="true"]::before{background:var(--accent);border-color:transparent}
+.switch[aria-checked="true"]::after{transform:translateX(18px)}
+.seg{display:flex;border:1px solid var(--line-strong);border-radius:var(--radius-sm);overflow:hidden;width:100%}
+.seg button{flex:1;min-height:40px;display:flex;align-items:center;justify-content:center;padding:0 10px;
+  white-space:nowrap;font-size:var(--fs-sm);color:var(--text-2);transition:var(--t-color)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--panel)}
+.dark .seg button[aria-pressed="true"]{background:#2E2618;color:var(--ink)}
+.input{width:100%;min-height:44px;padding:9px 12px;border-radius:var(--radius-sm);border:1px solid var(--input-border);
+  background:var(--step-2);color:var(--text-1);font:inherit;font-size:var(--fs-md);transition:var(--t-color)}
+.dark .input{background:var(--step-1)}
+textarea.input{min-height:96px;resize:none;line-height:var(--lh-body)}
+label.f{display:block;font-size:var(--fs-sm);color:var(--text-2);margin:0 0 6px;font-weight:500}
+.field + .field{margin-top:14px}
+
+/* ---------- P4 委托：移动端卡片 ---------- */
+.mcard{background:var(--card-bg);border:1px solid var(--line);border-radius:var(--radius-md);box-shadow:var(--shadow-1)}
+.mcard + .mcard{margin-top:10px}
+.mcard.off{opacity:.62}
+.mcard-b{padding:14px 15px 12px}
+.mcard-name{font-size:var(--fs-xl);font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap;line-height:1.35}
+.mline{display:flex;align-items:center;gap:7px;font-size:var(--fs-md);color:var(--text-2);margin-top:7px}
+.mline .ic{width:16px;height:16px;color:var(--accent-ink)}
+.mline b{color:var(--text-1);font-weight:600}
+.mline.next{color:var(--accent-ink);font-weight:600}
+/* 操作行：开关在左、操作在右，整行 ≥44px */
+.maction{display:flex;align-items:center;gap:4px;padding:5px 6px 5px 15px;border-top:1px dashed var(--line-strong);min-height:56px}
+.maction .btn-sm{min-height:40px}
+/* 执行历史 */
+.mrun{display:flex;gap:10px;align-items:flex-start;padding:11px 0;border-top:1px solid var(--line)}
+.mrun:first-child{border-top:none;padding-top:4px}
+.mrun .when{font-size:var(--fs-sm);color:var(--text-3);font-variant-numeric:tabular-nums;width:82px;flex:none;padding-top:1px}
+.mrun .what{flex:1;min-width:0;font-size:var(--fs-md)}
+.mrun .cost{font-size:var(--fs-xs);color:var(--text-3);font-variant-numeric:tabular-nums;text-align:right;flex:none}
+.stack{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+
+/* ---------- P5 总结 ---------- */
+.stat2{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.stat{background:var(--card-bg);border:1px solid var(--line);border-radius:var(--radius-md);padding:11px 13px}
+.stat .n{font-size:22px;font-weight:600;font-family:var(--serif);line-height:1.15}
+.stat .l{font-size:var(--fs-xs);color:var(--text-3);margin-top:2px}
+.hours{display:flex;align-items:flex-end;gap:3px;height:52px;margin-top:12px}
+.hours i{flex:1;background:var(--gold);border-radius:3px 3px 1px 1px;min-height:2px;opacity:.85}
+.hours i.zero{background:var(--fill-1);opacity:1}
+.hours-x{display:flex;gap:3px;margin-top:6px;font-size:9px;color:var(--text-3)}
+.hours-x span{flex:1;text-align:center}
+.concl{display:flex;gap:11px;align-items:flex-start;padding:13px 0;border-top:1px solid var(--line)}
+.concl:first-child{border-top:none;padding-top:2px}
+.concl .idx{width:22px;height:22px;flex:none;border-radius:50%;background:var(--accent-soft);color:var(--accent-ink);
+  font-size:var(--fs-xs);font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:1px}
+.concl p{margin:0;font-size:var(--fs-lg);line-height:1.75}
+/* 溯源角标：视觉 26px，热区 44px —— 用负 margin 撑开，不把 chip 做肥 */
+.refs{display:flex;flex-wrap:wrap;gap:2px;margin:6px 0 -8px -6px}
+.ref{display:inline-flex;align-items:center;gap:5px;min-height:44px;padding:0 7px;margin-right:2px;
+  font-size:var(--fs-xs);color:var(--accent-ink)}
+.ref>span.chipv{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;
+  border:1px solid rgba(200,137,42,.35);background:var(--accent-soft);transition:var(--t-color)}
+.ref:hover>span.chipv{background:rgba(200,137,42,.22)}
+.ref .ic{width:12px;height:12px}
+.callout{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:var(--radius-md);
+  background:var(--fill-3);font-size:var(--fs-sm);color:var(--text-2);border:1px solid var(--line)}
+.callout .ic{width:18px;height:18px;flex:none;color:var(--accent-ink);margin-top:2px}
+
+/* ---------- P6 打卡 ---------- */
+.share{background:var(--step-2);border:1px solid var(--line);border-radius:var(--radius-lg);padding:20px;box-shadow:var(--shadow-2)}
+.share-top{display:flex;align-items:center;gap:10px;padding-bottom:13px;border-bottom:1px dashed var(--line-strong)}
+.share-top .logo{width:30px;height:30px;color:var(--ink)}
+.share-top b{font-family:var(--serif);font-size:var(--fs-xl)}
+.share-top .meta{margin-left:auto;text-align:right;line-height:1.5}
+.tree{margin-top:15px;font-size:var(--fs-md)}
+.tree .root{font-weight:600;color:var(--accent-ink);margin-bottom:10px;display:flex;align-items:center;gap:7px}
+.tree .root .ic{width:17px;height:17px}
+.tree ul{margin-left:11px;border-left:1px solid var(--line-strong);padding-left:13px}
+.tree li{position:relative;padding:5px 0}
+.tree li::before{content:"";position:absolute;left:-13px;top:15px;width:9px;height:1px;background:var(--line-strong)}
+.tree li b{font-weight:600}
+.tree .tag{margin-left:6px}
+.share-foot{margin-top:15px;padding-top:12px;border-top:1px dashed var(--line-strong);display:flex;align-items:center;justify-content:space-between;font-size:var(--fs-xs);color:var(--text-3)}
+.streak{display:flex;align-items:baseline;gap:7px}
+.streak .n{font-family:var(--serif);font-size:34px;font-weight:600;color:var(--accent-ink)}
+.dots{display:flex;gap:5px;margin-top:11px;flex-wrap:wrap}
+.dots i{width:17px;height:17px;border-radius:5px;background:var(--fill-2);border:1px solid var(--line)}
+.dots i.on{background:var(--gold);border-color:transparent}
+.dots i.today{background:var(--accent);border-color:transparent;box-shadow:0 0 0 2px var(--accent-soft)}
+
+/* ---------- P7 设置：表格改成卡片 ---------- */
+.navrow{display:flex;align-items:center;gap:11px;min-height:52px;padding:4px 0;width:100%;transition:var(--t-color)}
+.navrow + .navrow{border-top:1px solid var(--line)}
+.navrow .ic{width:20px;height:20px;color:var(--text-3)}
+.navrow .t{flex:1;min-width:0;font-size:var(--fs-lg)}
+.navrow .v{font-size:var(--fs-sm);color:var(--text-3)}
+.navrow:hover .t{color:var(--accent-ink)}
+.toolbox{border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 12px;background:var(--fill-4)}
+.toolbox + .toolbox{margin-top:8px}
+.toolbox .tn{font-family:ui-monospace,Menlo,monospace;font-size:var(--fs-md);color:var(--text-1);font-weight:600}
+.toolbox .tf{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:6px;font-size:var(--fs-sm);color:var(--text-2)}
+.toolbox .tf em{font-style:normal;color:var(--text-3)}
+.bar{height:7px;border-radius:999px;background:var(--fill-2);overflow:hidden;margin-top:7px}
+.bar i{display:block;height:100%;background:var(--gold);border-radius:999px}
+.useblock + .useblock{margin-top:13px}
+/* 吸底提交条 */
+.stickyfoot{position:sticky;bottom:-20px;margin:16px -16px -20px;padding:12px 16px 16px;
+  background:linear-gradient(180deg,rgba(245,240,225,0) 0%,var(--bg) 34%);display:flex;gap:10px}
+.dark .stickyfoot{background:linear-gradient(180deg,rgba(26,22,16,0) 0%,var(--bg) 34%)}
+
+/* ---------- 说明 ---------- */
+.spec{margin-top:12px;background:var(--card-bg);border:1px solid var(--line);border-radius:var(--radius-md);
+  padding:14px 16px;box-shadow:var(--shadow-1)}
+.spec h3{font-size:var(--fs-md);letter-spacing:var(--ls-mid);color:var(--accent-ink);font-weight:600;margin-bottom:9px}
+.spec table{font-size:var(--fs-sm);border-collapse:collapse;width:100%}
+.spec td{padding:6px 10px 6px 0;vertical-align:top;border-top:1px solid var(--line)}
+.spec tr:first-child td{border-top:none}
+.spec td:first-child{width:104px;color:var(--text-3);white-space:nowrap}
+</style>
+</head>
+<body>
+
+<header class="board">
+  <div>
+    <p class="eyebrow">知穗 · 移动端设计稿 v0.1 · 2026-10-13</p>
+    <h1>新四屏 · 移动端</h1>
+    <p class="board-sub">
+      桌面稿（<code>知穗_新页面设计稿.html</code>）是 <b>max-width:1220px</b> 的双栏布局，390px 下只有一条粗暴的降级规则。
+      这一版把四屏重新排成手机形态：<b>底部 Tab 取代侧栏</b>、<b>表格卡片化</b>、<b>触控目标 ≥44px</b>、<b>视觉尺寸与热区分开处理</b>。
+      字段、接口、文案与桌面稿完全一致，只改<b>排布与触达</b>；令牌照抄 <code>tokens.css</code>，图标仍是 CornIcon 手绘语言，<b>不用 emoji</b>。
+    </p>
+    <div class="chips">
+      <span class="chip gold">底部 Tab 五个</span>
+      <span class="chip">触控目标 ≥44×44</span>
+      <span class="chip">表格一律卡片化</span>
+      <span class="chip">安全区 + 键盘避让</span>
+      <span class="chip">一屏一件事</span>
+    </div>
+  </div>
+  <button class="icon-btn" id="themeBtn" title="切换明暗（验证 .dark 链路）" aria-label="切换明暗主题">
+    <span class="ic" data-i="settings"></span>
+  </button>
+</header>
+
+<section class="rules">
+  <h2 class="rules-h">移动端六条硬约定</h2>
+  <div class="rules-grid">
+    <div class="rule"><span class="rule-n">01</span><b>底部 Tab，不是汉堡抽屉</b>
+      <p>对话 · 委托 · 总结 · 打卡 · 我的。抽屉要两次点击才到目标页，Tab 一次到位——而「每日委托」这类页面需要用户天天看见，藏进抽屉里等于不存在。</p></div>
+    <div class="rule"><span class="rule-n">02</span><b>触控目标 ≥44×44</b>
+      <p>取 iOS HIG 的 44，比规范里写的 40 更宽。图标按钮视觉上仍可只有 20px，但热区用 <code>padding</code> 撑到 44；相邻目标间距 ≥8px。手机上没有"悬停"可以补救，点不中就是点不中。</p></div>
+    <div class="rule"><span class="rule-n">03</span><b>表格一律卡片化</b>
+      <p>设置页的工具表是 5 列，390px 下无法阅读。横向滚动是最糟的解法——用户看不到右边，就不知道右边还有内容。每行改成一张小卡，字段纵排。</p></div>
+    <div class="rule"><span class="rule-n">04</span><b>视觉尺寸 ≠ 热区</b>
+      <p>溯源角标视觉上仍是 26px 的小 chip（保持结论的阅读节奏），但可点区域撑到 44px。密度与可点性分开处理，不为好点把 UI 做肥。</p></div>
+    <div class="rule"><span class="rule-n">05</span><b>安全区与键盘避让</b>
+      <p>Tab Bar 底部留 <code>env(safe-area-inset-bottom)</code>，否则 iPhone 上会被手势条压住。输入框聚焦时 Tab Bar 收起——键盘弹起后还留着 Tab，提交按钮就被顶出屏幕了。</p></div>
+    <div class="rule"><span class="rule-n">06</span><b>一屏一件事</b>
+      <p>桌面的「左列表 + 右表单」在手机上拆成两个页面推入，表单页的提交按钮吸底常驻。对比桌面稿里"表单常驻不弹窗、不遮挡列表"的取舍——那条在移动端不成立，因为根本没有第二列。</p></div>
+  </div>
+</section>
+
+<main class="phones">
+
+<!-- ==================== P4 每日委托（移动端） ==================== -->
+<figure class="phone-wrap" style="margin:0">
+  <div class="phone">
+    <div class="sbar"><span>9:41</span><span class="sig"><i></i><i></i><i></i><i></i><span class="batt"></span></span></div>
+    <div class="abar">
+      <h2>每日委托</h2>
+      <button class="icon-btn gold" aria-label="新建委托" title="新建委托"><span class="ic" data-i="plus"></span></button>
+    </div>
+    <div class="abody">
+      <div class="rowline" style="margin-bottom:10px">
+        <span class="tag gold">启用中 <b style="font-weight:700">3</b> / 5</span>
+        <span class="meta">满 5 条后需先停一条</span>
+      </div>
+
+      <div class="mcard">
+        <div class="mcard-b">
+          <div class="mcard-name">每日学习复盘 <span class="tag gold">复盘</span></div>
+          <div class="mline"><span class="ic" data-i="clock"></span>每天 21:00</div>
+          <div class="mline">投递到 <b>数据结构期末复习</b></div>
+          <div class="mline next">下次 今天 21:00 · 还有 2 小时 14 分</div>
+        </div>
+        <div class="maction">
+          <span class="switch" role="switch" aria-checked="true" aria-label="启用每日学习复盘"></span>
+          <span class="grow"></span>
+          <button class="btn btn-ghost btn-sm">预览</button>
+          <button class="icon-btn" aria-label="更多操作" title="更多操作"><span class="ic" data-i="more"></span></button>
+        </div>
+      </div>
+
+      <div class="mcard">
+        <div class="mcard-b">
+          <div class="mcard-name">早八前打个气 <span class="tag">鼓励</span></div>
+          <div class="mline"><span class="ic" data-i="clock"></span>工作日 07:30</div>
+          <div class="mline">投递到 <b>默认会话</b></div>
+          <div class="mline next">下次 明天 07:30</div>
+        </div>
+        <div class="maction">
+          <span class="switch" role="switch" aria-checked="true" aria-label="启用早八前打个气"></span>
+          <span class="grow"></span>
+          <button class="btn btn-ghost btn-sm">预览</button>
+          <button class="icon-btn" aria-label="更多操作"><span class="ic" data-i="more"></span></button>
+        </div>
+      </div>
+
+      <div class="mcard off">
+        <div class="mcard-b">
+          <div class="mcard-name">每周错题回炉 <span class="tag">学习计划</span></div>
+          <div class="mline"><span class="ic" data-i="calendar"></span>每周日 20:00</div>
+          <div class="mline">知识库 <b>错题本</b></div>
+          <div class="mline" style="color:var(--text-3)">已暂停 · next_run_at = null</div>
+        </div>
+        <div class="maction">
+          <span class="switch" role="switch" aria-checked="false" aria-label="启用每周错题回炉"></span>
+          <span class="grow"></span>
+          <button class="btn btn-ghost btn-sm">预览</button>
+          <button class="icon-btn" aria-label="更多操作"><span class="ic" data-i="more"></span></button>
+        </div>
+      </div>
+
+      <div class="callout" style="margin-top:12px">
+        <span class="ic" data-i="info"></span>
+        <div><b>「预览」不投递。</b>只生成给你看一眼，<code>dry_run=true</code>；真的投递要进「更多」里点。</div>
+      </div>
+
+      <p class="sec-label">执行历史</p>
+      <div class="card">
+        <div class="mrun">
+          <span class="when">今天 21:00</span>
+          <div class="what">
+            <div class="stack"><span class="tag ok">成功</span></div>
+            <div class="meta" style="margin-top:3px">定时触发 · 672 ms · 已投递</div>
+          </div>
+          <span class="cost">1,204 tok</span>
+        </div>
+        <div class="mrun">
+          <span class="when">昨天 21:00</span>
+          <div class="what">
+            <div class="stack"><span class="tag ok">成功</span></div>
+            <div class="meta" style="margin-top:3px">定时触发 · 588 ms · 已投递</div>
+          </div>
+          <span class="cost">1,057 tok</span>
+        </div>
+        <div class="mrun">
+          <span class="when">10-11 21:00</span>
+          <div class="what">
+            <div class="stack"><span class="tag bad">失败</span></div>
+            <div class="meta" style="margin-top:3px">定时触发 · 第 2 次重试 · 上游超时</div>
+          </div>
+          <span class="cost">0 tok</span>
+        </div>
+        <div class="mrun">
+          <span class="when">10-10 21:00</span>
+          <div class="what">
+            <div class="stack"><span class="tag info">手动</span></div>
+            <div class="meta" style="margin-top:3px">你点了「立即执行」 · 已投递</div>
+          </div>
+          <span class="cost">998 tok</span>
+        </div>
+      </div>
+    </div>
+    <nav class="tabbar">
+      <button><span class="ic" data-i="notes"></span>对话</button>
+      <button aria-current="page"><span class="ic" data-i="clock"></span>委托</button>
+      <button><span class="ic" data-i="calendar"></span>总结</button>
+      <button><span class="ic" data-i="star"></span>打卡</button>
+      <button><span class="ic" data-i="user"></span>我的</button>
+    </nav>
+  </div>
+  <figcaption class="cap"><b>P4 每日委托</b><span class="meta">列表页</span></figcaption>
+  <div class="spec">
+    <h3>移动端改了什么</h3>
+    <table>
+      <tr><td>新建入口</td><td>桌面「新建委托」文字按钮，改成顶栏一个 <b>+</b>。文案省下的宽度留给标题；按钮热区 44×44</td></tr>
+      <tr><td>表单位置</td><td>桌面右侧常驻列，改成<b>推入的全屏页</b>（见第 5 张）。390px 放不下"列表 + 表单"两列，硬塞就是两边都残</td></tr>
+      <tr><td>卡片操作</td><td>桌面是开关竖排右上 + 按钮组，改成<b>底部一条操作行</b>：开关在左、预览与「更多」在右，行高 56px。<b>原因</b>：右上角是拇指最远端，而删除这类危险操作不该在右上角随手可及</td></tr>
+      <tr><td>删除</td><td>桌面常驻垃圾桶，改成收进「更多」底部弹层，二次确认。<b>原因</b>：手机误触率高，且弹层里能写清"删掉的委托无法恢复"</td></tr>
+      <tr><td>执行历史</td><td>桌面 3 列 grid（时刻｜状态+说明｜token），改成两行堆叠，token 右对齐。<b>原因</b>：三列在 390px 下会把"定时触发 · 672 ms · 已投递"压成竖排</td></tr>
+      <tr><td>未变</td><td>字段、接口、颜色语义、开关的启用/暂停表达全部沿用桌面稿</td></tr>
+    </table>
+  </div>
+</figure>
+
+<!-- ==================== P4b 新建委托（移动端 · 全屏表单） ==================== -->
+<figure class="phone-wrap" style="margin:0">
+  <div class="phone">
+    <div class="sbar"><span>9:41</span><span class="sig"><i></i><i></i><i></i><i></i><span class="batt"></span></span></div>
+    <div class="abar">
+      <button class="icon-btn" aria-label="返回" title="返回"><span class="ic" data-i="back"></span></button>
+      <h2 style="font-size:17px">新建委托</h2>
+      <button class="btn btn-sm btn-ghost" style="min-height:38px">取消</button>
+    </div>
+    <div class="abody">
+      <p class="hint" style="margin:0 0 14px">桌面上这是右侧的常驻表单。手机上它独立成一页——<b>提交按钮吸在底部</b>，滚到哪儿都看得见。</p>
+
+      <div class="field">
+        <label class="f" for="d-name">名称（3–32 字，建后不可改）</label>
+        <input class="input" id="d-name" value="每日学习复盘">
+      </div>
+
+      <div class="field">
+        <label class="f">类型</label>
+        <div class="seg">
+          <button aria-pressed="false">学习</button>
+          <button aria-pressed="true">复盘</button>
+          <button aria-pressed="false">鼓励</button>
+          <button aria-pressed="false">自定义</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="f">频率</label>
+        <div class="seg">
+          <button aria-pressed="true">每天</button>
+          <button aria-pressed="false">工作日</button>
+          <button aria-pressed="false">每周</button>
+          <button aria-pressed="false">间隔</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="f">触发时间（时区固定 Asia/Shanghai）</label>
+        <input class="input" value="21:00">
+      </div>
+
+      <div class="field">
+        <label class="f">投递到会话</label>
+        <select class="input"><option>数据结构期末复习</option><option>论文提纲讨论</option></select>
+      </div>
+
+      <div class="field">
+        <label class="f">绑定资料库（可选）</label>
+        <select class="input"><option>数据结构讲义</option><option>不绑定</option></select>
+      </div>
+
+      <div class="field">
+        <label class="f">生成指令</label>
+        <textarea class="input">根据我今天的学习产出给一段复盘：先说清我今天掌握了什么，再指出一个最该补的漏洞，最后给明天一条具体到动作的建议。</textarea>
+      </div>
+
+      <div class="field">
+        <label class="f">长度上限</label>
+        <div class="seg">
+          <button aria-pressed="false">简短</button>
+          <button aria-pressed="true">600 字</button>
+          <button aria-pressed="false">不限</button>
+        </div>
+      </div>
+
+      <div class="rowline" style="margin-top:16px">
+        <span style="font-size:var(--fs-md)">创建后立即启用</span>
+        <span class="switch" role="switch" aria-checked="true" aria-label="创建后立即启用"></span>
+      </div>
+
+      <p class="hint">启用中的委托上限 5 条；同名会返回 409「同名委托已存在」。</p>
+
+      <div class="stickyfoot">
+        <button class="btn btn-primary" style="flex:1"><span class="ic" data-i="check"></span>创建委托</button>
+      </div>
+    </div>
+    <nav class="tabbar">
+      <button><span class="ic" data-i="notes"></span>对话</button>
+      <button aria-current="page"><span class="ic" data-i="clock"></span>委托</button>
+      <button><span class="ic" data-i="calendar"></span>总结</button>
+      <button><span class="ic" data-i="star"></span>打卡</button>
+      <button><span class="ic" data-i="user"></span>我的</button>
+    </nav>
+  </div>
+  <figcaption class="cap"><b>P4b 新建委托</b><span class="meta">表单页（推入）</span></figcaption>
+  <div class="spec">
+    <h3>移动端改了什么</h3>
+    <table>
+      <tr><td>为什么全屏</td><td>桌面稿的设计取舍是「表单常驻不弹窗、不遮挡列表」。那条在手机上有前提不成立——<b>没有第二列可遮挡</b>，而 10 个字段塞进底部弹层会只剩 40% 可见高度，边填边滚看不到自己填了什么</td></tr>
+      <tr><td>提交位置</td><td>吸底常驻（<code>position:sticky</code> + 渐变遮罩）。长表单滚到底部才能提交，是移动端最常见的弃单点</td></tr>
+      <tr><td>时区</td><td>从"输入框 + 禁用态"改成 <b>写进标签的括号里</b>。手机上不值得为一个不可改的字段占一整行</td></tr>
+      <tr><td>语气 / 长度</td><td>桌面是「语气 neutral + 长度 600 字」两个输入框，合并成一个段控件。手机用户不会去手输 <code>neutral</code></td></tr>
+      <tr><td>触控</td><td>段控件每格 min-height 40，输入框 44，开关热区 44×26</td></tr>
+    </table>
+  </div>
+</figure>
+
+<!-- ==================== P5 每日总结（移动端） ==================== -->
+<figure class="phone-wrap" style="margin:0">
+  <div class="phone">
+    <div class="sbar"><span>9:41</span><span class="sig"><i></i><i></i><i></i><i></i><span class="batt"></span></span></div>
+    <div class="abar">
+      <h2>每日总结</h2>
+      <button class="who" aria-label="切换日期" title="切换日期">2026-10-13<span class="ic" data-i="calendar" style="width:20px;height:20px"></span></button>
+    </div>
+    <div class="abody">
+      <button class="btn btn-primary btn-block"><span class="ic" data-i="refresh"></span>生成今天的总结</button>
+
+      <p class="sec-label">今天的结论 <span class="tag" style="margin-left:6px">3 条 · 已全部可溯源</span></p>
+      <div class="card">
+        <div class="concl">
+          <span class="idx">1</span>
+          <div>
+            <p>今天真正被消化的是<b>二叉树三种遍历</b>：能自己写出前/中/后序的递归实现，也说清了「中序 = 左根右」为什么能拿到有序序列。</p>
+            <div class="refs">
+              <button class="ref"><span class="chipv"><span class="ic" data-i="link"></span>数据结构期末复习 · 第 231 句</span></button>
+              <button class="ref"><span class="chipv"><span class="ic" data-i="link"></span>第 244 句</span></button>
+            </div>
+          </div>
+        </div>
+        <div class="concl">
+          <span class="idx">2</span>
+          <div>
+            <p><b>线索二叉树</b>的动机还没落地——你知道它「省了栈」，但说不出它到底在哪种场景下比递归更划算。</p>
+            <div class="refs">
+              <button class="ref"><span class="chipv"><span class="ic" data-i="link"></span>第 258 句</span></button>
+            </div>
+          </div>
+        </div>
+        <div class="concl">
+          <span class="idx">3</span>
+          <div>
+            <p>今天有 <b>2 次联网搜索</b>，都用在核对「平衡因子取值范围」，没有把外部资料直接当成结论。</p>
+            <div class="refs">
+              <button class="ref"><span class="chipv"><span class="ic" data-i="link"></span>第 302 句</span></button>
+              <button class="ref"><span class="chipv"><span class="ic" data-i="link"></span>第 310 句</span></button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="sec-label">今天的数据</p>
+      <div class="stat2">
+        <div class="stat"><div class="n">4</div><div class="l">对话</div></div>
+        <div class="stat"><div class="n">37</div><div class="l">消息</div></div>
+        <div class="stat"><div class="n">18 / 19</div><div class="l">提问 / 回答</div></div>
+        <div class="stat"><div class="n">19</div><div class="l">工具调用</div></div>
+      </div>
+
+      <p class="sec-label">活跃时段</p>
+      <div class="card">
+        <div class="rowline"><span class="card-title">集中在 14:00 与 21:00</span></div>
+        <div class="hours">
+          <i style="height:12%"></i><i class="zero" style="height:4%"></i><i class="zero" style="height:4%"></i>
+          <i style="height:46%"></i><i style="height:30%"></i><i style="height:8%"></i>
+          <i style="height:20%"></i><i style="height:14%"></i><i style="height:62%"></i>
+          <i style="height:88%"></i><i style="height:34%"></i><i style="height:10%"></i>
+        </div>
+        <div class="hours-x"><span>10</span><span>11</span><span>12</span><span>13</span><span>14</span><span>15</span><span>16</span><span>17</span><span>18</span><span>19</span><span>20</span><span>21</span></div>
+      </div>
+
+      <p class="sec-label">其他日期</p>
+      <div class="card">
+        <div class="mrun">
+          <span class="when">10-13</span>
+          <div class="what"><span class="tag gold">今天</span> <span class="meta">3 条结论</span></div>
+          <span class="cost">已读</span>
+        </div>
+        <div class="mrun">
+          <span class="when">10-12</span>
+          <div class="what"><span class="tag">2 条结论</span></div>
+          <span class="cost">已读</span>
+        </div>
+        <div class="mrun">
+          <span class="when">10-11</span>
+          <div class="what"><span class="tag">5 条结论</span></div>
+          <span class="cost">已读</span>
+        </div>
+        <div class="mrun">
+          <span class="when">10-10</span>
+          <div class="what"><span class="tag warn">当天没有对话</span></div>
+          <span class="cost">empty</span>
+        </div>
+      </div>
+
+      <div class="callout" style="margin-top:12px">
+        <span class="ic" data-i="info"></span>
+        <div><b>为什么有的结论不见了？</b>指不到真实消息的结论会被后端直接丢掉——宁可少说，不许瞎说。</div>
+      </div>
+    </div>
+    <nav class="tabbar">
+      <button><span class="ic" data-i="notes"></span>对话</button>
+      <button><span class="ic" data-i="clock"></span>委托</button>
+      <button aria-current="page"><span class="ic" data-i="calendar"></span>总结</button>
+      <button><span class="ic" data-i="star"></span>打卡</button>
+      <button><span class="ic" data-i="user"></span>我的</button>
+    </nav>
+  </div>
+  <figcaption class="cap"><b>P5 每日总结</b><span class="meta">移动端第一屏就是结论</span></figcaption>
+  <div class="spec">
+    <h3>移动端改了什么</h3>
+    <table>
+      <tr><td>内容顺序</td><td>桌面是「先统计、再活跃时段、最后结论」，手机上改成「<b>先结论、再统计、最后活跃时段</b>」。桌面有一屏高度可以先铺垫数据，手机只有 ~600px 可用高度，第一屏必须是最有价值的内容——<b>结论才是这个页面存在的理由</b>，统计只是佐证</td></tr>
+      <tr><td>统计卡</td><td>4 列改成<b>2×2</b>。4 列在 390px 下每格仅约 85px，「18 / 19」会被折行或截断</td></tr>
+      <tr><td>溯源角标</td><td><b>本稿最要紧的一处</b>：chip 视觉仍是 26px 的小圆角（保持结论的阅读节奏），但外层按钮 <code>min-height:44px</code> 把热区撑开——视觉密度和可点性分开处理。桌面稿里它只是个 22px 的 chip，直接搬到手机上会点不中</td></tr>
+      <tr><td>其他日期</td><td>桌面右栏常驻，改成顶栏日期按钮唤起。<b>理由</b>：手机没有右栏，而"看历史"是低频动作，不值得占据首屏</td></tr>
+      <tr><td>生成中</td><td>桌面放在右栏的骨架卡，改成覆盖式骨架（本稿未画，落地时点「生成」后整块替换为骨架 + 「正在生成（约 30 秒）…」）</td></tr>
+      <tr><td>未变</td><td>结论文案、日期语义（<code>empty</code> 也要留一条）、接口三支全部沿用</td></tr>
+    </table>
+  </div>
+</figure>
+
+<!-- ==================== P6 打卡（移动端） ==================== -->
+<figure class="phone-wrap" style="margin:0">
+  <div class="phone">
+    <div class="sbar"><span>9:41</span><span class="sig"><i></i><i></i><i></i><i></i><span class="batt"></span></span></div>
+    <div class="abar">
+      <h2>打卡</h2>
+      <button class="icon-btn gold" aria-label="保存或分享" title="保存或分享"><span class="ic" data-i="download"></span></button>
+    </div>
+    <div class="abody">
+      <p class="hint" style="margin:0 0 12px">这一屏在桌面上是「左卡 + 右数据」，手机上<b>分享卡本身就只有 390px 宽</b>——桌面稿给它设的 <code>max-width:420px</code> 说明它天生就是移动尺寸。</p>
+
+      <div class="share">
+        <div class="share-top">
+          <span class="logo ic" data-i="corn"></span>
+          <b>今日所学</b>
+          <span class="meta">2026-10-13<br>知穗 · 知穗Agent</span>
+        </div>
+        <div class="tree">
+          <div class="root"><span class="ic" data-i="book"></span>数据结构 · 树与二叉树</div>
+          <ul>
+            <li><b>遍历</b><span class="tag ok">已掌握</span>
+              <ul>
+                <li>前序 / 中序 / 后序的递归实现</li>
+                <li>中序为什么能得到有序序列</li>
+              </ul>
+            </li>
+            <li><b>平衡</b><span class="tag ok">已掌握</span>
+              <ul><li>平衡因子的取值范围</li></ul>
+            </li>
+            <li><b>线索化</b><span class="tag warn">待加强</span>
+              <ul><li>应用场景还不清楚</li></ul>
+            </li>
+          </ul>
+        </div>
+        <div class="share-foot">
+          <span>共 6 个知识点 · 2 个待加强</span>
+          <span>知穗 · 每天进步一点点</span>
+        </div>
+      </div>
+
+      <button class="btn btn-primary btn-block" style="margin-top:12px"><span class="ic" data-i="download"></span>保存 / 分享这张图</button>
+      <p class="hint" style="margin-top:8px">公网 http 下剪贴板不可用，统一走项目里的 <code>copyText()</code>；再失败给「长按图片保存」。</p>
+
+      <p class="sec-label">连续打卡</p>
+      <div class="card">
+        <div class="streak"><span class="n">5</span><span class="meta">天连续 · 最长 12 天</span></div>
+        <div class="dots">
+          <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on today"></i>
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+        <p class="hint">近 12 天。金色 = 已打卡，深金+描边 = 今天。</p>
+      </div>
+
+      <p class="sec-label">历史</p>
+      <div class="card">
+        <div class="mrun">
+          <span class="when">10-13</span>
+          <div class="what"><span class="tag gold">今天</span> <span class="meta">6 个知识点</span></div>
+          <span class="cost">未分享</span>
+        </div>
+        <div class="mrun">
+          <span class="when">10-12</span>
+          <div class="what"><span class="tag">4 个知识点</span></div>
+          <span class="cost">已分享</span>
+        </div>
+        <div class="mrun">
+          <span class="when">10-11</span>
+          <div class="what"><span class="tag">7 个知识点</span></div>
+          <span class="cost">已分享</span>
+        </div>
+      </div>
+
+      <div class="callout" style="margin-top:12px">
+        <span class="ic" data-i="warn"></span>
+        <div><b>后端还没有打卡接口。</b>图可由 <code>/api/report/{date}</code> 的结论直接渲染；但 streak、历史、成品图导出三块没有对应端点。</div>
+      </div>
+    </div>
+    <nav class="tabbar">
+      <button><span class="ic" data-i="notes"></span>对话</button>
+      <button><span class="ic" data-i="clock"></span>委托</button>
+      <button><span class="ic" data-i="calendar"></span>总结</button>
+      <button aria-current="page"><span class="ic" data-i="star"></span>打卡</button>
+      <button><span class="ic" data-i="user"></span>我的</button>
+    </nav>
+  </div>
+  <figcaption class="cap"><b>P6 打卡</b><span class="meta">分享卡天生就是移动尺寸</span></figcaption>
+  <div class="spec">
+    <h3>移动端改了什么</h3>
+    <table>
+      <tr><td>结构</td><td>桌面「左：分享卡 / 右：连续打卡 + 历史」，改成单列纵向。<b>这屏改动最小</b>：分享卡 <code>max-width:420px</code> 本来就是为手机设的，桌面版反而是"多余的大"</td></tr>
+      <tr><td>分享入口</td><td>角落图标 + 卡下全宽按钮，<b>两处入口</b>。这屏的主操作是分享，不该只放在顶栏一个 20px 图标里</td></tr>
+      <tr><td>长按保存</td><td>分享卡在手机上要能被<b>长按保存为图片</b>（<code>-webkit-touch-callout</code> 不要禁用），这是移动端最自然的兜底，桌面没有等价物</td></tr>
+      <tr><td>未变</td><td>脱敏规则、不做排行榜的克制、streak 的视觉语言全部沿用</td></tr>
+    </table>
+  </div>
+</figure>
+
+<!-- ==================== P7 设置（移动端） ==================== -->
+<figure class="phone-wrap" style="margin:0">
+  <div class="phone">
+    <div class="sbar"><span>9:41</span><span class="sig"><i></i><i></i><i></i><i></i><span class="batt"></span></span></div>
+    <div class="abar">
+      <h2>我的</h2>
+      <button class="icon-btn" aria-label="设置" title="设置"><span class="ic" data-i="settings"></span></button>
+    </div>
+    <div class="abody">
+      <div class="card" style="display:flex;align-items:center;gap:12px">
+        <span class="ic" style="width:40px;height:40px;color:var(--ink)" data-i="user"></span>
+        <div style="flex:1;min-width:0">
+          <div class="card-title">冯靖豪</div>
+          <div class="meta">普通用户 · 非管理员</div>
+        </div>
+      </div>
+
+      <p class="sec-label">外观</p>
+      <div class="card">
+        <div class="rowline">
+          <span style="font-size:var(--fs-lg)">正文字号</span>
+          <div class="seg" style="width:auto;flex:none">
+            <button aria-pressed="false">小</button>
+            <button aria-pressed="true">标准</button>
+            <button aria-pressed="false">大</button>
+          </div>
+        </div>
+        <div class="rowline" style="margin-top:14px">
+          <span style="font-size:var(--fs-lg)">深色纸面</span>
+          <span class="switch" role="switch" aria-checked="false" aria-label="深色主题"></span>
+        </div>
+      </div>
+
+      <p class="sec-label">检索与索引</p>
+      <div class="card">
+        <label class="f">处理方式（每个资料库各自记）</label>
+        <div class="seg">
+          <button aria-pressed="false">精细</button>
+          <button aria-pressed="true">均衡</button>
+          <button aria-pressed="false">完整</button>
+        </div>
+        <p class="hint">多数资料选「均衡」就行——切得细答得更准，切得整上下文更连贯。具体字数在「高级」里。</p>
+
+        <div class="divide"></div>
+
+        <div class="rowline"><span style="font-size:var(--fs-lg)">选择性索引</span></div>
+        <p class="hint" style="margin-top:4px">只有打开的才进索引。关掉的资料不参与检索。</p>
+        <div style="margin-top:6px">
+          <label class="rowline" style="min-height:48px">
+            <span style="font-size:var(--fs-md)">数据结构讲义 <span class="meta">128 片段</span></span>
+            <span class="switch" role="switch" aria-checked="true" aria-label="索引数据结构讲义"></span>
+          </label>
+          <label class="rowline" style="min-height:48px;border-top:1px solid var(--line)">
+            <span style="font-size:var(--fs-md)">错题本 <span class="meta">42 片段</span></span>
+            <span class="switch" role="switch" aria-checked="true" aria-label="索引错题本"></span>
+          </label>
+          <label class="rowline" style="min-height:48px;border-top:1px solid var(--line)">
+            <span style="font-size:var(--fs-md)">个人简历 <span class="meta">36 片段</span></span>
+            <span class="switch" role="switch" aria-checked="false" aria-label="索引个人简历"></span>
+          </label>
+        </div>
+      </div>
+
+      <p class="sec-label">用量与反馈</p>
+      <div class="card">
+        <div class="useblock">
+          <div class="rowline"><span style="font-size:var(--fs-md)">问答</span><span class="meta">12 / 60</span></div>
+          <div class="bar"><i style="width:20%"></i></div>
+        </div>
+        <div class="useblock">
+          <div class="rowline"><span style="font-size:var(--fs-md)">向量化</span><span class="meta">3 / 20</span></div>
+          <div class="bar"><i style="width:15%"></i></div>
+        </div>
+        <div class="useblock">
+          <div class="rowline"><span style="font-size:var(--fs-md)">自动（定时）</span><span class="meta">2 / 120</span></div>
+          <div class="bar"><i style="width:2%"></i></div>
+        </div>
+        <p class="hint">超限一律 429，前端解析 <code>retry_after</code> 说人话，不能只转圈。</p>
+      </div>
+
+      <p class="sec-label">知穗能调用哪些工具</p>
+      <div class="card">
+        <div class="toolbox">
+          <div class="rowline"><span class="tn">kb_search</span><span class="tag info">读</span></div>
+          <div class="tf"><span><em>可重试</em> 否</span><span><em>需确认</em> 否</span><span><em>上限</em> 4000</span></div>
+        </div>
+        <div class="toolbox">
+          <div class="rowline"><span class="tn">web_search</span><span class="tag info">读</span></div>
+          <div class="tf"><span><em>可重试</em> 是</span><span><em>需确认</em> 否</span><span><em>上限</em> 4000</span></div>
+        </div>
+        <div class="toolbox">
+          <div class="rowline"><span class="tn">calculator</span><span class="tag info">读</span></div>
+          <div class="tf"><span><em>可重试</em> 否</span><span><em>需确认</em> 否</span><span><em>上限</em> 1000</span></div>
+        </div>
+        <div class="toolbox">
+          <div class="rowline"><span class="tn">get_weather</span><span class="tag info">读</span></div>
+          <div class="tf"><span><em>可重试</em> 是</span><span><em>需确认</em> 否</span><span><em>上限</em> 1000</span></div>
+        </div>
+        <div class="toolbox">
+          <div class="rowline"><span class="tn">download_file</span><span class="tag warn">写</span></div>
+          <div class="tf"><span><em>可重试</em> 是</span><span><em>需确认</em> 是</span><span><em>上限</em> 2000</span></div>
+        </div>
+        <p class="hint">5 个工具都是「直接工具」，每轮全量下发。</p>
+      </div>
+
+      <p class="sec-label">调度进程 <span class="tag ok" style="margin-left:6px">运行中</span></p>
+      <div class="card">
+        <div class="rowline">
+          <div>
+            <div style="font-size:var(--fs-lg)">worker 心跳</div>
+            <div class="meta">最后心跳 12 秒前 · pid 28461</div>
+          </div>
+          <span class="tag ok">up</span>
+        </div>
+        <div class="divide"></div>
+        <div class="toolbox">
+          <div class="rowline"><span class="tn">delegate.dispatch</span><span class="meta">1 分钟前 · 成功</span></div>
+          <div class="tf"><span><em>周期</em> */5 * * * *</span><span><em>启用</em> 开</span></div>
+        </div>
+        <div class="toolbox">
+          <div class="rowline"><span class="tn">delegate.retry</span><span class="meta">7 分钟前 · 成功</span></div>
+          <div class="tf"><span><em>周期</em> 7,22,37,52 * * * *</span><span><em>启用</em> 开</span></div>
+        </div>
+        <div class="toolbox">
+          <div class="rowline"><span class="tn">report.daily</span><span class="meta">昨天 21:00 · 成功</span></div>
+          <div class="tf"><span><em>周期</em> 0 21 * * *</span><span><em>启用</em> 开</span></div>
+        </div>
+        <p class="hint">心跳超 300 秒 <code>stalled</code>、600 秒 <code>down</code>——进程卡死也能抓到。</p>
+      </div>
+
+      <p class="sec-label">账号</p>
+      <div class="card" style="padding:0 15px">
+        <button class="navrow"><span class="ic" data-i="user"></span><span class="t">修改密码</span><span class="v">待后端补端点</span><span class="ic" data-i="arrow"></span></button>
+        <button class="navrow"><span class="ic" data-i="trash"></span><span class="t" style="color:var(--red-ink)">清空我的数据</span><span class="ic" data-i="arrow"></span></button>
+      </div>
+
+      <button class="btn btn-ghost btn-block" style="margin-top:12px;border-color:rgba(180,71,47,.35);color:var(--red-ink)">退出登录</button>
+    </div>
+    <nav class="tabbar">
+      <button><span class="ic" data-i="notes"></span>对话</button>
+      <button><span class="ic" data-i="clock"></span>委托</button>
+      <button><span class="ic" data-i="calendar"></span>总结</button>
+      <button><span class="ic" data-i="star"></span>打卡</button>
+      <button aria-current="page"><span class="ic" data-i="user"></span>我的</button>
+    </nav>
+  </div>
+  <figcaption class="cap"><b>P7 设置（我的）</b><span class="meta">表格卡片化</span></figcaption>
+  <div class="spec">
+    <h3>移动端改了什么</h3>
+    <table>
+      <tr><td>工具表</td><td><b>本稿第二大改动</b>。桌面是 5 列 grid（工具｜类别｜可重试｜需确认｜上限），390px 下每列仅约 70px。改成<b>每行一张小卡</b>：工具名 + 类别 tag 一行，三个属性用「标签 + 值」纵排在第二行。横向滚动被明确否决——看不到右边就不知道右边有内容</td></tr>
+      <tr><td>调度表</td><td>同上：<code>*/5 * * * *</code> 这种 cron 表达式在窄屏必须独占一行，和任务名挤压会双双不可读</td></tr>
+      <tr><td>检索参数</td><td>桌面稿此块仍是 <b>三个裸数字框</b>（top_k / 切片长度 / 切片重叠），本稿改为<b>白话档位（精细 / 均衡 / 完整）</b>。这与 2026-10-13 前端已落地的改动一致（<code>lib/chunkProfiles.ts</code>），<b>桌面稿这一处需要同步修订</b>——工程参数不该以原始数字面向用户，这条已写进 <code>知穗_UI设计规范_v0.1.md</code> §5.4</td></tr>
+      <tr><td>分组</td><td>桌面「左列可编辑 / 右列只读」两栏，改成单列纵向分组，用 <code>sec-label</code> 分段。移动端没有左右栏，用"可编辑 vs 只读"分区的前提消失，改用<b>分组标题</b>表达</td></tr>
+      <tr><td>危险操作</td><td>清空数据与退出登录都放在最后，红色描边，且需要二次确认。<b>理由</b>：手机上滚动到底部才看到，本身就是一道防误触</td></tr>
+      <tr><td>未变</td><td>所有接口、状态语义、用量无 0 不画空进度条等规则沿用</td></tr>
+    </table>
+  </div>
+</figure>
+
+</main>
+
+<script>
+/* 图标：路径与 frontend/src/components/CornIcon.tsx 逐字一致，保证同一套手绘语言 */
+const ICON = {
+  corn:'<path d="M21 10.5 C21 7.5 22.3 5.5 24 4.5 M24.5 10.5 C24.7 8 25.8 6.3 27.5 5.5" fill="none" stroke-width="2.2"/><path d="M18.5 27 C13 28.5 9.5 33 8.5 38.5 C14 37.5 17.8 34 19 29.5 Z" fill="#7C9A54" stroke-width="2.4"/><path d="M29.5 27 C35 28.5 38.5 33 39.5 38.5 C34 37.5 30.2 34 29 29.5 Z" fill="#8FAF62" stroke-width="2.4"/><rect x="18" y="11" width="12" height="21" rx="6" fill="#F5B840" stroke-width="2.8"/><g fill="none" stroke-width="1.8" opacity=".3"><path d="M21.8 13.5 C21 19 21 25 21.8 29.5"/><path d="M26.2 13.5 C27 19 27 25 26.2 29.5"/></g>',
+  notes:'<rect x="11" y="10" width="26" height="31" rx="4.5" fill="#FFFDF6" stroke-width="3"/><g stroke-width="2.4"><path d="M16.5 10 V5.5"/><path d="M24 10 V5.5"/><path d="M31.5 10 V5.5"/></g><path d="M16.5 21 H31.5" stroke="#F5B840" stroke-width="3"/><g stroke-width="2.2" opacity=".32"><path d="M16.5 27 H31.5"/><path d="M16.5 33 H26.5"/></g>',
+  book:'<path d="M24 13 C20 9.5 13.5 8.5 8 10.5 V35 C13.5 33 20 34 24 37.5 C28 34 34.5 33 40 35 V10.5 C34.5 8.5 28 9.5 24 13 Z" fill="#FFFDF6" stroke-width="3"/><path d="M24 13 V37.5" stroke-width="2.6"/><g stroke-width="2.2" opacity=".32"><path d="M12 18 C15 17 18 17.5 20.5 19" fill="none"/><path d="M27.5 19 C30 17.5 33 17 36 18" fill="none"/><path d="M12 24 C15 23 18 23.5 20.5 25" fill="none"/><path d="M27.5 25 C30 23.5 33 23 36 24" fill="none"/></g><path d="M30.5 9.3 V19 L34 15.8 L37.5 19 V8.6 Z" fill="#F5B840" stroke-width="2.4"/>',
+  clock:'<circle cx="24" cy="25.5" r="15" fill="#FFFDF6" stroke-width="3"/><path d="M24 25.5 V17" stroke="#F5B840" stroke-width="2.8"/><path d="M24 25.5 L31 29.5" stroke="#F5B840" stroke-width="2.8"/><circle cx="24" cy="25.5" r="1.9" fill="currentColor" stroke="none"/><path d="M24 10.5 V7.5" stroke-width="2.6"/><path d="M20.5 7.5 h7" stroke-width="2.6"/>',
+  calendar:'<rect x="9" y="14" width="30" height="25" rx="4.5" fill="#FFFDF6" stroke-width="3"/><path d="M9.5 22 h29" stroke="#F5B840" stroke-width="3"/><g stroke-width="2.6"><path d="M16 10 v6"/><path d="M32 10 v6"/></g><g fill="#F5B840" stroke="none"><circle cx="16.5" cy="28" r="1.9"/><circle cx="24" cy="28" r="1.9"/><circle cx="31.5" cy="28" r="1.9"/><circle cx="16.5" cy="34" r="1.9"/><circle cx="24" cy="34" r="1.9"/></g>',
+  star:'<path d="M24 7 l4.7 11.3 12.3 1 -9.3 8.1 2.8 12 -10.5-6.4 -10.5 6.4 2.8-12 -9.3-8.1 12.3-1 Z" fill="#F5B840" stroke-width="2.8"/>',
+  settings:'<circle cx="24" cy="24" r="10.5" fill="#FFFDF6" stroke-width="3"/><circle cx="24" cy="24" r="3.8" fill="#F5B840" stroke-width="2.4"/><g stroke-width="3"><path d="M24 6.5 v4"/><path d="M24 37.5 v4"/><path d="M6.5 24 h4"/><path d="M37.5 24 h4"/><path d="M11.6 11.6 l2.9 2.9"/><path d="M33.5 33.5 l2.9 2.9"/><path d="M36.4 11.6 l-2.9 2.9"/><path d="M14.5 33.5 L11.6 36.4"/></g>',
+  user:'<circle cx="24" cy="18.5" r="7.5" fill="#F5B840" stroke-width="3"/><path d="M11.5 39.5 a12.5 12.5 0 0 1 25 0" fill="#FFFDF6" stroke-width="3"/>',
+  plus:'<path d="M24 13 V35 M13 24 H35" fill="none" stroke-width="4.6"/>',
+  pencil:'<path d="M15.5 29.2 L31.8 12.9 a3.4 3.4 0 0 1 4.8 4.8 L20.3 34 Z" fill="#F5B840" stroke-width="3"/><path d="M15.5 29.2 L20.3 34 L11.5 36.5 Z" fill="#FFFDF6" stroke-width="2.6"/><path d="M31.8 12.9 a3.4 3.4 0 0 1 4.8 4.8 l2.6-2.6 a3.4 3.4 0 0 0 -4.8-4.8 Z" fill="#EF8A56" stroke-width="2.4"/>',
+  trash:'<path d="M14 17 h20 l-1.6 21.4 a3.4 3.4 0 0 1 -3.4 3.1 h-10 a3.4 3.4 0 0 1 -3.4-3.1 Z" fill="#FFFDF6" stroke-width="3"/><path d="M11 17 h26" stroke-width="3"/><path d="M19.5 17 v-2.8 a2.5 2.5 0 0 1 2.5-2.5 h4 a2.5 2.5 0 0 1 2.5 2.5 V17" fill="none" stroke-width="2.6"/><g stroke-width="2.2" opacity=".4"><path d="M21 24 v9.5"/><path d="M27 24 v9.5"/></g>',
+  check:'<path d="M13 25 L21 33 L35 15" fill="none" stroke-width="4"/>',
+  close:'<path d="M15 15 L33 33 M33 15 L15 33" stroke-width="3.6"/>',
+  refresh:'<path d="M33.6 16 a13 13 0 1 0 3.1 11.5" fill="none" stroke-width="3"/><path d="M34.5 9.5 v7 h-7" fill="none" stroke="#F5B840" stroke-width="3"/>',
+  link:'<path d="M21 27 L27 21" stroke="#F5B840" stroke-width="3.2"/><path d="M18.6 25.4 l-2.4 2.4 a6.4 6.4 0 0 0 9 9 l2.4-2.4" fill="none" stroke-width="3"/><path d="M29.4 22.6 l2.4-2.4 a6.4 6.4 0 0 0 -9-9 l-2.4 2.4" fill="none" stroke-width="3"/>',
+  download:'<path d="M24 9 V26.5" fill="none" stroke-width="3"/><path d="M16.5 19.5 L24 27 L31.5 19.5" fill="none" stroke="#F5B840" stroke-width="3"/><path d="M11 31 v4 a4 4 0 0 0 4 4 h18 a4 4 0 0 0 4-4 v-4" fill="none" stroke-width="3"/>',
+  upload:'<path d="M24 27 V9.5" fill="none" stroke-width="3"/><path d="M16.5 16.5 L24 9 L31.5 16.5" fill="none" stroke="#F5B840" stroke-width="3"/><path d="M11 31 v4 a4 4 0 0 0 4 4 h18 a4 4 0 0 0 4-4 v-4" fill="none" stroke-width="3"/>',
+  info:'<circle cx="24" cy="24" r="16" fill="#F5B840" stroke-width="3"/><circle cx="24" cy="16.5" r="2" fill="currentColor" stroke="none"/><path d="M24 22.5 V33" stroke="#FFFDF6" stroke-width="3.6"/>',
+  warn:'<path d="M24 7.5 L42.5 38.5 C43.4 40 42.3 42 40.5 42 H7.5 C5.7 42 4.6 40 5.5 38.5 Z" fill="#F5B840" stroke-width="3"/><path d="M24 18.5 V27.5" stroke-width="2.8"/><circle cx="24" cy="33.5" r="1.8" fill="currentColor" stroke="none"/>',
+  arrow:'<path d="M10 24 H36" fill="none" stroke-width="3.4"/><path d="M26.5 14 L37 24 L26.5 34" fill="none" stroke="#F5B840" stroke-width="3.4"/>',
+  back:'<path d="M38 24 H12" fill="none" stroke-width="3.4"/><path d="M21.5 14 L11 24 L21.5 34" fill="none" stroke="#F5B840" stroke-width="3.4"/>',
+  /* more 是本次为移动端新增的手绘省略号：与 CornIcon 同语言（圆点 + 粗描边底色）。
+     落地时需补进 frontend/src/components/CornIcon.tsx，否则前端拿不到这一枚 */
+  more:'<g fill="currentColor" stroke="none"><circle cx="14" cy="24" r="3"/><circle cx="24" cy="24" r="3"/><circle cx="34" cy="24" r="3"/></g>',
+  search:'<circle cx="21.5" cy="21.5" r="12" fill="#FFFDF6" stroke-width="3"/><path d="M30.5 30.5 L39 39" stroke-width="3.4"/><path d="M15 21.5 h13" stroke="#F5B840" stroke-width="2.6"/>',
+  bolt:'<path d="M26.5 6 L12 27 h9.5 L19.5 42 L36 20 h-10 Z" fill="#F5B840" stroke-width="2.8"/>'
+};
+document.querySelectorAll('[data-i]').forEach(el=>{
+  const name = el.getAttribute('data-i');
+  const body = ICON[name] || ICON.corn;
+  const keep = el.className;                       /* 保留原有尺寸类 */
+  const sty  = el.getAttribute('style') || '';     /* 保留内联尺寸（否则裸 .ic 会撑满父容器） */
+  el.outerHTML = '<svg class="'+keep+'" viewBox="0 0 48 48" fill="none" stroke="currentColor" '
+    + 'stroke-linecap="round" stroke-linejoin="round" style="display:block;overflow:visible;'+sty+'" '
+    + 'width="100%" height="100%" aria-hidden="true"><g>'+body+'</g></svg>';
+});
+
+/* 明暗：验证 .dark 令牌链路 */
+document.getElementById('themeBtn').addEventListener('click',()=>{
+  document.documentElement.classList.toggle('dark');
+});
+</script>
+</body>
+</html>

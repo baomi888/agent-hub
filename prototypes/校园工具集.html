@@ -743,7 +743,7 @@ function dlLoad(){
         .filter(d=>d.name && !isNaN(d.date.getTime()));
     }
   }catch(e){}
-  return null; // 没存过 → 播种三条示例
+  return null; // 没存过，就播种三条示例
 }
 (function(){
   const saved=dlLoad();
