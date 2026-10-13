@@ -6,6 +6,7 @@ import re
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from html import unescape as _unescape
 
 import httpx
 from urllib.parse import urljoin
@@ -23,14 +24,54 @@ _HTTP_HEADERS = {
 }
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
-_HTML_SCRIPT_RE = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE)
+# 整块剔除的噪声元素：脚本样式 + 页面骨架（导航/页脚/侧栏/表单等）。
+# 只收录有闭合标签的元素——void 标签（embed/input/img）进这里会把整篇文档吞掉。
+_HTML_NOISE_RE = re.compile(
+    r"<(script|style|noscript|template|svg|iframe|object|head|nav|header|footer"
+    r"|aside|form|select|button)[^>]*>.*?</\1\s*>",
+    re.DOTALL | re.IGNORECASE,
+)
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+# 主内容容器：有 article/main 就只取容器内正文，否则退回去噪后的 body
+_MAIN_CONTENT_RE = re.compile(r"<(article|main)\b[^>]*>(.*?)</\1\s*>", re.DOTALL | re.IGNORECASE)
+_BODY_RE = re.compile(r"<body\b[^>]*>(.*?)</body\s*>", re.DOTALL | re.IGNORECASE)
+# 块级标签：作为文本块边界，一块出一行，短块（面包屑/按钮字/残留链接）整块丢弃
+_BLOCK_SPLIT_RE = re.compile(
+    r"</?(?:p|h[1-6]|li|blockquote|pre|tr|table|ul|ol|dl|dt|dd|div|section"
+    r"|article|main|figure|figcaption|br)\b[^>]*>",
+    re.IGNORECASE,
+)
+_MIN_BLOCK_CHARS = 12  # 短于此的文本块视为页面装饰，不入库
 
 
 def _strip_html(html: str) -> str:
-    html = _HTML_SCRIPT_RE.sub("", html)
-    text = _HTML_TAG_RE.sub(" ", html)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+    """网页正文提取：去脚本/导航/页脚等噪声，只留主内容文本块（零依赖折中）。
+
+    旧实现只删 script/style 就把全部标签换空格——导航链接、页脚版权、cookie
+    横幅全部进库，稀释 embedding 语料和 BM25 词表，检索质量被噪声拉低。
+    现在做三步：
+      1. 整块剔除噪声元素与 HTML 注释；
+      2. 有 <article>/<main> 只取容器内正文，没有则退回 <body>（此时
+         页面骨架已在上一步剔掉，剩余噪声主要靠第 3 步的长度闸兜底）；
+      3. 按块级标签切文本块，丢弃不足 _MIN_BLOCK_CHARS 的短块。
+    返回按块换行拼接的纯文本（切片用，换行对 RecursiveCharacterTextSplitter 无害）。
+    """
+    html = _HTML_COMMENT_RE.sub(" ", html)
+    html = _HTML_NOISE_RE.sub(" ", html)
+    m = _MAIN_CONTENT_RE.search(html)
+    if m:
+        html = m.group(2)
+    else:
+        b = _BODY_RE.search(html)
+        if b:
+            html = b.group(1)
+    blocks = []
+    for raw in _BLOCK_SPLIT_RE.split(html):
+        text = _unescape(_HTML_TAG_RE.sub(" ", raw))
+        text = re.sub(r"\s+", " ", text).strip()
+        if len(text) >= _MIN_BLOCK_CHARS:
+            blocks.append(text)
+    return "\n".join(blocks)
 
 
 # 网页正文上限：伪装成 HTML 的大文件（或异常巨页）会把整个响应体吃进内存

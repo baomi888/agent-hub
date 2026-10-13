@@ -23,7 +23,7 @@ import chromadb
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_core.documents import Document
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from core import config
@@ -1004,46 +1004,7 @@ class RagPipeline:
             lines.append(f"{head} ｜ {preview}...")
         return "\n\n".join(lines) if lines else "（无检索结果）"
 
-    def answer(self, question: str, top_k: int) -> tuple[str, str]:
-        """同步问答：返回 (答案正文, 参考片段 Markdown)。"""
-        docs_scores = self.retrieve_with_score(question, top_k)
-        if not docs_scores:
-            return "知识库中未检索到相关内容。", "（无检索结果）"
-        refs_md = self._format_refs(docs_scores)
-
-        references = "\n\n".join(
-            f"[{i + 1}] （来源：{d.metadata.get('source', '?')}）\n{d.page_content}"
-            for i, (d, _) in enumerate(docs_scores)
-        )
-        user_prompt = f"【参考资料】\n{references}\n\n【用户问题】\n{question}"
-
-        response = get_llm().invoke(
-            [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=user_prompt)]
-        )
-        return response.content, refs_md
-
-    def answer_stream(self, question: str, top_k: int) -> None:
-        """流式问答生成器：yield (累计答案文本, 参考片段Markdown)。
-
-        第一个 yield 的 text 为空字符串（先展示检索来源），
-        之后 LLM 逐 token 追加。
-        """
-        docs_scores = self.retrieve_with_score(question, top_k)
-        if not docs_scores:
-            yield "知识库中未检索到相关内容。", "（无检索结果）"
-            return
-        refs_md = self._format_refs(docs_scores)
-        yield "", refs_md  # 先展示检索来源
-
-        references = "\n\n".join(
-            f"[{i + 1}] （来源：{d.metadata.get('source', '?')}）\n{d.page_content}"
-            for i, (d, _) in enumerate(docs_scores)
-        )
-        user_prompt = f"【参考资料】\n{references}\n\n【用户问题】\n{question}"
-
-        acc = ""
-        for chunk in get_llm().stream(
-            [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=user_prompt)]
-        ):
-            acc += chunk.content or ""
-            yield acc, refs_md
+    # 说明：RagPipeline.answer / answer_stream 已删除（2026-10-13 死代码清理）。
+    # 生产问答路径在 api/chat.py：自己检索 + _format_refs/build_sources 组装 +
+    # 流式 LLM，这两个方法自多用户改造后就无生产调用方，只有脚本烟测在用，
+    # 留着会让人误以为改这里能影响线上回答。
