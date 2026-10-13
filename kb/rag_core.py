@@ -741,6 +741,23 @@ class RagPipeline:
         _cache_invalidate(self.collection_name)
         return len(ids)
 
+    def has_source(self, source: str) -> bool:
+        """该来源文件是否已有片段入库（只取一条 id 判断，不拉回任何片段内容）。
+
+        导入去重用它：get_source_chunks 会把整个文件的全部片段正文 + 元数据
+        拉回内存，几百片的大文件每次导入检查都白拉一遍；这里 limit=1 + 空 include，
+        无论文件多大都是 O(1) 的一次 sqlite 查询。
+        """
+        if self._vs is None:
+            self.get_or_open()
+        if self._vs is None:
+            return False
+        try:
+            got = self._vs._collection.get(where={"source": source}, limit=1, include=[])
+        except Exception:
+            return False
+        return bool(got.get("ids"))
+
     def get_source_chunks(self, source: str) -> list[dict]:
         """按来源取该文件的全部片段（按页码与片段顺序排好）。
 

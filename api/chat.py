@@ -625,10 +625,16 @@ def _generate_title(question: str) -> str:
     只看问题、不看答案：提示词里本来就没用到答案。去掉答案参数后，标题生成
     就能和答案流式生成**并行**跑（见 chat_stream 里的 title_task），
     收尾时基本零等待，不必再在 done 之前干等一次 LLM 往返。
+
+    两道成本护栏（2026-10-13）：
+      - 输入截到前 200 字：首问若是粘贴的长文档，完整问题会原样进标题 prompt，
+        一次标题生成就吃掉几千 token 输入，而标题只反映开头主题，截断不损质量；
+      - max_tokens=32：标题只要 ≤15 字，给输出兜底，防止模型跑偏成复述正文。
     """
-    llm = get_llm(temperature=0)
+    llm = get_llm(temperature=0, max_tokens=32)
     try:
-        resp = llm.invoke([HumanMessage(content=f"请为以下对话生成简短中文标题（≤15字），直接输出：用户提问：{question}")])
+        q = (question or "")[:200]
+        resp = llm.invoke([HumanMessage(content=f"请为以下对话生成简短中文标题（≤15字），直接输出：用户提问：{q}")])
         title = (resp.content or "").strip().strip('"').strip("'")
         if len(title) > 20:
             title = title[:15] + "..."
