@@ -186,6 +186,15 @@ export default function Home() {
     document.documentElement.dataset.fs = fontScale;
   }, [fontScale]);
 
+  // 四屏导航里点「知识库」会带 ?kb=1 落到本页。
+  // 桌面视口资料库本来就常驻，窄屏则是抽屉 —— 不补这一下，窄屏用户点进来什么都看不到。
+  // 只在挂载时读一次并立刻清掉 query，避免用户手动关掉抽屉后又被刷新拉回来。
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("kb") !== "1") return;
+    setKbPanelOpen(true);
+    window.history.replaceState(null, "", window.location.pathname);
+  }, [setKbPanelOpen]);
+
   // 初始化 defaults：本地存过的参数优先，没存过才用后端默认值
   // （sessions/kbs 列表由各自 hook 的 effect 并发拉取）
   useEffect(() => {

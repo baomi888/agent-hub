@@ -1,6 +1,14 @@
 // 后端 API 封装：统一错误处理 + 类型化（相对路径走 rewrites 代理）
 import type { Conversation, KbInfo, KbFile, FilePreview, SearchResult, Defaults, Message } from "./types";
 import type { MeOut, UserOut, Template, ApplyTemplateResult, UsageSummary } from "./types";
+import type {
+  AgentTool,
+  DailyReport,
+  Delegate,
+  DelegateRun,
+  ScheduleHealth,
+  ScheduleJob,
+} from "./types";
 
 /**
  * 登录态失效的广播事件名。
@@ -56,6 +64,54 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw await httpError(res);
   }
   return res.json() as Promise<T>;
+}
+
+/**
+ * 业务侧 404（区别于「端点不存在」）。
+ * 目前唯一的场景是 `GET /api/report/{date}` 的「今日总结尚未生成」——
+ * 这不是错误，页面该渲染成「今天还没有总结 + 生成按钮」。
+ */
+export class BusinessNotFoundError extends Error {
+  constructor(detail: string) {
+    super(detail);
+    this.name = "BusinessNotFoundError";
+  }
+}
+
+/**
+ * 探测式请求：把「后端还没有这个端点」和「真的出错了」分开。
+ *
+ * 为什么需要它：`/api/delegate`、`/api/report`、`/api/agent/tools`、`/api/schedule/*`
+ * 目前只存在于队友的 `feat/ai-module-20261013` 分支，本分支跑起来会 404。
+ * 页面要是把 404 当错误抛，用户看到一片红；要是静默吞掉，又变成「点了没反应」。
+ * 所以显式区分：**端点不存在 → 返回 null**，页面亮一块「接口待上线」；
+ * 其余错误照常抛，走正常的错误提示。
+ *
+ * 判定依据：FastAPI 找不到路由时 `detail` 恒为 `"Not Found"`。
+ * 业务侧的 404（如 report 的「今日总结尚未生成」）detail 是中文说明，
+ * 因此不会被误判成「未上线」。
+ */
+async function tryRequest<T>(path: string, init?: RequestInit): Promise<T | null> {
+  const cleanPath = path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+  const res = await fetch(cleanPath, {
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    ...init,
+  });
+  if (res.ok) return res.json() as Promise<T>;
+  if (res.status === 405 || res.status === 501) return null;
+  if (res.status === 404) {
+    let detail = "";
+    try {
+      detail = ((await res.json()) as { detail?: string }).detail ?? "";
+    } catch {
+      /* 非 JSON 错误体：当作未上线处理 */
+    }
+    if (detail === "Not Found" || detail === "") return null;
+    // 业务 404：让调用方自己去认（report 页会转成「今天还没有总结」）
+    throw new BusinessNotFoundError(detail);
+  }
+  throw await httpError(res);
 }
 
 export const api = {
@@ -209,4 +265,80 @@ export const api = {
     request<ApplyTemplateResult>(`/api/templates/${id}/apply`, {
       method: "POST",
     }),
+
+  /* ==========================================================
+     以下四组走 tryRequest：端点没上线时返回 null，由页面渲染
+     「接口待上线」而不是抛错。契约见 types.ts 顶部说明。
+     ========================================================== */
+
+  // ---------- P4 每日委托 /api/delegate（7 端点）----------
+  delegate: {
+    list: () => tryRequest<unknown>("/api/delegate/").then(unwrap<Delegate>("delegates")),
+    create: (body: Record<string, unknown>) =>
+      tryRequest<Delegate>("/api/delegate/", { method: "POST", body: JSON.stringify(body) }),
+    update: (id: string, body: Record<string, unknown>) =>
+      tryRequest<Delegate>(`/api/delegate/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    remove: (id: string) =>
+      tryRequest<{ ok: boolean }>(`/api/delegate/${id}`, { method: "DELETE" }),
+    runs: (id: string) =>
+      tryRequest<unknown>(`/api/delegate/${id}/runs`).then(unwrap<DelegateRun>("runs")),
+    /**
+     * dry_run=true = 只生成、不投递、不改 next_run_at。
+     * 这是「先生成后确认」的落地：用户先看到内容，再决定投不投。
+     */
+    run: (id: string, dryRun: boolean) =>
+      tryRequest<{ text?: string; output?: string; delivered?: boolean }>(
+        `/api/delegate/${id}/run${dryRun ? "?dry_run=true" : ""}`,
+        { method: "POST" }
+      ),
+  },
+
+  // ---------- P5 每日总结 /api/report（3 端点）----------
+  report: {
+    today: () => tryRequest<DailyReport>("/api/report/today"),
+    byDate: (date: string) => tryRequest<DailyReport>(`/api/report/${date}`),
+    /** MVP 是同步生成（约 20–40 秒），前端要用「生成中」态兜住 */
+    generate: (date?: string) =>
+      tryRequest<DailyReport>("/api/report/generate", {
+        method: "POST",
+        body: JSON.stringify(date ? { date } : {}),
+      }),
+  },
+
+  // ---------- P7 设置：工具元数据 /api/agent/tools（2 端点）----------
+  agent: {
+    tools: () => tryRequest<unknown>("/api/agent/tools").then(unwrap<AgentTool>("tools")),
+  },
+
+  // ---------- P7 设置：调度 /api/schedule（5 端点，2 个管理员）----------
+  schedule: {
+    health: () => tryRequest<ScheduleHealth>("/api/schedule/health"),
+    jobs: () => tryRequest<unknown>("/api/schedule/jobs").then(unwrap<ScheduleJob>("jobs")),
+    /** 全量执行历史（跨所有委托）。委托页的「执行历史」读它 —— 逐条去问 N 个委托要 N 次请求 */
+    runs: () => tryRequest<unknown>("/api/schedule/runs").then(unwrap<DelegateRun>("runs")),
+    /** 仅管理员；非管理员 403 —— 页面据此只读展示 */
+    runNow: (jobKey: string) =>
+      tryRequest<{ ok: boolean }>("/api/schedule/run-now", {
+        method: "POST",
+        body: JSON.stringify({ job_key: jobKey }),
+      }),
+    retry: (runId: string) =>
+      tryRequest<{ ok: boolean }>("/api/schedule/retry", {
+        method: "POST",
+        body: JSON.stringify({ run_id: runId }),
+      }),
+  },
 };
+
+/**
+ * 把列表响应统一成数组：后端可能返回 `[...]`，也可能包一层 `{delegates:[...]}`。
+ * 契约还没联调，两种都认，页面侧就不用各写一遍。
+ */
+function unwrap<T>(key: string) {
+  return (v: unknown): T[] | null => {
+    if (v === null || v === undefined) return null;
+    if (Array.isArray(v)) return v as T[];
+    const inner = (v as Record<string, unknown>)[key];
+    return Array.isArray(inner) ? (inner as T[]) : [];
+  };
+}

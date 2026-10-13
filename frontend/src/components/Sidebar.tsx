@@ -3,10 +3,19 @@
 // 左侧会话列表栏：品牌区 + 新建对话 + 搜索框 + 按时间分组的会话 + 深色模式开关
 // 视觉：暖米黄书本风格 · 大圆角 · 柔阴影 · 金色点缀
 import { useMemo, useRef, useState, type RefObject } from "react";
+import Link from "next/link";
 import MascotLogo from "./chat/MascotLogo";
 import CornIcon from "./CornIcon";
 import type { Conversation, QuotaInfo } from "@/lib/types";
 import type { FontScale } from "@/lib/hooks/usePrefs";
+
+/** 工作台之外的四屏入口。图标排一行，避免再堆四个通栏按钮把侧栏撑满 */
+const CONSOLE_LINKS = [
+  { href: "/delegate", icon: "clock", label: "每日委托" },
+  { href: "/report", icon: "calendar", label: "每日总结" },
+  { href: "/checkin", icon: "star", label: "打卡" },
+  { href: "/settings", icon: "settings", label: "设置" },
+];
 
 interface Props {
   sessions: Conversation[];
@@ -170,6 +179,22 @@ export default function Sidebar({
         <CornIcon name="tools" className="h-4 w-4" title="校园工具集" />
         校园工具集
       </a>
+
+      {/* 四屏入口：每日委托 / 总结 / 打卡 / 设置。
+          做成图标行而不是通栏按钮 —— 侧栏高度要留给会话列表，这四个不是高频操作 */}
+      <div className="mt-2 flex gap-1.5">
+        {CONSOLE_LINKS.map((it) => (
+          <Link
+            key={it.href}
+            href={it.href}
+            className="btn-import flex flex-1 items-center justify-center px-0 py-2.5"
+            title={it.label}
+            aria-label={it.label}
+          >
+            <CornIcon name={it.icon} className="h-4 w-4" />
+          </Link>
+        ))}
+      </div>
 
       {/* 搜索框：大圆角 */}
       <div className="search mt-4">

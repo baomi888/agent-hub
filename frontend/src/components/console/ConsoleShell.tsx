@@ -1,0 +1,115 @@
+"use client";
+
+// 四屏（每日委托 / 总结 / 打卡 / 设置）共用的应用外壳。
+//
+// 为什么不复用 Sidebar：那个侧栏的主语是**会话列表**，这四屏的主语是**页面**。
+// 把页面导航硬塞进会话栏，会让「我要找昨天那个对话」和「我要去设置」挤在同一条轴线上。
+// 所以这里另起一个 196px 的 mini-nav —— 与设计稿一致，也与工作台共用同一套令牌。
+//
+// 登录门放在这一层：四屏的数据（用量、会话、知识库）全部按用户隔离，
+// 和 / 一样必须整页挡住，不能只挡数据。
+import Link from "next/link";
+import { createContext, useContext, type ReactNode } from "react";
+import AuthGate from "../AuthGate";
+import CornIcon from "../CornIcon";
+import { useAuth } from "@/lib/hooks/useAuth";
+import type { MeOut } from "@/lib/types";
+
+export type ConsolePage = "delegate" | "report" | "checkin" | "settings";
+
+const NAV: { key: ConsolePage | null; href: string; icon: string; label: string }[] = [
+  { key: null, href: "/", icon: "notes", label: "对话" },
+  { key: null, href: "/?kb=1", icon: "book", label: "知识库" },
+  { key: "delegate", href: "/delegate", icon: "clock", label: "每日委托" },
+  { key: "report", href: "/report", icon: "calendar", label: "总结" },
+  { key: "checkin", href: "/checkin", icon: "star", label: "打卡" },
+  { key: "settings", href: "/settings", icon: "settings", label: "设置" },
+];
+
+interface Props {
+  /** 当前页 —— 由页面自己传，不靠 pathname 反推：
+   *  「知识库」指向 /?kb=1，它的 pathname 也是 /，光看路径分不清 */
+  active: ConsolePage;
+  /** 眉题（设计稿里的 P4 · /delegate） */
+  eyebrow: string;
+  title: string;
+  sub: ReactNode;
+  /** 页头右侧的操作区 */
+  actions?: ReactNode;
+  children: ReactNode;
+}
+
+/**
+ * 登录信息往下传一层。
+ *
+ * 为什么需要：`useAuth` 是**每个实例各查一次** /api/auth/me。
+ * 子页面如果自己再调一次 useAuth，它拿到的是一份独立状态 —— 用户在
+ * 登录门里登录时，子页面那份不会跟着变（还是 null），账号名就会空着。
+ * 所以由外壳查一次、往下发。
+ */
+const UserCtx = createContext<MeOut | null>(null);
+
+export function useConsoleUser(): MeOut | null {
+  return useContext(UserCtx);
+}
+
+export default function ConsoleShell({ active, eyebrow, title, sub, actions, children }: Props) {
+  const auth = useAuth();
+
+  // 与 / 同一套门：身份没确认完不给内容，免得空列表闪一下又跳回登录页
+  if (auth.loading) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-canvas">
+        <p className="text-fs-sm text-faint">正在确认登录状态...</p>
+      </div>
+    );
+  }
+  if (!auth.me) {
+    return (
+      <AuthGate allowSignup={auth.allowSignup} onLogin={auth.login} onRegister={auth.register} />
+    );
+  }
+
+  return (
+    <UserCtx.Provider value={auth.me}>
+      <div className="min-h-dvh bg-canvas px-4 py-6 sm:px-6">
+        <div className="console-shell mx-auto" style={{ maxWidth: 1220 }}>
+          <aside className="console-nav">
+            <div className="nav-brand">
+              <CornIcon name="corn" className="logo" title="知穗" />
+              <b>知穗</b>
+            </div>
+            <nav aria-label="主导航">
+              {NAV.map((it) => {
+                const current = it.key !== null && it.key === active;
+                return (
+                  <Link
+                    key={it.href}
+                    href={it.href}
+                    className="nav-item"
+                    aria-current={current ? "page" : undefined}
+                  >
+                    <CornIcon name={it.icon} />
+                    {it.label}
+                  </Link>
+                );
+              })}
+            </nav>
+          </aside>
+
+          <div className="console-page">
+            <div className="pg-head">
+              <div>
+                <p className="eyebrow">{eyebrow}</p>
+                <h2>{title}</h2>
+                <p className="pg-sub">{sub}</p>
+              </div>
+              {actions ? <div className="pg-actions">{actions}</div> : null}
+            </div>
+            <div style={{ marginTop: 18 }}>{children}</div>
+          </div>
+        </div>
+      </div>
+    </UserCtx.Provider>
+  );
+}

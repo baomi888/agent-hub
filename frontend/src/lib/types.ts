@@ -165,3 +165,140 @@ export interface ApplyTemplateResult {
   starter_prompt?: string | null;
   recommended_mode?: string;
 }
+
+/* ============================================================
+   以下四组类型对应「队友分支 feat/ai-module-20261013」新增的端点。
+   ────────────────────────────────────────────────────────────
+   ⚠️ 契约来源是 `docs/前端页面与接口映射_v0.2.md`（按分支代码反推的字段清单），
+   不是联调结果。用 tryRequest 拉取，端点不存在时页面走「接口待上线」态，
+   所以字段对不上也不会让页面崩掉；联调时逐项核对即可。
+   ============================================================ */
+
+// ---------- P4 每日委托 /api/delegate ----------
+
+export type DelegateFreq = "daily" | "weekdays" | "weekly" | "interval";
+export type DelegateKind = "study" | "review" | "encourage" | "custom";
+
+/**
+ * 触发计划。注意**不是 cron**：后端用的是结构化字段，
+ * 前端把它渲染成「每天 21:00」这种人话，而不是把 crontab 摊给用户看。
+ */
+export interface DelegateSchedule {
+  freq: DelegateFreq;
+  /** 触发时刻 HH:MM；interval 频率下可为空 */
+  at?: string | null;
+  /** weekly 用：0=周日 … 6=周六 */
+  weekday?: number | null;
+  /** interval 用：每多少分钟 */
+  every_minutes?: number | null;
+  tz: string;
+}
+
+export interface Delegate {
+  id: string;
+  /** 3–32 字，建后不可改 */
+  name: string;
+  kind: DelegateKind;
+  schedule: DelegateSchedule;
+  /** 投递目标会话；null = 默认会话 */
+  session_id: string | null;
+  session_title?: string | null;
+  kb_id: string | null;
+  kb_name?: string | null;
+  /** 给模型看的生成指令 */
+  instruction: string;
+  tone: string;
+  max_chars: number;
+  /** 后端没有 status，只有这个布尔 */
+  enabled: boolean;
+  /** 暂停时为 null —— 页面上要能看出「它不会再来了」 */
+  next_run_at: number | null;
+  created_at?: number | null;
+}
+
+export type DelegateRunStatus =
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "skipped";
+
+export interface DelegateRun {
+  run_id: string;
+  job_key: string;
+  subject_id?: string | null;
+  status: DelegateRunStatus;
+  planned_at: number | null;
+  started_at?: number | null;
+  finished_at?: number | null;
+  error?: string | null;
+  tokens_out?: number | null;
+  /** 排查「今天为什么没收到」先看这一列 */
+  trigger: "schedule" | "manual";
+}
+
+// ---------- P5 每日总结 /api/report ----------
+
+export interface ReportStats {
+  date: string;
+  conversation_count: number;
+  message_count: number;
+  user_msg_count: number;
+  assistant_msg_count: number;
+  /** { 小时: 条数 }，确定性统计，不走模型 */
+  active_hours: Record<string, number>;
+  tool_call_count: number;
+}
+
+/** 一条结论 + 它必须指得回的真实消息 id（后端强制溯源，指不到的直接丢） */
+export interface ReportConclusion {
+  text: string;
+  source_refs: number[];
+}
+
+export type ReportStatus = "pending" | "generating" | "ready" | "empty";
+
+export interface DailyReport {
+  report_id: string;
+  date: string;
+  status: ReportStatus;
+  stats: ReportStats;
+  content: ReportConclusion[];
+  model?: string | null;
+  generated_at?: number | null;
+  read_at?: number | null;
+}
+
+// ---------- P7 设置：Agent 工具元数据 /api/agent/tools ----------
+
+export interface AgentTool {
+  name: string;
+  /** read = 只读；write = 会改状态，页面上要用暖色区分 */
+  category: "read" | "write" | string;
+  /** 延迟下发（false = 每轮全量带给模型） */
+  defer: boolean;
+  retryable: boolean;
+  needs_approval: boolean;
+  max_output_chars: number;
+  cost_hint: string;
+}
+
+// ---------- P7 设置：调度进程 /api/schedule/* ----------
+
+/** 只看心跳年龄：>300s stalled、>600s down */
+export type WorkerHealth = "up" | "stalled" | "down";
+
+export interface ScheduleHealth {
+  status: WorkerHealth;
+  last_heartbeat: number | null;
+  pid?: number | null;
+  age_seconds?: number | null;
+}
+
+export interface ScheduleJob {
+  job_key: string;
+  cron?: string | null;
+  enabled: boolean;
+  last_run_at?: number | null;
+  last_status?: string | null;
+}

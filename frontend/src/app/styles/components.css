@@ -549,7 +549,10 @@
   padding: 4px 10px;
   font-family: inherit;
   font-size: var(--fs-sm);
-  color: var(--muted);
+  /* 原来是 var(--muted)：tokens.css 里没有这个令牌（只有 --text-2 和
+     @theme 里的 --color-muted），声明被整条丢弃，按钮一直在「继承色」下渲染。
+     与 @theme 的映射保持同一个来源，改成 --text-2 */
+  color: var(--text-2);
   border-radius: var(--radius-sm);
 }
 .fb-comment-skip:hover {
