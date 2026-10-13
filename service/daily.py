@@ -526,16 +526,111 @@ def run_one(job_key: str, subject_id: str, planned_at: int) -> dict:
 def _dispatch_one(did: str, planned_at: int) -> dict:
     d = _load_delegation(did)
     if not d or not d["enabled"]:
-        return {}
+        return {"status": "skipped"}
     uid = d["owner_id"]
     quota.consume(uid, "auto")
     context = today_context(uid, quota.day_key(planned_at))
     text = plan_today(d, context)
+    message_id = None
     if d.get("deliver_sid"):
         # 投递目标会话若已不属于该用户，add_message 抛 NotOwned → 转 fatal → on_failure 停用
-        store.add_message(uid, d["deliver_sid"], "assistant", text)
+        message_id = store.add_message(uid, d["deliver_sid"], "assistant", text)
     _bump_next_run(did, planned_at + 86400)  # 默认次日同刻
-    return {"tokens_out": 0}
+    # 把这次投递记账成一条 job_runs，这样「委托的执行历史」与定时任务的执行历史
+    # 是同一份数据，不用为委托单独造一张历史表（也就不用维护两套幂等逻辑）。
+    run_id = _record_manual_run(did, planned_at, "succeeded", None)
+    return {
+        "run_id": run_id,
+        "status": "succeeded",
+        "content": text,
+        "delivered": message_id is not None,
+        "delivered_message_id": message_id,
+        "tokens_out": 0,
+    }
+
+
+def _record_manual_run(did: str, planned_at: int, status: str, error: str | None) -> str | None:
+    """把一次手动执行记进 job_runs（委托历史与调度历史共用一张表）。
+
+    同时更新同一条记录的 finished_at / error：手动执行没有"先 pending 再领"的两步，
+    所以这里是"登记即收尾"。失败时**不抛**——历史记账失败不该把已经完成的投递变成报错。
+    """
+    try:
+        from core import scheduler as sched
+
+        sched.ensure_tables()  # 同 list_runs：job_runs 在调度库，先确保建表
+        run_id = sched.new_run_id()
+        with sched._get_conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO job_runs (run_id, job_key, subject_id, planned_at, "
+                "idem_key, status, attempts, started_at, finished_at, error, tokens_out, trigger) "
+                "VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, 0, 'manual')",
+                (
+                    run_id,
+                    "delegate.dispatch",
+                    did,
+                    int(planned_at),
+                    "delegate.dispatch|%s|manual|%s" % (did, run_id),
+                    status,
+                    int(time.time()),
+                    int(time.time()),
+                    error,
+                ),
+            )
+        return run_id
+    except Exception:  # noqa: BLE001 —— 记账失败不影响投递结果
+        return None
+
+
+def delete_delegation(uid: str, did: str) -> bool:
+    """删除委托。历史执行记录**保留**（审计需要，也方便查"它以前发过什么"）。"""
+    _ensure_daily_tables()
+    with store._get_conn() as conn:
+        cur = conn.execute(
+            "DELETE FROM delegations WHERE delegation_id = ? AND owner_id = ?", (did, uid)
+        )
+        return cur.rowcount > 0
+
+
+def list_runs(uid: str, did: str, limit: int = 20, cursor: str | None = None) -> dict:
+    """某条委托的执行历史（新→旧，游标分页）。
+
+    分页游标用 finished_at+run_id 组合，和 `core/scheduler.list_runs` 同一思路：
+    单靠时间戳在有并列时会漏行或重复行。
+    """
+    _ensure_daily_tables()
+    # job_runs 住在**调度库**（core/scheduler.py::_db_path() → data/scheduler.db），
+    # 与会话库（sessions.db）是两个文件。必须用调度库自己的连接，
+    # 拿 store._get_conn() 去查会得到 "no such table: job_runs"（实测踩过）。
+    from core import scheduler as _sched
+
+    _sched.ensure_tables()
+    limit = max(1, min(int(limit or 20), 100))
+    sql = (
+        "SELECT run_id, job_key, subject_id, status, planned_at, started_at, finished_at, "
+        "error, tokens_out, trigger FROM job_runs "
+        "WHERE job_key = 'delegate.dispatch' AND subject_id = ?"
+    )
+    params: list = [did]
+    if cursor:
+        try:
+            ts_str, rid = cursor.split("|", 1)
+            sql += " AND (finished_at < ? OR (finished_at = ? AND run_id < ?))"
+            params += [int(ts_str), int(ts_str), rid]
+        except (ValueError, AttributeError):
+            raise ValueError("cursor 无效")
+    sql += " ORDER BY finished_at DESC, run_id DESC LIMIT ?"
+    params.append(limit + 1)
+    # 用调度库的连接读（不是 store._get_conn()——那是会话库）
+    with _sched._get_conn() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    out = [dict(r) for r in rows]
+    next_cursor = None
+    if len(out) > limit:
+        out = out[:limit]
+        last = out[-1]
+        next_cursor = "%s|%s" % (last.get("finished_at") or 0, last["run_id"])
+    return {"items": out, "next_cursor": next_cursor}
 
 
 def _bump_next_run(did: str, next_at: int) -> None:
