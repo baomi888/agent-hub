@@ -24,11 +24,20 @@ async function httpError(res: Response): Promise<Error> {
     notifyUnauthorized();
     return new Error("未登录或登录已过期，请重新登录");
   }
+  // 429 有两种：每分钟限流带 retry_after，每日配额带 kind/limit。
+  // 后端 detail 已是中文说明，这里只补一个"多久能再试"的可操作提示，
+  // 避免用户把它当成"系统坏了"而不停重试。
+  let retryAfter: number | undefined;
   try {
-    const body = (await res.json()) as { detail?: string };
+    const body = (await res.json()) as { detail?: string; retry_after?: number };
     detail = body.detail || detail;
+    retryAfter = typeof body.retry_after === "number" ? body.retry_after : undefined;
   } catch {
     /* 忽略非 JSON 错误体 */
+  }
+  if (res.status === 429) {
+    const wait = retryAfter && retryAfter > 0 ? `（约 ${Math.ceil(retryAfter)} 秒后可重试）` : "";
+    return new Error(`${detail}${wait}`);
   }
   return new Error(detail);
 }

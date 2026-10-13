@@ -23,6 +23,23 @@ export type CornIconName =
   | "warn" // 警告/出错
   | "store" // 模板广场
   | "tools" // 校园工具集（扳手）
+  | "plus" // 新增 / 添加
+  | "pencil" // 编辑 / 改名
+  | "trash" // 删除
+  | "close" // 关闭 / 取消
+  | "check" // 确认 / 完成
+  | "clock" // 倒计时 / 时间
+  | "calendar" // 日期
+  | "star" // 收藏 / 重点
+  | "link" // 链接 / 外链
+  | "download" // 下载
+  | "upload" // 上传
+  | "refresh" // 重来 / 重建
+  | "user" // 账号
+  | "settings" // 设置
+  | "info" // 提示
+  | "back" // 返回（左箭头）
+  | "arrow" // 指向（右箭头）
   | "corn"; // 兜底：mini 知穗
 
 const INK_STROKE = { strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -253,6 +270,211 @@ function Warn() {
   );
 }
 
+/** 加号：粗圆头十字。继承 currentColor，深浅底与主按钮 hover 变色下都清晰
+ *  （替代全角「＋」字符；不填金色，避免压在金色 hover 底上糊掉） */
+function Plus() {
+  return (
+    <g {...INK_STROKE}>
+      <path d="M24 13 V35 M13 24 H35" fill="none" strokeWidth={4.6} />
+    </g>
+  );
+}
+
+/** 铅笔：编辑 / 改名（替代 ✎ 字符） */
+function Pencil() {
+  return (
+    <g {...INK_STROKE}>
+      {/* 笔身 */}
+      <path d="M15.5 29.2 L31.8 12.9 a3.4 3.4 0 0 1 4.8 4.8 L20.3 34 Z" fill="#F5B840" strokeWidth={3} />
+      {/* 笔尖 */}
+      <path d="M15.5 29.2 L20.3 34 L11.5 36.5 Z" fill="#FFFDF6" strokeWidth={2.6} />
+      {/* 箍 */}
+      <path d="M31.8 12.9 a3.4 3.4 0 0 1 4.8 4.8 l2.6-2.6 a3.4 3.4 0 0 0 -4.8-4.8 Z" fill="#EF8A56" strokeWidth={2.4} />
+    </g>
+  );
+}
+
+/** 垃圾桶：删除 */
+function Trash() {
+  return (
+    <g {...INK_STROKE}>
+      <path d="M14 17 h20 l-1.6 21.4 a3.4 3.4 0 0 1 -3.4 3.1 h-10 a3.4 3.4 0 0 1 -3.4-3.1 Z" fill="#FFFDF6" strokeWidth={3} />
+      <path d="M11 17 h26" strokeWidth={3} />
+      <path d="M19.5 17 v-2.8 a2.5 2.5 0 0 1 2.5-2.5 h4 a2.5 2.5 0 0 1 2.5 2.5 V17" fill="none" strokeWidth={2.6} />
+      <g strokeWidth={2.2} opacity={0.4}>
+        <path d="M21 24 v9.5" />
+        <path d="M27 24 v9.5" />
+      </g>
+    </g>
+  );
+}
+
+/** 叉：关闭 / 取消（中性色，由调用方决定语义色） */
+function Close() {
+  return (
+    <g {...INK_STROKE}>
+      <path d="M15 15 L33 33 M33 15 L15 33" strokeWidth={3.6} />
+    </g>
+  );
+}
+
+/** 对勾：确认（中性色，由调用方决定语义色） */
+function Check() {
+  return (
+    <g {...INK_STROKE}>
+      <path d="M13 25 L21 33 L35 15" fill="none" strokeWidth={4} />
+    </g>
+  );
+}
+
+/** 时钟：倒计时 / 时间 */
+function Clock() {
+  return (
+    <g {...INK_STROKE}>
+      <circle cx="24" cy="25.5" r="15" fill="#FFFDF6" strokeWidth={3} />
+      <path d="M24 25.5 V17" stroke="#F5B840" strokeWidth={2.8} />
+      <path d="M24 25.5 L31 29.5" stroke="#F5B840" strokeWidth={2.8} />
+      <circle cx="24" cy="25.5" r="1.9" fill="currentColor" stroke="none" />
+      <path d="M24 10.5 V7.5" strokeWidth={2.6} />
+      <path d="M20.5 7.5 h7" strokeWidth={2.6} />
+    </g>
+  );
+}
+
+/** 日历：日期 */
+function Calendar() {
+  return (
+    <g {...INK_STROKE}>
+      <rect x="9" y="14" width="30" height="25" rx="4.5" fill="#FFFDF6" strokeWidth={3} />
+      <path d="M9.5 22 h29" stroke="#F5B840" strokeWidth={3} />
+      <g strokeWidth={2.6}>
+        <path d="M16 10 v6" />
+        <path d="M32 10 v6" />
+      </g>
+      <g fill="#F5B840" stroke="none">
+        <circle cx="16.5" cy="28" r="1.9" />
+        <circle cx="24" cy="28" r="1.9" />
+        <circle cx="31.5" cy="28" r="1.9" />
+        <circle cx="16.5" cy="34" r="1.9" />
+        <circle cx="24" cy="34" r="1.9" />
+      </g>
+    </g>
+  );
+}
+
+/** 星标：收藏 / 重点 */
+function Star() {
+  return (
+    <g {...INK_STROKE}>
+      <path d="M24 7 l4.7 11.3 12.3 1 -9.3 8.1 2.8 12 -10.5-6.4 -10.5 6.4 2.8-12 -9.3-8.1 12.3-1 Z" fill="#F5B840" strokeWidth={2.8} />
+    </g>
+  );
+}
+
+/** 链接：外链 / 引用 */
+function Link() {
+  return (
+    <g {...INK_STROKE} fill="none">
+      <path d="M21 27 L27 21" stroke="#F5B840" strokeWidth={3.2} />
+      <path d="M18.6 25.4 l-2.4 2.4 a6.4 6.4 0 0 0 9 9 l2.4-2.4" strokeWidth={3} />
+      <path d="M29.4 22.6 l2.4-2.4 a6.4 6.4 0 0 0 -9-9 l-2.4 2.4" strokeWidth={3} />
+    </g>
+  );
+}
+
+/** 下载 */
+function Download() {
+  return (
+    <g {...INK_STROKE}>
+      <path d="M24 9 V26.5" strokeWidth={3} />
+      <path d="M16.5 19.5 L24 27 L31.5 19.5" fill="none" stroke="#F5B840" strokeWidth={3} />
+      <path d="M11 31 v4 a4 4 0 0 0 4 4 h18 a4 4 0 0 0 4-4 v-4" fill="none" strokeWidth={3} />
+    </g>
+  );
+}
+
+/** 上传 */
+function Upload() {
+  return (
+    <g {...INK_STROKE}>
+      <path d="M24 29 V11.5" strokeWidth={3} />
+      <path d="M16.5 18.5 L24 11 L31.5 18.5" fill="none" stroke="#F5B840" strokeWidth={3} />
+      <path d="M11 31 v4 a4 4 0 0 0 4 4 h18 a4 4 0 0 0 4-4 v-4" fill="none" strokeWidth={3} />
+    </g>
+  );
+}
+
+/** 刷新：重来 / 重建 */
+function Refresh() {
+  return (
+    <g {...INK_STROKE} fill="none">
+      <path d="M33.6 16 a13 13 0 1 0 3.1 11.5" strokeWidth={3} />
+      <path d="M34.5 9.5 v7 h-7" stroke="#F5B840" strokeWidth={3} />
+    </g>
+  );
+}
+
+/** 用户 / 账号 */
+function User() {
+  return (
+    <g {...INK_STROKE}>
+      <circle cx="24" cy="18.5" r="7.5" fill="#F5B840" strokeWidth={3} />
+      <path d="M11.5 39.5 a12.5 12.5 0 0 1 25 0" fill="#FFFDF6" strokeWidth={3} />
+    </g>
+  );
+}
+
+/** 设置（齿轮） */
+function Settings() {
+  return (
+    <g {...INK_STROKE}>
+      <circle cx="24" cy="24" r="10.5" fill="#FFFDF6" strokeWidth={3} />
+      <circle cx="24" cy="24" r="3.8" fill="#F5B840" strokeWidth={2.4} />
+      <g strokeWidth={3}>
+        <path d="M24 6.5 v4" />
+        <path d="M24 37.5 v4" />
+        <path d="M6.5 24 h4" />
+        <path d="M37.5 24 h4" />
+        <path d="M11.6 11.6 l2.9 2.9" />
+        <path d="M33.5 33.5 l2.9 2.9" />
+        <path d="M36.4 11.6 l-2.9 2.9" />
+        <path d="M14.5 33.5 L11.6 36.4" />
+      </g>
+    </g>
+  );
+}
+
+/** 提示 / 信息 */
+function Info() {
+  return (
+    <g {...INK_STROKE}>
+      <circle cx="24" cy="24" r="16" fill="#F5B840" strokeWidth={3} />
+      <circle cx="24" cy="16.5" r="2" fill="currentColor" stroke="none" />
+      <path d="M24 22.5 V33" stroke="#FFFDF6" strokeWidth={3.6} />
+    </g>
+  );
+}
+
+/** 返回：手绘左箭头（替代 ← 字符） */
+function Back() {
+  return (
+    <g {...INK_STROKE}>
+      <path d="M38 24 H12" strokeWidth={3.4} />
+      <path d="M21.5 14 L11 24 L21.5 34" fill="none" stroke="#F5B840" strokeWidth={3.4} />
+    </g>
+  );
+}
+
+/** 指向：手绘右箭头（替代 → 字符） */
+function Arrow() {
+  return (
+    <g {...INK_STROKE}>
+      <path d="M10 24 H36" strokeWidth={3.4} />
+      <path d="M26.5 14 L37 24 L26.5 34" fill="none" stroke="#F5B840" strokeWidth={3.4} />
+    </g>
+  );
+}
+
 const ICONS: Record<string, () => React.JSX.Element> = {
   book: Book,
   pen: Pen,
@@ -266,6 +488,23 @@ const ICONS: Record<string, () => React.JSX.Element> = {
   warn: Warn,
   store: Store,
   tools: Tools,
+  plus: Plus,
+  pencil: Pencil,
+  trash: Trash,
+  close: Close,
+  check: Check,
+  clock: Clock,
+  calendar: Calendar,
+  star: Star,
+  link: Link,
+  download: Download,
+  upload: Upload,
+  refresh: Refresh,
+  user: User,
+  settings: Settings,
+  info: Info,
+  back: Back,
+  arrow: Arrow,
   corn: Corn,
 };
 

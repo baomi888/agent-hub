@@ -118,8 +118,16 @@
   .stat .v{font-family:var(--font-serif);font-size:clamp(24px,6vw,30px);font-weight:700;color:var(--accent-ink);line-height:1.2;}
   .stat .k{font-size:var(--fs-xs);color:var(--text-3);margin-top:3px;}
   .note{font-size:var(--fs-xs);color:var(--text-3);margin-top:10px;line-height:1.7;}
-  .del{background:none;border:none;color:var(--red);cursor:pointer;font-size:15px;padding:2px 6px;border-radius:6px;transition:var(--t-color);}
+  .del{background:none;border:none;color:var(--red);cursor:pointer;padding:3px 6px;border-radius:6px;transition:var(--t-color);display:inline-flex;align-items:center;justify-content:center;line-height:1;}
   .del:hover{background:var(--fill-1);}
+  .del svg{width:15px;height:15px;display:block;}
+  /* 行内编辑按钮：此前没有样式（默认浏览器按钮），补齐为与 .del 同构的中性按钮 */
+  .dl-edit{background:none;border:none;color:var(--text-2);cursor:pointer;padding:3px 6px;border-radius:6px;transition:var(--t-color);display:inline-flex;align-items:center;justify-content:center;line-height:1;}
+  .dl-edit:hover{background:var(--fill-1);color:var(--accent-ink);}
+  .dl-edit svg{width:15px;height:15px;display:block;}
+  /* 正文/页脚里的小图标（替代编辑/工具等字符图标） */
+  .ico-inline{display:inline-flex;vertical-align:-2px;color:var(--accent-ink);}
+  .ico-inline svg{width:13px;height:13px;display:block;}
   .danger{color:var(--red-ink);font-weight:600;}
   .ok{color:var(--success-ink);font-weight:600;}
 
@@ -286,7 +294,7 @@
         <tbody id="rows"></tbody>
       </table>
       <div class="add-row">
-        <button class="btn-import btn-sm" id="add">＋ 添加课程</button>
+        <button class="btn-import btn-sm" id="add"><span class="ico-inline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M12 5.5v13M5.5 12h13"/></svg></span>添加课程</button>
         <button class="btn-import btn-sm" id="sample">载入示例</button>
       </div>
     </div>
@@ -413,7 +421,7 @@
       </div>
       <div class="word-ctrl">
         <button class="btn-import btn-sm" id="wFlip">翻转</button>
-        <button class="btn-new btn-sm" id="wKnow">认识 →</button>
+        <button class="btn-new btn-sm" id="wKnow">认识<span class="ico-inline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12h14.5"/><path d="M13 6.2l5.8 5.8-5.8 5.8"/></svg></span></button>
         <button class="btn-import btn-sm" id="wUnknow">不认识，复习</button>
         <button class="btn-import btn-sm" id="wReset">重来</button>
       </div>
@@ -431,7 +439,7 @@
         <button class="btn-new btn-sm" id="dlAdd">添加</button>
       </div>
       <div id="dlList" style="margin-top:14px"></div>
-      <p class="note">点 ✎ 可随时改名称/日期（编辑完还能再编辑）；剩余 ≤7 天标红提醒，过期显示「已逾期」；临近的自动排前面。数据保存在本机浏览器，下次打开还在。</p>
+      <p class="note">点 <span class="ico-inline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 15.6 17.4 6.2a1.9 1.9 0 0 1 2.7 2.7L10.7 18.3Z" fill="#F5B840" fill-opacity=".9"/><path d="M8 15.6 10.7 18.3 6 19.5Z" fill="#FFFDF6"/></svg></span> 可随时改名称/日期（编辑完还能再编辑）；剩余 ≤7 天标红提醒，过期显示「已逾期」；临近的自动排前面。数据保存在本机浏览器，下次打开还在。</p>
     </div>
   </section>
 
@@ -462,7 +470,7 @@
 
   <footer>
     苞米地笔记本 · 校园工具集预览（6 件本地小工具）<br/>
-    非线上功能 · 后续将接入平台「🎒 校园工具集」入口
+    非线上功能 · 后续将接入平台「<span class="ico-inline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16.6 6.2a3 3 0 0 0-3.9 3.5l-6.2 6.2a1.8 1.8 0 0 0 2.5 2.5l6.2-6.2a3 3 0 0 0 3.5-3.9l-1.7 1.7-1.5-1.5 1.7-1.7Z" fill="#F5B840" fill-opacity=".85"/></svg></span> 校园工具集」入口
   </footer>
 </div>
 
@@ -472,6 +480,11 @@ const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&qu
 const STAR='<svg class="tool-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)"><path d="M12 3.5l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4L3.2 9.2l5.4-.8z" fill="#F5B840" fill-opacity=".5"/></svg>';
 const TARGET='<svg class="tool-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent-ink)"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4" fill="#EF8A56" fill-opacity=".3"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/></svg>';
 const CHECK='<svg class="tool-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="color:var(--success-ink);width:14px;height:14px"><path d="M5 12.5l4 4 10-10"/></svg>';
+/* 与 CornIcon 同一套手绘语言（粗描边 + 圆头圆角 + 玉米金点缀）的小图标，替代编辑/删除/工具等字符图标 */
+const icoTrash='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6.5h16"/><path d="M9.5 6.5V4.8a1.6 1.6 0 0 1 1.6-1.6h1.8a1.6 1.6 0 0 1 1.6 1.6v1.7"/><path d="M6.6 6.5l.8 12.4A2 2 0 0 0 9.4 20.8h5.2a2 2 0 0 0 2-1.9l.8-12.4"/><path d="M10.2 10.2v6.6M13.8 10.2v6.6" stroke-width="1.5" opacity=".45"/></svg>';
+const icoEdit='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 15.6 17.4 6.2a1.9 1.9 0 0 1 2.7 2.7L10.7 18.3Z" fill="#F5B840" fill-opacity=".9"/><path d="M8 15.6 10.7 18.3 6 19.5Z" fill="#FFFDF6"/></svg>';
+const icoClose='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg>';
+const icoTools='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16.6 6.2a3 3 0 0 0-3.9 3.5l-6.2 6.2a1.8 1.8 0 0 0 2.5 2.5l6.2-6.2a3 3 0 0 0 3.5-3.9l-1.7 1.7-1.5-1.5 1.7-1.7Z" fill="#F5B840" fill-opacity=".85"/></svg>';
 
 /* ---------- Tab 切换 ---------- */
 const tabs=document.getElementById('tabs');
@@ -502,7 +515,7 @@ function makeRow(n='',c='',s=''){
     <td><input class="r-credit" type="number" min="0" step="0.5" placeholder="3" value="${c}"></td>
     <td><input class="r-score" type="number" min="0" max="100" step="1" placeholder="85" value="${s}"></td>
     <td style="text-align:center"><span class="r-gpa">—</span></td>
-    <td><button class="del" title="删除">✕</button></td>`;
+    <td style="text-align:center"><button class="del" title="删除" aria-label="删除该行">${icoTrash}</button></td>`;
   tr.querySelector('.del').onclick=()=>{tr.remove();recalc();};
   tr.querySelectorAll('input').forEach(i=>i.addEventListener('input',recalc));
   rowsEl.appendChild(tr);
@@ -715,7 +728,7 @@ wShow();
 
 /* ---------- 倒计时 ---------- */
 const dlList=document.getElementById('dlList'); let dls=[];
-let dlEdit=-1; // 正在行内编辑的卡片下标（-1 = 无）；编辑完保存后还能再点 ✎ 再改
+let dlEdit=-1; // 正在行内编辑的卡片下标（-1 = 无）；编辑完保存后还能再点编辑图标再改
 const DL_KEY='baomi_deadline_v1';
 function dlSave(){
   try{ localStorage.setItem(DL_KEY, JSON.stringify(dls.map(d=>({name:d.name, date:d.date.getTime()})))); }catch(e){}
@@ -758,14 +771,14 @@ function dlRender(){
         <input class="dl-ed-name" value="${esc(d.name)}" maxlength="30" style="flex:1;min-width:110px;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:6px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" />
         <input class="dl-ed-date" type="date" value="${dlDateStr(d.date)}" style="border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:6px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" />
         <button class="btn-import btn-sm dl-ok" data-i="${i}">保存</button>
-        <button class="del" data-cancel="${i}">✕</button>
+        <button class="del" data-cancel="${i}" title="取消" aria-label="取消编辑">${icoClose}</button>
       </div>`;
     }
     return `<div class="dl-item"><span class="dl-name">${esc(d.name)}</span>
       <span style="color:var(--text-3);font-size:var(--fs-xs)">${dlDateStr(d.date)}</span>
       <span class="dl-days ${cls}">${txt}</span>
-      <button class="dl-edit" data-i="${i}" title="编辑（改完还能再改）">✎</button>
-      <button class="del" data-i="${i}">✕</button></div>`;
+      <button class="dl-edit" data-i="${i}" title="编辑（改完还能再改）" aria-label="编辑该事项">${icoEdit}</button>
+      <button class="del" data-i="${i}" title="删除" aria-label="删除该事项">${icoTrash}</button></div>`;
   }).join('');
   dlList.querySelectorAll('.del[data-i]').forEach(b=>b.onclick=()=>{dls.splice(+b.dataset.i,1);dlEdit=-1;dlSave();dlRender();});
   dlList.querySelectorAll('.dl-edit').forEach(b=>b.onclick=()=>{dlEdit=+b.dataset.i;dlRender();const inp=dlList.querySelector('.dl-ed-name');if(inp)inp.focus();});

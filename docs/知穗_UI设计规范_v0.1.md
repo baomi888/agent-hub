@@ -1,0 +1,184 @@
+# 知穗 Agent · UI 设计规范 v0.1
+
+> 本文件是**知穗全站界面的唯一设计基准**。任何页面/组件动工前先读它，交付前按 §7 逐条自查。
+> 所有令牌值**照抄 `frontend/src/app/styles/tokens.css`**，不凭记忆写；类名照抄 `components.css`、图标照抄 `CornIcon.tsx`。
+> 版本：2026-10-13 · 基准工具：oil-ui · 适用范围：`frontend/src/**`、`frontend/public/*.html`、`prototypes/*.html`
+
+---
+
+## 0. 三条铁律（违反即返工）
+
+| # | 铁律 | 说明 |
+|---|---|---|
+| **1** | **全站禁用 emoji 与字符图标** | 界面里不得出现 `🎒 ✎ ✕ ✅ ⚠ ＋ → ★ …` 这类 emoji / 花体字符充当图标。一个都不行。 |
+| **2** | **图标一律走 `CornIcon` 手绘风** | 与「知穗吉祥物」同一套语言：`currentColor` 粗描边、圆头圆角、玉米金点缀。不许引入第三方向标库（lucide / heroicons / feather 等）。 |
+| **3** | **金色只做点缀** | 金 = 「选中的 / 这是主操作」；hover / focus 一律中性色（`--fill-*`），**不用金色表示"鼠标在上面"**。浅底小字用 `--accent-ink`，不用 `--accent`。 |
+
+> 禁忌（历史教训，别再犯）：荧光黄、粗黑描边、直角、深色大面积、玻璃拟态、白色高光线/高光圆球。
+
+---
+
+## 1. 设计说明
+
+### 1.1 用户与任务
+大学生用户，在**备考 / 求职**两个场景里，把学习资料、对话、工具集中到一个工作台上。核心任务只有一件：**让知穗读懂自己的资料并给出可追溯的回答**。
+
+### 1.2 页面主动作（每个页面只允许一个"实色主操作"）
+| 页面 | 主动作 | 主操作样式 |
+|---|---|---|
+| 首页 / 对话 | 开始提问 | 输入框发送（深棕墨实心） |
+| 侧栏 | 新建对话 / 导入会话 | `.btn-new`（**深棕墨实底**，hover 才转金） |
+| 知识库面板 | 喂资料（上传 / 联网） | `.btn-import`（描边 + `::before` 金点） |
+| 工具集 | 打开某个小工具 | 卡片整块可点，不加按钮 |
+| 设置 / 委托 / 总结 / 打卡 | 保存 / 提交 | 同 `.btn-new` 实心 |
+
+### 1.3 视觉关系（层级靠什么分区）
+- 明度只有**三级**（`--step-0/1/2`），面板与画布**同处一档**，这一层的分界交给 **1px 描边**，不靠明度差。
+- 「抬起」只靠 `--shadow-1`（贴纸薄卡）/ `--shadow-2`（浮层）两档，**不出现重投影**。
+- 圆角四档 `xs/sm/md/lg`，胶囊 `999px`、正圆 `50%`，**不许出现直角**。
+
+### 1.4 关键状态（每个交互件必须定义全）
+每个可交互元素都要给出：**默认 / hover / active / focus-visible / disabled**。
+每个数据区域都要给出：**空状态 / 加载中 / 错误**（见 §5）。
+> 空状态统一「玉米线描插画 + 一句引导」，**不用 emoji**；加载用现成 `.skel-block` 骨架；错误用**气泡/内联**，不用全局弹窗。
+
+---
+
+## 2. 设计令牌（真实值，来自 `tokens.css`）
+
+### 2.1 纸面（明度三级阶梯）
+| 令牌 | 明 | 用途 |
+|---|---|---|
+| `--step-0 #EDE4C8` | 最底层纸 / 侧栏 | `--bg` `--bg-sidebar` |
+| `--step-1 #F5F0E1` | 主画布 / 面板 | `--bg-canvas` `--panel` `--surface` |
+| `--step-2 #FDFAF2` | 抬起的卡片 | `--card-bg` |
+
+### 2.2 墨与文字
+| 令牌 | 值 | 用途 |
+|---|---|---|
+| `--ink` | `#3D2F1A` | 主文字 / 描边基准 |
+| `--text-2` | `#5A4C33` | 次级文字（6.3:1） |
+| `--text-3` | `#6F6044` | 弱文字（4.9:1） |
+
+### 2.3 金色（点缀）
+| 令牌 | 值 | 用途 |
+|---|---|---|
+| `--accent` | `#C8892A` | **只做实心填充 / 图形**（浅底文字仅 2.6:1） |
+| `--accent-ink` | `#875B10` | **纸底上的金色文字**（10–12px 眉题/序号必须用它，4.68:1 过 AA） |
+| `--accent-soft` | `rgba(200,137,42,.10)` | 选中态极淡金底 |
+
+### 2.4 语义色（每个两档：本名=实心压白字，`-ink`=纸底文字）
+| 语义 | 本名 | `-ink` |
+|---|---|---|
+| 成功 | `--success #1E7A46` | `--success-ink #2A6B45` |
+| 危险 | `--red #B4472F` / `--red-solid` | `--red-ink #A03E28` |
+| 警告 | `--warning #8A5A0A` | `--warning-ink #7A4E08` |
+| 信息 | `--info #2A5A8A` | `--info-ink #2A5A8A` |
+
+### 2.5 填充四级（所有"非纸面、非实色"的底都从这里取，**不带金**）
+`--fill-1`（按下/最重）`rgba(61,47,26,.12)` › `--fill-2`（hover）`.07` › `--fill-3`（静态淡底）`.035` › `--fill-4`（分隔/斑马纹）`.018`
+
+### 2.6 描边 / 输入框 / 投影
+`--line rgba(61,47,26,.10)` · `--line-strong rgba(61,47,26,.25)` · `--input-border #D8CCB0`
+`--shadow-1 0 1px 2px rgba(80,60,30,.06)` · `--shadow-2 0 2px 8px rgba(80,60,30,.10)`
+
+### 2.7 圆角 / 字号 / 行高 / 字距 / 间距
+- 圆角：`--radius-xs 4` · `sm 8` · `md 12` · `lg 16`
+- 字号（只五档 + 两例外）：`--fs-badge 10`（角标）｜`xs 11`｜`sm 12`｜`md 13`｜`lg 14`（正文基准）｜`xl 16`｜`--fs-title 20`（衬线标题）
+- 行高：`--lh-tight 1.4`（标题）｜`--lh-body 1.65`（说明）｜`--lh-loose 1.9`（对话正文）
+- 字距：`--ls-wide .2em`（中文眉题）｜`--ls-mid .06em`（按钮/标签）｜`--ls-tight .04em`（正文/链接）
+- 间距：`--space-2/3/4/5/6/7/8/10/12/14/16/20/24/32`
+- 阅读栏宽：`--measure 720px`（≥1600px 屏 → 800px）
+
+### 2.8 字体
+- 正文 `--font-sans`：`"Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui`
+- 标题 `--font-serif`：**首选 `"LXGW WenKai Screen"`** → `"Noto Serif SC"` → `"Songti SC"` → `"SimSun"`
+
+### 2.9 过渡（只两档，别再复制粘贴六属性全包）
+`--t-color`：background/border/color/opacity 各 0.14s ｜ `--t-move`：transform+box-shadow 0.22s（**只给两个主操作组件**）
+
+### 2.10 深色（`.dark`）
+同三级阶梯 `#1A1610 / #211B11 / #292217`，`--ink #EDE0C4`，`--accent #E0A03A`。
+**所有组件必须同时通过明暗两套**——手写颜色一律走 var()，不许硬编码纸面/墨色。
+
+---
+
+## 3. 图标系统 `CornIcon`
+
+文件：`frontend/src/components/CornIcon.tsx`（`viewBox="0 0 48 48"`，`stroke="currentColor"`，`strokeLinecap/Join="round"`）
+
+- **描边**：继承 `currentColor`（调用处外层 `color` 决定，一般是墨色）→ hover 变色、深浅底自动适配。
+- **点缀填色**：玉米金 `#F5B840` 主填；叶绿 `#7C9A54/#8FAF62`、陶橙 `#EF8A56`、纸白 `#FFFDF6` 辅助。
+- **形态**：粗描边、大圆角、Q 版手绘，**无直角锐角**。
+- **兜底**：未知 `name`（含历史残留 emoji）一律回退 `corn`（mini 知穗），**保证永不显示成系统 emoji**。
+
+**现有 27 个 name**（按用途分组）：
+- 场景：`book` 考研复习 · `pen` 论文写作(笔尖) · `notes` 课程笔记 · `bolt` 期末冲刺 · `briefcase` 求职简历 · `globe` 四六级/雅思 · `target` 社团策划 · `search` 文献阅读
+- 功能：`store` 模板广场 · `tools` 校园工具集 · `bulb` 理念提示 · `warn` 警告 · `info` 提示
+- 操作：`plus` 新增 · `pencil` 编辑 · `trash` 删除 · `close` 关闭 · `check` 确认 · `refresh` 重来 · `upload` 上传 · `download` 下载 · `link` 外链
+- 元信息：`clock` 倒计时 · `calendar` 日期 · `star` 收藏 · `user` 账号 · `settings` 设置
+- 兜底：`corn` mini 知穗
+
+**用法**：`<CornIcon name="trash" className="h-5 w-5" />`
+新增图标时：① 沿用同一 `INK_STROKE`；② 主色填 `#F5B840`；③ 注册进 `ICONS` 与 `CornIconName` 联合类型；④ **同步更新本表**。
+
+---
+
+## 4. 组件复用清单（`components.css` 真实类名，优先复用，别另造）
+
+| 类 | 用途 |
+|---|---|
+| `.eyebrow` | 中文小眉题（金色，用 `--accent-ink`；`--ls-wide`） |
+| `.btn-new` | **主操作实心按钮**（深棕墨底，hover 转金） |
+| `.btn-import` | 次操作描边按钮（`::before` 金点） |
+| `.feed-btn` | 知识库「＋ 我的文件 / ＋ 网上的资料」二选一 |
+| `.kb-chip` / `.kb-chip .dot` | 顶部已绑知识库胶囊 |
+| `.usage-chip` | 用量胶囊 |
+| `.icon-btn` | 图标按钮（`.icon-btn svg` 有统一尺寸） |
+| `.session` / `.session-name` / `.session-kb` | 会话项（含 `.active`） |
+| `.session-swipe-wrap` / `.session-swipe-del` | 手机左滑删除（`.open` 露出，宽 76px） |
+| `.search` | 搜索框（`::after` 描边） |
+| `.status .dot` | 服务状态点 |
+| `.import-progress-bar > span` | 导入进度条 |
+| `.skel-block` | 骨架屏（加载态统一用它） |
+| `.md*` | AI 回答 Markdown 排版（`.md-p/.md-h/.md-ul/.md-ol/.md-table/.md-pre/.md-quote/.md-code/.md-hr`） |
+| `.inline-link` | 正文内链接（含回答里的可点外链） |
+| `.corn-logo` / `.brand-sub` | 品牌 logo 与副标 |
+
+---
+
+## 5. 页面级约定
+
+### 5.1 三栏骨架
+`Sidebar`（左 · 会话）｜`ChatArea`（中 · 对话）｜`KnowledgePanel`（右 · 资料库）。
+断点：**wide**（≥1024 三栏常驻）· **mid**（右侧抽屉）· **narrow**（两侧皆抽屉 + 遮罩）。
+
+### 5.2 空 / 加载 / 错误
+- **空**：玉米线描插画 + 一句引导动作（如"还没对话，问一句试试"），无 emoji。
+- **加载**：`.skel-block` 骨架，尺寸与真实内容一致（避免跳动）。
+- **错误**：内联/气泡级提示；**429 要翻译成人话**——`api.ts` 会把 `retry_after` 拼成"（约 N 秒后可重试）"，配额超限直接用后端「每日问答已达上限…」文案。
+
+### 5.3 移动端
+- 会话左滑露出红色删除（`touch-action: pan-y`，滑过 1/3 吸附，须处理 `onTouchCancel` 复位）。
+- 欢迎页必须**一屏显示全**（logo + 场景卡 + 入口，短视口 `max-height:800px` 再缩一档）。
+- 触控目标 ≥ 40px。
+
+---
+
+## 6. 与现有实现的关系
+本规范是**既有系统的书面化**，不是推倒重来：现有 `tokens.css` / `components.css` / `CornIcon.tsx` 已基本符合，本轮只做了 ① 扩全图标集（+15）、② 清掉 `tools.html` 与原型页残留的 `✎ ✕ 🎒` 字符、③ 全角 `＋` 换手绘加号。**新页面照此新增即可。**
+
+---
+
+## 7. 交付自查清单（每个页面/组件过一遍）
+
+- [ ] 界面里**没有任何 emoji / 花体字符当图标**（含 title、aria-label、页脚）
+- [ ] 所有图标来自 `CornIcon`，风格与吉祥物一致（粗描边 + 圆头圆角 + 金点缀）
+- [ ] 颜色**全部走令牌 var()**，无硬编码纸面/墨色；浅底小字用 `-ink` 档
+- [ ] 金色只出现在「选中 / 主操作」，hover/focus 用 `--fill-*`
+- [ ] 圆角落在四档内，无直角；投影只 `--shadow-1/2`
+- [ ] 明暗两套主题都过（`.dark` 下文字可读）
+- [ ] 交互件定义了 hover/active/focus-visible/disabled
+- [ ] 数据区定义了**空 / 加载 / 错误**三态
+- [ ] `tsc --noEmit` Exit 0
+- [ ] `grep` 复查：`[🎒✎✕✅⚠＋★]` 在界面文件中为 0 命中

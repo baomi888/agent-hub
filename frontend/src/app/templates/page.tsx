@@ -103,7 +103,8 @@ export default function TemplatesPage() {
             className="icon-btn shrink-0 border border-line"
             aria-label="返回工作台"
           >
-            ← 工作台
+            <CornIcon name="back" className="h-4 w-4" />
+            工作台
           </Link>
         </div>
       </header>

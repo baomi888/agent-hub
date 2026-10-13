@@ -46,17 +46,31 @@ export function useKnowledge(showToast: ShowToast, chunkSize: number, chunkOverl
 
   // 上传文档建库：先把中文名解析为安全 kb_id，再上传（切片参数用当前设置）
   const uploadFiles = async (kbName: string, files: File[]) => {
+    // 本次是否新建了库：上传失败要把它删掉，否则列表里会多一个名字相同、里面空空的库
+    let createdId: string | null = null;
     try {
       // 名字对上已有库则复用，避免手打差一点就新建同名库
       const norm = kbName.trim().toLowerCase();
       const existing = kbs.find((k) => (k.name || "").trim().toLowerCase() === norm);
-      const kb_id = existing ? existing.kb_id : (await api.createKb(kbName)).kb_id;
+      let kb_id: string;
+      if (existing) {
+        kb_id = existing.kb_id;
+      } else {
+        kb_id = (await api.createKb(kbName)).kb_id;
+        createdId = kb_id;
+      }
       const r = await api.uploadFiles(kb_id, files, chunkSize, chunkOverlap);
       showToast("success", `已导入 ${r.chunks} 个片段到「${kbName}」`);
-      refreshKbs();
     } catch (e) {
+      // 回滚空壳库（复用已有库时不删，那里面可能有别的文件）
+      if (createdId) {
+        await api.deleteKb(createdId).catch(() => {});
+        createdId = null;
+      }
       const msg = e instanceof Error ? e.message : "上传失败，请稍后重试";
       showToast("error", msg);
+    } finally {
+      refreshKbs();
     }
   };
 

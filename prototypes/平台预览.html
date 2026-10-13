@@ -77,7 +77,10 @@
   }
   .card:hover{border-color:var(--accent); box-shadow:var(--shadow-2); transform:translateY(-2px);}
   .card .head{display:flex; align-items:flex-start; gap:12px;}
-  .icon-box{
+  .icon-box svg{width:25px;height:25px;display:block;color:var(--accent-ink);}
+  .ico-i{display:inline-flex;vertical-align:-2px;color:var(--accent-ink);}
+  .ico-i svg{width:14px;height:14px;display:block;}
+.icon-box{
     width:44px; height:44px; flex:0 0 44px; display:flex; align-items:center; justify-content:center;
     border-radius:10px; background:var(--fill-2); font-size:22px;
   }
@@ -169,22 +172,22 @@
   </header>
 
   <nav class="tabs" id="tabs">
-    <div class="tab active" data-tab="plaza">🏪 模板广场</div>
-    <div class="tab" data-tab="tools">🛠️ 校园工具集</div>
-    <div class="tab" data-tab="share">👥 分享广场</div>
-    <div class="tab" data-tab="contest">🏆 校内大赛</div>
+    <div class="tab active" data-tab="plaza"><span class="ico-i"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.5 21 V37.5 C11.5 39.4 13 41 15 41 H33 C35 41 36.5 39.4 36.5 37.5 V21" fill="#FFFDF6" stroke-width="3" /> <path d="M20 41 V31 C20 29.3 21.3 28 23 28 H25 C26.7 28 28 29.3 28 31 V41" fill="none" stroke-width="2.4" /> <path d="M15.5 25.5 H18.5" stroke-width="2.2" opacity="0.35" /> <path d="M29.5 25.5 H32.5" stroke-width="2.2" opacity="0.35" /> <path d="M9.5 14.5 C9.5 11 12 8.5 15.5 8.5 H32.5 C36 8.5 38.5 11 38.5 14.5 V16.5 Q34.75 20.5 31 16.5 Q27.25 20.5 23.5 16.5 Q19.75 20.5 16 16.5 Q12.25 20.5 9.5 16.5 Z" fill="#F5B840" stroke-width="2.8" /></svg></span> 模板广场</div>
+    <div class="tab" data-tab="tools"><span class="ico-i"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M33.5 12.5a6 6 0 0 0-7.9 7.1L11.5 33.8a3.6 3.6 0 0 0 5.1 5.1l13.9-14.1a6 6 0 0 0 7.1-7.9l-3.4 3.4-2.9-2.9 3.4-3.4Z" fill="#F5B840" stroke-width="3" /> <path d="M29 16.5 C30.2 14.6 32.8 14.4 34.4 16 C36 17.6 36.2 20.2 34.4 21.4" fill="none" stroke-width="2.2" opacity="0.45" /></svg></span> 校园工具集</div>
+    <div class="tab" data-tab="share"><span class="ico-i"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">fill="none"> <path d="M21 27 L27 21" stroke="#F5B840" stroke-width="3.2" /> <path d="M18.6 25.4 l-2.4 2.4 a6.4 6.4 0 0 0 9 9 l2.4-2.4" stroke-width="3" /> <path d="M29.4 22.6 l2.4-2.4 a6.4 6.4 0 0 0 -9-9 l-2.4 2.4" stroke-width="3" /></svg></span> 分享广场</div>
+    <div class="tab" data-tab="contest"><span class="ico-i"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 7 l4.7 11.3 12.3 1 -9.3 8.1 2.8 12 -10.5-6.4 -10.5 6.4 2.8-12 -9.3-8.1 12.3-1 Z" fill="#F5B840" stroke-width="2.8" /></svg></span> 校内大赛</div>
   </nav>
 
   <!-- ===================== 模板广场 ===================== -->
   <section class="panel active" id="plaza">
     <div class="banner">
-      💡 这里每个模板都帮你快速上手，但<b>答案要你自己来</b>——我们做的是为学习而生的 AI 素养平台，不是替你写答案的工具。
+      <span class="ico-i"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g stroke-width="2.4" opacity="0.55"> <path d="M24 2.5 V5" /> <path d="M10.5 8 L12.5 10.2" /> <path d="M37.5 8 L35.5 10.2" /> </g> <path d="M24 7 C17 7 12.5 12.2 12.5 18.4 C12.5 22.6 15 25.4 16.9 27.8 C18.1 29.3 18.8 30.6 18.8 32.5 H29.2 C29.2 30.6 29.9 29.3 31.1 27.8 C33 25.4 35.5 22.6 35.5 18.4 C35.5 12.2 31 7 24 7 Z" fill="#F5B840" stroke-width="3" /> <path d="M21 22 C21 19 22.3 17.5 24 17.5 C25.7 17.5 27 19 27 22" fill="none" stroke-width="2.2" opacity="0.5" /> <g stroke-width="2.6"> <path d="M19.5 36 H28.5" /> <path d="M20.5 40 H27.5" /> </g></svg></span> 这里每个模板都帮你快速上手，但<b>答案要你自己来</b>——我们做的是为学习而生的 AI 素养平台，不是替你写答案的工具。
     </div>
 
     <div class="group-head"><span class="eyebrow accent">升学规划</span><span class="rule"></span></div>
     <div class="grid" data-cat="升学规划">
       <article class="card">
-        <div class="head"><div class="icon-box">📚</div><div><div class="eyebrow accent">升学规划</div><h3>考研复习助手</h3></div></div>
+        <div class="head"><div class="icon-box"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 13 C20 9.5 13.5 8.5 8 10.5 V35 C13.5 33 20 34 24 37.5 C28 34 34.5 33 40 35 V10.5 C34.5 8.5 28 9.5 24 13 Z" fill="#FFFDF6" stroke-width="3" /> <path d="M24 13 V37.5" stroke-width="2.6" /> <g stroke-width="2.2" opacity="0.32"> <path d="M12 18 C15 17 18 17.5 20.5 19" fill="none" /> <path d="M27.5 19 C30 17.5 33 17 36 18" fill="none" /> <path d="M12 24 C15 23 18 23.5 20.5 25" fill="none" /> <path d="M27.5 25 C30 23.5 33 23 36 24" fill="none" /> </g> <path d="M30.5 9.3 V19 L34 15.8 L37.5 19 V8.6 Z" fill="#F5B840" stroke-width="2.4" /></svg></div><div><div class="eyebrow accent">升学规划</div><h3>考研复习助手</h3></div></div>
         <div class="tagline">把复习资料变成专属题库与时间表</div>
         <p class="desc">上传你的专业课笔记、真题与大纲，它会帮你拆解考点、规划每月节奏、生成自测题。</p>
         <div class="chips"><span class="chip">时间规划</span><span class="chip">真题解析</span><span class="chip">考点梳理</span></div>
@@ -196,7 +199,7 @@
     <div class="group-head"><span class="eyebrow info">学术科研</span><span class="rule"></span></div>
     <div class="grid" data-cat="学术科研">
       <article class="card">
-        <div class="head"><div class="icon-box">📝</div><div><div class="eyebrow info">学术科研</div><h3>论文写作助手</h3></div></div>
+        <div class="head"><div class="icon-box"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 44 C17.5 37 13.5 29 13.5 22 C13.5 14.5 18 9.5 24 9.5 C30 9.5 34.5 14.5 34.5 22 C34.5 29 30.5 37 24 44 Z" fill="#F5B840" stroke-width="3" /> <path d="M24 40 V27" stroke-width="2.6" /> <circle cx="24" cy="24.5" r="2.4" fill="#FFFDF6" stroke-width="2.2" /> <path d="M17.5 15 C19.5 13.4 21.8 12.8 24 12.8 C26.2 12.8 28.5 13.4 30.5 15" fill="none" stroke-width="2.2" opacity="0.4" /></svg></div><div><div class="eyebrow info">学术科研</div><h3>论文写作助手</h3></div></div>
         <div class="tagline">从选题到润色，理清你的论证链</div>
         <p class="desc">把参考文献、导师意见、自己的草稿放进知识库，它帮你梳理论文结构、找逻辑漏洞、润色表达。</p>
         <div class="chips"><span class="chip">结构梳理</span><span class="chip">文献综述</span><span class="chip">学术润色</span></div>
@@ -204,7 +207,7 @@
         <button class="btn-new" onclick="toast('已在真实版本上线：点「使用模板」自动建知识库+会话')">使用模板</button>
       </article>
       <article class="card">
-        <div class="head"><div class="icon-box">🔍</div><div><div class="eyebrow info">学术科研</div><h3>文献阅读助手</h3></div></div>
+        <div class="head"><div class="icon-box"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="21" cy="21" r="12.5" fill="#FFFDF6" stroke-width="3" /> <path d="M15.5 18.5 C16.6 16 19 14.3 21.5 14.2" stroke="#F5B840" stroke-width="2.8" fill="none" /> <path d="M16 24 H26" stroke-width="2.2" opacity="0.32" /> <path d="M30.5 30.5 L40.5 40.5" stroke-width="3.6" /></svg></div><div><div class="eyebrow info">学术科研</div><h3>文献阅读助手</h3></div></div>
         <div class="tagline">半小时读懂一篇硬核论文</div>
         <p class="desc">把 PDF 论文放进知识库，它帮你三句话概括核心、拆解方法、对比相关文献、提炼可复用思路。</p>
         <div class="chips"><span class="chip">核心概括</span><span class="chip">方法拆解</span><span class="chip">文献对比</span></div>
@@ -216,7 +219,7 @@
     <div class="group-head"><span class="eyebrow success">学习备考</span><span class="rule"></span></div>
     <div class="grid" data-cat="学习备考">
       <article class="card">
-        <div class="head"><div class="icon-box">🗒️</div><div><div class="eyebrow success">学习备考</div><h3>课程笔记整理</h3></div></div>
+        <div class="head"><div class="icon-box"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="11" y="10" width="26" height="31" rx="4.5" fill="#FFFDF6" stroke-width="3" /> <g stroke-width="2.4"> <path d="M16.5 10 V5.5" /> <path d="M24 10 V5.5" /> <path d="M31.5 10 V5.5" /> </g> <path d="M16.5 21 H31.5" stroke="#F5B840" stroke-width="3" /> <g stroke-width="2.2" opacity="0.32"> <path d="M16.5 27 H31.5" /> <path d="M16.5 33 H26.5" /> </g></svg></div><div><div class="eyebrow success">学习备考</div><h3>课程笔记整理</h3></div></div>
         <div class="tagline">散乱笔记一键变结构化大纲</div>
         <p class="desc">上传课堂录音转写、截图或零散笔记，它帮你提炼要点、生成思维导图式大纲与复习卡片。</p>
         <div class="chips"><span class="chip">要点提炼</span><span class="chip">大纲生成</span><span class="chip">复习卡片</span></div>
@@ -224,7 +227,7 @@
         <button class="btn-new" onclick="toast('已在真实版本上线：点「使用模板」自动建知识库+会话')">使用模板</button>
       </article>
       <article class="card">
-        <div class="head"><div class="icon-box">⚡</div><div><div class="eyebrow success">学习备考</div><h3>期末冲刺教练</h3></div></div>
+        <div class="head"><div class="icon-box"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M26.5 4.5 L12.5 26.5 H21.5 L19.5 43.5 L35.5 19.5 H26 Z" fill="#F5B840" stroke-width="3" /></svg></div><div><div class="eyebrow success">学习备考</div><h3>期末冲刺教练</h3></div></div>
         <div class="tagline">按你上传的重点出模拟自测</div>
         <p class="desc">把老师的划重点、往年卷、课件放进去，它按章节出选择/简答/论述题，并给出评分要点。</p>
         <div class="chips"><span class="chip">自测题</span><span class="chip">查漏补缺</span><span class="chip">评分要点</span></div>
@@ -236,7 +239,7 @@
     <div class="group-head"><span class="eyebrow warning">求职发展</span><span class="rule"></span></div>
     <div class="grid" data-cat="求职发展">
       <article class="card">
-        <div class="head"><div class="icon-box">💼</div><div><div class="eyebrow warning">求职发展</div><h3>求职简历与面试</h3></div></div>
+        <div class="head"><div class="icon-box"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18.5 16.5 V12.5 C18.5 10.8 19.8 9.5 21.5 9.5 H26.5 C28.2 9.5 29.5 10.8 29.5 12.5 V16.5" fill="none" stroke-width="2.8" /> <rect x="8" y="16.5" width="32" height="22.5" rx="4.5" fill="#F5B840" stroke-width="3" /> <rect x="21" y="24" width="6" height="5.5" rx="1.8" fill="#FFFDF6" stroke-width="2.2" /></svg></div><div><div class="eyebrow warning">求职发展</div><h3>求职简历与面试</h3></div></div>
         <div class="tagline">把经历讲成 HR 想听的故事</div>
         <p class="desc">上传你的项目经历与 JD，它帮你 STAR 化改写简历、模拟面试提问并给出应答思路。</p>
         <div class="chips"><span class="chip">STAR 改写</span><span class="chip">模拟面试</span><span class="chip">JD 匹配</span></div>
@@ -248,7 +251,7 @@
     <div class="group-head"><span class="eyebrow info">语言提升</span><span class="rule"></span></div>
     <div class="grid" data-cat="语言提升">
       <article class="card">
-        <div class="head"><div class="icon-box">🌐</div><div><div class="eyebrow info">语言提升</div><h3>四六级 / 雅思备考</h3></div></div>
+        <div class="head"><div class="icon-box"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="24" cy="24" r="16" fill="#FFFDF6" stroke-width="3" /> <ellipse cx="24" cy="24" rx="7" ry="16" fill="none" stroke-width="2.2" opacity="0.45" /> <path d="M9.5 19 C14 17.2 34 17.2 38.5 19" fill="none" stroke-width="2.2" opacity="0.45" /> <path d="M9.5 29 C14 30.8 34 30.8 38.5 29" fill="none" stroke-width="2.2" opacity="0.45" /> <path d="M8.4 24 H39.6" stroke="#F5B840" stroke-width="2.8" /></svg></div><div><div class="eyebrow info">语言提升</div><h3>四六级 / 雅思备考</h3></div></div>
         <div class="tagline">作文批改 + 口语陪练 + 词汇本</div>
         <p class="desc">上传你的英语作文让它逐句批改，或开口语陪练模式练 IELTS 话题；它还能按错题生成词汇本。</p>
         <div class="chips"><span class="chip">作文批改</span><span class="chip">口语陪练</span><span class="chip">词汇本</span></div>
@@ -260,7 +263,7 @@
     <div class="group-head"><span class="eyebrow accent">校园生活</span><span class="rule"></span></div>
     <div class="grid" data-cat="校园生活">
       <article class="card">
-        <div class="head"><div class="icon-box">🎯</div><div><div class="eyebrow accent">校园生活</div><h3>社团与活动策划</h3></div></div>
+        <div class="head"><div class="icon-box"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="24" cy="24" r="15.5" fill="#F5B840" stroke-width="3" /> <circle cx="24" cy="24" r="9.3" fill="#FFFDF6" stroke-width="2.6" /> <circle cx="24" cy="24" r="3.8" fill="#EF8A56" stroke-width="2.2" /></svg></div><div><div class="eyebrow accent">校园生活</div><h3>社团与活动策划</h3></div></div>
         <div class="tagline">从脑暴到执行清单一站搞定</div>
         <p class="desc">迎新、比赛、志愿活动都能用：它帮你写策划书、预算表、分工与时间线，还能出宣传文案。</p>
         <div class="chips"><span class="chip">策划书</span><span class="chip">预算分工</span><span class="chip">宣传文案</span></div>
@@ -273,19 +276,19 @@
   <!-- ===================== 校园工具集 ===================== -->
   <section class="panel" id="tools">
     <div class="banner">
-      🛠️ <b>工具集是日常使用频率最高的层</b>——把重复、繁琐的学习动作交给 AI，你只管思考。每个工具都能直接调用你已上传的私有知识库。
+      <span class="ico-i"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M33.5 12.5a6 6 0 0 0-7.9 7.1L11.5 33.8a3.6 3.6 0 0 0 5.1 5.1l13.9-14.1a6 6 0 0 0 7.1-7.9l-3.4 3.4-2.9-2.9 3.4-3.4Z" fill="#F5B840" stroke-width="3" /> <path d="M29 16.5 C30.2 14.6 32.8 14.4 34.4 16 C36 17.6 36.2 20.2 34.4 21.4" fill="none" stroke-width="2.2" opacity="0.45" /></svg></span> <b>工具集是日常使用频率最高的层</b>——把重复、繁琐的学习动作交给 AI，你只管思考。每个工具都能直接调用你已上传的私有知识库。
     </div>
     <div class="group-head"><span class="eyebrow info">学术科研</span><span class="rule"></span></div>
     <div class="grid">
       <article class="card">
-        <div class="head"><div class="icon-box">📄</div><div><div class="eyebrow info">学术科研</div><h3>文献一键抓取</h3></div></div>
+        <div class="head"><div class="icon-box"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 9 V26.5" stroke-width="3" /> <path d="M16.5 19.5 L24 27 L31.5 19.5" fill="none" stroke="#F5B840" stroke-width="3" /> <path d="M11 31 v4 a4 4 0 0 0 4 4 h18 a4 4 0 0 0 4-4 v-4" fill="none" stroke-width="3" /></svg></div><div><div class="eyebrow info">学术科研</div><h3>文献一键抓取</h3></div></div>
         <div class="tagline">粘贴 arXiv / 知网 / PubMed 链接即读</div>
         <p class="desc">输入论文 URL，自动抓取全文、提取核心贡献、研究方法与可引用格式，直接进你的文献库。</p>
         <div class="chips"><span class="chip">URL 抓取</span><span class="chip">核心提炼</span><span class="chip">引用格式</span></div>
         <button class="btn-new" onclick="toast('工具集为预览原型，真实版将在下一轮接入 Agent 工具')">试试</button>
       </article>
       <article class="card">
-        <div class="head"><div class="icon-box">✍️</div><div><div class="eyebrow info">学术科研</div><h3>论文降重润色</h3></div></div>
+        <div class="head"><div class="icon-box"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 44 C17.5 37 13.5 29 13.5 22 C13.5 14.5 18 9.5 24 9.5 C30 9.5 34.5 14.5 34.5 22 C34.5 29 30.5 37 24 44 Z" fill="#F5B840" stroke-width="3" /> <path d="M24 40 V27" stroke-width="2.6" /> <circle cx="24" cy="24.5" r="2.4" fill="#FFFDF6" stroke-width="2.2" /> <path d="M17.5 15 C19.5 13.4 21.8 12.8 24 12.8 C26.2 12.8 28.5 13.4 30.5 15" fill="none" stroke-width="2.2" opacity="0.4" /></svg></div><div><div class="eyebrow info">学术科研</div><h3>论文降重润色</h3></div></div>
         <div class="tagline">基于你的私有库改写建议</div>
         <p class="desc">把草稿放进知识库，它给出不偏离原意的同义改写、句式优化与学术表达建议，而非替你代写。</p>
         <div class="chips"><span class="chip">同义改写</span><span class="chip">句式优化</span><span class="chip">私有库</span></div>
@@ -296,14 +299,14 @@
     <div class="group-head"><span class="eyebrow warning">求职发展</span><span class="rule"></span></div>
     <div class="grid">
       <article class="card">
-        <div class="head"><div class="icon-box">📋</div><div><div class="eyebrow warning">求职发展</div><h3>JD 解析与匹配</h3></div></div>
+        <div class="head"><div class="icon-box"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="11" y="10" width="26" height="31" rx="4.5" fill="#FFFDF6" stroke-width="3" /> <g stroke-width="2.4"> <path d="M16.5 10 V5.5" /> <path d="M24 10 V5.5" /> <path d="M31.5 10 V5.5" /> </g> <path d="M16.5 21 H31.5" stroke="#F5B840" stroke-width="3" /> <g stroke-width="2.2" opacity="0.32"> <path d="M16.5 27 H31.5" /> <path d="M16.5 33 H26.5" /> </g></svg></div><div><div class="eyebrow warning">求职发展</div><h3>JD 解析与匹配</h3></div></div>
         <div class="tagline">粘贴招聘 JD，拆能力、算匹配</div>
         <p class="desc">上传目标岗位 JD，它拆解能力要求、对照你的简历素材给出匹配度，并列出准备优先级。</p>
         <div class="chips"><span class="chip">能力拆解</span><span class="chip">匹配度</span><span class="chip">准备建议</span></div>
         <button class="btn-new" onclick="toast('工具集为预览原型，真实版将在下一轮接入 Agent 工具')">试试</button>
       </article>
       <article class="card">
-        <div class="head"><div class="icon-box">📝</div><div><div class="eyebrow warning">求职发展</div><h3>简历诊断</h3></div></div>
+        <div class="head"><div class="icon-box"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 44 C17.5 37 13.5 29 13.5 22 C13.5 14.5 18 9.5 24 9.5 C30 9.5 34.5 14.5 34.5 22 C34.5 29 30.5 37 24 44 Z" fill="#F5B840" stroke-width="3" /> <path d="M24 40 V27" stroke-width="2.6" /> <circle cx="24" cy="24.5" r="2.4" fill="#FFFDF6" stroke-width="2.2" /> <path d="M17.5 15 C19.5 13.4 21.8 12.8 24 12.8 C26.2 12.8 28.5 13.4 30.5 15" fill="none" stroke-width="2.2" opacity="0.4" /></svg></div><div><div class="eyebrow warning">求职发展</div><h3>简历诊断</h3></div></div>
         <div class="tagline">对照目标 JD 给评分与改写</div>
         <p class="desc">上传简历 + JD，它按 HR 视角指出薄弱项、给出 STAR 改写示例，绝不强加没做过的内容。</p>
         <div class="chips"><span class="chip">HR 视角</span><span class="chip">STAR</span><span class="chip">薄弱项</span></div>
@@ -314,8 +317,8 @@
     <div class="group-head"><span class="eyebrow success">学习备考</span><span class="rule"></span></div>
     <div class="grid">
       <article class="card">
-        <div class="head"><div class="icon-box">🔤</div><div><div class="eyebrow success">学习备考</div><h3>公式 / 截图识别</h3></div></div>
-        <div class="tagline">图片 OCR → LaTeX / 文本入库</div>
+        <div class="head"><div class="icon-box"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="21" cy="21" r="12.5" fill="#FFFDF6" stroke-width="3" /> <path d="M15.5 18.5 C16.6 16 19 14.3 21.5 14.2" stroke="#F5B840" stroke-width="2.8" fill="none" /> <path d="M16 24 H26" stroke-width="2.2" opacity="0.32" /> <path d="M30.5 30.5 L40.5 40.5" stroke-width="3.6" /></svg></div><div><div class="eyebrow success">学习备考</div><h3>公式 / 截图识别</h3></div></div>
+        <div class="tagline">图片 OCR <span class="ico-i" style="vertical-align:-2px"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 24 H36" stroke-width="3.4" /> <path d="M26.5 14 L37 24 L26.5 34" fill="none" stroke="#F5B840" stroke-width="3.4" /></svg></span> LaTeX / 文本入库</div>
         <p class="desc">拍板书、截题，自动识别成可编辑文本或 LaTeX，一键归入对应知识库用于检索与出题。</p>
         <div class="chips"><span class="chip">OCR</span><span class="chip">LaTeX</span><span class="chip">入库</span></div>
         <button class="btn-new" onclick="toast('工具集为预览原型，真实版将在下一轮接入 Agent 工具')">试试</button>
@@ -325,14 +328,14 @@
     <div class="group-head"><span class="eyebrow accent">校园生活 / 升学</span><span class="rule"></span></div>
     <div class="grid">
       <article class="card">
-        <div class="head"><div class="icon-box">🗓️</div><div><div class="eyebrow accent">校园生活</div><h3>课表 / 培养方案解析</h3></div></div>
+        <div class="head"><div class="icon-box"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="14" width="30" height="25" rx="4.5" fill="#FFFDF6" stroke-width="3" /> <path d="M9.5 22 h29" stroke="#F5B840" stroke-width="3" /> <g stroke-width="2.6"> <path d="M16 10 v6" /> <path d="M32 10 v6" /> </g> <g fill="#F5B840" stroke="none"> <circle cx="16.5" cy="28" r="1.9" /> <circle cx="24" cy="28" r="1.9" /> <circle cx="31.5" cy="28" r="1.9" /> <circle cx="16.5" cy="34" r="1.9" /> <circle cx="24" cy="34" r="1.9" /> </g></svg></div><div><div class="eyebrow accent">校园生活</div><h3>课表 / 培养方案解析</h3></div></div>
         <div class="tagline">上传课表图片 / PDF 即排周视图</div>
         <p class="desc">识别课程、时间、地点，生成周视图与冲突检测，并提醒你该往哪个知识库补充资料。</p>
         <div class="chips"><span class="chip">周视图</span><span class="chip">冲突检测</span><span class="chip">提醒</span></div>
         <button class="btn-new" onclick="toast('工具集为预览原型，真实版将在下一轮接入 Agent 工具')">试试</button>
       </article>
       <article class="card">
-        <div class="head"><div class="icon-box">🏫</div><div><div class="eyebrow accent">升学规划</div><h3>考研院校库</h3></div></div>
+        <div class="head"><div class="icon-box"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 13 C20 9.5 13.5 8.5 8 10.5 V35 C13.5 33 20 34 24 37.5 C28 34 34.5 33 40 35 V10.5 C34.5 8.5 28 9.5 24 13 Z" fill="#FFFDF6" stroke-width="3" /> <path d="M24 13 V37.5" stroke-width="2.6" /> <g stroke-width="2.2" opacity="0.32"> <path d="M12 18 C15 17 18 17.5 20.5 19" fill="none" /> <path d="M27.5 19 C30 17.5 33 17 36 18" fill="none" /> <path d="M12 24 C15 23 18 23.5 20.5 25" fill="none" /> <path d="M27.5 25 C30 23.5 33 23 36 24" fill="none" /> </g> <path d="M30.5 9.3 V19 L34 15.8 L37.5 19 V8.6 Z" fill="#F5B840" stroke-width="2.4" /></svg></div><div><div class="eyebrow accent">升学规划</div><h3>考研院校库</h3></div></div>
         <div class="tagline">查分数线 / 报录比 / 专业课</div>
         <p class="desc">输入目标院校专业，聚合近三年分数线、报录比、专业课科目与参考书，辅助择校决策。</p>
         <div class="chips"><span class="chip">分数线</span><span class="chip">报录比</span><span class="chip">择校</span></div>
@@ -344,7 +347,7 @@
   <!-- ===================== 分享广场 ===================== -->
   <section class="panel" id="share">
     <div class="banner">
-      👥 把你的智能体分享出来，也克隆别人的——<b>好的学习搭子值得被复用</b>。所有分享都标注「辅助而非替代」，平台对代写类内容零容忍。
+      <span class="ico-i"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">fill="none"> <path d="M21 27 L27 21" stroke="#F5B840" stroke-width="3.2" /> <path d="M18.6 25.4 l-2.4 2.4 a6.4 6.4 0 0 0 9 9 l2.4-2.4" stroke-width="3" /> <path d="M29.4 22.6 l2.4-2.4 a6.4 6.4 0 0 0 -9-9 l-2.4 2.4" stroke-width="3" /></svg></span> 把你的智能体分享出来，也克隆别人的——<b>好的学习搭子值得被复用</b>。所有分享都标注「辅助而非替代」，平台对代写类内容零容忍。
     </div>
     <div class="filterbar" id="shareFilter">
       <span class="fchip active" data-cat="all">全部</span>
@@ -357,50 +360,50 @@
     </div>
     <div class="grid" id="shareGrid">
       <article class="card" data-cat="升学规划">
-        <div class="head"><div class="icon-box">📚</div><div><div class="eyebrow accent">升学规划</div><h3>考研政治刷题 bot</h3></div></div>
+        <div class="head"><div class="icon-box"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 13 C20 9.5 13.5 8.5 8 10.5 V35 C13.5 33 20 34 24 37.5 C28 34 34.5 33 40 35 V10.5 C34.5 8.5 28 9.5 24 13 Z" fill="#FFFDF6" stroke-width="3" /> <path d="M24 13 V37.5" stroke-width="2.6" /> <g stroke-width="2.2" opacity="0.32"> <path d="M12 18 C15 17 18 17.5 20.5 19" fill="none" /> <path d="M27.5 19 C30 17.5 33 17 36 18" fill="none" /> <path d="M12 24 C15 23 18 23.5 20.5 25" fill="none" /> <path d="M27.5 25 C30 23.5 33 23 36 24" fill="none" /> </g> <path d="M30.5 9.3 V19 L34 15.8 L37.5 19 V8.6 Z" fill="#F5B840" stroke-width="2.4" /></svg></div><div><div class="eyebrow accent">升学规划</div><h3>考研政治刷题 bot</h3></div></div>
         <p class="desc">基于马原/史纲/思修题库，按章节出选择+分析题，附考点溯源。作者已开源提示词。</p>
         <div class="chips"><span class="chip">政治</span><span class="chip">刷题</span><span class="chip">考点溯源</span></div>
-        <div class="meta-row"><span class="author">小李同学</span><span>·</span><span>1,280 人用过</span><span class="stars">★ 4.8</span></div>
-        <button class="clone-btn" onclick="toast('克隆到我的工作台（预览）')">＋ 克隆到我的工作台</button>
+        <div class="meta-row"><span class="author">小李同学</span><span>·</span><span>1,280 人用过</span><span class="stars"><span class="ico-i" style="vertical-align:-1px;width:12px;height:12px"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 7 l4.7 11.3 12.3 1 -9.3 8.1 2.8 12 -10.5-6.4 -10.5 6.4 2.8-12 -9.3-8.1 12.3-1 Z" fill="#F5B840" stroke-width="2.8" /></svg></span> 4.8</span></div>
+        <button class="clone-btn" onclick="toast('克隆到我的工作台（预览）')"><span class="ico-i" style="vertical-align:-3px"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 13 V35 M13 24 H35" fill="none" stroke-width="4.6" /></svg></span> 克隆到我的工作台</button>
       </article>
       <article class="card" data-cat="学术科研">
-        <div class="head"><div class="icon-box">🔍</div><div><div class="eyebrow info">学术科研</div><h3>文献速读官</h3></div></div>
+        <div class="head"><div class="icon-box"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="21" cy="21" r="12.5" fill="#FFFDF6" stroke-width="3" /> <path d="M15.5 18.5 C16.6 16 19 14.3 21.5 14.2" stroke="#F5B840" stroke-width="2.8" fill="none" /> <path d="M16 24 H26" stroke-width="2.2" opacity="0.32" /> <path d="M30.5 30.5 L40.5 40.5" stroke-width="3.6" /></svg></div><div><div class="eyebrow info">学术科研</div><h3>文献速读官</h3></div></div>
         <p class="desc">上传 PDF 三句话讲清核心，拆解方法、列局限。研究生群体高频使用。</p>
         <div class="chips"><span class="chip">PDF</span><span class="chip">核心概括</span><span class="chip">方法拆解</span></div>
-        <div class="meta-row"><span class="author">王同学</span><span>·</span><span>860 人用过</span><span class="stars">★ 4.7</span></div>
-        <button class="clone-btn" onclick="toast('克隆到我的工作台（预览）')">＋ 克隆到我的工作台</button>
+        <div class="meta-row"><span class="author">王同学</span><span>·</span><span>860 人用过</span><span class="stars"><span class="ico-i" style="vertical-align:-1px;width:12px;height:12px"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 7 l4.7 11.3 12.3 1 -9.3 8.1 2.8 12 -10.5-6.4 -10.5 6.4 2.8-12 -9.3-8.1 12.3-1 Z" fill="#F5B840" stroke-width="2.8" /></svg></span> 4.7</span></div>
+        <button class="clone-btn" onclick="toast('克隆到我的工作台（预览）')"><span class="ico-i" style="vertical-align:-3px"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 13 V35 M13 24 H35" fill="none" stroke-width="4.6" /></svg></span> 克隆到我的工作台</button>
       </article>
       <article class="card" data-cat="求职发展">
-        <div class="head"><div class="icon-box">💼</div><div><div class="eyebrow warning">求职发展</div><h3>互联网简历诊所</h3></div></div>
+        <div class="head"><div class="icon-box"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18.5 16.5 V12.5 C18.5 10.8 19.8 9.5 21.5 9.5 H26.5 C28.2 9.5 29.5 10.8 29.5 12.5 V16.5" fill="none" stroke-width="2.8" /> <rect x="8" y="16.5" width="32" height="22.5" rx="4.5" fill="#F5B840" stroke-width="3" /> <rect x="21" y="24" width="6" height="5.5" rx="1.8" fill="#FFFDF6" stroke-width="2.2" /></svg></div><div><div class="eyebrow warning">求职发展</div><h3>互联网简历诊所</h3></div></div>
         <p class="desc">对照大厂 JD 给简历打分与改写，模拟技术+HR 双面，附项目经历 STAR 模板。</p>
         <div class="chips"><span class="chip">简历</span><span class="chip">模拟面试</span><span class="chip">JD 匹配</span></div>
-        <div class="meta-row"><span class="author">阿杰</span><span>·</span><span>640 人用过</span><span class="stars">★ 4.9</span></div>
-        <button class="clone-btn" onclick="toast('克隆到我的工作台（预览）')">＋ 克隆到我的工作台</button>
+        <div class="meta-row"><span class="author">阿杰</span><span>·</span><span>640 人用过</span><span class="stars"><span class="ico-i" style="vertical-align:-1px;width:12px;height:12px"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 7 l4.7 11.3 12.3 1 -9.3 8.1 2.8 12 -10.5-6.4 -10.5 6.4 2.8-12 -9.3-8.1 12.3-1 Z" fill="#F5B840" stroke-width="2.8" /></svg></span> 4.9</span></div>
+        <button class="clone-btn" onclick="toast('克隆到我的工作台（预览）')"><span class="ico-i" style="vertical-align:-3px"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 13 V35 M13 24 H35" fill="none" stroke-width="4.6" /></svg></span> 克隆到我的工作台</button>
       </article>
       <article class="card" data-cat="学习备考">
-        <div class="head"><div class="icon-box">🗒️</div><div><div class="eyebrow success">学习备考</div><h3>高数复习卡片机</h3></div></div>
+        <div class="head"><div class="icon-box"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="11" y="10" width="26" height="31" rx="4.5" fill="#FFFDF6" stroke-width="3" /> <g stroke-width="2.4"> <path d="M16.5 10 V5.5" /> <path d="M24 10 V5.5" /> <path d="M31.5 10 V5.5" /> </g> <path d="M16.5 21 H31.5" stroke="#F5B840" stroke-width="3" /> <g stroke-width="2.2" opacity="0.32"> <path d="M16.5 27 H31.5" /> <path d="M16.5 33 H26.5" /> </g></svg></div><div><div class="eyebrow success">学习备考</div><h3>高数复习卡片机</h3></div></div>
         <p class="desc">上传课件自动生成概念卡+例题卡，按遗忘曲线推送自测，期末救命神器。</p>
         <div class="chips"><span class="chip">复习卡片</span><span class="chip">遗忘曲线</span><span class="chip">自测</span></div>
-        <div class="meta-row"><span class="author">数学课代表</span><span>·</span><span>512 人用过</span><span class="stars">★ 4.6</span></div>
-        <button class="clone-btn" onclick="toast('克隆到我的工作台（预览）')">＋ 克隆到我的工作台</button>
+        <div class="meta-row"><span class="author">数学课代表</span><span>·</span><span>512 人用过</span><span class="stars"><span class="ico-i" style="vertical-align:-1px;width:12px;height:12px"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 7 l4.7 11.3 12.3 1 -9.3 8.1 2.8 12 -10.5-6.4 -10.5 6.4 2.8-12 -9.3-8.1 12.3-1 Z" fill="#F5B840" stroke-width="2.8" /></svg></span> 4.6</span></div>
+        <button class="clone-btn" onclick="toast('克隆到我的工作台（预览）')"><span class="ico-i" style="vertical-align:-3px"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 13 V35 M13 24 H35" fill="none" stroke-width="4.6" /></svg></span> 克隆到我的工作台</button>
       </article>
       <article class="card" data-cat="校园生活">
-        <div class="head"><div class="icon-box">🎯</div><div><div class="eyebrow accent">校园生活</div><h3>社团策划模板库</h3></div></div>
+        <div class="head"><div class="icon-box"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="24" cy="24" r="15.5" fill="#F5B840" stroke-width="3" /> <circle cx="24" cy="24" r="9.3" fill="#FFFDF6" stroke-width="2.6" /> <circle cx="24" cy="24" r="3.8" fill="#EF8A56" stroke-width="2.2" /></svg></div><div><div class="eyebrow accent">校园生活</div><h3>社团策划模板库</h3></div></div>
         <p class="desc">迎新/比赛/志愿活动策划书骨架+预算表+宣传文案，改改就能用。</p>
         <div class="chips"><span class="chip">策划书</span><span class="chip">预算</span><span class="chip">宣传</span></div>
-        <div class="meta-row"><span class="author">学生会小羽</span><span>·</span><span>430 人用过</span><span class="stars">★ 4.5</span></div>
-        <button class="clone-btn" onclick="toast('克隆到我的工作台（预览）')">＋ 克隆到我的工作台</button>
+        <div class="meta-row"><span class="author">学生会小羽</span><span>·</span><span>430 人用过</span><span class="stars"><span class="ico-i" style="vertical-align:-1px;width:12px;height:12px"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 7 l4.7 11.3 12.3 1 -9.3 8.1 2.8 12 -10.5-6.4 -10.5 6.4 2.8-12 -9.3-8.1 12.3-1 Z" fill="#F5B840" stroke-width="2.8" /></svg></span> 4.5</span></div>
+        <button class="clone-btn" onclick="toast('克隆到我的工作台（预览）')"><span class="ico-i" style="vertical-align:-3px"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 13 V35 M13 24 H35" fill="none" stroke-width="4.6" /></svg></span> 克隆到我的工作台</button>
       </article>
       <article class="card" data-cat="语言提升">
-        <div class="head"><div class="icon-box">🌐</div><div><div class="eyebrow info">语言提升</div><h3>雅思口语陪练</h3></div></div>
+        <div class="head"><div class="icon-box"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="24" cy="24" r="16" fill="#FFFDF6" stroke-width="3" /> <ellipse cx="24" cy="24" rx="7" ry="16" fill="none" stroke-width="2.2" opacity="0.45" /> <path d="M9.5 19 C14 17.2 34 17.2 38.5 19" fill="none" stroke-width="2.2" opacity="0.45" /> <path d="M9.5 29 C14 30.8 34 30.8 38.5 29" fill="none" stroke-width="2.2" opacity="0.45" /> <path d="M8.4 24 H39.6" stroke="#F5B840" stroke-width="2.8" /></svg></div><div><div class="eyebrow info">语言提升</div><h3>雅思口语陪练</h3></div></div>
         <p class="desc">Part1-3 全话题实时对话，考后给流利度/词汇/语法反馈与范文表达。</p>
         <div class="chips"><span class="chip">口语</span><span class="chip">反馈</span><span class="chip">IELTS</span></div>
-        <div class="meta-row"><span class="author">Mia</span><span>·</span><span>390 人用过</span><span class="stars">★ 4.8</span></div>
-        <button class="clone-btn" onclick="toast('克隆到我的工作台（预览）')">＋ 克隆到我的工作台</button>
+        <div class="meta-row"><span class="author">Mia</span><span>·</span><span>390 人用过</span><span class="stars"><span class="ico-i" style="vertical-align:-1px;width:12px;height:12px"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 7 l4.7 11.3 12.3 1 -9.3 8.1 2.8 12 -10.5-6.4 -10.5 6.4 2.8-12 -9.3-8.1 12.3-1 Z" fill="#F5B840" stroke-width="2.8" /></svg></span> 4.8</span></div>
+        <button class="clone-btn" onclick="toast('克隆到我的工作台（预览）')"><span class="ico-i" style="vertical-align:-3px"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 13 V35 M13 24 H35" fill="none" stroke-width="4.6" /></svg></span> 克隆到我的工作台</button>
       </article>
     </div>
     <div style="margin-top:22px; text-align:center;">
-      <button class="big-btn" onclick="toast('发布我的智能体（预览）')">＋ 发布我的智能体</button>
+      <button class="big-btn" onclick="toast('发布我的智能体（预览）')"><span class="ico-i" style="vertical-align:-3px"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 13 V35 M13 24 H35" fill="none" stroke-width="4.6" /></svg></span> 发布我的智能体</button>
     </div>
   </section>
 
@@ -410,7 +413,7 @@
       <h2>第一届「知穗杯」大学生 AI 智能体大赛</h2>
       <p>主题：用 AI 搭个你的学习搭子。不限专业、不限场景——考研助手、文献速读、社团策划……只要它帮人"学得更好而非抄得更轻松"，就来参赛。</p>
       <button class="big-btn" onclick="toast('报名通道（预览）· 真实版将对接分享广场投稿')">立即报名</button>
-      <div class="sub2">📌 获客定位：校内大赛是品牌与口碑的放大器，而非日常工具——它以"活动"形态存在，配合校园社群与 B 站/抖音传播。</div>
+      <div class="sub2"><span class="ico-i"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="24" cy="24" r="16" fill="#F5B840" stroke-width="3" /> <circle cx="24" cy="16.5" r="2" fill="currentColor" stroke="none" /> <path d="M24 22.5 V33" stroke="#FFFDF6" stroke-width="3.6" /></svg></span> 获客定位：校内大赛是品牌与口碑的放大器，而非日常工具——它以"活动"形态存在，配合校园社群与 B 站/抖音传播。</div>
     </div>
 
     <div class="group-head"><span class="eyebrow accent">赛程时间线</span><span class="rule"></span></div>
@@ -440,13 +443,13 @@
     <div class="group-head"><span class="eyebrow info">往届 / 示例作品</span><span class="rule"></span></div>
     <div class="grid">
       <article class="card">
-        <div class="head"><div class="icon-box">📚</div><div><div class="eyebrow accent">示例</div><h3>考研政治刷题 bot</h3></div></div>
+        <div class="head"><div class="icon-box"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 13 C20 9.5 13.5 8.5 8 10.5 V35 C13.5 33 20 34 24 37.5 C28 34 34.5 33 40 35 V10.5 C34.5 8.5 28 9.5 24 13 Z" fill="#FFFDF6" stroke-width="3" /> <path d="M24 13 V37.5" stroke-width="2.6" /> <g stroke-width="2.2" opacity="0.32"> <path d="M12 18 C15 17 18 17.5 20.5 19" fill="none" /> <path d="M27.5 19 C30 17.5 33 17 36 18" fill="none" /> <path d="M12 24 C15 23 18 23.5 20.5 25" fill="none" /> <path d="M27.5 25 C30 23.5 33 23 36 24" fill="none" /> </g> <path d="M30.5 9.3 V19 L34 15.8 L37.5 19 V8.6 Z" fill="#F5B840" stroke-width="2.4" /></svg></div><div><div class="eyebrow accent">示例</div><h3>考研政治刷题 bot</h3></div></div>
         <p class="desc">上届人气作品：基于题库按章节出题，附考点溯源。已被 1,280 名同学克隆。</p>
         <div class="chips"><span class="chip">人气</span><span class="chip">开源</span></div>
         <button class="clone-btn" onclick="toast('查看作品（预览）')">查看作品</button>
       </article>
       <article class="card">
-        <div class="head"><div class="icon-box">🔍</div><div><div class="eyebrow info">示例</div><h3>文献速读官</h3></div></div>
+        <div class="head"><div class="icon-box"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="21" cy="21" r="12.5" fill="#FFFDF6" stroke-width="3" /> <path d="M15.5 18.5 C16.6 16 19 14.3 21.5 14.2" stroke="#F5B840" stroke-width="2.8" fill="none" /> <path d="M16 24 H26" stroke-width="2.2" opacity="0.32" /> <path d="M30.5 30.5 L40.5 40.5" stroke-width="3.6" /></svg></div><div><div class="eyebrow info">示例</div><h3>文献速读官</h3></div></div>
         <p class="desc">研究生团队作品：PDF 三句话讲清核心，拆解研究方法。决赛二等奖。</p>
         <div class="chips"><span class="chip">决赛</span><span class="chip">科研</span></div>
         <button class="clone-btn" onclick="toast('查看作品（预览）')">查看作品</button>

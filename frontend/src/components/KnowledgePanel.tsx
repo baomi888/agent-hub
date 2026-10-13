@@ -5,6 +5,7 @@
 import { useRef, useState, type RefObject } from "react";
 import type { KbInfo, SearchResult } from "@/lib/types";
 import FilePreviewModal, { shortName } from "./FilePreviewModal";
+import CornIcon from "./CornIcon";
 
 const MAX_UPLOAD_MB = 100;
 
@@ -199,14 +200,20 @@ export default function KnowledgePanel({
           className={`feed-btn ${feed === "upload" ? "on" : ""}`}
           aria-expanded={feed === "upload"}
         >
-          ＋ 我的文件
+          <span className="inline-flex items-center justify-center gap-1.5">
+            <CornIcon name="plus" className="h-3.5 w-3.5" />
+            我的文件
+          </span>
         </button>
         <button
           onClick={() => setFeed(feed === "web" ? null : "web")}
           className={`feed-btn ${feed === "web" ? "on" : ""}`}
           aria-expanded={feed === "web"}
         >
-          ＋ 网上的资料
+          <span className="inline-flex items-center justify-center gap-1.5">
+            <CornIcon name="plus" className="h-3.5 w-3.5" />
+            网上的资料
+          </span>
         </button>
       </div>
 

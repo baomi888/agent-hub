@@ -14,6 +14,19 @@ function displayUrl(url: string): string {
   }
 }
 
+/**
+ * 仅放行安全协议的外链。
+ *
+ * 模型（或它抓来的网页内容）可能输出 `[点我](javascript:alert(1))` 这类伪链接；
+ * 裸 URL 的正则已限定 http(s)，但 **markdown 链接的目标 `[^)\s]+` 什么都收**，
+ * 直接写进 href 就是一个 XSS 面。这里做协议白名单，白名单外一律降级为纯文本。
+ */
+const SAFE_HREF_RE = /^(https?:\/\/|mailto:|tel:)/i;
+export function safeHref(url: string): string | null {
+  const u = url.trim();
+  return SAFE_HREF_RE.test(u) ? u : null;
+}
+
 export function splitByUrl(text: string): Array<{ type: "text" | "url"; value: string }> {
   const out: Array<{ type: "text" | "url"; value: string }> = [];
   let rest = text;
@@ -89,23 +102,31 @@ export function renderInline(text: string, keyPrefix = "i"): ReactNode[] {
     } else if (tok.startsWith("~~")) {
       out.push(<del key={key}>{renderInline(tok.slice(2, -2), key)}</del>);
     } else if (tok.startsWith("[")) {
-      // [文案](https://…)
+      // [文案](https://…)：目标必须过协议白名单，否则只留文案、丢掉链接
       const mm = /\[([^\]]+)\]\(([^)\s]+)\)/.exec(tok);
-      if (mm) {
+      const href = mm ? safeHref(mm[2]) : null;
+      if (mm && href) {
         out.push(
-          <a key={key} href={mm[2]} target="_blank" rel="noopener noreferrer" className="inline-link" title={displayUrl(mm[2])}>
+          <a key={key} href={href} target="_blank" rel="noopener noreferrer" className="inline-link" title={displayUrl(href)}>
             {renderInline(mm[1], key)}
           </a>
         );
+      } else if (mm) {
+        out.push(<span key={key}>{renderInline(mm[1], key)}</span>);
       } else {
         out.push(<span key={key}>{tok}</span>);
       }
     } else {
-      // 裸 URL
+      // 裸 URL：正则已限定 http(s)，仍再走一次白名单兜底
+      const href = safeHref(tok);
       out.push(
-        <a key={key} href={tok} target="_blank" rel="noopener noreferrer" className="inline-link" title={displayUrl(tok)}>
-          {displayUrl(tok)}
-        </a>
+        href ? (
+          <a key={key} href={href} target="_blank" rel="noopener noreferrer" className="inline-link" title={displayUrl(href)}>
+            {displayUrl(href)}
+          </a>
+        ) : (
+          <span key={key}>{tok}</span>
+        )
       );
     }
     last = m.index! + tok.length;

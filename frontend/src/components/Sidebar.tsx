@@ -143,9 +143,12 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* 新建对话：深色圆角按钮 */}
+      {/* 新建对话：深色圆角按钮（加号走手绘图标，替代全角「+」字符） */}
       <button onClick={onCreate} className="btn-new mt-5 w-full">
-        ＋ 新建对话
+        <span className="inline-flex items-center justify-center gap-1.5">
+          <CornIcon name="plus" className="h-4 w-4" />
+          新建对话
+        </span>
       </button>
 
       {/* 模板广场：平台化入口（描边次按钮，与新建对话形成主次） */}
@@ -301,6 +304,15 @@ export default function Sidebar({
                     // 滑过 1/3 阈值就吸附展开；几乎没动则视作点按回收
                     if (off < -SWIPE_W / 3) setSwipedId(c.id);
                     else if (swiped) setSwipedId(null);
+                  }}
+                  onTouchCancel={() => {
+                    // 手势被系统中断（来电/通知/浏览器边缘返回手势）时不会触发 touchend，
+                    // 内联 transform 会留在半滑状态把这一行卡住 —— 这里强制复位。
+                    const st = swipeTouch.current;
+                    if (!st || st.id !== c.id) return;
+                    st.el.style.transition = "";
+                    st.el.style.transform = "";
+                    swipeTouch.current = null;
                   }}
                 >
                   {editingId === c.id ? (

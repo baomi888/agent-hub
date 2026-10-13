@@ -467,12 +467,20 @@ export default function Home() {
     urls: string[],
     onProgress: (i: number, total: number, title: string) => void
   ): Promise<string> => {
+    // 本次是否新建了库：全失败时要回滚，否则会留一个里面空空的库
+    let createdId: string | null = null;
     try {
       // 先把名字对上当前用户已有的库：手打的名字只要大小写/首尾空格略有出入，
       // 直连 createKb 就会用不同 kb_id 再建一个同名库。命中则复用，不新建。
       const norm = kbName.trim().toLowerCase();
       const existing = kbs.find((k) => (k.name || "").trim().toLowerCase() === norm);
-      const kb_id = existing ? existing.kb_id : (await api.createKb(kbName)).kb_id;
+      let kb_id: string;
+      if (existing) {
+        kb_id = existing.kb_id;
+      } else {
+        kb_id = (await api.createKb(kbName)).kb_id;
+        createdId = kb_id;
+      }
       let ok = 0;
       for (let i = 0; i < urls.length; i++) {
         const url = urls[i];
@@ -484,6 +492,14 @@ export default function Home() {
           onProgress(i + 1, urls.length, "");
         }
       }
+      // 一篇都没抓到、库又是这次新建的：删掉空壳并明确报错，别让用户以为导进去了
+      if (ok === 0 && createdId) {
+        await api.deleteKb(createdId).catch(() => {});
+        createdId = null; // 已清理，外层 catch 不要重复删
+        await refreshKbs();
+        showToast("error", `这 ${urls.length} 篇都没抓到正文，已取消建库`);
+        throw new Error("web-import-empty");
+      }
       await refreshKbs();
       // 不再用 if (activeSid) 挡一道：bindKb 自己会在没有会话时建一个，
       // 否则「联网建库成功但没绑上」会让人以为是导入失败了。
@@ -493,7 +509,15 @@ export default function Home() {
       showToast("success", `联网建库完成：成功 ${ok} / ${urls.length}`);
       return kb_id;
     } catch (e) {
-      showToast("error", "导入失败，请稍后重试");
+      if (createdId) {
+        // 其它异常（如 bindKb 失败）同样把空壳清掉
+        await api.deleteKb(createdId).catch(() => {});
+        createdId = null;
+        await refreshKbs();
+        showToast("error", "导入失败，已取消建库，请稍后重试");
+      } else if ((e as Error)?.message !== "web-import-empty") {
+        showToast("error", "导入失败，请稍后重试");
+      }
       throw e;
     }
   };
