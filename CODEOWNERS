@@ -1,0 +1,58 @@
+# CODEOWNERS — 代码归属与审核责任
+#
+# 作用：GitHub 会自动给 PR 请求对应归属人的审核，同时拦截"改别人文件没通知"的情况。
+# 规则：**最后匹配的模式优先**。所以先写通配兜底，再写具体目录覆盖。
+#
+# 账号归属（2026-10-13 申请人确认，**不再是推测**）：
+#     huashuotianxuan = 刘佳林（Agent 编排 / 每日委托 / 每日总结 / 调度）
+#     sakasa-code     = 林宏亮（知识库 / 检索 / 联网搜索）
+#
+# 语法说明：* 匹配任意字符（不跨目录），/ 结尾表示目录，! 表示排除。
+
+# ---------- 默认兜底：总负责人 ----------
+*                               @baomi888
+
+# ---------- 部署与 CI：只能申请人改 ----------
+/deploy.sh                      @baomi888
+/deploy-staging.sh              @baomi888
+/.github/                       @baomi888
+/.env.example                   @baomi888
+/.env.staging.example           @baomi888
+/requirements.txt               @baomi888
+/pytest.ini                     @baomi888
+/pyproject.toml                 @baomi888
+
+# ---------- 流程规范文档：申请人维护，全员可提 PR ----------
+/规范/                          @baomi888
+/CONTRIBUTING.md                @baomi888
+/CODEOWNERS                     @baomi888
+
+# ---------- 前端：申请人（A 线）----------
+/frontend/                      @baomi888
+
+# ---------- 知识库与检索：林宏亮（B 线）----------
+/kb/                            @sakasa-code
+/core/serper.py                 @sakasa-code
+/api/kb.py                      @sakasa-code
+/tests/test_kb_isolation.py     @sakasa-code
+/tests/test_web_import_creates_index.py @sakasa-code
+
+# ---------- Agent 与调度：刘佳林（C 线）----------
+/agent/                         @huashuotianxuan
+/service/                       @huashuotianxuan
+/worker/                        @huashuotianxuan
+/core/scheduler.py              @huashuotianxuan
+/core/tool_registry.py          @huashuotianxuan
+/api/agent.py                   @huashuotianxuan
+/api/schedule.py                @huashuotianxuan
+/api/report.py                  @huashuotianxuan
+/api/delegate.py                @huashuotianxuan
+
+# ---------- 交叉区：必须通知申请人（涉及鉴权/配额/数据模型的横切改动）----------
+/core/config.py                 @baomi888
+/core/session.py                @baomi888
+/core/account.py                @baomi888
+/core/auth.py                   @baomi888
+/core/quota.py                  @baomi888
+/main.py                        @baomi888
+/api/schemas.py                 @baomi888
