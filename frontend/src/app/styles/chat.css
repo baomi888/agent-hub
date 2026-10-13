@@ -374,12 +374,17 @@
 }
 .kb-meta {
   display: flex;
+  /* 允许整颗标签换行：新增「处理方式」标签后，窄侧栏里四个元素一行放不下，
+     不给 wrap 就会被压缩成「1 文 / 件」这种字内断行 */
+  flex-wrap: wrap;
   gap: var(--space-6);
   margin-top: 3px;
 }
 .tag {
   font-size: var(--fs-badge);
   color: var(--text-3);
+  /* 标签是整体，宁可换行也不要字内断 */
+  white-space: nowrap;
 }
 /* 资料来源标记：上传 / 网上抓取 */
 .tag.up {

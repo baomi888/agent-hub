@@ -4,27 +4,157 @@
 // 视觉：暖米黄书本风格 · 大圆角 · 柔阴影 · 金色点缀
 import { useRef, useState, type RefObject } from "react";
 import type { KbInfo, SearchResult } from "@/lib/types";
+import {
+  CHUNK_PROFILES,
+  DEFAULT_PROFILE_ID,
+  describeParams,
+  getProfile,
+  profileParams,
+  type ChunkParams,
+  type ChunkProfileId,
+} from "@/lib/chunkProfiles";
 import FilePreviewModal, { shortName } from "./FilePreviewModal";
 import CornIcon from "./CornIcon";
 
 const MAX_UPLOAD_MB = 100;
 
+/** 面板里「处理方式」的选择结果：三档之一，或用户改过数字后的自定义 */
+type ReadMode = ChunkProfileId | "custom";
+
+/**
+ * 处理方式选择器。
+ *
+ * 之前这里直接写着「分段 500 字 / 重叠 50 字」——那是 RAG 的实现细节，
+ * 用户既不知道 500 字是几段话，也不知道调大调小会怎样。
+ * 现在默认只给三个能凭直觉选的档位，原始数字收进「高级设置」。
+ */
+function ReadModePicker({
+  value,
+  onPick,
+  advanced,
+  onToggleAdvanced,
+  size,
+  overlap,
+  onSizeChange,
+  onOverlapChange,
+}: {
+  value: ReadMode;
+  onPick: (id: ChunkProfileId) => void;
+  advanced: boolean;
+  onToggleAdvanced: () => void;
+  size: number;
+  overlap: number;
+  onSizeChange: (v: number) => void;
+  onOverlapChange: (v: number) => void;
+}) {
+  // 高级设置里要显示「当前档位对应的数字」——选了完整就该看到 1000/100，
+  // 而不是永远显示全局兜底值；改数字即刻转成自定义档
+  const prof = getProfile(value);
+
+  const hint =
+    value === "custom"
+      ? `自定义：每段约 ${size} 字，相邻两段重叠 ${overlap} 字`
+      : `${prof.examples}，${prof.benefit}`;
+
+  return (
+    <div className="mt-0.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-fs-xs text-muted">这份资料想怎么读？</span>
+        <button
+          type="button"
+          onClick={onToggleAdvanced}
+          aria-expanded={advanced}
+          className="shrink-0 text-fs-xs text-faint transition hover:text-ink"
+        >
+          {advanced ? "收起" : "高级设置"}
+        </button>
+      </div>
+
+      <div className="mt-1.5 grid grid-cols-3 gap-1.5" role="group" aria-label="资料处理方式">
+        {CHUNK_PROFILES.map((p) => {
+          const on = value === p.id;
+          return (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => onPick(p.id)}
+              aria-pressed={on}
+              title={`${p.examples}（每段约 ${p.size} 字）`}
+              className={`flex flex-col items-center gap-px rounded-lg border py-1.5 transition ${
+                on
+                  ? "border-accent bg-accent-soft"
+                  : "border-line bg-bg hover:border-line-strong hover:bg-fill-2"
+              }`}
+            >
+              <span className="text-fs-xs font-medium text-ink">{p.label}</span>
+              <span className="text-fs-badge text-faint">{p.short}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <p className="mt-1.5 text-fs-xs text-faint">{hint}</p>
+
+      {advanced && (
+        <div className="mt-2 rounded-lg border border-line bg-fill-3 p-2">
+          <div className="grid grid-cols-2 gap-2">
+            <label className="flex flex-col">
+              <span className="text-fs-badge text-muted">每段字数</span>
+              <input
+                type="number"
+                min={100}
+                max={2000}
+                value={size}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (!Number.isNaN(v)) onSizeChange(v);
+                }}
+                className="underline-input mt-0.5 py-1 text-fs-xs"
+              />
+            </label>
+            <label className="flex flex-col">
+              <span className="text-fs-badge text-muted">重叠字数</span>
+              <input
+                type="number"
+                min={0}
+                max={500}
+                value={overlap}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (!Number.isNaN(v)) onOverlapChange(v);
+                }}
+                className="underline-input mt-0.5 py-1 text-fs-xs"
+              />
+            </label>
+          </div>
+          <p className="mt-1 text-fs-badge text-faint">
+            相邻两段共享的字数，防止一句话正好被切在中间。不清楚就保持默认
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface Props {
   kbs: KbInfo[];
   boundKb: string | null;
-  onUpload: (kbId: string, files: File[]) => Promise<void>;
+  onUpload: (kbId: string, files: File[], size?: number, overlap?: number) => Promise<void>;
   onSearch: (keyword: string) => Promise<SearchResult[]>;
   /** 联网建库：逐条抓并回调进度，完成后由页面层自动绑定 + 预填问题 */
   onWebImport: (
     kbName: string,
     urls: string[],
-    onProgress: (i: number, total: number, title: string) => void
+    onProgress: (i: number, total: number, title: string) => void,
+    params?: ChunkParams
   ) => Promise<string>;
   onDeleteKb: (kbId: string) => void;
   /** 删除库内单个文件（只清它的片段） */
   onDeleteFile?: (kbId: string, name: string) => void;
-  /** 按当前切片参数重建整库 */
+  /** 按这个库自己的处理方式重新整理整库 */
   onRebuildKb?: (kbId: string) => void;
+  /** 该库上次用的处理方式（浏览器本地），用于列表标签与重新整理 */
+  kbChunkOf?: (kbId: string) => ChunkParams;
   onBind: (kbId: string | null) => void;
   chunkSize: number;
   chunkOverlap: number;
@@ -48,6 +178,7 @@ export default function KnowledgePanel({
   onDeleteKb,
   onDeleteFile,
   onRebuildKb,
+  kbChunkOf,
   onBind,
   chunkSize,
   chunkOverlap,
@@ -83,6 +214,35 @@ export default function KnowledgePanel({
   } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // 这份资料的「处理方式」：默认均衡；用户改过数字才转成自定义
+  const [readMode, setReadMode] = useState<ReadMode>(DEFAULT_PROFILE_ID);
+  const [customSize, setCustomSize] = useState<number | null>(null);
+  const [customOverlap, setCustomOverlap] = useState<number | null>(null);
+  const [advanced, setAdvanced] = useState(false);
+  // 刚建好的库名：给一句「接下来怎么用」。很多用户卡在建完之后不知道下一步
+  const [justBuilt, setJustBuilt] = useState<string | null>(null);
+
+  // 当前生效的参数：自定义档用输入框的值，其余按档位查表
+  const effSize = customSize ?? chunkSize;
+  const effOverlap = customOverlap ?? chunkOverlap;
+  const activeParams: ChunkParams =
+    readMode === "custom"
+      ? { size: effSize, overlap: effOverlap }
+      : profileParams(readMode);
+
+  const pickReadMode = (id: ChunkProfileId) => setReadMode(id);
+  const changeSize = (v: number) => {
+    setCustomSize(v);
+    setReadMode("custom");
+  };
+  const changeOverlap = (v: number) => {
+    setCustomOverlap(v);
+    setReadMode("custom");
+  };
+
+  /** 库里上次用的处理方式；没记录过（老库）就用面板当前这套 */
+  const chunkOf = (kbId: string): ChunkParams => kbChunkOf?.(kbId) ?? activeParams;
+
   const fmtSize = (bytes: number) => {
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -116,10 +276,16 @@ export default function KnowledgePanel({
     setNetError(null);
     try {
       const urls = Array.from(selected);
-      await onWebImport(importKb.trim(), urls, (i, total, title) => {
-        setImportProgress({ i, total, title });
-      });
+      await onWebImport(
+        importKb.trim(),
+        urls,
+        (i, total, title) => {
+          setImportProgress({ i, total, title });
+        },
+        activeParams
+      );
       setImportProgress(null);
+      setJustBuilt(importKb.trim());
       setResults([]);
       setSelected(new Set());
       setImportKb("");
@@ -153,8 +319,9 @@ export default function KnowledgePanel({
     setBusy(true);
     setUploadError(null);
     try {
-      await onUpload(uploadKb.trim(), list);
+      await onUpload(uploadKb.trim(), list, activeParams.size, activeParams.overlap);
       setSelectedFiles([]);
+      setJustBuilt(uploadKb.trim());
       if (fileRef.current) fileRef.current.value = "";
     } catch (e) {
       const msg = e instanceof Error ? e.message : "上传失败";
@@ -234,11 +401,23 @@ export default function KnowledgePanel({
               <input
                 value={uploadKb}
                 onChange={(e) => setUploadKb(e.target.value)}
-                placeholder="资料库名称（如 寻臻项目计划书）"
+                placeholder="资料库名称，如「高数上册」"
                 aria-label="资料库名称"
                 list="kbNameList"
                 className="underline-input py-1.5 text-sm"
               />
+
+              <ReadModePicker
+                value={readMode}
+                onPick={pickReadMode}
+                advanced={advanced}
+                onToggleAdvanced={() => setAdvanced((a) => !a)}
+                size={activeParams.size}
+                overlap={activeParams.overlap}
+                onSizeChange={changeSize}
+                onOverlapChange={changeOverlap}
+              />
+
               <input
                 ref={fileRef}
                 type="file"
@@ -294,10 +473,6 @@ export default function KnowledgePanel({
                   )}
                 </div>
               )}
-
-              <p className="text-xs text-faint">
-                分段 {chunkSize} 字 / 重叠 {chunkOverlap} 字
-              </p>
             </div>
           </div>
         </div>
@@ -330,7 +505,7 @@ export default function KnowledgePanel({
               <input
                 value={importKb}
                 onChange={(e) => setImportKb(e.target.value)}
-                placeholder="导入到资料库名称（可点选已有库）"
+                placeholder="导入到哪个资料库？"
                 aria-label="导入到资料库名称"
                 list="kbNameList"
                 className="underline-input min-w-0 flex-1 py-1.5 text-sm"
@@ -343,6 +518,17 @@ export default function KnowledgePanel({
                 {importProgress ? `抓取中 ${importProgress.i}/${importProgress.total}` : `导入 ${selected.size} 条`}
               </button>
             </div>
+
+            <ReadModePicker
+              value={readMode}
+              onPick={pickReadMode}
+              advanced={advanced}
+              onToggleAdvanced={() => setAdvanced((a) => !a)}
+              size={effSize}
+              overlap={effOverlap}
+              onSizeChange={changeSize}
+              onOverlapChange={changeOverlap}
+            />
 
             {/* 逐条抓取进度：等待时间也是一次低成本的二次交互窗口 */}
             {importProgress && (
@@ -415,6 +601,27 @@ export default function KnowledgePanel({
         </div>
       )}
 
+      {/* 建完库后的下一步：不少用户卡在「建好了，然后呢」 */}
+      {justBuilt && (
+        <div className="fade-up mt-3 flex items-start gap-2 rounded-xl border border-line bg-accent-soft px-3 py-2.5">
+          <span className="mt-0.5 shrink-0" style={{ color: "var(--accent-ink)" }}>
+            <CornIcon name="info" className="h-4 w-4" />
+          </span>
+          <p className="min-w-0 flex-1 text-fs-xs text-ink">
+            「{justBuilt}」已建好。勾上它在列表左边的方框，回到对话框就能直接问里面的内容。
+          </p>
+          <button
+            type="button"
+            onClick={() => setJustBuilt(null)}
+            aria-label="知道了"
+            title="知道了"
+            className="shrink-0 text-faint transition hover:text-ink"
+          >
+            <CornIcon name="close" className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* 知识库列表 */}
       <div className="mt-3 flex-1 overflow-y-auto pr-1">
         {loading ? (
@@ -473,6 +680,9 @@ export default function KnowledgePanel({
               const bound = boundKb === k.kb_id;
               const files = k.files ?? [];
               const expanded = expandedKb === k.kb_id;
+              // 这个库用的处理方式（「均衡」/「自定义 800/80」）
+              const cp = chunkOf(k.kb_id);
+              const cpLabel = describeParams(cp.size, cp.overlap);
               return (
                 <div
                   key={k.kb_id}
@@ -494,6 +704,9 @@ export default function KnowledgePanel({
                     <div className="kb-meta">
                       <span className="tag">{files.length} 文件</span>
                       <span className="tag">{k.chunks} 片段</span>
+                      <span className="tag" title={`每段约 ${cp.size} 字，相邻重叠 ${cp.overlap} 字`}>
+                        {cpLabel}
+                      </span>
                       {files.length > 0 && (
                         <button
                           type="button"
@@ -581,10 +794,10 @@ export default function KnowledgePanel({
                             <button
                               type="button"
                               className="kb-rebuild"
-                              title="按当前切片参数重建整库（会对全部文件重新向量化）"
+                              title={`按「${cpLabel}」把库里全部资料重新切一遍（会用当前处理方式重新向量化）`}
                               onClick={() => onRebuildKb(k.kb_id)}
                             >
-                              按 {chunkSize}/{chunkOverlap} 重建整库
+                              按「{cpLabel}」重新整理
                             </button>
                           </li>
                         )}

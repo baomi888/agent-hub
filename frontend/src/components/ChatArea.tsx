@@ -14,7 +14,6 @@ import { ABILITIES, EXAMPLES, MODE_LABELS, SCENARIOS, INTRO_ENTRIES, TOOLS_URL, 
 import { buildPlanPrompt, detectPlanTopic, isPlanRequest, stripPlanHint } from "./chat/plan";
 import Bubble from "./chat/Bubble";
 import BubbleErrorBoundary from "./chat/BubbleErrorBoundary";
-import Field from "./chat/Field";
 import type { ChatAttachment, UiMessage } from "./chat/types";
 import FilePreviewModal from "./FilePreviewModal";
 
@@ -23,6 +22,17 @@ export type { UiMessage, ChatAttachment } from "./chat/types";
 export { stripPlanHint } from "./chat/plan";
 
 const aid = () => Math.random().toString(36).slice(2, 10);
+
+/**
+ * 检索条数也换成白话档位。
+ * 「topK = 5」没人看得懂，「参考 5 段资料」一看就明白，
+ * 顺带把「多参考 = 更全但更慢」的取舍讲清楚。
+ */
+const TOP_K_MODES = [
+  { value: 3, hint: "更快" },
+  { value: 5, hint: "均衡" },
+  { value: 8, hint: "更全" },
+] as const;
 
 /** 顶栏胶囊文案：管理员显示「无限额」，否则「问答 x/y · 向量化 a/b」 */
 function quotaLine(q: Record<string, QuotaInfo>): string {
@@ -46,13 +56,8 @@ interface Props {
   /** 轻量反馈出口：复制失败、赞踩等，交给页面出 toast */
   onNotice?: (type: "success" | "error" | "info", msg: string) => void;
   topK: number;
-  chunkSize: number;
-  chunkOverlap: number;
-  onParamChange: (patch: {
-    topK?: number;
-    chunkSize?: number;
-    chunkOverlap?: number;
-  }) => void;
+  /** 检索条数变化。资料怎么切片是「建库时」的事，在右侧资料库面板按库设置 */
+  onTopKChange: (v: number) => void;
   sessionTitle?: string | null;
   boundKb?: string | null;
   kbNameMap?: Record<string, string>;
@@ -95,9 +100,7 @@ export default function ChatArea({
   onRetry,
   onNotice,
   topK,
-  chunkSize,
-  chunkOverlap,
-  onParamChange,
+  onTopKChange,
   sessionTitle,
   boundKb,
   kbNameMap,
@@ -119,6 +122,8 @@ export default function ChatArea({
 }: Props) {
   const [input, setInput] = useState("");
   const [showParams, setShowParams] = useState(false);
+  // 「自己填」展开：想直接敲数字的少数人才会点
+  const [advancedTopK, setAdvancedTopK] = useState(false);
   const [pending, setPending] = useState<ChatAttachment[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -684,34 +689,69 @@ export default function ChatArea({
         )}
       </div>
 
-      {/* 参数面板 */}
+      {/* 检索设置：只留「参考几段资料」。
+          切片参数是建库时的事，已经移到右侧资料库面板按库单独设置 */}
       {showParams && (
         <div className="chat-measure mx-auto px-6 pb-2">
-          <div className="fade-up grid grid-cols-3 gap-4 rounded-xl border border-line-strong bg-panel p-4">
-            <Field
-              label="检索条数"
-              hint="返回几条最相关资料"
-              value={topK}
-              min={1}
-              max={10}
-              onCommit={(v) => onParamChange({ topK: v })}
-            />
-            <Field
-              label="分段长度"
-              hint="资料切多长的片段"
-              value={chunkSize}
-              min={100}
-              max={2000}
-              onCommit={(v) => onParamChange({ chunkSize: v })}
-            />
-            <Field
-              label="重叠字数"
-              hint="相邻片段重叠多少字"
-              value={chunkOverlap}
-              min={0}
-              max={500}
-              onCommit={(v) => onParamChange({ chunkOverlap: v })}
-            />
+          <div className="fade-up rounded-xl border border-line-strong bg-panel p-4">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-sm font-medium text-ink">每次回答参考几段资料？</span>
+              <button
+                type="button"
+                onClick={() => setAdvancedTopK((a) => !a)}
+                aria-expanded={advancedTopK}
+                className="shrink-0 text-xs text-faint transition hover:text-ink"
+              >
+                {advancedTopK ? "收起" : "自己填"}
+              </button>
+            </div>
+
+            <div className="mt-2 grid grid-cols-3 gap-2" role="group" aria-label="参考资料段数">
+              {TOP_K_MODES.map((m) => {
+                const on = topK === m.value;
+                return (
+                  <button
+                    key={m.value}
+                    type="button"
+                    onClick={() => onTopKChange(m.value)}
+                    aria-pressed={on}
+                    className={`flex flex-col items-center gap-px rounded-lg border py-2 transition ${
+                      on
+                        ? "border-accent bg-accent-soft"
+                        : "border-line bg-bg hover:border-line-strong hover:bg-fill-2"
+                    }`}
+                  >
+                    <span className="text-sm font-medium text-ink">{m.value} 段</span>
+                    <span className="text-fs-badge text-faint">{m.hint}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className="mt-2 text-xs text-faint">
+              参考得多，答得全但更慢；参考得少，答得快，但可能漏掉资料里的细节。
+            </p>
+
+            {advancedTopK && (
+              <label className="mt-2 flex items-center gap-2 rounded-lg border border-line bg-fill-3 px-2 py-1.5">
+                <span className="text-fs-badge text-muted">精确段数</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={topK}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (!Number.isNaN(v)) onTopKChange(v);
+                  }}
+                  className="underline-input w-16 py-0.5 text-xs"
+                />
+              </label>
+            )}
+
+            <p className="mt-2 border-t border-line pt-2 text-xs text-faint">
+              资料怎么分段、切多细，在右侧「资料库」里按每个库单独设置。
+            </p>
           </div>
         </div>
       )}

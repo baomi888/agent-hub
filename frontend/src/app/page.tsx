@@ -20,6 +20,7 @@ import { useAuth } from "@/lib/hooks/useAuth";
 import AuthGate from "@/components/AuthGate";
 import type { UiMessage } from "@/components/chat/types";
 import type { ChatMode, Grounding, RefSource, ToolEvent } from "@/lib/types";
+import type { ChunkParams } from "@/lib/chunkProfiles";
 
 // ---- 断点订阅（matchMedia 作为外部数据源） ----
 type Viewport = "wide" | "medium" | "narrow";
@@ -85,6 +86,7 @@ export default function Home() {
   const {
     kbs, kbNameMap, loading: kbsLoading,
     refreshKbs, uploadFiles, deleteKbFile, rebuildKb, searchPreview, deleteKb,
+    rememberChunk, chunkParamsOf,
   } = useKnowledge(showToast, chunkSize, chunkOverlap);
 
   // 登录成功后要重新拉一次：门后面的首屏请求是被 401 挡掉的，
@@ -462,11 +464,15 @@ export default function Home() {
   };
 
   // 联网建库：逐条抓（带进度）→ 自动绑定当前会话 → 预填一个建议问题（不自动发送）
+  // params：面板上选的「处理方式」档位；没传则用全局兜底值
   const webImport = async (
     kbName: string,
     urls: string[],
-    onProgress: (i: number, total: number, title: string) => void
+    onProgress: (i: number, total: number, title: string) => void,
+    params?: ChunkParams
   ): Promise<string> => {
+    const cs = params?.size ?? chunkSize;
+    const co = params?.overlap ?? chunkOverlap;
     // 本次是否新建了库：全失败时要回滚，否则会留一个里面空空的库
     let createdId: string | null = null;
     try {
@@ -485,7 +491,7 @@ export default function Home() {
       for (let i = 0; i < urls.length; i++) {
         const url = urls[i];
         try {
-          const r = await api.importUrl(kb_id, url, chunkSize, chunkOverlap);
+          const r = await api.importUrl(kb_id, url, cs, co);
           ok += 1;
           onProgress(i + 1, urls.length, r.title || url);
         } catch {
@@ -500,6 +506,8 @@ export default function Home() {
         showToast("error", `这 ${urls.length} 篇都没抓到正文，已取消建库`);
         throw new Error("web-import-empty");
       }
+      // 至少抓到一篇才算用上了这套参数，记下来供列表标签和「重新整理」复用
+      if (ok > 0) rememberChunk(kb_id, { size: cs, overlap: co });
       await refreshKbs();
       // 不再用 if (activeSid) 挡一道：bindKb 自己会在没有会话时建一个，
       // 否则「联网建库成功但没绑上」会让人以为是导入失败了。
@@ -619,13 +627,7 @@ export default function Home() {
           onRetry={retryMessage}
           onNotice={showToast}
           topK={topK}
-          chunkSize={chunkSize}
-          chunkOverlap={chunkOverlap}
-          onParamChange={({ topK: t, chunkSize: c, chunkOverlap: o }) => {
-            if (t !== undefined) setTopK(t);
-            if (c !== undefined) setChunkSize(c);
-            if (o !== undefined) setChunkOverlap(o);
-          }}
+          onTopKChange={setTopK}
           sessionTitle={sessions.find((s) => s.id === activeSid)?.title ?? null}
           boundKb={boundKb}
           kbNameMap={kbNameMap}
@@ -654,6 +656,7 @@ export default function Home() {
         onDeleteKb={deleteKb}
         onDeleteFile={deleteKbFile}
         onRebuildKb={rebuildKb}
+        kbChunkOf={chunkParamsOf}
         onBind={bindKb}
         containerRef={kbRef}
         loading={booting}
