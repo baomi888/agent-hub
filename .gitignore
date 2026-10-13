@@ -16,7 +16,13 @@ env/
 .env
 .env.local
 .env.*.local
+# ⚠️ .env.staging 含真实的 DeepSeek / 百炼密钥，同样严禁提交。
+#    仓库里只允许存在模板 .env.staging.example。
+.env.staging
+.env.production
+.env.prod
 data/.auth_secret
+data-staging/.auth_secret
 
 # ================= 多用户改造运行时归属数据（严禁提交，服务器启动时自生成）=================
 data/kb_owners.json
@@ -27,6 +33,8 @@ docs/screenshots/
 
 # ================= 向量库（运行时生成）=================
 chroma_db/
+# staging 的向量库与数据目录（与生产同机分端口并存，见 规范/04_环境与部署.md）
+chroma-staging/
 *.chroma
 *.sqlite
 *.sqlite3
@@ -41,6 +49,9 @@ data/chat_uploads/
 data/kb_sources/
 data/kb_files.json
 data/kb_names.json
+# staging 独立数据目录，绝不入库（也不该与生产 data/ 共用）
+data-staging/
+downloads-staging/
 
 # ================= 归档的未引用资源 =================
 frontend/_unused-public/

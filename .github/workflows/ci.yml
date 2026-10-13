@@ -1,12 +1,53 @@
 name: CI
 
+# 触发分支说明（本次修订的重点）：
+#   - 原来只监听 main，而 main 受保护、几乎不直接推 —— 结果 PR 到 dev 完全没有 CI。
+#   - dev 才是队友的集成分支，是日常 PR 的目标，必须纳入。
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
+  workflow_dispatch:
+
+# 同一分支的新推送取消旧构建，省 CI 额度
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  # ----------------------------------------------------------
+  # 1. 静态检查：最快，先跑，早失败早反馈
+  # ----------------------------------------------------------
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install ruff
+        run: python -m pip install --upgrade pip ruff
+
+      - name: ruff check
+        run: ruff check .
+
+      # 格式检查不算阻塞项：先只提示，避免历史代码一次性刷屏
+      - name: ruff format --check (非阻塞)
+        continue-on-error: true
+        run: ruff format --check .
+
+  # ----------------------------------------------------------
+  # 2. 离线测试：不依赖网络 / 外部服务 / 登录态，保证构建稳定绿色
+  #    这些用例不连真实 LLM / 向量库，embedding 用 DeterministicFakeEmbedding 打桩。
+  #    集成测试（auth/kb/owner 隔离、geo、web 导入、w2/w3 端到端）需本地服务与 .env，
+  #    CI 不跑，按 CONTRIBUTING.md 与 规范/03_流程规范.md 在合并前手动验证。
+  # ----------------------------------------------------------
   offline-tests:
     name: Offline tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
@@ -21,6 +62,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
 
       - name: Install dependencies
         run: |
@@ -28,14 +70,82 @@ jobs:
           pip install -r requirements.txt
           pip install pytest
 
-      - name: Run offline test subset
-        # 仅跑不依赖网络 / 外部服务 / 登录态的用例，保证构建稳定绿色。
-        # 集成测试（auth/kb/owner 隔离、geo、web 导入、w2/w3 端到端）需本地服务，
-        # 在 CONTRIBUTING.md 说明的本地环境手动验证，CI 不跑。
+      # ------------------------------------------------------
+      # a) pytest 风格用例（定义 test_* 函数）
+      # ------------------------------------------------------
+      - name: Run offline test subset (pytest 风格)
+        env:
+          # 给测试用的假密钥：只为让 config.validate() 与客户端构造不报错，
+          # 离线用例不会真的发出请求。
+          DEEPSEEK_API_KEY: ci-fake-key-not-used-offline-0000
+          EMBEDDING_API_KEY: ci-fake-key-not-used-offline-0000
+          EMBEDDING_BASE_URL: https://example.invalid/v1
         run: |
           pytest tests/test_chroma_singleton.py \
                  tests/test_upload_stream.py \
-                 tests/test_retrieve_select.py \
                  tests/test_pipelines_concurrency.py \
-                 tests/test_agent_checkpointer.py \
-                 tests/test_agent_guard.py -q
+                 tests/test_agent_checkpointer.py -q
+
+      # ------------------------------------------------------
+      # b) 脚本式自测（模块级执行 + sys.exit 结尾）
+      #
+      # ⚠️ 为什么单独跑、且必须用 `python` 而不是 `pytest`：
+      #    这些文件**没有** test_* 函数，检查逻辑写在模块级、结尾靠 sys.exit 汇总。
+      #    用 pytest 收集它们 → import 即执行 → 通过时 collected 0 items（**假绿**，
+      #    实际零覆盖统计），失败时 sys.exit(1) 直接把 pytest 进程干掉、
+      #    报错还看不出是哪一项挂的。所以必须逐个用 python 执行，退出码才是真信号。
+      #    这也是 pytest.ini 里逐文件 --ignore 的原因。
+      # ------------------------------------------------------
+      - name: Run script-style self-checks (脚本式自测)
+        env:
+          DEEPSEEK_API_KEY: ci-fake-key-not-used-offline-0000
+          EMBEDDING_API_KEY: ci-fake-key-not-used-offline-0000
+          EMBEDDING_BASE_URL: https://example.invalid/v1
+        run: |
+          set -e
+          for t in test_agent_guard test_grounding test_scenarios \
+                   test_retrieve_select test_slash_no_redirect test_usage_stats; do
+            if [ -f "tests/$t.py" ]; then
+              echo "::group::python tests/$t.py"
+              python "tests/$t.py"
+              echo "::endgroup::"
+            else
+              echo "跳过（文件不存在）：tests/$t.py"
+            fi
+          done
+
+  # ----------------------------------------------------------
+  # 3. 前端：类型检查 + 生产构建
+  #    原来完全没有前端检查，tsc 与 build 全靠人自觉。
+  # ----------------------------------------------------------
+  frontend:
+    name: Frontend (typecheck + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.0"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: TypeScript 类型检查
+        run: npx tsc --noEmit
+
+      - name: ESLint（非阻塞，先暴露问题）
+        continue-on-error: true
+        run: npm run lint
+
+      - name: 生产构建
+        env:
+          # 2G 机器上构建要限内存；CI 机器更宽裕，但保持一致以免掩盖问题
+          NODE_OPTIONS: --max-old-space-size=1536
+        run: npm run build
