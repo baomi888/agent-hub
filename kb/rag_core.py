@@ -14,6 +14,7 @@ import math
 import os
 import re
 import threading
+import time
 import uuid
 from collections import Counter, OrderedDict, defaultdict
 from concurrent.futures import ThreadPoolExecutor
@@ -201,34 +202,60 @@ class _BM25:
 # 库内容变更时由 _cache_invalidate 清掉，下次检索懒加载重建。
 _BM25_CACHE: OrderedDict[str, tuple[list, _BM25]] = OrderedDict()
 _BM25_CACHE_MAX = 8
-_BM25_LOCK = threading.Lock()
+# single-flight：缓存 miss 后构建在锁外进行，入库使缓存失效后的第一波并发查询
+# 会同时做 N 次全库读取 + 建索引（每次都把全文载入内存）。用条件变量 + in-flight
+# 登记保证同一 collection 同一时刻只有一个线程在构建，其余线程等待并复用结果。
+_BM25_COND = threading.Condition()
+_BM25_INFLIGHT: set[str] = set()
+# 超大库（超 HYBRID_MAX_DOCS）负缓存：返回 None 的库每次检索都会重新全库拉一遍
+# 才发现"还是太大"。记下短 TTL 的否定结果，期间直接放弃关键词通道。
+_BM25_NEG: dict[str, float] = {}
+_BM25_NEG_TTL = 300.0
 
 
 def _get_bm25(vs, collection_name: str):
-    """取该库的 (docs, BM25) 索引（带缓存）。库太大或读取失败返回 None。"""
-    with _BM25_LOCK:
-        hit = _BM25_CACHE.get(collection_name)
-        if hit is not None:
+    """取该库的 (docs, BM25) 索引（带缓存 + single-flight）。库太大或读取失败返回 None。"""
+    with _BM25_COND:
+        while True:
+            hit = _BM25_CACHE.get(collection_name)
+            if hit is not None:
+                _BM25_CACHE.move_to_end(collection_name)
+                return hit
+            neg = _BM25_NEG.get(collection_name)
+            if neg is not None:
+                if time.monotonic() < neg:
+                    return None  # 已确认超大，TTL 内不再重复全库拉取
+                del _BM25_NEG[collection_name]
+            if collection_name not in _BM25_INFLIGHT:
+                _BM25_INFLIGHT.add(collection_name)
+                break  # 由本线程构建
+            _BM25_COND.wait()  # 别的线程正在构建，等它完成后从缓存拿
+    try:
+        got = vs._collection.get(include=["documents", "metadatas"])
+        texts = got.get("documents") or []
+        if len(texts) > config.HYBRID_MAX_DOCS:
+            # 超过闸值：放弃关键词通道，退回纯向量，别把全文堆进内存
+            with _BM25_COND:
+                _BM25_NEG[collection_name] = time.monotonic() + _BM25_NEG_TTL
+            return None
+        metas = got.get("metadatas") or []
+        ids = got.get("ids") or []
+        docs = [
+            Document(page_content=t or "", metadata=m or {}, id=i)
+            for t, m, i in zip(texts, metas, ids)
+        ]
+        index = _BM25([_tokenize(d.page_content) for d in docs])
+        entry = (docs, index)
+        with _BM25_COND:
+            _BM25_CACHE[collection_name] = entry
             _BM25_CACHE.move_to_end(collection_name)
-            return hit
-    got = vs._collection.get(include=["documents", "metadatas"])
-    texts = got.get("documents") or []
-    if len(texts) > config.HYBRID_MAX_DOCS:
-        return None  # 超过闸值：放弃关键词通道，退回纯向量，别把全文堆进内存
-    metas = got.get("metadatas") or []
-    ids = got.get("ids") or []
-    docs = [
-        Document(page_content=t or "", metadata=m or {}, id=i)
-        for t, m, i in zip(texts, metas, ids)
-    ]
-    index = _BM25([_tokenize(d.page_content) for d in docs])
-    entry = (docs, index)
-    with _BM25_LOCK:
-        _BM25_CACHE[collection_name] = entry
-        _BM25_CACHE.move_to_end(collection_name)
-        while len(_BM25_CACHE) > _BM25_CACHE_MAX:
-            _BM25_CACHE.popitem(last=False)
-    return entry
+            while len(_BM25_CACHE) > _BM25_CACHE_MAX:
+                _BM25_CACHE.popitem(last=False)
+        return entry
+    finally:
+        with _BM25_COND:
+            _BM25_INFLIGHT.discard(collection_name)
+            _BM25_COND.notify_all()
 
 
 def _rrf_merge(vec_cands, kw_pairs, kw_docs, rrf_k: int) -> list:
@@ -397,8 +424,9 @@ def _cache_invalidate(collection_name: str) -> None:
             _RETRIEVE_CACHE.pop(key, None)
     with _SOURCES_CACHE_LOCK:
         _SOURCES_CACHE.pop(collection_name, None)
-    with _BM25_LOCK:
+    with _BM25_COND:
         _BM25_CACHE.pop(collection_name, None)
+        _BM25_NEG.pop(collection_name, None)
 
 
 def _cache_get(collection_name: str, question: str, top_k: int):
@@ -447,23 +475,36 @@ def _sources_cache_set(collection_name: str, result: list) -> None:
 
 _EMBED_CACHE: OrderedDict[str, list[float]] = OrderedDict()
 _EMBED_CACHE_MAX = 500
-_EMBED_CACHE_LOCK = threading.Lock()
+# single-flight：缓存 miss 后 embed_query 是约 250ms 的网络请求（也是真实费用），
+# 并发同题会各发一次。同一问题只许一个线程去取，其余等待复用结果。
+_EMBED_COND = threading.Condition()
+_EMBED_INFLIGHT: set[str] = set()
 
 
 def _embed_query(question: str) -> list[float]:
-    """取查询向量（带 LRU 缓存）。"""
-    with _EMBED_CACHE_LOCK:
-        hit = _EMBED_CACHE.get(question)
-        if hit is not None:
+    """取查询向量（LRU 缓存 + single-flight：同题并发只发一次 embedding 请求）。"""
+    with _EMBED_COND:
+        while True:
+            hit = _EMBED_CACHE.get(question)
+            if hit is not None:
+                _EMBED_CACHE.move_to_end(question)
+                return hit
+            if question not in _EMBED_INFLIGHT:
+                _EMBED_INFLIGHT.add(question)
+                break  # 由本线程去取
+            _EMBED_COND.wait()  # 别的线程正在取，等它完成后从缓存拿
+    try:
+        vec = get_embeddings().embed_query(question)
+        with _EMBED_COND:
+            _EMBED_CACHE[question] = vec
             _EMBED_CACHE.move_to_end(question)
-            return hit
-    vec = get_embeddings().embed_query(question)
-    with _EMBED_CACHE_LOCK:
-        _EMBED_CACHE[question] = vec
-        _EMBED_CACHE.move_to_end(question)
-        while len(_EMBED_CACHE) > _EMBED_CACHE_MAX:
-            _EMBED_CACHE.popitem(last=False)
-    return vec
+            while len(_EMBED_CACHE) > _EMBED_CACHE_MAX:
+                _EMBED_CACHE.popitem(last=False)
+        return vec
+    finally:
+        with _EMBED_COND:
+            _EMBED_INFLIGHT.discard(question)
+            _EMBED_COND.notify_all()
 
 
 # ==================== 查询改写（多轮追问 → 独立检索问题）====================
