@@ -113,6 +113,21 @@ RATE_PER_MINUTE = int(os.getenv("RATE_PER_MINUTE", "10"))
 DAILY_EMBED_LIMIT = int(os.getenv("DAILY_EMBED_LIMIT", "1000"))
 # 每个用户每日问答次数上限；0 = 不限
 DAILY_ASK_LIMIT = int(os.getenv("DAILY_ASK_LIMIT", "60"))
+# 每个用户每日「自动调用」次数上限（定时委托投递 + 每日总结生成，kind="auto"）；0 = 不限。
+# DAILY_ASK_LIMIT 挡的是用户主动提问，无人值守的定时任务完全在它之外——
+# 那条链路没人盯着，一旦写错（比如 is_due 判断反了）就是静默烧钱，所以单独卡一道。
+# 默认 120 = 3 人 ×（5 委托 + 1 总结）× 重试与手动补生成余量（见 docs/接口文档.html 调度节）。
+DAILY_AUTO_LIMIT = int(os.getenv("DAILY_AUTO_LIMIT", "120"))
+
+# ---------- 定时任务（独立 worker 进程）----------
+# 调度与解释统一用这个时区。禁止裸 datetime.now()——容器镜像的 TZ 常常是 UTC，
+# 一旦漏带时区，「早上七点」会整体偏移 8 小时且不报错，只会安静地错。
+SCHEDULER_TZ = os.getenv("SCHEDULER_TZ", "Asia/Shanghai")
+# 每日总结的生成时刻（北京时间）。默认 23:30：留出当晚补记的时间，
+# 次日跑到点时昨天的会话已经全部落盘。写进 schedule_jobs.cron 的初始值，
+# 之后改周期以表为准（改表不用改代码、不用发版）。
+REPORT_HOUR = int(os.getenv("REPORT_HOUR", "23"))
+REPORT_MINUTE = int(os.getenv("REPORT_MINUTE", "30"))
 
 # 管理员用户名（逗号分隔）。管理员不受配额与每分钟限流约束，相当于主账号。
 # 默认把项目作者账号设为管理员；其他部署在 .env 里改成自己的用户名即可
