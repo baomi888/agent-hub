@@ -43,6 +43,30 @@ SYSTEM_PROMPT = """你是一个智能问答助手，拥有以下能力：
   9. 闲聊、身份、常识等无需工具的问题直接回答。"""
 
 
+def _coarse_coord(v):
+    """把经纬度收成 1 位小数（≈11km，城市级精度）。
+
+    收粗有两个原因，**第二个才是关键**：
+
+    1. 6 位小数（≈0.1m）对天气查询毫无意义；
+    2. 这段文本会被**整段**拿去做 Agent 图的缓存键（见 `build_agent` 里
+       `key = (bool(has_kb), note, scene)`）。浏览器 `navigator.geolocation`
+       给的是 6 位小数，同一个人在同一张桌子上刷新两次末位就会变
+       ⇒ 键永不命中 ⇒ 每次 miss 都掉进 `_AGENT_LOCK` 里重新编译整张图。
+
+    所以归一化必须做在**这个生成提示词的函数内部**，不能在外面另算一个
+    「归一化键」—— 那会造成「同一个键、两份不同的提示词」。
+
+    非数字输入原样返回：宁可缓存键不稳，也不能因为坐标格式怪就让整轮对话报错。
+    """
+    if v is None:
+        return None
+    try:
+        return round(float(v), 1)
+    except (TypeError, ValueError):
+        return v
+
+
 def location_note(location: dict | None) -> str:
     """把用户地理定位信息整理成 system prompt 片段（无则空串）。
 
@@ -58,8 +82,8 @@ def location_note(location: dict | None) -> str:
         return ""
     raw_city = location.get("city")
     city = raw_city.strip() if isinstance(raw_city, str) else ""
-    lat = location.get("lat")
-    lon = location.get("lon")
+    lat = _coarse_coord(location.get("lat"))
+    lon = _coarse_coord(location.get("lon"))
     has_xy = lat is not None and lon is not None
 
     if city and has_xy:
