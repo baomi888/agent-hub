@@ -19,6 +19,7 @@ import ConsoleShell from "@/components/console/ConsoleShell";
 import CornIcon from "@/components/CornIcon";
 import { Callout, NotReady, SkeletonLines, ToastHost } from "@/components/console/ui";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/hooks/useAuth";
 import { DEMO_CHECKIN_HISTORY, DEMO_KNOWLEDGE_TREE } from "@/lib/consoleDemo";
 import { toProbe, type ProbeState } from "@/lib/probe";
 import { fmtDate } from "@/lib/time";
@@ -123,6 +124,8 @@ interface CardNode {
 
 export default function CheckinPage() {
   const { toasts, showToast } = useToast();
+  const auth = useAuth();
+  const authedId = auth.me?.user.id ?? null;
   const [todayStr, setTodayStr] = useState("");
   const [localDays, setLocalDays] = useState<DayMark[]>([]);
   const [report, setReport] = useState<ProbeState<DailyReport>>({ state: "loading" });
@@ -136,12 +139,16 @@ export default function CheckinPage() {
       setTodayStr(d);
       setLocalDays(readDays());
     }, 0);
-    api.report
-      .today()
-      .then((r) => setReport(toProbe(r)))
-      .catch(() => setReport({ state: "error", message: "读取今日总结失败" }));
+    // 未登录不发请求：登录前发的请求必然是 401（会把卡片钉在「读取失败」上），
+    // 登录成功会经 AUTHORIZED_EVENT 同步进 auth.me（见 useAuth / api.ts）→ 依赖变化补加载
+    if (authedId) {
+      api.report
+        .today()
+        .then((r) => setReport(toProbe(r)))
+        .catch(() => setReport({ state: "error", message: "读取今日总结失败" }));
+    }
     return () => window.clearTimeout(t);
-  }, []);
+  }, [authedId]);
 
   // ---- 卡片内容：优先用真实结论，退到演示结构 ----
   const liveReport =

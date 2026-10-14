@@ -18,6 +18,7 @@ import ConsoleShell, { useConsoleUser } from "@/components/console/ConsoleShell"
 import CornIcon from "@/components/CornIcon";
 import { Callout, NotReady, Seg, SkeletonLines, Switch } from "@/components/console/ui";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/hooks/useAuth";
 import {
   DEFAULT_TOP_K,
   FONT_SCALE_OPTIONS,
@@ -48,6 +49,8 @@ const TOP_K_OPTIONS = [
 
 export default function SettingsPage() {
   const router = useRouter();
+  const auth = useAuth();
+  const authedId = auth.me?.user.id ?? null;
 
   const [usage, setUsage] = useState<ProbeState<UsageSummary>>({ state: "loading" });
   const [kbs, setKbs] = useState<KbInfo[]>([]);
@@ -77,6 +80,9 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => {
+    // 未登录不发请求：登录前发的请求必然是 401（卡片会全部钉在错误态），
+    // 登录成功会经 AUTHORIZED_EVENT 同步进 auth.me（见 useAuth / api.ts）→ 依赖变化补加载
+    if (!authedId) return;
     api.usageSummary().then((d) => setUsage(toProbe(d))).catch((e) => setUsage(errProbe(e)));
     api.agent.tools().then((d) => setTools(toProbe(d))).catch((e) => setTools(errProbe(e)));
     api.schedule.health().then((d) => setHealth(toProbe(d))).catch((e) => setHealth(errProbe(e)));
@@ -88,7 +94,7 @@ export default function SettingsPage() {
         /* 资料库拉不到不影响其他卡片 */
       })
       .finally(() => setKbsLoading(false));
-  }, []);
+  }, [authedId]);
 
   const onToggleDark = useCallback((next: boolean) => {
     writeTheme(next);

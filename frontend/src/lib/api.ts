@@ -32,6 +32,25 @@ function notifyUnauthorized() {
   }
 }
 
+/**
+ * 登录态「建立」的广播事件名 —— 与 UNAUTHORIZED_EVENT 对称。
+ *
+ * 为什么需要：四屏（/delegate /report /checkin /settings /flow）的页面组件
+ * 自己持有数据加载 effect，而登录门在 ConsoleShell 那一层。未登录打开页面时
+ * 页面 effect 照常执行、请求 401、进入降级态；而「登录完成」发生在
+ * ConsoleShell 自己的 useAuth 实例里 —— 不广播的话页面感知不到，会一直停在
+ * 登录前的失败结果上（界面显示「接口待上线」，直到用户手动刷新）。
+ * 这里在凭证建立（登录/注册 200、cookie 已种上）时广播，让各 useAuth 实例
+ * 和页面级数据重新拉一次。
+ */
+export const AUTHORIZED_EVENT = "baomi:authorized";
+
+function notifyAuthorized() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(AUTHORIZED_EVENT));
+  }
+}
+
 /** 统一解析后端错误体（FastAPI 返回 { detail: string }），非 JSON 时回落状态码 */
 async function httpError(res: Response): Promise<Error> {
   let detail = `HTTP ${res.status}`;
@@ -258,16 +277,23 @@ export const api = {
 
   // ---------- 登录 ----------
   authConfig: () => request<{ allow_signup: boolean }>("/api/auth/config/"),
-  login: (username: string, password: string) =>
-    request<UserOut>("/api/auth/login/", {
+  login: async (username: string, password: string) => {
+    const u = await request<UserOut>("/api/auth/login/", {
       method: "POST",
       body: JSON.stringify({ username, password }),
-    }),
-  register: (username: string, password: string) =>
-    request<UserOut>("/api/auth/register/", {
+    });
+    // cookie 已种上：广播「登录成功」，让页面级数据重新加载（与 401 的收回对称）
+    notifyAuthorized();
+    return u;
+  },
+  register: async (username: string, password: string) => {
+    const u = await request<UserOut>("/api/auth/register/", {
       method: "POST",
       body: JSON.stringify({ username, password }),
-    }),
+    });
+    notifyAuthorized();
+    return u;
+  },
   logout: () => request<{ ok: boolean }>("/api/auth/logout/", { method: "POST" }),
   me: () => request<MeOut>("/api/auth/me/"),
 

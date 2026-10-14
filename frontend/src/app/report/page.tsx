@@ -18,6 +18,7 @@ import ConsoleShell from "@/components/console/ConsoleShell";
 import CornIcon from "@/components/CornIcon";
 import { Callout, NotReady, SkeletonLines, ToastHost } from "@/components/console/ui";
 import { BusinessNotFoundError, api } from "@/lib/api";
+import { useAuth } from "@/lib/hooks/useAuth";
 import { DEMO_REPORT } from "@/lib/consoleDemo";
 import { errProbe, toProbe, type ProbeState } from "@/lib/probe";
 import { fmtDate, fmtNum, fmtWhen } from "@/lib/time";
@@ -72,6 +73,8 @@ function RichText({ text }: { text: string }) {
 }
 
 export default function ReportPage() {
+  const auth = useAuth();
+  const authedId = auth.me?.user.id ?? null;
   // 日期一律在挂载后再定：服务端与客户端各自的时区/时刻可能不同，
   // 首帧就渲染日期会有水合不一致的风险（跨零点时尤为明显）
   const [todayStr, setTodayStr] = useState("");
@@ -108,10 +111,13 @@ export default function ReportPage() {
   }, []);
 
   useEffect(() => {
+    // 未登录不发请求：登录前发的请求必然是 401，且登录后不会自动重来。
+    // 登录成功会经 AUTHORIZED_EVENT 同步进 auth.me（见 useAuth / api.ts）→ 依赖变化补加载
+    if (!authedId) return;
     if (!date) return;
     const t = window.setTimeout(() => load(date), 0);
     return () => window.clearTimeout(t);
-  }, [date, load]);
+  }, [authedId, date, load]);
 
   const generate = async () => {
     setBusy(true);
