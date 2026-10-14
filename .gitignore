@@ -108,3 +108,8 @@ data/test.pdf
 
 # ================= 冲突分析临时目录（tools/analyze_merge_conflicts.py 用）=================
 .merge_probe_tmp/
+
+# ================= 字体子集的「源」文件（可重新生成，不进仓库）=================
+# 里面是 jsdelivr 下载的 97 个 unicode-range 分片 + 合并出的 6.9MB 完整 TTF，
+# 由 tools/fetch_lxgw_parts.py 重建。真正要入库的是 frontend/public/fonts/ 下的产物。
+tools/_fontsrc/

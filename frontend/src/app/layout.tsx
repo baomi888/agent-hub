@@ -38,15 +38,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             __html: `(function(){try{var s=localStorage.getItem('theme');var f=new URLSearchParams(location.search).get('theme');var d=f?f==='dark':s?s==='dark':window.matchMedia('(prefers-color-scheme: dark)').matches;if(d)document.documentElement.classList.add('dark');var p={};try{p=JSON.parse(localStorage.getItem('baomi.prefs')||'{}')}catch(e){}if(p.fontScale)document.documentElement.setAttribute('data-fs',p.fontScale);}catch(e){}})();`,
           }}
         />
-        <link rel="preconnect" href="https://miaoda.feishu.cn" />
-        <link
-          rel="stylesheet"
-          href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-screen-webfont@1.7.0/style.css"
-        />
-        <link
-          rel="stylesheet"
-          href="https://miaoda.feishu.cn/fonts/css2?family=Noto+Serif+SC:wght@400;600;700;900&family=Noto+Sans+SC:wght@300;400;500;700&display=swap"
-        />
+        {/* 中文 Web 字体改为本地子集（frontend/public/fonts/），彻底去掉外链依赖：
+            jsdelivr / 飞书字体在国内网络下时通时断，线上实测字体曾被重置两次，
+            汇报演示时一旦外链挂掉设计感会直接塌成系统默认字体。
+            重新生成见 tools/subset_fonts_project.py。 */}
+        <link rel="stylesheet" href="/fonts/fonts.css" />
       </head>
       <body className="min-h-full">
         {children}
