@@ -13,11 +13,17 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from core import quota
 from core import session as store
 from core.auth import get_current_user
 
 # 默认要登录：反馈挂在别人的会话 id 上，没有归属校验就等于能往别人会话里写东西
 router = APIRouter(dependencies=[Depends(get_current_user)])
+
+# 反馈的每分钟上限。刻意比全局 RATE_PER_MINUTE 严：
+# 正常用户点一次赞踩就完事，脚本才会一分钟打几十次 —— 而每次都是一条写库。
+# 0 = 不限（沿用 config.RATE_PER_MINUTE）。
+_FEEDBACK_RATE = 10
 
 
 class FeedbackRequest(BaseModel):
@@ -35,6 +41,9 @@ class FeedbackResponse(BaseModel):
 @router.post("/", response_model=FeedbackResponse)
 def add_feedback(req: FeedbackRequest, uid: str = Depends(get_current_user)) -> dict:
     """记录反馈。同一条消息重复提交会覆盖旧值（点赞再点踩算改，不算追加两条）。"""
+    # 先限流再校验归属：限流必须在最前面，否则脚本可以靠刷 404 来无限试探会话 id 是否存在。
+    # RateLimited 已由 main.py 注册成全局 429，这里不要自己 try 成 500。
+    quota.hit(uid, _FEEDBACK_RATE)
     # 先验归属，再验其它：不存在和不属于你都走同一个 404，不给枚举空间
     if not store.get_conversation(uid, req.sid):
         raise HTTPException(status_code=404, detail=f"会话不存在：{req.sid}")

@@ -13,6 +13,8 @@
 
 import ipaddress
 import logging
+import threading
+import time
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
@@ -27,6 +29,48 @@ router = APIRouter(dependencies=[Depends(get_current_user)])
 
 AMAP_IP_URL = "https://restapi.amap.com/v3/ip"
 _TIMEOUT = 6.0
+
+# ---------- 按 IP 的定位结果缓存 ----------
+#
+# 为什么缓存：/locate 是**每个用户每次进来都会打一次**的高德调用
+# （前端一打开就问一次），而 IP 定位是**城市级、几乎不变**的量。
+# 不缓存的话：① 同一批用户反复查同一个城市，② 高德按调用量计费，白花钱，
+# ③ 高德抖动时所有用户一起失败。
+#
+# 为什么必须有容量上限：键是 IP，攻击者可以随便伪造 X-Forwarded-For
+# 灌入无限个不同 IP（_client_ip 只筛「是不是公网」，不验证真伪）
+# ⇒ 不设上限就是一个可被主动撑爆的内存泄漏点。
+# _CACHE_MAX = 512 足够覆盖 NAT 后的活跃用户量级。
+_CACHE_TTL = 1800.0  # 30 分钟：城市级结果不会变，够用且能把缓存打满率降下来
+_CACHE_MAX = 512
+
+_cache: dict[str, tuple[float, "GeoOut"]] = {}
+_cache_lock = threading.Lock()
+
+
+def _cache_get(ip: str) -> "GeoOut | None":
+    with _cache_lock:
+        item = _cache.get(ip)
+        if not item:
+            return None
+        ts, val = item
+        if time.monotonic() - ts > _CACHE_TTL:
+            _cache.pop(ip, None)  # 过期就顺手删，避免只能靠容量淘汰
+            return None
+        return val
+
+
+def _cache_put(ip: str, val: "GeoOut") -> None:
+    with _cache_lock:
+        if len(_cache) >= _CACHE_MAX:
+            # 超容量时丢最早插入的那个（dict 保序 ⇒ next(iter) 就是最老的）。
+            # 用 LRU 的话还得维护链表，为这点收益不值当。
+            try:
+                oldest = next(iter(_cache))
+                _cache.pop(oldest, None)
+            except StopIteration:
+                pass
+        _cache[ip] = (time.monotonic(), val)
 
 
 def _is_public_ip(raw: str) -> bool:
@@ -99,6 +143,11 @@ async def locate(request: Request):
     if not ip:
         return GeoOut(reason="请求来自内网或本机，无法按 IP 推断城市")
 
+    # 命中缓存直接返回，省一次高德调用（高德按量计费，且它抖动时我们都跟着挂）
+    cached = _cache_get(ip)
+    if cached is not None:
+        return cached
+
     try:
         import httpx
 
@@ -130,7 +179,7 @@ async def locate(request: Request):
     if not city:
         return GeoOut(ip=ip, province=province, reason="该 IP 未返回城市信息")
 
-    return GeoOut(
+    out = GeoOut(
         ok=True,
         source="amap-ip",
         ip=ip,
@@ -138,3 +187,7 @@ async def locate(request: Request):
         city=city,
         adcode=_flat(data.get("adcode")),
     )
+    # ⚠️ 只缓存成功结果。失败（网络抖动/高德限流/IP 非法）不缓存 ——
+    # 否则高德抖一下，这个 IP 接下来 30 分钟全都拿不到定位，用户彻底没法用天气功能。
+    _cache_put(ip, out)
+    return out
