@@ -11,16 +11,20 @@
  *   - 这个跑公网地址，看的是**部署后的真实产物**（`.next` build 出来的），
  *     且顺带验证「后端只在 127.0.0.1 上、公网 :8000 不可达」这条隔离。
  *
- * 它做五件事：
+ * 它做六件事：
  *   1. 幂等拿账号：先试登录，失败再注册（不重复造号）
- *   2. 四屏逐个打开，断言**降级 UI 真的渲染出来了**
- *      （`/api/delegate|report|schedule|agent/tools` 当前分支返回 404 `{"detail":"Not Found"}`
- *        ⇒ 命中 api.ts::tryRequest 的判据 ⇒ 页面应显示「接口待上线」+「演示数据」，
- *        而不是红字报错。分支一合，这两块会自己消失 —— 那时这条断言要跟着改。）
+ *   1b.hybrid 探针（信息性）：`/api/hybrid/workflows` 200=今天的合并已部署；
+ *      404=尚未 deploy（不是失败，只是提示）。四屏断言与它无关。
+ *   2. 四屏逐个打开（浅色），断言**真实数据模式**：
+ *      不得出现「接口待上线」（checkin 有 1 处常驻披露块，见 allowNotReady）
+ *      且本页至少 1 个 /api 200（只查「没有待上线」会放跑 500 全挂的假健康）。
+ *      —— 2026-10-14 起 AI 模块（delegate/report/schedule/agent）已部署到线上，
+ *      旧版「必须显示降级 UI」的断言随之退役。
  *   3. 明暗各截一张，用 `?theme=` 硬跳转钉主题，并**断言实际底色亮度**
  *      （只比 class 或只比文件字节都放跑过 bug，见 2026-10-13 那次）
  *   4. console 错误分类：401/404 属预期，其余才算真错误
  *   5. 文案体检：emoji / 残留 `**` / 缺失关键文案
+ *   （本地验证跑法：LIVE_BASE=http://localhost:3100，跳过「后端不可直连」检查）
  */
 const puppeteer = require("puppeteer-core");
 const path = require("path");
@@ -37,7 +41,9 @@ const OUT = process.env.OUT_DIR || path.resolve(__dirname, "..", "docs", "实机
 const PAGES = [
   { key: "delegate", path: "/delegate", must: ["每日委托"] },
   { key: "report", path: "/report", must: ["每日总结"] },
-  { key: "checkin", path: "/checkin", must: ["打卡"] },
+  // checkin 有一处**常驻**披露块：打卡接口（/api/checkin/*、streak）后端尚未实现，
+  // 页面用本机记录推算并如实标注（后端补端点前，这处「接口待上线」应保留）。
+  { key: "checkin", path: "/checkin", must: ["打卡"], allowNotReady: 1 },
   { key: "settings", path: "/settings", must: ["设置"] },
 ];
 
@@ -127,14 +133,27 @@ async function main() {
     consoleErrors.push({ text: t, url, expected });
   });
   page.on("requestfailed", (r) => netFails.push(`${r.url()} :: ${r.failure()?.errorText}`));
+  // 当前页段的 /api 200 计数（每次导航前清空）——新版断言「真实数据到达」用
+  const api200 = [];
+  page.on("response", (r) => {
+    try {
+      if (r.url().includes("/api/") && r.status() === 200) api200.push(r.url());
+    } catch {
+      /* 忽略 */
+    }
+  });
 
   // ---- 0) 网络可达性 + 隔离（后端不该对外） ----
   log("=== 0. 连通性 ===");
-  for (const [label, url, want] of [
+  const connChecks = [
     ["首页", `${BASE}/`, 200],
     ["auth 配置", `${API_BASE}/api/auth/config`, 200],
-    ["后端 :8000 直连（应连不上）", BASE.replace(/:3000$/, ":8000") + "/health", null],
-  ]) {
+  ];
+  // 「后端不可公网直连」只对线上地址有意义：本地跑时后端本来就在 8000
+  if (!/localhost|127\.0\.0\.1/.test(BASE)) {
+    connChecks.push(["后端 :8000 直连（应连不上）", BASE.replace(/:\d+$/, ":8000") + "/health", null]);
+  }
+  for (const [label, url, want] of connChecks) {
     let code = "000";
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
@@ -170,10 +189,27 @@ async function main() {
   log(`\n=== 1. 账号（${acct.via}）=> HTTP ${acct.status} ===`);
   if (acct.status !== 200) problems.push(`取账号失败：${acct.body.slice(0, 200)}`);
 
-  // ---- 2) 四屏降级 UI + 文案体检 ----
+  // ---- 1b) hybrid 探针（信息性，不改变四屏断言） ----
+  // 2026-10-14 实测：线上已部署 AI 模块（delegate/report/schedule/agent 均 401=存在），
+  // 四屏走真实数据；唯一 404 的是当天新合并的 hybrid。探针只报告部署进度：
+  // /api/hybrid/workflows 200=已部署；404=尚未 deploy。
+  const hybridProbe = await page.evaluate(async () => {
+    const r = await fetch("/api/hybrid/workflows", { credentials: "include" });
+    return r.status;
+  });
+  log(
+    `\n=== 1b. hybrid 探针 === /api/hybrid/workflows => ${hybridProbe}` +
+      `（${hybridProbe === 200 ? "已部署" : hybridProbe === 404 ? "未部署（本次合并还没 deploy）" : "异常状态"}）`
+  );
+  if (hybridProbe !== 200 && hybridProbe !== 404) {
+    problems.push(`hybrid 探针异常状态 ${hybridProbe}（401=登录票据没生效；5xx=后端故障）`);
+  }
+
+  // ---- 2) 四屏 + 文案体检（断言方向随版本） ----
   log("\n=== 2. 四屏（浅色）===");
   const shots = [];
   for (const p of PAGES) {
+    api200.length = 0;
     await page.goto(`${BASE}${p.path}?theme=light`, { waitUntil: "networkidle2", timeout: 60000 });
     await sleep(1800);
     await page.addStyleTag({ content: "nextjs-portal{display:none!important}" });
@@ -198,19 +234,26 @@ async function main() {
       };
     });
     const px = await sampleViewport(page);
+    const got200 = api200.length;
 
     const miss = p.must.filter((m) => !st.text.includes(m));
-    const ok = miss.length === 0 && !st.isDark && px.l !== null && px.l > 180;
+    // 真实数据模式的统一断言：待上线块 ≤ 按页豁免数；且必须有真实 /api 200
+    // （只查「没有待上线」会放跑 500 全挂的假健康）
+    const allowNotReady = p.allowNotReady ?? 0;
+    const verOk = st.notReady <= allowNotReady && got200 >= 1;
+    const ok = miss.length === 0 && !st.isDark && px.l !== null && px.l > 180 && verOk;
     log(
       `  ${ok ? "OK " : "!! "} ${p.path.padEnd(11)} 待上线块=${st.notReady} 演示标记=${st.demo} ` +
-        `emoji=${st.emoji} 残留**=${st.stars} 像素=${px.cols[1]}(${px.l === null ? "?" : px.l.toFixed(0)})`
+        `api200=${got200} emoji=${st.emoji} 残留**=${st.stars} 像素=${px.cols[1]}(${px.l === null ? "?" : px.l.toFixed(0)})`
     );
     if (miss.length) problems.push(`${p.path} 缺关键文案：${miss.join("/")}`);
     if (st.emoji) problems.push(`${p.path} 出现 emoji ${st.emoji} 处`);
     if (st.stars) problems.push(`${p.path} 残留字面 ** ${st.stars} 处`);
     if (st.isDark) problems.push(`${p.path} 浅色模式下仍有 .dark`);
     if (px.l === null || px.l <= 180) problems.push(`${p.path} 浅色像素异常 ${px.cols.join(" / ")}`);
-    if (!st.notReady && !st.demo) problems.push(`${p.path} 既无「接口待上线」也无「演示数据」标记`);
+    if (st.notReady > allowNotReady)
+      problems.push(`${p.path} 出现「接口待上线」${st.notReady} 处（允许 ${allowNotReady}）—— 本页接口没部署？`);
+    if (got200 < 1) problems.push(`${p.path} 本页 0 个 /api 200（真实数据没到达）`);
 
     shots.push({ key: p.key, theme: "light", bg: px.cols[1], l: px.l, nav: st.nav });
     await page.screenshot({ path: path.join(OUT, `${p.key}.png`), fullPage: true });
@@ -265,6 +308,9 @@ async function main() {
   await browser.close();
 
   log("\n================ 结论 ================");
+  if (hybridProbe === 404) {
+    log("（注：hybrid 探针 404 = 当天的合并尚未部署；deploy 后重跑本脚本，此处应为 200）");
+  }
   if (problems.length === 0) {
     log("线上四屏验收：全部通过");
   } else {
