@@ -37,6 +37,7 @@ from pydantic import BaseModel, Field
 
 from core import quota, session as store
 from core.auth import get_current_user
+from kb import pipelines
 from service import daily
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -138,6 +139,9 @@ def _out(d: dict) -> dict:
     # 键名对齐前端契约：id / instruction / session_id 是前端在用的一组名，
     # delegation_id / prompt / deliver_sid 是内部与旧调用方沿用的原名（如 PATCH 的
     # merged 合并、service/daily.py 的落库），两套同时返回，避免任一侧被迫改动。
+    # kb_id 对应的库名和投递会话的标题由后端算好（前者读名字映射、后者是 SQL 里的 JOIN），
+    # 前端不用为了显示这两处再各查一次列表。
+    kb_id = d.get("kb_id")
     return {
         "id": d["delegation_id"],
         "delegation_id": d["delegation_id"],
@@ -148,7 +152,9 @@ def _out(d: dict) -> dict:
         "prompt": d.get("prompt") or "",
         "session_id": d.get("deliver_sid"),
         "deliver_sid": d.get("deliver_sid"),
-        "kb_id": d.get("kb_id"),
+        "session_title": d.get("session_title"),
+        "kb_id": kb_id,
+        "kb_name": pipelines.name_of(kb_id),
         "tone": d.get("tone") or "neutral",
         "max_chars": d.get("max_chars"),
         "enabled": bool(d.get("enabled")),
