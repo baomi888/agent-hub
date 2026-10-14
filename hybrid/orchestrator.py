@@ -117,82 +117,97 @@ class HybridOrchestrator:
         # 第一段跑完才落库的话，起跑阶段的人工指令会 404
         store.save_run(ctx)
 
-        for _segment in range(config.HYBRID_MAX_SWITCHES + 2):  # 迭代护栏
-            if ctx.status != "running":
-                break
-
-            # 段先消费人工指令：可能是在两段之间由 API 线程写入的
-            manual = _take_manual(ctx.run_id)
-            if manual:
-                yield self._apply_manual(manual)
+        # aborted：正常收尾后才置 False。生成器被关闭（客户端断开，GeneratorExit
+        # 从 yield 处抛出）或异常逃逸时，下面的正常收尾都到不了——没有 finally 兜底
+        # run 会永远停在 running：/runs 列表出现"幽灵执行中"，人工切换还会对它误报 ok
+        # （10-14 联调实测）。
+        aborted = True
+        try:
+            for _segment in range(config.HYBRID_MAX_SWITCHES + 2):  # 迭代护栏
                 if ctx.status != "running":
                     break
-                continue
 
-            engine = self._make_engine(ctx.current_mode)
-            async for ev in engine.stream(ctx, lambda: _peek_manual(ctx.run_id)):
-                store.add_log(ctx, ev)
-                yield ev
-            result: EngineResult = engine.result or EngineResult(status="failed", error="引擎未返回结果")
-            # 每段结束整体快照落库（崩溃续跑锚点）
-            store.save_run(ctx)
+                # 段先消费人工指令：可能是在两段之间由 API 线程写入的
+                manual = _take_manual(ctx.run_id)
+                if manual:
+                    yield self._apply_manual(manual)
+                    if ctx.status != "running":
+                        break
+                    continue
 
-            # ---- 人工指令优先于一切规则判定 ----
-            if result.signal == "manual":
-                action = _take_manual(ctx.run_id)
-                if action is None:
-                    # 指令已被消费但引擎还是让出了（理论上不该发生）：
-                    # 按"反向切换"兜底，比直接卡死强
-                    action = "to_workflow" if ctx.current_mode == "agent" else "to_agent"
-                yield self._apply_manual(action)
-                if ctx.status != "running":
+                engine = self._make_engine(ctx.current_mode)
+                async for ev in engine.stream(ctx, lambda: _peek_manual(ctx.run_id)):
+                    store.add_log(ctx, ev)
+                    yield ev
+                result: EngineResult = engine.result or EngineResult(status="failed", error="引擎未返回结果")
+                # 每段结束整体快照落库（崩溃续跑锚点）
+                store.save_run(ctx)
+
+                # ---- 人工指令优先于一切规则判定 ----
+                if result.signal == "manual":
+                    action = _take_manual(ctx.run_id)
+                    if action is None:
+                        # 指令已被消费但引擎还是让出了（理论上不该发生）：
+                        # 按"反向切换"兜底，比直接卡死强
+                        action = "to_workflow" if ctx.current_mode == "agent" else "to_agent"
+                    yield self._apply_manual(action)
+                    if ctx.status != "running":
+                        break
+                    continue
+
+                # ---- 无信号：按引擎结果直接落终态 ----
+                if not result.signal:
+                    if result.status == "completed":
+                        ctx.status = "completed"
+                    elif result.status == "timeout":
+                        ctx.status = "timeout"
+                    else:
+                        ctx.status = "failed"
+                        ctx.error = result.error
                     break
-                continue
 
-            # ---- 无信号：按引擎结果直接落终态 ----
-            if not result.signal:
-                if result.status == "completed":
-                    ctx.status = "completed"
-                elif result.status == "timeout":
-                    ctx.status = "timeout"
-                else:
-                    ctx.status = "failed"
-                    ctx.error = result.error
-                break
+                # ---- 有信号：走切换规则 ----
+                decision = switcher.decide(ctx, result.signal, {"error": result.error, "node_id": result.node_id})
+                if decision.action == "continue":
+                    # 无规则命中：按引擎结果落终态
+                    if result.status == "completed":
+                        ctx.status = "completed"
+                    else:
+                        ctx.status = "failed"
+                        ctx.error = result.error or f"信号 {result.signal} 无匹配规则"
+                    break
+                if decision.action == "terminate":
+                    ctx.status = "completed" if result.status == "completed" else "stopped"
+                    yield self._switch_event(decision.rule, decision.reason)
+                    break
 
-            # ---- 有信号：走切换规则 ----
-            decision = switcher.decide(ctx, result.signal, {"error": result.error, "node_id": result.node_id})
-            if decision.action == "continue":
-                # 无规则命中：按引擎结果落终态
-                if result.status == "completed":
-                    ctx.status = "completed"
-                else:
-                    ctx.status = "failed"
-                    ctx.error = result.error or f"信号 {result.signal} 无匹配规则"
-                break
-            if decision.action == "terminate":
-                ctx.status = "completed" if result.status == "completed" else "stopped"
+                target = "agent" if decision.action == "to_agent" else "workflow"
+                if target == ctx.current_mode or (target == "workflow" and self.wf is None):
+                    # 已在目标模式 / 没有工作流可收编：按引擎结果收工
+                    ctx.status = "completed" if result.status == "completed" else "stopped"
+                    break
+
+                ctx.record_switch(target, decision.rule, decision.reason)
+                store.save_run(ctx)  # 切换即快照
                 yield self._switch_event(decision.rule, decision.reason)
-                break
+            else:
+                # for 正常跑完 = 撞了迭代护栏（规则打架没触发 max_switches 的边角）
+                ctx.status = "stopped"
+                ctx.error = "执行段数超出护栏上限"
 
-            target = "agent" if decision.action == "to_agent" else "workflow"
-            if target == ctx.current_mode or (target == "workflow" and self.wf is None):
-                # 已在目标模式 / 没有工作流可收编：按引擎结果收工
-                ctx.status = "completed" if result.status == "completed" else "stopped"
-                break
-
-            ctx.record_switch(target, decision.rule, decision.reason)
-            store.save_run(ctx)  # 切换即快照
-            yield self._switch_event(decision.rule, decision.reason)
-        else:
-            # for 正常跑完 = 撞了迭代护栏（规则打架没触发 max_switches 的边角）
-            ctx.status = "stopped"
-            ctx.error = "执行段数超出护栏上限"
-
-        if ctx.status == "running":  # 各分支没来得及落态的兜底
-            ctx.status = "completed"
-        ctx.bump()
-        store.save_run(ctx)
+            if ctx.status == "running":  # 各分支没来得及落态的兜底
+                ctx.status = "completed"
+            aborted = False
+        finally:
+            # 落终态前最后一次快照，两条路径共用：
+            #   - 正常路径：把最终状态（completed 等）持久化；
+            #   - 中断路径（aborted=True，客户端断开 / 异常逃逸）：上面的收尾
+            #     根本到不了，这里补落 stopped —— 否则 run 会永远停在 running
+            #     （/runs 列表"幽灵执行中"，人工切换还会对它误报 ok；10-14 联调实测）。
+            if aborted and ctx.status == "running":
+                ctx.status = "stopped"
+            ctx.bump()
+            store.save_run(ctx)
 
     def _apply_manual(self, action: str) -> ExecEvent:
         """应用人工指令（优先级 0，不过规则链），返回 switch 事件。"""
