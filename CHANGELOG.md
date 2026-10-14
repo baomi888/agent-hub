@@ -11,6 +11,33 @@
 
 ## [2026-10-11]
 
+### 修复（top_k 上界 + 偏好读回）
+- 服务端 `top_k` 补硬上界：新增 `TOP_K_MAX`（默认 20，可用环境变量覆盖），
+  `ChatRequest` / `KBQueryRequest` / `query_kb` 三处入口统一加 `le` 约束，超限直接 422。
+- 前端 `usePrefs` 补读回 `topK / chunkSize / chunkOverlap`：此前挂载只读回 mode/kbPanel/fontScale，
+  检索参数停在默认值，`prefsReady` 后的落盘会把用户改过的值写回默认——刷新即被抹掉。
+- 详见 `docs/修复说明_2026-10-11_top_k与偏好读回.md`。
+
+### 新增（条件式查询改写 · 默认开启）
+- 多轮追问（"那它呢""第二个呢"）单独看检索不到东西。新增**条件式**改写：仅当问题含指代词
+  或长度 ≤ 8 字、且存在对话历史时，才用最近 4 条历史把它补全成可独立检索的问题；其余问题
+  零额外开销——这是它跟"每题都改写"的关键区别。
+- 新增配置：`QUERY_REWRITE_ENABLED`（默认 1，置 0 完全关闭）、`QUERY_REWRITE_MAX_LEN`(8)、
+  `QUERY_REWRITE_HISTORY`(4)、`QUERY_REWRITE_MAX_TOKENS`(64，只输出一条问题，防跑偏也防费用)。
+- 容错兜底：改写失败、结果不可信（空或过长）一律退回原问题，绝不阻塞检索；RAG 与图片理解
+  两条检索路径均已接入，改写后的问题直接作为检索词，检索结果缓存键随之正确、不跨上下文串结果。
+- 调用方一次取历史，改写与 `_build_messages` 共用，避免重复查 SQLite。
+- 新增离线用例 `tests/test_query_rewrite.py`（9 例，打桩 LLM 不触网）。
+
+### 新增（混合检索：向量 + BM25 · RRF）
+- 检索从纯向量升级为**混合检索**：新增 BM25 关键词通道（自实现，仅标准库，无新依赖），
+  两条通道用 RRF 融合。补上纯向量对专有名词 / 缩写 / 编号（"CUDA 12.4""第 3 条"）的召回短板。
+- 新增配置：`HYBRID_ENABLED`（默认 1，置 0 退回纯向量）、`HYBRID_RRF_K`(60)、
+  `HYBRID_KEYWORD_TOP`(20)、`HYBRID_MAX_DOCS`(20000，超限自动退回纯向量)。
+- `select_diverse` 兼容 `(doc, distance)` 与 `(doc, distance, rank)` 两种候选；
+  **关键词独有片段距离为 None，前端不显示相似度——绝不伪造分数**。现有调用方与回归用例零改动。
+- 关键词索引按库缓存，随 `_cache_invalidate`（导入 / 删除 / 重建）失效并懒加载重建。
+
 ### 修复（超时与下载收口）
 - LLM / 视觉 / Embedding 客户端补 `request_timeout` 与 `max_retries`（新增 `LLM_TIMEOUT`、
   `LLM_MAX_RETRIES`、`EMBED_TIMEOUT`、`EMBED_MAX_RETRIES`），消除单次请求无限挂起的隐患。

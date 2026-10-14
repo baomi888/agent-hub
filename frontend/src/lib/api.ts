@@ -288,10 +288,17 @@ export const api = {
      ========================================================== */
 
   // ---------- P4 每日委托 /api/delegate（7 端点）----------
+  //
+  // ⚠️ 路径**不带尾斜杠**（2026-10-14 实测确认）：
+  //   GET /api/delegate  → 401（存在，只差登录）✅
+  //   GET /api/delegate/ → 404（后端路由是 ""，不匹配）❌
+  // 后端已把 5 处路由去掉尾斜杠、与项目其余 ~35 个端点统一，前端跟着统一。
+  // 之前这里写的是带斜杠的版本 ⇒ 接口一上线列表就是空的（404 被 tryRequest 归一成 null
+  // ⇒ 走「接口待上线」降级，看起来像后端没部署，实际是路径不对）。
   delegate: {
-    list: () => tryRequest<unknown>("/api/delegate/").then(unwrap<Delegate>("delegates")),
+    list: () => tryRequest<unknown>("/api/delegate").then(unwrap<Delegate>("delegates")),
     create: (body: Record<string, unknown>) =>
-      tryRequest<Delegate>("/api/delegate/", { method: "POST", body: JSON.stringify(body) }),
+      tryRequest<Delegate>("/api/delegate", { method: "POST", body: JSON.stringify(body) }),
     update: (id: string, body: Record<string, unknown>) =>
       tryRequest<Delegate>(`/api/delegate/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
     remove: (id: string) =>

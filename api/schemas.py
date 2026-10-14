@@ -20,7 +20,7 @@ class KBBuildRequest(BaseModel):
 class KBQueryRequest(BaseModel):
     """同步问答请求。"""
     question: str = Field(..., description="用户问题")
-    top_k: int = Field(default=config.TOP_K_DEFAULT, gt=0)
+    top_k: int = Field(default=config.TOP_K_DEFAULT, gt=0, le=config.TOP_K_MAX)
 
 
 class KBQueryResponse(BaseModel):

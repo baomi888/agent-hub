@@ -33,6 +33,14 @@ python-multipart>=0.0.7
 # ---------- 文档加载 ----------
 pypdf>=4.0
 
+# ---------- 定时任务 worker（python -m worker.scheduler）----------
+# worker 是独立进程：APScheduler 的 BlockingScheduler + SQLAlchemyJobStore(data/scheduler.db)。
+# 版本卡在 3.x：4.x 的 API 与 SQLAlchemyJobStore 的用法都变了，升级要单独验一遍。
+apscheduler>=3.10,<4
+# sqlalchemy 是 SQLAlchemyJobStore 的硬依赖。本机恰好被其它包装上了，
+# 但不显式声明的话，下一次「照 requirements 装一台干净机器」时 worker 会 import 失败。
+sqlalchemy>=2.0
+
 # ---------- 联网搜索 ----------
 # 注意：duckduckgo-search 是死依赖（全项目零引用），已于 2026-10-02 移除。
 # 它原先只是“顺带”提供 httpx，现在改为显式声明，避免摘掉后 import httpx 失败

@@ -1,0 +1,69 @@
+flowchart TB
+    %% 整体设计架构图
+    %% 布局策略：层间用"单条主链路"决定纵向次序，层内元素用 ------ 串联决定横向次序。
+    %% 不嵌套 subgraph —— 嵌套子图会让 mermaid 自己重新分层，层序不可控（试过，会反）。
+
+    %% ===== 1. 入口 =====
+    Input["【1】用户输入"]:::io
+
+    %% ===== 2. LLM 执行 =====
+    LLM(("【2】LLM")):::llm
+    ToolCall["输出 Tool Call"]:::llm
+    ToolResult["Tool Result"]:::llm
+    Tools["工具集<br/>联网 / 个性化数据库 / 上下文"]:::llm
+    Decide{"还要继续吗"}:::llm
+    Input ==> LLM
+    LLM ==> ToolCall ==> ToolResult ==> Tools
+    Tools -.->|"结果反馈"| LLM
+    ToolResult -.-> Decide
+    Decide -.->|"是"| LLM
+
+    %% ===== 3. 产出 =====
+    FinalOutput["【3】最终输出"]:::out
+    Decide ==>|"否"| FinalOutput
+
+    %% ===== 4. 结果处理 =====
+    Compress["特定形式压缩<br/>长文本 / 上下文摘要"]:::proc
+    Recommend["大数据推荐算法运用<br/>按画像与历史排序"]:::proc
+    FinalOutput ==> Compress
+    Compress --- Recommend
+
+    %% ===== 5. 后台自进化 =====
+    AgentHub["【4】Agent-hub 继续在后台运行<br/>独立 worker 定时驱动：每日总结 / 每日委托"]:::bg
+    Recommend ==> AgentHub
+    Collect1["收集高抽象 / 有价值的问题<br/>（用户问的）"]:::bg
+    Collect2["收集高相关 / 高提炼的内容<br/>（输出中提炼的）"]:::bg
+    Gate{"提炼门槛 &amp; 溯源闸门<br/>重复≥2 次或用户修正过<br/>指不回原文的一律丢弃"}:::gate
+    AgentHub --> Collect1
+    AgentHub --> Collect2
+    Collect1 --> Gate
+    Collect2 --> Gate
+
+    %% ===== 6. 存储与画像 =====
+    DB[("【5】数据库 RAG")]:::db
+    HookTag["钩子 &amp; 标签<br/>让 LLM 感知到「有前科」"]:::db
+    LearningPath["用户总体学习提升路线"]:::profile
+    UserProfile(("用户画像")):::profile
+    Gate ==>|"通过：存入"| DB
+    DB === HookTag
+    LearningPath === UserProfile
+
+    %% ===== 反馈回流（虚线，不参与纵向分层）=====
+    AgentHub -.->|"完善总体学习路线"| LearningPath
+    Gate -.->|"提炼为结论 → 更新画像"| UserProfile
+    HookTag -.->|"命中即触发动作"| ToolCall
+    DB -.->|"检索增强"| Tools
+    UserProfile -.->|"告知怎样服务这个用户"| LLM
+    SysPrompt["System 预设词<br/>告知可用资源 / 注意事项"]:::io
+    LearningPath -.->|"作为系统预设写入"| SysPrompt
+    SysPrompt -.-> LLM
+
+    %% ===== 样式 =====
+    classDef io fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d3b52;
+    classDef llm fill:#e8f5e9,stroke:#388e3c,stroke-width:2px,color:#123d17;
+    classDef out fill:#dcedc8,stroke:#558b2f,stroke-width:2px,color:#22380f;
+    classDef proc fill:#fff8e1,stroke:#f9a825,stroke-width:2px,color:#4a3200;
+    classDef bg fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#3a0d4a;
+    classDef db fill:#e1f5fe,stroke:#0288d1,stroke-width:2px,color:#0d3b52;
+    classDef profile fill:#fff3e0,stroke:#f57c00,stroke-width:2px,color:#4a2600;
+    classDef gate fill:#fce4ec,stroke:#c2185b,stroke-width:2px,color:#4a0d24;

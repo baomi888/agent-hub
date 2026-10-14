@@ -44,7 +44,7 @@ class QuotaExceeded(Exception):
     """超过每日上限。"""
 
     def __init__(self, kind: str, limit: int) -> None:
-        label = {"ask": "每日问答", "embed": "每日向量化分片", "auto": "每日定时委托"}.get(kind, kind)
+        label = {"ask": "每日问答", "embed": "每日向量化分片", "auto": "每日自动任务"}.get(kind, kind)
         super().__init__(f"{label}已达上限（{limit}），明天再试或联系管理员调整配额")
         self.kind = kind
         self.limit = limit
@@ -129,7 +129,8 @@ def bump_usage(uid: str, kind: str, n: int = 1) -> int:
 _LIMITS = {
     "ask": "DAILY_ASK_LIMIT",
     "embed": "DAILY_EMBED_LIMIT",
-    # 定时委托触发的一次生成 = 一次 auto。这是唯一「用户不在场也会花钱」的入口
+    # 定时任务（委托投递 / 每日总结）烧的 token 原本不在任何配额里：
+    # 那条链路无人值守，必须单独卡一道，否则写错就是静默烧钱。
     "auto": "DAILY_AUTO_LIMIT",
 }
 

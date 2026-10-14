@@ -40,7 +40,7 @@ from core.auth import get_current_user
 from core.llm import get_llm, get_vision_llm
 from core import scenarios as scenarios_mod
 from kb import pipelines
-from kb.rag_core import SYSTEM_PROMPT, assess_grounding, describe_api_error, grounding_note
+from kb.rag_core import SYSTEM_PROMPT, assess_grounding, describe_api_error, grounding_note, rewrite_query
 
 # 默认要登录：整组路由统一挂鉴权，新增端点时不会漏
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -65,7 +65,7 @@ SSE_HEADERS = {
 class ChatRequest(BaseModel):
     sid: str = Field(...)
     question: str = Field(...)
-    top_k: int = Field(default=config.TOP_K_DEFAULT, gt=0)
+    top_k: int = Field(default=config.TOP_K_DEFAULT, gt=0, le=config.TOP_K_MAX)
     kb_id_override: str | None = Field(default=None)
     mode: str = Field(default="auto", description="auto / rag / agent / llm")
     scenario: str | None = Field(
@@ -361,6 +361,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
         # ---- 0. 图片理解模式：有图片附件时用视觉模型直接回答 ----
         if _has_image(req.attachments):
             yield _sse("status", {"text": "图片理解模式，正在分析图片..."})
+            history = store.get_messages(uid, req.sid, include_system=False)[:-1]
             # RAG 模式下顺带检索知识库，拼入文本
             vision_question = req.question
             vision_system = "你是一个能理解图片的 AI 助手。请结合图片内容用中文简洁作答。"
@@ -369,8 +370,9 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 try:
                     # 同步检索会堵事件循环（embed_query 实测约 250ms），必须丢线程
                     pipe = await asyncio.to_thread(pipelines.get_or_create, uid, kb_id)
+                    query = await asyncio.to_thread(rewrite_query, req.question, history)
                     docs_scores = await asyncio.to_thread(
-                        pipe.retrieve_with_score, req.question, req.top_k
+                        pipe.retrieve_with_score, query, req.top_k
                     )
                     if docs_scores:
                         refs_md = pipe._format_refs(docs_scores)
@@ -388,7 +390,6 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 except Exception:
                     yield _sse("status", {"text": "知识库检索失败，已仅按图片作答"})
 
-            history = (await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False))[:-1]
             messages = [SystemMessage(content=vision_system)]
             for m in history:
                 if m["role"] == "user":
@@ -522,9 +523,15 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
         # ---- 2. RAG 模式 ----
         elif mode == "rag":
             yield _sse("status", {"text": f"RAG 模式，正在检索知识库（{kb_id}）..."})
+            # 追问（"那它呢"）先结合上下文改写成独立问题再检索；不需要/失败时原样返回。
+            # 用改写后的问题当检索词，检索结果缓存的键也随之正确，不会跨上下文串结果。
+            history = store.get_messages(uid, req.sid, include_system=False)[:-1]
+            query = await asyncio.to_thread(rewrite_query, req.question, history)
+            if query != req.question:
+                yield _sse("status", {"text": f"已结合上下文改写检索词：{query}"})
             try:
                 pipe = await asyncio.to_thread(pipelines.get_or_create, uid, kb_id)
-                docs_scores = await asyncio.to_thread(pipe.retrieve_with_score, req.question, req.top_k)
+                docs_scores = await asyncio.to_thread(pipe.retrieve_with_score, query, req.top_k)
             except Exception as e:
                 yield _sse("error", {"detail": describe_api_error(e)})
                 return
@@ -548,7 +555,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             yield _sse("status", {"text": "正在生成答案..."})
             # 复用上面已经检索到的结果，不重复检索（早期实现在这里又检了一次，
             # 而且用的是默认 top_k，等于前端调的检索条数被悄悄忽略）
-            messages = await _build_messages(uid, req.sid, req.question, kb_id, docs_scores, grounding, req.scenario)
+            messages = await _build_messages(uid, req.sid, req.question, kb_id, docs_scores, grounding, req.scenario, history)
 
             acc = _Acc()
             try:
@@ -607,8 +614,8 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
 # ==================== 辅助 ====================
 
 async def _build_messages(
-    owner: str, sid: str, question: str, kb_id: str | None, docs_scores, grounding: dict | None = None,
-    scenario: str | None = None,
+    owner: str, sid: str, question: str, kb_id: str | None, docs_scores,
+    grounding: dict | None = None, scenario: str | None = None, history=None
 ) -> list:
     """组装 LLM 输入：历史 + 已检索到的参考资料。
 
@@ -618,8 +625,12 @@ async def _build_messages(
     grounding 是调用方算好的依据强度判定。weak=true 时追加一段"别硬答"的约束——
     系统提示词里的通用规则太软，模型看到 prompt 里真有几段资料，
     哪怕相似度只有 0.3 也会顺着往下编；单独再压一遍才压得住。
+    history 同理：调用方（RAG 路径做查询改写时）已取过就直接复用，不再重复查库。
     """
-    history_raw = (await asyncio.to_thread(store.get_messages, owner, sid, include_system=False))[:-1]
+    history_raw = (
+        history if history is not None
+        else (await asyncio.to_thread(store.get_messages, owner, sid, include_system=False))[:-1]
+    )
     messages = []
     references = ""
     if kb_id and docs_scores:
@@ -650,10 +661,16 @@ def _generate_title(question: str) -> str:
     只看问题、不看答案：提示词里本来就没用到答案。去掉答案参数后，标题生成
     就能和答案流式生成**并行**跑（见 chat_stream 里的 title_task），
     收尾时基本零等待，不必再在 done 之前干等一次 LLM 往返。
+
+    两道成本护栏（2026-10-13）：
+      - 输入截到前 200 字：首问若是粘贴的长文档，完整问题会原样进标题 prompt，
+        一次标题生成就吃掉几千 token 输入，而标题只反映开头主题，截断不损质量；
+      - max_tokens=32：标题只要 ≤15 字，给输出兜底，防止模型跑偏成复述正文。
     """
-    llm = get_llm(temperature=0)
+    llm = get_llm(temperature=0, max_tokens=32)
     try:
-        resp = llm.invoke([HumanMessage(content=f"请为以下对话生成简短中文标题（≤15字），直接输出：用户提问：{question}")])
+        q = (question or "")[:200]
+        resp = llm.invoke([HumanMessage(content=f"请为以下对话生成简短中文标题（≤15字），直接输出：用户提问：{q}")])
         title = (resp.content or "").strip().strip('"').strip("'")
         if len(title) > 20:
             title = title[:15] + "..."
