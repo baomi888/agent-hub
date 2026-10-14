@@ -12,7 +12,7 @@
 ## [2026-10-14]
 
 ### 新增（混合架构：工作流 × 自主 Agent）
-- 新增第五种模式 `hybrid`（`POST /api/chat` 的 `mode` 取值）：工作流跑确定性步骤，
+- 新增第五种模式 `hybrid`（`POST /api/chat/stream` 的 `mode` 取值）：工作流跑确定性步骤，
   Agent 接管不确定环节，执行中按上下文条件无缝切换（降级接管 / 收编回归 /
   流程内嵌 agent 节点三种形态）。
 - 引擎层 `hybrid/`：TaskContext 统一上下文（`shared` 唯一交换通道 + 切换即快照 + version 乐观锁）、
