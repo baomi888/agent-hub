@@ -2,7 +2,8 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 const TITLE = "知穗Agent · 知识库 · 场景智能体 · 校园工具集";
-const DESC = "为大学生的 AI 素养平台：考研复习/课程笔记/论文写作场景智能体，知识库问答，附 GPA 分析、番茄钟等校园工具集";
+// 定位对齐「备考 + 求职」两大主场景（10-14 晚场景撤出后，旧三场景名不再出现在主界面）
+const DESC = "为大学生的 AI 素养平台：备考与求职智能体，知识库问答，附 GPA 分析、番茄钟等校园工具集";
 
 export const metadata: Metadata = {
   title: TITLE,
