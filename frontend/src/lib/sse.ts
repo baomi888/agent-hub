@@ -28,6 +28,12 @@ export async function* streamChat(
     top_k?: number;
     mode?: string;
     kb_id_override?: string;
+    /**
+     * 混合架构（mode=hybrid）专用：指定工作流起跑。
+     * 缺省（null/undefined）时由后端按问题粗分决定走工作流还是裸跑 Agent。
+     * ⚠️ 传了不存在的 id 后端会直接回 error 事件，所以发之前要校验它还在列表里。
+     */
+    workflow_id?: string | null;
     attachments?: { path: string; type: string; filename?: string }[];
     // 场景预设：kaoyan / notes / paper（后端按此拼 system prompt）
     scenario?: string | null;

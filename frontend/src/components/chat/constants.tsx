@@ -9,6 +9,10 @@ export const MODE_LABELS: { value: ChatMode; label: string; hint: string }[] = [
   { value: "rag", label: "检索", hint: "强制从知识库检索回答" },
   { value: "agent", label: "智能体", hint: "可调用工具：联网搜索 / 计算 / 天气" },
   { value: "llm", label: "纯对话", hint: "纯大模型对话，不检索" },
+  // 混合：流程型任务走工作流（步骤确定、不会漏），开放型任务交给智能体（灵活），
+  // 两种模式在**一次任务内**自动换手，轨迹可见。
+  // ⚠️ 后端开关关掉时会静默退回「智能体」，所以 hint 里说明了它可能不出现轨迹。
+  { value: "hybrid", label: "混合", hint: "流程与智能体自动换手，过程可见" },
 ];
 
 // 首屏示例：三条都是「现在就能点、点了就有结果」的问题，

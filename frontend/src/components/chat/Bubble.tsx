@@ -9,6 +9,7 @@ import { TOOL_META, toolLabel } from "./constants";
 import { parseRefs, renderContent, renderMarkdown } from "./content";
 import CornIcon from "../CornIcon";
 import PlanCard, { detectPlanTopic, isPlanRequest, parsePlan } from "./plan";
+import { HybridTraceView } from "@/components/HybridTrace";
 import { useCopy } from "@/lib/useCopy";
 import HubMark from "./HubMark";
 
@@ -157,6 +158,21 @@ const Bubble = memo(function Bubble({
         )}
 
         <div className="bubble-ai whitespace-pre-wrap text-text">
+          {/* 混合架构执行轨迹（仅 mode=hybrid 的消息有）。
+              放在正文之前 —— 与下面的依据提示条同一个道理：用户边流边读，
+              「这一步是谁在执行」必须先于答案出现，否则读完整段答案才发现
+              中途换了执行者，就来不及判断这段结果可不可信了。
+              fallback = 用户选了「混合」但后端静默退回智能体（开关关闭），
+              必须明说，否则用户以为看到的就是混合轨迹。 */}
+          {(m.hybridTrace?.length || m.hybridMode || m.hybridRunId) && (
+            <HybridTraceView
+              items={m.hybridTrace ?? []}
+              mode={m.hybridMode}
+              running={m.streaming}
+              fallback={m.hybridMode === "agent" && !m.hybridRunId}
+            />
+          )}
+
           {/* 依据不足提示条：没有一条片段达到"可以直接当依据"的水平。
               放在正文之前——用户是边流边读的，提示必须比答案先出现，
               否则等读完一段"看起来很自信"的回答才看到提示就晚了。

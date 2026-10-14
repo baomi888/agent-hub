@@ -20,6 +20,8 @@ import { useAuth } from "@/lib/hooks/useAuth";
 import AuthGate from "@/components/AuthGate";
 import type { UiMessage } from "@/components/chat/types";
 import type { ChatMode, Grounding, RefSource, ToolEvent } from "@/lib/types";
+import { MODE_LABELS } from "@/components/chat/constants";
+import { useHybridTrace } from "@/lib/useHybridTrace";
 import type { ChunkParams } from "@/lib/chunkProfiles";
 
 // ---- 断点订阅（matchMedia 作为外部数据源） ----
@@ -89,6 +91,36 @@ export default function Home() {
     rememberChunk, chunkParamsOf,
   } = useKnowledge(showToast, chunkSize, chunkOverlap);
 
+  // ---------- 混合架构（mode=hybrid）----------
+  //
+  // hybrid 是「每轮一个实例」的归并器：消息发出去时 reset，流式过程中被三个事件喂，
+  // done 时收尾。刻意不做成全局 state —— 轨迹属于**某一条消息**，
+  // 放全局就会出现「A 轮的节点状态串到 B 轮」。
+  const hybrid = useHybridTrace();
+  // 轨迹是 hook 内部 state，但它要落到消息上（才能随消息持久化 / 刷新后重建），
+  // 所以订阅它变化，把 items 同步进当前那条助手消息。
+  const [hybridItems, setHybridItems] = useState<import("@/lib/types").TraceItem[]>([]);
+  useEffect(() => setHybridItems(hybrid.trace.items), [hybrid.trace.items]);
+  // 起跑前选中的工作流。用 ref 而不是 state：它是「发请求时要读一次」的值，
+  // 放进 state 会让改选择时多触发一次渲染，而它对 UI 没有独立展示需求。
+  const workflowIdRef = useRef<string | null>(null);
+  // 本轮助手消息 id：轨迹同步要靠它定位「往哪条消息上写」
+  const asstIdRef = useRef<string | null>(null);
+
+  // 轨迹 → 消息。hybrid hook 内部持有 items，这里把它落到消息上，
+  // 目的是让它随消息一起被持久化（刷新后还能拿到 hybridRunId 去 /logs 重建）。
+  //
+  // ⚠️ 用 ref 定位而不是在流式回调里顺手写：那样每个事件都要多一次 setMessages，
+  // 会和 token 的累加打架（同一条消息被两个分支各自 map）。
+  // 独立 effect 只在 items 真的变了时才动，语义单一。
+  useEffect(() => {
+    const target = asstIdRef.current;
+    if (!target || hybridItems.length === 0) return;
+    setMessages((prev) =>
+      prev.map((m) => (m.id === target ? { ...m, hybridTrace: hybridItems } : m))
+    );
+  }, [hybridItems, setMessages]);
+
   // 登录成功后要重新拉一次：门后面的首屏请求是被 401 挡掉的，
   // 两个 hook 的 init effect 已经跑过了，不补这一次就是空列表。
   const authedId = auth.me?.user.id ?? null;
@@ -151,8 +183,11 @@ export default function Home() {
     if (sessions.length === 0) return; // 列表还没回来
     if (!sessions.some((s) => s.id === a.sid)) return; // 这个会话还没进列表
     if (a.q) setPrefill({ text: a.q, ts: Date.now() });
-    // 模板推荐的对话模式：落进偏好，让新建会话默认走该模式
-    if (a.mode && (["auto", "rag", "agent", "llm"] as const).includes(a.mode as ChatMode)) {
+    // 模板推荐的对话模式：落进偏好，让新建会话默认走该模式。
+    // 白名单从 MODE_LABELS 派生（不再手写数组）—— 加 hybrid 那天就是漏了这里，
+    // 硬编码一份模式列表必然随新模式漏改。
+    const validModes = MODE_LABELS.map((m) => m.value) as readonly string[];
+    if (a.mode && validModes.includes(a.mode)) {
       setMode(a.mode as ChatMode);
     }
     if (activeSid !== a.sid) void selectSession(a.sid);
@@ -242,10 +277,14 @@ export default function Home() {
       { id: uid(), role: "user", content: display ?? question, attachments },
     ]);
     const asstId = uid();
+    // 新一轮开始：先把上一轮的轨迹归零，否则新旧两轮的节点会串在一条时间轴上
+    hybrid.reset();
     setMessages((prev) => [
       ...prev,
       { id: asstId, role: "assistant", content: "", streaming: true, toolCalls: [] },
     ]);
+    // 记住本轮助手消息 id，供下面的轨迹同步 effect 定位
+    asstIdRef.current = asstId;
     const controller = new AbortController();
     abortRef.current = controller;
     setSending(true);
@@ -265,12 +304,58 @@ export default function Home() {
         }
       }
       const gen = streamChat(
-        { sid, question, top_k: topK, mode, scenario, attachments: sentAttachments, location: getSendGeo() },
+        {
+          sid,
+          question,
+          top_k: topK,
+          mode,
+          scenario,
+          attachments: sentAttachments,
+          location: getSendGeo(),
+          // 混合架构：只有 mode=hybrid 时这个字段才有意义。
+          // 发之前必须确认选中的工作流还在列表里（刷新后可能已被删），
+          // 否则后端会直接回 error 事件，整轮白跑。
+          workflow_id: mode === "hybrid" ? (workflowIdRef.current ?? null) : null,
+        },
         controller.signal
       );
       let finalRefs = "";
       for await (const ev of gen) {
         switch (ev.event) {
+          // ---------- 混合架构三事件（仅 mode=hybrid 才有）----------
+          case "hybrid_start": {
+            hybrid.onStart(String(ev.data.run_id ?? ""), ev.data.mode === "workflow" ? "workflow" : "agent");
+            break;
+          }
+          case "workflow_node": {
+            const phase = ev.data.phase === "exit" ? "exit" : "enter";
+            if (phase === "enter") {
+              hybrid.onNode({
+                phase: "enter",
+                node_id: String(ev.data.node_id ?? ""),
+                type: (ev.data.type ?? "llm") as never,
+                name: String(ev.data.name ?? ""),
+              });
+            } else {
+              hybrid.onNode({
+                phase: "exit",
+                node_id: String(ev.data.node_id ?? ""),
+                status: ev.data.status === "failed" ? "failed" : "ok",
+                on_fail: (ev.data.on_fail ?? null) as string | null,
+                error: (ev.data.error ?? null) as string | null,
+              });
+            }
+            break;
+          }
+          case "mode_switch": {
+            hybrid.onSwitch({
+              rule: String(ev.data.rule ?? ""),
+              reason: String(ev.data.reason ?? ""),
+              from: ev.data.from === "workflow" ? "workflow" : "agent",
+              to: ev.data.to === "workflow" ? "workflow" : "agent",
+            });
+            break;
+          }
           case "token": {
             // 后端现在只发增量，前端自己累加（以前每帧回传全文，长回答流量是平方级）
             const delta = String(ev.data.text ?? "");
@@ -329,6 +414,27 @@ export default function Home() {
             // 后端回传的 messages 表 id：赞踩要按它落库，
             // 前端自己生成的 uid 后端不认，只能在这里补挂
             const dbId = Number(ev.data.message_id ?? 0) || undefined;
+            // 混合架构收尾：run_id 回传给消息（刷新后靠它 + /logs 重建轨迹），
+            // done.mode 才是**最终**模式（静默回退时这里是 agent）
+            const doneMode = String(ev.data.mode ?? "");
+            const doneRunId = String(ev.data.run_id ?? "");
+            hybrid.onDone(doneMode || null);
+            if (doneRunId || (doneMode === "workflow" || doneMode === "agent")) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === asstId
+                    ? {
+                        ...m,
+                        hybridRunId: doneRunId || m.hybridRunId,
+                        // 静默回退时这里是 agent：用户选了 hybrid 却没走混合，
+                        // 界面要能据此提示，而不是假装一切正常
+                        hybridMode:
+                          doneMode === "workflow" || doneMode === "agent" ? doneMode : m.hybridMode ?? null,
+                      }
+                    : m
+                )
+              );
+            }
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === asstId

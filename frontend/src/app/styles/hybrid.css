@@ -1,0 +1,211 @@
+/* 混合架构执行轨迹（mode=hybrid）
+ *
+ * 视觉遵循「苞米地笔记本」：暖米黄糙纸 + 深棕墨 + 玉米金点缀。
+ * 禁忌：荧光黄、粗黑描边、直角、深色大面积、玻璃拟态 —— 下面全部避开：
+ *  · 金只用在「模式切换点」和「进行中」这两处需要用户注意的地方
+ *  · 浅底上的金字一律用 --accent-ink（--accent 只有 2.6:1，10-12px 字看不清）
+ *  · 圆角小、描边极淡，靠留白而不是框线分区
+ */
+
+.hybrid-trace {
+  margin: var(--space-8) 0 var(--space-6);
+  padding: var(--space-10) var(--space-12, 12px);
+  background: var(--fill-4);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: var(--fs-md);
+  color: var(--ink);
+}
+
+.hybrid-trace-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  margin-bottom: var(--space-8);
+  color: var(--accent-ink);
+  font-size: var(--fs-sm);
+}
+
+/* 眉题用衬线（--font-serif 首选 LXGW WenKai Screen，已本地化，不再依赖外链） */
+.hybrid-trace-head > span {
+  font-family: var(--font-serif);
+  font-size: var(--fs-md);
+}
+
+.hybrid-mode,
+.hybrid-running {
+  margin-left: auto;
+  padding: 1px var(--space-6);
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  font-style: normal;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+}
+
+.hybrid-running {
+  margin-left: 0;
+}
+
+/* 静默回退提示：必须显眼 —— 用户选了混合却没走，不说清楚就是 bug 体验 */
+.hybrid-fallback,
+.hybrid-empty {
+  margin: 0 0 var(--space-6);
+  font-size: var(--fs-sm);
+  color: var(--warning-ink);
+}
+
+.hybrid-empty {
+  color: var(--ink);
+  opacity: 0.7;
+}
+
+.hybrid-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* 节点：左侧一条竖线串起来，视觉上是「一条执行链」而不是散落的标签 */
+.hybrid-node {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-6);
+  padding: var(--space-4) 0 var(--space-4) var(--space-14, 14px);
+  font-size: var(--fs-md);
+}
+
+.hybrid-node::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line-strong);
+}
+
+.hybrid-node:first-child::before {
+  top: 50%;
+}
+
+.hybrid-node:last-child::before {
+  bottom: 50%;
+}
+
+.hybrid-dot {
+  position: absolute;
+  left: 0;
+  top: var(--space-5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  background: var(--step-1);
+  border: 1px solid var(--line-strong);
+  color: var(--success-ink);
+}
+
+/* 进行中：小圆点用呼吸感表示，不用旋转图标（全局不做高动画） */
+.hybrid-node.is-running .hybrid-dot {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  animation: hybrid-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes hybrid-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hybrid-node.is-running .hybrid-dot {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+.hybrid-node.is-ok .hybrid-dot {
+  border-color: var(--success);
+  color: var(--success-ink);
+}
+
+.hybrid-node.is-failed .hybrid-dot {
+  border-color: var(--red);
+  color: var(--red-ink);
+}
+
+.hybrid-node-name {
+  font-family: var(--font-serif);
+}
+
+.hybrid-node-type {
+  padding: 0 var(--space-5);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  color: var(--ink);
+  opacity: 0.75;
+}
+
+.hybrid-node-error {
+  flex: 1 1 100%;
+  font-size: var(--fs-sm);
+  color: var(--red-ink);
+  overflow-wrap: anywhere;
+}
+
+/* 模式切换点：金色药丸。这是轨迹里最该被看见的一件事 ——
+   「谁在执行」变了，用户得能一眼找到变化发生在哪一步。 */
+.hybrid-switch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-6);
+  margin: var(--space-6) 0;
+  padding: var(--space-5) var(--space-8);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: 6px;
+  font-size: var(--fs-sm);
+  color: var(--accent-ink);
+}
+
+.hybrid-switch-text {
+  font-family: var(--font-serif);
+  font-weight: 600;
+}
+
+.hybrid-switch-reason {
+  flex: 1 1 100%;
+  font-size: var(--fs-xs);
+  color: var(--ink);
+  opacity: 0.85;
+  overflow-wrap: anywhere;
+}
+
+.hybrid-switchbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  margin-top: var(--space-6);
+}
+
+.hybrid-switchbar .btn-ghost.danger {
+  color: var(--red-ink);
+  border-color: var(--line-strong);
+}
+
+.hybrid-switchbar .btn-ghost.danger:hover:not(:disabled) {
+  border-color: var(--red);
+  background: var(--fill-2);
+}

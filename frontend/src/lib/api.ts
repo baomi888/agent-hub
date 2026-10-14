@@ -8,6 +8,13 @@ import type {
   DelegateRun,
   ScheduleHealth,
   ScheduleJob,
+  HybridLogRow,
+  HybridRunDetail,
+  HybridRunRow,
+  RuleIn,
+  RuleRow,
+  WorkflowIn,
+  WorkflowRow,
 } from "./types";
 
 /**
@@ -335,6 +342,62 @@ export const api = {
       tryRequest<{ ok: boolean }>("/api/schedule/retry", {
         method: "POST",
         body: JSON.stringify({ run_id: runId }),
+      }),
+  },
+
+  // ---------- P6 混合架构 /api/hybrid（12 端点）----------
+  //
+  // ⚠️ 后端截至 10-14 未推到任何远端分支，这一组是**照接口文档 v1 实现**的。
+  //    全部走 tryRequest ⇒ 端点不存在时返回 null，页面自动退到演示数据。
+  hybrid: {
+    // 工作流定义 CRUD
+    workflows: () => tryRequest<unknown>("/api/hybrid/workflows").then(unwrap<WorkflowRow>("items")),
+    workflow: (id: string) => tryRequest<WorkflowRow>(`/api/hybrid/workflows/${id}`),
+    createWorkflow: (body: WorkflowIn) =>
+      tryRequest<WorkflowRow>("/api/hybrid/workflows", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    /** ⚠️ 内置工作流（builtin=true）改删一律 404，界面要置灰而不是报错 */
+    updateWorkflow: (id: string, body: WorkflowIn) =>
+      tryRequest<WorkflowRow>(`/api/hybrid/workflows/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
+    deleteWorkflow: (id: string) =>
+      tryRequest<{ ok: boolean }>(`/api/hybrid/workflows/${id}`, { method: "DELETE" }),
+
+    // 切换规则（系统默认 + 用户覆盖）
+    /** ⚠️ 只返回 enabled=1 的规则；停用项会从列表消失，不是「显示成已停用」 */
+    rules: () => tryRequest<unknown>("/api/hybrid/rules").then(unwrap<RuleRow>("items")),
+    putRule: (name: string, body: RuleIn) =>
+      tryRequest<{ ok: boolean }>(`/api/hybrid/rules/${name}`, {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
+    /** 只能删用户覆盖；系统默认不可删（404） */
+    deleteRule: (name: string) =>
+      tryRequest<{ ok: boolean }>(`/api/hybrid/rules/${name}`, { method: "DELETE" }),
+
+    // 执行记录与全链路日志
+    /** limit 默认 20，上限 100 */
+    runs: (limit = 20) =>
+      tryRequest<unknown>(`/api/hybrid/runs?limit=${limit}`).then(unwrap<HybridRunRow>("items")),
+    run: (runId: string) => tryRequest<HybridRunDetail>(`/api/hybrid/runs/${runId}`),
+    /** limit 默认 500，上限 2000。刷新页面后靠它重建执行轨迹 */
+    logs: (runId: string, limit = 500) =>
+      tryRequest<unknown>(`/api/hybrid/runs/${runId}/logs?limit=${limit}`).then(
+        unwrap<HybridLogRow>("items")
+      ),
+    /**
+     * 人工接管。指令**不立即中断**：引擎在安全点（节点/事件边界）让出后才生效，
+     * 随后会推一条 rule="manual" 的 mode_switch。
+     * 409 = 任务已结束，界面据此提示「任务已结束，无需切换」而不是报错。
+     */
+    switchRun: (runId: string, action: "to_agent" | "to_workflow" | "terminate") =>
+      tryRequest<{ ok: boolean }>(`/api/hybrid/runs/${runId}/switch`, {
+        method: "POST",
+        body: JSON.stringify({ action }),
       }),
   },
 };

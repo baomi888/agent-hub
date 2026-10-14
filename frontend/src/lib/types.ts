@@ -32,8 +32,16 @@ export interface Message {
   created_at?: number;
 }
 
-// 聊天模式：auto 自动 / rag 强制检索 / agent 强制工具 / llm 纯对话
-export type ChatMode = "auto" | "rag" | "agent" | "llm";
+// 聊天模式：auto 自动 / rag 强制检索 / agent 强制工具 / llm 纯对话 / hybrid 混合编排
+//
+// hybrid（10-14 加）：工作流与自主 Agent 在**一次任务内**动态换手。
+// 它是唯一需要额外 SSE 事件（hybrid_start / workflow_node / mode_switch）才能正确
+// 渲染的模式 —— 其余四种只靠 token + done 就够了。
+//
+// ⚠️ 后端开关 HYBRID_MODE_ENABLED=0 时它会**静默回退 agent**（不报错）：
+// 表现为「收不到 hybrid_start」且「done.mode === 'agent'」。
+// 所以前端不能假设选了 hybrid 就一定走混合，得看事件有没有来（见 useHybridTrace）。
+export type ChatMode = "auto" | "rag" | "agent" | "llm" | "hybrid";
 
 // 场景预设：kaoyan 考研复习 / notes 课程笔记 / paper 论文写作（轻量版只做提示词 + 选择器）
 export type ScenarioId = "kaoyan" | "notes" | "paper";
@@ -304,4 +312,200 @@ export interface ScheduleJob {
   enabled: boolean;
   last_run_at?: number | null;
   last_status?: string | null;
+}
+// ============ P6 混合架构（工作流 × 自主 Agent）============
+// 契约来源：docs/前端对接接口文档_混合架构_2026-10-14.md（林宏亮 v1）
+// ⚠️ 后端代码截至 10-14 尚未推到任何远端分支（hybrid/ 与 api/hybrid.py 均为 0 文件），
+//    所以这一段是**照文档实现**，等后端上线后要按真实响应回归一次。
+
+// ---------- SSE 事件 ----------
+
+/** hybrid_start：起跑即发，mode 是**初始**模式（workflow / agent），不是最终模式 */
+export interface HybridStartEvent {
+  run_id: string;
+  mode: HybridRuntimeMode;
+}
+
+/** 工作流节点类型（NodeDef.type） */
+export type HybridNodeType = "llm" | "tool" | "agent" | "condition" | "human";
+
+export interface WorkflowNodeEnter {
+  phase: "enter";
+  node_id: string;
+  type: HybridNodeType;
+  /** 展示名；后端保证空则回填为 node_id */
+  name: string;
+}
+
+export interface WorkflowNodeExit {
+  phase: "exit";
+  node_id: string;
+  status: "ok" | "failed";
+  /** 失败跳转目标；null 才会进入切换规则判定 */
+  on_fail?: string | null;
+  error?: string | null;
+}
+
+export type WorkflowNodeEvent = WorkflowNodeEnter | WorkflowNodeExit;
+
+/** 模式切换；rule="manual" 是人工干预，"__max_switches__" 是切换次数达上限被强制收工 */
+export interface ModeSwitchEvent {
+  rule: string;
+  /** 人类可读决策依据，可直接展示在轨迹里 */
+  reason: string;
+  from: HybridRuntimeMode;
+  to: HybridRuntimeMode;
+}
+
+export type HybridRuntimeMode = "workflow" | "agent";
+
+// ---------- 执行轨迹（消息上持久化，刷新后靠 /logs 重建）----------
+
+/** 轨迹里的一段：要么是某个节点的一次进出，要么是一次模式切换 */
+export type TraceItem =
+  | {
+      kind: "node";
+      node_id: string;
+      type: HybridNodeType;
+      name: string;
+      /** 进行中 / 已完成 / 失败 */
+      status: "running" | "ok" | "failed";
+      on_fail?: string | null;
+      error?: string | null;
+    }
+  | { kind: "switch"; rule: string; reason: string; from: HybridRuntimeMode; to: HybridRuntimeMode };
+
+// ---------- 工作流定义（管理面 CRUD）----------
+
+export interface WorkflowNodeDef {
+  id: string;
+  type: HybridNodeType;
+  name?: string;
+  config?: Record<string, unknown>;
+  timeout_seconds?: number | null;
+  /** 节点内重试次数（先重试，再谈失败跳转/切换） */
+  retry?: number;
+  /** 失败跳转目标；null 才进入切换规则判定 */
+  on_fail?: string | null;
+  /** 执行到本节点主动让出给 Agent 模式 */
+  requires_agent?: boolean;
+}
+
+export interface WorkflowEdgeDef {
+  source: string;
+  target: string;
+  /** 受限表达式，仅 shared.<key> 作用域；null = 默认兜底边 */
+  condition?: string | null;
+}
+
+export interface WorkflowDef {
+  /** ⚠️ 不参与落库主键，后端会自己生成 12 位 hex 作为行 id；建议留空 */
+  id?: string;
+  name?: string;
+  version?: number;
+  entry?: string | null;
+  nodes: WorkflowNodeDef[];
+  edges?: WorkflowEdgeDef[];
+  /** 0 = 用服务端默认 */
+  timeout_seconds?: number;
+}
+
+export interface WorkflowIn {
+  name: string;
+  description?: string;
+  definition: WorkflowDef;
+}
+
+export interface WorkflowRow {
+  id: string;
+  owner_id: string;
+  name: string;
+  description: string;
+  definition: WorkflowDef;
+  version: number;
+  created_at: number;
+  updated_at: number;
+  /** 内置只读：改/删一律 404 */
+  builtin: boolean;
+}
+
+// ---------- 切换规则 ----------
+
+export type RuleAction = "to_agent" | "to_workflow" | "terminate";
+
+export interface RuleIn {
+  /** ≤ 40 字符。⚠️ 引擎实际只会上报 4 个 signal，自定义的存得下但不会触发 */
+  signal: string;
+  /** ≤ 500 字符；空 = 命中信号即触发。仅做语法校验，语义运行期才判 */
+  condition?: string;
+  action: RuleAction;
+  reason?: string;
+  /** 0–9999，数字小者先求值 */
+  priority?: number;
+  enabled?: boolean;
+  /** 0–86400，显式 0 = 结构型规则豁免防抖 */
+  cooldown_seconds?: number;
+}
+
+export interface RuleRow {
+  id: string;
+  owner_id: string;
+  name: string;
+  signal: string;
+  condition?: string | null;
+  action: RuleAction;
+  reason?: string | null;
+  priority: number;
+  enabled: boolean;
+  cooldown_seconds: number;
+  builtin: boolean;
+}
+
+/** 引擎只会上报这 4 个 signal；界面上自定义 signal 要提示「不会触发」 */
+export const KNOWN_SIGNALS = [
+  "requires_agent",
+  "node_failed",
+  "budget_exhausted",
+  "goal_satisfied",
+] as const;
+
+// ---------- 执行记录与日志 ----------
+
+export type HybridRunStatus = "running" | "completed" | "failed" | "timeout" | "stopped";
+
+export interface HybridRunRow {
+  run_id: string;
+  task_id: string;
+  workflow_id?: string | null;
+  status: HybridRunStatus;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface HybridRunDetail extends HybridRunRow {
+  owner_id: string;
+  /** TaskContext 快照：goal / current_mode / workflow_state / agent_state / shared / mode_trace */
+  context: Record<string, unknown>;
+}
+
+export type HybridLogEventType =
+  | "node_enter"
+  | "node_exit"
+  | "tool_call"
+  | "token"
+  | "switch"
+  | "error"
+  | "status"
+  | "human_intervention";
+
+export interface HybridLogRow {
+  id: number;
+  event_type: HybridLogEventType;
+  mode?: HybridRuntimeMode | null;
+  node_id?: string | null;
+  /** 仅 switch 事件 */
+  decision?: { rule: string; reason: string; from: HybridRuntimeMode; to: HybridRuntimeMode } | null;
+  /** 摘要级数据，后端序列化后截断 2000 字符 */
+  payload?: Record<string, unknown>;
+  ts: number;
 }
