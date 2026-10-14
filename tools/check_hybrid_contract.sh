@@ -3,6 +3,7 @@
 #
 # 为什么需要：前端是**照接口文档 v1** 写的，而后端代码在林宏亮本地、他推上来之前
 # 我无法验证任何一条真响应。与其两个人来回试，不如把「我这边依赖了什么」变成可执行检查。
+# 状态（10-14 深夜）：后端已合入 main（231a9c7），在本地 8010 实跑 17/17 全绿。
 #
 # 用法（本地或服务器上都行，前提是本地前后端已起）：
 #   bash tools/check_hybrid_contract.sh
@@ -67,20 +68,16 @@ fi
 _r=$(req GET "/api/hybrid/workflows")
 _c=$(code_of "$_r")
 if [ "$_c" = "404" ]; then
-  echo "=== 结论：后端 hybrid 端点还没上线（/api/hybrid/workflows 返回 404）==="
+  echo "=== 结论：所连后端还没有 hybrid 端点（/api/hybrid/workflows 返回 404）==="
   echo
-  echo "这不是前端问题。hybrid/ 与 api/hybrid.py 目前不在任何远端分支上，"
-  echo "所以下面这些检查全部无法进行。等代码推上来后重跑本脚本即可。"
+  echo "代码已经在 main 上了（hybrid/ 引擎 + api/hybrid.py，合入提交 231a9c7），"
+  echo "404 只说明跑着的还是旧进程："
+  echo "  - 本机：重启后端（8010/8000）后再跑本脚本；"
+  echo "  - 服务器：先拉 main 覆盖到 /root（codeload tarball），再 bash deploy.sh deploy。"
   echo
   echo "在那之前，前端会显示「接口待上线」+ 演示数据（三态降级），不会白屏。"
   echo
-  echo "与 hybrid 无关但同属 T5 契约统稿的 delegate 侧对齐点（10-14 已全部解决）："
-  echo "  [OK] 字段名 —— 林宏亮用「加法兼容」补齐了 id/instruction/session_id，"
-  echo "       并额外补了 session_title / kb_name（实测 200 确认）"
-  echo "  [OK] runs 壳层是 {items:[...]} —— 前端已按 items 读（实测确认）"
-  echo "  [OK] 尾斜杠 —— 他已去掉 5 处路由的斜杠，前端同步去掉（实测 /api/delegate 401）"
-  echo ""
-  echo "  仍待确认的只有 hybrid 本身的 3 点，见 we/议题_混合架构前端已就绪等待后端对接.md："
+  echo "（10-14 深夜已在本地 8010 对合并后的后端实跑本脚本：17/17 全绿。）"
   exit 0
 fi
 
