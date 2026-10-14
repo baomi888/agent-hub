@@ -22,6 +22,19 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
+# ---------- 思考模型（可选，DeepSeek Reasoner）----------
+# 只有这类模型才会**同时**产出「思考内容」和「正文」，前端的收纳式思考块才有东西可显示。
+# deepseek-chat 按定义不产思考内容——所以这个开关的含义是「要不要启用思考流」，
+# 而不是「要不要显示思考」（显示与否由前端决定）。
+#
+# 留空 = 关闭思考流，走原来的 DEEPSEEK_MODEL。填 deepseek-reasoner 即启用。
+# 为什么用环境变量而不是写死：思考模型的单价与延迟都更高，
+# 演示/评测期可以随时关掉而不动代码。
+DEEPSEEK_REASONER_MODEL = os.getenv("DEEPSEEK_REASONER_MODEL", "")
+# 允许前端逐次请求覆盖（值为 "auto" 时按上面的默认决定）。
+# 用于同一个部署里「平时用 chat、个别场景要思考」的混合用法。
+REASONER_ALLOW_OVERRIDE = os.getenv("REASONER_ALLOW_OVERRIDE", "1") not in ("0", "false", "False")
+
 # ---------- Embedding（向量化）----------
 # DeepSeek 不提供 embedding 接口，必须单独配置（阿里百炼等 OpenAI 兼容服务）
 EMBEDDING_API_KEY = os.getenv("EMBEDDING_API_KEY", "")

@@ -11,6 +11,10 @@
 langchain==1.4.1
 langchain-core==1.6.3
 langchain-openai==1.6.2
+# 思考流（reasoning_content）必需：ChatOpenAI 明确不转发第三方 provider 的非标准字段
+# （langchain_openai/chat_models/base.py:1-12 的原文警告），必须用 ChatDeepSeek 才拿得到。
+# 不装也能跑：core/llm.py 会退回 ChatOpenAI，只是没有思考内容。
+langchain-deepseek>=1.0
 langchain-community==0.4.2
 langchain-text-splitters==1.1.2
 # 注意：langchain-chroma 1.x 要 chromadb 1.x（沙箱限制无法安装），

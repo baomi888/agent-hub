@@ -20,14 +20,59 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 from core import config
 
+# 思考内容（reasoning_content）只有 provider 专用类才会转发。
+# langchain_openai/chat_models/base.py:1-12 的原文警告：
+#   "Non-standard response fields added by third-party providers (e.g., reasoning_content)
+#    are NOT extracted or preserved. If you are pointing base_url at a provider such as
+#    DeepSeek, use the corresponding provider-specific LangChain package instead."
+# ⇒ 用 ChatDeepSeek 才拿得到思考流；拿不到就退回 ChatOpenAI（功能不变，只是没有思考内容）。
+try:  # pragma: no cover - 取决于部署是否装了该包
+    from langchain_deepseek import ChatDeepSeek
+
+    _HAS_DEEPSEEK = True
+except Exception:  # noqa: BLE001
+    ChatDeepSeek = None  # type: ignore[assignment]
+    _HAS_DEEPSEEK = False
+
 _CLIENT_LOCK = threading.Lock()
 
 # 大模型（DeepSeek Chat）：键 = (temperature, max_tokens)
 _LLM_CACHE: dict[tuple[float, int | None], ChatOpenAI] = {}
+# 思考模型（DeepSeek Reasoner）：单独一份缓存，别和普通模型混用
+_REASONER_CACHE: dict[tuple[float, int | None], ChatOpenAI] = {}
 # 视觉模型（qwen-vl-plus）：键同上，单独一份，别和纯文本模型混用
 _VISION_CACHE: dict[tuple[float, int | None], ChatOpenAI] = {}
 # 向量化客户端：无参数，单例
 _EMBEDDINGS: OpenAIEmbeddings | None = None
+
+
+def has_reasoner() -> bool:
+    """当前部署是否启用了思考模型（填了 DEEPSEEK_REASONER_MODEL 且装了 langchain-deepseek）。"""
+    return bool(config.DEEPSEEK_REASONER_MODEL) and _HAS_DEEPSEEK
+
+
+def _build(model: str, temperature: float, max_tokens: int | None):
+    """按是否装了 langchain-deepseek 选择客户端类。
+
+    两者接口一致（ChatDeepSeek 继承 BaseChatOpenAI），区别只在
+    ChatDeepSeek 会把 delta.reasoning_content 放进 additional_kwargs。
+
+    ⚠️ key 为空时必须显式传占位串：两个基类的 validate_environment 都会用
+    `api_key_env="OPENAI_API_KEY"` 兜底，不传就会**静默拿环境里另一个 key 去请求**，
+    既不报错也不走我们要的 base_url。占位串保证「没配 key」= 请求时 401，而不是串到别处。
+    """
+    kwargs = dict(
+        api_key=config.DEEPSEEK_API_KEY or "not-set",
+        base_url=config.DEEPSEEK_BASE_URL,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        request_timeout=config.LLM_TIMEOUT,
+        max_retries=config.LLM_MAX_RETRIES,
+    )
+    if _HAS_DEEPSEEK:
+        return ChatDeepSeek(**kwargs)
+    return ChatOpenAI(**kwargs)
 
 
 # ---------- 大模型（DeepSeek Chat）----------
@@ -44,17 +89,43 @@ def get_llm(temperature: float = 0.1, max_tokens: int | None = None) -> ChatOpen
     with _CLIENT_LOCK:
         llm = _LLM_CACHE.get(key)
         if llm is None:
-            llm = ChatOpenAI(
-                api_key=config.DEEPSEEK_API_KEY,
-                base_url=config.DEEPSEEK_BASE_URL,
-                model=config.DEEPSEEK_MODEL,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                request_timeout=config.LLM_TIMEOUT,
-                max_retries=config.LLM_MAX_RETRIES,
-            )
+            llm = _build(config.DEEPSEEK_MODEL, temperature, max_tokens)
             _LLM_CACHE[key] = llm
     return llm
+
+
+# ---------- 思考模型（DeepSeek Reasoner，可选）----------
+
+def get_reasoner_llm(temperature: float = 0.1, max_tokens: int | None = None) -> ChatOpenAI:
+    """返回思考模型客户端；未配置时直接抛错，由调用方决定降级。
+
+    为什么单独一个函数而不是给 get_llm 加参数：
+    调用方需要能**明确知道**当前跑的是不是思考模型（决定要不要发 reasoning 事件），
+    用返回值类型区分不出来的东西，不如用入口区分。
+    """
+    if not has_reasoner():
+        raise RuntimeError(
+            "未启用思考模型：请在 .env 里设置 DEEPSEEK_REASONER_MODEL=deepseek-reasoner，"
+            "并确认已安装 langchain-deepseek"
+        )
+    key = (temperature, max_tokens)
+    with _CLIENT_LOCK:
+        llm = _REASONER_CACHE.get(key)
+        if llm is None:
+            llm = _build(config.DEEPSEEK_REASONER_MODEL, temperature, max_tokens)
+            _REASONER_CACHE[key] = llm
+    return llm
+
+
+def pick_llm(mode_reasoner: bool, temperature: float = 0.1, max_tokens: int | None = None) -> tuple[ChatOpenAI, bool]:
+    """按「本次要不要思考」挑客户端，返回 (客户端, 是否真的是思考模型)。
+
+    第二个返回值是给流式层用的：**只有真的走思考模型才应该发 reasoning 事件**，
+    否则前端会等一个永远不来的事件。
+    """
+    if mode_reasoner and has_reasoner():
+        return get_reasoner_llm(temperature, max_tokens), True
+    return get_llm(temperature, max_tokens), False
 
 
 # ---------- Embedding（阿里百炼）----------
