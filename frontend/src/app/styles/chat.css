@@ -81,6 +81,36 @@
   border-color: var(--accent-ink);
 }
 
+/* 校园工具集入口（原先在侧栏，10-14 搬到对话栏场景行右侧）。
+   刻意与 .scenario 同族（描边 + 全圆角 + 同一档间距），让它融进这一行；
+   但字号降一档、且只在 hover 点亮金描边 —— 它是跳出去的外链，
+   不是当前会话的属性（场景 chip 会用 aria-pressed 持久高亮），主次不该一样。 */
+.tools-link {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--fill-3);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  white-space: nowrap;
+  transition: var(--t-color);
+}
+.tools-link svg {
+  flex: none;
+  color: var(--text-3);
+}
+.tools-link:hover {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+.tools-link:hover svg {
+  color: var(--accent-ink);
+}
+
 /* 参数齿轮 */
 .gear {
   background: none;

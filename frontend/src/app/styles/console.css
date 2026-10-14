@@ -12,10 +12,37 @@
      里那个是资料库徽章），所以这里的标签统一叫 `.ctag`。
    ============================================================ */
 
+/* ---------- 滚动容器 ----------
+   base.css 里 html/body 是 height:100% + overflow:hidden（首页工作台靠内部面板滚动）。
+   四屏没有那层面板，所以外壳自带一个占满视口的滚动区，否则内容超出就滚不动。
+   两个 height 是刻意的回退顺序：老浏览器认 vh，认 dvh 的用 dvh（地址栏伸缩时更准）；
+   写死 px 不行 —— 底部安全区（iPhone home 条）要留出来。 */
+.console-scroll {
+  height: 100vh;
+  height: 100dvh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* iOS 惯性滚动；overscroll-contain 防止滚到底继续带动 body */
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  background: var(--bg-canvas);
+  padding: var(--space-24) var(--space-16) calc(var(--space-24) + env(safe-area-inset-bottom, 0px));
+}
+@media (min-width: 640px) {
+  .console-scroll {
+    padding-left: var(--space-24);
+    padding-right: var(--space-24);
+  }
+}
+
 /* ---------- 应用外壳 ---------- */
 .console-shell {
   display: grid;
-  grid-template-columns: 196px 1fr;
+  /* minmax(0, 1fr) 而不是 1fr：1fr 展开是 minmax(auto, 1fr)，而 auto 的下界
+     取「本列所有网格项的 min-content」——移动端导航那六个不可断的中文条目会
+     把列撑到 453px（视口只有 390），.console-page 跟着变宽、右边被裁。
+     手机截图里表现为「修改密码」按钮少一截、检索档位最右一个看不见。 */
+  grid-template-columns: 196px minmax(0, 1fr);
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
@@ -211,6 +238,10 @@
 .meta {
   font-size: var(--fs-xs);
   color: var(--text-3);
+  /* anywhere（而不是 break-word）才会参与 min-content 计算：
+     账号 ID 是一串 32 位十六进制、中间没有空格，break-word 下它仍算一个
+     不可断的长词，会把整列的 min-content 顶到 460px（视口才 390）。 */
+  overflow-wrap: anywhere;
 }
 .kv {
   display: flex;
@@ -260,20 +291,24 @@
 
 .grid2 {
   display: grid;
-  /* 右列要放下 5 列的工具表和 4 列的调度表，1.35:1 会把 job_key 挤成断词
+  /* 一律 minmax(0, …) 而不是裸 fr：裸 1fr 展开是 minmax(auto, 1fr)，auto 的下界
+     取本列内容的 min-content —— 只要有一个不可断的长词（账号 ID 那串 32 位十六进制、
+     长 job_key、长 URL），整列就被撑破，右边内容被 .console-scroll 的 overflow-x
+     悄悄裁掉（10-14 手机截图：设置页「修改密码」按钮少一截）。
+     右列要放下 5 列的工具表和 4 列的调度表，1.35:1 会把 job_key 挤成断词
      （delegate.dispatc / h），收到 1.25:1 刚好够 */
-  grid-template-columns: 1.25fr 1fr;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
   gap: var(--space-16);
   align-items: start;
 }
 .grid3 {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-12);
 }
 .grid4 {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-10);
 }
 .sec-label {
@@ -877,7 +912,7 @@ textarea.input {
 }
 @media (max-width: 900px) {
   .console-shell {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .console-nav {
     border-right: none;
@@ -887,14 +922,18 @@ textarea.input {
   .nav-brand {
     padding-bottom: var(--space-10);
   }
+  /* 6 个入口（对话/知识库/委托/总结/打卡/设置）在 390px 下排不满一行，
+     原来靠 overflow-x:auto 横滚 —— 但手机上没有任何"右边还有"的提示，
+     「打卡」「设置」就是看不见（10-14 手机截图确认）。
+     改 3 列网格：正好 2 行 × 3 列，全部入口一次看全。 */
   .console-nav nav {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: var(--space-6);
-    overflow-x: auto;
     padding-bottom: var(--space-4);
   }
   .console-nav nav .nav-item {
-    width: auto;
+    width: 100%;
     flex: none;
   }
   .nav-sec {
@@ -905,7 +944,19 @@ textarea.input {
   }
   .grid3,
   .grid4 {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .row {
+    /* 「正文字号 + 段位选择」这类一行两件，窄屏放不下就换行，别横向溢出 */
+    flex-wrap: wrap;
+  }
+  /* 账号卡：图标 + 名字/ID + 两个按钮并排，窄屏挤不下（ID 是一串不可断的十六进制），
+     换行让按钮落到第二行、各占一半 —— 比把按钮裁掉好 */
+  .acct-card {
+    flex-wrap: wrap;
+  }
+  .acct-card .btn {
+    flex: 1 1 40%;
   }
   .run {
     grid-template-columns: 1fr auto;

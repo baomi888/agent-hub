@@ -72,7 +72,12 @@ export default function ConsoleShell({ active, eyebrow, title, sub, actions, chi
 
   return (
     <UserCtx.Provider value={auth.me}>
-      <div className="min-h-dvh bg-canvas px-4 py-6 sm:px-6">
+      {/* 滚动容器必须由外壳自己提供。
+          base.css 给 html/body 设了 height:100% + overflow:hidden —— 那是首页工作台
+          「固定视口、滚动发生在内部面板」的做法；四屏直接铺在 body 里，没有这层容器
+          就会被内容顶出视口且无法滚动（移动端表现为「页面被固定死」）。
+          height 用 dvh（移动端地址栏收起/展开时视口高度会变，vh 会算错）。 */}
+      <div className="console-scroll">
         <div className="console-shell mx-auto" style={{ maxWidth: 1220 }}>
           <aside className="console-nav">
             <div className="nav-brand">

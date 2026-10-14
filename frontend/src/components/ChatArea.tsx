@@ -773,6 +773,20 @@ export default function ChatArea({
               {s.label}
             </button>
           ))}
+          {/* 校园工具集：从侧栏搬来（10-14）。
+              它是「发消息之前顺手用一下」的入口，挂在对话栏这一行才够得着使用场景；
+              放侧栏等于让它跟会话列表抢同一条视线。靠右、与 .scenario 同一族的胶囊外形，
+              所以看得见但不跟场景抢主次 —— 场景是当前会话的属性（会高亮），它只是个外链。 */}
+          <a
+            href={TOOLS_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="tools-link"
+            title="校园工具集：GPA 计算 · 番茄钟 · 课表……（免登录，独立页）"
+          >
+            <CornIcon name="tools" className="h-[15px] w-[15px]" />
+            校园工具集
+          </a>
         </div>
         <div className="mb-2 flex items-center gap-3">
           <div className="mode-tabs" role="group" aria-label="对话模式" ref={modeTabsRef}>

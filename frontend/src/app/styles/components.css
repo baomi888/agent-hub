@@ -89,6 +89,38 @@
   transform: scaleX(0);
 }
 
+/* 侧栏四屏入口（每日委托 / 总结 / 打卡 / 设置）。
+   图标在上、文字在下拼成 2×2 —— 之前是四个纯图标方块，用户认不出是干什么的。
+   视觉沿用 .btn-import 的金描边（次按钮=可点但不抢主操作），只把排布换成纵向：
+   两字标签 + 56px 高，热区比原来的 40px 方块明显更大，也好按。 */
+.side-entry {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  min-height: 56px;
+  padding: var(--space-7) var(--space-4);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  letter-spacing: var(--ls-tight);
+  line-height: 1;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.side-entry svg {
+  /* 图标比文字深一档：缩到 18px 后描边变细，颜色再淡就糊成一片 */
+  color: var(--ink);
+}
+.side-entry:hover {
+  background: var(--fill-2);
+  border-color: var(--accent-ink);
+  color: var(--ink);
+}
+
 /* 两种进料入口：我上传 / 它去搜 */
 .feed-btn {
   background: var(--panel);

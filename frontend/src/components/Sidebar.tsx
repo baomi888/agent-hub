@@ -10,11 +10,13 @@ import type { Conversation, QuotaInfo } from "@/lib/types";
 import type { FontScale } from "@/lib/hooks/usePrefs";
 
 /** 工作台之外的四屏入口。图标排一行，避免再堆四个通栏按钮把侧栏撑满 */
+// 四屏入口。label 只用两个字：侧栏是 240px、移动端是抽屉，四个格子横排两行，
+// 字太长会把格子撑到换行；全称放 title，悬停能看到（也供读屏器读）。
 const CONSOLE_LINKS = [
-  { href: "/delegate", icon: "clock", label: "每日委托" },
-  { href: "/report", icon: "calendar", label: "每日总结" },
-  { href: "/checkin", icon: "star", label: "打卡" },
-  { href: "/settings", icon: "settings", label: "设置" },
+  { href: "/delegate", icon: "clock", label: "委托", full: "每日委托" },
+  { href: "/report", icon: "calendar", label: "总结", full: "每日总结" },
+  { href: "/checkin", icon: "star", label: "打卡", full: "打卡记录" },
+  { href: "/settings", icon: "settings", label: "设置", full: "设置" },
 ];
 
 interface Props {
@@ -169,29 +171,22 @@ export default function Sidebar({
           </span>
         </button>
       )}
-      {/* 校园工具集：纯前端工具，无需登录即可用，独立静态页新标签打开 */}
-      <a
-        href="/tools.html"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="btn-import mt-2 flex w-full items-center justify-center gap-1.5"
-      >
-        <CornIcon name="tools" className="h-4 w-4" title="校园工具集" />
-        校园工具集
-      </a>
-
       {/* 四屏入口：每日委托 / 总结 / 打卡 / 设置。
-          做成图标行而不是通栏按钮 —— 侧栏高度要留给会话列表，这四个不是高频操作 */}
-      <div className="mt-2 flex gap-1.5">
+          图标在上、文字在下 —— 之前是四个纯图标方块，用户认不出是干什么的（10-14 反馈）。
+          2×2 而不是四个横排：横排时每格只有 45px 宽，放不下文字，热区也窄。
+          校园工具集已从这里移走，改挂在对话栏（它是"发消息前顺手用一下"的入口，
+          放在侧栏等于让它和会话列表抢轴线的注意力，也够不着使用场景）。 */}
+      <div className="mt-3 grid grid-cols-2 gap-1.5">
         {CONSOLE_LINKS.map((it) => (
           <Link
             key={it.href}
             href={it.href}
-            className="btn-import flex flex-1 items-center justify-center px-0 py-2.5"
-            title={it.label}
-            aria-label={it.label}
+            className="side-entry"
+            title={it.full}
+            aria-label={it.full}
           >
-            <CornIcon name={it.icon} className="h-4 w-4" />
+            <CornIcon name={it.icon} className="h-[18px] w-[18px]" />
+            <span>{it.label}</span>
           </Link>
         ))}
       </div>

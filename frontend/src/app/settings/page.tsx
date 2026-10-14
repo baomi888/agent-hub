@@ -320,7 +320,7 @@ export default function SettingsPage() {
 function AccountCard({ onLogout }: { onLogout: () => Promise<void> }) {
   const me = useConsoleUser();
   return (
-    <div className="card card-pad" style={{ display: "flex", alignItems: "center", gap: 14 }}>
+    <div className="card card-pad acct-card" style={{ display: "flex", alignItems: "center", gap: 14 }}>
       <CornIcon name="user" className="h-9 w-9" />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div className="card-title">{me?.user.username ?? "—"}</div>
