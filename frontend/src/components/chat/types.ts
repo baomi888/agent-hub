@@ -1,6 +1,6 @@
 // 对话区的共享类型：消息与附件
 // 从 ChatArea.tsx 拆出（2026-09 重构），page.tsx 经由 components/ChatArea 再导出引用
-import type { RefSource, ToolEvent } from "@/lib/types";
+import type { RefSource, ToolEvent, TraceItem } from "@/lib/types";
 
 export interface UiMessage {
   id: string;
@@ -17,6 +17,10 @@ export interface UiMessage {
   sources?: RefSource[];
   /** 后端 messages 表自增 id，用于删除整轮对话 */
   dbId?: number;
+  /** hybrid 模式：本次执行的 run_id（人工切换按它寻址） */
+  runId?: string;
+  /** hybrid 模式：执行轨迹（hybrid_start / workflow_node / mode_switch 累积） */
+  trace?: TraceItem[];
 }
 
 export interface ChatAttachment {

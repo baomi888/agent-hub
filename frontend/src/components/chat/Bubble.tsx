@@ -5,9 +5,11 @@
 // 已完成的旧消息对象引用不变，跳过重渲染，避免长对话越答越卡
 import { memo, useMemo, useState } from "react";
 import type { UiMessage } from "./types";
+import type { SwitchAction } from "@/lib/types";
 import { TOOL_META, toolLabel } from "./constants";
 import { parseRefs, renderContent } from "./content";
 import PlanCard, { detectPlanTopic, isPlanRequest, parsePlan } from "./plan";
+import TraceTimeline from "./TraceTimeline";
 import { useCopy } from "@/lib/useCopy";
 import HubMark from "./HubMark";
 
@@ -21,6 +23,7 @@ const Bubble = memo(function Bubble({
   onFeedback,
   onPreviewFile,
   onDeleteTurn,
+  onManualSwitch,
 }: {
   m: UiMessage;
   userQuestion?: string;
@@ -35,6 +38,8 @@ const Bubble = memo(function Bubble({
   onPreviewFile?: (source: string) => void;
   /** 删除该消息及其所在的一轮对话 */
   onDeleteTurn?: (msgDbId: number) => void;
+  /** hybrid 人工干预切换：转交智能体 / 转回工作流 / 终止（运行中才显示） */
+  onManualSwitch?: (runId: string, action: SwitchAction) => void;
 }) {
   const [feedback, setFeedback] = useState<"like" | "dislike" | null>(null);
   const { copied, copy } = useCopy();
@@ -116,6 +121,31 @@ const Bubble = memo(function Bubble({
       {/* 44px 才能看清神态：眨眼 / 腮红 / 思考时嘴变○，28px 时这些彩蛋全是噪点 */}
       <HubMark className="h-11 w-11 flex-shrink-0 mt-2" thinking={m.streaming} />
       <div className="min-w-0 flex-1 pt-0.5">
+        {/* hybrid 执行轨迹：进行中实时展开，结束后收成可展开记录 */}
+        {m.trace && m.trace.length > 0 && (
+          <TraceTimeline trace={m.trace} streaming={m.streaming} />
+        )}
+
+        {/* hybrid 人工干预：指令写入后由引擎在安全点让出，不是立即硬切 */}
+        {m.streaming && m.runId && onManualSwitch && (
+          <div className="trace-actions" role="group" aria-label="人工切换">
+            <span className="trace-actions-label">人工接管：</span>
+            <button type="button" onClick={() => onManualSwitch(m.runId!, "to_agent")}>
+              转交智能体
+            </button>
+            <button type="button" onClick={() => onManualSwitch(m.runId!, "to_workflow")}>
+              转回工作流
+            </button>
+            <button
+              type="button"
+              className="danger"
+              onClick={() => onManualSwitch(m.runId!, "terminate")}
+            >
+              终止任务
+            </button>
+          </div>
+        )}
+
         {/* 工具调用条：进行中显形（转圈 + 已用工具），结束后收成可展开记录 */}
         {m.toolCalls && m.toolCalls.length > 0 && (
           m.streaming ? (

@@ -9,6 +9,36 @@
 
 ---
 
+## [2026-10-14]
+
+### 新增（混合架构：工作流 × 自主 Agent）
+- 新增第五种聊天模式 `hybrid`：工作流跑确定性步骤，Agent 接管不确定环节，
+  执行中按上下文条件无缝切换（降级接管 / 收编回归 / 流程内嵌 agent 节点三种形态）。
+- 引擎层 `hybrid/`：TaskContext 统一上下文（`shared` 唯一交换通道 + 切换即快照 + version 乐观锁）、
+  WorkflowEngine（5 类节点 / 条件分支受限表达式 / 节点级超时重试 / on_fail 跳转）、
+  AgentEngine（复用 `build_agent()`，步数/token/时长三维预算护栏）、
+  SwitchEngine（规则链优先级 + 人工指令插队 + 防抖冷却）、HybridOrchestrator（引擎注册表，模式可插拔）。
+- 持久化独立 `hybrid.db` 四表：workflow_defs / workflow_runs / switch_rules / exec_logs。
+- 管理面 `api/hybrid.py` 12 端点：工作流 CRUD（内置只读）、规则覆盖模型
+  （系统默认删不掉，用户同名覆盖、删覆盖恢复默认，条件表达式语法级校验）、
+  执行记录与全链路日志查询、人工切换（running 才允许，否则 409）。
+- SSE 新增 `hybrid_start / workflow_node / mode_switch` 三事件，`done` 带 `run_id`；
+  协议说明见 `api/chat.py` 头注释。`HYBRID_MODE_ENABLED=0` 时静默回退 agent。
+- 前端：模式条加「混合」；hybrid 专属起跑工作流选择器（自动编排 / 指定流程，
+  选中流程被删自动回落）；气泡内执行轨迹时间轴（工作流蓝 / Agent 金 /
+  切换点菱形 + 决策依据）；运行中「人工接管」按钮组（转交智能体 / 转回工作流 / 终止）；
+  「混合编排」管理弹层（工作流列表 + 结构化节点表单 + 自绘 SVG 拓扑 + 规则页签）。
+- 内置资产：`builtin_plan_execute`（规划→执行）工作流 + 4 条系统默认切换规则。
+- 测试：新增 25 项混合架构用例（context / expr / workflow / switcher / orchestrator），
+  全量 64 项绿；前端 `tsc` + `next build` 绿。
+- 设计依据 `docs/混合架构系统研讨报告.md`，实现明细见 `docs/混合架构实现说明_2026-10-14.md`。
+
+### 修复
+- `orchestrator._switch_event` 补写 exec_logs：此前切换事件只发 SSE 不落库，
+  监控链路缺切换记录。
+
+---
+
 ## [2026-10-11]
 
 ### 修复（top_k 上界 + 偏好读回）

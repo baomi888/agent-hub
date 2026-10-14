@@ -1,6 +1,7 @@
 // 后端 API 封装：统一错误处理 + 类型化（相对路径走 rewrites 代理）
 import type { Conversation, KbInfo, KbFile, FilePreview, SearchResult, Defaults, Message } from "./types";
 import type { MeOut, UserOut, Template, ApplyTemplateResult } from "./types";
+import type { WorkflowRow, WorkflowDef, SwitchRule, SwitchAction, HybridRun, ExecLog } from "./types";
 
 /**
  * 登录态失效的广播事件名。
@@ -187,5 +188,41 @@ export const api = {
   applyTemplate: (id: string) =>
     request<ApplyTemplateResult>(`/api/templates/${id}/apply`, {
       method: "POST",
+    }),
+
+  // ---------- 混合架构：工作流定义 ----------
+  listWorkflows: () => request<{ items: WorkflowRow[] }>("/api/hybrid/workflows"),
+  createWorkflow: (name: string, description: string, definition: WorkflowDef) =>
+    request<WorkflowRow>("/api/hybrid/workflows", {
+      method: "POST",
+      body: JSON.stringify({ name, description, definition }),
+    }),
+  updateWorkflow: (id: string, name: string, description: string, definition: WorkflowDef) =>
+    request<WorkflowRow>(`/api/hybrid/workflows/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ name, description, definition }),
+    }),
+  deleteWorkflow: (id: string) =>
+    request<{ ok: boolean }>(`/api/hybrid/workflows/${id}`, { method: "DELETE" }),
+
+  // ---------- 混合架构：切换规则 ----------
+  listRules: () => request<{ items: SwitchRule[] }>("/api/hybrid/rules"),
+  upsertRule: (rule: SwitchRule) =>
+    request<{ ok: boolean }>(`/api/hybrid/rules/${encodeURIComponent(rule.name)}`, {
+      method: "PUT",
+      body: JSON.stringify(rule),
+    }),
+  deleteRule: (name: string) =>
+    request<{ ok: boolean }>(`/api/hybrid/rules/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
+
+  // ---------- 混合架构：执行记录 / 人工切换 ----------
+  listRuns: () => request<{ items: HybridRun[] }>("/api/hybrid/runs"),
+  runLogs: (runId: string) => request<{ items: ExecLog[] }>(`/api/hybrid/runs/${runId}/logs`),
+  manualSwitch: (runId: string, action: SwitchAction) =>
+    request<{ ok: boolean }>(`/api/hybrid/runs/${runId}/switch`, {
+      method: "POST",
+      body: JSON.stringify({ action }),
     }),
 };

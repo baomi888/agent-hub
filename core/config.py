@@ -133,6 +133,24 @@ AMAP_API_KEY = os.getenv("AMAP_API_KEY", "")
 # ---------- 可选：联网搜索备选 ----------
 SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
 
+# ---------- 混合执行架构（工作流 × 自主 Agent）----------
+# 注意与上面的检索混合（HYBRID_ENABLED）区分：这组是 mode=hybrid 执行模式的配置
+HYBRID_MODE_ENABLED = bool(int(os.getenv("HYBRID_MODE_ENABLED", "1")))
+# 单次任务允许的最大模式切换次数：防规则配错导致工作流⇄Agent 乒乓
+HYBRID_MAX_SWITCHES = int(os.getenv("HYBRID_MAX_SWITCHES", "5"))
+# 同方向切换全局防抖（秒）：刚切过去又切回来通常是规则打架，不是真需求
+HYBRID_SWITCH_COOLDOWN = int(os.getenv("HYBRID_SWITCH_COOLDOWN", "30"))
+# Agent 模式三重预算：步数 / 时长（秒）/ 近似 token（chars//2 折算），先到先触发收编
+HYBRID_AGENT_MAX_STEPS = int(os.getenv("HYBRID_AGENT_MAX_STEPS", "10"))
+HYBRID_AGENT_MAX_SECONDS = int(os.getenv("HYBRID_AGENT_MAX_SECONDS", "300"))
+HYBRID_AGENT_TOKEN_BUDGET = int(os.getenv("HYBRID_AGENT_TOKEN_BUDGET", "8000"))
+# 工作流整体超时护栏（秒）：单个流程实例不允许跑得更久
+HYBRID_WORKFLOW_TIMEOUT = int(os.getenv("HYBRID_WORKFLOW_TIMEOUT", "600"))
+# 工作流单节点默认超时（秒），节点定义可覆盖
+HYBRID_NODE_TIMEOUT = int(os.getenv("HYBRID_NODE_TIMEOUT", "120"))
+# 工作流内 LLM 节点的 max_tokens 上限（project memory 硬约束：内部推理调用必须显式限长）
+HYBRID_LLM_MAX_TOKENS = int(os.getenv("HYBRID_LLM_MAX_TOKENS", "2048"))
+
 
 def validate() -> list[str]:
     """启动前校验关键配置，返回缺失项的中文提示列表。"""
