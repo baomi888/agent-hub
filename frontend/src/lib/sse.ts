@@ -27,8 +27,6 @@ export async function* streamChat(
     question: string;
     top_k?: number;
     mode?: string;
-    // hybrid 模式专用：指定起跑的工作流定义 id；不传则由后端按任务分类自动选
-    workflow_id?: string;
     kb_id_override?: string;
     attachments?: { path: string; type: string; filename?: string }[];
     // 两种形态：{ lat, lon }（浏览器定位）或 { city }（公网 http 下由服务端按 IP 推断）。

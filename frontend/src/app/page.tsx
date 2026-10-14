@@ -18,7 +18,7 @@ import { useKnowledge } from "@/lib/hooks/useKnowledge";
 import { useAuth } from "@/lib/hooks/useAuth";
 import AuthGate from "@/components/AuthGate";
 import type { UiMessage } from "@/components/chat/types";
-import type { ChatMode, RefSource, SwitchAction, ToolEvent, TraceItem } from "@/lib/types";
+import type { ChatMode, RefSource, ToolEvent } from "@/lib/types";
 
 // ---- 断点订阅（matchMedia 作为外部数据源） ----
 type Viewport = "wide" | "medium" | "narrow";
@@ -72,7 +72,7 @@ export default function Home() {
   const {
     mode, setMode, topK, setTopK, chunkSize, setChunkSize,
     chunkOverlap, setChunkOverlap, kbPanelPref, setKbPanelPref, savedRef,
-    fontScale, setFontScale, workflowId, setWorkflowId,
+    fontScale, setFontScale,
   } = prefs;
   const sessions_ = useSessions(showToast);
   const {
@@ -224,85 +224,12 @@ export default function Home() {
         }
       }
       const gen = streamChat(
-        {
-          sid,
-          question,
-          top_k: topK,
-          mode,
-          // hybrid 模式才带工作流选择；null = 自动编排，让后端自己分类
-          workflow_id: mode === "hybrid" ? workflowId ?? undefined : undefined,
-          attachments: sentAttachments,
-          location: getSendGeo(),
-        },
+        { sid, question, top_k: topK, mode, attachments: sentAttachments, location: getSendGeo() },
         controller.signal
       );
-      // hybrid 轨迹的累加器：节点 enter 时要能找回名字给 exit 用
-      const nodeNames = new Map<string, string>();
       let finalRefs = "";
       for await (const ev of gen) {
         switch (ev.event) {
-          case "hybrid_start": {
-            // 起跑即发：run_id 挂上气泡（人工切换按它寻址），轨迹记初始模式
-            const runId = String(ev.data.run_id ?? "");
-            const startMode = String(ev.data.mode ?? "") as TraceItem["mode"];
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === asstId
-                  ? {
-                      ...m,
-                      runId: runId || undefined,
-                      trace: [...(m.trace ?? []), { kind: "start", mode: startMode }],
-                    }
-                  : m
-              )
-            );
-            break;
-          }
-          case "workflow_node": {
-            const phase = String(ev.data.phase ?? "");
-            const nodeId = String(ev.data.node_id ?? "");
-            let item: TraceItem;
-            if (phase === "enter") {
-              const name = String(ev.data.name ?? nodeId);
-              nodeNames.set(nodeId, name);
-              item = {
-                kind: "node_enter",
-                nodeId,
-                nodeName: name,
-                nodeType: ev.data.type as TraceItem["nodeType"],
-              };
-            } else {
-              item = {
-                kind: "node_exit",
-                nodeId,
-                nodeName: nodeNames.get(nodeId) ?? nodeId,
-                status: String(ev.data.status ?? "ok"),
-                error: ev.data.error ? String(ev.data.error) : undefined,
-              };
-            }
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === asstId ? { ...m, trace: [...(m.trace ?? []), item] } : m
-              )
-            );
-            break;
-          }
-          case "mode_switch": {
-            // 切换点：决策依据（规则 + 理由）是要求 6 的核心展示
-            const item: TraceItem = {
-              kind: "switch",
-              rule: ev.data.rule ? String(ev.data.rule) : undefined,
-              reason: ev.data.reason ? String(ev.data.reason) : undefined,
-              from: ev.data.from as TraceItem["from"],
-              to: ev.data.to as TraceItem["to"],
-            };
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === asstId ? { ...m, trace: [...(m.trace ?? []), item] } : m
-              )
-            );
-            break;
-          }
           case "token": {
             // 后端现在只发增量，前端自己累加（以前每帧回传全文，长回答流量是平方级）
             const delta = String(ev.data.text ?? "");
@@ -395,7 +322,7 @@ export default function Home() {
       setSending(false);
       refreshSessions();
     }
-  }, [activeSid, mode, topK, workflowId, setSessions, setActiveSid, setMessages, showToast, refreshSessions]);
+  }, [activeSid, mode, topK, setSessions, setActiveSid, setMessages, showToast, refreshSessions]);
 
   // 消息镜像：重试需要读当前列表，但不能让回调依赖 messages，否则每个 token
   // 都会生成新的 onRetry，把 Bubble 的 memo 全部打穿
@@ -423,22 +350,6 @@ export default function Home() {
   const stopSending = () => {
     abortRef.current?.abort();
   };
-
-  // hybrid 人工干预切换（要求 5）：指令写入后由引擎在安全点让出，
-  // 409（任务已结束）不是错误，只是慢了一步
-  const manualSwitch = useCallback(
-    async (runId: string, action: SwitchAction) => {
-      const label = action === "to_agent" ? "转交智能体" : action === "to_workflow" ? "转回工作流" : "终止任务";
-      try {
-        await api.manualSwitch(runId, action);
-        showToast("success", `已下发：${label}（将在安全点生效）`);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : "";
-        showToast("error", msg.includes("已结束") ? "任务已结束，无需切换" : msg || "切换指令下发失败");
-      }
-    },
-    [showToast]
-  );
 
   // 定位开关：开 → 先试浏览器定位，公网 http 下自动退到服务端 IP 定位；关 → 仅关闭开关（保留缓存）
   const toggleGeo = async () => {
@@ -658,9 +569,6 @@ export default function Home() {
           geoPending={geoPending}
           onToggleGeo={toggleGeo}
           sessionId={activeSid}
-          workflowId={workflowId}
-          onWorkflowChange={setWorkflowId}
-          onManualSwitch={manualSwitch}
         />
       </div>
 

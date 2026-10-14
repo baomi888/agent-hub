@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import MascotLogo from "./chat/MascotLogo";
 import { api } from "@/lib/api";
-import type { ChatMode, SwitchAction, WorkflowRow } from "@/lib/types";
+import type { ChatMode, RefSource } from "@/lib/types";
 import { ABILITIES, EXAMPLES, MODE_LABELS } from "./chat/constants";
 import { buildPlanPrompt, detectPlanTopic, isPlanRequest, stripPlanHint } from "./chat/plan";
 import Bubble from "./chat/Bubble";
@@ -16,7 +16,6 @@ import BubbleErrorBoundary from "./chat/BubbleErrorBoundary";
 import Field from "./chat/Field";
 import type { ChatAttachment, UiMessage } from "./chat/types";
 import FilePreviewModal from "./FilePreviewModal";
-import WorkflowManager from "./hybrid/WorkflowManager";
 
 // 兼容导出：page.tsx 仍从 "@/components/ChatArea" 引入这些符号
 export type { UiMessage, ChatAttachment } from "./chat/types";
@@ -65,11 +64,6 @@ interface Props {
   onToggleGeo?: () => void;
   /** 当前会话 id：赞踩要按「会话 + 消息 id」落库，否则后端无从归档 */
   sessionId?: string | null;
-  /** hybrid 模式选中的工作流 id；null = 自动编排（由后端按任务分类选） */
-  workflowId?: string | null;
-  onWorkflowChange?: (id: string | null) => void;
-  /** hybrid 人工干预切换入口（运行中的执行才有效） */
-  onManualSwitch?: (runId: string, action: SwitchAction) => void;
 }
 
 export default function ChatArea({
@@ -99,9 +93,6 @@ export default function ChatArea({
   geoPending = false,
   onToggleGeo,
   sessionId = null,
-  workflowId = null,
-  onWorkflowChange,
-  onManualSwitch,
 }: Props) {
   const [input, setInput] = useState("");
   const [showParams, setShowParams] = useState(false);
@@ -130,52 +121,6 @@ export default function ChatArea({
   const [previewFile, setPreviewFile] = useState<string | null>(null);
   // 顶栏「能力」快捷弹层：对话进行中也能一键切到常用能力（欢迎页四宫格的随身版）
   const [abOpen, setAbOpen] = useState(false);
-  // hybrid：工作流选择弹层 / 管理弹层 / 可选工作流列表
-  const [wfPopOpen, setWfPopOpen] = useState(false);
-  const [wfMgrOpen, setWfMgrOpen] = useState(false);
-  const [workflows, setWorkflows] = useState<WorkflowRow[] | null>(null);
-
-  const loadWorkflows = useCallback(async () => {
-    try {
-      const r = await api.listWorkflows();
-      setWorkflows(r.items);
-    } catch {
-      // 列表拉不到不挡主流程：hybrid 仍能按「自动编排」跑
-      setWorkflows([]);
-    }
-  }, []);
-
-  // 切到 hybrid 模式才拉列表：不用的用户不为它付一次请求
-  useEffect(() => {
-    if (mode !== "hybrid") return;
-    let alive = true;
-    api.listWorkflows().then(
-      (r) => alive && setWorkflows(r.items),
-      // 列表拉不到不挡主流程：hybrid 仍能按「自动编排」跑
-      () => alive && setWorkflows([])
-    );
-    return () => {
-      alive = false;
-    };
-  }, [mode]);
-
-  // 选中的工作流被删了（或在别处改名列表刷新后没了）要回落到自动编排，
-  // 否则下次发送会带着一个不存在的 workflow_id 撞 404
-  useEffect(() => {
-    if (workflowId && workflows && !workflows.some((w) => w.id === workflowId)) {
-      onWorkflowChange?.(null);
-    }
-  }, [workflowId, workflows, onWorkflowChange]);
-
-  // 工作流弹层：Esc 关闭
-  useEffect(() => {
-    if (!wfPopOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setWfPopOpen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [wfPopOpen]);
   // 联网建库后把建议问题预填进输入框：渲染期基于 prop 调整 state（用 state 去重，避免 ref 在渲染期被读写），
   // 不自动发送，让用户确认/补充后再发
   const [appliedPrefillTs, setAppliedPrefillTs] = useState<number>(-1);
@@ -626,7 +571,6 @@ export default function ChatArea({
                       onRetry={onRetry}
                       onPreviewFile={boundKb ? openPreviewFile : undefined}
                       onDeleteTurn={onDeleteTurn}
-                      onManualSwitch={onManualSwitch}
                     />
                   </BubbleErrorBoundary>
                 );
@@ -711,84 +655,6 @@ export default function ChatArea({
               </button>
             ))}
           </div>
-          {/* hybrid 专属：起跑工作流选择器 + 编排管理入口 */}
-          {mode === "hybrid" && (
-            <div className="wf-picker">
-              <button
-                type="button"
-                onClick={() => setWfPopOpen((o) => !o)}
-                title="选择起跑的工作流"
-                aria-haspopup="true"
-                aria-expanded={wfPopOpen}
-                className="wf-chip"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <rect x="3" y="3" width="7" height="7" rx="1.5" />
-                  <rect x="14" y="14" width="7" height="7" rx="1.5" />
-                  <path d="M10 6.5h4.5a2 2 0 0 1 2 2V14M14 17.5H9.5a2 2 0 0 1-2-2V10" />
-                </svg>
-                <span className="max-w-[120px] truncate">
-                  {workflowId
-                    ? workflows?.find((w) => w.id === workflowId)?.name ?? "已选流程"
-                    : "自动编排"}
-                </span>
-                <svg viewBox="0 0 24 24" className="wf-chip-caret" aria-hidden="true">
-                  <path d="m6 9 6 6 6-6" />
-                </svg>
-              </button>
-              {wfPopOpen && (
-                <>
-                  <div className="pop-backdrop" onClick={() => setWfPopOpen(false)} aria-hidden="true" />
-                  <div className="wf-pop" role="menu" aria-label="起跑工作流">
-                    <button
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={workflowId === null}
-                      className={`wf-pop-item ${workflowId === null ? "active" : ""}`}
-                      onClick={() => {
-                        onWorkflowChange?.(null);
-                        setWfPopOpen(false);
-                      }}
-                    >
-                      <span className="wf-pop-name">自动编排</span>
-                      <span className="wf-pop-hint">按任务分类决定从流程还是 Agent 起跑</span>
-                    </button>
-                    {(workflows ?? []).map((w) => (
-                      <button
-                        key={w.id}
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={workflowId === w.id}
-                        className={`wf-pop-item ${workflowId === w.id ? "active" : ""}`}
-                        onClick={() => {
-                          onWorkflowChange?.(w.id);
-                          setWfPopOpen(false);
-                        }}
-                      >
-                        <span className="wf-pop-name">
-                          {w.name}
-                          {w.builtin && <span className="wfm-badge">内置</span>}
-                        </span>
-                        <span className="wf-pop-hint">
-                          {w.description || `${w.definition.nodes.length} 个节点`}
-                        </span>
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      className="wf-pop-manage"
-                      onClick={() => {
-                        setWfPopOpen(false);
-                        setWfMgrOpen(true);
-                      }}
-                    >
-                      管理流程与切换规则…
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
           <button
             onClick={() => setShowParams((s) => !s)}
             title="检索参数设置"
@@ -998,14 +864,6 @@ export default function ChatArea({
           kbId={boundKb}
           name={previewFile}
           onClose={() => setPreviewFile(null)}
-        />
-      )}
-
-      {wfMgrOpen && (
-        <WorkflowManager
-          onClose={() => setWfMgrOpen(false)}
-          onChanged={() => void loadWorkflows()}
-          onNotice={onNotice}
         />
       )}
     </section>

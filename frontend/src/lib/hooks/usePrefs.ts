@@ -18,8 +18,6 @@ export interface Prefs {
   chunkOverlap?: number;
   kbPanel?: boolean;
   fontScale?: FontScale;
-  /** hybrid 模式选中的工作流 id；null/缺省 = 自动编排 */
-  workflowId?: string | null;
 }
 
 function readPrefs(): Prefs {
@@ -46,7 +44,6 @@ export function usePrefs() {
   const [chunkOverlap, setChunkOverlap] = useState(50);
   const [kbPanelPref, setKbPanelPref] = useState<boolean | null>(null);
   const [fontScale, setFontScale] = useState<FontScale>("m");
-  const [workflowId, setWorkflowId] = useState<string | null>(null);
   // 偏好是否已经从本地读回来，读完之前不要往回写，否则默认值会覆盖用户设置
   const [prefsReady, setPrefsReady] = useState(false);
   // 挂载时读到的本地偏好：供初始化流程做 defaults 兜底判断（本地存过的项不用后端默认值）
@@ -63,7 +60,6 @@ export function usePrefs() {
     if (typeof saved.topK === "number") setTopK(saved.topK);
     if (typeof saved.chunkSize === "number") setChunkSize(saved.chunkSize);
     if (typeof saved.chunkOverlap === "number") setChunkOverlap(saved.chunkOverlap);
-    if (typeof saved.workflowId === "string") setWorkflowId(saved.workflowId);
     setPrefsReady(true);
   }, []);
 
@@ -77,9 +73,8 @@ export function usePrefs() {
       chunkOverlap,
       kbPanel: kbPanelPref ?? undefined,
       fontScale,
-      workflowId,
     });
-  }, [prefsReady, mode, topK, chunkSize, chunkOverlap, kbPanelPref, fontScale, workflowId]);
+  }, [prefsReady, mode, topK, chunkSize, chunkOverlap, kbPanelPref, fontScale]);
 
   return {
     mode,
@@ -94,8 +89,6 @@ export function usePrefs() {
     setKbPanelPref,
     fontScale,
     setFontScale,
-    workflowId,
-    setWorkflowId,
     prefsReady,
     savedRef,
   };

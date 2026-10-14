@@ -8,7 +8,6 @@ export const MODE_LABELS: { value: ChatMode; label: string; hint: string }[] = [
   { value: "rag", label: "检索", hint: "强制从知识库检索回答" },
   { value: "agent", label: "智能体", hint: "可调用工具：联网搜索 / 计算 / 天气" },
   { value: "llm", label: "纯对话", hint: "纯大模型对话，不检索" },
-  { value: "hybrid", label: "混合", hint: "工作流与智能体接力：流程跑确定性步骤，Agent 接管不确定环节" },
 ];
 
 // 首屏示例：三条都是「不用先准备任何东西」的问题——
