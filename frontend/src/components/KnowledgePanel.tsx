@@ -210,6 +210,13 @@ export default function KnowledgePanel({
         </button>
       </div>
 
+      {/* 已有资料库名候选：导入框 input[list] 关联，避免手打名字和已有库差一点就新建同名库 */}
+      <datalist id="kbNameList">
+        {kbs.filter((k) => k.name).map((k) => (
+          <option key={k.kb_id} value={k.name as string} />
+        ))}
+      </datalist>
+
       {/* 进料①：上传文档 */}
       {feed === "upload" && (
         <div className="fade-up mt-3 flex flex-col gap-2.5">
@@ -222,6 +229,7 @@ export default function KnowledgePanel({
                 onChange={(e) => setUploadKb(e.target.value)}
                 placeholder="资料库名称（如 寻臻项目计划书）"
                 aria-label="资料库名称"
+                list="kbNameList"
                 className="underline-input py-1.5 text-sm"
               />
               <input
@@ -315,8 +323,9 @@ export default function KnowledgePanel({
               <input
                 value={importKb}
                 onChange={(e) => setImportKb(e.target.value)}
-                placeholder="导入到资料库名称"
+                placeholder="导入到资料库名称（可点选已有库）"
                 aria-label="导入到资料库名称"
+                list="kbNameList"
                 className="underline-input min-w-0 flex-1 py-1.5 text-sm"
               />
               <button

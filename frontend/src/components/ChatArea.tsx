@@ -7,9 +7,10 @@
 // 本文件只保留主组件（顶栏 + 欢迎页 + 消息区 + 输入区）。
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import MascotLogo from "./chat/MascotLogo";
+import CornIcon from "./CornIcon";
 import { api } from "@/lib/api";
-import type { ChatMode, RefSource } from "@/lib/types";
-import { ABILITIES, EXAMPLES, MODE_LABELS } from "./chat/constants";
+import type { ChatMode, RefSource, QuotaInfo } from "@/lib/types";
+import { ABILITIES, EXAMPLES, MODE_LABELS, SCENARIOS, INTRO_ENTRIES, TOOLS_URL, SCENARIO_STARTERS } from "./chat/constants";
 import { buildPlanPrompt, detectPlanTopic, isPlanRequest, stripPlanHint } from "./chat/plan";
 import Bubble from "./chat/Bubble";
 import BubbleErrorBoundary from "./chat/BubbleErrorBoundary";
@@ -22,6 +23,16 @@ export type { UiMessage, ChatAttachment } from "./chat/types";
 export { stripPlanHint } from "./chat/plan";
 
 const aid = () => Math.random().toString(36).slice(2, 10);
+
+/** 顶栏胶囊文案：管理员显示「无限额」，否则「问答 x/y · 向量化 a/b」 */
+function quotaLine(q: Record<string, QuotaInfo>): string {
+  if (Object.values(q).some((x) => x.unlimited)) return "无限额 · 管理员";
+  const fmt = (n: number) => (n === 0 ? "∞" : String(n));
+  const parts: string[] = [];
+  if (q["ask"]) parts.push(`问答 ${q["ask"].used}/${fmt(q["ask"].limit)}`);
+  if (q["embed"]) parts.push(`向量化 ${q["embed"].used}/${fmt(q["embed"].limit)}`);
+  return parts.join(" · ") || "用量";
+}
 
 interface Props {
   messages: UiMessage[];
@@ -58,12 +69,20 @@ interface Props {
   geoEnabled?: boolean;
   /** 当前定位城市（角标展示用，可能为 null） */
   geoCity?: string | null;
+  /** 当前会话选中的场景预设（null 表示未选）；轻量版仅前端保存 */
+  scenario?: string | null;
+  /** 切换场景预设，传 null 表示取消选择 */
+  onScenarioChange?: (id: string | null) => void;
   /** 定位请求进行中：等授权 + IP 兜底最长要 18 秒，期间按钮禁用并转圈 */
   geoPending?: boolean;
   /** 切换定位开关（请求权限 / 关闭），由页面层处理权限与缓存 */
   onToggleGeo?: () => void;
   /** 当前会话 id：赞踩要按「会话 + 消息 id」落库，否则后端无从归档 */
   sessionId?: string | null;
+  /** 当前账号配额概览：顶栏常驻胶囊用它显示今日用量 */
+  quota?: Record<string, QuotaInfo>;
+  /** 打开「用量与反馈」看板；不传则不显示顶栏胶囊 */
+  onOpenUsage?: () => void;
 }
 
 export default function ChatArea({
@@ -93,6 +112,10 @@ export default function ChatArea({
   geoPending = false,
   onToggleGeo,
   sessionId = null,
+  scenario = null,
+  onScenarioChange,
+  quota,
+  onOpenUsage,
 }: Props) {
   const [input, setInput] = useState("");
   const [showParams, setShowParams] = useState(false);
@@ -343,6 +366,37 @@ export default function ChatArea({
     onToggleKbPanel?.();
   };
 
+  // 首屏场景快选：选中场景预设 + 预填一句开场白（轻量版场景仅前端保存）
+  const startScenario = (id: string) => {
+    onScenarioChange?.(id);
+    const starter = SCENARIO_STARTERS[id] ?? "";
+    setInput(starter);
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    });
+  };
+
+  // 首屏功能入口：模板广场 / 校园工具集 / 上传建库 / 让它研究
+  const handleIntroEntry = (key: string) => {
+    switch (key) {
+      case "template":
+        window.location.href = "/templates";
+        break;
+      case "tools":
+        window.open(TOOLS_URL, "_blank", "noopener,noreferrer");
+        break;
+      case "upload":
+        openUpload();
+        break;
+      case "research":
+        startResearch();
+        break;
+    }
+  };
+
   const handleForward = useCallback((text: string) => {
     setInput(text);
     inputRef.current?.focus();
@@ -355,13 +409,17 @@ export default function ChatArea({
   );
   // 赞踩落库：失败不影响界面（本地高亮已经点了），只提示一声让用户知道没存上
   const handleFeedback = useCallback(
-    async (msgDbId: number, rating: "up" | "down") => {
+    async (msgDbId: number, rating: "up" | "down", comment?: string) => {
       if (!sessionId) return;
       try {
-        await api.sendFeedback(sessionId, msgDbId, rating);
+        await api.sendFeedback(sessionId, msgDbId, rating, comment);
         onNotice?.(
           "success",
-          rating === "up" ? "已记录：这条回答有帮助" : "已记录：这条回答不太行"
+          rating === "up"
+            ? "已记录：这条回答有帮助"
+            : comment
+              ? "已记录：谢谢你的补充，我会用来看板里复盘"
+              : "已记录：这条回答不太行"
         );
       } catch {
         onNotice?.("error", "反馈没能保存，稍后可再点一次");
@@ -415,6 +473,20 @@ export default function ChatArea({
           </span>
         )}
         <div className="flex-1" />
+        {/* 顶栏用量入口：常驻显示今日额度，点开看板。
+            侧栏那个入口太折叠，用户找不到——这里给一个一眼可见的。 */}
+        {onOpenUsage && (
+          <button
+            type="button"
+            onClick={onOpenUsage}
+            className="usage-chip"
+            title="查看用量与反馈"
+            aria-label="查看用量与反馈"
+          >
+            <CornIcon name="target" className="h-3.5 w-3.5 shrink-0" title="用量" />
+            <span className="usage-chip-text">{quota ? quotaLine(quota) : "用量"}</span>
+          </button>
+        )}
         {/* 顶栏能力快捷入口：对话进行中不用滚回欢迎页，点一下就切模式 + 预填示例 */}
         <button
           type="button"
@@ -487,40 +559,68 @@ export default function ChatArea({
         <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto">
           <div className="chat-measure mx-auto flex min-h-full flex-col px-6 pb-4 pt-6">
           {messages.length === 0 ? (
-            // 欢迎页：主路径是「直接问」，进料（研究/上传）只做被弱化的第二行
+            // 欢迎页：主路径是「直接问」，但首屏先把当前主打能力摆出来——
+            // ① 场景快选（考研/笔记/论文）② 功能入口（模板/工具集/建库/研究）③ 三句示例
             <div className="welcome">
               <MascotLogo
-                className="hero-logo mx-auto mb-4 h-[72px] w-[72px] object-contain"
+                className="hero-logo mx-auto mb-2 h-[52px] w-[52px] object-contain"
                 mood={messages.some((m) => m.streaming) ? "thinking" : "idle"}
                 tiltKey={mode}
               />
-              <div className="eyebrow mb-2">苞米地 · 智能体工作台</div>
+              <div className="eyebrow mb-1.5">苞米地 · 智能体工作台</div>
               <h1 className="hero-title font-serif font-bold leading-snug text-ink">
-                {greeting}，我是<span className="hero-name">苞米</span>
+                {greeting}，我是<span className="hero-name">知穗</span>
               </h1>
-              <p className="mt-3 max-w-[30rem] text-msg leading-relaxed text-muted">
-                一句话就行。我会自己决定——是查你的资料、上网搜，还是算一下。
+              <p className="mt-1.5 max-w-[30rem] text-msg leading-relaxed text-muted">
+                一句话就行。选个场景，或直接问我——我会自己决定怎么帮你。
               </p>
 
-              {/* 四宫格能力卡片：呼应设计稿，点一下直接进对应模式并预填一句能立刻发的话 */}
-              <div className="mt-6 grid w-full grid-cols-2 gap-2.5 sm:grid-cols-4">
-                {ABILITIES.map((a) => (
+              {/* ① 场景快选：当前主打能力，点一下进对应场景并预填开场白 */}
+              <div className="mt-4 w-full">
+                <div className="welcome-section-head">
+                  <span className="eyebrow">选个场景开始</span>
+                  <span className="rule" />
+                </div>
+                <div className="mt-2.5 flex w-full flex-wrap justify-center gap-2">
+                  {SCENARIOS.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => startScenario(s.id)}
+                      className="scenario-pick"
+                      title={s.desc}
+                    >
+                      <CornIcon name={s.id === "kaoyan" ? "book" : s.id === "notes" ? "notes" : "pen"} className="h-5 w-5" title={s.label} />
+                      <span className="sp-label">{s.label}</span>
+                      <span className="sp-desc">{s.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* ② 功能入口：替代旧四能力卡，反映当前真实功能 */}
+              <div className="mt-4 w-full grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                {INTRO_ENTRIES.map((e) => (
                   <button
-                    key={a.label}
+                    key={e.key}
                     type="button"
-                    onClick={() => startAbility(a.mode, a.example)}
-                    className="ability-card"
-                    aria-label={`${a.label}：${a.hint}`}
+                    onClick={() => handleIntroEntry(e.key)}
+                    className="intro-entry"
+                    aria-label={`${e.label}：${e.hint}`}
                   >
-                    <span className="ab-icon">{a.icon}</span>
-                    <span className="ab-label">{a.label}</span>
-                    <span className="ab-hint">{a.hint}</span>
+                    <span className="ie-icon">
+                      <CornIcon name={e.icon} className="h-6 w-6" title={e.label} />
+                    </span>
+                    <span className="ie-text">
+                      <span className="ie-label">{e.label}</span>
+                      <span className="ie-hint">{e.hint}</span>
+                    </span>
                   </button>
                 ))}
               </div>
 
-              {/* 次级示例：三句能立刻点的话，三列等宽便签；min-w-0 让长句在卡内截断不溢出 */}
-              <div className="mt-4 grid w-full grid-cols-1 gap-2 sm:grid-cols-3">
+              {/* ③ 次级示例：三句能立刻点的话，三列等宽便签；min-w-0 让长句在卡内截断不溢出 */}
+              <div className="mt-3 grid w-full grid-cols-1 gap-2 sm:grid-cols-3">
                 {EXAMPLES.map((e) => (
                   <button
                     key={e.q}
@@ -533,17 +633,6 @@ export default function ChatArea({
                   </button>
                 ))}
               </div>
-
-              <p className="mt-4 text-fs-md text-faint">
-                或者：
-                <button type="button" onClick={startResearch} className="welcome-link">
-                  让它研究一个题目
-                </button>
-                <span className="welcome-sep">·</span>
-                <button type="button" onClick={openUpload} className="welcome-link">
-                  上传你的资料
-                </button>
-              </p>
 
               <p className="welcome-foot">问完的每一句，都能翻回原文。</p>
             </div>
@@ -627,8 +716,24 @@ export default function ChatArea({
         </div>
       )}
 
-      {/* 底部：模式切换 + 输入框 */}
+      {/* 底部：场景预设 + 模式切换 + 输入框 */}
       <div className="chat-measure mx-auto px-6 pb-5">
+        {/* 场景预设：考研复习 / 课程笔记 / 论文写作（轻量版仅前端保存，发送时带入请求） */}
+        <div className="mb-2 flex items-center gap-2 flex-wrap">
+          <span className="scenario-label">场景</span>
+          {SCENARIOS.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => onScenarioChange?.(scenario === s.id ? null : s.id)}
+              aria-pressed={scenario === s.id}
+              title={s.desc}
+              className={`scenario ${scenario === s.id ? "active" : ""}`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
         <div className="mb-2 flex items-center gap-3">
           <div className="mode-tabs" role="group" aria-label="对话模式" ref={modeTabsRef}>
             <span

@@ -1,6 +1,6 @@
 # 更新日志（CHANGELOG）
 
-本文件记录 **苞米agent** 的所有重要变更，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
+本文件记录 **知穗agent** 的所有重要变更，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 日期采用 `YYYY-MM-DD`。
 
 > 说明：项目当前未打语义化版本 tag，故以「日期」作为发布单元；
@@ -158,7 +158,7 @@
 ## [2026-09-28]
 
 ### 新增（首个版本）
-- 苞米agent：RAG 知识库问答 + 苞米地笔记本主题前端。`9e7cd31`
+- 知穗agent：RAG 知识库问答 + 苞米地笔记本主题前端。`9e7cd31`
 - 吉祥物 `MascotLogo` 组件（眨眼 / 漂浮 / 摇摆 / 腮红呼吸），替换四处 logo。`9d6e3f9`
 - 吉祥物交互彩蛋：思考态（嘴变 ○）/ 完成眨眼 / 切模式歪头。`e926d9b`
 - 模式切换改为 Codex 式滑块。`7a1de78`

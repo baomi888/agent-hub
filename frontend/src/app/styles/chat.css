@@ -51,6 +51,36 @@
   font-weight: 600;
 }
 
+/* 场景预设 chips：复用 mode 的胶囊观感但不带滑块，选中态用玉米金 */
+.scenario-label {
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+  letter-spacing: var(--ls-tight);
+  margin-right: 2px;
+}
+.scenario {
+  border: 1px solid var(--line);
+  background: var(--fill-3);
+  cursor: pointer;
+  font-size: var(--fs-md);
+  color: var(--text-2);
+  padding: 4px 12px;
+  letter-spacing: var(--ls-tight);
+  border-radius: 999px;
+  white-space: nowrap;
+  transition: color var(--t-color), background var(--t-color), border-color var(--t-color);
+}
+.scenario:hover {
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+.scenario.active {
+  color: var(--accent-ink);
+  font-weight: 600;
+  background: var(--card-bg);
+  border-color: var(--accent-ink);
+}
+
 /* 参数齿轮 */
 .gear {
   background: none;

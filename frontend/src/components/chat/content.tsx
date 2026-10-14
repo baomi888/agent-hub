@@ -61,6 +61,219 @@ export function renderContent(text: string): ReactNode {
   });
 }
 
+// ============ Markdown 渲染（AI 回答正文专用） ============
+// 模型输出大量使用标题/列表/表格/代码块，旧 renderContent 只认 **粗体**+URL，
+// 排版全丢。这里做一个轻量块级解析器，输出 React 节点（不碰 innerHTML，天然防注入）。
+// 设计取舍：
+// - 单个换行按 <br/> 处理（聊天场景惯例，模型经常单换行分点）
+// - 无序列表收 [-*•]，有序列表收 \d+[.、)]（中文场景「1、」很常见）
+// - 流式渲染时未闭合的 ** 或 ` 走正则匹配不到 → 原样显示，不会崩
+// - 小输入（引用预览/用户消息）仍走旧 renderContent，不强行 markdown 化
+
+const MD_INLINE_RE =
+  /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[[^\]\n]+\]\([^)\s]+\))|(~~[^~\n]+~~)|(https?:\/\/[^\s<>"{}|\\^`\[\]。，、；：！？（）【】《》「」『』]+)/gi;
+
+/** 行内元素：行内代码 / 粗体 / 链接 / 删除线 / 裸 URL */
+export function renderInline(text: string, keyPrefix = "i"): ReactNode[] {
+  const out: ReactNode[] = [];
+  let last = 0;
+  let k = 0;
+  for (const m of text.matchAll(MD_INLINE_RE)) {
+    if (m.index! > last) out.push(<span key={`${keyPrefix}-t${k++}`}>{text.slice(last, m.index)}</span>);
+    const tok = m[0];
+    const key = `${keyPrefix}-m${k++}`;
+    if (tok.startsWith("`")) {
+      out.push(<code key={key} className="md-code">{tok.slice(1, -1)}</code>);
+    } else if (tok.startsWith("**")) {
+      out.push(<strong key={key}>{renderInline(tok.slice(2, -2), key)}</strong>);
+    } else if (tok.startsWith("~~")) {
+      out.push(<del key={key}>{renderInline(tok.slice(2, -2), key)}</del>);
+    } else if (tok.startsWith("[")) {
+      // [文案](https://…)
+      const mm = /\[([^\]]+)\]\(([^)\s]+)\)/.exec(tok);
+      if (mm) {
+        out.push(
+          <a key={key} href={mm[2]} target="_blank" rel="noopener noreferrer" className="inline-link" title={displayUrl(mm[2])}>
+            {renderInline(mm[1], key)}
+          </a>
+        );
+      } else {
+        out.push(<span key={key}>{tok}</span>);
+      }
+    } else {
+      // 裸 URL
+      out.push(
+        <a key={key} href={tok} target="_blank" rel="noopener noreferrer" className="inline-link" title={displayUrl(tok)}>
+          {displayUrl(tok)}
+        </a>
+      );
+    }
+    last = m.index! + tok.length;
+  }
+  if (last < text.length) out.push(<span key={`${keyPrefix}-t${k++}`}>{text.slice(last)}</span>);
+  return out;
+}
+
+/** 把一段文本拆成行内节点的数组；供表格单元格等复用 */
+const inlineOf = (s: string, kp: string) => renderInline(s, kp);
+
+interface MdTable {
+  head: string[];
+  rows: string[][];
+}
+
+/** 解析一行表格单元格：| a | b | → [a, b]（容忍首尾无竖线） */
+function splitTableRow(line: string): string[] {
+  return line
+    .replace(/^\s*\|/, "")
+    .replace(/\|\s*$/, "")
+    .split("|")
+    .map((c) => c.trim());
+}
+
+const isTableSep = (line: string) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/.test(line);
+
+export function renderMarkdown(text: string): ReactNode {
+  const lines = text.split("\n");
+  const out: ReactNode[] = [];
+  let i = 0;
+  let key = 0;
+  const nk = () => `md-${key++}`;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // 围栏代码块 ```（流式未闭合时收到底）
+    if (/^\s*```/.test(line)) {
+      const lang = line.replace(/^\s*```/, "").trim();
+      const buf: string[] = [];
+      i++;
+      while (i < lines.length && !/^\s*```/.test(lines[i])) buf.push(lines[i++]);
+      i++; // 跳过闭合 ```（不存在则已到底）
+      out.push(
+        <pre key={nk()} className="md-pre" data-lang={lang || undefined}>
+          <code>{buf.join("\n")}</code>
+        </pre>
+      );
+      continue;
+    }
+
+    // 标题 # ~ ####
+    const h = /^(#{1,4})\s+(.*)$/.exec(line);
+    if (h) {
+      const lvl = h[1].length;
+      const content = inlineOf(h[2], nk());
+      out.push(
+        lvl === 1 ? <h3 key={nk()} className="md-h md-h1">{content}</h3>
+        : lvl === 2 ? <h4 key={nk()} className="md-h md-h2">{content}</h4>
+        : <h5 key={nk()} className="md-h md-h3">{content}</h5>
+      );
+      i++;
+      continue;
+    }
+
+    // 分隔线
+    if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+      out.push(<hr key={nk()} className="md-hr" />);
+      i++;
+      continue;
+    }
+
+    // 表格：当前行含 | 且下一行是分隔行
+    if (line.includes("|") && i + 1 < lines.length && isTableSep(lines[i + 1]) && !/^\s*[-*•]\s/.test(line)) {
+      const head = splitTableRow(line);
+      const rows: string[][] = [];
+      i += 2;
+      while (i < lines.length && lines[i].includes("|") && lines[i].trim()) rows.push(splitTableRow(lines[i++]));
+      out.push(
+        <div key={nk()} className="md-table-wrap">
+          <table className="md-table">
+            <thead>
+              <tr>{head.map((c, ci) => <th key={ci}>{inlineOf(c, `${ci}-h`)}</th>)}</tr>
+            </thead>
+            <tbody>
+              {rows.map((r, ri) => (
+                <tr key={ri}>{r.map((c, ci) => <td key={ci}>{inlineOf(c, `${ri}-${ci}`)}</td>)}</tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      continue;
+    }
+
+    // 引用块 >
+    if (/^\s*>\s?/.test(line)) {
+      const buf: string[] = [];
+      while (i < lines.length && /^\s*>\s?/.test(lines[i])) buf.push(lines[i++].replace(/^\s*>\s?/, ""));
+      out.push(<blockquote key={nk()} className="md-quote">{inlineOf(buf.join("\n"), nk())}</blockquote>);
+      continue;
+    }
+
+    // 无序列表（连续行收成一组；缩进两层以内都算同级，嵌套列表暂不展开）
+    if (/^\s*[-*•]\s+/.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && /^\s*[-*•]\s+/.test(lines[i])) items.push(lines[i++].replace(/^\s*[-*•]\s+/, ""));
+      out.push(
+        <ul key={nk()} className="md-ul">
+          {items.map((it, ii) => <li key={ii}>{inlineOf(it, `${ii}-u`)}</li>)}
+        </ul>
+      );
+      continue;
+    }
+
+    // 有序列表（1. / 1、 / 1)）
+    if (/^\s*\d+[.、)]\s*/.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && /^\s*\d+[.、)]\s*/.test(lines[i])) items.push(lines[i++].replace(/^\s*\d+[.、)]\s*/, ""));
+      out.push(
+        <ol key={nk()} className="md-ol">
+          {items.map((it, ii) => <li key={ii}>{inlineOf(it, `${ii}-o`)}</li>)}
+        </ol>
+      );
+      continue;
+    }
+
+    // 空行：段落分隔
+    if (!line.trim()) {
+      i++;
+      continue;
+    }
+
+    // 普通段落：连续非空、且不属于上面任何块级的行合成一段；段内单换行 → <br/>
+    const buf: string[] = [];
+    while (
+      i < lines.length &&
+      lines[i].trim() &&
+      !/^\s*```/.test(lines[i]) &&
+      !/^(#{1,4})\s+/.test(lines[i]) &&
+      !/^\s*[-*•]\s+/.test(lines[i]) &&
+      !/^\s*\d+[.、)]\s*/.test(lines[i]) &&
+      !/^\s*>\s?/.test(lines[i]) &&
+      !/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(lines[i])
+    ) {
+      buf.push(lines[i++]);
+    }
+    if (buf.length) {
+      out.push(
+        <p key={nk()} className="md-p">
+          {buf.map((l, li) => (
+            <span key={li}>
+              {inlineOf(l, `${li}-p`)}
+              {li < buf.length - 1 && <br />}
+            </span>
+          ))}
+        </p>
+      );
+    } else {
+      // 兜底：不属于任何已知块级又进不了段落（理论到不了），跳过防死循环
+      i++;
+    }
+  }
+
+  return <div className="md">{out}</div>;
+}
+
 // ============ 引用角标：解析后端 refs 字符串 ============
 // 格式：**[1]** 文件名.pdf 第2页 ｜ score=0.812 ｜ 预览片段...
 export interface RefItem {

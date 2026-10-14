@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>知穗 · 校园工具集</title>
+<style>
+  /* ============ 设计令牌：严格对齐主工作台 tokens.css（苞米地笔记本） ============ */
+  :root{
+    --step-0:#EDE4C8; --step-1:#F5F0E1; --step-2:#FDFAF2;
+    --desk-0:#F3EAD8; --desk-1:#E7DCC2;
+    --bg:var(--step-0); --bg-canvas:var(--step-1); --card-bg:var(--step-2);
+    --ink:#3D2F1A; --text-2:#5A4C33; --text-3:#6F6044;
+    --accent:#C8892A; --accent-ink:#875B10; --accent-soft:rgba(200,137,42,.10);
+    --red:#B4472F; --red-ink:#A03E28;
+    --success:#1E7A46; --success-ink:#2A6B45;
+    --warning:#8A5A0A; --info:#2A5A8A;
+    --line:rgba(61,47,26,.10); --line-strong:rgba(61,47,26,.25);
+    --fill-1:rgba(61,47,26,.12); --fill-2:rgba(61,47,26,.07); --fill-3:rgba(61,47,26,.035);
+    --input-border:#D8CCB0;
+    --shadow-1:0 1px 2px rgba(80,60,30,.06); --shadow-2:0 2px 8px rgba(80,60,30,.10);
+    --radius-sm:8px; --radius-md:12px; --radius-lg:16px;
+    --ring-accent:0 0 0 3px rgba(200,137,42,.35);
+    --t-color:background-color .14s ease,border-color .14s ease,color .14s ease,opacity .14s ease;
+    --t-move:transform .22s cubic-bezier(.4,0,.2,1),box-shadow .22s ease;
+    --font-sans:"Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+    --font-serif:"LXGW WenKai Screen","Noto Serif SC","Songti SC","SimSun",serif;
+    --fs-badge:10px; --fs-xs:11px; --fs-sm:12px; --fs-md:13px; --fs-lg:14px; --fs-xl:16px; --fs-title:20px;
+    --ls-wide:.2em; --ls-mid:.06em; --ls-tight:.04em;
+    --lh-body:1.65; --lh-tight:1.4;
+    --canvas-light:rgba(255,251,240,.85);
+    --noise:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.04' numOctaves='2' seed='5'/%3E%3CfeColorMatrix values='0 0 0 0 0.55 0 0 0 0 0.45 0 0 0 0 0.28 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:
+      radial-gradient(1100px 760px at 8% 4%, var(--canvas-light) 0%, rgba(255,251,240,0) 52%),
+      radial-gradient(900px 700px at 96% 100%, rgba(150,118,70,.10) 0%, transparent 55%),
+      linear-gradient(135deg, var(--desk-0) 0%, var(--desk-1) 100%);
+    color:var(--ink); font-family:var(--font-sans); font-size:var(--fs-lg);
+    line-height:var(--lh-body); font-synthesis-weight:none; -webkit-font-smoothing:antialiased;
+    min-height:100vh;
+  }
+  body::before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.5;
+    background-image:var(--noise);background-size:180px 180px;z-index:0;}
+  .wrap{position:relative;z-index:1;max-width:860px;margin:0 auto;padding:0 18px 64px;}
+
+  /* ============ 顶栏：对齐 templates/page.tsx 结构 ============ */
+  .topbar{position:sticky;top:0;z-index:10;border-bottom:1px solid var(--line);
+    background:rgba(245,240,225,.85);backdrop-filter:blur(8px);}
+  .topbar-in{max-width:860px;margin:0 auto;display:flex;align-items:center;gap:12px;padding:12px 18px;}
+  .app-title{font-family:var(--font-serif);font-size:var(--fs-title);font-weight:700;margin:0;color:var(--ink);letter-spacing:var(--ls-tight);}
+  .brand-sub{font-size:var(--fs-badge);color:var(--text-3);letter-spacing:var(--ls-mid);margin-top:1px;}
+  .topbar .spacer{flex:1;}
+  .status{display:inline-flex;align-items:center;gap:7px;font-size:var(--fs-sm);color:var(--text-2);
+    border:1px solid var(--line);padding:5px 9px;border-radius:var(--radius-sm);transition:var(--t-color);}
+  .status .dot{width:6px;height:6px;background:var(--success);border-radius:50%;}
+
+  /* ============ 组件类：复用主工作台 ============ */
+  .eyebrow{font-size:var(--fs-badge);letter-spacing:var(--ls-wide);color:var(--accent-ink);font-weight:500;}
+  .btn-new{background:var(--ink);color:var(--card-bg);border:none;border-radius:var(--radius-sm);
+    font-size:var(--fs-lg);font-weight:500;letter-spacing:var(--ls-tight);padding:10px 20px;cursor:pointer;
+    transition:var(--t-color);box-shadow:var(--shadow-1);font-family:inherit;}
+  .btn-new:hover{background:var(--accent);}
+  .btn-new:active{background:var(--accent-ink);}
+  .btn-import{background:transparent;color:var(--ink);border:1px solid var(--accent);border-radius:var(--radius-sm);
+    font-size:var(--fs-md);font-family:inherit;letter-spacing:var(--ls-tight);cursor:pointer;transition:var(--t-color);
+    position:relative;overflow:hidden;padding:9px 14px;}
+  .btn-import::before{content:"";position:absolute;inset:0;background:var(--fill-1);transform:scaleX(0);
+    transform-origin:left;transition:transform .3s cubic-bezier(.4,0,.2,1);z-index:-1;}
+  .btn-import:hover{color:var(--ink);border-color:var(--accent);}
+  .btn-import:hover::before{transform:scaleX(1);}
+  .btn-sm{padding:6px 12px;font-size:var(--fs-sm);}
+  .icon-btn{background:none;border:none;cursor:pointer;color:var(--text-2);padding:5px;display:inline-flex;
+    align-items:center;gap:6px;font-size:var(--fs-sm);letter-spacing:var(--ls-tight);transition:var(--t-color);border-radius:var(--radius-sm);font-family:inherit;}
+  .icon-btn:hover{color:var(--accent-ink);background:var(--fill-2);}
+  .group-head{display:flex;align-items:center;gap:10px;margin:18px 0 8px;}
+  .group-head .rule{flex:1;height:1px;background:linear-gradient(90deg,var(--line) 0%,transparent 100%);}
+
+  /* ============ 工具集专属 ============ */
+  .banner{margin-top:18px;border:1px solid var(--accent);background:var(--accent-soft);border-radius:var(--radius-md);
+    padding:12px 16px;font-size:var(--fs-md);color:var(--ink);display:flex;gap:10px;align-items:flex-start;}
+  .banner svg{flex:0 0 auto;margin-top:1px;}
+  .banner b{color:var(--accent-ink);}
+  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0;}
+  .tab{border:1px solid var(--line-strong);background:transparent;color:var(--text-2);border-radius:999px;
+    padding:7px 14px;font-size:var(--fs-sm);cursor:pointer;transition:var(--t-color);font-family:inherit;letter-spacing:var(--ls-tight);
+    display:inline-flex;align-items:center;gap:7px;}
+  .tab:hover{border-color:var(--accent);color:var(--accent-ink);background:var(--fill-2);}
+  .tab.active{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-ink);font-weight:600;}
+  .tool-ico{width:17px;height:17px;flex:0 0 auto;}
+  .tool{display:none;}
+  .tool.active{display:block;animation:fadeIn .35s ease-out;}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+  .card{background:var(--card-bg);border:1px solid var(--line);border-radius:var(--radius-md);
+    padding:20px;box-shadow:var(--shadow-1);margin-bottom:16px;transition:var(--t-move);
+    animation:fadeSlideIn .4s ease-out both;}
+  .card:hover{transform:translateY(-2px);box-shadow:var(--shadow-2);}
+  .card:nth-child(2){animation-delay:.04s;}
+  .card:nth-child(3){animation-delay:.08s;}
+  @keyframes fadeSlideIn{from{opacity:0;transform:translateX(-8px);}to{opacity:1;transform:translateX(0);}}
+  .row-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px;}
+  h2.serif{font-family:var(--font-serif);font-size:var(--fs-title);margin:4px 0 0;font-weight:700;color:var(--ink);}
+  table{width:100%;border-collapse:collapse;font-size:var(--fs-md);}
+  th,td{padding:7px 6px;text-align:left;border-bottom:1px solid var(--line);}
+  th{color:var(--text-3);font-weight:600;font-size:var(--fs-xs);letter-spacing:var(--ls-tight);}
+  td input,td select{width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);
+    border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit;transition:var(--t-color);}
+  td input:focus,td select:focus{outline:none;border-color:var(--accent);box-shadow:var(--ring-accent);}
+  .add-row{margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;}
+  .algo{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;}
+  .algo label{display:flex;align-items:center;gap:6px;font-size:var(--fs-sm);border:1px solid var(--line-strong);
+    background:var(--bg-canvas);border-radius:999px;padding:6px 12px;cursor:pointer;transition:var(--t-color);}
+  .algo input{accent-color:var(--accent);}
+  .stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:6px;}
+  .stat{background:var(--bg-canvas);border:1px solid var(--line);border-radius:var(--radius-md);padding:14px;text-align:center;}
+  .stat .v{font-family:var(--font-serif);font-size:clamp(24px,6vw,30px);font-weight:700;color:var(--accent-ink);line-height:1.2;}
+  .stat .k{font-size:var(--fs-xs);color:var(--text-3);margin-top:3px;}
+  .note{font-size:var(--fs-xs);color:var(--text-3);margin-top:10px;line-height:1.7;}
+  .del{background:none;border:none;color:var(--red);cursor:pointer;font-size:15px;padding:2px 6px;border-radius:6px;transition:var(--t-color);}
+  .del:hover{background:var(--fill-1);}
+  .danger{color:var(--red-ink);font-weight:600;}
+  .ok{color:var(--success-ink);font-weight:600;}
+
+  /* 番茄钟 */
+  .pomo-clock{font-family:var(--font-serif);font-size:clamp(56px,16vw,84px);font-weight:700;text-align:center;
+    color:var(--ink);margin:8px 0;letter-spacing:2px;}
+  .pomo-ctrl{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;align-items:center;}
+  .pomo-meta{text-align:center;color:var(--text-2);font-size:var(--fs-md);margin-top:8px;display:inline-flex;align-items:center;gap:6px;}
+  .pomo-meta b{color:var(--accent-ink);}
+
+  /* 单词卡 */
+  .flip-card{background:var(--bg-canvas);border:2px solid var(--accent-soft);border-radius:var(--radius-md);
+    padding:26px 20px;text-align:center;min-height:170px;display:flex;flex-direction:column;justify-content:center;
+    cursor:pointer;user-select:none;margin-bottom:12px;transition:var(--t-move);}
+  .flip-card:hover{border-color:var(--accent);transform:translateY(-2px);}
+  .flip-card .word{font-family:var(--font-serif);font-size:30px;font-weight:700;color:var(--ink);}
+  .flip-card .meta{margin-top:10px;font-size:var(--fs-md);color:var(--text-2);white-space:pre-line;line-height:1.7;}
+  .flip-card .hint{margin-top:14px;font-size:var(--fs-badge);color:var(--text-3);letter-spacing:var(--ls-mid);}
+  .word-ctrl{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;}
+  .progress{text-align:center;color:var(--text-2);font-size:var(--fs-sm);margin-bottom:10px;}
+
+  /* 倒计时 */
+  .dl-item{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--line);
+    background:var(--bg-canvas);border-radius:var(--radius-md);padding:11px 14px;margin-bottom:9px;transition:var(--t-color);}
+  .dl-item:hover{border-color:var(--line-strong);}
+  .dl-name{font-weight:600;color:var(--ink);}
+  .dl-days{font-family:var(--font-serif);font-size:22px;font-weight:700;color:var(--accent-ink);white-space:nowrap;}
+  .dl-days.urgent{color:var(--red-ink);}
+  .dl-days.past{color:var(--text-3);}
+
+  /* 教程提示词框 */
+  .guide{border:1px solid var(--line);border-radius:var(--radius-md);padding:14px;margin:12px 0;background:var(--bg-canvas);}
+  .guide-h{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+  pre.prompt{background:var(--step-0);border:1px solid var(--line);border-radius:var(--radius-sm);padding:12px;
+    font-family:var(--font-sans);font-size:var(--fs-xs);line-height:1.7;color:var(--ink);white-space:pre-wrap;word-break:break-word;
+    max-height:280px;overflow:auto;margin:0;}
+
+  /* 课程表 · 仿小律周视图 */
+  .sched{display:flex;gap:5px;margin-top:6px;border:1px solid var(--line);border-radius:var(--radius-md);padding:8px;background:var(--bg-canvas);overflow-x:auto;}
+  .sched-rail{flex:0 0 30px;display:flex;flex-direction:column;}
+  .sched-rail .pr{height:44px;display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:10px;}
+  .sched-days{flex:1;display:grid;grid-template-columns:repeat(7,minmax(40px,1fr));gap:5px;min-width:330px;}
+  .sched-day{position:relative;background:var(--card-bg);border:1px solid var(--line);border-radius:8px;overflow:hidden;}
+  .sched-day .dh{position:absolute;top:0;left:0;right:0;height:22px;text-align:center;color:var(--text-3);
+    font-size:10px;font-weight:600;line-height:22px;background:var(--fill-2);z-index:2;}
+  .sched-block{position:absolute;left:2px;right:2px;border-radius:6px;padding:3px 4px;overflow:hidden;cursor:pointer;
+    border-left:3px solid;transition:var(--t-color);box-shadow:var(--shadow-1);}
+  .sched-block:hover{filter:brightness(.96);}
+  .sched-block .bn{font-weight:600;font-size:10px;line-height:1.15;color:var(--ink);}
+  .sched-block .br{font-size:9px;color:var(--text-2);line-height:1.1;margin-top:1px;}
+  .sched-block .bt{font-size:9px;color:var(--text-3);line-height:1.1;margin-top:1px;}
+
+  /* JSON 导入面板（小律同款） */
+  .import-panel{border:1px dashed var(--accent);border-radius:var(--radius-md);padding:14px;margin:12px 0;background:var(--accent-soft);}
+  .import-head{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+  .import-panel textarea{min-height:96px;}
+
+  /* 抽签 · 群抽签 */
+  textarea{width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);
+    padding:9px;color:var(--ink);font-size:var(--fs-md);font-family:inherit;resize:vertical;min-height:84px;transition:var(--t-color);}
+  textarea:focus{outline:none;border-color:var(--accent);box-shadow:var(--ring-accent);}
+  .draw-summary{font-size:var(--fs-md);color:var(--text-2);margin:6px 0 12px;text-align:center;}
+  .draw-col{margin-bottom:12px;}
+  .draw-col-h{font-size:var(--fs-xs);color:var(--text-3);letter-spacing:var(--ls-mid);margin-bottom:6px;font-weight:600;}
+  .draw-name{display:inline-flex;align-items:center;gap:5px;background:var(--bg-canvas);border:1px solid var(--line);
+    border-radius:999px;padding:5px 12px;margin:4px 4px 0 0;font-size:var(--fs-sm);}
+  .draw-name.win{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-ink);font-weight:600;}
+
+  footer{text-align:center;color:var(--text-3);font-size:var(--fs-xs);margin-top:30px;line-height:1.9;}
+
+  /* 知穗吉祥物动画（对齐 mascot.css 的 idle） */
+  .mascot{display:inline-block;width:44px;height:44px;animation:mascot-float 5s ease-in-out infinite;color:var(--ink);}
+  .mascot>svg{display:block;overflow:visible;transform-origin:50% 50%;transition:transform 220ms cubic-bezier(.34,1.3,.34,1);}
+  .mascot:hover>svg{transform:scale(1.06) translateY(-2px);}
+  .mascot-body{transform-box:fill-box;transform-origin:50% 88%;animation:mascot-rock 6s ease-in-out infinite;}
+  .mascot-eye{transform-box:fill-box;transform-origin:center;animation:mascot-blink 5.2s infinite;}
+  .mascot-blush{transform-box:fill-box;transform-origin:center;animation:mascot-blush 3.4s ease-in-out infinite;}
+  @keyframes mascot-float{0%,100%{transform:translateY(0);}50%{transform:translateY(-3px);}}
+  @keyframes mascot-rock{0%,100%{transform:rotate(0);}30%{transform:rotate(1.6deg);}70%{transform:rotate(-1.6deg);}}
+  @keyframes mascot-blink{0%,90%,100%{transform:scaleY(1);}94%{transform:scaleY(.08);}97%{transform:scaleY(1);}}
+  @keyframes mascot-blush{0%,100%{opacity:.5;}50%{opacity:.72;}}
+
+  @media (max-width:560px){
+    .stat-grid{gap:7px;}
+    .stat .v{font-size:21px;}
+    .card{padding:16px;}
+    .topbar-in{padding:10px 14px;}
+  }
+  @media (prefers-reduced-motion:reduce){
+    .mascot,.mascot-body,.mascot-eye,.mascot-blush{animation:none!important;}
+    .card{animation:none!important;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="topbar">
+    <div class="topbar-in">
+      <div class="mascot" role="img" aria-label="知穗吉祥物">
+        <svg viewBox="0 0 120 120" width="100%" height="100%" style="display:block;overflow:visible">
+          <g stroke-linecap="round" stroke-linejoin="round">
+            <path d="M52 22 C51 15 55 11 60 10 M60 22 C60 14 63 11 67 9 M67 22 C69 16 72 14 76 13" fill="none" stroke="currentColor" stroke-width="4"/>
+            <g class="mascot-body">
+              <path d="M42 78 C28 80 19 92 17 106 C31 104 42 95 46 84 Z" fill="#7C9A54" stroke="currentColor" stroke-width="5"/>
+              <path d="M78 78 C92 80 101 92 103 106 C89 104 78 95 74 84 Z" fill="#8FAF62" stroke="currentColor" stroke-width="5"/>
+              <rect x="37" y="24" width="46" height="68" rx="23" fill="#F5B840" stroke="currentColor" stroke-width="5"/>
+              <g fill="none" stroke="currentColor" stroke-width="3" opacity="0.28">
+                <path d="M48.5 28 C46 45 46 70 48.5 90"/><path d="M71.5 28 C74 45 74 70 71.5 90"/>
+                <path d="M38 34 C50 38 70 38 82 34"/><path d="M38 42 C50 46 70 46 82 42"/>
+                <path d="M38 76 C50 80 70 80 82 76"/><path d="M38 84 C50 88 70 88 82 84"/>
+              </g>
+              <g class="mascot-blush">
+                <ellipse cx="44.5" cy="64" rx="4.2" ry="2.6" fill="#EF8A56" opacity="0.55"/>
+                <ellipse cx="75.5" cy="64" rx="4.2" ry="2.6" fill="#EF8A56" opacity="0.55"/>
+              </g>
+              <g class="mascot-eye">
+                <circle cx="52" cy="57" r="4.6" fill="currentColor"/><circle cx="68" cy="57" r="4.6" fill="currentColor"/>
+                <circle cx="53.6" cy="55.4" r="1.7" fill="#FFFDF6"/><circle cx="69.6" cy="55.4" r="1.7" fill="#FFFDF6"/>
+              </g>
+              <path d="M53.5 67 Q60 73 66.5 67" fill="none" stroke="currentColor" stroke-width="4"/>
+              <path d="M45 31 C48 27 53 25 58 25" fill="none" stroke="#FFFFFF" stroke-width="4" opacity="0.5"/>
+            </g>
+          </g>
+        </svg>
+      </div>
+      <div>
+        <h1 class="app-title">校园工具集</h1>
+        <div class="brand-sub">为学习而生的实用小工具 · 纯前端 · 不连教务</div>
+      </div>
+      <div class="spacer"></div>
+      <span class="status"><span class="dot"></span>离线可用</span>
+    </div>
+  </header>
+
+  <div class="banner">
+    <svg class="tool-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent-ink)"><path d="M9 17h6M10 20h4"/><path d="M12 3a6 6 0 0 1 3.8 10.7c-.7.6-1.1 1.3-1.2 2.3H9.4c-.1-1-.5-1.7-1.2-2.3A6 6 0 0 1 12 3Z" fill="#F5B840" fill-opacity=".22"/></svg>
+    <div>这些都是<strong>本地就能跑</strong>的校园小工具，不依赖任何外部系统。空教室查询、课表解析需要对接各校教务，暂未纳入。答案要你自己来，但算分这类重复活交给知穗。</div>
+  </div>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="gpa"><svg class="tool-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V14"/><path d="M10 21V9"/><path d="M16 21V5"/><path d="M3 21h18"/><path d="M16 5l1-1.7 1.7 1-1 1.7z" fill="#F5B840" stroke-width="1.1"/></svg>GPA 分析</button>
+    <button class="tab" data-tab="pomo"><svg class="tool-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="14.5" r="7" fill="#EF8A56" fill-opacity=".85"/><path d="M12 7.5c0-2 1.6-3 3.2-3" stroke="#7C9A54"/><path d="M12 7.5c-1.4-1-3-1-4 0" stroke="#7C9A54"/><path d="M9.4 13.6c2.6 1.6 5.2 0 6.6-.3" stroke="currentColor" stroke-width="1.4"/></svg>番茄钟</button>
+    <button class="tab" data-tab="conflict"><svg class="tool-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="16" rx="3" fill="#FDFAF2"/><path d="M4 10h16"/><path d="M8 3v3M16 3v3"/><path d="M8 14h3" stroke="#C8892A" stroke-width="2.4"/><path d="M13 14h4" stroke="#7C9A54" stroke-width="2.4"/></svg>课程表</button>
+    <button class="tab" data-tab="words"><svg class="tool-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C9 4.5 5 4.5 3 5.2v12.6c2-.7 6-.7 9 1.2 3-1.9 7-1.9 9-1.2V5.2c-2-.7-6-.7-9 1.3Z" fill="#FDFAF2"/><path d="M12 6.5v12.5"/><path d="M6 9h3M15 9h3M6 12h3M15 12h3" stroke-width="1.3"/></svg>单词卡</button>
+    <button class="tab" data-tab="deadline"><svg class="tool-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h12M6 20h12"/><path d="M7 4l4.5 8L7 20M17 4l-4.5 8L17 20" fill="#F5B840" fill-opacity=".12"/><path d="M10.5 12l1.5 4 1.5-4z" fill="#EF8A56"/></svg>倒计时</button>
+    <button class="tab" data-tab="draw"><svg class="tool-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 9h7l-1 11h-5z" fill="#FDFAF2"/><path d="M8.5 9h7" stroke-width="2.6"/><path d="M11 9V4.5M13 9V3.5M12 9V5" stroke="#7C9A54"/><circle cx="13.2" cy="3.2" r="1.5" fill="#F5B840"/></svg>群抽签</button>
+  </nav>
+
+  <!-- ===== GPA ===== -->
+  <section class="tool active" id="gpa">
+    <div class="card">
+      <div class="row-head"><div><div class="eyebrow">算法</div><h2 class="serif">绩点换算标准</h2></div></div>
+      <div class="algo" id="algo">
+        <label><input type="radio" name="algo" value="std4" checked /> 标准 4.0</label>
+        <label><input type="radio" name="algo" value="pku" /> 北大 4.0</label>
+        <label><input type="radio" name="algo" value="wavg" /> 加权均分</label>
+      </div>
+      <p class="note" id="algoDesc"></p>
+    </div>
+    <div class="card">
+      <div class="row-head"><div><div class="eyebrow">课程</div><h2 class="serif">我的成绩单</h2></div></div>
+      <table>
+        <thead><tr><th style="width:40%">课程</th><th style="width:18%">学分</th><th style="width:18%">成绩</th><th style="width:14%;text-align:center">绩点</th><th></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div class="add-row">
+        <button class="btn-import btn-sm" id="add">＋ 添加课程</button>
+        <button class="btn-import btn-sm" id="sample">载入示例</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="row-head"><div><div class="eyebrow">结果</div><h2 class="serif">实时统计</h2></div></div>
+      <div class="stat-grid">
+        <div class="stat"><div class="v" id="sGpa">—</div><div class="k">总 GPA</div></div>
+        <div class="stat"><div class="v" id="sAvg">—</div><div class="k">加权均分</div></div>
+        <div class="stat"><div class="v" id="sCredit">0</div><div class="k">总学分</div></div>
+      </div>
+      <p class="note">GPA = Σ(绩点×学分) / Σ学分；加权均分 = Σ(成绩×学分) / Σ学分。低于 60 计 0 绩点。</p>
+    </div>
+  </section>
+
+  <!-- ===== 番茄钟 ===== -->
+  <section class="tool" id="pomo">
+    <div class="card">
+      <div class="row-head"><div><div class="eyebrow">专注</div><h2 class="serif">番茄钟</h2></div></div>
+      <div class="pomo-clock" id="clock">25:00</div>
+      <div class="pomo-ctrl">
+        <label style="font-size:var(--fs-md);color:var(--text-2)">时长
+          <input id="pomoLen" type="number" min="1" max="120" value="25" style="width:64px;display:inline-block;margin-left:6px" />
+          分钟
+        </label>
+        <button class="btn-new" id="pomoStart">开始</button>
+        <button class="btn-import" id="pomoPause">暂停</button>
+        <button class="btn-import" id="pomoReset">重置</button>
+      </div>
+      <div class="pomo-meta">今日已完成
+        <svg class="tool-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)"><circle cx="12" cy="14.5" r="7" fill="#EF8A56" fill-opacity=".85"/><path d="M12 7.5c0-2 1.6-3 3.2-3" stroke="#7C9A54"/><path d="M12 7.5c-1.4-1-3-1-4 0" stroke="#7C9A54"/></svg>
+        <b id="pomoDone">0</b> 个
+      </div>
+      <p class="note">25 分钟专注 + 5 分钟休息是经典节奏。专注时建议关掉其他标签页，让知穗陪你啃完这一段。</p>
+    </div>
+  </section>
+
+  <!-- ===== 课程表（仿小律 · 周视图 + 小律同款 JSON 导入） ===== -->
+  <section class="tool" id="conflict">
+    <div class="card">
+      <div class="row-head"><div><div class="eyebrow">课表</div><h2 class="serif">我的课程表</h2></div></div>
+      <p class="note" style="margin-top:0">仿小律课程的极简周视图。两种录入方式：① 把教务导出的课表文本丢给 <b>知穗 AI</b>，让它生成标准 JSON 粘进来一键导入（见下方教程）；② 在「添加一门课」里手动填。</p>
+
+      <!-- 教程：用 AI 生成课表 JSON -->
+      <div class="guide">
+        <div class="guide-h">
+          <span class="eyebrow">教程</span>
+          <span style="flex:1"></span>
+          <button class="btn-import btn-sm" id="copyPrompt">复制提示词</button>
+        </div>
+        <p class="note" style="margin:0 0 8px">把下面这段提示词，连同一份你的课表（教务导出文字 / 截图转文字 / 手写都行）一起发给知穗 AI，它会返回标准 JSON；再把 JSON 粘到「导入」框即可。</p>
+        <pre class="prompt" id="promptBox">你是一个课程表整理助手。请把我给的课表整理成如下 JSON，只输出 JSON、不要解释：
+
+{
+  "courses": [
+    {
+      "name": "课程名",
+      "dayOfWeek": 1,      // 1=周一 … 7=周日
+      "sections": [1, 2],  // 节次，逐节写，不用范围
+      "teacher": "老师(可选)",
+      "classroom": "教室(可选)",
+      "weeks": [1,2,3],    // 周次(可选)
+      "notes": "备注(可选)"
+    }
+  ]
+}
+
+我的课表如下：
+（把教务导出 / 截图转文字 / 手写的课表粘贴到这里）</pre>
+      </div>
+
+      <!-- JSON 导入面板 -->
+      <div class="import-panel">
+        <div class="import-head">
+          <span class="eyebrow">小律同款 · JSON 导入</span>
+          <span style="flex:1"></span>
+          <button class="btn-import btn-sm" id="cSample">下载示例</button>
+          <button class="btn-import btn-sm" id="cExport">导出我的课表</button>
+        </div>
+        <textarea id="cJson" placeholder="把 AI 生成的课程表 JSON 粘贴到这里，点「导入」即可。"></textarea>
+        <div class="add-row" style="align-items:center">
+          <button class="btn-new btn-sm" id="cImport">导入</button>
+          <span id="cImportMsg" class="note" style="margin:0"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row-head"><div><div class="eyebrow">手动</div><h2 class="serif">添加一门课</h2></div></div>
+      <div class="add-row" style="align-items:flex-end">
+        <div style="flex:1.4;min-width:120px"><input id="cName" placeholder="课程名，如：高等数学" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
+        <div style="flex:1;min-width:84px"><select id="cDay" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit">
+          <option value="1">周一</option><option value="2">周二</option><option value="3">周三</option><option value="4">周四</option><option value="5">周五</option><option value="6">周六</option><option value="7">周日</option>
+        </select></div>
+        <div style="flex:1.2;min-width:104px"><input id="cSec" placeholder="节次，如 1,2 或 1-3" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
+        <div style="flex:1;min-width:84px"><input id="cRoom" placeholder="教室(可选)" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
+        <div style="flex:1;min-width:84px"><input id="cTeach" placeholder="老师(可选)" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
+        <button class="btn-new btn-sm" id="cAdd">添加</button>
+      </div>
+      <div class="add-row" style="margin-top:8px;align-items:center">
+        <button class="btn-import btn-sm" id="cClear">清空课表</button>
+        <span id="cCount" class="note" style="margin:0"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row-head"><div><div class="eyebrow">周视图</div><h2 class="serif">本周课表</h2></div></div>
+      <div class="sched">
+        <div class="sched-rail" id="schedRail"></div>
+        <div class="sched-days" id="schedDays"></div>
+      </div>
+      <p class="note">点任意课块可删除该课程。课程块按节次高度自动拉伸，和手机上的课表 App 一样。</p>
+    </div>
+  </section>
+
+  <!-- ===== 单词卡 ===== -->
+  <section class="tool" id="words">
+    <div class="card">
+      <div class="row-head"><div><div class="eyebrow">记忆</div><h2 class="serif">四六级高频词卡</h2></div></div>
+      <div class="progress" id="wProgress">第 1 / 1 张</div>
+      <div class="flip-card" id="wCard">
+        <div class="word" id="wWord">—</div>
+        <div class="meta" id="wMeta"></div>
+        <div class="hint">点击卡片翻转看释义</div>
+      </div>
+      <div class="word-ctrl">
+        <button class="btn-import btn-sm" id="wFlip">翻转</button>
+        <button class="btn-new btn-sm" id="wKnow">认识 →</button>
+        <button class="btn-import btn-sm" id="wUnknow">不认识，复习</button>
+        <button class="btn-import btn-sm" id="wReset">重来</button>
+      </div>
+      <p class="note">内置一批四六级高频词。点「不认识」会把它收进复习堆，一轮过后优先重练。</p>
+    </div>
+  </section>
+
+  <!-- ===== 倒计时 ===== -->
+  <section class="tool" id="deadline">
+    <div class="card">
+      <div class="row-head"><div><div class="eyebrow">规划</div><h2 class="serif">Deadline 倒计时</h2></div></div>
+      <div class="add-row" style="align-items:flex-end">
+        <div style="flex:1;min-width:120px"><input id="dlName" placeholder="事项，如：期末考试" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
+        <div style="flex:1;min-width:140px"><input id="dlDate" type="date" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
+        <button class="btn-new btn-sm" id="dlAdd">添加</button>
+      </div>
+      <div id="dlList" style="margin-top:14px"></div>
+      <p class="note">点 ✎ 可随时改名称/日期（编辑完还能再编辑）；剩余 ≤7 天标红提醒，过期显示「已逾期」；临近的自动排前面。数据保存在本机浏览器，下次打开还在。</p>
+    </div>
+  </section>
+
+  <!-- ===== 群抽签（仿微信） ===== -->
+  <section class="tool" id="draw">
+    <div class="card">
+      <div class="row-head"><div><div class="eyebrow">随机</div><h2 class="serif">群抽签</h2></div></div>
+      <p class="note" style="margin-top:0">仿微信「群抽签」：写清事由 + 要抽几人，把参与者名单贴进来（每行一个，模拟群友接龙），点「开奖」随机抽出中签者并公示。</p>
+      <div style="margin:12px 0 6px"><input id="drawTitle" placeholder="抽签事由，如：今晚谁请喝奶茶" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:9px 10px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
+      <div class="add-row" style="align-items:center">
+        <span style="font-size:var(--fs-md);color:var(--text-2)">名额
+          <input id="drawNeed" type="number" min="1" max="999" value="3" style="width:60px;display:inline-block;margin:0 6px" /> 人</span>
+      </div>
+      <textarea id="drawList" placeholder="每行一个参与者（姓名 / 学号）。留空可点「模拟参与」生成编号。"></textarea>
+      <div class="add-row" style="align-items:center">
+        <span style="font-size:var(--fs-md);color:var(--text-2)">模拟
+          <input id="drawSim" type="number" min="1" max="200" value="30" style="width:60px;display:inline-block;margin:0 6px" /> 人参与</span>
+        <button class="btn-import btn-sm" id="drawSimBtn">填入名单</button>
+      </div>
+      <div class="word-ctrl" style="margin-top:12px">
+        <button class="btn-new" id="drawGo">开奖</button>
+        <button class="btn-import" id="drawAgain">重新抽签</button>
+        <button class="btn-import" id="drawOne">随机抽 1 个（点名）</button>
+      </div>
+      <div id="drawResult"></div>
+    </div>
+  </section>
+
+  <footer>
+    苞米地笔记本 · 校园工具集预览（6 件本地小工具）<br/>
+    非线上功能 · 后续将接入平台「🎒 校园工具集」入口
+  </footer>
+</div>
+
+<script>
+/* ---------- 通用 ---------- */
+const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const STAR='<svg class="tool-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)"><path d="M12 3.5l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4L3.2 9.2l5.4-.8z" fill="#F5B840" fill-opacity=".5"/></svg>';
+const TARGET='<svg class="tool-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent-ink)"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4" fill="#EF8A56" fill-opacity=".3"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/></svg>';
+const CHECK='<svg class="tool-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="color:var(--success-ink);width:14px;height:14px"><path d="M5 12.5l4 4 10-10"/></svg>';
+
+/* ---------- Tab 切换 ---------- */
+const tabs=document.getElementById('tabs');
+tabs.addEventListener('click',e=>{
+  const b=e.target.closest('.tab'); if(!b) return;
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.tool').forEach(t=>t.classList.remove('active'));
+  b.classList.add('active');
+  document.getElementById(b.dataset.tab).classList.add('active');
+});
+
+/* ---------- GPA ---------- */
+const TABLES={
+  std4:[[90,4.0],[85,3.7],[82,3.3],[78,3.0],[75,2.7],[72,2.3],[68,2.0],[64,1.5],[60,1.0],[0,0.0]],
+  pku:[[90,4.0],[85,3.7],[83,3.3],[80,3.0],[77,2.7],[73,2.3],[70,2.0],[67,1.5],[63,1.0],[60,1.0],[0,0.0]]
+};
+const ALGO_DESC={
+  std4:"标准 4.0：90=4.0、85=3.7、82=3.3、78=3.0、75=2.7、72=2.3、68=2.0、64=1.5、60=1.0、<60=0。",
+  pku:"北大 4.0：90=4.0、85=3.7、83=3.3、80=3.0、77=2.7、73=2.3、70=2.0、67=1.5、63/60=1.0、<60=0。",
+  wavg:"加权算术均分：直接用原始成绩按学分加权平均，不折算绩点。"
+};
+const rowsEl=document.getElementById('rows'),algoEl=document.getElementById('algo'),algoDesc=document.getElementById('algoDesc');
+const getAlgo=()=>algoEl.querySelector('input:checked').value;
+function toGpa(s,a){ if(a==='wavg') return s; const t=TABLES[a]||TABLES.std4; for(const[x,g]of t){ if(s>=x) return g;} return 0; }
+function makeRow(n='',c='',s=''){
+  const tr=document.createElement('tr');
+  tr.innerHTML=`<td><input class="r-name" placeholder="如：高等数学" value="${n}"></td>
+    <td><input class="r-credit" type="number" min="0" step="0.5" placeholder="3" value="${c}"></td>
+    <td><input class="r-score" type="number" min="0" max="100" step="1" placeholder="85" value="${s}"></td>
+    <td style="text-align:center"><span class="r-gpa">—</span></td>
+    <td><button class="del" title="删除">✕</button></td>`;
+  tr.querySelector('.del').onclick=()=>{tr.remove();recalc();};
+  tr.querySelectorAll('input').forEach(i=>i.addEventListener('input',recalc));
+  rowsEl.appendChild(tr);
+}
+function recalc(){
+  const a=getAlgo(); let sg=0,sc=0,ss=0;
+  rowsEl.querySelectorAll('tr').forEach(tr=>{
+    const cr=parseFloat(tr.querySelector('.r-credit').value)||0;
+    const sr=tr.querySelector('.r-score').value,s=parseFloat(sr);
+    const cell=tr.querySelector('.r-gpa');
+    if(sr===''||isNaN(s)){cell.textContent='—';return;}
+    const g=toGpa(s,a); cell.textContent=(a==='wavg')?s.toFixed(1):g.toFixed(1);
+    sc+=cr; sg+=g*cr; ss+=s*cr;
+  });
+  document.getElementById('sGpa').textContent=sc>0?(sg/sc).toFixed(2):'—';
+  document.getElementById('sAvg').textContent=sc>0?(ss/sc).toFixed(1):'—';
+  document.getElementById('sCredit').textContent=sc.toFixed(1);
+}
+document.getElementById('add').onclick=()=>makeRow();
+document.getElementById('sample').onclick=()=>{rowsEl.innerHTML='';
+  [['高等数学',5,88],['大学英语',3,76],['数据结构',4,92],['线性代数',3,81],['思想道德',2,69]].forEach(([n,c,s])=>makeRow(n,c,s));recalc();};
+algoEl.querySelectorAll('input').forEach(i=>i.addEventListener('change',()=>{algoDesc.textContent=ALGO_DESC[getAlgo()];recalc();}));
+algoDesc.textContent=ALGO_DESC.std4; document.getElementById('sample').onclick();
+
+/* ---------- 番茄钟 ---------- */
+let pTimer=null,pRemain=25*60,pRunning=false,pDone=0;
+const clockEl=document.getElementById('clock');
+const fmt=s=>String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');
+function pUpdate(){clockEl.textContent=fmt(pRemain);}
+function pStart(){ if(pRunning)return; const len=parseInt(document.getElementById('pomoLen').value)||25;
+  if(pRemain>len*60||pRemain<=0)pRemain=len*60; pRunning=true;
+  pTimer=setInterval(()=>{pRemain--;pUpdate(); if(pRemain<=0){clearInterval(pTimer);pRunning=false;pDone++;document.getElementById('pomoDone').textContent=pDone;alert('一个番茄完成！休息一下～');}},1000);}
+function pPause(){pRunning=false;clearInterval(pTimer);}
+function pReset(){pPause();pRemain=(parseInt(document.getElementById('pomoLen').value)||25)*60;pUpdate();}
+document.getElementById('pomoStart').onclick=pStart;
+document.getElementById('pomoPause').onclick=pPause;
+document.getElementById('pomoReset').onclick=pReset;
+pUpdate();
+
+/* ---------- 课程表（仿小律 · 周视图 + 小律同款 JSON 导入） ---------- */
+const DAYS=['一','二','三','四','五','六','日'];
+const PERIODS=12, ROW_H=44, HEAD_H=22;
+const CCOLORS=['#C8892A','#7C9A54','#EF8A56','#2A5A8A','#875B10','#1E7A46','#8A5A0A','#A03E28'];
+let courses=[],cseq=0;
+const schedDays=document.getElementById('schedDays'),schedRail=document.getElementById('schedRail');
+
+// 小律同款 JSON 示例（dayOfWeek:1=周一…7=周日；sections 逐节列出，不用范围）
+const SAMPLE_JSON=`{
+  "courses": [
+    {
+      "name": "高等数学",
+      "dayOfWeek": 1,
+      "sections": [1, 2],
+      "teacher": "张教授",
+      "classroom": "教三-201",
+      "weeks": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+      "notes": "单双周都上"
+    },
+    {
+      "name": "大学英语",
+      "dayOfWeek": 3,
+      "sections": [3, 4],
+      "classroom": "外语楼-305"
+    },
+    {
+      "name": "数据结构",
+      "dayOfWeek": 5,
+      "sections": [5, 6],
+      "classroom": "机房-A"
+    }
+  ]
+}`;
+
+function normSections(s){
+  if(typeof s==='string'){
+    return s.replace(/，/g,',').split(',').map(x=>x.trim()).filter(Boolean).map(x=>{
+      const m=x.match(/^(\d+)\s*-\s*(\d+)$/); if(m){const a=+m[1],b=+m[2],r=[];for(let i=a;i<=b;i++)r.push(i);return r;}
+      return [parseInt(x)];
+    }).flat();
+  }
+  if(Array.isArray(s)) return s.map(Number).filter(n=>n>=1&&n<=PERIODS);
+  return [];
+}
+function addCourse(c){
+  const id=++cseq;
+  const name=(typeof c==='string')?c:(c&&c.name)||('课程'+id);
+  courses.push({id,name:(name&&name.trim())||('课程'+id),color:CCOLORS[(id-1)%CCOLORS.length],
+    day:((((c&&c.dayOfWeek!=null?c.dayOfWeek:c.day)||1)%7)+7)%7,
+    sections:normSections(c&&c.sections!=null?c.sections:(c&&c.section!=null?c.section:[])),
+    teacher:(c&&c.teacher)||'',classroom:(c&&c.classroom)||'',weeks:(c&&c.weeks)||null,notes:(c&&c.notes)||''});
+  renderSched();
+}
+function renderRail(){
+  let h='<div class="pr" style="height:'+HEAD_H+'px"></div>';
+  for(let p=1;p<=PERIODS;p++) h+='<div class="pr">'+p+'</div>';
+  schedRail.innerHTML=h;
+}
+function renderSched(){
+  const bodyH=HEAD_H+PERIODS*ROW_H;
+  let h='';
+  for(let d=0;d<7;d++){
+    const blocks=courses.filter(c=>c.day===d).sort((a,b)=>a.sections[0]-b.sections[0]);
+    let bh='';
+    blocks.forEach(c=>{
+      const s0=c.sections[0], sl=c.sections.length;
+      const top=HEAD_H+(s0-1)*ROW_H+1, hgt=sl*ROW_H-2;
+      bh+='<div class="sched-block" data-id="'+c.id+'" style="top:'+top+'px;height:'+hgt+'px;background:'+c.color+'1f;border-color:'+c.color+'" title="'+esc(c.name)+(c.classroom?(' @'+c.classroom):'')+(c.teacher?(' · '+c.teacher):'')+'">'
+        +'<div class="bn">'+esc(c.name)+'</div>'+(c.classroom?'<div class="br">'+esc(c.classroom)+'</div>':'')+(c.teacher?'<div class="bt">'+esc(c.teacher)+'</div>':'')+'</div>';
+    });
+    h+='<div class="sched-day" style="height:'+bodyH+'px"><div class="dh">周'+DAYS[d]+'</div>'+bh+'</div>';
+  }
+  schedDays.innerHTML=h;
+  schedDays.querySelectorAll('.sched-block').forEach(b=>b.onclick=()=>{
+    const id=+b.dataset.id, c=courses.find(x=>x.id===id);
+    if(c&&confirm('删除《'+c.name+'》？')){ courses=courses.filter(x=>x.id!==id); renderSched(); }
+  });
+  const el=document.getElementById('cCount'); if(el) el.textContent='共 '+courses.length+' 门课';
+}
+function importSchedule(jsonText){
+  let data;
+  try{ data=JSON.parse(jsonText); }catch(e){ return 'JSON 格式有误：'+e.message; }
+  const list=Array.isArray(data)?data:(data&&data.courses?data.courses:null);
+  if(!list) return '没找到课程数组：顶层应为 {"courses":[...]} 或直接是数组。';
+  let n=0;
+  list.forEach(co=>{
+    if(!co||typeof co!=='object')return;
+    const name=co.name||co.course||co.title; if(!name)return;
+    if(co.dayOfWeek==null&&co.day==null)return;
+    if(!co.sections&&!co.section)return;
+    addCourse(co); n++;
+  });
+  renderSched();
+  return n?('已导入 '+n+' 门课程（缺 dayOfWeek/sections 的会被跳过）。'):'没解析到有效课程，请检查 name / dayOfWeek / sections 字段。';
+}
+function exportSchedule(){
+  const out=courses.map(c=>{const o={name:c.name,dayOfWeek:c.day+1,sections:[...c.sections].sort((a,b)=>a-b)};
+    if(c.teacher)o.teacher=c.teacher; if(c.classroom)o.classroom=c.classroom; if(c.weeks)o.weeks=c.weeks; if(c.notes)o.notes=c.notes; return o;});
+  return JSON.stringify({courses:out},null,2);
+}
+document.getElementById('copyPrompt').onclick=()=>{
+  const t=document.getElementById('promptBox').innerText;
+  if(navigator.clipboard) navigator.clipboard.writeText(t).then(()=>{
+    const b=document.getElementById('copyPrompt'), o=b.textContent; b.textContent='已复制'; setTimeout(()=>b.textContent=o,1500);
+  }).catch(()=>{});
+};
+document.getElementById('cImport').onclick=()=>{ const m=importSchedule(document.getElementById('cJson').value); const el=document.getElementById('cImportMsg'); el.textContent=m; el.style.color=m.indexOf('已导入')===0?'var(--success-ink)':'var(--red-ink)'; };
+document.getElementById('cSample').onclick=()=>{ document.getElementById('cJson').value=SAMPLE_JSON; document.getElementById('cJson').focus(); };
+document.getElementById('cExport').onclick=()=>{ const t=exportSchedule(); document.getElementById('cJson').value=t; if(navigator.clipboard)navigator.clipboard.writeText(t).catch(()=>{}); const el=document.getElementById('cImportMsg'); el.textContent='已导出到上方文本框（并尝试复制到剪贴板）。'; el.style.color='var(--success-ink)'; };
+document.getElementById('cAdd').onclick=()=>{
+  const name=document.getElementById('cName').value.trim();
+  const day=parseInt(document.getElementById('cDay').value);
+  const secs=normSections(document.getElementById('cSec').value);
+  const room=document.getElementById('cRoom').value.trim();
+  const teach=document.getElementById('cTeach').value.trim();
+  if(!name){ alert('请填写课程名'); return; }
+  if(secs.length===0){ alert('请填写节次，如 1,2 或 1-3'); return; }
+  addCourse({name,dayOfWeek:day,sections:secs,classroom:room,teacher:teach});
+  document.getElementById('cName').value=''; document.getElementById('cSec').value='';
+  document.getElementById('cRoom').value=''; document.getElementById('cTeach').value='';
+  document.getElementById('cName').focus();
+};
+document.getElementById('cClear').onclick=()=>{ if(confirm('清空整张课表？')){ courses=[]; cseq=0; renderSched(); } };
+renderRail();
+addCourse({name:'高等数学',dayOfWeek:1,sections:[1,2],classroom:'教三-201',teacher:'张教授'});
+addCourse({name:'大学英语',dayOfWeek:3,sections:[3,4],classroom:'外语楼-305'});
+addCourse({name:'数据结构',dayOfWeek:5,sections:[5,6],classroom:'机房-A'});
+
+/* ---------- 单词卡 ---------- */
+const WORDS=[
+  {w:'abandon',m:'v. 放弃，抛弃',ex:'He had to abandon his plan.'},
+  {w:'accumulate',m:'v. 积累，积聚',ex:'Dust accumulated on the shelf.'},
+  {w:'ambiguous',m:'adj. 模棱两可的',ex:'an ambiguous answer'},
+  {w:'anticipate',m:'v. 预期，期望',ex:'We anticipate a rise in price.'},
+  {w:'appropriate',m:'adj. 合适的',ex:'appropriate behavior'},
+  {w:'comprehensive',m:'adj. 综合的，全面的',ex:'a comprehensive review'},
+  {w:'contemporary',m:'adj. 当代的',ex:'contemporary art'},
+  {w:'deliberate',m:'adj. 故意的；v. 仔细考虑',ex:'a deliberate mistake'},
+  {w:'diminish',m:'v. 减少，削弱',ex:'His influence diminished.'},
+  {w:'elaborate',m:'adj. 精心制作的；v. 详尽阐述',ex:'elaborate on the point'},
+  {w:'fragile',m:'adj. 脆弱的',ex:'a fragile relationship'},
+  {w:'inevitable',m:'adj. 不可避免的',ex:'an inevitable result'},
+  {w:'necessitate',m:'v. 使成为必要',ex:'The cut necessitates a redo.'},
+  {w:'phenomenon',m:'n. 现象',ex:'a natural phenomenon'},
+  {w:'reluctant',m:'adj. 不情愿的',ex:'a reluctant smile'},
+  {w:'scrutinize',m:'v. 仔细检查',ex:'scrutinize the data'}
+];
+let wIdx=0,wFlipped=false,wWrong=[];
+const wWord=document.getElementById('wWord'),wMeta=document.getElementById('wMeta'),wProgress=document.getElementById('wProgress');
+function wShow(){
+  const pool=wWrong.length?wWrong:WORDS;
+  if(wIdx>=pool.length){
+    if(wWrong.length){wIdx=0;wProgress.textContent='复习轮：第 1 / '+wWrong.length;}
+    else{wWord.textContent='全部认完';wMeta.textContent='点「重来」再来一轮。';wProgress.textContent='完成';return;}
+  }
+  const it=wWrong.length?wWrong[wIdx]:WORDS[wIdx];
+  wFlipped=false;wWord.textContent=it.w;wMeta.textContent='';
+  wProgress.textContent=(wWrong.length?'复习 ':'')+'第 '+(wIdx+1)+' / '+pool.length+' 张';
+}
+function wFlip(){ const it=wWrong.length?wWrong[wIdx]:WORDS[wIdx]; wFlipped=true;
+  wWord.textContent=it.w; wMeta.textContent=it.m+'\n'+it.ex; }
+document.getElementById('wFlip').onclick=wFlip;
+document.getElementById('wCard').onclick=()=>{ if(!wFlipped)wFlip(); };
+document.getElementById('wKnow').onclick=()=>{ if(wWrong.length){wWrong.splice(wIdx,1);} else {wIdx++;} wShow(); };
+document.getElementById('wUnknow').onclick=()=>{
+  if(wWrong.length){ wIdx++; }
+  else { const it=WORDS[wIdx]; if(!wWrong.includes(it))wWrong.push(it); wIdx++; }
+  wShow(); };
+document.getElementById('wReset').onclick=()=>{wIdx=0;wWrong=[];wShow();};
+wShow();
+
+/* ---------- 倒计时 ---------- */
+const dlList=document.getElementById('dlList'); let dls=[];
+let dlEdit=-1; // 正在行内编辑的卡片下标（-1 = 无）；编辑完保存后还能再点 ✎ 再改
+const DL_KEY='baomi_deadline_v1';
+function dlSave(){
+  try{ localStorage.setItem(DL_KEY, JSON.stringify(dls.map(d=>({name:d.name, date:d.date.getTime()})))); }catch(e){}
+}
+function dlLoad(){
+  try{
+    const raw=localStorage.getItem(DL_KEY);
+    if(raw){
+      const arr=JSON.parse(raw);
+      if(Array.isArray(arr)) return arr
+        .map(d=>({name:String(d.name||'').slice(0,30), date:new Date(d.date)}))
+        .filter(d=>d.name && !isNaN(d.date.getTime()));
+    }
+  }catch(e){}
+  return null; // 没存过 → 播种三条示例
+}
+(function(){
+  const saved=dlLoad();
+  if(saved){ dls=saved; return; }
+  [['期末考试',30],['课程论文提交',14],['四六级考试',60]].forEach(([n,days])=>{
+    const d=new Date();d.setHours(0,0,0,0);d.setDate(d.getDate()+days);
+    dls.push({name:n,date:d});
+  });
+  dlSave();
+})();
+const dlDateStr=d=>{ const x=new Date(d.getTime()-d.getTimezoneOffset()*60000); return x.toISOString().slice(0,10); };
+function dlRender(){
+  const today=new Date(); today.setHours(0,0,0,0);
+  dls.sort((a,b)=>a.date-b.date);
+  if(dls.length===0){dlList.innerHTML='<p class="note">还没有事项，先添加一个吧。</p>';return;}
+  dlList.innerHTML=dls.map((d,i)=>{
+    const days=Math.ceil((d.date-today)/86400000);
+    let cls='',txt;
+    if(days<0){cls='past';txt='已逾期'+(-days)+'天';}
+    else if(days===0){cls='urgent';txt='就是今天!';}
+    else if(days<=7){cls='urgent';txt='剩 '+days+' 天';}
+    else txt='剩 '+days+' 天';
+    if(i===dlEdit){
+      return `<div class="dl-item" style="flex-wrap:wrap;gap:6px">
+        <input class="dl-ed-name" value="${esc(d.name)}" maxlength="30" style="flex:1;min-width:110px;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:6px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" />
+        <input class="dl-ed-date" type="date" value="${dlDateStr(d.date)}" style="border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:6px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" />
+        <button class="btn-import btn-sm dl-ok" data-i="${i}">保存</button>
+        <button class="del" data-cancel="${i}">✕</button>
+      </div>`;
+    }
+    return `<div class="dl-item"><span class="dl-name">${esc(d.name)}</span>
+      <span style="color:var(--text-3);font-size:var(--fs-xs)">${dlDateStr(d.date)}</span>
+      <span class="dl-days ${cls}">${txt}</span>
+      <button class="dl-edit" data-i="${i}" title="编辑（改完还能再改）">✎</button>
+      <button class="del" data-i="${i}">✕</button></div>`;
+  }).join('');
+  dlList.querySelectorAll('.del[data-i]').forEach(b=>b.onclick=()=>{dls.splice(+b.dataset.i,1);dlEdit=-1;dlSave();dlRender();});
+  dlList.querySelectorAll('.dl-edit').forEach(b=>b.onclick=()=>{dlEdit=+b.dataset.i;dlRender();const inp=dlList.querySelector('.dl-ed-name');if(inp)inp.focus();});
+  dlList.querySelectorAll('.del[data-cancel]').forEach(b=>b.onclick=()=>{dlEdit=-1;dlRender();});
+  dlList.querySelectorAll('.dl-ok').forEach(b=>b.onclick=()=>{
+    const row=b.closest('.dl-item');
+    const n=row.querySelector('.dl-ed-name').value.trim();
+    const dt=row.querySelector('.dl-ed-date').value;
+    if(!n||!dt){alert('名称和日期都要填好');return;}
+    dls[+b.dataset.i]={name:n,date:new Date(dt+'T00:00:00')};
+    dlEdit=-1; dlSave(); dlRender();
+  });
+  // 编辑态里按回车直接保存
+  const nameInp=dlList.querySelector('.dl-ed-name');
+  if(nameInp){ nameInp.onkeydown=e=>{ if(e.key==='Enter') dlList.querySelector('.dl-ok').click(); }; }
+}
+document.getElementById('dlAdd').onclick=()=>{
+  const n=document.getElementById('dlName').value.trim(),dt=document.getElementById('dlDate').value;
+  if(!n||!dt){alert('请填好事项和日期');return;}
+  dls.push({name:n,date:new Date(dt+'T00:00:00')});
+  document.getElementById('dlName').value=''; document.getElementById('dlDate').value='';
+  dlSave(); dlRender();
+};
+dlRender();
+
+/* ---------- 群抽签（仿微信） ---------- */
+const drawResult=document.getElementById('drawResult');
+function getParticipants(){ return document.getElementById('drawList').value.split('\n').map(s=>s.trim()).filter(Boolean); }
+function shuffle(a){ for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; }
+document.getElementById('drawSimBtn').onclick=()=>{
+  const n=parseInt(document.getElementById('drawSim').value)||0; if(n<=0)return;
+  document.getElementById('drawList').value=Array.from({length:n},(_,i)=>'第'+(i+1)+'号').join('\n');
+};
+function drawGroup(){
+  const title=document.getElementById('drawTitle').value.trim();
+  const ps=getParticipants();
+  const need=Math.max(1,parseInt(document.getElementById('drawNeed').value)||1);
+  if(ps.length===0){ alert('先贴入参与者名单，或点「模拟参与」生成编号'); return; }
+  const pool=shuffle([...ps]);
+  const winners=pool.slice(0,Math.min(need,ps.length));
+  const rest=pool.slice(winners.length);
+  drawResult.innerHTML=
+    `<div class="draw-summary">共 ${ps.length} 人参与，抽 ${winners.length} 名${title?' · '+esc(title):''}</div>`+
+    `<div class="draw-col"><div class="draw-col-h ok">中签（${winners.length}）</div>`+
+      winners.map(w=>`<span class="draw-name win">${STAR}${esc(w)}</span>`).join('')+`</div>`+
+    (rest.length?`<div class="draw-col"><div class="draw-col-h">未中（${rest.length}）</div>`+
+      rest.map(w=>`<span class="draw-name">${esc(w)}</span>`).join('')+`</div>`:'');
+}
+function drawOne(){
+  const ps=getParticipants();
+  if(ps.length===0){ alert('先贴入参与者名单，或点「模拟参与」生成编号'); return; }
+  const pick=ps[Math.floor(Math.random()*ps.length)];
+  drawResult.innerHTML=`<div class="draw-summary">随机点名</div><div class="draw-col"><div class="draw-col-h ok">抽中</div>`+
+    `<span class="draw-name win">${TARGET}${esc(pick)}</span></div>`;
+}
+document.getElementById('drawGo').onclick=drawGroup;
+document.getElementById('drawAgain').onclick=drawGroup;
+document.getElementById('drawOne').onclick=drawOne;
+</script>
+</body>
+</html>

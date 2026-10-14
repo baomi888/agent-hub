@@ -131,7 +131,7 @@
 
 /* 窄屏：左栏也变浮层抽屉，主区几乎占满 */
 @media (max-width: 899px) {
-  main {
+  main.workbench-main {
     margin: 8px;
     height: calc(100vh - 16px);
     height: calc(100dvh - 16px);

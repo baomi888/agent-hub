@@ -1,4 +1,4 @@
-// 品牌 icon：漫画风苞米吉祥物（消息头像等小尺寸场景）
+// 品牌 icon：漫画风知穗吉祥物（消息头像等小尺寸场景）
 import MascotLogo from "./MascotLogo";
 
 export default function HubMark({
@@ -9,5 +9,5 @@ export default function HubMark({
   /** AI 正在生成时传入，头像进入思考态（嘴变○） */
   thinking?: boolean;
 }) {
-  return <MascotLogo className={className} title="苞米" mood={thinking ? "thinking" : "idle"} />;
+  return <MascotLogo className={className} title="知穗" mood={thinking ? "thinking" : "idle"} />;
 }

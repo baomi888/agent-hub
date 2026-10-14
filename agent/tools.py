@@ -65,7 +65,7 @@ def kb_search(query: str, top_k: int = 3, config: RunnableConfig = None) -> str:
         # 距离 → 余弦相似度，和 RAG 链路（build_sources / _format_refs）保持同一口径。
         # 直接把 Chroma 距离打出来会显示成 >1 的"相似度"（线上见过 1.237），
         # 和同一条数据在 RAG 卡片上的 0.558 对不上。
-        from kb.rag_core import _to_similarity
+        from kb.rag_core import _to_similarity, assess_grounding
 
         # 归属在这一行校验：不是自己的库直接抛 NotOwned，落到下面的 except 里
         pipe = pipelines.get_or_create(owner, kb_id)
@@ -76,6 +76,7 @@ def kb_search(query: str, top_k: int = 3, config: RunnableConfig = None) -> str:
         if not docs_scores:
             return f"知识库中未找到与 '{query}' 相关的内容。"
 
+        assessment = assess_grounding(docs_scores)
         lines = []
         for i, (d, score) in enumerate(docs_scores):
             src = d.metadata.get("source", "?")
@@ -87,7 +88,19 @@ def kb_search(query: str, top_k: int = 3, config: RunnableConfig = None) -> str:
             score_txt = f" | score={sim:.3f}" if sim is not None else ""
             lines.append(f"**[{i + 1}]** {src}{loc}{score_txt} | {preview}...")
 
-        return "\n\n".join(lines)
+        body = "\n\n".join(lines)
+        if assessment.get("weak"):
+            # 这段是写给**模型**看的，措辞必须是可执行的下一步指令。
+            # 只写"可能不相关"会被忽略——Observation 里的语气会被当成资料本身来用，
+            # 必须明说"这些片段不足以作答"，把行为钉死。
+            return (
+                "⚠️ 检索到的片段相似度全部偏低，**不足以支撑对这个问题的回答**。\n"
+                "这些片段只能作为线索参考，不要据此拼凑答案，也不要把它们当作依据编号引用。\n"
+                "请直接告诉用户：知识库里暂时没有和这个问题直接相关的资料，"
+                "并建议补充相关文档，或者改用 web_search 联网查询。\n\n"
+                f"（以下为低相关度片段，仅供你判断是否真的不相关）\n{body}"
+            )
+        return body
     except Exception:
         # 给 LLM 看的话要写清楚"这是确定性失败，别重试"（见 docs 第 8 轮第 20 条）
         return "知识库检索不可用：当前会话绑定的知识库无法访问。请改用 web_search，不要重复调用本工具。"

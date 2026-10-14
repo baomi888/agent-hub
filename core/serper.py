@@ -79,7 +79,9 @@ def search_serper(query: str, count: int = 10) -> dict | None:
         resp = _get_client().post(
             _ENDPOINT,
             headers={"X-API-KEY": config.SERPER_API_KEY, "Content-Type": "application/json"},
-            json={"q": q, "num": count},
+            # gl/hl 锚定中国区 + 中文：面向国内用户压低国外结果，
+            # 否则 Google 全球接口会返回大量国内打不开的外站链接（承接 main edc781b 的意图）。
+            json={"q": q, "num": count, "gl": "cn", "hl": "zh-cn"},
         )
         resp.raise_for_status()
         data = resp.json() or {}

@@ -35,6 +35,9 @@ export interface Message {
 // 聊天模式：auto 自动 / rag 强制检索 / agent 强制工具 / llm 纯对话
 export type ChatMode = "auto" | "rag" | "agent" | "llm";
 
+// 场景预设：kaoyan 考研复习 / notes 课程笔记 / paper 论文写作（轻量版只做提示词 + 选择器）
+export type ScenarioId = "kaoyan" | "notes" | "paper";
+
 export interface SearchResult {
   title: string;
   body: string;
@@ -55,8 +58,21 @@ export interface RefSource {
   page: number | null;
   // 余弦相似度（越大越相关）。后端换算不了时给 null，此时前端不显示这一项
   score: number | null;
+  // 依据强度分级，由后端按 RETRIEVE_LOW_SIM 判定。
+  // 只给数字的话用户看不出 0.31 算不算数，所以要和百分比一起显示。
+  strength?: "high" | "medium" | "low" | null;
   preview: string;
   text: string;
+}
+
+// 依据强度（SSE grounding 事件）：weak=true 时回答上方挂「依据较弱」提示条
+export interface Grounding {
+  strength: "high" | "medium" | "low" | "none";
+  /** top1 余弦相似度，换算不出来时为 null */
+  best: number | null;
+  count: number;
+  /** 检索到了，但全部不够格当依据 */
+  weak: boolean;
 }
 
 // 库内文件正文预览：origin=archive 读原始留档，chunks 表示老库从向量片段拼回
@@ -94,11 +110,43 @@ export interface MeOut {
   quota: Record<string, QuotaInfo>;
 }
 
+// ---------- 用量与反馈看板（P2）----------
+export interface UsageDay {
+  /** YYYY-MM-DD */
+  day: string;
+  ask: number;
+  embed: number;
+}
+
+export interface FeedbackItem {
+  rating: "up" | "down";
+  comment: string;
+  title: string;
+  sid: string;
+  created_at: number;
+}
+
+export interface FeedbackStats {
+  up: number;
+  down: number;
+  total: number;
+  recent: FeedbackItem[];
+}
+
+export interface UsageSummary {
+  quota: Record<string, QuotaInfo>;
+  history: UsageDay[];
+  /** 0 表示未启用每分钟限流 */
+  rate_per_minute: number;
+  feedback: FeedbackStats;
+}
+
 // ---------- 模板广场 ----------
 export interface Template {
   id: string;
   name: string;
   category: string;
+  /** 卡片图标语义 key（CornIcon 组件按知穗吉祥物风格渲染；历史 emoji 值回退 mini 知穗） */
   icon: string;
   tagline: string;
   description: string;

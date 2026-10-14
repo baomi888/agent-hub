@@ -1,6 +1,6 @@
 # 贡献指南（Contributing）
 
-感谢你关注 **苞米 Agent**！这是一个基于 RAG 知识库 + LangChain Agent 的个人知识助手项目。
+感谢你关注 **知穗 Agent**！这是一个基于 RAG 知识库 + LangChain Agent 的个人知识助手项目。
 下面说明如何在本地把它跑起来、如何跑测试、以及提交代码的约定。
 
 > 项目整体介绍、功能亮点、架构图见根目录 [README.md](./README.md)。

@@ -462,6 +462,43 @@ def list_feedbacks(owner: str, sid: str) -> list[dict]:
         return [dict(r) for r in rows]
 
 
+def feedback_stats(owner: str, recent_limit: int = 5) -> dict:
+    """当前用户全部会话的赞踩聚合 + 最近几条原始反馈。
+
+    只统计自己的会话（JOIN conversations 按 owner_id 过滤），
+    和其它接口一样：别人的数据在这里等于不存在。
+    返回 {up, down, total, recent: [{rating, comment, title, sid, created_at}]}。
+    """
+    with _get_conn() as conn:
+        counts = {"up": 0, "down": 0}
+        for r in conn.execute(
+            "SELECT f.rating AS rating, COUNT(*) AS n FROM feedbacks f "
+            "JOIN conversations c ON c.id = f.conversation_id "
+            "WHERE c.owner_id = ? GROUP BY f.rating",
+            (owner,),
+        ).fetchall():
+            counts[r["rating"]] = int(r["n"])
+        rows = conn.execute(
+            "SELECT f.rating AS rating, f.comment AS comment, f.created_at AS created_at, "
+            "c.title AS title, c.id AS sid "
+            "FROM feedbacks f JOIN conversations c ON c.id = f.conversation_id "
+            "WHERE c.owner_id = ? ORDER BY f.id DESC LIMIT ?",
+            (owner, max(1, min(int(recent_limit), 20))),
+        ).fetchall()
+    recent = [
+        {
+            "rating": r["rating"],
+            "comment": r["comment"] or "",
+            "title": r["title"],
+            "sid": r["sid"],
+            "created_at": int(r["created_at"]),
+        }
+        for r in rows
+    ]
+    up, down = counts["up"], counts["down"]
+    return {"up": up, "down": down, "total": up + down, "recent": recent}
+
+
 def delete_messages(owner: str, sid: str, msg_ids: list[int]) -> bool:
     """批量删除消息，返回是否实际删到了。同时更新会话 updated_at。"""
     if not msg_ids:

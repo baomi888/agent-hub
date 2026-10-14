@@ -2,8 +2,9 @@
 
 // 左侧会话列表栏：品牌区 + 新建对话 + 搜索框 + 按时间分组的会话 + 深色模式开关
 // 视觉：暖米黄书本风格 · 大圆角 · 柔阴影 · 金色点缀
-import { useMemo, useState, type RefObject } from "react";
+import { useMemo, useRef, useState, type RefObject } from "react";
 import MascotLogo from "./chat/MascotLogo";
+import CornIcon from "./CornIcon";
 import type { Conversation, QuotaInfo } from "@/lib/types";
 import type { FontScale } from "@/lib/hooks/usePrefs";
 
@@ -37,6 +38,8 @@ interface Props {
   username?: string;
   /** 当前账号配额概览（含 unlimited 标记）；不传则不显示额度 */
   quota?: Record<string, QuotaInfo>;
+  /** 打开「用量与反馈」看板（P2）。不传则账号块不可点 */
+  onOpenUsage?: () => void;
   onLogout?: () => void;
 }
 
@@ -91,6 +94,7 @@ export default function Sidebar({
   onRetryLoad,
   username,
   quota,
+  onOpenUsage,
   onLogout,
 }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -98,6 +102,10 @@ export default function Sidebar({
   const [query, setQuery] = useState("");
   // 删除是破坏性操作，点一下先进确认态，避免误删整段对话
   const [confirmDelId, setConfirmDelId] = useState<string | null>(null);
+  // 手机左滑删除：swipedId = 当前左滑露出删除钮的会话；touch 存进行中的手势（不进 state，避免逐帧重渲染）
+  const [swipedId, setSwipedId] = useState<string | null>(null);
+  const swipeTouch = useRef<{ id: string; x0: number; y0: number; el: HTMLElement; horizontal: boolean | null } | null>(null);
+  const SWIPE_W = 76; // 与 .session-swipe-del 宽度一致
 
   const startEdit = (c: Conversation) => {
     setEditingId(c.id);
@@ -129,7 +137,7 @@ export default function Sidebar({
         <MascotLogo className="h-9 w-9 shrink-0 object-contain" />
         <div className="min-w-0">
           <h1 className="truncate font-serif text-fs-xl font-bold leading-tight text-ink">
-            苞米Agent
+            知穗Agent
           </h1>
           <p className="brand-sub truncate">知识库 · 多对话 · 智能体</p>
         </div>
@@ -143,9 +151,22 @@ export default function Sidebar({
       {/* 模板广场：平台化入口（描边次按钮，与新建对话形成主次） */}
       {onOpenTemplates && (
         <button onClick={onOpenTemplates} className="btn-import mt-2 w-full">
-          🏪 模板广场
+          <span className="inline-flex items-center justify-center gap-1.5">
+            <CornIcon name="store" className="h-4 w-4" title="模板广场" />
+            模板广场
+          </span>
         </button>
       )}
+      {/* 校园工具集：纯前端工具，无需登录即可用，独立静态页新标签打开 */}
+      <a
+        href="/tools.html"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="btn-import mt-2 flex w-full items-center justify-center gap-1.5"
+      >
+        <CornIcon name="tools" className="h-4 w-4" title="校园工具集" />
+        校园工具集
+      </a>
 
       {/* 搜索框：大圆角 */}
       <div className="search mt-4">
@@ -197,13 +218,38 @@ export default function Sidebar({
             </div>
             {g.items.map((c) => {
               const active = c.id === activeSid;
+              const swiped = swipedId === c.id;
               return (
+                <div key={c.id} className="session-swipe-wrap">
+                  {/* 底层删除钮：左滑后露出；点击进确认态（复用 confirmDelId 流程） */}
+                  <button
+                    type="button"
+                    className={`session-swipe-del${swiped ? " open" : ""}`}
+                    aria-label={`删除会话：${c.title}`}
+                    tabIndex={swiped ? 0 : -1}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setConfirmDelId(c.id);
+                      setSwipedId(null);
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                    </svg>
+                    删除
+                  </button>
                 <div
-                  key={c.id}
                   role="button"
                   tabIndex={0}
                   aria-current={active ? "true" : undefined}
-                  onClick={() => onSelect(c.id)}
+                  onClick={() => {
+                    // 已左滑的行：第一下点按只收回滑出，不误触选择
+                    if (swiped) {
+                      setSwipedId(null);
+                      return;
+                    }
+                    onSelect(c.id);
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
@@ -211,6 +257,51 @@ export default function Sidebar({
                     }
                   }}
                   className={`session group ${active ? "active" : ""}`}
+                  style={swiped ? { transform: `translateX(-${SWIPE_W}px)` } : undefined}
+                  onTouchStart={(e) => {
+                    const t = e.touches[0];
+                    swipeTouch.current = {
+                      id: c.id,
+                      x0: t.clientX,
+                      y0: t.clientY,
+                      el: e.currentTarget,
+                      horizontal: null,
+                    };
+                    if (swipedId && swipedId !== c.id) setSwipedId(null);
+                  }}
+                  onTouchMove={(e) => {
+                    const st = swipeTouch.current;
+                    if (!st || st.id !== c.id) return;
+                    const t = e.touches[0];
+                    const dx = t.clientX - st.x0;
+                    const dy = t.clientY - st.y0;
+                    if (st.horizontal === null) {
+                      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+                      st.horizontal = Math.abs(dx) > Math.abs(dy);
+                      if (!st.horizontal) {
+                        swipeTouch.current = null;
+                        return;
+                      }
+                    }
+                    if (!st.horizontal) return;
+                    // 从已滑开位置回拖也要连贯：起点补偿 -SWIPE_W
+                    const base = swiped ? -SWIPE_W : 0;
+                    const off = Math.max(-SWIPE_W, Math.min(0, base + dx));
+                    st.el.style.transition = "none";
+                    st.el.style.transform = `translateX(${off}px)`;
+                  }}
+                  onTouchEnd={() => {
+                    const st = swipeTouch.current;
+                    if (!st || st.id !== c.id) return;
+                    const m = /translateX\((-?[\d.]+)px\)/.exec(st.el.style.transform);
+                    const off = m ? parseFloat(m[1]) : 0;
+                    st.el.style.transition = "";
+                    st.el.style.transform = "";
+                    swipeTouch.current = null;
+                    // 滑过 1/3 阈值就吸附展开；几乎没动则视作点按回收
+                    if (off < -SWIPE_W / 3) setSwipedId(c.id);
+                    else if (swiped) setSwipedId(null);
+                  }}
                 >
                   {editingId === c.id ? (
                     <input
@@ -294,6 +385,7 @@ export default function Sidebar({
                     </>
                   )}
                 </div>
+                </div>
               );
             })}
           </div>
@@ -363,15 +455,31 @@ export default function Sidebar({
               {username.slice(0, 1).toUpperCase()}
             </span>
             <div className="min-w-0 flex-1">
-              <div className="truncate text-fs-sm text-ink" title={username}>
-                {username}
-              </div>
+              {/* 账号块可点开看板：额度不该只在超限时才被看见 */}
+              {onOpenUsage ? (
+                <button
+                  onClick={onOpenUsage}
+                  className="block w-full truncate rounded-xs text-left text-fs-sm text-ink transition hover:text-accent-ink"
+                  title={`${username} · 查看用量与反馈`}
+                >
+                  {username}
+                </button>
+              ) : (
+                <div className="truncate text-fs-sm text-ink" title={username}>
+                  {username}
+                </div>
+              )}
               {quota && (
-                <div className="truncate text-fs-xs text-muted">
+                <button
+                  onClick={onOpenUsage}
+                  disabled={!onOpenUsage}
+                  className="block w-full truncate rounded-xs text-left text-fs-xs text-muted transition enabled:hover:text-accent-ink disabled:cursor-default"
+                  title={onOpenUsage ? "查看用量与反馈" : undefined}
+                >
                   {Object.values(quota).some((q) => q.unlimited)
                     ? "无限额 · 管理员"
                     : quotaLine(quota)}
-                </div>
+                </button>
               )}
             </div>
             {onLogout && (

@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import Sidebar from "@/components/Sidebar";
 import ChatArea, { type ChatAttachment } from "@/components/ChatArea";
 import KnowledgePanel from "@/components/KnowledgePanel";
+import UsagePanel from "@/components/UsagePanel";
 import { api } from "@/lib/api";
 import { streamChat } from "@/lib/sse";
 import { uid } from "@/lib/id";
@@ -18,7 +19,7 @@ import { useKnowledge } from "@/lib/hooks/useKnowledge";
 import { useAuth } from "@/lib/hooks/useAuth";
 import AuthGate from "@/components/AuthGate";
 import type { UiMessage } from "@/components/chat/types";
-import type { ChatMode, RefSource, ToolEvent } from "@/lib/types";
+import type { ChatMode, Grounding, RefSource, ToolEvent } from "@/lib/types";
 
 // ---- 断点订阅（matchMedia 作为外部数据源） ----
 type Viewport = "wide" | "medium" | "narrow";
@@ -104,6 +105,29 @@ export default function Home() {
   const [geoCity, setGeoCity] = useState<string | null>(() => getCachedGeo()?.city ?? null);
   // 定位请求进行中：授权弹窗 + IP 兜底最长 18s，期间按钮转圈，否则看着像没反应
   const [geoPending, setGeoPending] = useState(false);
+  // 场景预设：随会话保存（localStorage），发送时带入请求；切换会话时恢复
+  const [scenario, setScenario] = useState<string | null>(null);
+  const scenarioBySid = useRef<Record<string, string>>({});
+  const onScenarioChange = useCallback((id: string | null) => {
+    setScenario(id);
+    const sid = activeSid;
+    if (!sid) return;
+    if (id) {
+      scenarioBySid.current[sid] = id;
+      localStorage.setItem(`baomi:scenario:${sid}`, id);
+    } else {
+      delete scenarioBySid.current[sid];
+      localStorage.removeItem(`baomi:scenario:${sid}`);
+    }
+  }, [activeSid]);
+  useEffect(() => {
+    if (!activeSid) { setScenario(null); return; }
+    const saved =
+      localStorage.getItem(`baomi:scenario:${activeSid}`) ??
+      scenarioBySid.current[activeSid] ??
+      null;
+    setScenario(saved);
+  }, [activeSid]);
   // 联网建库后把建议问题预填进输入框（不自动发送），让用户确认/补充
   const [prefill, setPrefill] = useState<{ text: string; ts: number } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -111,11 +135,11 @@ export default function Home() {
   // 模板广场套用后跳回：?sid 自动选中新建会话，?q 预填引导问题
   // 放在 setPrefill 声明之后；依赖 sessions 列表先回来，列表没回来时这个
   // sid 还不在里面，过早 select 会选空。
-  const applyRef = useRef<{ sid: string; q: string | null } | null>(null);
+  const applyRef = useRef<{ sid: string; q: string | null; mode?: string } | null>(null);
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
     const sid = sp.get("sid");
-    if (sid) applyRef.current = { sid, q: sp.get("q") };
+    if (sid) applyRef.current = { sid, q: sp.get("q"), mode: sp.get("mode") ?? undefined };
     // 只跑一次：读 query 是幂等的，无需进 deps
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -125,6 +149,10 @@ export default function Home() {
     if (sessions.length === 0) return; // 列表还没回来
     if (!sessions.some((s) => s.id === a.sid)) return; // 这个会话还没进列表
     if (a.q) setPrefill({ text: a.q, ts: Date.now() });
+    // 模板推荐的对话模式：落进偏好，让新建会话默认走该模式
+    if (a.mode && (["auto", "rag", "agent", "llm"] as const).includes(a.mode as ChatMode)) {
+      setMode(a.mode as ChatMode);
+    }
     if (activeSid !== a.sid) void selectSession(a.sid);
     void refreshKbs();
     applyRef.current = null;
@@ -139,6 +167,8 @@ export default function Home() {
   // 用 useSyncExternalStore 订阅 matchMedia，避免 effect 里 setState 造成的二次渲染
   const viewport = useSyncExternalStore(subscribeViewport, getViewport, () => "wide" as const);
   const [sidebarPref, setSidebarPref] = useState(false);
+  // 用量与反馈看板（P2）：侧栏账号块点开
+  const [usageOpen, setUsageOpen] = useState(false);
   const kbPanelOpen = kbPanelPref ?? viewport === "wide";
   const sidebarOpen = sidebarPref && viewport === "narrow";
 
@@ -224,7 +254,7 @@ export default function Home() {
         }
       }
       const gen = streamChat(
-        { sid, question, top_k: topK, mode, attachments: sentAttachments, location: getSendGeo() },
+        { sid, question, top_k: topK, mode, scenario, attachments: sentAttachments, location: getSendGeo() },
         controller.signal
       );
       let finalRefs = "";
@@ -251,6 +281,16 @@ export default function Home() {
                 prev.map((m) => (m.id === asstId ? { ...m, sources: items } : m))
               );
             }
+            break;
+          }
+          case "grounding": {
+            // 依据强度：后端判定本轮检索够不够格当依据。
+            // 单独发一帧而不是塞进 done，是因为用户边流边读，
+            // 「依据较弱」这个提示必须赶在正文之前出现在气泡里。
+            const g = ev.data as unknown as Grounding;
+            setMessages((prev) =>
+              prev.map((m) => (m.id === asstId ? { ...m, grounding: g } : m))
+            );
             break;
           }
           case "tool": {
@@ -428,7 +468,11 @@ export default function Home() {
     onProgress: (i: number, total: number, title: string) => void
   ): Promise<string> => {
     try {
-      const { kb_id } = await api.createKb(kbName);
+      // 先把名字对上当前用户已有的库：手打的名字只要大小写/首尾空格略有出入，
+      // 直连 createKb 就会用不同 kb_id 再建一个同名库。命中则复用，不新建。
+      const norm = kbName.trim().toLowerCase();
+      const existing = kbs.find((k) => (k.name || "").trim().toLowerCase() === norm);
+      const kb_id = existing ? existing.kb_id : (await api.createKb(kbName)).kb_id;
       let ok = 0;
       for (let i = 0; i < urls.length; i++) {
         const url = urls[i];
@@ -507,7 +551,7 @@ export default function Home() {
   }
 
   return (
-    <main className="flex overflow-hidden">
+    <main className="workbench-main flex overflow-hidden">
       <Sidebar
         sessions={sessions}
         activeSid={activeSid}
@@ -534,6 +578,7 @@ export default function Home() {
         open={sidebarOpen}
         username={auth.me?.user.username}
         quota={auth.me?.quota}
+        onOpenUsage={() => setUsageOpen(true)}
         onLogout={() => void auth.logout()}
       />
 
@@ -542,6 +587,8 @@ export default function Home() {
           messages={messages}
           mode={mode}
           sending={sending}
+          scenario={scenario}
+          onScenarioChange={onScenarioChange}
           onModeChange={setMode}
           onSend={sendMessage}
           onStop={stopSending}
@@ -569,6 +616,8 @@ export default function Home() {
           geoPending={geoPending}
           onToggleGeo={toggleGeo}
           sessionId={activeSid}
+          quota={auth.me?.quota}
+          onOpenUsage={() => setUsageOpen(true)}
         />
       </div>
 
@@ -606,6 +655,9 @@ export default function Home() {
           </div>
         ))}
       </div>
+
+      {/* 用量与反馈看板（portal 到 body，不受三栏布局裁切） */}
+      {usageOpen && <UsagePanel onClose={() => setUsageOpen(false)} />}
     </main>
   );
 }

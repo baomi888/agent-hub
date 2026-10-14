@@ -1,0 +1,77 @@
+flowchart TB
+    %% 整体设计架构图（清晰版）
+    %% 布局要点：层间只用"自上而下"的边，层内单向 LR；所有回环一律走最右侧的虚线，
+    %% 这样 mermaid 的分层结果与阅读顺序一致（嵌套 subgraph + 层内回环会把层序打乱，试过）。
+
+    subgraph L1["1. 输入与感知层"]
+        direction LR
+        Input["用户输入"]:::io
+        SysPrompt["System 预设词<br/>告知可用资源 / 注意事项"]:::io
+    end
+
+    subgraph L2["2. LLM 执行层（LangGraph 编排 · 受 recursion_limit 熔断）"]
+        direction LR
+        LLM(("LLM")):::llm
+        ToolCall["输出 Tool Call"]:::llm
+        ToolResult["Tool Result"]:::llm
+        Tools["工具集：联网 / 个性化数据库 / 上下文"]:::llm
+        LLM --> ToolCall --> ToolResult --> Tools
+    end
+
+    subgraph L3["3. 输出与结果处理层"]
+        direction LR
+        FinalOutput["最终输出"]:::out
+        Compress["特定形式压缩<br/>长文本 / 上下文摘要"]:::proc
+        Recommend["推荐算法运用<br/>按画像与历史排序"]:::proc
+        FinalOutput --> Compress --> Recommend
+    end
+
+    subgraph L4["4. 后台自进化层（Agent-hub · 独立 worker 定时驱动）"]
+        direction LR
+        AgentHub["Agent-hub 后台运行<br/>每日总结 / 每日委托"]:::bg
+        Collect1["收集高抽象 / 有价值的问题<br/>（用户问的）"]:::bg
+        Collect2["收集高相关 / 高提炼的内容<br/>（输出中提炼的）"]:::bg
+        Gate{"提炼门槛 &amp; 溯源闸门<br/>重复≥2 次或用户修正过<br/>指不回原文的一律丢弃"}:::gate
+        AgentHub --> Collect1
+        AgentHub --> Collect2
+        Collect1 --> Gate
+        Collect2 --> Gate
+    end
+
+    subgraph L5["5. 核心存储与画像层"]
+        direction LR
+        DB[("数据库 RAG")]:::db
+        HookTag["钩子 &amp; 标签<br/>让 LLM 感知到「有前科」"]:::db
+        LearningPath["用户总体学习提升路线"]:::profile
+        UserProfile(("用户画像")):::profile
+        DB --> HookTag
+    end
+
+    %% ===== 层间主链路：只从上往下（决定纵向次序）=====
+    SysPrompt ==> LLM
+    Input ==> LLM
+    Tools ==> FinalOutput
+    Recommend ==> AgentHub
+    Gate ==>|"通过：存入"| DB
+    LearningPath --- UserProfile
+
+    %% ===== 回环：一律虚线、一律指向右上方，不参与纵向分层 =====
+    ToolResult -.->|"结果反馈：再跑一轮"| LLM
+    AgentHub -.->|"完善总体学习路线"| LearningPath
+    Gate -.->|"提炼为结论 → 更新画像"| UserProfile
+    HookTag -.->|"命中即触发动作"| ToolCall
+    DB -.->|"检索增强"| Tools
+    UserProfile -.->|"告知怎样服务这个用户"| LLM
+    LearningPath -.->|"作为系统预设写入"| SysPrompt
+
+    %% ===== 样式 =====
+    classDef io fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d3b52;
+    classDef llm fill:#e8f5e9,stroke:#388e3c,stroke-width:2px,color:#123d17;
+    classDef out fill:#dcedc8,stroke:#558b2f,stroke-width:2px,color:#22380f;
+    classDef proc fill:#fff8e1,stroke:#f9a825,stroke-width:2px,color:#4a3200;
+    classDef bg fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#3a0d4a;
+    classDef db fill:#e1f5fe,stroke:#0288d1,stroke-width:2px,color:#0d3b52;
+    classDef profile fill:#fff3e0,stroke:#f57c00,stroke-width:2px,color:#4a2600;
+    classDef gate fill:#fce4ec,stroke:#c2185b,stroke-width:2px,color:#4a0d24;
+    classDef layer fill:#fcfcfc,stroke:#bdbdbd,stroke-width:1px,color:#444444;
+    class L1,L2,L3,L4,L5 layer;

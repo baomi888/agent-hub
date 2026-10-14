@@ -19,6 +19,7 @@ from langchain.agents import create_agent
 
 from agent.tools import AGENT_TOOLS
 from core.llm import get_llm
+from core import scenarios as scenarios_mod
 
 SYSTEM_PROMPT = """你是一个智能问答助手，拥有以下能力：
   - 从知识库中检索资料（kb_search）
@@ -36,6 +37,9 @@ SYSTEM_PROMPT = """你是一个智能问答助手，拥有以下能力：
   6. 若某工具明确返回失败（如提示"暂时不可用"），不要用相同参数重复调用该工具，直接基于已有信息回答或如实告知用户。
   7. 工具返回错误时如实向用户解释，绝不编造。
   8. 参考知识库资料回答时，末尾注明来源编号（依据：[1][2]）。
+     只用真正支撑了结论的片段当依据；如果 kb_search 提示"片段相似度偏低"，
+     就说明知识库里没有能回答这个问题的资料，如实告诉用户并给出下一步，
+     不要拿低分片段硬凑一个答案。
   9. 闲聊、身份、常识等无需工具的问题直接回答。"""
 
 
@@ -111,15 +115,19 @@ _CHECKPOINTER = _make_checkpointer()
 
 # ---------- 已编译 Agent 图缓存 ----------
 # create_agent 每次都要编译一遍 LangGraph 状态图（节点/边/路由），是纯 CPU 开销，
-# 而图结构只由 (has_kb, 定位片段) 决定 —— 同一用户定位固定、多数请求还没有定位，
-# 命中率很高。编译好的图无会话状态（checkpointer=None，状态每次 invoke 单独传），
+# 而图结构只由 (has_kb, 定位片段, 场景) 决定 —— 三者组合有限，命中率很高。
+# 编译好的图无会话状态（checkpointer=None，状态每次 invoke 单独传），
 # 可跨请求、跨线程复用。用 LRU 兜底，避免按城市无限增长。
-_AGENT_CACHE: "OrderedDict[tuple[bool, str], object]" = OrderedDict()
+_AGENT_CACHE: "OrderedDict[tuple[bool, str, str], object]" = OrderedDict()
 _AGENT_CACHE_MAX = 32
 _AGENT_LOCK = threading.Lock()
 
 
-def build_agent(has_kb: bool = False, location: dict | None = None):
+def build_agent(
+    has_kb: bool = False,
+    location: dict | None = None,
+    scenario: str | None = None,
+):
     """构建集合式 Agent（带 5 个工具 + 多轮记忆）。
 
     这里刻意**不再把 kb_id 写进提示词**。旧版会把 "kb_id = xxx" 塞给模型、
@@ -130,11 +138,13 @@ def build_agent(has_kb: bool = False, location: dict | None = None):
 
     has_kb 只用来告诉模型"当前会话有没有绑库"，好让它决定要不要调 kb_search。
     location 是用户地理定位（前端传来的经纬度 + 逆地理城市名），让用户问天气时免手输城市。
+    scenario 是场景预设 id（考研/笔记/论文），拼在提示词末尾压过通用默认。
 
-    结果按 (has_kb, 定位片段) 缓存：图编译是纯 CPU 开销，同参数直接复用已编译的图。
+    结果按 (has_kb, 定位片段, 场景) 缓存：图编译是纯 CPU 开销，同参数直接复用已编译的图。
     """
     note = location_note(location)
-    key = (bool(has_kb), note)
+    scene = scenarios_mod.get_scenario_prompt(scenario)
+    key = (bool(has_kb), note, scene)
 
     with _AGENT_LOCK:
         cached = _AGENT_CACHE.get(key)
@@ -143,7 +153,7 @@ def build_agent(has_kb: bool = False, location: dict | None = None):
             return cached
 
         # 在锁内编译：并发首请求只编译一次，其余等锁后直接命中缓存。
-        # 键的种类极少（has_kb 两种 × 少量定位片段），锁竞争可忽略。
+        # 键的种类极少（has_kb 两种 × 少量定位片段 × 少量场景），锁竞争可忽略。
         llm = get_llm(temperature=0.1)
         system_prompt = SYSTEM_PROMPT
         if has_kb:
@@ -159,6 +169,8 @@ def build_agent(has_kb: bool = False, location: dict | None = None):
                 "不要凭空猜测 kb_id 调用 kb_search；需要外部信息时用 web_search。"
             )
         system_prompt += note
+        # 场景预设：拼在末尾，让场景专属话术（如"考研先给作答空间再给答案"）压过通用默认
+        system_prompt += scene
 
         agent = create_agent(
             model=llm,
