@@ -15,7 +15,7 @@ import CornIcon from "../CornIcon";
 import { useAuth } from "@/lib/hooks/useAuth";
 import type { MeOut } from "@/lib/types";
 
-export type ConsolePage = "delegate" | "report" | "checkin" | "settings";
+export type ConsolePage = "delegate" | "report" | "checkin" | "settings" | "flow";
 
 const NAV: { key: ConsolePage | null; href: string; icon: string; label: string }[] = [
   { key: null, href: "/", icon: "notes", label: "对话" },
@@ -23,6 +23,8 @@ const NAV: { key: ConsolePage | null; href: string; icon: string; label: string 
   { key: "delegate", href: "/delegate", icon: "clock", label: "每日委托" },
   { key: "report", href: "/report", icon: "calendar", label: "总结" },
   { key: "checkin", href: "/checkin", icon: "star", label: "打卡" },
+  // 混合架构：工作流定义 + 切换规则。后端 API 由林宏亮提供，界面这一侧由前端做
+  { key: "flow", href: "/flow", icon: "target", label: "工作流" },
   { key: "settings", href: "/settings", icon: "settings", label: "设置" },
 ];
 

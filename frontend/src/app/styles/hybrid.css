@@ -238,3 +238,232 @@
   border-color: var(--red);
   background: var(--fill-2);
 }
+
+/* ================= 混合架构管理页 /flow =================
+ * 沿用苞米地笔记本：暖米黄纸面 + 深棕墨，金只用在「需要用户操作」的地方
+ * （标签、Tab 选中态）。状态标签用各语义色的 -ink 变体（浅底可读）。 */
+
+.flow-tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+}
+
+.flow-demo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  margin: 0 0 var(--space-10);
+  padding: var(--space-6) var(--space-10);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: 6px;
+  font-size: var(--fs-sm);
+  color: var(--accent-ink);
+}
+
+.flow-hint {
+  margin: 0 0 var(--space-8);
+  font-size: var(--fs-sm);
+  color: var(--ink);
+  opacity: 0.75;
+  line-height: 1.7;
+}
+
+.flow-signal,
+.flow-desc code {
+  display: inline-block;
+  margin-right: var(--space-4);
+  padding: 0 var(--space-4);
+  background: var(--fill-2);
+  border-radius: 3px;
+  font-family: ui-monospace, Consolas, Menlo, monospace;
+  font-size: var(--fs-xs);
+  color: var(--ink);
+}
+
+.flow-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.flow-card {
+  display: flex;
+  gap: var(--space-10);
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: var(--space-10) var(--space-12, 12px);
+  background: var(--step-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-width: 0;
+}
+
+/* min-width:0 —— flex 项默认 min-width:auto，长 JSON/长名字会把整行撑破
+   （与 MEMORY 里「裸 1fr 被长词撑破」同源） */
+.flow-card-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.flow-card-side {
+  flex: 0 0 auto;
+  display: flex;
+  gap: var(--space-6);
+}
+
+.flow-card-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-6);
+  font-family: var(--font-serif);
+  font-size: var(--fs-lg);
+  color: var(--ink);
+}
+
+.flow-tag,
+.flow-ver {
+  padding: 0 var(--space-5);
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  font-family: var(--font-sans);
+  font-size: var(--fs-badge);
+  font-style: normal;
+  color: var(--accent-ink);
+}
+
+.flow-ver {
+  border-color: var(--line);
+  background: var(--fill-3);
+  color: var(--ink);
+  opacity: 0.8;
+}
+
+.flow-status {
+  padding: 0 var(--space-5);
+  border-radius: 999px;
+  font-family: var(--font-sans);
+  font-size: var(--fs-badge);
+  font-style: normal;
+  border: 1px solid var(--line);
+}
+
+.flow-status.is-completed {
+  color: var(--success-ink);
+  border-color: var(--success);
+  background: var(--fill-3);
+}
+
+.flow-status.is-failed,
+.flow-status.is-timeout {
+  color: var(--red-ink);
+  border-color: var(--red);
+  background: var(--fill-3);
+}
+
+.flow-status.is-running {
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.flow-desc {
+  margin: var(--space-5) 0 0;
+  font-size: var(--fs-md);
+  color: var(--ink);
+  opacity: 0.85;
+  overflow-wrap: anywhere;
+}
+
+.flow-detail {
+  margin-top: var(--space-6);
+  font-size: var(--fs-sm);
+}
+
+.flow-detail summary {
+  cursor: pointer;
+  color: var(--accent-ink);
+  font-size: var(--fs-sm);
+}
+
+.flow-pre {
+  margin: var(--space-6) 0 0;
+  padding: var(--space-8);
+  max-height: 320px;
+  overflow: auto;
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: ui-monospace, Consolas, Menlo, monospace;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--ink);
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+/* 编辑浮层 */
+.flow-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-10);
+  background: var(--fill-1);
+}
+
+.flow-modal-box {
+  width: min(760px, 100%);
+  max-height: 86vh;
+  overflow: auto;
+  padding: var(--space-12, 12px);
+  background: var(--step-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+}
+
+.flow-modal-box h3 {
+  margin: 0 0 var(--space-6);
+  font-family: var(--font-serif);
+  font-size: var(--fs-xl);
+  color: var(--ink);
+}
+
+.flow-editor {
+  width: 100%;
+  min-height: 320px;
+  padding: var(--space-8);
+  background: var(--step-1);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  font-family: ui-monospace, Consolas, Menlo, monospace;
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  color: var(--ink);
+  resize: vertical;
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow-x: auto;
+}
+
+.flow-err {
+  margin: var(--space-6) 0 0;
+  font-size: var(--fs-sm);
+  color: var(--red-ink);
+  overflow-wrap: anywhere;
+}
+
+.flow-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-8);
+  margin-top: var(--space-10);
+}
