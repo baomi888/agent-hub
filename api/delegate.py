@@ -1,13 +1,17 @@
 # -*- coding: utf-8 -*-
 """每日委托的 HTTP 端点。
 
-  GET    /api/delegate/                       列出我的委托
-  POST   /api/delegate/                       新建委托
-  GET    /api/delegate/{delegation_id}/       取单条
-  PATCH  /api/delegate/{delegation_id}/       局部更新
-  DELETE /api/delegate/{delegation_id}/       删除
+  GET    /api/delegate                        列出我的委托
+  POST   /api/delegate                        新建委托
+  GET    /api/delegate/{delegation_id}        取单条
+  PATCH  /api/delegate/{delegation_id}        局部更新
+  DELETE /api/delegate/{delegation_id}        删除
   POST   /api/delegate/{delegation_id}/run    立即执行一次（调试用，不改 next_run_at）
   GET    /api/delegate/{delegation_id}/runs   执行历史
+
+路由一律不带尾斜杠，与项目其余端点（约 35 条）保持一致；带尾斜杠的旧写法
+由 main.py 的 normalize_api_slash 中间件归一，仍能命中，不会 3xx（见
+tests/test_slash_no_redirect.py）。
 
 三条设计取舍：
 
@@ -131,12 +135,18 @@ def _out(d: dict) -> dict:
             sched = _json.loads(sched)
         except ValueError:
             sched = None
+    # 键名对齐前端契约：id / instruction / session_id 是前端在用的一组名，
+    # delegation_id / prompt / deliver_sid 是内部与旧调用方沿用的原名（如 PATCH 的
+    # merged 合并、service/daily.py 的落库），两套同时返回，避免任一侧被迫改动。
     return {
+        "id": d["delegation_id"],
         "delegation_id": d["delegation_id"],
         "name": d["name"],
         "kind": d["kind"],
         "schedule": sched,
+        "instruction": d.get("prompt") or "",
         "prompt": d.get("prompt") or "",
+        "session_id": d.get("deliver_sid"),
         "deliver_sid": d.get("deliver_sid"),
         "kb_id": d.get("kb_id"),
         "tone": d.get("tone") or "neutral",
@@ -150,7 +160,7 @@ def _out(d: dict) -> dict:
 
 # ---------- 端点 ----------
 
-@router.get("/")
+@router.get("")
 async def list_delegations(enabled: bool | None = None, uid: str = Depends(get_current_user)) -> list[dict]:
     """列出我的委托。next_run_at 由服务端算好，前端不做 cron 推算。"""
     items = await asyncio.to_thread(daily.list_delegations, uid)
@@ -160,7 +170,7 @@ async def list_delegations(enabled: bool | None = None, uid: str = Depends(get_c
     return out
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 async def create_delegation(req: DelegationIn, uid: str = Depends(get_current_user)) -> dict:
     """新建委托。"""
     await asyncio.to_thread(quota.hit, uid)
@@ -192,14 +202,14 @@ async def create_delegation(req: DelegationIn, uid: str = Depends(get_current_us
     return _out(d)
 
 
-@router.get("/{delegation_id}/")
+@router.get("/{delegation_id}")
 async def get_delegation(delegation_id: str, uid: str = Depends(get_current_user)) -> dict:
     """取单条。返回 prompt 全文——委托的生成指令必须对用户可见可改。"""
     d = await asyncio.to_thread(_must_own, uid, delegation_id)
     return _out(d)
 
 
-@router.patch("/{delegation_id}/")
+@router.patch("/{delegation_id}")
 async def update_delegation(
     delegation_id: str, req: DelegationPatch, uid: str = Depends(get_current_user)
 ) -> dict:
@@ -247,7 +257,7 @@ async def update_delegation(
     }
 
 
-@router.delete("/{delegation_id}/")
+@router.delete("/{delegation_id}")
 async def delete_delegation(delegation_id: str, uid: str = Depends(get_current_user)) -> dict:
     """删除委托。历史执行记录保留（审计需要）。"""
     await asyncio.to_thread(_must_own, uid, delegation_id)
