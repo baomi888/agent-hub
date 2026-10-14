@@ -2,15 +2,16 @@
 
 // 设置页对本地偏好的读写。
 //
-// 为什么单独一层：`baomi.prefs` 是**整对象覆盖写**（page.tsx 的 usePrefs 每次都把
-// 全部字段一起写回）。设置页只改其中两三项，若自己拼一个新对象写回去，
-// 就会把工作台里刚改的模式、每个资料库的切片档位一并冲掉。
-// 这里统一走「读进来 → 改这一项 → 写回去」。
-//
-// ⚠️ 已知边界：设置页与工作台是两个独立路由，不会同时挂载；
-// 同一标签页内先改设置再回工作台是安全的（usePrefs 挂载时重新读）。
+// 为什么单独一层：`baomi.prefs` 曾有两套读写实现、行为不一致 —— 设置页走这里的
+// 「读进来 → 改这一项 → 写回去」，而 page.tsx 的 usePrefs 是整对象覆盖写，
+// 且读端只回 3 个字段、写端却写 6 个：设置页刚设好的 topK / chunkSize / chunkOverlap
+// 一回工作台就被默认值静默重置（用户设置永久丢失，且不易察觉）。
+// ⇒ 两边**必须共用**本文件的 readPrefs / patchPrefs（usePrefs 已改为复用）。
 const PREFS_KEY = "baomi.prefs";
 const THEME_KEY = "theme";
+
+/** 检索条数默认值。须与后端 core/config.py::TOP_K_DEFAULT 一致，改一处要改两处 */
+export const DEFAULT_TOP_K = 3;
 
 export type FontScale = "auto" | "s" | "m" | "l";
 

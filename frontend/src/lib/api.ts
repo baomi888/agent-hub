@@ -90,6 +90,13 @@ export class BusinessNotFoundError extends Error {
  * 判定依据：FastAPI 找不到路由时 `detail` 恒为 `"Not Found"`。
  * 业务侧的 404（如 report 的「今日总结尚未生成」）detail 是中文说明，
  * 因此不会被误判成「未上线」。
+ *
+ * ⚠️ 这是**按字符串猜**，不是按契约问。代价不对称：把「业务 404」误判成「未上线」
+ * 用户看不出差别，但反过来 —— 后端改了 detail 的大小写/空白，或合入的端点
+ * 路径与这里拼写不一致 —— 一个**真实的集成 bug 会长得和一个还没做的功能一模一样**，
+ * 不报错、不打日志。所以匹配刻意放宽：大小写不敏感 + 容忍首尾空白。
+ * 终局解法是让后端给一份能力清单（见 docs/前后端可更新点_2026-10-14.md 后端 #2），
+ * 与队友那批接口一起定契约时再换。
  */
 async function tryRequest<T>(path: string, init?: RequestInit): Promise<T | null> {
   const cleanPath = path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
@@ -107,7 +114,9 @@ async function tryRequest<T>(path: string, init?: RequestInit): Promise<T | null
     } catch {
       /* 非 JSON 错误体：当作未上线处理 */
     }
-    if (detail === "Not Found" || detail === "") return null;
+    // 空 detail：后端没给 JSON 错误体，多数也是路由未匹配
+    // 其余按大小写不敏感匹配，理由见上方注释「按字符串猜」那一段
+    if (detail === "" || /^not found$/i.test(detail.trim())) return null;
     // 业务 404：让调用方自己去认（report 页会转成「今天还没有总结」）
     throw new BusinessNotFoundError(detail);
   }

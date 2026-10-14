@@ -19,6 +19,7 @@ import CornIcon from "@/components/CornIcon";
 import { Callout, NotReady, Seg, SkeletonLines, Switch } from "@/components/console/ui";
 import { api } from "@/lib/api";
 import {
+  DEFAULT_TOP_K,
   FONT_SCALE_OPTIONS,
   applyFontScale,
   patchPrefs,
@@ -58,7 +59,7 @@ export default function SettingsPage() {
   // 本地偏好：挂载后读，避免 SSR/CSR 首帧不一致
   const [dark, setDark] = useState(false);
   const [fontScale, setFontScale] = useState<FontScale>("m");
-  const [topK, setTopK] = useState("5");
+  const [topK, setTopK] = useState(String(DEFAULT_TOP_K));
 
   useEffect(() => {
     // 本地偏好在挂载后读，避免 SSR/CSR 首帧不一致。

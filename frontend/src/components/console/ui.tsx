@@ -13,10 +13,14 @@ import type { Toast } from "@/lib/hooks/useToast";
 
 /* ---------------- Toast 容器 ---------------- */
 
-/** 复用工作台的 .toast-container / .toast 样式，保证两个路由的提示长得一样 */
+/** 复用工作台的 .toast-container / .toast 样式，保证两个路由的提示长得一样。
+ *
+ * role="status" + aria-live="polite"：Toast 是「操作结果」的唯一反馈通道，
+ * 没有它屏幕阅读器用户点完按钮得不到任何回应（容器必须常驻 DOM，不能条件渲染，
+ * 否则新增节点不会被播报）。**两个渲染点都要带**，改一处漏一处等于没改。 */
 export function ToastHost({ toasts }: { toasts: Toast[] }) {
   return (
-    <div className="toast-container">
+    <div className="toast-container" role="status" aria-live="polite">
       {toasts.map((t) => (
         <div key={t.id} className={`toast ${t.type}`}>
           <span>{t.msg}</span>

@@ -688,8 +688,9 @@ export default function Home() {
         aria-hidden="true"
       />
 
-      {/* Toast 容器 */}
-      <div className="toast-container">
+      {/* Toast 容器：role/aria-live 让屏幕阅读器能播报操作结果，
+          与 console/ui.tsx 的 ToastHost 保持同一份语义（两个渲染点都要带） */}
+      <div className="toast-container" role="status" aria-live="polite">
         {toasts.map((t) => (
           <div key={t.id} className={`toast ${t.type}`}>
             <span>{t.msg}</span>

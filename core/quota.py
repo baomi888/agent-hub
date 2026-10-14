@@ -44,7 +44,7 @@ class QuotaExceeded(Exception):
     """超过每日上限。"""
 
     def __init__(self, kind: str, limit: int) -> None:
-        label = {"ask": "每日问答", "embed": "每日向量化分片"}.get(kind, kind)
+        label = {"ask": "每日问答", "embed": "每日向量化分片", "auto": "每日定时委托"}.get(kind, kind)
         super().__init__(f"{label}已达上限（{limit}），明天再试或联系管理员调整配额")
         self.kind = kind
         self.limit = limit
@@ -124,9 +124,13 @@ def bump_usage(uid: str, kind: str, n: int = 1) -> int:
 
 
 # 每日上限表：kind -> config 里的限额
+# ⚠️ 这张表就是「有哪几种配额」的唯一声明：snapshot() 按它遍历、
+# history() 按它建列。新增一种配额只改这里 + config 一行，别再往别处硬编码 kind。
 _LIMITS = {
     "ask": "DAILY_ASK_LIMIT",
     "embed": "DAILY_EMBED_LIMIT",
+    # 定时委托触发的一次生成 = 一次 auto。这是唯一「用户不在场也会花钱」的入口
+    "auto": "DAILY_AUTO_LIMIT",
 }
 
 
@@ -208,11 +212,13 @@ def history(uid: str, days: int = 7) -> list[dict]:
     out: list[dict[str, int]] = []
     for i in range(days):
         d = day_key(time.time() - (days - 1 - i) * 86400)
-        out.append({"day": d, "ask": 0, "embed": 0})
+        # 零填充的列由 _LIMITS 派生：新增一种配额不必回来补这里，
+        # 否则记账了却在趋势图里当 undefined（画不出线）。
+        out.append({"day": d, **{k: 0 for k in _LIMITS}})
     by_day = {row["day"]: row for row in out}
     for r in rows:
         slot = by_day.get(r["day"])
-        if slot is not None and r["kind"] in ("ask", "embed"):
+        if slot is not None and r["kind"] in _LIMITS:
             slot[r["kind"]] = int(r["count"])
     return out
 

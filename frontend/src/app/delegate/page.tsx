@@ -214,6 +214,31 @@ export default function DelegatePage() {
     }, 0);
   }, [showToast]);
 
+  // 预览浮层的 Esc 关闭 + 焦点归还。
+  //
+  // 全项目 7 处弹层都支持 Esc，唯独这个浮层之前没有 —— 键盘用户按 Esc 毫无反应，
+  // 只能 Tab 到关闭按钮。写法与 FilePreviewModal 保持一致：
+  //  · 监听挂在 document 上且用 capture，确保浮层内任何焦点位置都能收到；
+  //  · cleanup 里把焦点还给触发元素，否则关掉浮层后键盘用户会被甩回页面开头。
+  //    ⚠️ 这里是在 effect 里读 `document.activeElement` 的写法，成立的前提是
+  //    **本浮层没有任何 autoFocus/自动聚焦**。若将来给浮层加了自动聚焦，
+  //    必须改成在用户点击「预览」的那一刻捕获 opener —— 否则读到的会是浮层内的元素，
+  //    焦点归还就静默失效了（FilePreviewModal 正因此改用惰性 useState 抓 opener）。
+  useEffect(() => {
+    if (!preview) return;
+    const opener = document.activeElement;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      setPreview(null);
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      if (opener instanceof HTMLElement) opener.focus?.();
+    };
+  }, [preview]);
+
   // 后端没上线时用演示数据顶住版面，但界面上会挂「演示数据」标记
   const isDemo = list.state === "absent";
   const items = list.state === "ready" ? list.data : isDemo ? DEMO_DELEGATES : [];

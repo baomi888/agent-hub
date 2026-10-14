@@ -2,10 +2,15 @@
 
 // 用户偏好持久化：模式 / 检索参数 / 资料库面板开合
 // 只存用户显式改过的项，读不到就回落到后端 defaults
+//
+// ⚠️ 读写一律走 consolePrefs（同一个 `baomi.prefs` 键）：设置页也在写这个键，
+// 且它是「读进来 → 改一项 → 写回去」。这里如果自己拼对象整份覆盖，
+// 就会把用户刚在设置页改的检索参数冲掉 —— 历史 bug：本文件读端只回 3 个字段、
+// 写端却写 6 个，于是「设置页改 8 段 → 回工作台 → 又变回 3 段」，
+// 且用户不会有任何提示。**新增字段时，读端与写端必须同时改。**
 import { useEffect, useRef, useState } from "react";
 import type { ChatMode } from "@/lib/types";
-
-const PREFS_KEY = "baomi.prefs";
+import { DEFAULT_TOP_K, patchPrefs, readPrefs } from "@/lib/consolePrefs";
 
 /** 聊天正文字号档位：跟随系统 / 小 / 标准 / 大（CSS 侧映射为 --msg-fs） */
 export type FontScale = "auto" | "s" | "m" | "l";
@@ -20,26 +25,9 @@ export interface Prefs {
   fontScale?: FontScale;
 }
 
-function readPrefs(): Prefs {
-  try {
-    const raw = localStorage.getItem(PREFS_KEY);
-    return raw ? (JSON.parse(raw) as Prefs) : {};
-  } catch {
-    return {};
-  }
-}
-
-function writePrefs(p: Prefs) {
-  try {
-    localStorage.setItem(PREFS_KEY, JSON.stringify(p));
-  } catch {
-    /* 隐私模式下写入失败可忽略 */
-  }
-}
-
 export function usePrefs() {
   const [mode, setMode] = useState<ChatMode>("auto");
-  const [topK, setTopK] = useState(3);
+  const [topK, setTopK] = useState(DEFAULT_TOP_K);
   const [chunkSize, setChunkSize] = useState(500);
   const [chunkOverlap, setChunkOverlap] = useState(50);
   const [kbPanelPref, setKbPanelPref] = useState<boolean | null>(null);
@@ -50,23 +38,29 @@ export function usePrefs() {
   const savedRef = useRef<Prefs>({});
 
   useEffect(() => {
-    const saved = readPrefs();
+    const saved = readPrefs() as Prefs;
     savedRef.current = saved;
+    // ⚠️ 六项都要读回来。漏读某项 = 该项在挂载后立刻被下面的写 effect 用默认值覆盖
     if (saved.mode) setMode(saved.mode);
+    if (typeof saved.topK === "number" && saved.topK > 0) setTopK(saved.topK);
+    if (typeof saved.chunkSize === "number") setChunkSize(saved.chunkSize);
+    if (typeof saved.chunkOverlap === "number") setChunkOverlap(saved.chunkOverlap);
     if (typeof saved.kbPanel === "boolean") setKbPanelPref(saved.kbPanel);
     if (FONT_SCALES.includes(saved.fontScale as FontScale)) setFontScale(saved.fontScale as FontScale);
     setPrefsReady(true);
   }, []);
 
   // 偏好变化后落盘（prefsReady 之前不写，避免默认值反向覆盖）
+  // 走 patchPrefs 而**不是**整对象覆盖：设置页可能刚在这个键里写了检索参数，
+  // 整份覆盖会把它们一起冲掉。kbPanelPref 为 null（用户没设置过）时不写该键。
   useEffect(() => {
     if (!prefsReady) return;
-    writePrefs({
+    patchPrefs({
       mode,
       topK,
       chunkSize,
       chunkOverlap,
-      kbPanel: kbPanelPref ?? undefined,
+      ...(kbPanelPref === null ? {} : { kbPanel: kbPanelPref }),
       fontScale,
     });
   }, [prefsReady, mode, topK, chunkSize, chunkOverlap, kbPanelPref, fontScale]);
