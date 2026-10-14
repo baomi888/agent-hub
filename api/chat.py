@@ -7,6 +7,7 @@ from __future__ import annotations
   rag    — 强制 RAG 模式（检索 + 提示词组装 + LLM，不走 Agent 工具链）
   agent  — 强制 Agent 模式（create_agent + 4 工具 + LangGraph checkpoint）
   llm    — 强制纯 LLM（多轮对话，不调工具不检索）
+  hybrid — 混合模式（工作流 × 自主 Agent 动态切换，hybrid/ 包编排）
 
 SSE 事件协议：
   event: status     { text: "..." }           状态提示
@@ -17,9 +18,14 @@ SSE 事件协议：
                    数据来源是 kb/rag_core.py::assess_grounding()
   event: token      { text: "...", refs: "" }  增量 token
   event: title      { title: "..." }          自动生成的会话标题（仅首轮）
-  event: done       { answer: "...", refs: "", title: "", mode: "", message_id: 123 }
+  event: done       { answer: "...", refs: "", title: "", mode: "", message_id: 123, run_id: "" }
                     message_id 是 assistant 消息在 messages 表里的 id，赞踩按它落库
+                    run_id 仅 hybrid 模式有值：人工切换 / 执行日志按它寻址
   event: error      { detail: "..." }
+  —— 以下仅 hybrid 模式 ——
+  event: hybrid_start  { run_id: "...", mode: "workflow|agent" }  起跑即发，带初始模式
+  event: workflow_node { phase: "enter|exit", node_id: "...", ... }  工作流节点进出
+  event: mode_switch   { rule: "...", reason: "...", from: "...", to: "..." }  模式切换
 """
 
 import asyncio
@@ -67,7 +73,12 @@ class ChatRequest(BaseModel):
     question: str = Field(...)
     top_k: int = Field(default=config.TOP_K_DEFAULT, gt=0, le=config.TOP_K_MAX)
     kb_id_override: str | None = Field(default=None)
-    mode: str = Field(default="auto", description="auto / rag / agent / llm")
+    mode: str = Field(default="auto", description="auto / rag / agent / llm / hybrid")
+    workflow_id: str | None = Field(
+        default=None,
+        description="仅 hybrid 模式有效：指定工作流定义 id 起跑；"
+        "缺省时按 classify_task 自动选择内置流程或 Agent 裸跑",
+    )
     scenario: str | None = Field(
         default=None,
         description="场景预设：kaoyan(考研复习) / notes(课程笔记) / paper(论文写作)。"
@@ -94,7 +105,11 @@ VALID_MODES = ("auto", "rag", "agent", "llm")
 
 
 def _pick_mode(req_mode: str, kb_id: str | None, kb_exists: bool) -> str:
-    """auto → rag / agent 自动路由；其它值先过白名单再放行。"""
+    """auto → rag / agent 自动路由；hybrid 不受知识库影响，只认功能开关；
+    其它值先过白名单再放行。"""
+    if req_mode == "hybrid":
+        # 功能开关关闭时静默回退 Agent：前端看到 mode=agent 的 done 就知道没走混合
+        return "hybrid" if config.HYBRID_MODE_ENABLED else "agent"
     if req_mode in VALID_MODES and req_mode != "auto":
         return req_mode
     if kb_id and kb_exists:
@@ -346,6 +361,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
 
     async def event_generator() -> None:
         refs_md = ""
+        hybrid_run_id: str | None = None  # 仅 hybrid 模式有值，随 done 回传给前端
 
         # 标题只依赖用户问题（提示词里答案根本没用到），所以一开始就和答案流式
         # 生成并行跑：收尾时它多半已经算完，省掉原来在 done 之前干等的一次
@@ -425,8 +441,111 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             })
             return
 
-        # ---- 1. Agent 模式 ----
-        if mode == "agent":
+        # ---- 1. 混合模式（工作流 × 自主 Agent 动态切换）----
+        if mode == "hybrid":
+            yield _sse("status", {"text": "混合模式，正在规划执行路径..."})
+            try:
+                from hybrid import store as hstore
+                from hybrid.context import TaskContext
+                from hybrid.orchestrator import HybridOrchestrator
+                from hybrid.switcher import classify_task
+                from hybrid.workflow import validate_definition
+
+                # 起跑模式决策：
+                #   显式 workflow_id → 指定工作流起跑（用户说了算）；
+                #   否则 classify_task 粗分：flow → 内置"规划-执行"工作流，
+                #   open → Agent 裸跑（跑起来后还有切换规则兜底，分错代价低）
+                wf_def = None
+                wf_id: str | None = None
+                if req.workflow_id:
+                    row = await asyncio.to_thread(hstore.get_workflow, uid, req.workflow_id)
+                    if not row:
+                        yield _sse("error", {"detail": f"工作流不存在或无权限：{req.workflow_id}"})
+                        return
+                    wf_def = validate_definition(row["definition"])
+                    wf_id = req.workflow_id
+                    start_mode = "workflow"
+                elif classify_task(req.question) == "flow":
+                    row = await asyncio.to_thread(hstore.get_workflow, uid, hstore.DEFAULT_WORKFLOW_ID)
+                    if row:
+                        wf_def = validate_definition(row["definition"])
+                        wf_id = hstore.DEFAULT_WORKFLOW_ID
+                    start_mode = "workflow" if wf_def else "agent"
+                else:
+                    start_mode = "agent"
+
+                ctx = TaskContext(
+                    owner_id=uid,
+                    goal=req.question,
+                    current_mode=start_mode,
+                    workflow_id=wf_id,
+                )
+                # kb_id 走私有段注入（与 agent 分支同一安全边界：模型没机会改写它）
+                ctx.agent_state["kb_id"] = kb_id if (kb_id and kb_exists) else None
+
+                rules = await asyncio.to_thread(hstore.list_rules, uid)
+                orch = HybridOrchestrator(
+                    ctx, workflow_def=wf_def, rules=rules,
+                    has_kb=bool(kb_id and kb_exists), location=location_ctx,
+                )
+
+                # run_id 先给前端：人工切换 / 执行日志查询都按它寻址
+                hybrid_run_id = ctx.run_id
+                yield _sse("hybrid_start", {"run_id": ctx.run_id, "mode": start_mode})
+
+                full_text = ""
+                async for ev in orch.stream():
+                    if await request.is_disconnected():
+                        return
+                    et = ev.event_type
+                    if et == "token":
+                        delta = ev.payload.get("text", "")
+                        if delta:
+                            full_text += delta
+                            yield _sse("token", {"text": delta})
+                    elif et == "tool_call":
+                        p = ev.payload
+                        frame = {"name": p.get("name", "?")}
+                        if "input" in p:
+                            frame["input"] = str(p["input"])[:200]
+                        if "output" in p:
+                            frame["output"] = str(p["output"])[:300]
+                        yield _sse("tool", frame)
+                    elif et in ("node_enter", "node_exit"):
+                        # 工作流节点进出：前端执行轨迹侧栏的时间轴事件
+                        yield _sse("workflow_node", {
+                            "phase": "enter" if et == "node_enter" else "exit",
+                            "node_id": ev.node_id,
+                            **ev.payload,
+                        })
+                    elif et == "switch":
+                        yield _sse("mode_switch", ev.decision or {})
+                    elif et == "human_intervention":
+                        yield _sse("status", {
+                            "text": f"人工节点 {ev.node_id}：{ev.payload.get('prompt', '') or '已自动通过'}"
+                        })
+                    elif et == "status":
+                        yield _sse("status", {"text": ev.payload.get("text", "")})
+                    elif et == "error":
+                        # 引擎级错误事件留痕但不打断：终态由 ctx.status 统一落锤
+                        yield _sse("status", {"text": f"执行异常：{ev.payload.get('error', '')}"})
+
+                if ctx.status in ("failed", "timeout"):
+                    yield _sse("error", {"detail": ctx.error or "混合执行失败"})
+                    return
+                acc_text = full_text or str(ctx.shared.get("agent_result") or "")
+                if not acc_text and ctx.shared:
+                    # 纯工作流 + 全非流式节点：取最后写入 shared 的产出作为答案
+                    acc_text = str(next(reversed(ctx.shared.values())))
+            except ValueError as e:
+                yield _sse("error", {"detail": str(e)})
+                return
+            except Exception as e:
+                yield _sse("error", {"detail": f"混合执行失败：{describe_api_error(e)}"})
+                return
+
+        # ---- 2. Agent 模式 ----
+        elif mode == "agent":
             yield _sse("status", {"text": "Agent 模式，正在规划任务..."})
             try:
                 from agent.builder import build_agent
@@ -520,7 +639,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 yield _sse("error", {"detail": acc_text})
                 return
 
-        # ---- 2. RAG 模式 ----
+        # ---- 3. RAG 模式 ----
         elif mode == "rag":
             yield _sse("status", {"text": f"RAG 模式，正在检索知识库（{kb_id}）..."})
             # 追问（"那它呢"）先结合上下文改写成独立问题再检索；不需要/失败时原样返回。
@@ -568,7 +687,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 return
             acc_text = acc.text
 
-        # ---- 3. 纯 LLM 模式 ----
+        # ---- 4. 纯 LLM 模式 ----
         else:
             yield _sse("status", {"text": "纯 LLM 模式..."})
             history = (await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False))[:-1]
@@ -600,12 +719,14 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             yield _sse("title", {"title": gen_title})
 
         # message_id 回给前端：赞踩要按消息 id 落库，前端自己生成的 uid 后端不认
+        # run_id 仅 hybrid 模式有值：人工切换 / 执行日志查询按它寻址
         yield _sse("done", {
             "answer": acc_text,
             "refs": refs_md,
             "title": gen_title,
             "mode": mode,
             "message_id": msg_id,
+            "run_id": hybrid_run_id,
         })
 
     return StreamingResponse(event_generator(), media_type="text/event-stream", headers=SSE_HEADERS)

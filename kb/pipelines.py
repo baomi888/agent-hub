@@ -382,7 +382,6 @@ def list_all(owner: str) -> list[dict]:
 
     mine = owned_kb_ids(owner)
     seen: set[str] = set()
-    seen: set[str] = set()
 
     # 整段加锁：循环里会 _get_or_create_raw 往注册表塞东西，
     # 不加锁的话并发遍历时 dict 被改动会直接抛 RuntimeError
