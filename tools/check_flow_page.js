@@ -1,10 +1,14 @@
-// 验证 /flow（混合架构管理页）在后端未上线时的降级表现
+// 验证 /flow（混合架构管理页）在后端未上线/旧版本时的降级表现
 // 重点验三件事：① 页面渲染出内容不是白屏 ② 挂「接口待上线」标记
 // ③ 三个 Tab 都能切、编辑浮层能开且能输半截非法 JSON（文档 §六.6 的坑）
+//
+// 场景要求：后端在跑但**没有** /api/hybrid 端点（旧版本），auth 正常。
+// 端口用环境变量 BASE 覆盖（默认 3000；本机 3000 可能被 VMware NAT 占用，改 -3100 跑）。
 const puppeteer = require("puppeteer-core");
 
 const CHROME = "C:/Program Files/Google/Chrome/Application/chrome.exe";
-const URL = "http://localhost:3000/flow";
+const BASE = process.env.BASE || "http://localhost:3000";
+const URL = `${BASE}/flow`;
 
 let pass = 0, fail = 0;
 const fails = [];
