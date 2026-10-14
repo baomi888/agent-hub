@@ -290,7 +290,7 @@ export const api = {
     remove: (id: string) =>
       tryRequest<{ ok: boolean }>(`/api/delegate/${id}`, { method: "DELETE" }),
     runs: (id: string) =>
-      tryRequest<unknown>(`/api/delegate/${id}/runs`).then(unwrap<DelegateRun>("runs")),
+      tryRequest<unknown>(`/api/delegate/${id}/runs`).then(unwrap<DelegateRun>("items")),
     /**
      * dry_run=true = 只生成、不投递、不改 next_run_at。
      * 这是「先生成后确认」的落地：用户先看到内容，再决定投不投。
@@ -316,7 +316,7 @@ export const api = {
 
   // ---------- P7 设置：工具元数据 /api/agent/tools（2 端点）----------
   agent: {
-    tools: () => tryRequest<unknown>("/api/agent/tools").then(unwrap<AgentTool>("tools")),
+    tools: () => tryRequest<unknown>("/api/agent/tools").then(unwrap<AgentTool>("items")),
   },
 
   // ---------- P7 设置：调度 /api/schedule（5 端点，2 个管理员）----------
@@ -324,7 +324,7 @@ export const api = {
     health: () => tryRequest<ScheduleHealth>("/api/schedule/health"),
     jobs: () => tryRequest<unknown>("/api/schedule/jobs").then(unwrap<ScheduleJob>("jobs")),
     /** 全量执行历史（跨所有委托）。委托页的「执行历史」读它 —— 逐条去问 N 个委托要 N 次请求 */
-    runs: () => tryRequest<unknown>("/api/schedule/runs").then(unwrap<DelegateRun>("runs")),
+    runs: () => tryRequest<unknown>("/api/schedule/runs").then(unwrap<DelegateRun>("items")),
     /** 仅管理员；非管理员 403 —— 页面据此只读展示 */
     runNow: (jobKey: string) =>
       tryRequest<{ ok: boolean }>("/api/schedule/run-now", {
@@ -340,14 +340,31 @@ export const api = {
 };
 
 /**
- * 把列表响应统一成数组：后端可能返回 `[...]`，也可能包一层 `{delegates:[...]}`。
- * 契约还没联调，两种都认，页面侧就不用各写一遍。
+ * 把列表响应统一成数组。**认三种壳层**，页面侧不用各写一遍：
+ *   1. 裸数组 `[...]`
+ *   2. `{ [key]: [...] }`          —— 传 primary，如 `{items:[...]}` / `{delegates:[...]}`
+ *   3. `{ items: [...] }` 兜底    —— 传 "items" 时额外认 `{runs:[...]}` / `{tools:[...]}`
+ *
+ * ⚠️ 为什么要第 3 条：后端这三个端点（/api/schedule/runs、/api/agent/tools、
+ * /api/delegate/{id}/runs）实际都返回 `{"items":[...],"next_cursor":...}`，
+ * 而当时我按直觉写成了各自的资源名（runs / tools）。契约联调前这层差异不致命
+ * （页面有演示数据兜底），但**后端一上线就会静默变成空列表**——
+ * 「不报错、只是永远空着」是最难查的一类问题。
+ * 与其赌后端用哪个 key，不如这里多认几个候选。
  */
 function unwrap<T>(key: string) {
   return (v: unknown): T[] | null => {
     if (v === null || v === undefined) return null;
     if (Array.isArray(v)) return v as T[];
-    const inner = (v as Record<string, unknown>)[key];
-    return Array.isArray(inner) ? (inner as T[]) : [];
+    const rec = v as Record<string, unknown>;
+    const primary = rec[key];
+    if (Array.isArray(primary)) return primary as T[];
+    // 兜底：任何值为数组的字段都认（只认一层，避免把分页元信息当数据）
+    for (const k of Object.keys(rec)) {
+      if (k === "next_cursor" || k === "total") continue;
+      const val = rec[k];
+      if (Array.isArray(val)) return val as T[];
+    }
+    return [];
   };
 }
