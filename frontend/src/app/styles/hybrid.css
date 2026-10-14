@@ -67,12 +67,21 @@
   padding: 0;
 }
 
-/* 节点：左侧一条竖线串起来，视觉上是「一条执行链」而不是散落的标签 */
+/* 节点：左侧一条竖线串起来，视觉上是「一条执行链」而不是散落的标签
+ *
+ * ⚠️ 三个 flex 约束缺一不可（第一版漏了 min-width: 0，实测「自主执行」被折成
+ * 「自主执」+「行」两行、类型标签「智能体」被挤成「智能」+「体」）：
+ *   · min-width: 0 —— flex 项默认 min-width:auto，长词不肯收缩；
+ *   · flex-shrink: 0 —— 类型标签是固定短文本，不该参与压缩；
+ *   · gap 而非 margin —— 避免压缩时两段文字贴死。
+ * 这与 MEMORY 里那条「裸 1fr 实为 minmax(auto,1fr) 被长词撑破」是同一个根因。 */
 .hybrid-node {
   position: relative;
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: var(--space-6);
+  min-width: 0;
   padding: var(--space-4) 0 var(--space-4) var(--space-14, 14px);
   font-size: var(--fs-md);
 }
@@ -98,16 +107,21 @@
 .hybrid-dot {
   position: absolute;
   left: 0;
-  top: var(--space-5);
+  top: var(--space-4);
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 11px;
-  height: 11px;
+  width: 13px;
+  height: 13px;
   border-radius: 999px;
   background: var(--step-1);
   border: 1px solid var(--line-strong);
   color: var(--success-ink);
+}
+/* 图标本身比容器小：CornIcon 默认会撑满父级，不压一层就会被描边切掉/压到文字上 */
+.hybrid-dot > svg {
+  width: 9px;
+  height: 9px;
 }
 
 /* 进行中：小圆点用呼吸感表示，不用旋转图标（全局不做高动画） */
@@ -144,17 +158,32 @@
   color: var(--red-ink);
 }
 
+/* 节点名：单行优先，但**必须允许在真的放不下时换行并溢出可见**。
+ *
+ * ⚠️ 这里踩过一个坑：先写了 `flex: 0 0 auto` + `white-space: nowrap`，
+ * 配合父级的 `min-width: 0`，在极窄容器（150px）下实测
+ *   容器宽 150px，文字宽 338px ⇒ **直接溢出而不是折行**（liW=150 / w=338）。
+ * 原因：`nowrap` 让文字不许断行，父级又允许收缩，于是两者打架 ⇒ 溢出。
+ * ⇒ 加 `max-width: 100%` + `overflow-wrap: anywhere`：
+ *   正常宽度下仍单行（338 < 容器），放不下时才断行，且不会溢出容器。
+ * 判据用 Range.getClientRects().length > 1（量行数），不用高度阈值 ——
+ * 高度会随字号/行高变化，用阈值必然要在边界上反复试错。
+ */
 .hybrid-node-name {
   font-family: var(--font-serif);
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .hybrid-node-type {
+  flex: 0 0 auto; /* 固定短文本（模型/工具/智能体…），不参与压缩 */
   padding: 0 var(--space-5);
   border: 1px solid var(--line);
   border-radius: 999px;
   font-size: var(--fs-xs);
   color: var(--ink);
   opacity: 0.75;
+  white-space: nowrap;
 }
 
 .hybrid-node-error {
