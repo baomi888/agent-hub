@@ -11,7 +11,7 @@ import MascotLogo from "./chat/MascotLogo";
 import CornIcon from "./CornIcon";
 import { api } from "@/lib/api";
 import type { ChatMode, RefSource, QuotaInfo } from "@/lib/types";
-import { ABILITIES, EXAMPLES, MODE_LABELS, SCENARIOS, PRIMARY_ENTRIES, SECONDARY_ENTRIES, TOOLS_URL, SCENARIO_STARTERS } from "./chat/constants";
+import { ABILITIES, EXAMPLES, MODE_LABELS, PRIMARY_ENTRIES, SECONDARY_ENTRIES, TOOLS_URL } from "./chat/constants";
 import { buildPlanPrompt, detectPlanTopic, isPlanRequest, stripPlanHint } from "./chat/plan";
 import Bubble from "./chat/Bubble";
 import BubbleErrorBoundary from "./chat/BubbleErrorBoundary";
@@ -75,10 +75,6 @@ interface Props {
   geoEnabled?: boolean;
   /** 当前定位城市（角标展示用，可能为 null） */
   geoCity?: string | null;
-  /** 当前会话选中的场景预设（null 表示未选）；轻量版仅前端保存 */
-  scenario?: string | null;
-  /** 切换场景预设，传 null 表示取消选择 */
-  onScenarioChange?: (id: string | null) => void;
   /** 定位请求进行中：等授权 + IP 兜底最长要 18 秒，期间按钮禁用并转圈 */
   geoPending?: boolean;
   /** 切换定位开关（请求权限 / 关闭），由页面层处理权限与缓存 */
@@ -116,8 +112,6 @@ export default function ChatArea({
   geoPending = false,
   onToggleGeo,
   sessionId = null,
-  scenario = null,
-  onScenarioChange,
   quota,
   onOpenUsage,
 }: Props) {
@@ -372,19 +366,6 @@ export default function ChatArea({
     onToggleKbPanel?.();
   };
 
-  // 首屏场景快选：选中场景预设 + 预填一句开场白（轻量版场景仅前端保存）
-  const startScenario = (id: string) => {
-    onScenarioChange?.(id);
-    const starter = SCENARIO_STARTERS[id] ?? "";
-    setInput(starter);
-    requestAnimationFrame(() => {
-      const el = inputRef.current;
-      if (!el) return;
-      el.focus();
-      el.setSelectionRange(el.value.length, el.value.length);
-    });
-  };
-
   // 首屏功能入口：模板广场 / 校园工具集 / 上传建库 / 让它研究
   const handleIntroEntry = (key: string) => {
     switch (key) {
@@ -565,8 +546,9 @@ export default function ChatArea({
         <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto">
           <div className="chat-measure mx-auto flex min-h-full flex-col px-6 pb-4 pt-6">
           {messages.length === 0 ? (
-            // 欢迎页：主路径是「直接问」，但首屏先把当前主打能力摆出来——
-            // ① 场景快选（考研/笔记/论文）② 功能入口（模板/工具集/建库/研究）③ 三句示例
+            // 欢迎页：主路径是「直接问」，首屏摆两块——
+            // ① 功能入口（持续陪伴三卡 + 一次性动作小胶囊）② 三句示例
+            // （场景快选已撤出主界面：场景化入口统一走模板广场，10-14 晚）
             <div className="welcome">
               <MascotLogo
                 className="hero-logo mx-auto mb-2 h-[52px] w-[52px] object-contain"
@@ -578,31 +560,8 @@ export default function ChatArea({
                 {greeting}，我是<span className="hero-name">知穗</span>
               </h1>
               <p className="mt-1.5 max-w-[30rem] text-msg leading-relaxed text-muted">
-                一句话就行。选个场景，或直接问我——我会自己决定怎么帮你。
+                一句话就行。直接问我——我会自己决定怎么帮你。
               </p>
-
-              {/* ① 场景快选：当前主打能力，点一下进对应场景并预填开场白 */}
-              <div className="mt-4 w-full">
-                <div className="welcome-section-head">
-                  <span className="eyebrow">选个场景开始</span>
-                  <span className="rule" />
-                </div>
-                <div className="mt-2.5 flex w-full flex-wrap justify-center gap-2">
-                  {SCENARIOS.map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() => startScenario(s.id)}
-                      className="scenario-pick"
-                      title={s.desc}
-                    >
-                      <CornIcon name={s.id === "kaoyan" ? "book" : s.id === "notes" ? "notes" : "pen"} className="h-5 w-5" title={s.label} />
-                      <span className="sp-label">{s.label}</span>
-                      <span className="sp-desc">{s.desc}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
 
               {/* ② 主线：三个持续陪伴功能。原来这里是四宫格，四件平级，
                   结果「模板广场」这种一次性动作和「每日委托」这种天天用的能力
@@ -779,27 +738,12 @@ export default function ChatArea({
         </div>
       )}
 
-      {/* 底部：场景预设 + 模式切换 + 输入框 */}
+      {/* 底部：外链入口 + 模式切换 + 输入框 */}
       <div className="chat-measure mx-auto px-6 pb-5">
-        {/* 场景预设：考研复习 / 课程笔记 / 论文写作（轻量版仅前端保存，发送时带入请求） */}
+        {/* 校园工具集：从侧栏搬来（10-14）。它是「发消息之前顺手用一下」的入口，
+            挂在对话栏这一行才够得着；放侧栏等于让它跟会话列表抢同一条视线。
+            场景 chips 撤出后（10-14 晚）这一行只剩它一个，保持靠右的胶囊观感。 */}
         <div className="mb-2 flex items-center gap-2 flex-wrap">
-          <span className="scenario-label">场景</span>
-          {SCENARIOS.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              onClick={() => onScenarioChange?.(scenario === s.id ? null : s.id)}
-              aria-pressed={scenario === s.id}
-              title={s.desc}
-              className={`scenario ${scenario === s.id ? "active" : ""}`}
-            >
-              {s.label}
-            </button>
-          ))}
-          {/* 校园工具集：从侧栏搬来（10-14）。
-              它是「发消息之前顺手用一下」的入口，挂在对话栏这一行才够得着使用场景；
-              放侧栏等于让它跟会话列表抢同一条视线。靠右、与 .scenario 同一族的胶囊外形，
-              所以看得见但不跟场景抢主次 —— 场景是当前会话的属性（会高亮），它只是个外链。 */}
           <a
             href={TOOLS_URL}
             target="_blank"

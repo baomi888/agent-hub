@@ -164,66 +164,7 @@
   background: linear-gradient(90deg, var(--line-strong), transparent);
 }
 
-/* ① 场景快选：三枚可点卡片，选中态用玉米金（仅持久/选中态用金）
-   手机端（<560px）压成横排单行：只留图标+标题，描述藏进 title，
-   保证三张卡一行放下、不把首屏顶出滚动 */
-.scenario-pick {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-3);
-  flex: 1 1 0;
-  min-width: 0;
-  text-align: left;
-  padding: 10px 13px;
-  background: var(--card-bg);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 1px 2px rgba(80, 60, 30, 0.05);
-  cursor: pointer;
-  color: var(--accent-ink);
-  transition: var(--t-color), var(--t-move);
-}
-@media (max-width: 560px) {
-  .scenario-pick {
-    flex-direction: row;
-    align-items: center;
-    gap: var(--space-5);
-    padding: 9px 11px;
-  }
-  .scenario-pick .sp-desc {
-    display: none;
-  }
-  .scenario-pick .sp-label {
-    font-size: var(--fs-md);
-  }
-}
-.scenario-pick:hover,
-.scenario-pick:focus-visible {
-  border-color: var(--accent);
-  background: var(--fill-2);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-2);
-  outline: none;
-}
-.scenario-pick:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-.scenario-pick .sp-label {
-  font-family: var(--font-serif);
-  font-size: var(--fs-lg);
-  font-weight: 700;
-  color: var(--ink);
-  line-height: var(--lh-tight);
-}
-.scenario-pick .sp-desc {
-  font-size: var(--fs-xs);
-  line-height: var(--lh-tight);
-  color: var(--text-3);
-}
-
-/* ② 主线入口：三个持续陪伴功能（每日委托 / 每日总结 / 打卡）。
+/* 主线入口：三个持续陪伴功能（每日委托 / 每日总结 / 打卡）。
    竖排卡片（图标在上 + 标题 + 一行说明），比下面那行小胶囊明显大一号 ——
    层级本身就是"这两个不是一类东西"的表达（10-14 从四宫格改成主次两层）。 */
 .entry-card {
@@ -282,7 +223,7 @@
   color: var(--text-3);
 }
 
-/* ③ 辅路入口：一次性动作，一行小胶囊。
+/* 辅路入口：一次性动作，一行小胶囊。
    外形与对话栏那个「校园工具集」(.tools-link) 一致 —— 同一类东西用同一套壳。 */
 .entry-mini {
   display: inline-flex;

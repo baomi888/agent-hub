@@ -58,12 +58,8 @@ export const SECONDARY_ENTRIES: {
   { key: "tools", label: "校园工具集", icon: "tools" },
 ];
 
-// 场景快选：首屏点一下进入对应场景并预填一句开场白（轻量版仅前端保存）
-export const SCENARIO_STARTERS: Record<string, string> = {
-  kaoyan: "帮我梳理这一章的考点和易错点",
-  notes: "把我的笔记提炼成要点清单",
-  paper: "给我一个论文的论证结构大纲",
-};
+// 场景快选（SCENARIO_STARTERS）已随「场景选择撤出主界面」删除（10-14 晚）：
+// 场景化入口统一走模板广场，工作台不再摆场景选择器。
 
 // ============ 工具调用：名称 → 中文标签 + 图标 ============
 export const TOOL_META: Record<string, { label: string; icon: ReactNode }> = {
@@ -106,17 +102,10 @@ export const TOOL_META: Record<string, { label: string; icon: ReactNode }> = {
 
 export const toolLabel = (name: string) => TOOL_META[name]?.label ?? name;
 
-// ============ 场景预设：考研复习 / 课程笔记 / 论文写作 ============
-import type { ScenarioId } from "@/lib/types";
-
-export const SCENARIOS: { id: ScenarioId; label: string; desc: string }[] = [
-  { id: "kaoyan", label: "考研复习", desc: "知识点讲解 · 真题自测 · 错题复盘" },
-  { id: "notes", label: "课程笔记", desc: "笔记整理 · 要点提炼 · 自动出题" },
-  { id: "paper", label: "论文写作", desc: "学术规范 · 结构搭建 · 文献引用" },
-];
-
-export const scenarioLabel = (id: string | null | undefined) =>
-  SCENARIOS.find((s) => s.id === id)?.label ?? null;
+// 场景预设（SCENARIOS / scenarioLabel）已随「场景选择撤出主界面」删除（10-14 晚）：
+// 原来的考研复习 / 课程笔记 / 论文写作三选一，与模板广场的同名模板重复，
+// 且覆盖不到「求职」这类主打场景 —— 场景化入口统一收归模板广场。
+// 后端 core/scenarios.py 的 prompt 机制保留（旧前端兼容 + 模板联动可复用）。
 
 // 首屏四宫格：呼应设计稿「查资料 / 联网搜索 / 数学计算 / 查天气」，
 // 点一下直接切到对应模式并预填一句能立刻发的问题（不用先去顶部切模式）

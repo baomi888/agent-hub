@@ -43,8 +43,10 @@ export interface Message {
 // 所以前端不能假设选了 hybrid 就一定走混合，得看事件有没有来（见 useHybridTrace）。
 export type ChatMode = "auto" | "rag" | "agent" | "llm" | "hybrid";
 
-// 场景预设：kaoyan 考研复习 / notes 课程笔记 / paper 论文写作（轻量版只做提示词 + 选择器）
-export type ScenarioId = "kaoyan" | "notes" | "paper";
+// 场景预设类型（ScenarioId）已随「场景选择撤出主界面」一并删除（10-14 晚）：
+// 场景化入口统一走模板广场（/templates，完整启动包：建库 + 会话 + 提示词）。
+// 后端 /api/chat 的 scenario 字段与 core/scenarios.py 机制保留（旧前端兼容 + 未来
+// 模板联动可复用），前端不再传。
 
 export interface SearchResult {
   title: string;
