@@ -74,12 +74,13 @@ if [ "$_c" = "404" ]; then
   echo
   echo "在那之前，前端会显示「接口待上线」+ 演示数据（三态降级），不会白屏。"
   echo
-  echo "已知的 3 个待对齐点（来自 docs/接口契约对齐_委托与总结_1014.md，"
-  echo "与 hybrid 无关但同属 T5 契约统稿）："
-  echo "  1. delegate 字段名：_out() 给 delegation_id/prompt/deliver_sid，"
-  echo "     前端用 id/instruction/session_id（id 对不上 ⇒ 按钮全点不动）"
-  echo "  2. runs 列表壳层是 {items:[...]}，不是 {runs:[...]}"
-  echo "  3. delegate 路由带尾斜杠、前端不带，建议去掉（对齐其余 35 个端点）"
+  echo "与 hybrid 无关但同属 T5 契约统稿的 delegate 侧对齐点（10-14 已全部解决）："
+  echo "  [OK] 字段名 —— 林宏亮用「加法兼容」补齐了 id/instruction/session_id，"
+  echo "       并额外补了 session_title / kb_name（实测 200 确认）"
+  echo "  [OK] runs 壳层是 {items:[...]} —— 前端已按 items 读（实测确认）"
+  echo "  [OK] 尾斜杠 —— 他已去掉 5 处路由的斜杠，前端同步去掉（实测 /api/delegate 401）"
+  echo ""
+  echo "  仍待确认的只有 hybrid 本身的 3 点，见 we/议题_混合架构前端已就绪等待后端对接.md："
   exit 0
 fi
 
