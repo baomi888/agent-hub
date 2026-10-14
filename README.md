@@ -2,7 +2,9 @@
 
 # 🌽 知穗 Agent
 
-**把 RAG 知识库、多会话和工具调用，装进一本摊开的纸质笔记本。**
+**把 RAG 知识库、多会话和工具调用，装进一本摊开的纸质笔记本 —— 并让它在后台慢慢记住你。**
+
+面向大学生的 **Agent 个性化学习助手**，覆盖**备考**（试卷 / 知识梳理）与**求职**（简历 / 面试演练）两条主线，底层 Agent 逻辑复用。核心理念是「**辅助学习而非替代思考**」。
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white)
@@ -21,11 +23,32 @@
 
 ---
 
+## 📌 实现状态（先说清楚，免得上手扑空）
+
+本项目正处在**分支并行**阶段，`main` 上的前端与 `feat` 分支上的后端尚未合并：
+
+| 能力 | 状态 | 位置 |
+|---|---|---|
+| 知识库问答 / 多会话 / 五工具 / SSE 流式 / 模板广场 / 校园工具集 | ✅ 已上线 | `main` |
+| 四屏控制台（每日委托 / 每日总结 / 打卡记录 / 设置） | ✅ 前端已上线 | `main` |
+| 上面对应的后端接口 | ⚠️ **已实现，未合并** | `feat/ai-module-20261013` |
+| 工具执行元数据注册表 · 独立调度 worker · 每日总结与委托端点 | ✅ 已实现并通过测试 | `feat/ai-module-20261013` |
+| 对话信息**蒸馏**入库 · **标签钩子** · 学习路径可视化 · 联网搜索协同路由 | 🚧 **未实现**（仅接口契约） | — |
+
+> 在 `main` 上跑，四屏会显示「接口待上线 + 演示数据」而不是报错 —— 这是**故意的**，见 `tools/shot_console_live.js` 的验收断言。
+> 想看完整功能：`git checkout feat/ai-module-20261013`。
+
+**已知取舍**：知识库存储当前是 **Chroma 向量库**，「可读可改的文本文件 + 结构化标签 + 全文检索」是**规划方向**，尚未实现。向量化走阿里百炼 API —— 因此「数据不出校」的说法在当前实现下**不成立**，本项目对外只声称「用户数据按 owner 强制隔离、不进入公共语料」。
+
+---
+
 ## 它能做什么
 
 **知识库问答，带出处。** 上传 txt / Markdown / PDF，切片、向量化、检索、生成一条龙。回答里的 `[1][2]` 角标能点开原文片段核对；知识库里没有的，它会明说，不硬编。
 
-检索不是简单取 top-k。先从候选池（默认 3 倍）捞回来，丢掉余弦相似度明显偏低的，再用 MMR 去掉互相重复的相邻切片，最后截到 top-k —— 避免「三条引用里两条是同一段话」把名额占满。
+检索不是简单取 top-k，而是**四段流水线**：候选池扩召回（默认 3 倍，下限 12）→ 丢掉余弦相似度低于 0.25 的 → 用 MMR（λ=0.65，字符 2-gram Jaccard）去掉互相重复的相邻切片 → 截到 top-k —— 避免「三条引用里两条是同一段话」把名额占满。
+
+**说不准就说说不准。** 最后一道是**置信度示弱**：最高相似度低于 0.45 时，回答会明确提示「依据不足」，而不是硬编一个像模像样的答案。切片长度 500 / 重叠 50。
 
 **多会话，各管各的。** 新建、切换、重命名、删除；每个会话有独立历史，可以绑定不同的知识库。聊完第一轮，标题自动起好。回答可以赞/踩，反馈按消息 id 落到库里。
 
@@ -41,7 +64,15 @@
 
 **问天气不用报城市。** 开了定位就自动带上。这条链路做过专门降级：浏览器定位（HTTPS / localhost 才有）→ 服务端按来源 IP 推断城市 → 手动输入，三级都不会卡死你。
 
-**模板广场（面向大学生）。** 不想从空白会话开始？挑一个校园场景模板（考研 / 论文 / 期末 / 求职 / 四六级 / 社团 / 文献 …），一键建好专属知识库 + 会话并预填引导问题，30 秒上手。每个模板都强调「辅助而非替代」——这是为学习而生的 AI 素养平台。详见 [`docs/可行性分析_大学生智能体平台_2026-10-10.md`](docs/可行性分析_大学生智能体平台_2026-10-10.md)。
+**模板广场（已转型）。** 原先的 8 个校园场景模板（考研 / 论文 / 期末 / 求职 / 四六级 / 社团 / 文献 …）仍在，但**它的定位变了**。盘完现状后确认：模板广场是「一次性的起点供给」（建库 + 开场白，用一次就完），而每日委托 / 每日总结是「持续性的陪伴机制」（天天用）；而模板谁来都一样，恰恰**不体现个性化**。首屏因此从「四宫格平级」改成**主次两层** —— 主线放天天用的三个入口（每日委托 / 每日总结 / 打卡记录），模板广场退到辅路；同时给每个模板加「设为每日委托」，把一次性资产接进持续机制。
+
+**四屏控制台（本轮新增）。** 侧栏四个入口，各自一屏：**每日委托**（填写当日产出、原理与问题 → Agent 反馈）、**每日总结**（思维导图式打卡复盘）、**打卡记录**、**设置**。手机端整体可滚动 —— 用的是 `100dvh` 而不是 `vh`，因为移动端地址栏收放会改变视口高度。
+
+**工具执行元数据（本轮新增）。** 每个工具在 `core/tool_registry.py` 里声明七件事：类别 / 是否延迟发现 / 可重试 / 需审批 / 输出上限 / 成本提示。**导入时强制校验与工具集一一对应，漏配直接起不来** —— 宁可启动失败，也不要运行到一半才发现某个工具没有元数据。
+
+**定时任务跑在独立进程里（本轮新增）。** APScheduler 单独一个 worker，按 `Asia/Shanghai` 时区调度。幂等靠 `UNIQUE(idem_key)` + `ON CONFLICT DO NOTHING`；存活靠心跳年龄判三态（`up` / `stalled` / `down`，见 `GET /api/schedule/health`）。诚实的代价是：`deploy.sh` 要多管一个进程。
+
+**成本有护栏。** 定时任务单独配额（`auto` 120/日）。此前定时任务烧的 token **不在任何配额里**，是个敞口 —— 现在补上了。
 
 ## 🎨 一本笔记本该有的样子
 
@@ -109,27 +140,31 @@ bash deploy.sh logs       # 看日志
 
 ```mermaid
 flowchart TB
-    U([用户]) --> FE[前端 · Next.js 16<br/>苞米地笔记本主题 / 明暗双态]
+    U([用户]) --> FE[前端 · Next.js 16<br/>工作台 / 知识库面板 / 模板广场<br/>四屏：委托 · 总结 · 打卡 · 设置]
     FE -. "Next.js rewrite 代理 /api/*" .-> BE[后端 · FastAPI<br/>全链路 SSE 流式]
 
     BE --> GW[安全网关<br/>默认拒绝 · 归属隔离<br/>配额 / 限流 / SSRF 收口]
     BE --> CHAT[流式问答 /api/chat/stream]
 
     CHAT --> ROUTE{auto 模式路由}
-    ROUTE -->|rag| RAG[RAG 检索增强<br/>候选池 → 离群过滤 → MMR 去重]
-    ROUTE -->|agent| AGENT[LangGraph Agent<br/>工具调度 · 多轮记忆]
+    ROUTE -->|rag| RAG[RAG 检索四段流水线<br/>扩召回 → 离群过滤<br/>→ MMR 去重 → 置信度示弱]
+    ROUTE -->|agent| AGENT[LangGraph Agent<br/>工具调度 · 历史重放]
     ROUTE -->|vision| VISION[视觉模型看图理解]
     ROUTE -->|llm| LLM[纯对话]
 
     RAG --> VS[("Chroma 向量库<br/>多库进程级单例")]
     AGENT --> TOOLS[工具集<br/>知识库检索 · 联网搜索<br/>计算器 · 天气 · 下载入库]
-    TOOLS --> EXT[外部服务<br/>DeepSeek · 高德 · Serper · Open-Meteo]
-    VS --> EMB[Embedding 向量化]
+    TOOLS --> TR[工具执行元数据<br/>TOOL_META 七字段<br/>导入时强制校验]
+    TOOLS --> EXT[外部服务<br/>DeepSeek · 百炼 · 高德 · Serper]
+    VS --> EMB[Embedding 向量化 · 百炼]
 
-    BE --> STORE[("SQLite<br/>会话 / 消息 / 赞踩<br/>参数化 · WAL · 窗口截断")]
+    BE --> STORE[("会话库 SQLite · WAL<br/>会话 / 消息 / 赞踩<br/>参数化 · 窗口截断")]
+    WK[独立 worker 进程<br/>APScheduler · Asia/Shanghai<br/>幂等 idem_key · 心跳三态判活] --> SDB[("调度库 SQLite<br/>schedule_jobs / job_runs")]
+    WK -.->|"每日总结 / 每日委托"| BE
 ```
 
 > 设计要点：前端只跟后端说话（同源代理，无需配 CORS）；后端**默认要登录**，每个业务端点都挂了鉴权依赖；多用户数据按 `owner` 强制隔离，归属校验失败返回 404 而非 403，避免 id 可枚举。
+> 调度库与会话库是**两个独立的 SQLite 文件** —— 跨库查表是本项目踩过的坑（`GET /api/delegate/{id}/runs` 曾因此 500）。
 
 ## 🏗️ 技术栈
 
@@ -138,20 +173,36 @@ flowchart TB
 | 对话模型 | DeepSeek `deepseek-chat`（OpenAI 兼容接口） |
 | 视觉模型 | 阿里百炼 `qwen-vl-plus`（图片理解） |
 | 向量化 | 阿里百炼 `text-embedding-v3` |
-| Agent 框架 | LangChain `create_agent` + LangGraph（**不挂 checkpoint**，记忆交给 SQLite） |
+| Agent 框架 | LangChain `create_agent` + LangGraph（**依赖已就绪，但当前 checkpointer = `None`**） |
 | 向量库 | Chroma（多 collection 隔离，进程级单例） |
 | 会话存储 | SQLite（WAL 模式，参数化查询，10 轮窗口截断） |
+| 调度存储 | SQLite 独立文件 `data/scheduler.db`（与 APScheduler JobStore 共用） |
+| 定时调度 | APScheduler 3.x，**独立 worker 进程**，cron 按 `Asia/Shanghai` |
 | 后端 | FastAPI + uvicorn，SSE 手写 `StreamingResponse` |
-| 联网搜索 | Serper API |
+| 联网搜索 | Serper API（统一入口 `core/serper.py`，连接复用 + TTL 缓存 + single-flight） |
 | 天气 | 高德地图 + Open-Meteo 双数据源 |
 | 前端 | Next.js 16 · React 19 · Tailwind CSS v4 · LXGW WenKai |
 
-> **为什么不用 LangGraph checkpoint**：会话历史本来就在 SQLite 里，每轮重放给模型。
-> 再挂一个 checkpoint 等于记两份，实测会让消息**重复累积**（3 轮后状态 12 条，本应 6 条）。
-> 用 DB 当唯一事实来源反而更稳：重启不丢、受窗口截断保护、不额外加依赖。
-> 完整论证在 `agent/builder.py:_make_checkpointer()` 的注释里。
+> **关于 LangGraph checkpoint：依赖装了，但代码里故意没挂。**
+>
+> `requirements.txt` 里 `langgraph-checkpoint` 与 `langgraph-checkpoint-sqlite` **都已就绪**，
+> 但 `agent/builder.py::_make_checkpointer()` **明确返回 `None`** —— 这是三条实测结论，不是遗漏：
+>
+> 1. **等于记两份。** 会话历史本来就在 SQLite（`core/session.py`），`api/chat.py` 每轮把完整历史
+>    重建成 messages 喂进来。再挂 checkpoint，这份还只在进程内存里。
+> 2. **会重复累积（已实测）。** 第 2 轮状态里第 1 轮的消息出现 2 次，白烧 token，
+>    模型还会看到重复提问（3 轮后状态 12 条，本应 6 条）。
+> 3. **两个直觉改法都是错的。** `SqliteSaver.from_conn_string()` 返回的是上下文管理器不是 saver，
+>    每次对话直接抛 `TypeError`；改成 `SqliteSaver(sqlite3.connect(...))` 也不行 —— 同步 saver
+>    不支持 `astream`，必须用 `AsyncSqliteSaver` 并在 lifespan 里 async 打开。
+>
+> **将来真要挂，必须同时做两件事**：改用 `AsyncSqliteSaver`，**并且**让 `api/chat.py` 只发当前
+> 这一条消息、别再重放历史 —— 否则就是上面第 2 条的重演。完整论证在
+> `agent/builder.py:_make_checkpointer()` 的注释里，回归测试是 `tests/test_agent_checkpointer.py`。
 
 ## 📁 目录结构
+
+> 下面是 **`main` 分支**的结构。`feat/ai-module-20261013` 分支另有增量（见本节末尾）。
 
 ```
 知穗agent/
@@ -178,10 +229,31 @@ flowchart TB
 ├── tools/                 # 性能压测脚本（stress_test.py / stress_live.py）
 ├── frontend/              # Next.js 16 前端（苞米地笔记本主题）
 │   └── src/app/styles/    # 设计令牌与全套样式
+├── 规范/                   # 团队规范（架构 / 数据结构 / 分支与提交 / 决策记录）
 ├── deploy.sh              # 服务器一键部署 / 更新
 ├── docs/                  # 设计文档 / 视觉审查 / 每日扫描报告 / 截图
 └── tests/                 # W1–W3 全链路 + 7 个离线回归
 ```
+
+**`feat/ai-module-20261013` 分支新增**（main 上还没有）：
+
+```
+├── core/
+│   ├── scheduler.py       # 调度底座：schedule_jobs / job_runs / worker_heartbeat 三表
+│   └── tool_registry.py   # TOOL_META 七字段，导入时强制校验
+├── worker/
+│   └── scheduler.py       # 独立 APScheduler 进程（Asia/Shanghai）
+├── service/
+│   └── daily.py           # 总结与委托的纯函数核心（LLM 可注入）
+├── api/
+│   ├── delegate.py        # 每日委托（7 条端点）
+│   ├── report.py          # 每日总结（5 条端点）
+│   ├── schedule.py        # 调度可观测：health / jobs / run-now / runs / retry
+│   └── agent.py           # 工具元数据：GET /api/agent/tools 等（2 条端点）
+├── kb/distill*            # 蒸馏检索 —— 只有接口契约，未实现
+└── docs/AI模块-20261013/   # 该轮完整交付（六个决定 / 接口契约 / 测试用例 / 验证记录）
+```
+
 
 ## 🔌 API 一览
 
@@ -265,7 +337,7 @@ python tests/test_w3.py   # Agent 多工具 + 联网导入（需后端已启动�
 另有 7 个**离线回归**（不联网、不起服务，跑几十毫秒，专门盯住踩过的坑）：
 
 ```bash
-python tests/test_retrieve_select.py      # 检索三段式重排（含相似度换算守卫）
+python tests/test_retrieve_select.py      # 检索四段流水线（含相似度换算守卫与置信度示弱）
 python tests/test_chroma_singleton.py     # Chroma 客户端单例
 python tests/test_upload_stream.py        # 上传分块写盘 + 失败清理
 python tests/test_pipelines_concurrency.py# 多库并发读写
@@ -273,6 +345,23 @@ python tests/test_slash_no_redirect.py    # 尾斜杠不再 307
 python tests/test_agent_checkpointer.py   # 确认不挂 checkpoint
 python tests/test_geo_locate.py           # IP 定位三级降级
 ```
+
+### AI 模块（`feat/ai-module-20261013` 分支）
+
+```bash
+python -m pytest -q                       # 72 passed + 18 subtests（改动前基线 28，只增不减）
+```
+
+| 项 | 结果 |
+|---|---|
+| 自动化测试 | **72 passed + 18 subtests** |
+| 新增端点 | **34 条**（工具 2 / 调度 5 / 总结 5 / 委托 7 / 蒸馏 5 / 编排 10） |
+| 真机冒烟 | 29 项全过（起真实 uvicorn 打真实 HTTP） |
+| 接口文档 | 静态 13 项 + headless Edge 25 项双校验通过 |
+| 未完成 | 蒸馏检索实现 · 标签钩子定义 · 联网搜索协同设计 |
+
+> 手上没有 Python 3.12 会装不上：`requirements.txt` 钉死的 `chromadb==0.5.23`
+> 在 3.14 上装不了。详见 `docs/AI模块-20261013/README.md`。
 
 ## 📊 性能实测
 
@@ -295,11 +384,16 @@ python tests/test_geo_locate.py           # IP 定位三级降级
 - **W2** SQLite 多会话 + SSE 流式 ✅
 - **W3** Agent + 5 工具 + 联网导入 ✅
 - **W4** 前端界面（苞米地笔记本主题，明暗双态）✅
-- **W5** 打磨交付 🚧 —— 设计令牌已收敛四轮（填充 / 字号 / 语义色 / 间距）；赞踩反馈已打通；
-  剩余：流式字号自适应、字体自托管（去掉 CDN 外链）、会话历史分页加载
+- **W5** 打磨交付 ✅ —— 设计令牌收敛四轮（填充 / 字号 / 语义色 / 间距）；赞踩反馈打通；
+  移动端四屏可滚动；模板广场转型为「委托模板」并让位给持续机制
+- **W6** AI 模块 🚧（`feat/ai-module-20261013`）—— 工具执行元数据注册表、独立调度 worker、
+  每日总结与每日委托端点已完成并通过 72 项测试；**蒸馏检索与标签钩子仅有接口契约，未实现**
 
 每日的代码扫描报告在 `docs/前后端可更新点_YYYY-MM-DD.md`，里面记了每一轮查出来的问题、
 哪些已修、哪些还欠着 —— 包括踩过的坑和当时的实测数据。
+
+AI 模块那一轮的完整交付（六个决定与否决理由、接口契约、测试用例、验证记录）在
+[`docs/AI模块-20261013/`](docs/AI模块-20261013/README.md)。
 
 ---
 
