@@ -37,7 +37,7 @@ from pydantic import BaseModel, Field
 
 from core import config, quota, session as store, upload
 from core.auth import get_current_user
-from core.llm import get_llm, get_vision_llm
+from core.llm import get_llm, get_vision_llm, pick_llm
 from core import scenarios as scenarios_mod
 from kb import pipelines
 from kb.rag_core import SYSTEM_PROMPT, assess_grounding, describe_api_error, grounding_note, rewrite_query
@@ -252,19 +252,57 @@ class _Acc:
 
     def __init__(self) -> None:
         self.text = ""
+        # 思考内容单独累计：它要能独立成块显示（前端收纳/展开），
+        # 也不能混进 text —— 混进去的话正文、落库、标题生成全被污染。
+        self.reasoning = ""
         self.error: str | None = None
 
 
-async def _stream_llm(llm, messages, request: Request, acc: _Acc) -> None:
+def _strip_reasoning(message) -> None:
+    """把 reasoning_content 从将要落库/回灌的消息里摘掉（就地修改）。
+
+    ⚠️ 这是**安全与正确性双重要求**，不是洁癖：
+    1. DeepSeek 官方口径是「不要把 reasoning_content 传回下一轮请求」，
+       部分版本会直接 400；而 ChatDeepSeek._get_request_payload 并不过滤它；
+    2. 思考内容可能包含用户的敏感信息与内部推理，不该被当作对话历史长期留存。
+    出口统一剥离，比依赖上游每处都记得处理可靠。
+    """
+    try:
+        kw = getattr(message, "additional_kwargs", None)
+        if isinstance(kw, dict):
+            kw.pop("reasoning_content", None)
+            kw.pop("reasoning", None)
+    except Exception:  # noqa: BLE001 —— 摘不掉也不能让回答失败
+        pass
+
+
+async def _stream_llm(llm, messages, request: Request, acc: _Acc, emit_reasoning: bool = False) -> None:
     """逐 token 产出增量 SSE。
 
     早期实现每帧回传"累计全文"，千 token 的回答会产生 O(n²) 的传输量；
     这里只发 delta，由前端自己累加。
+
+    两种增量分开成不同事件，前端才能做成 DeepSeek 网页版那样
+    「思考块收起 / 正文流式」：
+      event: reasoning  { text }  思考增量 —— 只在思考模型上出现
+      event: token      { text }  正文增量
+
+    emit_reasoning 由调用方按「本次是否真的走了思考模型」传入；
+    为 False 时连读取都跳过，避免普通模型上多做无用功。
     """
     try:
         async for chunk in llm.astream(messages):
             if await request.is_disconnected():
                 return
+
+            # ---- 思考增量 ----
+            if emit_reasoning:
+                kw = getattr(chunk, "additional_kwargs", None) or {}
+                rdelta = kw.get("reasoning_content")
+                if isinstance(rdelta, str) and rdelta:
+                    acc.reasoning += rdelta
+                    yield _sse("reasoning", {"text": rdelta})
+                # ---- 正文增量 ----
             delta = chunk.content or ""
             if isinstance(delta, list):
                 # 多模态 content list，只取文本
@@ -558,8 +596,12 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             messages = await _build_messages(uid, req.sid, req.question, kb_id, docs_scores, grounding, req.scenario, history)
 
             acc = _Acc()
+            # 思考流：由服务端配置决定（.env 里填了 DEEPSEEK_REASONER_MODEL 就启用）。
+            # 刻意不做成前端参数——同一个部署里「有的用户看到思考块、有的看不到」
+            # 会让演示很难讲清；要关就整个部署关。
+            r_llm, r_on = pick_llm(False, max_tokens=2048)
             try:
-                async for frame in _stream_llm(get_llm(max_tokens=2048), messages, request, acc):
+                async for frame in _stream_llm(r_llm, messages, request, acc, emit_reasoning=r_on):
                     yield frame
             except Exception as e:
                 yield _sse("error", {"detail": describe_api_error(e)})
@@ -581,8 +623,9 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             messages.append(HumanMessage(content=req.question))
 
             acc = _Acc()
+            r_llm, r_on = pick_llm(False, max_tokens=2048)
             try:
-                async for frame in _stream_llm(get_llm(max_tokens=2048), messages, request, acc):
+                async for frame in _stream_llm(r_llm, messages, request, acc, emit_reasoning=r_on):
                     yield frame
             except Exception as e:
                 yield _sse("error", {"detail": describe_api_error(e)})
@@ -606,6 +649,10 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             "title": gen_title,
             "mode": mode,
             "message_id": msg_id,
+            # 思考内容随 done 一次性给全：流式期间前端是逐帧累加的，
+            # 但断线重连/刷新的前端只能靠这一份拿到完整思考块。
+            # 未启用思考模型时恒为空串（前端据此不渲染思考块）。
+            "reasoning": acc.reasoning,
         })
 
     return StreamingResponse(event_generator(), media_type="text/event-stream", headers=SSE_HEADERS)
