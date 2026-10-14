@@ -21,10 +21,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from api.auth import router as auth_router
+from api.agent import router as agent_router
 from api.chat import router as chat_router
+from api.delegate import router as delegate_router
 from api.feedback import router as feedback_router
 from api.geo import router as geo_router
+from api.hybrid import router as hybrid_router
 from api.kb import router as kb_router
+from api.report import router as report_router
+from api.schedule import router as schedule_router
 from api.sessions import router as sessions_router
 from api.templates import router as templates_router
 from api.usage import router as usage_router
@@ -74,6 +79,8 @@ app.add_middleware(
 # 其余四个业务 router 都在各自文件里挂了 dependencies=[Depends(get_current_user)]，
 # 做成"默认要登录"——新增端点时忘了写鉴权，默认也是安全的那一侧。
 app.include_router(auth_router, prefix="/api/auth", tags=["认证"])
+# Agent 编排的元数据端点（工具清单 / 延迟发现）：只读代码里的 TOOL_META，不执行工具
+app.include_router(agent_router, prefix="/api/agent", tags=["Agent 编排"])
 app.include_router(kb_router, prefix="/api/kb", tags=["知识库"])
 app.include_router(sessions_router, prefix="/api/sessions", tags=["会话"])
 app.include_router(chat_router, prefix="/api/chat", tags=["问答"])
@@ -83,6 +90,15 @@ app.include_router(geo_router, prefix="/api/geo", tags=["定位"])
 app.include_router(templates_router, prefix="/api/templates", tags=["模板广场"])
 # 用量/反馈看板：只读聚合，鉴权沿用默认（get_current_user）
 app.include_router(usage_router, prefix="/api/usage", tags=["用量"])
+# 调度可观测与手动触发：只读调度库 + 写「待执行」行，
+# 真正的执行在独立 worker 进程（python -m worker.scheduler），web 不 import apscheduler
+app.include_router(schedule_router, prefix="/api/schedule", tags=["调度"])
+# 每日总结与每日委托：业务能力全在 service/daily.py，
+# worker 定时触发走的是同一套 service 函数，手动与定时不产生第二条代码路径
+app.include_router(report_router, prefix="/api/report", tags=["每日总结"])
+app.include_router(delegate_router, prefix="/api/delegate", tags=["每日委托"])
+# 混合架构（工作流 × 自主 Agent）：工作流定义 / 切换规则 / 执行记录与人工切换
+app.include_router(hybrid_router, prefix="/api/hybrid", tags=["混合执行"])
 
 
 # ---------- 修复：前后端尾部斜杠不一致导致的重定向黑洞 ----------

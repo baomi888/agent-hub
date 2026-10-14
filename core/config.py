@@ -43,6 +43,8 @@ DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", os.path.join(PROJECT_ROOT, "downloads")
 CHUNK_SIZE_DEFAULT = int(os.getenv("CHUNK_SIZE", "500"))
 CHUNK_OVERLAP_DEFAULT = int(os.getenv("CHUNK_OVERLAP", "50"))
 TOP_K_DEFAULT = int(os.getenv("TOP_K", "3"))
+# 检索条数上界：前端 UI 已限 1~10，服务端再兜一道，避免请求塞超大 top_k 拉爆检索与费用
+TOP_K_MAX = int(os.getenv("TOP_K_MAX", "20"))
 
 # Embedding 接口单次批量上限（阿里百炼为 10）
 EMBED_BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", "10"))
@@ -72,6 +74,28 @@ RETRIEVE_MMR_LAMBDA = float(os.getenv("RETRIEVE_MMR_LAMBDA", "0.65"))
 # 0.25 是刻意留宽的：宁可多带一条弱的，也别把能用的片段误杀。
 # 觉得回答还是太"硬答"就往 0.4 调；觉得资料太少就调回 0.2 或 0。
 RETRIEVE_MIN_SIM = float(os.getenv("RETRIEVE_MIN_SIM", "0.25"))
+
+# ---------- 混合检索（向量 + BM25 关键词，RRF 融合）----------
+# 纯向量对专有名词 / 缩写 / 编号（"第 3 条""CUDA 12.4"）召回差，关键词通道能补上。
+# 置 0 即退回纯向量，无需改代码。
+HYBRID_ENABLED = bool(int(os.getenv("HYBRID_ENABLED", "1")))
+# RRF 融合常数：score = Σ 1/(K + rank)，K 越大越弱化头部名次差异（业界惯用 60）
+HYBRID_RRF_K = int(os.getenv("HYBRID_RRF_K", "60"))
+# 关键词通道取前几条参与融合
+HYBRID_KEYWORD_TOP = int(os.getenv("HYBRID_KEYWORD_TOP", "20"))
+# 库内片段数超过它就放弃关键词通道（BM25 需要把全文载入内存，给大库留个闸）
+HYBRID_MAX_DOCS = int(os.getenv("HYBRID_MAX_DOCS", "20000"))
+
+# ---------- 查询改写（多轮追问 → 独立检索问题）----------
+# 追问（"那它呢""第二个呢"）单独看检索不到东西。只在"看起来像追问"时才用对话
+# 历史改写，其余问题零额外开销。置 0 完全关闭。
+QUERY_REWRITE_ENABLED = bool(int(os.getenv("QUERY_REWRITE_ENABLED", "1")))
+# 问题长度 ≤ 它且存在对话历史时，判定为追问（中文字符数）
+QUERY_REWRITE_MAX_LEN = int(os.getenv("QUERY_REWRITE_MAX_LEN", "8"))
+# 改写时喂给模型的历史消息条数（从最近往前取）
+QUERY_REWRITE_HISTORY = int(os.getenv("QUERY_REWRITE_HISTORY", "4"))
+# 改写输出的 token 上限：只输出一条问题，给小值即可，防跑偏也防费用
+QUERY_REWRITE_MAX_TOKENS = int(os.getenv("QUERY_REWRITE_MAX_TOKENS", "64"))
 
 # ---------- 可信度（P0：让模型"敢说知识库里没有"）----------
 # ⚠️ 和上面的 RETRIEVE_MIN_SIM 是**两件事**，别合并成一个：
@@ -113,10 +137,21 @@ RATE_PER_MINUTE = int(os.getenv("RATE_PER_MINUTE", "10"))
 DAILY_EMBED_LIMIT = int(os.getenv("DAILY_EMBED_LIMIT", "1000"))
 # 每个用户每日问答次数上限；0 = 不限
 DAILY_ASK_LIMIT = int(os.getenv("DAILY_ASK_LIMIT", "60"))
-# 每个用户每日「定时委托自动执行」次数上限；0 = 不限。
-# 定时委托是唯一「用户不在场也会花钱」的入口，服务端必须自己有一道闸门 ——
-# 前端表单上的 min 只是客户端属性，F12 就能改掉。
-DAILY_AUTO_LIMIT = int(os.getenv("DAILY_AUTO_LIMIT", "20"))
+# 每个用户每日「自动调用」次数上限（定时委托投递 + 每日总结生成，kind="auto"）；0 = 不限。
+# DAILY_ASK_LIMIT 挡的是用户主动提问，无人值守的定时任务完全在它之外——
+# 那条链路没人盯着，一旦写错（比如 is_due 判断反了）就是静默烧钱，所以单独卡一道。
+# 默认 120 = 3 人 ×（5 委托 + 1 总结）× 重试与手动补生成余量（见 docs/接口文档.html 调度节）。
+DAILY_AUTO_LIMIT = int(os.getenv("DAILY_AUTO_LIMIT", "120"))
+
+# ---------- 定时任务（独立 worker 进程）----------
+# 调度与解释统一用这个时区。禁止裸 datetime.now()——容器镜像的 TZ 常常是 UTC，
+# 一旦漏带时区，「早上七点」会整体偏移 8 小时且不报错，只会安静地错。
+SCHEDULER_TZ = os.getenv("SCHEDULER_TZ", "Asia/Shanghai")
+# 每日总结的生成时刻（北京时间）。默认 23:30：留出当晚补记的时间，
+# 次日跑到点时昨天的会话已经全部落盘。写进 schedule_jobs.cron 的初始值，
+# 之后改周期以表为准（改表不用改代码、不用发版）。
+REPORT_HOUR = int(os.getenv("REPORT_HOUR", "23"))
+REPORT_MINUTE = int(os.getenv("REPORT_MINUTE", "30"))
 
 # 管理员用户名（逗号分隔）。管理员不受配额与每分钟限流约束，相当于主账号。
 # 默认把项目作者账号设为管理员；其他部署在 .env 里改成自己的用户名即可
@@ -128,6 +163,24 @@ AMAP_API_KEY = os.getenv("AMAP_API_KEY", "")
 
 # ---------- 可选：联网搜索备选 ----------
 SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
+
+# ---------- 混合执行架构（工作流 × 自主 Agent）----------
+# 注意与上面的检索混合（HYBRID_ENABLED）区分：这组是 mode=hybrid 执行模式的配置
+HYBRID_MODE_ENABLED = bool(int(os.getenv("HYBRID_MODE_ENABLED", "1")))
+# 单次任务允许的最大模式切换次数：防规则配错导致工作流⇄Agent 乒乓
+HYBRID_MAX_SWITCHES = int(os.getenv("HYBRID_MAX_SWITCHES", "5"))
+# 同方向切换全局防抖（秒）：刚切过去又切回来通常是规则打架，不是真需求
+HYBRID_SWITCH_COOLDOWN = int(os.getenv("HYBRID_SWITCH_COOLDOWN", "30"))
+# Agent 模式三重预算：步数 / 时长（秒）/ 近似 token（chars//2 折算），先到先触发收编
+HYBRID_AGENT_MAX_STEPS = int(os.getenv("HYBRID_AGENT_MAX_STEPS", "10"))
+HYBRID_AGENT_MAX_SECONDS = int(os.getenv("HYBRID_AGENT_MAX_SECONDS", "300"))
+HYBRID_AGENT_TOKEN_BUDGET = int(os.getenv("HYBRID_AGENT_TOKEN_BUDGET", "8000"))
+# 工作流整体超时护栏（秒）：单个流程实例不允许跑得更久
+HYBRID_WORKFLOW_TIMEOUT = int(os.getenv("HYBRID_WORKFLOW_TIMEOUT", "600"))
+# 工作流单节点默认超时（秒），节点定义可覆盖
+HYBRID_NODE_TIMEOUT = int(os.getenv("HYBRID_NODE_TIMEOUT", "120"))
+# 工作流内 LLM 节点的 max_tokens 上限（project memory 硬约束：内部推理调用必须显式限长）
+HYBRID_LLM_MAX_TOKENS = int(os.getenv("HYBRID_LLM_MAX_TOKENS", "2048"))
 
 
 def validate() -> list[str]:

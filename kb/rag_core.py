@@ -10,17 +10,20 @@ from __future__ import annotations
     在 v1.x 中签名不变，直接复用。
 """
 
+import math
 import os
 import re
 import threading
+import time
 import uuid
-from collections import OrderedDict
+from collections import Counter, OrderedDict, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
 import chromadb
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.documents import Document
+from langchain_core.messages import HumanMessage
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from core import config
@@ -127,6 +130,168 @@ def _to_similarity(distance: float) -> float | None:
     return 1 - distance / 2
 
 
+# ==================== 关键词通道（BM25）====================
+# 纯向量检索对专有名词 / 缩写 / 编号很弱：库里写着「CUDA 12.4」「第 3 条」，
+# 问「CUDA 12.4」时向量可能被语义相近但没这个词的片段挤掉。BM25 按词面命中，
+# 正好补这条。两条通道用 RRF 融合，不需要调分数尺度，也不用训练。
+
+_ASCII_WORD = re.compile(r"[a-z0-9]+")
+_CJK_RUN = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf]+")
+
+
+def _tokenize(text: str) -> list[str]:
+    """中英混合分词：ASCII 取词、CJK 取字符 bigram。
+
+    不引第三方分词器（jieba 会拖一串依赖，本项目一直避免）。字符 bigram 对
+    中文专有名词/编号的召回已经够用，口径也和 _shingles 一致。
+    """
+    t = (text or "").lower()
+    tokens = _ASCII_WORD.findall(t)
+    for run in _CJK_RUN.findall(t):
+        if len(run) == 1:
+            tokens.append(run)
+        else:
+            tokens.extend(run[i : i + 2] for i in range(len(run) - 1))
+    return tokens
+
+
+class _BM25:
+    """极简 BM25（k1=1.5, b=0.75），只用标准库。
+
+    用倒排表 term → [(doc_idx, tf)]，打分只扫命中词命中的文档，
+    避免 O(词数 × 库大小) 的全量打分。
+    """
+
+    __slots__ = ("k1", "b", "n", "avgdl", "doc_len", "idf", "postings")
+
+    def __init__(self, tokenized: list[list[str]]) -> None:
+        self.k1, self.b = 1.5, 0.75
+        self.n = len(tokenized)
+        self.doc_len = [len(t) for t in tokenized]
+        self.avgdl = (sum(self.doc_len) / self.n) if self.n else 0.0
+        postings: dict[str, list[tuple[int, int]]] = defaultdict(list)
+        df: Counter = Counter()
+        for i, toks in enumerate(tokenized):
+            for term, f in Counter(toks).items():
+                postings[term].append((i, f))
+                df[term] += 1
+        # 带 +0.5 平滑的 IDF，恒为正，避免常见词拿到负分
+        self.idf = {t: math.log(1 + (self.n - d + 0.5) / (d + 0.5)) for t, d in df.items()}
+        self.postings = postings
+
+    def top(self, query: str, k: int) -> list[tuple[int, float]]:
+        """返回 [(doc_idx, score)]，按分数降序取前 k 条。"""
+        if self.n == 0 or k <= 0:
+            return []
+        scores: dict[int, float] = defaultdict(float)
+        avgdl = self.avgdl or 1.0
+        for term in _tokenize(query):
+            idf = self.idf.get(term)
+            if idf is None:
+                continue
+            for i, f in self.postings[term]:
+                dl = self.doc_len[i] or 1
+                denom = f + self.k1 * (1 - self.b + self.b * dl / avgdl)
+                scores[i] += idf * f * (self.k1 + 1) / denom
+        if not scores:
+            return []
+        return sorted(scores.items(), key=lambda x: -x[1])[:k]
+
+
+# 关键词索引按库缓存：整库拉全文是重操作，只在内容变更后重建一次。
+# 库内容变更时由 _cache_invalidate 清掉，下次检索懒加载重建。
+_BM25_CACHE: OrderedDict[str, tuple[list, _BM25]] = OrderedDict()
+_BM25_CACHE_MAX = 8
+# single-flight：缓存 miss 后构建在锁外进行，入库使缓存失效后的第一波并发查询
+# 会同时做 N 次全库读取 + 建索引（每次都把全文载入内存）。用条件变量 + in-flight
+# 登记保证同一 collection 同一时刻只有一个线程在构建，其余线程等待并复用结果。
+_BM25_COND = threading.Condition()
+_BM25_INFLIGHT: set[str] = set()
+# 超大库（超 HYBRID_MAX_DOCS）负缓存：返回 None 的库每次检索都会重新全库拉一遍
+# 才发现"还是太大"。记下短 TTL 的否定结果，期间直接放弃关键词通道。
+_BM25_NEG: dict[str, float] = {}
+_BM25_NEG_TTL = 300.0
+
+
+def _get_bm25(vs, collection_name: str):
+    """取该库的 (docs, BM25) 索引（带缓存 + single-flight）。库太大或读取失败返回 None。"""
+    with _BM25_COND:
+        while True:
+            hit = _BM25_CACHE.get(collection_name)
+            if hit is not None:
+                _BM25_CACHE.move_to_end(collection_name)
+                return hit
+            neg = _BM25_NEG.get(collection_name)
+            if neg is not None:
+                if time.monotonic() < neg:
+                    return None  # 已确认超大，TTL 内不再重复全库拉取
+                del _BM25_NEG[collection_name]
+            if collection_name not in _BM25_INFLIGHT:
+                _BM25_INFLIGHT.add(collection_name)
+                break  # 由本线程构建
+            _BM25_COND.wait()  # 别的线程正在构建，等它完成后从缓存拿
+    try:
+        got = vs._collection.get(include=["documents", "metadatas"])
+        texts = got.get("documents") or []
+        if len(texts) > config.HYBRID_MAX_DOCS:
+            # 超过闸值：放弃关键词通道，退回纯向量，别把全文堆进内存
+            with _BM25_COND:
+                _BM25_NEG[collection_name] = time.monotonic() + _BM25_NEG_TTL
+            return None
+        metas = got.get("metadatas") or []
+        ids = got.get("ids") or []
+        docs = [
+            Document(page_content=t or "", metadata=m or {}, id=i)
+            for t, m, i in zip(texts, metas, ids)
+        ]
+        index = _BM25([_tokenize(d.page_content) for d in docs])
+        entry = (docs, index)
+        with _BM25_COND:
+            _BM25_CACHE[collection_name] = entry
+            _BM25_CACHE.move_to_end(collection_name)
+            while len(_BM25_CACHE) > _BM25_CACHE_MAX:
+                _BM25_CACHE.popitem(last=False)
+        return entry
+    finally:
+        with _BM25_COND:
+            _BM25_INFLIGHT.discard(collection_name)
+            _BM25_COND.notify_all()
+
+
+def _rrf_merge(vec_cands, kw_pairs, kw_docs, rrf_k: int) -> list:
+    """向量候选与关键词候选用 RRF 融合。
+
+    Args:
+        vec_cands: [(Document, distance)]，已按距离升序
+        kw_pairs:  [(doc_idx, bm25_score)]，已按分数降序
+        kw_docs:   关键词索引对应的 Document 列表（下标与 doc_idx 对齐）
+        rrf_k:     融合常数
+
+    Returns:
+        [(Document, distance_or_None, rank)]，rank ∈ (0, 1]，越大越相关。
+        distance 为 None 表示该片段只被关键词通道召回（没有向量距离）。
+    """
+    fused: dict[str, float] = defaultdict(float)
+    dist: dict[str, float | None] = {}
+    by_id: dict[str, object] = {}
+    for rank, (d, distance) in enumerate(vec_cands, start=1):
+        did = d.id or f"v{rank}"
+        fused[did] += 1.0 / (rrf_k + rank)
+        dist[did] = distance
+        by_id[did] = d
+    for rank, (idx, _score) in enumerate(kw_pairs, start=1):
+        d = kw_docs[idx]
+        did = d.id or f"k{rank}"
+        fused[did] += 1.0 / (rrf_k + rank)
+        dist.setdefault(did, None)  # 关键词独有 → 无向量距离
+        by_id.setdefault(did, d)
+    if not fused:
+        return []
+    order = sorted(fused.items(), key=lambda x: -x[1])
+    top = order[0][1] or 1.0
+    return [(by_id[did], dist.get(did), score / top) for did, score in order]
+
+
 # ==================== 可信度判定（P0）====================
 
 # 依据强度分级。前端按这个字段决定要不要给回答加"依据较弱"的提示条。
@@ -228,7 +393,6 @@ def grounding_note(assessment: dict) -> str:
     return ""
 
 
-
 def select_diverse(docs_scores, top_k: int, lambda_mult: float | None = None) -> list:
     """从候选里挑出 top_k 条：先丢明显不相关的，再按 MMR 去掉互相重复的。
 
@@ -236,7 +400,9 @@ def select_diverse(docs_scores, top_k: int, lambda_mult: float | None = None) ->
     以及相邻切片的重叠部分会把名额占满（三条里两条是同一段话）。
 
     Args:
-        docs_scores: [(Document, distance), ...]，distance 越小越相关
+        docs_scores: [(Document, distance), ...] 或 [(Document, distance, rank), ...]。
+            distance 越小越相关；distance 为 None 表示仅关键词通道召回（无向量距离）；
+            rank ∈ (0,1] 为融合相关度，给了就按它排序（混合检索用）。
         top_k: 最终要几条
         lambda_mult: 相关度权重，默认取 config；1 = 退化为纯相关度排序
 
@@ -249,50 +415,79 @@ def select_diverse(docs_scores, top_k: int, lambda_mult: float | None = None) ->
     lam = config.RETRIEVE_MMR_LAMBDA if lambda_mult is None else lambda_mult
     lam = min(max(lam, 0.0), 1.0)
 
+    def _dist(c):
+        return c[1]
+
+    def _rank(c):
+        return c[2] if len(c) > 2 else None
+
     # ---- 1. 离群过滤：把明显不相关的尾巴砍掉 ----
     min_sim = config.RETRIEVE_MIN_SIM
     if min_sim > 0:
-        scored = [(c, _to_similarity(c[1])) for c in cands]
-        # 只有在距离能换算成余弦时才过滤；换不了就整批保留
-        if all(s is not None for _, s in scored):
-            kept = [c for c, s in scored if s >= min_sim]
+        # 只按"向量距离"判定能否换算：None 是关键词命中（本就没有向量距离），
+        # 不参与这条全局判定；越界浮点才是"向量未归一化"的全局信号。
+        # 全部向量距离可换算时才过滤；关键词命中一律保留（BM25 已保证词面相关）。
+        vec_dists = [d for d in (_dist(c) for c in cands) if d is not None]
+        if vec_dists and all(_to_similarity(d) is not None for d in vec_dists):
+            kept = [
+                c for c in cands
+                if _dist(c) is None or _to_similarity(_dist(c)) >= min_sim
+            ]
             # 别把结果砍空：一条不剩时至少留最相关的那条，让模型自己说"资料里没有"
-            cands = kept or [min(cands, key=lambda c: c[1])]
+            cands = kept or [
+                min(cands, key=lambda c: _dist(c) if _dist(c) is not None else float("inf"))
+            ]
 
     # 候选还不够挑，MMR 没意义（离群过滤已经在上面做过了）
     if len(cands) <= top_k:
-        return cands
+        return [(c[0], c[1]) for c in cands]
 
     # ---- 2. MMR 贪心：相关度高、且和已选内容重复度低的优先 ----
-    scores = [s for _, s in cands]
-    lo, hi = min(scores), max(scores)
+    dists = [_dist(c) for c in cands]
+    known = [d for d in dists if d is not None]
+    lo, hi = (min(known), max(known)) if known else (0.0, 1.0)
     span = hi - lo
 
-    def relevance(d: float) -> float:
+    def relevance(c) -> float:
         """相关度（0~1，越大越相关）。
 
-        优先用绝对余弦相似度，而不是批次内 min-max 归一化——
-        被重叠切片塞满时，几条候选的距离往往只差 0.0x，归一化会把这点差距放大成
-        "最相关 vs 最不相关"，结果重复片段靠微弱优势把名额全占了。
+        优先用融合 rank（混合检索），其次用绝对余弦相似度，而不是批次内
+        min-max 归一化——被重叠切片塞满时，几条候选的距离往往只差 0.0x，
+        归一化会把这点差距放大成"最相关 vs 最不相关"，结果重复片段靠微弱优势
+        把名额全占了。
         """
+        r = _rank(c)
+        if r is not None:
+            return r
+        d = _dist(c)
+        if d is None:
+            return 0.0
         sim = _to_similarity(d)
         if sim is not None:
             return sim
         # 距离换不成余弦（向量未归一化）时，退回批次内相对排序
         return 1.0 if span < 1e-9 else 1 - (d - lo) / span
 
-    shingles = [_shingles(d.page_content) for d, _ in cands]
+    def _first_key(i: int) -> float:
+        """基准条的排序键：有 rank 按 rank（大者优先），否则按距离（小者优先）。"""
+        r = _rank(cands[i])
+        if r is not None:
+            return -r
+        d = _dist(cands[i])
+        return d if d is not None else float("inf")
+
+    shingles = [_shingles(d.page_content) for d, *_ in cands]
     order: list[int] = []
     remaining = list(range(len(cands)))
     # 第一条固定取最相关的，给后面的多样性比较一个基准
-    first = min(remaining, key=lambda i: scores[i])
+    first = min(remaining, key=_first_key)
     order.append(first)
     remaining.remove(first)
 
     while remaining and len(order) < top_k:
         best_i, best_val = -1, -1e9
         for i in remaining:
-            rel = relevance(scores[i])
+            rel = relevance(cands[i])
             dup = max(_overlap(shingles[i], shingles[j]) for j in order)
             val = lam * rel - (1 - lam) * dup
             if val > best_val:
@@ -300,7 +495,7 @@ def select_diverse(docs_scores, top_k: int, lambda_mult: float | None = None) ->
         order.append(best_i)
         remaining.remove(best_i)
 
-    return [cands[i] for i in order]
+    return [(cands[i][0], cands[i][1]) for i in order]
 
 
 # ==================== 检索结果缓存 ====================
@@ -324,12 +519,15 @@ SOURCES_PAGE = 1000
 
 
 def _cache_invalidate(collection_name: str) -> None:
-    """知识库内容变更后清掉该库的检索缓存与来源清单缓存，避免读到旧片段。"""
+    """知识库内容变更后清掉该库的检索缓存、来源清单缓存与关键词索引，避免读到旧片段。"""
     with _RETRIEVE_CACHE_LOCK:
         for key in [k for k in _RETRIEVE_CACHE if k[0] == collection_name]:
             _RETRIEVE_CACHE.pop(key, None)
     with _SOURCES_CACHE_LOCK:
         _SOURCES_CACHE.pop(collection_name, None)
+    with _BM25_COND:
+        _BM25_CACHE.pop(collection_name, None)
+        _BM25_NEG.pop(collection_name, None)
 
 
 def _cache_get(collection_name: str, question: str, top_k: int):
@@ -378,23 +576,93 @@ def _sources_cache_set(collection_name: str, result: list) -> None:
 
 _EMBED_CACHE: OrderedDict[str, list[float]] = OrderedDict()
 _EMBED_CACHE_MAX = 500
-_EMBED_CACHE_LOCK = threading.Lock()
+# single-flight：缓存 miss 后 embed_query 是约 250ms 的网络请求（也是真实费用），
+# 并发同题会各发一次。同一问题只许一个线程去取，其余等待复用结果。
+_EMBED_COND = threading.Condition()
+_EMBED_INFLIGHT: set[str] = set()
 
 
 def _embed_query(question: str) -> list[float]:
-    """取查询向量（带 LRU 缓存）。"""
-    with _EMBED_CACHE_LOCK:
-        hit = _EMBED_CACHE.get(question)
-        if hit is not None:
+    """取查询向量（LRU 缓存 + single-flight：同题并发只发一次 embedding 请求）。"""
+    with _EMBED_COND:
+        while True:
+            hit = _EMBED_CACHE.get(question)
+            if hit is not None:
+                _EMBED_CACHE.move_to_end(question)
+                return hit
+            if question not in _EMBED_INFLIGHT:
+                _EMBED_INFLIGHT.add(question)
+                break  # 由本线程去取
+            _EMBED_COND.wait()  # 别的线程正在取，等它完成后从缓存拿
+    try:
+        vec = get_embeddings().embed_query(question)
+        with _EMBED_COND:
+            _EMBED_CACHE[question] = vec
             _EMBED_CACHE.move_to_end(question)
-            return hit
-    vec = get_embeddings().embed_query(question)
-    with _EMBED_CACHE_LOCK:
-        _EMBED_CACHE[question] = vec
-        _EMBED_CACHE.move_to_end(question)
-        while len(_EMBED_CACHE) > _EMBED_CACHE_MAX:
-            _EMBED_CACHE.popitem(last=False)
-    return vec
+            while len(_EMBED_CACHE) > _EMBED_CACHE_MAX:
+                _EMBED_CACHE.popitem(last=False)
+        return vec
+    finally:
+        with _EMBED_COND:
+            _EMBED_INFLIGHT.discard(question)
+            _EMBED_COND.notify_all()
+
+
+# ==================== 查询改写（多轮追问 → 独立检索问题）====================
+# 多轮里的追问（"那它呢""第二个呢"）单独看没有检索价值：向量与 BM25 都抓不到
+# 指代对象。用对话历史把它补全成可独立检索的问题。只在"看起来像追问"时才多花
+# 一次 LLM 调用，其余问题零额外开销（这是它跟"每题都改写"的关键区别）。
+
+_REWRITE_CUES = (
+    "它", "他", "她", "这个", "那个", "这些", "那些", "该", "此", "其",
+    "上述", "前者", "后者", "这样", "那样", "这里", "那里",
+)
+
+
+def needs_rewrite(question: str, history) -> bool:
+    """判断问题是否依赖上下文、值得改写。没有历史时一律不改写。"""
+    if not history:
+        return False
+    q = (question or "").strip()
+    if not q:
+        return False
+    if len(q) <= config.QUERY_REWRITE_MAX_LEN:
+        return True
+    return any(cue in q for cue in _REWRITE_CUES)
+
+
+def rewrite_query(question: str, history) -> str:
+    """把依赖上下文的追问改写成可独立检索的问题；不需要或失败时原样返回。
+
+    history: [{"role": "user"/"assistant", "content": "..."}]，按时间升序。
+    失败一律退回原问题——改写是增益不是必需，绝不能因为它把检索搞挂。
+    """
+    if not config.QUERY_REWRITE_ENABLED or not needs_rewrite(question, history):
+        return question
+    recent = history[-config.QUERY_REWRITE_HISTORY :]
+    convo = "\n".join(
+        f"{'用户' if m.get('role') == 'user' else '助手'}：{(m.get('content') or '')[:200]}"
+        for m in recent
+    )
+    prompt = (
+        "你是检索查询改写器。根据下面的对话历史，把用户的最新问题改写成一条"
+        "可以脱离上下文独立检索的完整问题。\n"
+        "规则：只补全指代和省略，不回答问题，不添加历史中没有的信息；"
+        "若最新问题本身已经完整，就原样输出。\n"
+        "只输出改写后的问题本身，不要解释，不要引号。\n\n"
+        f"【对话历史】\n{convo}\n\n【最新问题】\n{question}"
+    )
+    try:
+        resp = get_llm(temperature=0, max_tokens=config.QUERY_REWRITE_MAX_TOKENS).invoke(
+            [HumanMessage(content=prompt)]
+        )
+        out = (resp.content or "").strip().strip('"').strip("'").splitlines()[0].strip()
+    except Exception:
+        return question
+    # 结果不可信就退回原问题：空、过长（模型跑偏成回答）都算
+    if not out or len(out) > 200:
+        return question
+    return out
 
 
 # ==================== 文档加载 ====================
@@ -615,6 +883,23 @@ class RagPipeline:
         _cache_invalidate(self.collection_name)
         return len(ids)
 
+    def has_source(self, source: str) -> bool:
+        """该来源文件是否已有片段入库（只取一条 id 判断，不拉回任何片段内容）。
+
+        导入去重用它：get_source_chunks 会把整个文件的全部片段正文 + 元数据
+        拉回内存，几百片的大文件每次导入检查都白拉一遍；这里 limit=1 + 空 include，
+        无论文件多大都是 O(1) 的一次 sqlite 查询。
+        """
+        if self._vs is None:
+            self.get_or_open()
+        if self._vs is None:
+            return False
+        try:
+            got = self._vs._collection.get(where={"source": source}, limit=1, include=[])
+        except Exception:
+            return False
+        return bool(got.get("ids"))
+
     def get_source_chunks(self, source: str) -> list[dict]:
         """按来源取该文件的全部片段（按页码与片段顺序排好）。
 
@@ -721,11 +1006,28 @@ class RagPipeline:
             self._vs = self._ensure_vs()
 
     # ---------- 检索 + 问答 ----------
+    def _hybrid_candidates(self, question: str, vec_cands, keyword_top: int):
+        """向量候选 + BM25 关键词候选，RRF 融合。
+
+        返回 [(Document, distance_or_None, rank)]；无关键词命中或索引不可用
+        （库太大 / 读取失败）时返回 None，让调用方退回纯向量。
+        """
+        built = _get_bm25(self._vs, self.collection_name)
+        if built is None:
+            return None
+        kw_docs, index = built
+        kw_pairs = index.top(question, min(keyword_top, len(kw_docs)))
+        if not kw_pairs:
+            return None
+        return _rrf_merge(vec_cands, kw_pairs, kw_docs, config.HYBRID_RRF_K)
+
     def retrieve_with_score(self, question: str, top_k: int):
         """检索 top_k 条相关片段，返回 [(Document, distance), ...]。distance 越小越相关。
 
         不是直接取 top-k：先多捞几倍候选（默认 3 倍），丢掉明显不相关的，
         再用 MMR 去掉互相重复的，最后截到 top_k。详见 select_diverse。
+        开启混合检索时，向量候选再并上 BM25 关键词候选并用 RRF 融合
+        （专有名词 / 缩写 / 编号靠这条补召回）。详见 _rrf_merge。
         相同 (问题, top_k) 的检索结果按库缓存，命中时省掉一次 embedding + 向量查询。
         """
         cached = _cache_get(self.collection_name, question, top_k)
@@ -748,11 +1050,20 @@ class RagPipeline:
             # 只要一条（或关掉了候选池）时，多捞没有意义
             result = self._vs.similarity_search_by_vector_with_relevance_scores(vec, k=top_k)
         else:
-            fetch_k = max(top_k * mult, top_k + 6, config.RETRIEVE_MIN_FETCH)
-            cands = self._vs.similarity_search_by_vector_with_relevance_scores(
-                vec, k=min(fetch_k, total)
-            )
-            result = select_diverse(cands, top_k)
+            fetch_k = min(max(top_k * mult, top_k + 6, config.RETRIEVE_MIN_FETCH), total)
+            vec_cands = self._vs.similarity_search_by_vector_with_relevance_scores(vec, k=fetch_k)
+            result = None
+            if config.HYBRID_ENABLED:
+                try:
+                    merged = self._hybrid_candidates(
+                        question, vec_cands, config.HYBRID_KEYWORD_TOP
+                    )
+                except Exception:
+                    merged = None  # 关键词通道是增益不是必需：出错就退回纯向量
+                if merged:
+                    result = select_diverse(merged, top_k)
+            if result is None:
+                result = select_diverse(vec_cands, top_k)
 
         _cache_set(self.collection_name, question, top_k, result)
         return result
@@ -808,48 +1119,7 @@ class RagPipeline:
             lines.append(f"{head} ｜ {preview}...")
         return "\n\n".join(lines) if lines else "（无检索结果）"
 
-    def answer(self, question: str, top_k: int) -> tuple[str, str]:
-        """同步问答：返回 (答案正文, 参考片段 Markdown)。"""
-        docs_scores = self.retrieve_with_score(question, top_k)
-        if not docs_scores:
-            return "知识库中未检索到相关内容。", "（无检索结果）"
-        refs_md = self._format_refs(docs_scores)
-
-        references = "\n\n".join(
-            f"[{i + 1}] （来源：{d.metadata.get('source', '?')}）\n{d.page_content}"
-            for i, (d, _) in enumerate(docs_scores)
-        )
-        user_prompt = f"【参考资料】\n{references}\n\n【用户问题】\n{question}"
-
-        system = SYSTEM_PROMPT + grounding_note(assess_grounding(docs_scores))
-        response = get_llm().invoke(
-            [SystemMessage(content=system), HumanMessage(content=user_prompt)]
-        )
-        return response.content, refs_md
-
-    def answer_stream(self, question: str, top_k: int) -> None:
-        """流式问答生成器：yield (累计答案文本, 参考片段Markdown)。
-
-        第一个 yield 的 text 为空字符串（先展示检索来源），
-        之后 LLM 逐 token 追加。
-        """
-        docs_scores = self.retrieve_with_score(question, top_k)
-        if not docs_scores:
-            yield "知识库中未检索到相关内容。", "（无检索结果）"
-            return
-        refs_md = self._format_refs(docs_scores)
-        yield "", refs_md  # 先展示检索来源
-
-        references = "\n\n".join(
-            f"[{i + 1}] （来源：{d.metadata.get('source', '?')}）\n{d.page_content}"
-            for i, (d, _) in enumerate(docs_scores)
-        )
-        user_prompt = f"【参考资料】\n{references}\n\n【用户问题】\n{question}"
-
-        system = SYSTEM_PROMPT + grounding_note(assess_grounding(docs_scores))
-        acc = ""
-        for chunk in get_llm().stream(
-            [SystemMessage(content=system), HumanMessage(content=user_prompt)]
-        ):
-            acc += chunk.content or ""
-            yield acc, refs_md
+    # 说明：RagPipeline.answer / answer_stream 已删除（2026-10-13 死代码清理）。
+    # 生产问答路径在 api/chat.py：自己检索 + _format_refs/build_sources 组装 +
+    # 流式 LLM，这两个方法自多用户改造后就无生产调用方，只有脚本烟测在用，
+    # 留着会让人误以为改这里能影响线上回答。

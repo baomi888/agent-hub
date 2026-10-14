@@ -1,0 +1,60 @@
+flowchart TB
+    %% 整体设计架构图 · 主图（与人手排版版一致）
+    %% 说明：本文件是这份图的**可维护源码**。渲染用 scripts/render_mmd.mjs（离线，不依赖 CDN）。
+
+    %% ---------- 右侧：输入与 LLM 执行 ----------
+    Input["用 户 输 入"]:::io
+    LLM(("LLM")):::llm
+    ToolCall["输出 Tool Call"]:::llm
+    ToolResult["Tool Result"]:::llm
+    Tools["工具集：<br/>联网 / 个性化数据库 / 上下文"]:::tool
+
+    Input --> LLM
+    LLM --> ToolCall
+    ToolCall --> ToolResult
+    ToolResult --> Tools
+    ToolResult -.->|"结果反馈"| LLM
+
+    %% ---------- 中部上：最终输出与结果处理 ----------
+    FinalOutput["最 终 输 出"]:::out
+    Compress["特定的形式压缩"]:::proc
+    Recommend["大数据推荐算法的运用"]:::proc
+    LLM --> FinalOutput
+    FinalOutput --> Compress
+    FinalOutput --> Recommend
+
+    %% ---------- 中部：后台自进化 ----------
+    AgentHub["Agent-hub 继续在后台运行"]:::bg
+    Collect1["收集高抽象 / 有价值的问题<br/>用户问的"]:::bg
+    Collect2["收集高相关 / 高提炼的内容<br/>输出中提炼的"]:::bg
+    LearningPath["用户总体学习提升路线"]:::profile
+    Compress -.->|"经过压缩处理的内容"| AgentHub
+    Recommend -.->|"经过推荐处理的内容"| AgentHub
+    AgentHub --> Collect1
+    AgentHub --> Collect2
+    AgentHub --> LearningPath
+
+    %% ---------- 中部下：存储与画像 ----------
+    DB[("（数据库 RAG）")]:::db
+    HookTag["钩子 &amp; 标签<br/>让 LLM 感知到有前科"]:::db
+    UserProfile(("用户画像")):::profile
+    Collect1 -->|"存入"| DB
+    Collect2 -->|"存入"| DB
+    DB -->|"以钩子 &amp; 标签形式表现"| HookTag
+    LearningPath --> UserProfile
+
+    %% ---------- 右下：回灌系统预设词 ----------
+    SysPrompt["System 预设词<br/>告知资源 / 注意事项"]:::io
+    HookTag -.->|"作为系统预设写入"| SysPrompt
+    UserProfile -.->|"作为系统预设写入"| SysPrompt
+    SysPrompt -.-> LLM
+
+    %% ---------- 样式 ----------
+    classDef io fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d3b52;
+    classDef llm fill:#ffffff,stroke:#f9a825,stroke-width:2px,color:#4a3200;
+    classDef tool fill:#fff8e1,stroke:#f9a825,stroke-width:2px,color:#4a3200;
+    classDef out fill:#e8f5e9,stroke:#43a047,stroke-width:2px,color:#123d17;
+    classDef proc fill:#e8f5e9,stroke:#43a047,stroke-width:2px,color:#123d17;
+    classDef bg fill:#f3e5f5,stroke:#8e24aa,stroke-width:2px,color:#3a0d4a;
+    classDef db fill:#ffebee,stroke:#e53935,stroke-width:2px,color:#4a0d0d;
+    classDef profile fill:#ffebee,stroke:#e53935,stroke-width:2px,color:#4a0d0d;

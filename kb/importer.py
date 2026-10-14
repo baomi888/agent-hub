@@ -4,12 +4,15 @@
 import os
 import re
 import time
+from contextlib import contextmanager
 from pathlib import Path
+from html import unescape as _unescape
 
 import httpx
 from urllib.parse import urljoin
 
 from core.netsafe import assert_safe_url
+from core.serper import search_serper
 from kb import pipelines
 from kb.rag_core import load_document, split_documents
 
@@ -21,18 +24,68 @@ _HTTP_HEADERS = {
 }
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
-_HTML_SCRIPT_RE = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE)
+# 整块剔除的噪声元素：脚本样式 + 页面骨架（导航/页脚/侧栏/表单等）。
+# 只收录有闭合标签的元素——void 标签（embed/input/img）进这里会把整篇文档吞掉。
+_HTML_NOISE_RE = re.compile(
+    r"<(script|style|noscript|template|svg|iframe|object|head|nav|header|footer"
+    r"|aside|form|select|button)[^>]*>.*?</\1\s*>",
+    re.DOTALL | re.IGNORECASE,
+)
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+# 主内容容器：有 article/main 就只取容器内正文，否则退回去噪后的 body
+_MAIN_CONTENT_RE = re.compile(r"<(article|main)\b[^>]*>(.*?)</\1\s*>", re.DOTALL | re.IGNORECASE)
+_BODY_RE = re.compile(r"<body\b[^>]*>(.*?)</body\s*>", re.DOTALL | re.IGNORECASE)
+# 块级标签：作为文本块边界，一块出一行，短块（面包屑/按钮字/残留链接）整块丢弃
+_BLOCK_SPLIT_RE = re.compile(
+    r"</?(?:p|h[1-6]|li|blockquote|pre|tr|table|ul|ol|dl|dt|dd|div|section"
+    r"|article|main|figure|figcaption|br)\b[^>]*>",
+    re.IGNORECASE,
+)
+_MIN_BLOCK_CHARS = 12  # 短于此的文本块视为页面装饰，不入库
 
 
 def _strip_html(html: str) -> str:
-    html = _HTML_SCRIPT_RE.sub("", html)
-    text = _HTML_TAG_RE.sub(" ", html)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+    """网页正文提取：去脚本/导航/页脚等噪声，只留主内容文本块（零依赖折中）。
+
+    旧实现只删 script/style 就把全部标签换空格——导航链接、页脚版权、cookie
+    横幅全部进库，稀释 embedding 语料和 BM25 词表，检索质量被噪声拉低。
+    现在做三步：
+      1. 整块剔除噪声元素与 HTML 注释；
+      2. 有 <article>/<main> 只取容器内正文，没有则退回 <body>（此时
+         页面骨架已在上一步剔掉，剩余噪声主要靠第 3 步的长度闸兜底）；
+      3. 按块级标签切文本块，丢弃不足 _MIN_BLOCK_CHARS 的短块。
+    返回按块换行拼接的纯文本（切片用，换行对 RecursiveCharacterTextSplitter 无害）。
+    """
+    html = _HTML_COMMENT_RE.sub(" ", html)
+    html = _HTML_NOISE_RE.sub(" ", html)
+    m = _MAIN_CONTENT_RE.search(html)
+    if m:
+        html = m.group(2)
+    else:
+        b = _BODY_RE.search(html)
+        if b:
+            html = b.group(1)
+    blocks = []
+    for raw in _BLOCK_SPLIT_RE.split(html):
+        text = _unescape(_HTML_TAG_RE.sub(" ", raw))
+        text = re.sub(r"\s+", " ", text).strip()
+        if len(text) >= _MIN_BLOCK_CHARS:
+            blocks.append(text)
+    return "\n".join(blocks)
 
 
-def _safe_get(url: str, timeout: int) -> httpx.Response:
-    """带 SSRF 校验的 GET，**每一跳重定向都要重新校验**。
+# 网页正文上限：伪装成 HTML 的大文件（或异常巨页）会把整个响应体吃进内存
+_MAX_HTML_BYTES = 5 * 1024 * 1024
+
+
+@contextmanager
+def _safe_stream(url: str, timeout: int):
+    """带 SSRF 校验的流式 GET，**每一跳重定向都要重新校验**。
+
+    为什么从 httpx.get 换成 httpx.stream：httpx.get 返回时响应体已经**全部读进
+    内存**，之后 iter_bytes 只是在现成的内存块上切片——下载的 200MB 闸、网页的
+    5MB 闸都成了马后炮（闸触发前内存已经吃完了）。stream 模式按需拉取，
+    配合 _read_capped / 分块写盘才是真正的"超限即中止"。
 
     follow_redirects=False 是刻意的：交给 httpx 自动跟随时，
     一个公网 URL 只要 302 到 http://169.254.169.254/latest/meta-data/，
@@ -40,30 +93,54 @@ def _safe_get(url: str, timeout: int) -> httpx.Response:
     """
     target = assert_safe_url(url)
     for _ in range(_MAX_REDIRECTS + 1):
-        resp = httpx.get(target, headers=_HTTP_HEADERS, timeout=timeout, follow_redirects=False)
-        if resp.status_code in (301, 302, 303, 307, 308):
-            loc = resp.headers.get("location")
-            if not loc:
-                return resp
-            target = assert_safe_url(urljoin(target, loc))
-            continue
-        return resp
+        with httpx.stream(
+            "GET", target, headers=_HTTP_HEADERS, timeout=timeout, follow_redirects=False
+        ) as resp:
+            if resp.status_code in (301, 302, 303, 307, 308):
+                loc = resp.headers.get("location")
+                if loc:
+                    target = assert_safe_url(urljoin(target, loc))
+                    continue
+            yield resp
+            return
     raise ValueError(f"重定向次数超过 {_MAX_REDIRECTS} 次，已放弃：{url}")
 
 
-def fetch_url_text(url: str) -> tuple[str, str]:
-    """抓 URL 正文，返回 (纯文本, 标题)。"""
-    resp = _safe_get(url, _HTTP_TIMEOUT)
-    resp.raise_for_status()
+def _read_capped(resp: httpx.Response, limit: int) -> bytes:
+    """流式读取响应体，超限立即中止（内存里最多只有 limit 大小的数据）。"""
+    chunks: list[bytes] = []
+    size = 0
+    for chunk in resp.iter_bytes(chunk_size=64 * 1024):
+        size += len(chunk)
+        if size > limit:
+            raise ValueError(f"响应体超过 {limit // 1024 // 1024}MB 上限，已中止抓取")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _decode_html(resp: httpx.Response, raw: bytes) -> str:
+    """按响应头 charset 解码；缺失或失败时用 charset_normalizer 探测（httpx 自带依赖）。"""
     content_type = resp.headers.get("content-type", "")
     if "charset=" in content_type:
         charset = content_type.split("charset=")[-1].split(";")[0].strip()
         try:
-            html = resp.content.decode(charset)
+            return raw.decode(charset)
         except (UnicodeDecodeError, LookupError):
-            html = resp.text
-    else:
-        html = resp.text
+            pass
+    try:
+        from charset_normalizer import detect
+        enc = (detect(raw) or {}).get("encoding") or "utf-8"
+    except ImportError:
+        enc = "utf-8"
+    return raw.decode(enc, errors="replace")
+
+
+def fetch_url_text(url: str) -> tuple[str, str]:
+    """抓 URL 正文，返回 (纯文本, 标题)。流式读取，超 5MB 直接 ValueError。"""
+    with _safe_stream(url, _HTTP_TIMEOUT) as resp:
+        resp.raise_for_status()
+        raw = _read_capped(resp, _MAX_HTML_BYTES)
+        html = _decode_html(resp, raw)
     title_match = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
     title = title_match.group(1).strip() if title_match else url
     return _strip_html(html), title
@@ -86,7 +163,7 @@ def import_url(owner: str, kb_id: str, url: str, chunk_size: int = 500, chunk_ov
     with pipelines.kb_lock(kb_id):
         pipe = pipelines.get_or_create(owner, kb_id)
         # 去重：同名来源已入库时跳过，避免重复切片 + 重复付 embedding 费
-        if pipe.get_source_chunks(name):
+        if pipe.has_source(name):
             return {"url": url, "title": title, "chunks": 0, "file": name, "skipped": True}
         docs = load_document(dest, source_name=name)
         chunks = split_documents(docs, chunk_size, chunk_overlap)
@@ -115,71 +192,17 @@ def _safe_name(title: str, ext: str) -> str:
 
 # ==================== App 搜索优化 ====================
 
-_APP_SIGNALS = ("apk", "app", "android", "安卓", "ios", "软件", "应用", "客户端",
-                "安装包", "官网", "官方", "下载", "安装")
-
-_APP_STOP = ("什么", "如何", "怎么", "为什么", "教程", "论文", "文档", "文章", "新闻",
-             "天气", "介绍", "意思", "区别", "对比", "评价", "推荐", "好处", "原理")
-
-_DOWNLOAD_INTENT = ("下载", "安装", "apk", "安装包")
-
-# 裸词里会被误判为 App 的非 App 短词（精确匹配，避免把「学习强国」这类真 App 拦掉）
-_APP_NAME_BLOCK = {
-    "深度学习", "机器学习", "人工智能", "神经网络", "数据科学", "大数据",
-    "计算机", "编程", "前端", "后端", "算法", "数据库",
-    "数学", "物理", "化学", "历史", "地理", "生物", "语文", "英语", "政治",
-    "区块链", "元宇宙", "云计算", "微服务", "容器",
-    "python", "java", "linux", "mysql",
-}
-
-
-def boost_app_query(keyword: str) -> str:
-    """把 App / 软件类搜索补上「官网」，让官方下载页排到前面。
-
-    触发条件：关键词含 App 相关信号，或是一个很短的裸词（大概率是 App 名）。
-    含「什么 / 如何 / 教程…」等泛问词时不做改写，避免影响普通搜索。
-    """
-    kw = (keyword or "").strip()
-    if not kw:
-        return kw
-    low = kw.lower()
-    if any(s in low for s in _APP_STOP):
-        return kw
-    has_signal = any(s in low for s in _APP_SIGNALS)
-    is_bare = len(kw) <= 6 and not any(ch.isspace() for ch in kw) \
-        and not any(ch in kw for ch in "？?！!，,。.：:") \
-        and low not in _APP_NAME_BLOCK
-    if not (has_signal or is_bare):
-        return kw
-    if "官网" in kw or "官方" in kw:
-        return kw
-    if "下载" in kw:
-        return f"{kw} 官网"
-    if any(s in low for s in _DOWNLOAD_INTENT):
-        return f"{kw} 官网下载"
-    return f"{kw} 官网"
-
-
 def search_preview(keyword: str, max_results: int = 10) -> list[dict]:
-    """Serper 联网搜索预览（App 类搜索自动补「官网」直达下载页）。"""
+    """Serper 联网搜索预览（走 core.serper 统一入口：连接复用 + 缓存 + App 查询补官网）。"""
     from core import config
 
     if not config.SERPER_API_KEY:
         raise RuntimeError("联网搜索需要 SERPER_API_KEY，请在 .env 中配置后重启服务。")
 
-    try:
-        q = boost_app_query(keyword)
-        # gl/hl 锚定中国区 + 中文，减少国外结果（国内打不开的外站链接）。
-        resp = httpx.post(
-            "https://google.serper.dev/search",
-            headers={"X-API-KEY": config.SERPER_API_KEY, "Content-Type": "application/json"},
-            json={"q": q, "num": max_results, "gl": "cn", "hl": "zh-cn"},
-            timeout=15,
-        )
-        resp.raise_for_status()
-        items = (resp.json() or {}).get("organic") or []
-    except Exception:
+    data = search_serper(keyword, max_results)
+    if data is None:
         raise RuntimeError("联网搜索暂时不可用，请稍后再试。")
+    items = data.get("organic") or []
 
     return [{"title": r.get("title", "?"), "body": (r.get("snippet") or "")[:300], "href": r.get("link", "")}
             for r in items]
@@ -213,42 +236,43 @@ def download_file(url: str, save_dir: str | None = None) -> dict:
     save_dir = save_dir or config.DOWNLOAD_DIR
     os.makedirs(save_dir, exist_ok=True)
 
-    resp = _safe_get(url, 30)
-    resp.raise_for_status()
+    with _safe_stream(url, 30) as resp:
+        resp.raise_for_status()
 
-    content_type = (resp.headers.get("content-type") or "").lower().split(";")[0].strip()
-    ext = os.path.splitext(url.split("?")[0].split("#")[0])[1].lower()
-    if ext not in _DOWNLOAD_EXTS:
-        ext = _CONTENT_TYPE_EXT.get(content_type, "")
-    if not ext:
-        raise ValueError("无法识别该链接的文件类型（仅支持文档 / 应用安装包等可下载文件）")
+        content_type = (resp.headers.get("content-type") or "").lower().split(";")[0].strip()
+        ext = os.path.splitext(url.split("?")[0].split("#")[0])[1].lower()
+        if ext not in _DOWNLOAD_EXTS:
+            ext = _CONTENT_TYPE_EXT.get(content_type, "")
+        if not ext:
+            raise ValueError("无法识别该链接的文件类型（仅支持文档 / 应用安装包等可下载文件）")
 
-    base = os.path.basename(url.split("?")[0].split("#")[0]) or "download"
-    stem = re.sub(r"[^\w一-龥.-]", "_", base)
-    if os.path.splitext(stem)[1].lower() != ext:
-        stem = os.path.splitext(stem)[0] + ext
-    path = os.path.join(save_dir, stem)
-    n = 1
-    while os.path.exists(path):
-        path = os.path.join(save_dir, f"{os.path.splitext(stem)[0]}_{n}{ext}")
-        n += 1
+        base = os.path.basename(url.split("?")[0].split("#")[0]) or "download"
+        stem = re.sub(r"[^\w一-龥.-]", "_", base)
+        if os.path.splitext(stem)[1].lower() != ext:
+            stem = os.path.splitext(stem)[0] + ext
+        path = os.path.join(save_dir, stem)
+        n = 1
+        while os.path.exists(path):
+            path = os.path.join(save_dir, f"{os.path.splitext(stem)[0]}_{n}{ext}")
+            n += 1
 
-    # 流式写盘：resp.content 会把整个文件读进内存（ISO 级文件直接 OOM），
-    # 分块写 + 累计大小上限，超限删掉半成品再报错
-    size = 0
-    try:
-        with open(path, "wb") as f:
-            for chunk in resp.iter_bytes(chunk_size=256 * 1024):
-                size += len(chunk)
-                if size > _MAX_DOWNLOAD_MB * 1024 * 1024:
-                    raise ValueError(f"文件超过 {_MAX_DOWNLOAD_MB}MB 上限，下载已中止")
-                f.write(chunk)
-    except ValueError:
+        # 流式写盘：resp.content 会把整个文件读进内存（ISO 级文件直接 OOM），
+        # 分块写 + 累计大小上限，超限删掉半成品再报错。
+        # 注意必须走 _safe_stream 才是真流式：httpx.get 返回时 body 已全部进内存。
+        size = 0
         try:
-            os.unlink(path)
-        except OSError:
-            pass
-        raise
+            with open(path, "wb") as f:
+                for chunk in resp.iter_bytes(chunk_size=256 * 1024):
+                    size += len(chunk)
+                    if size > _MAX_DOWNLOAD_MB * 1024 * 1024:
+                        raise ValueError(f"文件超过 {_MAX_DOWNLOAD_MB}MB 上限，下载已中止")
+                    f.write(chunk)
+        except ValueError:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            raise
     return {"url": url, "filename": os.path.basename(path), "path": path,
             "ext": ext, "size": size}
 
@@ -272,7 +296,7 @@ def download_and_index(owner: str, kb_id: str, url: str, chunk_size: int = 500, 
     with pipelines.kb_lock(kb_id):
         pipe = pipelines.get_or_create(owner, kb_id)
         # 去重：同名来源已入库时跳过，不再重复切片与 embedding
-        if pipe.get_source_chunks(info["filename"]):
+        if pipe.has_source(info["filename"]):
             info["chunks"] = 0
             info["skipped"] = True
             return info

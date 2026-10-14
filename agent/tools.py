@@ -126,24 +126,16 @@ def web_search(query: str, max_results: int = 5) -> str:
         max_results = 5
 
     try:
-        import httpx
         from core import config
-        from kb.importer import boost_app_query
+        from core.serper import search_serper
 
         if not config.SERPER_API_KEY:
             return "联网搜索需要 SERPER_API_KEY，请在 .env 中配置后重启服务。"
 
-        q = boost_app_query(query)
-        # gl/hl 把结果锚定到中国区 + 中文：面向国内用户，默认压低国外结果，
-        # 否则 Google 全球接口会返回大量国内打不开的外站链接。
-        resp = httpx.post(
-            "https://google.serper.dev/search",
-            headers={"X-API-KEY": config.SERPER_API_KEY, "Content-Type": "application/json"},
-            json={"q": q, "num": max_results, "gl": "cn", "hl": "zh-cn"},
-            timeout=15,
-        )
-        resp.raise_for_status()
-        data = resp.json() or {}
+        # 统一入口：连接复用 + TTL 缓存 + App 查询补官网（与搜索预览同一套规则）
+        data = search_serper(query, max_results)
+        if data is None:
+            return "联网搜索暂时不可用，请稍后再试或换个问法。"
         organic = data.get("organic") or []
 
         if not organic:

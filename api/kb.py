@@ -23,12 +23,12 @@ import os
 import re
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.schemas import KBQueryResponse
-from core import quota, upload
+from core import config, quota, upload
 from core.auth import get_current_user
 from core.netsafe import assert_safe_url
 from kb import pipelines
@@ -155,7 +155,7 @@ async def upload_and_build(
 # ==================== 查询 ====================
 
 @router.post("/{kb_id}/query", response_model=KBQueryResponse)
-async def query_kb(kb_id: str, question: str, top_k: int = 3, uid: str = Depends(get_current_user)) -> dict:
+async def query_kb(kb_id: str, question: str, top_k: int = Query(default=3, gt=0, le=config.TOP_K_MAX), uid: str = Depends(get_current_user)) -> dict:
     """同步问答：返回带 [1][2] 引用角标的答案。"""
     _must_own(uid, kb_id)
     # 一次问答 = 一次检索 + 一次 LLM，落到每日问答额度里

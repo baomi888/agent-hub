@@ -214,6 +214,21 @@ def owned_kb_ids(owner: str) -> set[str]:
         return {k for k, v in _KB_OWNERS.items() if v == owner}
 
 
+def name_of(kb_id: str | None) -> str | None:
+    """kb_id → 显示名。
+
+    只读名字映射，不扫磁盘、不开 collection —— 与 list_all 的区别就在这里：
+    调用方只想在响应里带上"投递到了哪个库"的库名时，不该为一个字段去遍历全部库。
+    映射里没有就返回 None，不拿 kb_id 冒充库名（那是 list_all 展示兜底的做法）。
+    """
+    if not kb_id:
+        return None
+    with _REGISTRY_LOCK:
+        if not _KB_NAMES:
+            _load_names()
+        return _KB_NAMES.get(kb_id)
+
+
 def claim_orphan_kbs(owner: str) -> int:
     """把改造前遗留的（无主）知识库指派给某个账号。
 
@@ -366,7 +381,6 @@ def list_all(owner: str) -> list[dict]:
         all_collections = []
 
     mine = owned_kb_ids(owner)
-    seen: set[str] = set()
     seen: set[str] = set()
 
     # 整段加锁：循环里会 _get_or_create_raw 往注册表塞东西，

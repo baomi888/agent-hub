@@ -1,5 +1,10 @@
 # -*- coding: utf-8 -*-
-"""W1 端到端测试脚本：建库 → 检索 → 问答。"""
+"""W1 端到端测试脚本：建库 → 检索 → 格式化 → LLM 连通。
+
+说明：RagPipeline.answer / answer_stream 已作为死代码删除（生产问答在
+api/chat.py），本脚本的问答步骤改为两段：引用格式化（走生产同款
+_format_refs / build_sources）+ LLM 流式连通（直接调 get_llm().stream）。
+"""
 import os
 import sys
 
@@ -11,6 +16,7 @@ sys.path.insert(0, _PROJECT_ROOT)
 print("=== Step 1: Import Check ===")
 from core import config
 from core.llm import get_llm, get_embeddings
+from langchain_core.messages import HumanMessage
 from kb.rag_core import RagPipeline, load_document
 from kb import pipelines
 
@@ -83,27 +89,29 @@ except Exception as e:
     print(f"  ❌ RETRIEVE FAILED: {describe_api_error(e)}")
     sys.exit(1)
 
-# ====== 5. 同步问答测试 ======
-print("\n=== Step 5: Answer (同步) ===")
+# ====== 5. 引用格式化测试（生产同款：api/chat.py 检索后用这两个组装引用）======
+print("\n=== Step 5: Format refs / sources ===")
 try:
-    answer, refs = pipe.answer("什么是人工智能和大语言模型？", 3)
-    print(f"  ✅ ANSWER ({len(answer)} 字): {answer[:300]}")
+    docs_scores = pipe.retrieve_with_score("什么是人工智能和大语言模型？", 3)
+    refs = RagPipeline._format_refs(docs_scores)
+    sources = RagPipeline.build_sources(docs_scores)
     print(f"  ✅ REFS ({len(refs)} 字): {refs[:200]}")
+    print(f"  ✅ SOURCES ({len(sources)} 条): {sources[0]['source'] if sources else '-'}")
 except Exception as e:
     from kb.rag_core import describe_api_error
-    print(f"  ❌ ANSWER FAILED: {describe_api_error(e)}")
+    print(f"  ❌ FORMAT FAILED: {describe_api_error(e)}")
     sys.exit(1)
 
-# ====== 6. 流式问答测试 ======
-print("\n=== Step 6: Answer (流式) ===")
+# ====== 6. LLM 流式连通测试 ======
+print("\n=== Step 6: LLM stream ===")
 try:
     print("  流式输出: ", end="", flush=True)
     acc_text = ""
     token_count = 0
-    for text, refs in pipe.answer_stream("LangChain 和 Chroma 是什么关系？", 2):
-        if text and len(text) > len(acc_text):
-            delta = text[len(acc_text):]
-            acc_text = text
+    for chunk in get_llm().stream([HumanMessage(content="用不超过十个字打个招呼。")]):
+        delta = chunk.content or ""
+        if delta:
+            acc_text += delta
             token_count += 1
             # 每 20 个 token 打一个点
             if token_count % 20 == 0:

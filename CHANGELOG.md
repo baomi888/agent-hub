@@ -9,7 +9,64 @@
 
 ---
 
+## [2026-10-14]
+
+### 新增（混合架构：工作流 × 自主 Agent）
+- 新增第五种模式 `hybrid`（`POST /api/chat/stream` 的 `mode` 取值）：工作流跑确定性步骤，
+  Agent 接管不确定环节，执行中按上下文条件无缝切换（降级接管 / 收编回归 /
+  流程内嵌 agent 节点三种形态）。
+- 引擎层 `hybrid/`：TaskContext 统一上下文（`shared` 唯一交换通道 + 切换即快照 + version 乐观锁）、
+  WorkflowEngine（5 类节点 / 条件分支受限表达式 / 节点级超时重试 / on_fail 跳转）、
+  AgentEngine（复用 `build_agent()`，步数/token/时长三维预算护栏）、
+  SwitchEngine（规则链优先级 + 人工指令插队 + 防抖冷却）、HybridOrchestrator（引擎注册表，模式可插拔）。
+- 持久化独立 `hybrid.db` 四表：workflow_defs / workflow_runs / switch_rules / exec_logs。
+- 管理面 `api/hybrid.py` 12 端点：工作流 CRUD（内置只读）、规则覆盖模型
+  （系统默认删不掉，用户同名覆盖、删覆盖恢复默认，条件表达式语法级校验）、
+  执行记录与全链路日志查询、人工切换（running 才允许，否则 409）。
+- SSE 新增 `hybrid_start / workflow_node / mode_switch` 三事件，`done` 带 `run_id`；
+  协议说明见 `api/chat.py` 头注释。`HYBRID_MODE_ENABLED=0` 时静默回退 agent。
+- 前端对接接口预留（后端契约）：请求体 `workflow_id`、SSE 三事件 + `done.run_id`、
+  `/api/hybrid` 12 端点，详见 `docs/混合架构实现说明_2026-10-14.md`「前端对接接口」。
+  前端 UI 实现按职责边界不在本次改动范围，`frontend/` 保持改动前状态。
+- 内置资产：`builtin_plan_execute`（规划→执行）工作流 + 4 条系统默认切换规则。
+- 测试：新增 25 项混合架构用例（context / expr / workflow / switcher / orchestrator），
+  全量 64 项绿；前端回退后 `tsc --noEmit` 通过。
+- 设计依据 `docs/混合架构系统研讨报告.md`，实现明细见 `docs/混合架构实现说明_2026-10-14.md`。
+
+### 修复
+- `orchestrator._switch_event` 补写 exec_logs：此前切换事件只发 SSE 不落库，
+  监控链路缺切换记录。
+
+---
+
 ## [2026-10-11]
+
+### 修复（top_k 上界 + 偏好读回）
+- 服务端 `top_k` 补硬上界：新增 `TOP_K_MAX`（默认 20，可用环境变量覆盖），
+  `ChatRequest` / `KBQueryRequest` / `query_kb` 三处入口统一加 `le` 约束，超限直接 422。
+- 前端 `usePrefs` 补读回 `topK / chunkSize / chunkOverlap`：此前挂载只读回 mode/kbPanel/fontScale，
+  检索参数停在默认值，`prefsReady` 后的落盘会把用户改过的值写回默认——刷新即被抹掉。
+- 详见 `docs/修复说明_2026-10-11_top_k与偏好读回.md`。
+
+### 新增（条件式查询改写 · 默认开启）
+- 多轮追问（"那它呢""第二个呢"）单独看检索不到东西。新增**条件式**改写：仅当问题含指代词
+  或长度 ≤ 8 字、且存在对话历史时，才用最近 4 条历史把它补全成可独立检索的问题；其余问题
+  零额外开销——这是它跟"每题都改写"的关键区别。
+- 新增配置：`QUERY_REWRITE_ENABLED`（默认 1，置 0 完全关闭）、`QUERY_REWRITE_MAX_LEN`(8)、
+  `QUERY_REWRITE_HISTORY`(4)、`QUERY_REWRITE_MAX_TOKENS`(64，只输出一条问题，防跑偏也防费用)。
+- 容错兜底：改写失败、结果不可信（空或过长）一律退回原问题，绝不阻塞检索；RAG 与图片理解
+  两条检索路径均已接入，改写后的问题直接作为检索词，检索结果缓存键随之正确、不跨上下文串结果。
+- 调用方一次取历史，改写与 `_build_messages` 共用，避免重复查 SQLite。
+- 新增离线用例 `tests/test_query_rewrite.py`（9 例，打桩 LLM 不触网）。
+
+### 新增（混合检索：向量 + BM25 · RRF）
+- 检索从纯向量升级为**混合检索**：新增 BM25 关键词通道（自实现，仅标准库，无新依赖），
+  两条通道用 RRF 融合。补上纯向量对专有名词 / 缩写 / 编号（"CUDA 12.4""第 3 条"）的召回短板。
+- 新增配置：`HYBRID_ENABLED`（默认 1，置 0 退回纯向量）、`HYBRID_RRF_K`(60)、
+  `HYBRID_KEYWORD_TOP`(20)、`HYBRID_MAX_DOCS`(20000，超限自动退回纯向量)。
+- `select_diverse` 兼容 `(doc, distance)` 与 `(doc, distance, rank)` 两种候选；
+  **关键词独有片段距离为 None，前端不显示相似度——绝不伪造分数**。现有调用方与回归用例零改动。
+- 关键词索引按库缓存，随 `_cache_invalidate`（导入 / 删除 / 重建）失效并懒加载重建。
 
 ### 修复（超时与下载收口）
 - LLM / 视觉 / Embedding 客户端补 `request_timeout` 与 `max_retries`（新增 `LLM_TIMEOUT`、
