@@ -277,3 +277,9 @@ RAG 的 `chunk_size` / `chunk_overlap` 是实现细节。**禁止用裸数字输
 - [ ] 数据区定义了**空 / 加载 / 错误**三态
 - [ ] `tsc --noEmit` Exit 0
 - [ ] `grep` 复查：`[🎒✎✕✅⚠＋★]` 在界面文件中为 0 命中
+- [ ] **新页面自带滚动容器**（`100dvh` + `overflow-y:auto`）—— `base.css` 把 `html,body`
+      设成 `overflow:hidden`，不走 `main.workbench-main` 的页面不自己滚就会「被固定死」（10-14）
+- [ ] **首屏/首页入口区分主次层级**：持续型能力（委托/总结/打卡）与一次性动作
+      （模板/建库/工具集）不能平级摆 —— 平级等于让通用功能挤掉差异化功能（10-14）
+- [ ] **`grid-template-columns` 用 `minmax(0, 1fr)`**，长串文本配 `overflow-wrap: anywhere`；
+      横向溢出的断言要逐元素量 `right > innerWidth`（`overflow:hidden` 会把溢出静默裁掉）

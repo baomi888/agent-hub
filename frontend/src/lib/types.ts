@@ -154,6 +154,9 @@ export interface Template {
   suggested_kb_name?: string | null;
   session_title?: string;
   starter_prompt?: string | null;
+  /** 点「设为每日委托」时预填的委托指令（持续型表述、不带频率词——频率由用户在表单里选）。
+   *  目录里没有这个字段时前端回退到 tagline，所以后端没升级也不会空着。 */
+  delegate_instruction?: string | null;
   recommended_mode?: string;
   philosophy?: string;
 }

@@ -6,11 +6,12 @@
 // 2026-09 重构：消息类型/常量/正文渲染/计划卡片/Bubble/Field 拆到 ./chat/*，
 // 本文件只保留主组件（顶栏 + 欢迎页 + 消息区 + 输入区）。
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import Link from "next/link";
 import MascotLogo from "./chat/MascotLogo";
 import CornIcon from "./CornIcon";
 import { api } from "@/lib/api";
 import type { ChatMode, RefSource, QuotaInfo } from "@/lib/types";
-import { ABILITIES, EXAMPLES, MODE_LABELS, SCENARIOS, INTRO_ENTRIES, TOOLS_URL, SCENARIO_STARTERS } from "./chat/constants";
+import { ABILITIES, EXAMPLES, MODE_LABELS, SCENARIOS, PRIMARY_ENTRIES, SECONDARY_ENTRIES, TOOLS_URL, SCENARIO_STARTERS } from "./chat/constants";
 import { buildPlanPrompt, detectPlanTopic, isPlanRequest, stripPlanHint } from "./chat/plan";
 import Bubble from "./chat/Bubble";
 import BubbleErrorBoundary from "./chat/BubbleErrorBoundary";
@@ -603,23 +604,45 @@ export default function ChatArea({
                 </div>
               </div>
 
-              {/* ② 功能入口：替代旧四能力卡，反映当前真实功能 */}
-              <div className="mt-4 w-full grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-                {INTRO_ENTRIES.map((e) => (
+              {/* ② 主线：三个持续陪伴功能。原来这里是四宫格，四件平级，
+                  结果「模板广场」这种一次性动作和「每日委托」这种天天用的能力
+                  一样醒目 —— 而知穗的差别恰恰在后面那类。改成两层之后，
+                  主线是大卡 + 有标题栏，辅路缩成一行小胶囊。 */}
+              <div className="mt-4 w-full">
+                <div className="welcome-section-head">
+                  <span className="eyebrow">让知穗每天做点什么</span>
+                  <span className="rule" />
+                </div>
+                <div className="mt-2.5 grid w-full grid-cols-1 gap-2.5 sm:grid-cols-3">
+                  {PRIMARY_ENTRIES.map((e) => (
+                    <Link
+                      key={e.href}
+                      href={e.href}
+                      className="entry-card"
+                      aria-label={`${e.label}：${e.hint}`}
+                    >
+                      <span className="ec-icon">
+                        <CornIcon name={e.icon} className="h-6 w-6" title={e.label} />
+                      </span>
+                      <span className="ec-label">{e.label}</span>
+                      <span className="ec-hint">{e.hint}</span>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+
+              {/* ③ 辅路：一次性动作，收成一行小入口 */}
+              <div className="mt-2.5 flex w-full flex-wrap justify-center gap-2">
+                {SECONDARY_ENTRIES.map((e) => (
                   <button
                     key={e.key}
                     type="button"
                     onClick={() => handleIntroEntry(e.key)}
-                    className="intro-entry"
-                    aria-label={`${e.label}：${e.hint}`}
+                    className="entry-mini"
+                    title={e.label}
                   >
-                    <span className="ie-icon">
-                      <CornIcon name={e.icon} className="h-6 w-6" title={e.label} />
-                    </span>
-                    <span className="ie-text">
-                      <span className="ie-label">{e.label}</span>
-                      <span className="ie-hint">{e.hint}</span>
-                    </span>
+                    <CornIcon name={e.icon} className="h-4 w-4" />
+                    {e.label}
                   </button>
                 ))}
               </div>

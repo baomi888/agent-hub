@@ -22,20 +22,36 @@ export const EXAMPLES: { hint: string; q: string }[] = [
 // 校园工具集静态页地址（frontend/public/tools.html，无需登录即可用）
 export const TOOLS_URL = "/tools.html";
 
-// 首屏功能入口：替代旧「查资料/联网搜索/数学计算/查天气」四能力卡，
-// 改为反映当前真实功能（模板广场 / 校园工具集 / 上传建库 / 研究）
-// action 由 ChatArea 接管：template→开模板广场、tools→开工具集页、
-// upload→开资料库面板、research→预填研究引导
-export const INTRO_ENTRIES: {
-  key: "template" | "tools" | "upload" | "research";
+// 首屏入口（10-14 重排为「主次两层」）。
+//
+// 为什么拆两层：原来是一个四宫格（模板广场 / 校园工具集 / 上传建库 / 让它去研究），
+// 四件平级 —— 但其中三件是**一次性动作**，而「每日委托 / 每日总结 / 打卡」才是
+// 知穗区别于通用助手的部分（持续陪着你，而不是答完就走）。平级摆在一起，
+// 差异化功能反而没有存在感。所以：
+//   主线 = 三个持续陪伴功能（各自是独立页面，用 Link 跳）
+//   辅路 = 三个一次性动作（留在首屏，但缩小成一行）
+export const PRIMARY_ENTRIES: {
+  href: string;
   label: string;
   hint: string;
   icon: CornIconName;
 }[] = [
-  { key: "template", label: "模板广场", hint: "挑一个场景化智能体", icon: "store" },
-  { key: "tools", label: "校园工具集", hint: "GPA · 番茄钟 · 课表…", icon: "tools" },
-  { key: "upload", label: "上传资料建库", hint: "让知穗读你的文件", icon: "notes" },
-  { key: "research", label: "让它去研究", hint: "带题目去联网深挖", icon: "bulb" },
+  { href: "/delegate", label: "每日委托", hint: "定好时间，知穗自己去做", icon: "clock" },
+  { href: "/report", label: "每日总结", hint: "把今天的问答压成结论", icon: "calendar" },
+  { href: "/checkin", label: "打卡记录", hint: "把学到的东西分享出去", icon: "star" },
+];
+
+// 辅路动作。tools → 开校园工具集静态页、upload → 开资料库上传、
+// research → 预填研究引导（由 ChatArea 的 handleIntroEntry 接管）
+export const SECONDARY_ENTRIES: {
+  key: "template" | "tools" | "upload" | "research";
+  label: string;
+  icon: CornIconName;
+}[] = [
+  { key: "template", label: "模板广场", icon: "store" },
+  { key: "upload", label: "上传资料建库", icon: "notes" },
+  { key: "research", label: "让它去研究", icon: "bulb" },
+  { key: "tools", label: "校园工具集", icon: "tools" },
 ];
 
 // 场景快选：首屏点一下进入对应场景并预填一句开场白（轻量版仅前端保存）

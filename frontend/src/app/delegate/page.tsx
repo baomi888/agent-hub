@@ -10,7 +10,7 @@
 // 关键设计点：**「预览」不投递**。
 // 后端给的是 `POST /{id}/run?dry_run=true`（只生成、不改 next_run_at），
 // 这正好是产品方向文档要的「系统先跑一遍，人再确认」—— 先看到内容，再决定投不投。
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ConsoleShell from "@/components/console/ConsoleShell";
 import CornIcon from "@/components/CornIcon";
 import { Callout, Field, NotReady, Seg, SkeletonLines, Switch, ToastHost } from "@/components/console/ui";
@@ -133,6 +133,7 @@ export default function DelegatePage() {
   const [form, setForm] = useState<FormState>(BLANK_FORM);
   const [preview, setPreview] = useState<{ name: string; text: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const formRef = useRef<HTMLDivElement>(null);
 
   const loadList = useCallback(() => {
     api.delegate
@@ -161,6 +162,57 @@ export default function DelegatePage() {
         /* 同上 */
       });
   }, [loadList]);
+
+  /**
+   * 接住从模板广场带过来的预填（`/delegate?new=1` + sessionStorage）。
+   *
+   * 模板广场的「设为每日委托」会把指令写进 sessionStorage 再跳过来 ——
+   * 那条 `baomi:delegate-preset` 读完立刻删掉，否则下次用户自己点「新建委托」
+   * 还会莫名其妙冒出一段模板文案。
+   *
+   * ⚠️ 两个刻意之处，改动前先看这里：
+   *  · setState 推在 `setTimeout(..., 0)` 里 —— 本项目的 react-hooks/set-state-in-effect
+   *    不允许在 effect 体内直接 setState。
+   *  · **故意不返回 cleanup**。如果写成 `return () => clearTimeout(t)`，那么只要
+   *    effect 的依赖（showToast）变了、effect 重跑，cleanup 就会把这个定时器取消掉，
+   *    而 sessionStorage 已经在同步阶段删过了 —— 结果是预填永远不生效。
+   *    防重入改由 presetGuard 这个 ref 承担（它一旦置位，后续重跑一律早退）。
+   */
+  const presetGuard = useRef(false);
+  useEffect(() => {
+    if (presetGuard.current) return;
+    if (typeof window === "undefined") return;
+    if (new URLSearchParams(window.location.search).get("new") !== "1") return;
+
+    let raw: string | null = null;
+    try {
+      raw = sessionStorage.getItem("baomi:delegate-preset");
+      if (raw) sessionStorage.removeItem("baomi:delegate-preset");
+    } catch {
+      return; // 隐私模式禁了 sessionStorage：没有预填可用，静默放过
+    }
+    if (!raw) return;
+
+    let preset: { from?: string; instruction?: string } | null = null;
+    try {
+      preset = JSON.parse(raw) as { from?: string; instruction?: string };
+    } catch {
+      return; // 存进去的不是合法 JSON，当没这回事
+    }
+    if (!preset?.instruction) return;
+
+    presetGuard.current = true;
+    const from = preset.from ?? "模板";
+    const instruction = preset.instruction;
+    window.setTimeout(() => {
+      setForm((f) => ({ ...f, name: from.slice(0, 32), instruction }));
+      // URL 上的 ?new=1 用完就清：刷新页面不该再预填一次
+      window.history.replaceState(null, "", "/delegate");
+      // 表单在右侧常驻但位置靠下，不滚过去用户会以为"点了没反应"
+      formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      showToast("info", `已按「${from}」填好指令，确认频率后保存`);
+    }, 0);
+  }, [showToast]);
 
   // 后端没上线时用演示数据顶住版面，但界面上会挂「演示数据」标记
   const isDemo = list.state === "absent";
@@ -513,7 +565,7 @@ export default function DelegatePage() {
             </div>
 
             {/* ============ 右：新建 / 编辑表单（常驻） ============ */}
-            <div>
+            <div ref={formRef}>
               <p className="sec-label">{editing ? "编辑委托" : "新建委托"}</p>
               <div className="card card-pad">
                 <Field label="名称（3–32 字，建后不可改）">

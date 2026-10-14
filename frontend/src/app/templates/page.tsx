@@ -84,6 +84,37 @@ export default function TemplatesPage() {
     }
   };
 
+  /**
+   * 把模板变成一条「每日委托」。
+   *
+   * 模板与委托本来是同一件事的两个时间尺度：模板给一个**一次性**的起点
+   * （建库 + 开场白），委托则是把这件事**持续**做下去（定时自动执行）。
+   * 与其让 8 个模板停在"用一次就完"，不如让它们能直接变成长期任务。
+   *
+   * 预填内容走 sessionStorage 而不是 URL query：指令动辄几十字，塞进 query
+   * 既难看又有超长风险；而且跳过去之后模板对象就取不到了。
+   * 这里**只预填、不调 /api/delegate** —— 那个端点还在 feat/ai-module-20261013
+   * 分支上，本分支 404。用户到委托页填完点保存才发请求，届时接口没上线的话，
+   * 那个页面本来就会显示「接口待上线」。
+   */
+  const onDelegate = (t: Template) => {
+    try {
+      sessionStorage.setItem(
+        "baomi:delegate-preset",
+        JSON.stringify({
+          from: t.name,
+          // 目录里没有 delegate_instruction 时回退 tagline：
+          // 宁可预填得粗一点，也不要给用户一张空白表单
+          instruction: t.delegate_instruction || t.tagline || "",
+          ts: Date.now(),
+        })
+      );
+    } catch {
+      /* 隐私模式可能禁掉 sessionStorage —— 那只是不预填，不该拦住跳转 */
+    }
+    router.push("/delegate?new=1");
+  };
+
   return (
     <div className="h-dvh overflow-y-auto overscroll-contain bg-canvas">
       {/* 顶栏：品牌 + 返回工作台（窄屏收起副标题） */}
@@ -116,6 +147,7 @@ export default function TemplatesPage() {
           <p>
             这里每个模板都帮你快速上手，但<strong>答案要你自己来</strong>——
             我们做的是为学习而生的 AI 素养平台，不是替你写答案的工具。
+            用一次就好的点「使用模板」；<strong>想让它每天自动做的，点「设为每日委托」</strong>。
           </p>
         </div>
 
@@ -188,14 +220,24 @@ export default function TemplatesPage() {
                       </p>
                     )}
 
-                    {/* flex-1 + items-end：同一行卡片不论文字长短，按钮都贴底对齐 */}
-                    <div className="mt-4 flex flex-1 items-end">
+                    {/* flex-1 + justify-end：同一行卡片不论文字长短，按钮都贴底对齐。
+                        「设为每日委托」是次要动作（描边），主操作仍是「使用模板」（实心）——
+                        后者立刻能聊，前者是"以后每天帮我做这件事"。 */}
+                    <div className="mt-4 flex flex-1 flex-col justify-end gap-2">
                       <button
                         onClick={() => onUse(t)}
                         disabled={usingId === t.id}
                         className="btn-new w-full disabled:opacity-50"
                       >
                         {usingId === t.id ? "正在创建…" : "使用模板"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDelegate(t)}
+                        className="btn-import w-full px-4 py-2 text-fs-md"
+                        title="把这件事交给知穗定时去做（会带着这个模板的说明跳到委托页）"
+                      >
+                        设为每日委托
                       </button>
                     </div>
                   </article>
