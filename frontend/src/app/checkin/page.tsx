@@ -7,17 +7,15 @@
 // 为什么刻意克制：**不做奖惩、不做排行榜** —— 参考作业帮的教训，
 // 竞争性激励带来的是负体验，而不是学习动力。
 //
-// ⚠️ 这一页是四屏里唯一「后端完全没有」的：没有 /api/checkin/*，
-// `stats` 里也没有 streak 字段。所以数据分两块处理：
-//   · 连续天数 / 历史 —— 用**本地记录**（baomi.reportDays，总结页生成时会写）
-//     真实推算，这比编一个数字诚实
-//   · 知识结构图 —— 后端没有出图端点。若当天总结已生成，直接渲染它的结论（真实）；
-//     否则用设计稿的演示内容，并挂「演示数据」标记
+// 后端 /api/checkin/* 现已上线（4 端点：streak / history / generate / share），
+// 打卡数据**服务端优先**：连续天数、最长连续、历史都从服务端 daily_reports 派生，
+// 端点未部署时退回**本地记录**（baomi.reportDays，总结页生成时会写），再退回演示数据。
+// 知识结构图仍来自当日总结结论（真实）或演示内容（挂「演示数据」标记）。
 // 分享兜底：公网 http 下 navigator.clipboard 不可用，统一走项目里的 copyText()。
 import { useEffect, useState } from "react";
 import ConsoleShell from "@/components/console/ConsoleShell";
 import CornIcon from "@/components/CornIcon";
-import { Callout, NotReady, SkeletonLines, ToastHost } from "@/components/console/ui";
+import { Callout, SkeletonLines, ToastHost } from "@/components/console/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { DEMO_CHECKIN_HISTORY, DEMO_KNOWLEDGE_TREE } from "@/lib/consoleDemo";
@@ -25,7 +23,7 @@ import { toProbe, type ProbeState } from "@/lib/probe";
 import { fmtDate } from "@/lib/time";
 import { useToast } from "@/lib/hooks/useToast";
 import { copyText } from "@/lib/useCopy";
-import type { DailyReport } from "@/lib/types";
+import type { CheckinHistoryItem, CheckinStreak, DailyReport } from "@/lib/types";
 
 /** 与报告页共用同一份本地记录 */
 const DAYS_KEY = "baomi.reportDays";
@@ -130,6 +128,10 @@ export default function CheckinPage() {
   const [localDays, setLocalDays] = useState<DayMark[]>([]);
   const [report, setReport] = useState<ProbeState<DailyReport>>({ state: "loading" });
   const [busy, setBusy] = useState(false);
+  // 服务端打卡数据（null = 端点未部署，页面退回本地/演示）
+  const [streakData, setStreakData] = useState<CheckinStreak | null>(null);
+  const [historyData, setHistoryData] = useState<CheckinHistoryItem[] | null>(null);
+  const [genBusy, setGenBusy] = useState(false);
 
   useEffect(() => {
     // 延到下一个宏任务再 setState：直接在 effect 体内同步 setState 会被判成级联渲染
@@ -146,6 +148,15 @@ export default function CheckinPage() {
         .today()
         .then((r) => setReport(toProbe(r)))
         .catch(() => setReport({ state: "error", message: "读取今日总结失败" }));
+      // 打卡：服务端优先，拿不到（端点未部署）则 null → 页面退回本地/演示
+      api.checkin
+        .streak()
+        .then((s) => setStreakData(s))
+        .catch(() => setStreakData(null));
+      api.checkin
+        .history()
+        .then((h) => setHistoryData(h))
+        .catch(() => setHistoryData(null));
     }
     return () => window.clearTimeout(t);
   }, [authedId]);
@@ -176,13 +187,28 @@ export default function CheckinPage() {
   // 否则同一张卡里会同时出现「历史：10-13 已分享、10-12 已分享」和「0 天连续、12 个空点」
   // 这种互相打脸的组合（2026-10-13 实机发现）。
   const hasLocal = localDays.length > 0;
-  const dayMarks: DayMark[] = hasLocal
-    ? localDays
-    : DEMO_CHECKIN_HISTORY.map((h) => ({ date: h.date, count: h.points }));
-  const dates = dayMarks.map((d) => d.date);
-  const streak = todayStr ? computeStreak(dates, todayStr) : 0;
-  const longest = todayStr ? computeLongest(dates) : 0;
+  // 服务端优先：两端都拿不到才退回本地记录 / 演示数据
+  const fromServer = streakData !== null || historyData !== null;
+  const serverHist = historyData;
+  const dayMarks: DayMark[] = fromServer
+    ? (serverHist ?? []).map((h) => ({ date: h.date, count: h.points }))
+    : localDays;
+  const dates: string[] = fromServer
+    ? streakData?.dates ?? (serverHist ?? []).map((h) => h.date)
+    : dayMarks.map((d) => d.date);
+  // 连续天数优先用服务端算好的（口径统一在后端），否则本地推算兜底
+  const streak = todayStr
+    ? streakData
+      ? streakData.streak
+      : computeStreak(dates, todayStr)
+    : 0;
+  const longest = todayStr
+    ? streakData
+      ? streakData.longest
+      : computeLongest(dates)
+    : 0;
   const dots = todayStr ? buildDots(dates, todayStr, WINDOW_DAYS) : [];
+  const dataSource = fromServer ? "服务端" : hasLocal ? "本地记录" : "演示数据";
 
   /** 文字版：分享兜底的第一步，也是唯一在公网 http 下 100% 可用的导出方式 */
   const toText = () =>
@@ -193,13 +219,49 @@ export default function CheckinPage() {
       root,
       ...nodes.flatMap((n) => [`· ${n.name}`, ...n.children.map((c) => `   - ${c}`)]),
       "",
-      `共 ${pointCount} 个知识点${hasLocal ? ` · 已连续 ${streak} 天` : ""}`,
+      `共 ${pointCount} 个知识点${dataSource !== "演示数据" ? ` · 已连续 ${streak} 天` : ""}`,
       "知穗 · 每天进步一点点",
     ].join("\n");
+
+  /** 生成今日打卡 = 触发当日总结（复用 /api/report/generate 同一份逻辑）。
+   *  后端同步生成约 20–40 秒，用 genBusy 兜住；完成后重拉三块数据。 */
+  const generateToday = async () => {
+    if (!authedId) return;
+    setGenBusy(true);
+    try {
+      await api.checkin.generate();
+      // 重拉：今日总结（知识结构）+ 连续/历史
+      const r = await api.report.today().catch(() => null);
+      if (r) setReport(toProbe(r));
+      const s = await api.checkin.streak().catch(() => null);
+      if (s) setStreakData(s);
+      const h = await api.checkin.history().catch(() => null);
+      if (h) setHistoryData(h);
+      showToast("success", "今日打卡已生成");
+    } catch (e) {
+      showToast("error", e instanceof Error ? e.message : "生成失败");
+    } finally {
+      setGenBusy(false);
+    }
+  };
+
+  /** 标记今天已分享（幂等）。最佳努力：失败静默，不影响分享动作本身。 */
+  const markSharedToday = () => {
+    if (!todayStr) return;
+    api.checkin
+      .share(todayStr)
+      .then((res) => {
+        if (res?.ok) {
+          api.checkin.history().then((h) => h && setHistoryData(h)).catch(() => {});
+        }
+      })
+      .catch(() => {});
+  };
 
   const copyCard = async () => {
     const ok = await copyText(toText());
     showToast(ok ? "success" : "error", ok ? "文字版已复制，可以直接粘贴分享" : "复制失败，请长按选择文字");
+    if (ok) markSharedToday();
   };
 
   /**
@@ -246,7 +308,7 @@ export default function CheckinPage() {
   ${lines.join("\n  ")}
   <line x1="48" y1="${height - 60}" x2="472" y2="${height - 60}" stroke="#D8CCB0" stroke-dasharray="6 5"/>
   <text x="48" y="${height - 32}" font-size="12" fill="#6F6044">共 ${pointCount} 个知识点${
-    hasLocal ? ` · 已连续 ${streak} 天` : ""
+    dataSource !== "演示数据" ? ` · 已连续 ${streak} 天` : ""
   }</text>
   <text x="472" y="${height - 32}" font-size="12" fill="#6F6044" text-anchor="end">知穗 · 每天进步一点点</text>
 </svg>`;
@@ -260,6 +322,7 @@ export default function CheckinPage() {
       a.remove();
       URL.revokeObjectURL(url);
       showToast("success", "已保存 SVG，可直接拿去分享");
+      markSharedToday();
     } catch {
       showToast("error", "导出失败，可先用「复制文字版」");
     } finally {
@@ -267,9 +330,11 @@ export default function CheckinPage() {
     }
   };
 
-  const history = hasLocal
-    ? localDays.map((d) => ({ date: d.date, points: d.count, shared: false }))
-    : DEMO_CHECKIN_HISTORY;
+  const historyRows: { date: string; points: number; shared: boolean }[] = fromServer
+    ? (serverHist ?? [])
+    : hasLocal
+      ? localDays.map((d) => ({ date: d.date, points: d.count, shared: false }))
+      : DEMO_CHECKIN_HISTORY;
 
   return (
     <ConsoleShell
@@ -284,6 +349,15 @@ export default function CheckinPage() {
       }
       actions={
         <>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            disabled={genBusy}
+            onClick={() => void generateToday()}
+          >
+            <CornIcon name="check" />
+            {genBusy ? "生成中…" : "生成今日打卡"}
+          </button>
           <button type="button" className="btn btn-ghost" onClick={() => void copyCard()}>
             <CornIcon name="link" />
             复制文字版
@@ -370,16 +444,11 @@ export default function CheckinPage() {
           </div>
 
           <div style={{ marginTop: 12 }}>
-            <NotReady
-              what="打卡接口（/api/checkin/generate、/streak、历史）"
-              note={
-                <>
-                  后端连 <code>streak</code> 字段都还没有。所以这页的
-                  <b>连续天数与历史由本机记录推算</b>，知识结构在当天总结已生成时
-                  直接读它的结论 —— 都不是编的。要出真正的「脱敏导图」，需要后端补这三个端点。
-                </>
-              }
-            />
+            <Callout icon="ok">
+              <b>打卡已接入后端。</b>连续天数、最长连续与历史都由服务端
+              （<code>/api/checkin</code>）基于每日总结实时计算，不再依赖本机记录；
+              点「生成今日打卡」会触发当天的总结，这里立刻更新。
+            </Callout>
           </div>
         </div>
 
@@ -388,7 +457,7 @@ export default function CheckinPage() {
           <p className="sec-label">
             连续打卡
             <span className="ctag" style={{ marginLeft: 6 }}>
-              {hasLocal ? "本地记录" : "演示数据"}
+              {dataSource}
             </span>
           </p>
           <div className="card card-pad">
@@ -406,8 +475,8 @@ export default function CheckinPage() {
               )}
             </div>
             <p className="hint">
-              {hasLocal
-                ? `近 ${WINDOW_DAYS} 天。金色 = 已打卡，深金 + 描边 = 今天。`
+              {fromServer
+                ? `近 ${WINDOW_DAYS} 天。金色 = 已打卡，深金 + 描边 = 今天。数据来自服务端实时计算。`
                 : `演示数据 —— 这 ${WINDOW_DAYS} 天里有 ${dots.filter((d) => d.on).length} 天记录。生成一次「每日总结」，这里就开始记你自己的。`}
               相邻判定只看<b>有没有生成那天的总结</b>，不看时长、不算分数。
             </p>
@@ -417,12 +486,12 @@ export default function CheckinPage() {
             历史
           </p>
           <div className="card card-pad">
-            {history.length === 0 ? (
+            {historyRows.length === 0 ? (
               <p className="hint" style={{ marginTop: 0 }}>
                 完成第一次打卡后，这里会有记录。
               </p>
             ) : (
-              history.map((h, i) => (
+              historyRows.map((h, i) => (
                 <div className="run" key={h.date} style={i === 0 ? { borderTop: "none" } : undefined}>
                   <span className="when">{h.date}</span>
                   <span>

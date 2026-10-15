@@ -282,6 +282,31 @@ export interface DailyReport {
   read_at?: number | null;
 }
 
+// ---------- P6 打卡 /api/checkin ----------
+//
+// ⚠️ 后端打卡语义 = 「那天有没有生成每日总结（status='ready'）」，所以打卡数据
+// 全部从 daily_reports 派生，不另造数据。下面两个类型对应 api/checkin.py。
+
+/** GET /api/checkin/streak：连续天数 / 最长连续 / 已打卡日期集合 */
+export interface CheckinStreak {
+  /** 所有打卡日（升序） */
+  dates: string[];
+  /** 当前连续天数 */
+  streak: number;
+  /** 近 30 天内最长连续 */
+  longest: number;
+}
+
+/** GET /api/checkin/history 单条：{date, points, shared} */
+export interface CheckinHistoryItem {
+  /** YYYY-MM-DD */
+  date: string;
+  /** 当天总结的结论条数 */
+  points: number;
+  /** 是否已分享（POST /api/checkin/share 标记） */
+  shared: boolean;
+}
+
 // ---------- P7 设置：Agent 工具元数据 /api/agent/tools ----------
 
 export interface AgentTool {

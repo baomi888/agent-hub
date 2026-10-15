@@ -15,6 +15,8 @@ import type {
   RuleRow,
   WorkflowIn,
   WorkflowRow,
+  CheckinStreak,
+  CheckinHistoryItem,
 } from "./types";
 
 /**
@@ -351,6 +353,32 @@ export const api = {
       tryRequest<DailyReport>("/api/report/generate", {
         method: "POST",
         body: JSON.stringify(date ? { date } : {}),
+      }),
+  },
+
+  // ---------- P6 打卡 /api/checkin（4 端点）----------
+  //
+  // 打卡语义 = 「那天有没有生成每日总结（status='ready'）」：数据全从 daily_reports 派生。
+  // 端点**不带尾斜杠**（与项目 ~62 个端点统一，避免 308 黑洞）。
+  // streak / history 走 tryRequest：端点未部署时返回 null，页面退回本地/演示数据；
+  // generate / share 是写操作，走 request —— 真失败要让用户知道。
+  checkin: {
+    streak: () => tryRequest<CheckinStreak>("/api/checkin/streak"),
+    /** 后端返回 { history: [...] }，这里直接解开成数组 */
+    history: () =>
+      tryRequest<{ history: CheckinHistoryItem[] }>("/api/checkin/history").then(
+        (v) => (v ? v.history : null)
+      ),
+    /** 触发今日总结（同步，约 20–40 秒）；返回 {date, status, points} */
+    generate: () =>
+      request<{ date: string; status: string; points: number }>("/api/checkin/generate", {
+        method: "POST",
+      }),
+    /** 标记某天已分享（幂等 upsert） */
+    share: (date: string) =>
+      request<{ ok: boolean; date: string; shared: boolean }>("/api/checkin/share", {
+        method: "POST",
+        body: JSON.stringify({ date }),
       }),
   },
 
