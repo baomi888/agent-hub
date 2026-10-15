@@ -403,7 +403,11 @@ def get_delegation(uid: str, did: str) -> dict | None:
     _ensure_daily_tables()
     with store._get_conn() as conn:
         row = conn.execute(
-            "SELECT * FROM delegations WHERE delegation_id = ? AND owner_id = ?",
+            "SELECT d.*, c.title AS session_title "
+            "FROM delegations d "
+            "LEFT JOIN conversations c "
+            "  ON c.id = d.deliver_sid AND c.owner_id = d.owner_id "
+            "WHERE d.delegation_id = ? AND d.owner_id = ?",
             (did, uid),
         ).fetchone()
     return dict(row) if row else None
@@ -413,7 +417,11 @@ def list_delegations(uid: str) -> list[dict]:
     _ensure_daily_tables()
     with store._get_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM delegations WHERE owner_id = ? ORDER BY updated_at DESC",
+            "SELECT d.*, c.title AS session_title "
+            "FROM delegations d "
+            "LEFT JOIN conversations c "
+            "  ON c.id = d.deliver_sid AND c.owner_id = d.owner_id "
+            "WHERE d.owner_id = ? ORDER BY d.updated_at DESC",
             (uid,),
         ).fetchall()
     return [dict(r) for r in rows]
