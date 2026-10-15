@@ -720,6 +720,86 @@ def split_documents(docs, chunk_size: int, chunk_overlap: int):
     return splitter.split_documents(docs)
 
 
+# ==================== 主题标签（方案 C · A 块）====================
+
+def _extract_topics_one(text: str) -> list[str]:
+    """用 LLM 从一段文档文本里抽 3~6 个简短中文主题标签。
+
+    返回归一化后的标签列表（去空白、去重、限长、限数量）。任何失败都返回空列表——
+    主题标签是"锦上添花"，绝不能因为抽标签失败而阻断入库。
+    """
+    if not config.TOPIC_EXTRACT_ENABLED or not text or not text.strip():
+        return []
+    llm = get_llm(temperature=0, max_tokens=64)
+    prompt = (
+        "你是文档主题标注器。请阅读下面这段文档内容，提取最能概括它主题的 "
+        "3~6 个简短中文标签（每个标签不超过 6 个字，如：线性代数、考研数学、操作系统）。\n"
+        "只输出一个 JSON 数组，例如 [\"线性代数\",\"考研数学\"]，"
+        "不要解释，不要 Markdown 代码块，不要多余文字。\n\n"
+        f"【文档内容】\n{text[:4000]}"
+    )
+    try:
+        resp = llm.invoke([HumanMessage(content=prompt)])
+        raw = (resp.content or "").strip()
+        # 兼容模型偶尔用 ```json ``` 包裹的情况
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            if raw[:4].lower() == "json":
+                raw = raw[4:]
+            raw = raw.strip()
+        import json as _json
+        tags = _json.loads(raw)
+        out: list[str] = []
+        for t in tags:
+            t = str(t).strip().strip("|").strip()
+            if t and len(t) <= 12 and t not in out:
+                out.append(t)
+            if len(out) >= 8:
+                break
+        return out
+    except Exception:
+        return []
+
+
+def _inject_topics(chunks) -> None:
+    """给入库切片注入 topics 分隔串（A 块）。
+
+    按来源文件分组，每个来源只用一次 LLM（从全文前 4000 字推断），
+    再把它写成 "|t1|t2|" 形式挂到该来源所有切片的 metadata["topics"] 上。
+    首尾加 | 是为了检索时 `$contains:"|数学|"` 能精确命中成员、避免子串误伤
+    （"|英语|" 不会误中 "|英语语法|"）。
+
+    失败静默：抽不到就跳过，绝不影响正常入库。
+    """
+    if not config.TOPIC_EXTRACT_ENABLED or not chunks:
+        return
+    by_source: dict[str, list] = {}
+    for c in chunks:
+        src = c.metadata.get("source") or ""
+        if src:
+            by_source.setdefault(src, []).append(c)
+    for src, group in by_source.items():
+        text = "\n".join(c.page_content for c in group)[:4000]
+        tags = _extract_topics_one(text)
+        if not tags:
+            continue
+        tstr = "|" + "|".join(tags) + "|"
+        for c in group:
+            c.metadata["topics"] = tstr
+
+
+def topic_where(topic: str) -> dict:
+    """（D 块预留）把主题标签翻译成 Chroma 的 where 过滤条件。
+
+    用 `$contains` + 首尾 `|` 实现精确成员判定。D 块做检索偏置时直接复用，
+    不用各自拼字符串，避免口径不一致。
+    """
+    t = (topic or "").strip().strip("|").strip()
+    if not t:
+        return {}
+    return {"topics": {"$contains": f"|{t}|"}}
+
+
 # ==================== RAG 链路 ====================
 
 
@@ -742,6 +822,8 @@ def _embed_and_store(vs, chunks) -> None:
     """
     if not chunks:
         return
+    # A 块：入库级主题标签（失败静默降级，不影响入库）
+    _inject_topics(chunks)
     bs = max(1, config.EMBED_BATCH_SIZE)
     # 每批打包成 (文本, 元数据, id)，窗口内并发 embedding、窗口内按序写出
     batches = []
