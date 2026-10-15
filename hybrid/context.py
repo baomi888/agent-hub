@@ -86,7 +86,10 @@ def shared_set(shared: dict[str, Any], key: str, value: Any, *, strict: bool = T
                     f"规范前缀为 {_KEY_PREFIXES}"
                 )
     if isinstance(value, str) and len(value) > SHARED_MAX_VALUE_CHARS:
-        value = spill_value(value, key)
+        # 经模块全局查找，而不是直接引用函数名：这样测试可以 monkeypatch
+        # context.spill_value 来避免真落盘（可测性；直接叫名字会绕开替换）。
+        spiller = globals().get("spill_value")
+        value = spiller(value, key) if spiller else f"[值 {len(value)} 字符超限]"
     shared[key] = value
 
 

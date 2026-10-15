@@ -20,15 +20,18 @@ import tempfile
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
-# ⚠️ 必须在 import core.config 之前把 DATA_DIR 指到临时目录：
-# hybrid.context.spill_value 会往 DATA_DIR/shared_spill/ 落盘，
-# 不隔离的话测试会在仓库里留下运行时文件（实测踩过，已误提交过一次）。
-_TMP_DIR = tempfile.mkdtemp(prefix="hybrid_human_")
-os.environ["DATA_DIR"] = _TMP_DIR
+# ⚠️ 本测试**不改任何全局配置**（不改 config.DATA_DIR、不改 os.environ）：
+# 一旦改了，同进程内别的测试会看到被污染的路径——
+# 实测踩过：改 DATA_DIR 后 tests/test_scheduler.py 的默认路径断言直接失败。
+# 隔离办法是下面把 spill_value 换成"不落盘"的假实现（本测试只验控制流，不验落盘）。
+from hybrid import context as _hctx  # noqa: E402
 
-from core import config  # noqa: E402
+_ORIG_SPILL = _hctx.spill_value
+_hctx.spill_value = lambda value, key: f"[TEST-SPILL {len(str(value))}]"
 
-config.DATA_DIR = _TMP_DIR
+import atexit  # noqa: E402
+
+atexit.register(lambda: setattr(_hctx, "spill_value", _ORIG_SPILL))
 
 FAILS: list[str] = []
 
