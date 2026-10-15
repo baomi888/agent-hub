@@ -516,6 +516,8 @@ def due_subjects(job_key: str, planned_at: int) -> list[str]:
                 (planned_at,),
             ).fetchall()
         return [r["delegation_id"] for r in rows]
+    if job_key == "profile.aggregate":
+        return store.get_owners_with_tags()
     return []
 
 
@@ -528,7 +530,22 @@ def run_one(job_key: str, subject_id: str, planned_at: int) -> dict:
         return {"tokens_out": 0, "status": rep.status}
     if job_key == "delegate.dispatch":
         return _dispatch_one(subject_id, planned_at)
+    if job_key == "profile.aggregate":
+        return aggregate_user_profile(subject_id, planned_at)
     return {}
+
+
+def aggregate_user_profile(owner: str, planned_at: int) -> dict:
+    """C2：聚合单个用户的兴趣画像快照。
+
+    取 Top N 权重标签 + 权重和，零 LLM 调用（纯结构化、零成本、零失败风险），
+    存 user_profiles 表；失败由 worker 的 _execute_one 兜底（转 failed，不掀翻进程）。
+    """
+    tags = store.get_user_tags(owner, limit=config.PROFILE_TOP_TAGS)
+    top_tags = [{"tag": t["tag"], "weight": t["weight"]} for t in tags]
+    weight_sum = float(sum(t["weight"] for t in tags))
+    store.save_user_profile(owner, top_tags, weight_sum, len(top_tags), int(planned_at))
+    return {"tokens_out": 0, "status": "succeeded", "tag_count": len(top_tags)}
 
 
 def _dispatch_one(did: str, planned_at: int) -> dict:

@@ -43,6 +43,7 @@ EXPECTED_CRONS = {
     "report.daily": "30 23 * * *",
     "report.backfill": "0 4 * * *",
     "housekeeping": "15 4 * * *",
+    "profile.aggregate": "30 2 * * *",
 }
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -423,7 +424,7 @@ class TestScheduleApi(unittest.TestCase):
         self.assertEqual(sorted(body), ["jobs", "worker"])
         self.assertEqual(body["worker"]["status"], "down", "没有心跳就是 down")
         self.assertIsNone(body["worker"]["heartbeat_age_seconds"])
-        self.assertEqual(len(body["jobs"]), 5)
+        self.assertEqual(len(body["jobs"]), len(EXPECTED_CRONS))
 
         sched.heartbeat(pid=9999, version="pytest")
         body = self.client.get("/api/schedule/health").json()

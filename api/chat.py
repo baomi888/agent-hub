@@ -399,7 +399,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                     pipe = await asyncio.to_thread(pipelines.get_or_create, uid, kb_id)
                     query = await asyncio.to_thread(rewrite_query, req.question, history)
                     docs_scores = await asyncio.to_thread(
-                        pipe.retrieve_with_score, query, req.top_k
+                        pipe.retrieve_with_score, query, req.top_k, uid
                     )
                     if docs_scores:
                         refs_md = pipe._format_refs(docs_scores)
@@ -668,7 +668,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 yield _sse("status", {"text": f"已结合上下文改写检索词：{query}"})
             try:
                 pipe = await asyncio.to_thread(pipelines.get_or_create, uid, kb_id)
-                docs_scores = await asyncio.to_thread(pipe.retrieve_with_score, query, req.top_k)
+                docs_scores = await asyncio.to_thread(pipe.retrieve_with_score, query, req.top_k, uid)
             except Exception as e:
                 yield _sse("error", {"detail": describe_api_error(e)})
                 return

@@ -530,9 +530,9 @@ def _cache_invalidate(collection_name: str) -> None:
         _BM25_NEG.pop(collection_name, None)
 
 
-def _cache_get(collection_name: str, question: str, top_k: int):
-    """命中返回结果的浅拷贝，防止调用方误改污染缓存。"""
-    key = (collection_name, question, top_k)
+def _cache_get(collection_name: str, question: str, top_k: int, owner: str | None = None):
+    """命中返回结果的浅拷贝，防止调用方误改污染缓存。owner 纳入 key：避免不同用户串结果。"""
+    key = (collection_name, question, top_k, owner)
     with _RETRIEVE_CACHE_LOCK:
         hit = _RETRIEVE_CACHE.get(key)
         if hit is not None:
@@ -541,13 +541,47 @@ def _cache_get(collection_name: str, question: str, top_k: int):
     return None
 
 
-def _cache_set(collection_name: str, question: str, top_k: int, result) -> None:
-    key = (collection_name, question, top_k)
+def _cache_set(collection_name: str, question: str, top_k: int, result,
+              owner: str | None = None) -> None:
+    key = (collection_name, question, top_k, owner)
     with _RETRIEVE_CACHE_LOCK:
         _RETRIEVE_CACHE[key] = list(result)
         _RETRIEVE_CACHE.move_to_end(key)
         while len(_RETRIEVE_CACHE) > _RETRIEVE_CACHE_MAX:
             _RETRIEVE_CACHE.popitem(last=False)
+
+
+def _apply_profile_bias(docs_scores, owner):
+    """D 块：读取用户画像标签，对命中主题的片段做减距离偏置并重排。"""
+    from core import session as _session
+    profile = _session.get_user_tags(owner, limit=config.RETRIEVAL_BIAS_TOP)
+    if not profile:
+        return docs_scores
+    profile_tags = {p["tag"] for p in profile}
+    return _bias_rerank(docs_scores, profile_tags, config.RETRIEVAL_BIAS_ALPHA)
+
+
+def _bias_rerank(docs_scores, profile_tags, alpha):
+    """按「文档 topics 与画像标签重合度」减距离重排；返回 (Document, 原始distance)。
+
+    双向包含匹配：画像标签 p 与文档主题段 s 任一方向包含即算命中，
+    以兼容「数学」(粗) 与「数学分析」(细) 这类粗细不一致的标签。
+    distance 越小越相关，命中越多 distance 减得越多 → 排越前；
+    最终返回的 distance 仍是原始值，调用方按它换算相似度/阈值不受影响。
+    """
+    biased = []
+    for d, distance in docs_scores:
+        topics = d.metadata.get("topics", "") or ""
+        segs = {s for s in topics.strip("|").split("|") if s}
+        overlap = 0
+        if segs and profile_tags:
+            for p in profile_tags:
+                if any(p in s or s in p for s in segs):
+                    overlap += 1
+        new_distance = max(0.0, float(distance) - alpha * overlap) if overlap else float(distance)
+        biased.append((d, float(distance), new_distance))
+    biased.sort(key=lambda x: x[2])
+    return [(d, dist) for d, dist, _ in biased]
 
 
 def _sources_cache_get(collection_name: str):
@@ -1103,16 +1137,17 @@ class RagPipeline:
             return None
         return _rrf_merge(vec_cands, kw_pairs, kw_docs, config.HYBRID_RRF_K)
 
-    def retrieve_with_score(self, question: str, top_k: int):
+    def retrieve_with_score(self, question: str, top_k: int, owner: str | None = None):
         """检索 top_k 条相关片段，返回 [(Document, distance), ...]。distance 越小越相关。
 
         不是直接取 top-k：先多捞几倍候选（默认 3 倍），丢掉明显不相关的，
         再用 MMR 去掉互相重复的，最后截到 top_k。详见 select_diverse。
         开启混合检索时，向量候选再并上 BM25 关键词候选并用 RRF 融合
         （专有名词 / 缩写 / 编号靠这条补召回）。详见 _rrf_merge。
-        相同 (问题, top_k) 的检索结果按库缓存，命中时省掉一次 embedding + 向量查询。
+        相同 (问题, top_k, owner) 的检索结果按库缓存，命中时省掉一次 embedding + 向量查询。
+        owner 不为空时按用户画像做检索偏置（D 块），且缓存 key 含 owner 避免串结果。
         """
-        cached = _cache_get(self.collection_name, question, top_k)
+        cached = _cache_get(self.collection_name, question, top_k, owner)
         if cached is not None:
             return cached
 
@@ -1147,7 +1182,11 @@ class RagPipeline:
             if result is None:
                 result = select_diverse(vec_cands, top_k)
 
-        _cache_set(self.collection_name, question, top_k, result)
+        # D 块：按用户画像偏置（仅重排，不改原始 distance；含 owner 避免跨用户串缓存）
+        if owner and config.RETRIEVAL_BIAS_ENABLED and result:
+            result = _apply_profile_bias(result, owner)
+
+        _cache_set(self.collection_name, question, top_k, result, owner)
         return result
 
     @staticmethod

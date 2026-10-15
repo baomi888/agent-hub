@@ -139,6 +139,16 @@ def _init_db() -> None:
                 PRIMARY KEY (owner_id, tag)
             );
             CREATE INDEX IF NOT EXISTS idx_usertag_owner ON user_tags(owner_id);
+
+            -- 用户画像快照（方案 C · C2 块）：由 worker 定时聚合 user_tags 生成，
+            -- 供前端展示「用户兴趣画像」与 D 块检索偏置读取。零 LLM 调用。
+            CREATE TABLE IF NOT EXISTS user_profiles (
+                owner_id    TEXT PRIMARY KEY,
+                top_tags   TEXT NOT NULL,        -- JSON: [{"tag":..., "weight":...}, ...] 权重降序
+                weight_sum REAL NOT NULL DEFAULT 0,
+                tag_count  INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL
+            );
         """)
 
         # 迁移：老库补 refs 列（已存在则忽略）
@@ -335,6 +345,58 @@ def get_user_tags(owner: str, limit: int = 30) -> list[dict]:
             (owner, limit),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ==================== 用户画像快照（方案 C · C2 块）====================
+
+def get_owners_with_tags(limit: int | None = None) -> list[str]:
+    """返回所有沉淀过画像标签的 owner（供 worker 枚举聚合对象）。"""
+    with _get_conn() as conn:
+        sql = "SELECT DISTINCT owner_id FROM user_tags"
+        if limit:
+            rows = conn.execute(sql + " LIMIT ?", (int(limit),)).fetchall()
+        else:
+            rows = conn.execute(sql).fetchall()
+    return [r["owner_id"] for r in rows]
+
+
+def save_user_profile(owner: str, top_tags: list[dict], weight_sum: float,
+                      tag_count: int, updated_at: int) -> None:
+    """upsert 用户画像快照（C2 聚合结果）。失败静默。"""
+    if not owner:
+        return
+    try:
+        import json
+        with _get_conn() as conn:
+            conn.execute(
+                "INSERT INTO user_profiles (owner_id, top_tags, weight_sum, tag_count, updated_at) "
+                "VALUES (?, ?, ?, ?, ?) ON CONFLICT(owner_id) DO UPDATE SET "
+                "top_tags=excluded.top_tags, weight_sum=excluded.weight_sum, "
+                "tag_count=excluded.tag_count, updated_at=excluded.updated_at",
+                (owner, json.dumps(top_tags, ensure_ascii=False), float(weight_sum),
+                 int(tag_count), int(updated_at)),
+            )
+    except Exception:
+        pass
+
+
+def get_user_profile(owner: str) -> dict | None:
+    """取用户画像快照；未聚合过返回 None。"""
+    with _get_conn() as conn:
+        row = conn.execute(
+            "SELECT owner_id, top_tags, weight_sum, tag_count, updated_at "
+            "FROM user_profiles WHERE owner_id = ?", (owner,)
+        ).fetchone()
+    if not row:
+        return None
+    import json
+    return {
+        "owner_id": row["owner_id"],
+        "top_tags": json.loads(row["top_tags"]),
+        "weight_sum": row["weight_sum"],
+        "tag_count": row["tag_count"],
+        "updated_at": row["updated_at"],
+    }
 
 
 def get_messages(
