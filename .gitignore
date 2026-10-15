@@ -113,3 +113,35 @@ data/test.pdf
 # 里面是 jsdelivr 下载的 97 个 unicode-range 分片 + 合并出的 6.9MB 完整 TTF，
 # 由 tools/fetch_lxgw_parts.py 重建。真正要入库的是 frontend/public/fonts/ 下的产物。
 tools/_fontsrc/
+
+# ================= 隐私材料 / 内部工作文档（2026-10-15 清理 + 护栏，严禁再入库）=================
+# 背景：本仓库为公开仓库。以下为 10-15 全面排查（文件名模式 + 全文内容双层扫描）后
+# 移出的不应公开内容 + 预防规则。package-lock.json 不在其中（CI 的 npm ci 依赖，保留跟踪）。
+docs/申报书B3定稿.md
+docs/知穗Agent_挑战杯申报书_已填.docx
+docs/挑战杯_*
+docs/我的工作_*
+docs/前端页面与接口映射_v*
+docs/前后端可更新点_*
+docs/团队分支分析_*
+docs/申报事实底稿_*
+docs/知穗_UI设计规范_*
+docs/今晚能做什么_*
+docs/分支合并预演报告_*
+docs/功能测试清单_*
+docs/可行性分析_*
+docs/接口契约对齐_*
+docs/产品发展方向讨论/
+/we/
+checks.json
+outputs/
+tools/app_content.py
+tools/apply_application.py
+tools/build_deck.py
+tools/docx_cell.py
+tools/revise_application.py
+prototypes/知穗_*
+规范/知穗Agent_团队研发规范手册_*
+知穗-面向大学生个性化AI学习助手/
+知穗-面向大学生个性化AI学习助手-2/
+/_*

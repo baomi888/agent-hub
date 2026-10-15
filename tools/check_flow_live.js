@@ -14,15 +14,16 @@
 // 端口说明：本机 3000 被 VMware NAT 服务（vmnat.exe）独占
 //   （SO_EXCLUSIVEADDRUSE → EACCES，不能共存也不该杀），前端 dev 用 3100。
 //
-// 前置条件：后端 :8000 已起；用户 flowuitest / FlowTest2026x 已注册，
+// 前置条件：后端 :8000 已起；测试账号已注册（经 BAOMI_USER / BAOMI_PASS 环境变量传入），
 //   且已有 1 个自定义工作流「UI 验证·三段式研究流」（本脚本用名称定位它）。
 const puppeteer = require("puppeteer-core");
 const path = require("path");
 
 const CHROME = "C:/Program Files/Google/Chrome/Application/chrome.exe";
 const BASE = process.env.BAOMI_BASE || "http://localhost:3100";
-const USER = process.env.BAOMI_USER || "flowuitest";
-const PASS = process.env.BAOMI_PASS || "FlowTest2026x";
+const USER = process.env.BAOMI_USER || "";
+const PASS = process.env.BAOMI_PASS || "";
+if (!USER || !PASS) { console.error("缺少 BAOMI_USER / BAOMI_PASS 环境变量（测试账号）"); process.exit(1); }
 const SHOT_DIR = path.join(__dirname, "..", "docs", "实机截图", "2026-10-14");
 
 let pass = 0, fail = 0;

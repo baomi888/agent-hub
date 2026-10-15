@@ -15,8 +15,9 @@ const puppeteer = require("puppeteer-core");
 
 const CHROME = "C:/Program Files/Google/Chrome/Application/chrome.exe";
 const BASE = process.env.BAOMI_BASE || "http://localhost:3100";
-const USER = process.env.BAOMI_USER || "flowuitest";
-const PASS = process.env.BAOMI_PASS || "FlowTest2026x";
+const USER = process.env.BAOMI_USER || "";
+const PASS = process.env.BAOMI_PASS || "";
+if (!USER || !PASS) { console.error("缺少 BAOMI_USER / BAOMI_PASS 环境变量（测试账号）"); process.exit(1); }
 const SHOT_DIR = process.env.OUT_DIR || "C:/Users/HUAWEI/AppData/Local/Temp/welcome_verify";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
