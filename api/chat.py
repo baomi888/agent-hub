@@ -17,10 +17,16 @@ SSE 事件协议：
                    检索依据强度。weak=true 时前端在回答上方挂「依据较弱」提示条，
                    数据来源是 kb/rag_core.py::assess_grounding()
   event: token      { text: "...", refs: "" }  增量 token
+  event: reasoning  { text: "..." }           思考增量（delta，前端自行累加）
+                   仅在服务端配置了思考模型时出现（.env 的 DEEPSEEK_REASONER_MODEL）。
+                   前端渲染成可收纳的「思考过程」块；未配置时此事件**完全不出现**。
   event: title      { title: "..." }          自动生成的会话标题（仅首轮）
-  event: done       { answer: "...", refs: "", title: "", mode: "", message_id: 123, run_id: "" }
+  event: done       { answer: "...", refs: "", title: "", mode: "", message_id: 123,
+                      run_id: "", reasoning: "..." }
                     message_id 是 assistant 消息在 messages 表里的 id，赞踩按它落库
                     run_id 仅 hybrid 模式有值：人工切换 / 执行日志按它寻址
+                    reasoning 是**完整思考文本**：流式期间前端逐帧累加，
+                    断线重连/刷新的前端只能靠这一份拿回完整思考块（未启用时为空串）
   event: error      { detail: "..." }
   —— 以下仅 hybrid 模式 ——
   event: hybrid_start  { run_id: "...", mode: "workflow|agent" }  起跑即发，带初始模式

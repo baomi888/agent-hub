@@ -166,6 +166,48 @@ else
   fi
 fi
 
+# ---------- 6. 本轮新增契约（人工恢复 / 思考流）----------
+# 新增于 2026-10-15。为什么用 OpenAPI 核对而不是直接打端点：
+#   - resume 需要"一条 status=awaiting_human 的真实执行"才可能返回 200，
+#     拿不到就只会看到 404/409，**那不代表端点不存在**，直接打会误报；
+#   - 服务端 /openapi.json 是后端自己生成的权威路由清单，免登录、不会误报。
+echo "--- 本轮新增契约（用 OpenAPI 权威核对）---"
+_oa=$(req GET "/openapi.json"); _code=$(code_of "$_oa"); _body=$(body_of "$_oa")
+if [ "$_code" != "200" ]; then
+  echo "SKIP  /openapi.json 返回 $_code，跳过新增契约核对"
+else
+  # 6.1 人工恢复端点：human 节点挂起后由此唤醒（注意尾斜杠，FastAPI 不做重定向）
+  if printf '%s' "$_body" | grep -q '/api/hybrid/runs/{run_id}/resume'; then
+    ok "新增 POST /api/hybrid/runs/{run_id}/resume（人工挂起后唤醒）"
+  else
+    bad "缺 /api/hybrid/runs/{run_id}/resume" "human 节点挂起后前端没有唤醒入口"
+  fi
+
+  # 6.2 人工切换端点（既有，一并确认没被改掉路径）
+  if printf '%s' "$_body" | grep -q '/api/hybrid/runs/{run_id}/switch'; then
+    ok "POST /api/hybrid/runs/{run_id}/switch（改道，与 resume 语义不同）"
+  else
+    bad "缺 /api/hybrid/runs/{run_id}/switch" "人工切换入口不见了"
+  fi
+
+  # 6.3 hybrid 模式仍在 ChatMode 里（后端认它，前端才敢加进 tab）
+  if printf '%s' "$_body" | grep -q 'hybrid'; then
+    ok "OpenAPI 里能看到 hybrid 模式相关描述"
+  else
+    echo "SKIP  OpenAPI 描述里未见 hybrid 字样（不影响对接，模式取值靠文档约定）"
+  fi
+fi
+
+# 6.4 思考流：需要服务端配了思考模型才可能出现 reasoning 事件。
+#     这里只做"是否具备条件"的判断，不硬造一次真实模型调用（会烧 token 且要 Key）。
+echo "--- 思考流前置条件 ---"
+if [ -n "${DEEPSEEK_REASONER_MODEL:-}" ]; then
+  ok "已设 DEEPSEEK_REASONER_MODEL=$DEEPSEEK_REASONER_MODEL ⇒ 问答流会出现 event: reasoning"
+else
+  echo "INFO  未设 DEEPSEEK_REASONER_MODEL ⇒ 不会出现 event: reasoning（前端应把它当可选事件）"
+  echo "      前端务必按「事件可能完全不出现」实现，否则思考块会一直空转。"
+fi
+
 # ---------- 汇总 ----------
 echo
 echo "===================================="
