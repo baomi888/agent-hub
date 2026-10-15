@@ -73,7 +73,7 @@ case "${1:-deploy}" in
   stop)    do_stop;   exit 0 ;;
   status)  do_status; exit 0 ;;
   logs)    do_logs;   exit 0 ;;
-  restart) do_stop; "$0" start; exit 0 ;;
+  restart) do_stop; bash "$0" start; exit 0 ;;
   env)     : ;;                       # 继续往下走到 .env 环节
   start)   SKIP_BUILD=1 ;;
   deploy)  SKIP_BUILD=0 ;;
