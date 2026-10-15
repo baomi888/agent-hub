@@ -841,6 +841,9 @@ def _extract_user_tags(question: str, answer: str) -> list[str]:
 
     只允许输出 USER_PROFILE_TAGS 里的标签，超出一律丢弃——这是防标签表爆炸的硬闸门。
     任何失败都返回空列表（画像只是辅助，绝不能拖慢或拖垮问答）。
+
+    ⚠️ `get_llm()` 必须在 try 之内：它构造 `ChatOpenAI`，没配 key 时**构造即抛**
+    `openai.OpenAIError`，不会等到 invoke。放在 try 之外会让"静默降级"的承诺失效。
     """
     if not config.USER_TAG_HOOK_ENABLED:
         return []
@@ -849,17 +852,17 @@ def _extract_user_tags(question: str, answer: str) -> list[str]:
     if not q and not a:
         return []
     vocab = "、".join(USER_PROFILE_TAGS)
-    llm = get_llm(temperature=0, max_tokens=48)
-    prompt = (
-        "你是用户画像标注器。根据下面的「用户提问 + AI 回答（节选）」，判断该用户当前"
-        "关注的主题，从给定词表里挑选 0~3 个最贴切的标签。\n"
-        "只允许输出词表中的标签；若都贴不上就输出空数组 []。"
-        "只输出一个 JSON 数组（如 [\"考研数学\",\"编程开发\"]），不要解释、不要 Markdown。\n\n"
-        f"【可选标签】\n{vocab}\n\n"
-        f"【用户提问】\n{q[:300]}\n\n"
-        f"【AI 回答（节选）】\n{a[:800]}"
-    )
     try:
+        llm = get_llm(temperature=0, max_tokens=48)
+        prompt = (
+            "你是用户画像标注器。根据下面的「用户提问 + AI 回答（节选）」，判断该用户当前"
+            "关注的主题，从给定词表里挑选 0~3 个最贴切的标签。\n"
+            "只允许输出词表中的标签；若都贴不上就输出空数组 []。"
+            "只输出一个 JSON 数组（如 [\"考研数学\",\"编程开发\"]），不要解释、不要 Markdown。\n\n"
+            f"【可选标签】\n{vocab}\n\n"
+            f"【用户提问】\n{q[:300]}\n\n"
+            f"【AI 回答（节选）】\n{a[:800]}"
+        )
         resp = llm.invoke([HumanMessage(content=prompt)])
         raw = (resp.content or "").strip()
         if raw.startswith("```"):

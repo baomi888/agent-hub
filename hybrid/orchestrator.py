@@ -155,6 +155,26 @@ class HybridOrchestrator:
                         break
                     continue
 
+                # ---- 人工挂起：不是终态，也不是切换 ----
+                # 工作流状态（含 next_node 续跑锚点）已在 ctx 里，这里只落盘并结束本轮。
+                # 恢复靠 POST /api/hybrid/runs/{run_id}/resume：它把 human_resumed 标记
+                # 写回快照再重新起跑，工作流从锚点的下一个节点继续（不重跑已完成的节点）。
+                if result.status == "awaiting_human":
+                    ctx.status = "awaiting_human"
+                    ctx.workflow_state["suspended_at"] = result.node_id
+                    store.save_run(ctx)  # 挂起即快照
+                    yield ExecEvent(
+                        event_type="human_intervention",
+                        mode=ctx.current_mode,
+                        node_id=result.node_id,
+                        decision={
+                            "rule": "human_suspend",
+                            "reason": "任务已挂起，等待人工确认后恢复",
+                        },
+                        payload={"decision": "awaiting_human", "run_id": ctx.run_id},
+                    )
+                    break
+
                 # ---- 无信号：按引擎结果直接落终态 ----
                 if not result.signal:
                     if result.status == "completed":

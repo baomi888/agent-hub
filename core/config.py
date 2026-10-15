@@ -187,6 +187,17 @@ HYBRID_NODE_TIMEOUT = int(os.getenv("HYBRID_NODE_TIMEOUT", "120"))
 # 工作流内 LLM 节点的 max_tokens 上限（project memory 硬约束：内部推理调用必须显式限长）
 HYBRID_LLM_MAX_TOKENS = int(os.getenv("HYBRID_LLM_MAX_TOKENS", "2048"))
 
+# ---------- Agent 主循环（api/chat.py 的 agent 模式 / hybrid 的 Agent 引擎）----------
+# Agent 一次回答的 max_tokens 上限。0 = 用平台默认（保持改造前行为）。
+#
+# 为什么留这个开关：hybrid 的 Agent 引擎已配了步数/时长/token 三重预算护栏，
+# 但护栏是"绕开"主循环算的；主循环自己不封顶的话，单次回答仍可无界增长。
+# 默认 0 是为了不动既有行为（改默认值会让现有回答长度突变），
+# 生产建议按 HYBRID_AGENT_TOKEN_BUDGET 同量级设置（如 2048）。
+AGENT_LLM_MAX_TOKENS = int(os.getenv("AGENT_LLM_MAX_TOKENS", "0"))
+# 标题生成：只要 ≤15 字，给输出兜底防跑偏（原为硬编码 32，提到配置便于调）
+TITLE_MAX_TOKENS = int(os.getenv("TITLE_MAX_TOKENS", "32"))
+
 # ---------- 标签钩子（方案 C：入库级主题 + 对话级用户画像）----------
 # A 块：文件入库时对每个来源抽主题标签，写入每片 metadata["topics"]（"|t1|t2|" 分隔串），
 #   后续检索（D 块）可用 Chroma `where: {"topics": {"$contains": "|t1|"}}` 精确过滤。

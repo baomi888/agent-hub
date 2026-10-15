@@ -27,9 +27,22 @@ from typing import Any, AsyncIterator, Literal
 from pydantic import BaseModel, Field
 
 from core import config
-from hybrid.context import ExecEvent, TaskContext
+from hybrid.context import ExecEvent, TaskContext, shared_set
 from hybrid.engine import AgentEngineFactory, ControlFn, EngineResult
 from hybrid.expr import eval_condition
+
+
+class _Suspend(Exception):
+    """人工节点挂起信号：用异常穿透 _run_with_retry，避免被当成节点失败。
+
+    为什么需要专门一条通道：`_run_with_retry` 把节点抛的异常统一转成 error 事件，
+    而"挂起"不是失败——它是正常让出。用异常穿透后由 stream() 显式接住。
+    """
+
+    def __init__(self, node_id: str, next_node: str | None) -> None:
+        self.node_id = node_id
+        self.next_node = next_node
+        super().__init__(f"人工节点 {node_id} 挂起")
 
 
 # ==================== 定义模型 ====================
@@ -193,6 +206,26 @@ class WorkflowEngine:
                     return
                 agent_already_handled = wf_state.pop("agent_handled", None) == current
 
+                # 人工节点恢复：拿到 human_resumed 标记就**不重新执行节点体**，
+                # 直接记录批准值 + 留一条恢复事件 + 路由到下一节点。
+                # 这样既不会重复挂起，也保证不重跑已完成的节点。
+                if node.type == "human" and wf_state.get("human_resumed") == current:
+                    wf_state.pop("human_resumed")
+                    wf_state.pop("suspended_at", None)
+                    _key = node.config.get("output_key")
+                    if _key:
+                        shared_set(ctx.shared, _key, node.config.get("resume_value", "approved"))
+                    yield ExecEvent(
+                        event_type="human_intervention", mode="workflow", node_id=current,
+                        decision={"rule": "human_resume", "reason": "人工已确认，从断点继续"},
+                        payload={"decision": "approved", "resumed": True},
+                    )
+                    nxt, _ = self._route(current, ctx)
+                    wf_state["completed"].append(current)
+                    current = nxt
+                    wf_state["next_node"] = current
+                    continue
+
                 if not agent_already_handled:
                     yield ExecEvent(
                         event_type="node_enter", mode="workflow", node_id=current,
@@ -201,10 +234,25 @@ class WorkflowEngine:
                     # 直接消费节点生成器：事件原样透传给编排器，
                     # error 事件既透传（留痕）又作为失败信号落锤
                     error: str | None = None
-                    async for ev in self._run_with_retry(ctx, node, control, wf_state):
-                        if ev.event_type == "error":
-                            error = ev.payload.get("error", "节点执行失败")
-                        yield ev
+                    try:
+                        async for ev in self._run_with_retry(ctx, node, control, wf_state):
+                            if ev.event_type == "error":
+                                error = ev.payload.get("error", "节点执行失败")
+                            yield ev
+                    except _Suspend as sp:
+                        # 人工挂起：正常让出，不是失败。
+                        # 锚点指向**被挂起的节点本身**（不是它的下一节点）——
+                        # 恢复时要重新进入这个节点，才能在那里记录"人工已批准"。
+                        # 若锚点直接指向下游，恢复后就直接跑下游了，批准值永远写不进去。
+                        # 注意：**不把该节点计入 completed** —— 它还没完成，恢复后才算数。
+                        wf_state["next_node"] = sp.node_id
+                        wf_state["suspended_at"] = sp.node_id
+                        ctx.status = "awaiting_human"
+                        self.result = EngineResult(
+                            status="awaiting_human", node_id=sp.node_id,
+                            output_key=node.config.get("output_key"), signal="human_suspend",
+                        )
+                        return
                     if error is not None:
                         # 失败路径：on_fail 跳转优先，否则上报切换判定
                         if node.on_fail:
@@ -270,6 +318,10 @@ class WorkflowEngine:
                     yield ev
             except asyncio.TimeoutError:
                 err = f"节点超时（>{timeout}s）"
+            except _Suspend:
+                # 挂起必须原样穿透：它不是失败！若落到下面的 except Exception，
+                # 会被转成 error 事件 + 重试，挂起就静默失效了（实测踩过）。
+                raise
             except Exception as e:  # 节点内部异常兜底：不炸整个流程
                 err = f"{type(e).__name__}: {e}"
             finally:
@@ -303,13 +355,58 @@ class WorkflowEngine:
             # 条件节点不做事：它只是路由汇合点，分支逻辑在边的 condition 上
             return
         elif node.type == "human":
-            # 本期骨架：人工节点自动通过，只留事件痕迹（要求 2 的占位能力）
+            # 人工节点。两种行为，由 config.suspend 决定：
+            #   suspend=true  —— **真挂起**：存续跑锚点、让出执行、等人工恢复
+            #   suspend 缺省  —— 自动通过（保持既有行为，避免老流程突然卡住）
+            #
+            # 挂起不是"停止"：ctx.status 落 awaiting_human，工作流状态（含 next_node）
+            # 已写进快照，恢复时从**下一个节点**继续，不重跑已完成的节点。
+            # 这条让出路径与 requires_agent 完全同构，复用同一套断点机制。
             key = node.config.get("output_key")
+            should_suspend = bool(node.config.get("suspend", False))
+            # 注意：这里没有 stream() 里的 wf_state 局部名，工作流状态要经 ctx 取
+            wf_state = ctx.workflow_state
+            resumed = wf_state.pop("human_resumed", None) == node.id
+
+            if should_suspend and not resumed:
+                nxt, _ = self._route(node.id, ctx)
+                wf_state["next_node"] = nxt
+                wf_state["suspended_at"] = node.id
+                # 记下挂起时的上下文，恢复接口要按它校验归属与判断是否已恢复
+                ctx.status = "awaiting_human"
+                yield ExecEvent(
+                    event_type="human_intervention",
+                    mode="workflow",
+                    node_id=node.id,
+                    decision={
+                        "rule": "human_suspend",
+                        "reason": f"节点 {node.id} 需要人工确认后才继续",
+                        "next_node": nxt,
+                    },
+                    payload={
+                        "prompt": render_template(node.config.get("prompt", ""), ctx),
+                        "decision": "awaiting_human",
+                    },
+                )
+                # ⚠️ 必须用异常穿透，不能用 return：
+                # `_exec_human` 是**异步生成器**，生成器里的 return 只是"正常结束"，
+                # 调用方（_run_with_retry）会当成节点执行成功，接着跑下一个节点——
+                # 挂起就静默失效了（实测踩过）。
+                raise _Suspend(node.id, nxt)
+
+            # 恢复后（或未要求挂起）走这里：把批准结果写进 shared
             if key:
-                ctx.shared[key] = "approved"
+                shared_set(ctx.shared, key, node.config.get("resume_value", "approved"))
             yield ExecEvent(
                 event_type="human_intervention", mode="workflow", node_id=node.id,
-                payload={"prompt": render_template(node.config.get("prompt", ""), ctx), "decision": "auto_approve"},
+                decision={
+                    "rule": "human_resume" if resumed else "human_auto",
+                    "reason": "人工已确认，继续执行" if resumed else "未要求挂起，自动通过",
+                },
+                payload={
+                    "prompt": render_template(node.config.get("prompt", ""), ctx),
+                    "decision": "approved" if resumed else "auto_approve",
+                },
             )
         else:
             yield ExecEvent(
