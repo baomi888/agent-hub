@@ -73,7 +73,12 @@ def spill_value(value: Any, key: str) -> str:
 
 
 def shared_set(shared: dict[str, Any], key: str, value: Any, *, strict: bool = True) -> None:
-    """写 shared 的推荐入口：校验键 + 超限落盘。strict=False 用于恢复历史快照。"""
+    """写 shared 的推荐入口：校验键 + 超限落盘。strict=False 用于恢复历史快照。
+
+    注意：节点产出（`workflow.py` 的 `_exec_llm/_exec_tool`、`agent_engine` 的最终
+    结果）**刻意不走这里**，而是直接赋值——产出全文要被下游模板逐字读取，落盘成指针
+    会破坏渲染。理由详见 `hybrid/workflow.py::_exec_llm` 的 docstring。
+    """
     if not isinstance(key, str) or not key.strip():
         raise SharedKeyError("shared 的键不能为空")
     if strict:

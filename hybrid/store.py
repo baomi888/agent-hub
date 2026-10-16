@@ -71,7 +71,11 @@ DEFAULT_WORKFLOW_DEF: dict = {
 
 # ---------- 数据库路径 ----------
 def _db_path() -> str:
-    os.makedirs(config.DATA_DIR, exist_ok=True)
+    """数据库文件路径（纯计算，不做 IO）。
+
+    目录创建挪到 `_conn()` 真正建连前做：`_conn()` 每次调用都要取一次路径，
+    此前顺带一次 `os.makedirs(exist_ok=True)`，等于每条 SQL 前都白做一次系统调用。
+    """
     return os.path.join(config.DATA_DIR, "hybrid.db")
 
 
@@ -89,6 +93,7 @@ def _conn() -> sqlite3.Connection:
             conn.close()
         except Exception:
             pass
+    os.makedirs(os.path.dirname(path), exist_ok=True)  # 建连前确保目录存在（路径可能被测试改到临时目录）
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")

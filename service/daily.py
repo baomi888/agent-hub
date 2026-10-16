@@ -352,19 +352,6 @@ def get_report(uid: str, date: str) -> Report | None:
     return _row_to_report(row) if row else None
 
 
-def mark_read(uid: str, date: str) -> bool:
-    """标记总结已读（更新 read_at）。"""
-    _ensure_daily_tables()
-    rid = _report_id(uid, date)
-    now = int(time.time())
-    with store._get_conn() as conn:
-        cur = conn.execute(
-            "UPDATE daily_reports SET read_at = ? WHERE report_id = ? AND owner_id = ?",
-            (now, rid, uid),
-        )
-        return cur.rowcount > 0
-
-
 # ==================== 每日委托 ====================
 
 def save_delegation(

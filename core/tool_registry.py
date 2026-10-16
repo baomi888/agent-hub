@@ -169,10 +169,6 @@ def assert_meta_complete() -> None:
         )
 
 
-def get_meta(name: str) -> ToolMeta | None:
-    return TOOL_META.get(name)
-
-
 def all_meta() -> list[dict]:
     """给前端编排面板用的工具清单（含发现状态）。"""
     from agent.tools import AGENT_TOOLS
@@ -289,10 +285,6 @@ def mark_activated(name: str) -> None:
 def reset_activated() -> None:
     """清空激活状态。给测试用；生产上重启进程即等价。"""
     _activated.clear()
-
-
-def is_activated(name: str) -> bool:
-    return name in _activated
 
 
 # 导入即校验：漏配元数据要让服务起不来，而不是跑起来才发现

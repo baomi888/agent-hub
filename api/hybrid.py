@@ -108,7 +108,8 @@ def upsert_rule(name: str, req: RuleIn, uid: str = Depends(get_current_user)) ->
     if req.condition.strip():
         try:
             ast.parse(req.condition.strip(), mode="eval")
-        except SyntaxError as e:
+        except (SyntaxError, ValueError) as e:
+            # ValueError：含 NUL 等字符时 ast.parse 抛的是它；两者同属"条件写错了"
             raise HTTPException(status_code=400, detail=f"条件表达式语法错误：{e}")
     store.upsert_rule(
         uid, name, req.signal, req.condition, req.action,

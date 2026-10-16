@@ -29,6 +29,7 @@ tests/test_slash_no_redirect.py）。
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import time
 
@@ -116,8 +117,14 @@ def _require_own_session(uid: str, sid: str) -> None:
         raise HTTPException(status_code=404, detail=f"会话不存在：{sid}")
 
 
-def _enabled_count(uid: str) -> int:
-    return sum(1 for d in daily.list_delegations(uid) if d.get("enabled"))
+def _count_enabled(items: list[dict]) -> int:
+    """统计一批委托里启用中的条数。
+
+    「启用数量上限」在建/改两处都要判，收敛成一个纯函数，避免两处各写一遍
+    `sum(1 for d ... if d.get("enabled"))` 而改一处漏一处。
+    传列表而不是 uid：两个调用方手上本来就有一份完整列表，不必再查一次库。
+    """
+    return sum(1 for d in items if d.get("enabled"))
 
 
 def _must_own(uid: str, did: str) -> dict:
@@ -128,12 +135,10 @@ def _must_own(uid: str, did: str) -> dict:
 
 
 def _out(d: dict) -> dict:
-    import json as _json
-
     sched = d.get("schedule_json")
     if isinstance(sched, str) and sched:
         try:
-            sched = _json.loads(sched)
+            sched = json.loads(sched)
         except ValueError:
             sched = None
     # 键名对齐前端契约：id / instruction / session_id 是前端在用的一组名，
@@ -187,7 +192,7 @@ async def create_delegation(req: DelegationIn, uid: str = Depends(get_current_us
     existing = await asyncio.to_thread(daily.list_delegations, uid)
     if any(d["name"] == req.name for d in existing):
         raise HTTPException(status_code=409, detail="同名委托已存在")
-    if req.enabled and sum(1 for d in existing if d.get("enabled")) >= MAX_ENABLED:
+    if req.enabled and _count_enabled(existing) >= MAX_ENABLED:
         raise HTTPException(status_code=400, detail=f"启用中的委托数量已达上限（{MAX_ENABLED}）")
     if req.kind == "custom" and not req.prompt.strip():
         raise HTTPException(status_code=400, detail="kind=custom 时必须提供 prompt")
@@ -227,12 +232,13 @@ async def update_delegation(
     if "kind" in data and data["kind"]:
         _validate_kind(data["kind"])
     if "schedule" in data and data["schedule"]:
-        _validate_schedule(ScheduleIn(**data["schedule"]) if isinstance(data["schedule"], dict) else data["schedule"])
+        # model_dump() 已把嵌套的 ScheduleIn 转成 dict，这里无需再判类型
+        _validate_schedule(ScheduleIn(**data["schedule"]))
     if "deliver_sid" in data and data["deliver_sid"]:
         await asyncio.to_thread(_require_own_session, uid, data["deliver_sid"])
     if data.get("enabled") is True and not cur.get("enabled"):
         others = await asyncio.to_thread(daily.list_delegations, uid)
-        if sum(1 for d in others if d.get("enabled")) >= MAX_ENABLED:
+        if _count_enabled(others) >= MAX_ENABLED:
             raise HTTPException(status_code=400, detail=f"启用中的委托数量已达上限（{MAX_ENABLED}）")
 
     merged = {**_out(cur), **{k: v for k, v in data.items() if k != "schedule"}}

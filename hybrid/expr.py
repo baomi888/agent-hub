@@ -193,14 +193,27 @@ def safe_eval(expr: str, scope: dict[str, Any] | None = None) -> Any:
     wrapped = {k: _wrap(v) for k, v in (scope or {}).items()}
     try:
         tree = ast.parse(expr.strip(), mode="eval")
-    except SyntaxError as e:
+    except (SyntaxError, ValueError) as e:
+        # ValueError：源码含 NUL 等非法字符时 ast.parse 抛的是它而非 SyntaxError
         raise ExprError(f"表达式语法错误：{e}") from e
-    return _eval(tree, wrapped)
+    except RecursionError as e:
+        raise ExprError("表达式嵌套过深") from e
+    try:
+        return _eval(tree, wrapped)
+    except RecursionError as e:
+        # 求值阶段递归过深同样收敛成 ExprError，保持"非法表达式抛 ExprError"的契约
+        raise ExprError("表达式嵌套过深") from e
 
 
 def eval_condition(expr: str, scope: dict[str, Any] | None = None) -> bool:
-    """条件求值：任何异常都按 False 处理（条件不成立 ≠ 流程崩溃）。"""
+    """条件求值：任何异常都按 False 处理（条件不成立 ≠ 流程崩溃）。
+
+    捕获 Exception 而非仅 ExprError：超深嵌套可能触发 RecursionError、含 NUL 的
+    文本会让 ast.parse 抛 ValueError——按本函数的承诺，它们都应退成「条件不成立」，
+    而不是把异常抛进编排主循环。KeyboardInterrupt / SystemExit 继承自 BaseException，
+    不受影响。
+    """
     try:
         return bool(safe_eval(expr, scope))
-    except ExprError:
+    except Exception:
         return False

@@ -136,10 +136,6 @@ def render_template(template: str, ctx: TaskContext) -> str:
 
 # ==================== 工作流引擎 ====================
 
-class NodeError(Exception):
-    """节点执行失败（含超时）。重试/跳转/上报都以此为准。"""
-
-
 class WorkflowEngine:
     """一次工作流执行。实例随执行段创建（result 挂在实例上，不共享状态）。"""
 
@@ -415,7 +411,15 @@ class WorkflowEngine:
             )
 
     async def _exec_llm(self, ctx: TaskContext, node: NodeDef) -> AsyncIterator[ExecEvent]:
-        """LLM 节点：config = {prompt, output_key, stream}。"""
+        """LLM 节点：config = {prompt, output_key, stream}。
+
+        产出直接写 `ctx.shared[key]`，**刻意不走 `shared_set()`**：
+          1. 节点产出（全文）要被下游 `render_template` 逐字取出，而 `shared_set`
+             对超长值会落盘、只在 shared 里留一个指针字符串，模板无法解析该指针；
+          2. `shared_set` 的命名空间校验会把 `plan` / `agent_result` 这类正常输出键
+             与 `node_*` 前缀判成冲突。
+        因此只有 `resume_value` 这类有界字面量才走 `shared_set`。细节见 hybrid/context.py。
+        """
         prompt = render_template(node.config.get("prompt", "{question}"), ctx)
         key = node.config.get("output_key") or f"node_{node.id}"
         llm = self._get_llm()
