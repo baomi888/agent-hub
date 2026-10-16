@@ -21,6 +21,7 @@ import AuthGate from "@/components/AuthGate";
 import type { UiMessage } from "@/components/chat/types";
 import type { ChatMode, Grounding, RefSource, ToolEvent } from "@/lib/types";
 import { MODE_LABELS } from "@/components/chat/constants";
+import { isPlanRequest } from "@/components/chat/plan";
 import { useHybridTrace } from "@/lib/useHybridTrace";
 import type { ChunkParams } from "@/lib/chunkProfiles";
 
@@ -237,7 +238,8 @@ export default function Home() {
   const sendMessage = useCallback(async (
     question: string,
     attachments?: ChatAttachment[],
-    display?: string
+    display?: string,
+    plan?: boolean
   ) => {
     let sid = activeSid;
     // 无会话时自动新建
@@ -296,6 +298,7 @@ export default function Home() {
           // 发之前必须确认选中的工作流还在列表里（刷新后可能已被删），
           // 否则后端会直接回 error 事件，整轮白跑。
           workflow_id: mode === "hybrid" ? (workflowIdRef.current ?? null) : null,
+          plan: plan ?? false,
         },
         controller.signal
       );
@@ -415,10 +418,18 @@ export default function Home() {
                 )
               );
             }
+            // 计划主题名（P2）：主题可能是后端从历史推断的，前端猜不到，只能靠它回填
+            const planTopic = String(ev.data.plan_topic ?? "");
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === asstId
-                  ? { ...m, streaming: false, refs: refs || m.refs, dbId: dbId ?? m.dbId }
+                  ? {
+                      ...m,
+                      streaming: false,
+                      refs: refs || m.refs,
+                      dbId: dbId ?? m.dbId,
+                      planTopic: planTopic || m.planTopic,
+                    }
                   : m
               )
             );
@@ -478,7 +489,8 @@ export default function Home() {
       if (i < 0) return;
       const start = i > 0 && list[i - 1].role === "user" ? i - 1 : i;
       setMessages(list.slice(0, start));
-      void sendMessage(question);
+      // 重试沿用同一问题：计划类请求要重新带上 plan 标志，否则卡片不会再生成
+      void sendMessage(question, undefined, undefined, isPlanRequest(question));
     },
     [sendMessage, sending, setMessages]
   );
@@ -723,6 +735,7 @@ export default function Home() {
           onTopKChange={setTopK}
           sessionTitle={sessions.find((s) => s.id === activeSid)?.title ?? null}
           boundKb={boundKb}
+          kbCount={kbs.length}
           kbNameMap={kbNameMap}
           onUnbindKb={() => bindKb(null)}
           onToggleKbPanel={() => setKbPanelOpen(!kbPanelOpen)}

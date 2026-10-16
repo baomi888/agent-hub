@@ -36,6 +36,49 @@ _MAX_CONSEC_FAILURES = 3
 _FAIL_HINTS = ("不可用", "失败", "无法", "缺少", "错误")
 
 
+def history_items(ctx: TaskContext) -> list[dict]:
+    """取对话历史（跨轮记忆，来自 ctx.shared["history"]）。
+
+    条数上限由 config.HYBRID_HISTORY_MAX_MESSAGES 控制（取最近 N 条）；
+    <=0 表示关闭历史注入，退回旧的无记忆行为（出问题可一键回退）。
+    """
+    if config.HYBRID_HISTORY_MAX_MESSAGES <= 0:
+        return []
+    hist = ctx.shared.get("history") or []
+    if not isinstance(hist, list):
+        return []
+    items = [
+        m for m in hist
+        if isinstance(m, dict)
+        and m.get("role") in ("user", "assistant")
+        and m.get("content")
+    ]
+    return items[-config.HYBRID_HISTORY_MAX_MESSAGES:]
+
+
+def history_messages(ctx: TaskContext) -> list:
+    """对话历史 → LangChain 消息列表（Human/AI）。无历史返回 []。"""
+    out: list = []
+    for m in history_items(ctx):
+        content = str(m["content"])
+        out.append(
+            HumanMessage(content=content) if m["role"] == "user" else AIMessage(content=content)
+        )
+    return out
+
+
+def history_prefix(ctx: TaskContext) -> str:
+    """对话历史 → 文本前缀（供工作流 LLM 节点把上下文拼进 prompt）。无历史返回 ""。"""
+    items = history_items(ctx)
+    if not items:
+        return ""
+    lines = ["【对话历史（供理解上下文，勿复述）】"]
+    for m in items:
+        role = "用户" if m["role"] == "user" else "助手"
+        lines.append(f"{role}：{str(m['content'])[:500]}")
+    return "\n".join(lines) + "\n\n"
+
+
 class AgentEngine:
     """一次 Agent 执行段。实例随段创建（result 挂在实例上）。"""
 
@@ -86,8 +129,12 @@ class AgentEngine:
                     "kb_id": st.get("kb_id"),
                 },
             }
+            # 跨轮记忆：把历史消息前置到本轮 goal 之前（历史为空则退化为单轮）。
+            # thread_id 仍是 per-run（段隔离），跨轮上下文靠显式注入 messages 实现。
+            msgs = history_messages(ctx)
+            msgs.append(HumanMessage(content=goal))
             agen = agent.astream(
-                {"messages": [HumanMessage(content=goal)]},
+                {"messages": msgs},
                 config=config_,
                 stream_mode=["updates", "messages"],
             )

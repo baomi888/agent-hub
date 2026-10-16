@@ -420,7 +420,11 @@ class WorkflowEngine:
              与 `node_*` 前缀判成冲突。
         因此只有 `resume_value` 这类有界字面量才走 `shared_set`。细节见 hybrid/context.py。
         """
-        prompt = render_template(node.config.get("prompt", "{question}"), ctx)
+        # 跨轮记忆：把对话历史作为前缀拼进 prompt（无历史时为空串，退化为单轮）。
+        # 惰性导入避免模块级循环依赖。
+        from hybrid.agent_engine import history_prefix
+
+        prompt = history_prefix(ctx) + render_template(node.config.get("prompt", "{question}"), ctx)
         key = node.config.get("output_key") or f"node_{node.id}"
         llm = self._get_llm()
         if node.config.get("stream"):

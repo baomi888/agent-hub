@@ -38,6 +38,11 @@ export async function* streamChat(
     // 两种形态：{ lat, lon }（浏览器定位）或 { city }（公网 http 下由服务端按 IP 推断）。
     // 字段都可选 —— 只有 city 没有坐标是合法的。
     location?: { lat?: number; lon?: number; city?: string } | null;
+    /**
+     * 计划类请求。true 时后端把「结构化计划格式要求」拼到本轮提问上（服务端注入）。
+     * 前端不再改写 question 文本——改写会让当前轮丢上下文、并污染历史。
+     */
+    plan?: boolean;
   },
   signal?: AbortSignal
 ): AsyncGenerator<StreamEvent> {

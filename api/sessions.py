@@ -13,8 +13,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from core import config
 from core import session as store
 from core.auth import get_current_user
+from kb import pipelines
 
 # 默认要登录：会话列表是最直接的隐私面，绝不能让访客互相看到
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -39,7 +41,19 @@ class MessageDeleteResponse(BaseModel):
 
 @router.post("/")
 def create(body: SessionCreate, uid: str = Depends(get_current_user)):
-    conv = store.create_conversation(uid, title=body.title, kb_id=body.kb_id)
+    kb_id = body.kb_id
+    # P3：没指定资料库时，若该用户**有且仅有一个**知识库，自动绑上它。
+    # 线上复现：用户传过资料、新开一个会话来问，模型却说"当前会话没绑定资料库"——
+    # 资料明明在，只是没继承过来。多库时不自动绑（绑错库比不绑更糟，检索到不相干的段落），
+    # 交给前端顶栏「未绑定资料库」提示引导手动选择。
+    if kb_id is None and config.AUTO_BIND_SINGLE_KB:
+        try:
+            mine = pipelines.owned_kb_ids(uid)
+        except Exception:
+            mine = set()
+        if len(mine) == 1:
+            kb_id = next(iter(mine))
+    conv = store.create_conversation(uid, title=body.title, kb_id=kb_id)
     return conv
 
 

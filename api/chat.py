@@ -75,6 +75,136 @@ USER_PROFILE_TAGS = [
     "机器学习", "深度学习", "英语四六级", "文献阅读", "实验操作", "考证",
     "公务员", "留学申请", "社团活动", "时间管理", "心态调节",
 ]
+
+# 计划类请求的格式要求：由服务端拼到"本轮提问"末尾（req.plan=true 时），
+# 不落库、不参与历史——避免像旧前端那样把格式块写进历史污染后续轮次。
+# 前端 plan.tsx 的 parsePlan 依赖这套格式（时间轴 / 编号阶段）来渲染卡片。
+PLAN_FORMAT_HEADER = (
+    "\n\n【格式要求】请直接输出一份结构化计划，不要解释。格式如下：\n"
+    "第一行：计划标题\n"
+    "时间轴：每行以「第1周 xxx」「第N天 xxx」或「DAY 1 xxx」开头，简短\n"
+    "阶段清单：每行用「1. xxx」编号，标题一行、说明一行\n"
+)
+PLAN_DEFAULT_HINT = "时间轴建议按「第1周 / 第N天 / DAY N」划分，阶段用编号列出。"
+
+# 计划主题词表（P2）：决定"时间轴按什么粒度切"那行提示，从而让计划贴着话题走。
+# 与前端 frontend/src/components/chat/plan.tsx 的 PLAN_TOPICS 是同一套词，
+# 刻意重复：**服务端这份是权威**（真正进 prompt、决定模型输出什么），
+# 前端那份只用来给卡片打标签（"PLAN · 学习计划"），并在老消息没带 topic 时兜底。
+PLAN_TOPICS: list[dict] = [
+    {
+        "name": "营销活动",
+        "keys": ["营销", "发布会", "推广", "上市", "促销", "品牌", "市场", "宣发", "campaign", "活动策划"],
+        "hint": "时间轴建议按「第1周 筹备期 / 第2周 预热期 / 第3周 爆发期」划分。",
+    },
+    {
+        "name": "学习计划",
+        # 考试名要直命中（2026-10-16 线上探针发现的缺口）：
+        # 此前只有"备考/复习/考试/考研"，但"我这次六级只考了 473 分"这类
+        # **只报成绩、不带意图词**的说法一个都命不中 → 主题续不上 →
+        # 退回通用 hint（计划里混出 DAY 1/DAY 2）、前端卡片抬头也变通用。
+        # 知穗面向大学生，考试名是最常见的学习计划入口，必须直命中。
+        "keys": [
+            "学习", "备考", "复习", "考研", "考公", "雅思", "托福",
+            "六级", "四级", "四六级", "cet", "gre", "专四", "专八",
+            "期末", "期中", "考证", "证书", "刷题", "真题", "单词", "英语",
+            "读书", "课程", "培训", "考试", "study",
+        ],
+        "hint": "时间轴建议按「第1周 ~ 第N周」划分，阶段按科目或模块编号。",
+    },
+    {
+        "name": "旅行行程",
+        "keys": ["旅行", "旅游", "出游", "自驾", "攻略", "度假", "出差", "trip", "travel"],
+        "hint": "时间轴建议按「DAY 1 / DAY 2」或「第1天 / 第2天」划分。",
+    },
+    {
+        "name": "健身训练",
+        "keys": ["健身", "训练", "减脂", "增肌", "跑步", "马拉松", "瑜伽", "运动", "fitness"],
+        "hint": "时间轴建议按「第1周 ~ 第N周」划分，阶段按训练部位编号。",
+    },
+    {
+        "name": "婚礼派对",
+        "keys": ["婚礼", "订婚", "求婚", "派对", "聚会", "生日", "wedding"],
+        "hint": "时间轴建议按「筹备期 / 当天 / 收尾」或「第N个月」划分。",
+    },
+    {
+        "name": "搬家装修",
+        "keys": ["搬家", "装修", "改造", "布置", "收纳", "move"],
+        "hint": "时间轴建议按「第N周」或「打包 / 运输 / 布置」阶段划分。",
+    },
+    {
+        "name": "内容创作",
+        "keys": ["内容", "写作", "文案", "脚本", "公众号", "小红书", "直播", "自媒体", "专栏", "书籍", "论文", "content", "video"],
+        "hint": "时间轴建议按「第N周」或「选题 / 撰写 / 发布 / 复盘」阶段划分。",
+    },
+    {
+        "name": "产品研发",
+        "keys": ["产品", "开发", "研发", "上线", "迭代", "立项", "需求", "版本", "发布"],
+        "hint": "时间轴建议按「第N周」或「需求 / 设计 / 开发 / 测试 / 上线」阶段划分。",
+    },
+    {
+        "name": "创业经营",
+        "keys": ["创业", "开店", "经营", "融资", "商业", "公司", "团队", "startup"],
+        "hint": "时间轴建议按「第N月」或「筹备 / 启动 / 运营」阶段划分。",
+    },
+    {
+        "name": "财务预算",
+        "keys": ["预算", "财务", "理财", "省钱", "采购", "成本", "资金", "budget"],
+        "hint": "时间轴建议按「第N周」或「盘点 / 规划 / 执行 / 复盘」阶段划分。",
+    },
+]
+
+
+def detect_plan_topic(*texts: str) -> dict | None:
+    """按给定顺序找第一个命中的计划主题，都没命中返回 None。
+
+    P2 的加固点就在"顺序"上：先传本轮提问，再传历史（近→远）。
+    "计划能不能详细一点"这类没主语的追问，本轮命不中，就靠历史里的
+    "我六级考了 473"把主题续成「学习计划」，而不是退化成通用模板。
+    """
+    for text in texts:
+        if not text:
+            continue
+        lt = text.lower()
+        for t in PLAN_TOPICS:
+            if any(k in lt for k in t["keys"]):
+                return t
+    return None
+
+
+async def _resolve_plan_topic(uid: str, sid: str, question: str) -> dict | None:
+    """P2：定这份计划的主题——先看本轮提问，命不中再回看历史（近 → 远）。
+
+    ⚠️ 调用时机必须在"本轮用户消息落库之前"：否则历史里混进当前这句，
+    回看就白做了（补的正是这句话缺的主语）。
+    """
+    topic = detect_plan_topic(question)
+    if topic is not None or config.PLAN_TOPIC_HISTORY_MESSAGES <= 0:
+        return topic
+    try:
+        recent = await asyncio.to_thread(
+            store.get_messages, uid, sid, include_system=False
+        )
+    except Exception:
+        return None
+    texts = [
+        m.get("content") or ""
+        for m in reversed(recent)
+        if m.get("role") == "user"
+    ][: config.PLAN_TOPIC_HISTORY_MESSAGES]
+    return detect_plan_topic(*texts)
+
+
+def _augment_plan(question: str, plan: bool, topic: dict | None = None) -> str:
+    """plan=true 时把格式要求（含主题时间轴提示）拼到提问末尾；否则原样返回。
+
+    只用于"喂给模型的本轮提问"，绝不用来落库（落库一律用原始 question）。
+    """
+    if not plan:
+        return question
+    hint = (topic or {}).get("hint") or PLAN_DEFAULT_HINT
+    return question + PLAN_FORMAT_HEADER + hint
+
 # 上传件保留时长：图片理解完就不需要了，超时自动清，避免目录无限增长
 UPLOAD_TTL_HOURS = 24
 
@@ -107,6 +237,12 @@ class ChatRequest(BaseModel):
         description="用户地理定位。两种形态：{ lat, lon }（浏览器定位，精度高）或 "
         "{ city }（公网 http 下浏览器定位不可用，由后端按来源 IP 推断）。"
         "有坐标时后端会逆地理补 city，用于天气/本地问答免手输城市",
+    )
+    plan: bool = Field(
+        default=False,
+        description="是否计划类请求。true 时后端才把「结构化计划格式要求」拼到本轮提问上——"
+        "拼在服务端是为了：(1) 让格式指令和历史一起进模型（前端改写会让当前轮丢上下文）；"
+        "(2) 入库存原始问题，不污染历史。",
     )
 
 
@@ -347,6 +483,16 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
     if mode == "rag" and not kb_exists:
         mode = "agent"
 
+    # 喂给模型的本轮提问（plan 请求才带格式要求）；落库/标题/画像一律用原始 req.question
+    # P2：计划主题先看本轮提问；命不中（"计划再细一点"这类没主语的追问）就回看最近
+    # 几轮用户消息，把主题续上，避免退化成与话题无关的通用模板。
+    # 注意：此刻用户这条消息还没落库（add_message 在下面），所以历史里不含本轮问题。
+    plan_topic: dict | None = None
+    prompt_question = req.question
+    if req.plan:
+        plan_topic = await _resolve_plan_topic(uid, req.sid, req.question)
+        prompt_question = _augment_plan(req.question, True, plan_topic)
+
     # 解析用户地理定位，两种来源都要接住（天气/本地问答免手输城市）：
     #   ① 浏览器定位（HTTPS / localhost 才可用）→ 带 lat/lon，精度最高
     #   ② 公网 http 下浏览器 geolocation 不可用 → 前端改调 /api/geo/locate
@@ -506,12 +652,23 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
 
                 ctx = TaskContext(
                     owner_id=uid,
-                    goal=req.question,
+                    goal=prompt_question,
                     current_mode=start_mode,
                     workflow_id=wf_id,
                 )
                 # kb_id 走私有段注入（与 agent 分支同一安全边界：模型没机会改写它）
                 ctx.agent_state["kb_id"] = kb_id if (kb_id and kb_exists) else None
+                # 对话历史注入：修复"混合模式每轮失忆"（2026-10-16 线上复现）。
+                # 其它三种模式都读历史，唯独 hybrid 过去只拿当前一句 → 模型看不到上下文。
+                # 历史放 shared（跨模式数据通道），Agent/Workflow 引擎拼 prompt 时前置。
+                hist_raw = (await asyncio.to_thread(
+                    store.get_messages, uid, req.sid, include_system=False
+                ))[:-1]
+                ctx.shared["history"] = [
+                    {"role": m["role"], "content": m["content"]}
+                    for m in hist_raw
+                    if m.get("role") in ("user", "assistant") and m.get("content")
+                ]
 
                 rules = await asyncio.to_thread(hstore.list_rules, uid)
                 orch = HybridOrchestrator(
@@ -591,7 +748,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                         messages.append(HumanMessage(content=m["content"]))
                     elif m["role"] == "assistant":
                         messages.append(AIMessage(content=m["content"]))
-                messages.append(HumanMessage(content=req.question))
+                messages.append(HumanMessage(content=prompt_question))
 
                 # LangGraph checkpoint thread_id = 会话 id，天然多轮记忆。
                 # owner_id / kb_id 一并注入：工具内部只认这里的值，
@@ -704,7 +861,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             yield _sse("status", {"text": "正在生成答案..."})
             # 复用上面已经检索到的结果，不重复检索（早期实现在这里又检了一次，
             # 而且用的是默认 top_k，等于前端调的检索条数被悄悄忽略）
-            messages = await _build_messages(uid, req.sid, req.question, kb_id, docs_scores, grounding, req.scenario, history)
+            messages = await _build_messages(uid, req.sid, prompt_question, kb_id, docs_scores, grounding, req.scenario, history)
 
             acc = _Acc()
             try:
@@ -727,7 +884,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                     messages.append(HumanMessage(content=m["content"]))
                 elif m["role"] == "assistant":
                     messages.append(AIMessage(content=m["content"]))
-            messages.append(HumanMessage(content=req.question))
+            messages.append(HumanMessage(content=prompt_question))
 
             acc = _Acc()
             try:
@@ -763,6 +920,9 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             "mode": mode,
             "message_id": msg_id,
             "run_id": hybrid_run_id,
+            # P2：主题名回给前端，卡片抬头才能显示"PLAN · 学习计划"。
+            # 主题可能是从历史推断出来的，前端自己那份关键词匹配猜不到，必须由后端给。
+            "plan_topic": plan_topic["name"] if plan_topic else None,
         })
 
     return StreamingResponse(event_generator(), media_type="text/event-stream", headers=SSE_HEADERS)

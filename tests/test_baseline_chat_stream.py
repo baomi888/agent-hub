@@ -138,12 +138,14 @@ def test_rag_stream_event_sequence(client):
     import json
 
     done = json.loads([d for n, d in frames if n == "done"][0])
-    assert set(done) == {"answer", "refs", "title", "mode", "message_id", "run_id"}
+    # plan_topic 为 2026-10-16 合入「计划主题识别」特性后新增的 done 字段
+    assert set(done) == {"answer", "refs", "title", "mode", "message_id", "run_id", "plan_topic"}
     assert done["answer"] == "你好呀"
     assert done["mode"] == "rag"
     assert done["message_id"] == 123
     assert done["run_id"] is None  # 仅 hybrid 模式有值
     assert done["title"] == "固定标题"
+    assert done["plan_topic"] is None  # 非计划类问题（问的是种植密度）
 
     srcs = json.loads([d for n, d in frames if n == "sources"][0])["items"]
     assert [s["source"] for s in srcs] == ["资料.txt", "别的.txt"]
