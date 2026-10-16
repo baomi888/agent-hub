@@ -72,7 +72,7 @@ def kb_search(query: str, top_k: int = 3, config: RunnableConfig = None) -> str:
         if pipe.peek() == 0:
             return "当前绑定的知识库为空，请先上传文档构建索引。"
 
-        docs_scores = pipe.retrieve_with_score(query, top_k)
+        docs_scores = pipe.retrieve_with_score(query, top_k, owner)
         if not docs_scores:
             return f"知识库中未找到与 '{query}' 相关的内容。"
 

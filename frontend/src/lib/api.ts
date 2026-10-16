@@ -15,6 +15,8 @@ import type {
   RuleRow,
   WorkflowIn,
   WorkflowRow,
+  CheckinStreak,
+  CheckinHistoryItem,
 } from "./types";
 
 /**
@@ -29,6 +31,25 @@ export const UNAUTHORIZED_EVENT = "baomi:unauthorized";
 function notifyUnauthorized() {
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+  }
+}
+
+/**
+ * 登录态「建立」的广播事件名 —— 与 UNAUTHORIZED_EVENT 对称。
+ *
+ * 为什么需要：四屏（/delegate /report /checkin /settings /flow）的页面组件
+ * 自己持有数据加载 effect，而登录门在 ConsoleShell 那一层。未登录打开页面时
+ * 页面 effect 照常执行、请求 401、进入降级态；而「登录完成」发生在
+ * ConsoleShell 自己的 useAuth 实例里 —— 不广播的话页面感知不到，会一直停在
+ * 登录前的失败结果上（界面显示「接口待上线」，直到用户手动刷新）。
+ * 这里在凭证建立（登录/注册 200、cookie 已种上）时广播，让各 useAuth 实例
+ * 和页面级数据重新拉一次。
+ */
+export const AUTHORIZED_EVENT = "baomi:authorized";
+
+function notifyAuthorized() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(AUTHORIZED_EVENT));
   }
 }
 
@@ -258,16 +279,23 @@ export const api = {
 
   // ---------- 登录 ----------
   authConfig: () => request<{ allow_signup: boolean }>("/api/auth/config/"),
-  login: (username: string, password: string) =>
-    request<UserOut>("/api/auth/login/", {
+  login: async (username: string, password: string) => {
+    const u = await request<UserOut>("/api/auth/login/", {
       method: "POST",
       body: JSON.stringify({ username, password }),
-    }),
-  register: (username: string, password: string) =>
-    request<UserOut>("/api/auth/register/", {
+    });
+    // cookie 已种上：广播「登录成功」，让页面级数据重新加载（与 401 的收回对称）
+    notifyAuthorized();
+    return u;
+  },
+  register: async (username: string, password: string) => {
+    const u = await request<UserOut>("/api/auth/register/", {
       method: "POST",
       body: JSON.stringify({ username, password }),
-    }),
+    });
+    notifyAuthorized();
+    return u;
+  },
   logout: () => request<{ ok: boolean }>("/api/auth/logout/", { method: "POST" }),
   me: () => request<MeOut>("/api/auth/me/"),
 
@@ -325,6 +353,32 @@ export const api = {
       tryRequest<DailyReport>("/api/report/generate", {
         method: "POST",
         body: JSON.stringify(date ? { date } : {}),
+      }),
+  },
+
+  // ---------- P6 打卡 /api/checkin（4 端点）----------
+  //
+  // 打卡语义 = 「那天有没有生成每日总结（status='ready'）」：数据全从 daily_reports 派生。
+  // 端点**不带尾斜杠**（与项目 ~62 个端点统一，避免 308 黑洞）。
+  // streak / history 走 tryRequest：端点未部署时返回 null，页面退回本地/演示数据；
+  // generate / share 是写操作，走 request —— 真失败要让用户知道。
+  checkin: {
+    streak: () => tryRequest<CheckinStreak>("/api/checkin/streak"),
+    /** 后端返回 { history: [...] }，这里直接解开成数组 */
+    history: () =>
+      tryRequest<{ history: CheckinHistoryItem[] }>("/api/checkin/history").then(
+        (v) => (v ? v.history : null)
+      ),
+    /** 触发今日总结（同步，约 20–40 秒）；返回 {date, status, points} */
+    generate: () =>
+      request<{ date: string; status: string; points: number }>("/api/checkin/generate", {
+        method: "POST",
+      }),
+    /** 标记某天已分享（幂等 upsert） */
+    share: (date: string) =>
+      request<{ ok: boolean; date: string; shared: boolean }>("/api/checkin/share", {
+        method: "POST",
+        body: JSON.stringify({ date }),
       }),
   },
 

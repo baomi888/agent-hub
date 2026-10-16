@@ -102,6 +102,10 @@ def job_defs() -> dict[str, dict]:
             "cron": "15 4 * * *",
             "description": "清理过期运行记录（>90 天）与历史上传件",
         },
+        "profile.aggregate": {
+            "cron": "30 2 * * *",
+            "description": "聚合用户兴趣画像（基于 user_tags 权重，生成每日快照）",
+        },
     }
 
 

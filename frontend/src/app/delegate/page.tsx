@@ -15,6 +15,7 @@ import ConsoleShell from "@/components/console/ConsoleShell";
 import CornIcon from "@/components/CornIcon";
 import { Callout, Field, NotReady, Seg, SkeletonLines, Switch, ToastHost } from "@/components/console/ui";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/hooks/useAuth";
 import { DEMO_DELEGATES, DEMO_RUNS } from "@/lib/consoleDemo";
 import { errProbe, toProbe, type ProbeState } from "@/lib/probe";
 import { fmtDuration, fmtNum, fmtRemaining, fmtWhen } from "@/lib/time";
@@ -126,6 +127,8 @@ function toForm(d: Delegate): FormState {
 
 export default function DelegatePage() {
   const { toasts, showToast } = useToast();
+  const auth = useAuth();
+  const authedId = auth.me?.user.id ?? null;
   const [list, setList] = useState<ProbeState<Delegate[]>>({ state: "loading" });
   const [runs, setRuns] = useState<ProbeState<DelegateRun[]>>({ state: "loading" });
   const [sessions, setSessions] = useState<Conversation[]>([]);
@@ -148,6 +151,10 @@ export default function DelegatePage() {
   }, []);
 
   useEffect(() => {
+    // 未登录不发请求：页面组件挂在 ConsoleShell 的登录门之外，登录前发的请求
+    // 必然是 401，且登录后不会自动重来。登录成功会经 AUTHORIZED_EVENT 同步进
+    // auth.me（见 useAuth / api.ts），依赖变化后自动补加载。
+    if (!authedId) return;
     loadList();
     api
       .listSessions()
@@ -161,7 +168,7 @@ export default function DelegatePage() {
       .catch(() => {
         /* 同上 */
       });
-  }, [loadList]);
+  }, [authedId, loadList]);
 
   /**
    * 接住从模板广场带过来的预填（`/delegate?new=1` + sessionStorage）。

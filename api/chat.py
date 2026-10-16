@@ -58,6 +58,17 @@ MAX_CHAT_UPLOAD_MB = 20
 MAX_CHAT_FILES = 9
 # 只收这些扩展名的图片：视觉模型只消费图片，别的格式传进来也是白传（还占磁盘）
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+
+# B 块：对话级用户画像标签（受控词表，防标签表爆炸）。
+# 模型只许从这几十个里选，超出一律丢弃；既能沉淀"这个用户关心什么"，
+# 又不会让 user_tags 表无限膨胀。后续 C2 聚合 / D 检索偏置可直接消费这些标签。
+USER_PROFILE_TAGS = [
+    "考研备考", "考研数学", "考研英语", "考研政治", "保研", "求职面试", "实习",
+    "课程作业", "期末考试", "论文写作", "毕业设计", "编程开发", "Python",
+    "前端开发", "后端开发", "算法竞赛", "操作系统", "计算机网络", "数据库",
+    "机器学习", "深度学习", "英语四六级", "文献阅读", "实验操作", "考证",
+    "公务员", "留学申请", "社团活动", "时间管理", "心态调节",
+]
 # 上传件保留时长：图片理解完就不需要了，超时自动清，避免目录无限增长
 UPLOAD_TTL_HOURS = 24
 
@@ -388,7 +399,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                     pipe = await asyncio.to_thread(pipelines.get_or_create, uid, kb_id)
                     query = await asyncio.to_thread(rewrite_query, req.question, history)
                     docs_scores = await asyncio.to_thread(
-                        pipe.retrieve_with_score, query, req.top_k
+                        pipe.retrieve_with_score, query, req.top_k, uid
                     )
                     if docs_scores:
                         refs_md = pipe._format_refs(docs_scores)
@@ -427,6 +438,13 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
 
             # 收尾：标题并行任务多半已完成，这里 await 基本零等待
             msg_id = await asyncio.to_thread(store.add_message, uid, req.sid, "assistant", acc_text, refs=refs_md)
+
+            # B 块：对话级用户画像标签（fire-and-forget，不阻塞 SSE；失败静默）
+            if config.USER_TAG_HOOK_ENABLED and acc_text:
+                _t = asyncio.create_task(_record_user_tags(uid, req.question, acc_text))
+                _BG_TASKS.add(_t)
+                _t.add_done_callback(_BG_TASKS.discard)
+
             gen_title = await _take_title(title_task, acc_text)
             if gen_title:
                 await asyncio.to_thread(store.rename_conversation, uid, req.sid, gen_title)
@@ -650,7 +668,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 yield _sse("status", {"text": f"已结合上下文改写检索词：{query}"})
             try:
                 pipe = await asyncio.to_thread(pipelines.get_or_create, uid, kb_id)
-                docs_scores = await asyncio.to_thread(pipe.retrieve_with_score, query, req.top_k)
+                docs_scores = await asyncio.to_thread(pipe.retrieve_with_score, query, req.top_k, uid)
             except Exception as e:
                 yield _sse("error", {"detail": describe_api_error(e)})
                 return
@@ -712,6 +730,12 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
 
         # ---- 收尾：存 assistant 消息 + 取回并行生成的标题 ----
         msg_id = await asyncio.to_thread(store.add_message, uid, req.sid, "assistant", acc_text, refs=refs_md)
+
+        # B 块：对话级用户画像标签（fire-and-forget，不阻塞 SSE；失败静默）
+        if config.USER_TAG_HOOK_ENABLED and acc_text:
+            _t = asyncio.create_task(_record_user_tags(uid, req.question, acc_text))
+            _BG_TASKS.add(_t)
+            _t.add_done_callback(_BG_TASKS.discard)
 
         gen_title = await _take_title(title_task, acc_text)
         if gen_title:
@@ -808,6 +832,58 @@ async def _take_title(task: "asyncio.Task | None", acc_text: str) -> str:
         return await task
     except Exception:
         return ""
+
+
+# ==================== 用户画像标签（方案 C · B 块）====================
+
+def _extract_user_tags(question: str, answer: str) -> list[str]:
+    """从"用户提问 + AI 回答"里挑 0~3 个最贴切的用户画像标签（受控词表）。
+
+    只允许输出 USER_PROFILE_TAGS 里的标签，超出一律丢弃——这是防标签表爆炸的硬闸门。
+    任何失败都返回空列表（画像只是辅助，绝不能拖慢或拖垮问答）。
+    """
+    if not config.USER_TAG_HOOK_ENABLED:
+        return []
+    q = (question or "").strip()
+    a = (answer or "").strip()
+    if not q and not a:
+        return []
+    vocab = "、".join(USER_PROFILE_TAGS)
+    llm = get_llm(temperature=0, max_tokens=48)
+    prompt = (
+        "你是用户画像标注器。根据下面的「用户提问 + AI 回答（节选）」，判断该用户当前"
+        "关注的主题，从给定词表里挑选 0~3 个最贴切的标签。\n"
+        "只允许输出词表中的标签；若都贴不上就输出空数组 []。"
+        "只输出一个 JSON 数组（如 [\"考研数学\",\"编程开发\"]），不要解释、不要 Markdown。\n\n"
+        f"【可选标签】\n{vocab}\n\n"
+        f"【用户提问】\n{q[:300]}\n\n"
+        f"【AI 回答（节选）】\n{a[:800]}"
+    )
+    try:
+        resp = llm.invoke([HumanMessage(content=prompt)])
+        raw = (resp.content or "").strip()
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            if raw[:4].lower() == "json":
+                raw = raw[4:]
+            raw = raw.strip()
+        import json as _json
+        tags = _json.loads(raw)
+        vocab_set = set(USER_PROFILE_TAGS)
+        out = [str(t).strip() for t in tags if str(t).strip() in vocab_set]
+        return out[:3]
+    except Exception:
+        return []
+
+
+async def _record_user_tags(uid: str, question: str, answer: str) -> None:
+    """后台钩子：抽用户画像标签并落库（fire-and-forget，不阻塞 SSE）。"""
+    try:
+        tags = await asyncio.to_thread(_extract_user_tags, question, answer)
+        if tags:
+            await asyncio.to_thread(store.add_user_tags, uid, tags)
+    except Exception:
+        pass
 
 
 # 后台任务强引用：任务完成前被 GC 会报 "Task was destroyed but it is pending"。

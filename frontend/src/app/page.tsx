@@ -139,29 +139,10 @@ export default function Home() {
   const [geoCity, setGeoCity] = useState<string | null>(() => getCachedGeo()?.city ?? null);
   // 定位请求进行中：授权弹窗 + IP 兜底最长 18s，期间按钮转圈，否则看着像没反应
   const [geoPending, setGeoPending] = useState(false);
-  // 场景预设：随会话保存（localStorage），发送时带入请求；切换会话时恢复
-  const [scenario, setScenario] = useState<string | null>(null);
-  const scenarioBySid = useRef<Record<string, string>>({});
-  const onScenarioChange = useCallback((id: string | null) => {
-    setScenario(id);
-    const sid = activeSid;
-    if (!sid) return;
-    if (id) {
-      scenarioBySid.current[sid] = id;
-      localStorage.setItem(`baomi:scenario:${sid}`, id);
-    } else {
-      delete scenarioBySid.current[sid];
-      localStorage.removeItem(`baomi:scenario:${sid}`);
-    }
-  }, [activeSid]);
-  useEffect(() => {
-    if (!activeSid) { setScenario(null); return; }
-    const saved =
-      localStorage.getItem(`baomi:scenario:${activeSid}`) ??
-      scenarioBySid.current[activeSid] ??
-      null;
-    setScenario(saved);
-  }, [activeSid]);
+  // 场景预设（scenario state + localStorage 随会话保存）已随「场景选择撤出
+  // 主界面」整体删除（10-14 晚）：场景化入口统一走模板广场（完整启动包），
+  // 工作台不再给对话贴场景标签；后端 /api/chat 的 scenario 字段保留兼容。
+
   // 联网建库后把建议问题预填进输入框（不自动发送），让用户确认/补充
   const [prefill, setPrefill] = useState<{ text: string; ts: number } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -309,7 +290,6 @@ export default function Home() {
           question,
           top_k: topK,
           mode,
-          scenario,
           attachments: sentAttachments,
           location: getSendGeo(),
           // 混合架构：只有 mode=hybrid 时这个字段才有意义。
@@ -734,8 +714,6 @@ export default function Home() {
           messages={messages}
           mode={mode}
           sending={sending}
-          scenario={scenario}
-          onScenarioChange={onScenarioChange}
           onModeChange={setMode}
           onSend={sendMessage}
           onStop={stopSending}

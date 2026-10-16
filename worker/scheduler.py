@@ -322,8 +322,11 @@ def _sync_next_run() -> None:
     """
     for j in sched.list_jobs():
         job = _scheduler.get_job(j["job_key"]) if _scheduler is not None else None
-        if job is not None and job.next_run_time is not None:
-            next_ts: int | None = int(job.next_run_time.timestamp())
+        # ⚠️ start() 之前作业是 pending：next_run_time 这个 slot 尚未赋值，
+        # 直接访问会 AttributeError（worker 首次常驻时必炸）。getattr 安全取值。
+        nrt = getattr(job, "next_run_time", None) if job is not None else None
+        if nrt is not None:
+            next_ts: int | None = int(nrt.timestamp())
         else:
             next_ts = sched.estimate_next_run(j["cron"], config.SCHEDULER_TZ)
         sched.update_next_run(j["job_key"], next_ts)

@@ -530,9 +530,9 @@ def _cache_invalidate(collection_name: str) -> None:
         _BM25_NEG.pop(collection_name, None)
 
 
-def _cache_get(collection_name: str, question: str, top_k: int):
-    """命中返回结果的浅拷贝，防止调用方误改污染缓存。"""
-    key = (collection_name, question, top_k)
+def _cache_get(collection_name: str, question: str, top_k: int, owner: str | None = None):
+    """命中返回结果的浅拷贝，防止调用方误改污染缓存。owner 纳入 key：避免不同用户串结果。"""
+    key = (collection_name, question, top_k, owner)
     with _RETRIEVE_CACHE_LOCK:
         hit = _RETRIEVE_CACHE.get(key)
         if hit is not None:
@@ -541,13 +541,47 @@ def _cache_get(collection_name: str, question: str, top_k: int):
     return None
 
 
-def _cache_set(collection_name: str, question: str, top_k: int, result) -> None:
-    key = (collection_name, question, top_k)
+def _cache_set(collection_name: str, question: str, top_k: int, result,
+              owner: str | None = None) -> None:
+    key = (collection_name, question, top_k, owner)
     with _RETRIEVE_CACHE_LOCK:
         _RETRIEVE_CACHE[key] = list(result)
         _RETRIEVE_CACHE.move_to_end(key)
         while len(_RETRIEVE_CACHE) > _RETRIEVE_CACHE_MAX:
             _RETRIEVE_CACHE.popitem(last=False)
+
+
+def _apply_profile_bias(docs_scores, owner):
+    """D 块：读取用户画像标签，对命中主题的片段做减距离偏置并重排。"""
+    from core import session as _session
+    profile = _session.get_user_tags(owner, limit=config.RETRIEVAL_BIAS_TOP)
+    if not profile:
+        return docs_scores
+    profile_tags = {p["tag"] for p in profile}
+    return _bias_rerank(docs_scores, profile_tags, config.RETRIEVAL_BIAS_ALPHA)
+
+
+def _bias_rerank(docs_scores, profile_tags, alpha):
+    """按「文档 topics 与画像标签重合度」减距离重排；返回 (Document, 原始distance)。
+
+    双向包含匹配：画像标签 p 与文档主题段 s 任一方向包含即算命中，
+    以兼容「数学」(粗) 与「数学分析」(细) 这类粗细不一致的标签。
+    distance 越小越相关，命中越多 distance 减得越多 → 排越前；
+    最终返回的 distance 仍是原始值，调用方按它换算相似度/阈值不受影响。
+    """
+    biased = []
+    for d, distance in docs_scores:
+        topics = d.metadata.get("topics", "") or ""
+        segs = {s for s in topics.strip("|").split("|") if s}
+        overlap = 0
+        if segs and profile_tags:
+            for p in profile_tags:
+                if any(p in s or s in p for s in segs):
+                    overlap += 1
+        new_distance = max(0.0, float(distance) - alpha * overlap) if overlap else float(distance)
+        biased.append((d, float(distance), new_distance))
+    biased.sort(key=lambda x: x[2])
+    return [(d, dist) for d, dist, _ in biased]
 
 
 def _sources_cache_get(collection_name: str):
@@ -720,6 +754,86 @@ def split_documents(docs, chunk_size: int, chunk_overlap: int):
     return splitter.split_documents(docs)
 
 
+# ==================== 主题标签（方案 C · A 块）====================
+
+def _extract_topics_one(text: str) -> list[str]:
+    """用 LLM 从一段文档文本里抽 3~6 个简短中文主题标签。
+
+    返回归一化后的标签列表（去空白、去重、限长、限数量）。任何失败都返回空列表——
+    主题标签是"锦上添花"，绝不能因为抽标签失败而阻断入库。
+    """
+    if not config.TOPIC_EXTRACT_ENABLED or not text or not text.strip():
+        return []
+    llm = get_llm(temperature=0, max_tokens=64)
+    prompt = (
+        "你是文档主题标注器。请阅读下面这段文档内容，提取最能概括它主题的 "
+        "3~6 个简短中文标签（每个标签不超过 6 个字，如：线性代数、考研数学、操作系统）。\n"
+        "只输出一个 JSON 数组，例如 [\"线性代数\",\"考研数学\"]，"
+        "不要解释，不要 Markdown 代码块，不要多余文字。\n\n"
+        f"【文档内容】\n{text[:4000]}"
+    )
+    try:
+        resp = llm.invoke([HumanMessage(content=prompt)])
+        raw = (resp.content or "").strip()
+        # 兼容模型偶尔用 ```json ``` 包裹的情况
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            if raw[:4].lower() == "json":
+                raw = raw[4:]
+            raw = raw.strip()
+        import json as _json
+        tags = _json.loads(raw)
+        out: list[str] = []
+        for t in tags:
+            t = str(t).strip().strip("|").strip()
+            if t and len(t) <= 12 and t not in out:
+                out.append(t)
+            if len(out) >= 8:
+                break
+        return out
+    except Exception:
+        return []
+
+
+def _inject_topics(chunks) -> None:
+    """给入库切片注入 topics 分隔串（A 块）。
+
+    按来源文件分组，每个来源只用一次 LLM（从全文前 4000 字推断），
+    再把它写成 "|t1|t2|" 形式挂到该来源所有切片的 metadata["topics"] 上。
+    首尾加 | 是为了检索时 `$contains:"|数学|"` 能精确命中成员、避免子串误伤
+    （"|英语|" 不会误中 "|英语语法|"）。
+
+    失败静默：抽不到就跳过，绝不影响正常入库。
+    """
+    if not config.TOPIC_EXTRACT_ENABLED or not chunks:
+        return
+    by_source: dict[str, list] = {}
+    for c in chunks:
+        src = c.metadata.get("source") or ""
+        if src:
+            by_source.setdefault(src, []).append(c)
+    for src, group in by_source.items():
+        text = "\n".join(c.page_content for c in group)[:4000]
+        tags = _extract_topics_one(text)
+        if not tags:
+            continue
+        tstr = "|" + "|".join(tags) + "|"
+        for c in group:
+            c.metadata["topics"] = tstr
+
+
+def topic_where(topic: str) -> dict:
+    """（D 块预留）把主题标签翻译成 Chroma 的 where 过滤条件。
+
+    用 `$contains` + 首尾 `|` 实现精确成员判定。D 块做检索偏置时直接复用，
+    不用各自拼字符串，避免口径不一致。
+    """
+    t = (topic or "").strip().strip("|").strip()
+    if not t:
+        return {}
+    return {"topics": {"$contains": f"|{t}|"}}
+
+
 # ==================== RAG 链路 ====================
 
 
@@ -742,6 +856,8 @@ def _embed_and_store(vs, chunks) -> None:
     """
     if not chunks:
         return
+    # A 块：入库级主题标签（失败静默降级，不影响入库）
+    _inject_topics(chunks)
     bs = max(1, config.EMBED_BATCH_SIZE)
     # 每批打包成 (文本, 元数据, id)，窗口内并发 embedding、窗口内按序写出
     batches = []
@@ -1021,16 +1137,17 @@ class RagPipeline:
             return None
         return _rrf_merge(vec_cands, kw_pairs, kw_docs, config.HYBRID_RRF_K)
 
-    def retrieve_with_score(self, question: str, top_k: int):
+    def retrieve_with_score(self, question: str, top_k: int, owner: str | None = None):
         """检索 top_k 条相关片段，返回 [(Document, distance), ...]。distance 越小越相关。
 
         不是直接取 top-k：先多捞几倍候选（默认 3 倍），丢掉明显不相关的，
         再用 MMR 去掉互相重复的，最后截到 top_k。详见 select_diverse。
         开启混合检索时，向量候选再并上 BM25 关键词候选并用 RRF 融合
         （专有名词 / 缩写 / 编号靠这条补召回）。详见 _rrf_merge。
-        相同 (问题, top_k) 的检索结果按库缓存，命中时省掉一次 embedding + 向量查询。
+        相同 (问题, top_k, owner) 的检索结果按库缓存，命中时省掉一次 embedding + 向量查询。
+        owner 不为空时按用户画像做检索偏置（D 块），且缓存 key 含 owner 避免串结果。
         """
-        cached = _cache_get(self.collection_name, question, top_k)
+        cached = _cache_get(self.collection_name, question, top_k, owner)
         if cached is not None:
             return cached
 
@@ -1065,7 +1182,11 @@ class RagPipeline:
             if result is None:
                 result = select_diverse(vec_cands, top_k)
 
-        _cache_set(self.collection_name, question, top_k, result)
+        # D 块：按用户画像偏置（仅重排，不改原始 distance；含 owner 避免跨用户串缓存）
+        if owner and config.RETRIEVAL_BIAS_ENABLED and result:
+            result = _apply_profile_bias(result, owner)
+
+        _cache_set(self.collection_name, question, top_k, result, owner)
         return result
 
     @staticmethod

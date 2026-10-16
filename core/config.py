@@ -187,6 +187,26 @@ HYBRID_NODE_TIMEOUT = int(os.getenv("HYBRID_NODE_TIMEOUT", "120"))
 # 工作流内 LLM 节点的 max_tokens 上限（project memory 硬约束：内部推理调用必须显式限长）
 HYBRID_LLM_MAX_TOKENS = int(os.getenv("HYBRID_LLM_MAX_TOKENS", "2048"))
 
+# ---------- 标签钩子（方案 C：入库级主题 + 对话级用户画像）----------
+# A 块：文件入库时对每个来源抽主题标签，写入每片 metadata["topics"]（"|t1|t2|" 分隔串），
+#   后续检索（D 块）可用 Chroma `where: {"topics": {"$contains": "|t1|"}}` 精确过滤。
+#   置 0 关闭；失败静默降级（抽不到就不写 topics，不影响正常入库）。
+TOPIC_EXTRACT_ENABLED = bool(int(os.getenv("TOPIC_EXTRACT_ENABLED", "1")))
+
+# B 块：每轮对话结束后异步抽用户画像标签，沉淀到 sessions.db 的 user_tags 表，
+#   供后续 C2 聚合 / D 检索偏置使用。置 0 关闭；钩子 fire-and-forget，失败静默。
+USER_TAG_HOOK_ENABLED = bool(int(os.getenv("USER_TAG_HOOK_ENABLED", "1")))
+
+# C2 块：worker 定时（默认每天 02:30）聚合每个用户的 user_tags，生成画像快照。
+#   聚合取 Top N 标签 + 权重和，存 user_profiles 表（零 LLM 调用，纯结构化）。
+PROFILE_TOP_TAGS = int(os.getenv("PROFILE_TOP_TAGS", "30"))
+
+# D 块：检索时按用户画像（user_tags）对命中主题的片段做加权偏置，提升个性化排序。
+#   置 0 关闭；偏置只改排序、不改原始 distance（相似度换算/阈值不被污染）。
+RETRIEVAL_BIAS_ENABLED = bool(int(os.getenv("RETRIEVAL_BIAS_ENABLED", "1")))
+RETRIEVAL_BIAS_ALPHA = float(os.getenv("RETRIEVAL_BIAS_ALPHA", "0.08"))
+RETRIEVAL_BIAS_TOP = int(os.getenv("RETRIEVAL_BIAS_TOP", "8"))
+
 
 def validate() -> list[str]:
     """启动前校验关键配置，返回缺失项的中文提示列表。"""

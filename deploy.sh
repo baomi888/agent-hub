@@ -13,6 +13,10 @@
 #
 #  说明：本脚本会自动补齐运行环境（Node >= 20.9、Python >= 3.10），
 #        因为 Next.js 16 必须 Node 20+，LangChain 1.x 必须 Python 3.10+。
+#  进程：本脚本管三个 —— uvicorn（127.0.0.1:8000）、next start（:3000）、
+#        调度 worker（python -m worker.scheduler，独立常驻、不监听端口）。
+#        worker 挂了 = 「用户今天没收到提醒」而页面全正常（静默故障），
+#        所以 stop/status/logs 都要带着它；见 规范/guides/调度与Agent开发指南.md §2.2。
 # ============================================================
 set -uo pipefail
 
@@ -40,7 +44,9 @@ do_stop() {
   pkill -f "uvicorn main:app" >/dev/null 2>&1 && ok "后端已停" || warn "后端本来就没在跑"
   pkill -f "next start"       >/dev/null 2>&1 && ok "前端已停" || warn "前端本来就没在跑"
   pkill -f "next-server"      >/dev/null 2>&1 || true
-  rm -f /tmp/baomi-back.pid /tmp/baomi-front.pid
+  # worker 必须一起停：否则重启后新老两个调度进程同时写 data/scheduler.db
+  pkill -f "worker.scheduler" >/dev/null 2>&1 && ok "调度 worker 已停" || warn "调度 worker 本来就没在跑"
+  rm -f /tmp/baomi-back.pid /tmp/baomi-front.pid /tmp/baomi-worker.pid
 }
 
 do_status() {
@@ -53,20 +59,21 @@ do_status() {
   echo "  --- 进程 ---"
   pgrep -af "uvicorn main:app" || echo "  (无后端进程)"
   pgrep -af "next start"      || echo "  (无前端进程)"
+  pgrep -af "worker.scheduler" || echo "  (无 worker 进程 —— 委托/总结不会自动执行)"
   echo "  内存："; free -h | head -3
   echo "  磁盘："; df -h "$ROOT" | tail -1
 }
 
 do_logs() {
   log "日志（Ctrl+C 退出）"
-  tail -n 60 -F /tmp/baomi-back.log /tmp/baomi-front.log 2>/dev/null
+  tail -n 60 -F /tmp/baomi-back.log /tmp/baomi-front.log /tmp/baomi-worker.log 2>/dev/null
 }
 
 case "${1:-deploy}" in
   stop)    do_stop;   exit 0 ;;
   status)  do_status; exit 0 ;;
   logs)    do_logs;   exit 0 ;;
-  restart) do_stop; "$0" start; exit 0 ;;
+  restart) do_stop; bash "$0" start; exit 0 ;;
   env)     : ;;                       # 继续往下走到 .env 环节
   start)   SKIP_BUILD=1 ;;
   deploy)  SKIP_BUILD=0 ;;
@@ -308,6 +315,15 @@ echo $! > /tmp/baomi-front.pid
 cd "$ROOT"
 ok "前端已启动（pid $(cat /tmp/baomi-front.pid)）"
 
+# 调度 worker：第三个常驻进程（不监听端口）。五个 job（委托投递/重试/日报/补报/清理）
+# 都靠它跑；它没起来 = 页面全正常、用户只是「今天没收到提醒」——最隐蔽的静默故障。
+# 与 web 彻底隔离（总结生成 20~40s 不能拖慢在线问答），见 规范/guides/调度与Agent开发指南.md §2.2。
+PYTHONUTF8=1 PYTHONDONTWRITEBYTECODE=1 \
+  nohup venv/bin/python -m worker.scheduler \
+  > /tmp/baomi-worker.log 2>&1 &
+echo $! > /tmp/baomi-worker.pid
+ok "调度 worker 已启动（pid $(cat /tmp/baomi-worker.pid)）"
+
 # ------------------------------------------------------------
 # 8. 本机防火墙（安全组之外的第二道门，很多人卡在这）
 # ------------------------------------------------------------
@@ -335,6 +351,12 @@ BC=$(curl -s -m 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:${BACK_PORT}/
 FC=$(curl -s -m 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:${FRONT_PORT}/"      2>/dev/null || echo 000)
 printf '  后端 /health  -> HTTP %s\n' "$BC"
 printf '  前端 /        -> HTTP %s\n' "$FC"
+WPID="$(cat /tmp/baomi-worker.pid 2>/dev/null || true)"
+if [ -n "$WPID" ] && kill -0 "$WPID" 2>/dev/null; then
+  printf '  调度 worker   -> 存活（pid %s）\n' "$WPID"
+else
+  warn "调度 worker 没活着，日志： tail -20 /tmp/baomi-worker.log"
+fi
 
 echo
 if [ "$BC" = "200" ] && [ "$FC" != "000" ]; then
@@ -352,8 +374,8 @@ cat <<EOF
          服务器上自测： curl -s http://127.0.0.1:${BACK_PORT}/health
 
  常用命令
-   bash deploy.sh status    看状态
-   bash deploy.sh logs      看日志
+   bash deploy.sh status    看状态（后端/前端/worker 三进程）
+   bash deploy.sh logs      看日志（后端/前端/worker）
    bash deploy.sh restart   重启
    bash deploy.sh stop      停止
 
@@ -362,5 +384,6 @@ cat <<EOF
       ${BACK_PORT} 不需要放行：后端已改为只监听回环，公网访问不到它
    2) 确认实例有公网带宽 / 已绑定弹性公网 IP
    3) 看日志：tail -50 /tmp/baomi-front.log
+   4) worker 没起来时页面正常、但委托/总结不会自动执行：tail -20 /tmp/baomi-worker.log
 ============================================================
 EOF

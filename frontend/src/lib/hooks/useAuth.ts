@@ -8,7 +8,7 @@
 //      不这么做的话，登录过期后用户点什么都是"没反应"：请求其实失败了，
 //      只是失败被埋在某个 hook 的 catch 里。
 import { useCallback, useEffect, useRef, useState } from "react";
-import { UNAUTHORIZED_EVENT, api } from "@/lib/api";
+import { AUTHORIZED_EVENT, UNAUTHORIZED_EVENT, api } from "@/lib/api";
 import type { MeOut } from "@/lib/types";
 
 export interface AuthState {
@@ -70,6 +70,16 @@ export function useAuth(): AuthState {
     window.addEventListener(UNAUTHORIZED_EVENT, onExpired);
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onExpired);
   }, []);
+
+  useEffect(() => {
+    // 与 401 的「收回」对称：登录/注册成功（凭证建立）时刷新。
+    // 每个 useAuth 实例各持一份状态，登录动作只发生在发起登录的那个实例上
+    // （例如 ConsoleShell 的）—— 没有这个监听，同屏其它实例（以及由它们
+    // 驱动的页面级数据加载）会一直停在「未登录」的旧结论上，直到手动刷新。
+    const onAuthorized = () => void refresh();
+    window.addEventListener(AUTHORIZED_EVENT, onAuthorized);
+    return () => window.removeEventListener(AUTHORIZED_EVENT, onAuthorized);
+  }, [refresh]);
 
   const login = useCallback(async (username: string, password: string) => {
     await api.login(username, password);

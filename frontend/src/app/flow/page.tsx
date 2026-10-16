@@ -2,9 +2,10 @@
 
 // 混合架构管理面：工作流定义 + 切换规则
 //
-// 契约来源：docs/前端对接接口文档_混合架构_2026-10-14.md（林宏亮 v1）§5
-// ⚠️ 后端截至 10-14 未推到任何远端分支（hybrid/ 与 api/hybrid.py 均 0 文件），
-//    所以这一页带**三态降级**：端点 404 时显示演示数据 + 「接口待上线」标记，不是白屏。
+// 契约来源：docs/前端对接接口文档_混合架构_2026-10-14.md（林宏亮 v1）
+// 后端已合入 main（提交 231a9c7），本地 8010/8000 实跑 17/17 契约通过。
+// 页面仍保留**三态降级**（加载中 / 端点 404 演示数据+「接口待上线」 / 真实数据）：
+// 服务器尚未部署新版本时，前端不会白屏。
 //
 // ★ 这个页面最容易踩的坑（文档 §六.6 也特意点了）：
 // **编辑工作流定义必须用「非受控文本域 + 失焦提交」**。
@@ -18,8 +19,9 @@ import ConsoleShell from "@/components/console/ConsoleShell";
 import { Seg, ToastHost } from "@/components/console/ui";
 import CornIcon from "@/components/CornIcon";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/hooks/useAuth";
 import { useToast } from "@/lib/hooks/useToast";
-import type { HybridRunRow, RuleRow, WorkflowRow } from "@/lib/types";
+import type { HybridRunRow, RuleRow, WorkflowDef, WorkflowRow } from "@/lib/types";
 import { KNOWN_SIGNALS } from "@/lib/types";
 
 type Tab = "wf" | "rule" | "run";
@@ -76,13 +78,19 @@ const STATUS_LABEL: Record<string, string> = {
 
 export default function FlowPage() {
   const { toasts, showToast } = useToast();
+  const auth = useAuth();
+  const authedId = auth.me?.user.id ?? null;
   const [tab, setTab] = useState<Tab>("wf");
-  const [wfs, setWfs] = useState<WorkflowRow[] | null>(null);
-  const [rules, setRules] = useState<RuleRow[] | null>(null);
-  const [runs, setRuns] = useState<HybridRunRow[] | null>(null);
+  // 三态而不是两态：undefined = 加载中（还没结果）；null = 加载失败（降级演示
+  // 数据）；数组 = 真实数据。若让 null 兼作「加载中」，每次打开页面都会先闪
+  // 一下「接口待上线」的假降级（请求回来前的空窗期），慢网络下能停好几秒。
+  const [wfs, setWfs] = useState<WorkflowRow[] | null | undefined>(undefined);
+  const [rules, setRules] = useState<RuleRow[] | null | undefined>(undefined);
+  const [runs, setRuns] = useState<HybridRunRow[] | null | undefined>(undefined);
   const [editing, setEditing] = useState<WorkflowRow | null>(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const editorRef = useRef<HTMLTextAreaElement>(null);
 
   const load = useCallback(() => {
     api.hybrid.workflows().then((d) => setWfs(d)).catch(() => setWfs(null));
@@ -90,9 +98,16 @@ export default function FlowPage() {
     api.hybrid.runs(20).then((d) => setRuns(d)).catch(() => setRuns(null));
   }, []);
   useEffect(() => {
+    // 未登录不发请求：页面组件挂在 ConsoleShell 的登录门之外，登录前发的请求
+    // 必然是 401；而「登录完成」发生在 ConsoleShell 自己的 useAuth 实例里，
+    // 这里感知不到 —— 不守卫的话页面会一直停在登录前的失败结果上（登录后
+    // 界面还显示「接口待上线」，必须手动刷新才恢复；10-14 浏览器联调实测）。
+    // 登录成功会经 AUTHORIZED_EVENT 同步进本实例的 auth.me，依赖变化自动补加载。
+    if (!authedId) return;
     load();
-  }, [load]);
+  }, [authedId, load]);
 
+  const isLoading = wfs === undefined || rules === undefined || runs === undefined;
   const isDemo = wfs === null;
   const wfItems = wfs ?? DEMO_WORKFLOWS;
   const ruleItems = rules ?? DEMO_RULES;
@@ -137,12 +152,23 @@ export default function FlowPage() {
       setEditing(null);
       return;
     }
+    // 从 DOM 现读编辑器内容：编辑器是**非受控**的（输入期间不能解析，否则
+    // 用户连括号都删不掉），state 里的 definition 还是打开时的旧值 —— 不现读
+    // 的话用户改的 JSON 会被静默丢弃：界面弹「已保存」，落库的还是旧内容
+    // （10-14 浏览器联调实测：改完保存再打开，定义原样不动）。
+    let def: WorkflowDef;
+    try {
+      def = JSON.parse(editorRef.current?.value ?? "") as WorkflowDef;
+    } catch (ex) {
+      setErr(String(ex));
+      return;
+    }
     setBusy(true);
     try {
       await api.hybrid.updateWorkflow(editing.id, {
         name: editing.name,
         description: editing.description,
-        definition: editing.definition,
+        definition: def,
       });
       showToast("success", "已保存");
       setEditing(null);
@@ -152,7 +178,7 @@ export default function FlowPage() {
     } finally {
       setBusy(false);
     }
-  }, [demoGuard, editing, err, load, showToast]);
+  }, [demoGuard, editing, load, showToast]);
 
   return (
     <ConsoleShell
@@ -170,9 +196,9 @@ export default function FlowPage() {
           <Seg
             ariaLabel="管理视图切换"
             options={[
-              { value: "wf", label: `工作流 ${wfItems.length}` },
-              { value: "rule", label: `切换规则 ${ruleItems.length}` },
-              { value: "run", label: `执行记录 ${runItems.length}` },
+              { value: "wf", label: isLoading ? "工作流" : `工作流 ${wfItems.length}` },
+              { value: "rule", label: isLoading ? "切换规则" : `切换规则 ${ruleItems.length}` },
+              { value: "run", label: isLoading ? "执行记录" : `执行记录 ${runItems.length}` },
             ]}
             value={tab}
             onChange={(v) => setTab(v as Tab)}
@@ -180,13 +206,19 @@ export default function FlowPage() {
         </div>
       }
     >
+      {isLoading && (
+        <p className="flow-hint" role="status">
+          正在加载…
+        </p>
+      )}
+
       {isDemo && (
         <p className="flow-demo" role="status">
           <CornIcon name="info" /> 接口待上线，以下是演示数据。
         </p>
       )}
 
-      {tab === "wf" && (
+      {!isLoading && tab === "wf" && (
         <ul className="flow-list">
           {wfItems.map((w) => (
             <li key={w.id} className="flow-card">
@@ -229,7 +261,7 @@ export default function FlowPage() {
         </ul>
       )}
 
-      {tab === "rule" && (
+      {!isLoading && tab === "rule" && (
         <>
           <p className="flow-hint">
             引擎只会上报 4 个 signal（下面这四个）。自定义 signal 能存下但不会有事件触发。
@@ -284,7 +316,7 @@ export default function FlowPage() {
         </>
       )}
 
-      {tab === "run" && (
+      {!isLoading && tab === "run" && (
         <ul className="flow-list">
           {runItems.map((r) => (
             <li key={r.run_id} className="flow-card">
@@ -332,6 +364,7 @@ export default function FlowPage() {
               输入过程中允许非法 JSON，否则你连括号都删不掉。
             </p>
             <textarea
+              ref={editorRef}
               className="flow-editor"
               defaultValue={JSON.stringify(editing.definition, null, 2)}
               onBlur={(e) => {

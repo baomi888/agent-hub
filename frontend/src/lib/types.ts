@@ -43,8 +43,10 @@ export interface Message {
 // 所以前端不能假设选了 hybrid 就一定走混合，得看事件有没有来（见 useHybridTrace）。
 export type ChatMode = "auto" | "rag" | "agent" | "llm" | "hybrid";
 
-// 场景预设：kaoyan 考研复习 / notes 课程笔记 / paper 论文写作（轻量版只做提示词 + 选择器）
-export type ScenarioId = "kaoyan" | "notes" | "paper";
+// 场景预设类型（ScenarioId）已随「场景选择撤出主界面」一并删除（10-14 晚）：
+// 场景化入口统一走模板广场（/templates，完整启动包：建库 + 会话 + 提示词）。
+// 后端 /api/chat 的 scenario 字段与 core/scenarios.py 机制保留（旧前端兼容 + 未来
+// 模板联动可复用），前端不再传。
 
 export interface SearchResult {
   title: string;
@@ -278,6 +280,31 @@ export interface DailyReport {
   model?: string | null;
   generated_at?: number | null;
   read_at?: number | null;
+}
+
+// ---------- P6 打卡 /api/checkin ----------
+//
+// ⚠️ 后端打卡语义 = 「那天有没有生成每日总结（status='ready'）」，所以打卡数据
+// 全部从 daily_reports 派生，不另造数据。下面两个类型对应 api/checkin.py。
+
+/** GET /api/checkin/streak：连续天数 / 最长连续 / 已打卡日期集合 */
+export interface CheckinStreak {
+  /** 所有打卡日（升序） */
+  dates: string[];
+  /** 当前连续天数 */
+  streak: number;
+  /** 近 30 天内最长连续 */
+  longest: number;
+}
+
+/** GET /api/checkin/history 单条：{date, points, shared} */
+export interface CheckinHistoryItem {
+  /** YYYY-MM-DD */
+  date: string;
+  /** 当天总结的结论条数 */
+  points: number;
+  /** 是否已分享（POST /api/checkin/share 标记） */
+  shared: boolean;
 }
 
 // ---------- P7 设置：Agent 工具元数据 /api/agent/tools ----------

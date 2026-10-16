@@ -51,40 +51,9 @@
   font-weight: 600;
 }
 
-/* 场景预设 chips：复用 mode 的胶囊观感但不带滑块，选中态用玉米金 */
-.scenario-label {
-  font-size: var(--fs-sm);
-  color: var(--text-3);
-  letter-spacing: var(--ls-tight);
-  margin-right: 2px;
-}
-.scenario {
-  border: 1px solid var(--line);
-  background: var(--fill-3);
-  cursor: pointer;
-  font-size: var(--fs-md);
-  color: var(--text-2);
-  padding: 4px 12px;
-  letter-spacing: var(--ls-tight);
-  border-radius: 999px;
-  white-space: nowrap;
-  transition: color var(--t-color), background var(--t-color), border-color var(--t-color);
-}
-.scenario:hover {
-  color: var(--ink);
-  border-color: var(--line-strong);
-}
-.scenario.active {
-  color: var(--accent-ink);
-  font-weight: 600;
-  background: var(--card-bg);
-  border-color: var(--accent-ink);
-}
-
-/* 校园工具集入口（原先在侧栏，10-14 搬到对话栏场景行右侧）。
-   刻意与 .scenario 同族（描边 + 全圆角 + 同一档间距），让它融进这一行；
-   但字号降一档、且只在 hover 点亮金描边 —— 它是跳出去的外链，
-   不是当前会话的属性（场景 chip 会用 aria-pressed 持久高亮），主次不该一样。 */
+/* 校园工具集入口（原先在侧栏，10-14 搬到对话栏；10-14 晚场景 chips 撤出后，
+   这一行只剩它一个）。描边 + 全圆角 + 靠右的胶囊观感；字号降一档、只在 hover
+   点亮金描边 —— 它是跳出去的外链，不是当前会话的属性，别跟主操作抢视线。 */
 .tools-link {
   margin-left: auto;
   display: inline-flex;
