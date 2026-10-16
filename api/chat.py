@@ -292,10 +292,16 @@ async def _stream_llm(llm, messages, request: Request, acc: _Acc) -> None:
 
     早期实现每帧回传"累计全文"，千 token 的回答会产生 O(n²) 的传输量；
     这里只发 delta，由前端自己累加。
+
+    断连检测改成每 16 帧查一次（首帧仍然查）：is_disconnected() 要读 asgi 状态，
+    逐帧调用等于千 token 回答白付上千次开销。连接正常时帧序列一模一样，
+    代价只是"客户端已经走了"最多晚几十毫秒被发现。
     """
     try:
+        seen = 0
         async for chunk in llm.astream(messages):
-            if await request.is_disconnected():
+            seen += 1
+            if (seen == 1 or seen % 16 == 0) and await request.is_disconnected():
                 return
             delta = chunk.content or ""
             if isinstance(delta, list):
