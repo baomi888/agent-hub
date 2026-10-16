@@ -11,6 +11,34 @@
 
 ## [2026-10-16]
 
+### 重构（剩余 AI/RAG/知识库模块：死代码清理 + 缺陷修复）
+
+范围：上一轮 RAG/AI 核心之外尚未治理的模块（`kb/pipelines.py`、`agent/builder.py`、
+`hybrid/*`、`core/llm.py`、`core/config.py`、`core/session.py`、`core/tool_registry.py`、
+`api/hybrid.py`、`api/delegate.py`、`service/daily.py`）。原则同上一轮：可观测行为不变，
+先钉行为再改。详见 `docs/剩余模块屎山治理与重构报告_2026-10-16.md`。
+
+- **缺陷修复**
+  - `hybrid/expr.py::eval_condition` 此前只兜 `ExprError`，与其 docstring「任何异常都按 False
+    处理」不符：含 NUL 的表达式（`ast.parse` 抛 `ValueError`）与超深嵌套（`RecursionError`）
+    都会漏进编排主循环。现统一收敛为「条件不成立」——只影响此前本就报错的输入。`d66499a`
+  - `api/hybrid.py::upsert_rule` 条件语法校验补兜 `ValueError` → 400（此前含 NUL 的条件会 500）。`d66499a`
+- **性能**
+  - `hybrid/store.py`、`core/session.py` 的 `_db_path()` 改为纯计算，目录创建挪到建连前——
+    去掉每条 SQL 前的一次 `os.makedirs` 系统调用。`d66499a`
+- **清理（死代码，均经全仓库引用核查）**
+  - 删除 8 处零引用符号：`hybrid/workflow.py::NodeError`、`core/tool_registry.py::get_meta/is_activated`、
+    `service/daily.py::mark_read`、`core/auth.py::NotAuthenticated`、
+    `core/account.py::count_users/list_users`、`core/scheduler.py::today_local`。`d66499a`
+  - `api/delegate.py`：死函数 `_enabled_count` 收敛为共享纯函数 `_count_enabled`；
+    `import json` 提到模块级；去掉 `model_dump()` 后不可达的 `isinstance` 分支。`d66499a`
+- **注释**
+  - 说明工作流 / Agent 节点产出为何直接写 `ctx.shared` 而不走 `shared_set`
+    （落盘指针会破坏下游模板渲染）。`d66499a`
+- **测试**
+  - 新增 `tests/test_baseline_refactor_edges.py`（11 条，离线）：expr 正常语义不变 +
+    NUL / 超深嵌套 / 白名单拒绝；delegate 返回体契约与启用计数口径。全量 189 → 200 passed。`d66499a`
+
 ### 重构（RAG / AI 核心：等价重构 + 性能优化）
 
 范围：`kb/rag_core.py`、`kb/importer.py`、`api/kb.py`、`api/chat.py`、`agent/tools.py`。
