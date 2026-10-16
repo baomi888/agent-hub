@@ -26,7 +26,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import core.config as config  # noqa: E402
 import core.session as session  # noqa: E402
 import kb.pipelines as pipelines  # noqa: E402
-from api.chat import _augment_plan, _resolve_plan_topic, detect_plan_topic  # noqa: E402
+from api.chat import (  # noqa: E402
+    PLAN_TOPICS,
+    _augment_plan,
+    _resolve_plan_topic,
+    detect_plan_topic,
+)
 from api.sessions import SessionCreate, create  # noqa: E402
 
 
@@ -59,6 +64,46 @@ def test_detect_plan_topic_skips_empty_inputs():
     assert detect_plan_topic("", None, "   ") is None
 
 
+def test_detect_plan_topic_exam_names_without_intent_words():
+    """只报成绩、不带"备考/学习"字样的说法也要命中学习计划。
+
+    线上探针 2026-10-16 复现的缺口："六级"此前不在词表里，
+    "我这次六级只考了473分" 一个词都命不中 → 主题续不上 → 退回通用 hint，
+    计划里因此混出 DAY 1/DAY 2，前端卡片抬头也退回"结构化计划"。
+    """
+    for q in (
+        "我这次六级只考了473分，挺受打击的。",
+        "四级没过线，好烦",
+        "四六级刚考完",
+        "CET6 只考了 473",
+        "期末还有两周就考了",
+        "想考证，但不知道从哪开始",
+    ):
+        t = detect_plan_topic(q)
+        assert t is not None, q
+        assert t["name"] == "学习计划", q
+
+
+def test_plan_topics_align_with_frontend():
+    """服务端词表是权威，前端那份只用于给卡片打标签 —— 两边不能漂移。
+
+    漂移的后果很隐蔽：后端算出了主题（进 prompt 的 hint 是对的），
+    前端却认不出，卡片抬头仍旧显示通用的"结构化计划"。
+    """
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "frontend" / "src" / "components" / "chat" / "plan.tsx"
+    )
+    text = src.read_text(encoding="utf-8")
+    for t in PLAN_TOPICS:
+        assert 'name: "%s"' % t["name"] in text, "前端缺主题：%s" % t["name"]
+    study = next(t for t in PLAN_TOPICS if t["name"] == "学习计划")
+    missing = [k for k in study["keys"] if '"%s"' % k not in text]
+    assert not missing, "前端学习计划缺关键词：%s" % missing
+
+
 # ==================== 2. _resolve_plan_topic（含历史回看）====================
 
 def test_resolve_plan_topic_hits_without_history(monkeypatch):
@@ -83,6 +128,18 @@ def test_resolve_plan_topic_from_history(monkeypatch):
     ]
     monkeypatch.setattr(session, "get_messages", lambda *_a, **_k: rows)
     t = asyncio.run(_resolve_plan_topic("u1", "s1", "计划能不能详细一点"))
+    assert t is not None and t["name"] == "学习计划", t
+
+
+def test_resolve_plan_topic_from_history_exam_score_only(monkeypatch):
+    """截图场景原样复现：第一轮只报六级分数（不带意图词），第二轮无主语追问。"""
+    monkeypatch.setattr(config, "PLAN_TOPIC_HISTORY_MESSAGES", 6)
+    rows = [
+        {"role": "user", "content": "我这次六级只考了473分，挺受打击的。"},
+        {"role": "assistant", "content": "别灰心，先看看差在哪。"},
+    ]
+    monkeypatch.setattr(session, "get_messages", lambda *_a, **_k: rows)
+    t = asyncio.run(_resolve_plan_topic("u1", "s1", "计划再细一点"))
     assert t is not None and t["name"] == "学习计划", t
 
 
