@@ -212,6 +212,17 @@ RETRIEVAL_BIAS_ENABLED = bool(int(os.getenv("RETRIEVAL_BIAS_ENABLED", "1")))
 RETRIEVAL_BIAS_ALPHA = float(os.getenv("RETRIEVAL_BIAS_ALPHA", "0.08"))
 RETRIEVAL_BIAS_TOP = int(os.getenv("RETRIEVAL_BIAS_TOP", "8"))
 
+# ---------- 计划主题识别加固（P2）----------
+# 计划请求命不中主题词时不直接退化成通用模板，回看最近 N 条用户消息续上主题
+#   （"计划再细一点" → 从前文的"六级备考"推断）。置 0 表示只看本轮提问。
+PLAN_TOPIC_HISTORY_MESSAGES = int(os.getenv("PLAN_TOPIC_HISTORY_MESSAGES", "6"))
+
+# ---------- 新建会话自动绑定资料库（P3）----------
+# 用户**有且仅有一个**知识库时，新建会话自动绑上它。修复"传过资料、新开会话
+#   模型却说没绑定"的割裂（2026-10-16 线上复现）。多库时不自动绑（绑错比不绑更糟），
+#   改由前端顶栏「未绑定资料库」提示引导手动选择。置 0 关闭。
+AUTO_BIND_SINGLE_KB = bool(int(os.getenv("AUTO_BIND_SINGLE_KB", "1")))
+
 
 def validate() -> list[str]:
     """启动前校验关键配置，返回缺失项的中文提示列表。"""

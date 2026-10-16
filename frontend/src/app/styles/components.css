@@ -373,6 +373,22 @@
 }
 /* 顶栏「已绑定」长名截断，避免挤压右侧收起按钮 */
 .kb-chip-name { min-width: 0; }
+
+/* 「未绑定资料库」引导胶囊（P3）：虚线边 + 警示墨色，可点开右侧面板去选。
+   用 --warning-ink 而不是 --red：这不是报错，只是「还没选」，红色会把人吓一跳。
+   两个 button 专属声明是为了抵消浏览器给 button 的默认底色和字体。 */
+button.kb-chip-unbound {
+  background: transparent;
+  font-family: inherit;
+  font-weight: inherit;
+  color: var(--warning-ink);
+  border-style: dashed;
+  cursor: pointer;
+}
+button.kb-chip-unbound:hover {
+  border-color: var(--warning-ink);
+  color: var(--warning-ink);
+}
 @media (max-width: 359px) {
   /* 超窄屏（<360px）：长知识库名会挤压收起按钮，直接隐藏解绑 ✕，名字截断即可 */
   .kb-unbind { display: none; }

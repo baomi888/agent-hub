@@ -418,10 +418,18 @@ export default function Home() {
                 )
               );
             }
+            // 计划主题名（P2）：主题可能是后端从历史推断的，前端猜不到，只能靠它回填
+            const planTopic = String(ev.data.plan_topic ?? "");
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === asstId
-                  ? { ...m, streaming: false, refs: refs || m.refs, dbId: dbId ?? m.dbId }
+                  ? {
+                      ...m,
+                      streaming: false,
+                      refs: refs || m.refs,
+                      dbId: dbId ?? m.dbId,
+                      planTopic: planTopic || m.planTopic,
+                    }
                   : m
               )
             );
@@ -727,6 +735,7 @@ export default function Home() {
           onTopKChange={setTopK}
           sessionTitle={sessions.find((s) => s.id === activeSid)?.title ?? null}
           boundKb={boundKb}
+          kbCount={kbs.length}
           kbNameMap={kbNameMap}
           onUnbindKb={() => bindKb(null)}
           onToggleKbPanel={() => setKbPanelOpen(!kbPanelOpen)}

@@ -61,6 +61,8 @@ interface Props {
   onTopKChange: (v: number) => void;
   sessionTitle?: string | null;
   boundKb?: string | null;
+  /** 该用户拥有的资料库总数：>0 且当前未绑定时，顶栏给「未绑定」引导提示 */
+  kbCount?: number;
   kbNameMap?: Record<string, string>;
   onUnbindKb?: () => void;
   kbPanelOpen?: boolean;
@@ -100,6 +102,7 @@ export default function ChatArea({
   onTopKChange,
   sessionTitle,
   boundKb,
+  kbCount,
   kbNameMap,
   onUnbindKb,
   kbPanelOpen,
@@ -433,7 +436,7 @@ export default function ChatArea({
         <span className="truncate font-serif text-sm font-medium text-ink">
           {sessionTitle ?? "新对话"}
         </span>
-        {boundKb && (
+        {boundKb ? (
           <span
             className="kb-chip min-w-0 max-w-[44vw]"
             title={kbNameMap?.[boundKb] ?? boundKb}
@@ -455,7 +458,22 @@ export default function ChatArea({
               </button>
             )}
           </span>
-        )}
+        ) : (kbCount ?? 0) > 0 && onToggleKbPanel ? (
+          // P3：手上有资料库却没绑到本会话 —— 必须说出来，否则用户以为资料"丢了"
+          // （线上复现：传过资料的库还在，模型却说当前会话没绑定）。
+          // 一个库都没有时不提示：没东西可绑，提示只会变成噪音。
+          <button
+            type="button"
+            onClick={onToggleKbPanel}
+            className="kb-chip kb-chip-unbound min-w-0 max-w-[44vw]"
+            title="当前会话未绑定资料库，点此从右侧选择"
+            aria-label="当前会话未绑定资料库，点此选择"
+          >
+            <span className="kb-chip-name min-w-0 truncate">
+              未绑定资料库 · 点此选择
+            </span>
+          </button>
+        ) : null}
         <div className="flex-1" />
         {/* 顶栏用量入口：常驻显示今日额度，点开看板。
             侧栏那个入口太折叠，用户找不到——这里给一个一眼可见的。 */}

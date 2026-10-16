@@ -218,7 +218,11 @@ const Bubble = memo(function Bubble({
             (() => {
               const plan = parsePlan(m.content);
               if (!plan) return renderMarkdown(m.content);
-              const topic = detectPlanTopic(userQuestion);
+              // 优先用后端回传的主题（能从历史推断）；没有才退回本句关键词匹配。
+              // PlanCard 只用到 topic.name（抬头文案），hint 在这里给空串即可。
+              const topic = m.planTopic
+                ? { name: m.planTopic, hint: "" }
+                : detectPlanTopic(userQuestion);
               return <PlanCard data={plan} content={m.content} topic={topic} onCopy={handleCopy} />;
             })()
           ) : m.streaming && !m.content ? (
