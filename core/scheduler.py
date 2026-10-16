@@ -242,11 +242,6 @@ def now_local() -> datetime:
     return datetime.now(TZ)
 
 
-def today_local() -> str:
-    """上海日历日，形如 2026-10-12（与 core/quota.day_key() 同一套语义）。"""
-    return now_local().strftime("%Y-%m-%d")
-
-
 def day_bounds(day: str) -> tuple[int, int]:
     """把一个上海日历日解释成区间 [当日起点, 次日起点) 的 Unix 秒。
 
