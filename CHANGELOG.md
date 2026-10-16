@@ -11,6 +11,15 @@
 
 ## [2026-10-16]
 
+### 合入（混合模式跨轮记忆 + 计划主题识别）
+
+- 合入 `e6075889`：hybrid 模式注入对话历史，修复「混合模式每轮失忆」——新增
+  `HYBRID_HISTORY_MAX_MESSAGES`（默认 12，0=关闭），`ctx.shared["history"]` 由
+  Agent / Workflow 引擎在拼 prompt 时前置。新增计划主题识别
+  （`api/chat.py::detect_plan_topic` / `_resolve_plan_topic`），SSE `done` 新增
+  `plan_topic` 字段。两处冲突（`core/config.py`、`hybrid/workflow.py`）均按「保留双方意图」
+  解决，并同步更新 `tests/test_baseline_chat_stream.py` 的 done 字段断言。`38c75f2`
+
 ### 重构（剩余 AI/RAG/知识库模块：死代码清理 + 缺陷修复）
 
 范围：上一轮 RAG/AI 核心之外尚未治理的模块（`kb/pipelines.py`、`agent/builder.py`、
@@ -27,9 +36,10 @@
   - `hybrid/store.py`、`core/session.py` 的 `_db_path()` 改为纯计算，目录创建挪到建连前——
     去掉每条 SQL 前的一次 `os.makedirs` 系统调用。`d66499a`
 - **清理（死代码，均经全仓库引用核查）**
-  - 删除 8 处零引用符号：`hybrid/workflow.py::NodeError`、`core/tool_registry.py::get_meta/is_activated`、
-    `service/daily.py::mark_read`、`core/auth.py::NotAuthenticated`、
-    `core/account.py::count_users/list_users`、`core/scheduler.py::today_local`。`d66499a`
+  - 删除 8 处零引用符号（均经「全仓库引用核查」确认）：`hybrid/workflow.py::NodeError`、
+    `core/tool_registry.py::get_meta/is_activated`、`service/daily.py::mark_read`。`d66499a`
+  - 同批第二批（首轮提交时漏 stage，已在合并期间补提交）：`core/auth.py::NotAuthenticated`、
+    `core/account.py::count_users/list_users`、`core/scheduler.py::today_local`。`da1adf8`
   - `api/delegate.py`：死函数 `_enabled_count` 收敛为共享纯函数 `_count_enabled`；
     `import json` 提到模块级；去掉 `model_dump()` 后不可达的 `isinstance` 分支。`d66499a`
 - **注释**
