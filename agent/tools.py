@@ -263,6 +263,35 @@ def reverse_geocode_city(lat: float, lon: float) -> str | None:
 _AMAP_CACHE: dict[str, tuple[str, str, str]] = {}
 
 
+# ---------- 天气工具用到的固定表（模块级：字面量、无变异，不必每次调用重建）----------
+
+WEATHER_HTTP_TIMEOUT = 10
+AMAP_GEO = "https://restapi.amap.com/v3/geocode/geo"
+AMAP_WEATHER = "https://restapi.amap.com/v3/weather/weatherInfo"
+OPEN_METEO = "https://api.open-meteo.com/v1/forecast"
+
+# 拼音 → 中文地名。用户手输 "beijing" 这类拼音时先折成中文再查地理编码，
+# 否则高德地理编码对纯拼音的命中率很不稳定。
+CITY_ALIASES = {
+    "beijing": "北京", "tianjin": "天津", "xian": "西安", "harbin": "哈尔滨",
+    "shanghai": "上海", "hangzhou": "杭州", "nanjing": "南京", "suzhou": "苏州",
+    "wuhan": "武汉", "chengdu": "成都", "chongqing": "重庆", "guangzhou": "广州",
+    "shenzhen": "深圳", "haikou": "海口", "kunming": "昆明", "lhasa": "拉萨",
+    "maoming": "茂名", "xiamen": "厦门", "fuzhou": "福州", "jinan": "济南",
+    "qingdao": "青岛", "zhengzhou": "郑州", "changsha": "长沙", "guiyang": "贵阳",
+    "nanning": "南宁", "urumqi": "乌鲁木齐", "taiyuan": "太原", "xining": "西宁",
+    "lanzhou": "兰州", "yinchuan": "银川", "changchun": "长春", "shenyang": "沈阳",
+    "dalian": "大连", "taipei": "台北", "hongkong": "香港", "macau": "澳门",
+}
+
+# WMO 天气码 → 中文（Open-Meteo 返回的就是这套码）
+WMO_CN = {0: "晴", 1: "基本晴", 2: "局部多云", 3: "阴", 45: "雾",
+          48: "雾凇", 51: "毛毛雨", 53: "小雨", 55: "中雨", 56: "冻毛毛雨",
+          61: "小雨", 63: "中雨", 65: "大雨", 66: "冻雨", 71: "小雪",
+          73: "中雪", 75: "大雪", 80: "阵雨", 81: "阵雨", 82: "强阵雨",
+          85: "阵雪", 95: "雷阵雨", 96: "雷阵雨伴冰雹", 99: "强雷暴冰雹"}
+
+
 @tool
 def get_weather(city: str = "", days: int = 1, lat: float = None, lon: float = None) -> str:
     """查询中国城市天气（实时 + 未来预报，高德 + Open-Meteo 双数据源）。
@@ -291,23 +320,9 @@ def get_weather(city: str = "", days: int = 1, lat: float = None, lon: float = N
     import urllib.parse
     import urllib.request
 
-    WEATHER_HTTP_TIMEOUT = 10
+    # Key 必须每次现读：它是运行时配置（改 .env 后不必重启进程），
+    # 与上面那几张字面量表不同，不能一起提到模块级
     AMAP_KEY = _get_amap_key()
-    AMAP_GEO = "https://restapi.amap.com/v3/geocode/geo"
-    AMAP_WEATHER = "https://restapi.amap.com/v3/weather/weatherInfo"
-    OPEN_METEO = "https://api.open-meteo.com/v1/forecast"
-
-    CITY_ALIASES = {
-        "beijing": "北京", "tianjin": "天津", "xian": "西安", "harbin": "哈尔滨",
-        "shanghai": "上海", "hangzhou": "杭州", "nanjing": "南京", "suzhou": "苏州",
-        "wuhan": "武汉", "chengdu": "成都", "chongqing": "重庆", "guangzhou": "广州",
-        "shenzhen": "深圳", "haikou": "海口", "kunming": "昆明", "lhasa": "拉萨",
-        "maoming": "茂名", "xiamen": "厦门", "fuzhou": "福州", "jinan": "济南",
-        "qingdao": "青岛", "zhengzhou": "郑州", "changsha": "长沙", "guiyang": "贵阳",
-        "nanning": "南宁", "urumqi": "乌鲁木齐", "taiyuan": "太原", "xining": "西宁",
-        "lanzhou": "兰州", "yinchuan": "银川", "changchun": "长春", "shenyang": "沈阳",
-        "dalian": "大连", "taipei": "台北", "hongkong": "香港", "macau": "澳门",
-    }
 
     def _http_get(base, params, amap=True):
         if amap:
@@ -319,12 +334,6 @@ def get_weather(city: str = "", days: int = 1, lat: float = None, lon: float = N
         if amap and str(data.get("status")) != "1":
             raise RuntimeError(data.get("info", "unknown error"))
         return data
-
-    WMO_CN = {0: "晴", 1: "基本晴", 2: "局部多云", 3: "阴", 45: "雾",
-              48: "雾凇", 51: "毛毛雨", 53: "小雨", 55: "中雨", 56: "冻毛毛雨",
-              61: "小雨", 63: "中雨", 65: "大雨", 66: "冻雨", 71: "小雪",
-              73: "中雪", 75: "大雪", 80: "阵雨", 81: "阵雨", 82: "强阵雨",
-              85: "阵雪", 95: "雷阵雨", 96: "雷阵雨伴冰雹", 99: "强雷暴冰雹"}
 
     # ---- 参数校验 ----
     if not isinstance(days, int) or isinstance(days, bool) or days < 1 or days > 7:
