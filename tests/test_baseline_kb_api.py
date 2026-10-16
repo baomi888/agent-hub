@@ -164,19 +164,33 @@ def test_upload_partial_failure_keeps_first_record(monkeypatch):
     assert [r["name"] for r in pipelines.get_files(OWNER, kb_id)] == ["ok.txt"]
 
 
-# ==================== 同步问答端点：现状 500（既有缺陷）====================
+# ==================== 同步问答端点 ====================
 
-def test_query_kb_currently_returns_500(monkeypatch):
-    """★ 现状（重构前）：`/api/kb/{kb_id}/query` 必然 500。
+def test_query_kb_returns_answer_and_refs(monkeypatch):
+    """★ 阶段 4 修复后的行为：`/api/kb/{kb_id}/query` 正常返回 {answer, refs}。
 
-    根因是 `api/kb.py` 仍调用已在死代码清理中删掉的 `RagPipeline.answer`，
-    调用点抛 AttributeError，被端点末尾的 `except Exception` 兜成 500。
-    阶段 4 修掉之后，这条断言要改成"正常返回 {answer, refs}"。
+    修复前这里必然 500——端点调用的是已在死代码清理中删掉的 `RagPipeline.answer`，
+    AttributeError 被端点末尾的 `except Exception` 兜成了 500。
+    现在按删除前的实现恢复了该方法，用假 LLM 顶掉真实调用，断言返回结构与 refs 文案。
     """
     _no_quota(monkeypatch)
     kb_id, _ = pipelines.create_kb(OWNER, "问答库")
+    _upload(kb_id, [_uf("a.txt", "苞米的种植密度一般每亩 3500 到 4000 株。" * 15)])
 
-    with pytest.raises(HTTPException) as ei:
-        asyncio.run(kb_api.query_kb(kb_id, "库里有什么", 3, OWNER))
-    assert ei.value.status_code == 500
-    assert not hasattr(rc.RagPipeline, "answer")
+    class _Resp:
+        content = "每亩 3500 到 4000 株。"
+
+    class _FakeLLM:
+        def invoke(self, messages):
+            # 与 build_sources 同口径的组装：system + user 两条
+            assert isinstance(messages, list) and len(messages) == 2
+            return _Resp()
+
+    monkeypatch.setattr(rc, "get_llm", lambda *a, **k: _FakeLLM())
+
+    out = asyncio.run(kb_api.query_kb(kb_id, "苞米种植密度", 3, OWNER))
+
+    assert out["answer"] == "每亩 3500 到 4000 株。"
+    assert out["refs"].startswith("**[1]** a.txt ｜ ")
+    # 假 embedding 的向量未归一化 → 距离越界、相似度换算不了 → 整段 score 省掉（既有约定）
+    assert "score=" not in out["refs"].split("\n")[0]

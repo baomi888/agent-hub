@@ -23,7 +23,7 @@ import chromadb
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_core.documents import Document
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from core import config
@@ -568,9 +568,17 @@ def _bias_rerank(docs_scores, profile_tags, alpha):
     以兼容「数学」(粗) 与「数学分析」(细) 这类粗细不一致的标签。
     distance 越小越相关，命中越多 distance 减得越多 → 排越前；
     最终返回的 distance 仍是原始值，调用方按它换算相似度/阈值不受影响。
+
+    `distance is None` 是关键词通道独有的召回（混合检索里 BM25 命中、没有向量距离，
+    见 _rrf_merge）。这类片段没有距离可比，既不减距也不参与重排——保持它原来那一格
+    不动（原先这里对 None 直接 float() 会抛 TypeError：只有"用户有画像标签 + 命中
+    关键词独有片段"两个条件同时成立才会炸，线上是一条静默 500）。
     """
-    biased = []
-    for d, distance in docs_scores:
+    slots = []
+    for idx, (d, distance) in enumerate(docs_scores):
+        if distance is None:
+            slots.append((d, None, None, idx))  # 无距离：占位待原样放回
+            continue
         topics = d.metadata.get("topics", "") or ""
         segs = {s for s in topics.strip("|").split("|") if s}
         overlap = 0
@@ -578,10 +586,20 @@ def _bias_rerank(docs_scores, profile_tags, alpha):
             for p in profile_tags:
                 if any(p in s or s in p for s in segs):
                     overlap += 1
-        new_distance = max(0.0, float(distance) - alpha * overlap) if overlap else float(distance)
-        biased.append((d, float(distance), new_distance))
-    biased.sort(key=lambda x: x[2])
-    return [(d, dist) for d, dist, _ in biased]
+        biased = max(0.0, float(distance) - alpha * overlap) if overlap else float(distance)
+        slots.append((d, float(distance), biased, idx))
+
+    # 只有拿到向量距离的条目参与重排；None 条目继续占着它原来的位置。
+    # 全是数值距离时（无关键词独有召回）这一步退化成普通的按新距离排序，与改动前一致。
+    ranked = iter(sorted((s for s in slots if s[2] is not None), key=lambda s: s[2]))
+    out = []
+    for slot in slots:
+        if slot[2] is None:
+            out.append((slot[0], None))
+        else:
+            d, dist, _biased, _idx = next(ranked)
+            out.append((d, dist))
+    return out
 
 
 def _sources_cache_get(collection_name: str):
@@ -1311,7 +1329,34 @@ class RagPipeline:
             lines.append(f"{head} ｜ {preview}...")
         return "\n\n".join(lines) if lines else "（无检索结果）"
 
-    # 说明：RagPipeline.answer / answer_stream 已删除（2026-10-13 死代码清理）。
-    # 生产问答路径在 api/chat.py：自己检索 + _format_refs/build_sources 组装 +
-    # 流式 LLM，这两个方法自多用户改造后就无生产调用方，只有脚本烟测在用，
-    # 留着会让人误以为改这里能影响线上回答。
+    def answer(self, question: str, top_k: int) -> tuple[str, str]:
+        """同步问答：返回 (答案正文, 参考片段 Markdown)。
+
+        `api/kb.py` 的 `POST /api/kb/{kb_id}/query` 走这里。与 api/chat.py 的 RAG
+        路径同口径：同一套检索 + _format_refs + SYSTEM_PROMPT / 依据强度约束，
+        区别只是它不流式、也不做查询改写。
+
+        ⚠️ 2026-10-13 的死代码清理把它删过一次，但那个端点仍在调用，删完就变成
+        必然 500（AttributeError 被端点的 except 兜成 500）。2026-10-16 重构时按
+        删除前的实现原样恢复——行为与保留期间的"预期行为"一致。
+        """
+        docs_scores = self.retrieve_with_score(question, top_k)
+        if not docs_scores:
+            return "知识库中未检索到相关内容。", "（无检索结果）"
+        refs_md = self._format_refs(docs_scores)
+
+        references = "\n\n".join(
+            f"[{i + 1}] （来源：{d.metadata.get('source', '?')}）\n{d.page_content}"
+            for i, (d, _) in enumerate(docs_scores)
+        )
+        user_prompt = f"【参考资料】\n{references}\n\n【用户问题】\n{question}"
+
+        system = SYSTEM_PROMPT + grounding_note(assess_grounding(docs_scores))
+        response = get_llm().invoke(
+            [SystemMessage(content=system), HumanMessage(content=user_prompt)]
+        )
+        return response.content, refs_md
+
+    # 说明：answer_stream（流式版）仍不保留——`POST /api/kb/{kb_id}/query` 是同步
+    # 接口，没有第二个调用方；生产流式路径在 api/chat.py，自己检索 + 组装 + 流式 LLM，
+    # 两者不共用实现是有意为之（那边还要处理改写、SSE 事件与 hybrid 分支）。

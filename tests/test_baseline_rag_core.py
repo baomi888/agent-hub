@@ -81,16 +81,25 @@ def test_bias_rerank_no_overlap_keeps_order():
     assert [(d.page_content, dist) for d, dist in out] == [("A", 0.5), ("B", 0.9)]
 
 
-def test_bias_rerank_none_distance_currently_raises():
-    """★ 现状（重构前）：关键词独有召回（distance=None）走进偏置会抛 TypeError。
+def test_bias_rerank_none_distance_keeps_slot_and_does_not_raise():
+    """★ 阶段 4 修复后的行为：关键词独有召回（distance=None）不再抛异常。
 
-    这是被钉住的**既有缺陷**，不是期望行为：`POST /api/chat/stream` 在
-    「用户有画像标签 + 混合检索命中关键词独有片段」时会 500。
-    阶段 4 修掉它之后，这条断言要改成"不抛异常、且按原序保留"。
+    修复前这里会 TypeError（"用户有画像标签 + 混合检索命中关键词独有片段"必炸，
+    线上是一条静默 500）。现在：该片段既不减距也不挪位，保持原来那一格；
+    其余拿到向量距离的条目照常按偏置重排。
     """
-    cands = [(_doc("仅关键词召回", topics="|数学|"), None)]
-    with pytest.raises(TypeError):
-        rc._bias_rerank(cands, {"数学"}, config.RETRIEVAL_BIAS_ALPHA)
+    cands = [
+        (_doc("仅关键词召回", topics="|数学|"), None),
+        (_doc("英语片段", topics="|英语|"), 1.0),
+        (_doc("数学片段", topics="|数学|"), 1.05),
+    ]
+    out = rc._bias_rerank(cands, {"数学"}, config.RETRIEVAL_BIAS_ALPHA)
+
+    assert out[0][0].page_content == "仅关键词召回"
+    assert out[0][1] is None
+    # 后两格仍是数值距离条目：数学减距后 0.97 < 英语 1.0，于是换位
+    assert [d.page_content for d, _ in out[1:]] == ["数学片段", "英语片段"]
+    assert [dist for _, dist in out[1:]] == [1.05, 1.0]
 
 
 # ==================== 候选选择：不足 top_k 时透传 ====================
