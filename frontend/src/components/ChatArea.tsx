@@ -12,7 +12,7 @@ import CornIcon from "./CornIcon";
 import { api } from "@/lib/api";
 import type { ChatMode, RefSource, QuotaInfo } from "@/lib/types";
 import { ABILITIES, EXAMPLES, MODE_LABELS, PRIMARY_ENTRIES, SECONDARY_ENTRIES, TOOLS_URL } from "./chat/constants";
-import { buildPlanPrompt, detectPlanTopic, isPlanRequest, stripPlanHint } from "./chat/plan";
+import { isPlanRequest, stripPlanHint } from "./chat/plan";
 import Bubble from "./chat/Bubble";
 import BubbleErrorBoundary from "./chat/BubbleErrorBoundary";
 import type { ChatAttachment, UiMessage } from "./chat/types";
@@ -50,7 +50,7 @@ interface Props {
   mode: ChatMode;
   sending: boolean;
   onModeChange: (m: ChatMode) => void;
-  onSend: (question: string, attachments?: ChatAttachment[], display?: string) => void;
+  onSend: (question: string, attachments?: ChatAttachment[], display?: string, plan?: boolean) => void;
   onStop: () => void;
   /** 重新生成：传入目标助手消息 id 与原始问题，覆盖原答案而不是追加 */
   onRetry?: (assistantId: string, question: string) => void;
@@ -329,12 +329,9 @@ export default function ChatArea({
     // 自己发的内容一定要看到，重置为贴底跟随
     stickRef.current = true;
     setAtBottom(true);
-    if (isPlanRequest(q)) {
-      const topic = detectPlanTopic(q);
-      onSend(buildPlanPrompt(q, topic), atts, q);
-      return;
-    }
-    onSend(q, atts);
+    // 计划类请求：只传标志位，格式要求由后端在拼好对话历史之后注入。
+    // （前端改写 question 文本会让当前轮丢上下文，并把格式块写进历史污染后续轮次。）
+    onSend(q, atts, undefined, isPlanRequest(q));
   };
 
   const fillExample = (q: string) => {

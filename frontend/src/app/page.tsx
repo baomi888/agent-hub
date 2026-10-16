@@ -21,6 +21,7 @@ import AuthGate from "@/components/AuthGate";
 import type { UiMessage } from "@/components/chat/types";
 import type { ChatMode, Grounding, RefSource, ToolEvent } from "@/lib/types";
 import { MODE_LABELS } from "@/components/chat/constants";
+import { isPlanRequest } from "@/components/chat/plan";
 import { useHybridTrace } from "@/lib/useHybridTrace";
 import type { ChunkParams } from "@/lib/chunkProfiles";
 
@@ -237,7 +238,8 @@ export default function Home() {
   const sendMessage = useCallback(async (
     question: string,
     attachments?: ChatAttachment[],
-    display?: string
+    display?: string,
+    plan?: boolean
   ) => {
     let sid = activeSid;
     // 无会话时自动新建
@@ -296,6 +298,7 @@ export default function Home() {
           // 发之前必须确认选中的工作流还在列表里（刷新后可能已被删），
           // 否则后端会直接回 error 事件，整轮白跑。
           workflow_id: mode === "hybrid" ? (workflowIdRef.current ?? null) : null,
+          plan: plan ?? false,
         },
         controller.signal
       );
@@ -478,7 +481,8 @@ export default function Home() {
       if (i < 0) return;
       const start = i > 0 && list[i - 1].role === "user" ? i - 1 : i;
       setMessages(list.slice(0, start));
-      void sendMessage(question);
+      // 重试沿用同一问题：计划类请求要重新带上 plan 标志，否则卡片不会再生成
+      void sendMessage(question, undefined, undefined, isPlanRequest(question));
     },
     [sendMessage, sending, setMessages]
   );

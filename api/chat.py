@@ -69,6 +69,28 @@ USER_PROFILE_TAGS = [
     "机器学习", "深度学习", "英语四六级", "文献阅读", "实验操作", "考证",
     "公务员", "留学申请", "社团活动", "时间管理", "心态调节",
 ]
+
+# 计划类请求的格式要求：由服务端拼到"本轮提问"末尾（req.plan=true 时），
+# 不落库、不参与历史——避免像旧前端那样把格式块写进历史污染后续轮次。
+# 前端 plan.tsx 的 parsePlan 依赖这套格式（时间轴 / 编号阶段）来渲染卡片。
+PLAN_FORMAT_HINT = (
+    "\n\n【格式要求】请直接输出一份结构化计划，不要解释。格式如下：\n"
+    "第一行：计划标题\n"
+    "时间轴：每行以「第1周 xxx」「第N天 xxx」或「DAY 1 xxx」开头，简短\n"
+    "阶段清单：每行用「1. xxx」编号，标题一行、说明一行\n"
+    "时间轴建议按「第1周 / 第N天 / DAY N」划分，阶段用编号列出。"
+)
+
+
+def _augment_plan(question: str, plan: bool) -> str:
+    """plan=true 时把格式要求拼到提问末尾；否则原样返回。
+
+    只用于"喂给模型的本轮提问"，绝不用来落库（落库一律用原始 question）。
+    """
+    if not plan:
+        return question
+    return question + PLAN_FORMAT_HINT
+
 # 上传件保留时长：图片理解完就不需要了，超时自动清，避免目录无限增长
 UPLOAD_TTL_HOURS = 24
 
@@ -101,6 +123,12 @@ class ChatRequest(BaseModel):
         description="用户地理定位。两种形态：{ lat, lon }（浏览器定位，精度高）或 "
         "{ city }（公网 http 下浏览器定位不可用，由后端按来源 IP 推断）。"
         "有坐标时后端会逆地理补 city，用于天气/本地问答免手输城市",
+    )
+    plan: bool = Field(
+        default=False,
+        description="是否计划类请求。true 时后端才把「结构化计划格式要求」拼到本轮提问上——"
+        "拼在服务端是为了：(1) 让格式指令和历史一起进模型（前端改写会让当前轮丢上下文）；"
+        "(2) 入库存原始问题，不污染历史。",
     )
 
 
@@ -335,6 +363,9 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
     if mode == "rag" and not kb_exists:
         mode = "agent"
 
+    # 喂给模型的本轮提问（plan 请求才带格式要求）；落库/标题/画像一律用原始 req.question
+    prompt_question = _augment_plan(req.question, req.plan)
+
     # 解析用户地理定位，两种来源都要接住（天气/本地问答免手输城市）：
     #   ① 浏览器定位（HTTPS / localhost 才可用）→ 带 lat/lon，精度最高
     #   ② 公网 http 下浏览器 geolocation 不可用 → 前端改调 /api/geo/locate
@@ -494,12 +525,23 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
 
                 ctx = TaskContext(
                     owner_id=uid,
-                    goal=req.question,
+                    goal=prompt_question,
                     current_mode=start_mode,
                     workflow_id=wf_id,
                 )
                 # kb_id 走私有段注入（与 agent 分支同一安全边界：模型没机会改写它）
                 ctx.agent_state["kb_id"] = kb_id if (kb_id and kb_exists) else None
+                # 对话历史注入：修复"混合模式每轮失忆"（2026-10-16 线上复现）。
+                # 其它三种模式都读历史，唯独 hybrid 过去只拿当前一句 → 模型看不到上下文。
+                # 历史放 shared（跨模式数据通道），Agent/Workflow 引擎拼 prompt 时前置。
+                hist_raw = (await asyncio.to_thread(
+                    store.get_messages, uid, req.sid, include_system=False
+                ))[:-1]
+                ctx.shared["history"] = [
+                    {"role": m["role"], "content": m["content"]}
+                    for m in hist_raw
+                    if m.get("role") in ("user", "assistant") and m.get("content")
+                ]
 
                 rules = await asyncio.to_thread(hstore.list_rules, uid)
                 orch = HybridOrchestrator(
@@ -579,7 +621,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                         messages.append(HumanMessage(content=m["content"]))
                     elif m["role"] == "assistant":
                         messages.append(AIMessage(content=m["content"]))
-                messages.append(HumanMessage(content=req.question))
+                messages.append(HumanMessage(content=prompt_question))
 
                 # LangGraph checkpoint thread_id = 会话 id，天然多轮记忆。
                 # owner_id / kb_id 一并注入：工具内部只认这里的值，
@@ -692,7 +734,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             yield _sse("status", {"text": "正在生成答案..."})
             # 复用上面已经检索到的结果，不重复检索（早期实现在这里又检了一次，
             # 而且用的是默认 top_k，等于前端调的检索条数被悄悄忽略）
-            messages = await _build_messages(uid, req.sid, req.question, kb_id, docs_scores, grounding, req.scenario, history)
+            messages = await _build_messages(uid, req.sid, prompt_question, kb_id, docs_scores, grounding, req.scenario, history)
 
             acc = _Acc()
             try:
@@ -715,7 +757,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                     messages.append(HumanMessage(content=m["content"]))
                 elif m["role"] == "assistant":
                     messages.append(AIMessage(content=m["content"]))
-            messages.append(HumanMessage(content=req.question))
+            messages.append(HumanMessage(content=prompt_question))
 
             acc = _Acc()
             try:

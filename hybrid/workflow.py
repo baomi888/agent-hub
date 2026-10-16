@@ -319,7 +319,11 @@ class WorkflowEngine:
 
     async def _exec_llm(self, ctx: TaskContext, node: NodeDef) -> AsyncIterator[ExecEvent]:
         """LLM 节点：config = {prompt, output_key, stream}。"""
-        prompt = render_template(node.config.get("prompt", "{question}"), ctx)
+        # 跨轮记忆：把对话历史作为前缀拼进 prompt（无历史时为空串，退化为单轮）。
+        # 惰性导入避免模块级循环依赖。
+        from hybrid.agent_engine import history_prefix
+
+        prompt = history_prefix(ctx) + render_template(node.config.get("prompt", "{question}"), ctx)
         key = node.config.get("output_key") or f"node_{node.id}"
         llm = self._get_llm()
         if node.config.get("stream"):
