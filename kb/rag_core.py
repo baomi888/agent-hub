@@ -427,12 +427,12 @@ def select_diverse(docs_scores, top_k: int, lambda_mult: float | None = None) ->
         # 只按"向量距离"判定能否换算：None 是关键词命中（本就没有向量距离），
         # 不参与这条全局判定；越界浮点才是"向量未归一化"的全局信号。
         # 全部向量距离可换算时才过滤；关键词命中一律保留（BM25 已保证词面相关）。
-        vec_dists = [d for d in (_dist(c) for c in cands) if d is not None]
-        if vec_dists and all(_to_similarity(d) is not None for d in vec_dists):
-            kept = [
-                c for c in cands
-                if _dist(c) is None or _to_similarity(_dist(c)) >= min_sim
-            ]
+        # 相似度只算一遍：下面既要判"向量距离能否换算"，又要按阈值过滤，
+        # 原先两个列表推导各算了一次 _to_similarity
+        scored = [(c, _to_similarity(_dist(c))) for c in cands]
+        vec_sims = [sim for c, sim in scored if _dist(c) is not None]
+        if vec_sims and all(sim is not None for sim in vec_sims):
+            kept = [c for c, sim in scored if _dist(c) is None or sim >= min_sim]
             # 别把结果砍空：一条不剩时至少留最相关的那条，让模型自己说"资料里没有"
             cands = kept or [
                 min(cands, key=lambda c: _dist(c) if _dist(c) is not None else float("inf"))
@@ -800,6 +800,25 @@ def _extract_topics_one(text: str) -> list[str]:
         return []
 
 
+def _join_head(chunks, limit: int = 4000) -> str:
+    """按换行拼接切片正文，拼够 limit 就停。
+
+    与 `"\\n".join(正文)[:limit]` 逐字节等价：每一步累积的都是完整拼接串的前缀，
+    一到长度就截断返回。区别只在于不会为一篇几 MB 的文档先造一个同样大的中间
+    字符串再丢掉——而入库时每个来源都要算一次这份预览。
+    """
+    acc = ""
+    for i, c in enumerate(chunks):
+        if i:
+            acc += "\n"
+            if len(acc) >= limit:
+                return acc[:limit]
+        acc += c.page_content
+        if len(acc) >= limit:
+            return acc[:limit]
+    return acc
+
+
 def _inject_topics(chunks) -> None:
     """给入库切片注入 topics 分隔串（A 块）。
 
@@ -818,7 +837,7 @@ def _inject_topics(chunks) -> None:
         if src:
             by_source.setdefault(src, []).append(c)
     for src, group in by_source.items():
-        text = "\n".join(c.page_content for c in group)[:4000]
+        text = _join_head(group)
         tags = _extract_topics_one(text)
         if not tags:
             continue
