@@ -744,14 +744,8 @@ def load_document(file_path: str, source_name: str | None = None):
 
 
 def split_documents(docs, chunk_size: int, chunk_overlap: int):
-    """RecursiveCharacterTextSplitter 切片。"""
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        separators=["\n\n", "\n", "。", "！", "？", "；", "，", " ", ""],
-        length_function=len,
-    )
-    return splitter.split_documents(docs)
+    """RecursiveCharacterTextSplitter 切片（切分器按参数复用，见 _splitter）。"""
+    return _splitter(chunk_size, chunk_overlap).split_documents(docs)
 
 
 # ==================== 主题标签（方案 C · A 块）====================
@@ -861,6 +855,48 @@ def topic_where(topic: str) -> dict:
 # ==================== RAG 链路 ====================
 
 
+_SPLITTER_CACHE: dict[tuple[int, int], RecursiveCharacterTextSplitter] = {}
+_SPLITTER_LOCK = threading.Lock()
+_EMBED_POOL: ThreadPoolExecutor | None = None
+_EMBED_POOL_LOCK = threading.Lock()
+
+
+def _splitter(chunk_size: int, chunk_overlap: int) -> RecursiveCharacterTextSplitter:
+    """按 (chunk_size, chunk_overlap) 复用切分器。
+
+    splitter 本身无状态（每次 split 的状态都在方法内部），同一组参数反复新建
+    只是白付一次构造。参数会随知识库变化，所以做成小键缓存而不是模块级单例。
+    """
+    key = (chunk_size, chunk_overlap)
+    with _SPLITTER_LOCK:
+        got = _SPLITTER_CACHE.get(key)
+        if got is None:
+            got = RecursiveCharacterTextSplitter(
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+                separators=["\n\n", "\n", "。", "！", "？", "；", "，", " ", ""],
+                length_function=len,
+            )
+            _SPLITTER_CACHE[key] = got
+        return got
+
+
+def _embed_pool() -> ThreadPoolExecutor:
+    """进程内复用同一个 embedding 线程池。
+
+    池只用来发 embed_documents（任务之间无共享状态），复用不改变"窗口内并发、
+    窗口内按序写"的语义；省掉的是每次入库重建/回收线程的开销。
+    只按 EMBED_CONCURRENCY 定容量——并发度是配置项，运行期不变。
+    """
+    global _EMBED_POOL
+    with _EMBED_POOL_LOCK:
+        if _EMBED_POOL is None:
+            _EMBED_POOL = ThreadPoolExecutor(
+                max_workers=max(1, config.EMBED_CONCURRENCY), thread_name_prefix="embed"
+            )
+        return _EMBED_POOL
+
+
 def _embed_and_store(vs, chunks) -> None:
     """并发 embedding + 串行 upsert（分窗，峰值内存受限）。
 
@@ -895,23 +931,19 @@ def _embed_and_store(vs, chunks) -> None:
     emb = vs._embedding_function
     workers = max(1, min(config.EMBED_CONCURRENCY, len(batches)))
 
-    pool = ThreadPoolExecutor(max_workers=workers) if workers > 1 else None
-    try:
-        for w in range(0, len(batches), workers):
-            window = batches[w : w + workers]
-            if pool is None:
-                # 单批或显式关并发：退回串行，行为与旧实现一致
-                vectors = [emb.embed_documents(texts) for texts, _md, _ids in window]
-            else:
-                # 同一窗口内的各批并发发出；list() 会等齐并按提交顺序返回
-                vectors = list(pool.map(lambda b: emb.embed_documents(b[0]), window))
-            for (texts, metadatas, ids), vecs in zip(window, vectors):
-                vs._collection.upsert(
-                    ids=ids, embeddings=vecs, documents=texts, metadatas=metadatas
-                )
-    finally:
-        if pool is not None:
-            pool.shutdown()
+    pool = _embed_pool() if workers > 1 else None
+    for w in range(0, len(batches), workers):
+        window = batches[w : w + workers]
+        if pool is None:
+            # 单批或显式关并发：退回串行，行为与旧实现一致
+            vectors = [emb.embed_documents(texts) for texts, _md, _ids in window]
+        else:
+            # 同一窗口内的各批并发发出；list() 会等齐并按提交顺序返回
+            vectors = list(pool.map(lambda b: emb.embed_documents(b[0]), window))
+        for (texts, metadatas, ids), vecs in zip(window, vectors):
+            vs._collection.upsert(
+                ids=ids, embeddings=vecs, documents=texts, metadatas=metadatas
+            )
 
 
 class RagPipeline:
