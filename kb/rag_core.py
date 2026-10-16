@@ -1246,17 +1246,16 @@ class RagPipeline:
         return result
 
     @staticmethod
-    def build_sources(docs_scores) -> list[dict]:
-        """把检索结果整理成前端可展开的引用条目（含原文，供溯源查看）。
+    def _source_meta(docs_scores) -> list[dict]:
+        """两条格式化路径共用的中间量：来源名 / 页码 / 相似度 / 依据强度。
 
-        每条额外带 strength（high/medium/low），前端据此把"相似度"标成
-        「强 / 中 / 弱」——只给数字的话，用户看不出 0.31 到底算不算数。
+        原先 build_sources 与 _format_refs 各自算一遍 basename、页码、_to_similarity，
+        还各写了一遍"强 / 中 / 弱"的阈值判断（两处注释都要求同步维护）。
+        合并成一次计算，阈值口径不会再漂；两条格式化器只负责各自的排版。
         """
-        out = []
         low = config.RETRIEVE_LOW_SIM
-        for i, (d, distance) in enumerate(docs_scores):
-            src = os.path.basename(d.metadata.get("source", "?"))
-            page = d.metadata.get("page")
+        metas = []
+        for d, distance in docs_scores:
             # 前端那个位置的标签是「相似度」，所以这里必须给真相似度（越大越相关），
             # 不能直接把距离丢过去。距离越界导致换算不了时给 None，前端会隐藏这一项。
             sim = _to_similarity(distance)
@@ -1268,12 +1267,30 @@ class RagPipeline:
                 strength = STRENGTH_MEDIUM
             else:
                 strength = STRENGTH_LOW
+            metas.append({
+                "source": os.path.basename(d.metadata.get("source", "?")),
+                "page": d.metadata.get("page"),
+                "sim": sim,
+                "strength": strength,
+            })
+        return metas
+
+    @staticmethod
+    def build_sources(docs_scores) -> list[dict]:
+        """把检索结果整理成前端可展开的引用条目（含原文，供溯源查看）。
+
+        每条额外带 strength（high/medium/low），前端据此把"相似度"标成
+        「强 / 中 / 弱」——只给数字的话，用户看不出 0.31 到底算不算数。
+        """
+        metas = RagPipeline._source_meta(docs_scores)
+        out = []
+        for i, ((d, _distance), m) in enumerate(zip(docs_scores, metas)):
             out.append({
                 "id": i + 1,
-                "source": src,
-                "page": (page + 1) if isinstance(page, int) else None,
-                "score": round(sim, 4) if sim is not None else None,
-                "strength": strength,
+                "source": m["source"],
+                "page": (m["page"] + 1) if isinstance(m["page"], int) else None,
+                "score": round(m["sim"], 4) if m["sim"] is not None else None,
+                "strength": m["strength"],
                 "preview": d.page_content.replace("\n", " ")[:80],
                 "text": d.page_content[:1500],
             })
@@ -1282,17 +1299,15 @@ class RagPipeline:
     @staticmethod
     def _format_refs(docs_scores) -> str:
         """参考片段格式化：来源文件名 + 页码 + 相似度 + 60 字预览。"""
+        metas = RagPipeline._source_meta(docs_scores)
         lines = []
-        for i, (d, distance) in enumerate(docs_scores):
-            src = os.path.basename(d.metadata.get("source", "?"))
-            page = d.metadata.get("page")
-            loc = f" 第{page + 1}页" if page is not None else ""
+        for i, ((d, _distance), m) in enumerate(zip(docs_scores, metas)):
+            # 页码与相似度取自 _source_meta，与 build_sources 同一口径
+            loc = f" 第{m['page'] + 1}页" if m["page"] is not None else ""
+            head = f"**[{i + 1}]** {m['source']}{loc}"
+            if m["sim"] is not None:
+                head += f" ｜ score={m['sim']:.3f}"
             preview = d.page_content.replace("\n", " ")[:60]
-            # 同 build_sources：给相似度而不是距离；换算不了就整段省掉，避免显示错标签
-            sim = _to_similarity(distance)
-            head = f"**[{i + 1}]** {src}{loc}"
-            if sim is not None:
-                head += f" ｜ score={sim:.3f}"
             lines.append(f"{head} ｜ {preview}...")
         return "\n\n".join(lines) if lines else "（无检索结果）"
 
