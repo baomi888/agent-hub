@@ -17,10 +17,16 @@ SSE 事件协议：
                    检索依据强度。weak=true 时前端在回答上方挂「依据较弱」提示条，
                    数据来源是 kb/rag_core.py::assess_grounding()
   event: token      { text: "...", refs: "" }  增量 token
+  event: reasoning  { text: "..." }           思考增量（delta，前端自行累加）
+                   仅在服务端配置了思考模型时出现（.env 的 DEEPSEEK_REASONER_MODEL）。
+                   前端渲染成可收纳的「思考过程」块；未配置时此事件**完全不出现**。
   event: title      { title: "..." }          自动生成的会话标题（仅首轮）
-  event: done       { answer: "...", refs: "", title: "", mode: "", message_id: 123, run_id: "" }
+  event: done       { answer: "...", refs: "", title: "", mode: "", message_id: 123,
+                      run_id: "", reasoning: "..." }
                     message_id 是 assistant 消息在 messages 表里的 id，赞踩按它落库
                     run_id 仅 hybrid 模式有值：人工切换 / 执行日志按它寻址
+                    reasoning 是**完整思考文本**：流式期间前端逐帧累加，
+                    断线重连/刷新的前端只能靠这一份拿回完整思考块（未启用时为空串）
   event: error      { detail: "..." }
   —— 以下仅 hybrid 模式 ——
   event: hybrid_start  { run_id: "...", mode: "workflow|agent" }  起跑即发，带初始模式
@@ -841,6 +847,9 @@ def _extract_user_tags(question: str, answer: str) -> list[str]:
 
     只允许输出 USER_PROFILE_TAGS 里的标签，超出一律丢弃——这是防标签表爆炸的硬闸门。
     任何失败都返回空列表（画像只是辅助，绝不能拖慢或拖垮问答）。
+
+    ⚠️ `get_llm()` 必须在 try 之内：它构造 `ChatOpenAI`，没配 key 时**构造即抛**
+    `openai.OpenAIError`，不会等到 invoke。放在 try 之外会让"静默降级"的承诺失效。
     """
     if not config.USER_TAG_HOOK_ENABLED:
         return []
@@ -849,17 +858,17 @@ def _extract_user_tags(question: str, answer: str) -> list[str]:
     if not q and not a:
         return []
     vocab = "、".join(USER_PROFILE_TAGS)
-    llm = get_llm(temperature=0, max_tokens=48)
-    prompt = (
-        "你是用户画像标注器。根据下面的「用户提问 + AI 回答（节选）」，判断该用户当前"
-        "关注的主题，从给定词表里挑选 0~3 个最贴切的标签。\n"
-        "只允许输出词表中的标签；若都贴不上就输出空数组 []。"
-        "只输出一个 JSON 数组（如 [\"考研数学\",\"编程开发\"]），不要解释、不要 Markdown。\n\n"
-        f"【可选标签】\n{vocab}\n\n"
-        f"【用户提问】\n{q[:300]}\n\n"
-        f"【AI 回答（节选）】\n{a[:800]}"
-    )
     try:
+        llm = get_llm(temperature=0, max_tokens=48)
+        prompt = (
+            "你是用户画像标注器。根据下面的「用户提问 + AI 回答（节选）」，判断该用户当前"
+            "关注的主题，从给定词表里挑选 0~3 个最贴切的标签。\n"
+            "只允许输出词表中的标签；若都贴不上就输出空数组 []。"
+            "只输出一个 JSON 数组（如 [\"考研数学\",\"编程开发\"]），不要解释、不要 Markdown。\n\n"
+            f"【可选标签】\n{vocab}\n\n"
+            f"【用户提问】\n{q[:300]}\n\n"
+            f"【AI 回答（节选）】\n{a[:800]}"
+        )
         resp = llm.invoke([HumanMessage(content=prompt)])
         raw = (resp.content or "").strip()
         if raw.startswith("```"):

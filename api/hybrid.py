@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from core.auth import get_current_user
 from hybrid import store
+from hybrid.context import ModeSwitch, TaskContext
 from hybrid.orchestrator import request_manual_switch
 from hybrid.workflow import validate_definition
 
@@ -166,3 +167,84 @@ def manual_switch(run_id: str, req: SwitchIn, uid: str = Depends(get_current_use
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True}
+
+
+class ResumeIn(BaseModel):
+    """人工恢复（human 节点挂起后）。"""
+
+    decision: str = Field(default="approve", description="approve / reject")
+    note: str = Field(default="", max_length=500, description="人工填写的意见，进轨迹日志")
+
+
+@router.post("/runs/{run_id}/resume")
+def resume_run(run_id: str, req: ResumeIn, uid: str = Depends(get_current_user)) -> dict:
+    """恢复挂起的人工节点（要求 5 的"人工介入"入口）。
+
+    与 manual_switch 的区别必须说清：
+      switch  = 改道，任务**还在跑**（等引擎在安全点消费指令）
+      resume  = 唤醒，任务**已经停下**（status=awaiting_human），需要重新起跑
+
+    所以这里不直接执行引擎，而是：
+      1. 校验 belongs-to-you 且状态确为 awaiting_human（否则 409，避免重复恢复）
+      2. 把 human_resumed 标记写回工作流状态并落库（**恢复即快照**，与挂起对称）
+      3. 把"重新起跑所需的一切"返回给调用方（前端据此开一条新 SSE 续跑）
+
+    为什么不在这里直接跑引擎：原 SSE 连接在挂起时已经结束，
+    服务端没有可推送的通道；让客户端重新发起是唯一能立刻见效的做法。
+    后续若要做"后台续跑 + 轮询取结果"，改动只在这一层。
+    """
+    row = store.get_run(uid, run_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="执行记录不存在")
+    if row["status"] != "awaiting_human":
+        raise HTTPException(
+            status_code=409,
+            detail=f"该执行当前状态为 {row['status']}，只有 awaiting_human 才能恢复",
+        )
+
+    ctx_data = row.get("context") or {}
+    if isinstance(ctx_data, str):
+        try:
+            import json as _json
+
+            ctx_data = _json.loads(ctx_data)
+        except ValueError:
+            raise HTTPException(status_code=500, detail="执行快照损坏，无法恢复")
+
+    wf_state = ctx_data.get("workflow_state") or {}
+    suspended_at = wf_state.get("suspended_at") or wf_state.get("next_node")
+    if not suspended_at:
+        raise HTTPException(status_code=409, detail="快照里没有挂起点，无法定位续跑位置")
+
+    if req.decision not in ("approve", "reject"):
+        raise HTTPException(status_code=400, detail="decision 需为 approve 或 reject")
+
+    # 恢复即快照：标记写回并落库，避免重复恢复 / 进程重启后丢失
+    ctx = TaskContext.restore(ctx_data)
+    if req.decision == "approve":
+        ctx.workflow_state["human_resumed"] = suspended_at
+        ctx.status = "running"
+    else:
+        # 拒绝：不续跑，直接落终态（后续可扩展为走 on_fail 分支）
+        ctx.status = "stopped"
+        ctx.error = f"人工拒绝：{req.note or '未填写理由'}"
+        ctx.workflow_state.pop("suspended_at", None)
+    ctx.mode_trace.append(
+        ModeSwitch(
+            from_mode=ctx.current_mode, to_mode=ctx.current_mode,
+            rule="human_" + ("resume" if req.decision == "approve" else "reject"),
+            reason=req.note or ("人工确认继续" if req.decision == "approve" else "人工拒绝"),
+        )
+    )
+    store.save_run(ctx)
+
+    return {
+        "ok": True,
+        "run_id": run_id,
+        "decision": req.decision,
+        "status": ctx.status,
+        "resume_from": suspended_at if req.decision == "approve" else None,
+        # 前端据此开一条新 SSE 续跑（同一 mode=hybrid + 同一 workflow_id）
+        "context": ctx.snapshot(),
+        "workflow_id": ctx.workflow_id,
+    }

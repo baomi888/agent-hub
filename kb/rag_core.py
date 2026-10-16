@@ -759,20 +759,25 @@ def split_documents(docs, chunk_size: int, chunk_overlap: int):
 def _extract_topics_one(text: str) -> list[str]:
     """用 LLM 从一段文档文本里抽 3~6 个简短中文主题标签。
 
-    返回归一化后的标签列表（去空白、去重、限长、限数量）。任何失败都返回空列表——
+    返回归一化后的标签列表（去空白、去重、限长、限数量）。**任何失败都返回空列表**——
     主题标签是"锦上添花"，绝不能因为抽标签失败而阻断入库。
+
+    ⚠️ `get_llm()` 必须在 try 之内。它构造的是 `ChatOpenAI`，**没配 key 时会直接抛
+    `openai.OpenAIError: Missing credentials`**，不是等到 invoke 才失败。
+    历史上这行曾在 try 之外，导致「没配 key 的机器上建库直接 500」，
+    而文档承诺的是"静默降级"——两处不一致就是这么来的。
     """
     if not config.TOPIC_EXTRACT_ENABLED or not text or not text.strip():
         return []
-    llm = get_llm(temperature=0, max_tokens=64)
-    prompt = (
-        "你是文档主题标注器。请阅读下面这段文档内容，提取最能概括它主题的 "
-        "3~6 个简短中文标签（每个标签不超过 6 个字，如：线性代数、考研数学、操作系统）。\n"
-        "只输出一个 JSON 数组，例如 [\"线性代数\",\"考研数学\"]，"
-        "不要解释，不要 Markdown 代码块，不要多余文字。\n\n"
-        f"【文档内容】\n{text[:4000]}"
-    )
     try:
+        llm = get_llm(temperature=0, max_tokens=64)
+        prompt = (
+            "你是文档主题标注器。请阅读下面这段文档内容，提取最能概括它主题的 "
+            "3~6 个简短中文标签（每个标签不超过 6 个字，如：线性代数、考研数学、操作系统）。\n"
+            "只输出一个 JSON 数组，例如 [\"线性代数\",\"考研数学\"]，"
+            "不要解释，不要 Markdown 代码块，不要多余文字。\n\n"
+            f"【文档内容】\n{text[:4000]}"
+        )
         resp = llm.invoke([HumanMessage(content=prompt)])
         raw = (resp.content or "").strip()
         # 兼容模型偶尔用 ```json ``` 包裹的情况

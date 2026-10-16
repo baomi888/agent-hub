@@ -19,6 +19,7 @@ from langchain.agents import create_agent
 
 from agent.tools import AGENT_TOOLS
 from core.llm import get_llm
+from core import config
 from core import scenarios as scenarios_mod
 
 SYSTEM_PROMPT = """你是一个智能问答助手，拥有以下能力：
@@ -178,7 +179,10 @@ def build_agent(
 
         # 在锁内编译：并发首请求只编译一次，其余等锁后直接命中缓存。
         # 键的种类极少（has_kb 两种 × 少量定位片段 × 少量场景），锁竞争可忽略。
-        llm = get_llm(temperature=0.1)
+        # Agent 主循环的模型。显式传 max_tokens：hybrid 的 Agent 引擎有步数/时长/token
+        # 三重预算护栏，但护栏在"外面"计数；主循环自己不封顶的话，单次回答仍可无界增长。
+        # 默认 0 = 用平台默认，保持改造前行为（见 core/config.py 的说明）。
+        llm = get_llm(temperature=0.1, max_tokens=config.AGENT_LLM_MAX_TOKENS or None)
         system_prompt = SYSTEM_PROMPT
         if has_kb:
             system_prompt += (

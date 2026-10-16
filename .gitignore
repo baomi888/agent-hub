@@ -49,6 +49,9 @@ data/chat_uploads/
 data/kb_sources/
 data/kb_files.json
 data/kb_names.json
+# shared 超限值的落盘目录（hybrid/context.py 的 spill_value）：
+# 运行时产物，会随任务执行不断新增，绝不入库
+data/shared_spill/
 # staging 独立数据目录，绝不入库（也不该与生产 data/ 共用）
 data-staging/
 downloads-staging/
