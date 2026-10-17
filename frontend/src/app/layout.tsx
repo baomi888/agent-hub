@@ -1,4 +1,4 @@
-import type { Metadata, Viewport } from "next";
+import type { Metadata, ReactNode, Viewport } from "next";
 import "./globals.css";
 
 const TITLE = "知穗Agent · 知识库 · 场景智能体 · 校园工具集";
@@ -30,7 +30,7 @@ export const viewport: Viewport = {
   ],
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="zh-CN" className="h-full antialiased" suppressHydrationWarning>
       <head>
