@@ -177,7 +177,7 @@ flowchart TB
 | 向量化 | 阿里百炼 `text-embedding-v3` |
 | Agent 框架 | LangChain `create_agent` + LangGraph（**依赖已就绪，但当前 checkpointer = `None`**） |
 | 向量库 | Chroma（多 collection 隔离，进程级单例） |
-| 会话存储 | SQLite（WAL 模式，参数化查询，10 轮窗口截断） |
+| 会话存储 | SQLite（WAL 模式，参数化查询，30 轮窗口截断） |
 | 调度存储 | SQLite 独立文件 `data/scheduler.db`（与 APScheduler JobStore 共用） |
 | 定时调度 | APScheduler 3.x，**独立 worker 进程**，cron 按 `Asia/Shanghai` |
 | 后端 | FastAPI + uvicorn，SSE 手写 `StreamingResponse` |

@@ -201,7 +201,7 @@ TITLE_MAX_TOKENS = int(os.getenv("TITLE_MAX_TOKENS", "32"))
 # 混合模式注入对话历史的消息条数上限（跨轮记忆；0=关闭历史注入，退回旧的无记忆行为）。
 # 修复"混合模式每轮失忆"：hybrid 会把最近 N 条历史塞进 ctx.shared["history"]，
 # Agent/Workflow 引擎在拼 prompt 时前置，从而获得多轮上下文。
-HYBRID_HISTORY_MAX_MESSAGES = int(os.getenv("HYBRID_HISTORY_MAX_MESSAGES", "12"))
+HYBRID_HISTORY_MAX_MESSAGES = int(os.getenv("HYBRID_HISTORY_MAX_MESSAGES", "60"))
 
 # ---------- 标签钩子（方案 C：入库级主题 + 对话级用户画像）----------
 # A 块：文件入库时对每个来源抽主题标签，写入每片 metadata["topics"]（"|t1|t2|" 分隔串），

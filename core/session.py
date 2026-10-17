@@ -9,7 +9,7 @@ from __future__ import annotations
     feedbacks      —— 消息赞踩
 
   所有 SQL 用参数化查询防注入；窗口截断：加载历史时只取最近
-  MAX_HISTORY_TURNS 轮（默认 10 轮 = 20 条消息），避免长会话爆 token。
+  MAX_HISTORY_TURNS 轮（默认 30 轮 = 60 条消息），避免长会话爆 token。
 
 归属隔离（多用户改造 P1）
 ------------------------
@@ -34,7 +34,7 @@ from typing import Literal
 
 from core import config
 
-MAX_HISTORY_TURNS = 10  # 每个会话最多保留的对话轮数（1 轮 = user + assistant 两条）
+MAX_HISTORY_TURNS = 30  # 每个会话最多保留的对话轮数（1 轮 = user + assistant 两条）
 
 
 # ---------- 数据库路径 ----------
