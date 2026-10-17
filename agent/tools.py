@@ -65,7 +65,7 @@ def kb_search(query: str, top_k: int = 3, config: RunnableConfig = None) -> str:
         # 距离 → 余弦相似度，和 RAG 链路（build_sources / _format_refs）保持同一口径。
         # 直接把 Chroma 距离打出来会显示成 >1 的"相似度"（线上见过 1.237），
         # 和同一条数据在 RAG 卡片上的 0.558 对不上。
-        from kb.rag_core import _to_similarity, assess_grounding
+        from kb.rag_core import _to_similarity, assess_grounding, grounding_note
 
         # 归属在这一行校验：不是自己的库直接抛 NotOwned，落到下面的 except 里
         pipe = pipelines.get_or_create(owner, kb_id)
@@ -89,16 +89,15 @@ def kb_search(query: str, top_k: int = 3, config: RunnableConfig = None) -> str:
             lines.append(f"**[{i + 1}]** {src}{loc}{score_txt} | {preview}...")
 
         body = "\n\n".join(lines)
-        if assessment.get("weak"):
-            # 这段是写给**模型**看的，措辞必须是可执行的下一步指令。
-            # 只写"可能不相关"会被忽略——Observation 里的语气会被当成资料本身来用，
-            # 必须明说"这些片段不足以作答"，把行为钉死。
+        # 与纯 RAG 链路共用同一套 grounding 注释：检索偏弱（low / medium）时，
+        # 由 rag_core.grounding_note 产出"必须遵守"的约束，且受 GROUNDING_NOTICE
+        # 开关统一控制。单来源、措辞与 RAG 路径完全一致，避免两套话术各写各的。
+        note = grounding_note(assessment)
+        if note:
             return (
-                "⚠️ 检索到的片段相似度全部偏低，**不足以支撑对这个问题的回答**。\n"
-                "这些片段只能作为线索参考，不要据此拼凑答案，也不要把它们当作依据编号引用。\n"
-                "请直接告诉用户：知识库里暂时没有和这个问题直接相关的资料，"
-                "并建议补充相关文档，或者改用 web_search 联网查询。\n\n"
-                f"（以下为低相关度片段，仅供你判断是否真的不相关）\n{body}"
+                f"{note}\n\n"
+                "（以下为检索到的片段，仅供你判断是否真的不相关）\n"
+                f"{body}"
             )
         return body
     except Exception:
