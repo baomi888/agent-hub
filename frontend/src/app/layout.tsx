@@ -1,4 +1,5 @@
-import type { Metadata, ReactNode, Viewport } from "next";
+import type { Metadata, Viewport } from "next";
+import type { ReactNode } from "react";
 import "./globals.css";
 
 const TITLE = "知穗Agent · 知识库 · 场景智能体 · 校园工具集";
