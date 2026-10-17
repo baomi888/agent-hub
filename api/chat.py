@@ -674,6 +674,9 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 orch = HybridOrchestrator(
                     ctx, workflow_def=wf_def, rules=rules,
                     has_kb=bool(kb_id and kb_exists), location=location_ctx,
+                    # #7：激活集在请求开始取定、整轮不变（与下面 Agent 路径同源），
+                    # hybrid 段的 build_agent 才能绑定本用户已 discover 的延迟工具。
+                    activated=tool_registry.activated_for(uid),
                 )
 
                 # run_id 先给前端：人工切换 / 执行日志查询都按它寻址

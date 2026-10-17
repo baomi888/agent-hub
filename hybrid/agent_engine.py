@@ -84,10 +84,21 @@ class AgentEngine:
 
     name = "agent"
 
-    def __init__(self, has_kb: bool = False, location: dict | None = None, agent: Any = None):
+    def __init__(
+        self,
+        has_kb: bool = False,
+        location: dict | None = None,
+        agent: Any = None,
+        activated: "frozenset[str]" = frozenset(),
+    ):
         self._has_kb = has_kb
         self._location = location
         self._agent = agent  # 测试注入假 agent；None 时惰性 build_agent
+        # 本用户已激活的延迟工具集（#7）：与 api/chat.py 的 Agent 路径同一来源
+        # （tool_registry.activated_for(uid)，请求开始取定、整轮不变）。
+        # 不传的话 hybrid 段 build_agent 拿到空集 → 已激活的延迟工具不进 bind_tools，
+        # 甲用户明明 discover 过，混合模式里却"没学过"。
+        self._activated = activated
         self.result: EngineResult | None = None
 
     async def _get_agent(self) -> Any:
@@ -95,7 +106,9 @@ class AgentEngine:
             import asyncio
             from agent.builder import build_agent
             # 编译是 CPU 活，放线程里别堵事件循环
-            self._agent = await asyncio.to_thread(build_agent, self._has_kb, self._location)
+            self._agent = await asyncio.to_thread(
+                build_agent, self._has_kb, self._location, None, self._activated
+            )
         return self._agent
 
     async def stream(

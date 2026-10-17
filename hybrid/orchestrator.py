@@ -107,6 +107,9 @@ class HybridOrchestrator:
             has_kb=self._engine_kwargs.get("has_kb", False),
             location=self._engine_kwargs.get("location"),
             agent=self._engine_kwargs.get("agent"),
+            # #7：激活集透传给 AgentEngine（最终进 build_agent 的缓存键与 bind_tools），
+            # 与 Agent 直连路径同源——请求开始由调用方 activated_for(uid) 取定。
+            activated=self._engine_kwargs.get("activated", frozenset()),
         )
 
     async def stream(self) -> AsyncIterator[ExecEvent]:

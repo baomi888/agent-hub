@@ -235,6 +235,70 @@ try:
 except Exception as e:  # TestClient 起不来时不要把整份自测拖垮
     check("TestClient 段可运行", False, f"{type(e).__name__}: {e}")
 
+print("\n[8] #7 收口：激活集固化语义 + 绑定顺序稳定 + hybrid 透传")
+
+# 8a. 固化语义：请求开始取出的 activated_for(uid) 快照，不随后续激活变化。
+#     这是"整轮不变 → 工具前缀稳定"的保障（api/chat.py 在请求开始调用一次）。
+_OWNER_C = "ownerC"
+tr.reset_activated()
+tr.mark_activated("get_weather", _OWNER_C)
+_snapshot = tr.activated_for(_OWNER_C)
+check("#7 快照含已激活工具", "get_weather" in _snapshot, _snapshot)
+check("#7 快照是只读 frozenset", isinstance(_snapshot, frozenset))
+tr.mark_activated("kb_search", _OWNER_C)  # 请求中途又发生一次激活
+check("#7 固化语义：先前取出的快照不随后续激活变化",
+      "kb_search" not in _snapshot, _snapshot)
+check("#7 快照之后的 activated_for 能看到新激活",
+      "kb_search" in tr.activated_for(_OWNER_C))
+tr.reset_activated()
+
+# 8b. 绑定顺序稳定：build_guarded_tools 重建后顺序与 AGENT_TOOLS 一致，
+#     且两次重建等价 —— bind_tools 的顺序稳定才保证工具前缀稳定（#7 的根诉求）。
+try:
+    from core.tool_guard import build_guarded_tools
+    from agent.tools import AGENT_TOOLS
+
+    _g1 = build_guarded_tools(list(AGENT_TOOLS))
+    _g2 = build_guarded_tools(list(AGENT_TOOLS))
+    check("#7 守卫重建数量不变", len(_g1) == len(AGENT_TOOLS),
+          f"{len(_g1)} vs {len(AGENT_TOOLS)}")
+    check("#7 绑定顺序稳定（两次重建与原始 AGENT_TOOLS 的 name 序列一致）",
+          [t.name for t in _g1] == [t.name for t in _g2] == [t.name for t in AGENT_TOOLS],
+          [t.name for t in _g1])
+except Exception as e:  # noqa: BLE001
+    check("#7 build_guarded_tools 顺序断言可运行", False, f"{type(e).__name__}: {e}")
+
+# 8c. hybrid 透传：AgentEngine 把 activated 原样传给 build_agent
+#     （此前 hybrid 段只传 (has_kb, location)，已激活的延迟工具进不了 bind_tools）。
+try:
+    import asyncio
+
+    import agent.builder as _builder_mod
+    from hybrid.agent_engine import AgentEngine
+
+    _calls: list = []
+    _orig_build = _builder_mod.build_agent
+
+    def _fake_build(*a, **k):
+        _calls.append((a, k))
+        return "FAKE_AGENT"
+
+    _builder_mod.build_agent = _fake_build
+    try:
+        _eng = AgentEngine(has_kb=True, location={"city": "北京"}, activated=frozenset({"tool_x"}))
+        _got = asyncio.run(_eng._get_agent())
+        check("#7 hybrid 透传：build_agent 被调用且返回其产物",
+              _got == "FAKE_AGENT" and len(_calls) == 1, _calls)
+        if _calls:
+            _a = _calls[0][0]
+            check("#7 hybrid 透传：has_kb / location 原样", _a[:2] == (True, {"city": "北京"}), _a)
+            check("#7 hybrid 透传：scenario=None、activated 原样（不再丢激活集）",
+                  len(_a) == 4 and _a[2] is None and _a[3] == frozenset({"tool_x"}), _a)
+    finally:
+        _builder_mod.build_agent = _orig_build
+except Exception as e:  # noqa: BLE001
+    check("#7 hybrid 透传断言可运行", False, f"{type(e).__name__}: {e}")
+
 print()
 if FAILED:
     print(f"SELF-CHECK FAILED：{len(FAILED)} 项 -> {FAILED}")
