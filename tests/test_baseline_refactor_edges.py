@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """2026-10-16「剩余模块治理」为重构点补的边界/契约基线。
 
 覆盖本轮两处**行为契约**：
@@ -9,6 +8,7 @@
 
 全部离线：不触网、不连真库、不依赖运行中的服务。
 """
+
 from __future__ import annotations
 
 import pytest
@@ -17,7 +17,6 @@ from fastapi import HTTPException
 from api import delegate as deleg
 from hybrid.expr import ExprError, eval_condition, safe_eval
 
-
 # ==================== hybrid/expr.py ====================
 
 
@@ -25,7 +24,7 @@ def test_eval_condition_normal_semantics_unchanged():
     """本轮只加宽异常兜底，正常命中/不命中的语义必须一字不变。"""
     assert eval_condition("shared.score > 0.5", {"shared": {"score": 0.8}}) is True
     assert eval_condition("shared.score > 0.5", {"shared": {"score": 0.2}}) is False
-    assert eval_condition("", {"shared": {}}) is False          # 空表达式
+    assert eval_condition("", {"shared": {}}) is False  # 空表达式
     assert eval_condition("unknown_name > 1", {"shared": {}}) is False  # 未定义名字
 
 
@@ -48,11 +47,11 @@ def test_eval_condition_returns_false_on_deep_nesting():
 @pytest.mark.parametrize(
     "expr",
     [
-        "[x for x in (1, 2)]",   # 推导式
-        "(1).__class__",         # 私有属性
-        "__import__('os')",      # 未定义/危险名字
-        "1 if 1 else 0",         # 条件表达式
-        "x := 1",                # 海象（语法上都可能过，求值白名单必须挡）
+        "[x for x in (1, 2)]",  # 推导式
+        "(1).__class__",  # 私有属性
+        "__import__('os')",  # 未定义/危险名字
+        "1 if 1 else 0",  # 条件表达式
+        "x := 1",  # 海象（语法上都可能过，求值白名单必须挡）
     ],
 )
 def test_eval_condition_rejects_disallowed_syntax(expr):

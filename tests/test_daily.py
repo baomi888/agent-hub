@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """05 每日总结 + 委托 的核心测试（假 LLM，不依赖真实 API Key）。
 
 覆盖 issues/05-daily-summary.md 验收：
@@ -9,6 +8,7 @@
 
 DB 隔离：monkeypatch core.session._db_path 到临时目录，导入前生效。
 """
+
 from __future__ import annotations
 
 import json
@@ -32,6 +32,7 @@ session._db_path = _tmp_db  # type: ignore[assignment]
 session._init_db()  # 在临时库建会话/消息表
 
 from service import daily  # noqa: E402
+
 daily._ensure_daily_tables()  # noqa: E402
 
 from langchain_core.messages import AIMessage  # noqa: E402

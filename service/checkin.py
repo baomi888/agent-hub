@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """打卡业务逻辑：从 daily_reports 派生连续天数 / 历史，并维护分享标记。
 
 设计要点（对齐 service/daily.py）：
@@ -126,8 +125,7 @@ def mark_shared(uid: str, date: str) -> bool:
     now = int(__import__("time").time())
     with store._get_conn() as conn:
         cur = conn.execute(
-            "INSERT OR REPLACE INTO checkin_shares (owner_id, date, shared_at) "
-            "VALUES (?, ?, ?)",
+            "INSERT OR REPLACE INTO checkin_shares (owner_id, date, shared_at) VALUES (?, ?, ?)",
             (uid, date, now),
         )
     return cur.rowcount > 0

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """方案 C · C2(画像聚合) 与 D(检索偏置) 离线自测（不联网、不碰真实数据）。
 
 C2 块（worker 定时聚合用户画像）：
@@ -10,20 +9,20 @@ D 块（检索按画像偏置）：
   - rc._bias_rerank：按 topics 与画像标签重合度减距离重排；distance 原始值还原
   - rc._apply_profile_bias：取 owner 画像并调用 _bias_rerank；owner 隔离
 """
-import asyncio
+
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import core.config as config
+from langchain_core.documents import Document
+
 import core.session as session
 import kb.rag_core as rc
 import service.daily as daily
-from langchain_core.documents import Document
-
 
 # ---------- fixtures ----------
+
 
 def _patch_session_db(monkeypatch, tmp_path):
     """把会话库挪到临时文件并重建表，避免污染真实库。"""
@@ -33,6 +32,7 @@ def _patch_session_db(monkeypatch, tmp_path):
 
 
 # ==================== C2 块：快照读写 ====================
+
 
 def test_save_and_get_user_profile(monkeypatch, tmp_path):
     _patch_session_db(monkeypatch, tmp_path)
@@ -58,6 +58,7 @@ def test_get_owners_with_tags(monkeypatch, tmp_path):
 
 
 # ==================== C2 块：聚合逻辑 ====================
+
 
 def test_aggregate_user_profile_saves_snapshot(monkeypatch, tmp_path):
     _patch_session_db(monkeypatch, tmp_path)
@@ -91,6 +92,7 @@ def test_daily_run_one_profile(monkeypatch, tmp_path):
 
 
 # ==================== D 块：检索偏置 ====================
+
 
 def test_bias_rerank_promotes_hit_and_keeps_distance():
     docs = [
@@ -152,5 +154,6 @@ def test_apply_profile_bias_owner_isolation(monkeypatch):
 def test_apply_profile_bias_via_retrieve_signature():
     # retrieve_with_score 已接受 owner 形参（签名兼容），不传时行为不变
     import inspect
+
     sig = inspect.signature(rc.RagPipeline.retrieve_with_score)
     assert "owner" in sig.parameters

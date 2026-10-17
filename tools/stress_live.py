@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 知穗agent · 现场性能测试（零第三方依赖版）
 ==========================================
@@ -62,7 +61,8 @@ def http_post_json(url, payload, timeout=120):
     try:
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
-            url, data=data,
+            url,
+            data=data,
             headers={**UA, "Content-Type": "application/json"},
         )
         with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -79,17 +79,21 @@ def post_multipart(url, fields, files, timeout=120):
     boundary = "----baomi_live_boundary_x9"
     body = b""
     for k, v in fields.items():
-        body += (f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n'
-                 f"{v}\r\n").encode("utf-8")
+        body += (
+            f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'
+        ).encode()
     for name, filename, content in files:
-        body += (f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"; '
-                 f'filename="{filename}"\r\nContent-Type: text/plain\r\n\r\n').encode("utf-8")
+        body += (
+            f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"; '
+            f'filename="{filename}"\r\nContent-Type: text/plain\r\n\r\n'
+        ).encode()
         body += content + b"\r\n"
-    body += f"--{boundary}--\r\n".encode("utf-8")
+    body += f"--{boundary}--\r\n".encode()
     t0 = time.perf_counter()
     try:
         req = urllib.request.Request(
-            url, data=body,
+            url,
+            data=body,
             headers={**UA, "Content-Type": f"multipart/form-data; boundary={boundary}"},
         )
         with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -124,17 +128,30 @@ def report(label, rows, unit="ms"):
     p95 = pct(lat, 95)
     mx = max(lat)
     if unit == "ms":
-        print(f"      {label:<8} 样本 {len(rows):>2}  "
-              f"P50 {ms(p50):>7.1f}ms  P95 {ms(p95):>7.1f}ms  "
-              f"最大 {ms(mx):>7.1f}ms  失败 {fails}", flush=True)
+        print(
+            f"      {label:<8} 样本 {len(rows):>2}  "
+            f"P50 {ms(p50):>7.1f}ms  P95 {ms(p95):>7.1f}ms  "
+            f"最大 {ms(mx):>7.1f}ms  失败 {fails}",
+            flush=True,
+        )
     else:
-        print(f"      {label:<8} 样本 {len(rows):>2}  "
-              f"P50 {p50:>6.2f}s  最大 {mx:>6.2f}s  失败 {fails}", flush=True)
+        print(
+            f"      {label:<8} 样本 {len(rows):>2}  "
+            f"P50 {p50:>6.2f}s  最大 {mx:>6.2f}s  失败 {fails}",
+            flush=True,
+        )
     if fails:
         codes = sorted({str(r[1]) for r in rows if r[1] != 200})
         print(f"               └ 失败状态码：{', '.join(codes)}", flush=True)
-    return {"label": label, "n": len(rows), "ok": ok, "fails": fails,
-            "p50": p50, "p95": p95, "max": mx}
+    return {
+        "label": label,
+        "n": len(rows),
+        "ok": ok,
+        "fails": fails,
+        "p50": p50,
+        "p95": p95,
+        "max": mx,
+    }
 
 
 def main():
@@ -198,13 +215,28 @@ def main():
             for i in range(2):
                 t, st = http_post_json(
                     f"{FE}/api/chat/stream",
-                    {"sid": sid, "question": "简单介绍这个项目用了哪些技术？",
-                     "top_k": 3, "mode": "rag"},
+                    {
+                        "sid": sid,
+                        "question": "简单介绍这个项目用了哪些技术？",
+                        "top_k": 3,
+                        "mode": "rag",
+                    },
                 )
-                qa.append({"label": f"第{i+1}次", "n": 1, "ok": 1 if st == 200 else 0,
-                           "fails": 0 if st == 200 else 1, "p50": t, "p95": t, "max": t})
-                print(f"      第 {i+1} 次  {t:>5.2f}s  "
-                      f"{'✓' if st == 200 else '✗ ' + str(st)}", flush=True)
+                qa.append(
+                    {
+                        "label": f"第{i + 1}次",
+                        "n": 1,
+                        "ok": 1 if st == 200 else 0,
+                        "fails": 0 if st == 200 else 1,
+                        "p50": t,
+                        "p95": t,
+                        "max": t,
+                    }
+                )
+                print(
+                    f"      第 {i + 1} 次  {t:>5.2f}s  {'✓' if st == 200 else '✗ ' + str(st)}",
+                    flush=True,
+                )
     else:
         print("[2/3] 问答链路 —— 快模式已跳过", flush=True)
     print(flush=True)
@@ -217,22 +249,29 @@ def main():
         try:
             data = json.dumps({"name": "现场演示临时库"}).encode("utf-8")
             req = urllib.request.Request(
-                f"{FE}/api/kb/create", data=data,
-                headers={**UA, "Content-Type": "application/json"})
+                f"{FE}/api/kb/create", data=data, headers={**UA, "Content-Type": "application/json"}
+            )
             with urllib.request.urlopen(req, timeout=15) as r:
                 kb_id = json.loads(r.read().decode("utf-8")).get("kb_id")
         except Exception as e:
             print(f"      建库失败：{e}", flush=True)
         if kb_id:
-            doc = ("本项目使用 FastAPI 与 Chroma 构建检索增强生成服务，"
-                   "前端基于 Next.js。文档上传后自动切片并向量化。\n" * 60).encode("utf-8")
+            doc = (
+                "本项目使用 FastAPI 与 Chroma 构建检索增强生成服务，"
+                "前端基于 Next.js。文档上传后自动切片并向量化。\n" * 60
+            ).encode("utf-8")
             for conc in (1, 3):
                 # 每次用不同文件名 —— 并发上传同名文件会在落盘环节互相覆盖
                 rows = run_concurrent(
                     lambda i: post_multipart(
                         f"{FE}/api/kb/{kb_id}/upload",
                         {"chunk_size": "500", "chunk_overlap": "50", "mode": "append"},
-                        [("files", f"live_demo_{i}.txt", doc)]), conc, conc * 2, tick=2)
+                        [("files", f"live_demo_{i}.txt", doc)],
+                    ),
+                    conc,
+                    conc * 2,
+                    tick=2,
+                )
                 up.append(report(f"并发{conc}", rows, unit="s"))
             # 删除必须试两种写法：urllib 对 308 重定向不跟随，而本项目 /api 的
             # 斜杠约定是混合的（带尾斜杠会被 Next 去尾斜杠重定向）。实测不带尾斜杠才成功。
@@ -256,18 +295,29 @@ def main():
     print("=" * 66, flush=True)
     print(" 汇总", flush=True)
     print("=" * 66, flush=True)
-    print(f" 只读接口   并发 1 → {ladder[-1]}   "
-          f"P50 {ms(readonly[0]['p50']):.1f}ms → {ms(readonly[-1]['p50']):.1f}ms   "
-          f"失败 {sum(x['fails'] for x in readonly)}", flush=True)
+    print(
+        f" 只读接口   并发 1 → {ladder[-1]}   "
+        f"P50 {ms(readonly[0]['p50']):.1f}ms → {ms(readonly[-1]['p50']):.1f}ms   "
+        f"失败 {sum(x['fails'] for x in readonly)}",
+        flush=True,
+    )
     if qa:
-        print(f" 问答链路   P50 {statistics.median([x['p50'] for x in qa]):.2f}s   "
-              f"失败 {sum(x['fails'] for x in qa)}", flush=True)
+        print(
+            f" 问答链路   P50 {statistics.median([x['p50'] for x in qa]):.2f}s   "
+            f"失败 {sum(x['fails'] for x in qa)}",
+            flush=True,
+        )
     if up:
-        print(f" 上传链路   P50 {up[0]['p50']:.2f}s → {up[-1]['p50']:.2f}s   "
-              f"失败 {sum(x['fails'] for x in up)}", flush=True)
-    total_fail = (sum(x["fails"] for x in readonly)
-                  + sum(x["fails"] for x in qa)
-                  + sum(x["fails"] for x in up))
+        print(
+            f" 上传链路   P50 {up[0]['p50']:.2f}s → {up[-1]['p50']:.2f}s   "
+            f"失败 {sum(x['fails'] for x in up)}",
+            flush=True,
+        )
+    total_fail = (
+        sum(x["fails"] for x in readonly)
+        + sum(x["fails"] for x in qa)
+        + sum(x["fails"] for x in up)
+    )
     print(f" 全程失败次数：{total_fail}", flush=True)
     print(flush=True)
     print(" 结论：并发提升后延迟基本持平、无失败，服务在压力下仍可正常访问。", flush=True)

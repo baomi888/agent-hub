@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """混合模式跨轮记忆（P0）+ 计划提示词服务端化（P1）回归测试。
 
 不联网、不依赖真实 LLM / DB：
@@ -50,6 +49,7 @@ def _no_control():
 
 # ==================== 1. 历史助手函数 ====================
 
+
 def test_history_items_filters_invalid():
     items = history_items(_ctx(history=_HIST))
     assert items == [
@@ -82,6 +82,7 @@ def test_history_prefix_and_messages_shape():
 
 
 # ==================== 2. AgentEngine 注入历史 ====================
+
 
 class _RecordingAgent:
     """假 Agent：记录每次 astream 收到的 messages，不产出事件。"""
@@ -126,6 +127,7 @@ async def _drain(agen):
 
 # ==================== 3. WorkflowEngine LLM 节点拼接历史前缀 ====================
 
+
 class _RecordingLLM:
     def __init__(self):
         self.prompts = []
@@ -137,8 +139,10 @@ class _RecordingLLM:
 
 def _one_node_wf():
     return WorkflowDef(
-        id="w", nodes=[NodeDef(id="n1", type="llm", config={"prompt": "请回答：{question}"})],
-        entry="n1", edges=[],
+        id="w",
+        nodes=[NodeDef(id="n1", type="llm", config={"prompt": "请回答：{question}"})],
+        entry="n1",
+        edges=[],
     )
 
 
@@ -156,6 +160,7 @@ def test_workflow_llm_node_gets_history_prefix():
 
 
 # ==================== 4. 计划提示词服务端化 ====================
+
 
 def test_augment_plan_appends_hint_only_when_plan():
     raw = "给我列一份每日计划"

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """认证与身份：口令散列 + 会话令牌 + FastAPI 依赖。
 
 多用户改造的第一块地基。项目里原本没有任何身份概念，
@@ -42,16 +41,15 @@ _KEYLEN = 32
 
 # ==================== 口令散列 ====================
 
+
 def hash_password(password: str) -> str:
     """生成口令散列串：pbkdf2_sha256$<轮数>$<盐>$<摘要>（全部 base64，方便落库）。"""
     rounds = config.AUTH_PBKDF2_ROUNDS
     salt = secrets.token_bytes(16)
     dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, rounds, dklen=_KEYLEN)
-    return "pbkdf2_sha256$%d$%s$%s" % (
-        rounds,
-        base64.b64encode(salt).decode(),
-        base64.b64encode(dk).decode(),
-    )
+    salt_b64 = base64.b64encode(salt).decode()
+    dk_b64 = base64.b64encode(dk).decode()
+    return f"pbkdf2_sha256${rounds}${salt_b64}${dk_b64}"
 
 
 def verify_password(password: str, stored: str) -> bool:
@@ -72,6 +70,7 @@ def verify_password(password: str, stored: str) -> bool:
 
 # ==================== 令牌签发 ====================
 
+
 def _secret() -> bytes:
     """取签发密钥。
 
@@ -82,7 +81,7 @@ def _secret() -> bytes:
         return config.AUTH_SECRET.encode("utf-8")
     path = config._AUTH_SECRET_FILE
     if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             s = f.read().strip()
         if s:
             return s.encode("utf-8")
@@ -112,10 +111,12 @@ def create_token(user_id: str, ttl_days: int | None = None) -> str:
     now = int(time.time())
     header = {"alg": "HS256", "typ": "JWT"}
     payload = {"sub": user_id, "iat": now, "exp": now + days * 86400}
-    signing_input = "%s.%s" % (_b64e(json.dumps(header, separators=(",", ":")).encode()),
-                               _b64e(json.dumps(payload, separators=(",", ":")).encode()))
+    signing_input = "{}.{}".format(
+        _b64e(json.dumps(header, separators=(",", ":")).encode()),
+        _b64e(json.dumps(payload, separators=(",", ":")).encode()),
+    )
     sig = hmac.new(_secret(), signing_input.encode("utf-8"), hashlib.sha256).digest()
-    return "%s.%s" % (signing_input, _b64e(sig))
+    return f"{signing_input}.{_b64e(sig)}"
 
 
 def decode_token(token: str) -> str | None:
@@ -125,7 +126,7 @@ def decode_token(token: str) -> str | None:
     parts = token.split(".")
     if len(parts) != 3:
         return None
-    signing_input = "%s.%s" % (parts[0], parts[1])
+    signing_input = f"{parts[0]}.{parts[1]}"
     try:
         expect_sig = hmac.new(_secret(), signing_input.encode("utf-8"), hashlib.sha256).digest()
         if not hmac.compare_digest(_b64e(expect_sig), parts[2]):
@@ -140,6 +141,7 @@ def decode_token(token: str) -> str | None:
 
 
 # ==================== Cookie 读写 ====================
+
 
 def set_session_cookie(resp: Response, token: str) -> None:
     """把登录态写进 HttpOnly Cookie。
@@ -163,6 +165,7 @@ def clear_session_cookie(resp: Response) -> None:
 
 
 # ==================== FastAPI 依赖 ====================
+
 
 def current_user_id(request: Request) -> str:
     """从 Cookie 取出当前登录用户 id，失败直接 401。

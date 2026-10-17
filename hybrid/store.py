@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """混合架构持久化层：hybrid.db（与 sessions.db 同目录的独立库）。
 
 为什么独立成库而不是往 sessions.db 加表：
@@ -93,7 +92,9 @@ def _conn() -> sqlite3.Connection:
             conn.close()
         except Exception:
             pass
-    os.makedirs(os.path.dirname(path), exist_ok=True)  # 建连前确保目录存在（路径可能被测试改到临时目录）
+    os.makedirs(
+        os.path.dirname(path), exist_ok=True
+    )  # 建连前确保目录存在（路径可能被测试改到临时目录）
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
@@ -191,7 +192,8 @@ def _init_db() -> None:
                 name             TEXT NOT NULL,
                 signal           TEXT NOT NULL,
                 condition        TEXT NOT NULL DEFAULT '',
-                action           TEXT NOT NULL CHECK(action IN ('to_agent','to_workflow','terminate')),
+                action           TEXT NOT NULL CHECK(action IN (
+                    'to_agent','to_workflow','terminate')),
                 reason           TEXT NOT NULL DEFAULT '',
                 priority         INTEGER NOT NULL DEFAULT 100,
                 enabled          INTEGER NOT NULL DEFAULT 1,
@@ -225,11 +227,19 @@ def _init_db() -> None:
             if not exists:
                 conn.execute(
                     "INSERT INTO switch_rules "
-                    "(owner_id, name, signal, condition, action, reason, priority, enabled, cooldown_seconds, created_at, updated_at) "
+                    "(owner_id, name, signal, condition, action, reason, priority, enabled, "
+                    "cooldown_seconds, created_at, updated_at) "
                     "VALUES (NULL, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
                     (
-                        rule["name"], rule["signal"], rule["condition"], rule["action"],
-                        rule["reason"], rule["priority"], rule["cooldown_seconds"], now, now,
+                        rule["name"],
+                        rule["signal"],
+                        rule["condition"],
+                        rule["action"],
+                        rule["reason"],
+                        rule["priority"],
+                        rule["cooldown_seconds"],
+                        now,
+                        now,
                     ),
                 )
 
@@ -238,14 +248,17 @@ def _init_db() -> None:
             "SELECT 1 FROM workflow_defs WHERE id = ?", (DEFAULT_WORKFLOW_ID,)
         ).fetchone():
             conn.execute(
-                "INSERT INTO workflow_defs (id, owner_id, name, description, definition, version, created_at, updated_at) "
+                "INSERT INTO workflow_defs (id, owner_id, name, description, definition, "
+                "version, created_at, updated_at) "
                 "VALUES (?, NULL, ?, ?, ?, 1, ?, ?)",
                 (
                     DEFAULT_WORKFLOW_ID,
                     DEFAULT_WORKFLOW_DEF["name"],
-                    "内置流程：LLM 先把目标拆成步骤，Agent 按规划自主执行（hybrid 模式默认起跑流程）",
+                    "内置流程：LLM 先把目标拆成步骤，Agent 按规划自主执行"
+                    "（hybrid 模式默认起跑流程）",
                     json.dumps(DEFAULT_WORKFLOW_DEF, ensure_ascii=False),
-                    now, now,
+                    now,
+                    now,
                 ),
             )
 
@@ -259,13 +272,15 @@ def _truncate(text: str) -> str:
 
 # ==================== 工作流定义 CRUD ====================
 
+
 def create_workflow(owner: str, name: str, description: str, definition: dict) -> dict:
     """新建用户工作流，返回完整行。definition 的合法性由调用方（API 层）先校验。"""
     wf_id = uuid.uuid4().hex[:12]
     now = int(time.time())
     with _get_conn() as conn:
         conn.execute(
-            "INSERT INTO workflow_defs (id, owner_id, name, description, definition, version, created_at, updated_at) "
+            "INSERT INTO workflow_defs (id, owner_id, name, description, definition, "
+            "version, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
             (wf_id, owner, name, description, json.dumps(definition, ensure_ascii=False), now, now),
         )
@@ -315,10 +330,18 @@ def update_workflow(owner: str, wf_id: str, name: str, description: str, definit
         if not row:
             return False
         cur = conn.execute(
-            "UPDATE workflow_defs SET name = ?, description = ?, definition = ?, version = ?, updated_at = ? "
+            "UPDATE workflow_defs SET name = ?, description = ?, definition = ?, "
+            "version = ?, updated_at = ? "
             "WHERE id = ? AND owner_id = ?",
-            (name, description, json.dumps(definition, ensure_ascii=False),
-             row["version"] + 1, now, wf_id, owner),
+            (
+                name,
+                description,
+                json.dumps(definition, ensure_ascii=False),
+                row["version"] + 1,
+                now,
+                wf_id,
+                owner,
+            ),
         )
         return cur.rowcount > 0
 
@@ -334,6 +357,7 @@ def delete_workflow(owner: str, wf_id: str) -> bool:
 
 # ==================== 执行快照（workflow_runs）====================
 
+
 def save_run(ctx: TaskContext) -> None:
     """把 TaskContext 整体快照落库（upsert）。每次切换前后由编排器调用。
 
@@ -343,10 +367,12 @@ def save_run(ctx: TaskContext) -> None:
     data = json.dumps(ctx.snapshot(), ensure_ascii=False)
     with _get_conn() as conn:
         conn.execute(
-            "INSERT INTO workflow_runs (run_id, task_id, owner_id, workflow_id, status, context, created_at, updated_at) "
+            "INSERT INTO workflow_runs (run_id, task_id, owner_id, workflow_id, "
+            "status, context, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(run_id) DO UPDATE SET status = excluded.status, "
-            "context = excluded.context, workflow_id = excluded.workflow_id, updated_at = excluded.updated_at",
+            "context = excluded.context, workflow_id = excluded.workflow_id, "
+            "updated_at = excluded.updated_at",
             (ctx.run_id, ctx.task_id, ctx.owner_id, ctx.workflow_id, ctx.status, data, now, now),
         )
 
@@ -355,7 +381,8 @@ def get_run(owner: str, run_id: str) -> dict | None:
     """按 run_id 取执行记录（含上下文快照）。不是自己的返回 None。"""
     with _get_conn() as conn:
         row = conn.execute(
-            "SELECT run_id, task_id, owner_id, workflow_id, status, context, created_at, updated_at "
+            "SELECT run_id, task_id, owner_id, workflow_id, status, context, "
+            "created_at, updated_at "
             "FROM workflow_runs WHERE run_id = ? AND owner_id = ?",
             (run_id, owner),
         ).fetchone()
@@ -379,6 +406,7 @@ def list_runs(owner: str, limit: int = 20) -> list[dict]:
 
 # ==================== 切换规则 ====================
 
+
 def list_rules(owner: str) -> list[dict]:
     """取该用户的**生效规则集**：系统默认 + 用户同名覆盖，按 priority 升序。
 
@@ -387,7 +415,8 @@ def list_rules(owner: str) -> list[dict]:
     """
     with _get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, owner_id, name, signal, condition, action, reason, priority, enabled, cooldown_seconds "
+            "SELECT id, owner_id, name, signal, condition, action, reason, "
+            "priority, enabled, cooldown_seconds "
             "FROM switch_rules WHERE (owner_id IS NULL OR owner_id = ?) AND enabled = 1",
             (owner,),
         ).fetchall()
@@ -422,13 +451,36 @@ def upsert_rule(
             conn.execute(
                 "UPDATE switch_rules SET signal = ?, condition = ?, action = ?, reason = ?, "
                 "priority = ?, enabled = ?, cooldown_seconds = ?, updated_at = ? WHERE id = ?",
-                (signal, condition, action, reason, priority, int(enabled), cooldown_seconds, now, row["id"]),
+                (
+                    signal,
+                    condition,
+                    action,
+                    reason,
+                    priority,
+                    int(enabled),
+                    cooldown_seconds,
+                    now,
+                    row["id"],
+                ),
             )
         else:
             conn.execute(
-                "INSERT INTO switch_rules (owner_id, name, signal, condition, action, reason, priority, enabled, cooldown_seconds, created_at, updated_at) "
+                "INSERT INTO switch_rules (owner_id, name, signal, condition, action, "
+                "reason, priority, enabled, cooldown_seconds, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (owner, name, signal, condition, action, reason, priority, int(enabled), cooldown_seconds, now, now),
+                (
+                    owner,
+                    name,
+                    signal,
+                    condition,
+                    action,
+                    reason,
+                    priority,
+                    int(enabled),
+                    cooldown_seconds,
+                    now,
+                    now,
+                ),
             )
 
 
@@ -443,16 +495,22 @@ def delete_rule(owner: str, name: str) -> bool:
 
 # ==================== 执行日志 ====================
 
+
 def add_log(ctx: TaskContext, event: ExecEvent) -> None:
     """落一条执行事件。payload/decision 序列化后截断，摘要级数据不进大文本。"""
     decision = json.dumps(event.decision, ensure_ascii=False) if event.decision else None
     payload = json.dumps(event.payload, ensure_ascii=False) if event.payload else None
     with _get_conn() as conn:
         conn.execute(
-            "INSERT INTO exec_logs (run_id, task_id, event_type, mode, node_id, decision, payload, ts) "
+            "INSERT INTO exec_logs (run_id, task_id, event_type, mode, node_id, "
+            "decision, payload, ts) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                ctx.run_id, ctx.task_id, event.event_type, event.mode, event.node_id,
+                ctx.run_id,
+                ctx.task_id,
+                event.event_type,
+                event.mode,
+                event.node_id,
                 _truncate(decision) if decision else None,
                 _truncate(payload) if payload else None,
                 event.ts,

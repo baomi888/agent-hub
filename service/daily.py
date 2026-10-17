@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """每日委托与每日总结的纯函数核心。
 
 设计要点（详见 .scratch/daily-scheduler/spec.md §3.1 / issues/05-daily-summary.md）：
@@ -35,8 +34,8 @@ import re
 import time
 from dataclasses import dataclass
 
-from core import config, llm as llm_mod
-from core import quota
+from core import config, quota
+from core import llm as llm_mod
 from core import session as store
 
 logger = logging.getLogger("service.daily")
@@ -56,6 +55,7 @@ _SYS_SUMMARY = (
 
 
 # ==================== DB ====================
+
 
 def _report_id(uid: str, date: str) -> str:
     return hashlib.md5(f"{uid}|{date}".encode()).hexdigest()[:12]
@@ -113,6 +113,7 @@ def _ensure_daily_tables() -> None:
 
 
 # ==================== 统计 ====================
+
 
 def _day_bounds(date: str) -> tuple[int, int]:
     """本地时区的当天 [start, end) unix 秒。与 core.quota.day_key 的「本地日子」口径一致。"""
@@ -177,9 +178,11 @@ def _day_message_ids(uid: str, date: str) -> set[int]:
 
 # ==================== 每日总结 ====================
 
+
 @dataclass
 class Report:
     """一条每日总结。status: pending | generating | ready | empty。"""
+
     report_id: str
     owner_id: str
     date: str
@@ -254,7 +257,9 @@ def _parse_conclusions(raw: str) -> list[dict]:
     return out
 
 
-def _filter_by_traceability(conclusions: list[dict], whitelist: set[int]) -> tuple[list[dict], list[dict]]:
+def _filter_by_traceability(
+    conclusions: list[dict], whitelist: set[int]
+) -> tuple[list[dict], list[dict]]:
     """溯源强制：保留每条 refs 都指回真实消息的结论；其余丢弃。"""
     kept: list[dict] = []
     dropped: list[dict] = []
@@ -275,13 +280,19 @@ def _save_report(rep: Report) -> None:
     with store._get_conn() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO daily_reports "
-            "(report_id, owner_id, date, status, stats_json, content_json, model, generated_at, read_at) "
+            "(report_id, owner_id, date, status, stats_json, content_json, "
+            "model, generated_at, read_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                rep.report_id, rep.owner_id, rep.date, rep.status,
+                rep.report_id,
+                rep.owner_id,
+                rep.date,
+                rep.status,
                 json.dumps(rep.stats, ensure_ascii=False),
                 json.dumps(rep.content, ensure_ascii=False),
-                rep.model, rep.generated_at, rep.read_at,
+                rep.model,
+                rep.generated_at,
+                rep.read_at,
             ),
         )
 
@@ -330,9 +341,7 @@ def summarize_day(uid: str, date: str, stats: dict | None = None, llm=None) -> R
     conclusions = _parse_conclusions(raw)
     kept, dropped = _filter_by_traceability(conclusions, whitelist)
     for d in dropped:
-        logger.warning(
-            "丢弃无法溯源的结论(uid=%s date=%s): %s", uid, date, d.get("text")
-        )
+        logger.warning("丢弃无法溯源的结论(uid=%s date=%s): %s", uid, date, d.get("text"))
 
     rep.content = kept
     rep.status = "ready" if kept else "empty"
@@ -353,6 +362,7 @@ def get_report(uid: str, date: str) -> Report | None:
 
 
 # ==================== 每日委托 ====================
+
 
 def save_delegation(
     uid: str,
@@ -377,10 +387,22 @@ def save_delegation(
             " kb_id, tone, max_chars, enabled, next_run_at, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                did, uid, name, kind,
-                json.dumps(schedule_json, ensure_ascii=False) if schedule_json is not None else None,
-                prompt, deliver_sid, kb_id, tone, max_chars,
-                1 if enabled else 0, None, now, now,
+                did,
+                uid,
+                name,
+                kind,
+                json.dumps(schedule_json, ensure_ascii=False)
+                if schedule_json is not None
+                else None,
+                prompt,
+                deliver_sid,
+                kb_id,
+                tone,
+                max_chars,
+                1 if enabled else 0,
+                None,
+                now,
+                now,
             ),
         )
     return get_delegation(uid, did)  # type: ignore[return-value]
@@ -458,13 +480,12 @@ def plan_today(delegation: dict, context: str = "", llm=None) -> str:
 # 这套钩子本身**不调模型**（模型调用在 summarize_day / plan_today 里，已可注入）；
 # 这里只负责「枚举对象 + 幂等键 + 配额闸门 + 投递落库」。
 
+
 def _load_delegation(did: str) -> dict | None:
     """按 delegation_id 取委托（不过滤 owner——worker 只拿到 id）。"""
     _ensure_daily_tables()
     with store._get_conn() as conn:
-        row = conn.execute(
-            "SELECT * FROM delegations WHERE delegation_id = ?", (did,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM delegations WHERE delegation_id = ?", (did,)).fetchone()
     return dict(row) if row else None
 
 
@@ -582,7 +603,7 @@ def _record_manual_run(did: str, planned_at: int, status: str, error: str | None
                     "delegate.dispatch",
                     did,
                     int(planned_at),
-                    "delegate.dispatch|%s|manual|%s" % (did, run_id),
+                    f"delegate.dispatch|{did}|manual|{run_id}",
                     status,
                     int(time.time()),
                     int(time.time()),
@@ -630,7 +651,7 @@ def list_runs(uid: str, did: str, limit: int = 20, cursor: str | None = None) ->
             sql += " AND (finished_at < ? OR (finished_at = ? AND run_id < ?))"
             params += [int(ts_str), int(ts_str), rid]
         except (ValueError, AttributeError):
-            raise ValueError("cursor 无效")
+            raise ValueError("cursor 无效") from None
     sql += " ORDER BY finished_at DESC, run_id DESC LIMIT ?"
     params.append(limit + 1)
     # 用调度库的连接读（不是 store._get_conn()——那是会话库）
@@ -641,7 +662,7 @@ def list_runs(uid: str, did: str, limit: int = 20, cursor: str | None = None) ->
     if len(out) > limit:
         out = out[:limit]
         last = out[-1]
-        next_cursor = "%s|%s" % (last.get("finished_at") or 0, last["run_id"])
+        next_cursor = "{}|{}".format(last.get("finished_at") or 0, last["run_id"])
     return {"items": out, "next_cursor": next_cursor}
 
 

@@ -1,9 +1,9 @@
-# -*- coding: utf-8 -*-
 """检索结果挑选逻辑自测（纯函数，不需要网络和知识库）。
 
 运行：python tests/test_retrieve_select.py
 调 RETRIEVE_MIN_SIM / RETRIEVE_MMR_LAMBDA 之后跑一遍，确认阈值没有误杀或漏筛。
 """
+
 import os
 import sys
 
@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from langchain_core.documents import Document
 
-from kb.rag_core import RagPipeline, select_diverse, _to_similarity
+from kb.rag_core import RagPipeline, _to_similarity, select_diverse
 
 BASE = "苞米是一种在东北广泛种植的作物，秋天收割后可以直接煮着吃，也可以磨成玉米面。"
 
@@ -30,8 +30,8 @@ def show(tag, picked):
 # 1) 重复去重：候选里 3 条几乎同一段（模拟相邻切片重叠），外加 2 条不同内容
 cands = [
     d(BASE, 0.20),
-    d(BASE + "农家一般在霜降前后完成收割。", 0.24),          # 与上一条高度重合
-    d(BASE + "收割后要晾晒三天再入仓储存。", 0.27),          # 还是同一段
+    d(BASE + "农家一般在霜降前后完成收割。", 0.24),  # 与上一条高度重合
+    d(BASE + "收割后要晾晒三天再入仓储存。", 0.27),  # 还是同一段
     d("高德的天气接口需要申请 Web 服务 Key 才能调用。", 0.45),
     d("知识库的切片参数包括分段长度与重叠字数两项。", 0.50),
 ]
@@ -52,9 +52,9 @@ assert all("不相关" not in doc.page_content for doc, _ in picked2), "离群�
 
 # 3) 距离 > 4（平方 L2 的值域上界，超出说明向量没归一化）→ 换算不了，跳过过滤只做去重
 cands3 = [
-    d("片段一：关于苞米的储存方式。", 3.1),                      # cos = -0.55，合法但会被阈值砍掉
-    d("片段二：关于苞米的储存方式补充。", 3.3),                  # cos = -0.65
-    d("片段三：讲天气接口怎么申请。", 5.0),                      # 越界 -> None
+    d("片段一：关于苞米的储存方式。", 3.1),  # cos = -0.55，合法但会被阈值砍掉
+    d("片段二：关于苞米的储存方式补充。", 3.3),  # cos = -0.65
+    d("片段三：讲天气接口怎么申请。", 5.0),  # 越界 -> None
 ]
 picked3 = select_diverse(cands3, 2)
 show("不可换算时跳过过滤", picked3)
@@ -68,14 +68,15 @@ assert any("天气接口" in doc.page_content for doc, _ in picked3), "越界时
 # 验证方式：把 kb/rag_core.py 的守卫临时改回 `distance > 2`，本用例与上面的
 # 用例 3 都会失败；改回 `distance > 4` 即 ALL PASS。
 cands3b = [
-    d("相关内容 A：苞米的种植密度与产量关系密切。", 0.30),        # cos 0.85
-    d("相关内容 B：玉米螟是苞米的主要虫害之一。", 0.36),          # cos 0.82
-    d("明显不相关：讲的是高德接口怎么申请。", 2.237),            # cos -0.12，应被砍
+    d("相关内容 A：苞米的种植密度与产量关系密切。", 0.30),  # cos 0.85
+    d("相关内容 B：玉米螟是苞米的主要虫害之一。", 0.36),  # cos 0.82
+    d("明显不相关：讲的是高德接口怎么申请。", 2.237),  # cos -0.12，应被砍
 ]
 picked3b = select_diverse(cands3b, 3)
 show("(2,4] 不再短路过滤", picked3b)
-assert all("不相关" not in doc.page_content for doc, _ in picked3b), \
+assert all("不相关" not in doc.page_content for doc, _ in picked3b), (
     "cos 为负的离群片段应被过滤掉（守卫值域应为 [0,4]）"
+)
 assert len(picked3b) == 2
 
 # 3c) 换算边界：cos = 1 - d/2，d=0 -> 1.0，d=4 -> -1.0
@@ -86,13 +87,17 @@ assert _to_similarity(4.2) is None, "超出 [0,4] 应判定为不可换算"
 assert _to_similarity(-0.1) is None
 
 # 3d) build_sources 暴露给前端的 score 必须是相似度而不是距离
-_srcs = RagPipeline.build_sources([
-    (Document(page_content="片段一", metadata={"source": "a.pdf", "page": 0}), 1.089),
-    (Document(page_content="片段二", metadata={"source": "a.pdf", "page": 1}), 2.237),
-])
+_srcs = RagPipeline.build_sources(
+    [
+        (Document(page_content="片段一", metadata={"source": "a.pdf", "page": 0}), 1.089),
+        (Document(page_content="片段二", metadata={"source": "a.pdf", "page": 1}), 2.237),
+    ]
+)
 assert abs(_srcs[0]["score"] - 0.4555) < 1e-4, f"期望 0.4555 got {_srcs[0]['score']}"
 assert _srcs[1]["score"] < 0, "cos 为负应如实给负值，而不是把距离 2.237 直接透出"
-_refs_md = RagPipeline._format_refs([(Document(page_content="片段一", metadata={"source": "a.pdf", "page": 0}), 1.089)])
+_refs_md = RagPipeline._format_refs(
+    [(Document(page_content="片段一", metadata={"source": "a.pdf", "page": 0}), 1.089)]
+)
 assert "score=0.456" in _refs_md, f"参考片段里应写相似度：{_refs_md}"
 
 # 4) 候选不足 → 原样返回，不多不少

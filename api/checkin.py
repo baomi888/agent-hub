@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """打卡的 HTTP 端点。
 
   GET  /api/checkin/streak   连续天数 / 最长连续 / 已打卡日期集合（来自 daily_reports）
@@ -15,7 +14,6 @@ service/checkin 派生。generate 复用每日总结同一份逻辑，手动与�
 from __future__ import annotations
 
 import time
-from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -51,6 +49,6 @@ async def checkin_share(body: dict, uid: str = Depends(get_current_user)) -> dic
     try:
         time.strptime(date, "%Y-%m-%d")
     except (ValueError, TypeError):
-        raise HTTPException(status_code=400, detail="date 格式应为 YYYY-MM-DD")
+        raise HTTPException(status_code=400, detail="date 格式应为 YYYY-MM-DD") from None
     chk.mark_shared(uid, date)
     return {"ok": True, "date": date, "shared": True}

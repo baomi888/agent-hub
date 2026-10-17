@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
 from __future__ import annotations
+
 """会话管理路由。
 
 路由清单：
@@ -38,6 +38,7 @@ class MessageDeleteResponse(BaseModel):
 
 
 # ==================== 路由 ====================
+
 
 @router.post("/")
 def create(body: SessionCreate, uid: str = Depends(get_current_user)):

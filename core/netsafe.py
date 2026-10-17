@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """URL 安全校验：挡 SSRF。
 
 为什么现在必须做：单用户时"让服务器去访问一个 URL"顶多是访问自己的东西；
@@ -48,9 +47,9 @@ def _is_bad_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
             or ip.is_multicast
         )
     return (
-        ip.is_loopback        # 127.0.0.0/8
-        or ip.is_link_local   # 169.254.0.0/16 ← 云元数据 169.254.169.254 就在这
-        or ip.is_private      # 10/8、172.16/12、192.168/16
+        ip.is_loopback  # 127.0.0.0/8
+        or ip.is_link_local  # 169.254.0.0/16 ← 云元数据 169.254.169.254 就在这
+        or ip.is_private  # 10/8、172.16/12、192.168/16
         or ip.is_reserved
         or ip.is_unspecified  # 0.0.0.0
         or ip.is_multicast
@@ -95,7 +94,7 @@ def assert_safe_url(url: str) -> str:
     try:
         infos = socket.getaddrinfo(host, None)
     except socket.gaierror:
-        raise UnsafeURLError(f"域名无法解析：{host}")
+        raise UnsafeURLError(f"域名无法解析：{host}") from None
 
     if not infos:
         raise UnsafeURLError(f"域名解析结果为空：{host}")
@@ -105,7 +104,7 @@ def assert_safe_url(url: str) -> str:
         try:
             ip = ipaddress.ip_address(raw)
         except ValueError:
-            raise UnsafeURLError(f"域名解析出异常地址：{host} -> {raw}")
+            raise UnsafeURLError(f"域名解析出异常地址：{host} -> {raw}") from None
         if _is_bad_ip(ip):
             raise UnsafeURLError(f"域名 {host} 解析到内网地址 {ip}，拒绝访问")
 

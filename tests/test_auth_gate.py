@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """离线自测：认证门是否真的关上了。
 
 不联网、不碰真实数据库。做法是在 import 业务模块之前，
@@ -13,7 +12,6 @@
 import os
 import sys
 import tempfile
-import time
 
 # ---- 必须在 import 业务模块之前把落盘位置挪走 ----
 _TMP = tempfile.mkdtemp(prefix="baomi_auth_test_")
@@ -40,7 +38,11 @@ FAIL = []
 
 def check(name: str, cond: bool, extra: str = ""):
     (PASS if cond else FAIL).append(name)
-    print(("  PASS  " if cond else "  FAIL  ") + name + (("  <- " + extra) if extra and not cond else ""))
+    print(
+        ("  PASS  " if cond else "  FAIL  ")
+        + name
+        + (("  <- " + extra) if extra and not cond else "")
+    )
 
 
 client = TestClient(main.app)  # 不用 with：跳过 lifespan，避免预热 Chroma
@@ -86,8 +88,11 @@ check("登录成功 200", r8.status_code == 200, r8.text[:120])
 r9 = client.get("/api/sessions/")
 check("带 Cookie 访问会话列表 -> 200", r9.status_code == 200, f"实际 {r9.status_code}")
 r10 = client.get("/api/auth/me/")
-check("me 返回用户名", r10.status_code == 200 and r10.json().get("user", {}).get("username") == "alice",
-      r10.text[:120])
+check(
+    "me 返回用户名",
+    r10.status_code == 200 and r10.json().get("user", {}).get("username") == "alice",
+    r10.text[:120],
+)
 check("me 返回配额概览", isinstance(r10.json().get("quota"), dict), r10.text[:120])
 
 print("\n[5] 令牌防伪造")
@@ -111,8 +116,11 @@ check("拿不到 alice 的用户名", "alice" not in rm.text, rm.text[:120])
 print("\n[6] 退出登录")
 r11 = client.post("/api/auth/logout/")
 check("logout -> 200", r11.status_code == 200)
-check("logout 后 Cookie 被清", "baomi_session=;" in r11.headers.get("set-cookie", "").replace('"', ''),
-      r11.headers.get("set-cookie", "")[:80])
+check(
+    "logout 后 Cookie 被清",
+    "baomi_session=;" in r11.headers.get("set-cookie", "").replace('"', ""),
+    r11.headers.get("set-cookie", "")[:80],
+)
 r12 = client.get("/api/sessions/")
 check("logout 后再访问 -> 401", r12.status_code == 401, f"实际 {r12.status_code}")
 
@@ -128,7 +136,9 @@ try:
     check("超日限额抛 QuotaExceeded", False, "没抛异常")
 except quota.QuotaExceeded:
     check("超日限额抛 QuotaExceeded", True)
-check("超限不计入（仍为 3）", quota.usage_today(uid, "ask") == 3, str(quota.usage_today(uid, "ask")))
+check(
+    "超限不计入（仍为 3）", quota.usage_today(uid, "ask") == 3, str(quota.usage_today(uid, "ask"))
+)
 core.config.DAILY_ASK_LIMIT = cfg_before
 
 core.config.RATE_PER_MINUTE = 3

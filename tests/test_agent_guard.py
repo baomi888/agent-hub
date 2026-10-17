@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """离线自测：Agent 越权面收紧 + 配额限流 + SSRF 防护（多用户改造 P3 的验收点）。
 
 不联网、不碰真实数据：临时目录 + 假 embedding + 打桩 DNS。
@@ -33,11 +32,11 @@ import core.session  # noqa: E402
 core.session._db_path = lambda: os.path.join(_TMP, "sessions.db")
 core.session._init_db()
 
-from kb import pipelines  # noqa: E402
-
 # 假 embedding：离线、确定性，检索链路照常跑通（学自 test_web_import_creates_index）
 from langchain_core.embeddings import DeterministicFakeEmbedding  # noqa: E402
+
 import kb.rag_core  # noqa: E402
+from kb import pipelines  # noqa: E402
 
 kb.rag_core.get_embeddings = lambda: DeterministicFakeEmbedding(size=32)
 
@@ -54,7 +53,11 @@ FAIL = []
 
 def check(name: str, cond: bool, extra: str = ""):
     (PASS if cond else FAIL).append(name)
-    print(("  PASS  " if cond else "  FAIL  ") + name + (("  <- " + extra) if extra and not cond else ""))
+    print(
+        ("  PASS  " if cond else "  FAIL  ")
+        + name
+        + (("  <- " + extra) if extra and not cond else "")
+    )
 
 
 def cfg_for(owner, kb_id):
@@ -63,8 +66,7 @@ def cfg_for(owner, kb_id):
 
 # ---------------------------------------------------------------- [1] 运行时身份
 print("\n[1] kb_id 只认服务端注入的那一份")
-check("_runtime 能取出 (owner, kb)",
-      _runtime(cfg_for(ALICE, "kb_x")) == (ALICE, "kb_x"))
+check("_runtime 能取出 (owner, kb)", _runtime(cfg_for(ALICE, "kb_x")) == (ALICE, "kb_x"))
 check("config 为 None 时返回 (None, None)", _runtime(None) == (None, None))
 check("config 里没有 configurable 时返回 (None, None)", _runtime({}) == (None, None))
 
@@ -75,8 +77,7 @@ kb_params = inspect.signature(kb_search.func).parameters
 dl_params = inspect.signature(download_file.func).parameters
 check("kb_search 已不接受 kb_id 参数", "kb_id" not in kb_params, str(list(kb_params)))
 check("download_file 已不接受 kb_id 参数", "kb_id" not in dl_params, str(list(dl_params)))
-check("两个工具都保留了 config 注入口",
-      "config" in kb_params and "config" in dl_params)
+check("两个工具都保留了 config 注入口", "config" in kb_params and "config" in dl_params)
 
 # ---------------------------------------------------------------- [2] 未绑定 / 越权
 print("\n[2] 没绑库、以及绑了别人的库")
@@ -126,8 +127,11 @@ try:
         check("第三次 -> 抛 QuotaExceeded", True)
         check("异常里带上 kind 与 limit", e.kind == "ask" and e.limit == 2)
     # 关键：超限时不能把计数继续往上推，否则用户第二天零点之前永远解不开
-    check("超限请求不计数（仍是 2）", quota.usage_today("u_quota", "ask") == 2,
-          str(quota.usage_today("u_quota", "ask")))
+    check(
+        "超限请求不计数（仍是 2）",
+        quota.usage_today("u_quota", "ask") == 2,
+        str(quota.usage_today("u_quota", "ask")),
+    )
     try:
         quota.ensure("u_quota", "ask")
         check("ensure 在触顶时抛错", False, "没抛")
@@ -202,10 +206,10 @@ def _reject(url):
 for bad in (
     "http://127.0.0.1:8000/health",
     "http://localhost:3000/",
-    "http://169.254.169.254/latest/meta-data/",   # 云元数据，SSRF 头号靶子
+    "http://169.254.169.254/latest/meta-data/",  # 云元数据，SSRF 头号靶子
     "http://10.0.3.7/admin",
     "http://192.168.1.1/",
-    "http://172.17.233.143/",                     # 本项目服务器的内网 IP
+    "http://172.17.233.143/",  # 本项目服务器的内网 IP
     "http://[::1]/",
     "http://0.0.0.0/",
     "file:///etc/passwd",

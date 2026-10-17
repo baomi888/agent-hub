@@ -60,6 +60,7 @@ Windows 上目标文件被任何句柄开着都会 `WinError 5`，所以有 6 �
 # api/kb.py:47-54
 """刻意不返回 403：403 等于告诉对方"这个 kb_id 是真的，只是你没权限"，
 那是一条可以用来枚举别人知识库的线索。不存在与无权，对外长得一样。"""
+
 if pipelines.owner_of(kb_id) != uid:
     raise HTTPException(status_code=404, detail=f"知识库不存在：{kb_id}")
 ```
@@ -75,8 +76,7 @@ if pipelines.owner_of(kb_id) != uid:
 2. 所以「新建一个同名库」在服务端**根本不可能**。反过来改成「每次新建一个 id」才会产生同名重复库，`list_all` 里出现两条一模一样的名字，用户无法分辨。
 3. `tests/test_kb_isolation.py:59-60` 把这条语义钉死了：
    ```python
-   check("同一个人重建同名库 -> 同一个 id（幂等）",
-         pipelines.create_kb(ALICE, "我的库")[0] == ka)
+   check("同一个人重建同名库 -> 同一个 id（幂等）", pipelines.create_kb(ALICE, "我的库")[0] == ka)
    ```
 
 **改这条语义会破坏契约**：`02` §6.1 明写「同名即同库」；仓库里也有历史提交
@@ -175,7 +175,9 @@ else:
     result = select_diverse(cands, top_k)
 
 # rag_core.py:292-301  MMR 打分
-val = lam * relevance(scores[i]) - (1 - lam) * max(_overlap(shingles[i], shingles[j]) for j in order)
+val = lam * relevance(scores[i]) - (1 - lam) * max(
+    _overlap(shingles[i], shingles[j]) for j in order
+)
 ```
 
 | 常量 | `config.py` | 默认 | 语义 |
@@ -369,14 +371,15 @@ pytest tests/test_grounding.py -q        # 依据判定回归
 follow_redirects=False 是刻意的：交给 httpx 自动跟随时，
 一个公网 URL 只要 302 到 http://169.254.169.254/latest/meta-data/，
 入口那次校验就成了摆设。多用户之后这是别人能打进内网的口子。"""
+
 target = assert_safe_url(url)
-for _ in range(_MAX_REDIRECTS + 1):          # _MAX_REDIRECTS = 5
+for _ in range(_MAX_REDIRECTS + 1):  # _MAX_REDIRECTS = 5
     resp = httpx.get(target, headers=_HTTP_HEADERS, timeout=timeout, follow_redirects=False)
     if resp.status_code in (301, 302, 303, 307, 308):
         loc = resp.headers.get("location")
         if not loc:
             return resp
-        target = assert_safe_url(urljoin(target, loc))   # ← 每一跳都重新校验
+        target = assert_safe_url(urljoin(target, loc))  # ← 每一跳都重新校验
         continue
     return resp
 ```
@@ -466,8 +469,15 @@ for _ in range(_MAX_REDIRECTS + 1):          # _MAX_REDIRECTS = 5
 
 ```python
 # build_sources 每条的形状
-{"id": 1, "source": "a.pdf", "page": 1, "score": 0.4555,
- "strength": "high", "preview": "...", "text": "..."}
+{
+    "id": 1,
+    "source": "a.pdf",
+    "page": 1,
+    "score": 0.4555,
+    "strength": "high",
+    "preview": "...",
+    "text": "...",
+}
 ```
 
 - `score`：**真相似度**（越大越相关）；换算不了给 `None`，前端隐藏这一项；
@@ -519,8 +529,8 @@ event: grounding  { "strength": "medium", "best": 0.31, "count": 3, "weak": true
 
 ```python
 # 方案：常量建议加进 core/config.py 供全项目复用（需先通知申请人）
-MAX_TOP_K = 20          # 候选池 3 倍 = 60 条，足够 MMR 挑，再多只是烧 embedding
-MAX_CHUNK_SIZE = 2000   # 再大就失去"切片"的意义，检索精度反而下降
+MAX_TOP_K = 20  # 候选池 3 倍 = 60 条，足够 MMR 挑，再多只是烧 embedding
+MAX_CHUNK_SIZE = 2000  # 再大就失去"切片"的意义，检索精度反而下降
 
 top_k: int = Field(default=config.TOP_K_DEFAULT, gt=0, le=MAX_TOP_K)
 chunk_size: int = Field(default=500, gt=0, le=MAX_CHUNK_SIZE)

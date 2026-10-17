@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """动态多知识库管理。
 
 与 rag-knowledge-base-demo 固定 main/left/right 三个 collection 不同，
@@ -135,7 +134,7 @@ def _load_files() -> None:
     """从磁盘加载文件清单。调用方需持有 _REGISTRY_LOCK。"""
     global _KB_FILES
     try:
-        with open(_files_path(), "r", encoding="utf-8") as f:
+        with open(_files_path(), encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict):
             _KB_FILES = {
@@ -164,7 +163,7 @@ def _load_names() -> None:
     """从磁盘加载中文名映射。调用方需持有 _REGISTRY_LOCK。"""
     global _KB_NAMES
     try:
-        with open(_names_path(), "r", encoding="utf-8") as f:
+        with open(_names_path(), encoding="utf-8") as f:
             _KB_NAMES = json.load(f)
     except Exception:
         _KB_NAMES = {}
@@ -182,10 +181,13 @@ def _load_owners() -> None:
     """从磁盘加载归属表。调用方需持有 _REGISTRY_LOCK。"""
     global _KB_OWNERS
     try:
-        with open(_owners_path(), "r", encoding="utf-8") as f:
+        with open(_owners_path(), encoding="utf-8") as f:
             data = json.load(f)
-        _KB_OWNERS = {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)} \
-            if isinstance(data, dict) else {}
+        _KB_OWNERS = (
+            {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)}
+            if isinstance(data, dict)
+            else {}
+        )
     except Exception:
         _KB_OWNERS = {}
 
@@ -287,11 +289,12 @@ def new_kb_id(owner: str, name: str) -> str:
     不混的话，两个人各建一个「我的库」会算出同一个 id，
     后一个直接写进前一个的 collection 里。混了之后同名不同主也是两个库。
     """
-    raw = "%s|%s" % (owner, (name or "").strip())
+    raw = "{}|{}".format(owner, (name or "").strip())
     return hashlib.md5(raw.encode("utf-8")).hexdigest()[:12]
 
 
 # ==================== CRUD ====================
+
 
 def create_kb(owner: str, name: str) -> tuple[str, str]:
     """登记一个知识库（中文名亦可），返回 (kb_id, display_name)。"""
@@ -399,28 +402,33 @@ def list_all(owner: str) -> list[dict]:
                 pipe.get_or_open()
             # 文件清单以落盘记录为准，库里真有片段但没记录时用 Chroma 元数据兜底
             files = get_files(owner, kb_id) or pipe.list_sources()
-            result.append({
-                "kb_id": kb_id,
-                "name": _KB_NAMES.get(kb_id, kb_id),  # 无映射时回退到 kb_id
-                "chunks": pipe.count(),
-                "files": files,
-            })
+            result.append(
+                {
+                    "kb_id": kb_id,
+                    "name": _KB_NAMES.get(kb_id, kb_id),  # 无映射时回退到 kb_id
+                    "chunks": pipe.count(),
+                    "files": files,
+                }
+            )
 
         # 刚建好、还没传过文件的空库：Chroma 上的 collection 是第一次写入时才建的，
         # 所以扫磁盘扫不到它。但用户已经在界面上看到这个库名了，
         # 列表里凭空少一项会让人以为"建库失败了"。
         for kb_id in mine - seen:
-            result.append({
-                "kb_id": kb_id,
-                "name": _KB_NAMES.get(kb_id, kb_id),
-                "chunks": 0,
-                "files": get_files(owner, kb_id),
-            })
+            result.append(
+                {
+                    "kb_id": kb_id,
+                    "name": _KB_NAMES.get(kb_id, kb_id),
+                    "chunks": 0,
+                    "files": get_files(owner, kb_id),
+                }
+            )
     return result
 
 
 # ==================== 原始文件存储 ====================
 # 只留向量不够：换切片参数要重建索引，必须有原始文件；删单个文件也要能定位它
+
 
 def source_dir(kb_id: str) -> str:
     """该知识库原始文件的存放目录。"""
@@ -477,6 +485,7 @@ def safe_source_name(name: str, fallback_ext: str = "") -> str:
 
 
 # ==================== 文件管理 ====================
+
 
 def add_file_records(owner: str, kb_id: str, records: list[dict]) -> None:
     """登记文件（同名覆盖），并落盘。record: {name, chunks, added_at}"""
@@ -551,6 +560,7 @@ def get_file_names(owner: str, kb_id: str) -> list[str]:
 
 # ==================== 状态查询 ====================
 
+
 def get_status(owner: str, kb_id: str) -> dict | None:
     """汇总单个库状态，不存在或不属于该用户都返回 None。"""
     if owner_of(kb_id) != owner:
@@ -571,6 +581,7 @@ def get_status(owner: str, kb_id: str) -> dict | None:
 
 
 # ==================== 启动预热 ====================
+
 
 def warmup() -> None:
     """启动时扫描磁盘，把已有 collection 加载进注册表。

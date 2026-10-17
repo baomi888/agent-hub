@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
 from __future__ import annotations
+
 """消息反馈路由（赞 / 踩）。
 
 路由清单：

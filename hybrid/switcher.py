@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """切换引擎（要求 1/5：自动切换规则 + 防抖 + 上限）。
 
 规则数据驱动（存 switch_rules 表，这里只收生效规则列表）：
@@ -20,7 +19,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -54,11 +53,14 @@ class SwitchEngine:
         parsed = [r if isinstance(r, SwitchRule) else SwitchRule.model_validate(r) for r in rules]
         self.rules = sorted(parsed, key=lambda r: r.priority)
 
-    def decide(self, ctx: TaskContext, signal: str, signal_payload: dict | None = None) -> SwitchDecision:
+    def decide(
+        self, ctx: TaskContext, signal: str, signal_payload: dict | None = None
+    ) -> SwitchDecision:
         # 硬上限最先查：已经切了 N 次还在出信号，说明规则在打架
         if len(ctx.mode_trace) >= config.HYBRID_MAX_SWITCHES:
             return SwitchDecision(
-                action="terminate", rule="__max_switches__",
+                action="terminate",
+                rule="__max_switches__",
                 reason=f"模式切换已达上限（{config.HYBRID_MAX_SWITCHES} 次），强制收工防乒乓",
             )
         now = int(time.time())
@@ -69,10 +71,14 @@ class SwitchEngine:
                 if self._rule_fired_within(ctx, rule.name, rule.cooldown_seconds, now):
                     continue
                 target = {"to_agent": "agent", "to_workflow": "workflow"}.get(rule.action)
-                if target and self._direction_fired_within(ctx, target, config.HYBRID_SWITCH_COOLDOWN, now):
+                if target and self._direction_fired_within(
+                    ctx, target, config.HYBRID_SWITCH_COOLDOWN, now
+                ):
                     continue
             if not rule.condition or self._eval(rule.condition, ctx, signal_payload):
-                return SwitchDecision(action=rule.action, rule=rule.name, reason=rule.reason or rule.name)
+                return SwitchDecision(
+                    action=rule.action, rule=rule.name, reason=rule.reason or rule.name
+                )
         return SwitchDecision(action="continue")
 
     @staticmethod
@@ -98,12 +104,38 @@ class SwitchEngine:
 # 轻量关键词打分，刻意不上 LLM：分类只决定"从哪个模式起跑"，
 # 跑起来之后还有一整套切换规则兜底，分类错了代价很低，不值一次 LLM 往返
 _FLOW_HINTS = (
-    "先", "然后", "接着", "依次", "步骤", "流程", "第一步", "第二步",
-    "按照", "最后", "整理成", "汇总", "生成报告", "制成", "批量", "并保存", "并下载",
+    "先",
+    "然后",
+    "接着",
+    "依次",
+    "步骤",
+    "流程",
+    "第一步",
+    "第二步",
+    "按照",
+    "最后",
+    "整理成",
+    "汇总",
+    "生成报告",
+    "制成",
+    "批量",
+    "并保存",
+    "并下载",
 )
 _OPEN_HINTS = (
-    "调研", "研究", "分析", "比较", "怎么看", "如何", "为什么", "哪些",
-    "建议", "聊聊", "介绍", "解释", "探索",
+    "调研",
+    "研究",
+    "分析",
+    "比较",
+    "怎么看",
+    "如何",
+    "为什么",
+    "哪些",
+    "建议",
+    "聊聊",
+    "介绍",
+    "解释",
+    "探索",
 )
 
 

@@ -1,8 +1,6 @@
-# -*- coding: utf-8 -*-
 """W2 端到端测试：通过 HTTP 调后端验证会话层 + SSE 流式问答。"""
 
 import json
-import sys
 
 import requests
 
@@ -54,10 +52,17 @@ assert r, "创建失败"
 sid = r["id"]
 print(f"   sid = {sid}")
 
-r2 = test("创建会话（绑定 test_w1 知识库）", lambda: http("POST", "/api/sessions/", {
-    "title": "RAG 测试",
-    "kb_id": "test_w1",
-}))
+r2 = test(
+    "创建会话（绑定 test_w1 知识库）",
+    lambda: http(
+        "POST",
+        "/api/sessions/",
+        {
+            "title": "RAG 测试",
+            "kb_id": "test_w1",
+        },
+    ),
+)
 assert r2
 sid2 = r2["id"]
 print(f"   sid2 = {sid2}, kb_id = {r2.get('kb_id')}")
@@ -102,9 +107,9 @@ resp.close()
 event_types = [e[0] for e in sse_events]
 print(f"   事件: {event_types}")
 
-assert "token" in event_types, f"缺 token"
-assert "done" in event_types, f"缺 done"
-assert "title" in event_types, f"缺 title（首轮应自动生成）"
+assert "token" in event_types, "缺 token"
+assert "done" in event_types, "缺 done"
+assert "title" in event_types, "缺 title（首轮应自动生成）"
 
 done_data = json.loads(sse_events[event_types.index("done")][1])
 print(f"   LLM 回答: {done_data['answer'][:100]}...")
@@ -199,6 +204,3 @@ print(f"{PASS} 清理测试会话")
 print("\n" + "=" * 50)
 print("🎉  W2 端到端验证全部通过！")
 print("=" * 50)
-
-
-

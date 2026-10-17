@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """api/geo.py 的按 IP 缓存行为测试（离线，不联网、不需要高德 key）。
 
 验证四件事：
@@ -7,6 +6,7 @@
   3. 缓存有容量上限 ⇒ 灌超过 _CACHE_MAX 个不同 IP 不会无限增长
   4. 过期条目会被丢弃（用 TTL=0 模拟过期）
 """
+
 import asyncio
 import time
 import types
@@ -106,7 +106,7 @@ async def main():
         for i in range(25):
             await geo.locate(_make_request(f"1.1.1.{i}"))
         check(
-            f"灌 25 个 IP（上限 10）后缓存不超上限",
+            "灌 25 个 IP（上限 10）后缓存不超上限",
             len(geo._cache) <= 10,
             f"(实际 {len(geo._cache)})",
         )

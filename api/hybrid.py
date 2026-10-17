@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """混合架构管理接口：工作流定义 / 切换规则 / 执行记录与日志（要求 2/5/6 的 API 面）。
 
 归属约定与 store 层一致：
@@ -30,6 +29,7 @@ _RULE_ACTIONS = ("to_agent", "to_workflow", "terminate")
 
 # ==================== 工作流定义 ====================
 
+
 class WorkflowIn(BaseModel):
     name: str = Field(..., min_length=1, max_length=60)
     description: str = Field(default="", max_length=500)
@@ -49,7 +49,7 @@ def create_workflow(req: WorkflowIn, uid: str = Depends(get_current_user)) -> di
     try:
         validate_definition(req.definition)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return store.create_workflow(uid, req.name, req.description, req.definition)
 
 
@@ -66,7 +66,7 @@ def update_workflow(wf_id: str, req: WorkflowIn, uid: str = Depends(get_current_
     try:
         validate_definition(req.definition)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     if not store.update_workflow(uid, wf_id, req.name, req.description, req.definition):
         raise HTTPException(status_code=404, detail="工作流不存在或为系统内置（不可修改）")
     return store.get_workflow(uid, wf_id)
@@ -80,6 +80,7 @@ def delete_workflow(wf_id: str, uid: str = Depends(get_current_user)) -> dict:
 
 
 # ==================== 切换规则 ====================
+
 
 class RuleIn(BaseModel):
     signal: str = Field(..., min_length=1, max_length=40)
@@ -110,10 +111,17 @@ def upsert_rule(name: str, req: RuleIn, uid: str = Depends(get_current_user)) ->
             ast.parse(req.condition.strip(), mode="eval")
         except (SyntaxError, ValueError) as e:
             # ValueError：含 NUL 等字符时 ast.parse 抛的是它；两者同属"条件写错了"
-            raise HTTPException(status_code=400, detail=f"条件表达式语法错误：{e}")
+            raise HTTPException(status_code=400, detail=f"条件表达式语法错误：{e}") from e
     store.upsert_rule(
-        uid, name, req.signal, req.condition, req.action,
-        req.reason, req.priority, req.enabled, req.cooldown_seconds,
+        uid,
+        name,
+        req.signal,
+        req.condition,
+        req.action,
+        req.reason,
+        req.priority,
+        req.enabled,
+        req.cooldown_seconds,
     )
     return {"ok": True}
 
@@ -127,6 +135,7 @@ def delete_rule(name: str, uid: str = Depends(get_current_user)) -> dict:
 
 
 # ==================== 执行记录与日志 ====================
+
 
 @router.get("/runs")
 def list_runs(uid: str = Depends(get_current_user), limit: int = 20) -> dict:
@@ -166,7 +175,7 @@ def manual_switch(run_id: str, req: SwitchIn, uid: str = Depends(get_current_use
     try:
         request_manual_switch(run_id, req.action)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return {"ok": True}
 
 
@@ -210,7 +219,7 @@ def resume_run(run_id: str, req: ResumeIn, uid: str = Depends(get_current_user))
 
             ctx_data = _json.loads(ctx_data)
         except ValueError:
-            raise HTTPException(status_code=500, detail="执行快照损坏，无法恢复")
+            raise HTTPException(status_code=500, detail="执行快照损坏，无法恢复") from None
 
     wf_state = ctx_data.get("workflow_state") or {}
     suspended_at = wf_state.get("suspended_at") or wf_state.get("next_node")
@@ -232,7 +241,8 @@ def resume_run(run_id: str, req: ResumeIn, uid: str = Depends(get_current_user))
         ctx.workflow_state.pop("suspended_at", None)
     ctx.mode_trace.append(
         ModeSwitch(
-            from_mode=ctx.current_mode, to_mode=ctx.current_mode,
+            from_mode=ctx.current_mode,
+            to_mode=ctx.current_mode,
             rule="human_" + ("resume" if req.decision == "approve" else "reject"),
             reason=req.note or ("人工确认继续" if req.decision == "approve" else "人工拒绝"),
         )

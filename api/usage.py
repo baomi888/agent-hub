@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """用量与反馈看板（P2 信任基础设施）。
 
   GET /api/usage/summary   当日配额快照 + 近 7 天用量 + 赞踩聚合
@@ -14,9 +13,9 @@ import asyncio
 
 from fastapi import APIRouter, Depends
 
-from core.auth import get_current_user
 from core import config, quota
 from core import session as store
+from core.auth import get_current_user
 
 router = APIRouter()
 

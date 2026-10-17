@@ -10,6 +10,7 @@
   · 单文件原型必须离线可用：无第三方 img / font / CDN 外链
 只读检查，不改文件。退出码非 0 表示有命中。
 """
+
 import glob
 import os
 import re
@@ -22,10 +23,10 @@ DEFAULT_GLOB = os.path.join(ROOT, "prototypes", "*.html")
 EMOJI_RANGES = [
     (0x1F300, 0x1FAFF),  # 表情、符号、补充符号
     (0x1F000, 0x1F2FF),  # 麻将、扑克、区域指示
-    (0x2600, 0x27BF),    # 杂项符号、装饰符号（✎ ✕ ★ 等）
-    (0x2B00, 0x2BFF),    # 杂项符号与箭头
-    (0xFE0F, 0xFE0F),    # 变体选择符
-    (0x2190, 0x21FF),    # 箭头字符（← → 等）
+    (0x2600, 0x27BF),  # 杂项符号、装饰符号（✎ ✕ ★ 等）
+    (0x2B00, 0x2BFF),  # 杂项符号与箭头
+    (0xFE0F, 0xFE0F),  # 变体选择符
+    (0x2190, 0x21FF),  # 箭头字符（← → 等）
 ]
 
 # 注意：「苞米地笔记本」是**刻意保留**的设计语言名（与「苞米」吉祥物、账号「苞米呀」同源），
@@ -90,7 +91,10 @@ def audit(path: str) -> int:
         used = set(re.findall(r'data-i="([a-zA-Z]+)"', src))
         defined = set(re.findall(r"\n\s{2}([a-zA-Z]+):\s*'", src))
         extra = f"｜手机框 {phones}" if phones else ""
-        print(f"[5] 结构：图标占位 {ph}（{len(used)} 种）｜ICON 已定义 {len(defined)} 种｜设计说明表 {specs}{extra}")
+        print(
+            f"[5] 结构：图标占位 {ph}（{len(used)} 种）｜ICON 已定义 {len(defined)} 种"
+            f"｜设计说明表 {specs}{extra}"
+        )
         missing = sorted(used - defined)
         if missing:
             print(f"      ✗ 用到了但 ICON 表没定义：{missing}")

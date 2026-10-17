@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """行为基线（characterization tests）：天气工具的城市别名与天气码映射。
 
 天气工具把两张映射表（`CITY_ALIASES` 城市别名、`WMO_CN` WMO 天气码→中文）
@@ -8,6 +7,7 @@
 
 不联网：`urllib.request.urlopen` 换成本地假响应。
 """
+
 import json
 import os
 import sys
@@ -48,13 +48,18 @@ def _stub_urlopen(monkeypatch, payload_for):
 
 # ==================== 坐标路径：WMO 天气码 → 中文 + 输出文本格式 ====================
 
+
 def test_weather_coordinate_current_day_format(monkeypatch):
     monkeypatch.setattr(tools, "_get_amap_key", lambda: "")  # 无高德 Key：逆地理拿不到，标签走兜底
 
     payload = {
         "current": {
-            "weather_code": 61, "temperature_2m": 21, "apparent_temperature": 20,
-            "relative_humidity_2m": 55, "wind_direction_10m": "东南", "wind_speed_10m": 12.5,
+            "weather_code": 61,
+            "temperature_2m": 21,
+            "apparent_temperature": 20,
+            "relative_humidity_2m": 55,
+            "wind_direction_10m": "东南",
+            "wind_speed_10m": 12.5,
         }
     }
     _stub_urlopen(monkeypatch, lambda url: payload)
@@ -62,9 +67,7 @@ def test_weather_coordinate_current_day_format(monkeypatch):
     out = tools.get_weather.invoke({"days": 1, "lat": 39.90, "lon": 116.40})
 
     # WMO 61 → "小雨"；格式逐字钉住（空行、单位、标点都不能变）
-    assert out == (
-        "你所在位置当前小雨，气温 21℃（体感 20℃），湿度 55%，东南风约 12.5 km/h。"
-    )
+    assert out == ("你所在位置当前小雨，气温 21℃（体感 20℃），湿度 55%，东南风约 12.5 km/h。")
 
 
 def test_weather_coordinate_daily_format(monkeypatch):
@@ -90,6 +93,7 @@ def test_weather_coordinate_daily_format(monkeypatch):
 
 
 # ==================== 城市路径：别名归一 ====================
+
 
 def test_city_alias_normalizes_pinyin_input(monkeypatch):
     """`beijing` 必须被折成「北京」再去查地理编码（大小写无关）。"""
@@ -121,7 +125,11 @@ def test_weather_without_city_or_coords(monkeypatch):
 
 def test_weather_day_range_validation(monkeypatch):
     monkeypatch.setattr(tools, "_get_amap_key", lambda: "fake-key")
-    assert tools.get_weather.invoke({"days": 0, "lat": 1.0, "lon": 1.0}) == \
-        "天数必须是 1~7 的整数，收到的是 0。"
-    assert tools.get_weather.invoke({"days": 8, "lat": 1.0, "lon": 1.0}) == \
-        "天数必须是 1~7 的整数，收到的是 8。"
+    assert (
+        tools.get_weather.invoke({"days": 0, "lat": 1.0, "lon": 1.0})
+        == "天数必须是 1~7 的整数，收到的是 0。"
+    )
+    assert (
+        tools.get_weather.invoke({"days": 8, "lat": 1.0, "lon": 1.0})
+        == "天数必须是 1~7 的整数，收到的是 8。"
+    )

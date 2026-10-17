@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """集中配置管理。
 
 所有 API Key、地址、路径、默认参数统一在此读取，业务代码禁止硬编码。
@@ -161,7 +160,9 @@ REPORT_MINUTE = int(os.getenv("REPORT_MINUTE", "30"))
 # 管理员用户名（逗号分隔）。管理员不受配额与每分钟限流约束，相当于主账号。
 # 默认把项目作者账号设为管理员；其他部署在 .env 里改成自己的用户名即可
 # （例如 ADMIN_USERNAMES=admin,alice）。名单为空则没有管理员。
-ADMIN_USERNAMES = [x.strip() for x in os.getenv("ADMIN_USERNAMES", "苞米呀").split(",") if x.strip()]
+ADMIN_USERNAMES = [
+    x.strip() for x in os.getenv("ADMIN_USERNAMES", "苞米呀").split(",") if x.strip()
+]
 
 # ---------- 可选：天气工具 ----------
 AMAP_API_KEY = os.getenv("AMAP_API_KEY", "")
@@ -197,6 +198,14 @@ HYBRID_LLM_MAX_TOKENS = int(os.getenv("HYBRID_LLM_MAX_TOKENS", "2048"))
 AGENT_LLM_MAX_TOKENS = int(os.getenv("AGENT_LLM_MAX_TOKENS", "0"))
 # 标题生成：只要 ≤15 字，给输出兜底防跑偏（原为硬编码 32，提到配置便于调）
 TITLE_MAX_TOKENS = int(os.getenv("TITLE_MAX_TOKENS", "32"))
+
+# ---------- 工具守卫（P0-3：让 TOOL_META 的声明真正生效）----------
+# 危险动作审批开关（默认开）。needs_approval=True 的工具首次调用只返回确认串，
+# 带同一确认串再调才执行。演示期若嫌摩擦大，置 0 可整体关闭。
+TOOL_APPROVAL_ENABLED = os.getenv("TOOL_APPROVAL_ENABLED", "1") not in ("0", "false", "False")
+# 单个工具输出的硬上限（兜底档）：TOOL_META 里按工具分档（4000/2000/1000），
+# 这里只在元数据缺失时兜底使用。
+TOOL_OUTPUT_HARD_LIMIT = int(os.getenv("TOOL_OUTPUT_HARD_LIMIT", "8000"))
 
 # 混合模式注入对话历史的消息条数上限（跨轮记忆；0=关闭历史注入，退回旧的无记忆行为）。
 # 修复"混合模式每轮失忆"：hybrid 会把最近 N 条历史塞进 ctx.shared["history"]，
