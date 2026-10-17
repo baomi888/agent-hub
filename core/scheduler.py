@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """定时任务库层：幂等登记 / 重试分级 / 心跳。
 
 设计取舍（为什么不把这些直接交给 APScheduler 的 JobStore）
@@ -66,9 +65,9 @@ STATUS_SUCCEEDED = "succeeded"
 STATUS_FAILED = "failed"
 STATUS_SKIPPED = "skipped"
 
-CLASS_RETRY = "retry"    # 可重试：超时 / 5xx / 429
-CLASS_FATAL = "fatal"    # 不可重试：401 / 402、会话已删、库不存在
-CLASS_QUOTA = "quota"    # 配额触顶：延后到次日同刻
+CLASS_RETRY = "retry"  # 可重试：超时 / 5xx / 429
+CLASS_FATAL = "fatal"  # 不可重试：401 / 402、会话已删、库不存在
+CLASS_QUOTA = "quota"  # 配额触顶：延后到次日同刻
 
 
 def job_defs() -> dict[str, dict]:
@@ -91,7 +90,7 @@ def job_defs() -> dict[str, dict]:
             "description": "重试失败的委托投递（错开 dispatch 的分钟，避免抢 SQLite 写锁）",
         },
         "report.daily": {
-            "cron": "%d %d * * *" % (config.REPORT_MINUTE, config.REPORT_HOUR),
+            "cron": f"{config.REPORT_MINUTE} {config.REPORT_HOUR} * * *",
             "description": "生成当日每日总结",
         },
         "report.backfill": {
@@ -232,6 +231,7 @@ def ensure_tables(seed: bool = True) -> None:
 
 # ---------- 时间 ----------
 
+
 def now_ts() -> int:
     """当前 Unix 秒（UTC）。"""
     return int(time.time())
@@ -266,10 +266,11 @@ def idem_key(job_key: str, subject_id: str, planned_at: int) -> str:
     为什么带 planned_at：同一委托今天 07:00 和明天 07:00 是两次不同的投递，都要发；
     但「今天 07:00 这一次」无论被触发几次（worker 重启、重复扫描、手动重跑）都只能发一次。
     """
-    return "%s|%s|%d" % (job_key, subject_id, int(planned_at))
+    return f"{job_key}|{subject_id}|{int(planned_at)}"
 
 
 # ---------- 任务定义表 ----------
+
 
 def list_jobs(enabled: bool | None = None) -> list[dict]:
     """任务定义表（可按开关过滤）。enabled 是 INTEGER 落库，这里转回 bool 给前端。"""
@@ -308,6 +309,7 @@ def update_next_run(job_key: str, next_run_at: int | None) -> None:
 
 
 # ---------- 登记（幂等） ----------
+
 
 def claim_job(
     job_key: str,
@@ -366,8 +368,9 @@ def enqueue_job(
         return (rid if cur.rowcount else None), key
 
 
-def claim_pending(limit: int = 50, now: int | None = None,
-                  job_keys: list[str] | None = None) -> list[dict]:
+def claim_pending(
+    limit: int = 50, now: int | None = None, job_keys: list[str] | None = None
+) -> list[dict]:
     """原子领取手动触发（pending）的执行行，置为 running、attempts+1。
 
     「先 SELECT 再 UPDATE」在这里是安全的：UPDATE 的 WHERE 里带了
@@ -385,13 +388,13 @@ def claim_pending(limit: int = 50, now: int | None = None,
         keys = [str(k) for k in job_keys]
         if not keys:
             return []
-        where += " AND job_key IN (%s)" % ",".join("?" * len(keys))
+        where += " AND job_key IN ({})".format(",".join("?" * len(keys)))
         params.extend(keys)
     with _get_conn() as conn:
         rows = conn.execute(
             "UPDATE job_runs SET status = ?, attempts = attempts + 1, started_at = ? "
-            "WHERE run_id IN (SELECT run_id FROM job_runs WHERE %s "
-            "ORDER BY planned_at ASC LIMIT ?) AND status = ? RETURNING *" % where,
+            f"WHERE run_id IN (SELECT run_id FROM job_runs WHERE {where} "
+            "ORDER BY planned_at ASC LIMIT ?) AND status = ? RETURNING *",
             (STATUS_RUNNING, ts, *params, n, STATUS_PENDING),
         ).fetchall()
         return [dict(r) for r in rows]
@@ -399,12 +402,24 @@ def claim_pending(limit: int = 50, now: int | None = None,
 
 # ---------- 收尾与重试分级 ----------
 
-_RETRYABLE_HINTS = ("timeout", "timed out", "超时", "connection", "连接", "429", "500", "502", "503", "504")
+_RETRYABLE_HINTS = (
+    "timeout",
+    "timed out",
+    "超时",
+    "connection",
+    "连接",
+    "429",
+    "500",
+    "502",
+    "503",
+    "504",
+)
 _FATAL_HINTS = ("401", "402", "会话不存在", "会话已删除", "知识库不存在", "库不存在")
 
 
-def classify_error(exc: BaseException | None = None, status_code: int | None = None,
-                   message: str | None = None) -> str:
+def classify_error(
+    exc: BaseException | None = None, status_code: int | None = None, message: str | None = None
+) -> str:
     """把一次失败分成三类：CLASS_RETRY / CLASS_FATAL / CLASS_QUOTA。
 
     判定顺序：异常类型 > HTTP 状态码 > 文案关键词。
@@ -581,6 +596,7 @@ def requeue_run(run_id: str, force: bool = False, now: int | None = None) -> dic
 
 # ---------- 查询 ----------
 
+
 def get_run(run_id: str) -> dict | None:
     ensure_tables()
     with _get_conn() as conn:
@@ -593,7 +609,7 @@ class InvalidCursor(ValueError):
 
 
 def _encode_cursor(row: dict) -> str:
-    return "%d:%s" % (int(row["planned_at"]), row["run_id"])
+    return f"{int(row['planned_at'])}:{row['run_id']}"
 
 
 def _decode_cursor(cursor: str) -> tuple[int, str]:
@@ -601,7 +617,7 @@ def _decode_cursor(cursor: str) -> tuple[int, str]:
         planned, rid = str(cursor).split(":", 1)
         return int(planned), rid
     except Exception:
-        raise InvalidCursor(str(cursor))
+        raise InvalidCursor(str(cursor)) from None
 
 
 def list_runs(
@@ -644,7 +660,9 @@ def count_runs(status: str | None = None) -> int:
     ensure_tables()
     with _get_conn() as conn:
         if status:
-            row = conn.execute("SELECT COUNT(*) AS c FROM job_runs WHERE status = ?", (status,)).fetchone()
+            row = conn.execute(
+                "SELECT COUNT(*) AS c FROM job_runs WHERE status = ?", (status,)
+            ).fetchone()
         else:
             row = conn.execute("SELECT COUNT(*) AS c FROM job_runs").fetchone()
         return int(row["c"])
@@ -698,6 +716,7 @@ def job_stats(job_key: str, lookback: int = 20) -> dict:
 
 
 # ---------- 心跳与健康 ----------
+
 
 def heartbeat(pid: int | None = None, version: str = WORKER_VERSION) -> int:
     """写一次心跳（恒为 id=1 的一行 upsert），返回写入的时刻。
@@ -779,6 +798,7 @@ def health(threshold: int = HEARTBEAT_DOWN_SECONDS, now: int | None = None) -> d
 
 # ---------- cron 估算（给「worker 挂了也要能看到下次该跑的时间」用） ----------
 
+
 def _parse_field(field: str, fmin: int, fmax: int) -> list[int] | None:
     """解析一个 cron 字段为取值集合；不支持的写法返回 None。
 
@@ -814,7 +834,9 @@ def _parse_field(field: str, fmin: int, fmax: int) -> list[int] | None:
     return sorted(out)
 
 
-def estimate_next_run(cron: str, tz_name: str | None = None, after: int | None = None) -> int | None:
+def estimate_next_run(
+    cron: str, tz_name: str | None = None, after: int | None = None
+) -> int | None:
     """按 5 段 cron 估算下一次触发时刻（Unix 秒），算不出来返回 None。
 
     只支持本项目用到的写法：分钟 / 小时支持 `*`、`*/n`、列表、区间、步长；

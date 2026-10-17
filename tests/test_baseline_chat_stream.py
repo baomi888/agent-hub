@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """行为基线（characterization tests）：流式问答的 SSE 事件序列。
 
 走真 HTTP 层（TestClient），但把外部依赖全部换掉：鉴权用 dependency_overrides
@@ -8,8 +7,8 @@
 `_stream_llm` 里那个"每帧查一次断连"的调优最容易被这类断言挡住——一旦帧序列
 或少一帧，前端就会缺一段渲染。
 """
+
 import os
-import re
 import sys
 import tempfile
 
@@ -27,19 +26,24 @@ import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from langchain_core.documents import Document  # noqa: E402
 
-import core.session as session  # noqa: E402
-from core.auth import get_current_user  # noqa: E402
-
 import api.chat as chat  # noqa: E402
+import core.session as session  # noqa: E402
 import kb.rag_core as rc  # noqa: E402
 import main as m  # noqa: E402
+from core.auth import get_current_user  # noqa: E402
 
 OWNER = "u_stream"
 SID = "conv_stream"
 
 DOCS = [
     (Document(page_content="强相关片段", metadata={"source": "资料.txt"}), 0.4),
-    (Document(page_content="沾边片段", metadata={"source": "别的.txt"}, ), 1.4),
+    (
+        Document(
+            page_content="沾边片段",
+            metadata={"source": "别的.txt"},
+        ),
+        1.4,
+    ),
 ]
 
 
@@ -75,9 +79,9 @@ def _frames(body: str):
         data = ""
         for line in raw.split("\n"):
             if line.startswith("event:"):
-                name = line[len("event:"):].strip()
+                name = line[len("event:") :].strip()
             elif line.startswith("data:"):
-                data += line[len("data:"):].strip()
+                data += line[len("data:") :].strip()
         out.append((name, data))
     return out
 
@@ -87,7 +91,9 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(session, "_db_path", lambda: os.path.join(str(tmp_path), "sessions.db"))
     session._init_db()
 
-    monkeypatch.setattr(chat.store, "get_conversation", lambda uid, sid: {"id": sid, "kb_id": "kb_x"})
+    monkeypatch.setattr(
+        chat.store, "get_conversation", lambda uid, sid: {"id": sid, "kb_id": "kb_x"}
+    )
     monkeypatch.setattr(chat.store, "count_messages", lambda uid, sid: 1)
     monkeypatch.setattr(chat.store, "get_messages", lambda *a, **k: [])
     monkeypatch.setattr(chat.store, "add_message", lambda *a, **k: 123)
@@ -120,17 +126,20 @@ def _body(client, **payload):
 
 # ==================== RAG 路径 ====================
 
+
 def test_rag_stream_event_sequence(client):
     frames = _frames(_body(client, mode="rag"))
     names = [n for n, _ in frames]
 
     assert names == [
-        "status",    # RAG 模式，正在检索知识库
-        "sources",   # 引用溯源条目
+        "status",  # RAG 模式，正在检索知识库
+        "sources",  # 引用溯源条目
         "grounding",  # 依据强度（前端据此挂"依据较弱"提示条）
-        "status",    # 检索到 N 条片段
-        "status",    # 正在生成答案...
-        "token", "token", "token",
+        "status",  # 检索到 N 条片段
+        "status",  # 正在生成答案...
+        "token",
+        "token",
+        "token",
         "title",
         "done",
     ]
@@ -168,7 +177,12 @@ def test_rag_stream_rewrite_frame_only_when_query_changes(client, monkeypatch):
 def test_llm_stream_event_sequence(client):
     frames = _frames(_body(client, mode="llm", kb_id_override=None))
     assert [n for n, _ in frames] == [
-        "status", "token", "token", "token", "title", "done",
+        "status",
+        "token",
+        "token",
+        "token",
+        "title",
+        "done",
     ]
     import json
 

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 知穗agent 线上轻量压力测试
 =========================
@@ -23,10 +22,10 @@ import time
 
 import aiohttp
 
-FE = "http://8.163.62.25:3000"   # 前端（用户真实入口，Next 反代到后端 :8000）
+FE = "http://8.163.62.25:3000"  # 前端（用户真实入口，Next 反代到后端 :8000）
 # 后端 :8000 已改为只监听 127.0.0.1（无鉴权，不对外暴露），公网直连测不到。
 # 要测后端裸性能，请在服务器上跑： curl -s http://127.0.0.1:8000/health
-TIMEOUT = 30                     # 单次请求硬超时，超过即记失败，不重试
+TIMEOUT = 30  # 单次请求硬超时，超过即记失败，不重试
 
 
 def pct(values, p):
@@ -55,9 +54,11 @@ def summary(name, rows):
         "P95_ms": round(pct(lat, 95) * 1000, 1) if lat else 0,
         "最大_ms": round(max(lat) * 1000, 1) if lat else 0,
     }
-    print(f"  {name:<34} 成功 {len(ok):>3}/{len(rows):<3} "
-          f"失败率 {out['失败率']:>5.1f}%  "
-          f"P50 {out['P50_ms']:>8.1f}ms  P95 {out['P95_ms']:>8.1f}ms  max {out['最大_ms']:>8.1f}ms")
+    print(
+        f"  {name:<34} 成功 {len(ok):>3}/{len(rows):<3} "
+        f"失败率 {out['失败率']:>5.1f}%  "
+        f"P50 {out['P50_ms']:>8.1f}ms  P95 {out['P95_ms']:>8.1f}ms  max {out['最大_ms']:>8.1f}ms"
+    )
     return out
 
 
@@ -95,7 +96,7 @@ async def main():
         print("\n[0] 健康检查")
         # 后端 :8000 只监听回环，公网测不到 —— 探前端代理链路代替
         h = await timed_get(sess, f"{FE}/api/kb/")
-        print(f"  /api/kb/ -> HTTP {h[1]}  {h[0]*1000:.0f}ms")
+        print(f"  /api/kb/ -> HTTP {h[1]}  {h[0] * 1000:.0f}ms")
         if h[1] != 200:
             print("  服务不可达，终止测试")
             return
@@ -103,8 +104,9 @@ async def main():
         # ---------- 拿一个真实会话和知识库 ----------
         sid, kb_id = None, None
         try:
-            async with sess.get(f"{FE}/api/sessions",
-                                timeout=aiohttp.ClientTimeout(total=TIMEOUT)) as r:
+            async with sess.get(
+                f"{FE}/api/sessions", timeout=aiohttp.ClientTimeout(total=TIMEOUT)
+            ) as r:
                 data = await r.json()
                 lst = data if isinstance(data, list) else data.get("sessions", [])
                 if lst:
@@ -112,8 +114,7 @@ async def main():
         except Exception as e:
             print(f"  (取会话失败: {e})")
         try:
-            async with sess.get(f"{FE}/api/kb/",
-                                timeout=aiohttp.ClientTimeout(total=TIMEOUT)) as r:
+            async with sess.get(f"{FE}/api/kb/", timeout=aiohttp.ClientTimeout(total=TIMEOUT)) as r:
                 data = await r.json()
                 lst = data if isinstance(data, list) else data.get("kbs", [])
                 if lst:
@@ -139,14 +140,19 @@ async def main():
         print("\n[B] 文档上传链路（6KB TXT，含切片+向量化+落盘）")
         result["上传"] = []
         tmp_kb = None
-        doc = ("本项目采用 FastAPI 构建后端服务，使用 Chroma 作为向量数据库，"
-               "前端基于 Next.js 与 React。知识库文档上传后会自动切片、"
-               "调用百炼 text-embedding-v3 生成向量并写入 Chroma 集合。"
-               "检索阶段先取候选池，再做余弦离群过滤与 MMR 多样性选择。\n") * 60
+        doc = (
+            "本项目采用 FastAPI 构建后端服务，使用 Chroma 作为向量数据库，"
+            "前端基于 Next.js 与 React。知识库文档上传后会自动切片、"
+            "调用百炼 text-embedding-v3 生成向量并写入 Chroma 集合。"
+            "检索阶段先取候选池，再做余弦离群过滤与 MMR 多样性选择。\n"
+        ) * 60
         payload = doc.encode("utf-8")
         try:
-            async with sess.post(f"{FE}/api/kb/create", json={"name": "压测临时库"},
-                                 timeout=aiohttp.ClientTimeout(total=TIMEOUT)) as r:
+            async with sess.post(
+                f"{FE}/api/kb/create",
+                json={"name": "压测临时库"},
+                timeout=aiohttp.ClientTimeout(total=TIMEOUT),
+            ) as r:
                 d = await r.json()
                 tmp_kb = d.get("kb_id")
             print(f"  建立临时知识库: {tmp_kb}")
@@ -158,33 +164,37 @@ async def main():
                 sem = asyncio.Semaphore(conc)
                 rows = []
 
-                async def up(i):
+                async def up(i, sem=sem):  # 默认参绑定，防闭包晚绑定（B023）
                     form = aiohttp.FormData()
-                    form.add_field("files", payload, filename=f"stress_{i}.txt",
-                                   content_type="text/plain")
+                    form.add_field(
+                        "files", payload, filename=f"stress_{i}.txt", content_type="text/plain"
+                    )
                     form.add_field("chunk_size", "500")
                     form.add_field("chunk_overlap", "50")
                     form.add_field("mode", "append")
                     t0 = time.perf_counter()
                     try:
-                        async with sem, sess.post(
-                            f"{FE}/api/kb/{tmp_kb}/upload", data=form,
-                            timeout=aiohttp.ClientTimeout(total=60)
-                        ) as r:
+                        async with (
+                            sem,
+                            sess.post(
+                                f"{FE}/api/kb/{tmp_kb}/upload",
+                                data=form,
+                                timeout=aiohttp.ClientTimeout(total=60),
+                            ) as r,
+                        ):
                             await r.read()
                             return (time.perf_counter() - t0, r.status, 0)
                     except Exception:
                         return (time.perf_counter() - t0, -1, 0)
 
                 rows = await asyncio.gather(*[up(i) for i in range(conc * 2)])
-                result["上传"].append(
-                    dict(summary(f"上传 6KB TXT  并发{conc}", rows), 并发=conc)
-                )
+                result["上传"].append(dict(summary(f"上传 6KB TXT  并发{conc}", rows), 并发=conc))
 
             # 清理，绝不留脏数据
             try:
-                async with sess.delete(f"{FE}/api/kb/{tmp_kb}/",
-                                       timeout=aiohttp.ClientTimeout(total=TIMEOUT)) as r:
+                async with sess.delete(
+                    f"{FE}/api/kb/{tmp_kb}/", timeout=aiohttp.ClientTimeout(total=TIMEOUT)
+                ) as r:
                     print(f"  清理临时知识库 -> HTTP {r.status}")
             except Exception as e:
                 print(f"  清理失败(需手工删除 {tmp_kb}): {e}")
@@ -197,22 +207,28 @@ async def main():
                 sem = asyncio.Semaphore(conc)
                 rows = []
 
-                async def ask(i):
-                    body = {"sid": sid,
-                            "question": "简单介绍一下这个项目用到了哪些技术？",
-                            "top_k": 3, "mode": "rag"}
+                async def ask(i, sem=sem):  # 默认参绑定，防闭包晚绑定（B023）
+                    body = {
+                        "sid": sid,
+                        "question": "简单介绍一下这个项目用到了哪些技术？",
+                        "top_k": 3,
+                        "mode": "rag",
+                    }
                     t0 = time.perf_counter()
                     ttfb = None
                     try:
-                        async with sem, sess.post(
-                            f"{FE}/api/chat/stream", json=body,
-                            timeout=aiohttp.ClientTimeout(total=120)
-                        ) as r:
+                        async with (
+                            sem,
+                            sess.post(
+                                f"{FE}/api/chat/stream",
+                                json=body,
+                                timeout=aiohttp.ClientTimeout(total=120),
+                            ) as r,
+                        ):
                             async for chunk in r.content.iter_any():
                                 if ttfb is None and chunk:
                                     ttfb = time.perf_counter() - t0
-                            return (time.perf_counter() - t0, r.status,
-                                    (ttfb or 0) * 1000)
+                            return (time.perf_counter() - t0, r.status, (ttfb or 0) * 1000)
                     except Exception:
                         return (time.perf_counter() - t0, -1, 0)
 
@@ -221,17 +237,21 @@ async def main():
                 ok = [r for r in rows if r[1] == 200]
                 ttfbs = [r[2] for r in rows if r[2] > 0]
                 item = {
-                    "项": f"SSE 问答  并发{conc}", "并发": conc,
-                    "样本数": len(rows), "成功": len(ok),
+                    "项": f"SSE 问答  并发{conc}",
+                    "并发": conc,
+                    "样本数": len(rows),
+                    "成功": len(ok),
                     "失败": len(rows) - len(ok),
                     "整轮P50_ms": round(statistics.median(lat) * 1000, 1) if lat else 0,
                     "整轮最大_ms": round(max(lat) * 1000, 1) if lat else 0,
                     "首字节P50_ms": round(statistics.median(ttfbs), 1) if ttfbs else 0,
                 }
                 result["问答"].append(item)
-                print(f"  {item['项']:<34} 成功 {len(ok):>3}/{len(rows):<3}  "
-                      f"整轮 P50 {item['整轮P50_ms']:>8.1f}ms  "
-                      f"首字节 P50 {item['首字节P50_ms']:>8.1f}ms")
+                print(
+                    f"  {item['项']:<34} 成功 {len(ok):>3}/{len(rows):<3}  "
+                    f"整轮 P50 {item['整轮P50_ms']:>8.1f}ms  "
+                    f"首字节 P50 {item['首字节P50_ms']:>8.1f}ms"
+                )
         else:
             print("  没有可用会话，跳过")
 

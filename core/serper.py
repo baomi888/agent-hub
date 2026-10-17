@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Serper（Google）联网搜索的统一入口。
 
 之前 agent/tools.py（web_search）和 kb/importer.py（search_preview）各写了一遍
@@ -13,6 +12,7 @@ httpx.post，重建 TLS 连接白丢 100~300ms。Serper 又**按次计费**—�
   4. App 类查询补「官网」的改写（boost_app_query）也从 kb/importer 挪过来，
      两个调用方共用同一份规则（此前只 importer 有，tools 是后补的拷贝）。
 """
+
 from __future__ import annotations
 
 import threading
@@ -102,21 +102,77 @@ def search_serper(query: str, count: int = 10) -> dict | None:
 # ==================== App 类查询补「官网」====================
 # 从 kb/importer.py 挪来：web_search 与 search_preview 共用同一份改写规则。
 
-_APP_SIGNALS = ("apk", "app", "android", "安卓", "ios", "软件", "应用", "客户端",
-                "安装包", "官网", "官方", "下载", "安装")
+_APP_SIGNALS = (
+    "apk",
+    "app",
+    "android",
+    "安卓",
+    "ios",
+    "软件",
+    "应用",
+    "客户端",
+    "安装包",
+    "官网",
+    "官方",
+    "下载",
+    "安装",
+)
 
-_APP_STOP = ("什么", "如何", "怎么", "为什么", "教程", "论文", "文档", "文章", "新闻",
-             "天气", "介绍", "意思", "区别", "对比", "评价", "推荐", "好处", "原理")
+_APP_STOP = (
+    "什么",
+    "如何",
+    "怎么",
+    "为什么",
+    "教程",
+    "论文",
+    "文档",
+    "文章",
+    "新闻",
+    "天气",
+    "介绍",
+    "意思",
+    "区别",
+    "对比",
+    "评价",
+    "推荐",
+    "好处",
+    "原理",
+)
 
 _DOWNLOAD_INTENT = ("下载", "安装", "apk", "安装包")
 
 # 裸词里会被误判为 App 的非 App 短词（精确匹配，避免把「学习强国」这类真 App 拦掉）
 _APP_NAME_BLOCK = {
-    "深度学习", "机器学习", "人工智能", "神经网络", "数据科学", "大数据",
-    "计算机", "编程", "前端", "后端", "算法", "数据库",
-    "数学", "物理", "化学", "历史", "地理", "生物", "语文", "英语", "政治",
-    "区块链", "元宇宙", "云计算", "微服务", "容器",
-    "python", "java", "linux", "mysql",
+    "深度学习",
+    "机器学习",
+    "人工智能",
+    "神经网络",
+    "数据科学",
+    "大数据",
+    "计算机",
+    "编程",
+    "前端",
+    "后端",
+    "算法",
+    "数据库",
+    "数学",
+    "物理",
+    "化学",
+    "历史",
+    "地理",
+    "生物",
+    "语文",
+    "英语",
+    "政治",
+    "区块链",
+    "元宇宙",
+    "云计算",
+    "微服务",
+    "容器",
+    "python",
+    "java",
+    "linux",
+    "mysql",
 }
 
 
@@ -133,9 +189,12 @@ def boost_app_query(keyword: str) -> str:
     if any(s in low for s in _APP_STOP):
         return kw
     has_signal = any(s in low for s in _APP_SIGNALS)
-    is_bare = len(kw) <= 6 and not any(ch.isspace() for ch in kw) \
-        and not any(ch in kw for ch in "？?！!，,。.：:") \
+    is_bare = (
+        len(kw) <= 6
+        and not any(ch.isspace() for ch in kw)
+        and not any(ch in kw for ch in "？?！!，,。.：:")
         and low not in _APP_NAME_BLOCK
+    )
     if not (has_signal or is_bare):
         return kw
     if "官网" in kw or "官方" in kw:

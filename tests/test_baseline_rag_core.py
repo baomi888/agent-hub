@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """行为基线（characterization tests）：RAG 核心纯函数与格式化输出。
 
 这一组只测不依赖网络、不依赖 Chroma、不调真 LLM 的部分，作用是给后续的
@@ -9,6 +8,7 @@
 覆盖：RRF 融合、画像偏置重排、候选选择透传、切片边界、主题注入、来源卡片与
 参考片段格式化、topic_where。
 """
+
 import os
 import sys
 
@@ -33,6 +33,7 @@ def _doc_id(text: str, did: str) -> Document:
 
 # ==================== RRF 融合 ====================
 
+
 def test_rrf_merge_order_dist_and_rank():
     """向量 2 条 + 关键词 2 条（其中 C 只被关键词召回）→ 顺序/距离/归一 rank 固定。"""
     vec_cands = [(_doc_id("A", "a"), 0.1), (_doc_id("B", "b"), 0.2)]
@@ -56,6 +57,7 @@ def test_rrf_merge_empty_returns_empty():
 
 
 # ==================== 画像偏置重排（方案 C · D 块）====================
+
 
 def test_bias_rerank_reorders_hits_and_returns_original_distance():
     """命中主题的片段被减距离提前，但返回给调用方的 distance 仍是原始值。"""
@@ -104,6 +106,7 @@ def test_bias_rerank_none_distance_keeps_slot_and_does_not_raise():
 
 # ==================== 候选选择：不足 top_k 时透传 ====================
 
+
 def test_select_diverse_passthrough_when_candidates_fit():
     cands = [(_doc("A"), 0.1), (_doc("B"), 0.2)]
     out = rc.select_diverse(cands, 3)
@@ -142,6 +145,7 @@ def test_split_documents_chunk_shape():
 
 
 # ==================== 主题注入（方案 C · A 块）====================
+
 
 def test_inject_topics_groups_by_source_and_truncates_preview():
     """每个来源只抽一次标签，且喂给 LLM 的预览是"该来源切片全文拼接后的前 4000 字"。"""
@@ -185,6 +189,7 @@ def test_inject_topics_skips_when_disabled_or_empty():
 
 
 # ==================== topic_where ====================
+
 
 def test_topic_where_literal():
     assert rc.topic_where("数学") == {"topics": {"$contains": "|数学|"}}

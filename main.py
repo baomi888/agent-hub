@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """集合式 Agent 后端入口。
 
 启动前必须保证：
@@ -12,24 +11,23 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from typing import Any
 
-from contextlib import asynccontextmanager
-
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api.auth import router as auth_router
 from api.agent import router as agent_router
+from api.auth import router as auth_router
 from api.chat import router as chat_router
+from api.checkin import router as checkin_router
 from api.delegate import router as delegate_router
 from api.feedback import router as feedback_router
 from api.geo import router as geo_router
 from api.hybrid import router as hybrid_router
 from api.kb import router as kb_router
 from api.report import router as report_router
-from api.checkin import router as checkin_router
 from api.schedule import router as schedule_router
 from api.sessions import router as sessions_router
 from api.templates import router as templates_router
@@ -151,7 +149,7 @@ def _exact_matches(template: str, path: str) -> bool:
     ps = path.split("/")
     if len(ts) != len(ps):
         return False
-    for a, b in zip(ts, ps):
+    for a, b in zip(ts, ps, strict=False):
         if a == b or (a.startswith("{") and a.endswith("}")):
             continue
         return False

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """账号：users 表与口令校验。
 
 为什么和会话分开两个文件
@@ -16,11 +15,9 @@ users 表一行都不用改。
 """
 
 import re
-import sqlite3
 import time
 import uuid
 
-from core import config
 from core.auth import hash_password, verify_password
 from core.session import _get_conn
 
@@ -35,6 +32,7 @@ MAX_PASSWORD = 128
 
 
 # ---------- 内部工具 ----------
+
 
 def _public(row) -> dict:
     """把数据库行转成可以安全返回给前端的 dict。
@@ -78,6 +76,7 @@ def check_password(pwd: str) -> str | None:
 
 # ---------- 建表 ----------
 
+
 def _ensure_tables() -> None:
     """首次运行时创建 users 表（幂等）。"""
     with _get_conn() as conn:
@@ -99,6 +98,7 @@ _ensure_tables()
 
 # ---------- 读写 ----------
 
+
 def get_user(uid: str) -> dict | None:
     with _get_conn() as conn:
         row = conn.execute(
@@ -111,7 +111,8 @@ def get_user(uid: str) -> dict | None:
 def get_user_by_username(name: str) -> dict | None:
     with _get_conn() as conn:
         row = conn.execute(
-            "SELECT id, username, password_hash, created_at, last_login_at FROM users WHERE username = ?",
+            "SELECT id, username, password_hash, created_at, last_login_at "
+            "FROM users WHERE username = ?",
             (normalize_name(name),),
         ).fetchone()
         return dict(row) if row else None

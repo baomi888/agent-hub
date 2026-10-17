@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """工作流引擎回归（混合架构要求 2）：假 LLM / 假 Agent 注入，不联网。
 
 覆盖七项：
@@ -59,6 +58,7 @@ def _types(events: list[ExecEvent]) -> list[str]:
 
 # ==================== 假 LLM / 假 Agent ====================
 
+
 class _FakeLLM:
     """ainvoke 返回固定文案；astream 吐两片 token；记录每次 prompt。"""
 
@@ -90,7 +90,7 @@ class _FlakyLLM:
         self.calls += 1
         if self.calls <= self.fail_times:
             raise RuntimeError("偶发故障")
-        return SimpleNamespace(content="第%d次成功" % self.calls)
+        return SimpleNamespace(content=f"第{self.calls}次成功")
 
 
 class _FakeAgentEngine:
@@ -106,10 +106,14 @@ class _FakeAgentEngine:
 
     async def stream(self, ctx, control, goal=None, output_key=None, node_id=None, **_):
         self.goals.append(goal or "")
-        yield ExecEvent(event_type="token", mode="agent", node_id=node_id, payload={"text": self._text})
+        yield ExecEvent(
+            event_type="token", mode="agent", node_id=node_id, payload={"text": self._text}
+        )
         if self._ok:
             ctx.shared[output_key or "agent_result"] = self._text
-            self.result = EngineResult(status="completed", signal="goal_satisfied", output_key=output_key)
+            self.result = EngineResult(
+                status="completed", signal="goal_satisfied", output_key=output_key
+            )
         else:
             self.result = EngineResult(status="failed", error="agent炸了")
 
@@ -120,10 +124,12 @@ def _wf(data: dict) -> WorkflowDef:
 
 # ==================== 1. 定义校验与模板渲染 ====================
 
+
 def test_1_validate_and_template() -> None:
     print("\n[1] validate_definition 图完整性 / render_template")
     base = {
-        "id": "t", "entry": "a",
+        "id": "t",
+        "entry": "a",
         "nodes": [{"id": "a", "type": "llm", "config": {}}],
         "edges": [],
     }
@@ -131,6 +137,7 @@ def test_1_validate_and_template() -> None:
 
     def _bad(mutate, expect: str) -> bool:
         import copy
+
         d = copy.deepcopy(base)
         mutate(d)
         try:
@@ -140,8 +147,14 @@ def test_1_validate_and_template() -> None:
             return expect in str(e)
 
     check(_bad(lambda d: d["nodes"].append({"id": "a", "type": "llm"}), "重复"), "节点 id 重复被拒")
-    check(_bad(lambda d: d["edges"].append({"source": "a", "target": "ghost"}), "不存在"), "边指向不存在节点被拒")
-    check(_bad(lambda d: d["nodes"][0].update({"on_fail": "ghost"}), "on_fail"), "on_fail 指向不存在被拒")
+    check(
+        _bad(lambda d: d["edges"].append({"source": "a", "target": "ghost"}), "不存在"),
+        "边指向不存在节点被拒",
+    )
+    check(
+        _bad(lambda d: d["nodes"][0].update({"on_fail": "ghost"}), "on_fail"),
+        "on_fail 指向不存在被拒",
+    )
     check(_bad(lambda d: d.update({"entry": "ghost"}), "入口"), "入口不存在被拒")
     check(_bad(lambda d: d.update({"nodes": []}), "至少"), "空节点列表被拒")
 
@@ -153,21 +166,39 @@ def test_1_validate_and_template() -> None:
     check(render_template("{shared.nested.x}", ctx) == "值", "嵌套 shared 渲染")
     check(render_template("[{shared.nope}]", ctx) == "[]", "缺失 key 渲染为空串（不炸）")
     check(render_template("{shared.plan.x}", ctx) == "", "中间值非 dict 渲染为空串")
-    check(render_template("{unknown} {shared..}", ctx) == "{unknown} {shared..}", "未知占位符原样保留")
+    check(
+        render_template("{unknown} {shared..}", ctx) == "{unknown} {shared..}", "未知占位符原样保留"
+    )
 
 
 # ==================== 2. 线性流 ====================
 
+
 def test_2_linear_flow() -> None:
     print("\n[2] 线性流：顺序执行 / 产物进 shared / 模板渲染")
-    wf = _wf({
-        "id": "t_linear", "entry": "a",
-        "nodes": [
-            {"id": "a", "type": "llm", "config": {"prompt": "第一步：{question}", "output_key": "ka"}},
-            {"id": "b", "type": "llm", "config": {"prompt": "参考[{shared.ka}]继续", "output_key": "kb", "stream": True}},
-        ],
-        "edges": [{"source": "a", "target": "b"}],
-    })
+    wf = _wf(
+        {
+            "id": "t_linear",
+            "entry": "a",
+            "nodes": [
+                {
+                    "id": "a",
+                    "type": "llm",
+                    "config": {"prompt": "第一步：{question}", "output_key": "ka"},
+                },
+                {
+                    "id": "b",
+                    "type": "llm",
+                    "config": {
+                        "prompt": "参考[{shared.ka}]继续",
+                        "output_key": "kb",
+                        "stream": True,
+                    },
+                },
+            ],
+            "edges": [{"source": "a", "target": "b"}],
+        }
+    )
     llm = _FakeLLM(reply="甲")
     engine = WorkflowEngine(wf=wf, llm=llm)
     ctx = _ctx("写方案")
@@ -179,8 +210,10 @@ def test_2_linear_flow() -> None:
     check(llm.prompts[0] == "第一步：写方案", "{question} 渲染进 prompt")
     check(llm.prompts[1] == "参考[甲]继续", "{shared.ka} 渲染进下游 prompt（跨节点数据通道）")
     t = _types(events)
-    check(t == ["node_enter", "node_exit", "node_enter", "token", "token", "node_exit"],
-          "事件序列：enter/exit 成对 + 流式 token")
+    check(
+        t == ["node_enter", "node_exit", "node_enter", "token", "token", "node_exit"],
+        "事件序列：enter/exit 成对 + 流式 token",
+    )
     check(events[0].node_id == "a" and events[-1].node_id == "b", "事件携带 node_id")
     check(ctx.workflow_state["completed"] == ["a", "b"], "completed 记录两节点")
     check("next_node" not in ctx.workflow_state, "跑完后断点锚点清除")
@@ -188,19 +221,23 @@ def test_2_linear_flow() -> None:
 
 # ==================== 3. 条件分支 ====================
 
+
 def _branch_wf(reply: str) -> tuple[WorkflowDef, _FakeLLM]:
-    wf = _wf({
-        "id": "t_branch", "entry": "a",
-        "nodes": [
-            {"id": "a", "type": "llm", "config": {"output_key": "kind"}},
-            {"id": "b", "type": "llm", "config": {"output_key": "kb"}},
-            {"id": "c", "type": "llm", "config": {"output_key": "kc"}},
-        ],
-        "edges": [
-            {"source": "a", "target": "b", "condition": "shared.kind == '甲'"},
-            {"source": "a", "target": "c"},
-        ],
-    })
+    wf = _wf(
+        {
+            "id": "t_branch",
+            "entry": "a",
+            "nodes": [
+                {"id": "a", "type": "llm", "config": {"output_key": "kind"}},
+                {"id": "b", "type": "llm", "config": {"output_key": "kb"}},
+                {"id": "c", "type": "llm", "config": {"output_key": "kc"}},
+            ],
+            "edges": [
+                {"source": "a", "target": "b", "condition": "shared.kind == '甲'"},
+                {"source": "a", "target": "c"},
+            ],
+        }
+    )
     return wf, _FakeLLM(reply=reply)
 
 
@@ -219,32 +256,44 @@ def test_3_condition_branch() -> None:
     _run(engine2, ctx2)
     check("kc" in ctx2.shared and "kb" not in ctx2.shared, "不命中落默认边 c")
 
-    wf3 = _wf({
-        "id": "t_noroute", "entry": "a",
-        "nodes": [
-            {"id": "a", "type": "llm", "config": {"output_key": "kind"}},
-            {"id": "b", "type": "llm", "config": {}},
-        ],
-        "edges": [{"source": "a", "target": "b", "condition": "shared.kind == '不存在的值'"}],
-    })
+    wf3 = _wf(
+        {
+            "id": "t_noroute",
+            "entry": "a",
+            "nodes": [
+                {"id": "a", "type": "llm", "config": {"output_key": "kind"}},
+                {"id": "b", "type": "llm", "config": {}},
+            ],
+            "edges": [{"source": "a", "target": "b", "condition": "shared.kind == '不存在的值'"}],
+        }
+    )
     engine3 = WorkflowEngine(wf=wf3, llm=_FakeLLM(reply="随便"))
     ctx3 = _ctx()
     events3 = _run(engine3, ctx3)
     r3 = engine3.result
-    check(r3.status == "failed" and r3.signal == "node_failed", "全不命中且无默认边：failed + node_failed 上报")
+    check(
+        r3.status == "failed" and r3.signal == "node_failed",
+        "全不命中且无默认边：failed + node_failed 上报",
+    )
     check("无匹配" in (r3.error or ""), "错误说明分支无匹配")
     check("error" in _types(events3), "error 事件留痕")
 
 
 # ==================== 4. 超时 ====================
 
+
 def test_4_timeout() -> None:
     print("\n[4] 节点级超时 / 流程级整体超时")
-    wf = _wf({
-        "id": "t_nto", "entry": "a",
-        "nodes": [{"id": "a", "type": "llm", "timeout_seconds": 1, "config": {"output_key": "ka"}}],
-        "edges": [],
-    })
+    wf = _wf(
+        {
+            "id": "t_nto",
+            "entry": "a",
+            "nodes": [
+                {"id": "a", "type": "llm", "timeout_seconds": 1, "config": {"output_key": "ka"}}
+            ],
+            "edges": [],
+        }
+    )
     engine = WorkflowEngine(wf=wf, llm=_FakeLLM(reply="慢", delay=3.0))
     ctx = _ctx()
     _run(engine, ctx)
@@ -252,15 +301,19 @@ def test_4_timeout() -> None:
     check(r.status == "failed" and r.signal == "node_failed", "节点超时：failed + node_failed")
     check("超时" in (r.error or ""), "错误说明含超时")
 
-    wf2 = _wf({
-        "id": "t_wto", "entry": "a", "timeout_seconds": 1,
-        "nodes": [
-            {"id": "a", "type": "llm", "config": {"output_key": "ka"}},
-            {"id": "b", "type": "llm", "config": {"output_key": "kb"}},
-            {"id": "c", "type": "llm", "config": {"output_key": "kc"}},
-        ],
-        "edges": [{"source": "a", "target": "b"}, {"source": "b", "target": "c"}],
-    })
+    wf2 = _wf(
+        {
+            "id": "t_wto",
+            "entry": "a",
+            "timeout_seconds": 1,
+            "nodes": [
+                {"id": "a", "type": "llm", "config": {"output_key": "ka"}},
+                {"id": "b", "type": "llm", "config": {"output_key": "kb"}},
+                {"id": "c", "type": "llm", "config": {"output_key": "kc"}},
+            ],
+            "edges": [{"source": "a", "target": "b"}, {"source": "b", "target": "c"}],
+        }
+    )
     engine2 = WorkflowEngine(wf=wf2, llm=_FakeLLM(reply="慢", delay=0.7))
     ctx2 = _ctx()
     events2 = _run(engine2, ctx2)
@@ -273,13 +326,17 @@ def test_4_timeout() -> None:
 
 # ==================== 5. retry ====================
 
+
 def test_5_retry() -> None:
     print("\n[5] retry：先重试再谈失败")
-    wf = _wf({
-        "id": "t_retry", "entry": "a",
-        "nodes": [{"id": "a", "type": "llm", "retry": 1, "config": {"output_key": "ka"}}],
-        "edges": [],
-    })
+    wf = _wf(
+        {
+            "id": "t_retry",
+            "entry": "a",
+            "nodes": [{"id": "a", "type": "llm", "retry": 1, "config": {"output_key": "ka"}}],
+            "edges": [],
+        }
+    )
     llm = _FlakyLLM(fail_times=1)
     engine = WorkflowEngine(wf=wf, llm=llm)
     ctx = _ctx()
@@ -287,8 +344,10 @@ def test_5_retry() -> None:
     check(engine.result.status == "completed", "第一次失败第二次成功：整体 completed")
     check(llm.calls == 2, "实际调用了 2 次")
     check(ctx.shared.get("ka") == "第2次成功", "重试后的产物进 shared")
-    check(any(e.event_type == "status" and "重试" in e.payload.get("text", "") for e in events),
-          "重试过程有 status 事件留痕")
+    check(
+        any(e.event_type == "status" and "重试" in e.payload.get("text", "") for e in events),
+        "重试过程有 status 事件留痕",
+    )
 
     llm2 = _FlakyLLM(fail_times=99)
     engine2 = WorkflowEngine(wf=wf, llm=llm2)
@@ -296,22 +355,28 @@ def test_5_retry() -> None:
     _run(engine2, ctx2)
     r2 = engine2.result
     check(llm2.calls == 2, "一直失败：retry=1 共尝试 2 次后放弃")
-    check(r2.status == "failed" and r2.signal == "node_failed", "重试耗尽：failed + node_failed 上报")
+    check(
+        r2.status == "failed" and r2.signal == "node_failed", "重试耗尽：failed + node_failed 上报"
+    )
     check("偶发故障" in (r2.error or ""), "错误带最后一次失败原因")
 
 
 # ==================== 6. on_fail ====================
 
+
 def test_6_on_fail() -> None:
     print("\n[6] on_fail 失败跳转：补偿分支优先于切换规则")
-    wf = _wf({
-        "id": "t_onfail", "entry": "a",
-        "nodes": [
-            {"id": "a", "type": "llm", "on_fail": "b", "config": {"output_key": "ka"}},
-            {"id": "b", "type": "llm", "config": {"output_key": "kb"}},
-        ],
-        "edges": [],
-    })
+    wf = _wf(
+        {
+            "id": "t_onfail",
+            "entry": "a",
+            "nodes": [
+                {"id": "a", "type": "llm", "on_fail": "b", "config": {"output_key": "ka"}},
+                {"id": "b", "type": "llm", "config": {"output_key": "kb"}},
+            ],
+            "edges": [],
+        }
+    )
     # 节点 a 用必败 LLM，节点 b 换个引擎实例共享一个总是成功的 LLM 做不到（单 llm 注入），
     # 所以让 _FlakyLLM 只在第 1 次失败：a 失败后跳 b，b 一次成功。
     llm = _FlakyLLM(fail_times=1)
@@ -323,57 +388,83 @@ def test_6_on_fail() -> None:
     check(ctx.workflow_state["completed"] == ["a", "b"], "a 按失败完成、b 正常完成")
     check("kb" in ctx.shared, "补偿节点 b 的产物进 shared")
     exit_a = [e for e in events if e.event_type == "node_exit" and e.node_id == "a"]
-    check(bool(exit_a) and exit_a[0].payload.get("status") == "failed"
-          and exit_a[0].payload.get("on_fail") == "b", "a 的 exit 事件带 on_fail 去向")
+    check(
+        bool(exit_a)
+        and exit_a[0].payload.get("status") == "failed"
+        and exit_a[0].payload.get("on_fail") == "b",
+        "a 的 exit 事件带 on_fail 去向",
+    )
 
 
 # ==================== 7. Agent 融合 ====================
 
+
 def test_7_agent_node_and_requires_agent() -> None:
     print("\n[7] agent 节点内嵌 / requires_agent 让出与续跑")
     # --- agent 类型节点：流程内一等公民，不走切换规则 ---
-    wf = _wf({
-        "id": "t_agent_node", "entry": "a",
-        "nodes": [
-            {"id": "a", "type": "llm", "config": {"output_key": "ka"}},
-            {"id": "g", "type": "agent", "config": {"goal": "用[{shared.ka}]做事", "output_key": "agent_result"}},
-        ],
-        "edges": [{"source": "a", "target": "g"}],
-    })
+    wf = _wf(
+        {
+            "id": "t_agent_node",
+            "entry": "a",
+            "nodes": [
+                {"id": "a", "type": "llm", "config": {"output_key": "ka"}},
+                {
+                    "id": "g",
+                    "type": "agent",
+                    "config": {"goal": "用[{shared.ka}]做事", "output_key": "agent_result"},
+                },
+            ],
+            "edges": [{"source": "a", "target": "g"}],
+        }
+    )
     fake_agent = _FakeAgentEngine(text="自主产出")
-    engine = WorkflowEngine(wf=wf, llm=_FakeLLM(reply="原料"), agent_engine_factory=lambda: fake_agent)
+    engine = WorkflowEngine(
+        wf=wf, llm=_FakeLLM(reply="原料"), agent_engine_factory=lambda: fake_agent
+    )
     ctx = _ctx()
     events = _run(engine, ctx)
     check(engine.result.status == "completed", "agent 节点成功：整体 completed")
     check(ctx.shared.get("agent_result") == "自主产出", "Agent 产出回写 shared（唯一数据通道）")
     check(fake_agent.goals and "原料" in fake_agent.goals[0], "Agent 子目标渲染了上游 shared 产物")
     tok = [e for e in events if e.event_type == "token"]
-    check(bool(tok) and tok[0].mode == "agent" and tok[0].node_id == "g", "Agent token 事件带模式与节点归属")
+    check(
+        bool(tok) and tok[0].mode == "agent" and tok[0].node_id == "g",
+        "Agent token 事件带模式与节点归属",
+    )
 
     bad_agent = _FakeAgentEngine(ok=False)
-    engine_b = WorkflowEngine(wf=wf, llm=_FakeLLM(reply="原料"), agent_engine_factory=lambda: bad_agent)
+    engine_b = WorkflowEngine(
+        wf=wf, llm=_FakeLLM(reply="原料"), agent_engine_factory=lambda: bad_agent
+    )
     ctx_b = _ctx()
     _run(engine_b, ctx_b)
-    check(engine_b.result.status == "failed" and engine_b.result.signal == "node_failed",
-          "agent 节点失败：按节点失败上报（无 on_fail 时交给切换判定）")
+    check(
+        engine_b.result.status == "failed" and engine_b.result.signal == "node_failed",
+        "agent 节点失败：按节点失败上报（无 on_fail 时交给切换判定）",
+    )
 
     # --- requires_agent：让出 → Agent 接管 → 断点续跑 ---
-    wf2 = _wf({
-        "id": "t_req", "entry": "s",
-        "nodes": [
-            {"id": "s", "type": "llm", "config": {"output_key": "ks"}},
-            {"id": "w", "type": "llm", "requires_agent": True, "config": {"output_key": "kw"}},
-            {"id": "e", "type": "llm", "config": {"output_key": "ke"}},
-        ],
-        "edges": [{"source": "s", "target": "w"}, {"source": "w", "target": "e"}],
-    })
+    wf2 = _wf(
+        {
+            "id": "t_req",
+            "entry": "s",
+            "nodes": [
+                {"id": "s", "type": "llm", "config": {"output_key": "ks"}},
+                {"id": "w", "type": "llm", "requires_agent": True, "config": {"output_key": "kw"}},
+                {"id": "e", "type": "llm", "config": {"output_key": "ke"}},
+            ],
+            "edges": [{"source": "s", "target": "w"}, {"source": "w", "target": "e"}],
+        }
+    )
     # 第一段：跑到 w 主动让出
     eng1 = WorkflowEngine(wf=wf2, llm=_FakeLLM(reply="第一段"))
     ctx2 = _ctx()
     ev1 = _run(eng1, ctx2)
     r1 = eng1.result
-    check(r1.status == "switched" and r1.signal == "requires_agent" and r1.node_id == "w",
-          "跑到 requires_agent 节点主动让出（switched + requires_agent）")
+    check(
+        r1.status == "switched" and r1.signal == "requires_agent" and r1.node_id == "w",
+        "跑到 requires_agent 节点主动让出（switched + requires_agent）",
+    )
     check(r1.output_key == "kw", "让出时带上节点声明的 output_key（Agent 产出落点）")
     check(ctx2.workflow_state.get("next_node") == "w", "断点锚在 w（续跑依据）")
     enters1 = [e.node_id for e in ev1 if e.event_type == "node_enter"]

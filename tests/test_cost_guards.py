@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """成本与内存护栏回归（2026-10-13 第一档）：不联网、不依赖真实知识库 / LLM。
 
 覆盖三项：
@@ -30,6 +29,7 @@ def check(cond: bool, msg: str) -> None:
 
 
 # ==================== 1. 标题生成护栏 ====================
+
 
 class _FakeLLM:
     def __init__(self) -> None:
@@ -70,6 +70,7 @@ def test_1_title_guard() -> None:
 
 # ==================== 2. has_source 轻量判存 ====================
 
+
 class _FakeCollection:
     """记录 get() 调用参数的假 collection。"""
 
@@ -109,6 +110,7 @@ def test_2_has_source() -> None:
 
 # ==================== 3. 抓取大小闸与解码 ====================
 
+
 class _FakeStreamResp:
     def __init__(self, chunks):
         self._chunks = chunks
@@ -135,15 +137,19 @@ def test_3_read_capped_and_decode() -> None:
     check(raised is not None and "上限" in str(raised), "错误提示带上限说明")
 
     gbk = SimpleNamespace(headers={"content-type": "text/html; charset=gbk"})
-    check(importer._decode_html(gbk, "中文标题".encode("gbk")) == "中文标题",
-          "响应头带 charset=gbk 时按 gbk 解码")
+    check(
+        importer._decode_html(gbk, "中文标题".encode("gbk")) == "中文标题",
+        "响应头带 charset=gbk 时按 gbk 解码",
+    )
 
     utf8 = SimpleNamespace(headers={"content-type": "text/html"})
-    check(importer._decode_html(utf8, "中文标题".encode("utf-8")) == "中文标题",
-          "无 charset 时探测解码 utf-8")
+    check(
+        importer._decode_html(utf8, "中文标题".encode()) == "中文标题",
+        "无 charset 时探测解码 utf-8",
+    )
 
     bad = SimpleNamespace(headers={"content-type": "text/html; charset=gbk"})
-    out = importer._decode_html(bad, "中文".encode("utf-8"))
+    out = importer._decode_html(bad, "中文".encode())
     check(isinstance(out, str) and out, "声明 charset 解码失败时兜底不乱抛")
 
 

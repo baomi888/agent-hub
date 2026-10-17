@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Agent 引擎：把 build_agent() 包装进混合架构的执行引擎契约（要求 3）。
 
 复用点（与 chat.py agent 分支同一套，理由见原文件）：
@@ -21,7 +20,8 @@
 from __future__ import annotations
 
 import time
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
@@ -48,12 +48,11 @@ def history_items(ctx: TaskContext) -> list[dict]:
     if not isinstance(hist, list):
         return []
     items = [
-        m for m in hist
-        if isinstance(m, dict)
-        and m.get("role") in ("user", "assistant")
-        and m.get("content")
+        m
+        for m in hist
+        if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content")
     ]
-    return items[-config.HYBRID_HISTORY_MAX_MESSAGES:]
+    return items[-config.HYBRID_HISTORY_MAX_MESSAGES :]
 
 
 def history_messages(ctx: TaskContext) -> list:
@@ -84,18 +83,33 @@ class AgentEngine:
 
     name = "agent"
 
-    def __init__(self, has_kb: bool = False, location: dict | None = None, agent: Any = None):
+    def __init__(
+        self,
+        has_kb: bool = False,
+        location: dict | None = None,
+        agent: Any = None,
+        activated: frozenset[str] = frozenset(),
+    ):
         self._has_kb = has_kb
         self._location = location
         self._agent = agent  # 测试注入假 agent；None 时惰性 build_agent
+        # 本用户已激活的延迟工具集（#7）：与 api/chat.py 的 Agent 路径同一来源
+        # （tool_registry.activated_for(uid)，请求开始取定、整轮不变）。
+        # 不传的话 hybrid 段 build_agent 拿到空集 → 已激活的延迟工具不进 bind_tools，
+        # 甲用户明明 discover 过，混合模式里却"没学过"。
+        self._activated = activated
         self.result: EngineResult | None = None
 
     async def _get_agent(self) -> Any:
         if self._agent is None:
             import asyncio
+
             from agent.builder import build_agent
+
             # 编译是 CPU 活，放线程里别堵事件循环
-            self._agent = await asyncio.to_thread(build_agent, self._has_kb, self._location)
+            self._agent = await asyncio.to_thread(
+                build_agent, self._has_kb, self._location, None, self._activated
+            )
         return self._agent
 
     async def stream(
@@ -146,13 +160,15 @@ class AgentEngine:
                         return
                     if time.monotonic() > deadline:
                         self.result = EngineResult(
-                            status="switched", signal="budget_exhausted",
+                            status="switched",
+                            signal="budget_exhausted",
                             error=f"Agent 时长预算耗尽（>{config.HYBRID_AGENT_MAX_SECONDS}s）",
                         )
                         return
                     if st["chars"] // 2 >= config.HYBRID_AGENT_TOKEN_BUDGET:
                         self.result = EngineResult(
-                            status="switched", signal="budget_exhausted",
+                            status="switched",
+                            signal="budget_exhausted",
                             error=f"Agent token 预算耗尽（>{config.HYBRID_AGENT_TOKEN_BUDGET}）",
                         )
                         return
@@ -166,13 +182,19 @@ class AgentEngine:
                         delta = getattr(chunk, "content", "")
                         if isinstance(delta, list):  # 多模态 content list 只取文本
                             delta = "".join(
-                                p.get("text", "") for p in delta
+                                p.get("text", "")
+                                for p in delta
                                 if isinstance(p, dict) and p.get("type") == "text"
                             )
                         if isinstance(delta, str) and delta:
                             full_text += delta
                             st["chars"] += len(delta)
-                            yield ExecEvent(event_type="token", mode="agent", node_id=node_id, payload={"text": delta})
+                            yield ExecEvent(
+                                event_type="token",
+                                mode="agent",
+                                node_id=node_id,
+                                payload={"text": delta},
+                            )
 
                     elif mode_name == "updates" and isinstance(payload, dict):
                         for node_output in payload.values():
@@ -183,22 +205,38 @@ class AgentEngine:
                                     st["steps"] += 1
                                     for tc in msg.tool_calls:
                                         yield ExecEvent(
-                                            event_type="tool_call", mode="agent", node_id=node_id,
-                                            payload={"name": tc.get("name", "?"), "input": str(tc.get("args", {}))[:200]},
+                                            event_type="tool_call",
+                                            mode="agent",
+                                            node_id=node_id,
+                                            payload={
+                                                "name": tc.get("name", "?"),
+                                                "input": str(tc.get("args", {}))[:200],
+                                            },
                                         )
                                 elif isinstance(msg, ToolMessage):
                                     content = str(getattr(msg, "content", ""))
                                     st["chars"] += len(content)
                                     failed = any(h in content for h in _FAIL_HINTS)
-                                    st["consec_failures"] = st["consec_failures"] + 1 if failed else 0
+                                    st["consec_failures"] = (
+                                        st["consec_failures"] + 1 if failed else 0
+                                    )
                                     yield ExecEvent(
-                                        event_type="tool_call", mode="agent", node_id=node_id,
-                                        payload={"name": getattr(msg, "name", "?"), "output": content[:300]},
+                                        event_type="tool_call",
+                                        mode="agent",
+                                        node_id=node_id,
+                                        payload={
+                                            "name": getattr(msg, "name", "?"),
+                                            "output": content[:300],
+                                        },
                                     )
                                     if st["consec_failures"] >= _MAX_CONSEC_FAILURES:
                                         self.result = EngineResult(
-                                            status="failed", signal="agent_stuck",
-                                            error=f"工具连续 {_MAX_CONSEC_FAILURES} 次失败，Agent 疑似死磕",
+                                            status="failed",
+                                            signal="agent_stuck",
+                                            error=(
+                                                f"工具连续 {_MAX_CONSEC_FAILURES} 次失败，"
+                                                "Agent 疑似死磕"
+                                            ),
                                         )
                                         return
             finally:
@@ -211,13 +249,16 @@ class AgentEngine:
             if type(e).__name__ == "GraphRecursionError":
                 ctx.shared[key] = full_text
                 self.result = EngineResult(
-                    status="switched", signal="budget_exhausted",
+                    status="switched",
+                    signal="budget_exhausted",
                     error=f"Agent 步数预算耗尽（>{config.HYBRID_AGENT_MAX_STEPS} 步）",
                     output_key=key,
                 )
                 return
             ctx.shared[key] = full_text
-            self.result = EngineResult(status="failed", error=f"Agent 执行失败：{type(e).__name__}: {e}")
+            self.result = EngineResult(
+                status="failed", error=f"Agent 执行失败：{type(e).__name__}: {e}"
+            )
             return
 
         # 正常跑完：产出落 shared，上报 goal_satisfied（编排器决定收编还是收工）。

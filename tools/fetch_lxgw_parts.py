@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 下载 LXGW WenKai Screen 的全部 unicode-range 分片（jsdelivr 上的 webfont 包），
 用 fontTools 合并成完整 TTF，供 subset_fonts_project.py 子集化。
@@ -7,13 +6,13 @@
 之所以不直接下完整 TTF：GitHub Release 直连在本机返回 502，npm 无完整版包。
 分片是静态 woff2，合并比可变字体稳（不会踩 VarStore 合并坑）。
 """
-import os
+
 import json
+import os
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
 from fontTools.merge import Merger
-from fontTools.ttLib import TTFont
 
 PKG = "lxgw-wenkai-screen-webfont@1.7.0"
 BASE = f"https://cdn.jsdelivr.net/npm/{PKG}/"
@@ -24,15 +23,12 @@ OUT = os.path.join(ROOT, "tools", "_fontsrc", "LXGWWenKaiScreen.ttf")
 
 def fetch_list():
     url = f"https://data.jsdelivr.com/v1/packages/npm/{PKG}?structure=flat"
-    raw = subprocess.run(
-        ["curl", "-sL", "-m", "30", url], capture_output=True, text=True
-    ).stdout
+    raw = subprocess.run(["curl", "-sL", "-m", "30", url], capture_output=True, text=True).stdout
     data = json.loads(raw)
     return [
         f["name"]
         for f in data.get("files", [])
-        if f["name"].endswith(".woff2")
-        and f["name"].startswith("/files/lxgwwenkaiscreen-subset-")
+        if f["name"].endswith(".woff2") and f["name"].startswith("/files/lxgwwenkaiscreen-subset-")
     ]
 
 
@@ -65,7 +61,7 @@ def main():
     merger = Merger()
     merged = merger.merge(parts)  # Merger 接收「路径列表」，不要预先 TTFont()
     merged.save(OUT)
-    print("合并完成:", OUT, f"{os.path.getsize(OUT)/1024/1024:.1f} MB")
+    print("合并完成:", OUT, f"{os.path.getsize(OUT) / 1024 / 1024:.1f} MB")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """把改造前的存量数据认领给指定账号。
 
 背景
@@ -33,7 +32,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core import account, session as store  # noqa: E402
+from core import account  # noqa: E402
+from core import session as store
 from kb import pipelines  # noqa: E402
 
 
@@ -48,10 +48,7 @@ def _count_orphans() -> tuple[int, int]:
         cols = [c.name for c in pipelines.chroma_client().list_collections()]
     except Exception:
         cols = []
-    kb = sum(
-        1 for c in cols
-        if c.startswith("kb_") and pipelines.owner_of(c[3:]) is None
-    )
+    kb = sum(1 for c in cols if c.startswith("kb_") and pipelines.owner_of(c[3:]) is None)
     return conv, kb
 
 

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """调度可观测与手动触发端点。
 
   GET  /api/schedule/health    worker 心跳 + 各 job 最近执行情况
@@ -96,7 +95,7 @@ async def schedule_runs(
             partial(sched.list_runs, limit=limit, cursor=cursor, job_key=job_key, status=status)
         )
     except sched.InvalidCursor:
-        raise HTTPException(status_code=400, detail="cursor 无效")
+        raise HTTPException(status_code=400, detail="cursor 无效") from None
 
 
 @router.post("/run-now", status_code=202)
@@ -151,7 +150,7 @@ async def schedule_retry(req: RetryRequest, uid: str = Depends(get_current_user)
         if res["reason"] == "exhausted":
             raise HTTPException(
                 status_code=409,
-                detail="已达重试上限（%d），需 force=true 才能强制重排" % sched.MAX_ATTEMPTS,
+                detail=f"已达重试上限（{sched.MAX_ATTEMPTS}），需 force=true 才能强制重排",
             )
         raise HTTPException(status_code=409, detail="只有失败的执行才能重试")
 

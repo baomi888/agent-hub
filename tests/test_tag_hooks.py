@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """方案 C · A/B 块离线自测（不联网、不碰真实数据）。
 
 A 块（入库级 topics metadata）：
@@ -11,19 +10,21 @@ B 块（对话级 user_tags）：
   - chat._extract_user_tags：受控词表过滤，越界标签丢弃，失败静默
   - chat._record_user_tags：fire-and-forget 落库路径（不抛异常、写入正确）
 """
+
 import asyncio
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from langchain_core.documents import Document
+
 import core.config as config
 import core.session as session
 import kb.rag_core as rc
-from langchain_core.documents import Document
-
 
 # ---------- fixtures ----------
+
 
 def _patch_session_db(monkeypatch, tmp_path):
     """把会话库挪到临时文件并重建表，避免污染真实库。"""
@@ -33,6 +34,7 @@ def _patch_session_db(monkeypatch, tmp_path):
 
 
 # ---------- A 块：_extract_topics_one ----------
+
 
 def test_extract_topics_one_parses_json(monkeypatch):
     monkeypatch.setattr(config, "TOPIC_EXTRACT_ENABLED", True)
@@ -88,6 +90,7 @@ def test_extract_topics_one_empty_text_returns_empty(monkeypatch):
 
 # ---------- A 块：_inject_topics ----------
 
+
 def test_inject_topics_writes_pipe_delimited_per_source(monkeypatch):
     monkeypatch.setattr(config, "TOPIC_EXTRACT_ENABLED", True)
     monkeypatch.setattr(rc, "_extract_topics_one", lambda text: ["考研数学", "线性代数"])
@@ -124,6 +127,7 @@ def test_inject_topics_disabled_is_noop(monkeypatch):
 
 # ---------- A 块：topic_where（D 块预留，纯函数）----------
 
+
 def test_topic_where_builds_contains_filter():
     assert rc.topic_where("数学") == {"topics": {"$contains": "|数学|"}}
 
@@ -138,6 +142,7 @@ def test_topic_where_empty_returns_empty():
 
 
 # ---------- B 块：session 读写 ----------
+
 
 def test_add_user_tags_basic_and_read(monkeypatch, tmp_path):
     _patch_session_db(monkeypatch, tmp_path)
@@ -177,6 +182,7 @@ def test_add_user_tags_empty_input_is_safe(monkeypatch, tmp_path):
 
 
 # ---------- B 块：_extract_user_tags（受控词表）----------
+
 
 def _enable_user_tag_llm(monkeypatch, content):
     monkeypatch.setattr(config, "USER_TAG_HOOK_ENABLED", True)
@@ -228,6 +234,7 @@ def test_extract_user_tags_disabled_returns_empty(monkeypatch):
 
 # ---------- B 块：_record_user_tags（fire-and-forget 落库路径）----------
 
+
 def test_record_user_tags_writes_to_db(monkeypatch, tmp_path):
     _patch_session_db(monkeypatch, tmp_path)
     import api.chat as chat
@@ -245,7 +252,9 @@ def test_record_user_tags_silent_on_failure(monkeypatch, tmp_path):
     import api.chat as chat
 
     monkeypatch.setattr(config, "USER_TAG_HOOK_ENABLED", True)
-    monkeypatch.setattr(chat, "_extract_user_tags", lambda q, a: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(
+        chat, "_extract_user_tags", lambda q, a: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
     # 即使抽取环节炸了，也绝不向外抛异常（fire-and-forget 静默）
     asyncio.run(chat._record_user_tags("u1", "q", "a"))
     assert session.get_user_tags("u1") == []

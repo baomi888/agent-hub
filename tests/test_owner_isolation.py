@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """离线自测：会话归属隔离（多用户改造 P2 的验收点）。
 
 验的是"两个账号互相看不见"这件事在**数据层**成立，而不是靠前端藏起来：
@@ -34,7 +33,11 @@ FAIL = []
 
 def check(name: str, cond: bool, extra: str = ""):
     (PASS if cond else FAIL).append(name)
-    print(("  PASS  " if cond else "  FAIL  ") + name + (("  <- " + extra) if extra and not cond else ""))
+    print(
+        ("  PASS  " if cond else "  FAIL  ")
+        + name
+        + (("  <- " + extra) if extra and not cond else "")
+    )
 
 
 def _login(username: str, password: str = "pw123456") -> TestClient:
@@ -47,7 +50,9 @@ def _login(username: str, password: str = "pw123456") -> TestClient:
 print("\n[1] 两个账号各自建会话")
 alice = _login("alice")
 bob = _login("bob")
-uid_a = alice.post("/api/auth/login/", json={"username": "alice", "password": "pw123456"}).json()["id"]
+uid_a = alice.post("/api/auth/login/", json={"username": "alice", "password": "pw123456"}).json()[
+    "id"
+]
 uid_b = bob.post("/api/auth/login/", json={"username": "bob", "password": "pw123456"}).json()["id"]
 
 sa = alice.post("/api/sessions/", json={"title": "A 的会话"}).json()
@@ -62,7 +67,10 @@ check("B 只看得到自己 1 条", len(lb) == 1 and lb[0]["id"] == sb["id"], st
 print("\n[2] 跨界读取")
 check("B 读 A 的会话 -> 404", bob.get(f"/api/sessions/{sa['id']}/").status_code == 404)
 check("B 读 A 的消息列表 -> 404", bob.get(f"/api/feedback/{sa['id']}/").status_code == 404)
-check("B 改 A 的标题 -> 404", bob.patch(f"/api/sessions/{sa['id']}/", json={"title": "被改了"}).status_code == 404)
+check(
+    "B 改 A 的标题 -> 404",
+    bob.patch(f"/api/sessions/{sa['id']}/", json={"title": "被改了"}).status_code == 404,
+)
 check("B 删 A 的会话 -> 404", bob.delete(f"/api/sessions/{sa['id']}/").status_code == 404)
 still = alice.get("/api/sessions/").json()["sessions"]
 check("A 的会话没被删掉", len(still) == 1 and still[0]["title"] == "A 的会话", str(still))
@@ -91,9 +99,11 @@ with core.session._get_conn() as conn:
     )
 check("旧会话对 A 不可见", store.get_conversation(uid_a, "legacy01") is None)
 check("旧会话对 B 不可见", store.get_conversation(uid_b, "legacy01") is None)
-check("不出现在任何人的列表里",
-      "legacy01" not in [s["id"] for s in store.list_conversations(uid_a)] and
-      "legacy01" not in [s["id"] for s in store.list_conversations(uid_b)])
+check(
+    "不出现在任何人的列表里",
+    "legacy01" not in [s["id"] for s in store.list_conversations(uid_a)]
+    and "legacy01" not in [s["id"] for s in store.list_conversations(uid_b)],
+)
 
 n = store.claim_orphan_conversations(uid_a)
 check("显式认领返回条数 1", n == 1, str(n))

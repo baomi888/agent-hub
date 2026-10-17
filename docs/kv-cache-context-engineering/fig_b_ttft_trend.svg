@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="460" viewBox="0 0 820 460" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+<rect width="820" height="460" fill="#FFFFFF"/>
+<text x="78" y="34" font-size="20" font-weight="700" fill="#2A313C">图B  逐轮 TTFT（秒）—— 趋势比首尾单点更可信</text>
+<line x1="78" y1="396.0" x2="792" y2="396.0" stroke="#D9DEE6" stroke-width="1"/>
+<text x="70" y="396.0" font-size="12" fill="#8A93A2" text-anchor="end" dominant-baseline="middle">0s</text>
+<line x1="78" y1="335.6" x2="792" y2="335.6" stroke="#D9DEE6" stroke-width="1"/>
+<text x="70" y="335.6" font-size="12" fill="#8A93A2" text-anchor="end" dominant-baseline="middle">2s</text>
+<line x1="78" y1="275.3" x2="792" y2="275.3" stroke="#D9DEE6" stroke-width="1"/>
+<text x="70" y="275.3" font-size="12" fill="#8A93A2" text-anchor="end" dominant-baseline="middle">4s</text>
+<line x1="78" y1="214.9" x2="792" y2="214.9" stroke="#D9DEE6" stroke-width="1"/>
+<text x="70" y="214.9" font-size="12" fill="#8A93A2" text-anchor="end" dominant-baseline="middle">6s</text>
+<line x1="78" y1="154.5" x2="792" y2="154.5" stroke="#D9DEE6" stroke-width="1"/>
+<text x="70" y="154.5" font-size="12" fill="#8A93A2" text-anchor="end" dominant-baseline="middle">8s</text>
+<line x1="78" y1="94.2" x2="792" y2="94.2" stroke="#D9DEE6" stroke-width="1"/>
+<text x="70" y="94.2" font-size="12" fill="#8A93A2" text-anchor="end" dominant-baseline="middle">10s</text>
+<line x1="78.0" y1="64" x2="78.0" y2="396" stroke="#D9DEE6" stroke-width="1"/>
+<text x="78.0" y="416" font-size="12" fill="#8A93A2" text-anchor="middle">1</text>
+<line x1="180.0" y1="64" x2="180.0" y2="396" stroke="#D9DEE6" stroke-width="1"/>
+<text x="180.0" y="416" font-size="12" fill="#8A93A2" text-anchor="middle">3</text>
+<line x1="282.0" y1="64" x2="282.0" y2="396" stroke="#D9DEE6" stroke-width="1"/>
+<text x="282.0" y="416" font-size="12" fill="#8A93A2" text-anchor="middle">5</text>
+<line x1="384.0" y1="64" x2="384.0" y2="396" stroke="#D9DEE6" stroke-width="1"/>
+<text x="384.0" y="416" font-size="12" fill="#8A93A2" text-anchor="middle">7</text>
+<line x1="486.0" y1="64" x2="486.0" y2="396" stroke="#D9DEE6" stroke-width="1"/>
+<text x="486.0" y="416" font-size="12" fill="#8A93A2" text-anchor="middle">9</text>
+<line x1="588.0" y1="64" x2="588.0" y2="396" stroke="#D9DEE6" stroke-width="1"/>
+<text x="588.0" y="416" font-size="12" fill="#8A93A2" text-anchor="middle">11</text>
+<line x1="690.0" y1="64" x2="690.0" y2="396" stroke="#D9DEE6" stroke-width="1"/>
+<text x="690.0" y="416" font-size="12" fill="#8A93A2" text-anchor="middle">13</text>
+<line x1="792.0" y1="64" x2="792.0" y2="396" stroke="#D9DEE6" stroke-width="1"/>
+<text x="792.0" y="416" font-size="12" fill="#8A93A2" text-anchor="middle">15</text>
+<line x1="78" y1="64" x2="78" y2="396" stroke="#5A6473" stroke-width="1.6"/>
+<line x1="78" y1="396" x2="792" y2="396" stroke="#5A6473" stroke-width="1.6"/>
+<text x="435" y="446" font-size="13" fill="#2A313C" text-anchor="middle">迭代轮次 (iteration)</text>
+<text x="18" y="230" font-size="13" fill="#2A313C" text-anchor="middle" transform="rotate(-90 18 230.0)">TTFT (秒)</text>
+<polyline fill="none" stroke="#2E9E5B" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" points="78.0,282.0 129.0,367.1 180.0,345.9 231.0,360.7 282.0,351.5 333.0,346.3 384.0,362.1 435.0,351.5 486.0,357.8 537.0,133.0"/>
+<circle cx="78.0" cy="282.0" r="3.2" fill="#2E9E5B"/><circle cx="129.0" cy="367.1" r="3.2" fill="#2E9E5B"/><circle cx="180.0" cy="345.9" r="3.2" fill="#2E9E5B"/><circle cx="231.0" cy="360.7" r="3.2" fill="#2E9E5B"/><circle cx="282.0" cy="351.5" r="3.2" fill="#2E9E5B"/><circle cx="333.0" cy="346.3" r="3.2" fill="#2E9E5B"/><circle cx="384.0" cy="362.1" r="3.2" fill="#2E9E5B"/><circle cx="435.0" cy="351.5" r="3.2" fill="#2E9E5B"/><circle cx="486.0" cy="357.8" r="3.2" fill="#2E9E5B"/><circle cx="537.0" cy="133.0" r="3.2" fill="#2E9E5B"/>
+<polyline fill="none" stroke="#E2574C" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" points="78.0,353.7 129.0,363.2 180.0,369.9 231.0,363.7 282.0,358.6 333.0,345.5 384.0,345.0 435.0,331.2 486.0,326.3 537.0,327.9 588.0,333.5 639.0,330.0 690.0,321.8 741.0,331.4 792.0,88.8"/>
+<circle cx="78.0" cy="353.7" r="3.2" fill="#E2574C"/><circle cx="129.0" cy="363.2" r="3.2" fill="#E2574C"/><circle cx="180.0" cy="369.9" r="3.2" fill="#E2574C"/><circle cx="231.0" cy="363.7" r="3.2" fill="#E2574C"/><circle cx="282.0" cy="358.6" r="3.2" fill="#E2574C"/><circle cx="333.0" cy="345.5" r="3.2" fill="#E2574C"/><circle cx="384.0" cy="345.0" r="3.2" fill="#E2574C"/><circle cx="435.0" cy="331.2" r="3.2" fill="#E2574C"/><circle cx="486.0" cy="326.3" r="3.2" fill="#E2574C"/><circle cx="537.0" cy="327.9" r="3.2" fill="#E2574C"/><circle cx="588.0" cy="333.5" r="3.2" fill="#E2574C"/><circle cx="639.0" cy="330.0" r="3.2" fill="#E2574C"/><circle cx="690.0" cy="321.8" r="3.2" fill="#E2574C"/><circle cx="741.0" cy="331.4" r="3.2" fill="#E2574C"/><circle cx="792.0" cy="88.8" r="3.2" fill="#E2574C"/>
+<circle cx="537.0" cy="133.0" r="6" fill="none" stroke="#C0392B" stroke-width="2"/>
+<text x="537.0" y="121.0" font-size="11" fill="#C0392B" text-anchor="middle">末轮 outlier</text>
+<circle cx="792.0" cy="88.8" r="6" fill="none" stroke="#C0392B" stroke-width="2"/>
+<text x="792.0" y="76.8" font-size="11" fill="#C0392B" text-anchor="middle">末轮 outlier</text>
+<rect x="542" y="80" width="238" height="56" rx="6" fill="#FFFFFF" stroke="#D9DEE6"/>
+<line x1="554" y1="98.0" x2="582" y2="98.0" stroke="#2E9E5B" stroke-width="3"/>
+<circle cx="568" cy="98.0" r="3" fill="#2E9E5B"/>
+<text x="590" y="98.0" font-size="13" fill="#2A313C" dominant-baseline="middle">correct（稳定 system prompt）</text>
+<line x1="554" y1="120.0" x2="582" y2="120.0" stroke="#E2574C" stroke-width="3"/>
+<circle cx="568" cy="120.0" r="3" fill="#E2574C"/>
+<text x="590" y="120.0" font-size="13" fill="#2A313C" dominant-baseline="middle">dynamic_system（每次变 system prompt）</text>
+<text x="78" y="430" font-size="11.5" fill="#8A93A2">correct 去首末后均值 ≈ 1.33s；dynamic_system 去首末后均值 ≈ 1.77s（单次 +33%，纯缓存效应）。</text>
+<text x="78" y="446" font-size="11.5" fill="#8A93A2">首尾两轮为 outlier：首轮冷启动、末轮长 prompt(≈79k)+满额输出(2000) 叠加，不计入趋势均值。</text>
+</svg>

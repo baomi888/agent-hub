@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """P6 打卡（/api/checkin）测试：服务层派生 + HTTP 端点 + owner 隔离 + 斜杠。
 
 不联网、不依赖真实 API Key：
@@ -23,13 +22,12 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import core.config  # noqa: E402
-import core.session  # noqa: E402
-import core.account  # noqa: E402
-import core.quota  # noqa: E402
-
 from fastapi.testclient import TestClient  # noqa: E402
 
+import core.account  # noqa: E402
+import core.config  # noqa: E402
+import core.quota  # noqa: E402
+import core.session  # noqa: E402
 import main  # noqa: E402
 from service import checkin as chk  # noqa: E402
 from service import daily  # noqa: E402
@@ -168,7 +166,7 @@ def test_http_generate_and_share(monkeypatch):
     _prep_db(monkeypatch, "http_gen")
 
     with TestClient(main.app) as c:
-        uid = _login(c, "gen_a")
+        _login(c, "gen_a")
         g = c.post("/api/checkin/generate")
         assert g.status_code == 200
         assert g.json()["points"] == 1
@@ -189,7 +187,7 @@ def test_http_owner_isolation(monkeypatch):
 
     with TestClient(main.app) as ca, TestClient(main.app) as cb:
         uid_a = _login(ca, "iso_http_a")
-        uid_b = _login(cb, "iso_http_b")
+        _login(cb, "iso_http_b")
         _seed(uid_a)
         rb = cb.get("/api/checkin/streak")
         assert rb.status_code == 200
@@ -205,8 +203,12 @@ def test_http_slash_no_redirect(monkeypatch):
     REDIRECTS = (301, 302, 303, 307, 308)
     with TestClient(main.app) as c:
         _login(c, "slash_a")
-        for path in ("/api/checkin/streak", "/api/checkin/streak/",
-                     "/api/checkin/history", "/api/checkin/history/"):
+        for path in (
+            "/api/checkin/streak",
+            "/api/checkin/streak/",
+            "/api/checkin/history",
+            "/api/checkin/history/",
+        ):
             for form in (path, path.rstrip("/") + "/" if path.endswith("/") else path + "/"):
                 r = c.request("GET", form, follow_redirects=False)
                 assert r.status_code not in REDIRECTS, f"{form} -> {r.status_code}"

@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
 from __future__ import annotations
+
 """登录注册路由。
 
 这是全站**唯一**的公开路由组（其它业务路由都在 main.py 里挂了
@@ -22,9 +22,9 @@ from pydantic import BaseModel, Field
 
 from core import account, config, quota
 from core.auth import (
+    clear_session_cookie,
     create_token,
     get_current_user,
-    clear_session_cookie,
     set_session_cookie,
 )
 
@@ -56,6 +56,7 @@ def _auth_rate_bucket(name: str) -> str:
 
 
 # ==================== 公开端点 ====================
+
 
 @router.get("/config/")
 def auth_config() -> dict:
@@ -112,6 +113,7 @@ def logout(response: Response) -> dict:
 
 
 # ==================== 需登录 ====================
+
 
 @router.get("/me/", response_model=MeOut)
 async def me(uid: str = Depends(get_current_user)):

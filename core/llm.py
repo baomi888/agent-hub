@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """大模型客户端统一封装。
 
 为什么不用 init_chat_model？
@@ -32,6 +31,7 @@ _EMBEDDINGS: OpenAIEmbeddings | None = None
 
 # ---------- 大模型（DeepSeek Chat）----------
 
+
 def get_llm(temperature: float = 0.1, max_tokens: int | None = None) -> ChatOpenAI:
     """返回 DeepSeek Chat 客户端（OpenAI 兼容），按参数缓存复用。
 
@@ -59,6 +59,7 @@ def get_llm(temperature: float = 0.1, max_tokens: int | None = None) -> ChatOpen
 
 # ---------- Embedding（阿里百炼）----------
 
+
 def get_embeddings() -> OpenAIEmbeddings:
     """返回向量化客户端（单例）。
 
@@ -81,6 +82,7 @@ def get_embeddings() -> OpenAIEmbeddings:
 
 
 # ---------- 视觉多模态模型（阿里百炼 qwen-vl-plus）----------
+
 
 def get_vision_llm(temperature: float = 0.1, max_tokens: int | None = None) -> ChatOpenAI:
     """返回视觉多模态模型客户端，用于图片理解。按参数缓存复用。
