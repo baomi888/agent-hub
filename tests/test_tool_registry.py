@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """离线自测：工具注册表 —— 执行元数据 + 延迟发现（工单 03）。
 
 不联网、不碰真实数据：临时目录 + FastAPI TestClient。
@@ -49,19 +48,39 @@ def check(name: str, cond: bool, detail: str = "") -> None:
 print("\n[1] 元数据与已注册工具一一对应")
 tr.assert_meta_complete()
 check("assert_meta_complete 通过", True)
-check("键集合 == 工具名集合", set(tr.TOOL_META) == set(tr.tool_names()),
-      f"{sorted(tr.TOOL_META)} vs {sorted(tr.tool_names())}")
+check(
+    "键集合 == 工具名集合",
+    set(tr.TOOL_META) == set(tr.tool_names()),
+    f"{sorted(tr.TOOL_META)} vs {sorted(tr.tool_names())}",
+)
 check("工具数 = 5", len(tr.tool_names()) == 5, len(tr.tool_names()))
 
 print("\n[2] 现有工具全是直接工具（defer=False）")
 metas = {m["name"]: m for m in tr.all_meta()}
-check("5 个工具 defer 全为 False", all(m["defer"] is False for m in metas.values()),
-      {n: m["defer"] for n, m in metas.items()})
+check(
+    "5 个工具 defer 全为 False",
+    all(m["defer"] is False for m in metas.values()),
+    {n: m["defer"] for n, m in metas.items()},
+)
 check("deferred_names() 为空", tr.deferred_names() == [], tr.deferred_names())
-check("每个工具都有完整元数据字段",
-      all(set(m) >= {"name", "description", "category", "defer", "retryable",
-                     "needs_approval", "max_output_chars", "cost_hint", "discovered"}
-          for m in metas.values()))
+check(
+    "每个工具都有完整元数据字段",
+    all(
+        set(m)
+        >= {
+            "name",
+            "description",
+            "category",
+            "defer",
+            "retryable",
+            "needs_approval",
+            "max_output_chars",
+            "cost_hint",
+            "discovered",
+        }
+        for m in metas.values()
+    ),
+)
 
 print("\n[3] 关键工具的语义正确")
 check("kb_search.retryable=False（确定性失败）", metas["kb_search"]["retryable"] is False)
@@ -118,30 +137,51 @@ tr.assert_playbook_complete()
 _OWNER_A, _OWNER_B = "ownerA", "ownerB"
 tr.reset_activated()
 try:
-    check("deferred_names() 现在含 get_weather", tr.deferred_names() == ["get_weather"], tr.deferred_names())
-    check("未激活时 discovered=False（按用户视角）",
-          [m for m in tr.all_meta(_OWNER_A) if m["name"] == "get_weather"][0]["discovered"] is False)
+    check(
+        "deferred_names() 现在含 get_weather",
+        tr.deferred_names() == ["get_weather"],
+        tr.deferred_names(),
+    )
+    check(
+        "未激活时 discovered=False（按用户视角）",
+        [m for m in tr.all_meta(_OWNER_A) if m["name"] == "get_weather"][0]["discovered"] is False,
+    )
 
     names, schemas = tr.discover("select:get_weather", _OWNER_A)
     check("select: 精确激活命中", names == ["get_weather"], names)
     check("返回了 schema 且含 input_schema", bool(schemas) and "input_schema" in schemas[0])
-    check("第二层 playbook 随 schema 一起返回", schemas[0].get("playbook", "").startswith("测试 playbook"),
-          schemas[0].get("playbook", "")[:12])
+    check(
+        "第二层 playbook 随 schema 一起返回",
+        schemas[0].get("playbook", "").startswith("测试 playbook"),
+        schemas[0].get("playbook", "")[:12],
+    )
     check("第三层 refs 缺省为空列表", schemas[0].get("refs") == [], schemas[0].get("refs"))
-    check("激活后 discovered=True（仅该用户）",
-          [m for m in tr.all_meta(_OWNER_A) if m["name"] == "get_weather"][0]["discovered"] is True)
+    check(
+        "激活后 discovered=True（仅该用户）",
+        [m for m in tr.all_meta(_OWNER_A) if m["name"] == "get_weather"][0]["discovered"] is True,
+    )
     # 按用户隔离：甲激活，乙看不到
-    check("另一用户 discovered 仍为 False（不串用户）",
-          [m for m in tr.all_meta(_OWNER_B) if m["name"] == "get_weather"][0]["discovered"] is False)
+    check(
+        "另一用户 discovered 仍为 False（不串用户）",
+        [m for m in tr.all_meta(_OWNER_B) if m["name"] == "get_weather"][0]["discovered"] is False,
+    )
     # 语义分清：deferred_names() = 所有 defer 工具（含已激活），用于"你能激活哪些"；
     # 而"尚未发现"要看 discovered 字段 / list_meta(deferred=True)。
-    check("deferred_names() 仍列出该工具（它是 defer 工具）", tr.deferred_names() == ["get_weather"],
-          tr.deferred_names())
-    check("但 ownerA 已激活 -> 不在其待发现列表",
-          tr.list_meta(deferred=True, owner_id=_OWNER_A) == [], tr.list_meta(deferred=True, owner_id=_OWNER_A))
-    check("ownerB 仍在其待发现列表",
-          [i["name"] for i in tr.list_meta(deferred=True, owner_id=_OWNER_B)] == ["get_weather"],
-          tr.list_meta(deferred=True, owner_id=_OWNER_B))
+    check(
+        "deferred_names() 仍列出该工具（它是 defer 工具）",
+        tr.deferred_names() == ["get_weather"],
+        tr.deferred_names(),
+    )
+    check(
+        "但 ownerA 已激活 -> 不在其待发现列表",
+        tr.list_meta(deferred=True, owner_id=_OWNER_A) == [],
+        tr.list_meta(deferred=True, owner_id=_OWNER_A),
+    )
+    check(
+        "ownerB 仍在其待发现列表",
+        [i["name"] for i in tr.list_meta(deferred=True, owner_id=_OWNER_B)] == ["get_weather"],
+        tr.list_meta(deferred=True, owner_id=_OWNER_B),
+    )
 
     tr.reset_activated()
     names2, _ = tr.discover("weather", _OWNER_A)
@@ -212,26 +252,40 @@ try:
     body = r.json()
     check("返回 5 个工具", body.get("total") == 5, body.get("total"))
     check("全部 defer=false", all(i["defer"] is False for i in body["items"]))
-    check("kb_search.retryable=false",
-          [i for i in body["items"] if i["name"] == "kb_search"][0]["retryable"] is False)
+    check(
+        "kb_search.retryable=false",
+        [i for i in body["items"] if i["name"] == "kb_search"][0]["retryable"] is False,
+    )
 
     r = client.get("/api/agent/tools?q=search", cookies=cookie)
     check("q=search 过滤命中 2 个", r.json().get("total") == 2, r.json().get("total"))
 
     r = client.get("/api/agent/tools?deferred=true", cookies=cookie)
-    check("deferred=true 时为空（现有全是直接工具）", r.json().get("total") == 0, r.json().get("total"))
+    check(
+        "deferred=true 时为空（现有全是直接工具）",
+        r.json().get("total") == 0,
+        r.json().get("total"),
+    )
 
     r = client.post("/api/agent/tools/discover", json={"query": ""}, cookies=cookie)
     check("空 query -> 400", r.status_code == 400, r.status_code)
 
     r = client.post("/api/agent/tools/discover", json={"query": "weather"}, cookies=cookie)
     check("未命中 -> 404", r.status_code == 404, r.status_code)
-    check("404 响应体给出候选名单说明", "可激活的工具" in r.json().get("detail", ""),
-          r.json().get("detail", "")[:80])
+    check(
+        "404 响应体给出候选名单说明",
+        "可激活的工具" in r.json().get("detail", ""),
+        r.json().get("detail", "")[:80],
+    )
 
-    r = client.post("/api/agent/tools/discover", json={"query": "select:get_weather"}, cookies=cookie)
-    check("select: 精确激活 -> 404（因为 get_weather 是直接工具，不是延迟工具）",
-          r.status_code == 404, r.status_code)
+    r = client.post(
+        "/api/agent/tools/discover", json={"query": "select:get_weather"}, cookies=cookie
+    )
+    check(
+        "select: 精确激活 -> 404（因为 get_weather 是直接工具，不是延迟工具）",
+        r.status_code == 404,
+        r.status_code,
+    )
 except Exception as e:  # TestClient 起不来时不要把整份自测拖垮
     check("TestClient 段可运行", False, f"{type(e).__name__}: {e}")
 
@@ -246,25 +300,24 @@ _snapshot = tr.activated_for(_OWNER_C)
 check("#7 快照含已激活工具", "get_weather" in _snapshot, _snapshot)
 check("#7 快照是只读 frozenset", isinstance(_snapshot, frozenset))
 tr.mark_activated("kb_search", _OWNER_C)  # 请求中途又发生一次激活
-check("#7 固化语义：先前取出的快照不随后续激活变化",
-      "kb_search" not in _snapshot, _snapshot)
-check("#7 快照之后的 activated_for 能看到新激活",
-      "kb_search" in tr.activated_for(_OWNER_C))
+check("#7 固化语义：先前取出的快照不随后续激活变化", "kb_search" not in _snapshot, _snapshot)
+check("#7 快照之后的 activated_for 能看到新激活", "kb_search" in tr.activated_for(_OWNER_C))
 tr.reset_activated()
 
 # 8b. 绑定顺序稳定：build_guarded_tools 重建后顺序与 AGENT_TOOLS 一致，
 #     且两次重建等价 —— bind_tools 的顺序稳定才保证工具前缀稳定（#7 的根诉求）。
 try:
-    from core.tool_guard import build_guarded_tools
     from agent.tools import AGENT_TOOLS
+    from core.tool_guard import build_guarded_tools
 
     _g1 = build_guarded_tools(list(AGENT_TOOLS))
     _g2 = build_guarded_tools(list(AGENT_TOOLS))
-    check("#7 守卫重建数量不变", len(_g1) == len(AGENT_TOOLS),
-          f"{len(_g1)} vs {len(AGENT_TOOLS)}")
-    check("#7 绑定顺序稳定（两次重建与原始 AGENT_TOOLS 的 name 序列一致）",
-          [t.name for t in _g1] == [t.name for t in _g2] == [t.name for t in AGENT_TOOLS],
-          [t.name for t in _g1])
+    check("#7 守卫重建数量不变", len(_g1) == len(AGENT_TOOLS), f"{len(_g1)} vs {len(AGENT_TOOLS)}")
+    check(
+        "#7 绑定顺序稳定（两次重建与原始 AGENT_TOOLS 的 name 序列一致）",
+        [t.name for t in _g1] == [t.name for t in _g2] == [t.name for t in AGENT_TOOLS],
+        [t.name for t in _g1],
+    )
 except Exception as e:  # noqa: BLE001
     check("#7 build_guarded_tools 顺序断言可运行", False, f"{type(e).__name__}: {e}")
 
@@ -287,13 +340,19 @@ try:
     try:
         _eng = AgentEngine(has_kb=True, location={"city": "北京"}, activated=frozenset({"tool_x"}))
         _got = asyncio.run(_eng._get_agent())
-        check("#7 hybrid 透传：build_agent 被调用且返回其产物",
-              _got == "FAKE_AGENT" and len(_calls) == 1, _calls)
+        check(
+            "#7 hybrid 透传：build_agent 被调用且返回其产物",
+            _got == "FAKE_AGENT" and len(_calls) == 1,
+            _calls,
+        )
         if _calls:
             _a = _calls[0][0]
             check("#7 hybrid 透传：has_kb / location 原样", _a[:2] == (True, {"city": "北京"}), _a)
-            check("#7 hybrid 透传：scenario=None、activated 原样（不再丢激活集）",
-                  len(_a) == 4 and _a[2] is None and _a[3] == frozenset({"tool_x"}), _a)
+            check(
+                "#7 hybrid 透传：scenario=None、activated 原样（不再丢激活集）",
+                len(_a) == 4 and _a[2] is None and _a[3] == frozenset({"tool_x"}),
+                _a,
+            )
     finally:
         _builder_mod.build_agent = _orig_build
 except Exception as e:  # noqa: BLE001

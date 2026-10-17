@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """每日总结的 HTTP 端点。
 
   GET  /api/report/today        当前用户今日总结（无则 404 + detail）
@@ -17,14 +16,14 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from core.auth import get_current_user
 from core import quota
+from core.auth import get_current_user
 from service import daily
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
-def _report_to_dict(rep: "daily.Report") -> dict[str, Any]:
+def _report_to_dict(rep: daily.Report) -> dict[str, Any]:
     return {
         "report_id": rep.report_id,
         "date": rep.date,
@@ -51,7 +50,7 @@ async def report_by_date(date: str, uid: str = Depends(get_current_user)) -> dic
     try:
         time.strptime(date, "%Y-%m-%d")
     except ValueError:
-        raise HTTPException(status_code=400, detail="date 格式应为 YYYY-MM-DD")
+        raise HTTPException(status_code=400, detail="date 格式应为 YYYY-MM-DD") from None
     rep = daily.get_report(uid, date)
     if rep is None:
         raise HTTPException(status_code=404, detail="该日总结不存在")

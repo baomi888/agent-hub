@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """定时任务 worker 包。
 
 `python -m worker.scheduler` 启动常驻调度进程；本包**不进 api/ 的依赖链**——

@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
 from __future__ import annotations
+
 """Agent 编排的元数据路由。
 
 路由清单：
@@ -73,8 +73,10 @@ async def discover_tools(req: DiscoverRequest, uid: str = Depends(get_current_us
         # 同时把候选名单一并给出，下一步才有得选。
         raise HTTPException(
             status_code=404,
-            detail=f"没有匹配的工具：{query}。可激活的工具：{('、'.join(e.candidates)) or '（无）'}",
-        )
+            detail=(
+                f"没有匹配的工具：{query}。可激活的工具：{('、'.join(e.candidates)) or '（无）'}"
+            ),
+        ) from e
     return {
         "activated": activated,
         "schemas": schemas,

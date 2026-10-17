@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
 from __future__ import annotations
+
 """SQLite 多会话管理。
 
 设计：
@@ -67,12 +67,14 @@ def _conn() -> sqlite3.Connection:
             conn.close()
         except Exception:
             pass
-    os.makedirs(os.path.dirname(path), exist_ok=True)  # 建连前确保目录存在（路径可能被测试改到临时目录）
+    os.makedirs(
+        os.path.dirname(path), exist_ok=True
+    )  # 建连前确保目录存在（路径可能被测试改到临时目录）
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row  # 让 cursor 返回 dict-like 对象
-    conn.execute("PRAGMA journal_mode=WAL")    # 写前日志，提升并发读性能
+    conn.execute("PRAGMA journal_mode=WAL")  # 写前日志，提升并发读性能
     conn.execute("PRAGMA synchronous=NORMAL")  # WAL 下不必每次 fsync，写更快
-    conn.execute("PRAGMA busy_timeout=5000")   # 撞上并发写时等待而不是立刻报错
+    conn.execute("PRAGMA busy_timeout=5000")  # 撞上并发写时等待而不是立刻报错
     _LOCAL.conn = conn
     _LOCAL.path = path
     return conn
@@ -202,6 +204,7 @@ def _owned(owner: str, sid: str) -> bool:
 
 # ==================== 会话 CRUD ====================
 
+
 def create_conversation(owner: str, title: str = "新对话", kb_id: str | None = None) -> dict:
     """新建会话，返回会话 dict。"""
     sid = uuid.uuid4().hex[:12]  # 短 ID，前端好展示
@@ -269,9 +272,7 @@ def delete_conversation(owner: str, sid: str) -> bool:
         # ON DELETE CASCADE 会自动删 messages，但保险起见先删消息
         conn.execute("DELETE FROM messages WHERE conversation_id = ?", (sid,))
         conn.execute("DELETE FROM feedbacks WHERE conversation_id = ?", (sid,))
-        cur = conn.execute(
-            "DELETE FROM conversations WHERE id = ? AND owner_id = ?", (sid, owner)
-        )
+        cur = conn.execute("DELETE FROM conversations WHERE id = ? AND owner_id = ?", (sid, owner))
         return cur.rowcount > 0
 
 
@@ -282,13 +283,12 @@ def claim_orphan_conversations(owner: str) -> int:
     否则第一个注册的人就把别人的历史数据认领走了。返回实际认领条数。
     """
     with _get_conn() as conn:
-        cur = conn.execute(
-            "UPDATE conversations SET owner_id = ? WHERE owner_id IS NULL", (owner,)
-        )
+        cur = conn.execute("UPDATE conversations SET owner_id = ? WHERE owner_id IS NULL", (owner,))
         return cur.rowcount
 
 
 # ==================== 消息管理 ====================
+
 
 class NotOwned(Exception):
     """会话不属于当前用户。
@@ -312,7 +312,8 @@ def add_message(
     now = int(time.time())
     with _get_conn() as conn:
         conn.execute(
-            "INSERT INTO messages (conversation_id, role, content, refs, created_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO messages (conversation_id, role, content, refs, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
             (sid, role, content, refs, now),
         )
         conn.execute(
@@ -325,6 +326,7 @@ def add_message(
 
 
 # ==================== 用户画像标签（方案 C · B 块）====================
+
 
 def add_user_tags(owner: str, tags: list[str], delta: float = 1.0) -> None:
     """累加用户的画像标签权重（同一标签多次出现 → 权重 +delta）。
@@ -369,6 +371,7 @@ def get_user_tags(owner: str, limit: int = 30) -> list[dict]:
 
 # ==================== 用户画像快照（方案 C · C2 块）====================
 
+
 def get_owners_with_tags(limit: int | None = None) -> list[str]:
     """返回所有沉淀过画像标签的 owner（供 worker 枚举聚合对象）。"""
     with _get_conn() as conn:
@@ -380,21 +383,28 @@ def get_owners_with_tags(limit: int | None = None) -> list[str]:
     return [r["owner_id"] for r in rows]
 
 
-def save_user_profile(owner: str, top_tags: list[dict], weight_sum: float,
-                      tag_count: int, updated_at: int) -> None:
+def save_user_profile(
+    owner: str, top_tags: list[dict], weight_sum: float, tag_count: int, updated_at: int
+) -> None:
     """upsert 用户画像快照（C2 聚合结果）。失败静默。"""
     if not owner:
         return
     try:
         import json
+
         with _get_conn() as conn:
             conn.execute(
                 "INSERT INTO user_profiles (owner_id, top_tags, weight_sum, tag_count, updated_at) "
                 "VALUES (?, ?, ?, ?, ?) ON CONFLICT(owner_id) DO UPDATE SET "
                 "top_tags=excluded.top_tags, weight_sum=excluded.weight_sum, "
                 "tag_count=excluded.tag_count, updated_at=excluded.updated_at",
-                (owner, json.dumps(top_tags, ensure_ascii=False), float(weight_sum),
-                 int(tag_count), int(updated_at)),
+                (
+                    owner,
+                    json.dumps(top_tags, ensure_ascii=False),
+                    float(weight_sum),
+                    int(tag_count),
+                    int(updated_at),
+                ),
             )
     except Exception:
         pass
@@ -405,11 +415,13 @@ def get_user_profile(owner: str) -> dict | None:
     with _get_conn() as conn:
         row = conn.execute(
             "SELECT owner_id, top_tags, weight_sum, tag_count, updated_at "
-            "FROM user_profiles WHERE owner_id = ?", (owner,)
+            "FROM user_profiles WHERE owner_id = ?",
+            (owner,),
         ).fetchone()
     if not row:
         return None
     import json
+
     return {
         "owner_id": row["owner_id"],
         "top_tags": json.loads(row["top_tags"]),
@@ -500,7 +512,8 @@ def get_message(owner: str, sid: str, msg_id: int) -> dict | None:
         return None
     with _get_conn() as conn:
         row = conn.execute(
-            "SELECT id, role, content, refs, created_at FROM messages WHERE conversation_id = ? AND id = ?",
+            "SELECT id, role, content, refs, created_at FROM messages "
+            "WHERE conversation_id = ? AND id = ?",
             (sid, msg_id),
         ).fetchone()
         return dict(row) if row else None
@@ -511,7 +524,8 @@ def find_turn_ids(owner: str, sid: str, msg_id: int) -> list[int]:
 
     规则：
       - 若目标是 user 消息：包含该 user 及其后连续的所有 assistant 消息，直到下一条 user 前。
-      - 若目标是 assistant 消息：包含其前最近一条 user 消息，以及该 user 与目标之间的所有 assistant。
+      - 若目标是 assistant 消息：包含其前最近一条 user 消息，
+        以及该 user 与目标之间的所有 assistant。
     这样前端点 user 或 assistant 的删除，都能整轮移除。
     """
     if not _owned(owner, sid):
@@ -544,6 +558,7 @@ def find_turn_ids(owner: str, sid: str, msg_id: int) -> list[int]:
 
 
 # ==================== 消息反馈（赞 / 踩）====================
+
 
 def add_feedback(
     owner: str,

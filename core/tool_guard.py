@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """工具守卫：让 `TOOL_META` 的声明**真正生效**（P0-3）。
 
 背景：`core/tool_registry.py` 已经把五个工具的元数据声明齐了（category /
@@ -32,7 +31,6 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import hashlib
-import inspect
 import json
 import os
 import time
@@ -94,6 +92,7 @@ def _state() -> _GuardState:
 
 # ==================== 确认串 ====================
 
+
 def approval_token(tool_name: str, args: dict[str, Any]) -> str:
     """(工具名, 参数) 的稳定 hash。参数变了 -> 串变了 -> 必须重新确认。"""
     payload = json.dumps(
@@ -103,6 +102,7 @@ def approval_token(tool_name: str, args: dict[str, Any]) -> str:
 
 
 # ==================== 输出截断 ====================
+
 
 def _spill_dir() -> str:
     d = os.path.join(getattr(config, "DATA_DIR", ".") or ".", "tool_outputs")
@@ -130,8 +130,15 @@ def truncate_output(tool_name: str, text: str, limit: int) -> str:
 
 # ==================== 守卫主逻辑 ====================
 
-def guarded_run(tool_name: str, original_run, args: dict[str, Any], run_manager=None,
-                call_args: tuple = (), call_kwargs: dict | None = None):
+
+def guarded_run(
+    tool_name: str,
+    original_run,
+    args: dict[str, Any],
+    run_manager=None,
+    call_args: tuple = (),
+    call_kwargs: dict | None = None,
+):
     """包装一个工具的 `_run`：依次做 审批 / 封禁 / 执行 / 截断。
 
     `args` 是**工具入参**（用于审批 hash），`call_args`/`call_kwargs` 是
@@ -183,7 +190,8 @@ def guarded_run(tool_name: str, original_run, args: dict[str, Any], run_manager=
             st.banned.add(tool_name)
         if meta is not None and not meta.retryable:
             return (
-                f"工具 {tool_name} 执行失败（确定性失败，重试不会改变结果）：{type(e).__name__}: {e}\n"
+                f"工具 {tool_name} 执行失败（确定性失败，重试不会改变结果）："
+                f"{type(e).__name__}: {e}\n"
                 "请换用其他工具或直接告知用户当前条件不具备。**不要重复调用本工具。**"
             )
         return f"工具 {tool_name} 执行失败（临时性，可再试）：{type(e).__name__}: {e}"
@@ -205,7 +213,14 @@ def guarded_run(tool_name: str, original_run, args: dict[str, Any], run_manager=
 # 工具把错误写成"返回值"而不是抛异常时，用文案特征识别确定性失败。
 # 只用于 retryable=False 的工具，且只影响"后续是否允许再调"，不改变本次返回内容。
 _FAILURE_HINTS = (
-    "无法访问", "不存在", "没有绑定", "不可用", "无权", "未找到", "下载失败", "检索不可用",
+    "无法访问",
+    "不存在",
+    "没有绑定",
+    "不可用",
+    "无权",
+    "未找到",
+    "下载失败",
+    "检索不可用",
 )
 
 
@@ -264,9 +279,7 @@ def _make_guarded_fn(tool_name: str, fn):
             ui_args["_args"] = args
         else:
             ui_args = ui_kwargs
-        return guarded_run(
-            tool_name, fn, ui_args, kwargs.get("run_manager"), args, kwargs
-        )
+        return guarded_run(tool_name, fn, ui_args, kwargs.get("run_manager"), args, kwargs)
 
     return _guarded
 

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """工具守卫回归测试（P0-3）：让 TOOL_META 的声明真正生效。
 
 验四件事（对应 docs/P0三条优化方案.md 的 P0-3 验证表）：
@@ -13,6 +12,7 @@
 
 离线、不联网、不碰真实 data/（DATA_DIR 指到临时目录）。
 """
+
 from __future__ import annotations
 
 import os
@@ -58,6 +58,7 @@ def check(name: str, cond: bool, detail: str = "") -> None:
 
 def fake_tool(name: str, ret: str = "ok", raises: Exception | None = None):
     """造一个最小可包装对象：只需要 name 和 _run。"""
+
     class T:
         pass
 
@@ -86,8 +87,7 @@ def main() -> int:
 
     print("\n[B] needs_approval：未批准不执行")
     # download_file 在 TOOL_META 里是 needs_approval=True
-    check("前提：download_file 需要审批",
-          TOOL_META["download_file"].needs_approval is True)
+    check("前提：download_file 需要审批", TOOL_META["download_file"].needs_approval is True)
     from agent.tools import AGENT_TOOLS
 
     G = tool_guard.build_guarded_tools(AGENT_TOOLS)
@@ -144,9 +144,11 @@ def main() -> int:
         o = orig_by_name[t.name]
         check(f"{t.name}: name 一致", t.name == o.name)
         check(f"{t.name}: description 一致", t.description == o.description)
-        check(f"{t.name}: args_schema 结构一致",
-              t.args_schema.model_json_schema().get("properties", {}).keys()
-              == o.args_schema.model_json_schema().get("properties", {}).keys())
+        check(
+            f"{t.name}: args_schema 结构一致",
+            t.args_schema.model_json_schema().get("properties", {}).keys()
+            == o.args_schema.model_json_schema().get("properties", {}).keys(),
+        )
 
     print("\n[F] guard_scope 之间状态隔离")
     with tool_guard.guard_scope() as st1:

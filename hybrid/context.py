@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """统一任务上下文（要求 4 的核心载体）。
 
 TaskContext 是两种执行模式之间**唯一**的数据交换通道：
@@ -116,8 +115,14 @@ class ExecEvent(BaseModel):
     """
 
     event_type: Literal[
-        "node_enter", "node_exit", "tool_call", "token",
-        "switch", "error", "status", "human_intervention",
+        "node_enter",
+        "node_exit",
+        "tool_call",
+        "token",
+        "switch",
+        "error",
+        "status",
+        "human_intervention",
     ]
     mode: str  # 事件发生时的模式：workflow / agent
     node_id: str | None = None  # 工作流事件必填，Agent 事件为空
@@ -198,8 +203,12 @@ class TaskContext(BaseModel):
         object.__setattr__(self, "goal", value)
         self._goal_locked = True
         self.mode_trace.append(
-            ModeSwitch(from_mode=self.current_mode, to_mode=self.current_mode,
-                       rule="goal_override", reason=reason)
+            ModeSwitch(
+                from_mode=self.current_mode,
+                to_mode=self.current_mode,
+                rule="goal_override",
+                reason=reason,
+            )
         )
         self.bump()
 
@@ -229,6 +238,6 @@ class TaskContext(BaseModel):
         return self.model_dump()
 
     @classmethod
-    def restore(cls, data: dict) -> "TaskContext":
+    def restore(cls, data: dict) -> TaskContext:
         """从快照还原。字段新增带默认值，旧快照可前向兼容（pydantic 兜住缺字段）。"""
         return cls.model_validate(data)

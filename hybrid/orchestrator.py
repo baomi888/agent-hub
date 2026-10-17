@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """混合编排器（要求 1/4/5/6/7 的汇合点）。
 
 职责：
@@ -21,7 +20,8 @@
 from __future__ import annotations
 
 import threading
-from typing import Any, AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable
+from typing import Any
 
 from core import config
 from hybrid import store
@@ -75,6 +75,7 @@ def _take_manual(run_id: str) -> str | None:
 
 
 # ==================== 编排器 ====================
+
 
 class HybridOrchestrator:
     """一次混合执行。stream() 产出 ExecEvent，chat 层翻译成 SSE。"""
@@ -142,7 +143,9 @@ class HybridOrchestrator:
                 async for ev in engine.stream(ctx, lambda: _peek_manual(ctx.run_id)):
                     store.add_log(ctx, ev)
                     yield ev
-                result: EngineResult = engine.result or EngineResult(status="failed", error="引擎未返回结果")
+                result: EngineResult = engine.result or EngineResult(
+                    status="failed", error="引擎未返回结果"
+                )
                 # 每段结束整体快照落库（崩溃续跑锚点）
                 store.save_run(ctx)
 
@@ -190,7 +193,9 @@ class HybridOrchestrator:
                     break
 
                 # ---- 有信号：走切换规则 ----
-                decision = switcher.decide(ctx, result.signal, {"error": result.error, "node_id": result.node_id})
+                decision = switcher.decide(
+                    ctx, result.signal, {"error": result.error, "node_id": result.node_id}
+                )
                 if decision.action == "continue":
                     # 无规则命中：按引擎结果落终态
                     if result.status == "completed":
@@ -250,7 +255,8 @@ class HybridOrchestrator:
         ctx = self.ctx
         last = ctx.mode_trace[-1] if ctx.mode_trace else None
         ev = ExecEvent(
-            event_type="switch", mode=ctx.current_mode,
+            event_type="switch",
+            mode=ctx.current_mode,
             decision={
                 "rule": rule,
                 "reason": reason,

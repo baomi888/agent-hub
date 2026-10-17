@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """离线自测：Agent 路径 kb_search 在检索偏弱时复用 RAG 路径的 grounding_note。
 
 验证 agent/tools.py::kb_search 与 kb/rag_core.py 共用同一套防编造注释
@@ -38,9 +37,10 @@ core.config.DOWNLOAD_DIR = os.path.join(_TMP, "proj", "downloads")
 os.makedirs(os.path.join(core.config.PROJECT_ROOT, "data"), exist_ok=True)
 
 from langchain_core.documents import Document  # noqa: E402
+
+from agent.tools import kb_search  # noqa: E402
 from kb import pipelines  # noqa: E402
 from kb.rag_core import assess_grounding, grounding_note  # noqa: E402
-from agent.tools import kb_search  # noqa: E402
 
 
 def _doc(text: str = "苞米是玉米的俗称，原产于美洲") -> Document:
@@ -79,13 +79,17 @@ PASS, FAIL = [], []
 
 def check(name: str, cond: bool, extra: str = ""):
     (PASS if cond else FAIL).append(name)
-    print(("  PASS  " if cond else "  FAIL  ") + name + (("  <- " + extra) if extra and not cond else ""))
+    print(
+        ("  PASS  " if cond else "  FAIL  ")
+        + name
+        + (("  <- " + extra) if extra and not cond else "")
+    )
 
 
 # ---- 三档命中：距离按 _to_similarity(d)=1-d/2 反推，落在 low/medium/high ----
-DS_LOW = 2.0    # sim 0.00 -> low
-DS_MED = 1.3    # sim 0.35 -> medium
-DS_HIGH = 0.0   # sim 1.00 -> high
+DS_LOW = 2.0  # sim 0.00 -> low
+DS_MED = 1.3  # sim 0.35 -> medium
+DS_HIGH = 0.0  # sim 1.00 -> high
 
 LOW = [(_doc(), DS_LOW)]
 MED = [(_doc(), DS_MED)]
@@ -100,8 +104,7 @@ try:
     check("low 档 grounding_note 非空", exp != "", repr(exp))
     check("kb_search 开头 == grounding_note（单来源）", r.startswith(exp), r[:60])
     check("返回含【…必须遵守】约束", "必须遵守" in r, r[:60])
-    check("已移除旧版硬编码提示（回归护栏）",
-          "检索到的片段相似度全部偏低" not in r, "旧文案仍在")
+    check("已移除旧版硬编码提示（回归护栏）", "检索到的片段相似度全部偏低" not in r, "旧文案仍在")
 finally:
     _restore(saved)
 

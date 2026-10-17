@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Chroma 客户端单例自测（不联网、不污染真实数据）。
 
 背景：exists / list_all / get_status / peek 这几个"只读一下"的接口，
@@ -22,8 +21,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import chromadb  # noqa: E402
 
 from core import config  # noqa: E402
-from kb import pipelines  # noqa: E402
-from kb import rag_core  # noqa: E402
+from kb import (
+    pipelines,  # noqa: E402
+    rag_core,  # noqa: E402
+)
 
 FAILED: list[str] = []
 
@@ -89,10 +90,14 @@ def test_3_read_paths_use_singleton() -> None:
     except Exception as e:
         check(False, f"list_all() 抛异常：{e}")
 
-    check(pipelines.exists("__no_such_owner__", "__no_such_kb__") is False,
-          "不存在的库 exists() 返回 False 而非抛错")
-    check(pipelines.get_status("__no_such_owner__", "__no_such_kb__") is None,
-          "不存在的库 get_status() 返回 None")
+    check(
+        pipelines.exists("__no_such_owner__", "__no_such_kb__") is False,
+        "不存在的库 exists() 返回 False 而非抛错",
+    )
+    check(
+        pipelines.get_status("__no_such_owner__", "__no_such_kb__") is None,
+        "不存在的库 get_status() 返回 None",
+    )
 
 
 def test_4_thread_safe_first_call() -> None:

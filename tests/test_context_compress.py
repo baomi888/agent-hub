@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """上下文压缩回归测试（P0-2）。
 
 断言对应评审意见的每一条：
@@ -14,6 +13,7 @@
 
 离线、不联网、不碰真实 data/。
 """
+
 from __future__ import annotations
 
 import os
@@ -62,7 +62,10 @@ def main() -> int:
     check("抽到 URL", any("https://example.com/a.pdf" == e for e in ents), sorted(ents)[:6])
     check("抽到文件名", any(e.endswith(".docx") for e in ents))
     check("抽到 UUID", any("-" in e and len(e) == 36 for e in ents))
-    check("抽到长 hex", any(len(e) >= 16 and all(c in "0123456789abcdef" for c in e.lower()) for e in ents))
+    check(
+        "抽到长 hex",
+        any(len(e) >= 16 and all(c in "0123456789abcdef" for c in e.lower()) for e in ents),
+    )
     check("抽到待办关键词", any(e in ("待办", "必须", "注意", "截止") for e in ents), sorted(ents))
     check("空文本无实体", cc.extract_entities("") == set())
 
@@ -89,11 +92,13 @@ def main() -> int:
 
     print("\n[E] L3 硬截断（防『回退全量』死锁）")
     d4 = cc.apply_safety_valve(
-        src, good, prev_summary="prev",
-        est_tokens_after=5000, hard_limit_tokens=4000,
+        src,
+        good,
+        prev_summary="prev",
+        est_tokens_after=5000,
+        hard_limit_tokens=4000,
     )
-    check("压缩后仍超硬顶 -> truncate 而不是回退全量",
-          d4.action == cc.ACT_TRUNCATE, d4)
+    check("压缩后仍超硬顶 -> truncate 而不是回退全量", d4.action == cc.ACT_TRUNCATE, d4)
     check("截断理由提到硬顶", "硬顶" in d4.reason, d4.reason)
 
     print("\n[A] 压缩块预算（折叠而非无限膨胀）")
@@ -102,7 +107,9 @@ def main() -> int:
         blk.append(f"第{i}段内容" * 20)
     check("段数不超过上限", len(blk.segments) <= cc.MAX_SEGMENTS, len(blk.segments))
     check("字符数在预算内", blk.chars <= cc.MAX_SUMMARY_CHARS, blk.chars)
-    check("最早内容被折叠成概述", blk.segments[0].startswith("[早期内容已折叠]"), blk.segments[0][:30])
+    check(
+        "最早内容被折叠成概述", blk.segments[0].startswith("[早期内容已折叠]"), blk.segments[0][:30]
+    )
 
     print("\n[B] 增量分段：追加不改旧段")
     b2 = cc.SummaryBlock([])
@@ -111,12 +118,18 @@ def main() -> int:
     b2.append("第二段：用户问英语长难句")
     rendered = b2.render()
     check("旧段原样保留（前缀只增长不重写）", rendered.startswith(first_render), rendered[:60])
-    check("新段追加在后", "第二段" in rendered and rendered.index("第一段") < rendered.index("第二段"))
+    check(
+        "新段追加在后", "第二段" in rendered and rendered.index("第一段") < rendered.index("第二段")
+    )
     check("有分段标记", "[COMPRESSED-1]" in rendered and "[COMPRESSED-2]" in rendered)
 
     print("\n[B2] 序列化往返")
     parsed = cc.SummaryBlock.parse(rendered)
-    check("段数一致", len(parsed.segments) == len(b2.segments), f"{len(parsed.segments)} vs {len(b2.segments)}")
+    check(
+        "段数一致",
+        len(parsed.segments) == len(b2.segments),
+        f"{len(parsed.segments)} vs {len(b2.segments)}",
+    )
     check("渲染一致", parsed.render() == rendered)
     check("空文本解析为空块", cc.SummaryBlock.parse(None).segments == [])
 
@@ -161,22 +174,34 @@ def main() -> int:
             "SELECT compressed_summary, compressed_summary_prev, compressed_upto "
             "FROM conversations WHERE id='s1'"
         ).fetchone()
-    check("prev 存了上一版压缩块（L1 回退的依据）",
-          row["compressed_summary_prev"] is not None, row["compressed_summary_prev"])
+    check(
+        "prev 存了上一版压缩块（L1 回退的依据）",
+        row["compressed_summary_prev"] is not None,
+        row["compressed_summary_prev"],
+    )
 
     print("\n[I] 以 compressed_upto 过滤原文（不重复进上下文）")
-    msgs = [{"id": i, "role": "user" if i % 2 else "assistant", "content": f"m{i}"} for i in range(1, 41)]
+    msgs = [
+        {"id": i, "role": "user" if i % 2 else "assistant", "content": f"m{i}"}
+        for i in range(1, 41)
+    ]
     plan = cc.plan_context("u1", "s1", msgs, keep_turns=2)
-    check("只保留 id > compressed_upto 的消息", plan.keep_message_id_from >= 30,
-          plan.keep_message_id_from)
+    check(
+        "只保留 id > compressed_upto 的消息",
+        plan.keep_message_id_from >= 30,
+        plan.keep_message_id_from,
+    )
     check("压缩块带出来了", "块三" in plan.summary_text, plan.summary_text[:40])
     check("K 轮上限生效（2 轮 = 4 条）", True)
 
     print("\n[J] 触发阈值")
     check("未到阈值不压", cc.should_compress(100, max_context_chars=1000) is False)
     check("超过阈值才压", cc.should_compress(900, max_context_chars=1000) is True)
-    check("token 粗估：纯中文 ≈ 字数（允许标点/量化误差）",
-          4 <= cc.estimate_tokens("你好世界") <= 6, cc.estimate_tokens("你好世界"))
+    check(
+        "token 粗估：纯中文 ≈ 字数（允许标点/量化误差）",
+        4 <= cc.estimate_tokens("你好世界") <= 6,
+        cc.estimate_tokens("你好世界"),
+    )
 
     print()
     if FAILS:

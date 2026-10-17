@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """P2（计划主题识别加固）+ P3（新建会话自动绑定资料库）回归测试。
 
 背景（2026-10-16 线上复现的 14 张截图）：
@@ -43,6 +42,7 @@ def _patch_session_db(monkeypatch, tmp_path):
 
 
 # ==================== 1. detect_plan_topic（纯函数）====================
+
 
 def test_detect_plan_topic_from_question():
     t = detect_plan_topic("帮我做一个六级备考计划")
@@ -94,17 +94,22 @@ def test_plan_topics_align_with_frontend():
 
     src = (
         Path(__file__).resolve().parents[1]
-        / "frontend" / "src" / "components" / "chat" / "plan.tsx"
+        / "frontend"
+        / "src"
+        / "components"
+        / "chat"
+        / "plan.tsx"
     )
     text = src.read_text(encoding="utf-8")
     for t in PLAN_TOPICS:
-        assert 'name: "%s"' % t["name"] in text, "前端缺主题：%s" % t["name"]
+        assert 'name: "{}"'.format(t["name"]) in text, "前端缺主题：{}".format(t["name"])
     study = next(t for t in PLAN_TOPICS if t["name"] == "学习计划")
-    missing = [k for k in study["keys"] if '"%s"' % k not in text]
-    assert not missing, "前端学习计划缺关键词：%s" % missing
+    missing = [k for k in study["keys"] if f'"{k}"' not in text]
+    assert not missing, f"前端学习计划缺关键词：{missing}"
 
 
 # ==================== 2. _resolve_plan_topic（含历史回看）====================
+
 
 def test_resolve_plan_topic_hits_without_history(monkeypatch):
     calls = {"n": 0}
@@ -146,8 +151,8 @@ def test_resolve_plan_topic_from_history_exam_score_only(monkeypatch):
 def test_resolve_plan_topic_prefers_most_recent(monkeypatch):
     monkeypatch.setattr(config, "PLAN_TOPIC_HISTORY_MESSAGES", 6)
     rows = [
-        {"role": "user", "content": "帮我规划一下云南自驾的路线"},      # 旧：旅行
-        {"role": "user", "content": "算了，先把六级备考计划做出来"},     # 新：学习（更近）
+        {"role": "user", "content": "帮我规划一下云南自驾的路线"},  # 旧：旅行
+        {"role": "user", "content": "算了，先把六级备考计划做出来"},  # 新：学习（更近）
     ]
     monkeypatch.setattr(session, "get_messages", lambda *_a, **_k: rows)
     t = asyncio.run(_resolve_plan_topic("u1", "s1", "先给我个每日安排"))
@@ -157,7 +162,7 @@ def test_resolve_plan_topic_prefers_most_recent(monkeypatch):
 def test_resolve_plan_topic_respects_history_limit(monkeypatch):
     monkeypatch.setattr(config, "PLAN_TOPIC_HISTORY_MESSAGES", 1)
     rows = [
-        {"role": "user", "content": "我想考研"},   # 更旧，被上限截掉
+        {"role": "user", "content": "我想考研"},  # 更旧，被上限截掉
         {"role": "assistant", "content": "好的"},
         {"role": "user", "content": "今晚吃什么"},  # 最近一条，命不中
     ]
@@ -168,7 +173,8 @@ def test_resolve_plan_topic_respects_history_limit(monkeypatch):
 def test_resolve_plan_topic_disabled_when_zero(monkeypatch):
     monkeypatch.setattr(config, "PLAN_TOPIC_HISTORY_MESSAGES", 0)
     monkeypatch.setattr(
-        session, "get_messages",
+        session,
+        "get_messages",
         lambda *_a, **_k: [{"role": "user", "content": "六级备考"}],
     )
     # 置 0 = 只看本轮，退回 P2 之前的行为
@@ -188,6 +194,7 @@ def test_resolve_plan_topic_db_error_is_silent(monkeypatch):
 
 # ==================== 3. _augment_plan（提示词注入）====================
 
+
 def test_augment_plan_uses_topic_hint():
     raw = "给我列一份计划"
     out = _augment_plan(raw, True, detect_plan_topic("考研复习计划"))
@@ -205,6 +212,7 @@ def test_augment_plan_no_topic_falls_back_to_default():
 
 
 # ==================== 4. 新建会话自动绑定资料库（P3）====================
+
 
 def test_create_autobinds_single_kb(monkeypatch, tmp_path):
     _patch_session_db(monkeypatch, tmp_path)

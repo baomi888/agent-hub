@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """条件式查询改写自测（纯函数 + 打桩 LLM，不需要网络）。
 
 覆盖三件事：
@@ -8,6 +7,7 @@
 
 运行：python tests/test_query_rewrite.py
 """
+
 import os
 import sys
 

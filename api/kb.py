@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
 from __future__ import annotations
+
 """知识库管理路由。
 
 路由清单：
@@ -55,6 +55,7 @@ def _must_own(uid: str, kb_id: str) -> None:
 
 
 # ==================== 上传 + 建库 ====================
+
 
 @router.post("/{kb_id}/upload")
 async def upload_and_build(
@@ -152,7 +153,7 @@ async def upload_and_build(
     try:
         total, names = await asyncio.to_thread(_build)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=describe_api_error(e))
+        raise HTTPException(status_code=500, detail=describe_api_error(e)) from e
     # 按真实切片数记账：入口那道 ensure 只知道"还没超"，不知道这一次切了多少
     if total:
         await asyncio.to_thread(quota.bump_usage, uid, "embed", total)
@@ -161,8 +162,14 @@ async def upload_and_build(
 
 # ==================== 查询 ====================
 
+
 @router.post("/{kb_id}/query", response_model=KBQueryResponse)
-async def query_kb(kb_id: str, question: str, top_k: int = Query(default=3, gt=0, le=config.TOP_K_MAX), uid: str = Depends(get_current_user)) -> dict:
+async def query_kb(
+    kb_id: str,
+    question: str,
+    top_k: int = Query(default=3, gt=0, le=config.TOP_K_MAX),
+    uid: str = Depends(get_current_user),
+) -> dict:
     """同步问答：返回带 [1][2] 引用角标的答案。"""
     _must_own(uid, kb_id)
     # 一次问答 = 一次检索 + 一次 LLM，落到每日问答额度里
@@ -173,12 +180,13 @@ async def query_kb(kb_id: str, question: str, top_k: int = Query(default=3, gt=0
         answer, refs = await asyncio.to_thread(pipe.answer, question, top_k)
         return {"answer": answer, "refs": refs}
     except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=describe_api_error(e))
+        raise HTTPException(status_code=500, detail=describe_api_error(e)) from e
 
 
 # ==================== 列表 / 状态 / 删除 ====================
+
 
 @router.get("/")
 async def list_kbs(uid: str = Depends(get_current_user)) -> dict:
@@ -212,7 +220,13 @@ async def get_kb_status(kb_id: str, uid: str = Depends(get_current_user)) -> dic
     if status is None:
         # 内存里没记录，但磁盘上可能存在
         if await asyncio.to_thread(pipelines.exists, uid, kb_id):
-            return {"kb_id": kb_id, "chunks": 0, "chunk_size": None, "chunk_overlap": None, "files": []}
+            return {
+                "kb_id": kb_id,
+                "chunks": 0,
+                "chunk_size": None,
+                "chunk_overlap": None,
+                "files": [],
+            }
         raise HTTPException(status_code=404, detail=f"知识库不存在：{kb_id}")
     return status
 
@@ -257,7 +271,9 @@ class DeleteFileRequest(BaseModel):
 
 
 @router.delete("/{kb_id}/files")
-async def delete_file(kb_id: str, req: DeleteFileRequest, uid: str = Depends(get_current_user)) -> dict:
+async def delete_file(
+    kb_id: str, req: DeleteFileRequest, uid: str = Depends(get_current_user)
+) -> dict:
     """删除单个文件：从向量库移除它的片段 + 删掉原始文件 + 更新清单。"""
     _must_own(uid, kb_id)
     name = req.name.strip()
@@ -399,7 +415,7 @@ async def rebuild_kb(kb_id: str, req: RebuildRequest, uid: str = Depends(get_cur
     try:
         total, done = await asyncio.to_thread(_rebuild)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=describe_api_error(e))
+        raise HTTPException(status_code=500, detail=describe_api_error(e)) from e
 
     if not done:
         raise HTTPException(status_code=400, detail="原始文件已全部丢失，请重新上传文档")
@@ -411,6 +427,7 @@ async def rebuild_kb(kb_id: str, req: RebuildRequest, uid: str = Depends(get_cur
 
 
 # ==================== 联网导入 ====================
+
 
 class ImportSearchRequest(BaseModel):
     keyword: str = Field(..., description="联网搜索关键词")
@@ -438,25 +455,31 @@ async def preview_search(req: ImportSearchRequest, uid: str = Depends(get_curren
         results = await asyncio.to_thread(search_preview, req.keyword, req.max_results)
         return {"keyword": req.keyword, "results": results}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/{kb_id}/import-url")
-async def import_single_url(kb_id: str, req: ImportURLRequest, uid: str = Depends(get_current_user)):
+async def import_single_url(
+    kb_id: str, req: ImportURLRequest, uid: str = Depends(get_current_user)
+):
     """直接抓一个 URL 正文追加到指定知识库。"""
     _must_own(uid, kb_id)
     await asyncio.to_thread(quota.guard, uid, "embed")
     try:
-        r = await asyncio.to_thread(import_url, uid, kb_id, req.url, req.chunk_size, req.chunk_overlap)
+        r = await asyncio.to_thread(
+            import_url, uid, kb_id, req.url, req.chunk_size, req.chunk_overlap
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
     if r.get("chunks"):
         await asyncio.to_thread(quota.bump_usage, uid, "embed", r["chunks"])
     return r
 
 
 @router.post("/{kb_id}/import-batch")
-async def import_batch_urls(kb_id: str, req: ImportBatchRequest, uid: str = Depends(get_current_user)) -> dict:
+async def import_batch_urls(
+    kb_id: str, req: ImportBatchRequest, uid: str = Depends(get_current_user)
+) -> dict:
     """批量抓多个 URL 追加入库（搜索勾选结果的落地接口）。"""
     _must_own(uid, kb_id)
     if not req.urls:
@@ -467,12 +490,17 @@ async def import_batch_urls(kb_id: str, req: ImportBatchRequest, uid: str = Depe
             import_urls_batch, uid, kb_id, req.urls, req.chunk_size, req.chunk_overlap
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
     got = sum(int(r.get("chunks") or 0) for r in results)
     if got:
         await asyncio.to_thread(quota.bump_usage, uid, "embed", got)
     ok_count = sum(1 for r in results if r["ok"])
-    return {"total": len(results), "ok": ok_count, "failed": len(results) - ok_count, "details": results}
+    return {
+        "total": len(results),
+        "ok": ok_count,
+        "failed": len(results) - ok_count,
+        "details": results,
+    }
 
 
 async def _close_download(client, resp) -> None:
@@ -496,8 +524,9 @@ async def download_remote(url: str, uid: str = Depends(get_current_user)) -> Res
     浏览器，一个 ISO 级文件就能把进程打爆。这里改成边收边发（256KB 一块），
     并加 200MB 上限（优先看 Content-Length，缺失时在流式过程中兜底拦截）。
     """
-    import httpx
     from urllib.parse import quote, unquote, urljoin
+
+    import httpx
 
     await asyncio.to_thread(quota.hit, uid)
 
@@ -507,11 +536,11 @@ async def download_remote(url: str, uid: str = Depends(get_current_user)) -> Res
         # 服务端代理下载 = 让浏览器借服务器的网络位置取东西，必须挡 SSRF
         assert_safe_url(url)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                      "(KHTML, like Gecko) Chrome/124.0 Agent/1.0",
+        "(KHTML, like Gecko) Chrome/124.0 Agent/1.0",
     }
     # 不用 async with：流式响应要在函数返回后才消费，客户端必须活到生成器结束
     client = httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=300.0), follow_redirects=False)
@@ -529,7 +558,7 @@ async def download_remote(url: str, uid: str = Depends(get_current_user)) -> Res
                 try:
                     assert_safe_url(nxt)
                 except ValueError as e:
-                    raise HTTPException(status_code=400, detail=str(e))
+                    raise HTTPException(status_code=400, detail=str(e)) from e
                 req = client.build_request("GET", nxt, headers=headers)
                 resp = await client.send(req, stream=True)
         resp.raise_for_status()
@@ -538,13 +567,17 @@ async def download_remote(url: str, uid: str = Depends(get_current_user)) -> Res
         raise
     except Exception:
         await _close_download(client, resp)
-        raise HTTPException(status_code=500, detail="下载失败：无法访问该链接或网络异常。")
+        raise HTTPException(
+            status_code=500, detail="下载失败：无法访问该链接或网络异常。"
+        ) from None
 
     # 先看 Content-Length，超限直接拒（能拿到时是最干净的一刀）
     cl = resp.headers.get("content-length")
     if cl and cl.isdigit() and int(cl) > _DOWNLOAD_MAX_MB * 1024 * 1024:
         await _close_download(client, resp)
-        raise HTTPException(status_code=413, detail=f"文件超过 {_DOWNLOAD_MAX_MB}MB 上限，已拒绝下载")
+        raise HTTPException(
+            status_code=413, detail=f"文件超过 {_DOWNLOAD_MAX_MB}MB 上限，已拒绝下载"
+        )
 
     # 文件名：优先 Content-Disposition，其次 URL 路径
     cd = resp.headers.get("content-disposition", "")
@@ -552,7 +585,9 @@ async def download_remote(url: str, uid: str = Depends(get_current_user)) -> Res
     filename = unquote(m.group(1)) if m else ""
     if not filename:
         filename = os.path.basename(url.split("?")[0].split("#")[0]) or "download"
-    content_type = resp.headers.get("content-type", "application/octet-stream").split(";")[0].strip()
+    content_type = (
+        resp.headers.get("content-type", "application/octet-stream").split(";")[0].strip()
+    )
 
     async def _body():
         total = 0

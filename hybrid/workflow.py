@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """工作流引擎（要求 2：节点定义 / 条件分支 / 超时控制 / 重试 / 失败跳转）。
 
 执行模型：
@@ -22,7 +21,8 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from typing import Any, AsyncIterator, Literal
+from collections.abc import AsyncIterator
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -46,6 +46,7 @@ class _Suspend(Exception):
 
 
 # ==================== 定义模型 ====================
+
 
 class NodeDef(BaseModel):
     id: str
@@ -119,6 +120,7 @@ def render_template(template: str, ctx: TaskContext) -> str:
     而且 format spec 有属性访问注入面。正则只认这两类，缺失的 shared key
     渲染为空串（宁可空着也不让流程炸掉）。
     """
+
     def _sub(m: re.Match) -> str:
         if m.group(1) == "question":
             return ctx.goal
@@ -135,6 +137,7 @@ def render_template(template: str, ctx: TaskContext) -> str:
 
 
 # ==================== 工作流引擎 ====================
+
 
 class WorkflowEngine:
     """一次工作流执行。实例随执行段创建（result 挂在实例上，不共享状态）。"""
@@ -155,13 +158,16 @@ class WorkflowEngine:
     def _get_llm(self) -> Any:
         if self._llm is None:
             from core.llm import get_llm
+
             # 内部推理调用必须显式 max_tokens（project memory 硬约束）
             self._llm = get_llm(temperature=0.3, max_tokens=config.HYBRID_LLM_MAX_TOKENS)
         return self._llm
 
     # ---------- 主循环 ----------
 
-    async def stream(self, ctx: TaskContext, control: ControlFn, **_: Any) -> AsyncIterator[ExecEvent]:
+    async def stream(
+        self, ctx: TaskContext, control: ControlFn, **_: Any
+    ) -> AsyncIterator[ExecEvent]:
         wf_state = ctx.workflow_state
         wf_state.setdefault("completed", [])
         wf_state.setdefault("node_outputs", {})
@@ -181,7 +187,9 @@ class WorkflowEngine:
                 node = nodes.get(current)
                 if node is None:
                     self.result = EngineResult(
-                        status="failed", signal="node_failed", node_id=current,
+                        status="failed",
+                        signal="node_failed",
+                        node_id=current,
                         error=f"节点 {current} 不存在（定义可能在执行中被改）",
                     )
                     return
@@ -196,7 +204,9 @@ class WorkflowEngine:
                 if node.requires_agent and wf_state.get("agent_handled") != current:
                     wf_state["next_node"] = current
                     self.result = EngineResult(
-                        status="switched", signal="requires_agent", node_id=current,
+                        status="switched",
+                        signal="requires_agent",
+                        node_id=current,
                         output_key=node.config.get("output_key"),
                     )
                     return
@@ -212,7 +222,9 @@ class WorkflowEngine:
                     if _key:
                         shared_set(ctx.shared, _key, node.config.get("resume_value", "approved"))
                     yield ExecEvent(
-                        event_type="human_intervention", mode="workflow", node_id=current,
+                        event_type="human_intervention",
+                        mode="workflow",
+                        node_id=current,
                         decision={"rule": "human_resume", "reason": "人工已确认，从断点继续"},
                         payload={"decision": "approved", "resumed": True},
                     )
@@ -224,7 +236,9 @@ class WorkflowEngine:
 
                 if not agent_already_handled:
                     yield ExecEvent(
-                        event_type="node_enter", mode="workflow", node_id=current,
+                        event_type="node_enter",
+                        mode="workflow",
+                        node_id=current,
                         payload={"type": node.type, "name": node.name or node.id},
                     )
                     # 直接消费节点生成器：事件原样透传给编排器，
@@ -245,27 +259,40 @@ class WorkflowEngine:
                         wf_state["suspended_at"] = sp.node_id
                         ctx.status = "awaiting_human"
                         self.result = EngineResult(
-                            status="awaiting_human", node_id=sp.node_id,
-                            output_key=node.config.get("output_key"), signal="human_suspend",
+                            status="awaiting_human",
+                            node_id=sp.node_id,
+                            output_key=node.config.get("output_key"),
+                            signal="human_suspend",
                         )
                         return
                     if error is not None:
                         # 失败路径：on_fail 跳转优先，否则上报切换判定
                         if node.on_fail:
                             yield ExecEvent(
-                                event_type="node_exit", mode="workflow", node_id=current,
-                                payload={"status": "failed", "on_fail": node.on_fail, "error": error},
+                                event_type="node_exit",
+                                mode="workflow",
+                                node_id=current,
+                                payload={
+                                    "status": "failed",
+                                    "on_fail": node.on_fail,
+                                    "error": error,
+                                },
                             )
                             wf_state["completed"].append(current)
                             current = node.on_fail
                             wf_state["next_node"] = current
                             continue
                         self.result = EngineResult(
-                            status="failed", signal="node_failed", node_id=current, error=error,
+                            status="failed",
+                            signal="node_failed",
+                            node_id=current,
+                            error=error,
                         )
                         return
                     yield ExecEvent(
-                        event_type="node_exit", mode="workflow", node_id=current,
+                        event_type="node_exit",
+                        mode="workflow",
+                        node_id=current,
                         payload={"status": "ok"},
                     )
                     wf_state["completed"].append(current)
@@ -274,8 +301,12 @@ class WorkflowEngine:
                 nxt, no_route = self._route(current, ctx)
                 if no_route:
                     err = f"节点 {current} 的条件分支无匹配"
-                    yield ExecEvent(event_type="error", mode="workflow", node_id=current, payload={"error": err})
-                    self.result = EngineResult(status="failed", signal="node_failed", node_id=current, error=err)
+                    yield ExecEvent(
+                        event_type="error", mode="workflow", node_id=current, payload={"error": err}
+                    )
+                    self.result = EngineResult(
+                        status="failed", signal="node_failed", node_id=current, error=err
+                    )
                     return
                 current = nxt
                 wf_state["next_node"] = current
@@ -312,7 +343,7 @@ class WorkflowEngine:
                         err = ev.payload.get("error", "节点执行失败")
                         break
                     yield ev
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 err = f"节点超时（>{timeout}s）"
             except _Suspend:
                 # 挂起必须原样穿透：它不是失败！若落到下面的 except Exception，
@@ -327,10 +358,14 @@ class WorkflowEngine:
             last_error = err
             if attempt < attempts:
                 yield ExecEvent(
-                    event_type="status", mode="workflow", node_id=node.id,
+                    event_type="status",
+                    mode="workflow",
+                    node_id=node.id,
                     payload={"text": f"节点 {node.id} 第 {attempt} 次失败，重试中：{err}"},
                 )
-        yield ExecEvent(event_type="error", mode="workflow", node_id=node.id, payload={"error": last_error})
+        yield ExecEvent(
+            event_type="error", mode="workflow", node_id=node.id, payload={"error": last_error}
+        )
 
     # ---------- 节点执行器 ----------
 
@@ -394,7 +429,9 @@ class WorkflowEngine:
             if key:
                 shared_set(ctx.shared, key, node.config.get("resume_value", "approved"))
             yield ExecEvent(
-                event_type="human_intervention", mode="workflow", node_id=node.id,
+                event_type="human_intervention",
+                mode="workflow",
+                node_id=node.id,
                 decision={
                     "rule": "human_resume" if resumed else "human_auto",
                     "reason": "人工已确认，继续执行" if resumed else "未要求挂起，自动通过",
@@ -406,7 +443,9 @@ class WorkflowEngine:
             )
         else:
             yield ExecEvent(
-                event_type="error", mode="workflow", node_id=node.id,
+                event_type="error",
+                mode="workflow",
+                node_id=node.id,
                 payload={"error": f"未知节点类型：{node.type}"},
             )
 
@@ -434,7 +473,9 @@ class WorkflowEngine:
                 text = chunk.content if isinstance(chunk.content, str) else ""
                 if text:
                     chunks.append(text)
-                    yield ExecEvent(event_type="token", mode="workflow", node_id=node.id, payload={"text": text})
+                    yield ExecEvent(
+                        event_type="token", mode="workflow", node_id=node.id, payload={"text": text}
+                    )
             ctx.shared[key] = "".join(chunks)
         else:
             resp = await llm.ainvoke(prompt)
@@ -448,13 +489,16 @@ class WorkflowEngine:
         安全边界：工具查谁的库不由配置说了算）。
         """
         from langchain_core.runnables import RunnableConfig
+
         from agent.tools import AGENT_TOOLS
 
         tool_name = node.config.get("tool", "")
         tool = next((t for t in AGENT_TOOLS if t.name == tool_name), None)
         if tool is None:
             yield ExecEvent(
-                event_type="error", mode="workflow", node_id=node.id,
+                event_type="error",
+                mode="workflow",
+                node_id=node.id,
                 payload={"error": f"未知工具：{tool_name}"},
             )
             return
@@ -463,10 +507,14 @@ class WorkflowEngine:
             for k, v in (node.config.get("args") or {}).items()
         }
         yield ExecEvent(
-            event_type="tool_call", mode="workflow", node_id=node.id,
+            event_type="tool_call",
+            mode="workflow",
+            node_id=node.id,
             payload={"name": tool_name, "input": args},
         )
-        cfg: RunnableConfig = {"configurable": {"owner_id": ctx.owner_id, "kb_id": ctx.agent_state.get("kb_id")}}
+        cfg: RunnableConfig = {
+            "configurable": {"owner_id": ctx.owner_id, "kb_id": ctx.agent_state.get("kb_id")}
+        }
         out = await tool.ainvoke(args, config=cfg)
         key = node.config.get("output_key") or f"node_{node.id}"
         ctx.shared[key] = str(out)
@@ -477,7 +525,9 @@ class WorkflowEngine:
         """Agent 节点：内嵌一次 Agent 执行（config = {goal, output_key}）。"""
         if self._agent_factory is None:
             yield ExecEvent(
-                event_type="error", mode="workflow", node_id=node.id,
+                event_type="error",
+                mode="workflow",
+                node_id=node.id,
                 payload={"error": "Agent 引擎未装配"},
             )
             return
@@ -489,7 +539,9 @@ class WorkflowEngine:
         r = eng.result
         if r is None or r.status != "completed":
             yield ExecEvent(
-                event_type="error", mode="workflow", node_id=node.id,
+                event_type="error",
+                mode="workflow",
+                node_id=node.id,
                 payload={"error": (r.error if r else "Agent 执行异常")},
             )
 

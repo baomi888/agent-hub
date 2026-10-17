@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
 from __future__ import annotations
+
 """RAG 核心逻辑（文档加载 → 切片 → Embedding → Chroma → 检索 → 提示词组装 → LLM 生成）
 
 与界面完全分离，可被 Agent / FastAPI / 后续前端复用。
@@ -56,11 +56,14 @@ def chroma_client():
                 _CHROMA_CLIENT = chromadb.PersistentClient(path=config.PERSIST_DIR)
     return _CHROMA_CLIENT
 
+
 # RAG 系统提示词：仅依据参考资料回答；资料不足时说明情况并给出下一步，不做冷拒答
 SYSTEM_PROMPT = """你是一个严谨的问答助手，必须遵守以下规则：
 1. 仅依据【参考资料】回答用户问题，不得使用资料之外的任何知识；
 2. 回答末尾注明依据的片段编号，例如（依据：[1][3]）；
-3. 如果参考资料不足以回答问题，不要只甩一句冷冰冰的拒答。先一句话说明「知识库里暂时没有这段内容，所以我不能按资料乱答」，再给出下一步（把相关文档放进这个知识库，或者换成联网搜索），语气自然、简短；
+3. 如果参考资料不足以回答问题，不要只甩一句冷冰冰的拒答。
+   先一句话说明「知识库里暂时没有这段内容，所以我不能按资料乱答」，
+   再给出下一步（把相关文档放进这个知识库，或者换成联网搜索），语气自然、简短；
 4. 用中文简洁作答，不要编造任何资料中没有的信息；
 5. 如果用户输入的是词语或短语（而非完整问题），则根据参考资料围绕该主题做简要介绍。"""
 
@@ -71,7 +74,10 @@ def describe_api_error(e: Exception) -> str:
     # openai 认证/网络/限额类异常
     if cls_name == "AuthenticationError" or "401" in str(e):
         return "401 认证失败：密钥无效，请检查 .env 中各接口对应的 Key 与 BASE_URL"
-    if cls_name in ("APIConnectionError", "ConnectError", "ConnectionError") or "connect" in str(e).lower():
+    if (
+        cls_name in ("APIConnectionError", "ConnectError", "ConnectionError")
+        or "connect" in str(e).lower()
+    ):
         return "网络连接失败：请检查网络/代理以及各 BASE_URL 配置"
     if cls_name == "RateLimitError" or "429" in str(e):
         return "429 请求受限：请求过于频繁或额度不足，请稍后再试"
@@ -242,7 +248,7 @@ def _get_bm25(vs, collection_name: str):
         ids = got.get("ids") or []
         docs = [
             Document(page_content=t or "", metadata=m or {}, id=i)
-            for t, m, i in zip(texts, metas, ids)
+            for t, m, i in zip(texts, metas, ids, strict=False)
         ]
         index = _BM25([_tokenize(d.page_content) for d in docs])
         entry = (docs, index)
@@ -295,10 +301,10 @@ def _rrf_merge(vec_cands, kw_pairs, kw_docs, rrf_k: int) -> list:
 # ==================== 可信度判定（P0）====================
 
 # 依据强度分级。前端按这个字段决定要不要给回答加"依据较弱"的提示条。
-STRENGTH_HIGH = "high"      # 至少一条强相关：可以正常回答
+STRENGTH_HIGH = "high"  # 至少一条强相关：可以正常回答
 STRENGTH_MEDIUM = "medium"  # 有相关但不强：正常回答，但标注依据强度
-STRENGTH_LOW = "low"        # 全都不够格：必须示弱，不许硬答
-STRENGTH_NONE = "none"      # 什么都没检索到
+STRENGTH_LOW = "low"  # 全都不够格：必须示弱，不许硬答
+STRENGTH_NONE = "none"  # 什么都没检索到
 
 
 def assess_grounding(docs_scores) -> dict:
@@ -541,8 +547,9 @@ def _cache_get(collection_name: str, question: str, top_k: int, owner: str | Non
     return None
 
 
-def _cache_set(collection_name: str, question: str, top_k: int, result,
-              owner: str | None = None) -> None:
+def _cache_set(
+    collection_name: str, question: str, top_k: int, result, owner: str | None = None
+) -> None:
     key = (collection_name, question, top_k, owner)
     with _RETRIEVE_CACHE_LOCK:
         _RETRIEVE_CACHE[key] = list(result)
@@ -554,6 +561,7 @@ def _cache_set(collection_name: str, question: str, top_k: int, result,
 def _apply_profile_bias(docs_scores, owner):
     """D 块：读取用户画像标签，对命中主题的片段做减距离偏置并重排。"""
     from core import session as _session
+
     profile = _session.get_user_tags(owner, limit=config.RETRIEVAL_BIAS_TOP)
     if not profile:
         return docs_scores
@@ -666,8 +674,23 @@ def _embed_query(question: str) -> list[float]:
 # 一次 LLM 调用，其余问题零额外开销（这是它跟"每题都改写"的关键区别）。
 
 _REWRITE_CUES = (
-    "它", "他", "她", "这个", "那个", "这些", "那些", "该", "此", "其",
-    "上述", "前者", "后者", "这样", "那样", "这里", "那里",
+    "它",
+    "他",
+    "她",
+    "这个",
+    "那个",
+    "这些",
+    "那些",
+    "该",
+    "此",
+    "其",
+    "上述",
+    "前者",
+    "后者",
+    "这样",
+    "那样",
+    "这里",
+    "那里",
 )
 
 
@@ -719,6 +742,7 @@ def rewrite_query(question: str, history) -> str:
 
 # ==================== 文档加载 ====================
 
+
 def load_document(file_path: str, source_name: str | None = None):
     """加载单个文档，返回 Document 列表。
 
@@ -747,7 +771,7 @@ def load_document(file_path: str, source_name: str | None = None):
             raise ValueError(
                 f"PDF 解析失败：{e}。可能原因：① 扫描版 PDF（无文字层）需先 OCR；"
                 f"② 文件加密或损坏；③ 文件过大。建议转换为 TXT/Markdown 后再上传。"
-            )
+            ) from e
     if not docs or all(not (d.page_content or "").strip() for d in docs):
         raise ValueError(
             "PDF 未提取到任何文字内容。若为扫描件请先 OCR，或导出为 TXT/Markdown 后再上传。"
@@ -768,6 +792,7 @@ def split_documents(docs, chunk_size: int, chunk_overlap: int):
 
 # ==================== 主题标签（方案 C · A 块）====================
 
+
 def _extract_topics_one(text: str) -> list[str]:
     """用 LLM 从一段文档文本里抽 3~6 个简短中文主题标签。
 
@@ -786,7 +811,7 @@ def _extract_topics_one(text: str) -> list[str]:
         prompt = (
             "你是文档主题标注器。请阅读下面这段文档内容，提取最能概括它主题的 "
             "3~6 个简短中文标签（每个标签不超过 6 个字，如：线性代数、考研数学、操作系统）。\n"
-            "只输出一个 JSON 数组，例如 [\"线性代数\",\"考研数学\"]，"
+            '只输出一个 JSON 数组，例如 ["线性代数","考研数学"]，'
             "不要解释，不要 Markdown 代码块，不要多余文字。\n\n"
             f"【文档内容】\n{text[:4000]}"
         )
@@ -799,6 +824,7 @@ def _extract_topics_one(text: str) -> list[str]:
                 raw = raw[4:]
             raw = raw.strip()
         import json as _json
+
         tags = _json.loads(raw)
         out: list[str] = []
         for t in tags:
@@ -848,7 +874,7 @@ def _inject_topics(chunks) -> None:
         src = c.metadata.get("source") or ""
         if src:
             by_source.setdefault(src, []).append(c)
-    for src, group in by_source.items():
+    for _src, group in by_source.items():
         text = _join_head(group)
         tags = _extract_topics_one(text)
         if not tags:
@@ -941,11 +967,13 @@ def _embed_and_store(vs, chunks) -> None:
     batches = []
     for i in range(0, len(chunks), bs):
         part = chunks[i : i + bs]
-        batches.append((
-            [c.page_content for c in part],
-            [c.metadata for c in part],
-            [str(uuid.uuid4()) for _ in part],
-        ))
+        batches.append(
+            (
+                [c.page_content for c in part],
+                [c.metadata for c in part],
+                [str(uuid.uuid4()) for _ in part],
+            )
+        )
     emb = vs._embedding_function
     workers = max(1, min(config.EMBED_CONCURRENCY, len(batches)))
 
@@ -958,10 +986,8 @@ def _embed_and_store(vs, chunks) -> None:
         else:
             # 同一窗口内的各批并发发出；list() 会等齐并按提交顺序返回
             vectors = list(pool.map(lambda b: emb.embed_documents(b[0]), window))
-        for (texts, metadatas, ids), vecs in zip(window, vectors):
-            vs._collection.upsert(
-                ids=ids, embeddings=vecs, documents=texts, metadatas=metadatas
-            )
+        for (texts, metadatas, ids), vecs in zip(window, vectors, strict=False):
+            vs._collection.upsert(ids=ids, embeddings=vecs, documents=texts, metadatas=metadatas)
 
 
 class RagPipeline:
@@ -969,8 +995,8 @@ class RagPipeline:
 
     def __init__(self, collection_name: str) -> None:
         self.collection_name = collection_name  # 如 kb_001 / kb_nba
-        self._vs = None          # Chroma 实例缓存
-        self._params = None      # 当前库对应的 (chunk_size, chunk_overlap)
+        self._vs = None  # Chroma 实例缓存
+        self._params = None  # 当前库对应的 (chunk_size, chunk_overlap)
 
     # ---------- 建库 ----------
     def _ensure_vs(self):
@@ -1106,17 +1132,21 @@ class RagPipeline:
         except Exception:
             return []
         items: list[dict] = []
-        for text, md in zip(got.get("documents") or [], got.get("metadatas") or []):
+        for text, md in zip(got.get("documents") or [], got.get("metadatas") or [], strict=False):
             md = md or {}
-            items.append({
-                "page": md.get("page"),
-                "chunk_index": md.get("chunk_index"),
-                "text": text or "",
-            })
-        items.sort(key=lambda x: (
-            x["page"] if isinstance(x["page"], int) else 0,
-            x["chunk_index"] if isinstance(x["chunk_index"], int) else 0,
-        ))
+            items.append(
+                {
+                    "page": md.get("page"),
+                    "chunk_index": md.get("chunk_index"),
+                    "text": text or "",
+                }
+            )
+        items.sort(
+            key=lambda x: (
+                x["page"] if isinstance(x["page"], int) else 0,
+                x["chunk_index"] if isinstance(x["chunk_index"], int) else 0,
+            )
+        )
         return items
 
     def list_sources(self) -> list[dict]:
@@ -1246,9 +1276,7 @@ class RagPipeline:
             result = None
             if config.HYBRID_ENABLED:
                 try:
-                    merged = self._hybrid_candidates(
-                        question, vec_cands, config.HYBRID_KEYWORD_TOP
-                    )
+                    merged = self._hybrid_candidates(question, vec_cands, config.HYBRID_KEYWORD_TOP)
                 except Exception:
                     merged = None  # 关键词通道是增益不是必需：出错就退回纯向量
                 if merged:
@@ -1285,12 +1313,14 @@ class RagPipeline:
                 strength = STRENGTH_MEDIUM
             else:
                 strength = STRENGTH_LOW
-            metas.append({
-                "source": os.path.basename(d.metadata.get("source", "?")),
-                "page": d.metadata.get("page"),
-                "sim": sim,
-                "strength": strength,
-            })
+            metas.append(
+                {
+                    "source": os.path.basename(d.metadata.get("source", "?")),
+                    "page": d.metadata.get("page"),
+                    "sim": sim,
+                    "strength": strength,
+                }
+            )
         return metas
 
     @staticmethod
@@ -1302,16 +1332,18 @@ class RagPipeline:
         """
         metas = RagPipeline._source_meta(docs_scores)
         out = []
-        for i, ((d, _distance), m) in enumerate(zip(docs_scores, metas)):
-            out.append({
-                "id": i + 1,
-                "source": m["source"],
-                "page": (m["page"] + 1) if isinstance(m["page"], int) else None,
-                "score": round(m["sim"], 4) if m["sim"] is not None else None,
-                "strength": m["strength"],
-                "preview": d.page_content.replace("\n", " ")[:80],
-                "text": d.page_content[:1500],
-            })
+        for i, ((d, _distance), m) in enumerate(zip(docs_scores, metas, strict=False)):
+            out.append(
+                {
+                    "id": i + 1,
+                    "source": m["source"],
+                    "page": (m["page"] + 1) if isinstance(m["page"], int) else None,
+                    "score": round(m["sim"], 4) if m["sim"] is not None else None,
+                    "strength": m["strength"],
+                    "preview": d.page_content.replace("\n", " ")[:80],
+                    "text": d.page_content[:1500],
+                }
+            )
         return out
 
     @staticmethod
@@ -1319,7 +1351,7 @@ class RagPipeline:
         """参考片段格式化：来源文件名 + 页码 + 相似度 + 60 字预览。"""
         metas = RagPipeline._source_meta(docs_scores)
         lines = []
-        for i, ((d, _distance), m) in enumerate(zip(docs_scores, metas)):
+        for i, ((d, _distance), m) in enumerate(zip(docs_scores, metas, strict=False)):
             # 页码与相似度取自 _source_meta，与 build_sources 同一口径
             loc = f" 第{m['page'] + 1}页" if m["page"] is not None else ""
             head = f"**[{i + 1}]** {m['source']}{loc}"

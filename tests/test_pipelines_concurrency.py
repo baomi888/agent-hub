@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """并发安全自测：注册表锁 + 文件清单原子写。
 
 纯本地、不联网、不碰真实数据（PROJECT_ROOT 指到临时目录，跑完还原）。
@@ -59,12 +58,18 @@ def test_1_concurrent_records() -> None:
 
     def worker(tid: int) -> None:
         for j in range(per_thread):
-            pipelines.add_file_records(OWNER, kb, [{
-                "name": f"t{tid}_f{j}.txt",
-                "chunks": 1,
-                "added_at": 0,
-                "origin": "upload",
-            }])
+            pipelines.add_file_records(
+                OWNER,
+                kb,
+                [
+                    {
+                        "name": f"t{tid}_f{j}.txt",
+                        "chunks": 1,
+                        "added_at": 0,
+                        "origin": "upload",
+                    }
+                ],
+            )
 
     ts = [threading.Thread(target=worker, args=(i,)) for i in range(n_threads)]
     for t in ts:
@@ -73,14 +78,18 @@ def test_1_concurrent_records() -> None:
         t.join()
 
     names = pipelines.get_file_names(OWNER, kb)
-    check(len(names) == n_threads * per_thread,
-          f"{n_threads}x{per_thread} 条记录全在（实际 {len(names)}）")
+    check(
+        len(names) == n_threads * per_thread,
+        f"{n_threads}x{per_thread} 条记录全在（实际 {len(names)}）",
+    )
 
     # 磁盘上也得是对的：不看内存缓存，直接读文件
     with open(pipelines._files_path(), encoding="utf-8") as f:
         on_disk = json.load(f)
-    check(len(on_disk.get(kb, [])) == n_threads * per_thread,
-          f"落盘内容同样完整（实际 {len(on_disk.get(kb, []))}）")
+    check(
+        len(on_disk.get(kb, [])) == n_threads * per_thread,
+        f"落盘内容同样完整（实际 {len(on_disk.get(kb, []))}）",
+    )
 
 
 def test_2_never_read_partial() -> None:
@@ -135,7 +144,7 @@ def test_3_transient_lock_recovers() -> None:
     p = pipelines._files_path()
     pipelines.add_file_records(OWNER, kb, [{"name": "first.txt", "chunks": 1, "added_at": 0}])
 
-    blocker = open(p, "r", encoding="utf-8")  # 占住句柄
+    blocker = open(p, encoding="utf-8")  # 占住句柄
     done = threading.Event()
 
     def writer() -> None:
@@ -164,7 +173,7 @@ def test_4_old_file_survives() -> None:
     pipelines.add_file_records(OWNER, kb, [{"name": "keep.txt", "chunks": 1, "added_at": 0}])
     good = open(p, encoding="utf-8").read()
 
-    blocker = open(p, "r", encoding="utf-8")
+    blocker = open(p, encoding="utf-8")
     try:
         pipelines.add_file_records(OWNER, kb, [{"name": "lost.txt", "chunks": 1, "added_at": 0}])
     finally:
@@ -222,7 +231,9 @@ def test_6_reentrant() -> None:
 
     def worker() -> None:
         with pipelines._REGISTRY_LOCK:
-            pipelines.add_file_records(OWNER, _own("re_kb"), [{"name": "x.txt", "chunks": 1, "added_at": 0}])
+            pipelines.add_file_records(
+                OWNER, _own("re_kb"), [{"name": "x.txt", "chunks": 1, "added_at": 0}]
+            )
         done.set()
 
     t = threading.Thread(target=worker, daemon=True)

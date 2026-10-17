@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 把知穗前端依赖的两个外部中文字体离线化，彻底去掉 layout.tsx 里的 jsdelivr / 飞书外链。
 
@@ -19,15 +18,14 @@
 产出：frontend/public/fonts/*.woff2 + frontend/public/fonts/fonts.css
 用法：python tools/subset_fonts_project.py
 """
-import os
-import re
+
 import glob
-import sys
+import os
 
 from fontTools import ttLib
-from fontTools.varLib import instancer
-from fontTools.subset import Subsetter, Options
+from fontTools.subset import Options, Subsetter
 from fontTools.ttLib.tables._g_l_y_f import GlyphCoordinates
+from fontTools.varLib import instancer
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PUBLIC_FONTS = os.path.join(ROOT, "frontend", "public", "fonts")
@@ -81,7 +79,7 @@ def collect_source_chars():
         files.extend(glob.glob(p, recursive=True))
     for f in files:
         try:
-            with open(f, "r", encoding="utf-8") as fh:
+            with open(f, encoding="utf-8") as fh:
                 text = fh.read()
         except Exception:
             continue
@@ -97,7 +95,10 @@ def build_charsets():
     # ASCII 全量（数字/英文/符号），保证任何拉丁字符都有字形
     strict |= set(chr(c) for c in range(0x20, 0x7F))
     # 一些常用全角标点/符号兜底
-    strict |= set("　，。、；：？！“”‘’（）《》【】〔〕—…·～「」『』〈〉「」『』｛｝［］％＆＊＋＝＜＞／＼｜＠＃")
+    strict |= set(
+        "　，。、；：？！“”‘’（）《》【】〔〕—…·～「」『』〈〉「」『』"
+        "｛｝［］％＆＊＋＝＜＞／＼｜＠＃"
+    )
     full = strict | gb2312_chars()
     return "".join(sorted(strict)), "".join(sorted(full))
 
@@ -171,9 +172,7 @@ def subset_one(family, src_path, weight, slug, charset, need_gb2312):
     font = ttLib.TTFont(src_path)
     # Noto 可变字体需要实例化到目标字重；LXGW 是静态 TTF，跳过
     if "fvar" in font:
-        font = instancer.instantiateVariableFont(
-            font, {"wght": weight}, inplace=False
-        )
+        font = instancer.instantiateVariableFont(font, {"wght": weight}, inplace=False)
     opts = Options()
     opts.flavor = "woff2"
     opts.desubroutinize = True
@@ -193,7 +192,7 @@ def subset_one(family, src_path, weight, slug, charset, need_gb2312):
     font.save(out_path)
     size = os.path.getsize(out_path)
     tag = "full(含GB2312)" if need_gb2312 else "strict(仅源码)"
-    print(f"    [OK] {out_name}  ({size/1024:.1f} KB)  [{tag}]")
+    print(f"    [OK] {out_name}  ({size / 1024:.1f} KB)  [{tag}]")
     return out_name
 
 
@@ -207,15 +206,14 @@ def main():
         name = subset_one(family, src, weight, slug, charset, need_gb2312)
         if name:
             css_blocks.append(
-                "/* %s */\n"
+                f"/* {family} */\n"
                 "@font-face {\n"
-                "  font-family: '%s';\n"
+                f"  font-family: '{family}';\n"
                 "  font-style: normal;\n"
-                "  font-weight: %d;\n"
+                f"  font-weight: {weight};\n"
                 "  font-display: swap;\n"
-                "  src: url('/fonts/%s') format('woff2');\n"
+                f"  src: url('/fonts/{name}') format('woff2');\n"
                 "}\n"
-                % (family, family, weight, name)
             )
     css_path = os.path.join(PUBLIC_FONTS, "fonts.css")
     with open(css_path, "w", encoding="utf-8") as fh:

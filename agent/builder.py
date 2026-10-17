@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
 from __future__ import annotations
+
 """Agent 构建（LangChain v1 create_agent）。
 
 核心：create_agent(model, tools, system_prompt)
@@ -18,9 +18,9 @@ from collections import OrderedDict
 from langchain.agents import create_agent
 
 from agent.tools import AGENT_TOOLS
-from core.llm import get_llm
 from core import config, tool_registry
 from core import scenarios as scenarios_mod
+from core.llm import get_llm
 
 SYSTEM_PROMPT = """你是一个智能问答助手，拥有以下能力：
   - 从知识库中检索资料（kb_search）
@@ -34,8 +34,10 @@ SYSTEM_PROMPT = """你是一个智能问答助手，拥有以下能力：
   2. 需要知识库资料时用 kb_search；需要最新互联网信息时用 web_search。
   3. 数学计算必须用 calculator 工具，禁止口算。
   4. 天气查询优先用 get_weather，支持中文或拼音输入（如 北京 / beijing）。
-  5. 当用户要求"搜索并下载论文/文档/报告"时，先用 web_search 找到文件直链，再用 download_file 下载；若用户说明要入库，传入对应的 kb_id。
-  6. 若某工具明确返回失败（如提示"暂时不可用"），不要用相同参数重复调用该工具，直接基于已有信息回答或如实告知用户。
+  5. 当用户要求"搜索并下载论文/文档/报告"时，先用 web_search 找到文件直链，再用 download_file 下载；
+     若用户说明要入库，传入对应的 kb_id。
+  6. 若某工具明确返回失败（如提示"暂时不可用"），不要用相同参数重复调用该工具，
+     直接基于已有信息回答或如实告知用户。
   7. 工具返回错误时如实向用户解释，绝不编造。
   8. 参考知识库资料回答时，末尾注明来源编号（依据：[1][2]）。
      只用真正支撑了结论的片段当依据；kb_search 在检索偏弱（相似度过低或仅沾边）
@@ -103,8 +105,9 @@ def location_note(location: dict | None) -> str:
     if has_xy:
         return (
             f"\n\n【用户当前位置】经纬度 {lat}, {lon}（前端地理定位得到，未反查出城市名）。"
-            "当用户询问天气且未指定城市时，调用 get_weather(lat=" + str(lat) +
-            f", lon={lon}) 用坐标直接查询。"
+            "当用户询问天气且未指定城市时，调用 get_weather(lat="
+            + str(lat)
+            + f", lon={lon}) 用坐标直接查询。"
         )
     return ""
 
@@ -143,7 +146,7 @@ _CHECKPOINTER = _make_checkpointer()
 # 而图结构只由 (has_kb, 定位片段, 场景) 决定 —— 三者组合有限，命中率很高。
 # 编译好的图无会话状态（checkpointer=None，状态每次 invoke 单独传），
 # 可跨请求、跨线程复用。用 LRU 兜底，避免按城市无限增长。
-_AGENT_CACHE: "OrderedDict[tuple[bool, str, str], object]" = OrderedDict()
+_AGENT_CACHE: OrderedDict[tuple[bool, str, str], object] = OrderedDict()
 _AGENT_CACHE_MAX = 32
 _AGENT_LOCK = threading.Lock()
 
@@ -152,7 +155,7 @@ def build_agent(
     has_kb: bool = False,
     location: dict | None = None,
     scenario: str | None = None,
-    activated: "frozenset[str]" = frozenset(),
+    activated: frozenset[str] = frozenset(),
 ):
     """构建集合式 Agent（带 5 个工具 + 多轮记忆）。
 
@@ -224,7 +227,8 @@ def build_agent(
         from core.tool_guard import build_guarded_tools
 
         enabled = [
-            t for t in AGENT_TOOLS
+            t
+            for t in AGENT_TOOLS
             if (not tool_registry.TOOL_META[t.name].defer) or (t.name in activated)
         ]
         tools_to_bind = build_guarded_tools(enabled)

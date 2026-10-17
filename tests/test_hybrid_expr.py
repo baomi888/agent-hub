@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """受限表达式求值器回归（混合架构：条件分支与切换规则的安全底座）。
 
 覆盖三项：
@@ -41,6 +40,7 @@ SCOPE = {
 
 # ==================== 1. 白名单放行 ====================
 
+
 def test_1_whitelist() -> None:
     """合法表达式按语义求值。"""
     print("\n[1] 白名单表达式求值")
@@ -64,6 +64,7 @@ def test_1_whitelist() -> None:
 
 
 # ==================== 2. 注入拒绝 ====================
+
 
 def _raises(expr: str) -> bool:
     try:
@@ -96,6 +97,7 @@ def test_2_injection_rejected() -> None:
 
 # ==================== 3. DictView 与 eval_condition 兜底 ====================
 
+
 def test_3_dictview_and_condition() -> None:
     """DictView 只读行为；eval_condition 任何异常按 False。"""
     print("\n[3] DictView 行为 / eval_condition 兜底")
@@ -117,7 +119,10 @@ def test_3_dictview_and_condition() -> None:
     check(eval_condition("shared.score > 0.8", SCOPE) is True, "成立 → True")
     check(eval_condition("shared.score < 0.8", SCOPE) is False, "不成立 → False")
     check(eval_condition("__import__('os')", SCOPE) is False, "注入表达式 → False（不炸）")
-    check(eval_condition("shared.missing > 1", SCOPE) is False, "None 比大小 → False（TypeError 兜底）")
+    check(
+        eval_condition("shared.missing > 1", SCOPE) is False,
+        "None 比大小 → False（TypeError 兜底）",
+    )
     check(eval_condition("shared.n / 0 == 1", SCOPE) is False, "除零 → None == 1 → False")
     check(eval_condition("", SCOPE) is False, "空条件 → False")
 

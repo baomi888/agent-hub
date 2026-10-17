@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """每日委托的 HTTP 端点。
 
   GET    /api/delegate                        列出我的委托
@@ -36,7 +35,8 @@ import time
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from core import quota, session as store
+from core import quota
+from core import session as store
 from core.auth import get_current_user
 from kb import pipelines
 from service import daily
@@ -63,7 +63,9 @@ class ScheduleIn(BaseModel):
     freq: str = Field(default="daily", description="daily / weekdays / weekly / interval")
     at: str | None = Field(default=None, description="HH:MM，freq=interval 时可为空")
     weekday: int | None = Field(default=None, ge=0, le=6, description="freq=weekly 时必填，0=周一")
-    every_minutes: int | None = Field(default=None, ge=60, le=1440, description="freq=interval 时必填")
+    every_minutes: int | None = Field(
+        default=None, ge=60, le=1440, description="freq=interval 时必填"
+    )
     tz: str = Field(default="Asia/Shanghai", description="固定 Asia/Shanghai")
 
 
@@ -93,6 +95,7 @@ class DelegationPatch(BaseModel):
 
 # ---------- 校验 ----------
 
+
 def _validate_kind(kind: str) -> None:
     if kind not in KINDS:
         raise HTTPException(status_code=400, detail=f"kind 需为 {' / '.join(KINDS)} 之一")
@@ -104,11 +107,17 @@ def _validate_schedule(s: ScheduleIn) -> None:
     if s.at is not None and not _HHMM.match(s.at):
         raise HTTPException(status_code=400, detail="schedule.at 需为 HH:MM 格式")
     if s.freq in ("daily", "weekdays", "weekly") and not s.at:
-        raise HTTPException(status_code=400, detail=f"schedule.freq={s.freq} 时必须提供 at（HH:MM）")
+        raise HTTPException(
+            status_code=400, detail=f"schedule.freq={s.freq} 时必须提供 at（HH:MM）"
+        )
     if s.freq == "weekly" and s.weekday is None:
-        raise HTTPException(status_code=400, detail="schedule.freq=weekly 时必须提供 weekday（0=周一）")
+        raise HTTPException(
+            status_code=400, detail="schedule.freq=weekly 时必须提供 weekday（0=周一）"
+        )
     if s.freq == "interval" and s.every_minutes is None:
-        raise HTTPException(status_code=400, detail="schedule.freq=interval 时必须提供 every_minutes")
+        raise HTTPException(
+            status_code=400, detail="schedule.freq=interval 时必须提供 every_minutes"
+        )
 
 
 def _require_own_session(uid: str, sid: str) -> None:
@@ -171,8 +180,11 @@ def _out(d: dict) -> dict:
 
 # ---------- 端点 ----------
 
+
 @router.get("")
-async def list_delegations(enabled: bool | None = None, uid: str = Depends(get_current_user)) -> list[dict]:
+async def list_delegations(
+    enabled: bool | None = None, uid: str = Depends(get_current_user)
+) -> list[dict]:
     """列出我的委托。next_run_at 由服务端算好，前端不做 cron 推算。"""
     items = await asyncio.to_thread(daily.list_delegations, uid)
     out = [_out(d) for d in items]
@@ -239,13 +251,17 @@ async def update_delegation(
     if data.get("enabled") is True and not cur.get("enabled"):
         others = await asyncio.to_thread(daily.list_delegations, uid)
         if _count_enabled(others) >= MAX_ENABLED:
-            raise HTTPException(status_code=400, detail=f"启用中的委托数量已达上限（{MAX_ENABLED}）")
+            raise HTTPException(
+                status_code=400, detail=f"启用中的委托数量已达上限（{MAX_ENABLED}）"
+            )
 
     merged = {**_out(cur), **{k: v for k, v in data.items() if k != "schedule"}}
     if "schedule" in data and data["schedule"]:
         merged["schedule"] = data["schedule"]
     if "name" in data and data["name"] and data["name"] != cur["name"]:
-        raise HTTPException(status_code=400, detail="name 不支持修改（它是委托的唯一标识）；请新建一条")
+        raise HTTPException(
+            status_code=400, detail="name 不支持修改（它是委托的唯一标识）；请新建一条"
+        )
 
     d = await asyncio.to_thread(
         daily.save_delegation,

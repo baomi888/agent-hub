@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """工具注册表：工具的**执行元数据**与延迟发现。
 
 为什么要有这一层
@@ -175,6 +174,7 @@ def activated_for(owner_id: str) -> frozenset[str]:
 
 # ==================== 注册表读取 ====================
 
+
 def tool_names() -> list[str]:
     """已注册工具的名字（从 AGENT_TOOLS 取，顺序稳定）。"""
     from agent.tools import AGENT_TOOLS
@@ -212,7 +212,9 @@ def assert_playbook_complete() -> None:
     直接工具（defer=False）常驻全量下发，靠函数 docstring 就能讲清，不必配 playbook。
     缺配就起不来：否则模型拿到一个它不知道怎么用的工具，比没有更糟。
     """
-    missing = [n for n, m in TOOL_META.items() if m.defer and not (TOOL_PLAYBOOK.get(n) or "").strip()]
+    missing = [
+        n for n, m in TOOL_META.items() if m.defer and not (TOOL_PLAYBOOK.get(n) or "").strip()
+    ]
     if missing:
         raise RuntimeError(
             "延迟工具缺少 playbook（第二层使用说明）："
@@ -256,13 +258,15 @@ def list_meta(deferred: bool | None = None, q: str = "", owner_id: str | None = 
     if q:
         needle = q.strip().lower()
         items = [
-            i for i in items
+            i
+            for i in items
             if needle in i["name"].lower() or needle in (i["description"] or "").lower()
         ]
     return items
 
 
 # ==================== 延迟发现 ====================
+
 
 class NoMatchError(LookupError):
     """没有匹配的工具。异常里带上全部可激活的工具名，方便下一步猜对。"""
@@ -288,7 +292,11 @@ def _schema_of(name: str) -> dict:
     for t in AGENT_TOOLS:
         if t.name != name:
             continue
-        schema = t.args_schema.model_json_schema() if t.args_schema else {"type": "object", "properties": {}}
+        schema = (
+            t.args_schema.model_json_schema()
+            if t.args_schema
+            else {"type": "object", "properties": {}}
+        )
         # pydantic 生成的 schema 带 title 等元信息，留着对模型无害，但去掉更干净
         schema.pop("title", None)
         return {
@@ -318,7 +326,7 @@ def discover(query: str, owner_id: str | None = None) -> tuple[list[str], list[d
         raise NoMatchError(q, deferred_names())
 
     if q.startswith("select:"):
-        wanted = [x.strip().lower() for x in q[len("select:"):].split(",") if x.strip()]
+        wanted = [x.strip().lower() for x in q[len("select:") :].split(",") if x.strip()]
         matched = [n for n in tool_names() if TOOL_META[n].defer and n.lower() in wanted]
     else:
         needle = q.lower()

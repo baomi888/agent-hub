@@ -1,9 +1,7 @@
-# -*- coding: utf-8 -*-
 """第三档回归：网页正文提取（_strip_html）与死代码清理。不联网。"""
 
 import kb.importer as importer
 from kb.rag_core import RagPipeline
-
 
 PAGE = """<html><head><title>测试页</title>
 <style>.x{color:red}</style><script>var tracking = 1;</script></head>
@@ -41,9 +39,11 @@ def test_strip_html_drops_page_chrome():
 
 def test_strip_html_body_fallback():
     """没有 article/main 的页面退回 body，噪声元素仍然整块剔除。"""
-    html = ("<html><body><nav><a href='/'>首页</a></nav>"
-            "<div><p>正文内容比较长，足够通过长度过滤这一关，讲的是检索质量。</p></div>"
-            "<footer>页脚信息不做入库处理保留原样版权所有</footer></body></html>")
+    html = (
+        "<html><body><nav><a href='/'>首页</a></nav>"
+        "<div><p>正文内容比较长，足够通过长度过滤这一关，讲的是检索质量。</p></div>"
+        "<footer>页脚信息不做入库处理保留原样版权所有</footer></body></html>"
+    )
     text = importer._strip_html(html)
     assert "检索质量" in text
     assert "首页" not in text

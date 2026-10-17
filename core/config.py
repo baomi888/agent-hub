@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """集中配置管理。
 
 所有 API Key、地址、路径、默认参数统一在此读取，业务代码禁止硬编码。
@@ -161,7 +160,9 @@ REPORT_MINUTE = int(os.getenv("REPORT_MINUTE", "30"))
 # 管理员用户名（逗号分隔）。管理员不受配额与每分钟限流约束，相当于主账号。
 # 默认把项目作者账号设为管理员；其他部署在 .env 里改成自己的用户名即可
 # （例如 ADMIN_USERNAMES=admin,alice）。名单为空则没有管理员。
-ADMIN_USERNAMES = [x.strip() for x in os.getenv("ADMIN_USERNAMES", "苞米呀").split(",") if x.strip()]
+ADMIN_USERNAMES = [
+    x.strip() for x in os.getenv("ADMIN_USERNAMES", "苞米呀").split(",") if x.strip()
+]
 
 # ---------- 可选：天气工具 ----------
 AMAP_API_KEY = os.getenv("AMAP_API_KEY", "")

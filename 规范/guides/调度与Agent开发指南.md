@@ -220,8 +220,8 @@ worker 每轮把心跳写入 `worker_heartbeat` 表。**这是健康判定的唯
 ### 4.4 时区红线：**禁止裸 `datetime.now()`**
 
 ```python
-datetime.now()                            # ❌ 禁止
-datetime.now(ZoneInfo("Asia/Shanghai"))   # ✅ 必须
+datetime.now()  # ❌ 禁止
+datetime.now(ZoneInfo("Asia/Shanghai"))  # ✅ 必须
 ```
 
 **理由不是洁癖**：服务器 `TZ` 一旦是 UTC（容器镜像默认常常就是 UTC），所有「早上七点」会整体偏移 8 小时，**而且不会报错，只会安静地错**。
@@ -506,7 +506,7 @@ f"\n\n【用户当前位置】{city}（经纬度 {lat}, {lon}）。"
 f"\n\n【用户当前位置】经纬度 {lat}, {lon}（前端地理定位得到，未反查出城市名）。"
 # :145-149 —— 提示词片段直接当缓存键
 note = location_note(location)
-key = (bool(has_kb), note, scene)     # ← note 含 6 位小数的原始经纬度
+key = (bool(has_kb), note, scene)  # ← note 含 6 位小数的原始经纬度
 ```
 
 **为什么永不命中**：浏览器定位返回的是 **6 位小数**（如 `31.230416, 121.473701`），
@@ -520,7 +520,7 @@ key = (bool(has_kb), note, scene)     # ← note 含 6 位小数的原始经纬�
 **✅ 修法：在 `location_note` 内部归一化坐标**
 
 ```python
-lat = round(float(lat), 2)    # 约 1km 精度，对「查天气」完全够用
+lat = round(float(lat), 2)  # 约 1km 精度，对「查天气」完全够用
 lon = round(float(lon), 2)
 ```
 
@@ -531,8 +531,8 @@ lon = round(float(lon), 2)
 
 ```python
 # ❌ 错误修法：外面另做一个归一化键，但提示词里仍是原始坐标
-note = location_note(location)                      # 含 6 位小数
-key = (bool(has_kb), normalize(note), scene)        # 归一化后的键
+note = location_note(location)  # 含 6 位小数
+key = (bool(has_kb), normalize(note), scene)  # 归一化后的键
 ```
 
 这会让**两次不同坐标算出同一个 key**，但 `note`（进提示词的内容）**并不相同** ——

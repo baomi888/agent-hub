@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """上下文压缩（P0-2）：压缩块落库 + 最近 K 轮原文，替代滑动窗口。
 
 为什么做
@@ -34,9 +33,8 @@
 from __future__ import annotations
 
 import re
-import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
 
 from core import config
 
@@ -61,9 +59,13 @@ SEG_PREFIX = "[COMPRESSED-"
 _RE_URL = re.compile(r"https?://[^\s<>\"')]+", re.I)
 _RE_UUID = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)
 _RE_HEX = re.compile(r"\b[0-9a-f]{16,}\b", re.I)
-_RE_FILE = re.compile(r"\b[\w\-]+\.(?:pdf|docx?|xlsx?|pptx?|txt|md|csv|json|png|jpe?g|zip|py|ts|js)\b", re.I)
+_RE_FILE = re.compile(
+    r"\b[\w\-]+\.(?:pdf|docx?|xlsx?|pptx?|txt|md|csv|json|png|jpe?g|zip|py|ts|js)\b", re.I
+)
 # 待办/目标类关键词（中文为主，覆盖"结论/约束/必须/截止"等硬信息）
-_RE_TODO = re.compile(r"(待办|TODO|待完成|需要做|下一步|截止|deadline|必须|不要|注意|目标|计划)", re.I)
+_RE_TODO = re.compile(
+    r"(待办|TODO|待完成|需要做|下一步|截止|deadline|必须|不要|注意|目标|计划)", re.I
+)
 
 
 def extract_entities(text: str) -> set[str]:
@@ -103,12 +105,10 @@ class SummaryBlock:
     # ---- 序列化 ----
     def render(self) -> str:
         """渲染成落库文本：每段一行 `[COMPRESSED-n] ...`。"""
-        return "\n".join(
-            f"{SEG_PREFIX}{i + 1}] {seg}" for i, seg in enumerate(self.segments)
-        )
+        return "\n".join(f"{SEG_PREFIX}{i + 1}] {seg}" for i, seg in enumerate(self.segments))
 
     @classmethod
-    def parse(cls, text: str | None) -> "SummaryBlock":
+    def parse(cls, text: str | None) -> SummaryBlock:
         """从落库文本还原。解析失败时退回"整块一段"，不丢内容。"""
         if not text:
             return cls([])
@@ -171,11 +171,11 @@ class SummaryBlock:
 # ==================== 安全阀（分级，替代二值回退）====================
 
 # 动作名
-ACT_ACCEPT = "accept"          # 接受新压缩块
+ACT_ACCEPT = "accept"  # 接受新压缩块
 ACT_REJECT_KEEP_OLD = "keep_old"  # L0 失败且没有 prev：保留旧块（或继续用原文）
-ACT_ROLLBACK = "rollback"      # L1：回退到上一版压缩块
+ACT_ROLLBACK = "rollback"  # L1：回退到上一版压缩块
 ACT_EXPAND_KEEP = "expand_keep"  # L2：扩大 keep_turns
-ACT_TRUNCATE = "truncate"      # L3：硬截断原文
+ACT_TRUNCATE = "truncate"  # L3：硬截断原文
 
 
 @dataclass
@@ -315,9 +315,7 @@ def build_compressed_segment(
     compressor 可注入：默认走抽取式（零 LLM，冷启动安全）；
     配置了 LLM 摘要时可注入 LLM 版本。这样压缩策略与执行时机解耦。
     """
-    raw = "\n".join(
-        f"{m.get('role')}: {m.get('content', '')}" for m in old_messages
-    )
+    raw = "\n".join(f"{m.get('role')}: {m.get('content', '')}" for m in old_messages)
     seg = (compressor or extractive_compress)(raw)
     return seg, raw
 
@@ -353,7 +351,7 @@ def plan_context(
     kept = [m for m in messages if int(m.get("id") or 0) > upto]
     # 最近 keep_turns 轮：一轮 = user + assistant
     if keep_turns > 0:
-        kept = kept[-(keep_turns * 2):]
+        kept = kept[-(keep_turns * 2) :]
     first_id = int(kept[0]["id"]) if kept else 0
     return ContextPlan(
         summary_text=summary.render(),

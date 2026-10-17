@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """P2 信任基础设施：用量历史与赞踩聚合的离线单测（不联网）。
 
 验证点：
@@ -8,15 +7,16 @@
 
 用临时库：monkeypatch session._db_path，避免污染真实 data/sessions.db。
 """
+
 import os
 import sys
+import tempfile
 import time
 import unittest
-import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core import session, quota  # noqa: E402
+from core import quota, session  # noqa: E402
 
 
 def _use_temp_db(case: unittest.TestCase) -> None:

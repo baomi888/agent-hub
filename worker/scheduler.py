@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """定时任务 worker 进程入口（独立进程，不监听端口、不接受外部请求）。
 
 启动方式：
@@ -56,8 +55,9 @@ import logging
 import os
 import sys
 import time
+from collections.abc import Callable
+from typing import Any
 from zoneinfo import ZoneInfo
-from typing import Any, Callable
 
 from core import config
 
@@ -92,6 +92,7 @@ _scheduler: BlockingScheduler | None = None
 
 # ---------- 业务 hook 装载 ----------
 
+
 def register_handler(job_key: str, module: Any) -> None:
     """手动挂一个业务模块（测试与函数注入用）。
 
@@ -113,9 +114,9 @@ def _load_handlers(force: bool = False) -> tuple[bool, str]:
     try:
         from service import daily  # type: ignore
     except ImportError as e:
-        return False, "service.daily 尚未实现（%s）" % e
+        return False, f"service.daily 尚未实现（{e}）"
     except Exception as e:  # 对方模块里有语法错误/依赖缺失时也別把 worker 拖下水
-        return False, "service.daily 导入失败：%s" % e
+        return False, f"service.daily 导入失败：{e}"
     for job_key in sched.JOB_DEFS:
         register_handler(job_key, daily)
     return True, ""
@@ -128,6 +129,7 @@ def _hook(module: Any, name: str) -> Callable[..., Any] | None:
 
 # ---------- 结构化日志（第 5 问的第 2 层告警手段） ----------
 
+
 def _log_json(event: str, **fields: Any) -> None:
     payload = {"event": event, "worker_version": WORKER_VERSION, "ts": sched.now_ts()}
     payload.update(fields)
@@ -139,6 +141,7 @@ def _log_json(event: str, **fields: Any) -> None:
 
 # ---------- 单个对象的执行（幂等 + 重试分级都在这条路径上） ----------
 
+
 def _execute_one(job_key: str, subject_id: str, planned_at: int, run_id: str, module: Any) -> str:
     """执行一个对象并把结果落到 job_runs。返回 "succeeded" / "failed"。
 
@@ -147,24 +150,38 @@ def _execute_one(job_key: str, subject_id: str, planned_at: int, run_id: str, mo
     """
     runner = _hook(module, "run_one")
     if runner is None:
-        sched.finish_job(run_id, ok=False, error="service.daily 未实现 run_one",
-                         error_class=sched.CLASS_FATAL)
+        sched.finish_job(
+            run_id, ok=False, error="service.daily 未实现 run_one", error_class=sched.CLASS_FATAL
+        )
         return "failed"
     started = time.time()
     try:
         res = runner(job_key, subject_id, planned_at) or {}
         tokens = int(res.get("tokens_out") or 0) if isinstance(res, dict) else 0
         sched.finish_job(run_id, ok=True, tokens_out=tokens)
-        _log_json("run", job_key=job_key, run_id=run_id, subject_id=subject_id,
-                  status="succeeded", tokens_out=tokens,
-                  elapsed_ms=int((time.time() - started) * 1000))
+        _log_json(
+            "run",
+            job_key=job_key,
+            run_id=run_id,
+            subject_id=subject_id,
+            status="succeeded",
+            tokens_out=tokens,
+            elapsed_ms=int((time.time() - started) * 1000),
+        )
         return "succeeded"
     except Exception as e:  # noqa: BLE001 —— 业务异常一律转成「一次失败」，不能掀翻 worker
         cls = sched.classify_error(exc=e)
-        sched.finish_job(run_id, ok=False, error="%s: %s" % (type(e).__name__, e), error_class=cls)
-        _log_json("run", job_key=job_key, run_id=run_id, subject_id=subject_id,
-                  status="failed", error_class=cls, error=str(e)[:300],
-                  elapsed_ms=int((time.time() - started) * 1000))
+        sched.finish_job(run_id, ok=False, error=f"{type(e).__name__}: {e}", error_class=cls)
+        _log_json(
+            "run",
+            job_key=job_key,
+            run_id=run_id,
+            subject_id=subject_id,
+            status="failed",
+            error_class=cls,
+            error=str(e)[:300],
+            elapsed_ms=int((time.time() - started) * 1000),
+        )
         if cls == sched.CLASS_FATAL:
             # 依赖已失效（会话被删 / 库不存在 / 额度耗尽）：重试没有意义，
             # 交给业务收尾（例如把委托 enabled 置 false）
@@ -173,8 +190,12 @@ def _execute_one(job_key: str, subject_id: str, planned_at: int, run_id: str, mo
                 try:
                     closer(job_key, subject_id, True)
                 except Exception as e2:  # noqa: BLE001
-                    _log_json("on_failure_error", job_key=job_key, subject_id=subject_id,
-                              error=str(e2)[:300])
+                    _log_json(
+                        "on_failure_error",
+                        job_key=job_key,
+                        subject_id=subject_id,
+                        error=str(e2)[:300],
+                    )
         return "failed"
 
 
@@ -195,8 +216,9 @@ def _run_job(job_key: str, planned_at: int) -> dict:
             # 先登记再干活：INSERT ... ON CONFLICT DO NOTHING，插不进去说明这份活已经有人领了
             if not sched.claim_job(job_key, subject_id, planned_at, run_id=run_id):
                 stats["skipped"] += 1
-                _log_json("skip_duplicate", job_key=job_key, subject_id=subject_id,
-                          planned_at=planned_at)
+                _log_json(
+                    "skip_duplicate", job_key=job_key, subject_id=subject_id, planned_at=planned_at
+                )
                 continue
             stats["claimed"] += 1
             stats[_execute_one(job_key, subject_id, planned_at, run_id, module)] += 1
@@ -216,14 +238,22 @@ def _run_job(job_key: str, planned_at: int) -> dict:
             whole(job_key, planned_at)
             sched.finish_job(run_id, ok=True)
             stats["succeeded"] += 1
-            _log_json("run", job_key=job_key, run_id=run_id, subject_id=subject_id,
-                      status="succeeded")
+            _log_json(
+                "run", job_key=job_key, run_id=run_id, subject_id=subject_id, status="succeeded"
+            )
         except Exception as e:  # noqa: BLE001
             cls = sched.classify_error(exc=e)
-            sched.finish_job(run_id, ok=False, error="%s: %s" % (type(e).__name__, e), error_class=cls)
+            sched.finish_job(run_id, ok=False, error=f"{type(e).__name__}: {e}", error_class=cls)
             stats["failed"] += 1
-            _log_json("run", job_key=job_key, run_id=run_id, subject_id=subject_id,
-                      status="failed", error_class=cls, error=str(e)[:300])
+            _log_json(
+                "run",
+                job_key=job_key,
+                run_id=run_id,
+                subject_id=subject_id,
+                status="failed",
+                error_class=cls,
+                error=str(e)[:300],
+            )
     return stats
 
 
@@ -241,8 +271,11 @@ def run_pending(limit: int = 50) -> dict:
         if module is None:
             continue
         stats["pending"] += 1
-        stats[_execute_one(row["job_key"], row["subject_id"], int(row["planned_at"]),
-                           row["run_id"], module)] += 1
+        stats[
+            _execute_one(
+                row["job_key"], row["subject_id"], int(row["planned_at"]), row["run_id"], module
+            )
+        ] += 1
     return stats
 
 
@@ -261,8 +294,11 @@ def run_retries(limit: int = 50) -> dict:
         if not sched.claim_retry(row["run_id"]):
             continue  # 另一个 worker 已经领走了，或 attempts 已到上限
         stats["claimed"] += 1
-        stats[_execute_one(row["job_key"], row["subject_id"], int(row["planned_at"]),
-                           row["run_id"], module)] += 1
+        stats[
+            _execute_one(
+                row["job_key"], row["subject_id"], int(row["planned_at"]), row["run_id"], module
+            )
+        ] += 1
     return stats
 
 
@@ -285,6 +321,7 @@ def run_housekeeping(planned_at: int | None = None) -> dict:
 
 
 # ---------- 每轮调度 ----------
+
 
 def _beat() -> None:
     """心跳任务：只写一行心跳，不干活。"""
@@ -334,6 +371,7 @@ def _sync_next_run() -> None:
 
 # ---------- 进程入口 ----------
 
+
 def build_scheduler() -> BlockingScheduler:
     """按 schedule_jobs 表建 BlockingScheduler（SQLAlchemyJobStore → data/scheduler.db）。
 
@@ -357,8 +395,8 @@ def build_scheduler() -> BlockingScheduler:
             # 错过触发（比如 worker 停了一晚）在 5 分钟内补跑，再久就跳过——
             # 补跑一次「今天的总结」事小，第二天早上补跑十次事大
             misfire_grace_time=300,
-            coalesce=True,      # 堆积的多次触发合并成一次
-            max_instances=1,    # 同一个 job 不并发，SQLite 是单写者
+            coalesce=True,  # 堆积的多次触发合并成一次
+            max_instances=1,  # 同一个 job 不并发，SQLite 是单写者
         )
     sch.add_job(
         _beat,
@@ -391,8 +429,14 @@ def _serve() -> int:
     sched.heartbeat(pid=os.getpid(), version=WORKER_VERSION)
     _sync_next_run()
     jobs = [j["job_key"] for j in sched.list_jobs() if j["enabled"]]
-    _log_json("worker_start", pid=os.getpid(), tz=config.SCHEDULER_TZ, version=WORKER_VERSION,
-              jobstore=jobstore_url(), jobs=jobs)
+    _log_json(
+        "worker_start",
+        pid=os.getpid(),
+        tz=config.SCHEDULER_TZ,
+        version=WORKER_VERSION,
+        jobstore=jobstore_url(),
+        jobs=jobs,
+    )
     try:
         sch.start()  # 阻塞；内部处理 KeyboardInterrupt / SystemExit
     finally:
@@ -406,11 +450,13 @@ def _run_once(target: str | None) -> int:
     keys = list(sched.JOB_DEFS) if (not target or target == "*") else [target]
     unknown = [k for k in keys if k not in sched.JOB_DEFS]
     if unknown:
-        print("未知的 task key: %s（可选：%s）" % (", ".join(unknown), ", ".join(sched.JOB_DEFS)))
+        print(
+            "未知的 task key: {}（可选：{}）".format(", ".join(unknown), ", ".join(sched.JOB_DEFS))
+        )
         return 2
     ok, why = _load_handlers(force=True)
     if not ok:
-        print("[提示] %s —— 本轮只写心跳，不执行业务动作" % why)
+        print(f"[提示] {why} —— 本轮只写心跳，不执行业务动作")
     for k in keys:
         _tick(k)
     return 0
@@ -421,28 +467,42 @@ def main(argv: list[str] | None = None) -> int:
         prog="python -m worker.scheduler",
         description="定时任务 worker：独立进程 + APScheduler + SQLite JobStore（不监听端口）",
     )
-    parser.add_argument("--once", nargs="?", const="*", default=None, metavar="JOB_KEY",
-                        help="只跑一轮就退出；不给 JOB_KEY 表示 5 个任务各跑一轮")
+    parser.add_argument(
+        "--once",
+        nargs="?",
+        const="*",
+        default=None,
+        metavar="JOB_KEY",
+        help="只跑一轮就退出；不给 JOB_KEY 表示 5 个任务各跑一轮",
+    )
     parser.add_argument("--list-jobs", action="store_true", help="打印任务定义表后退出")
     parser.add_argument("--init-db", action="store_true", help="建表并补齐任务定义后退出")
-    parser.add_argument("--log-level", default="INFO",
-                        choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="日志级别")
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="日志级别",
+    )
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=getattr(logging, args.log_level),
-                        format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
 
     if args.init_db:
         sched.ensure_tables()
-        print("已建表并补齐任务定义：%s" % sched._db_path())
+        print(f"已建表并补齐任务定义：{sched._db_path()}")
         return 0
 
     if args.list_jobs:
         sched.ensure_tables()
         for j in sched.list_jobs():
             nxt = sched.estimate_next_run(j["cron"], config.SCHEDULER_TZ)
-            print("%-18s %-16s enabled=%-5s tz=%s next_run_at=%s  %s" % (
-                j["job_key"], j["cron"], j["enabled"], j["tz"], nxt, j["description"]))
+            print(
+                f"{j['job_key']:<18} {j['cron']:<16} enabled={str(j['enabled']):<5} "
+                f"tz={j['tz']} next_run_at={nxt}  {j['description']}"
+            )
         return 0
 
     if args.once is not None:

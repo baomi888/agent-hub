@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
 from __future__ import annotations
+
 """配额与限流：别让别人用你的界面烧你的额度。
 
 两件事，尺度不同所以实现也不同：
@@ -44,13 +44,16 @@ class QuotaExceeded(Exception):
     """超过每日上限。"""
 
     def __init__(self, kind: str, limit: int) -> None:
-        label = {"ask": "每日问答", "embed": "每日向量化分片", "auto": "每日自动任务"}.get(kind, kind)
+        label = {"ask": "每日问答", "embed": "每日向量化分片", "auto": "每日自动任务"}.get(
+            kind, kind
+        )
         super().__init__(f"{label}已达上限（{limit}），明天再试或联系管理员调整配额")
         self.kind = kind
         self.limit = limit
 
 
 # ---------- 每分钟：进程内滑动窗口 ----------
+
 
 def hit(uid: str, limit: int | None = None) -> int:
     """记一次请求，超限抛 RateLimited，否则返回本窗口内已用次数。
@@ -74,6 +77,7 @@ def hit(uid: str, limit: int | None = None) -> int:
 
 
 # ---------- 每日：落库计数 ----------
+
 
 def _ensure_tables() -> None:
     with _get_conn() as conn:

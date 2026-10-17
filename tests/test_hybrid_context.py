@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """统一任务上下文回归（混合架构要求 4）：不联网、不依赖真实 LLM。
 
 覆盖三项：
@@ -27,10 +26,13 @@ def check(cond: bool, msg: str) -> None:
 
 # ==================== 1. snapshot / restore 往返 ====================
 
+
 def test_1_snapshot_restore() -> None:
     """全量状态快照后可完整还原：跨模式传递不丢数据。"""
     print("\n[1] snapshot / restore 往返")
-    ctx = TaskContext(owner_id="u1", goal="先查天气再写报告", current_mode="workflow", workflow_id="wf1")
+    ctx = TaskContext(
+        owner_id="u1", goal="先查天气再写报告", current_mode="workflow", workflow_id="wf1"
+    )
     ctx.shared["plan"] = "1.查 2.写"
     ctx.shared["score"] = 0.9
     ctx.workflow_state["next_node"] = "write"
@@ -44,6 +46,7 @@ def test_1_snapshot_restore() -> None:
     check(isinstance(snap, dict), "snapshot 返回 dict（可 JSON 序列化落库）")
 
     import json
+
     snap2 = json.loads(json.dumps(snap, ensure_ascii=False))  # 过一遍 JSON 模拟落库回读
     back = TaskContext.restore(snap2)
 
@@ -64,6 +67,7 @@ def test_1_snapshot_restore() -> None:
 
 
 # ==================== 2. record_switch / bump ====================
+
 
 def test_2_record_switch_and_bump() -> None:
     """每次切换：mode_trace +1、current_mode 翻转、version +1。"""
@@ -89,6 +93,7 @@ def test_2_record_switch_and_bump() -> None:
 
 # ==================== 3. 前向兼容 ====================
 
+
 def test_3_restore_forward_compat() -> None:
     """旧快照缺字段时 restore 用默认值兜住（新增字段带默认值才能演进）。"""
     print("\n[3] restore 前向兼容")
@@ -102,7 +107,9 @@ def test_3_restore_forward_compat() -> None:
     ctx = TaskContext.restore(minimal)
     check(ctx.status == "running", "缺 status 默认 running")
     check(ctx.current_mode == "agent", "缺 current_mode 默认 agent")
-    check(ctx.shared == {} and ctx.workflow_state == {} and ctx.agent_state == {}, "缺各段默认空 dict")
+    check(
+        ctx.shared == {} and ctx.workflow_state == {} and ctx.agent_state == {}, "缺各段默认空 dict"
+    )
     check(ctx.mode_trace == [] and ctx.version == 0, "缺切换链/版本号默认空/0")
 
     extra = dict(minimal, future_field="未来版本加的字段")

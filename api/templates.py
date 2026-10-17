@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
 from __future__ import annotations
+
 """模板广场路由。
 
 路由清单：
@@ -17,10 +17,12 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from core import session as store, quota
+from core import quota
+from core import session as store
 from core.auth import get_current_user
 from core.templates_catalog import get_catalog, get_template
 from kb import pipelines
+
 from .chat import VALID_MODES
 
 router = APIRouter(dependencies=[Depends(get_current_user)])

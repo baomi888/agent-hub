@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
 from __future__ import annotations
+
 """流式问答接口（SSE）。
 
 三条路径（由 req.mode 决定，默认 auto 自动判断）：
@@ -47,12 +47,19 @@ from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from pydantic import BaseModel, Field
 
-from core import config, quota, session as store, upload, tool_registry
+from core import config, quota, tool_registry, upload
+from core import scenarios as scenarios_mod
+from core import session as store
 from core.auth import get_current_user
 from core.llm import get_llm, get_vision_llm
-from core import scenarios as scenarios_mod
 from kb import pipelines
-from kb.rag_core import SYSTEM_PROMPT, assess_grounding, describe_api_error, grounding_note, rewrite_query
+from kb.rag_core import (
+    SYSTEM_PROMPT,
+    assess_grounding,
+    describe_api_error,
+    grounding_note,
+    rewrite_query,
+)
 
 # 默认要登录：整组路由统一挂鉴权，新增端点时不会漏
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -69,11 +76,36 @@ _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 # 模型只许从这几十个里选，超出一律丢弃；既能沉淀"这个用户关心什么"，
 # 又不会让 user_tags 表无限膨胀。后续 C2 聚合 / D 检索偏置可直接消费这些标签。
 USER_PROFILE_TAGS = [
-    "考研备考", "考研数学", "考研英语", "考研政治", "保研", "求职面试", "实习",
-    "课程作业", "期末考试", "论文写作", "毕业设计", "编程开发", "Python",
-    "前端开发", "后端开发", "算法竞赛", "操作系统", "计算机网络", "数据库",
-    "机器学习", "深度学习", "英语四六级", "文献阅读", "实验操作", "考证",
-    "公务员", "留学申请", "社团活动", "时间管理", "心态调节",
+    "考研备考",
+    "考研数学",
+    "考研英语",
+    "考研政治",
+    "保研",
+    "求职面试",
+    "实习",
+    "课程作业",
+    "期末考试",
+    "论文写作",
+    "毕业设计",
+    "编程开发",
+    "Python",
+    "前端开发",
+    "后端开发",
+    "算法竞赛",
+    "操作系统",
+    "计算机网络",
+    "数据库",
+    "机器学习",
+    "深度学习",
+    "英语四六级",
+    "文献阅读",
+    "实验操作",
+    "考证",
+    "公务员",
+    "留学申请",
+    "社团活动",
+    "时间管理",
+    "心态调节",
 ]
 
 # 计划类请求的格式要求：由服务端拼到"本轮提问"末尾（req.plan=true 时），
@@ -94,7 +126,18 @@ PLAN_DEFAULT_HINT = "时间轴建议按「第1周 / 第N天 / DAY N」划分，�
 PLAN_TOPICS: list[dict] = [
     {
         "name": "营销活动",
-        "keys": ["营销", "发布会", "推广", "上市", "促销", "品牌", "市场", "宣发", "campaign", "活动策划"],
+        "keys": [
+            "营销",
+            "发布会",
+            "推广",
+            "上市",
+            "促销",
+            "品牌",
+            "市场",
+            "宣发",
+            "campaign",
+            "活动策划",
+        ],
         "hint": "时间轴建议按「第1周 筹备期 / 第2周 预热期 / 第3周 爆发期」划分。",
     },
     {
@@ -105,10 +148,33 @@ PLAN_TOPICS: list[dict] = [
         # 退回通用 hint（计划里混出 DAY 1/DAY 2）、前端卡片抬头也变通用。
         # 知穗面向大学生，考试名是最常见的学习计划入口，必须直命中。
         "keys": [
-            "学习", "备考", "复习", "考研", "考公", "雅思", "托福",
-            "六级", "四级", "四六级", "cet", "gre", "专四", "专八",
-            "期末", "期中", "考证", "证书", "刷题", "真题", "单词", "英语",
-            "读书", "课程", "培训", "考试", "study",
+            "学习",
+            "备考",
+            "复习",
+            "考研",
+            "考公",
+            "雅思",
+            "托福",
+            "六级",
+            "四级",
+            "四六级",
+            "cet",
+            "gre",
+            "专四",
+            "专八",
+            "期末",
+            "期中",
+            "考证",
+            "证书",
+            "刷题",
+            "真题",
+            "单词",
+            "英语",
+            "读书",
+            "课程",
+            "培训",
+            "考试",
+            "study",
         ],
         "hint": "时间轴建议按「第1周 ~ 第N周」划分，阶段按科目或模块编号。",
     },
@@ -134,7 +200,21 @@ PLAN_TOPICS: list[dict] = [
     },
     {
         "name": "内容创作",
-        "keys": ["内容", "写作", "文案", "脚本", "公众号", "小红书", "直播", "自媒体", "专栏", "书籍", "论文", "content", "video"],
+        "keys": [
+            "内容",
+            "写作",
+            "文案",
+            "脚本",
+            "公众号",
+            "小红书",
+            "直播",
+            "自媒体",
+            "专栏",
+            "书籍",
+            "论文",
+            "content",
+            "video",
+        ],
         "hint": "时间轴建议按「第N周」或「选题 / 撰写 / 发布 / 复盘」阶段划分。",
     },
     {
@@ -182,16 +262,12 @@ async def _resolve_plan_topic(uid: str, sid: str, question: str) -> dict | None:
     if topic is not None or config.PLAN_TOPIC_HISTORY_MESSAGES <= 0:
         return topic
     try:
-        recent = await asyncio.to_thread(
-            store.get_messages, uid, sid, include_system=False
-        )
+        recent = await asyncio.to_thread(store.get_messages, uid, sid, include_system=False)
     except Exception:
         return None
-    texts = [
-        m.get("content") or ""
-        for m in reversed(recent)
-        if m.get("role") == "user"
-    ][: config.PLAN_TOPIC_HISTORY_MESSAGES]
+    texts = [m.get("content") or "" for m in reversed(recent) if m.get("role") == "user"][
+        : config.PLAN_TOPIC_HISTORY_MESSAGES
+    ]
     return detect_plan_topic(*texts)
 
 
@@ -204,6 +280,7 @@ def _augment_plan(question: str, plan: bool, topic: dict | None = None) -> str:
         return question
     hint = (topic or {}).get("hint") or PLAN_DEFAULT_HINT
     return question + PLAN_FORMAT_HEADER + hint
+
 
 # 上传件保留时长：图片理解完就不需要了，超时自动清，避免目录无限增长
 UPLOAD_TTL_HOURS = 24
@@ -248,6 +325,7 @@ class ChatRequest(BaseModel):
 
 # ==================== SSE 帧 ====================
 
+
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
@@ -272,6 +350,7 @@ def _pick_mode(req_mode: str, kb_id: str | None, kb_exists: bool) -> str:
 
 # ==================== 附件上传 ====================
 
+
 def _cleanup_old_uploads() -> None:
     """清掉超过 TTL 的历史上传件（目录只在上传时顺带扫一次，不做常驻任务）。"""
     try:
@@ -289,7 +368,9 @@ def _cleanup_old_uploads() -> None:
 
 
 @router.post("/upload")
-async def upload_attachments(files: list[UploadFile] = File(...)) -> dict:
+async def upload_attachments(
+    files: list[UploadFile] = File(...),  # noqa: B008 -- FastAPI 依赖注入惯例
+) -> dict:
     """上传聊天附件（图片），返回服务端路径供图片理解使用。
 
     只收图片；其他格式即使上传成功也不会参与回答，直接拒绝省磁盘省流量。
@@ -317,12 +398,14 @@ async def upload_attachments(files: list[UploadFile] = File(...)) -> dict:
         # 分块写盘：以前是 await f.read() 整份读进内存再判大小，
         # 1GB 的附件在 2G 内存的机器上等判出来时进程已经被 OOM killer 带走了
         size = await upload.save_stream(f, path, MAX_CHAT_UPLOAD_MB * 1024 * 1024)
-        results.append({
-            "filename": f.filename,
-            "path": path,
-            "size": size,
-            "type": f.content_type or "application/octet-stream",
-        })
+        results.append(
+            {
+                "filename": f.filename,
+                "path": path,
+                "size": size,
+                "type": f.content_type or "application/octet-stream",
+            }
+        )
     return {"files": results}
 
 
@@ -337,6 +420,7 @@ def _is_supported_image(filename: str | None, content_type: str | None) -> bool:
 
 
 # ==================== 图片理解辅助 ====================
+
 
 def _has_image(attachments: list[dict]) -> bool:
     """附件中是否包含图片。"""
@@ -406,14 +490,17 @@ def _build_vision_user_message(question: str, attachments: list[dict]) -> HumanM
         resolved = _resolve_upload_path(path) if isinstance(path, str) else None
         if not resolved or not os.path.exists(resolved):
             continue
-        content.append({
-            "type": "image_url",
-            "image_url": {"url": _image_to_data_url(resolved)},
-        })
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": _image_to_data_url(resolved)},
+            }
+        )
     return HumanMessage(content=content)
 
 
 # ==================== 流式输出 ====================
+
 
 class _Acc:
     """流式累计器：异步生成器没法 return 值，用对象把结果带出去。"""
@@ -458,8 +545,11 @@ async def _stream_llm(llm, messages, request: Request, acc: _Acc) -> None:
 
 # ==================== 主路由 ====================
 
+
 @router.post("/stream")
-async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get_current_user)) -> StreamingResponse:
+async def chat_stream(
+    req: ChatRequest, request: Request, uid: str = Depends(get_current_user)
+) -> StreamingResponse:
     # 限流 + 每日问答额度。放在 event_generator 外面是对的：
     # 流一旦开始，响应头（200）就发出去了，那时候再想回 429 已经来不及，
     # 只会变成一条断掉的 SSE 流，前端读不出任何提示。
@@ -537,9 +627,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
         # LLM 往返（约 1~2s）。错误/中断提前 return 时结果丢弃，标题保持默认。
         title_task: asyncio.Task | None = None
         if should_gen_title:
-            title_task = asyncio.create_task(
-                asyncio.to_thread(_generate_title, req.question)
-            )
+            title_task = asyncio.create_task(asyncio.to_thread(_generate_title, req.question))
             _BG_TASKS.add(title_task)
             title_task.add_done_callback(_BG_TASKS.discard)
 
@@ -570,7 +658,9 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                             f"[{i + 1}] （来源：{d.metadata.get('source', '?')}）\n{d.page_content}"
                             for i, (d, _) in enumerate(docs_scores)
                         )
-                        vision_question = f"【参考资料】\n{references}\n\n【用户问题】\n{req.question}"
+                        vision_question = (
+                            f"【参考资料】\n{references}\n\n【用户问题】\n{req.question}"
+                        )
                         vision_system += grounding_note(g)
                 except Exception:
                     yield _sse("status", {"text": "知识库检索失败，已仅按图片作答"})
@@ -585,7 +675,9 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
 
             acc = _Acc()
             try:
-                async for frame in _stream_llm(get_vision_llm(max_tokens=2048), messages, request, acc):
+                async for frame in _stream_llm(
+                    get_vision_llm(max_tokens=2048), messages, request, acc
+                ):
                     yield frame
             except Exception as e:
                 yield _sse("error", {"detail": describe_api_error(e)})
@@ -595,7 +687,9 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             acc_text = acc.text
 
             # 收尾：标题并行任务多半已完成，这里 await 基本零等待
-            msg_id = await asyncio.to_thread(store.add_message, uid, req.sid, "assistant", acc_text, refs=refs_md)
+            msg_id = await asyncio.to_thread(
+                store.add_message, uid, req.sid, "assistant", acc_text, refs=refs_md
+            )
 
             # B 块：对话级用户画像标签（fire-and-forget，不阻塞 SSE；失败静默）
             if config.USER_TAG_HOOK_ENABLED and acc_text:
@@ -608,13 +702,16 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 await asyncio.to_thread(store.rename_conversation, uid, req.sid, gen_title)
                 yield _sse("title", {"title": gen_title})
             # message_id 回给前端：赞踩要按消息 id 落库，前端自己生成的 uid 后端不认
-            yield _sse("done", {
-                "answer": acc_text,
-                "refs": refs_md,
-                "title": gen_title,
-                "mode": "vision",
-                "message_id": msg_id,
-            })
+            yield _sse(
+                "done",
+                {
+                    "answer": acc_text,
+                    "refs": refs_md,
+                    "title": gen_title,
+                    "mode": "vision",
+                    "message_id": msg_id,
+                },
+            )
             return
 
         # ---- 1. 混合模式（工作流 × 自主 Agent 动态切换）----
@@ -642,7 +739,9 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                     wf_id = req.workflow_id
                     start_mode = "workflow"
                 elif classify_task(req.question) == "flow":
-                    row = await asyncio.to_thread(hstore.get_workflow, uid, hstore.DEFAULT_WORKFLOW_ID)
+                    row = await asyncio.to_thread(
+                        hstore.get_workflow, uid, hstore.DEFAULT_WORKFLOW_ID
+                    )
                     if row:
                         wf_def = validate_definition(row["definition"])
                         wf_id = hstore.DEFAULT_WORKFLOW_ID
@@ -661,9 +760,9 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 # 对话历史注入：修复"混合模式每轮失忆"（2026-10-16 线上复现）。
                 # 其它三种模式都读历史，唯独 hybrid 过去只拿当前一句 → 模型看不到上下文。
                 # 历史放 shared（跨模式数据通道），Agent/Workflow 引擎拼 prompt 时前置。
-                hist_raw = (await asyncio.to_thread(
-                    store.get_messages, uid, req.sid, include_system=False
-                ))[:-1]
+                hist_raw = (
+                    await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False)
+                )[:-1]
                 ctx.shared["history"] = [
                     {"role": m["role"], "content": m["content"]}
                     for m in hist_raw
@@ -672,8 +771,11 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
 
                 rules = await asyncio.to_thread(hstore.list_rules, uid)
                 orch = HybridOrchestrator(
-                    ctx, workflow_def=wf_def, rules=rules,
-                    has_kb=bool(kb_id and kb_exists), location=location_ctx,
+                    ctx,
+                    workflow_def=wf_def,
+                    rules=rules,
+                    has_kb=bool(kb_id and kb_exists),
+                    location=location_ctx,
                     # #7：激活集在请求开始取定、整轮不变（与下面 Agent 路径同源），
                     # hybrid 段的 build_agent 才能绑定本用户已 discover 的延迟工具。
                     activated=tool_registry.activated_for(uid),
@@ -703,17 +805,26 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                         yield _sse("tool", frame)
                     elif et in ("node_enter", "node_exit"):
                         # 工作流节点进出：前端执行轨迹侧栏的时间轴事件
-                        yield _sse("workflow_node", {
-                            "phase": "enter" if et == "node_enter" else "exit",
-                            "node_id": ev.node_id,
-                            **ev.payload,
-                        })
+                        yield _sse(
+                            "workflow_node",
+                            {
+                                "phase": "enter" if et == "node_enter" else "exit",
+                                "node_id": ev.node_id,
+                                **ev.payload,
+                            },
+                        )
                     elif et == "switch":
                         yield _sse("mode_switch", ev.decision or {})
                     elif et == "human_intervention":
-                        yield _sse("status", {
-                            "text": f"人工节点 {ev.node_id}：{ev.payload.get('prompt', '') or '已自动通过'}"
-                        })
+                        yield _sse(
+                            "status",
+                            {
+                                "text": (
+                                    f"人工节点 {ev.node_id}："
+                                    f"{ev.payload.get('prompt', '') or '已自动通过'}"
+                                )
+                            },
+                        )
                     elif et == "status":
                         yield _sse("status", {"text": ev.payload.get("text", "")})
                     elif et == "error":
@@ -739,6 +850,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             yield _sse("status", {"text": "Agent 模式，正在规划任务..."})
             try:
                 from agent.builder import build_agent, location_note
+
                 # 只告诉模型"有没有绑库"，不告诉它是哪个库：
                 # kb_id 走下面的 configurable 注入，模型没有机会改写它
                 agent = await asyncio.to_thread(
@@ -750,7 +862,9 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 )
 
                 # 组装历史 + 当前问题
-                history = (await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False))[:-1]
+                history = (
+                    await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False)
+                )[:-1]
                 messages = []
                 for m in history:
                     if m["role"] == "user":
@@ -808,7 +922,8 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                             if isinstance(delta, list):
                                 # 多模态 content list，只取文本
                                 delta = "".join(
-                                    p.get("text", "") for p in delta
+                                    p.get("text", "")
+                                    for p in delta
                                     if isinstance(p, dict) and p.get("type") == "text"
                                 )
                             if isinstance(delta, str) and delta:
@@ -824,16 +939,22 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                                 # 模型发起工具调用：AIMessage 带 tool_calls
                                 if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
                                     for tc in msg.tool_calls:
-                                        yield _sse("tool", {
-                                            "name": tc.get("name", "?"),
-                                            "input": str(tc.get("args", {}))[:200],
-                                        })
+                                        yield _sse(
+                                            "tool",
+                                            {
+                                                "name": tc.get("name", "?"),
+                                                "input": str(tc.get("args", {}))[:200],
+                                            },
+                                        )
                                 # 工具返回结果：ToolMessage
                                 elif isinstance(msg, ToolMessage):
-                                    yield _sse("tool", {
-                                        "name": getattr(msg, "name", "?"),
-                                        "output": str(getattr(msg, "content", ""))[:300],
-                                    })
+                                    yield _sse(
+                                        "tool",
+                                        {
+                                            "name": getattr(msg, "name", "?"),
+                                            "output": str(getattr(msg, "content", ""))[:300],
+                                        },
+                                    )
 
                 acc_text = full_text
 
@@ -857,7 +978,9 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 yield _sse("status", {"text": f"已结合上下文改写检索词：{query}"})
             try:
                 pipe = await asyncio.to_thread(pipelines.get_or_create, uid, kb_id)
-                docs_scores = await asyncio.to_thread(pipe.retrieve_with_score, query, req.top_k, uid)
+                docs_scores = await asyncio.to_thread(
+                    pipe.retrieve_with_score, query, req.top_k, uid
+                )
             except Exception as e:
                 yield _sse("error", {"detail": describe_api_error(e)})
                 return
@@ -881,7 +1004,9 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             yield _sse("status", {"text": "正在生成答案..."})
             # 复用上面已经检索到的结果，不重复检索（早期实现在这里又检了一次，
             # 而且用的是默认 top_k，等于前端调的检索条数被悄悄忽略）
-            messages = await _build_messages(uid, req.sid, prompt_question, kb_id, docs_scores, grounding, req.scenario, history)
+            messages = await _build_messages(
+                uid, req.sid, prompt_question, kb_id, docs_scores, grounding, req.scenario, history
+            )
 
             acc = _Acc()
             try:
@@ -897,8 +1022,15 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
         # ---- 4. 纯 LLM 模式 ----
         else:
             yield _sse("status", {"text": "纯 LLM 模式..."})
-            history = (await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False))[:-1]
-            messages = [SystemMessage(content="你是一个友好、专业的 AI 助手。用中文简洁作答。" + scenarios_mod.get_scenario_prompt(req.scenario))]
+            history = (
+                await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False)
+            )[:-1]
+            messages = [
+                SystemMessage(
+                    content="你是一个友好、专业的 AI 助手。用中文简洁作答。"
+                    + scenarios_mod.get_scenario_prompt(req.scenario)
+                )
+            ]
             for m in history:
                 if m["role"] == "user":
                     messages.append(HumanMessage(content=m["content"]))
@@ -918,7 +1050,9 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             acc_text = acc.text
 
         # ---- 收尾：存 assistant 消息 + 取回并行生成的标题 ----
-        msg_id = await asyncio.to_thread(store.add_message, uid, req.sid, "assistant", acc_text, refs=refs_md)
+        msg_id = await asyncio.to_thread(
+            store.add_message, uid, req.sid, "assistant", acc_text, refs=refs_md
+        )
 
         # B 块：对话级用户画像标签（fire-and-forget，不阻塞 SSE；失败静默）
         if config.USER_TAG_HOOK_ENABLED and acc_text:
@@ -933,26 +1067,36 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
 
         # message_id 回给前端：赞踩要按消息 id 落库，前端自己生成的 uid 后端不认
         # run_id 仅 hybrid 模式有值：人工切换 / 执行日志查询按它寻址
-        yield _sse("done", {
-            "answer": acc_text,
-            "refs": refs_md,
-            "title": gen_title,
-            "mode": mode,
-            "message_id": msg_id,
-            "run_id": hybrid_run_id,
-            # P2：主题名回给前端，卡片抬头才能显示"PLAN · 学习计划"。
-            # 主题可能是从历史推断出来的，前端自己那份关键词匹配猜不到，必须由后端给。
-            "plan_topic": plan_topic["name"] if plan_topic else None,
-        })
+        yield _sse(
+            "done",
+            {
+                "answer": acc_text,
+                "refs": refs_md,
+                "title": gen_title,
+                "mode": mode,
+                "message_id": msg_id,
+                "run_id": hybrid_run_id,
+                # P2：主题名回给前端，卡片抬头才能显示"PLAN · 学习计划"。
+                # 主题可能是从历史推断出来的，前端自己那份关键词匹配猜不到，必须由后端给。
+                "plan_topic": plan_topic["name"] if plan_topic else None,
+            },
+        )
 
     return StreamingResponse(event_generator(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 # ==================== 辅助 ====================
 
+
 async def _build_messages(
-    owner: str, sid: str, question: str, kb_id: str | None, docs_scores,
-    grounding: dict | None = None, scenario: str | None = None, history=None
+    owner: str,
+    sid: str,
+    question: str,
+    kb_id: str | None,
+    docs_scores,
+    grounding: dict | None = None,
+    scenario: str | None = None,
+    history=None,
 ) -> list:
     """组装 LLM 输入：历史 + 已检索到的参考资料。
 
@@ -965,7 +1109,8 @@ async def _build_messages(
     history 同理：调用方（RAG 路径做查询改写时）已取过就直接复用，不再重复查库。
     """
     history_raw = (
-        history if history is not None
+        history
+        if history is not None
         else (await asyncio.to_thread(store.get_messages, owner, sid, include_system=False))[:-1]
     )
     messages = []
@@ -976,9 +1121,16 @@ async def _build_messages(
             for i, (d, _) in enumerate(docs_scores)
         )
     if references:
-        system = SYSTEM_PROMPT + grounding_note(grounding or {}) + scenarios_mod.get_scenario_prompt(scenario)
+        system = (
+            SYSTEM_PROMPT
+            + grounding_note(grounding or {})
+            + scenarios_mod.get_scenario_prompt(scenario)
+        )
     else:
-        system = "你是一个友好、专业的 AI 助手。用中文简洁作答。" + scenarios_mod.get_scenario_prompt(scenario)
+        system = (
+            "你是一个友好、专业的 AI 助手。用中文简洁作答。"
+            + scenarios_mod.get_scenario_prompt(scenario)
+        )
     messages.append(SystemMessage(content=system))
     for m in history_raw:
         if m["role"] == "user":
@@ -1007,7 +1159,13 @@ def _generate_title(question: str) -> str:
     llm = get_llm(temperature=0, max_tokens=32)
     try:
         q = (question or "")[:200]
-        resp = llm.invoke([HumanMessage(content=f"请为以下对话生成简短中文标题（≤15字），直接输出：用户提问：{q}")])
+        resp = llm.invoke(
+            [
+                HumanMessage(
+                    content=f"请为以下对话生成简短中文标题（≤15字），直接输出：用户提问：{q}"
+                )
+            ]
+        )
         title = (resp.content or "").strip().strip('"').strip("'")
         if len(title) > 20:
             title = title[:15] + "..."
@@ -1016,7 +1174,7 @@ def _generate_title(question: str) -> str:
         return question[:15] if len(question) > 15 else question
 
 
-async def _take_title(task: "asyncio.Task | None", acc_text: str) -> str:
+async def _take_title(task: asyncio.Task | None, acc_text: str) -> str:
     """取回并行生成的标题；无任务 / 无答案 / 失败都返回空串。"""
     if task is None or not acc_text:
         return ""
@@ -1027,6 +1185,7 @@ async def _take_title(task: "asyncio.Task | None", acc_text: str) -> str:
 
 
 # ==================== 用户画像标签（方案 C · B 块）====================
+
 
 def _extract_user_tags(question: str, answer: str) -> list[str]:
     """从"用户提问 + AI 回答"里挑 0~3 个最贴切的用户画像标签（受控词表）。
@@ -1050,7 +1209,7 @@ def _extract_user_tags(question: str, answer: str) -> list[str]:
             "你是用户画像标注器。根据下面的「用户提问 + AI 回答（节选）」，判断该用户当前"
             "关注的主题，从给定词表里挑选 0~3 个最贴切的标签。\n"
             "只允许输出词表中的标签；若都贴不上就输出空数组 []。"
-            "只输出一个 JSON 数组（如 [\"考研数学\",\"编程开发\"]），不要解释、不要 Markdown。\n\n"
+            '只输出一个 JSON 数组（如 ["考研数学","编程开发"]），不要解释、不要 Markdown。\n\n'
             f"【可选标签】\n{vocab}\n\n"
             f"【用户提问】\n{q[:300]}\n\n"
             f"【AI 回答（节选）】\n{a[:800]}"
@@ -1063,6 +1222,7 @@ def _extract_user_tags(question: str, answer: str) -> list[str]:
                 raw = raw[4:]
             raw = raw.strip()
         import json as _json
+
         tags = _json.loads(raw)
         vocab_set = set(USER_PROFILE_TAGS)
         out = [str(t).strip() for t in tags if str(t).strip() in vocab_set]

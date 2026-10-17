@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """行为基线（characterization tests）：知识库上传/入库接口。
 
 只直接调用 `api.kb` 里的 async 端点函数（显式传 uid，绕过鉴权依赖），
@@ -9,6 +8,7 @@ chroma / 数据目录全部落在临时目录。
 retain 语义、校验失败的分支与状态码、以及**中途失败时前面已成功文件的记录
 是否保留**（这条最容易在"批量写盘"类优化里被改坏）。
 """
+
 import asyncio
 import os
 import sys
@@ -59,6 +59,7 @@ def _upload(kb_id, files, mode="append", chunk_size=500, chunk_overlap=50):
 
 # ==================== 上传：响应结构与文件记录 ====================
 
+
 def test_upload_response_shape_and_records(monkeypatch):
     _no_quota(monkeypatch)
     kb_id, _ = pipelines.create_kb(OWNER, "基线库")
@@ -105,6 +106,7 @@ def test_upload_rebuild_retains_only_uploaded(monkeypatch):
 
 # ==================== 上传：校验分支 ====================
 
+
 def test_upload_validation_errors(monkeypatch):
     _no_quota(monkeypatch)
     kb_id, _ = pipelines.create_kb(OWNER, "校验库")
@@ -130,11 +132,14 @@ def test_upload_not_owner_is_404(monkeypatch):
     _no_quota(monkeypatch)
     kb_id, _ = pipelines.create_kb(OWNER, "别人库")
     with pytest.raises(HTTPException) as ei:
-        asyncio.run(kb_api.upload_and_build(kb_id, [_uf("a.txt", "x")], 500, 50, "append", "u_other"))
+        asyncio.run(
+            kb_api.upload_and_build(kb_id, [_uf("a.txt", "x")], 500, 50, "append", "u_other")
+        )
     assert ei.value.status_code == 404
 
 
 # ==================== 上传：中途失败时已成功文件的记录要保留 ====================
+
 
 def test_upload_partial_failure_keeps_first_record(monkeypatch):
     """★ 第 2 个文件建索引抛错时，第 1 个文件已经登记进 kb_files.json 的记录必须还在。
@@ -165,6 +170,7 @@ def test_upload_partial_failure_keeps_first_record(monkeypatch):
 
 
 # ==================== 同步问答端点 ====================
+
 
 def test_query_kb_returns_answer_and_refs(monkeypatch):
     """★ 阶段 4 修复后的行为：`/api/kb/{kb_id}/query` 正常返回 {answer, refs}。
