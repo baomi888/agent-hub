@@ -9,7 +9,8 @@
      不是用来"优化"现在这 5 个的
   3. `kb_search.retryable=False`（库不存在是确定性失败，不该诱导模型原地重试）、
      `download_file` 是 write + 需要审批
-  4. 延迟发现：`select:` 精确激活、关键词模糊命中、未命中时抛出**带候选名单**的异常
+  4. 延迟发现：`select:` 精确激活、关键词模糊命中、未命中时抛出**带候选名单**的异常；
+     且 discover 随 schema 返回第二层 playbook / 第三层 refs；激活集**按用户隔离**不串
   5. 两个端点的真实 HTTP 行为（鉴权、未命中 404 的响应体、400 空 query）
 """
 
@@ -108,46 +109,58 @@ for bad_kwargs, label in (
     except ValueError:
         check(f"{label} -> 抛错", True)
 
-print("\n[6] 延迟发现：把现有工具临时标记为 defer 来验代码路径")
+print("\n[6] 延迟发现：把现有工具临时标记为 defer 来验代码路径（含三层 + 按用户隔离）")
 # 现有工具都是 defer=False，延迟那条路平时走不到；这里临时改元数据把它跑起来。
 _orig = tr.TOOL_META["get_weather"]
 tr.TOOL_META["get_weather"] = tr.ToolMeta(category="read", defer=True, max_output_chars=2000)
+tr.TOOL_PLAYBOOK["get_weather"] = "测试 playbook：用户要查天气时调 get_weather；不要凭空编温度。"
+tr.assert_playbook_complete()
+_OWNER_A, _OWNER_B = "ownerA", "ownerB"
 tr.reset_activated()
 try:
     check("deferred_names() 现在含 get_weather", tr.deferred_names() == ["get_weather"], tr.deferred_names())
-    check("未激活时 discovered=False",
-          [m for m in tr.all_meta() if m["name"] == "get_weather"][0]["discovered"] is False)
+    check("未激活时 discovered=False（按用户视角）",
+          [m for m in tr.all_meta(_OWNER_A) if m["name"] == "get_weather"][0]["discovered"] is False)
 
-    names, schemas = tr.discover("select:get_weather")
+    names, schemas = tr.discover("select:get_weather", _OWNER_A)
     check("select: 精确激活命中", names == ["get_weather"], names)
     check("返回了 schema 且含 input_schema", bool(schemas) and "input_schema" in schemas[0])
-    check("激活后 discovered=True",
-          [m for m in tr.all_meta() if m["name"] == "get_weather"][0]["discovered"] is True)
+    check("第二层 playbook 随 schema 一起返回", schemas[0].get("playbook", "").startswith("测试 playbook"),
+          schemas[0].get("playbook", "")[:12])
+    check("第三层 refs 缺省为空列表", schemas[0].get("refs") == [], schemas[0].get("refs"))
+    check("激活后 discovered=True（仅该用户）",
+          [m for m in tr.all_meta(_OWNER_A) if m["name"] == "get_weather"][0]["discovered"] is True)
+    # 按用户隔离：甲激活，乙看不到
+    check("另一用户 discovered 仍为 False（不串用户）",
+          [m for m in tr.all_meta(_OWNER_B) if m["name"] == "get_weather"][0]["discovered"] is False)
     # 语义分清：deferred_names() = 所有 defer 工具（含已激活），用于"你能激活哪些"；
     # 而"尚未发现"要看 discovered 字段 / list_meta(deferred=True)。
     check("deferred_names() 仍列出该工具（它是 defer 工具）", tr.deferred_names() == ["get_weather"],
           tr.deferred_names())
-    check("但已激活 -> 不在待发现列表",
-          tr.list_meta(deferred=True) == [], tr.list_meta(deferred=True))
+    check("但 ownerA 已激活 -> 不在其待发现列表",
+          tr.list_meta(deferred=True, owner_id=_OWNER_A) == [], tr.list_meta(deferred=True, owner_id=_OWNER_A))
+    check("ownerB 仍在其待发现列表",
+          [i["name"] for i in tr.list_meta(deferred=True, owner_id=_OWNER_B)] == ["get_weather"],
+          tr.list_meta(deferred=True, owner_id=_OWNER_B))
 
     tr.reset_activated()
-    names2, _ = tr.discover("weather")
+    names2, _ = tr.discover("weather", _OWNER_A)
     check("关键词模糊命中（大小写不敏感）", names2 == ["get_weather"], names2)
 
     tr.reset_activated()
-    names3, _ = tr.discover("WEATHER")
+    names3, _ = tr.discover("WEATHER", _OWNER_A)
     check("大写关键词也命中", names3 == ["get_weather"], names3)
 
     tr.reset_activated()
     try:
-        tr.discover("完全不存在的工具")
+        tr.discover("完全不存在的工具", _OWNER_A)
         check("未命中 -> NoMatchError", False, "竟然没抛")
     except tr.NoMatchError as e:
         check("未命中 -> NoMatchError", True)
         check("异常里带候选名单", e.candidates == ["get_weather"], e.candidates)
 
     try:
-        tr.discover("")
+        tr.discover("", _OWNER_A)
         check("空 query -> NoMatchError", False, "竟然没抛")
     except tr.NoMatchError:
         check("空 query -> NoMatchError", True)
@@ -155,12 +168,13 @@ try:
     # 直接工具不该被搜索到（只搜延迟工具）
     tr.reset_activated()
     try:
-        tr.discover("calculator")
+        tr.discover("calculator", _OWNER_A)
         check("直接工具不进延迟搜索", False, "竟然命中了 calculator")
     except tr.NoMatchError:
         check("直接工具不进延迟搜索", True)
 finally:
     tr.TOOL_META["get_weather"] = _orig
+    tr.TOOL_PLAYBOOK.pop("get_weather", None)
     tr.reset_activated()
 tr.assert_meta_complete()
 

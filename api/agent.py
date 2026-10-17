@@ -51,7 +51,7 @@ async def list_tools(
     deferred=true 只看**尚未激活**的延迟工具（前端"可发现的工具"列表）；
     q 按名称与描述做子串匹配。
     """
-    items = await asyncio.to_thread(tool_registry.list_meta, deferred, q)
+    items = await asyncio.to_thread(tool_registry.list_meta, deferred, q, uid)
     return {"items": items, "total": len(items)}
 
 
@@ -67,7 +67,7 @@ async def discover_tools(req: DiscoverRequest, uid: str = Depends(get_current_us
         raise HTTPException(status_code=400, detail="query 不能为空")
 
     try:
-        activated, schemas = await asyncio.to_thread(tool_registry.discover, query)
+        activated, schemas = await asyncio.to_thread(tool_registry.discover, query, uid)
     except tool_registry.NoMatchError as e:
         # 404 而不是 200+空列表：这是"你要的东西不存在"，不是"查到了零条"。
         # 同时把候选名单一并给出，下一步才有得选。

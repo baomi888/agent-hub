@@ -19,7 +19,7 @@ from langchain.agents import create_agent
 
 from agent.tools import AGENT_TOOLS
 from core.llm import get_llm
-from core import config
+from core import config, tool_registry
 from core import scenarios as scenarios_mod
 
 SYSTEM_PROMPT = """你是一个智能问答助手，拥有以下能力：
@@ -152,6 +152,7 @@ def build_agent(
     has_kb: bool = False,
     location: dict | None = None,
     scenario: str | None = None,
+    activated: "frozenset[str]" = frozenset(),
 ):
     """构建集合式 Agent（带 5 个工具 + 多轮记忆）。
 
@@ -165,11 +166,13 @@ def build_agent(
     location 是用户地理定位（前端传来的经纬度 + 逆地理城市名），让用户问天气时免手输城市。
     scenario 是场景预设 id（考研/笔记/论文），拼在提示词末尾压过通用默认。
 
-    结果按 (has_kb, 定位片段, 场景) 缓存：图编译是纯 CPU 开销，同参数直接复用已编译的图。
+    结果按 (has_kb, 定位片段, 场景, 已激活工具集) 缓存：图编译是纯 CPU 开销，
+    同参数直接复用已编译的图。已激活工具集纳入键，保证不同激活状态的用户拿到不同
+    编译图、且各自会话内工具前缀稳定（不破坏 KV 缓存）。
     """
     note = location_note(location)
     scene = scenarios_mod.get_scenario_prompt(scenario)
-    key = (bool(has_kb), note, scene)
+    key = (bool(has_kb), note, scene, frozenset(activated))
 
     with _AGENT_LOCK:
         cached = _AGENT_CACHE.get(key)
@@ -200,9 +203,17 @@ def build_agent(
         # 场景预设：拼在末尾，让场景专属话术（如"考研先给作答空间再给答案"）压过通用默认
         system_prompt += scene
 
+        # 绑定的工具 = 全部直接工具 + 本用户已激活的延迟工具。
+        # 延迟工具不在激活集里就不进 bind_tools，省每轮 schema token；
+        # 激活集来自请求开始时的 tool_registry.activated_for(uid)，整轮不变
+        # → 工具前缀稳定，不破坏 KV 缓存（呼应 kv-cache 实验报告：前缀变了命中率 90%→0%）。
+        tools_to_bind = [
+            t for t in AGENT_TOOLS
+            if (not tool_registry.TOOL_META[t.name].defer) or (t.name in activated)
+        ]
         agent = create_agent(
             model=llm,
-            tools=AGENT_TOOLS,
+            tools=tools_to_bind,
             system_prompt=system_prompt,
             checkpointer=_CHECKPOINTER,
         )

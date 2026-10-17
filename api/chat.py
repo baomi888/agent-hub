@@ -47,7 +47,7 @@ from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from pydantic import BaseModel, Field
 
-from core import config, quota, session as store, upload
+from core import config, quota, session as store, upload, tool_registry
 from core.auth import get_current_user
 from core.llm import get_llm, get_vision_llm
 from core import scenarios as scenarios_mod
@@ -738,7 +738,13 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 from agent.builder import build_agent
                 # 只告诉模型"有没有绑库"，不告诉它是哪个库：
                 # kb_id 走下面的 configurable 注入，模型没有机会改写它
-                agent = await asyncio.to_thread(build_agent, bool(kb_id and kb_exists), location_ctx, req.scenario)
+                agent = await asyncio.to_thread(
+                    build_agent,
+                    bool(kb_id and kb_exists),
+                    location_ctx,
+                    req.scenario,
+                    tool_registry.activated_for(uid),
+                )
 
                 # 组装历史 + 当前问题
                 history = (await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False))[:-1]
