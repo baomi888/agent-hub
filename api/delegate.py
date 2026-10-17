@@ -34,7 +34,7 @@ import re
 import time
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 from core import quota, session as store
 from core.auth import get_current_user
@@ -48,6 +48,10 @@ router = APIRouter(dependencies=[Depends(get_current_user)])
 MAX_ENABLED = 5
 
 KINDS = ("study_plan", "review", "encourage", "custom")
+# 前端曾把「学习计划」写成 "study"（旧 DelegateKind 的取值）。为一个枚举别名就回 422，
+# 用户那侧只会看到 "[object Object]"（见前端 api.ts::httpError 的说明），很不划算，
+# 所以这里容错归一；前端已同步改成规范值 "study_plan"（规范/02 第 9 节）。
+_KIND_ALIASES = {"study": "study_plan"}
 FREQS = ("daily", "weekdays", "weekly", "interval")
 _TONE_MAX = 8
 _HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -71,8 +75,19 @@ class DelegationIn(BaseModel):
     name: str = Field(..., min_length=3, max_length=32)
     kind: str = Field(default="study_plan")
     schedule: ScheduleIn = Field(default_factory=ScheduleIn)
-    prompt: str = Field(default="", max_length=1000)
-    deliver_sid: str = Field(..., description="投递到哪个会话（必须是本人的会话）")
+    # 前端契约用 instruction / session_id 命名，内部与旧调用方用 prompt / deliver_sid。
+    # AliasChoices 让两套名字都能进：此前 `_out` 只对**输出**做了加法兼容，
+    # **输入**没做 —— 前端一发 session_id 就被 422 挡下（前端把它显示成 "[object Object]"）。
+    prompt: str = Field(
+        default="",
+        max_length=1000,
+        validation_alias=AliasChoices("prompt", "instruction"),
+    )
+    deliver_sid: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("deliver_sid", "session_id"),
+        description="投递到哪个会话（必须是本人的会话）；空 = 前端「默认会话」，落到最近更新的会话",
+    )
     kb_id: str | None = Field(default=None)
     tone: str = Field(default="neutral", max_length=_TONE_MAX)
     max_chars: int = Field(default=600, ge=200, le=2000)
@@ -83,8 +98,15 @@ class DelegationPatch(BaseModel):
     name: str | None = Field(default=None, min_length=3, max_length=32)
     kind: str | None = Field(default=None)
     schedule: ScheduleIn | None = Field(default=None)
-    prompt: str | None = Field(default=None, max_length=1000)
-    deliver_sid: str | None = Field(default=None)
+    prompt: str | None = Field(
+        default=None,
+        max_length=1000,
+        validation_alias=AliasChoices("prompt", "instruction"),
+    )
+    deliver_sid: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("deliver_sid", "session_id"),
+    )
     kb_id: str | None = Field(default=None)
     tone: str | None = Field(default=None, max_length=_TONE_MAX)
     max_chars: int | None = Field(default=None, ge=200, le=2000)
@@ -93,9 +115,12 @@ class DelegationPatch(BaseModel):
 
 # ---------- 校验 ----------
 
-def _validate_kind(kind: str) -> None:
-    if kind not in KINDS:
+def _normalize_kind(kind: str) -> str:
+    """校验 kind 并返回落库用的规范值（顺带吸收历史的别名写法）。"""
+    canon = _KIND_ALIASES.get(kind, kind)
+    if canon not in KINDS:
         raise HTTPException(status_code=400, detail=f"kind 需为 {' / '.join(KINDS)} 之一")
+    return canon
 
 
 def _validate_schedule(s: ScheduleIn) -> None:
@@ -111,10 +136,22 @@ def _validate_schedule(s: ScheduleIn) -> None:
         raise HTTPException(status_code=400, detail="schedule.freq=interval 时必须提供 every_minutes")
 
 
-def _require_own_session(uid: str, sid: str) -> None:
-    """投递目标必须是本人的会话：别人的 sid 一律 404（不泄露存在性）。"""
-    if not store.get_conversation(uid, sid):
-        raise HTTPException(status_code=404, detail=f"会话不存在：{sid}")
+def _resolve_deliver_sid(uid: str, sid: str | None) -> str:
+    """把请求里的投递目标落成一个**合法的本人会话 id**。
+
+    · 给了 sid：必须是本人的会话，否则 404（不泄露「这个 id 存在但不属于你」，与 api/kb.py 同款）。
+    · 没给（前端下拉的「默认会话」发的是 null）：落到该用户最近更新的会话。
+      直接透传 null 会存下一条**永不投递**的委托 —— 用户只会觉得「怎么又没收到」，
+      却查不出错。一个会话都没有时给 400，让用户先去对话页建一个，而不是静默失败。
+    """
+    if sid and sid.strip():
+        if not store.get_conversation(uid, sid):
+            raise HTTPException(status_code=404, detail=f"会话不存在：{sid}")
+        return sid
+    convs = store.list_conversations(uid)
+    if convs:
+        return convs[0]["id"]
+    raise HTTPException(status_code=400, detail="还没有可投递的会话：请先在对话页新建一个会话")
 
 
 def _count_enabled(items: list[dict]) -> int:
@@ -185,26 +222,26 @@ async def list_delegations(enabled: bool | None = None, uid: str = Depends(get_c
 async def create_delegation(req: DelegationIn, uid: str = Depends(get_current_user)) -> dict:
     """新建委托。"""
     await asyncio.to_thread(quota.hit, uid)
-    _validate_kind(req.kind)
+    kind = _normalize_kind(req.kind)
     _validate_schedule(req.schedule)
-    await asyncio.to_thread(_require_own_session, uid, req.deliver_sid)
+    deliver_sid = await asyncio.to_thread(_resolve_deliver_sid, uid, req.deliver_sid)
 
     existing = await asyncio.to_thread(daily.list_delegations, uid)
     if any(d["name"] == req.name for d in existing):
         raise HTTPException(status_code=409, detail="同名委托已存在")
     if req.enabled and _count_enabled(existing) >= MAX_ENABLED:
         raise HTTPException(status_code=400, detail=f"启用中的委托数量已达上限（{MAX_ENABLED}）")
-    if req.kind == "custom" and not req.prompt.strip():
+    if kind == "custom" and not req.prompt.strip():
         raise HTTPException(status_code=400, detail="kind=custom 时必须提供 prompt")
 
     d = await asyncio.to_thread(
         daily.save_delegation,
         uid,
         req.name,
-        req.kind,
+        kind,
         req.schedule.model_dump(),
         req.prompt,
-        req.deliver_sid,
+        deliver_sid,
         req.kb_id,
         req.tone,
         req.max_chars,
@@ -230,12 +267,15 @@ async def update_delegation(
 
     data = req.model_dump(exclude_unset=True)
     if "kind" in data and data["kind"]:
-        _validate_kind(data["kind"])
+        data["kind"] = _normalize_kind(data["kind"])
     if "schedule" in data and data["schedule"]:
         # model_dump() 已把嵌套的 ScheduleIn 转成 dict，这里无需再判类型
         _validate_schedule(ScheduleIn(**data["schedule"]))
-    if "deliver_sid" in data and data["deliver_sid"]:
-        await asyncio.to_thread(_require_own_session, uid, data["deliver_sid"])
+    if "deliver_sid" in data:
+        # 含显式置空（前端「默认会话」）——交给 resolver 落成一个真实会话
+        data["deliver_sid"] = await asyncio.to_thread(
+            _resolve_deliver_sid, uid, data["deliver_sid"]
+        )
     if data.get("enabled") is True and not cur.get("enabled"):
         others = await asyncio.to_thread(daily.list_delegations, uid)
         if _count_enabled(others) >= MAX_ENABLED:

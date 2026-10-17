@@ -1,6 +1,8 @@
 // SSE 流式解析：fetch + ReadableStream（EventSource 不支持 POST 流式）
 // 后端帧格式：`event: X\ndata: {json}\n\n`
 
+import { detailToMessage } from "./errors";
+
 export interface StreamEvent {
   event: string;
   data: Record<string, unknown>;
@@ -63,7 +65,9 @@ export async function* streamChat(
     }
     try {
       const j = await res.json();
-      detail = j.detail || detail;
+      // 同 api.ts：detail 可能是字符串，也可能是 FastAPI 422 的数组。
+      // 直接 `new Error(j.detail)` 会把它变成 "[object Object]"。
+      detail = detailToMessage(j.detail, detail);
     } catch {
       /* ignore */
     }

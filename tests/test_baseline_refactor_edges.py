@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import pytest
+from fastapi import HTTPException
 
 from api import delegate as deleg
 from hybrid.expr import ExprError, eval_condition, safe_eval
@@ -104,3 +105,112 @@ def test_out_tolerates_broken_schedule_json(monkeypatch):
     monkeypatch.setattr(deleg.pipelines, "name_of", lambda kb_id: None)
     out = deleg._out(_delegation_record(schedule_json="{not json"))
     assert out["schedule"] is None
+
+
+# ---- 输入契约：前端发的是 session_id / instruction，后端字段名是 deliver_sid / prompt ----
+#
+# 这一组是本轮"[object Object]"异常的回归钉。此前只有 `_out`（**输出**）做了加法兼容，
+# **输入**没做 ⇒ 前端一提交就 422 ⇒ 错误体里 detail 是数组 ⇒ 前端 `new Error(detail)`
+# 把它转成 "[object Object]"。任何一侧改回旧行为，这组用例立刻红。
+
+
+def _frontend_body(**over):
+    """照抄 frontend/src/app/delegate/page.tsx::submit 里拼的 body。"""
+    body = {
+        "name": "每日复盘",
+        "kind": "study_plan",
+        "schedule": {
+            "freq": "daily",
+            "at": "21:00",
+            "weekday": None,
+            "every_minutes": None,
+            "tz": "Asia/Shanghai",
+        },
+        "session_id": "s1",
+        "kb_id": None,
+        "instruction": "给我每天都生成一次复盘",
+        "tone": "neutral",
+        "max_chars": 600,
+        "enabled": True,
+    }
+    body.update(over)
+    return body
+
+
+def test_delegation_in_accepts_frontend_field_names():
+    """前端 body 必须能直接过校验，并映射到内部的 deliver_sid / prompt。"""
+    req = deleg.DelegationIn(**_frontend_body())
+    assert req.deliver_sid == "s1"
+    assert req.prompt == "给我每天都生成一次复盘"
+
+
+def test_delegation_in_still_accepts_canonical_field_names():
+    """加法兼容：旧调用方（文档/测试文档里的 deliver_sid / prompt）不能被打翻。"""
+    req = deleg.DelegationIn(
+        name="早上七点",
+        kind="study_plan",
+        schedule={"freq": "daily", "at": "07:00"},
+        deliver_sid="s9",
+        prompt="列今日三件事",
+    )
+    assert req.deliver_sid == "s9" and req.prompt == "列今日三件事"
+
+
+def test_delegation_in_defaults_deliver_sid_to_none():
+    """前端「默认会话」发的是 null —— 不能因此 422（null 由 resolver 兜）。"""
+    req = deleg.DelegationIn(**_frontend_body(session_id=None))
+    assert req.deliver_sid is None
+
+
+def test_delegation_patch_accepts_frontend_field_names():
+    """PATCH 同样吃前端的指令/会话字段名，否则「编辑指令」是静默不生效的。"""
+    patch = deleg.DelegationPatch(
+        schedule={"freq": "daily", "at": "21:00"},
+        session_id="s2",
+        instruction="改成每天写复盘",
+        enabled=False,
+    ).model_dump(exclude_unset=True)
+    assert patch["deliver_sid"] == "s2"
+    assert patch["prompt"] == "改成每天写复盘"
+    # 没提交的字段不应出现在 exclude_unset 的结果里（PATCH 的"只改提交的"语义）
+    assert "kind" not in patch and "name" not in patch
+
+
+def test_normalize_kind_maps_legacy_alias_and_rejects_unknown():
+    """kind=study 是前端历史写法，归一成规范值 study_plan；别的值仍 400。"""
+    assert deleg._normalize_kind("study") == "study_plan"
+    assert deleg._normalize_kind("review") == "review"
+    with pytest.raises(HTTPException) as ei:
+        deleg._normalize_kind("whatever")
+    assert ei.value.status_code == 400
+
+
+def test_resolve_deliver_sid_keeps_owned_session(monkeypatch):
+    monkeypatch.setattr(deleg.store, "get_conversation", lambda uid, sid: {"id": sid})
+    assert deleg._resolve_deliver_sid("u1", "s1") == "s1"
+
+
+def test_resolve_deliver_sid_404_on_foreign_or_missing(monkeypatch):
+    """别人的 / 不存在的 sid 一律 404（不泄露存在性）。"""
+    monkeypatch.setattr(deleg.store, "get_conversation", lambda uid, sid: None)
+    with pytest.raises(HTTPException) as ei:
+        deleg._resolve_deliver_sid("u1", "someone-else")
+    assert ei.value.status_code == 404
+
+
+def test_resolve_deliver_sid_falls_back_to_latest_conversation(monkeypatch):
+    """「默认会话」（null / 空串）落到最近更新的会话，而不是存一条永不投递的委托。"""
+    monkeypatch.setattr(
+        deleg.store, "list_conversations", lambda uid: [{"id": "newest"}, {"id": "older"}]
+    )
+    assert deleg._resolve_deliver_sid("u1", None) == "newest"
+    assert deleg._resolve_deliver_sid("u1", "") == "newest"
+
+
+def test_resolve_deliver_sid_400_when_no_conversation(monkeypatch):
+    """一个会话都没有：明确 400 让用户先去建会话，而不是静默失败。"""
+    monkeypatch.setattr(deleg.store, "list_conversations", lambda uid: [])
+    with pytest.raises(HTTPException) as ei:
+        deleg._resolve_deliver_sid("u1", None)
+    assert ei.value.status_code == 400
+
