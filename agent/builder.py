@@ -163,16 +163,22 @@ def build_agent(
     模型只能决定"查不查"，"查谁的库"它说了不算。
 
     has_kb 只用来告诉模型"当前会话有没有绑库"，好让它决定要不要调 kb_search。
-    location 是用户地理定位（前端传来的经纬度 + 逆地理城市名），让用户问天气时免手输城市。
+    location 是用户地理定位（前端传来的经纬度 + 逆地理城市名）——**注意：P0-1 之后
+    它不再进 system prompt，也不进缓存键**；调用方应把它作为末尾动态消息追加，
+    这样 system 前缀恒定、KV 缓存不被城市变化打掉。
     scenario 是场景预设 id（考研/笔记/论文），拼在提示词末尾压过通用默认。
 
-    结果按 (has_kb, 定位片段, 场景, 已激活工具集) 缓存：图编译是纯 CPU 开销，
+    结果按 (has_kb, 场景, 已激活工具集) 缓存：图编译是纯 CPU 开销，
     同参数直接复用已编译的图。已激活工具集纳入键，保证不同激活状态的用户拿到不同
     编译图、且各自会话内工具前缀稳定（不破坏 KV 缓存）。
     """
-    note = location_note(location)
     scene = scenarios_mod.get_scenario_prompt(scenario)
-    key = (bool(has_kb), note, scene, frozenset(activated))
+    # ⚠️ 缓存键里**不含 note**（P0-1）：动态定位进缓存键会带来双重代价——
+    # ① 城市一多变 LRU 抖动、反复重编译图（原本 2×#城市×#场景×#激活集）；
+    # ② 更贵的是 system prompt 前缀随城市变化，KV 缓存直接失效（实测命中率 90%→0%）。
+    # 现在定位只作为**末尾**的动态消息追加（见 location_note 的调用方 api/chat.py），
+    # 前缀恒定，键的种类降为 2×#场景×#激活集。
+    key = (bool(has_kb), scene, frozenset(activated))
 
     with _AGENT_LOCK:
         cached = _AGENT_CACHE.get(key)
@@ -199,18 +205,29 @@ def build_agent(
                 "\n\n【当前会话没有绑定知识库】\n"
                 "不要凭空猜测 kb_id 调用 kb_search；需要外部信息时用 web_search。"
             )
-        system_prompt += note
-        # 场景预设：拼在末尾，让场景专属话术（如"考研先给作答空间再给答案"）压过通用默认
+        # P0-1：定位不再拼进 system prompt。
+        # 理由：system prompt 是**前缀**，动态内容拼进去 = 每换一个城市前缀全变，
+        # KV 缓存全废（书第 2 章：系统提示词定下后别改，动态信息追加到末尾）。
+        # 定位改由调用方在**最后一条用户消息**里追加（api/chat.py），
+        # 模型仍在回答前看得到，只是位置从"头部"挪到"尾部"。
+        # 场景预设保留在 system 里：它是按场景选定的稳定内容，不随请求变化。
         system_prompt += scene
 
         # 绑定的工具 = 全部直接工具 + 本用户已激活的延迟工具。
         # 延迟工具不在激活集里就不进 bind_tools，省每轮 schema token；
         # 激活集来自请求开始时的 tool_registry.activated_for(uid)，整轮不变
         # → 工具前缀稳定，不破坏 KV 缓存（呼应 kv-cache 实验报告：前缀变了命中率 90%→0%）。
-        tools_to_bind = [
+        #
+        # 用 build_guarded_tools 而不是直接用 AGENT_TOOLS：守卫（输出截断 /
+        # 危险动作审批 / 不可重试工具封禁）靠它装配。它用 StructuredTool.from_function
+        # 重建，name / description / args_schema 原样沿用——工具前缀与模型观感都不变。
+        from core.tool_guard import build_guarded_tools
+
+        enabled = [
             t for t in AGENT_TOOLS
             if (not tool_registry.TOOL_META[t.name].defer) or (t.name in activated)
         ]
+        tools_to_bind = build_guarded_tools(enabled)
         agent = create_agent(
             model=llm,
             tools=tools_to_bind,

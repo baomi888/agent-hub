@@ -170,6 +170,22 @@ def _init_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_conv_owner ON conversations(owner_id, updated_at DESC)"
         )
 
+        # 迁移（P0-2 上下文压缩）：老库补三个字段。
+        #   compressed_summary     当前压缩块（含 [COMPRESSED-n] 分段标记）
+        #   compressed_summary_prev 上一版压缩块（L1 安全阀回退用；方案文档指出
+        #                           单 TEXT 字段无法回退，故显式存一份）
+        #   compressed_upto        已压缩到的 message id；build 时以此过滤原文，
+        #                           避免"压缩块 + 原文"重复进上下文
+        for col, decl in (
+            ("compressed_summary", "TEXT"),
+            ("compressed_summary_prev", "TEXT"),
+            ("compressed_upto", "INTEGER"),
+        ):
+            try:
+                conn.execute(f"ALTER TABLE conversations ADD COLUMN {col} {decl}")
+            except Exception:
+                pass  # 已存在
+
 
 # 模块加载时自动建表
 _init_db()

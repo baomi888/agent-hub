@@ -522,3 +522,8 @@ def download_file(url: str, config: RunnableConfig = None) -> str:
 # ==================== 工具清单 ====================
 
 AGENT_TOOLS = [kb_search, web_search, calculator, get_weather, download_file]
+
+# 注：工具守卫（core/tool_guard.py 的截断/审批/封禁）**不在工具对象上做包装**。
+# 原因：LangChain 的 StructuredTool 会在 `_run` 与 `func` 两层做签名内省并注入
+# config/run_manager，从外面再包一层会破坏注入（实测两次踩坑，见 tool_guard 的注释）。
+# 守卫逻辑本身保留为可单测的纯函数，由调用方（api/chat.py）在执行前显式施加。

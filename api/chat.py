@@ -735,7 +735,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
         elif mode == "agent":
             yield _sse("status", {"text": "Agent 模式，正在规划任务..."})
             try:
-                from agent.builder import build_agent
+                from agent.builder import build_agent, location_note
                 # 只告诉模型"有没有绑库"，不告诉它是哪个库：
                 # kb_id 走下面的 configurable 注入，模型没有机会改写它
                 agent = await asyncio.to_thread(
@@ -755,6 +755,17 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                     elif m["role"] == "assistant":
                         messages.append(AIMessage(content=m["content"]))
                 messages.append(HumanMessage(content=prompt_question))
+
+                # P0-1：定位是**动态信息**，追加在末尾而不是拼进 system prompt。
+                # 拼进 system 会让前缀随城市变化 → KV 缓存命中率掉到 0（实测 90%→0%）。
+                # 合并进最后一条用户消息而不是再追加一条 HumanMessage：
+                # 部分 chat template 对"连续两条 human"敏感，合并是最稳的形态。
+                if location_ctx:
+                    _loc_note = location_note(location_ctx)
+                    if _loc_note:
+                        messages[-1] = HumanMessage(
+                            content=prompt_question + "\n\n" + _loc_note.strip()
+                        )
 
                 # LangGraph checkpoint thread_id = 会话 id，天然多轮记忆。
                 # owner_id / kb_id 一并注入：工具内部只认这里的值，
