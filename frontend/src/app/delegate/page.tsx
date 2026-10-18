@@ -35,13 +35,13 @@ const MAX_ACTIVE = 5;
 const TZ = "Asia/Shanghai";
 
 const KIND_OPTIONS: { value: DelegateKind; label: string }[] = [
-  { value: "study", label: "学习计划" },
+  { value: "study_plan", label: "学习计划" },
   { value: "review", label: "复盘" },
   { value: "encourage", label: "鼓励" },
   { value: "custom", label: "自定义" },
 ];
 const KIND_LABEL: Record<DelegateKind, string> = {
-  study: "学习计划",
+  study_plan: "学习计划",
   review: "复盘",
   encourage: "鼓励",
   custom: "自定义",
@@ -54,7 +54,9 @@ const FREQ_OPTIONS: { value: DelegateFreq; label: string; hint: string }[] = [
   { value: "interval", label: "间隔", hint: "每隔 N 分钟一次" },
 ];
 
-const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
+// 下标即后端 weekday 取值：0=周一 … 6=周日（见 api/delegate.py 的 ScheduleIn.weekday）。
+// 顺序刻意从「一」开始：第 0 项必须和「周一」对上，否则每周委托整体错一天。
+const WEEKDAYS = ["一", "二", "三", "四", "五", "六", "日"];
 
 const RUN_TAG: Record<DelegateRunStatus, [string, string]> = {
   succeeded: ["ok", "成功"],
@@ -363,7 +365,7 @@ export default function DelegatePage() {
     try {
       const r = await api.delegate.run(d.id, dryRun);
       if (dryRun) {
-        setPreview({ name: d.name, text: r?.text ?? r?.output ?? "（后端未返回内容）" });
+        setPreview({ name: d.name, text: r?.content ?? "（后端未返回内容）" });
       } else {
         showToast("success", "已投递到会话，打开对话即可看到");
         loadList();
@@ -633,14 +635,14 @@ export default function DelegatePage() {
                 </div>
 
                 {form.freq === "interval" ? (
-                  <Field label="每多少分钟一次" hint="最小 5 分钟">
+                  <Field label="每多少分钟一次" hint="最小 60 分钟（1 小时），最多 1440">
                     <input
                       className="input"
                       type="number"
-                      min={5}
+                      min={60}
                       max={1440}
                       value={form.everyMinutes}
-                      onChange={(e) => patch({ everyMinutes: Number(e.target.value) || 5 })}
+                      onChange={(e) => patch({ everyMinutes: Number(e.target.value) || 60 })}
                     />
                   </Field>
                 ) : (
@@ -710,6 +712,7 @@ export default function DelegatePage() {
                   <textarea
                     className="input"
                     value={form.instruction}
+                    maxLength={1000}
                     placeholder="例如：根据我今天的学习产出给一段复盘，先说掌握了什么，再指出一个最该补的漏洞。"
                     onChange={(e) => patch({ instruction: e.target.value })}
                   />
@@ -734,7 +737,7 @@ export default function DelegatePage() {
                       <input
                         className="input"
                         type="number"
-                        min={100}
+                        min={200}
                         max={2000}
                         step={50}
                         value={form.maxChars}

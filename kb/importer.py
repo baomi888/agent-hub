@@ -146,6 +146,39 @@ def fetch_url_text(url: str) -> tuple[str, str]:
     return _strip_html(html), title
 
 
+def _index_into_kb(owner: str, kb_id: str, dest: str, name: str, chunk_size: int,
+                   chunk_overlap: int, empty_msg: str) -> int:
+    """把已落档的来源切片入库；同名来源已在库内则跳过。返回本次写入的切片数（跳过 0）。
+
+    抓网页正文与下载文档这两条入口，后段流程完全一致（加锁 → 去重 → 加载 → 切片 →
+    写向量 → 登记文件记录），只有"切片为空"时的报错文案不同，所以文案作为参数传入。
+    那段文案会直接显示给用户，两条必须各自保留，不要合并成一句。
+
+    只锁「写库」这一段：抓网页/下载那几秒不该占着锁，但 embedding + 写向量 + 改文件
+    清单必须和同库的入库 / 重建 / 删除互斥。
+    """
+    with pipelines.kb_lock(kb_id):
+        pipe = pipelines.get_or_create(owner, kb_id)
+        # 去重：同名来源已入库时跳过，避免重复切片 + 重复付 embedding 费
+        if pipe.has_source(name):
+            return 0
+        docs = load_document(dest, source_name=name)
+        chunks = split_documents(docs, chunk_size, chunk_overlap)
+        if not chunks:
+            raise ValueError(empty_msg)
+        # 空库也要能写进去：add_chunks 内部走 _ensure_vs()（没有 collection 就先建），
+        # 换成 get_or_open() 会在 _vs=None 上 add_documents ⇒ AttributeError，
+        # 而且失败在建 collection 之前，重试永远不可能成功。
+        pipe.add_chunks(chunks)
+        pipelines.add_file_records(owner, kb_id, [{
+            "name": name,
+            "chunks": len(chunks),
+            "added_at": int(time.time()),
+            "origin": "web",
+        }])
+        return len(chunks)
+
+
 def import_url(owner: str, kb_id: str, url: str, chunk_size: int = 500, chunk_overlap: int = 50) -> dict:
     """抓 URL 正文追加到指定知识库（正文留档 + 登记文件，便于后续单条删除/重建）。
 
@@ -158,28 +191,10 @@ def import_url(owner: str, kb_id: str, url: str, chunk_size: int = 500, chunk_ov
     with open(dest, "w", encoding="utf-8") as f:
         f.write(f"来源URL: {url}\n标题: {title}\n\n{text}")
 
-    # 只锁「写库」这一段：抓网页那几秒不该占着锁，
-    # 但 embedding + add_documents + 改文件清单必须和同库的入库 / 重建 / 删除互斥
-    with pipelines.kb_lock(kb_id):
-        pipe = pipelines.get_or_create(owner, kb_id)
-        # 去重：同名来源已入库时跳过，避免重复切片 + 重复付 embedding 费
-        if pipe.has_source(name):
-            return {"url": url, "title": title, "chunks": 0, "file": name, "skipped": True}
-        docs = load_document(dest, source_name=name)
-        chunks = split_documents(docs, chunk_size, chunk_overlap)
-        if not chunks:
-            raise ValueError("URL 内容切片为空")
-        # 空库也要能写进去：add_chunks 内部走 _ensure_vs()（没有 collection 就先建），
-        # 换成 get_or_open() 会在 _vs=None 上 add_documents ⇒ AttributeError，
-        # 而且失败在建 collection 之前，重试永远不可能成功。
-        pipe.add_chunks(chunks)
-        pipelines.add_file_records(owner, kb_id, [{
-            "name": name,
-            "chunks": len(chunks),
-            "added_at": int(time.time()),
-            "origin": "web",
-        }])
-    return {"url": url, "title": title, "chunks": len(chunks), "file": name}
+    n = _index_into_kb(owner, kb_id, dest, name, chunk_size, chunk_overlap, "URL 内容切片为空")
+    if n == 0:
+        return {"url": url, "title": title, "chunks": 0, "file": name, "skipped": True}
+    return {"url": url, "title": title, "chunks": n, "file": name}
 
 
 def _safe_name(title: str, ext: str) -> str:
@@ -293,26 +308,13 @@ def download_and_index(owner: str, kb_id: str, url: str, chunk_size: int = 500, 
     with open(dest, "wb") as out:
         out.write(Path(info["path"]).read_bytes())
 
-    with pipelines.kb_lock(kb_id):
-        pipe = pipelines.get_or_create(owner, kb_id)
-        # 去重：同名来源已入库时跳过，不再重复切片与 embedding
-        if pipe.has_source(info["filename"]):
-            info["chunks"] = 0
-            info["skipped"] = True
-            return info
-        docs = load_document(dest, source_name=info["filename"])
-        chunks = split_documents(docs, chunk_size, chunk_overlap)
-        if not chunks:
-            raise ValueError("文档内容切片为空，无法入库")
-        # 同 import_url：空库入库走 add_chunks，不能用 get_or_open()
-        pipe.add_chunks(chunks)
-        info["chunks"] = len(chunks)
-        pipelines.add_file_records(owner, kb_id, [{
-            "name": info["filename"],
-            "chunks": len(chunks),
-            "added_at": int(time.time()),
-            "origin": "web",
-        }])
+    n = _index_into_kb(
+        owner, kb_id, dest, info["filename"], chunk_size, chunk_overlap,
+        "文档内容切片为空，无法入库",
+    )
+    info["chunks"] = n
+    if n == 0:
+        info["skipped"] = True
     return info
 
 

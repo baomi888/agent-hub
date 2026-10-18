@@ -190,7 +190,7 @@ export interface ApplyTemplateResult {
 // ---------- P4 每日委托 /api/delegate ----------
 
 export type DelegateFreq = "daily" | "weekdays" | "weekly" | "interval";
-export type DelegateKind = "study" | "review" | "encourage" | "custom";
+export type DelegateKind = "study_plan" | "review" | "encourage" | "custom";
 
 /**
  * 触发计划。注意**不是 cron**：后端用的是结构化字段，
@@ -200,7 +200,7 @@ export interface DelegateSchedule {
   freq: DelegateFreq;
   /** 触发时刻 HH:MM；interval 频率下可为空 */
   at?: string | null;
-  /** weekly 用：0=周日 … 6=周六 */
+  /** weekly 用：0=周一 … 6=周日（与后端 ScheduleIn.weekday 对齐） */
   weekday?: number | null;
   /** interval 用：每多少分钟 */
   every_minutes?: number | null;

@@ -14,16 +14,88 @@ TaskContext 是两种执行模式之间**唯一**的数据交换通道：
 
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
+
+from core import config
 
 ModeName = Literal["workflow", "agent"]
 
-# 执行状态机：running 只往这四个终态走，引擎返回结果时由编排器落锤
-TaskStatus = Literal["running", "completed", "failed", "timeout", "stopped"]
+# 执行状态机：running 只往这四个终态走，引擎返回结果时由编排器落锤。
+# awaiting_human 是"挂起"（human 节点等人确认），不是终态——恢复后回到 running。
+TaskStatus = Literal["running", "completed", "failed", "timeout", "stopped", "awaiting_human"]
+
+# ==================== shared 的三条防线（为什么）====================
+# shared 是两种模式之间**唯一**的数据交换通道。它出问题不是"某个功能坏了"，
+# 而是全链路静默错误，所以在这里硬拦：
+#
+#   1. 值上限：节点产物与 Agent 产出都往里写，长文一进去，"切换即快照"
+#      会把整份 context 落库（workflow_runs.context），库会无声膨胀。
+#      超限值改为"落盘 + 存预览指针"，与 exec_logs 的 payload 截断同一思路。
+#   2. 键命名空间：shared 是扁平 dict，两个写入方可能撞名。
+#      约定前缀 `node:` / `agent:` / `wf:`；裸键视为共享输入，允许存在，
+#      但同一逻辑名被不同前缀重复写入时抛错，避免静默覆盖。
+#   3. goal 只读：事后改 goal 会让 mode_trace 失去可复现性
+#      （回放时不知道当时的任务目标是什么）。
+# ================================================================
+
+SHARED_MAX_VALUE_CHARS = int(os.getenv("HYBRID_SHARED_MAX_VALUE_CHARS", "8000"))
+SHARED_SPILL_SUBDIR = "shared_spill"
+_KEY_PREFIXES = ("node:", "agent:", "wf:")
+
+
+class SharedKeyError(ValueError):
+    """shared 键的命名空间冲突。"""
+
+
+def _spill_dir() -> str:
+    d = os.path.join(getattr(config, "DATA_DIR", ".") or ".", SHARED_SPILL_SUBDIR)
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def spill_value(value: Any, key: str) -> str:
+    """把超限值落盘，返回预览指针。落盘失败也不抛——退化为纯截断预览。"""
+    text = value if isinstance(value, str) else str(value)
+    n = len(text)
+    try:
+        safe = "".join(c if c.isalnum() else "_" for c in str(key))[:60]
+        path = os.path.join(_spill_dir(), f"{safe}_{int(time.time() * 1000)}.txt")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        return f"[值 {n} 字符已落盘：{path} — 需要时读取该文件]"
+    except Exception:  # noqa: BLE001 —— 落盘失败也不能让执行中断
+        return f"[值 {n} 字符超限且落盘失败，已截断：{text[:200]}...]"
+
+
+def shared_set(shared: dict[str, Any], key: str, value: Any, *, strict: bool = True) -> None:
+    """写 shared 的推荐入口：校验键 + 超限落盘。strict=False 用于恢复历史快照。
+
+    注意：节点产出（`workflow.py` 的 `_exec_llm/_exec_tool`、`agent_engine` 的最终
+    结果）**刻意不走这里**，而是直接赋值——产出全文要被下游模板逐字读取，落盘成指针
+    会破坏渲染。理由详见 `hybrid/workflow.py::_exec_llm` 的 docstring。
+    """
+    if not isinstance(key, str) or not key.strip():
+        raise SharedKeyError("shared 的键不能为空")
+    if strict:
+        for exist in shared:
+            if exist == key:
+                continue
+            if exist.split(":", 1)[-1] == key.split(":", 1)[-1]:
+                raise SharedKeyError(
+                    f"shared 键命名空间冲突：{exist!r} 与 {key!r} 指向同一逻辑名；"
+                    f"规范前缀为 {_KEY_PREFIXES}"
+                )
+    if isinstance(value, str) and len(value) > SHARED_MAX_VALUE_CHARS:
+        # 经模块全局查找，而不是直接引用函数名：这样测试可以 monkeypatch
+        # context.spill_value 来避免真落盘（可测性；直接叫名字会绕开替换）。
+        spiller = globals().get("spill_value")
+        value = spiller(value, key) if spiller else f"[值 {len(value)} 字符超限]"
+    shared[key] = value
 
 
 class ModeSwitch(BaseModel):
@@ -59,8 +131,11 @@ class TaskContext(BaseModel):
 
     workflow_state / agent_state 是各模式的**私有段**：
     对方模式可以读（用于决策），但只能写自己的段；
-    跨模式递数据一律走 shared。
+    跨模式递数据一律走 shared（见文件顶部三条防线）。
     """
+
+    # 开启赋值校验，才能对 goal 做"起跑后只读"
+    model_config = {"validate_assignment": True}
 
     task_id: str = Field(default_factory=lambda: uuid.uuid4().hex[:12])
     run_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
@@ -82,6 +157,59 @@ class TaskContext(BaseModel):
 
     mode_trace: list[ModeSwitch] = Field(default_factory=list)
     version: int = 0
+
+    # goal 只读的实现：第一次成功赋值后置位，之后只允许赋同一个值。
+    # 为什么不用 property 覆盖字段——那会让 pydantic 丢掉字段定义，
+    # 是**错的**做法（实测会把字段从 model_fields 里抹掉）。
+    _goal_locked: bool = PrivateAttr(default=False)
+
+    def set_goal(self, value: str) -> None:
+        """设定任务目标（只允许在起跑时设一次）。
+
+        之后想改必须显式调用 `override_goal()`，那会记一条 mode_trace，
+        让"目标被改过"这件事在回放里可见——而不是静默漂移。
+        """
+        if self._goal_locked and value != self.goal:
+            raise ValueError(
+                "goal 在任务起跑后只读：改目标会让 mode_trace 失去可复现性；"
+                "确需变更请用 override_goal() 并说明理由"
+            )
+        self.goal = value
+        self._goal_locked = True
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        """goal 的只读硬闸：所有赋值路径（含直接赋值 `ctx.goal = ...`）都经过这里。
+
+        为什么必须在这一层拦：只靠 `set_goal()` 的检查拦不住直接赋值，
+        而 pydantic 的 validate_assignment 仍然会走 `__setattr__`，
+        所以这里是唯一真正封死的地方。
+        """
+        if name == "goal" and getattr(self, "_goal_locked", False):
+            if value != self.__dict__.get("goal"):
+                raise ValueError(
+                    "goal 在任务起跑后只读：改目标会让 mode_trace 失去可复现性；"
+                    "确需变更请用 override_goal(reason=...)"
+                )
+        super().__setattr__(name, value)
+
+    def override_goal(self, value: str, reason: str) -> None:
+        """显式改目标：留痕（写进 mode_trace），使回放仍可解释。"""
+        self._goal_locked = False
+        object.__setattr__(self, "goal", value)
+        self._goal_locked = True
+        self.mode_trace.append(
+            ModeSwitch(from_mode=self.current_mode, to_mode=self.current_mode,
+                       rule="goal_override", reason=reason)
+        )
+        self.bump()
+
+    def set_shared(self, key: str, value: Any, *, strict: bool = True) -> None:
+        """写入 shared：校验命名空间 + 超限落盘。见文件顶部三条防线。"""
+        shared_set(self.shared, key, value, strict=strict)
+        self.bump()
+
+    def get_shared(self, key: str, default: Any = None) -> Any:
+        return self.shared.get(key, default)
 
     def bump(self) -> int:
         """每次状态变更 +1，切换移交时双方比对，防止并发撕裂。"""

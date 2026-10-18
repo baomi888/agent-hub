@@ -23,7 +23,7 @@ import chromadb
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_core.documents import Document
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from core import config
@@ -427,12 +427,12 @@ def select_diverse(docs_scores, top_k: int, lambda_mult: float | None = None) ->
         # 只按"向量距离"判定能否换算：None 是关键词命中（本就没有向量距离），
         # 不参与这条全局判定；越界浮点才是"向量未归一化"的全局信号。
         # 全部向量距离可换算时才过滤；关键词命中一律保留（BM25 已保证词面相关）。
-        vec_dists = [d for d in (_dist(c) for c in cands) if d is not None]
-        if vec_dists and all(_to_similarity(d) is not None for d in vec_dists):
-            kept = [
-                c for c in cands
-                if _dist(c) is None or _to_similarity(_dist(c)) >= min_sim
-            ]
+        # 相似度只算一遍：下面既要判"向量距离能否换算"，又要按阈值过滤，
+        # 原先两个列表推导各算了一次 _to_similarity
+        scored = [(c, _to_similarity(_dist(c))) for c in cands]
+        vec_sims = [sim for c, sim in scored if _dist(c) is not None]
+        if vec_sims and all(sim is not None for sim in vec_sims):
+            kept = [c for c, sim in scored if _dist(c) is None or sim >= min_sim]
             # 别把结果砍空：一条不剩时至少留最相关的那条，让模型自己说"资料里没有"
             cands = kept or [
                 min(cands, key=lambda c: _dist(c) if _dist(c) is not None else float("inf"))
@@ -568,9 +568,17 @@ def _bias_rerank(docs_scores, profile_tags, alpha):
     以兼容「数学」(粗) 与「数学分析」(细) 这类粗细不一致的标签。
     distance 越小越相关，命中越多 distance 减得越多 → 排越前；
     最终返回的 distance 仍是原始值，调用方按它换算相似度/阈值不受影响。
+
+    `distance is None` 是关键词通道独有的召回（混合检索里 BM25 命中、没有向量距离，
+    见 _rrf_merge）。这类片段没有距离可比，既不减距也不参与重排——保持它原来那一格
+    不动（原先这里对 None 直接 float() 会抛 TypeError：只有"用户有画像标签 + 命中
+    关键词独有片段"两个条件同时成立才会炸，线上是一条静默 500）。
     """
-    biased = []
-    for d, distance in docs_scores:
+    slots = []
+    for idx, (d, distance) in enumerate(docs_scores):
+        if distance is None:
+            slots.append((d, None, None, idx))  # 无距离：占位待原样放回
+            continue
         topics = d.metadata.get("topics", "") or ""
         segs = {s for s in topics.strip("|").split("|") if s}
         overlap = 0
@@ -578,10 +586,20 @@ def _bias_rerank(docs_scores, profile_tags, alpha):
             for p in profile_tags:
                 if any(p in s or s in p for s in segs):
                     overlap += 1
-        new_distance = max(0.0, float(distance) - alpha * overlap) if overlap else float(distance)
-        biased.append((d, float(distance), new_distance))
-    biased.sort(key=lambda x: x[2])
-    return [(d, dist) for d, dist, _ in biased]
+        biased = max(0.0, float(distance) - alpha * overlap) if overlap else float(distance)
+        slots.append((d, float(distance), biased, idx))
+
+    # 只有拿到向量距离的条目参与重排；None 条目继续占着它原来的位置。
+    # 全是数值距离时（无关键词独有召回）这一步退化成普通的按新距离排序，与改动前一致。
+    ranked = iter(sorted((s for s in slots if s[2] is not None), key=lambda s: s[2]))
+    out = []
+    for slot in slots:
+        if slot[2] is None:
+            out.append((slot[0], None))
+        else:
+            d, dist, _biased, _idx = next(ranked)
+            out.append((d, dist))
+    return out
 
 
 def _sources_cache_get(collection_name: str):
@@ -744,14 +762,8 @@ def load_document(file_path: str, source_name: str | None = None):
 
 
 def split_documents(docs, chunk_size: int, chunk_overlap: int):
-    """RecursiveCharacterTextSplitter 切片。"""
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        separators=["\n\n", "\n", "。", "！", "？", "；", "，", " ", ""],
-        length_function=len,
-    )
-    return splitter.split_documents(docs)
+    """RecursiveCharacterTextSplitter 切片（切分器按参数复用，见 _splitter）。"""
+    return _splitter(chunk_size, chunk_overlap).split_documents(docs)
 
 
 # ==================== 主题标签（方案 C · A 块）====================
@@ -759,20 +771,25 @@ def split_documents(docs, chunk_size: int, chunk_overlap: int):
 def _extract_topics_one(text: str) -> list[str]:
     """用 LLM 从一段文档文本里抽 3~6 个简短中文主题标签。
 
-    返回归一化后的标签列表（去空白、去重、限长、限数量）。任何失败都返回空列表——
+    返回归一化后的标签列表（去空白、去重、限长、限数量）。**任何失败都返回空列表**——
     主题标签是"锦上添花"，绝不能因为抽标签失败而阻断入库。
+
+    ⚠️ `get_llm()` 必须在 try 之内。它构造的是 `ChatOpenAI`，**没配 key 时会直接抛
+    `openai.OpenAIError: Missing credentials`**，不是等到 invoke 才失败。
+    历史上这行曾在 try 之外，导致「没配 key 的机器上建库直接 500」，
+    而文档承诺的是"静默降级"——两处不一致就是这么来的。
     """
     if not config.TOPIC_EXTRACT_ENABLED or not text or not text.strip():
         return []
-    llm = get_llm(temperature=0, max_tokens=64)
-    prompt = (
-        "你是文档主题标注器。请阅读下面这段文档内容，提取最能概括它主题的 "
-        "3~6 个简短中文标签（每个标签不超过 6 个字，如：线性代数、考研数学、操作系统）。\n"
-        "只输出一个 JSON 数组，例如 [\"线性代数\",\"考研数学\"]，"
-        "不要解释，不要 Markdown 代码块，不要多余文字。\n\n"
-        f"【文档内容】\n{text[:4000]}"
-    )
     try:
+        llm = get_llm(temperature=0, max_tokens=64)
+        prompt = (
+            "你是文档主题标注器。请阅读下面这段文档内容，提取最能概括它主题的 "
+            "3~6 个简短中文标签（每个标签不超过 6 个字，如：线性代数、考研数学、操作系统）。\n"
+            "只输出一个 JSON 数组，例如 [\"线性代数\",\"考研数学\"]，"
+            "不要解释，不要 Markdown 代码块，不要多余文字。\n\n"
+            f"【文档内容】\n{text[:4000]}"
+        )
         resp = llm.invoke([HumanMessage(content=prompt)])
         raw = (resp.content or "").strip()
         # 兼容模型偶尔用 ```json ``` 包裹的情况
@@ -795,6 +812,25 @@ def _extract_topics_one(text: str) -> list[str]:
         return []
 
 
+def _join_head(chunks, limit: int = 4000) -> str:
+    """按换行拼接切片正文，拼够 limit 就停。
+
+    与 `"\\n".join(正文)[:limit]` 逐字节等价：每一步累积的都是完整拼接串的前缀，
+    一到长度就截断返回。区别只在于不会为一篇几 MB 的文档先造一个同样大的中间
+    字符串再丢掉——而入库时每个来源都要算一次这份预览。
+    """
+    acc = ""
+    for i, c in enumerate(chunks):
+        if i:
+            acc += "\n"
+            if len(acc) >= limit:
+                return acc[:limit]
+        acc += c.page_content
+        if len(acc) >= limit:
+            return acc[:limit]
+    return acc
+
+
 def _inject_topics(chunks) -> None:
     """给入库切片注入 topics 分隔串（A 块）。
 
@@ -813,7 +849,7 @@ def _inject_topics(chunks) -> None:
         if src:
             by_source.setdefault(src, []).append(c)
     for src, group in by_source.items():
-        text = "\n".join(c.page_content for c in group)[:4000]
+        text = _join_head(group)
         tags = _extract_topics_one(text)
         if not tags:
             continue
@@ -835,6 +871,48 @@ def topic_where(topic: str) -> dict:
 
 
 # ==================== RAG 链路 ====================
+
+
+_SPLITTER_CACHE: dict[tuple[int, int], RecursiveCharacterTextSplitter] = {}
+_SPLITTER_LOCK = threading.Lock()
+_EMBED_POOL: ThreadPoolExecutor | None = None
+_EMBED_POOL_LOCK = threading.Lock()
+
+
+def _splitter(chunk_size: int, chunk_overlap: int) -> RecursiveCharacterTextSplitter:
+    """按 (chunk_size, chunk_overlap) 复用切分器。
+
+    splitter 本身无状态（每次 split 的状态都在方法内部），同一组参数反复新建
+    只是白付一次构造。参数会随知识库变化，所以做成小键缓存而不是模块级单例。
+    """
+    key = (chunk_size, chunk_overlap)
+    with _SPLITTER_LOCK:
+        got = _SPLITTER_CACHE.get(key)
+        if got is None:
+            got = RecursiveCharacterTextSplitter(
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+                separators=["\n\n", "\n", "。", "！", "？", "；", "，", " ", ""],
+                length_function=len,
+            )
+            _SPLITTER_CACHE[key] = got
+        return got
+
+
+def _embed_pool() -> ThreadPoolExecutor:
+    """进程内复用同一个 embedding 线程池。
+
+    池只用来发 embed_documents（任务之间无共享状态），复用不改变"窗口内并发、
+    窗口内按序写"的语义；省掉的是每次入库重建/回收线程的开销。
+    只按 EMBED_CONCURRENCY 定容量——并发度是配置项，运行期不变。
+    """
+    global _EMBED_POOL
+    with _EMBED_POOL_LOCK:
+        if _EMBED_POOL is None:
+            _EMBED_POOL = ThreadPoolExecutor(
+                max_workers=max(1, config.EMBED_CONCURRENCY), thread_name_prefix="embed"
+            )
+        return _EMBED_POOL
 
 
 def _embed_and_store(vs, chunks) -> None:
@@ -871,23 +949,19 @@ def _embed_and_store(vs, chunks) -> None:
     emb = vs._embedding_function
     workers = max(1, min(config.EMBED_CONCURRENCY, len(batches)))
 
-    pool = ThreadPoolExecutor(max_workers=workers) if workers > 1 else None
-    try:
-        for w in range(0, len(batches), workers):
-            window = batches[w : w + workers]
-            if pool is None:
-                # 单批或显式关并发：退回串行，行为与旧实现一致
-                vectors = [emb.embed_documents(texts) for texts, _md, _ids in window]
-            else:
-                # 同一窗口内的各批并发发出；list() 会等齐并按提交顺序返回
-                vectors = list(pool.map(lambda b: emb.embed_documents(b[0]), window))
-            for (texts, metadatas, ids), vecs in zip(window, vectors):
-                vs._collection.upsert(
-                    ids=ids, embeddings=vecs, documents=texts, metadatas=metadatas
-                )
-    finally:
-        if pool is not None:
-            pool.shutdown()
+    pool = _embed_pool() if workers > 1 else None
+    for w in range(0, len(batches), workers):
+        window = batches[w : w + workers]
+        if pool is None:
+            # 单批或显式关并发：退回串行，行为与旧实现一致
+            vectors = [emb.embed_documents(texts) for texts, _md, _ids in window]
+        else:
+            # 同一窗口内的各批并发发出；list() 会等齐并按提交顺序返回
+            vectors = list(pool.map(lambda b: emb.embed_documents(b[0]), window))
+        for (texts, metadatas, ids), vecs in zip(window, vectors):
+            vs._collection.upsert(
+                ids=ids, embeddings=vecs, documents=texts, metadatas=metadatas
+            )
 
 
 class RagPipeline:
@@ -1190,17 +1264,16 @@ class RagPipeline:
         return result
 
     @staticmethod
-    def build_sources(docs_scores) -> list[dict]:
-        """把检索结果整理成前端可展开的引用条目（含原文，供溯源查看）。
+    def _source_meta(docs_scores) -> list[dict]:
+        """两条格式化路径共用的中间量：来源名 / 页码 / 相似度 / 依据强度。
 
-        每条额外带 strength（high/medium/low），前端据此把"相似度"标成
-        「强 / 中 / 弱」——只给数字的话，用户看不出 0.31 到底算不算数。
+        原先 build_sources 与 _format_refs 各自算一遍 basename、页码、_to_similarity，
+        还各写了一遍"强 / 中 / 弱"的阈值判断（两处注释都要求同步维护）。
+        合并成一次计算，阈值口径不会再漂；两条格式化器只负责各自的排版。
         """
-        out = []
         low = config.RETRIEVE_LOW_SIM
-        for i, (d, distance) in enumerate(docs_scores):
-            src = os.path.basename(d.metadata.get("source", "?"))
-            page = d.metadata.get("page")
+        metas = []
+        for d, distance in docs_scores:
             # 前端那个位置的标签是「相似度」，所以这里必须给真相似度（越大越相关），
             # 不能直接把距离丢过去。距离越界导致换算不了时给 None，前端会隐藏这一项。
             sim = _to_similarity(distance)
@@ -1212,12 +1285,30 @@ class RagPipeline:
                 strength = STRENGTH_MEDIUM
             else:
                 strength = STRENGTH_LOW
+            metas.append({
+                "source": os.path.basename(d.metadata.get("source", "?")),
+                "page": d.metadata.get("page"),
+                "sim": sim,
+                "strength": strength,
+            })
+        return metas
+
+    @staticmethod
+    def build_sources(docs_scores) -> list[dict]:
+        """把检索结果整理成前端可展开的引用条目（含原文，供溯源查看）。
+
+        每条额外带 strength（high/medium/low），前端据此把"相似度"标成
+        「强 / 中 / 弱」——只给数字的话，用户看不出 0.31 到底算不算数。
+        """
+        metas = RagPipeline._source_meta(docs_scores)
+        out = []
+        for i, ((d, _distance), m) in enumerate(zip(docs_scores, metas)):
             out.append({
                 "id": i + 1,
-                "source": src,
-                "page": (page + 1) if isinstance(page, int) else None,
-                "score": round(sim, 4) if sim is not None else None,
-                "strength": strength,
+                "source": m["source"],
+                "page": (m["page"] + 1) if isinstance(m["page"], int) else None,
+                "score": round(m["sim"], 4) if m["sim"] is not None else None,
+                "strength": m["strength"],
                 "preview": d.page_content.replace("\n", " ")[:80],
                 "text": d.page_content[:1500],
             })
@@ -1226,21 +1317,46 @@ class RagPipeline:
     @staticmethod
     def _format_refs(docs_scores) -> str:
         """参考片段格式化：来源文件名 + 页码 + 相似度 + 60 字预览。"""
+        metas = RagPipeline._source_meta(docs_scores)
         lines = []
-        for i, (d, distance) in enumerate(docs_scores):
-            src = os.path.basename(d.metadata.get("source", "?"))
-            page = d.metadata.get("page")
-            loc = f" 第{page + 1}页" if page is not None else ""
+        for i, ((d, _distance), m) in enumerate(zip(docs_scores, metas)):
+            # 页码与相似度取自 _source_meta，与 build_sources 同一口径
+            loc = f" 第{m['page'] + 1}页" if m["page"] is not None else ""
+            head = f"**[{i + 1}]** {m['source']}{loc}"
+            if m["sim"] is not None:
+                head += f" ｜ score={m['sim']:.3f}"
             preview = d.page_content.replace("\n", " ")[:60]
-            # 同 build_sources：给相似度而不是距离；换算不了就整段省掉，避免显示错标签
-            sim = _to_similarity(distance)
-            head = f"**[{i + 1}]** {src}{loc}"
-            if sim is not None:
-                head += f" ｜ score={sim:.3f}"
             lines.append(f"{head} ｜ {preview}...")
         return "\n\n".join(lines) if lines else "（无检索结果）"
 
-    # 说明：RagPipeline.answer / answer_stream 已删除（2026-10-13 死代码清理）。
-    # 生产问答路径在 api/chat.py：自己检索 + _format_refs/build_sources 组装 +
-    # 流式 LLM，这两个方法自多用户改造后就无生产调用方，只有脚本烟测在用，
-    # 留着会让人误以为改这里能影响线上回答。
+    def answer(self, question: str, top_k: int) -> tuple[str, str]:
+        """同步问答：返回 (答案正文, 参考片段 Markdown)。
+
+        `api/kb.py` 的 `POST /api/kb/{kb_id}/query` 走这里。与 api/chat.py 的 RAG
+        路径同口径：同一套检索 + _format_refs + SYSTEM_PROMPT / 依据强度约束，
+        区别只是它不流式、也不做查询改写。
+
+        ⚠️ 2026-10-13 的死代码清理把它删过一次，但那个端点仍在调用，删完就变成
+        必然 500（AttributeError 被端点的 except 兜成 500）。2026-10-16 重构时按
+        删除前的实现原样恢复——行为与保留期间的"预期行为"一致。
+        """
+        docs_scores = self.retrieve_with_score(question, top_k)
+        if not docs_scores:
+            return "知识库中未检索到相关内容。", "（无检索结果）"
+        refs_md = self._format_refs(docs_scores)
+
+        references = "\n\n".join(
+            f"[{i + 1}] （来源：{d.metadata.get('source', '?')}）\n{d.page_content}"
+            for i, (d, _) in enumerate(docs_scores)
+        )
+        user_prompt = f"【参考资料】\n{references}\n\n【用户问题】\n{question}"
+
+        system = SYSTEM_PROMPT + grounding_note(assess_grounding(docs_scores))
+        response = get_llm().invoke(
+            [SystemMessage(content=system), HumanMessage(content=user_prompt)]
+        )
+        return response.content, refs_md
+
+    # 说明：answer_stream（流式版）仍不保留——`POST /api/kb/{kb_id}/query` 是同步
+    # 接口，没有第二个调用方；生产流式路径在 api/chat.py，自己检索 + 组装 + 流式 LLM，
+    # 两者不共用实现是有意为之（那边还要处理改写、SSE 事件与 hybrid 分支）。

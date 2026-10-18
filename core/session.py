@@ -9,7 +9,7 @@ from __future__ import annotations
     feedbacks      —— 消息赞踩
 
   所有 SQL 用参数化查询防注入；窗口截断：加载历史时只取最近
-  MAX_HISTORY_TURNS 轮（默认 10 轮 = 20 条消息），避免长会话爆 token。
+  MAX_HISTORY_TURNS 轮（默认 30 轮 = 60 条消息），避免长会话爆 token。
 
 归属隔离（多用户改造 P1）
 ------------------------
@@ -34,15 +34,18 @@ from typing import Literal
 
 from core import config
 
-MAX_HISTORY_TURNS = 10  # 每个会话最多保留的对话轮数（1 轮 = user + assistant 两条）
+MAX_HISTORY_TURNS = 30  # 每个会话最多保留的对话轮数（1 轮 = user + assistant 两条）
 
 
 # ---------- 数据库路径 ----------
 def _db_path() -> str:
-    """SQLite 文件路径（放在 PERSIST_DIR 同级）。"""
-    db_dir = os.path.join(config.PROJECT_ROOT, "data")
-    os.makedirs(db_dir, exist_ok=True)
-    return os.path.join(db_dir, "sessions.db")
+    """SQLite 文件路径（放在 PERSIST_DIR 同级）。
+
+    纯计算、不做 IO：目录创建挪到 `_conn()` 建连前做。`_conn()` 每次查询都要取路径，
+    此前顺带一次 `os.makedirs(exist_ok=True)`，等于每条 SQL 前都白做一次系统调用。
+    测试 monkeypatch 本函数到临时目录时，建目录仍会跟着新路径走。
+    """
+    return os.path.join(config.PROJECT_ROOT, "data", "sessions.db")
 
 
 # ---------- 连接管理 ----------
@@ -64,6 +67,7 @@ def _conn() -> sqlite3.Connection:
             conn.close()
         except Exception:
             pass
+    os.makedirs(os.path.dirname(path), exist_ok=True)  # 建连前确保目录存在（路径可能被测试改到临时目录）
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row  # 让 cursor 返回 dict-like 对象
     conn.execute("PRAGMA journal_mode=WAL")    # 写前日志，提升并发读性能

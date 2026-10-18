@@ -124,19 +124,26 @@ async def upload_and_build(
         with pipelines.kb_lock(kb_id):
             pipe = pipelines.get_or_create(uid, kb_id)
             total = 0
-            for idx, (path, name) in enumerate(saved):
-                # 只有第一个文件在 rebuild 模式下清库，其余一律追加
-                n = pipe.build_index(
-                    chunk_size,
-                    chunk_overlap,
-                    [path],
-                    mode=(mode if idx == 0 else "append"),
-                    source_names=[name],
-                )
-                total += n
-                pipelines.add_file_records(
-                    uid, kb_id, [{"name": name, "chunks": n, "added_at": now, "origin": "upload"}]
-                )
+            pending: list[dict] = []
+            try:
+                for idx, (path, name) in enumerate(saved):
+                    # 只有第一个文件在 rebuild 模式下清库，其余一律追加
+                    n = pipe.build_index(
+                        chunk_size,
+                        chunk_overlap,
+                        [path],
+                        mode=(mode if idx == 0 else "append"),
+                        source_names=[name],
+                    )
+                    total += n
+                    pending.append({"name": name, "chunks": n, "added_at": now, "origin": "upload"})
+            finally:
+                # 一次性登记本轮已入库的文件：add_file_records 内部是"重读 kb_files.json →
+                # 改 → 整份覆盖写"，逐文件调用等于 N 次读 + N 次写（每次还带一次落盘 fsync）。
+                # 放在 finally 里是为了保住原来的语义：中途某个文件失败时，前面已经入库成功的
+                # 文件记录照样要写进去（tests/test_baseline_kb_api.py 盯着这一点）。
+                if pending:
+                    pipelines.add_file_records(uid, kb_id, pending)
             if mode == "rebuild":
                 # 整库重建：本次没上传的旧记录要一并清掉
                 pipelines.retain_file_records(uid, kb_id, {name for _, name in saved})

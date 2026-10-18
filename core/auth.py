@@ -164,10 +164,6 @@ def clear_session_cookie(resp: Response) -> None:
 
 # ==================== FastAPI 依赖 ====================
 
-class NotAuthenticated(Exception):
-    """内部抛错用，由端点转成 401。"""
-
-
 def current_user_id(request: Request) -> str:
     """从 Cookie 取出当前登录用户 id，失败直接 401。
 

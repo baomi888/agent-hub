@@ -154,16 +154,3 @@ def authenticate(username: str, password: str) -> dict | None:
 def touch_login(uid: str) -> None:
     with _get_conn() as conn:
         conn.execute("UPDATE users SET last_login_at = ? WHERE id = ?", (int(time.time()), uid))
-
-
-def count_users() -> int:
-    with _get_conn() as conn:
-        return conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
-
-
-def list_users() -> list[dict]:
-    with _get_conn() as conn:
-        rows = conn.execute(
-            "SELECT id, username, created_at, last_login_at FROM users ORDER BY created_at ASC"
-        ).fetchall()
-        return [dict(r) for r in rows]

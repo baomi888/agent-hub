@@ -1,5 +1,6 @@
 // 后端 API 封装：统一错误处理 + 类型化（相对路径走 rewrites 代理）
 import type { Conversation, KbInfo, KbFile, FilePreview, SearchResult, Defaults, Message } from "./types";
+import { detailToMessage } from "./errors";
 import type { MeOut, UserOut, Template, ApplyTemplateResult, UsageSummary } from "./types";
 import type {
   AgentTool,
@@ -53,7 +54,11 @@ function notifyAuthorized() {
   }
 }
 
-/** 统一解析后端错误体（FastAPI 返回 { detail: string }），非 JSON 时回落状态码 */
+/**
+ * 统一解析后端错误体：`detail` 可能是字符串（业务错误）也可能是数组（FastAPI 422），
+ * 交给 `errors.ts::detailToMessage` 归一成人话 —— 直接 `new Error(body.detail)` 会把
+ * 数组/对象转成 "[object Object]"，这正是委托页那个看不懂的报错气泡的成因。
+ */
 async function httpError(res: Response): Promise<Error> {
   let detail = `HTTP ${res.status}`;
   if (res.status === 401) {
@@ -65,8 +70,8 @@ async function httpError(res: Response): Promise<Error> {
   // 避免用户把它当成"系统坏了"而不停重试。
   let retryAfter: number | undefined;
   try {
-    const body = (await res.json()) as { detail?: string; retry_after?: number };
-    detail = body.detail || detail;
+    const body = (await res.json()) as { detail?: unknown; retry_after?: number };
+    detail = detailToMessage(body.detail, detail);
     retryAfter = typeof body.retry_after === "number" ? body.retry_after : undefined;
   } catch {
     /* 忽略非 JSON 错误体 */
@@ -136,12 +141,15 @@ async function tryRequest<T>(path: string, init?: RequestInit): Promise<T | null
   if (res.ok) return res.json() as Promise<T>;
   if (res.status === 405 || res.status === 501) return null;
   if (res.status === 404) {
-    let detail = "";
+    // detail 可能是字符串，也可能是 422 那种数组 —— 先判类型再判内容，
+    // 否则 detail.trim() 会在数组上抛 TypeError，把一次普通 404 变成未捕获异常。
+    let rawDetail: unknown = "";
     try {
-      detail = ((await res.json()) as { detail?: string }).detail ?? "";
+      rawDetail = ((await res.json()) as { detail?: unknown }).detail ?? "";
     } catch {
       /* 非 JSON 错误体：当作未上线处理 */
     }
+    const detail = typeof rawDetail === "string" ? rawDetail : "";
     // 空 detail：后端没给 JSON 错误体，多数也是路由未匹配
     // 其余按大小写不敏感匹配，理由见上方注释「按字符串猜」那一段
     if (detail === "" || /^not found$/i.test(detail.trim())) return null;
@@ -336,9 +344,11 @@ export const api = {
     /**
      * dry_run=true = 只生成、不投递、不改 next_run_at。
      * 这是「先生成后确认」的落地：用户先看到内容，再决定投不投。
+     * 生成内容在响应的 `content` 字段（此前这里按 text/output 取，永远是 undefined
+     * ⇒ 预览弹层恒显示「后端未返回内容」）。
      */
     run: (id: string, dryRun: boolean) =>
-      tryRequest<{ text?: string; output?: string; delivered?: boolean }>(
+      tryRequest<{ content?: string; delivered?: boolean }>(
         `/api/delegate/${id}/run${dryRun ? "?dry_run=true" : ""}`,
         { method: "POST" }
       ),

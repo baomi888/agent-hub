@@ -110,7 +110,7 @@ export const DEMO_DELEGATES: Delegate[] = [
   {
     id: "demo-3",
     name: "每周错题回炉",
-    kind: "study",
+    kind: "study_plan",
     schedule: { freq: "weekly", at: "20:00", weekday: 0, tz: "Asia/Shanghai" },
     session_id: null,
     kb_id: "demo-kb2",

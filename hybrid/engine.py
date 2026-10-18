@@ -22,7 +22,8 @@ from hybrid.context import ExecEvent, TaskContext
 #   failed    失败（细节在 error；signal 通常带 node_failed 等供切换判定）
 #   timeout   整体超时
 #   switched  引擎主动请求切换（如工作流遇到 requires_agent 节点）
-EngineStatus = Literal["completed", "failed", "timeout", "switched"]
+#   awaiting_human  人工节点挂起，等恢复（不是终态）
+EngineStatus = Literal["completed", "failed", "timeout", "switched", "awaiting_human"]
 
 
 class EngineResult(BaseModel):

@@ -63,9 +63,14 @@ def test_strip_html_no_tiny_fragment_pollution():
     assert len(lines) >= 3  # h1 + 两个 p（ul 行可能与 p 相邻，不强求）
 
 
-def test_dead_answer_methods_removed():
-    """死代码清理回归：生产问答路径在 api/chat.py，rag_core 不再有 answer 入口。"""
-    assert not hasattr(RagPipeline, "answer")
+def test_answer_entries_reflect_actual_callers():
+    """死代码清理回归（2026-10-16 调整）。
+
+    `answer` 不再是死代码：`POST /api/kb/{kb_id}/query` 一直在调它，2026-10-13 那次清理
+    把方法删了却没注意到调用点，导致该端点必然 500，现已按原实现恢复——所以这里必须
+    "存在"。`answer_stream` 没有第二个调用方（那个端点是同步接口），仍然保持删除。
+    """
+    assert hasattr(RagPipeline, "answer")
     assert not hasattr(RagPipeline, "answer_stream")
     # 生产同款格式化器必须保留（api/chat.py 在用）
     assert hasattr(RagPipeline, "_format_refs")

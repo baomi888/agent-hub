@@ -220,6 +220,8 @@ class AgentEngine:
             self.result = EngineResult(status="failed", error=f"Agent 执行失败：{type(e).__name__}: {e}")
             return
 
-        # 正常跑完：产出落 shared，上报 goal_satisfied（编排器决定收编还是收工）
+        # 正常跑完：产出落 shared，上报 goal_satisfied（编排器决定收编还是收工）。
+        # 直接赋值而非 shared_set：产出全文要能被下游模板逐字读取，不能落盘成指针
+        # （理由同 hybrid/workflow.py::_exec_llm）
         ctx.shared[key] = full_text
         self.result = EngineResult(status="completed", signal="goal_satisfied", output_key=key)
