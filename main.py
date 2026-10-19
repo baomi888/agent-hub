@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
@@ -36,12 +37,20 @@ from api.templates import router as templates_router
 from api.usage import router as usage_router
 from core import config, quota
 from kb import pipelines
+from service import daily
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """启动事件：预热 + 配置检查。"""
+    """启动事件：预热 + 配置检查 + 数据表迁移。"""
     pipelines.warmup()
+    # 部署后免手动触发：在启动时把 daily_reports / delegations 两张表建好、补列（幂等）。
+    # 否则 _ensure_daily_tables 是懒执行的，刚部署完没人访问过 delegation 时会查不到新列。
+    # 兜 try/except：迁移失败（如库被锁）只告警不阻断启动——懒执行那条路仍会在首次访问时自愈。
+    try:
+        await asyncio.to_thread(daily._ensure_daily_tables)
+    except Exception as e:  # noqa: BLE001
+        print(f"[启动警告] 数据表迁移失败（首次访问时会自动重试）：{e}")
     missing = config.validate()
     if missing:
         print(f"[启动警告] 配置缺失：{'；'.join(missing)}")
