@@ -105,10 +105,16 @@ def _ensure_daily_tables() -> None:
                 enabled        INTEGER NOT NULL DEFAULT 1,
                 next_run_at    INTEGER,
                 created_at     INTEGER NOT NULL,
-                updated_at     INTEGER NOT NULL
+                updated_at     INTEGER NOT NULL,
+                last_error     TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_del_owner ON delegations(owner_id);
         """)
+        # 旧库可能没有 last_error 列（2026-10-19 新增）：补列，幂等忽略「已存在」。
+        try:
+            conn.execute("ALTER TABLE delegations ADD COLUMN last_error TEXT")
+        except Exception:
+            pass
     _daily_tables_ready = True
 
 
@@ -366,21 +372,38 @@ def save_delegation(
     max_chars: int = 500,
     enabled: bool = True,
 ) -> dict:
-    """新建或覆盖一条委托。返回存好的 dict。"""
+    """新建或覆盖一条委托。返回存好的 dict。
+
+    覆盖（PATCH 二次写入）时必须保住既有委托的 `next_run_at` 与 `created_at`：
+    - `next_run_at` 一旦被重置成 NULL，到期判定会立刻判定它"到期"，于是用户只改了一个字、
+      或只切了一下开关，就会再被派发一次（白白烧一次 LLM + 推一条消息）。
+    - `created_at` 一旦被刷成 now，"创建于"就是假的。
+    新建（名字确实不存在）时两者走默认：next_run_at=NULL（立即派发一次）、created_at=now。
+
+    同样要保住 `last_error`：它是 worker 自动停用留下的告警原因，若被 PATCH 顺手覆盖成 NULL，
+    用户编辑个名字就把"为什么被停用"弄丢了。仅在「重新启用」时清空（与 set_enabled 语义一致）。
+    """
     _ensure_daily_tables()
     now = int(time.time())
     did = _delegation_id(uid, name)
+    prev = get_delegation(uid, did)
+    keep_next_run = prev.get("next_run_at") if prev else None
+    keep_created = prev.get("created_at") if prev else now
+    # 重新启用（enabled=True）时清告警；其余情况沿用既有 last_error（含手动停用时保留）
+    keep_last_error = (
+        None if (enabled and prev) else (prev.get("last_error") if prev else None)
+    )
     with store._get_conn() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO delegations "
             "(delegation_id, owner_id, name, kind, schedule_json, prompt, deliver_sid, "
-            " kb_id, tone, max_chars, enabled, next_run_at, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " kb_id, tone, max_chars, enabled, next_run_at, created_at, last_error, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 did, uid, name, kind,
                 json.dumps(schedule_json, ensure_ascii=False) if schedule_json is not None else None,
                 prompt, deliver_sid, kb_id, tone, max_chars,
-                1 if enabled else 0, None, now, now,
+                1 if enabled else 0, keep_next_run, keep_created, keep_last_error, now,
             ),
         )
     return get_delegation(uid, did)  # type: ignore[return-value]
@@ -418,10 +441,12 @@ def set_enabled(uid: str, did: str, enabled: bool) -> bool:
     _ensure_daily_tables()
     now = int(time.time())
     with store._get_conn() as conn:
+        # 重新启用时清掉自动停用留下的 last_error，免得开关一开还显示旧告警
         cur = conn.execute(
-            "UPDATE delegations SET enabled = ?, updated_at = ? "
+            "UPDATE delegations SET enabled = ?, updated_at = ?, "
+            "last_error = CASE WHEN ? THEN NULL ELSE last_error END "
             "WHERE delegation_id = ? AND owner_id = ?",
-            (1 if enabled else 0, now, did, uid),
+            (1 if enabled else 0, now, 1 if enabled else 0, did, uid),
         )
         return cur.rowcount > 0
 
@@ -547,7 +572,11 @@ def _dispatch_one(did: str, planned_at: int) -> dict:
     if d.get("deliver_sid"):
         # 投递目标会话若已不属于该用户，add_message 抛 NotOwned → 转 fatal → on_failure 停用
         message_id = store.add_message(uid, d["deliver_sid"], "assistant", text)
-    _bump_next_run(did, planned_at + 86400)  # 默认次日同刻
+    # 派发后按 schedule 的节奏把"下次定时"顺延到下一个触发点（见 compute_next_run）：
+    # 对 daily 即"次日同 at"、对 weekly 即"下个 weekday 的 at"、对 interval 即"now+every_minutes"。
+    # 这样既让定时派发真正按频次跑，也保留"今天已手动跑过就不再自动投递同一槽位"的意图
+    # （手动立即执行同样走这里，与下方 run 端点的 docstring 对齐）。
+    _bump_next_run(did, compute_next_run(d.get("schedule_json"), planned_at))
     # 把这次投递记账成一条 job_runs，这样「委托的执行历史」与定时任务的执行历史
     # 是同一份数据，不用为委托单独造一张历史表（也就不用维护两套幂等逻辑）。
     run_id = _record_manual_run(did, planned_at, "succeeded", None)
@@ -645,6 +674,71 @@ def list_runs(uid: str, did: str, limit: int = 20, cursor: str | None = None) ->
     return {"items": out, "next_cursor": next_cursor}
 
 
+def compute_next_run(schedule: dict | None, after_ts: int) -> int:
+    """给定 schedule_json 与「本次已发生的时间」after_ts，算出下一次应触发的时间戳（秒）。
+
+    语义对齐前端 scheduleLabel / api.delegate.FREQS：
+      - daily   : after_ts 之后最近的 at(HH:MM)；当天 at 已过则顺延次日
+      - weekdays: after_ts 之后最近的「工作日(Mon–Fri) at」
+      - weekly  : after_ts 之后最近的「指定 weekday 的 at」（weekday: 0=周一 … 6=周日）
+      - interval: after_ts + every_minutes*60（at 不参与）
+    兜底（无 schedule / 不认识的 freq）：after_ts + 86400（维持旧行为，不破坏既有委托）。
+
+    这是修「每周/间隔是假功能」的核心：此前 _dispatch_one 一律 +86400，等于所有频次都退化成
+    「每天一次」。worker 的 due_subjects 只认 next_run_at，所以只要这里算对，定时链路就真正按
+    频次跑；前端「下次触发」读的是后端算出的 next_run_at，无需改动。
+    """
+    if not isinstance(schedule, dict):
+        return after_ts + 86400
+    freq = schedule.get("freq", "daily")
+    if freq == "interval":
+        every = schedule.get("every_minutes") or 60
+        try:
+            every = max(1, int(every))
+        except (TypeError, ValueError):
+            every = 60
+        return after_ts + every * 60
+    # daily / weekdays / weekly 都按 at + weekday 推进
+    at = schedule.get("at") or "09:00"
+    try:
+        hh, mm = (int(x) for x in str(at).split(":"))
+    except (ValueError, AttributeError, TypeError):
+        hh, mm = 9, 0
+    hh = max(0, min(23, hh))
+    mm = max(0, min(59, mm))
+    weekday = schedule.get("weekday")
+    try:
+        weekday = int(weekday) if weekday is not None else None
+    except (TypeError, ValueError):
+        weekday = None
+    base = time.localtime(after_ts)
+    # 从 after_ts 当天起向后扫 14 天，找第一个满足约束且严格晚于 after_ts 的 (日, at)。
+    # 14 天足够覆盖「每周固定一天」与「跳过周末」，又不会无限循环。
+    for offset in range(0, 14):
+        y, m, day = base.tm_year, base.tm_mon, base.tm_mday + offset
+        ts = time.mktime(time.struct_time((y, m, day, hh, mm, 0, 0, 0, -1)))
+        wd = time.localtime(ts).tm_wday  # Python: 0=Mon … 6=Sun，与前端 weekday 约定一致
+        if freq == "weekdays" and wd >= 5:
+            continue
+        if freq == "weekly" and weekday is not None and wd != weekday:
+            continue
+        if ts > after_ts:
+            return int(ts)
+    return after_ts + 86400
+
+
+def reschedule_if_needed(did: str, schedule: dict) -> None:
+    """schedule 被改、且委托已有未来的 next_run_at 时，按新节奏重算。
+
+    不改 created_at；next_run_at 为 None（待首次立即派发）时不动——首次派发会自行按
+    新 schedule 排期。供 PATCH 端点调用，使「改 schedule 后下次触发立即反映新频次」成真。
+    """
+    d = _load_delegation(did)
+    if not d or d.get("next_run_at") is None:
+        return
+    _bump_next_run(did, compute_next_run(schedule, int(time.time())))
+
+
 def _bump_next_run(did: str, next_at: int) -> None:
     _ensure_daily_tables()
     with store._get_conn() as conn:
@@ -654,9 +748,22 @@ def _bump_next_run(did: str, next_at: int) -> None:
         )
 
 
-def on_failure(job_key: str, subject_id: str, fatal: bool) -> None:
-    """不可重试失败时收尾：委托投递目标会话失效 → 停用该委托，避免每天重试同一错误。"""
+def on_failure(job_key: str, subject_id: str, fatal: bool, error: str | None = None) -> None:
+    """不可重试失败时收尾：委托投递目标会话失效 → 停用该委托，避免每天重试同一错误。
+
+    error：worker 传来的运行异常摘要（已在 worker 层截断过），写入 last_error 让前端能
+    把「被自动停用的原因」直接展示给用户，而不是默默消失。
+    """
     if job_key == "delegate.dispatch" and fatal:
         d = _load_delegation(subject_id)
         if d:
-            set_enabled(d["owner_id"], subject_id, False)
+            owner = d["owner_id"]
+            set_enabled(owner, subject_id, False)
+            now = int(time.time())
+            msg = (error or "投递失败（目标会话可能已被删除）")
+            with store._get_conn() as conn:
+                conn.execute(
+                    "UPDATE delegations SET last_error = ?, updated_at = ? "
+                    "WHERE delegation_id = ? AND owner_id = ?",
+                    ("自动停用：%s" % msg[:240], now, subject_id, owner),
+                )

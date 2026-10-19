@@ -8,6 +8,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import MascotLogo from "@/components/chat/MascotLogo";
 import CornIcon from "@/components/CornIcon";
+import { useAuth } from "@/lib/hooks/useAuth";
+import AuthGate from "@/components/AuthGate";
 import { api } from "@/lib/api";
 import type { Template } from "@/lib/types";
 
@@ -29,8 +31,14 @@ export default function TemplatesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [usingId, setUsingId] = useState<string | null>(null);
+  const auth = useAuth();
 
   useEffect(() => {
+    // 未登录不发请求：先等 useAuth 确认身份，登录后再拉目录，避免 401 白跑一轮。
+    if (!auth.me) {
+      setLoading(false);
+      return;
+    }
     let alive = true;
     (async () => {
       try {
@@ -39,7 +47,6 @@ export default function TemplatesPage() {
       } catch (e) {
         if (alive) {
           const msg = e instanceof Error ? e.message : String(e);
-          // 未登录：后端 401 会被 api 层翻译成这串，提示先回工作台登录
           setError(msg.includes("登录") ? "请先登录后再浏览模板广场" : msg);
         }
       } finally {
@@ -49,7 +56,7 @@ export default function TemplatesPage() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [auth.me]);
 
   // 按分类分组，保持目录里出现的顺序
   const grouped = useMemo(() => {
@@ -114,6 +121,19 @@ export default function TemplatesPage() {
     }
     router.push("/delegate?new=1");
   };
+
+  // 登录门：与四屏一致，未登录整页挡住（后端 /api/templates 也按用户隔离，这里只是提前挡，
+  // 免得登录前先渲染空列表再跳走）。auth.loading 期间不打断，等确认完再决定渲染什么。
+  if (auth.loading) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-canvas">
+        <p className="text-fs-sm text-faint">正在确认登录状态...</p>
+      </div>
+    );
+  }
+  if (!auth.me) {
+    return <AuthGate allowSignup={auth.allowSignup} onLogin={auth.login} onRegister={auth.register} />;
+  }
 
   return (
     <div className="h-dvh overflow-y-auto overscroll-contain bg-canvas">

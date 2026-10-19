@@ -57,10 +57,15 @@ def history_items(ctx: TaskContext) -> list[dict]:
 
 
 def history_messages(ctx: TaskContext) -> list:
-    """对话历史 → LangChain 消息列表（Human/AI）。无历史返回 []。"""
+    """对话历史 → LangChain 消息列表（Human/AI）。无历史返回 []。
+
+    单条内容与 history_prefix 对齐做 [:500] 截断：历史上限放宽到 60 条后，无截断的
+    agent 节点会把同一份历史送进去 2 次（工作流每个 llm 节点前缀一次 + agent 节点再注一次），
+    贴着 64K 线跑。这里统一用同一个上限，避免越界。
+    """
     out: list = []
     for m in history_items(ctx):
-        content = str(m["content"])
+        content = str(m["content"])[:500]
         out.append(
             HumanMessage(content=content) if m["role"] == "user" else AIMessage(content=content)
         )

@@ -948,6 +948,21 @@ async def _build_messages(
         history if history is not None
         else (await asyncio.to_thread(store.get_messages, owner, sid, include_system=False))[:-1]
     )
+    # 输入侧字符预算：窗口放宽到 30 轮（最多 70 条）后，超长会话会把 prompt 推过
+    # 模型上下文（实测最重会话 76k tok > 64K，会让 DeepSeek 直接 500）。
+    # 从最新往旧累计，超预算就丢最旧的（保留"最近的上下文"），而不是截断最新一轮——
+    # 截断最新一轮会让模型答非所问。参考 core/config.CHAT_HISTORY_MAX_CHARS。
+    budget = config.CHAT_HISTORY_MAX_CHARS
+    if budget and budget > 0:
+        kept: list = []
+        total = 0
+        for m in reversed(history_raw):
+            c = len(m.get("content") or "")
+            if kept and total + c > budget:
+                break
+            kept.append(m)
+            total += c
+        history_raw = list(reversed(kept))
     messages = []
     references = ""
     if kb_id and docs_scores:

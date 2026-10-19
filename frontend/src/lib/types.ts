@@ -226,6 +226,8 @@ export interface Delegate {
   enabled: boolean;
   /** 暂停时为 null —— 页面上要能看出「它不会再来了」 */
   next_run_at: number | null;
+  /** 被 worker 自动停用时记录的原因（如投递目标会话失效）；手动暂停时为 null */
+  last_error?: string | null;
   created_at?: number | null;
 }
 

@@ -14,6 +14,7 @@ service/checkin 派生。generate 复用每日总结同一份逻辑，手动与�
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
@@ -29,19 +30,19 @@ router = APIRouter(dependencies=[Depends(get_current_user)])
 
 @router.get("/streak")
 async def checkin_streak(uid: str = Depends(get_current_user)) -> dict:
-    return chk.compute_streak(uid)
+    return await asyncio.to_thread(chk.compute_streak, uid)
 
 
 @router.get("/history")
 async def checkin_history(uid: str = Depends(get_current_user)) -> dict:
-    return {"history": chk.list_history(uid)}
+    return {"history": await asyncio.to_thread(chk.list_history, uid)}
 
 
 @router.post("/generate")
 async def checkin_generate(uid: str = Depends(get_current_user)) -> dict:
     date = quota.day_key()
-    quota.consume(uid, "auto")
-    rep = daily.summarize_day(uid, date)
+    await asyncio.to_thread(quota.consume, uid, "auto")
+    rep = await asyncio.to_thread(daily.summarize_day, uid, date)
     return {"date": date, "status": rep.status, "points": len(rep.content)}
 
 

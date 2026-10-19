@@ -83,20 +83,45 @@ async function httpError(res: Response): Promise<Error> {
   return new Error(detail);
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+// 默认请求超时（毫秒）。后端部分端点同步跑 LLM（打卡/总结/委托执行约 20–40s），
+// 一旦上游卡死，前端既不能取消也看不到"还要多久"——给一个上限，超时直接 fail，
+// 页面转入错误提示而不是永远转圈。长操作（生成/执行）可传 opts.timeoutMs 单独放宽。
+const DEFAULT_TIMEOUT_MS = 60000;
+
+async function request<T>(
+  path: string,
+  init?: RequestInit,
+  opts?: { timeoutMs?: number }
+): Promise<T> {
   // Next dev 对带尾斜杠的 /api/* 会 308 重定向，浏览器 fetch 跟随时偶尔丢 body/cookie，
   // 直接把尾斜杠去掉，请求落到 rewrite 目标，彻底绕开重定向。
   const cleanPath = path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
-  const res = await fetch(cleanPath, {
-    // 登录态在 HttpOnly Cookie 里，同源也要显式带；不写这行浏览器会丢弃
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    ...init,
-  });
-  if (!res.ok) {
-    throw await httpError(res);
+  const controller = new AbortController();
+  const timer: ReturnType<typeof setTimeout> | undefined =
+    opts?.timeoutMs !== 0
+      ? setTimeout(() => controller.abort(), opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+      : undefined;
+  try {
+    const res = await fetch(cleanPath, {
+      // 登录态在 HttpOnly Cookie 里，同源也要显式带；不写这行浏览器会丢弃
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      ...init,
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      throw await httpError(res);
+    }
+    return res.json() as Promise<T>;
+  } catch (e) {
+    // 超时（AbortController 触发）转成可懂的提示，而不是一堆原生 abort 噪音
+    if ((e as Error)?.name === "AbortError") {
+      throw new Error("请求超时，请稍后重试或检查网络");
+    }
+    throw e;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
-  return res.json() as Promise<T>;
 }
 
 /**
@@ -131,32 +156,51 @@ export class BusinessNotFoundError extends Error {
  * 终局解法是让后端给一份能力清单（见 docs/前后端可更新点_2026-10-14.md 后端 #2），
  * 与队友那批接口一起定契约时再换。
  */
-async function tryRequest<T>(path: string, init?: RequestInit): Promise<T | null> {
+async function tryRequest<T>(
+  path: string,
+  init?: RequestInit,
+  opts?: { timeoutMs?: number }
+): Promise<T | null> {
   const cleanPath = path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
-  const res = await fetch(cleanPath, {
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    ...init,
-  });
-  if (res.ok) return res.json() as Promise<T>;
-  if (res.status === 405 || res.status === 501) return null;
-  if (res.status === 404) {
-    // detail 可能是字符串，也可能是 422 那种数组 —— 先判类型再判内容，
-    // 否则 detail.trim() 会在数组上抛 TypeError，把一次普通 404 变成未捕获异常。
-    let rawDetail: unknown = "";
-    try {
-      rawDetail = ((await res.json()) as { detail?: unknown }).detail ?? "";
-    } catch {
-      /* 非 JSON 错误体：当作未上线处理 */
+  const controller = new AbortController();
+  const timer: ReturnType<typeof setTimeout> | undefined =
+    opts?.timeoutMs !== 0
+      ? setTimeout(() => controller.abort(), opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+      : undefined;
+  try {
+    const res = await fetch(cleanPath, {
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      ...init,
+      signal: controller.signal,
+    });
+    if (res.ok) return res.json() as Promise<T>;
+    if (res.status === 405 || res.status === 501) return null;
+    if (res.status === 404) {
+      // 否则 detail.trim() 会在数组上抛 TypeError，把一次普通 404 变成未捕获异常。
+      let rawDetail: unknown = "";
+      try {
+        rawDetail = ((await res.json()) as { detail?: unknown }).detail ?? "";
+      } catch {
+        /* 非 JSON 错误体：当作未上线处理 */
+      }
+      const detail = typeof rawDetail === "string" ? rawDetail : "";
+      // 空 detail：后端没给 JSON 错误体，多数也是路由未匹配
+      // 其余按大小写不敏感匹配，理由见上方注释「按字符串猜」那一段
+      if (detail === "" || /^not found$/i.test(detail.trim())) return null;
+      // 业务 404：让调用方自己去认（report 页会转成「今天还没有总结」）
+      throw new BusinessNotFoundError(detail);
     }
-    const detail = typeof rawDetail === "string" ? rawDetail : "";
-    // 空 detail：后端没给 JSON 错误体，多数也是路由未匹配
-    // 其余按大小写不敏感匹配，理由见上方注释「按字符串猜」那一段
-    if (detail === "" || /^not found$/i.test(detail.trim())) return null;
-    // 业务 404：让调用方自己去认（report 页会转成「今天还没有总结」）
-    throw new BusinessNotFoundError(detail);
+    throw await httpError(res);
+  } catch (e) {
+    // 超时（AbortController 触发）转成可懂的提示，而不是一堆原生 abort 噪音
+    if ((e as Error)?.name === "AbortError") {
+      throw new Error("请求超时，请稍后重试或检查网络");
+    }
+    throw e;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
-  throw await httpError(res);
 }
 
 export const api = {
@@ -350,7 +394,8 @@ export const api = {
     run: (id: string, dryRun: boolean) =>
       tryRequest<{ content?: string; delivered?: boolean }>(
         `/api/delegate/${id}/run${dryRun ? "?dry_run=true" : ""}`,
-        { method: "POST" }
+        { method: "POST" },
+        { timeoutMs: 120000 }
       ),
   },
 
@@ -363,7 +408,7 @@ export const api = {
       tryRequest<DailyReport>("/api/report/generate", {
         method: "POST",
         body: JSON.stringify(date ? { date } : {}),
-      }),
+      }, { timeoutMs: 120000 }),
   },
 
   // ---------- P6 打卡 /api/checkin（4 端点）----------
@@ -381,9 +426,11 @@ export const api = {
       ),
     /** 触发今日总结（同步，约 20–40 秒）；返回 {date, status, points} */
     generate: () =>
-      request<{ date: string; status: string; points: number }>("/api/checkin/generate", {
-        method: "POST",
-      }),
+      request<{ date: string; status: string; points: number }>(
+        "/api/checkin/generate",
+        { method: "POST" },
+        { timeoutMs: 120000 }
+      ),
     /** 标记某天已分享（幂等 upsert） */
     share: (date: string) =>
       request<{ ok: boolean; date: string; shared: boolean }>("/api/checkin/share", {

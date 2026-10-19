@@ -34,7 +34,7 @@ worker 负责幂等 / 重试分级 / 心跳 / 结构化日志，业务只实现�
 
       due_subjects(job_key, planned_at) -> list[str]   # 本轮到期的对象 id；没有就 []
       run_one(job_key, subject_id, planned_at) -> dict # 干一次活，可返回 {"tokens_out": int}
-      on_failure(job_key, subject_id, fatal: bool)     # 可选：不可重试失败时收尾
+      on_failure(job_key, subject_id, fatal: bool, error=None)  # 可选：不可重试失败时收尾，error 为运行异常摘要
 
   可选（整任务入口，适合没有「对象」的活，如 housekeeping 的历史上传件清理）::
 
@@ -171,7 +171,7 @@ def _execute_one(job_key: str, subject_id: str, planned_at: int, run_id: str, mo
             closer = _hook(module, "on_failure")
             if closer is not None:
                 try:
-                    closer(job_key, subject_id, True)
+                    closer(job_key, subject_id, True, str(e)[:200])
                 except Exception as e2:  # noqa: BLE001
                     _log_json("on_failure_error", job_key=job_key, subject_id=subject_id,
                               error=str(e2)[:300])

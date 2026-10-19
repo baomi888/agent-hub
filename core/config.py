@@ -203,6 +203,11 @@ TITLE_MAX_TOKENS = int(os.getenv("TITLE_MAX_TOKENS", "32"))
 # Agent/Workflow 引擎在拼 prompt 时前置，从而获得多轮上下文。
 HYBRID_HISTORY_MAX_MESSAGES = int(os.getenv("HYBRID_HISTORY_MAX_MESSAGES", "60"))
 
+# 主链路历史注入的「输入侧字符预算」：窗口放宽到 30 轮（70 条）后，最重真实会话
+# 会把 prompt 推过 DeepSeek 64K 上下文（实测 76k tok > 64K）。从最新往旧累计、
+# 超预算就丢最旧的，而不是截断最新一轮（那会让模型答非所问）。≈15k tok。
+CHAT_HISTORY_MAX_CHARS = int(os.getenv("CHAT_HISTORY_MAX_CHARS", "24000"))
+
 # ---------- 标签钩子（方案 C：入库级主题 + 对话级用户画像）----------
 # A 块：文件入库时对每个来源抽主题标签，写入每片 metadata["topics"]（"|t1|t2|" 分隔串），
 #   后续检索（D 块）可用 Chroma `where: {"topics": {"$contains": "|t1|"}}` 精确过滤。
