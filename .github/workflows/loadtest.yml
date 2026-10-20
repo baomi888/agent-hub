@@ -67,13 +67,6 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
 
-      - name: 记录 runner 规格（数字要配机器才有意义）
-        id: spec
-        run: |
-          echo "cpu=$(nproc)" >> "$GITHUB_OUTPUT"
-          echo "mem=$(awk '/^MemTotal:/{printf "%d", $2/1024}' /proc/meminfo)" >> "$GITHUB_OUTPUT"
-          echo "CPU $(nproc) 核 / 内存 $(awk '/^MemTotal:/{printf "%d MB", $2/1024}' /proc/meminfo)"
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -99,6 +92,24 @@ jobs:
             echo "mode=me"         >> "$GITHUB_OUTPUT"
             echo "max_p95=3000"    >> "$GITHUB_OUTPUT"
           fi
+
+      # 记录 runner 规格（数字要配机器才有意义）。放在"设定参数"之后，因为要
+      # 把 workers 一起写进产物。
+      - name: 记录 runner 规格
+        id: spec
+        run: |
+          cpu=$(nproc)
+          mem=$(awk '/^MemTotal:/{printf "%d", $2/1024}' /proc/meminfo)
+          echo "cpu=$cpu" >> "$GITHUB_OUTPUT"
+          echo "mem=$mem" >> "$GITHUB_OUTPUT"
+          echo "$cpu 核 / ${mem} MB 内存"
+          # 落一份到产物里：数字必须配机器规格才有意义，否则过两个月回看
+          # 只会剩一个孤零零的 RPS，谁也说不清当时的上限是被测端还是生成端。
+          printf '%s\n' \
+            "runner: ${cpu} 核 / ${mem} MB 内存" \
+            "uvicorn workers: ${{ steps.cfg.outputs.workers }}" \
+            "commit: ${{ github.sha }}" \
+            > "$RUNNER_TEMP/spec.txt"
 
       - name: 启动后端
         run: |
@@ -153,6 +164,7 @@ jobs:
           path: |
             loadtest.json
             summary.md
+            "$RUNNER_TEMP/spec.txt"
 
       - name: 后端日志（排障用）
         if: failure()
