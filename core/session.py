@@ -99,6 +99,17 @@ def _init_db() -> None:
     两种路径得到同一套结构，省得迁移脚本和建表语句各写一遍。
     """
     with _get_conn() as conn:
+        # 令牌吊销名单：JWT 是无状态的，退出登录 / 强制下线只能靠这份黑名单。
+        # 只存 jti + 过期时间，过期行由 core/token_store.py 顺手清掉，
+        # 所以这张表不会无限长。
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS revoked_tokens (
+                jti TEXT PRIMARY KEY,
+                exp INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_revoked_exp ON revoked_tokens(exp);
+        """)
+    with _get_conn() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS conversations (
                 id          TEXT PRIMARY KEY,

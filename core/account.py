@@ -86,11 +86,26 @@ def _ensure_tables() -> None:
                 username      TEXT NOT NULL COLLATE NOCASE,
                 password_hash TEXT NOT NULL,
                 created_at    INTEGER NOT NULL,
-                last_login_at INTEGER
+                last_login_at INTEGER,
+                status        INTEGER NOT NULL DEFAULT 1
             );
             -- NOCASE 让 ASCII 大小写视为同一个用户（Abc 和 abc 不能各注册一份）
             CREATE UNIQUE INDEX IF NOT EXISTS idx_users_name ON users(username COLLATE NOCASE);
         """)
+    _ensure_columns()
+
+
+def _ensure_columns() -> None:
+    """给老库补列（幂等）。
+
+    对应 sky-take-out 的 `employee.status`：1 正常 / 0 锁定。
+    老库里没有这一列，直接 ALTER 补上并默认 1（已注册用户视为正常），
+    这样升级不需要停机迁移脚本。
+    """
+    with _get_conn() as conn:
+        cols = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
+        if "status" not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN status INTEGER NOT NULL DEFAULT 1")
 
 
 _ensure_tables()
@@ -102,7 +117,8 @@ _ensure_tables()
 def get_user(uid: str) -> dict | None:
     with _get_conn() as conn:
         row = conn.execute(
-            "SELECT id, username, password_hash, created_at, last_login_at FROM users WHERE id = ?",
+            "SELECT id, username, password_hash, created_at, last_login_at, status "
+            "FROM users WHERE id = ?",
             (uid,),
         ).fetchone()
         return dict(row) if row else None
@@ -111,7 +127,7 @@ def get_user(uid: str) -> dict | None:
 def get_user_by_username(name: str) -> dict | None:
     with _get_conn() as conn:
         row = conn.execute(
-            "SELECT id, username, password_hash, created_at, last_login_at "
+            "SELECT id, username, password_hash, created_at, last_login_at, status "
             "FROM users WHERE username = ?",
             (normalize_name(name),),
         ).fetchone()
@@ -136,20 +152,64 @@ def create_user(username: str, password: str) -> dict:
     return _public(row)
 
 
-def authenticate(username: str, password: str) -> dict | None:
-    """校验账号口令，通过返回公开 dict，否则 None。
+# 登录失败原因。对外**不**区分前三种，只在内部区分（日志 / 后续风控用）
+LOGIN_OK = "ok"
+LOGIN_NO_USER = "no_user"
+LOGIN_BAD_PASSWORD = "bad_password"
+LOGIN_LOCKED = "locked"
 
-    用户名不存在和口令错返回同一个结果，避免被用来枚举注册用户。
+# 状态值（对应 sky-take-out 的 StatusConstant.ENABLE / DISABLE）
+STATUS_ENABLE = 1
+STATUS_DISABLE = 0
+
+
+def login(username: str, password: str) -> tuple[dict | None, str]:
+    """按 sky-take-out 的顺序校验账号，返回 (用户, 原因)。
+
+    顺序是刻意对齐 `EmployeeServiceImpl.login` 的：
+
+      1. 按用户名查库          → 查不到 = no_user
+      2. 口令比对              → 不匹配 = bad_password
+      3. 账号状态              → 锁定   = locked
+      4. 全过 → 刷新 last_login_at，返回用户
+
+    **与 sky 的刻意差异**：sky 把"账号不存在"和"密码错误"分成两个异常、给
+    前端两句不同的话；这里对外统一成一句"用户名或密码不正确"。原因是本项目
+    注册是自助开放的，区分这两者等于免费送一个"哪些用户名存在"的枚举接口。
+    状态（locked）则必须区分——用户需要知道"不是密码错了，是号被停了"。
+
+    第 1 步查不到用户时仍然跑一次等价耗时的散列，让两种失败的响应时间一致，
+    否则时间差本身就泄露了"用户存不存在"。
     """
     row = get_user_by_username(username)
     if not row:
-        # 走一次等价耗时的散列，让"用户不存在"和"密码错"的响应时间一致
         verify_password(password, "pbkdf2_sha256$1$AA==$AA==")
-        return None
+        return None, LOGIN_NO_USER
     if not verify_password(password, row["password_hash"]):
-        return None
+        return None, LOGIN_BAD_PASSWORD
+    if int(row.get("status", STATUS_ENABLE) or 0) == STATUS_DISABLE:
+        return None, LOGIN_LOCKED
     touch_login(row["id"])
-    return _public(row)
+    return _public(row), LOGIN_OK
+
+
+def authenticate(username: str, password: str) -> dict | None:
+    """校验账号口令，通过返回公开 dict，否则 None。
+
+    保留这个入口是给老调用方用的（语义就是"能不能登录"）；
+    需要知道失败原因的用 login()。
+    """
+    user, reason = login(username, password)
+    return user
+
+
+def set_status(uid: str, status: int) -> bool:
+    """启用 / 锁定账号，返回是否真的改到了行（对应 sky 的 startOrStop）。"""
+    with _get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE users SET status = ? WHERE id = ?", (int(status), uid)
+        )
+        return bool(cur.rowcount)
 
 
 def touch_login(uid: str) -> None:

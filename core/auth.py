@@ -70,6 +70,16 @@ def verify_password(password: str, stored: str) -> bool:
 
 # ==================== 令牌签发 ====================
 
+# ---- Claims 字段名 ----
+# 对应 sky-take-out 的 `JwtClaimsConstant`（那边是 EMP_ID / USER_ID / USERNAME）。
+# 这里只保留本项目需要的三个：谁（uid）、叫什么（username）、这一枚令牌的身份（jti）。
+CLAIM_UID = "uid"
+CLAIM_USERNAME = "username"
+CLAIM_JTI = "jti"
+
+# 兼容历史令牌：早期只写了标准字段 sub，没有 uid / jti
+_LEGACY_SUB = "sub"
+
 
 def _secret() -> bytes:
     """取签发密钥。
@@ -105,12 +115,28 @@ def _b64d(s: str) -> bytes:
     return base64.urlsafe_b64decode(s + pad)
 
 
-def create_token(user_id: str, ttl_days: int | None = None) -> str:
-    """签发 HS256 令牌（手工 JWT）。载荷只放 uid 与过期时间，不多带东西。"""
+def create_token(user_id: str, ttl_days: int | None = None, username: str | None = None) -> str:
+    """签发 HS256 令牌（手工 JWT）。
+
+    载荷：uid（身份）+ username（展示用）+ jti（吊销用）+ iat/exp。
+    和 sky-take-out 的区别是它只放 empId；多带 username 是为了省掉"每次渲染
+    导航栏都查一次库"，但**权限判定一律以 uid 为准**（username 可以被改名，
+    uid 不行）。
+
+    不放进载荷的东西：角色 / 配额 / 过期后的兜底状态。放进去就等于把
+    "改权限"这件事推迟到令牌过期，那是 7 天的窗口。
+    """
     days = config.AUTH_TTL_DAYS if ttl_days is None else ttl_days
     now = int(time.time())
     header = {"alg": "HS256", "typ": "JWT"}
-    payload = {"sub": user_id, "iat": now, "exp": now + days * 86400}
+    payload = {
+        "sub": user_id,  # 保留标准字段，老令牌 / 老代码都还认
+        CLAIM_UID: user_id,
+        CLAIM_USERNAME: username or "",
+        "iat": now,
+        "exp": now + days * 86400,
+        CLAIM_JTI: secrets.token_urlsafe(16),
+    }
     signing_input = "{}.{}".format(
         _b64e(json.dumps(header, separators=(",", ":")).encode()),
         _b64e(json.dumps(payload, separators=(",", ":")).encode()),
@@ -119,8 +145,12 @@ def create_token(user_id: str, ttl_days: int | None = None) -> str:
     return f"{signing_input}.{_b64e(sig)}"
 
 
-def decode_token(token: str) -> str | None:
-    """校验令牌，返回 user_id；任何失败（过期/被改/格式错）都返回 None。"""
+def decode_claims(token: str) -> dict | None:
+    """校验签名与过期时间，通过返回完整载荷，否则 None。
+
+    任何失败（空串 / 段数不对 / 签名被改 / 过期 / JSON 坏）都返回 None，
+    调用方不需要区分——对外统一 401，别把"到底哪一步错了"漏给攻击者。
+    """
     if not token:
         return None
     parts = token.split(".")
@@ -136,8 +166,21 @@ def decode_token(token: str) -> str | None:
         return None
     if not isinstance(payload, dict) or int(payload.get("exp", 0)) < int(time.time()):
         return None
-    uid = payload.get("sub")
+    return payload
+
+
+def decode_token(token: str) -> str | None:
+    """校验令牌，返回 user_id；任何失败都返回 None。
+
+    保留这个函数名与返回值形状，是因为历史测试与调用点都按"只取 id"在用；
+    需要更多字段（username / jti）的调用方用 decode_claims。
+    """
+    payload = decode_claims(token)
+    if not payload:
+        return None
+    uid = payload.get(CLAIM_UID) or payload.get(_LEGACY_SUB)
     return str(uid) if uid else None
+
 
 
 # ==================== Cookie 读写 ====================
@@ -190,18 +233,65 @@ def clear_session_cookie(resp: Response) -> None:
 # ==================== FastAPI 依赖 ====================
 
 
+_BEARER = "bearer "
+
+
+def extract_token(request: Request) -> str:
+    """从请求里取出令牌，返回空串表示没带。
+
+    读取顺序（对应 sky-take-out 拦截器"从请求头拿令牌"，外加本项目原有的 Cookie）：
+
+      1. 自定义头 ``X-Auth-Token``（名字可用 AUTH_TOKEN_HEADER 改）
+         —— 对应 sky 的 admin-token-name / user-token-name；
+      2. ``Authorization: Bearer <token>``
+         —— 给移动端 / 小程序 / Swagger / 压测脚本用，它们没有 Cookie 罐子；
+      3. Cookie ``baomi_session``
+         —— 浏览器主路径，HttpOnly，JS 读不到。
+
+    头部优先于 Cookie：显式带 token 的调用方意图明确，不该被浏览器残留的
+    旧 Cookie 覆盖掉。
+    """
+    raw = (request.headers.get(config.AUTH_TOKEN_HEADER) or "").strip()
+    if not raw:
+        authz = (request.headers.get("authorization") or "").strip()
+        if authz.lower().startswith(_BEARER):
+            raw = authz[len(_BEARER) :].strip()
+    if not raw:
+        raw = (request.cookies.get(COOKIE_NAME) or "").strip()
+    # 自定义头里也允许直接写 "Bearer xxx"
+    if raw.lower().startswith(_BEARER):
+        raw = raw[len(_BEARER) :].strip()
+    return raw
+
+
 def current_user_id(request: Request) -> str:
-    """从 Cookie 取出当前登录用户 id，失败直接 401。
+    """从请求中取出令牌并校验，返回 uid；失败直接 401。
 
     这是全站唯一的身份入口。业务路由通过
     `APIRouter(dependencies=[Depends(get_current_user)])` 挂上去，
     做成"默认要登录"，避免将来新增端点时漏掉鉴权——本项目历史上多次因为
     "同一个规则在这一处遵守、在那一处漏了"而踩坑，这里从机制上堵住。
     """
-    token = request.cookies.get(COOKIE_NAME)
-    uid = decode_token(token or "")
+    token = extract_token(request)
+    claims = decode_claims(token)
+    if not claims:
+        raise HTTPException(status_code=401, detail="未登录或登录已过期，请重新登录")
+
+    jti = str(claims.get(CLAIM_JTI) or "")
+    if jti:
+        from core import token_store  # 延迟导入，避免 auth ←→ storage 的循环导入
+
+        if token_store.is_revoked(jti):
+            raise HTTPException(status_code=401, detail="登录已退出，请重新登录")
+
+    uid = claims.get(CLAIM_UID) or claims.get(_LEGACY_SUB)
     if not uid:
         raise HTTPException(status_code=401, detail="未登录或登录已过期，请重新登录")
+
+    uid = str(uid)
+    request.state.uid = uid
+    request.state.username = str(claims.get(CLAIM_USERNAME) or "")
+    request.state.token_claims = claims
     return uid
 
 

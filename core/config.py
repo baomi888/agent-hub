@@ -124,6 +124,16 @@ ALLOW_SIGNUP = os.getenv("ALLOW_SIGNUP", "1").strip().lower() in ("1", "true", "
 # 口令散列轮数（PBKDF2-SHA256）。机器好可以调高，反之别低于 10 万
 AUTH_PBKDF2_ROUNDS = int(os.getenv("AUTH_PBKDF2_ROUNDS", "200000"))
 
+# 是否在登录响应体里额外回吐 token。
+# 默认关：浏览器侧走 HttpOnly Cookie 就够了，把 token 交给 JS 等于把 XSS 的
+# 收益从"偷不到"变成"直接顺走"。只在给移动端 / 小程序 / 接口调试时需要，
+# 那些客户端本来也没有 Cookie 罐子，用的是 Authorization 头。
+AUTH_RETURN_TOKEN = os.getenv("AUTH_RETURN_TOKEN", "0").strip().lower() in ("1", "true", "yes")
+
+# 令牌头的名字。对应 sky-take-out 的 admin-token-name / user-token-name，
+# 只是那边一个端一个头名，这边同一套身份两处都认（见 core/auth.py:extract_token）。
+AUTH_TOKEN_HEADER = os.getenv("AUTH_TOKEN_HEADER", "X-Auth-Token")
+
 # 迁移账号：历史数据（改造前建的会话 / 知识库）先锁在这个名下，谁都看不到，
 # 由 tools/migrate_owner.py 明确指派给某个真人账号后才恢复可用。
 # 这是刻意的"默认拒绝"——宁可暂时看不见，也不能让第一个登录的人顺手认领别人的数据。
@@ -236,6 +246,22 @@ RETRIEVAL_BIAS_TOP = int(os.getenv("RETRIEVAL_BIAS_TOP", "8"))
 # 计划请求命不中主题词时不直接退化成通用模板，回看最近 N 条用户消息续上主题
 #   （"计划再细一点" → 从前文的"六级备考"推断）。置 0 表示只看本轮提问。
 PLAN_TOPIC_HISTORY_MESSAGES = int(os.getenv("PLAN_TOPIC_HISTORY_MESSAGES", "6"))
+
+# ---------- 上下文压缩（P0-2 接线开关）----------
+# 总开关：置 0 后 assemble_history 原样返回全量历史、maybe_compress 不落库，
+# 即完全退回"滑动窗口"旧行为。这是线上出问题时的**一键回滚开关**，
+# 不需要改代码、不需要回滚版本。
+COMPRESS_ENABLED = os.getenv("COMPRESS_ENABLED", "1") not in ("0", "false", "False")
+# 触发压缩的字符阈值（按**全量历史**估，不是按窗口内）。
+# 低于它不压：短会话压了反而丢信息、且压缩块本身要占 token。
+COMPRESS_MAX_CONTEXT_CHARS = int(os.getenv("COMPRESS_MAX_CONTEXT_CHARS", "12000"))
+# 压缩后保留最近 K 轮原文（1 轮 = user + assistant）
+COMPRESS_KEEP_TURNS = int(os.getenv("COMPRESS_KEEP_TURNS", "6"))
+# L2 安全阀扩容后的 K（实体丢失且无上一版压缩块时用，压得更少）
+COMPRESS_KEEP_TURNS_EXPANDED = int(os.getenv("COMPRESS_KEEP_TURNS_EXPANDED", "12"))
+# 压缩块自身预算：字符上限 / 段数上限，超限折叠最早的段
+COMPRESS_MAX_SUMMARY_CHARS = int(os.getenv("COMPRESS_MAX_SUMMARY_CHARS", "4000"))
+COMPRESS_MAX_SEGMENTS = int(os.getenv("COMPRESS_MAX_SEGMENTS", "12"))
 
 # ---------- 新建会话自动绑定资料库（P3）----------
 # 用户**有且仅有一个**知识库时，新建会话自动绑上它。修复"传过资料、新开会话

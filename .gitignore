@@ -44,6 +44,8 @@ chroma-staging/
 *.db-wal
 *.db-shm
 data/sessions.db
+# 本地压测产物（tools/loadtest_concurrency.py 用）：临时 SQLite + 结果 JSON
+.loadtest/
 data/uploads/
 data/chat_uploads/
 data/kb_sources/

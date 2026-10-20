@@ -200,8 +200,14 @@ async def _on_quota_exceeded(request: Request, exc: quota.QuotaExceeded) -> JSON
 
 
 @app.get("/api/config/defaults")
-def get_defaults() -> dict:
-    """返回前端初始表单所需的默认参数。"""
+async def get_defaults() -> dict:
+    """返回前端初始表单所需的默认参数。
+
+    刻意用 async def：这个接口只读常量，没有任何阻塞调用。写成同步 def 的话
+    FastAPI 会把它丢进 anyio 线程池（默认上限 40 个线程）执行，200 人同时
+    在线时请求先在线程池外排队，p95 直接从毫秒级涨到秒级——2026-10-20 的
+    压测就是这个现象（见 docs/并发承载与JWT改造报告_2026-10-20.md）。
+    """
     return {
         "chunk_size": config.CHUNK_SIZE_DEFAULT,
         "chunk_overlap": config.CHUNK_OVERLAP_DEFAULT,
@@ -211,8 +217,9 @@ def get_defaults() -> dict:
 
 
 @app.get("/health")
-def health() -> dict:
-    """健康检查端点。"""
+async def health() -> dict:
+    """健康检查端点。同样必须 async：探活/负载均衡器会高频打它，
+    同步版会把线程池占满，连带把真正的业务请求一起拖慢。"""
     return {"status": "ok", "version": "0.3.0 (W3)"}
 
 
