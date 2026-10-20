@@ -55,7 +55,8 @@ jobs:
       DEEPSEEK_API_KEY: ci-fake-key-not-used-loadtest-0000
       EMBEDDING_API_KEY: ci-fake-key-not-used-loadtest-0000
       EMBEDDING_BASE_URL: https://example.invalid/v1
-      DATA_DIR: ${{ runner.temp }}/loadtest-data
+      # ⚠️ DATA_DIR 不写在这里：job 级 env 的表达式里 `runner` 不可用（会直接
+      # Invalid workflow file），改成在启动那一步用 runner 自带的 $RUNNER_TEMP。
     steps:
       - uses: actions/checkout@v4
 
@@ -101,8 +102,9 @@ jobs:
 
       - name: 启动后端
         run: |
-          mkdir -p "$DATA_DIR"
-          nohup python -m uvicorn main:app --host 127.0.0.1 --port 8123 \
+          mkdir -p "$RUNNER_TEMP/loadtest-data"
+          DATA_DIR="$RUNNER_TEMP/loadtest-data" \
+            nohup python -m uvicorn main:app --host 127.0.0.1 --port 8123 \
             --workers "${{ steps.cfg.outputs.workers }}" > "$RUNNER_TEMP/backend.log" 2>&1 &
           echo $! > "$RUNNER_TEMP/backend.pid"
 
