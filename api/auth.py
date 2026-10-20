@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from core import account, config, quota
@@ -65,7 +65,7 @@ def auth_config() -> dict:
 
 
 @router.post("/register/", response_model=UserOut)
-def register(body: Credentials, response: Response):
+def register(body: Credentials, request: Request, response: Response):
     if not config.ALLOW_SIGNUP:
         _reject("本站已关闭自助注册，请联系管理员开通账号", 403)
 
@@ -86,12 +86,12 @@ def register(body: Credentials, response: Response):
         # 免得数据库的错误信息一路漏到前端
         _reject("该用户名已被占用", 409)
 
-    set_session_cookie(response, create_token(user["id"]))
+    set_session_cookie(response, create_token(user["id"]), request)
     return UserOut(id=user["id"], username=user["username"])
 
 
 @router.post("/login/", response_model=UserOut)
-def login(body: Credentials, response: Response):
+def login(body: Credentials, request: Request, response: Response):
     try:
         quota.hit(_auth_rate_bucket(body.username), limit=10)
     except quota.RateLimited as e:
@@ -102,7 +102,7 @@ def login(body: Credentials, response: Response):
         # 用户名不存在与密码错返回同一句话，不提供枚举线索
         _reject("用户名或密码不正确", 401)
 
-    set_session_cookie(response, create_token(user["id"]))
+    set_session_cookie(response, create_token(user["id"]), request)
     return UserOut(id=user["id"], username=user["username"])
 
 

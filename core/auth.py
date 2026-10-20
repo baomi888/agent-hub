@@ -143,11 +143,33 @@ def decode_token(token: str) -> str | None:
 # ==================== Cookie 读写 ====================
 
 
-def set_session_cookie(resp: Response, token: str) -> None:
+def _is_secure_request(request: Request | None) -> bool:
+    """判断当前请求是否走 https。
+
+    反向代理（nginx）会把真实协议放在 ``X-Forwarded-Proto``；而 uvicorn 默认
+    不信任该头（未开 --proxy-headers），``request.url.scheme`` 会在 TLS 终结后
+    仍显示 http。所以这里显式优先读该头，没有再退回 scheme；两条都取不到就按
+    http 处理（保守，宁可不加 Secure 也不让本地 http 调试丢 Cookie）。
+    """
+    if request is None:
+        return False
+    proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    if proto:
+        return proto == "https"
+    try:
+        return request.url.scheme == "https"
+    except Exception:
+        return False
+
+
+def set_session_cookie(resp: Response, token: str, request: Request | None = None) -> None:
     """把登录态写进 HttpOnly Cookie。
 
     SameSite=Lax：本站跳转带着，跨站表单不带，够用且不会把 CSRF 面再开大。
     Secure 只在 https 下加，否则本地 http 调试会直接丢 Cookie。
+
+    注意：此前注释这么写、但 kwargs 里漏了 secure，等于**永远不加**——
+    上 HTTPS 后会话 Cookie 仍可能被浏览器在 http 下带出/拒存。现已按请求协议补齐。
     """
     kwargs = {
         "key": COOKIE_NAME,
@@ -156,6 +178,7 @@ def set_session_cookie(resp: Response, token: str) -> None:
         "httponly": True,
         "samesite": "lax",
         "path": "/",
+        "secure": _is_secure_request(request),
     }
     resp.set_cookie(**kwargs)
 
