@@ -105,11 +105,13 @@ jobs:
           echo "$cpu 核 / ${mem} MB 内存"
           # 落一份到产物里：数字必须配机器规格才有意义，否则过两个月回看
           # 只会剩一个孤零零的 RPS，谁也说不清当时的上限是被测端还是生成端。
+          # 写进工作区（不写 $RUNNER_TEMP）：upload-artifact 的 path 不展开 shell
+          # 变量，写绝对路径会静默丢文件。
           printf '%s\n' \
             "runner: ${cpu} 核 / ${mem} MB 内存" \
             "uvicorn workers: ${{ steps.cfg.outputs.workers }}" \
             "commit: ${{ github.sha }}" \
-            > "$RUNNER_TEMP/spec.txt"
+            > loadtest-spec.txt
 
       - name: 启动后端
         run: |
@@ -164,7 +166,7 @@ jobs:
           path: |
             loadtest.json
             summary.md
-            "$RUNNER_TEMP/spec.txt"
+            loadtest-spec.txt
 
       - name: 后端日志（排障用）
         if: failure()
