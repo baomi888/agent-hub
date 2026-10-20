@@ -242,8 +242,22 @@ async def amain(args) -> int:
         print(f"  {r['scenario']}: {r['codes']}")
 
     if args.json_out:
+        # duration / processes / mode 一并落盘：CI 的 job summary 与门槛判定
+        # 全靠这几个字段复述口径，缺了就只能靠人记当时是怎么跑的。
         with open(args.json_out, "w", encoding="utf-8") as f:
-            json.dump({"base": base, "concurrency": args.concurrency, "rows": rows}, f, ensure_ascii=False, indent=2)
+            json.dump(
+                {
+                    "base": base,
+                    "concurrency": args.concurrency,
+                    "processes": args.processes,
+                    "duration": args.duration,
+                    "mode": args.mode,
+                    "rows": rows,
+                },
+                f,
+                ensure_ascii=False,
+                indent=2,
+            )
         print(f"\n[输出] {os.path.abspath(args.json_out)}")
     return 0
 

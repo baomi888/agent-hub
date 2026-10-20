@@ -1,0 +1,157 @@
+name: Loadtest
+
+# 压测跑在 GitHub Actions 的 runner 上，而不是本机。
+#
+# 为什么值得单独占一条 workflow：本机压测的**生成器**会先饱和——单进程 asyncio 受
+# GIL 限制，200 并发时打出的压力还没到服务端就先自己排队了（实测 20 并发 684 RPS、
+# 200 并发只剩 138 RPS），必须 --processes 拆进程才勉强够看，而 4 个生成器进程合计
+# 也就 ~1000 RPS。也就是说本机测到的"天花板"常常是压测机自己的天花板。
+# Runner 是干净的 Linux、网络与本机分离，能把生成端和被测端分开看。
+#
+# 两档：
+#   · push dev  → 冒烟档（50 并发 / 2 进程 / 5s），作用是把"某次改动把 p95 拉高一个
+#                 数量级"这类回归挡在合并前；跑不完 3 分钟。
+#   · 手动触发  → 正式档（默认 200 并发 / 8 进程 / 10s / 4 worker），参数可调，
+#                 用来拿可信的承载数字。
+#
+# 只压 /health 与 /api/auth/me，**不打 LLM**：一是真实并发会撞上游 TPM 限额并烧钱，
+# 二是要测的是本项目自身的框架/鉴权/SQLite 承载，不是上游的。
+on:
+  workflow_dispatch:
+    inputs:
+      concurrency:
+        description: "总并发数"
+        default: "200"
+      processes:
+        description: "压测生成器进程数（应 ≥ 4，否则生成器先饱和）"
+        default: "8"
+      duration:
+        description: "每个场景持续秒数"
+        default: "10"
+      workers:
+        description: "uvicorn worker 数"
+        default: "4"
+      mode:
+        description: "场景：health / me / all（all 含 login，会被限流打成 429，属预期）"
+        default: "me"
+      max_p95:
+        description: "p95 门槛（毫秒），超过即判失败"
+        default: "3000"
+  push:
+    branches: [dev]
+
+concurrency:
+  group: loadtest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  loadtest:
+    name: 并发压测 (${{ github.event_name == 'workflow_dispatch' && '正式档' || '冒烟档' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # 假密钥：只让 config.validate() 不刷警告、客户端能构造。压测场景不发任何
+      # 真实上游请求，health / me 两条路径根本不碰 LLM。
+      DEEPSEEK_API_KEY: ci-fake-key-not-used-loadtest-0000
+      EMBEDDING_API_KEY: ci-fake-key-not-used-loadtest-0000
+      EMBEDDING_BASE_URL: https://example.invalid/v1
+      DATA_DIR: ${{ runner.temp }}/loadtest-data
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: 记录 runner 规格（数字要配机器才有意义）
+        id: spec
+        run: |
+          echo "cpu=$(nproc)" >> "$GITHUB_OUTPUT"
+          echo "mem=$(awk '/^MemTotal:/{printf "%d", $2/1024}' /proc/meminfo)" >> "$GITHUB_OUTPUT"
+          echo "CPU $(nproc) 核 / 内存 $(awk '/^MemTotal:/{printf "%d MB", $2/1024}' /proc/meminfo)"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 冒烟档与正式档的差别只在参数，命令序列完全一样 —— 这样冒烟档才真的
+      # 是在预演正式档，不会出现"冒烟绿、正式挂"。
+      - name: 设定参数
+        id: cfg
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "concurrency=${{ inputs.concurrency }}" >> "$GITHUB_OUTPUT"
+            echo "processes=${{ inputs.processes }}" >> "$GITHUB_OUTPUT"
+            echo "duration=${{ inputs.duration }}" >> "$GITHUB_OUTPUT"
+            echo "workers=${{ inputs.workers }}" >> "$GITHUB_OUTPUT"
+            echo "mode=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
+            echo "max_p95=${{ inputs.max_p95 }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "concurrency=50"  >> "$GITHUB_OUTPUT"
+            echo "processes=2"     >> "$GITHUB_OUTPUT"
+            echo "duration=5"      >> "$GITHUB_OUTPUT"
+            echo "workers=2"       >> "$GITHUB_OUTPUT"
+            echo "mode=me"         >> "$GITHUB_OUTPUT"
+            echo "max_p95=3000"    >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 启动后端
+        run: |
+          mkdir -p "$DATA_DIR"
+          nohup python -m uvicorn main:app --host 127.0.0.1 --port 8123 \
+            --workers "${{ steps.cfg.outputs.workers }}" > "$RUNNER_TEMP/backend.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/backend.pid"
+
+      - name: 等待就绪
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8123/health > /dev/null; then
+              echo "后端已就绪（第 ${i} 次探活）"
+              curl -sS http://127.0.0.1:8123/health; echo
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::后端 120s 内未就绪"
+          exit 1
+
+      - name: 跑压测
+        run: |
+          python tools/loadtest_concurrency.py \
+            --base-url http://127.0.0.1:8123 \
+            --mode "${{ steps.cfg.outputs.mode }}" \
+            --concurrency "${{ steps.cfg.outputs.concurrency }}" \
+            --processes "${{ steps.cfg.outputs.processes }}" \
+            --duration "${{ steps.cfg.outputs.duration }}" \
+            --json-out loadtest.json
+
+      - name: 生成结果表 + 门槛判定
+        run: |
+          python tools/loadtest_report.py loadtest.json \
+            --max-p95 "${{ steps.cfg.outputs.max_p95 }}" --max-err 1 \
+            --out summary.md
+          {
+            echo "## 并发压测（${{ github.event_name == 'workflow_dispatch' && '正式档' || '冒烟档' }}）"
+            echo
+            echo "Runner：${{ steps.spec.outputs.cpu }} 核 / ${{ steps.spec.outputs.mem }} MB；"
+            echo "uvicorn workers=${{ steps.cfg.outputs.workers }}；commit ${{ github.sha }}"
+            echo
+            cat summary.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传原始数据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loadtest-${{ github.run_number }}
+          path: |
+            loadtest.json
+            summary.md
+
+      - name: 后端日志（排障用）
+        if: failure()
+        run: tail -n 80 "$RUNNER_TEMP/backend.log"
