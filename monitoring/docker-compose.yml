@@ -1,0 +1,37 @@
+services:
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: agent-hub-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.listen-address=127.0.0.1:9090
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prom-data:/prometheus
+    # 2C2G 机器：给 Prometheus 封顶，避免抢应用内存
+    mem_limit: 256m
+    depends_on:
+      - node-exporter
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: agent-hub-node-exporter
+    restart: unless-stopped
+    pid: host
+    command:
+      - --path.rootfs=/host
+      - --collector.textfile.directory=/textfile
+    volumes:
+      - /:/host:ro
+      - /var/lib/node_exporter/textfile:/textfile:ro
+    mem_limit: 64m
+    # 只绑回环，不对公网暴露
+    ports:
+      - "127.0.0.1:9100:9100"
+
+volumes:
+  prom-data:

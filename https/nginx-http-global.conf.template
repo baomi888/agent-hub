@@ -1,0 +1,11 @@
+# ============================================================
+#  知穗 Agent · nginx http 级配置（log_format timed）
+#  由 setup-https.sh 安装到 /etc/nginx/conf.d/00-agent-hub-log.conf
+#
+#  log_format 只能定义在 http{} 上下文，所以单独放这里；
+#  站点配置（sites-available/agent-hub.conf）里用 `access_log ... timed;` 引用。
+# ============================================================
+
+log_format timed '$remote_addr - $remote_user [$time_local] "$request" '
+                 '$status $body_bytes_sent "$http_referer" "$http_user_agent" '
+                 'rt=$request_time uct=$upstream_connect_time urt=$upstream_response_time';

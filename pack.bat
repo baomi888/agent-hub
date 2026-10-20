@@ -23,8 +23,8 @@ if errorlevel 1 (
 )
 
 echo [1/2] packing source tree ...
-echo        excluded: node_modules .next .git chroma_db data .workbuddy ui-redesign venv .env
-tar -czf "%TMPOUT%" --exclude=node_modules --exclude=.next --exclude=.git --exclude=chroma_db --exclude=data --exclude=.workbuddy --exclude=.trae --exclude=ui-redesign --exclude=baomi-agent --exclude=venv --exclude=.venv --exclude=__pycache__ --exclude=*.pyc --exclude=*.log --exclude=.env --exclude=baomi-deploy.tar.gz -C "%~dp0" .
+echo        excluded: node_modules .next .git chroma_db data .workbuddy ui-redesign venv .env nginx-1.30.6
+tar -czf "%TMPOUT%" --exclude=node_modules --exclude=.next --exclude=.git --exclude=chroma_db --exclude=data --exclude=.workbuddy --exclude=.trae --exclude=ui-redesign --exclude=baomi-agent --exclude=venv --exclude=.venv --exclude=__pycache__ --exclude=*.pyc --exclude=*.log --exclude=.env --exclude=baomi-deploy.tar.gz --exclude=nginx-1.30.6 -C "%~dp0" .
 
 if not exist "%TMPOUT%" (
   echo.

@@ -1,0 +1,118 @@
+# ============================================================
+#  知穗 Agent · HTTPS 反代配置模板（由 setup-https.sh 生成）
+#  域名占位符：__DOMAIN__  （脚本会用真实域名替换）
+#
+#  流量拓扑：
+#    浏览器 https://__DOMAIN__
+#      -> 服务器 nginx :443 (TLS 终结 + 反代)
+#      -> /                -> 127.0.0.1:3000  (Next.js 前端)
+#      -> /api/chat/stream -> 127.0.0.1:8000  (SSE 专用，HTTP/1.1 + 关缓冲)
+#      -> /api/            -> 127.0.0.1:8000  (uvicorn 其余接口)
+#
+#  本文件只写 80 端口的 server，certbot --nginx 会自动：
+#    1) 复制本段为 :443 ssl 并填入证书路径
+#    2) 把原来的 80 server 改成 301 跳转到 https
+#  所以这里把全部规则写全，443 段会自动继承。
+#
+#  依赖：log_format timed 定义在 http 级文件
+#        /etc/nginx/conf.d/00-agent-hub-log.conf（setup-https.sh 会安装）
+# ============================================================
+
+server {
+    listen 80;
+    server_name __DOMAIN__;
+
+    # 关掉 nginx 版本号泄露
+    server_tokens off;
+
+    # ---------------- 安全响应头（443 段会继承） ----------------
+    add_header X-Content-Type-Options   "nosniff" always;
+    add_header X-Frame-Options          "SAMEORIGIN" always;
+    add_header Referrer-Policy          "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy       "geolocation=(self), microphone=(), camera=()" always;
+    add_header X-XSS-Protection         "0" always;
+    # 说明：故意不加 CSP —— Next.js 有内联脚本，硬加会白屏；
+    #       要上 CSP 需先做 nonce/hash 方案，属独立改造。
+
+    # ---------------- Gzip ----------------
+    # SSE 不在 gzip_types 内，且 /api/chat/stream 里再显式 gzip off，双保险。
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 5;
+    gzip_min_length 1024;
+    gzip_types
+        text/plain text/css text/xml
+        application/json application/javascript application/xml application/xml+rss
+        text/javascript image/svg+xml;
+
+    # ---------------- 上传体积 ----------------
+    # 知识库文档上传；按需调整。默认 nginx 1m 会直接 413。
+    client_max_body_size 50m;
+
+    # ---------------- 日志（带耗时，便于定位慢请求） ----------------
+    access_log /var/log/nginx/agent-hub.access.log timed;
+    error_log  /var/log/nginx/agent-hub.error.log warn;
+
+    # Let's Encrypt HTTP-01 校验目录（certbot 的 --nginx 插件会自动临时接管，
+    # 这里保留一个固定根目录，便于日后手动 webroot 续期）
+    location /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+    }
+
+    # ---------------- SSE 专用 location：HTTP/1.1 + 关一切缓冲 ----------------
+    # 为什么不是「独立 server block」：那需要再签一张证书 / 再占一个 server_name，
+    # 没必要；独立 location 同样能保证 HTTP/1.1 语义。且本配置**未启用 http2**
+    # （certbot 默认也不加），因此不存在 http2+SSE 的已知流式故障组合。
+    # 若将来要开 http2，SSE 仍走这里即可（本 location 已锁 HTTP/1.1）。
+    location = /api/chat/stream {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_set_header Connection '';
+        proxy_buffering off;
+        proxy_cache off;
+        gzip off;
+        chunked_transfer_encoding on;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    # ---------------- 前端：Next.js (127.0.0.1:3000) ----------------
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host  $host;
+
+        proxy_connect_timeout 30s;
+        proxy_send_timeout    60s;
+        proxy_read_timeout    60s;
+    }
+
+    # ---------------- 后端其余接口：uvicorn (127.0.0.1:8000) ----------------
+    # proxy_pass 末尾不带斜杠 -> "/api/xxx" 原样转发到后端 "/api/xxx"
+    location /api/ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host  $host;
+
+        # 其它可能的流式/长连接接口也一并关缓冲（SSE 精确匹配优先命中上面那条）
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_set_header Connection '';
+        proxy_read_timeout  3600s;
+        proxy_send_timeout  3600s;
+    }
+}

@@ -39,6 +39,7 @@ tar \
   --exclude='*.log' \
   --exclude='.env' \
   --exclude='baomi-deploy*.tar.gz' \
+  --exclude='nginx-1.30.6' \
   --exclude='.baomi-pack.tmp.tar.gz' \
   -czf "$TMP" .
 
