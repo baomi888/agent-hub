@@ -36,6 +36,7 @@ SSE 事件协议：
 
 import asyncio
 import base64
+import contextlib
 import json
 import mimetypes
 import os
@@ -46,8 +47,10 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 
-from core import config, quota, tool_registry, upload
+from core import config, llm_gate, metrics, quota, tool_registry, upload
+from core import context_compress as ctxcompress
 from core import scenarios as scenarios_mod
 from core import session as store
 from core.auth import get_current_user
@@ -508,38 +511,155 @@ class _Acc:
     def __init__(self) -> None:
         self.text = ""
         self.error: str | None = None
+        # 因客户端断开而中断（不是错误，但绝不能把半截回答当完整答案落库）
+        self.aborted = False
+        # 上游给的结束原因（最后一帧才是终值）。None = 上游没给，或没收到。
+        self.finish_reason: str | None = None
+        # 被长度上限截断：文本合法、结构完整、但**内容不完整**
+        self.truncated = False
 
 
-async def _stream_llm(llm, messages, request: Request, acc: _Acc) -> None:
+# 各供应商对"被长度上限截断"的叫法。OpenAI 兼容接口用 length，
+# Anthropic 叫 max_tokens，Gemini 类似 max_output_tokens——写成集合而不是单值比较，
+# 是为了换供应商时不用回来改判断。
+_TRUNCATED_REASONS = frozenset({"length", "max_tokens", "max_output_tokens", "max_tokens_reached"})
+
+
+def _finish_reason_of(chunk) -> str | None:
+    """从流式帧里取 finish_reason。取不到返回 None。
+
+    为什么要在三个地方找：LangChain 不同版本的 ChatModel 把上游的结束原因放在
+    `response_metadata` / `generation_info` / `additional_kwargs` 里的位置不一样，
+    而且同一家的不同模型也可能不同。全找一遍比"猜哪一个是"稳。
+
+    ⚠️ 取不到时**必须当作"未截断"**。反过来（取不到就报警）会让所有正常回答
+    被标成残缺，比不检测更糟——这类"防御性误报"是最容易把新机制做废的方式。
+    """
+    for attr in ("response_metadata", "generation_info", "additional_kwargs"):
+        meta = getattr(chunk, attr, None)
+        if not isinstance(meta, dict):
+            continue
+        for key in ("finish_reason", "stop_reason", "finishReason"):
+            val = meta.get(key)
+            if val:
+                return str(val)
+    return None
+
+
+def _truncation_frame(reason: str | None) -> str:
+    """截断提示帧。带一句可操作的话——只说"被截断"用户不知道该怎么办。"""
+    return _sse(
+        "truncation",
+        {
+            "reason": reason or "length",
+            "hint": "回答达到长度上限被截断，内容可能不完整。可以回复「继续」让它接着写。",
+        },
+    )
+
+
+def _is_truncation(reason: str | None, path: str) -> bool:
+    """上游的结束原因是否表示"被长度上限截断"。是则记一笔指标。"""
+    if not getattr(config, "TRUNCATION_DETECT_ENABLED", True):
+        return False
+    if (reason or "").lower() not in _TRUNCATED_REASONS:
+        return False
+    metrics.inc("chat_truncated", {"path": path})
+    return True
+
+
+def _mark_truncated(acc: _Acc, reason: str | None, path: str) -> bool:
+    """记一次截断（标记 + 指标）。返回是否真的截断了。"""
+    if not _is_truncation(reason, path):
+        return False
+    acc.truncated = True
+    acc.finish_reason = reason
+    return True
+
+
+class _Upstreams:
+    """本轮问答打开的上游异步生成器，收尾时统一关闭。
+
+    为什么需要显式登记：跳出 `async for` **不会**立刻 aclose 上游生成器
+    （要等 GC 触发 asyncgen 终结器），这期间上游 HTTP 流还在跑、还在烧 token。
+    「200 人同时点开又关掉」会留下 200 个幽灵请求，所以关闭必须**确定发生**。
+
+    关闭点挂在 `StreamingResponse(background=...)` 上：Starlette 无论正常结束、
+    抛异常还是被取消，都会在 body 迭代结束后执行 background —— 这是唯一
+    100% 会跑到的位置（`finally` 在生成器被遗弃时都可能不执行）。
+    """
+
+    __slots__ = ("_items",)
+
+    def __init__(self) -> None:
+        self._items: list = []
+
+    def track(self, agen):
+        """登记一个上游生成器，返回它本身（写法上可以就地串起来）。"""
+        self._items.append(agen)
+        return agen
+
+    async def aclose(self) -> None:
+        while self._items:
+            agen = self._items.pop()
+            with contextlib.suppress(Exception):
+                await agen.aclose()
+
+
+async def _finish_turn(upstreams: _Upstreams, ticket) -> None:
+    """收尾：关上游 → 还名额。两件事都必须幂等，且不能抛。"""
+    try:
+        await upstreams.aclose()
+    finally:
+        ticket.release()
+
+
+async def _stream_llm(
+    llm, messages, request: Request, acc: _Acc, upstreams=None, path: str = "llm"
+) -> None:
     """逐 token 产出增量 SSE。
 
     早期实现每帧回传"累计全文"，千 token 的回答会产生 O(n²) 的传输量；
     这里只发 delta，由前端自己累加。
 
     断连检测改成每 16 帧查一次（首帧仍然查）：is_disconnected() 要读 asgi 状态，
-    逐帧调用等于千 token 回答白付上千次开销。连接正常时帧序列一模一样，
-    代价只是"客户端已经走了"最多晚几十毫秒被发现。
+    逐帧调用等于千 token 回答白付上千次开销。**确定性由关闭动作保证，不靠检测频率**：
+    无论走哪条出口（正常结束 / 断连 return / 上游异常），`aclosing` 都会 aclose 上游。
     """
+    agen = upstreams.track(llm.astream(messages)) if upstreams is not None else llm.astream(messages)
     try:
         seen = 0
-        async for chunk in llm.astream(messages):
-            seen += 1
-            if (seen == 1 or seen % 16 == 0) and await request.is_disconnected():
-                return
-            delta = chunk.content or ""
-            if isinstance(delta, list):
-                # 多模态 content list，只取文本
-                delta = "".join(
-                    p.get("text", "")
-                    for p in delta
-                    if isinstance(p, dict) and p.get("type") == "text"
-                )
-            if not isinstance(delta, str) or not delta:
-                continue
-            acc.text += delta
-            yield _sse("token", {"text": delta})
+        async with contextlib.aclosing(agen) as stream:
+            async for chunk in stream:
+                seen += 1
+                if (seen == 1 or seen % 16 == 0) and await request.is_disconnected():
+                    acc.aborted = True
+                    metrics.inc("chat_client_disconnect")
+                    return
+                # 结束原因**每帧都读**：它通常挂在最后一帧，而那一帧的 content 常常是空的
+                # （下面会因为 `not delta` 被 continue 掉）。只在有 delta 时读 = 永远读不到。
+                reason = _finish_reason_of(chunk)
+                if reason:
+                    acc.finish_reason = reason
+                delta = chunk.content or ""
+                if isinstance(delta, list):
+                    # 多模态 content list，只取文本
+                    delta = "".join(
+                        p.get("text", "")
+                        for p in delta
+                        if isinstance(p, dict) and p.get("type") == "text"
+                    )
+                if not isinstance(delta, str) or not delta:
+                    continue
+                acc.text += delta
+                yield _sse("token", {"text": delta})
+        # 正常结束才判截断：走到这里说明上游把流跑完了（不是断连、不是异常）。
+        # 截断帧放在 token 之后、done 之前——前端读到时正文已经渲染完，
+        # 提示条出现在最后，符合"先给内容再给限制"的顺序。
+        if _mark_truncated(acc, acc.finish_reason, path):
+            yield _truncation_frame(acc.finish_reason)
     except Exception as e:
         acc.error = describe_api_error(e)
+        metrics.inc("llm_error", {"class": type(e).__name__})
         yield _sse("error", {"detail": acc.error})
 
 
@@ -549,6 +669,33 @@ async def _stream_llm(llm, messages, request: Request, acc: _Acc) -> None:
 @router.post("/stream")
 async def chat_stream(
     req: ChatRequest, request: Request, uid: str = Depends(get_current_user)
+) -> StreamingResponse:
+    """问答入口：先抢一个 LLM 并发名额，抢不到直接 429。
+
+    闸为什么抢在这里：SSE 一旦发出 200 响应头，就再也没机会回 429 了
+    （与下面「限流放在 event_generator 外面」是同一个理由）。且必须抢在
+    `quota.consume` 之前 —— 排队失败的人不该被白扣一次每日额度。
+    """
+    try:
+        ticket = await llm_gate.acquire()
+    except llm_gate.Busy as e:
+        raise HTTPException(
+            status_code=429,
+            detail=str(e),
+            headers={"Retry-After": str(e.retry_after)},
+        ) from e
+
+    try:
+        return await _chat_stream_impl(req, request, uid, ticket)
+    except BaseException:
+        # 没走到 StreamingResponse（会话不存在 / 配额超限 / 参数错）：名额当场还掉。
+        # 漏还一次就永久少一个位置，攒一夜闸就废了，所以这里必须兜住。
+        ticket.release()
+        raise
+
+
+async def _chat_stream_impl(
+    req: ChatRequest, request: Request, uid: str, ticket
 ) -> StreamingResponse:
     # 限流 + 每日问答额度。放在 event_generator 外面是对的：
     # 流一旦开始，响应头（200）就发出去了，那时候再想回 429 已经来不及，
@@ -618,9 +765,17 @@ async def chat_stream(
     await asyncio.to_thread(store.add_message, uid, req.sid, "user", req.question)
     should_gen_title = (await asyncio.to_thread(store.count_messages, uid, req.sid)) <= 2
 
+    # 本轮打开的上游异步生成器登记处：收尾统一关闭（见 _Upstreams 的说明）
+    upstreams = _Upstreams()
+
     async def event_generator() -> None:
         refs_md = ""
         hybrid_run_id: str | None = None  # 仅 hybrid 模式有值，随 done 回传给前端
+        metrics.inc("chat_total", {"path": mode})
+        # A1：本轮回答是否被长度上限截断。默认 False，只有真的读到上游给的
+        # finish_reason ∈ {length, max_tokens, ...} 才会变 True——
+        # 取不到上游信号时一律按"未截断"处理（见 _finish_reason_of 的注释）。
+        truncated = False
 
         # 标题只依赖用户问题（提示词里答案根本没用到），所以一开始就和答案流式
         # 生成并行跑：收尾时它多半已经算完，省掉原来在 done 之前干等的一次
@@ -634,7 +789,9 @@ async def chat_stream(
         # ---- 0. 图片理解模式：有图片附件时用视觉模型直接回答 ----
         if _has_image(req.attachments):
             yield _sse("status", {"text": "图片理解模式，正在分析图片..."})
-            history = store.get_messages(uid, req.sid, include_system=False)[:-1]
+            history = (
+                await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False)
+            )[:-1]
             # RAG 模式下顺带检索知识库，拼入文本
             vision_question = req.question
             vision_system = "你是一个能理解图片的 AI 助手。请结合图片内容用中文简洁作答。"
@@ -666,7 +823,7 @@ async def chat_stream(
                     yield _sse("status", {"text": "知识库检索失败，已仅按图片作答"})
 
             messages = [SystemMessage(content=vision_system)]
-            for m in history:
+            for m in ctxcompress.assemble_history(uid, req.sid, history):
                 if m["role"] == "user":
                     messages.append(HumanMessage(content=m["content"]))
                 elif m["role"] == "assistant":
@@ -676,19 +833,29 @@ async def chat_stream(
             acc = _Acc()
             try:
                 async for frame in _stream_llm(
-                    get_vision_llm(max_tokens=2048), messages, request, acc
+                    get_vision_llm(max_tokens=2048), messages, request, acc, upstreams,
+                    path="vision",
                 ):
                     yield frame
             except Exception as e:
                 yield _sse("error", {"detail": describe_api_error(e)})
                 return
-            if acc.error:
+            # 上游出错，或客户端已断开（aborted）：两种情况都**不能**往下走收尾，
+            # 否则会把半截回答当成完整答案 add_message 落库 —— 用户刷新后看到的
+            # 是一条没有任何中断痕迹的残缺回答。
+            if acc.aborted or acc.error:
                 return
             acc_text = acc.text
 
             # 收尾：标题并行任务多半已完成，这里 await 基本零等待
             msg_id = await asyncio.to_thread(
-                store.add_message, uid, req.sid, "assistant", acc_text, refs=refs_md
+                store.add_message,
+                uid,
+                req.sid,
+                "assistant",
+                acc_text,
+                refs=refs_md,
+                truncated=acc.truncated,
             )
 
             # B 块：对话级用户画像标签（fire-and-forget，不阻塞 SSE；失败静默）
@@ -696,6 +863,7 @@ async def chat_stream(
                 _t = asyncio.create_task(_record_user_tags(uid, req.question, acc_text))
                 _BG_TASKS.add(_t)
                 _t.add_done_callback(_BG_TASKS.discard)
+            _schedule_compress(uid, req.sid)
 
             gen_title = await _take_title(title_task, acc_text)
             if gen_title:
@@ -763,11 +931,7 @@ async def chat_stream(
                 hist_raw = (
                     await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False)
                 )[:-1]
-                ctx.shared["history"] = [
-                    {"role": m["role"], "content": m["content"]}
-                    for m in hist_raw
-                    if m.get("role") in ("user", "assistant") and m.get("content")
-                ]
+                ctx.shared["history"] = ctxcompress.assemble_history(uid, req.sid, hist_raw)
 
                 rules = await asyncio.to_thread(hstore.list_rules, uid)
                 orch = HybridOrchestrator(
@@ -786,7 +950,9 @@ async def chat_stream(
                 yield _sse("hybrid_start", {"run_id": ctx.run_id, "mode": start_mode})
 
                 full_text = ""
-                async for ev in orch.stream():
+                # 上游生成器登记到本轮，收尾统一 aclose（跳出循环不会自己关闭）
+                orch_events = upstreams.track(orch.stream())
+                async for ev in orch_events:
                     if await request.is_disconnected():
                         return
                     et = ev.event_type
@@ -861,12 +1027,12 @@ async def chat_stream(
                     tool_registry.activated_for(uid),
                 )
 
-                # 组装历史 + 当前问题
+                # 组装历史 + 当前问题（P0-2：压缩块前置 + 最近 K 轮原文）
                 history = (
                     await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False)
                 )[:-1]
                 messages = []
-                for m in history:
+                for m in ctxcompress.assemble_history(uid, req.sid, history):
                     if m["role"] == "user":
                         messages.append(HumanMessage(content=m["content"]))
                     elif m["role"] == "assistant":
@@ -898,15 +1064,19 @@ async def chat_stream(
                     },
                 }
                 full_text = ""
+                agent_reason: str | None = None
 
                 # stream_mode=["updates","messages"] 事件为 (mode字符串, payload)
                 # 必须走 astream：同步 stream() 会把整个事件循环堵住，
                 # 一次 Agent 回答十几秒，期间建库/上传/切会话全部排队
-                async for event in agent.astream(
-                    {"messages": messages},
-                    config=config_,
-                    stream_mode=["updates", "messages"],
-                ):
+                agent_events = upstreams.track(
+                    agent.astream(
+                        {"messages": messages},
+                        config=config_,
+                        stream_mode=["updates", "messages"],
+                    )
+                )
+                async for event in agent_events:
                     if await request.is_disconnected():
                         return
 
@@ -917,6 +1087,11 @@ async def chat_stream(
                     # -- messages 模式：payload=(chunk, metadata)，逐 token --
                     if mode_name == "messages":
                         chunk, _meta = payload
+                        # A1：结束原因可能在**任何**一帧上（通常最后一帧、content 为空），
+                        # 所以先读再判 delta
+                        _r = _finish_reason_of(chunk)
+                        if _r:
+                            agent_reason = _r
                         if hasattr(chunk, "content") and chunk.content:
                             delta = chunk.content
                             if isinstance(delta, list):
@@ -957,6 +1132,11 @@ async def chat_stream(
                                     )
 
                 acc_text = full_text
+                # A1：Agent 路径不走 _stream_llm，截断要在这里单独判一次。
+                # 判断用的是同一个 _TRUNCATED_REASONS 集合，换供应商时口径不会分叉。
+                if _is_truncation(agent_reason, "agent"):
+                    truncated = True
+                    yield _truncation_frame(agent_reason)
 
             except ImportError as e:
                 acc_text = f"Agent 模式未初始化：{e}"
@@ -972,7 +1152,9 @@ async def chat_stream(
             yield _sse("status", {"text": f"RAG 模式，正在检索知识库（{kb_id}）..."})
             # 追问（"那它呢"）先结合上下文改写成独立问题再检索；不需要/失败时原样返回。
             # 用改写后的问题当检索词，检索结果缓存的键也随之正确，不会跨上下文串结果。
-            history = store.get_messages(uid, req.sid, include_system=False)[:-1]
+            history = (
+                await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False)
+            )[:-1]
             query = await asyncio.to_thread(rewrite_query, req.question, history)
             if query != req.question:
                 yield _sse("status", {"text": f"已结合上下文改写检索词：{query}"})
@@ -1005,19 +1187,33 @@ async def chat_stream(
             # 复用上面已经检索到的结果，不重复检索（早期实现在这里又检了一次，
             # 而且用的是默认 top_k，等于前端调的检索条数被悄悄忽略）
             messages = await _build_messages(
-                uid, req.sid, prompt_question, kb_id, docs_scores, grounding, req.scenario, history
+                uid,
+                req.sid,
+                prompt_question,
+                kb_id,
+                docs_scores,
+                grounding,
+                req.scenario,
+                # 查询改写用原文（改写要看逐轮字面），喂模型用压缩后的上下文
+                ctxcompress.assemble_history(uid, req.sid, history),
             )
 
             acc = _Acc()
             try:
-                async for frame in _stream_llm(get_llm(max_tokens=2048), messages, request, acc):
+                async for frame in _stream_llm(
+                    get_llm(max_tokens=2048), messages, request, acc, upstreams, path="rag"
+                ):
                     yield frame
             except Exception as e:
                 yield _sse("error", {"detail": describe_api_error(e)})
                 return
-            if acc.error:
+            # 上游出错，或客户端已断开（aborted）：两种情况都**不能**往下走收尾，
+            # 否则会把半截回答当成完整答案 add_message 落库 —— 用户刷新后看到的
+            # 是一条没有任何中断痕迹的残缺回答。
+            if acc.aborted or acc.error:
                 return
             acc_text = acc.text
+            truncated = acc.truncated
 
         # ---- 4. 纯 LLM 模式 ----
         else:
@@ -1031,7 +1227,7 @@ async def chat_stream(
                     + scenarios_mod.get_scenario_prompt(req.scenario)
                 )
             ]
-            for m in history:
+            for m in ctxcompress.assemble_history(uid, req.sid, history):
                 if m["role"] == "user":
                     messages.append(HumanMessage(content=m["content"]))
                 elif m["role"] == "assistant":
@@ -1040,18 +1236,30 @@ async def chat_stream(
 
             acc = _Acc()
             try:
-                async for frame in _stream_llm(get_llm(max_tokens=2048), messages, request, acc):
+                async for frame in _stream_llm(
+                    get_llm(max_tokens=2048), messages, request, acc, upstreams, path="llm"
+                ):
                     yield frame
             except Exception as e:
                 yield _sse("error", {"detail": describe_api_error(e)})
                 return
-            if acc.error:
+            # 上游出错，或客户端已断开（aborted）：两种情况都**不能**往下走收尾，
+            # 否则会把半截回答当成完整答案 add_message 落库 —— 用户刷新后看到的
+            # 是一条没有任何中断痕迹的残缺回答。
+            if acc.aborted or acc.error:
                 return
             acc_text = acc.text
+            truncated = acc.truncated
 
         # ---- 收尾：存 assistant 消息 + 取回并行生成的标题 ----
         msg_id = await asyncio.to_thread(
-            store.add_message, uid, req.sid, "assistant", acc_text, refs=refs_md
+            store.add_message,
+            uid,
+            req.sid,
+            "assistant",
+            acc_text,
+            refs=refs_md,
+            truncated=truncated,
         )
 
         # B 块：对话级用户画像标签（fire-and-forget，不阻塞 SSE；失败静默）
@@ -1059,6 +1267,11 @@ async def chat_stream(
             _t = asyncio.create_task(_record_user_tags(uid, req.question, acc_text))
             _BG_TASKS.add(_t)
             _t.add_done_callback(_BG_TASKS.discard)
+
+        # P0-2 写入侧：回答结束后在两轮之间做一次压缩判定（fire-and-forget）。
+        # 必须放在 assistant 消息落库**之后**：否则本轮这一问一答会被算进"旧轮次"，
+        # 刚回答完就被压成摘要，下一轮追问细节时模型已经看不到原文了。
+        _schedule_compress(uid, req.sid)
 
         gen_title = await _take_title(title_task, acc_text)
         if gen_title:
@@ -1076,13 +1289,24 @@ async def chat_stream(
                 "mode": mode,
                 "message_id": msg_id,
                 "run_id": hybrid_run_id,
+                # A1：本条回答是否被长度上限截断。前端据此在正文末尾挂"内容可能不完整"，
+                # 也用于事后统计（messages.truncated 同样记了一位）。
+                "truncated": truncated,
                 # P2：主题名回给前端，卡片抬头才能显示"PLAN · 学习计划"。
                 # 主题可能是从历史推断出来的，前端自己那份关键词匹配猜不到，必须由后端给。
                 "plan_topic": plan_topic["name"] if plan_topic else None,
             },
         )
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream", headers=SSE_HEADERS)
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
+        # 收尾兜底：关上游 + 还并发名额。Starlette 在 body 迭代结束后**一定**执行
+        # background —— 正常结束、抛异常、客户端断连被取消都一样。
+        # 这是全链路里唯一 100% 会跑到的收尾点，所以两件事都挂在它上面。
+        background=BackgroundTask(_finish_turn, upstreams, ticket),
+    )
 
 
 # ==================== 辅助 ====================
@@ -1108,11 +1332,14 @@ async def _build_messages(
     哪怕相似度只有 0.3 也会顺着往下编；单独再压一遍才压得住。
     history 同理：调用方（RAG 路径做查询改写时）已取过就直接复用，不再重复查库。
     """
-    history_raw = (
-        history
-        if history is not None
-        else (await asyncio.to_thread(store.get_messages, owner, sid, include_system=False))[:-1]
-    )
+    if history is not None:
+        # 调用方传入的已是 assemble_history 的结果（含压缩块前置）
+        history_raw = history
+    else:
+        raw = (
+            await asyncio.to_thread(store.get_messages, owner, sid, include_system=False)
+        )[:-1]
+        history_raw = ctxcompress.assemble_history(owner, sid, raw)
     messages = []
     references = ""
     if kb_id and docs_scores:
@@ -1156,8 +1383,19 @@ def _generate_title(question: str) -> str:
         一次标题生成就吃掉几千 token 输入，而标题只反映开头主题，截断不损质量；
       - max_tokens=32：标题只要 ≤15 字，给输出兜底，防止模型跑偏成复述正文。
     """
-    llm = get_llm(temperature=0, max_tokens=32)
+    fallback = question[:15] if len(question) > 15 else question
+    # 闸满就跳过标题（退回截断的问题文本）：后台活绝不能排队，
+    # 它跑在 anyio 线程池里，排队会把 40 个线程占满、连带堵死前台业务的 DB 读。
+    _ticket = llm_gate.try_ticket()
+    if _ticket is None:
+        return fallback
     try:
+        # ⚠️ get_llm 必须在 try 里面：它会构造 ChatOpenAI，而构造阶段就会校验凭证，
+        # 缺 Key / base_url 写错时**在构造时**抛 OpenAIError。
+        # 这一行原本在 try 外面，于是这个后台任务会带着未取回的异常结束，
+        # 进程日志里留下一条 "Task exception was never retrieved" + 完整 traceback
+        # （2026-10-20 端到端验收时暴露）。标题是装饰性功能，任何失败都该静默降级。
+        llm = get_llm(temperature=0, max_tokens=32)
         q = (question or "")[:200]
         resp = llm.invoke(
             [
@@ -1169,9 +1407,12 @@ def _generate_title(question: str) -> str:
         title = (resp.content or "").strip().strip('"').strip("'")
         if len(title) > 20:
             title = title[:15] + "..."
-        return title or question[:15]
+        return title or fallback
     except Exception:
-        return question[:15] if len(question) > 15 else question
+        metrics.inc("llm_error", {"class": "title"})
+        return fallback
+    finally:
+        _ticket.release()
 
 
 async def _take_title(task: asyncio.Task | None, acc_text: str) -> str:
@@ -1203,6 +1444,10 @@ def _extract_user_tags(question: str, answer: str) -> list[str]:
     if not q and not a:
         return []
     vocab = "、".join(USER_PROFILE_TAGS)
+    # 闸满就跳过画像标签（空列表）：它只是辅助信息，排队会把线程池堵死
+    _ticket = llm_gate.try_ticket()
+    if _ticket is None:
+        return []
     try:
         llm = get_llm(temperature=0, max_tokens=48)
         prompt = (
@@ -1229,6 +1474,8 @@ def _extract_user_tags(question: str, answer: str) -> list[str]:
         return out[:3]
     except Exception:
         return []
+    finally:
+        _ticket.release()
 
 
 async def _record_user_tags(uid: str, question: str, answer: str) -> None:
@@ -1239,6 +1486,42 @@ async def _record_user_tags(uid: str, question: str, answer: str) -> None:
             await asyncio.to_thread(store.add_user_tags, uid, tags)
     except Exception:
         pass
+
+
+async def _compress_after_turn(uid: str, sid: str) -> None:
+    """后台钩子：回答结束后做一次上下文压缩判定（P0-2 写入侧）。
+
+    为什么异步：压缩要做全量历史读取 + 规则抽取，压一次是几十毫秒级，
+    放在 SSE 收尾路径上会拖慢 done 帧；而它压的是"用户已经看完的旧轮次"，
+    晚几十毫秒完全没有影响。
+
+    失败一律静默：压缩是优化项，任何异常都不能让用户看到错误、
+    更不能影响下一轮对话（读取侧 `assemble_history` 自带降级）。
+    """
+    # 闸满就跳过本轮压缩（下一轮还会再判一次，不会永久漏压）
+    _ticket = llm_gate.try_ticket()
+    if _ticket is None:
+        return
+    try:
+        await asyncio.to_thread(ctxcompress.maybe_compress, uid, sid)
+    except Exception:
+        pass
+    finally:
+        _ticket.release()
+
+
+def _schedule_compress(uid: str, sid: str) -> None:
+    """把压缩判定丢到后台（fire-and-forget，不阻塞 SSE）。"""
+    if not getattr(config, "COMPRESS_ENABLED", True):
+        return
+    try:
+        _t = asyncio.create_task(_compress_after_turn(uid, sid))
+    except RuntimeError:
+        # 没有运行中的事件循环（同步调用场景，如单测直接调 handler）：
+        # 压缩不是必需动作，直接跳过
+        return
+    _BG_TASKS.add(_t)
+    _t.add_done_callback(_BG_TASKS.discard)
 
 
 # 后台任务强引用：任务完成前被 GC 会报 "Task was destroyed but it is pending"。

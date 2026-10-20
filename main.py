@@ -27,12 +27,14 @@ from api.feedback import router as feedback_router
 from api.geo import router as geo_router
 from api.hybrid import router as hybrid_router
 from api.kb import router as kb_router
+from api.metrics import router as metrics_router
+from api.prompt_evo import router as prompt_evo_router
 from api.report import router as report_router
 from api.schedule import router as schedule_router
 from api.sessions import router as sessions_router
 from api.templates import router as templates_router
 from api.usage import router as usage_router
-from core import config, quota
+from core import config, llm_gate, quota
 from kb import pipelines
 
 
@@ -99,6 +101,13 @@ app.include_router(checkin_router, prefix="/api/checkin", tags=["打卡"])
 app.include_router(delegate_router, prefix="/api/delegate", tags=["每日委托"])
 # 混合架构（工作流 × 自主 Agent）：工作流定义 / 切换规则 / 执行记录与人工切换
 app.include_router(hybrid_router, prefix="/api/hybrid", tags=["混合执行"])
+# Prompt 自进化（GEPA）：候选列表 / 指标对比 / promote / rollback / 手动触发。
+# 读端点要登录、写端点要管理员；执行同样交给 worker（job_key=prompt.evolve）
+app.include_router(prompt_evo_router, prefix="/api/prompt-evo", tags=["Prompt 自进化"])
+# 指标导出（审计 A5）：Prometheus 文本 + 结构化快照。
+# 权限是「管理员 或 带正确 X-Metrics-Token」——**不能靠回环地址判定**，
+# 因为 Next 的 rewrite 让所有请求看起来都来自 127.0.0.1（api/metrics.py 有说明）。
+app.include_router(metrics_router, prefix="/api/metrics", tags=["指标"])
 
 
 # ---------- 修复：前后端尾部斜杠不一致导致的重定向黑洞 ----------
@@ -219,8 +228,12 @@ async def get_defaults() -> dict:
 @app.get("/health")
 async def health() -> dict:
     """健康检查端点。同样必须 async：探活/负载均衡器会高频打它，
-    同步版会把线程池占满，连带把真正的业务请求一起拖慢。"""
-    return {"status": "ok", "version": "0.3.0 (W3)"}
+    同步版会把线程池占满，连带把真正的业务请求一起拖慢。
+
+    附带 `llm_gate` 快照（每进程一份，多 worker 时各自报各自的）：
+    排查"是不是闸把请求挡在门外"时，第一眼看的就是 rejected / waiting。
+    """
+    return {"status": "ok", "version": "0.3.0 (W3)", "llm_gate": llm_gate.snapshot()}
 
 
 if __name__ == "__main__":

@@ -145,16 +145,57 @@ def create_token(user_id: str, ttl_days: int | None = None, username: str | None
     return f"{signing_input}.{_b64e(sig)}"
 
 
+# 唯一接受的算法。校验 header.alg 的意义见 decode_claims 的注释。
+_ALG = "HS256"
+_TYP = "JWT"
+
+
+def _check_header(header_b64: str) -> bool:
+    """校验 JOSE header：alg 必须是 HS256，typ 存在时必须是 JWT。
+
+    现在的实现**不依赖这个校验**——验签是硬编码 `hmac.new(secret, ..., sha256)`，
+    不按 header.alg 分派，所以经典的 `alg: none` / `HS256→RS256` 混淆打不进来。
+    这一点必须说清楚，否则会误以为这里堵住了一个真实漏洞。
+
+    真正要修的是**迁移风险**：本文件顶部注释写明"将来想换成 PyJWT"。
+    PyJWT 的行为恰恰是按 header.alg 分派算法——迁移那天如果没人记得补这个校验，
+    今天这个"无害的宽松"会立刻变成真漏洞。而迁移是最容易漏测的时刻。
+
+    typ 缺失时放行：手工构造的令牌常常省略它，且 typ 不参与安全判定；
+    存在则必须是 JWT，否则说明这不是我们签的那类令牌。
+    """
+    if not getattr(config, "JWT_HEADER_CHECK", True):
+        return True
+    try:
+        raw = _b64d(header_b64)
+        header = json.loads(raw)
+    except Exception:
+        return False
+    if not isinstance(header, dict):
+        return False
+    if str(header.get("alg") or "") != _ALG:
+        return False
+    typ = header.get("typ")
+    if typ is not None and str(typ) != _TYP:
+        return False
+    return True
+
+
 def decode_claims(token: str) -> dict | None:
     """校验签名与过期时间，通过返回完整载荷，否则 None。
 
-    任何失败（空串 / 段数不对 / 签名被改 / 过期 / JSON 坏）都返回 None，
-    调用方不需要区分——对外统一 401，别把"到底哪一步错了"漏给攻击者。
+    任何失败（空串 / 段数不对 / header 不合规 / 签名被改 / 过期 / JSON 坏）都返回
+    None，调用方不需要区分——对外统一 401，别把"到底哪一步错了"漏给攻击者。
+
+    header 校验放在验签**之前**：header 是不受签名保护的部分（它本身是签名输入），
+    先拒掉明显不对的算法声明，可以少做一次 HMAC。
     """
     if not token:
         return None
     parts = token.split(".")
     if len(parts) != 3:
+        return None
+    if not _check_header(parts[0]):
         return None
     signing_input = f"{parts[0]}.{parts[1]}"
     try:

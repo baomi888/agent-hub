@@ -58,6 +58,19 @@ EMBED_CONCURRENCY = int(os.getenv("EMBED_CONCURRENCY", "4"))
 LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT", "60"))
 # 失败自动重试次数（含 429 / 5xx / 超时）。重试会重复计费，别调太大。
 LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "2"))
+# ---------- LLM 并发闸（200 人同时提问时唯一真正会拖垮体验的点）----------
+# 每进程允许「同时打到上游」的问答轮数。0 或负数 = 关闭闸门（不限）。
+# ⚠️ 这是**每进程**的值：uvicorn 起 N 个 worker 时全局上限 = N × 该值。
+#    闸是进程内的（跨进程共享需要 Redis），要收紧就调小这个数。
+# 默认 16：DeepSeek 的并发/TPM 限制按账号等级给，16×2 worker = 32 条并行流
+# 已经接近常见额度的上限；先保守设，按实际表现再调。
+LLM_MAX_CONCURRENCY = int(os.getenv("LLM_MAX_CONCURRENCY", "16"))
+# 排队超时：抢不到名额最多等这么多秒，超时返回 429（前端提示"稍后再试"）。
+# 设太大等于让用户干等，设太小会在峰值时把本来能排上的请求也拒掉。20 秒折中。
+LLM_QUEUE_TIMEOUT = float(os.getenv("LLM_QUEUE_TIMEOUT", "20"))
+# 一键关闸（排障用）：0 时 /health 的 llm_gate.enabled 变 false，行为回到改造前。
+LLM_GATE_ENABLED = os.getenv("LLM_GATE_ENABLED", "1").strip().lower() not in ("0", "false", "no")
+
 # 向量化请求超时：embedding 是批量小请求，短超时即可。
 EMBED_TIMEOUT = float(os.getenv("EMBED_TIMEOUT", "30"))
 EMBED_MAX_RETRIES = int(os.getenv("EMBED_MAX_RETRIES", "2"))
@@ -314,6 +327,43 @@ PROMPT_EVO_JUDGE_MAX_TOKENS = int(os.getenv("PROMPT_EVO_JUDGE_MAX_TOKENS", "512"
 #   模型却说没绑定"的割裂（2026-10-16 线上复现）。多库时不自动绑（绑错比不绑更糟），
 #   改由前端顶栏「未绑定资料库」提示引导手动选择。置 0 关闭。
 AUTO_BIND_SINGLE_KB = bool(int(os.getenv("AUTO_BIND_SINGLE_KB", "1")))
+
+
+# ---------- 审计修复开关（2026-10-20）----------
+# 这一组全部遵循同一条原则：**默认开启修复，出问题一行 env 回退**。
+# 沿用 COMPRESS_ENABLED / AUTH_RETURN_TOKEN 的既有惯例。
+#
+# A1 输出截断检测：模型因 max_tokens / 上下文上限被截断时，上游会在最后一帧给
+#   finish_reason="length"。此前这个字段被完整收到、完整丢掉，于是半句话被当成
+#   完整答案返回（不报错、日志干净、前端照常渲染）——静默失败里最贵的一种。
+#   置 0 退回旧行为（不检测、不发 truncation 帧、不落 truncated 标记）。
+TRUNCATION_DETECT_ENABLED = os.getenv("TRUNCATION_DETECT_ENABLED", "1") not in (
+    "0",
+    "false",
+    "False",
+)
+
+# A2 时区严格模式：置 0 时 core/timeutil.py 的 day_str / day_bounds 退回
+#   time.localtime()（依赖服务器 TZ 的旧行为）。只在修复本身出问题时用。
+TZ_STRICT = os.getenv("TZ_STRICT", "1") not in ("0", "false", "False")
+
+# A3 限流双层：置 1 时进程内滑窗超限会再查一次落库计数确认（多 worker 下限流
+#   不再变成 N 倍）。置 0 退回纯进程内单层（旧行为）。单 worker 下两者等价。
+RATE_LIMIT_SHARED = os.getenv("RATE_LIMIT_SHARED", "1") not in ("0", "false", "False")
+
+# A4 向量空间指纹校验：换了 EMBEDDING_MODEL 但没重建索引时，旧向量与新查询向量
+#   不在同一语义空间，余弦仍算得出来、只是不再可比 → 检索退化成噪声且不报错。
+#   置 0 关闭校验（不推荐，仅用于紧急绕过）。
+EMBED_GUARD_ENABLED = os.getenv("EMBED_GUARD_ENABLED", "1") not in ("0", "false", "False")
+
+# A5 指标埋点：置 0 后 core/metrics.py 的 inc/observe 全部空转（热路径不再加锁）。
+#   注意 /api/metrics 端点的权限门是独立的，不靠这个开关保护。
+METRICS_ENABLED = os.getenv("METRICS_ENABLED", "1") not in ("0", "false", "False")
+
+# A7 JWT header 校验：校验 header.alg == HS256 / header.typ == JWT（typ 缺失时放行）。
+#   当前实现不可利用（验签是硬编码 HS256，不按 alg 分派），这个开关修的是
+#   "将来换成 PyJWT" 那天的迁移风险。置 0 退回不校验 header。
+JWT_HEADER_CHECK = os.getenv("JWT_HEADER_CHECK", "1") not in ("0", "false", "False")
 
 
 def validate() -> list[str]:

@@ -25,6 +25,9 @@ cd "$ROOT"
 
 BACK_PORT=8000
 FRONT_PORT=3000
+# 后端 uvicorn worker 数。留空 = 自动探测（见 detect_workers）；
+# 显式指定（如 WORKERS=4 bash deploy.sh start）会跳过探测。WORKERS=1 即回退单进程。
+WORKERS="${WORKERS:-}"
 NODE_WANT_VER="v20.19.0"          # 国内走 npmmirror，比 NodeSource 快且稳
 PIP_MIRROR="https://pypi.tuna.tsinghua.edu.cn/simple"
 
@@ -35,6 +38,22 @@ warn() { printf '  %s[!]%s %s\n' "$YELLOW" "$NC" "$*"; }
 die()  { printf '\n%s[中止]%s %s\n\n' "$RED" "$NC" "$*"; exit 1; }
 
 if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi
+
+# 后端 worker 数自动探测。
+# 为什么要多进程：单进程只能吃一个核，200 并发实测鉴权吞吐 693 → 1050 RPS、p99 -43%。
+# 为什么不能无脑开 4：每个 worker 都要把 langchain + chromadb 全量 import 一遍，
+# 常驻约 300MB；这台 2 核 2G 上还跑着 Next.js 和 2G swap，开 4 个会被 OOM Killer 随机杀一个。
+detect_workers() {
+  local cpu mem_kb mem_gb w
+  cpu=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
+  mem_kb=$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null || echo 2097152)
+  mem_gb=$(( mem_kb / 1024 / 1024 ))
+  w=$cpu
+  if [ "$w" -gt 4 ]; then w=4; fi          # 再多收益递减，先封 4
+  if [ "$mem_gb" -lt 3 ] && [ "$w" -gt 2 ]; then w=2; fi   # 小内存机器保命
+  if [ "$w" -lt 1 ]; then w=1; fi
+  printf '%s' "$w"
+}
 
 # ------------------------------------------------------------
 # 子命令：stop / status / logs
@@ -57,6 +76,7 @@ do_status() {
   printf '  后端 :%s  ->  HTTP %s\n' "$BACK_PORT" "$bc"
   printf '  前端 :%s  ->  HTTP %s\n' "$FRONT_PORT" "$fc"
   echo "  --- 进程 ---"
+  printf '  后端进程数：%s（uvicorn --workers）\n' "$(pgrep -f "uvicorn main:app" 2>/dev/null | wc -l)"
   pgrep -af "uvicorn main:app" || echo "  (无后端进程)"
   pgrep -af "next start"      || echo "  (无前端进程)"
   pgrep -af "worker.scheduler" || echo "  (无 worker 进程 —— 委托/总结不会自动执行)"
@@ -300,14 +320,29 @@ log "7. 启动服务"
 do_stop >/dev/null 2>&1 || true
 
 cd "$ROOT"
+# WORKERS 可以直接 export 给脚本，也可以写进 .env（.env 里的值由这里读，
+# 因为 deploy.sh 不像后端那样 load_dotenv）。优先级：环境变量 > .env > 自动探测。
+if [ -z "$WORKERS" ] && [ -f "$ROOT/.env" ]; then
+  WORKERS="$(awk -F= '/^WORKERS=/{print $2}' "$ROOT/.env" | tail -1 | tr -d '[:space:]')"
+fi
+if [ -z "$WORKERS" ]; then WORKERS="$(detect_workers)"; fi
+case "$WORKERS" in
+  ''|*[!0-9]*) die "WORKERS 必须是正整数，当前是：$WORKERS" ;;
+esac
+if [ "$WORKERS" -lt 1 ]; then die "WORKERS 至少为 1，当前是：$WORKERS"; fi
+
 # --host 127.0.0.1：后端没有任何鉴权，不对外暴露。
 # 前端靠 next.config.ts 的 /api/* rewrite 从本机访问它，功能不受影响；
 # 需要临时对外调试时用 `venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000` 手动起。
+# --workers N：多进程吃多核。注意 N 个进程各自有独立的进程内状态：
+#   · 每分钟限流（core/quota.py 的字典）实际强度会变成 N 倍 —— 已知遗留，见 issue #15
+#   · LLM 并发闸同样是每进程一份，全局上限 = N × LLM_MAX_CONCURRENCY
 PYTHONUTF8=1 PYTHONDONTWRITEBYTECODE=1 \
   nohup venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port "$BACK_PORT" \
+  --workers "$WORKERS" \
   > /tmp/baomi-back.log 2>&1 &
 echo $! > /tmp/baomi-back.pid
-ok "后端已启动（pid $(cat /tmp/baomi-back.pid)）"
+ok "后端已启动（pid $(cat /tmp/baomi-back.pid)，workers=$WORKERS）"
 
 cd "$ROOT/frontend"
 PORT="$FRONT_PORT" nohup npm run start > /tmp/baomi-front.log 2>&1 &

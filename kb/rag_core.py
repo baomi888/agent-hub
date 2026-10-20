@@ -26,7 +26,7 @@ from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from core import config
+from core import config, embed_guard, metrics, prompt_store
 from core.llm import get_embeddings, get_llm
 
 SUPPORTED_EXT = (".txt", ".md", ".pdf")  # .md 按纯文本加载，Markdown 语法不影响切片
@@ -230,6 +230,9 @@ def _get_bm25(vs, collection_name: str):
             neg = _BM25_NEG.get(collection_name)
             if neg is not None:
                 if time.monotonic() < neg:
+                    # A5：负缓存命中也算一次"关键词通道没参与"。
+                    # 不记的话，我们会误以为混合检索一直在生效，而实际上大库早就退化了。
+                    metrics.inc("retrieval_cache", {"kind": "neg"})
                     return None  # 已确认超大，TTL 内不再重复全库拉取
                 del _BM25_NEG[collection_name]
             if collection_name not in _BM25_INFLIGHT:
@@ -346,6 +349,12 @@ def assess_grounding(docs_scores) -> dict:
     else:
         strength = STRENGTH_LOW
 
+    # A5 埋点：这里同时是"top1 相似度"和"依据强度分级"的唯一产出点，
+    # 所以两个指标都记在这里，别在别处再记一遍（两处记一定会漂）。
+    # 有了这条分布，下次调 RETRIEVE_LOW_SIM=0.45 才是基于数据的判断。
+    metrics.inc("retrieval_grounding", {"level": strength})
+    metrics.observe("retrieval_top1_similarity", best)
+
     # ★ medium 也算"没找到硬证据"，必须一起 weak。
     # medium 的语义是"留下了，但都不够格"——它和 low 的区别只是"有没有沾点边"，
     # 不是"能不能当依据"。只让 low 示弱的话，0.26~0.44 这段最常见的灰色地带
@@ -388,14 +397,19 @@ def grounding_note(assessment: dict) -> str:
 
     medium 和 low 都要追加，只是话术不同——两者都表示"没有硬证据"。
     见 assess_grounding 里对 medium 为什么也算 weak 的说明。
+
+    模板走 `core/prompt_store` 的 active 版本（path = rag_note_low /
+    rag_note_medium），没有 active 时退回本文件的常量。这条路径和 Agent 路径
+    共用同一个版本化入口：P0 修复（2026-10-17）刚把双路径的防编造约束合成同源，
+    进化时不能又分叉（方案 §4 的要求）。
     """
     if not config.GROUNDING_NOTICE:
         return ""
     strength = (assessment or {}).get("strength")
     if strength == STRENGTH_LOW:
-        return LOW_CONFIDENCE_NOTE
+        return prompt_store.resolve("rag_note_low", LOW_CONFIDENCE_NOTE)[0]
     if strength == STRENGTH_MEDIUM:
-        return MARGINAL_CONFIDENCE_NOTE
+        return prompt_store.resolve("rag_note_medium", MARGINAL_CONFIDENCE_NOTE)[0]
     return ""
 
 
@@ -439,6 +453,11 @@ def select_diverse(docs_scores, top_k: int, lambda_mult: float | None = None) ->
         vec_sims = [sim for c, sim in scored if _dist(c) is not None]
         if vec_sims and all(sim is not None for sim in vec_sims):
             kept = [c for c, sim in scored if _dist(c) is None or sim >= min_sim]
+            # A5：闸门拦掉多少条，这是判断 RETRIEVE_MIN_SIM=0.25 是否过狠的唯一依据。
+            # 记在这里而不是调用方：只有这儿知道"过滤前多少条、过滤后多少条"。
+            dropped = len(cands) - len(kept)
+            if dropped > 0:
+                metrics.inc("retrieval_gate_blocked", n=dropped)
             # 别把结果砍空：一条不剩时至少留最相关的那条，让模型自己说"资料里没有"
             cands = kept or [
                 min(cands, key=lambda c: _dist(c) if _dist(c) is not None else float("inf"))
@@ -941,8 +960,12 @@ def _embed_pool() -> ThreadPoolExecutor:
         return _EMBED_POOL
 
 
-def _embed_and_store(vs, chunks) -> None:
-    """并发 embedding + 串行 upsert（分窗，峰值内存受限）。
+def _embed_and_store(vs, chunks) -> int | None:
+    """并发 embedding + 串行 upsert（分窗，峰值内存受限）。返回向量维度（拿不到为 None）。
+
+    返回值是给 core/embed_guard.py 用的：向量空间指纹里记的 dim 要来自
+    **真实的向量长度**，而不是模型文档上写的维度——文档与实际不一致的情况
+    真会发生（接口截断、兼容层补齐），记错了反而会让校验形同虚设。
 
     入库的真正瓶颈是 embedding 的网络往返：每批 EMBED_BATCH_SIZE 条一次请求，
     原实现一批批串行等待，N 批就是 N 个 RTT 首尾相接。这里把各批的
@@ -959,7 +982,7 @@ def _embed_and_store(vs, chunks) -> None:
     EMBED_BATCH_SIZE 语义不变：每批仍按该大小切，只是批与批之间不再排队。
     """
     if not chunks:
-        return
+        return None
     # A 块：入库级主题标签（失败静默降级，不影响入库）
     _inject_topics(chunks)
     bs = max(1, config.EMBED_BATCH_SIZE)
@@ -978,6 +1001,7 @@ def _embed_and_store(vs, chunks) -> None:
     workers = max(1, min(config.EMBED_CONCURRENCY, len(batches)))
 
     pool = _embed_pool() if workers > 1 else None
+    dim: int | None = None
     for w in range(0, len(batches), workers):
         window = batches[w : w + workers]
         if pool is None:
@@ -987,7 +1011,11 @@ def _embed_and_store(vs, chunks) -> None:
             # 同一窗口内的各批并发发出；list() 会等齐并按提交顺序返回
             vectors = list(pool.map(lambda b: emb.embed_documents(b[0]), window))
         for (texts, metadatas, ids), vecs in zip(window, vectors, strict=False):
+            if dim is None and vecs and vecs[0]:
+                # 维度取自**真实向量**而不是模型文档：文档与实际不一致的情况真会发生
+                dim = len(vecs[0])
             vs._collection.upsert(ids=ids, embeddings=vecs, documents=texts, metadatas=metadatas)
+    return dim
 
 
 class RagPipeline:
@@ -1030,7 +1058,10 @@ class RagPipeline:
             return 0
         vs = self._ensure_vs()
         # 并发 embedding、串行写入，避免超出单次批量限制（百炼为 10）
-        _embed_and_store(vs, chunks)
+        dim = _embed_and_store(vs, chunks)
+        # 记下"这个库的向量是哪个模型、多少维算的"。检索前会比这个指纹，
+        # 防止换了 EMBEDDING_MODEL 却还在查旧库（详见 core/embed_guard.py）
+        embed_guard.stamp(self.collection_name, dim)
         _cache_invalidate(self.collection_name)
         return len(chunks)
 
@@ -1076,7 +1107,10 @@ class RagPipeline:
 
         vs = self._ensure_vs()
         # 并发 embedding、串行写入，避免超出单次批量限制（百炼为 10）
-        _embed_and_store(vs, chunks)
+        dim = _embed_and_store(vs, chunks)
+        # rebuild 会删掉 collection 重建，metadata 指纹也一起没了 → 这里重新盖一个
+        embed_guard.invalidate(self.collection_name)
+        embed_guard.stamp(self.collection_name, dim)
 
         self._params = (chunk_size, chunk_overlap)
         _cache_invalidate(self.collection_name)
@@ -1251,8 +1285,14 @@ class RagPipeline:
         相同 (问题, top_k, owner) 的检索结果按库缓存，命中时省掉一次 embedding + 向量查询。
         owner 不为空时按用户画像做检索偏置（D 块），且缓存 key 含 owner 避免串结果。
         """
+        # A4：向量空间指纹校验必须放在**最前面**，包括缓存之前。
+        # 缓存里存的是"用旧模型检索出来的结果"，换了模型后它一样是错的——
+        # 把校验放在缓存之后等于给错结果开了一条捷径。
+        embed_guard.check(self.collection_name)
+
         cached = _cache_get(self.collection_name, question, top_k, owner)
         if cached is not None:
+            metrics.inc("retrieval_cache", {"kind": "hit"})
             return cached
 
         if not self._vs:
@@ -1287,6 +1327,9 @@ class RagPipeline:
         # D 块：按用户画像偏置（仅重排，不改原始 distance；含 owner 避免跨用户串缓存）
         if owner and config.RETRIEVAL_BIAS_ENABLED and result:
             result = _apply_profile_bias(result, owner)
+
+        if not result:
+            metrics.inc("retrieval_empty")
 
         _cache_set(self.collection_name, question, top_k, result, owner)
         return result

@@ -147,8 +147,21 @@ def test_rag_stream_event_sequence(client):
     import json
 
     done = json.loads([d for n, d in frames if n == "done"][0])
-    # plan_topic 为 2026-10-16 合入「计划主题识别」特性后新增的 done 字段
-    assert set(done) == {"answer", "refs", "title", "mode", "message_id", "run_id", "plan_topic"}
+    # plan_topic 为 2026-10-16 合入「计划主题识别」特性后新增的 done 字段；
+    # truncated 为 2026-10-20 审计 A1 新增：本条回答是否被长度上限截断。
+    # 这是**契约变更**，所以这里同步放宽期望集合并单独断言取值——
+    # 只删断言不改期望值等于把契约测试改成摆设。
+    assert set(done) == {
+        "answer",
+        "refs",
+        "title",
+        "mode",
+        "message_id",
+        "run_id",
+        "plan_topic",
+        "truncated",
+    }
+    assert done["truncated"] is False  # 这个假 LLM 不带 finish_reason=length
     assert done["answer"] == "你好呀"
     assert done["mode"] == "rag"
     assert done["message_id"] == 123

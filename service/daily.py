@@ -34,7 +34,7 @@ import re
 import time
 from dataclasses import dataclass
 
-from core import config, quota
+from core import config, quota, timeutil
 from core import llm as llm_mod
 from core import session as store
 
@@ -116,10 +116,17 @@ def _ensure_daily_tables() -> None:
 
 
 def _day_bounds(date: str) -> tuple[int, int]:
-    """本地时区的当天 [start, end) unix 秒。与 core.quota.day_key 的「本地日子」口径一致。"""
-    t = time.strptime(date, "%Y-%m-%d")
-    start = int(time.mktime(t))
-    return start, start + 86400
+    """业务时区（默认 Asia/Shanghai）的当天 [start, end) unix 秒。
+
+    ⚠️ 2026-10-20 审计 A2：这里原本是 `time.mktime(time.strptime(...))` + `start + 86400`
+    ——按**服务器本地时区**解释，且用硬加一天而不是日历加一天。
+    与 core/quota.day_key（当时也是 localtime）"看起来一致"，但两者都不等于
+    调度器用的 Asia/Shanghai。服务器 TZ 一旦不是上海，就会出现
+    「总结按上海日历日取数据、却按另一套口径算小时分布」——
+    报告里的数字和报告里的内容不是同一天的。
+    现在三个地方共用一个入口：core/timeutil.py。
+    """
+    return timeutil.day_bounds(date)
 
 
 def collect_stats(uid: str, date: str) -> dict:
@@ -149,7 +156,7 @@ def collect_stats(uid: str, date: str) -> dict:
             user_n += 1
         elif r["role"] == "assistant":
             assistant_n += 1
-        h = time.localtime(r["created_at"]).tm_hour
+        h = timeutil.hour_of(r["created_at"])
         active_hours[h] = active_hours.get(h, 0) + 1
 
     return {

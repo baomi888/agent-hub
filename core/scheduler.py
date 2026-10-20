@@ -38,14 +38,21 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from core import config
+from core import timeutil
 
 # ---------- 常量 ----------
 
 # worker 写进心跳的版本号，与 data/scheduler.db 里的行一起给运维看
 WORKER_VERSION = "0.1.0"
 
-TZ_NAME = getattr(config, "SCHEDULER_TZ", "Asia/Shanghai") or "Asia/Shanghai"
-TZ = ZoneInfo(TZ_NAME)
+# 时区与时间换算统一收在 core/timeutil.py（2026-10-20 审计 A2）：
+# 原先这里自定义了一份 TZ + now_local + day_bounds，而 core/quota.py 与
+# service/daily.py 又各自用 time.localtime()，三处两种答案。现在只有一个入口。
+TZ_NAME = timeutil.TZ_NAME
+TZ = timeutil.TZ
+now_ts = timeutil.now_ts
+now_local = timeutil.now_local
+day_bounds = timeutil.day_bounds
 
 # 心跳年龄超过它判 down（秒）。600s = 两个 dispatch 周期：
 # 进程在但卡死（比如被一次 LLM 调用挂住）同样会被抓到，这就是不走进程表的原因。
@@ -237,29 +244,11 @@ def ensure_tables(seed: bool = True) -> None:
 
 
 # ---------- 时间 ----------
-
-
-def now_ts() -> int:
-    """当前 Unix 秒（UTC）。"""
-    return int(time.time())
-
-
-def now_local() -> datetime:
-    """带时区的当前时刻（Asia/Shanghai）。禁止裸 datetime.now()。"""
-    return datetime.now(TZ)
-
-
-def day_bounds(day: str) -> tuple[int, int]:
-    """把一个上海日历日解释成区间 [当日起点, 次日起点) 的 Unix 秒。
-
-    给「每日总结」用：date=2026-10-12 覆盖的正是 [10-12 00:00, 10-13 00:00)（上海时间）。
-    放在这里而不是让对方工单自己算：跨日边界的口径只应该有一份，
-    否则「总结差了八小时」这种 bug 会反复出现（服务器 TZ 一旦不是上海就必然踩）。
-    """
-    d = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=TZ)
-    start = d
-    end = d + timedelta(days=1)
-    return int(start.timestamp()), int(end.timestamp())
+#
+# now_ts / now_local / day_bounds 三个函数已经在文件头从 core/timeutil.py 引入并
+# 直接复用（`from ... import` 的别名），这里不再重复定义。
+# 保留这三个公开名字是为了不动既有调用方（worker/、api/schedule.py、service/daily.py
+# 都在用），同时保证"时区口径只有一份"。
 
 
 def new_run_id() -> str:
@@ -867,7 +856,9 @@ def estimate_next_run(
     if dom != list(range(1, 32)) or month != list(range(1, 13)) or dow != list(range(0, 8)):
         return None
 
-    tz = ZoneInfo(tz_name or TZ_NAME)
+    # 默认时区直接用 timeutil.TZ（唯一口径）；只有显式传了别的时区名才另建。
+    # ZoneInfo 仍从标准库引入：它不是"第二份口径"，只是把名字换成时区对象。
+    tz = TZ if (not tz_name or tz_name == TZ_NAME) else ZoneInfo(tz_name)
     base = datetime.fromtimestamp(now_ts() if after is None else int(after), tz)
     # 从下一分钟开始找：同一分钟内的调用不该被算成「下一次」
     start = base.replace(second=0, microsecond=0) + timedelta(minutes=1)

@@ -131,8 +131,25 @@ for bad_kwargs, label in (
 print("\n[6] 延迟发现：把现有工具临时标记为 defer 来验代码路径（含三层 + 按用户隔离）")
 # 现有工具都是 defer=False，延迟那条路平时走不到；这里临时改元数据把它跑起来。
 _orig = tr.TOOL_META["get_weather"]
+_orig_pb = tr.TOOL_PLAYBOOK["get_weather"]
 tr.TOOL_META["get_weather"] = tr.ToolMeta(category="read", defer=True, max_output_chars=2000)
-tr.TOOL_PLAYBOOK["get_weather"] = "测试 playbook：用户要查天气时调 get_weather；不要凭空编温度。"
+
+# 2026-10-20（审计 A8）：assert_playbook_complete 从「有没有」升级为「有四条小节」。
+# 原来这里塞一行字就能过，现在必须四节齐全——顺手把"一行会被拒"也验一遍，
+# 否则这条升级等于没测（只测了"合规能过"，没测"不合规会挂"）。
+tr.TOOL_PLAYBOOK["get_weather"] = "测试 playbook：用户要查天气时调 get_weather。"
+try:
+    tr.assert_playbook_complete()
+    check("旧式一行 playbook -> 应被拒", False, "竟然没抛")
+except RuntimeError as e:
+    check("旧式一行 playbook -> 被拒", "缺小节" in str(e), str(e)[:80])
+
+tr.TOOL_PLAYBOOK["get_weather"] = (
+    "何时用：用户查具体地点天气时。"
+    "何时不用：问气候规律或历史统计时不要用。"
+    "参数：city 用中文地名，days 取 1~7。"
+    "失败怎么办：查不到就如实说，不要编造温度。"
+)
 tr.assert_playbook_complete()
 _OWNER_A, _OWNER_B = "ownerA", "ownerB"
 tr.reset_activated()
@@ -152,7 +169,9 @@ try:
     check("返回了 schema 且含 input_schema", bool(schemas) and "input_schema" in schemas[0])
     check(
         "第二层 playbook 随 schema 一起返回",
-        schemas[0].get("playbook", "").startswith("测试 playbook"),
+        # A8 之后这一项不再用"测试 playbook"当哨兵：playbook 现在是真实内容，
+        # 断言改成"与注册表里的那份逐字一致"，反而更强（哨兵串只证明"有东西"）
+        schemas[0].get("playbook", "") == tr.TOOL_PLAYBOOK["get_weather"].strip(),
         schemas[0].get("playbook", "")[:12],
     )
     check("第三层 refs 缺省为空列表", schemas[0].get("refs") == [], schemas[0].get("refs"))
@@ -214,7 +233,8 @@ try:
         check("直接工具不进延迟搜索", True)
 finally:
     tr.TOOL_META["get_weather"] = _orig
-    tr.TOOL_PLAYBOOK.pop("get_weather", None)
+    # 恢复原 playbook 而不是 pop 掉：真值现在是必备的（A8 之后空前校验会直接起不来）
+    tr.TOOL_PLAYBOOK["get_weather"] = _orig_pb
     tr.reset_activated()
 tr.assert_meta_complete()
 

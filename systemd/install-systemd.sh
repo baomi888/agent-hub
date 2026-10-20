@@ -54,6 +54,24 @@ fi
 
 APP_DIR="${1:-/root}"
 
+# 后端 worker 数：WORKERS=4 bash systemd/install-systemd.sh 可显式指定；
+# 不指定就按 CPU / 内存探测（与 deploy.sh 的 detect_workers 同一套规则）。
+detect_workers() {
+  local cpu mem_kb mem_gb w
+  cpu=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
+  mem_kb=$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null || echo 2097152)
+  mem_gb=$(( mem_kb / 1024 / 1024 ))
+  w=$cpu
+  if [ "$w" -gt 4 ]; then w=4; fi
+  if [ "$mem_gb" -lt 3 ] && [ "$w" -gt 2 ]; then w=2; fi
+  if [ "$w" -lt 1 ]; then w=1; fi
+  printf '%s' "$w"
+}
+WORKERS="${WORKERS:-$(detect_workers)}"
+case "$WORKERS" in
+  ''|*[!0-9]*) die "WORKERS 必须是正整数，当前是：$WORKERS" ;;
+esac
+
 log "0. 校验 APP_DIR"
 [ -f "$APP_DIR/main.py" ] || die "找不到 $APP_DIR/main.py —— APP_DIR 传错了？"
 [ -x "$APP_DIR/venv/bin/python" ] || die "找不到 $APP_DIR/venv/bin/python（后端 venv 不存在，先跑 deploy.sh）"
@@ -68,11 +86,11 @@ pkill -f "next-server"      >/dev/null 2>&1 || true
 pkill -f "worker.scheduler" >/dev/null 2>&1 && ok "worker 已停" || warn "worker 本来就没在跑"
 rm -f /tmp/baomi-back.pid /tmp/baomi-front.pid /tmp/baomi-worker.pid
 
-log "2. 安装 unit 文件"
+log "2. 安装 unit 文件（backend workers=$WORKERS）"
 for s in "${SERVICES[@]}"; do
   src="$UNIT_SRC/$s.service"
   [ -f "$src" ] || die "缺少模板：$src"
-  sed "s|__APP_DIR__|$APP_DIR|g" "$src" > "$UNIT_DST/$s.service"
+  sed -e "s|__APP_DIR__|$APP_DIR|g" -e "s|__WORKERS__|$WORKERS|g" "$src" > "$UNIT_DST/$s.service"
   ok "已安装 $UNIT_DST/$s.service"
 done
 
