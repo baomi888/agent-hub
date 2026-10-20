@@ -257,17 +257,31 @@ def commit_summary(
 
 def load_summary(owner: str, sid: str) -> tuple[SummaryBlock, int]:
     """读取当前压缩块与 `compressed_upto`。"""
+    block, upto, _prev = load_summary_state(owner, sid)
+    return block, upto
+
+
+def load_summary_state(owner: str, sid: str) -> tuple[SummaryBlock, int, str | None]:
+    """读取 (当前压缩块, compressed_upto, 上一版压缩块)。
+
+    多返回一个 prev，是因为 L1 安全阀要拿它来回退；`load_summary` 保持二元签名
+    不变（调用方只关心"现在是什么"），需要回退依据的写入侧才用这个。
+    """
     from core import session as store
 
     with store._get_conn() as conn:  # noqa: SLF001
         row = conn.execute(
-            "SELECT compressed_summary, compressed_upto FROM conversations "
-            "WHERE id = ? AND owner_id = ?",
+            "SELECT compressed_summary, compressed_summary_prev, compressed_upto "
+            "FROM conversations WHERE id = ? AND owner_id = ?",
             (sid, owner),
         ).fetchone()
     if not row:
-        return SummaryBlock([]), 0
-    return SummaryBlock.parse(row["compressed_summary"]), int(row["compressed_upto"] or 0)
+        return SummaryBlock([]), 0, None
+    return (
+        SummaryBlock.parse(row["compressed_summary"]),
+        int(row["compressed_upto"] or 0),
+        row["compressed_summary_prev"],
+    )
 
 
 # ==================== 冷启动：抽取式压缩（零 LLM）====================
@@ -332,6 +346,10 @@ class ContextPlan:
     keep_turns: int
     decision: ValveDecision | None = None
     truncated_from_id: int | None = None
+    # 过滤后真正要喂给模型的原文（id > compressed_upto，且只留最近 keep_turns 轮）。
+    # 放在这里而不是让调用方自己再过滤一次：过滤规则（以 compressed_upto 为准）
+    # 只能有一处实现，否则迟早两边算得不一样。
+    kept: list[dict] = field(default_factory=list)
 
 
 def plan_context(
@@ -357,6 +375,7 @@ def plan_context(
         summary_text=summary.render(),
         keep_message_id_from=first_id,
         keep_turns=keep_turns,
+        kept=kept,
     )
 
 
@@ -376,6 +395,180 @@ def estimate_tokens(text: str) -> int:
 
 
 def should_compress(total_chars: int, max_context_chars: int | None = None) -> bool:
-    """是否该触发压缩：超过阈值比例才压（批量低频，不每轮压）。"""
-    limit = max_context_chars or int(getattr(config, "MAX_CONTEXT_CHARS", 12000))
+    """是否该触发压缩：超过阈值比例才压（批量低频，不每轮压）。
+
+    `total_chars` 必须是**全量历史**的字符数，不是窗口内——
+    窗口内字符数会随 `MAX_HISTORY_TURNS` 封顶而恒定，永远到不了阈值，
+    压缩就永远不会触发（接线时踩过这个坑）。
+    """
+    limit = max_context_chars or int(
+        getattr(config, "COMPRESS_MAX_CONTEXT_CHARS", None)
+        or getattr(config, "MAX_CONTEXT_CHARS", 12000)
+    )
     return total_chars > limit * TRIGGER_RATIO
+
+
+# ==================== 接入请求路径（读写两侧）====================
+#
+# 此前 `context_compress` 只有一个"库"，没人调用：`plan_context` 写好了却没接进
+# `api/chat.py`，也没有任何地方**写**压缩块。这一段就是补上这两头。
+#
+# 三个必须说清的设计决定：
+#
+# 1. **压缩块放在历史最前面，不塞 system prompt**
+#    Agent 路径的 system prompt 在 `build_agent` 里随图编译固化，且图按
+#    (has_kb, 场景, 激活集) 做 LRU 缓存；把压缩块塞进 system 会让缓存键多出一个
+#    随会话变化的维度 —— 每个会话都编译一张新图，缓存直接失效。
+#    而压缩块本身是**稳定前缀**（只在压缩事件时增长），放在历史最前面同样不破 KV 缓存。
+#
+# 2. **用一对 human→ai 包住，而不是裸插一条 human**
+#    部分 chat template 对"连续两条 human"敏感（P0-1 踩过）；而且必须显式写明
+#    "这不是用户的新提问"，否则模型会把摘要内容当成本轮诉求去执行。
+#
+# 3. **没有压缩块时，原样返回全量历史**
+#    这是最容易写错的地方：`plan_context` 无条件按最近 K 轮截断，
+#    若在"还没压缩过"的短会话上也套 K 轮窗口，等于把 30 轮窗口悄悄改成 6 轮 ——
+#    功能倒退。所以下面先判 `summary_text` 为空就整段直通。
+
+# 压缩块前置说明（写死在代码里，属于行为契约，不做成配置项）
+PRELUDE_HEAD = (
+    "【早期对话压缩摘要】以下是本会话**更早**内容的系统压缩摘要，不是用户的新提问，"
+    "也不是待办指令。摘要可能丢失细节：需要细节时如实说明或向用户确认，不要编造。\n\n"
+)
+PRELUDE_ACK = "已了解早期对话的压缩摘要，后续回答会参考它。"
+
+
+def _clean(msgs: list[dict]) -> list[dict]:
+    """只留 user / assistant 且内容非空，转成 {role, content}。"""
+    return [
+        {"role": m["role"], "content": m["content"]}
+        for m in msgs
+        if m.get("role") in ("user", "assistant") and m.get("content")
+    ]
+
+
+def assemble_history(
+    owner: str,
+    sid: str,
+    raw_messages: list[dict],
+    *,
+    keep_turns: int | None = None,
+) -> list[dict]:
+    """把会话原文组装成"喂给模型的历史"：压缩块前置 + 最近 K 轮原文。
+
+    所有模式（vision / hybrid / agent / rag / llm）都走这一个函数，
+    避免五处各写一份、日后改规则漏掉其中一处。
+
+    返回 `[{role, content}, ...]`，调用方自己转成 HumanMessage/AIMessage 或 dict。
+    压缩层任何异常都**降级为原样返回**：压缩是优化，不能成为对话失败的原因。
+    """
+    if not getattr(config, "COMPRESS_ENABLED", True):
+        return _clean(raw_messages)
+    try:
+        plan = plan_context(
+            owner, sid, raw_messages, keep_turns=KEEP_TURNS if keep_turns is None else keep_turns
+        )
+    except Exception:  # noqa: BLE001 —— 压缩失败不许影响对话
+        return _clean(raw_messages)
+    if not plan.summary_text:
+        # 还没压缩过：原样直通（绝不能在这里套 K 轮窗口，见上面第 3 条）
+        return _clean(raw_messages)
+    out = [
+        {"role": "user", "content": PRELUDE_HEAD + plan.summary_text},
+        {"role": "assistant", "content": PRELUDE_ACK},
+    ]
+    out.extend(_clean(plan.kept))
+    return out
+
+
+def maybe_compress(
+    owner: str,
+    sid: str,
+    *,
+    keep_turns: int | None = None,
+    compressor: Callable[[str], str] | None = None,
+    force: bool = False,
+    max_context_chars: int | None = None,
+) -> dict:
+    """回答结束后调用：够长就把"最近 K 轮之前"的原文压成一段落库。
+
+    为什么是"回答结束后"：压缩要在两轮之间做（书第 2 章），
+    回答过程中压会让本轮上下文形状中途变化；而且用户已经看到答案了，
+    这一轮压不压不影响体验。
+
+    返回 `{"ok", "reason", "upto", "action"}`，调用方只记日志，不据此做业务判断。
+    """
+    from core import session as store
+
+    if not getattr(config, "COMPRESS_ENABLED", True):
+        return {"ok": False, "reason": "disabled", "upto": 0}
+    kt = KEEP_TURNS if keep_turns is None else keep_turns
+
+    try:
+        # limit_turns=None：阈值必须按**全量历史**算（见 should_compress 的说明）
+        raw = store.get_messages(owner, sid, limit_turns=None, include_system=False)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "reason": f"read_failed: {e}", "upto": 0}
+    if not raw:
+        return {"ok": False, "reason": "empty", "upto": 0}
+
+    block, upto, prev = load_summary_state(owner, sid)
+    total_chars = sum(len(m.get("content") or "") for m in raw)
+    if not force and not should_compress(total_chars, max_context_chars):
+        return {"ok": False, "reason": "below_threshold", "upto": upto}
+
+    pending = [m for m in raw if int(m.get("id") or 0) > upto]
+    old = pending[: -kt * 2] if kt > 0 else pending
+    if not old:
+        return {"ok": False, "reason": "nothing_to_compress", "upto": upto}
+
+    seg, seg_raw = build_compressed_segment(old, compressor)
+    if not seg:
+        return {"ok": False, "reason": "compressor_empty", "upto": upto}
+
+    # 增量：在旧块上追加一段（不改旧段，前缀只增长）
+    new_block = SummaryBlock(list(block.segments))
+    new_text = new_block.append(seg)
+
+    recent = pending[-kt * 2 :] if kt > 0 else []
+    est_after = estimate_tokens(new_text) + estimate_tokens(
+        "\n".join(m.get("content") or "" for m in recent)
+    )
+    hard_limit = int(
+        getattr(config, "COMPRESS_MAX_CONTEXT_CHARS", None)
+        or getattr(config, "MAX_CONTEXT_CHARS", 12000)
+    )
+    decision = apply_safety_valve(
+        seg_raw,
+        new_text,
+        prev,
+        est_tokens_after=est_after,
+        hard_limit_tokens=hard_limit,
+        base_keep_turns=kt,
+    )
+
+    # L2：实体丢失且无上一版可回退 → 扩大 keep_turns 重压一次（压得更少、更保守）。
+    # 只重试一次：扩到 KEEP_TURNS_EXPANDED 后条件不再成立，不会无限递归。
+    if decision.action == ACT_EXPAND_KEEP and decision.keep_turns != kt:
+        return maybe_compress(
+            owner,
+            sid,
+            keep_turns=decision.keep_turns,
+            compressor=compressor,
+            force=True,
+            max_context_chars=max_context_chars,
+        )
+    # L1：有上一版就回退——即**保持库里现状不动**（不是把 prev 写回去，
+    # 那会让 compressed_upto 倒退，已压缩的原文又会重新进上下文）
+    if decision.action == ACT_ROLLBACK:
+        return {"ok": False, "reason": decision.reason, "upto": upto, "action": decision.action}
+
+    new_upto = int(old[-1].get("id") or 0)
+    ok = commit_summary(owner, sid, new_text, new_upto, expected_upto=upto)
+    return {
+        "ok": ok,
+        "reason": decision.reason if ok else "race_lost（并发压缩，本轮放弃）",
+        "upto": new_upto if ok else upto,
+        "action": decision.action,
+    }
+

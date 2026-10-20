@@ -105,6 +105,13 @@ def job_defs() -> dict[str, dict]:
             "cron": "30 2 * * *",
             "description": "聚合用户兴趣画像（基于 user_tags 权重，生成每日快照）",
         },
+        # Prompt 自进化（GEPA · issue #12）。默认每日 4 次（方案 §待讨论的口径），
+        # 稳定后可用 PROMPT_EVOLVE_CRON 提频——周期改表或改环境变量，不改代码。
+        # 只产出 shadow 候选，上线仍要人工 promote（PROMPT_EVO_AUTO_PROMOTE 默认关）。
+        "prompt.evolve": {
+            "cron": os.getenv("PROMPT_EVOLVE_CRON", "20 */6 * * *"),
+            "description": "Prompt 自进化一轮（采集→变异→评估→择优，产出 shadow 候选）",
+        },
     }
 
 

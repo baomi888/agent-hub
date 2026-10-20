@@ -18,7 +18,7 @@ from collections import OrderedDict
 from langchain.agents import create_agent
 
 from agent.tools import AGENT_TOOLS
-from core import config, tool_registry
+from core import config, prompt_store, tool_registry
 from core import scenarios as scenarios_mod
 from core.llm import get_llm
 
@@ -146,9 +146,22 @@ _CHECKPOINTER = _make_checkpointer()
 # 而图结构只由 (has_kb, 定位片段, 场景) 决定 —— 三者组合有限，命中率很高。
 # 编译好的图无会话状态（checkpointer=None，状态每次 invoke 单独传），
 # 可跨请求、跨线程复用。用 LRU 兜底，避免按城市无限增长。
-_AGENT_CACHE: OrderedDict[tuple[bool, str, str], object] = OrderedDict()
+_AGENT_CACHE: OrderedDict[tuple, object] = OrderedDict()
 _AGENT_CACHE_MAX = 32
 _AGENT_LOCK = threading.Lock()
+
+
+def _cache_key(
+    has_kb: bool, scene: str, activated: frozenset[str], prompt_version: int
+) -> tuple:
+    """编译缓存的键。**prompt_version 必须在里面**。
+
+    这是自进化最容易踩的坑（方案 §4 点名）：提示词是 DB 里的可变数据，
+    而编译好的图把 system prompt 固化了。键里不带版本号的话，
+    promote 之后 `build_agent` 照样命中旧图 —— 库里版本号变了、线上一个字没变，
+    表现为"进化不生效"，而且重启才恢复，最难查。
+    """
+    return (bool(has_kb), scene, frozenset(activated), int(prompt_version or 0))
 
 
 def build_agent(
@@ -171,17 +184,21 @@ def build_agent(
     这样 system 前缀恒定、KV 缓存不被城市变化打掉。
     scenario 是场景预设 id（考研/笔记/论文），拼在提示词末尾压过通用默认。
 
-    结果按 (has_kb, 场景, 已激活工具集) 缓存：图编译是纯 CPU 开销，
+    结果按 (has_kb, 场景, 已激活工具集, 提示词版本) 缓存：图编译是纯 CPU 开销，
     同参数直接复用已编译的图。已激活工具集纳入键，保证不同激活状态的用户拿到不同
     编译图、且各自会话内工具前缀稳定（不破坏 KV 缓存）。
+
+    提示词从 `core/prompt_store` 取 active 版本（无 active 时退回本文件的
+    `SYSTEM_PROMPT` 常量），**版本号进缓存键**——见 `_cache_key` 的说明。
     """
     scene = scenarios_mod.get_scenario_prompt(scenario)
     # ⚠️ 缓存键里**不含 note**（P0-1）：动态定位进缓存键会带来双重代价——
     # ① 城市一多变 LRU 抖动、反复重编译图（原本 2×#城市×#场景×#激活集）；
     # ② 更贵的是 system prompt 前缀随城市变化，KV 缓存直接失效（实测命中率 90%→0%）。
     # 现在定位只作为**末尾**的动态消息追加（见 location_note 的调用方 api/chat.py），
-    # 前缀恒定，键的种类降为 2×#场景×#激活集。
-    key = (bool(has_kb), scene, frozenset(activated))
+    # 前缀恒定，键的种类降为 2×#场景×#激活集×#提示词版本（版本极少变，实际仍是那几个）。
+    base_prompt, prompt_version = prompt_store.resolve("agent", SYSTEM_PROMPT)
+    key = _cache_key(has_kb, scene, frozenset(activated), prompt_version)
 
     with _AGENT_LOCK:
         cached = _AGENT_CACHE.get(key)
@@ -195,7 +212,7 @@ def build_agent(
         # 三重预算护栏，但护栏在"外面"计数；主循环自己不封顶的话，单次回答仍可无界增长。
         # 默认 0 = 用平台默认，保持改造前行为（见 core/config.py 的说明）。
         llm = get_llm(temperature=0.1, max_tokens=config.AGENT_LLM_MAX_TOKENS or None)
-        system_prompt = SYSTEM_PROMPT
+        system_prompt = base_prompt
         if has_kb:
             system_prompt += (
                 "\n\n【当前会话已绑定知识库】\n"

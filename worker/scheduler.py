@@ -119,6 +119,14 @@ def _load_handlers(force: bool = False) -> tuple[bool, str]:
         return False, f"service.daily 导入失败：{e}"
     for job_key in sched.JOB_DEFS:
         register_handler(job_key, daily)
+    # prompt.evolve 的业务在 service/prompt_evo.py，不属于 daily：
+    # 单独挂、单独兜异常——它挂了不该让 daily 的几个 job 跟着没实现。
+    try:
+        from service import prompt_evo  # type: ignore
+
+        register_handler(prompt_evo.JOB_KEY, prompt_evo)
+    except Exception as e:  # noqa: BLE001
+        _log_json("handler_missing", job_key="prompt.evolve", reason=f"{e}"[:200])
     return True, ""
 
 

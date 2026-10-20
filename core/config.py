@@ -263,6 +263,52 @@ COMPRESS_KEEP_TURNS_EXPANDED = int(os.getenv("COMPRESS_KEEP_TURNS_EXPANDED", "12
 COMPRESS_MAX_SUMMARY_CHARS = int(os.getenv("COMPRESS_MAX_SUMMARY_CHARS", "4000"))
 COMPRESS_MAX_SEGMENTS = int(os.getenv("COMPRESS_MAX_SEGMENTS", "12"))
 
+# ---------- Prompt 自进化（GEPA 式 · issue #12）----------
+# 总开关：置 0 后 prompt_store.resolve 一律返回内置基线，进化产物不生效
+#   （线上出问题的一键回滚开关：不改代码、不回滚版本）。
+PROMPT_EVO_ENABLED = os.getenv("PROMPT_EVO_ENABLED", "1") not in ("0", "false", "False")
+# 允许进化的提示词路径。agent = agent/builder.py 的行为准则段；
+#   rag_note_low / rag_note_medium = kb/rag_core.py 的示弱约束模板。
+#   hybrid 路径本期不含（方案 §待讨论已明确）。
+PROMPT_EVO_PATHS = tuple(
+    p.strip()
+    for p in os.getenv("PROMPT_EVO_PATHS", "agent,rag_note_low,rag_note_medium").split(",")
+    if p.strip()
+)
+# 回放集规模：200~300 例（用户 2026-10-20 拍板）。低于 MIN 直接判
+#   insufficient_sample —— 样本不足时做显著性判断只会得出假结论。
+PROMPT_EVO_REPLAY_MIN = int(os.getenv("PROMPT_EVO_REPLAY_MIN", "200"))
+PROMPT_EVO_REPLAY_MAX = int(os.getenv("PROMPT_EVO_REPLAY_MAX", "300"))
+# 回放集里 up 样本占比：必须混入，否则模型会退化成"什么都不答"的对抗解。
+PROMPT_EVO_REPLAY_UP_RATIO = float(os.getenv("PROMPT_EVO_REPLAY_UP_RATIO", "0.3"))
+# 固定抽样种子：同一批数据每轮抽到同一批样本，否则两轮指标不可比。
+PROMPT_EVO_SEED = int(os.getenv("PROMPT_EVO_SEED", "20261020"))
+# 晋升闸门（用户拍板）：M1-M4 用成对 bootstrap 求 95% 置信区间，
+#   下界 ≥ -5pp 才允许进前沿。调这两个值等于改验收口径，要先改文档。
+PROMPT_EVO_CI_ALPHA = float(os.getenv("PROMPT_EVO_CI_ALPHA", "0.05"))
+PROMPT_EVO_MAX_DROP = float(os.getenv("PROMPT_EVO_MAX_DROP", "0.05"))
+PROMPT_EVO_BOOTSTRAP = int(os.getenv("PROMPT_EVO_BOOTSTRAP", "2000"))
+# 成本 / 延迟护栏：候选相对基线的放大倍数上限（M5 / M6 是越小越好的指标）。
+PROMPT_EVO_MAX_COST_RATIO = float(os.getenv("PROMPT_EVO_MAX_COST_RATIO", "1.15"))
+PROMPT_EVO_MAX_LATENCY_RATIO = float(os.getenv("PROMPT_EVO_MAX_LATENCY_RATIO", "1.20"))
+# 变异护栏：单条候选允许改动的总行数上限（KV 前缀稳定 + 回归面可控）。
+PROMPT_EVO_MAX_DIFF_LINES = int(os.getenv("PROMPT_EVO_MAX_DIFF_LINES", "6"))
+# 一轮最多评估几个候选（成本闸门：每候选 = 回放集条数 × 一次生成 + 一次判分）。
+PROMPT_EVO_CANDIDATES = int(os.getenv("PROMPT_EVO_CANDIDATES", "2"))
+# 单轮评估最多跑多少条 case（预算闸门）。回放集仍是 200~300，
+#   可跨轮跑完；给 0 表示不额外截断。
+PROMPT_EVO_RUN_MAX_CASES = int(os.getenv("PROMPT_EVO_RUN_MAX_CASES", "200"))
+# 自动 promote：默认关（与 CODEOWNERS / PR 文化一致），仅供演示环境打开。
+PROMPT_EVO_AUTO_PROMOTE = os.getenv("PROMPT_EVO_AUTO_PROMOTE", "0") not in ("0", "false", "False")
+# active 提示词的进程内缓存 TTL（秒）。0 = 每次 build_agent 都读库。
+PROMPT_EVO_CACHE_TTL = float(os.getenv("PROMPT_EVO_CACHE_TTL", "2"))
+# 单条回放样本的最大字符数（脱敏后截断，控制判分成本）。
+PROMPT_EVO_MAX_CASE_CHARS = int(os.getenv("PROMPT_EVO_MAX_CASE_CHARS", "800"))
+# 判分器：heuristic（默认，确定性、零成本、离线可跑）| llm（独立模板 + temperature=0）。
+#   生产建议用 llm，但必须与被评提示词用**不同**模板——否则等于让模型给自己打分。
+PROMPT_EVO_JUDGE = os.getenv("PROMPT_EVO_JUDGE", "heuristic")
+PROMPT_EVO_JUDGE_MAX_TOKENS = int(os.getenv("PROMPT_EVO_JUDGE_MAX_TOKENS", "512"))
+
 # ---------- 新建会话自动绑定资料库（P3）----------
 # 用户**有且仅有一个**知识库时，新建会话自动绑上它。修复"传过资料、新开会话
 #   模型却说没绑定"的割裂（2026-10-16 线上复现）。多库时不自动绑（绑错比不绑更糟），

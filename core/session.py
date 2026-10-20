@@ -166,11 +166,80 @@ def _init_db() -> None:
                 tag_count  INTEGER NOT NULL DEFAULT 0,
                 updated_at INTEGER NOT NULL
             );
+
+            -- ========== Prompt 自进化（GEPA 式 · issue #12）==========
+            -- ⑤ 存储层：每条提示词快照一行。version=0 是内置基线（不落库），
+            -- 所以这里从 1 开始；同一 path 内 version 唯一。
+            CREATE TABLE IF NOT EXISTS prompt_variants (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                path        TEXT NOT NULL,          -- 'agent' | 'rag_note_low' | 'rag_note_medium'
+                version     INTEGER NOT NULL,
+                parent_id   INTEGER,                -- 变异来源（基线用 NULL）
+                diff_json   TEXT,                   -- 结构化 diff（可读可审计）
+                prompt_text TEXT NOT NULL,          -- 全量快照：retired 也能一键回退
+                metrics_json TEXT,                  -- {M1..M6, gate:{...}, pareto:bool}
+                status      TEXT NOT NULL DEFAULT 'candidate',
+                created_by  TEXT NOT NULL,          -- 'evolve:<run_id>' | 'manual:<uid>'
+                created_at  INTEGER NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_prompt_variant
+                ON prompt_variants(path, version);
+            CREATE INDEX IF NOT EXISTS idx_prompt_variant_status
+                ON prompt_variants(path, status, id DESC);
+
+            -- ③ 评估层明细：每条 case 的判分都留档，指标能复盘到样本。
+            -- variant_id=0 表示内置基线（基线每次回放也存一份，否则"相对谁下降"不可查）。
+            CREATE TABLE IF NOT EXISTS prompt_evals (
+                id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                path               TEXT NOT NULL,
+                variant_id         INTEGER NOT NULL DEFAULT 0,
+                replay_set_version INTEGER NOT NULL,
+                per_case_json      TEXT NOT NULL,
+                summary_json       TEXT NOT NULL,
+                elapsed_ms         INTEGER NOT NULL DEFAULT 0,
+                created_at         INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_prompt_eval
+                ON prompt_evals(path, variant_id, replay_set_version);
+
+            -- 回放集版本表 + 明细。只增不改：要改就升版本，老版本的样本原样留着，
+            -- 这样两轮指标永远能对上"当时那批题"。
+            CREATE TABLE IF NOT EXISTS prompt_replay_sets (
+                path       TEXT NOT NULL,
+                version    INTEGER NOT NULL,
+                seed       INTEGER NOT NULL,
+                size       INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                note       TEXT,
+                PRIMARY KEY (path, version)
+            );
+            CREATE TABLE IF NOT EXISTS prompt_replay_items (
+                path        TEXT NOT NULL,
+                set_version INTEGER NOT NULL,
+                case_key    TEXT NOT NULL,
+                question    TEXT NOT NULL,          -- 已脱敏
+                gold        TEXT,
+                tags        TEXT,                   -- 失败模式标签（逗号分隔）
+                source      TEXT NOT NULL,          -- 'down' | 'up'
+                meta_json   TEXT,
+                created_at  INTEGER NOT NULL,
+                PRIMARY KEY (path, set_version, case_key)
+            );
         """)
 
         # 迁移：老库补 refs 列（已存在则忽略）
         try:
             conn.execute("ALTER TABLE messages ADD COLUMN refs TEXT")
+        except Exception:
+            pass
+
+        # 迁移（审计 A1）：老库补 truncated 列。
+        # 1 = 这条回答因 max_tokens / 上下文上限被截断（上游 finish_reason=length）。
+        # 为什么要落库而不是只在 SSE 里提示一下：这是唯一能回答
+        # 「我们有多少回答其实是残缺的」的数据。塞进 refs 会污染来源引用，
+        # 另建表又不值得——一个 BOOLEAN 语义的整数列，成本一行。
+        try:
+            conn.execute("ALTER TABLE messages ADD COLUMN truncated INTEGER NOT NULL DEFAULT 0")
         except Exception:
             pass
 
@@ -316,16 +385,21 @@ def add_message(
     role: Literal["user", "assistant", "system"],
     content: str,
     refs: str = "",
+    truncated: bool = False,
 ) -> int:
-    """追加一条消息，返回 message id。同时更新会话的 updated_at。"""
+    """追加一条消息，返回 message id。同时更新会话的 updated_at。
+
+    truncated=True 表示这条回答被长度上限截断了（见 core/session.py 的迁移注释与
+    审计报告 A1）。默认 False，所有既有调用方不需要改。
+    """
     if not _owned(owner, sid):
         raise NotOwned(sid)
     now = int(time.time())
     with _get_conn() as conn:
         conn.execute(
-            "INSERT INTO messages (conversation_id, role, content, refs, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (sid, role, content, refs, now),
+            "INSERT INTO messages (conversation_id, role, content, refs, truncated, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (sid, role, content, refs, 1 if truncated else 0, now),
         )
         conn.execute(
             "UPDATE conversations SET updated_at = ? WHERE id = ?",
