@@ -1,0 +1,49 @@
+name: Deploy Staging
+
+# 触发：仅手动（workflow_dispatch）。staging 部署能力保留，需要时到 Actions 页 Run workflow。
+# staging 与生产在同一台 ECS 上分端口并存（staging 3001/8001，生产 3000/8000），
+# 部署细节见 规范/04_环境与部署.md 第 5 节。
+on:
+  workflow_dispatch:        # 仅手动触发（推 dev 不再自动跑，避免无 secrets 报“没有运行作业”；需要部署时在 Actions 页点 Run workflow）
+
+concurrency:
+  # 同一时间只允许一次 staging 部署，避免两个部署互相打断
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to staging
+    runs-on: ubuntu-latest
+    # environment 用于在 GitHub 上记录部署历史（可选设置审批门）
+    environment:
+      name: staging
+      url: ${{ secrets.STAGING_URL }}
+    steps:
+      - name: 部署到 staging（SSH）
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ${{ secrets.STAGING_USER }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          # 部署可能因前端构建耗时几分钟，给足超时
+          command_timeout: 20m
+          script: |
+            set -e
+            cd /root/agent-hub-staging
+            bash deploy-staging.sh deploy
+
+      - name: 部署后健康检查
+        run: |
+          # 等前端与后端就绪（脚本内部已 sleep 6，这里再兜底重试）
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' "${{ secrets.STAGING_URL }}/health" || echo 000)
+            echo "尝试 $i: /health -> $code"
+            if [ "$code" = "200" ]; then
+              echo "staging 健康检查通过"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "staging 健康检查失败，请到服务器执行： bash deploy-staging.sh logs"
+          exit 1
