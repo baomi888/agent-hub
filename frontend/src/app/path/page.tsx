@@ -6,7 +6,7 @@
 // （服务端 service/path.py 读时现算），所以卡片上那个「已掌握 84 / 100 词」
 // 是当场算出来的，不是写死的文案。演示时评委点开任意一关，看到的都是真数。
 //
-// 三态：done（已过）/ current（当前这一关）/ locked（前面还没过）。
+// 三态：done（已过）/ current（已经动手、还没到线）/ locked（一步没走）。
 // 关卡严格线性——前一关没过，后面的关卡不亮，这是「关卡」和「清单」的区别。
 
 import { useCallback, useEffect, useState } from "react";
@@ -115,7 +115,7 @@ function LevelCard({ lv, onOpen }: { lv: Level; onOpen: (lv: Level) => void }) {
             fontWeight: cur ? 600 : 400,
           }}
         >
-          {done ? "已通过" : cur ? "进行中" : "未解锁"}
+          {done ? "已通过" : cur ? "进行中" : "未开始"}
         </span>
       </div>
       <div style={{ fontSize: 15, fontWeight: 600, color: titleColor, lineHeight: 1.3 }}>{lv.name}</div>
@@ -315,7 +315,7 @@ export default function PathPage() {
             ))}
 
             <div style={{ ...label, paddingLeft: 2 }}>
-              关卡按顺序推进：前一关没过时，后面的关卡显示为未解锁。通过时间记录的是你第一次过这关的日子，不会因为后来断卡而改写。
+              「进行中」表示你已经动手但还没到线，「未开始」表示一步没走。通过时间记录的是你第一次过这关的日子，不会因为后来断卡而改写。
             </div>
           </>
         )}
@@ -343,7 +343,7 @@ export default function PathPage() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
               <div>
                 <div style={{ ...label, marginBottom: 4 }}>
-                  {open.id.slice(1)} · {open.status === "done" ? "已通过" : open.status === "current" ? "进行中" : "未解锁"}
+                  {open.id.slice(1)} · {open.status === "done" ? "已通过" : open.status === "current" ? "进行中" : "未开始"}
                 </div>
                 <div style={{ fontSize: 17, fontWeight: 600, color: "var(--text-1)" }}>{open.name}</div>
               </div>

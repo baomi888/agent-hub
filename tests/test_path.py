@@ -170,6 +170,25 @@ def test_all_levels_cleared(monkeypatch):
     assert lv["L10"]["checks"][0]["passed"] is True
 
 
+def test_partial_progress_is_not_locked(monkeypatch):
+    """已经有进展的关卡不能显示成「未解锁」——那等于说用户没动手。
+
+    真实场景：先背了 45 个词、还没往知识库里传东西。此时「建库」是该先补的那关，
+    但「词汇地基 45/100」不该被锁死，否则界面会出现「过 / 锁 / 过」这种自相矛盾的排布。
+    """
+    _prep_db(monkeypatch, "partial")
+    _add_vocab("u1", 45, step=1)
+
+    ov = path_svc.overview("u1")
+    lv = _levels(ov)
+
+    assert lv["L01"]["status"] == "current"  # 第一个没达成的
+    assert lv["L06"]["status"] == "current"  # 有进展 → 进行中，不是未解锁
+    assert lv["L06"]["percent"] == 45
+    assert lv["L02"]["status"] == "locked"  # 一步没走，才叫未解锁
+    assert ov["current"]["id"] == "L01"  # 指路仍指向顺序上最早没过的那关
+
+
 def test_done_at_is_first_time(monkeypatch):
     _prep_db(monkeypatch, "ts")
     monkeypatch.setattr(path_svc, "_kb_counts", lambda uid: (1, 3))

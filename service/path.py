@@ -316,19 +316,22 @@ def overview(uid: str) -> dict[str, Any]:
     """路径页首屏：章节 / 12 关三态 / 总进度 / 当前该做哪一关。"""
     m = _metrics(uid)
 
+    evs = [_evaluate(spec, m) for spec in _LEVELS]
+    # 第一个没达成的关卡 = 「当前该做的那一关」（进度条下面那个 CTA）
+    first_open = next((i for i, ev in enumerate(evs) if not ev["ok"]), None)
+
     levels: list[dict[str, Any]] = []
     done_ids: list[str] = []
-    prev_ok = True  # 前一关是否已过；第一关不受限
-    for spec in _LEVELS:
-        ev = _evaluate(spec, m)
+    for i, (spec, ev) in enumerate(zip(_LEVELS, evs)):
         if ev["ok"]:
             status = "done"
             done_ids.append(spec["id"])
-        elif prev_ok:
+        elif i == first_open or ev["percent"] > 0:
+            # 已经开始做的关卡不该显示成「未解锁」——那是在说用户没动手，而事实是
+            # 他走了 45%，只是还没到线。只有一步没走的关卡才配得上「未解锁」。
             status = "current"
         else:
             status = "locked"
-        prev_ok = prev_ok and ev["ok"]
         levels.append(
             {
                 "id": spec["id"],
@@ -378,7 +381,9 @@ def overview(uid: str) -> dict[str, Any]:
         )
 
     done = len(done_ids)
-    current = next((x for x in levels if x["status"] == "current"), None)
+    # 指路用「第一个没达成的关卡」，不是「第一个 current」：
+    # 顺序上更早的关卡哪怕已有进展，也仍然是该先补的那一关。
+    current = levels[first_open] if first_open is not None else None
     return {
         "progress": {
             "done": done,
