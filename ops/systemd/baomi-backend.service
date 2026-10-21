@@ -1,0 +1,26 @@
+[Unit]
+Description=Zhisui backend (FastAPI / uvicorn, 127.0.0.1:8000)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root
+# .env 由 core/config.py 里的 load_dotenv 自己读，这里刻意不加 EnvironmentFile：
+# 两个来源(EnvironmentFile / dotenv)并存时，改了 .env 却忘了 daemon-reload 就会出现
+# "配置改了但进程里还是旧值"的鬼故事，只留一条读配置的路径最省心。
+Environment=PYTHONUTF8=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+# 只监听回环：后端没有自身鉴权，靠前端 /api/* rewrite 访问，不对公网暴露
+ExecStart=/root/venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=3
+# 2C2G 机器上并发长连接容易撞 EMFILE，默认 1024 不够
+LimitNOFILE=65535
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=baomi-back
+
+[Install]
+WantedBy=multi-user.target
