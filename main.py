@@ -28,6 +28,8 @@ from api.delegate import router as delegate_router
 from api.feedback import router as feedback_router
 from api.geo import router as geo_router
 from api.hybrid import router as hybrid_router
+from api.cet import router as cet_router
+from api.path import router as path_router
 from api.kb import router as kb_router
 from api.report import router as report_router
 from api.checkin import router as checkin_router
@@ -110,6 +112,10 @@ app.include_router(checkin_router, prefix="/api/checkin", tags=["打卡"])
 app.include_router(delegate_router, prefix="/api/delegate", tags=["每日委托"])
 # 混合架构（工作流 × 自主 Agent）：工作流定义 / 切换规则 / 执行记录与人工切换
 app.include_router(hybrid_router, prefix="/api/hybrid", tags=["混合执行"])
+# 四六级备考工作区：计划 / 任务 / 词汇本 / 模考分数（申报书 B3 承诺的专项模块）
+app.include_router(cet_router, prefix="/api/cet", tags=["四六级"])
+# 关卡式学习路径（申报书 3.4 关卡式学习路径 + 2.8 输出层「学习路径进度」）
+app.include_router(path_router, prefix="/api/path", tags=["学习路径"])
 
 
 # ---------- 修复：前后端尾部斜杠不一致导致的重定向黑洞 ----------
