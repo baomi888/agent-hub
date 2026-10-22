@@ -12,7 +12,8 @@
 // 没有计划就显示「生成计划」的空状态，避免出现「看起来有、其实是假的」。
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import ConsoleShell, { useConsoleUser } from "@/components/console/ConsoleShell";
+import ConsoleShell from "@/components/console/ConsoleShell";
+import { useAuth } from "@/lib/hooks/useAuth";
 import CornIcon from "@/components/CornIcon";
 
 interface Plan {
@@ -168,7 +169,11 @@ function ScoreChart({ scores }: { scores: Score[] }) {
 }
 
 export default function CetPage() {
-  const me = useConsoleUser();
+  // 身份必须从 useAuth 拿：useConsoleUser 读的是 ConsoleShell 内部的 Context，
+  // 而页面组件是 ConsoleShell 的**父级**，在它外面读永远拿到 null ——
+  // 结果就是 if (!authedId) return 一直命中，页面永远停在「正在加载…」。
+  const auth = useAuth();
+  const authedId = auth.me?.user.id ?? null;
   const [ov, setOv] = useState<Overview | null>(null);
   const [vocab, setVocab] = useState<Vocab[]>([]);
   const [loading, setLoading] = useState(true);
@@ -198,11 +203,11 @@ export default function CetPage() {
     }
   }, []);
 
-  // 登录态守卫：没有 me 就不发请求（与全站约定一致，避免 401 刷屏）
+  // 登录态守卫：身份确认前不发请求（与 /checkin 同一套写法）
   useEffect(() => {
-    if (!me) return;
+    if (!authedId) return;
     void load();
-  }, [me, load]);
+  }, [authedId, load]);
 
   const createPlan = async () => {
     setBusy(true);

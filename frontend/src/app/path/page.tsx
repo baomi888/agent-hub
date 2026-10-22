@@ -10,7 +10,8 @@
 // 关卡严格线性——前一关没过，后面的关卡不亮，这是「关卡」和「清单」的区别。
 
 import { useCallback, useEffect, useState } from "react";
-import ConsoleShell, { useConsoleUser } from "@/components/console/ConsoleShell";
+import ConsoleShell from "@/components/console/ConsoleShell";
+import { useAuth } from "@/lib/hooks/useAuth";
 import CornIcon from "@/components/CornIcon";
 
 type Status = "done" | "current" | "locked";
@@ -162,7 +163,10 @@ function Connector({ on }: { on: boolean }) {
 }
 
 export default function PathPage() {
-  const me = useConsoleUser();
+  // 身份必须从 useAuth 拿：useConsoleUser 的 Context 在 ConsoleShell 内部，
+  // 页面是它的父级，在外面读永远是 null，页面就会永远停在「正在读取你的学习记录…」。
+  const auth = useAuth();
+  const authedId = auth.me?.user.id ?? null;
   const [ov, setOv] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -179,11 +183,11 @@ export default function PathPage() {
     }
   }, []);
 
-  // 登录态守卫：没有 me 就不发请求（与全站约定一致，避免 401 刷屏）
+  // 登录态守卫：身份确认前不发请求（与 /checkin 同一套写法）
   useEffect(() => {
-    if (!me) return;
+    if (!authedId) return;
     void load();
-  }, [me, load]);
+  }, [authedId, load]);
 
   const p = ov?.progress;
 
