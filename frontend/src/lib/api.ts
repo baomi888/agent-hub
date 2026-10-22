@@ -2,6 +2,7 @@
 import type { Conversation, KbInfo, KbFile, FilePreview, SearchResult, Defaults, Message } from "./types";
 import { detailToMessage } from "./errors";
 import type { MeOut, UserOut, Template, ApplyTemplateResult, UsageSummary } from "./types";
+import type { ProfileSnapshot, TagTaxonomy, TemplateRecommend } from "./types";
 import type {
   AgentTool,
   DailyReport,
@@ -356,10 +357,22 @@ export const api = {
 
   // ---------- 模板广场 ----------
   templates: () =>
-    request<{ templates: Template[] }>("/api/templates/"),
+    request<{ templates: Template[]; recommended?: TemplateRecommend[] }>("/api/templates/"),
   applyTemplate: (id: string) =>
     request<ApplyTemplateResult>(`/api/templates/${id}/apply`, {
       method: "POST",
+    }),
+
+  // ---------- 用户兴趣标签（画像）----------
+  //
+  // 路径不带尾斜杠：后端路由是 ""/"/tags"，带斜杠会先吃一个 308。
+  // saveTags 是覆盖式（PUT）：传什么就是最终选择，取消勾选靠"不传"表达。
+  tagTaxonomy: () => request<TagTaxonomy>("/api/profile/tags"),
+  myProfile: () => request<ProfileSnapshot>("/api/profile"),
+  saveTags: (tags: string[]) =>
+    request<ProfileSnapshot>("/api/profile/tags", {
+      method: "PUT",
+      body: JSON.stringify({ tags }),
     }),
 
   /* ==========================================================

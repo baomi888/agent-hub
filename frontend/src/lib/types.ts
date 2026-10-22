@@ -180,6 +180,64 @@ export interface ApplyTemplateResult {
 }
 
 /* ============================================================
+   用户兴趣标签（/api/profile）
+   ────────────────────────────────────────────────────────────
+   词表权威在 core/tag_taxonomy.py（30 条定稿，4 位组员清单合并）。
+   前端**不硬编码任何标签名**：大类、可选项、说明全部由 /api/profile/tags 下发，
+   加标签只改后端一处。这里的类型只描述形状。
+   ============================================================ */
+
+/** 单个标签的定义。type 是"目标/身份/任务/学科/方向/考试/场景/能力/状态"之一 */
+export interface TagDef {
+  name: string;
+  category: string;
+  type: string;
+  /** 父标签名（如"考研数学"的父级是"考研备考"）；顶层为 null */
+  parent: string | null;
+  desc: string;
+}
+
+export interface TagGroup {
+  category: string;
+  tags: TagDef[];
+}
+
+export interface TagTaxonomy {
+  categories: string[];
+  types: string[];
+  groups: TagGroup[];
+  /** 首屏可选标签（已排除"能力/状态"两类） */
+  pickable: string[];
+  total: number;
+}
+
+/** 画像里的一条标签（带权重与元数据；词表外的自由主题 category/type 为 null） */
+export interface ProfileTag {
+  tag: string;
+  weight: number;
+  category: string | null;
+  type: string | null;
+  desc: string | null;
+}
+
+export interface ProfileSnapshot {
+  /** 用户亲手勾选过的标签（覆盖式保存，前端据此回显已选状态） */
+  picks: string[];
+  /** 按权重降序的全部标签（含对话自动抽的） */
+  tags: ProfileTag[];
+  /** 按大类聚合的权重，权重降序 */
+  categories: { category: string; weight: number }[];
+  has_tags: boolean;
+}
+
+/** 「为你推荐」的一条：模板 id + 得分 + 命中的标签（前端拿来显示"因为你在准备英语四六级"） */
+export interface TemplateRecommend {
+  id: string;
+  score: number;
+  matched: string[];
+}
+
+/* ============================================================
    以下四组类型对应「队友分支 feat/ai-module-20261013」新增的端点。
    ────────────────────────────────────────────────────────────
    ⚠️ 契约来源是 `docs/前端页面与接口映射_v0.2.md`（按分支代码反推的字段清单），

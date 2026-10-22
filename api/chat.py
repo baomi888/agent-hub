@@ -48,6 +48,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from pydantic import BaseModel, Field
 
 from core import config, quota, session as store, upload
+from core import tag_taxonomy
 from core.auth import get_current_user
 from core.llm import get_llm, get_vision_llm
 from core import scenarios as scenarios_mod
@@ -66,15 +67,10 @@ MAX_CHAT_FILES = 9
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 
 # B 块：对话级用户画像标签（受控词表，防标签表爆炸）。
-# 模型只许从这几十个里选，超出一律丢弃；既能沉淀"这个用户关心什么"，
-# 又不会让 user_tags 表无限膨胀。后续 C2 聚合 / D 检索偏置可直接消费这些标签。
-USER_PROFILE_TAGS = [
-    "考研备考", "考研数学", "考研英语", "考研政治", "保研", "求职面试", "实习",
-    "课程作业", "期末考试", "论文写作", "毕业设计", "编程开发", "Python",
-    "前端开发", "后端开发", "算法竞赛", "操作系统", "计算机网络", "数据库",
-    "机器学习", "深度学习", "英语四六级", "文献阅读", "实验操作", "考证",
-    "公务员", "留学申请", "社团活动", "时间管理", "心态调节",
-]
+# 词表与"大类/父子/类型"元数据已抽到 core/tag_taxonomy.py（30 条定稿，4 位组员合并）。
+# 这里保留 USER_PROFILE_TAGS 这个名字，因为它是**受控词表**的语义，
+# 和"标签体系"（含大类、同义词）不是一回事：抽标签时只该看到词表。
+USER_PROFILE_TAGS = tag_taxonomy.USER_PROFILE_TAGS
 
 # 计划类请求的格式要求：由服务端拼到"本轮提问"末尾（req.plan=true 时），
 # 不落库、不参与历史——避免像旧前端那样把格式块写进历史污染后续轮次。
@@ -1059,9 +1055,10 @@ def _extract_user_tags(question: str, answer: str) -> list[str]:
             raw = raw.strip()
         import json as _json
         tags = _json.loads(raw)
-        vocab_set = set(USER_PROFILE_TAGS)
-        out = [str(t).strip() for t in tags if str(t).strip() in vocab_set]
-        return out[:3]
+        # filter_known_tags 而不是 set 交集：它会先把 "CET6 / 六级 / 英语四六级"
+        # 归一成同一条再判断命中。此前直接做集合交集，"六级"会被当成越界标签丢掉，
+        # 30 条词表等于白摆——归一字典的价值就在这里。
+        return tag_taxonomy.filter_known_tags(tags, limit=3)
     except Exception:
         return []
 

@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from core import session as store, quota
 from core.auth import get_current_user
-from core.templates_catalog import get_catalog, get_template
+from core.templates_catalog import get_catalog, get_template, recommend_for_tags
 from kb import pipelines
 from .chat import VALID_MODES
 
@@ -27,9 +27,20 @@ router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 @router.get("/")
-def list_templates() -> dict:
-    """返回模板广场的全部场景模板（纯静态数据，已登录即可浏览）。"""
-    return {"templates": get_catalog()}
+async def list_templates(uid: str = Depends(get_current_user)) -> dict:
+    """返回模板广场的全部场景模板，并附带「按你的兴趣标签推荐」。
+
+    推荐是**附加值**，不是必需项：拿不到标签（新用户 / 读库失败）时
+    返回空列表，前端就不渲染「为你推荐」那一栏 —— 绝不因为推荐失败
+    让整个模板广场 500。这才是把个性化挂在这里的理由：可降级。
+    """
+    try:
+        rows = await asyncio.to_thread(store.get_user_tags, uid, 30)
+        weights = {r["tag"]: float(r["weight"] or 0) for r in rows}
+        recommended = recommend_for_tags(weights, limit=3)
+    except Exception:
+        recommended = []
+    return {"templates": get_catalog(), "recommended": recommended}
 
 
 @router.post("/{tid}/apply")

@@ -30,6 +30,7 @@ from api.geo import router as geo_router
 from api.hybrid import router as hybrid_router
 from api.cet import router as cet_router
 from api.path import router as path_router
+from api.profile import router as profile_router
 from api.kb import router as kb_router
 from api.report import router as report_router
 from api.checkin import router as checkin_router
@@ -116,6 +117,8 @@ app.include_router(hybrid_router, prefix="/api/hybrid", tags=["混合执行"])
 app.include_router(cet_router, prefix="/api/cet", tags=["四六级"])
 # 关卡式学习路径（申报书 3.4 关卡式学习路径 + 2.8 输出层「学习路径进度」）
 app.include_router(path_router, prefix="/api/path", tags=["学习路径"])
+# 用户兴趣标签（画像）：30 条定稿词表 / 手选标签 / 按大类聚合的权重
+app.include_router(profile_router, prefix="/api/profile", tags=["用户画像"])
 
 
 # ---------- 修复：前后端尾部斜杠不一致导致的重定向黑洞 ----------

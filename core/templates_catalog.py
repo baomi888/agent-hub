@@ -196,6 +196,92 @@ def get_catalog() -> list[dict]:
     return copy.deepcopy(_TEMPLATE_LIST)
 
 
+# ==================== 按用户兴趣标签推荐模板 ====================
+# 键是 core/tag_taxonomy.py 里的标签名，值是模板 id（可多个）。
+#
+# 刻意写成显式映射而不是"按分类字符串匹配"：模板的 category（升学规划/学术科研/…）
+# 和标签的 category（升学考研/科研论文/…）是两套词，硬凑字符串只会得到
+# "编程技术 → 没有对应分类 → 不推荐"。而 30 条标签里编程占了 10 条，
+# 恰好是这个项目最典型的用户，不能让它落空。
+#
+# 空列表 = 这个标签确实没有对应模板（时间管理/心态调节），
+# 与其硬塞一个不相干的，不如不推荐 —— 推荐错了比不推荐更伤信任。
+TAG_TO_TEMPLATES: dict[str, list[str]] = {
+    # 升学
+    "考研备考": ["kaoyan"],
+    "考研数学": ["kaoyan"],
+    "考研英语": ["kaoyan"],
+    "考研政治": ["kaoyan"],
+    "保研": ["kaoyan", "resume"],
+    "留学申请": ["english", "resume"],
+    # 求职
+    "求职面试": ["resume"],
+    "实习": ["resume"],
+    "公务员": ["resume"],
+    # 课程
+    "期末考试": ["final-sprint"],
+    "课程作业": ["lecture-notes", "final-sprint"],
+    # 科研
+    "论文写作": ["thesis"],
+    "文献阅读": ["literature"],
+    "实验操作": ["literature", "thesis"],
+    "毕业设计": ["thesis"],
+    # 编程：没有专门的"写代码"模板，最近的落点是课程笔记整理与论文/毕设写作
+    "编程开发": ["lecture-notes"],
+    "Python": ["lecture-notes"],
+    "前端开发": ["lecture-notes"],
+    "后端开发": ["lecture-notes"],
+    "算法竞赛": ["final-sprint"],
+    "操作系统": ["lecture-notes", "final-sprint"],
+    "计算机网络": ["lecture-notes", "final-sprint"],
+    "数据库": ["lecture-notes", "final-sprint"],
+    "机器学习": ["lecture-notes", "literature"],
+    "深度学习": ["lecture-notes", "literature"],
+    # 语言考证
+    "英语四六级": ["english"],
+    "考证": ["final-sprint"],
+    # 校园
+    "社团活动": ["club"],
+    "时间管理": [],
+    "心态调节": [],
+}
+
+_TEMPLATE_ORDER: dict[str, int] = {t["id"]: i for i, t in enumerate(_TEMPLATE_LIST)}
+
+
+def recommend_for_tags(tag_weights: dict[str, float], limit: int = 3) -> list[dict]:
+    """按标签权重给模板打分，返回 [{id, score, matched}]（分数降序）。
+
+    用**权重**而不是"命中个数"：用户手选的标签权重是 3（见
+    session.PICK_WEIGHT），聊天里顺带提到的是 1。前者才代表"我是谁"，
+    后者常常只是问了一嘴。按个数算的话，聊过十个杂题的人会盖过认真选过
+    三个方向的用户。
+
+    同分时按目录顺序，保证每次刷新顺序一致（推荐列表自己跳来跳去很怪）。
+    """
+    scores: dict[str, float] = {}
+    matched: dict[str, list[str]] = {}
+    for tag, w in (tag_weights or {}).items():
+        tids = TAG_TO_TEMPLATES.get(str(tag))
+        if not tids:
+            continue
+        weight = float(w or 0)
+        if weight <= 0:
+            continue
+        for tid in tids:
+            scores[tid] = scores.get(tid, 0.0) + weight
+            bucket = matched.setdefault(tid, [])
+            if tag not in bucket:
+                bucket.append(tag)
+    ranked = sorted(
+        scores.items(), key=lambda kv: (-kv[1], _TEMPLATE_ORDER.get(kv[0], 999))
+    )
+    return [
+        {"id": tid, "score": round(score, 2), "matched": matched.get(tid, [])}
+        for tid, score in ranked[:limit]
+    ]
+
+
 def get_template(tid: str) -> dict | None:
     """按 id 取单个模板；不存在返回 None。"""
     for t in _TEMPLATE_LIST:

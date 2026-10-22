@@ -32,7 +32,7 @@ import uuid
 from contextlib import contextmanager
 from typing import Literal
 
-from core import config
+from core import config, tag_taxonomy
 
 MAX_HISTORY_TURNS = 30  # 每个会话最多保留的对话轮数（1 轮 = user + assistant 两条）
 
@@ -153,6 +153,21 @@ def _init_db() -> None:
                 tag_count  INTEGER NOT NULL DEFAULT 0,
                 updated_at INTEGER NOT NULL
             );
+
+            -- 用户**亲手勾选**的兴趣标签（与 user_tags 分工不同）：
+            --   user_tags  = 权重事实（对话自动抽的 + 手选的，都只是权重，分不出谁是谁）
+            --   user_tag_picks = "他明确声明过什么"，只用于前端回显"我选过哪些"，
+            --                    以及让"取消勾选"能被记住（user_tags 里那条不删，
+            --                    因为它可能同时是聊出来的证据）。
+            -- 加这张表而不是给 user_tags 加 source 列：主键是 (owner_id, tag)，
+            -- 同一个标签两种来源在物理上就只能存一行。
+            CREATE TABLE IF NOT EXISTS user_tag_picks (
+                owner_id   TEXT NOT NULL,
+                tag        TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY (owner_id, tag)
+            );
+            CREATE INDEX IF NOT EXISTS idx_tagpick_owner ON user_tag_picks(owner_id);
         """)
 
         # 迁移：老库补 refs 列（已存在则忽略）
@@ -315,6 +330,10 @@ def add_user_tags(owner: str, tags: list[str], delta: float = 1.0) -> None:
 
     调用方（api/chat.py 后台钩子）只传词表内的标签，这里再兜底一次去重与清洗。
     失败静默：画像只是辅助，绝不能因为写标签失败而把正常问答搞崩。
+
+    ★ 落库前先过 `tag_taxonomy.normalize_tag`：把"CET6 / 六级 / 英语四六级"
+      统一成"英语四六级"。**这里只归一、不过滤** —— 词表外的主题词（"数学""英语"）
+      原样保留，因为检索偏置那边也会写词表外的主题；硬闸门在抽标签那一侧。
     """
     if not owner or not tags:
         return
@@ -322,7 +341,7 @@ def add_user_tags(owner: str, tags: list[str], delta: float = 1.0) -> None:
     clean: list[str] = []
     seen: set[str] = set()
     for t in tags:
-        t = str(t).strip().strip("|").strip()
+        t = tag_taxonomy.normalize_tag(t).strip("|").strip()
         if t and t not in seen:
             seen.add(t)
             clean.append(t)
@@ -338,6 +357,70 @@ def add_user_tags(owner: str, tags: list[str], delta: float = 1.0) -> None:
                 )
     except Exception:
         pass
+
+
+# 手选标签的权重：一次声明 ≈ 3 次对话证据。
+# 太低会被聊天的噪声盖过，太高则用户改主意后旧标签赖着不走。
+PICK_WEIGHT = 3.0
+# 单次手选上限。汇总文档的建议是"选 1~3 个"，留到 6 是给跨方向的同学余地，
+# 再多就变成"全选"，推荐会退化成"什么都有"，等于没选。
+MAX_PICKS = 6
+
+
+def pick_user_tags(owner: str, tags: list[str], weight: float = PICK_WEIGHT) -> list[str]:
+    """保存用户**手选**的兴趣标签（覆盖式），返回实际生效的标签名列表。
+
+    两个必须满足的性质：
+
+    1. **幂等**：同一个标签反复提交不会把权重越堆越高。做法是
+       `ON CONFLICT DO NOTHING` —— 已存在的标签（不管是手选的还是聊出来的）
+       权重一律不动，只补新标签。
+    2. **可取消**：这次没选的、上次手选过的，从 picks 表里删掉（前端不再回显），
+       但 `user_tags` 里那条记录**保留** —— 它可能同时是"聊出来"的证据，
+       删了等于替用户抹掉他真实问过的问题。
+
+    词表外的标签直接丢弃：手选只发生在 30 条定稿清单里
+    （前端渲染的就是这份清单，脏值必然来自被改过的请求）。
+    """
+    if not owner:
+        return []
+    chosen = tag_taxonomy.filter_known_tags(tags, limit=MAX_PICKS)
+    now = int(time.time())
+    try:
+        with _get_conn() as conn:
+            for t in chosen:
+                conn.execute(
+                    "INSERT INTO user_tags (owner_id, tag, weight, updated_at) VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(owner_id, tag) DO UPDATE SET updated_at = ?",
+                    (owner, t, weight, now, now),
+                )
+            # 覆盖式：先清掉旧的手选记录，再写入本次的
+            conn.execute("DELETE FROM user_tag_picks WHERE owner_id = ?", (owner,))
+            # created_at 加序号偏移：同一秒内写入的多条 created_at 全等，
+            # 排序会退化成按 tag 的字节序，回显顺序就和用户勾选顺序对不上了
+            for i, t in enumerate(chosen):
+                conn.execute(
+                    "INSERT INTO user_tag_picks (owner_id, tag, created_at) VALUES (?, ?, ?)",
+                    (owner, t, now + i),
+                )
+    except Exception:
+        return []
+    return chosen
+
+
+def get_user_tag_picks(owner: str) -> list[str]:
+    """取用户手选过的标签（前端回显已选状态用）。"""
+    if not owner:
+        return []
+    try:
+        with _get_conn() as conn:
+            rows = conn.execute(
+                "SELECT tag FROM user_tag_picks WHERE owner_id = ? ORDER BY created_at ASC, tag ASC",
+                (owner,),
+            ).fetchall()
+    except Exception:
+        return []
+    return [r["tag"] for r in rows]
 
 
 def get_user_tags(owner: str, limit: int = 30) -> list[dict]:
