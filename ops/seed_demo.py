@@ -136,7 +136,7 @@ def main() -> None:
     print(f"\n===== 学习路径 {p['done']} / {p['total']} 关（{p['percent']}%）=====")
     for ch in ov["chapters"]:
         names = "  ".join(
-            ("[过]" if lv["status"] == "done" else "[当前]" if lv["status"] == "current" else "[锁]")
+            ("[过]" if lv["status"] == "done" else "[进行中]" if lv["status"] == "current" else "[未开始]")
             + lv["name"]
             for lv in ch["levels"]
         )

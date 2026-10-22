@@ -50,9 +50,24 @@ sleep 5
 
 echo "===== 4. 自检 ====="
 systemctl is-active baomi-backend baomi-frontend baomi-worker
-bc=$(curl -s -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/health 2>/dev/null || echo 000)
-fc=$(curl -s -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/ 2>/dev/null || echo 000)
-echo "  后端 /health -> HTTP $bc"
+
+# 轮询等端口起来，不要「启完立刻 curl」——后端要加载 LangChain/Chroma，
+# 冷启动通常 10~30s，立刻探测必然拿到 000，看起来像启动失败，其实是还没就绪。
+# 注意不要写成 `curl ... || echo 000`：curl 失败时 -w 本身就会打印 000，
+# 再 echo 一次会拼成 "000000"，误导性极强。
+wait_http() {           # $1=url $2=超时秒数
+  local url="$1" limit="$2" i=0 code=""
+  while [ "$i" -lt "$limit" ]; do
+    code="$(curl -s -m 3 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null)"
+    [ "$code" != "000" ] && [ -n "$code" ] && { echo "$code"; return 0; }
+    sleep 2; i=$((i + 2))
+  done
+  echo "000"
+}
+
+bc="$(wait_http http://127.0.0.1:8000/health 60)"
+fc="$(wait_http http://127.0.0.1:3000/ 60)"
+echo "  后端 /health -> HTTP $bc    （期望 200；000 才是没起来）"
 echo "  前端 /       -> HTTP $fc"
 echo
 echo "看日志： bash deploy.sh logs     （托管模式走 journalctl）"
