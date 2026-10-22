@@ -90,6 +90,31 @@ def _make_vocab_due(uid: str, today: str, n: int = 12) -> int:
     return len(ids)
 
 
+def _ensure_demo_reports(uid: str, today: str, n: int = 3) -> int:
+    """给演示账号铺最近 n 天的每日总结，返回铺了几条。
+
+    ★ 主键必须用 daily._report_id(uid, date)：报告接口是拿这个 md5 反查的。
+    随便编一个 id 虽然能被打卡与学习路径统计到（它们只按 date 查），
+    但 /api/report/today 永远查不到 —— 报告页会说「今天还没有总结」，
+    打卡页却显示「连续 3 天」，自相矛盾，演示时很容易被追问。
+
+    顺带清掉早期版本按 demo- 前缀写进去的行：接口读不到，纯垃圾数据。
+    """
+    with store._get_conn() as conn:
+        conn.execute(
+            "DELETE FROM daily_reports WHERE owner_id = ? AND report_id LIKE 'demo-%'", (uid,)
+        )
+        for i in range(n):
+            d = (datetime.date.fromisoformat(today) - datetime.timedelta(days=i)).isoformat()
+            conn.execute(
+                "INSERT OR REPLACE INTO daily_reports(report_id, owner_id, date, status, "
+                "stats_json, content_json, model, generated_at, read_at) "
+                "VALUES (?, ?, ?, 'ready', NULL, NULL, NULL, 0, NULL)",
+                (daily._report_id(uid, d), uid, d),
+            )
+    return n
+
+
 def seed(uid: str) -> None:
     daily._ensure_daily_tables()
     cet._ensure_cet_tables()
@@ -100,9 +125,11 @@ def seed(uid: str) -> None:
 
     if cet.list_scores(uid) or cet.overview(uid)["plan"]:
         n = _make_vocab_due(uid, today)
+        r = _ensure_demo_reports(uid, today)
         print("  已有备考数据，跳过灌数据（不会重复叠加）")
         if n:
             print(f"  词汇本：已把 {n} 个词调回今日到期（演示时词卡不为空）")
+        print(f"  每日总结：已校正最近 {r} 天（报告接口按日期能查到了）")
         return
 
     # 1. 54 天备考计划（与申报书 B3 那份计划的长度一致）
@@ -125,15 +152,7 @@ def seed(uid: str) -> None:
     print("  模考分数：432 → 473（目标 500）")
 
     # 4. 连续 3 天的每日总结（打卡页/学习路径的第 5 关靠它点亮）
-    for i in range(3):
-        d = (datetime.date.fromisoformat(today) - datetime.timedelta(days=i)).isoformat()
-        with store._get_conn() as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO daily_reports(report_id, owner_id, date, status, "
-                "stats_json, content_json, model, generated_at, read_at) "
-                "VALUES (?, ?, ?, 'ready', NULL, NULL, NULL, 0, NULL)",
-                (f"demo-{uid[:8]}-{d}", uid, d),
-            )
+    _ensure_demo_reports(uid, today)
     print("  每日总结：最近 3 天（连续打卡 3 天）")
 
     # 5. 每日委托：一个启用的，演示"交给它自己跑"
