@@ -63,17 +63,47 @@ def ensure_user() -> dict:
     return created
 
 
+def _make_vocab_due(uid: str, today: str, n: int = 12) -> int:
+    """把最近 n 个词的下次复习日调回今天，返回改动条数。
+
+    为什么需要这一步：add_vocab 之后立刻 review 会把 45 个词全部推到未来，
+    于是演示时「今日待复习」显示 0、词卡列表是空的——页面上看着像没数据，
+    实际库里有 45 条。演示账号的价值就在于「打开就有东西」，所以留一批当天到期。
+
+    幂等：重复执行只是把这批词的下次复习日重置为今天，不会产生重复行。
+    """
+    with store._get_conn() as conn:
+        ids = [
+            r["id"]
+            for r in conn.execute(
+                "SELECT id FROM vocab_items WHERE owner_id = ? ORDER BY rowid DESC LIMIT ?",
+                (uid, n),
+            ).fetchall()
+        ]
+        if not ids:
+            return 0
+        conn.executemany(
+            "UPDATE vocab_items SET next_review = ?, step = 1, interval_days = 3 "
+            "WHERE id = ? AND owner_id = ?",
+            [(today, i, uid) for i in ids],
+        )
+    return len(ids)
+
+
 def seed(uid: str) -> None:
     daily._ensure_daily_tables()
     cet._ensure_cet_tables()
     checkin._ensure_checkin_tables()
     path_svc._ensure_path_tables()
 
-    if cet.list_scores(uid) or cet.overview(uid)["plan"]:
-        print("  已有备考数据，跳过灌数据（不会重复叠加）")
-        return
-
     today = quota.day_key()
+
+    if cet.list_scores(uid) or cet.overview(uid)["plan"]:
+        n = _make_vocab_due(uid, today)
+        print("  已有备考数据，跳过灌数据（不会重复叠加）")
+        if n:
+            print(f"  词汇本：已把 {n} 个词调回今日到期（演示时词卡不为空）")
+        return
 
     # 1. 54 天备考计划（与申报书 B3 那份计划的长度一致）
     plan = cet.create_plan(uid, title="六级 54 天备考计划", days=54)
@@ -86,6 +116,8 @@ def seed(uid: str) -> None:
         for _ in range(rounds):
             cet.review_vocab(uid, item["id"], True)
     print(f"  词汇本：{len(WORDS)} 词（15 个已复习两轮，30 个一轮）")
+    due = _make_vocab_due(uid, today)
+    print(f"  词汇本：留 {due} 个词今天到期（演示时「今日待复习」与词卡都有内容）")
 
     # 3. 模考分数：两条，画出趋势 + 目标线
     cet.add_score(uid, "MOCK", 432, 500, note="首测")
