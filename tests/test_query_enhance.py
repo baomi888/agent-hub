@@ -1,0 +1,252 @@
+# -*- coding: utf-8 -*-
+"""检索词增强（B1 词表契约 + B2 匹配器）回归。
+
+这些测试锁的不是"能跑"，而是四条**改起来最容易破的约束**：
+
+1. 原话永不被改（display_text 恒等于输入）——技术报告三条原则里的"不改展示"。
+2. 反例按词条挂，不是全局黑名单——实测做错会让召回从 99% 掉到 94%。
+3. 长别名优先——否则"操作系统"会被拆成"操作"+"系统"。
+4. 替换后不许叠字——"二战考研"换成"考研二战考研"是制造噪声。
+
+另外留了一条金标集冒烟测试：metrics 掉下去就说明匹配器或词表被改坏了。
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import pytest  # noqa: E402
+
+from core.query_enhance import Term, Vocab, load_vocab, match  # noqa: E402
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+GOLDEN = os.path.join(ROOT, "data/golden/golden_v1.csv")
+TEMP_VOCAB = os.path.join(ROOT, "data/vocab/temp_from_golden.csv")
+
+
+def build(*terms) -> Vocab:
+    v = Vocab()
+    for t in terms:
+        v.add(Term(**t))
+    return v
+
+
+# ==================== 1. 三原则：不改展示 ====================
+
+def test_display_text_never_changes():
+    """★ 原话一个字都不能动，只有检索用的那份被换。"""
+    v = build({"canonical": "高等数学", "aliases": ["高数"]})
+    r = match("高数怎么复习", v)
+    assert r.original == "高数怎么复习"
+    assert r.display_text == "高数怎么复习"          # 展示：原样
+    assert r.retrieval_text == "高等数学怎么复习"    # 检索：换过
+    assert r.hits[0].raw == "高数"                  # 高亮要能定位到原话
+    assert r.hits[0].start == 0 and r.hits[0].end == 2
+
+
+def test_hit_positions_index_original_string():
+    """命中下标必须能在原话上直接切片，否则前端高亮会偏移。"""
+    v = build({"canonical": "线性代数", "aliases": ["线代"]})
+    q = "帮我复习下高数和线代"
+    r = match(q, v)
+    for h in r.hits:
+        assert q[h.start:h.end] == h.raw
+
+
+# ==================== 2. 反例的作用域 ====================
+
+def test_negative_is_term_scoped():
+    """★★ 反例只挡它所属的词条，不牵连别的词条。
+
+    这条是拿数据换来的：把金标里所有 must_not_replace 当全局黑名单，
+    「实习」这个词会把「远程实习→线上实习」也一起挡掉，召回从 99.0% 掉到 94.1%。
+    """
+    v = build(
+        {"canonical": "线上实习", "aliases": ["远程实习"]},
+        {"canonical": "考研二战", "aliases": ["二战"], "negative_aliases": ["二战考研"]},
+    )
+    r1 = match("二战考研怎么准备", v)
+    assert "考研二战" not in r1.canonicals, "「二战考研」已是对的，不该再替换"
+
+    r2 = match("远程实习靠谱吗", v)
+    assert r2.canonicals == ["线上实习"], "别的词条的反例不该牵连这个词条"
+
+
+def test_negative_blocks_its_own_alias():
+    v = build({"canonical": "考研二战", "aliases": ["二战"], "negative_aliases": ["二战考研"]})
+    r = match("二战考研", v)
+    assert r.hits == []
+    assert any("反例" in s.reason for s in r.skipped)
+
+
+def test_global_block_still_works_when_explicitly_passed():
+    """调用方显式要跨词条禁用时（如 X4 判定的通用歧义词），仍然有效。"""
+    v = build({"canonical": "线上实习", "aliases": ["远程实习"]})
+    r = match("远程实习", v, global_block={"实习"})
+    assert r.hits == []
+
+
+# ==================== 3. 最长优先 + 不重复替换 ====================
+
+def test_longest_alias_wins():
+    """「操作系统」这个别名不能被更短的「系统」抢先匹配掉。
+
+    注意别名不能等于标准词：`Term` 会把「自己替换自己」的别名剔掉（没有意义），
+    所以这里别名用「操作系统」、标准词用「操作系统课程」。
+    """
+    v = build(
+        {"canonical": "操作系统课程", "aliases": ["操作系统"]},
+        {"canonical": "系统", "aliases": ["系统"]},
+    )
+    r = match("操作系统怎么学", v)
+    assert r.canonicals == ["操作系统课程"]
+    assert "系统" not in [h.raw for h in r.hits], "「系统」被吃掉说明长优先失效"
+
+
+def test_each_char_replaced_at_most_once():
+    v = build({"canonical": "高等数学", "aliases": ["高数"]})
+    r = match("高数和高数", v)
+    assert len(r.hits) == 2
+    assert r.retrieval_text == "高等数学和高等数学"
+    spans = [(h.start, h.end) for h in r.hits]
+    assert spans == sorted(spans)
+    assert all(a[1] <= b[0] for a, b in zip(spans, spans[1:])), "命中区间不能重叠"
+
+
+# ==================== 4. 叠字防护 ====================
+
+def test_adjacent_standard_word_prevents_duplication():
+    """★ 「二战考研」换完会变成「考研二战考研」，宁可不换。"""
+    v = build({"canonical": "考研二战", "aliases": ["二战"]})
+    r = match("二战考研怎么准备", v)
+    assert r.canonicals == []
+    assert any("叠字" in s.reason for s in r.skipped)
+    assert "考研二战考研" not in r.retrieval_text
+
+
+def test_adjacent_guard_does_not_block_normal_cases():
+    """别把防护做成误伤：正常句子该换还得换。"""
+    v = build({"canonical": "考研二战", "aliases": ["二战"]})
+    assert match("二战怎么准备", v).canonicals == ["考研二战"]
+    assert match("二战在家复习", v).canonicals == ["考研二战"]
+
+
+# ==================== 5. 歧义词拦截 ====================
+
+def test_ambiguous_canonical_is_not_replaced():
+    v = build({"canonical": "考研二战", "aliases": ["二战"]})
+    r = match("二战怎么准备", v, ambiguous={"考研二战"})
+    assert r.hits == []
+    assert "歧义" in r.skipped[0].reason
+
+
+# ==================== 6. 英文大小写 ====================
+
+@pytest.mark.parametrize("raw", ["OS", "os", "Os"])
+def test_english_alias_is_case_insensitive(raw):
+    v = build({"canonical": "操作系统", "aliases": ["OS"]})
+    r = match(f"{raw}怎么学", v)
+    assert r.canonicals == ["操作系统"]
+    assert r.hits[0].raw == raw, "替换用标准词，但命中片段要保留原话大小写"
+
+
+# ==================== 7. 边界 ====================
+
+def test_empty_inputs_are_safe():
+    v = build({"canonical": "高等数学", "aliases": ["高数"]})
+    assert match("", v).hits == []
+    assert match("", v).retrieval_text == ""
+    assert match("高数", Vocab()).hits == []
+    # 空词表时检索文本必须回落成原话
+    assert match("高数", Vocab()).retrieval_text == "高数"
+
+
+# ==================== 8. 词表加载契约 ====================
+
+def _write(path, text):
+    with open(path, "w", encoding="utf-8-sig", newline="") as f:
+        f.write(text)
+    return str(path)
+
+
+def test_loader_handles_bom_and_multi_separators(tmp_path):
+    """Excel 导出的 BOM、组员顺手写的全角竖线/分号，都要能吃。"""
+    p = _write(tmp_path / "v.csv",
+               "term_id,canonical,domain,definition,aliases,negative_aliases\n"
+               "T1,高等数学,数学,,高数｜高数课,高数课代表\n"
+               "T2,线性代数,数学,,线代;线代课,\n")
+    v, warns = load_vocab(p)
+    assert len(v) == 2
+    assert sorted(v.terms["高等数学"].aliases) == ["高数", "高数课"]
+    assert v.terms["高等数学"].negative_aliases == ["高数课代表"]
+    assert sorted(v.terms["线性代数"].aliases) == ["线代", "线代课"]
+    assert not any("缺" in w for w in warns)
+
+
+def test_loader_rejects_missing_column(tmp_path):
+    """列名对不上要直接报错 —— 安静地少匹配一半比报错更难查。"""
+    p = _write(tmp_path / "bad.csv", "idx,word,alias\n1,高等数学,高数\n")
+    with pytest.raises(ValueError, match="缺必需列"):
+        load_vocab(p)
+
+
+def test_loader_merges_duplicate_canonical(tmp_path):
+    """X1 多人分头写必然出现同名行，要合并别名而不是互相覆盖。"""
+    p = _write(tmp_path / "dup.csv",
+               "canonical,aliases\n高等数学,高数\n高等数学,高数课\n")
+    v, _ = load_vocab(p)
+    assert len(v) == 1
+    assert sorted(v.terms["高等数学"].aliases) == ["高数", "高数课"]
+
+
+def test_loader_warns_on_alias_conflict(tmp_path):
+    """同一个别名挂到两个标准词上，要报出来（否则谁赢是随机的）。"""
+    p = _write(tmp_path / "conf.csv",
+               "canonical,aliases\n高等数学,高数\n高等数学课,高数\n")
+    _, warns = load_vocab(p)
+    assert any("多个标准词" in w for w in warns)
+
+
+def test_loader_skips_row_without_aliases(tmp_path):
+    p = _write(tmp_path / "noalias.csv", "canonical,aliases\n高等数学,\n")
+    _, warns = load_vocab(p)
+    assert any("没有别名" in w for w in warns)
+
+
+# ==================== 9. 金标集冒烟（防退化）====================
+
+@pytest.mark.skipif(not (os.path.exists(GOLDEN) and os.path.exists(TEMP_VOCAB)),
+                    reason="缺金标集或临时词表")
+def test_golden_regression_does_not_degrate():
+    """★ 指标护栏：任何改动都不许让金标表现明显退步。
+
+    当前基线（2026-10-23，94 条 / 101 词条）：
+        逐条全对 90/94 = 95.7%　精确率 97.1%　召回率 99.0%
+    调参可以，但跌破下面几条线就得说明理由。
+    """
+    import csv
+    from collections import Counter
+
+    from core.query_enhance import split_multi
+
+    vocab, _ = load_vocab(TEMP_VOCAB)
+    rows = list(csv.DictReader(open(GOLDEN, encoding="utf-8-sig")))
+
+    exact = 0
+    tp = fp = fn = 0
+    for r in rows:
+        want = split_multi(r["replace_to"])
+        got = match(r["query"], vocab).canonicals
+        got_c, want_c = Counter(got), Counter(want)
+        hit = sum((got_c & want_c).values())
+        tp += hit
+        fp += sum(got_c.values()) - hit
+        fn += sum(want_c.values()) - hit
+        if got_c == want_c:
+            exact += 1
+
+    precision = tp / (tp + fp) if tp + fp else 0
+    recall = tp / (tp + fn) if tp + fn else 0
+    assert exact / len(rows) >= 0.93, f"逐条全对率掉到 {exact}/{len(rows)}"
+    assert precision >= 0.95, f"精确率掉到 {precision:.1%}（开始乱换了）"
+    assert recall >= 0.97, f"召回率掉到 {recall:.1%}（漏换变多了）"
