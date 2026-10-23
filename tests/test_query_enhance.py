@@ -250,3 +250,78 @@ def test_golden_regression_does_not_degrate():
     assert exact / len(rows) >= 0.93, f"逐条全对率掉到 {exact}/{len(rows)}"
     assert precision >= 0.95, f"精确率掉到 {precision:.1%}（开始乱换了）"
     assert recall >= 0.97, f"召回率掉到 {recall:.1%}（漏换变多了）"
+
+
+# ==================== 10. 歧义裁决表 ====================
+
+ADJ = os.path.join(ROOT, "data/vocab/adjudication.csv")
+
+
+@pytest.mark.skipif(not os.path.exists(ADJ), reason="缺裁决表")
+def test_adjudication_loads_all_words():
+    from core.query_enhance import load_adjudication
+
+    rows = load_adjudication(ADJ)
+    assert len(rows) == 70, "X4 有 70 个词，裁决表必须一一对应"
+    assert sum(1 for a in rows.values() if a.needs_clarify) == 31
+    assert sum(1 for a in rows.values() if a.is_conditional) == 2
+    # 三类裁决加起来必须等于总数，不能有漏判
+    kinds = {a.decision for a in rows.values()}
+    assert kinds == {"禁止入表", "禁止入表·需澄清", "可入表·有条件"}, kinds
+
+
+@pytest.mark.skipif(not os.path.exists(ADJ), reason="缺裁决表")
+def test_block_words_excludes_conditional():
+    from core.query_enhance import block_words, load_adjudication
+
+    rows = load_adjudication(ADJ)
+    blocked = block_words(rows)
+    assert "系统" in blocked and "栈" in blocked
+    assert "综述" not in blocked and "模型" not in blocked, "有条件入表的词不该被无条件禁掉"
+
+
+@pytest.mark.skipif(not os.path.exists(ADJ), reason="缺裁决表")
+def test_conditional_word_depends_on_collocation():
+    """★ 触发条件用「搭配短语」，不是学科标签。
+
+    「综述部分怎么写」该换（指文献综述那一节），「你综述一下」不该换；
+    「跑模型要租显卡」该换（金标第 5 条），「模型怎么选」不该换。
+    """
+    from core.query_enhance import blocked_for_query, load_adjudication
+
+    rows = load_adjudication(ADJ)
+    assert "综述" not in blocked_for_query(rows, "综述部分怎么写才不像凑字数")
+    assert "综述" in blocked_for_query(rows, "你综述一下这几篇文章")
+    assert "模型" not in blocked_for_query(rows, "跑模型要租显卡吗")
+    assert "模型" in blocked_for_query(rows, "模型怎么选")
+
+
+@pytest.mark.skipif(not os.path.exists(ADJ), reason="缺裁决表")
+def test_clarify_only_fires_when_word_present():
+    from core.query_enhance import clarify_questions, load_adjudication
+
+    rows = load_adjudication(ADJ)
+    qs = clarify_questions(rows, "数二不考概率，那我是不是能少复习一章")
+    assert len(qs) == 1 and "概率" in qs[0]
+    assert clarify_questions(rows, "高数怎么复习") == []
+
+
+def test_missing_adjudication_degrades_gracefully(tmp_path):
+    """裁决表缺失时不能把功能搞挂，只能退化成「不做歧义拦截」。"""
+    from core.query_enhance import block_words, load_adjudication
+
+    rows = load_adjudication(str(tmp_path / "nope.csv"))
+    assert rows == {}
+    assert block_words(rows) == set()
+
+
+@pytest.mark.skipif(not os.path.exists(ADJ), reason="缺裁决表")
+def test_conditional_adjudication_keeps_golden_row_working():
+    """裁决表接入后，「跑模型」这条金标必须仍然能换出来（A→D 不许掉召回）。"""
+    from core.query_enhance import blocked_for_query, load_adjudication
+
+    vocab, _ = load_vocab(TEMP_VOCAB)
+    rows = load_adjudication(ADJ)
+    q = "跑模型要租显卡吗，实验室太慢"
+    r = match(q, vocab, global_block=blocked_for_query(rows, q))
+    assert r.canonicals == ["模型训练"]

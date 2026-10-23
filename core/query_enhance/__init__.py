@@ -17,15 +17,27 @@
 写进接口里就只能靠人肉点对话验证，改一次词表要试半天。
 """
 
+from core.query_enhance.ambiguous import (
+    Adjudication,
+    block_words,
+    blocked_for_query,
+    clarify_questions,
+    load_adjudication,
+)
 from core.query_enhance.matcher import EnhanceResult, Hit, Skipped, match
 from core.query_enhance.vocab import Term, Vocab, load_vocab, norm_key, split_multi
 
 __all__ = [
+    "Adjudication",
     "EnhanceResult",
     "Hit",
     "Skipped",
     "Term",
     "Vocab",
+    "block_words",
+    "blocked_for_query",
+    "clarify_questions",
+    "load_adjudication",
     "load_vocab",
     "match",
     "norm_key",

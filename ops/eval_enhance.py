@@ -30,7 +30,14 @@ if hasattr(sys.stdout, "reconfigure"):
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from core.query_enhance import load_vocab, match, norm_key, split_multi  # noqa: E402
+from core.query_enhance import (  # noqa: E402
+    clarify_questions,
+    load_adjudication,
+    load_vocab,
+    match,
+    norm_key,
+    split_multi,
+)
 
 
 def load_golden(path: str) -> list[dict]:
@@ -80,7 +87,10 @@ def ambiguous_high_risk(xlsx: str) -> set[str]:
 
 
 def evaluate(queries: list[dict], vocab, ambiguous: set[str], verbose: int = 0,
-             global_block: set[str] | None = None) -> dict:
+             global_block: set[str] | None = None,
+             adjudication: dict | None = None) -> dict:
+    from core.query_enhance import blocked_for_query
+
     tp = fp = fn = 0
     exact = 0
     bad_neg: list[tuple[str, str, str]] = []   # (query, 被换的反例词, 换成了什么)
@@ -90,7 +100,11 @@ def evaluate(queries: list[dict], vocab, ambiguous: set[str], verbose: int = 0,
 
     for item in queries:
         q = item["query"]
-        r = match(q, vocab, ambiguous=ambiguous, global_block=global_block or set())
+        # 裁决表按句生效：「有条件下入表」的词要看这一句有没有命中触发词
+        blocked = set(global_block or set())
+        if adjudication:
+            blocked |= blocked_for_query(adjudication, q)
+        r = match(q, vocab, ambiguous=ambiguous, global_block=blocked)
         got = r.canonicals
         want = item["replace_to"]
 
@@ -185,6 +199,8 @@ def main() -> int:
     ap.add_argument("--golden", default=os.path.join(ROOT, "data/golden/golden_v1.csv"))
     ap.add_argument("--vocab", default=os.path.join(ROOT, "data/vocab/temp_from_golden.csv"))
     ap.add_argument("--ambiguous-from-x4", default="", help="X4 歧义词 xlsx（取风险=高）")
+    ap.add_argument("--adjudication", default=os.path.join(ROOT, "data/vocab/adjudication.csv"),
+                    help="X4 裁决表（推荐上线配置用它）")
     ap.add_argument("--verbose", type=int, default=6, help="打印多少条未全对的明细")
     args = ap.parse_args()
 
@@ -211,6 +227,26 @@ def main() -> int:
           f"但白丢了 {base['TP'] - naive['TP']} 处该换的")
     print("     ⇒ 结论：negative_aliases 必须**按词条挂**（term-scoped），"
           "这才是给 X1 的硬要求")
+
+    # ---- D 组：接入裁决表（这才是推荐上线配置）----
+    if args.adjudication and os.path.exists(args.adjudication):
+        adj = load_adjudication(args.adjudication)
+        final = evaluate(queries, vocab, set(), args.verbose, adjudication=adj)
+        show("D · 接入歧义裁决表（推荐上线配置）", final, args.verbose)
+        asks = [(it["query"], clarify_questions(adj, it["query"])) for it in queries]
+        asks = [(q, a) for q, a in asks if a]
+        print(f"\n  裁决表：{len(adj)} 词"
+              f"（禁止入表 {sum(1 for a in adj.values() if a.decision == '禁止入表')}、"
+              f"需澄清 {sum(1 for a in adj.values() if a.needs_clarify)}、"
+              f"有条件 {sum(1 for a in adj.values() if a.is_conditional)}）")
+        print(f"  这句里会触发追问的：{len(asks)}/{len(queries)} 条")
+        for q, a in asks[:3]:
+            print(f"      {q[:24]} → {a[0]}")
+        print(f"\n  A→D：精确率 {base['替换级精确率']:.1%} → {final['替换级精确率']:.1%}"
+              f"　召回率 {base['替换级召回率']:.1%} → {final['替换级召回率']:.1%}"
+              f"　反例误替换 {base['反例误替换']} → {final['反例误替换']}")
+    elif args.adjudication:
+        print(f"\n⚠️ 找不到裁决表：{args.adjudication}（先跑 ops/build_adjudication.py）")
 
     if args.ambiguous_from_x4 and os.path.exists(args.ambiguous_from_x4):
         amb = ambiguous_high_risk(args.ambiguous_from_x4)
