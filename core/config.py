@@ -238,6 +238,9 @@ ENHANCE_ADJUDICATION_PATH = os.getenv(
 # 预览接口的文本上限。这是"一句话的口语词"场景，不是长文改写，
 # 放开长度只会让单次请求变慢，没有收益。
 ENHANCE_MAX_CHARS = int(os.getenv("ENHANCE_MAX_CHARS", "2000"))
+# B4：把换词接进聊天检索链路。默认开——不接进链路等于没人用；
+# 但它会改变检索用文本进而影响召回，所以必须留一个能当场关掉的开关（置 0 即回到旧行为）。
+ENHANCE_CHAT_ENABLED = bool(int(os.getenv("ENHANCE_CHAT_ENABLED", "1")))
 
 # ---------- 计划主题识别加固（P2）----------
 # 计划请求命不中主题词时不直接退化成通用模板，回看最近 N 条用户消息续上主题

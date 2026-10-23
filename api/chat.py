@@ -54,6 +54,7 @@ from core.llm import get_llm, get_vision_llm
 from core import scenarios as scenarios_mod
 from kb import pipelines
 from kb.rag_core import SYSTEM_PROMPT, assess_grounding, describe_api_error, grounding_note, rewrite_query
+from service import enhance as enhance_svc
 
 # 默认要登录：整组路由统一挂鉴权，新增端点时不会漏
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -264,6 +265,52 @@ def _pick_mode(req_mode: str, kb_id: str | None, kb_exists: bool) -> str:
     if kb_id and kb_exists:
         return "rag"
     return "agent"
+
+
+def _retrieval_query(question: str, history) -> tuple[str, list[dict], bool]:
+    """把用户原话变成「检索用文本」：先补全指代，再把口语词换成规范术语。
+
+    为什么合成一个函数
+    ------------------
+    图片理解模式（554 行）和 RAG 模式（831 行）都要这一步。分开写就是两份口径，
+    改一处忘一处，最后"同一句话在图片模式下检索命中的片段不一样"。
+
+    为什么顺序不能反
+    ----------------
+    rewrite_query 是用 LLM 补全指代（"那它呢" → "RRF 融合算法有什么缺点"），
+    补出来的文本里可能又冒出新的口语词，所以 enhance 必须排在它后面。
+    反过来先换词再交给 LLM 改写，LLM 改写完还可能把术语说回口语。
+
+    ★ 返回的是**检索用文本**，绝不回写 req.question。
+      界面展示与聊天记录永远是用户原话——这是三个原则里最不能破的一条。
+
+    返回 (检索词, 替换列表, 是否发生过指代改写)。
+    替换列表只用于发一条"已校准哪几个词"的提示，**不含 start/end**：
+    这里的文本可能已被 LLM 改写，偏移在原话上没有意义（要高亮走 /api/query/enhance）。
+    """
+    query = rewrite_query(question, history)
+    rewritten = query != question
+    if not config.ENHANCE_CHAT_ENABLED:
+        # 关掉开关时退回旧行为：只有改写，一个词都不换
+        return query, [], rewritten
+    text, changes = enhance_svc.enhance_for_retrieval(query)
+    return text, changes, rewritten
+
+
+def _enhance_note(changes: list[dict], rewritten: bool, query: str) -> str:
+    """拼一条状态条文案：做了什么 + 最终用哪个检索词。
+
+    只发**一条**：状态条是覆盖式的，连发两条用户只看得到最后一条，
+    第一条等于白发。所以改写和换词都发生时合成一句。
+    """
+    bits = []
+    if rewritten:
+        bits.append("结合上下文改写")
+    if changes:
+        pairs = "、".join(f"{c['raw']}→{c['canonical']}" for c in changes[:2])
+        more = f" 等 {len(changes)} 处" if len(changes) > 2 else ""
+        bits.append(f"按规范术语校准（{pairs}{more}）")
+    return f"已{'，'.join(bits)}，检索词：{query}"
 
 
 # ==================== 附件上传 ====================
@@ -551,7 +598,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 try:
                     # 同步检索会堵事件循环（embed_query 实测约 250ms），必须丢线程
                     pipe = await asyncio.to_thread(pipelines.get_or_create, uid, kb_id)
-                    query = await asyncio.to_thread(rewrite_query, req.question, history)
+                    query, _, _ = await asyncio.to_thread(_retrieval_query, req.question, history)
                     docs_scores = await asyncio.to_thread(
                         pipe.retrieve_with_score, query, req.top_k, uid
                     )
@@ -827,10 +874,13 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             yield _sse("status", {"text": f"RAG 模式，正在检索知识库（{kb_id}）..."})
             # 追问（"那它呢"）先结合上下文改写成独立问题再检索；不需要/失败时原样返回。
             # 用改写后的问题当检索词，检索结果缓存的键也随之正确，不会跨上下文串结果。
+            # 再把口语词（"高数""线代"）换成规范术语（"高等数学""线性代数"）——只改检索词。
             history = store.get_messages(uid, req.sid, include_system=False)[:-1]
-            query = await asyncio.to_thread(rewrite_query, req.question, history)
-            if query != req.question:
-                yield _sse("status", {"text": f"已结合上下文改写检索词：{query}"})
+            query, changes, rewritten = await asyncio.to_thread(
+                _retrieval_query, req.question, history
+            )
+            if changes or rewritten:
+                yield _sse("status", {"text": _enhance_note(changes, rewritten, query)})
             try:
                 pipe = await asyncio.to_thread(pipelines.get_or_create, uid, kb_id)
                 docs_scores = await asyncio.to_thread(pipe.retrieve_with_score, query, req.top_k, uid)

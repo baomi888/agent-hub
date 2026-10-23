@@ -19,6 +19,7 @@
 """
 from __future__ import annotations
 
+import logging
 import os
 import threading
 
@@ -33,6 +34,10 @@ from core.query_enhance import (
 
 _LOCK = threading.Lock()
 _CACHE: dict[str, dict] = {}      # key -> {"stamp": tuple, "obj": 对象, "warns": list}
+
+# 检索链路降级只报一次警：词表坏了会让每一句话都走异常分支，
+# 不设这个标志，日志会被同一行刷满，真正的问题反而被淹掉。
+_DEGRADE_REPORTED = False
 
 _VOCAB_CANDIDATES = ("vocab_v1.csv", "temp_from_golden.csv")
 
@@ -154,3 +159,40 @@ def preview(text: str, with_clarify: bool = True) -> dict:
                   "terms": len(vocab)},
         "warnings": warns,
     }
+
+
+def enhance_for_retrieval(text: str) -> tuple[str, list[dict]]:
+    """检索链路专用（B4）：只返回「检索文本 + 换了哪些词」，不做统计与追问。
+
+    和 preview() 的分工
+    -------------------
+    preview() 是给人看的：要 stats、要 skipped、要 clarify，出错就该红着脸报出来。
+    这个函数是给检索用的：**出错必须原样放行**。
+
+    为什么必须吞异常（不是偷懒）
+    ----------------------------
+    词表是组员每天在改的文件。改坏一次（删列、改名、编码搞错）`load_vocab` 就会
+    抛 `ValueError`。预览接口挂掉是好事——谁改坏的谁立刻看见；但聊天不能因此整条
+    链路挂掉。换词是**增益**，不是聊天和检索的前置条件。
+
+    返回值不带 start/end
+    --------------------
+    传进来的 text 是 `rewrite_query` 的产物（可能已被 LLM 补全指代），不是用户原话，
+    偏移在原话上没有意义。要做高亮走 preview()，那里的偏移是在 original 上的。
+    """
+    try:
+        vocab, _ = get_vocab()
+        adj, _ = get_adjudication()
+        blocked = blocked_for_query(adj, text) if adj else set()
+        r = match(text, vocab, global_block=blocked)
+        return r.retrieval_text, [
+            {"raw": h.raw, "canonical": h.canonical} for h in r.hits
+        ]
+    except Exception as exc:  # noqa: BLE001 —— 见上：换词失败绝不能让检索挂掉
+        # 但要留下痕迹：静默降级等于"接了跟没接一样，却没人知道"。
+        # 只报第一次，避免每句话刷一行日志把真问题淹掉。
+        global _DEGRADE_REPORTED
+        if not _DEGRADE_REPORTED:
+            _DEGRADE_REPORTED = True
+            logging.warning("[检索词增强] 词表加载失败，检索已降级为不换词：%s", exc)
+        return text, []
