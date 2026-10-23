@@ -228,6 +228,17 @@ RETRIEVAL_BIAS_ENABLED = bool(int(os.getenv("RETRIEVAL_BIAS_ENABLED", "1")))
 RETRIEVAL_BIAS_ALPHA = float(os.getenv("RETRIEVAL_BIAS_ALPHA", "0.08"))
 RETRIEVAL_BIAS_TOP = int(os.getenv("RETRIEVAL_BIAS_TOP", "8"))
 
+# ---------- 检索词增强（roadmap B2 匹配器 / B3 预览接口）----------
+# 词表路径。留空 = 自动挑：优先 vocab_v1.csv（X1 正式词表），没有再退回从金标集
+# 派生的临时词表。**故意不写死默认路径**：X1 到货那天只需要把文件放进 data/vocab/，
+# 不用改 .env、不用重启（service/enhance.py 按 mtime 热加载）。
+ENHANCE_VOCAB_PATH = os.getenv("ENHANCE_VOCAB_PATH", "")
+ENHANCE_ADJUDICATION_PATH = os.getenv(
+    "ENHANCE_ADJUDICATION_PATH", os.path.join(DATA_DIR, "vocab", "adjudication.csv"))
+# 预览接口的文本上限。这是"一句话的口语词"场景，不是长文改写，
+# 放开长度只会让单次请求变慢，没有收益。
+ENHANCE_MAX_CHARS = int(os.getenv("ENHANCE_MAX_CHARS", "2000"))
+
 # ---------- 计划主题识别加固（P2）----------
 # 计划请求命不中主题词时不直接退化成通用模板，回看最近 N 条用户消息续上主题
 #   （"计划再细一点" → 从前文的"六级备考"推断）。置 0 表示只看本轮提问。
