@@ -3,6 +3,7 @@ import type { Conversation, KbInfo, KbFile, FilePreview, SearchResult, Defaults,
 import { detailToMessage } from "./errors";
 import type { MeOut, UserOut, Template, ApplyTemplateResult, UsageSummary } from "./types";
 import type { ProfileSnapshot, TagTaxonomy, TemplateRecommend } from "./types";
+import type { EnhanceResult } from "./types";
 import type {
   AgentTool,
   DailyReport,
@@ -201,6 +202,36 @@ async function tryRequest<T>(
     throw e;
   } finally {
     if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * 检索词校准预览（B3 接口）。**失败一律返回 null，绝不抛错。**
+ *
+ * 为什么和 api 里其它方法不一样：
+ * 这是一个"用户每打一句话就可能在后台跑一次"的辅助能力，不是用户主动发起的业务操作。
+ * 它挂在输入框上方，一旦限流（429）或超时就弹红字，用户会以为聊天坏了——
+ * 而实际上换词只是个增益，没有它检索照样跑。
+ *
+ * 所以：连不上、被限流、没登录，全部静默降级为"不提示"。
+ * 唯一例外是不传 signal：超时由 tryRequest 自己的 AbortController 管（8s），
+ * 这个接口是纯本地计算，正常都在 20ms 内返回。
+ */
+export async function previewEnhance(
+  text: string,
+  withClarify = true
+): Promise<EnhanceResult | null> {
+  const q = text.trim();
+  if (q.length < 2) return null;
+  try {
+    return await tryRequest<EnhanceResult>(
+      "/api/query/enhance",
+      { method: "POST", body: JSON.stringify({ text: q, with_clarify: withClarify }) },
+      { timeoutMs: 8000 }
+    );
+  } catch {
+    // 429 / 401 / 网络错误：提示条不出现就是了，不要打扰正在打字的人
+    return null;
   }
 }
 

@@ -596,3 +596,41 @@ export interface HybridLogRow {
   payload?: Record<string, unknown>;
   ts: number;
 }
+
+// ---------- 检索词校准（B3 预览接口 / B5 输入框提示条）----------
+
+/**
+ * 一次替换：raw 是用户原话里的片段，canonical 是它被换成的规范术语。
+ *
+ * `start` / `end` 是**在 `original` 上的下标**，前端直接切片做高亮。
+ * 千万不要拿 `raw` 去 `indexOf` —— 同一个词在一句话里出现两次时，
+ * 两次都会定位到第一个位置，高亮就会错位。
+ */
+export interface EnhanceHit {
+  raw: string;
+  canonical: string;
+  start: number;
+  end: number;
+}
+
+/** 命中但故意没换的词（反例 / 歧义词），只给排障看，界面上不展示。 */
+export interface EnhanceSkipped {
+  raw: string;
+  canonical: string;
+  reason: string;
+}
+
+export interface EnhanceResult {
+  /** 用户原话（可能与输入有前后空白差异，后端会 strip） */
+  original: string;
+  /** 增强后的检索用文本，只喂检索，绝不展示成"用户说的话" */
+  retrieval: string;
+  changed: boolean;
+  hits: EnhanceHit[];
+  skipped: EnhanceSkipped[];
+  /** 歧义词的追问句，可直接渲染 */
+  clarify: string[];
+  /** 当前生效的词表（截图报 bug 时看这个就知道是哪版） */
+  vocab: { file: string; terms: number };
+  warnings: string[];
+}
