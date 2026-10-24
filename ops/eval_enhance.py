@@ -97,6 +97,8 @@ def evaluate(queries: list[dict], vocab, ambiguous: set[str], verbose: int = 0,
     fp_rows: list[dict] = []                   # 多换的词，带上「金标有没有声明反例」
     miss_rows: list[dict] = []
     skip_reasons: Counter = Counter()
+    rewritten_text = 0                         # 检索文本把原话改掉了（必须是 0）
+    rewritten_rows: list[tuple[str, str]] = []
 
     for item in queries:
         q = item["query"]
@@ -107,6 +109,18 @@ def evaluate(queries: list[dict], vocab, ambiguous: set[str], verbose: int = 0,
         r = match(q, vocab, ambiguous=ambiguous, global_block=blocked)
         got = r.canonicals
         want = item["replace_to"]
+
+        # ★★ 「原话有没有被改」——这条指标是 2026-10-24 补上的，原因写在这里：
+        # 前面四个数（全对率/精确/召回/反例）**全都测不出病句**。
+        # 替换式时代它们一直是 95.7% / 97.1% / 99.0%，同时「查重率」被改成
+        # 「重复率检测率」——因为指标只看"识别了哪些词"，不看"拼出来通不通"。
+        # 病句是靠 X2 那 142 条真实问法人工读出来的，代价太大。
+        # 现在把不变量变成指标：检索文本必须以原话为前缀，否则一律报警。
+        ret = r.retrieval_text
+        if not (ret == q or ret.startswith(q + " ")):
+            rewritten_text += 1
+            if len(rewritten_rows) < 8:
+                rewritten_rows.append((q, ret))
 
         # 反例误替换：命中片段本身就是 must_not_replace 里的词
         neg_keys = {norm_key(n) for n in item["must_not"]}
@@ -156,6 +170,8 @@ def evaluate(queries: list[dict], vocab, ambiguous: set[str], verbose: int = 0,
         "TP": tp, "FP": fp, "FN": fn,
         "反例误替换": len(bad_neg),
         "反例误替换明细": bad_neg[:8],
+        "原话被改写": rewritten_text,
+        "原话被改写明细": rewritten_rows,
         "多换的词": fp_rows,
         "金标未声明反例的多换": undeclared,
         "未全对的条目": miss_rows,
@@ -174,6 +190,11 @@ def show(tag: str, m: dict, verbose: int) -> None:
     if m["反例误替换明细"]:
         for q, raw, canon in m["反例误替换明细"]:
             print(f"      「{raw}」被换成「{canon}」  ← {q[:26]}")
+    rw = m.get("原话被改写", 0)
+    rflag = "✅" if rw == 0 else "❌ 增强不该动用户的原话"
+    print(f"  原话被改写    {rw}  {rflag}")
+    for q, ret in (m.get("原话被改写明细") or [])[:3]:
+        print(f"      {q[:28]}  →  {ret[:40]}")
     und = m.get("金标未声明反例的多换") or []
     if und:
         print(f"  多换的词      {len(m['多换的词'])} 个，其中 {len(und)} 个"
@@ -262,8 +283,10 @@ def main() -> int:
 
     print("\n" + "-" * 68)
     print("判读：精确率低 = 乱换（会改坏检索）；召回率低 = 漏换（增强白做）；")
-    print("      反例误替换必须为 0，否则这个词表不能上线。")
-    return 0 if base["反例误替换"] == 0 else 1
+    print("      反例误替换、原话被改写两项必须为 0，否则不能上线。")
+    print("      ★ 「原话被改写」是 2026-10-24 新增的：它专门抓病句，")
+    print("        前四个数对病句是瞎的（替换时代一直 97.1% 而句子已经不通）。")
+    return 0 if (base["反例误替换"] == 0 and base["原话被改写"] == 0) else 1
 
 
 if __name__ == "__main__":

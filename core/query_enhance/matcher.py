@@ -1,28 +1,41 @@
 # -*- coding: utf-8 -*-
 """检索词增强 · 匹配器（B2）。
 
-它只做一件事：把学生原话里的口语词，换成词表里的标准词。
-**换的结果只用来检索，原话一个字都不动**（这是技术报告里三条不可违背原则的第三条）。
+它只做一件事：在学生的口语问法后面，**追加**词表里的规范术语，让检索同时能命中
+「高数」和「高等数学」两种说法。原话一个字都不动。
+
+★ 为什么是追加而不是替换（2026-10-24 改，这次改动有血有泪）
+-----------------------------------------------------------
+第一版是替换：`高数怎么复习` → `高等数学怎么复习`。金标集上跑得好看（精确 97.1%、
+召回 99.0%），但拿 X2 的 142 条真实问法一测就露了：
+
+    32 条触发换词，**12 条改出了病句**（每 3 条坏 1 条）
+    文献综述怎么写   → 文献文献综述怎么写     ← 防护漏了一个方向
+    学分绩点怎么算   → 学分平均学分绩点怎么算   ← 替换点吞掉「学分」再还回一个
+    查重率多少算安全 → 重复率检测率多少算安全   ← 术语自带「率」，和原字撞车
+
+后两条**防不住**：2 字口语词换成 5~6 字术语，必然和原句相邻的字重新组合。
+补 heuristic 只能一个个打补丁，词表一扩又冒新的。
+
+所以改成 OR 扩展（query expansion 的标准做法就是 OR，不是替换）：
+原话全保留，末尾追加标准词，检索两边都能命中。病句问题在结构上消失，
+而且召回只会更高——原话里的口语词不再被删掉。
 
 匹配器要同时满足三个互相拉扯的目标
 ----------------------------------
-1. **该换的要换**（召回）：「高数怎么复习」→「高等数学怎么复习」
-2. **不该换的绝不能换**（精确）：反例词、歧义词、已经正确的说法
-3. **换完还得像人话**：「二战考研怎么准备」里的「二战」如果换成「考研二战」，
-   会变成「考研二战考研怎么准备」——这不是增强，是制造噪声。
-
-第 3 条最容易被忽略。只按「别名表扫一遍全替换」的写法，
-在第一版测试里就会撞上它，而且**指标上看不出来**：命中率还是 100%，
-只是答案变难看了。所以这里专门有一个 `_adjacent_already_standard` 检查。
+1. **该追加的要追加**（召回）：「高数怎么复习」→ 追加「高等数学」
+2. **不该追加的绝不能追加**（精确）：反例词、歧义词、已经说过标准词的说法
+3. **追加完还得像人话**：检索文本是「原话 + 空格 + 术语」，原话部分恒为前缀，
+   所以不存在「改了语法」这回事；要防的只剩「同一个术语塞两遍」这种冗余。
 
 优先级（从高到低）
 ------------------
 1. 全局黑名单（调用方显式给的原词）——命中即占位，谁也别想动
 2. 长别名优先——避免「操作系统」被拆成「操作」+「系统」
-3. 已占用位置不再匹配——保证一个字符只被替换一次
+3. 已占用位置不再匹配——保证一个字符只被处理一次
 4. 该词条自己的反例——只挡它自己，不牵连别的词条
-5. 歧义词（需上下文裁决，来自 X4）——有疑问就不换，宁可少换不可错换
-6. 冗余检查——替换后会和标准词叠字的，不换
+5. 歧义词（需上下文裁决，来自 X4）——有疑问就不追加，宁可少换不可错换
+6. 冗余检查——原话里已经说过标准词的，不重复追加
 """
 from __future__ import annotations
 
@@ -33,6 +46,10 @@ from core.query_enhance.vocab import Vocab
 # 判断「相邻片段是否已属于标准词」时，至少比对 2 个字。
 # 1 个字太容易误伤（「数」几乎什么都沾边）。
 _MIN_FRAGMENT = 2
+
+# 原话与追加术语之间、术语与术语之间的分隔符。只用于检索，不参与展示。
+# 用空格而不是顿号：检索侧（BM25 / 向量）按空白切词，标点会被当成正文。
+_JOIN = " "
 
 
 @dataclass
@@ -61,6 +78,9 @@ class EnhanceResult:
 
     `display_text` 恒等于原话——三原则里的「不改展示」在类型层面就锁死了，
     调用方拿不到被改过的展示文本，只能拿 `retrieval_text` 去检索。
+
+    ★ 现在 `retrieval_text` 也**以原话开头**（追加式而非替换式），
+      所以「展示」和「检索」不再是两种语法，只差末尾多出来的术语串。
     """
 
     original: str
@@ -72,21 +92,52 @@ class EnhanceResult:
         return self.original
 
     @property
-    def retrieval_text(self) -> str:
-        """把命中处替换成标准词后、用于检索的文本。"""
-        if not self.hits:
-            return self.original
-        out, last = [], 0
-        for h in self.hits:
-            out.append(self.original[last:h.start])
-            out.append(h.canonical)
-            last = h.end
-        out.append(self.original[last:])
-        return "".join(out)
+    def canonicals(self) -> list[str]:
+        """命中侧的标准词（**不去重**）——精确率/召回率按"处"算，重复出现要计多处。
+
+        要拿去检索的请用 `added_terms`（去重版）。
+        """
+        return [h.canonical for h in self.hits]
 
     @property
-    def canonicals(self) -> list[str]:
-        return [h.canonical for h in self.hits]
+    def added_terms(self) -> list[str]:
+        """要追加给检索的标准词，去重且保持出现顺序。
+
+        去重是必须的：「高数和线代都要看，线代更难」里「线性代数」只该出现一次。
+        保持顺序是为了让检索文本可复现——同一句话任何时候生成的串都一样，
+        否则缓存和 A/B 对比都会变得不可信。
+        """
+        seen: set[str] = set()
+        out: list[str] = []
+        for h in self.hits:
+            if h.canonical not in seen:
+                seen.add(h.canonical)
+                out.append(h.canonical)
+        return out
+
+    @property
+    def retrieval_text(self) -> str:
+        """检索用文本 = 原话 + 空格 + 标准词（OR 扩展）。
+
+        例：「高数怎么复习」→「高数怎么复习 高等数学」
+
+        ★ 为什么不替换（2026-10-24 改）
+        -------------------------------
+        替换会让替换点和原句相邻的字重新组合成病句，而且是结构性的：
+        「学分绩点」→「学分平均学分绩点」、「查重率」→「重复率检测率」。
+        拿 X2 的 142 条真实问法实测，32 条触发换词里 12 条变形（每 3 条坏 1 条）。
+        这类错误补 heuristic 防不住 —— 2 字口语词换 5~6 字术语必然与原邻字碰撞。
+
+        追加则完全没有这个问题：原话一个字不动，口语词和术语同时可被检索命中。
+        这也是 query expansion 的标准做法（同义词扩展是 OR，不是替换）。
+
+        ★ 附带好处：`original` 恒为前缀 ⇒ `hits[].start/end` 在检索文本上
+        同样成立，前端拿同一套下标就能高亮，不用做偏移换算。
+        """
+        terms = self.added_terms
+        if not terms:
+            return self.original
+        return self.original + _JOIN + _JOIN.join(terms)
 
 
 def _find_all(haystack: str, needle: str) -> list[int]:
@@ -98,27 +149,32 @@ def _find_all(haystack: str, needle: str) -> list[int]:
     return out
 
 
-def _adjacent_already_standard(query: str, start: int, end: int, canonical: str) -> str:
-    """检查替换后会不会和句子里已有的标准词叠字。返回原因（空串=不冲突）。
+def _already_said(query: str, start: int, end: int, canonical: str) -> str:
+    """原话里是否已经说过这个标准词。返回原因（空串=没说，可以追加）。
 
-    两种情形都算冲突：
-      · 别名**前面**紧挨着标准词的后半截：`[高等]高数` —— 少见，但存在
-      · 别名**后面**紧挨着标准词的前半截：`二战[考研]` —— 这是真实高频情形
+    改成追加式之后，这个检查的职责变了：不再是"救语法"（追加不会破坏语法），
+    而是**不乱塞重复项**——检索词里同一个术语出现两遍纯属浪费算力，还会稀释相似度。
 
-    例：canonical = 考研二战，query = 「二战考研怎么准备」
-        别名「二战」后面紧跟「考研」，正是 canonical 的前缀 ⇒ 换了会变成
-        「考研二战考研」，所以跳过。
+    三条判据：
+      · 标准词整段就在原话里 —— `文献综述怎么写` 里的 `文献综述`
+        ★ 这条是 X2 验收补上的。原来只判"替换后会不会叠字"，漏了这个方向：
+          `文献` + `[综述]` 替换后确实是 `文献文献综述`，而正确做法是压根不用动。
+      · 别名**前面**紧挨着标准词的后半截：`[高等]高数`
+      · 别名**后面**紧挨着标准词的前半截：`二战[考研]`
     """
+    if canonical in query:
+        return f"原话里已有标准词「{canonical}」，不必追加"
+
     before = query[max(0, start - len(canonical)):start]
     after = query[end:end + len(canonical)]
 
     for n in range(_MIN_FRAGMENT, len(canonical)):
         # canonical 的后缀落在别名前面
         if before.endswith(canonical[-n:]):
-            return f"前文已有标准词尾「{canonical[-n:]}」，替换会叠字"
+            return f"前文已含标准词尾「{canonical[-n:]}」，不必追加"
         # canonical 的前缀落在别名后面
         if after.startswith(canonical[:n]):
-            return f"后文已有标准词头「{canonical[:n]}」，替换会叠字"
+            return f"后文已含标准词头「{canonical[:n]}」，不必追加"
     return ""
 
 
@@ -193,7 +249,7 @@ def match(query: str, vocab: Vocab, ambiguous: set[str] | None = None,
             if canon_key in blocked:
                 result.skipped.append(Skipped(raw, term.canonical, s, "歧义词需上下文裁决"))
                 continue
-            why = _adjacent_already_standard(query, s, e, term.canonical)
+            why = _already_said(query, s, e, term.canonical)
             if why:
                 result.skipped.append(Skipped(raw, term.canonical, s, why))
                 continue

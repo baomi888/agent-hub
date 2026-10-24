@@ -268,7 +268,7 @@ def _pick_mode(req_mode: str, kb_id: str | None, kb_exists: bool) -> str:
 
 
 def _retrieval_query(question: str, history) -> tuple[str, list[dict], bool]:
-    """把用户原话变成「检索用文本」：先补全指代，再把口语词换成规范术语。
+    """把用户原话变成「检索用文本」：先补全指代，再追加规范术语。
 
     为什么合成一个函数
     ------------------
@@ -283,9 +283,11 @@ def _retrieval_query(question: str, history) -> tuple[str, list[dict], bool]:
 
     ★ 返回的是**检索用文本**，绝不回写 req.question。
       界面展示与聊天记录永远是用户原话——这是三个原则里最不能破的一条。
+    ★ 增强是**追加**（原话 + 术语）而不是替换。替换在真实短句上每 3 条就有 1 条
+      造出病句（`查重率`→`重复率检测率`），追加式原文一字不动，不存在这个问题。
 
-    返回 (检索词, 替换列表, 是否发生过指代改写)。
-    替换列表只用于发一条"已校准哪几个词"的提示，**不含 start/end**：
+    返回 (检索词, 命中列表, 是否发生过指代改写)。
+    命中列表只用于发一条"已补充哪几个术语"的提示，**不含 start/end**：
     这里的文本可能已被 LLM 改写，偏移在原话上没有意义（要高亮走 /api/query/enhance）。
     """
     query = rewrite_query(question, history)
@@ -301,7 +303,10 @@ def _enhance_note(changes: list[dict], rewritten: bool, query: str) -> str:
     """拼一条状态条文案：做了什么 + 最终用哪个检索词。
 
     只发**一条**：状态条是覆盖式的，连发两条用户只看得到最后一条，
-    第一条等于白发。所以改写和换词都发生时合成一句。
+    第一条等于白发。所以改写和增强都发生时合成一句。
+
+    措辞用「补充规范术语检索」而不是「校准」：增强是**追加**，用户原话没有被改掉。
+    说成"校准"会让人以为自己的问题被动手脚了，而这正是三原则要避免的观感。
     """
     bits = []
     if rewritten:
@@ -309,7 +314,7 @@ def _enhance_note(changes: list[dict], rewritten: bool, query: str) -> str:
     if changes:
         pairs = "、".join(f"{c['raw']}→{c['canonical']}" for c in changes[:2])
         more = f" 等 {len(changes)} 处" if len(changes) > 2 else ""
-        bits.append(f"按规范术语校准（{pairs}{more}）")
+        bits.append(f"补充规范术语检索（{pairs}{more}）")
     return f"已{'，'.join(bits)}，检索词：{query}"
 
 

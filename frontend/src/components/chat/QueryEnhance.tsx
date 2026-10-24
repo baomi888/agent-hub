@@ -1,17 +1,23 @@
 "use client";
 
 /**
- * 检索词校准提示条（roadmap B5）—— 把 B3 的「一句话会被怎么理解」摆到输入框上面。
+ * 检索词增强提示条（roadmap B5）—— 把 B3 的「检索时会怎么理解你」摆到输入框上面。
  *
  * 为什么要有这个东西
  * ------------------
- * 后端会在检索前把「高数」换成「高等数学」。这件事如果用户看不见，就是**偷偷改他的问题**；
+ * 后端检索前会在用户原话后面**追加**规范术语（`高数怎么复习` → `高数怎么复习 高等数学`），
+ * 让口语词和术语都能命中。这件事如果用户看不见，就是**偷偷动了他的问题**；
  * 看见了并且能撤掉，才是"帮他检索得更准"。技术方案里那三条原则（可见 / 可撤销 / 不改展示）
  * 落到界面上就是这一个组件：
  *
- *   · 可见   —— 输入停顿后自动出现，明说换了哪几个词
- *   · 可撤销 —— 「这次不用」，这一句立刻恢复按原话检索
- *   · 不改展示 —— 只影响检索词；用户发出去的话、聊天记录里显示的，一个字都不变
+ *   · 可见   —— 输入停顿后自动出现，明说会额外按几个术语检索
+ *   · 可撤销 —— 「这次不用」，这一句立刻恢复只按原话检索
+ *   · 不改展示 —— 增强只在检索侧追加；用户发出去的话、聊天记录里显示的，一个字都不变
+ *
+ * ★ 2026-10-24 从「替换」改成「追加」后，这个组件的 UI 也跟着变了：
+ *   以前展示「原话 / 检索」两行对照（检索那行是改过的句子），
+ *   现在展示「原话（高亮被识别的词）/ 补充（术语 chips）」——因为原话根本没被改，
+ *   再摆一份"检索后的句子"只会把原话重复念一遍，又长又让人以为被改写了。
  *
  * 为什么是浮层而不是占一行的字段
  * ------------------------------
@@ -21,7 +27,7 @@
  * 为什么请求失败什么都不显示
  * --------------------------
  * 这是"每打一句话就可能跑一次"的辅助能力，不是用户主动发起的操作。
- * 限流（429）或超时如果弹红字，用户会以为聊天坏了，而实际换词只是增益。
+ * 限流（429）或超时如果弹红字，用户会以为聊天坏了，而实际增强只是增益。
  * 详见 lib/api.ts::previewEnhance —— 它在那一层就把异常吞干净了。
  */
 import { useEffect, useRef, useState } from "react";
@@ -88,7 +94,8 @@ export default function QueryEnhance({ text }: { text: string }) {
   if (!state || state.text !== q || q === dismissed) return null;
 
   const result = state.data;
-  const n = result.hits.length;
+  // 去重后的术语数，与下面 chips 一一对应。用 hits.length 会出现"3 处"却只列 2 个词的困惑。
+  const n = result.added.length;
 
   if (!open) {
     return (
@@ -98,7 +105,7 @@ export default function QueryEnhance({ text }: { text: string }) {
             <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />
           </svg>
           <span>
-            会把 <b>{n}</b> 处口语词换成规范术语
+            会额外按 <b>{n}</b> 个规范术语检索
           </span>
           <span className="qe-bar-more">看看</span>
         </button>
@@ -107,10 +114,10 @@ export default function QueryEnhance({ text }: { text: string }) {
   }
 
   return (
-    <div className="qe" role="region" aria-label="检索词校准预览">
+    <div className="qe" role="region" aria-label="检索词增强预览">
       <div className="qe-card">
         <div className="qe-head">
-          <span className="qe-title">检索时这样理解你的问题</span>
+          <span className="qe-title">检索时会同时按规范术语找资料</span>
           {/* 正文只报词条数：文件名对用户没意义，但排障时又要看，所以塞进 title */}
           <span className="qe-src" title={`当前词表：${result.vocab.file}`}>
             {result.vocab.terms} 条词
@@ -128,7 +135,11 @@ export default function QueryEnhance({ text }: { text: string }) {
             <dd>
               {segments(result.original, result.hits).map((s, i) =>
                 s.hit ? (
-                  <mark key={i} className="qe-mark" title={`检索时按「${s.hit.canonical}」找资料`}>
+                  <mark
+                    key={i}
+                    className="qe-mark"
+                    title={`这个词同时按「${s.hit.canonical}」检索`}
+                  >
                     {s.text}
                   </mark>
                 ) : (
@@ -138,8 +149,14 @@ export default function QueryEnhance({ text }: { text: string }) {
             </dd>
           </div>
           <div>
-            <dt>检索</dt>
-            <dd className="qe-retrieval">{result.retrieval}</dd>
+            <dt>补充</dt>
+            <dd className="qe-terms">
+              {result.added.map((t, i) => (
+                <span key={i} className="qe-term">
+                  {t}
+                </span>
+              ))}
+            </dd>
           </div>
         </dl>
 

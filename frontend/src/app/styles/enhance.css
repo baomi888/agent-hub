@@ -193,16 +193,31 @@
   overflow-wrap: anywhere;
 }
 
-/* 检索用文本压暗一档：它不是用户说的话，视觉上就该退后一层 */
-.qe-retrieval {
-  color: var(--text-2) !important;
+/* 追加的术语用 chip 列出。它们是"检索时额外带上的词"，不是用户说的话，
+   所以压暗一档、加个浅底，视觉上退后一层，但必须清楚地一个个分开——
+   连成一行会被误读成"你把我的话改成这样了"。 */
+.qe-terms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
-/* 被替换的词：一条金色实线下划线 + 极淡金底。
+.qe-term {
+  padding: 1px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2) !important;
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+/* 被识别的口语词：一条金色实线下划线 + 极淡金底。
    一开始只用 --accent-soft（alpha .12）当底色，深色主题下几乎看不见——
-   提示条的全部价值就是"让用户看见哪几个词被换了"，看不见等于没做。
+   提示条的全部价值就是"让用户看见哪几个词被识别到了"，看不见等于没做。
    实线用 --accent 本身（深色下是亮金，浅色下与 -ink 搭配也够）。
-   鼠标悬停用 title 说明会被换成什么。 */
+   鼠标悬停用 title 说明会按哪个术语额外检索。 */
 .qe-mark {
   padding: 0 1px 1px;
   border-bottom: 1.5px solid var(--accent);

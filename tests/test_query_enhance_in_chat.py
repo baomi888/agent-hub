@@ -69,26 +69,27 @@ def _no_rewrite(monkeypatch):
 # ==================== 1. 底线：展示不改 ====================
 
 def test_returns_retrieval_text_only_and_keeps_original(monkeypatch, vocab, chat_on):
-    """★ 返回的检索词被换了，但传进去的原话必须原封不动。"""
+    """★ 检索词被增强了（原话 + 术语），但传进去的原话必须原封不动。"""
     _no_rewrite(monkeypatch)
     original = "高数怎么复习"
     query, changes, rewritten = chat._retrieval_query(original, [])
 
-    assert query == "高等数学怎么复习", "检索词没换上，等于白接"
-    assert original == "高数怎么复习", "原话被改了——展示层会跟着变，这是红线"
+    assert query == "高数怎么复习 高等数学", "术语没追加上，等于白接"
+    assert query.startswith(original), "原话被改写了——展示层会跟着变，这是红线"
+    assert original == "高数怎么复习"
     assert changes == [{"raw": "高数", "canonical": "高等数学"}]
     assert rewritten is False
 
 
 def test_changes_carry_no_offsets(monkeypatch, vocab, chat_on):
-    """★ 替换列表故意不带 start/end。
+    """★ 命中列表故意不带 start/end。
 
     这里的文本可能已经被 LLM 补全过指代，偏移在**用户原话**上没有意义；
     带了偏移前端一定会拿去高亮，然后错位。要高亮走 /api/query/enhance。
     """
     _no_rewrite(monkeypatch)
     _, changes, _ = chat._retrieval_query("高数和线代", [])
-    assert changes, "这一步本来就该有替换"
+    assert changes, "这一步本来就该有命中"
     for c in changes:
         assert set(c) == {"raw", "canonical"}, f"多带了字段：{c}"
 
@@ -116,7 +117,7 @@ def test_rewrite_runs_before_enhance(monkeypatch, vocab, chat_on):
     query, changes, rewritten = chat._retrieval_query("那它呢", [{"role": "user", "content": "高数"}])
 
     assert rewritten is True
-    assert query == "高等数学那章怎么复习", "rewrite 补出来的口语词没被换 —— 顺序反了"
+    assert query == "高数那章怎么复习 高等数学", "rewrite 补出来的口语词没被增强 —— 顺序反了"
     assert changes == [{"raw": "高数", "canonical": "高等数学"}]
 
 

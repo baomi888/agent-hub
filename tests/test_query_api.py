@@ -111,11 +111,13 @@ def test_endpoints_require_login(monkeypatch):
 # ==================== 2. 核心契约：不改展示 ====================
 
 def test_preview_never_touches_display_text(monkeypatch):
-    """★ original 必须与用户输入逐字相同，检索文本才是被替换的那份。"""
+    """★ original 必须与用户输入逐字相同；retrieval 是它后面追加术语。"""
     _prep(monkeypatch, "display")
     body = _enhance(_client("qapi_display"), "高数怎么复习")
     assert body["original"] == "高数怎么复习"
-    assert body["retrieval"] == "高等数学怎么复习"
+    assert body["added"] == ["高等数学"]
+    assert body["retrieval"] == "高数怎么复习 高等数学"
+    assert body["retrieval"].startswith(body["original"]), "原话被改动了——这是红线"
     assert body["changed"] is True
 
 
@@ -168,7 +170,7 @@ def test_conditional_word_follows_collocation(monkeypatch):
 
     good = _enhance(c, "综述部分怎么写才不像凑字数")
     assert good["changed"] is True
-    assert good["retrieval"].startswith("文献综述")
+    assert good["added"] == ["文献综述"]
 
     bad = _enhance(c, "你综述一下这几篇文章")
     assert bad["changed"] is False, "动词义被换成名词义了"

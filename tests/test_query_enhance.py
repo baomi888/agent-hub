@@ -3,12 +3,22 @@
 
 这些测试锁的不是"能跑"，而是四条**改起来最容易破的约束**：
 
-1. 原话永不被改（display_text 恒等于输入）——技术报告三条原则里的"不改展示"。
+1. 原话永不被改 —— `display_text` 恒等于输入，`retrieval_text` 也**以原话为前缀**。
+   后一条是 2026-10-24 从"替换"改"追加"之后加的，比原来强得多：
+   整个检索文本里，用户写的那句话原封不动排在最前面。
 2. 反例按词条挂，不是全局黑名单——实测做错会让召回从 99% 掉到 94%。
 3. 长别名优先——否则"操作系统"会被拆成"操作"+"系统"。
-4. 替换后不许叠字——"二战考研"换成"考研二战考研"是制造噪声。
+4. 追加时不许重复塞同一个术语——「文献综述」原话已有，就不该再追加一次。
 
-另外留了一条金标集冒烟测试：metrics 掉下去就说明匹配器或词表被改坏了。
+另外两条护栏：
+· 金标集指标不许明显退步；
+· X2 的真实问法不许被改出病句（替换时代的 12 条变形，逐条钉在这里）。
+
+为什么第 4 条和第 2 条历史不一样
+--------------------------------
+替换时代要防的是"改出病句"（`文献综述`→`文献文献综述`、`查重率`→`重复率检测率`）。
+那些病句现在从结构上消失了：原话没被动过，不可能再造出病句。
+留下要防的只剩"同一个术语在检索词里出现两遍"，属于浪费而非错误。
 """
 import os
 import sys
@@ -34,14 +44,38 @@ def build(*terms) -> Vocab:
 # ==================== 1. 三原则：不改展示 ====================
 
 def test_display_text_never_changes():
-    """★ 原话一个字都不能动，只有检索用的那份被换。"""
+    """★ 原话一个字都不能动；检索文本只是在它后面追加术语。"""
     v = build({"canonical": "高等数学", "aliases": ["高数"]})
     r = match("高数怎么复习", v)
     assert r.original == "高数怎么复习"
-    assert r.display_text == "高数怎么复习"          # 展示：原样
-    assert r.retrieval_text == "高等数学怎么复习"    # 检索：换过
-    assert r.hits[0].raw == "高数"                  # 高亮要能定位到原话
+    assert r.display_text == "高数怎么复习"                    # 展示：原样
+    assert r.retrieval_text == "高数怎么复习 高等数学"          # 检索：原话 + 术语
+    assert r.added_terms == ["高等数学"]
+    assert r.hits[0].raw == "高数"                            # 高亮要能定位到原话
     assert r.hits[0].start == 0 and r.hits[0].end == 2
+
+
+def test_retrieval_text_always_starts_with_original():
+    """★★ 本次改动的核心不变量：**检索文本以原话开头**。
+
+    这条一旦成立，"增强把用户的问题改坏了"这类 bug 在结构上就不可能发生。
+    替换时代没有这个性质（`学分绩点`→`学分平均学分绩点`），所以只能靠一个个
+    heuristic 去挡，挡不住就出病句。改动后这里变成一条可断言的性质。
+    """
+    v = build(
+        {"canonical": "高等数学", "aliases": ["高数"]},
+        {"canonical": "平均学分绩点", "aliases": ["绩点"]},
+        {"canonical": "重复率检测", "aliases": ["查重"]},
+        {"canonical": "文献综述", "aliases": ["综述"]},
+    )
+    for q in ["高数怎么复习", "学分绩点怎么算", "查重率多少算安全",
+              "文献综述怎么写才有逻辑", "帮我看看这段代码", ""]:
+        r = match(q, v)
+        assert r.retrieval_text == q or r.retrieval_text.startswith(q + " "), \
+            f"检索文本没以原话开头：{q!r} → {r.retrieval_text!r}"
+        # 命中下标在原话上必须能切出 raw（前端高亮靠这个）
+        for h in r.hits:
+            assert q[h.start:h.end] == h.raw
 
 
 def test_hit_positions_index_original_string():
@@ -103,29 +137,55 @@ def test_longest_alias_wins():
     assert "系统" not in [h.raw for h in r.hits], "「系统」被吃掉说明长优先失效"
 
 
-def test_each_char_replaced_at_most_once():
+def test_each_char_matched_at_most_once():
     v = build({"canonical": "高等数学", "aliases": ["高数"]})
     r = match("高数和高数", v)
     assert len(r.hits) == 2
-    assert r.retrieval_text == "高等数学和高等数学"
+    # 两处命中，但术语只追加一次（去重）——检索词里塞两遍「高等数学」纯属浪费
+    assert r.retrieval_text == "高数和高数 高等数学"
+    assert r.canonicals == ["高等数学", "高等数学"]
     spans = [(h.start, h.end) for h in r.hits]
     assert spans == sorted(spans)
     assert all(a[1] <= b[0] for a, b in zip(spans, spans[1:])), "命中区间不能重叠"
 
 
-# ==================== 4. 叠字防护 ====================
+def test_added_terms_are_deduped_in_order():
+    """去重 + 保持出现顺序：同一句话任何时候生成的检索串都一样，A/B 才有意义。"""
+    v = build(
+        {"canonical": "高等数学", "aliases": ["高数"]},
+        {"canonical": "线性代数", "aliases": ["线代"]},
+    )
+    r = match("高数和线代都要看，线代更难", v)
+    assert r.added_terms == ["高等数学", "线性代数"]
+    assert r.retrieval_text == "高数和线代都要看，线代更难 高等数学 线性代数"
 
-def test_adjacent_standard_word_prevents_duplication():
-    """★ 「二战考研」换完会变成「考研二战考研」，宁可不换。"""
+
+# ==================== 4. 冗余防护 ====================
+
+def test_adjacent_standard_word_is_not_appended_again():
+    """★ 原话里已经说了「考研」，「二战考研」就不必再追加「考研二战」。"""
     v = build({"canonical": "考研二战", "aliases": ["二战"]})
     r = match("二战考研怎么准备", v)
     assert r.canonicals == []
-    assert any("叠字" in s.reason for s in r.skipped)
-    assert "考研二战考研" not in r.retrieval_text
+    assert any("不必追加" in s.reason for s in r.skipped)
+    assert r.retrieval_text == "二战考研怎么准备"
+
+
+def test_query_already_contains_canonical_adds_nothing():
+    """★★ X2 验收补的判据：标准词整段已在原话里出现，就别再追加一次。
+
+    原先是替换式，`文献` + `[综述]` 换成了 `文献文献综述`。
+    根因不是"叠字防护不够强"，而是**压根不该动这一处**——用户写的就是标准词。
+    """
+    v = build({"canonical": "文献综述", "aliases": ["综述"]})
+    r = match("文献综述怎么写才有逻辑", v)
+    assert r.hits == [], "原话已经是标准词，不该再追加"
+    assert r.retrieval_text == "文献综述怎么写才有逻辑"
+    assert any("已有标准词" in s.reason for s in r.skipped)
 
 
 def test_adjacent_guard_does_not_block_normal_cases():
-    """别把防护做成误伤：正常句子该换还得换。"""
+    """别把防护做成误伤：正常句子该追加还得追加。"""
     v = build({"canonical": "考研二战", "aliases": ["二战"]})
     assert match("二战怎么准备", v).canonicals == ["考研二战"]
     assert match("二战在家复习", v).canonicals == ["考研二战"]
@@ -325,3 +385,53 @@ def test_conditional_adjudication_keeps_golden_row_working():
     q = "跑模型要租显卡吗，实验室太慢"
     r = match(q, vocab, global_block=blocked_for_query(rows, q))
     assert r.canonicals == ["模型训练"]
+
+
+# ==================== 11. X2 真实问法：不许改出病句 ====================
+#
+# 这一节是本次改动的"案发现场"。替换时代下面这几句都被改坏了，
+# 而金标 94 条（更书面、更长）一条都没测出来 —— 说明真实短句是另一类样本。
+
+X2 = os.path.join(ROOT, "docs/组员交付_2026-10-24/queries_刘立轩.csv")
+
+# 验收记录里逐条点名的 3 条，各代表一类错法：
+#   叠字 / 替换点吞掉原字 / 术语自带原字造成重复
+BROKEN_IN_REPLACE_ERA = [
+    ("文献综述怎么写才有逻辑", "文献文献综述怎么写才有逻辑"),
+    ("学分绩点怎么算", "学分平均学分绩点怎么算"),
+    ("查重率多少算安全", "重复率检测率多少算安全"),
+]
+
+
+@pytest.mark.skipif(not os.path.exists(TEMP_VOCAB), reason="缺临时词表")
+def test_x2_broken_sentences_are_fixed():
+    """★★ 这三句曾经被改成病句，现在原话必须原封不动。"""
+    vocab, _ = load_vocab(TEMP_VOCAB)
+    for q, broken in BROKEN_IN_REPLACE_ERA:
+        r = match(q, vocab)
+        assert broken not in r.retrieval_text, f"病句回来了：{broken!r}"
+        assert r.retrieval_text.startswith(q), f"原话被改坏了：{q!r} → {r.retrieval_text!r}"
+
+
+@pytest.mark.skipif(not os.path.exists(X2), reason="缺 X2 真实问法（docs/组员交付_2026-10-24 未归档）")
+def test_x2_no_query_ever_gets_rewritten():
+    """★★ 全量 142 条真实问法：检索文本必须以原话为前缀。
+
+    比逐条盯"这三句对不对"更强 —— 只要这条不变量成立，
+    以后词表怎么扩、加多少新词，都不可能再改坏用户的话。
+    """
+    import csv
+
+    vocab, _ = load_vocab(TEMP_VOCAB)
+    rows = list(csv.DictReader(open(X2, encoding="utf-8-sig")))
+    assert len(rows) >= 100, f"X2 样本只有 {len(rows)} 条，护栏太薄"
+
+    bad = []
+    for r in rows:
+        q = (r.get("query") or "").strip()
+        if not q:
+            continue
+        got = match(q, vocab).retrieval_text
+        if not (got == q or got.startswith(q + " ")):
+            bad.append((q, got))
+    assert not bad, f"{len(bad)} 条原话被改动，前 3 条：{bad[:3]}"

@@ -134,6 +134,10 @@ def preview(text: str, with_clarify: bool = True) -> dict:
 
     返回的 `original` 与 `retrieval` 必须分开给前端：
     前者用于展示与聊天记录（三原则之"不改展示"），后者只用于检索。
+
+    ★ 两者不再是"两种语法"：`retrieval` = `original` + 空格 + `added` 里的术语串。
+      原话是恒定的前缀（2026-10-24 从替换改追加，见 matcher.EnhanceResult）。
+      前端要展示"多加了什么"，应该渲染 `added`，不要拿 `retrieval` 整行去显示。
     """
     vocab, warns = get_vocab()
     adj, _ = get_adjudication()
@@ -144,6 +148,10 @@ def preview(text: str, with_clarify: bool = True) -> dict:
     return {
         "original": result.original,
         "retrieval": result.retrieval_text,
+        # ★ retrieval 现在是「原话 + 空格 + 术语串」，原文恒为前缀。
+        # 前端要用的是「追加了哪几个术语」这个列表，而不是把 retrieval 整行显示——
+        # 整行显示等于把用户原话再念一遍，又长又难看。去重、保持出现顺序。
+        "added": result.added_terms,
         "changed": bool(result.hits),
         "hits": [
             {"raw": h.raw, "canonical": h.canonical, "start": h.start, "end": h.end}
@@ -162,7 +170,10 @@ def preview(text: str, with_clarify: bool = True) -> dict:
 
 
 def enhance_for_retrieval(text: str) -> tuple[str, list[dict]]:
-    """检索链路专用（B4）：只返回「检索文本 + 换了哪些词」，不做统计与追问。
+    """检索链路专用（B4）：只返回「检索文本 + 命中了哪些口语词」，不做统计与追问。
+
+    返回的检索文本是 **原话 + 追加的标准词**（例：`高数怎么复习 高等数学`）。
+    原话一个字没动 —— 追加式增强在结构上就不会造病句（替换式会，实测每 3 条坏 1 条）。
 
     和 preview() 的分工
     -------------------

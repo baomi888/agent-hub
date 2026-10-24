@@ -600,7 +600,10 @@ export interface HybridLogRow {
 // ---------- 检索词校准（B3 预览接口 / B5 输入框提示条）----------
 
 /**
- * 一次替换：raw 是用户原话里的片段，canonical 是它被换成的规范术语。
+ * 一次命中：raw 是用户原话里的口语词，canonical 是它对应的规范术语。
+ *
+ * ★ 增强是**追加**不是替换：原话里的 raw 一个字母都不会被改掉，
+ *   只是检索时额外带上 canonical（口语词和术语都能被命中）。
  *
  * `start` / `end` 是**在 `original` 上的下标**，前端直接切片做高亮。
  * 千万不要拿 `raw` 去 `indexOf` —— 同一个词在一句话里出现两次时，
@@ -623,8 +626,16 @@ export interface EnhanceSkipped {
 export interface EnhanceResult {
   /** 用户原话（可能与输入有前后空白差异，后端会 strip） */
   original: string;
-  /** 增强后的检索用文本，只喂检索，绝不展示成"用户说的话" */
+  /**
+   * 检索用文本 = **原话 + 空格 + `added` 里的术语**。
+   *
+   * 原话恒为前缀，后端只追加不改写（替换会造病句：`查重率`→`重复率检测率`）。
+   * 界面上不要整行渲染它 —— 那等于把用户原话再念一遍。
+   * 要展示"多加了什么"，渲染 `added`。
+   */
   retrieval: string;
+  /** 追加给检索的规范术语（已去重、保持出现顺序）。空数组 = 无需增强。 */
+  added: string[];
   changed: boolean;
   hits: EnhanceHit[];
   skipped: EnhanceSkipped[];
