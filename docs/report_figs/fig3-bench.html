@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>html,body{margin:0;padding:0;background:#FDFBF5;font-family:"Microsoft YaHei",sans-serif;}svg{display:block;}</style>
+</head>
+<body>
+<svg width="1200" height="640" viewBox="0 0 1200 640" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="640" fill="#FDFBF5"/>
+  <text x="600" y="50" text-anchor="middle" font-size="28" font-weight="700" fill="#3B2C18">200 并发实测：吞吐随 worker 数线性增长，零错误</text>
+  <text x="600" y="80" text-anchor="middle" font-size="15" fill="#8A7B63">接口 /api/auth/me（鉴权全链路），本地压测工具 tools/loadtest_concurrency.py，2026-10-20</text>
+
+  <!-- axes -->
+  <line x1="140" y1="120" x2="140" y2="480" stroke="#8A7B63" stroke-width="2"/>
+  <line x1="140" y1="480" x2="1120" y2="480" stroke="#8A7B63" stroke-width="2"/>
+  <!-- gridlines -->
+  <g stroke="#EDE3CC" stroke-width="1.5">
+    <line x1="140" y1="408" x2="1120" y2="408"/>
+    <line x1="140" y1="336" x2="1120" y2="336"/>
+    <line x1="140" y1="264" x2="1120" y2="264"/>
+    <line x1="140" y1="192" x2="1120" y2="192"/>
+    <line x1="140" y1="120" x2="1120" y2="120"/>
+  </g>
+  <g font-size="14" fill="#8A7B63" text-anchor="end">
+    <text x="128" y="484">0</text>
+    <text x="128" y="412">250</text>
+    <text x="128" y="340">500</text>
+    <text x="128" y="268">750</text>
+    <text x="128" y="196">1000</text>
+    <text x="128" y="124">1250</text>
+  </g>
+  <text x="60" y="300" font-size="15" fill="#5A4632" transform="rotate(-90 60 300)" text-anchor="middle">吞吐（RPS）</text>
+
+  <!-- bars: 615, 776, 1050 ; scale: 1250 rps = 360px -> 0.288 px/rps -->
+  <!-- 615 -> 177px; 776 -> 223px; 1050 -> 302px -->
+  <g>
+    <rect x="240" y="303" width="170" height="177" rx="6" fill="#D9C39A"/>
+    <rect x="520" y="257" width="170" height="223" rx="6" fill="#C8892A"/>
+    <rect x="800" y="178" width="170" height="302" rx="6" fill="#8A5A17"/>
+  </g>
+  <g font-size="22" font-weight="700" fill="#3B2C18" text-anchor="middle">
+    <text x="325" y="288">615</text>
+    <text x="605" y="242">776</text>
+    <text x="885" y="163">1050</text>
+  </g>
+  <g font-size="15" fill="#5A4632" text-anchor="middle">
+    <text x="325" y="508">单 worker</text>
+    <text x="605" y="508">2 workers</text>
+    <text x="885" y="508">4 workers</text>
+  </g>
+
+  <!-- annotations -->
+  <g font-size="13.5" fill="#8A7B63" text-anchor="middle">
+    <text x="325" y="532">p99 = 2336 ms</text>
+    <text x="605" y="532">p99 下降中</text>
+    <text x="885" y="532">p99 = 1012 ms（减半以上）</text>
+  </g>
+  <g font-size="13.5" fill="#6B8E5A" text-anchor="middle" font-weight="700">
+    <text x="325" y="556">错误 0</text>
+    <text x="605" y="556">错误 0</text>
+    <text x="885" y="556">错误 0</text>
+  </g>
+
+  <!-- side note -->
+  <rect x="140" y="580" width="980" height="44" rx="10" fill="#FBF3E4" stroke="#E3D5B8"/>
+  <text x="600" y="607" text-anchor="middle" font-size="14" fill="#5A4632">配套机制：LLM 并发闸（超额返回 429 + Retry-After）· SSE 断连即取消上游 · 双层限流（进程内滑窗 + 落库确认）</text>
+</svg>
+</body>
+</html>

@@ -154,3 +154,8 @@ prototypes/知穗_*
 # Windows 版 nginx 副本（约 7.7MB 二进制）。服务器上用 apt 装的 nginx，
 # 这份只在本地调试前端静态资源时用过，不进仓库。
 nginx-1.30.6/
+
+# 本地一次性探针脚本与 pytest 临时目录（沙箱的 safe-delete 会拦住自动清理，
+# 所以用 ignore 兜住而不是指望每次都能删掉）
+.probe_*
+.pytest_tmp*/
