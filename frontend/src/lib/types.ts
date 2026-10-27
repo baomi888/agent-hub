@@ -648,6 +648,8 @@ export interface DashboardOverview {
 export interface ApiRankItem {
   path: string;
   method: string;
+  /** 中文业务名（后端 core/api_labels.py 是唯一来源，前端不许自己拼） */
+  label: string;
   calls: number;
   failed: number;
   avg_ms: number;

@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from core import apilog, timeutil, user_feedback
+from core import apilog, api_labels, timeutil, user_feedback
 
 
 def range_of(days: int = 7) -> dict:
@@ -183,6 +183,10 @@ def api_ranking(days: int = 7, limit: int = 20, sort: str = "calls") -> dict:
             {
                 "path": str(x["path"]),
                 "method": str(x["method"]),
+                # 中文业务名：给非技术读者看的那一层。原始 path 仍然返回，
+                # 前端以小字附在下面 —— 中文名回答"是什么功能"，路径回答"哪个接口"，
+                # 两个都要，不能只留一个。
+                "label": api_labels.label_for(str(x["method"]), str(x["path"])),
                 "calls": int(x["calls"]),
                 "failed": int(x["failed"] or 0),
                 "avg_ms": int(x["avg_ms"] or 0),

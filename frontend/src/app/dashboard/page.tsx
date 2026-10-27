@@ -50,13 +50,13 @@ const DAY_OPTIONS = [
 type SortKey = "calls" | "slow" | "fail";
 
 const SORT_OPTIONS: { value: SortKey; label: string; hint: string }[] = [
-  { value: "calls", label: "调用量", hint: "哪个接口被调得最多" },
+  { value: "calls", label: "用得最多", hint: "哪个功能被调得最多" },
   {
     value: "slow",
-    label: "最慢",
-    hint: "平均耗时最高（只算调用 ≥ 3 次的接口：首次冷启动的偶发慢不该上榜）",
+    label: "最耗时",
+    hint: "平均等待时间最长（只算用过 3 次以上的：第一次启动时的偶发慢不算）",
   },
-  { value: "fail", label: "失败", hint: "4xx / 5xx 最多的接口" },
+  { value: "fail", label: "出过错", hint: "返回过错误（4xx / 5xx）的功能" },
 ];
 
 const STATUS_CLASS: Record<string, string> = {
@@ -329,7 +329,8 @@ export default function DashboardPage() {
           {/* ============ 接口排行 ============ */}
           <section>
             <p className="sec-label">
-              接口排行 {apis ? <span className="meta">共 {apis.total_paths} 个接口</span> : null}
+              功能使用排行{" "}
+              {apis ? <span className="meta">共 {apis.total_paths} 个功能被调用过</span> : null}
             </p>
             <div className="card card-pad">
               <div className="row" style={{ gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
@@ -352,41 +353,58 @@ export default function DashboardPage() {
               ) : apis.items.length === 0 ? (
                 <p className="hint" style={{ marginTop: 0 }}>
                   {sort === "fail"
-                    ? "这个区间没有失败请求 —— 是好事。"
+                    ? "这个区间没有出过错 —— 是好事。"
                     : sort === "slow"
-                      ? "没有调用次数 ≥ 3 的接口，算不出有意义的平均耗时。"
+                      ? "这个区间里没有用过 3 次以上的功能，还算不出有参考价值的平均耗时。"
                       : "这个区间还没有调用记录。"}
                 </p>
               ) : (
                 <>
                   <div
                     className="tr apis th"
-                    style={{ display: "grid", gridTemplateColumns: "1fr 52px 52px 60px", gap: 8 }}
+                    style={{ display: "grid", gridTemplateColumns: "1fr 44px 44px 66px", gap: 8 }}
                   >
-                    <span>接口（路由模板）</span>
+                    <span>功能</span>
                     <span>次数</span>
                     <span>失败</span>
-                    <span>均值</span>
+                    <span>平均耗时</span>
                   </div>
                   {apis.items.map((it) => (
                     <div
                       className="tr apis"
                       key={`${it.method} ${it.path}`}
-                      style={{ display: "grid", gridTemplateColumns: "1fr 52px 52px 60px", gap: 8 }}
+                      style={{ display: "grid", gridTemplateColumns: "1fr 44px 44px 66px", gap: 8 }}
+                      title={`${it.method} ${it.path}`}
                     >
-                      <span
-                        className="mono"
-                        title={`${it.method} ${it.path}`}
-                        style={{
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        <span className={`ctag ${it.method === "GET" ? "info" : ""}`}>
-                          {it.method}
-                        </span>{" "}
-                        {it.path}
+                      {/* 中文业务名是主信息（评委/老师看这行），
+                          原始路由路径退成第二行的浅色小字（开发者排查用）。
+                          这一层分工在后端 core/api_labels.py 里做，前端不拼中文。 */}
+                      <span style={{ minWidth: 0, overflow: "hidden" }}>
+                        <span
+                          style={{
+                            display: "block",
+                            fontSize: 13,
+                            color: "var(--ink)",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {it.label}
+                        </span>
+                        <span
+                          className="mono"
+                          style={{
+                            display: "block",
+                            fontSize: 11,
+                            color: "var(--text-3)",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {it.method} {it.path}
+                        </span>
                       </span>
                       <span>{fmtNum(it.calls)}</span>
                       <span className="meta" style={{ color: it.failed ? "var(--red-ink)" : undefined }}>
@@ -396,9 +414,10 @@ export default function DashboardPage() {
                     </div>
                   ))}
                   <p className="hint">
-                    按<b>路由模板</b>聚合（<code>/api/sessions/{"{sid}"}</code>），不是真实路径 ——
-                    否则每个会话 id 都会变成一个"只调用过 1 次"的接口，排行就没意义了。
-                    打开本页的请求不计入统计（否则越刷新数字越大）。
+                    同一个功能的多次调用合并计数 —— 比如打开不同会话都算「对话 · 打开会话」，
+                    不会因为换了个 id 就变成一个新功能。打开本页本身的请求不计入。
+                    其中「账号 · 登录方式」「账号 · 当前用户」这类是打开页面时自动发起的，
+                    不代表用户主动操作。
                   </p>
                 </>
               )}

@@ -527,3 +527,77 @@ def test_non_streaming_duration_unchanged(env, client, monkeypatch):
     rows = [r for r in apilog._BUF if r[1] == path]
     assert len(rows) == 1
     assert rows[0][4] >= int(gap * 1000 * 0.8), f"非流式耗时异常：{rows[0][4]}ms"
+
+
+# ==================== 接口中文名（展示层） ====================
+
+_IGNORED_METHODS = {"HEAD", "OPTIONS", "TRACE"}
+
+
+def test_every_route_has_chinese_label():
+    """所有已注册的 /api 路由都必须在 `core/api_labels.py` 里登记中文名。
+
+    这条断言的作用不是"测功能"，而是**防止看板悄悄退化成技术界面**：
+    新加接口忘了登记时，`label_for` 会兜底成「知识库 · 其他提交」——
+    页面仍然能跑、仍然有中文，但信息量为零，评审看到的是"其他操作"。
+    没有这条断言，这种退化要等到有人翻看板才会发现。
+    """
+    import main
+    from core import api_labels
+
+    missing: list[str] = []
+    for r in main.app.routes:
+        path = str(getattr(r, "path", "") or "")
+        if not path.startswith("/api"):
+            continue
+        for m in getattr(r, "methods", set()) or set():
+            if m in _IGNORED_METHODS:
+                continue
+            if not api_labels.is_known(m, path):
+                missing.append(f"{m} {path}")
+
+    assert not missing, (
+        "以下接口没有中文名，去看板「功能使用排行」会显示成「其他操作」，"
+        "请在 core/api_labels.py 补上：\n  " + "\n  ".join(sorted(missing))
+    )
+
+
+def test_label_lookup_ignores_param_names():
+    """路由改参数名（`{sid}` → `{id}`）不能让中文名失效。
+
+    日志表里存的是历史模板，路由改名后旧行仍带旧参数名；
+    查表时若按字面匹配，改一次名就会让整类历史数据掉进兜底。
+    """
+    from core import api_labels
+
+    assert api_labels.label_for("GET", "/api/sessions/{sid}") == "对话 · 打开会话"
+    assert api_labels.label_for("GET", "/api/sessions/{id}") == "对话 · 打开会话"
+    assert api_labels.label_for("GET", "/api/sessions/{anything}/") == "对话 · 打开会话"
+    # 尾斜杠同理：项目里 `/api/kb/` 与 `/api/sessions` 两种风格并存
+    assert api_labels.label_for("GET", "/api/auth/me/") == api_labels.label_for("GET", "/api/auth/me")
+
+
+def test_unknown_route_falls_back_with_module_name():
+    """真查不到时也不能吐英文路径 —— 兜底至少要给出中文模块名。"""
+    from core import api_labels
+
+    label = api_labels.label_for("POST", "/api/kb/{id}/not-a-real-thing")
+    assert label.startswith("知识库 · 其他")
+    assert "/" not in label  # 中文名里不该出现路径碎片
+
+
+def test_ranking_items_carry_labels(env, client):
+    """排行接口下发的每一行都带中文名，且和 path 对应得上（不是错位）。"""
+    now = int(time.time())
+    _seed_calls(
+        [
+            (now, "/api/chat/stream", "POST", 200, 1200, None),
+            (now, "/api/kb/{sid}/upload", "POST", 200, 300, None),
+        ]
+    )
+    _login(client, ADMIN_NAME)
+    r = client.get("/api/admin/apis?days=1&limit=50")
+    assert r.status_code == 200
+    labels = {it["path"]: it["label"] for it in r.json()["items"]}
+    assert labels["/api/chat/stream"] == "对话 · 提问（逐字回复）"
+    assert labels["/api/kb/{sid}/upload"] == "知识库 · 上传文件"
