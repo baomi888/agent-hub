@@ -106,6 +106,17 @@ jobs:
           EMBEDDING_BASE_URL: https://example.invalid/v1
         run: python tools/check_dashboard.py --days 7 --json
 
+      # 数据看板端到端：起真 uvicorn 子进程（AGENT_HUB_DB 指向临时库），
+      # 真注册 / 真登录 / 真打接口，验证的是"接线"而不是函数。
+      # 只在 3.12 上跑一次：与解释器版本无关，跑两遍纯浪费。
+      - name: Dashboard E2E (真进程)
+        if: matrix.python-version == '3.12'
+        env:
+          DEEPSEEK_API_KEY: ci-fake-key-not-used-offline-0000
+          EMBEDDING_API_KEY: ci-fake-key-not-used-offline-0000
+          EMBEDDING_BASE_URL: https://example.invalid/v1
+        run: python tools/dashboard_e2e.py
+
       # ------------------------------------------------------
       # b) 脚本式自测（模块级执行 + sys.exit 结尾）
       #

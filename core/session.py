@@ -45,6 +45,12 @@ def _db_path() -> str:
     此前顺带一次 `os.makedirs(exist_ok=True)`，等于每条 SQL 前都白做一次系统调用。
     测试 monkeypatch 本函数到临时目录时，建目录仍会跟着新路径走。
     """
+    # 库路径覆盖：给"起真进程但用独立库"的场景用（tools/dashboard_e2e.py）。
+    # 这是**测试缝**，不是配置项：默认不设，行为与只返回 PROJECT_ROOT 时完全一致。
+    # 有它才能在没有生产库副本的机器上跑端到端，且不可能污染真实数据。
+    override = os.getenv("AGENT_HUB_DB")
+    if override:
+        return override
     return os.path.join(config.PROJECT_ROOT, "data", "sessions.db")
 
 
