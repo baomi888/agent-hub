@@ -174,7 +174,7 @@ def main() -> int:
         rep.check("导出接口已下线（404）", code == 404, str(code))
 
         # ---------- 制造业务流量 ----------
-        for i in range(3):
+        for _ in range(3):
             _http(admin, "GET", f"{base}/api/sessions/")
             _http(normal, "GET", f"{base}/api/auth/me/")
         _http(normal, "GET", f"{base}/api/does-not-exist-{int(time.time())}")
