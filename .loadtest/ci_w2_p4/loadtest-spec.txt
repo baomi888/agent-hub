@@ -1,0 +1,3 @@
+runner: 4 核 / 15989 MB 内存
+uvicorn workers: 2
+commit: 9997a554f8926710f4ec6e6238b05b1b28450d90

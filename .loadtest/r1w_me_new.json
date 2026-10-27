@@ -1,0 +1,20 @@
+{
+  "base": "http://127.0.0.1:8126",
+  "concurrency": 200,
+  "rows": [
+    {
+      "scenario": "GET /api/auth/me/（Cookie 鉴权 + 查库）  [进程x4, 每进程50]",
+      "requests": 4956,
+      "rps": 614.7,
+      "ok": 4956,
+      "err_rate": 0.0,
+      "p50_ms": 277.0,
+      "p95_ms": 1536.9,
+      "p99_ms": 2336.3,
+      "max_ms": 2488.1,
+      "codes": {
+        "200": 4956
+      }
+    }
+  ]
+}
