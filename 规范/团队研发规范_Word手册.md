@@ -203,7 +203,7 @@
 | `refs` | TEXT | 可空，**JSON 字符串**，前端需 `JSON.parse` |
 | `created_at` | INTEGER | NOT NULL |
 
-`MAX_HISTORY_TURNS = 10`：喂给模型时最多保留 10 轮。
+`MAX_HISTORY_TURNS = 30`：喂给模型时最多保留 30 轮。
 
 ## 3.5 反馈 `feedbacks`
 

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """执行引擎契约：EngineResult + ExecutionEngine 协议（要求 7 可扩展性的落点）。
 
 编排器只认这两个东西：
@@ -11,7 +10,8 @@ orchestrator.ENGINE_REGISTRY，编排器与切换引擎完全无感知。
 
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Callable, Literal, Protocol
+from collections.abc import AsyncIterator, Callable
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel
 

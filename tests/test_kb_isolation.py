@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """离线自测：知识库归属隔离（多用户改造 P2 的验收点）。
 
 不联网、不碰真实数据：PROJECT_ROOT / PERSIST_DIR / SQLite 全部指到临时目录。
@@ -48,7 +47,11 @@ FAIL = []
 
 def check(name: str, cond: bool, extra: str = ""):
     (PASS if cond else FAIL).append(name)
-    print(("  PASS  " if cond else "  FAIL  ") + name + (("  <- " + extra) if extra and not cond else ""))
+    print(
+        ("  PASS  " if cond else "  FAIL  ")
+        + name
+        + (("  <- " + extra) if extra and not cond else "")
+    )
 
 
 print("\n[1] 同名知识库在不同人名下是两个库")
@@ -56,8 +59,7 @@ ka, _ = pipelines.create_kb(ALICE, "我的库")
 kb, _ = pipelines.create_kb(BOB, "我的库")
 check("两人同名库拿到不同 kb_id", ka != kb, f"{ka} vs {kb}")
 check("各自归属正确", pipelines.owner_of(ka) == ALICE and pipelines.owner_of(kb) == BOB)
-check("同一个人重建同名库 -> 同一个 id（幂等）",
-      pipelines.create_kb(ALICE, "我的库")[0] == ka)
+check("同一个人重建同名库 -> 同一个 id（幂等）", pipelines.create_kb(ALICE, "我的库")[0] == ka)
 
 print("\n[2] 拿到别人的 kb_id 也进不去")
 try:
@@ -95,9 +97,11 @@ chroma_client().create_collection(f"kb_{legacy}")
 check("老库 owner_of -> None", pipelines.owner_of(legacy) is None)
 check("A 看不到老库", pipelines.get_status(ALICE, legacy) is None)
 check("B 看不到老库", pipelines.get_status(BOB, legacy) is None)
-check("老库不出现在任何人的列表里",
-      legacy not in {k["kb_id"] for k in pipelines.list_all(ALICE)} and
-      legacy not in {k["kb_id"] for k in pipelines.list_all(BOB)})
+check(
+    "老库不出现在任何人的列表里",
+    legacy not in {k["kb_id"] for k in pipelines.list_all(ALICE)}
+    and legacy not in {k["kb_id"] for k in pipelines.list_all(BOB)},
+)
 
 n = pipelines.claim_orphan_kbs(ALICE)
 check("显式认领至少 1 个", n >= 1, str(n))
@@ -116,7 +120,10 @@ c_b.post("/api/auth/login/", json={"username": "kbowner_b", "password": "pw12345
 ra = c_a.post("/api/kb/create", json={"name": "A 的资料"})
 check("A 建库 200", ra.status_code == 200, ra.text[:120])
 http_kb = ra.json()["kb_id"]
-check("B 看不到 A 的库（列表）", http_kb not in [k["kb_id"] for k in c_b.get("/api/kb/").json()["kbs"]])
+check(
+    "B 看不到 A 的库（列表）",
+    http_kb not in [k["kb_id"] for k in c_b.get("/api/kb/").json()["kbs"]],
+)
 check("B 直接查 A 的库 -> 404", c_b.get(f"/api/kb/{http_kb}/").status_code == 404)
 check("B 直接删 A 的库 -> 404", c_b.delete(f"/api/kb/{http_kb}/").status_code == 404)
 # 注意：不带文件时 FastAPI 会先返回 422（参数校验），走不到归属判断。

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """打卡的 HTTP 端点。
 
   GET  /api/checkin/streak   连续天数 / 最长连续 / 已打卡日期集合（来自 daily_reports）
@@ -14,8 +13,8 @@ service/checkin 派生。generate 复用每日总结同一份逻辑，手动与�
 
 from __future__ import annotations
 
+import asyncio
 import time
-from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -29,19 +28,19 @@ router = APIRouter(dependencies=[Depends(get_current_user)])
 
 @router.get("/streak")
 async def checkin_streak(uid: str = Depends(get_current_user)) -> dict:
-    return chk.compute_streak(uid)
+    return await asyncio.to_thread(chk.compute_streak, uid)
 
 
 @router.get("/history")
 async def checkin_history(uid: str = Depends(get_current_user)) -> dict:
-    return {"history": chk.list_history(uid)}
+    return {"history": await asyncio.to_thread(chk.list_history, uid)}
 
 
 @router.post("/generate")
 async def checkin_generate(uid: str = Depends(get_current_user)) -> dict:
     date = quota.day_key()
-    quota.consume(uid, "auto")
-    rep = daily.summarize_day(uid, date)
+    await asyncio.to_thread(quota.consume, uid, "auto")
+    rep = await asyncio.to_thread(daily.summarize_day, uid, date)
     return {"date": date, "status": rep.status, "points": len(rep.content)}
 
 
@@ -51,6 +50,6 @@ async def checkin_share(body: dict, uid: str = Depends(get_current_user)) -> dic
     try:
         time.strptime(date, "%Y-%m-%d")
     except (ValueError, TypeError):
-        raise HTTPException(status_code=400, detail="date 格式应为 YYYY-MM-DD")
+        raise HTTPException(status_code=400, detail="date 格式应为 YYYY-MM-DD") from None
     chk.mark_shared(uid, date)
     return {"ok": True, "date": date, "shared": True}

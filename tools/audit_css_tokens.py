@@ -14,10 +14,11 @@
     python tools/audit_css_tokens.py                 # 审 frontend/src/app/styles
     python tools/audit_css_tokens.py <目录> [<目录>]  # 审指定目录下的 *.css
 """
-import re
-import sys
+
 import glob
 import os
+import re
+import sys
 
 # var(--x) / var(--x, fallback) 都要抓；只记录变量名
 USE_RE = re.compile(r"var\(\s*(--[A-Za-z0-9_-]+)")

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """尾部斜杠重定向回归测试（不联网、不需要知识库）。
 
 运行：python tests/test_slash_no_redirect.py
@@ -14,6 +13,7 @@ http://localhost:8000/...（代理把 Host 改成了 localhost:8000），浏览�
   1) 任何 /api/* 请求都不允许返回 3xx（否则又会把浏览器带偏）
   2) 带尾斜杠与不带尾斜杠两种写法都要能命中已注册的路由
 """
+
 import os
 import sys
 import tempfile
@@ -71,8 +71,10 @@ print(f"  默认 FastAPI  GET /api/sessions -> {r.status_code}  Location={r.head
 check(r.status_code in REDIRECTS, "默认 FastAPI 确实会重定向（这就是病根）")
 
 print("\n=== 1. main.py 里修复代码都在 ===")
-src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "main.py"),
-           encoding="utf-8").read()
+src = open(
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "main.py"),
+    encoding="utf-8",
+).read()
 check("redirect_slashes=False" in src, "已设置 redirect_slashes=False")
 check("normalize_api_slash" in src, "已挂上 normalize_api_slash 中间件")
 
@@ -94,6 +96,7 @@ check(not bad, f"{probes} 次探测中 0 次重定向（实际 {len(bad)} 次）
 for b in bad[:10]:
     print("      ", b)
 
+
 def _login(c):
     """注册 + 登录，把 Cookie 挂到 client 上，之后请求就是"已登录用户"。"""
     c.post("/api/auth/register/", json={"username": "slashtester", "password": "test12345"})
@@ -105,12 +108,18 @@ def _login(c):
 print("\n=== 3. 前端真正会调的几条路径（登录后）===")
 with TestClient(m.app) as c:
     _login(c)
-    for meth, path in (("GET", "/api/sessions/"), ("GET", "/api/sessions"),
-                       ("POST", "/api/sessions/"), ("GET", "/api/kb")):
+    for meth, path in (
+        ("GET", "/api/sessions/"),
+        ("GET", "/api/sessions"),
+        ("POST", "/api/sessions/"),
+        ("GET", "/api/kb"),
+    ):
         r = c.request(meth, path, follow_redirects=False)
         ok = r.status_code in (200, 422)
-        print(f"  {'✔' if ok else '✘'} {meth:5} {path:20} -> {r.status_code} "
-              f"Location={r.headers.get('location')}")
+        print(
+            f"  {'✔' if ok else '✘'} {meth:5} {path:20} -> {r.status_code} "
+            f"Location={r.headers.get('location')}"
+        )
         if not ok:
             FAILS.append(f"{meth} {path} -> {r.status_code}")
 

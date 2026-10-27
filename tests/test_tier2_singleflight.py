@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """第二档回归：缓存并发踩踏（single-flight）与 Serper 统一入口。不联网。
 
 覆盖（2026-10-13）：
@@ -48,6 +47,7 @@ def _run_concurrent(fn, n=4):
 
 
 # ==================== 1. BM25 single-flight + 负缓存 ====================
+
 
 class _FakeCollection:
     def __init__(self, n_docs: int, delay: float = 0.15):
@@ -101,6 +101,7 @@ def test_1_bm25_singleflight() -> None:
 
 # ==================== 2. _embed_query single-flight ====================
 
+
 class _FakeEmbeddings:
     def __init__(self):
         self.calls: list[str] = []
@@ -119,8 +120,9 @@ def test_2_embed_query_singleflight() -> None:
     rag_core._EMBED_CACHE.clear()
     try:
         results = _run_concurrent(lambda: rag_core._embed_query("什么是向量检索"))
-        check(fake.calls == ["什么是向量检索"],
-              f"4 线程同题只请求一次（实际 {len(fake.calls)} 次）")
+        check(
+            fake.calls == ["什么是向量检索"], f"4 线程同题只请求一次（实际 {len(fake.calls)} 次）"
+        )
         check(all(r == results[0] for r in results), "所有线程拿到同一向量")
 
         # 不同问题互不影响
@@ -133,6 +135,7 @@ def test_2_embed_query_singleflight() -> None:
 
 
 # ==================== 3. Serper 统一入口 ====================
+
 
 class _FakeResp:
     def __init__(self, data):

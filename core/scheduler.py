@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """定时任务库层：幂等登记 / 重试分级 / 心跳。
 
 设计取舍（为什么不把这些直接交给 APScheduler 的 JobStore）
@@ -32,21 +31,26 @@ APScheduler 负责「什么时候跑」，本模块负责「跑没跑过、失�
 import os
 import sqlite3
 import threading
-import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from core import config
+from core import config, timeutil
 
 # ---------- 常量 ----------
 
 # worker 写进心跳的版本号，与 data/scheduler.db 里的行一起给运维看
 WORKER_VERSION = "0.1.0"
 
-TZ_NAME = getattr(config, "SCHEDULER_TZ", "Asia/Shanghai") or "Asia/Shanghai"
-TZ = ZoneInfo(TZ_NAME)
+# 时区与时间换算统一收在 core/timeutil.py（2026-10-20 审计 A2）：
+# 原先这里自定义了一份 TZ + now_local + day_bounds，而 core/quota.py 与
+# service/daily.py 又各自用 time.localtime()，三处两种答案。现在只有一个入口。
+TZ_NAME = timeutil.TZ_NAME
+TZ = timeutil.TZ
+now_ts = timeutil.now_ts
+now_local = timeutil.now_local
+day_bounds = timeutil.day_bounds
 
 # 心跳年龄超过它判 down（秒）。600s = 两个 dispatch 周期：
 # 进程在但卡死（比如被一次 LLM 调用挂住）同样会被抓到，这就是不走进程表的原因。
@@ -66,9 +70,9 @@ STATUS_SUCCEEDED = "succeeded"
 STATUS_FAILED = "failed"
 STATUS_SKIPPED = "skipped"
 
-CLASS_RETRY = "retry"    # 可重试：超时 / 5xx / 429
-CLASS_FATAL = "fatal"    # 不可重试：401 / 402、会话已删、库不存在
-CLASS_QUOTA = "quota"    # 配额触顶：延后到次日同刻
+CLASS_RETRY = "retry"  # 可重试：超时 / 5xx / 429
+CLASS_FATAL = "fatal"  # 不可重试：401 / 402、会话已删、库不存在
+CLASS_QUOTA = "quota"  # 配额触顶：延后到次日同刻
 
 
 def job_defs() -> dict[str, dict]:
@@ -91,7 +95,7 @@ def job_defs() -> dict[str, dict]:
             "description": "重试失败的委托投递（错开 dispatch 的分钟，避免抢 SQLite 写锁）",
         },
         "report.daily": {
-            "cron": "%d %d * * *" % (config.REPORT_MINUTE, config.REPORT_HOUR),
+            "cron": f"{config.REPORT_MINUTE} {config.REPORT_HOUR} * * *",
             "description": "生成当日每日总结",
         },
         "report.backfill": {
@@ -105,6 +109,13 @@ def job_defs() -> dict[str, dict]:
         "profile.aggregate": {
             "cron": "30 2 * * *",
             "description": "聚合用户兴趣画像（基于 user_tags 权重，生成每日快照）",
+        },
+        # Prompt 自进化（GEPA · issue #12）。默认每日 4 次（方案 §待讨论的口径），
+        # 稳定后可用 PROMPT_EVOLVE_CRON 提频——周期改表或改环境变量，不改代码。
+        # 只产出 shadow 候选，上线仍要人工 promote（PROMPT_EVO_AUTO_PROMOTE 默认关）。
+        "prompt.evolve": {
+            "cron": os.getenv("PROMPT_EVOLVE_CRON", "20 */6 * * *"),
+            "description": "Prompt 自进化一轮（采集→变异→评估→择优，产出 shadow 候选）",
         },
     }
 
@@ -231,28 +242,11 @@ def ensure_tables(seed: bool = True) -> None:
 
 
 # ---------- 时间 ----------
-
-def now_ts() -> int:
-    """当前 Unix 秒（UTC）。"""
-    return int(time.time())
-
-
-def now_local() -> datetime:
-    """带时区的当前时刻（Asia/Shanghai）。禁止裸 datetime.now()。"""
-    return datetime.now(TZ)
-
-
-def day_bounds(day: str) -> tuple[int, int]:
-    """把一个上海日历日解释成区间 [当日起点, 次日起点) 的 Unix 秒。
-
-    给「每日总结」用：date=2026-10-12 覆盖的正是 [10-12 00:00, 10-13 00:00)（上海时间）。
-    放在这里而不是让对方工单自己算：跨日边界的口径只应该有一份，
-    否则「总结差了八小时」这种 bug 会反复出现（服务器 TZ 一旦不是上海就必然踩）。
-    """
-    d = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=TZ)
-    start = d
-    end = d + timedelta(days=1)
-    return int(start.timestamp()), int(end.timestamp())
+#
+# now_ts / now_local / day_bounds 三个函数已经在文件头从 core/timeutil.py 引入并
+# 直接复用（`from ... import` 的别名），这里不再重复定义。
+# 保留这三个公开名字是为了不动既有调用方（worker/、api/schedule.py、service/daily.py
+# 都在用），同时保证"时区口径只有一份"。
 
 
 def new_run_id() -> str:
@@ -266,10 +260,11 @@ def idem_key(job_key: str, subject_id: str, planned_at: int) -> str:
     为什么带 planned_at：同一委托今天 07:00 和明天 07:00 是两次不同的投递，都要发；
     但「今天 07:00 这一次」无论被触发几次（worker 重启、重复扫描、手动重跑）都只能发一次。
     """
-    return "%s|%s|%d" % (job_key, subject_id, int(planned_at))
+    return f"{job_key}|{subject_id}|{int(planned_at)}"
 
 
 # ---------- 任务定义表 ----------
+
 
 def list_jobs(enabled: bool | None = None) -> list[dict]:
     """任务定义表（可按开关过滤）。enabled 是 INTEGER 落库，这里转回 bool 给前端。"""
@@ -308,6 +303,7 @@ def update_next_run(job_key: str, next_run_at: int | None) -> None:
 
 
 # ---------- 登记（幂等） ----------
+
 
 def claim_job(
     job_key: str,
@@ -366,8 +362,9 @@ def enqueue_job(
         return (rid if cur.rowcount else None), key
 
 
-def claim_pending(limit: int = 50, now: int | None = None,
-                  job_keys: list[str] | None = None) -> list[dict]:
+def claim_pending(
+    limit: int = 50, now: int | None = None, job_keys: list[str] | None = None
+) -> list[dict]:
     """原子领取手动触发（pending）的执行行，置为 running、attempts+1。
 
     「先 SELECT 再 UPDATE」在这里是安全的：UPDATE 的 WHERE 里带了
@@ -385,13 +382,13 @@ def claim_pending(limit: int = 50, now: int | None = None,
         keys = [str(k) for k in job_keys]
         if not keys:
             return []
-        where += " AND job_key IN (%s)" % ",".join("?" * len(keys))
+        where += " AND job_key IN ({})".format(",".join("?" * len(keys)))
         params.extend(keys)
     with _get_conn() as conn:
         rows = conn.execute(
             "UPDATE job_runs SET status = ?, attempts = attempts + 1, started_at = ? "
-            "WHERE run_id IN (SELECT run_id FROM job_runs WHERE %s "
-            "ORDER BY planned_at ASC LIMIT ?) AND status = ? RETURNING *" % where,
+            f"WHERE run_id IN (SELECT run_id FROM job_runs WHERE {where} "
+            "ORDER BY planned_at ASC LIMIT ?) AND status = ? RETURNING *",
             (STATUS_RUNNING, ts, *params, n, STATUS_PENDING),
         ).fetchall()
         return [dict(r) for r in rows]
@@ -399,12 +396,24 @@ def claim_pending(limit: int = 50, now: int | None = None,
 
 # ---------- 收尾与重试分级 ----------
 
-_RETRYABLE_HINTS = ("timeout", "timed out", "超时", "connection", "连接", "429", "500", "502", "503", "504")
+_RETRYABLE_HINTS = (
+    "timeout",
+    "timed out",
+    "超时",
+    "connection",
+    "连接",
+    "429",
+    "500",
+    "502",
+    "503",
+    "504",
+)
 _FATAL_HINTS = ("401", "402", "会话不存在", "会话已删除", "知识库不存在", "库不存在")
 
 
-def classify_error(exc: BaseException | None = None, status_code: int | None = None,
-                   message: str | None = None) -> str:
+def classify_error(
+    exc: BaseException | None = None, status_code: int | None = None, message: str | None = None
+) -> str:
     """把一次失败分成三类：CLASS_RETRY / CLASS_FATAL / CLASS_QUOTA。
 
     判定顺序：异常类型 > HTTP 状态码 > 文案关键词。
@@ -581,6 +590,7 @@ def requeue_run(run_id: str, force: bool = False, now: int | None = None) -> dic
 
 # ---------- 查询 ----------
 
+
 def get_run(run_id: str) -> dict | None:
     ensure_tables()
     with _get_conn() as conn:
@@ -593,7 +603,7 @@ class InvalidCursor(ValueError):
 
 
 def _encode_cursor(row: dict) -> str:
-    return "%d:%s" % (int(row["planned_at"]), row["run_id"])
+    return f"{int(row['planned_at'])}:{row['run_id']}"
 
 
 def _decode_cursor(cursor: str) -> tuple[int, str]:
@@ -601,7 +611,7 @@ def _decode_cursor(cursor: str) -> tuple[int, str]:
         planned, rid = str(cursor).split(":", 1)
         return int(planned), rid
     except Exception:
-        raise InvalidCursor(str(cursor))
+        raise InvalidCursor(str(cursor)) from None
 
 
 def list_runs(
@@ -644,7 +654,9 @@ def count_runs(status: str | None = None) -> int:
     ensure_tables()
     with _get_conn() as conn:
         if status:
-            row = conn.execute("SELECT COUNT(*) AS c FROM job_runs WHERE status = ?", (status,)).fetchone()
+            row = conn.execute(
+                "SELECT COUNT(*) AS c FROM job_runs WHERE status = ?", (status,)
+            ).fetchone()
         else:
             row = conn.execute("SELECT COUNT(*) AS c FROM job_runs").fetchone()
         return int(row["c"])
@@ -698,6 +710,7 @@ def job_stats(job_key: str, lookback: int = 20) -> dict:
 
 
 # ---------- 心跳与健康 ----------
+
 
 def heartbeat(pid: int | None = None, version: str = WORKER_VERSION) -> int:
     """写一次心跳（恒为 id=1 的一行 upsert），返回写入的时刻。
@@ -779,6 +792,7 @@ def health(threshold: int = HEARTBEAT_DOWN_SECONDS, now: int | None = None) -> d
 
 # ---------- cron 估算（给「worker 挂了也要能看到下次该跑的时间」用） ----------
 
+
 def _parse_field(field: str, fmin: int, fmax: int) -> list[int] | None:
     """解析一个 cron 字段为取值集合；不支持的写法返回 None。
 
@@ -814,7 +828,9 @@ def _parse_field(field: str, fmin: int, fmax: int) -> list[int] | None:
     return sorted(out)
 
 
-def estimate_next_run(cron: str, tz_name: str | None = None, after: int | None = None) -> int | None:
+def estimate_next_run(
+    cron: str, tz_name: str | None = None, after: int | None = None
+) -> int | None:
     """按 5 段 cron 估算下一次触发时刻（Unix 秒），算不出来返回 None。
 
     只支持本项目用到的写法：分钟 / 小时支持 `*`、`*/n`、列表、区间、步长；
@@ -838,7 +854,9 @@ def estimate_next_run(cron: str, tz_name: str | None = None, after: int | None =
     if dom != list(range(1, 32)) or month != list(range(1, 13)) or dow != list(range(0, 8)):
         return None
 
-    tz = ZoneInfo(tz_name or TZ_NAME)
+    # 默认时区直接用 timeutil.TZ（唯一口径）；只有显式传了别的时区名才另建。
+    # ZoneInfo 仍从标准库引入：它不是"第二份口径"，只是把名字换成时区对象。
+    tz = TZ if (not tz_name or tz_name == TZ_NAME) else ZoneInfo(tz_name)
     base = datetime.fromtimestamp(now_ts() if after is None else int(after), tz)
     # 从下一分钟开始找：同一分钟内的调用不该被算成「下一次」
     start = base.replace(second=0, microsecond=0) + timedelta(minutes=1)

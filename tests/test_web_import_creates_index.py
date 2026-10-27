@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """联网导入「空库也能写进去」自测（不联网、不花钱、用假 embedding）。
 
 背景（2026-10-04 定位、10-05 修）：
@@ -30,14 +29,19 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from langchain_core.embeddings import DeterministicFakeEmbedding  # noqa: E402
 
-from kb import pipelines, rag_core  # noqa: E402
-from kb import importer  # noqa: E402
+from kb import (  # noqa: E402
+    importer,  # noqa: E402
+    pipelines,
+    rag_core,
+)
 
 FAILED: list[str] = []
 PORT = 8766  # 避开常用端口；被占用时自动换
-DOC = ("苞米agent 是一个基于 FastAPI 与 Next.js 的检索增强问答系统。"
-       "文档上传后会先切片，再用阿里百炼 text-embedding-v3 生成向量，写入 Chroma；"
-       "检索阶段先取候选池，再做余弦离群过滤与 MMR 多样性选择。\n") * 20
+DOC = (
+    "苞米agent 是一个基于 FastAPI 与 Next.js 的检索增强问答系统。"
+    "文档上传后会先切片，再用阿里百炼 text-embedding-v3 生成向量，写入 Chroma；"
+    "检索阶段先取候选池，再做余弦离群过滤与 MMR 多样性选择。\n"
+) * 20
 
 _fake = DeterministicFakeEmbedding(size=32)
 
@@ -58,8 +62,9 @@ def _serve(dirpath: str):
     port = PORT
     for _ in range(20):
         try:
-            httpd = socketserver.TCPServer(("127.0.0.1", port),
-                                           lambda *a, **k: _QuietHandler(*a, directory=dirpath, **k))
+            httpd = socketserver.TCPServer(
+                ("127.0.0.1", port), lambda *a, **k: _QuietHandler(*a, directory=dirpath, **k)
+            )
             break
         except OSError:
             port += 1
@@ -103,8 +108,9 @@ def main() -> int:
         print("\n[1] 空库语义")
         check(pipe.peek() == 0, "新库 peek() == 0（确实是个空库）")
         pipe.get_or_open()
-        check(pipe._vs is None,
-              "空库 get_or_open() 后 _vs 仍为 None（所以原写法必抛 AttributeError）")
+        check(
+            pipe._vs is None, "空库 get_or_open() 后 _vs 仍为 None（所以原写法必抛 AttributeError）"
+        )
 
         # ---- 2. import_url 能写进空库 ----
         print("\n[2] import_url 入库")
@@ -113,12 +119,14 @@ def main() -> int:
             check(r["chunks"] > 0, f"import_url 返回片段数 {r['chunks']} > 0")
         except Exception as e:
             check(False, f"import_url 抛异常：{type(e).__name__}: {e}")
-            raise SystemExit(1)
+            raise SystemExit(1) from e
         c1 = pipelines.get_or_create(OWNER, kb_id).peek()
         check(c1 > 0, f"库内真的有片段：count = {c1}")
         check(pipelines.exists(OWNER, kb_id) is True, "exists() 由 False 变为 True")
-        check(any(f["name"] == r["file"] for f in pipelines.get_files(OWNER, kb_id)),
-              "文件清单里登记了这份联网资料")
+        check(
+            any(f["name"] == r["file"] for f in pipelines.get_files(OWNER, kb_id)),
+            "文件清单里登记了这份联网资料",
+        )
 
         # ---- 3. download_and_index 追加 ----
         print("\n[3] download_and_index 追加")
@@ -127,7 +135,7 @@ def main() -> int:
             check(r2.get("chunks", 0) > 0, f"download_and_index 返回片段数 {r2.get('chunks')} > 0")
         except Exception as e:
             check(False, f"download_and_index 抛异常：{type(e).__name__}: {e}")
-            raise SystemExit(1)
+            raise SystemExit(1) from e
         c2 = pipelines.get_or_create(OWNER, kb_id).peek()
         check(c2 > c1, f"追加生效：{c1} → {c2}")
 
@@ -135,8 +143,10 @@ def main() -> int:
         print("\n[4] 源码约束")
         src = open(os.path.join(root, "kb", "importer.py"), encoding="utf-8").read()
         # 只匹配调用形式：注释里还会提到旧写法（说明为什么不能用它），别误伤
-        check(".get_or_open()" not in src,
-              "kb/importer.py 里已无 get_or_open() 调用（写入路径必须是 _ensure_vs 系）")
+        check(
+            ".get_or_open()" not in src,
+            "kb/importer.py 里已无 get_or_open() 调用（写入路径必须是 _ensure_vs 系）",
+        )
         check("add_chunks(" in src, "kb/importer.py 走的是 pipe.add_chunks()")
     finally:
         if kb_id:

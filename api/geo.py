@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """用户地理定位：**按请求来源公网 IP 推断所在城市**。
 
 为什么需要它：浏览器只在**安全上下文**（HTTPS 或 localhost）里暴露 navigator.geolocation。
@@ -154,9 +153,7 @@ async def locate(request: Request):
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             # 必须显式传 ip：不传的话高德取的是「本服务器」的出口 IP，
             # 那就永远定位到机房所在的城市了。
-            resp = await client.get(
-                AMAP_IP_URL, params={"key": config.AMAP_API_KEY, "ip": ip}
-            )
+            resp = await client.get(AMAP_IP_URL, params={"key": config.AMAP_API_KEY, "ip": ip})
             data = resp.json()
     except Exception as e:
         logger.warning("IP 定位失败（ip=%s）：%s", ip, e)

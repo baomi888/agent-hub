@@ -34,8 +34,12 @@
 | 四屏控制台**前端**（每日委托 / 每日总结 / 打卡记录 / 设置） | ✅ 前端已上线 |
 | 对应后端接口（委托 / 总结 / 调度 / 工具元数据 / hybrid 工作流） | ✅ 已合入 main 并部署 |
 | 独立调度 worker（APScheduler，每日总结与委托定时执行） | ✅ 已上线（`deploy.sh` 自动拉起第三进程） |
-| 对话**蒸馏**入库 · **标签钩子** · 学习画像 · 蒸馏检索 | 🚧 **规划中**（仅接口契约 / 静态目录，无独立实现） |
+| 对话**蒸馏**入库 · 蒸馏检索 | 🚧 **规划中**（仅接口契约 / 静态目录，无独立实现） |
+| **标签钩子 · 学习画像**（方案 C 四块：入库主题标签 / 对话画像标签 / worker 定时聚合 / 检索加权偏置） | ✅ **已实现**（此前误标为规划中）——`core/config.py` 四个开关、`service/daily.py` 画像聚合、`core/scheduler.py` 每日 02:30 任务、`kb/rag_core.py` 检索偏置 |
+| **混合检索**（稠密 + BM25 稀疏 + RRF 融合） | ✅ **已实现**（此前 README 只写了四段流水线，漏了这条）——`kb/rag_core.py` 的 `_BM25`（k1=1.5 / b=0.75）+ RRF |
+| **上下文工程**（工具元数据生效 / 定位移出 system / 压缩块 + 最近 K 轮） | ✅ 已实现（2026-10-17 P0 三条 + 2026-10-20 接入请求路径）——前缀稳定，KV 缓存可命中 |
 | 打卡记录**后端**接口 `/api/checkin/*` | 🚧 **未实现**——前端按本地记录推算连续天数，页面如实标注「接口待上线」 |
+| 能力评估集 / LLM-as-Judge / GEPA 自进化 | 🚧 规划中（`docs/规划/Prompt自进化GEPA方案_2026-10-17.md`），样本量与验收口径待定 |
 
 > 想本地看完整功能：`git checkout main` 后按下方「快速开始」启动即可。四屏里**打卡记录页**因后端接口尚未实现，
 > 目前显示「接口待上线」+ 本地推算（这是如实标注，不是故障）；每日委托 / 每日总结两屏已是真实后端驱动。
@@ -156,7 +160,7 @@ flowchart TB
 
     RAG --> VS[("Chroma 向量库<br/>多库进程级单例")]
     AGENT --> TOOLS[工具集<br/>知识库检索 · 联网搜索<br/>计算器 · 天气 · 下载入库]
-    TOOLS --> TR[工具执行元数据<br/>TOOL_META 七字段<br/>导入时强制校验]
+    TOOLS --> TR[工具执行元数据<br/>TOOL_META 六字段<br/>导入时强制校验]
     TOOLS --> EXT[外部服务<br/>DeepSeek · 百炼 · 高德 · Serper]
     VS --> EMB[Embedding 向量化 · 百炼]
 
@@ -177,7 +181,7 @@ flowchart TB
 | 向量化 | 阿里百炼 `text-embedding-v3` |
 | Agent 框架 | LangChain `create_agent` + LangGraph（**依赖已就绪，但当前 checkpointer = `None`**） |
 | 向量库 | Chroma（多 collection 隔离，进程级单例） |
-| 会话存储 | SQLite（WAL 模式，参数化查询，10 轮窗口截断） |
+| 会话存储 | SQLite（WAL 模式，参数化查询，30 轮窗口截断） |
 | 调度存储 | SQLite 独立文件 `data/scheduler.db`（与 APScheduler JobStore 共用） |
 | 定时调度 | APScheduler 3.x，**独立 worker 进程**，cron 按 `Asia/Shanghai` |
 | 后端 | FastAPI + uvicorn，SSE 手写 `StreamingResponse` |
@@ -242,7 +246,7 @@ flowchart TB
 ```
 ├── core/
 │   ├── scheduler.py       # 调度底座：schedule_jobs / job_runs / worker_heartbeat 三表
-│   └── tool_registry.py   # TOOL_META 七字段，导入时强制校验
+│   └── tool_registry.py   # TOOL_META 六字段，导入时强制校验
 ├── worker/
 │   └── scheduler.py       # 独立 APScheduler 进程（Asia/Shanghai）
 ├── service/
@@ -351,16 +355,16 @@ python tests/test_geo_locate.py           # IP 定位三级降级
 ### AI 模块（已合并进 `main`）
 
 ```bash
-python -m pytest -q                       # 72 passed + 18 subtests（改动前基线 28，只增不减）
+python -m pytest -q                       # 254 passed + 19 subtests（2026-10-20 实测）
 ```
 
 | 项 | 结果 |
 |---|---|
-| 自动化测试 | **72 passed + 18 subtests** |
+| 自动化测试 | **254 passed + 19 subtests**（另有 13 个脚本式自测由 `pytest.ini` 逐文件 ignore，需 `python tests/xxx.py` 直接跑） |
 | 新增端点 | **34 条**（工具 2 / 调度 5 / 总结 5 / 委托 7 / 蒸馏 5 / 编排 10） |
 | 真机冒烟 | 29 项全过（起真实 uvicorn 打真实 HTTP） |
 | 接口文档 | 静态 13 项 + headless Edge 25 项双校验通过 |
-| 未完成 | 蒸馏检索实现 · 标签钩子 · 打卡记录后端接口 · 学习画像 |
+| 未完成 | 蒸馏检索实现 · 打卡记录后端接口 · 能力评估集 / GEPA 自进化 |
 
 > 手上没有 Python 3.12 会装不上：`requirements.txt` 钉死的 `chromadb==0.5.23`
 > 在 3.14 上装不了。详见 `docs/AI模块-20261013/README.md`。
@@ -389,7 +393,11 @@ python -m pytest -q                       # 72 passed + 18 subtests（改动前�
 - **W5** 打磨交付 ✅ —— 设计令牌收敛四轮（填充 / 字号 / 语义色 / 间距）；赞踩反馈打通；
   移动端四屏可滚动；模板广场转型为「委托模板」并让位给持续机制
 - **W6** AI 模块 ✅（已合并 `main` 并部署）—— 工具执行元数据注册表、独立调度 worker、
-  每日总结与每日委托端点已完成并通过 72 项测试并上线；**蒸馏检索与标签钩子、打卡后端接口、学习画像仍为规划项**
+  每日总结与每日委托端点已完成并上线
+- **W7** 上下文工程与运维强化 ✅ —— P0 三条（工具元数据真正生效 / 定位移出 system prompt /
+  压缩块替代滑动窗口）已接入请求路径；HTTPS 一键脚本、systemd、安全加固、监控告警四组资产就绪
+  （域名备案通过后执行 `https/setup-https.sh`）。
+  **仍为规划项**：蒸馏检索、打卡后端接口、能力评估集 / GEPA 自进化
 
 每日的代码扫描报告在 `docs/前后端可更新点_YYYY-MM-DD.md`，里面记了每一轮查出来的问题、
 哪些已修、哪些还欠着 —— 包括踩过的坑和当时的实测数据。

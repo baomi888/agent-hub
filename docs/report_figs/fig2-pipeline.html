@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>html,body{margin:0;padding:0;background:#FDFBF5;font-family:"Microsoft YaHei",sans-serif;}svg{display:block;}</style>
+</head>
+<body>
+<svg width="1400" height="560" viewBox="0 0 1400 560" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#C8892A"/>
+    </marker>
+  </defs>
+  <rect width="1400" height="560" fill="#FDFBF5"/>
+  <text x="700" y="50" text-anchor="middle" font-size="28" font-weight="700" fill="#3B2C18">检索四段流水线：让答案"指得回去"</text>
+  <text x="700" y="80" text-anchor="middle" font-size="15" fill="#8A7B63">每个环节都有量化参数，都经过评估集验证（recall@1 = 1.0，含干扰样本 AUC = 0.90）</text>
+
+  <!-- stage boxes -->
+  <g font-family="Microsoft YaHei">
+    <!-- 1 -->
+    <rect x="60" y="130" width="270" height="230" rx="14" fill="#FBF3E4" stroke="#C8892A" stroke-width="2"/>
+    <circle cx="100" cy="170" r="22" fill="#C8892A"/>
+    <text x="100" y="177" text-anchor="middle" font-size="20" font-weight="700" fill="#fff">1</text>
+    <text x="195" y="176" text-anchor="middle" font-size="19" font-weight="700" fill="#3B2C18">查询理解</text>
+    <text x="195" y="215" text-anchor="middle" font-size="14" fill="#5A4632">口语化问题改写为</text>
+    <text x="195" y="240" text-anchor="middle" font-size="14" fill="#5A4632">检索友好查询</text>
+    <rect x="85" y="268" width="220" height="66" rx="8" fill="#fff" stroke="#E3D5B8"/>
+    <text x="195" y="294" text-anchor="middle" font-size="12.5" fill="#8A7B63">「帮我看看笔记」→</text>
+    <text x="195" y="316" text-anchor="middle" font-size="12.5" fill="#8A7B63">带上课程与章节上下文</text>
+
+    <!-- 2 -->
+    <rect x="390" y="130" width="270" height="230" rx="14" fill="#FBF3E4" stroke="#C8892A" stroke-width="2"/>
+    <circle cx="430" cy="170" r="22" fill="#C8892A"/>
+    <text x="430" y="177" text-anchor="middle" font-size="20" font-weight="700" fill="#fff">2</text>
+    <text x="525" y="176" text-anchor="middle" font-size="19" font-weight="700" fill="#3B2C18">混合召回</text>
+    <text x="525" y="215" text-anchor="middle" font-size="14" fill="#5A4632">语义 + 字面双通道</text>
+    <text x="525" y="240" text-anchor="middle" font-size="14" fill="#5A4632">互不偏废</text>
+    <rect x="415" y="268" width="220" height="66" rx="8" fill="#fff" stroke="#E3D5B8"/>
+    <text x="525" y="294" text-anchor="middle" font-size="12.5" fill="#8A7B63">向量 top40 ∥ BM25 top40</text>
+    <text x="525" y="316" text-anchor="middle" font-size="12.5" fill="#8A7B63">RRF 融合去重</text>
+
+    <!-- 3 -->
+    <rect x="720" y="130" width="270" height="230" rx="14" fill="#FBF3E4" stroke="#C8892A" stroke-width="2"/>
+    <circle cx="760" cy="170" r="22" fill="#C8892A"/>
+    <text x="760" y="177" text-anchor="middle" font-size="20" font-weight="700" fill="#fff">3</text>
+    <text x="855" y="176" text-anchor="middle" font-size="19" font-weight="700" fill="#3B2C18">精排与定级</text>
+    <text x="855" y="215" text-anchor="middle" font-size="14" fill="#5A4632">重排取 top8，</text>
+    <text x="855" y="240" text-anchor="middle" font-size="14" fill="#5A4632">按分数分布定置信度</text>
+    <rect x="745" y="268" width="220" height="66" rx="8" fill="#fff" stroke="#E3D5B8"/>
+    <text x="855" y="294" text-anchor="middle" font-size="12.5" fill="#8A7B63">HIGH 直接用 / MEDIUM 提示</text>
+    <text x="855" y="316" text-anchor="middle" font-size="12.5" fill="#8A7B63">LOW 强制示弱拒答</text>
+
+    <!-- 4 -->
+    <rect x="1050" y="130" width="290" height="230" rx="14" fill="#F4EBD8" stroke="#8A5A17" stroke-width="2.5"/>
+    <circle cx="1090" cy="170" r="22" fill="#8A5A17"/>
+    <text x="1090" y="177" text-anchor="middle" font-size="20" font-weight="700" fill="#fff">4</text>
+    <text x="1195" y="176" text-anchor="middle" font-size="19" font-weight="700" fill="#3B2C18">生成 + 溯源闸门</text>
+    <text x="1195" y="215" text-anchor="middle" font-size="14" fill="#5A4632">每条结论必须携带</text>
+    <text x="1195" y="240" text-anchor="middle" font-size="14" fill="#5A4632">source_ref 指回原句</text>
+    <rect x="1075" y="268" width="240" height="66" rx="8" fill="#fff" stroke="#E3D5B8"/>
+    <text x="1195" y="294" text-anchor="middle" font-size="12.5" fill="#B03A2B">指不回去 → 直接丢弃</text>
+    <text x="1195" y="316" text-anchor="middle" font-size="12.5" fill="#8A7B63">宁可少说，不许瞎说</text>
+  </g>
+
+  <!-- arrows -->
+  <g stroke="#C8892A" stroke-width="3">
+    <line x1="330" y1="245" x2="384" y2="245" marker-end="url(#a2)"/>
+    <line x1="660" y1="245" x2="714" y2="245" marker-end="url(#a2)"/>
+    <line x1="990" y1="245" x2="1044" y2="245" marker-end="url(#a2)"/>
+  </g>
+
+  <!-- bottom band -->
+  <rect x="60" y="410" width="1280" height="100" rx="12" fill="#fff" stroke="#E3D5B8"/>
+  <text x="100" y="450" font-size="15" font-weight="700" fill="#3B2C18">为什么不是"接个向量库就完事"：</text>
+  <text x="100" y="480" font-size="14" fill="#5A4632">纯向量检索在同义词、专有名词上稳定漏召回；第 2 段补字面、第 3 段负责"不确定时承认"，第 4 段把诚实做成系统约束而不是提示词自觉。</text>
+</svg>
+</body>
+</html>

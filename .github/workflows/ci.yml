@@ -54,7 +54,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        # 2026-10-27 移除 3.13：离线用例在 3.13 上是**收集阶段**就崩（退出码 132 = SIGILL），
+        # 崩点在 chromadb 依赖链的 C 扩展，与业务代码无关；重试无意义，
+        # 等依赖方给出 3.13 wheel 再加回。3.11/3.12 覆盖生产实际使用的版本。
+        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
 
@@ -84,7 +87,35 @@ jobs:
           pytest tests/test_chroma_singleton.py \
                  tests/test_upload_stream.py \
                  tests/test_pipelines_concurrency.py \
-                 tests/test_agent_checkpointer.py -q
+                 tests/test_agent_checkpointer.py \
+                 tests/test_dashboard.py \
+                 tests/test_truncation_detect.py \
+                 tests/test_timeutil_consistency.py \
+                 tests/test_rate_limit_shared.py \
+                 tests/test_embed_guard.py \
+                 tests/test_metrics.py \
+                 tests/test_jwt_header_check.py \
+                 tests/test_tool_playbook.py -q
+
+      # 数据看板对账：看板数字 vs 裸 SQL、路径归一化、采集范围、不重复计数。
+      # 空库也应该全过（0 == 0），所以不需要预置数据。
+      - name: Dashboard reconciliation (对账)
+        env:
+          DEEPSEEK_API_KEY: ci-fake-key-not-used-offline-0000
+          EMBEDDING_API_KEY: ci-fake-key-not-used-offline-0000
+          EMBEDDING_BASE_URL: https://example.invalid/v1
+        run: python tools/check_dashboard.py --days 7 --json
+
+      # 数据看板端到端：起真 uvicorn 子进程（AGENT_HUB_DB 指向临时库），
+      # 真注册 / 真登录 / 真打接口，验证的是"接线"而不是函数。
+      # 只在 3.12 上跑一次：与解释器版本无关，跑两遍纯浪费。
+      - name: Dashboard E2E (真进程)
+        if: matrix.python-version == '3.12'
+        env:
+          DEEPSEEK_API_KEY: ci-fake-key-not-used-offline-0000
+          EMBEDDING_API_KEY: ci-fake-key-not-used-offline-0000
+          EMBEDDING_BASE_URL: https://example.invalid/v1
+        run: python tools/dashboard_e2e.py
 
       # ------------------------------------------------------
       # b) 脚本式自测（模块级执行 + sys.exit 结尾）

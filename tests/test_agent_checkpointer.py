@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Agent checkpointer 回归测试（纯本地、不联网、不需要 API Key）。
 
 背景（2026-10-02 线上事故）：
@@ -16,6 +15,7 @@
 
 直接跑：python tests/test_agent_checkpointer.py
 """
+
 import asyncio
 import os
 import sys
@@ -62,7 +62,10 @@ def test_create_agent_accepts_none_checkpointer():
     assert events, "astream 一个事件都没产出"
     kinds = {e[0] for e in events if isinstance(e, tuple) and len(e) == 2}
     assert "messages" in kinds, f"没收到 messages 流式事件，实际 {kinds}"
-    print(f"PASS 2: create_agent(checkpointer=None) + astream 正常，事件 {len(events)} 个，类型 {kinds}")
+    print(
+        f"PASS 2: create_agent(checkpointer=None) + astream 正常，"
+        f"事件 {len(events)} 个，类型 {kinds}"
+    )
 
 
 class _S(TypedDict):

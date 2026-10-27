@@ -17,6 +17,7 @@ import { usePrefs } from "@/lib/hooks/usePrefs";
 import { useSessions } from "@/lib/hooks/useSessions";
 import { useKnowledge } from "@/lib/hooks/useKnowledge";
 import { useAuth } from "@/lib/hooks/useAuth";
+import { detailToMessage } from "@/lib/errors";
 import AuthGate from "@/components/AuthGate";
 import type { UiMessage } from "@/components/chat/types";
 import type { ChatMode, Grounding, RefSource, ToolEvent } from "@/lib/types";
@@ -436,7 +437,7 @@ export default function Home() {
             break;
           }
           case "error": {
-            const detail = String(ev.data.detail ?? "未知错误");
+            const detail = detailToMessage(ev.data.detail, "未知错误");
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === asstId ? { ...m, error: detail, streaming: false } : m

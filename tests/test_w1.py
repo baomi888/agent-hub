@@ -1,10 +1,10 @@
-# -*- coding: utf-8 -*-
 """W1 端到端测试脚本：建库 → 检索 → 格式化 → LLM 连通。
 
 说明：RagPipeline.answer / answer_stream 已作为死代码删除（生产问答在
 api/chat.py），本脚本的问答步骤改为两段：引用格式化（走生产同款
 _format_refs / build_sources）+ LLM 流式连通（直接调 get_llm().stream）。
 """
+
 import os
 import sys
 
@@ -14,11 +14,12 @@ sys.path.insert(0, _PROJECT_ROOT)
 
 # ====== 1. Import 检查 ======
 print("=== Step 1: Import Check ===")
-from core import config
-from core.llm import get_llm, get_embeddings
 from langchain_core.messages import HumanMessage
-from kb.rag_core import RagPipeline, load_document
+
+from core import config
+from core.llm import get_llm
 from kb import pipelines
+from kb.rag_core import RagPipeline
 
 print(f"  PROJECT_ROOT = {config.PROJECT_ROOT}")
 print(f"  EMBEDDING_BASE_URL = {config.EMBEDDING_BASE_URL[:30]}...")
@@ -48,9 +49,13 @@ print(f"  usable docs = {len(files)}（仅 txt/md/pdf）")
 if not files:
     sample = os.path.join(data_dir, "sample.txt")
     with open(sample, "w", encoding="utf-8") as w:
-        w.write("人工智能（Artificial Intelligence，简称AI）是研究如何让计算机模拟人类智能的学科。\n")
+        w.write(
+            "人工智能（Artificial Intelligence，简称AI）是研究如何让计算机模拟人类智能的学科。\n"
+        )
         w.write("它涵盖机器学习、深度学习、自然语言处理、计算机视觉等多个方向。\n")
-        w.write("大语言模型（LLM）是AI的一个重要分支，通过海量文本预训练获得强大的语言理解和生成能力。\n")
+        w.write(
+            "大语言模型（LLM）是AI的一个重要分支，通过海量文本预训练获得强大的语言理解和生成能力。\n"
+        )
         w.write("LangChain 是一个用于构建大语言模型应用的开源框架，支持多种LLM和向量数据库。\n")
         w.write("Chroma 是一个轻量级的向量数据库，非常适合原型开发和小到中型应用。\n")
         w.write("RAG（检索增强生成）技术通过检索外部知识库来增强LLM的回答质量。\n")
@@ -83,9 +88,10 @@ try:
     for i, (d, s) in enumerate(docs_scores):
         src = os.path.basename(d.metadata.get("source", "?"))
         preview = d.page_content[:60].replace("\n", " ")
-        print(f"    [{i+1}] {src} | score={s:.3f} | {preview}...")
+        print(f"    [{i + 1}] {src} | score={s:.3f} | {preview}...")
 except Exception as e:
     from kb.rag_core import describe_api_error
+
     print(f"  ❌ RETRIEVE FAILED: {describe_api_error(e)}")
     sys.exit(1)
 
@@ -99,6 +105,7 @@ try:
     print(f"  ✅ SOURCES ({len(sources)} 条): {sources[0]['source'] if sources else '-'}")
 except Exception as e:
     from kb.rag_core import describe_api_error
+
     print(f"  ❌ FORMAT FAILED: {describe_api_error(e)}")
     sys.exit(1)
 
@@ -121,6 +128,7 @@ try:
     print(f"  答案末尾: {acc_text[-100:]}")
 except Exception as e:
     from kb.rag_core import describe_api_error
+
     print(f"\n  ❌ STREAM FAILED: {describe_api_error(e)}")
     sys.exit(1)
 

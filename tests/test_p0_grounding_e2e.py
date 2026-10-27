@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """P0 端到端离线自检：假 embedding + 本地 txt，验证整条链路真的会"示弱"。
 
 前面 test_grounding.py 只测了判定函数本身。这个脚本往下再走一层：
@@ -8,6 +7,7 @@
 
 不联网：embedding 换成 DeterministicFakeEmbedding，LLM 不调用（只看 prompt）。
 """
+
 import os
 import shutil
 import sys
@@ -31,7 +31,6 @@ from kb.rag_core import (  # noqa: E402
     RagPipeline,
     assess_grounding,
     grounding_note,
-    select_diverse,
 )
 
 FAILS = []
@@ -74,6 +73,7 @@ srcs = pipe.build_sources(docs_scores)
 check("build_sources 每条都带 strength 字段", all("strength" in s for s in srcs), str(srcs[:1]))
 check("每条 strength 取值合法", all(s["strength"] in ("high", "medium", "low", None) for s in srcs))
 
+
 # ---- 2. ★ 强制低相似度场景：直接喂远离的向量，确认提示条会亮 ----
 # 用假 embedding 很难稳定造出"低分"，所以这里直接构造距离，走真实判定 + 组装
 class _D:
@@ -105,7 +105,11 @@ check("灰色地带提示提到「沾边」", "沾边" in note_gray, note_gray[:
 # ---- 4. 真正走一遍 build_sources 的卡片强度 ----
 cards = pipe.build_sources(far + gray + [(_D("强相关片段"), (1 - 0.8) * 2)])
 print("\n[卡片] " + " | ".join(f"{c['score']}→{c['strength']}" for c in cards))
-check("卡片强弱标注与判定一致", cards[0]["strength"] == "low" and cards[-1]["strength"] == "high", str(cards))
+check(
+    "卡片强弱标注与判定一致",
+    cards[0]["strength"] == "low" and cards[-1]["strength"] == "high",
+    str(cards),
+)
 
 # ---- 5. 开关回退：关掉后不该再往 prompt 里塞约束 ----
 _saved = config.GROUNDING_NOTICE

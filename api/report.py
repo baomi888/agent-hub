@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """每日总结的 HTTP 端点。
 
   GET  /api/report/today        当前用户今日总结（无则 404 + detail）
@@ -12,19 +11,20 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from core.auth import get_current_user
 from core import quota
+from core.auth import get_current_user
 from service import daily
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
-def _report_to_dict(rep: "daily.Report") -> dict[str, Any]:
+def _report_to_dict(rep: daily.Report) -> dict[str, Any]:
     return {
         "report_id": rep.report_id,
         "date": rep.date,
@@ -40,7 +40,7 @@ def _report_to_dict(rep: "daily.Report") -> dict[str, Any]:
 @router.get("/today")
 async def report_today(uid: str = Depends(get_current_user)) -> dict:
     date = quota.day_key()
-    rep = daily.get_report(uid, date)
+    rep = await asyncio.to_thread(daily.get_report, uid, date)
     if rep is None:
         raise HTTPException(status_code=404, detail="今日总结尚未生成")
     return _report_to_dict(rep)
@@ -51,8 +51,8 @@ async def report_by_date(date: str, uid: str = Depends(get_current_user)) -> dic
     try:
         time.strptime(date, "%Y-%m-%d")
     except ValueError:
-        raise HTTPException(status_code=400, detail="date 格式应为 YYYY-MM-DD")
-    rep = daily.get_report(uid, date)
+        raise HTTPException(status_code=400, detail="date 格式应为 YYYY-MM-DD") from None
+    rep = await asyncio.to_thread(daily.get_report, uid, date)
     if rep is None:
         raise HTTPException(status_code=404, detail="该日总结不存在")
     return _report_to_dict(rep)
@@ -61,6 +61,6 @@ async def report_by_date(date: str, uid: str = Depends(get_current_user)) -> dic
 @router.post("/generate")
 async def report_generate(uid: str = Depends(get_current_user)) -> dict:
     date = quota.day_key()
-    quota.consume(uid, "auto")
-    rep = daily.summarize_day(uid, date)
+    await asyncio.to_thread(quota.consume, uid, "auto")
+    rep = await asyncio.to_thread(daily.summarize_day, uid, date)
     return _report_to_dict(rep)

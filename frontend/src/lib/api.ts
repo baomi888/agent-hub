@@ -1,6 +1,9 @@
 // 后端 API 封装：统一错误处理 + 类型化（相对路径走 rewrites 代理）
 import type { Conversation, KbInfo, KbFile, FilePreview, SearchResult, Defaults, Message } from "./types";
+import { detailToMessage } from "./errors";
 import type { MeOut, UserOut, Template, ApplyTemplateResult, UsageSummary } from "./types";
+import type { ProfileSnapshot, TagTaxonomy, TemplateRecommend } from "./types";
+import type { EnhanceResult } from "./types";
 import type {
   AgentTool,
   DailyReport,
@@ -17,6 +20,12 @@ import type {
   WorkflowRow,
   CheckinStreak,
   CheckinHistoryItem,
+  DashboardOverview,
+  ApiRankResp,
+  AdminFeedbackResp,
+  MyFeedbackResp,
+  FeedbackDict,
+  UserFeedbackItem,
 } from "./types";
 
 /**
@@ -53,7 +62,11 @@ function notifyAuthorized() {
   }
 }
 
-/** 统一解析后端错误体（FastAPI 返回 { detail: string }），非 JSON 时回落状态码 */
+/**
+ * 统一解析后端错误体：`detail` 可能是字符串（业务错误）也可能是数组（FastAPI 422），
+ * 交给 `errors.ts::detailToMessage` 归一成人话 —— 直接 `new Error(body.detail)` 会把
+ * 数组/对象转成 "[object Object]"，这正是委托页那个看不懂的报错气泡的成因。
+ */
 async function httpError(res: Response): Promise<Error> {
   let detail = `HTTP ${res.status}`;
   if (res.status === 401) {
@@ -65,8 +78,8 @@ async function httpError(res: Response): Promise<Error> {
   // 避免用户把它当成"系统坏了"而不停重试。
   let retryAfter: number | undefined;
   try {
-    const body = (await res.json()) as { detail?: string; retry_after?: number };
-    detail = body.detail || detail;
+    const body = (await res.json()) as { detail?: unknown; retry_after?: number };
+    detail = detailToMessage(body.detail, detail);
     retryAfter = typeof body.retry_after === "number" ? body.retry_after : undefined;
   } catch {
     /* 忽略非 JSON 错误体 */
@@ -78,20 +91,45 @@ async function httpError(res: Response): Promise<Error> {
   return new Error(detail);
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+// 默认请求超时（毫秒）。后端部分端点同步跑 LLM（打卡/总结/委托执行约 20–40s），
+// 一旦上游卡死，前端既不能取消也看不到"还要多久"——给一个上限，超时直接 fail，
+// 页面转入错误提示而不是永远转圈。长操作（生成/执行）可传 opts.timeoutMs 单独放宽。
+const DEFAULT_TIMEOUT_MS = 60000;
+
+async function request<T>(
+  path: string,
+  init?: RequestInit,
+  opts?: { timeoutMs?: number }
+): Promise<T> {
   // Next dev 对带尾斜杠的 /api/* 会 308 重定向，浏览器 fetch 跟随时偶尔丢 body/cookie，
   // 直接把尾斜杠去掉，请求落到 rewrite 目标，彻底绕开重定向。
   const cleanPath = path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
-  const res = await fetch(cleanPath, {
-    // 登录态在 HttpOnly Cookie 里，同源也要显式带；不写这行浏览器会丢弃
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    ...init,
-  });
-  if (!res.ok) {
-    throw await httpError(res);
+  const controller = new AbortController();
+  const timer: ReturnType<typeof setTimeout> | undefined =
+    opts?.timeoutMs !== 0
+      ? setTimeout(() => controller.abort(), opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+      : undefined;
+  try {
+    const res = await fetch(cleanPath, {
+      // 登录态在 HttpOnly Cookie 里，同源也要显式带；不写这行浏览器会丢弃
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      ...init,
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      throw await httpError(res);
+    }
+    return res.json() as Promise<T>;
+  } catch (e) {
+    // 超时（AbortController 触发）转成可懂的提示，而不是一堆原生 abort 噪音
+    if ((e as Error)?.name === "AbortError") {
+      throw new Error("请求超时，请稍后重试或检查网络");
+    }
+    throw e;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
-  return res.json() as Promise<T>;
 }
 
 /**
@@ -126,29 +164,81 @@ export class BusinessNotFoundError extends Error {
  * 终局解法是让后端给一份能力清单（见 docs/前后端可更新点_2026-10-14.md 后端 #2），
  * 与队友那批接口一起定契约时再换。
  */
-async function tryRequest<T>(path: string, init?: RequestInit): Promise<T | null> {
+async function tryRequest<T>(
+  path: string,
+  init?: RequestInit,
+  opts?: { timeoutMs?: number }
+): Promise<T | null> {
   const cleanPath = path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
-  const res = await fetch(cleanPath, {
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    ...init,
-  });
-  if (res.ok) return res.json() as Promise<T>;
-  if (res.status === 405 || res.status === 501) return null;
-  if (res.status === 404) {
-    let detail = "";
-    try {
-      detail = ((await res.json()) as { detail?: string }).detail ?? "";
-    } catch {
-      /* 非 JSON 错误体：当作未上线处理 */
+  const controller = new AbortController();
+  const timer: ReturnType<typeof setTimeout> | undefined =
+    opts?.timeoutMs !== 0
+      ? setTimeout(() => controller.abort(), opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+      : undefined;
+  try {
+    const res = await fetch(cleanPath, {
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      ...init,
+      signal: controller.signal,
+    });
+    if (res.ok) return res.json() as Promise<T>;
+    if (res.status === 405 || res.status === 501) return null;
+    if (res.status === 404) {
+      // 否则 detail.trim() 会在数组上抛 TypeError，把一次普通 404 变成未捕获异常。
+      let rawDetail: unknown = "";
+      try {
+        rawDetail = ((await res.json()) as { detail?: unknown }).detail ?? "";
+      } catch {
+        /* 非 JSON 错误体：当作未上线处理 */
+      }
+      const detail = typeof rawDetail === "string" ? rawDetail : "";
+      // 空 detail：后端没给 JSON 错误体，多数也是路由未匹配
+      // 其余按大小写不敏感匹配，理由见上方注释「按字符串猜」那一段
+      if (detail === "" || /^not found$/i.test(detail.trim())) return null;
+      // 业务 404：让调用方自己去认（report 页会转成「今天还没有总结」）
+      throw new BusinessNotFoundError(detail);
     }
-    // 空 detail：后端没给 JSON 错误体，多数也是路由未匹配
-    // 其余按大小写不敏感匹配，理由见上方注释「按字符串猜」那一段
-    if (detail === "" || /^not found$/i.test(detail.trim())) return null;
-    // 业务 404：让调用方自己去认（report 页会转成「今天还没有总结」）
-    throw new BusinessNotFoundError(detail);
+    throw await httpError(res);
+  } catch (e) {
+    // 超时（AbortController 触发）转成可懂的提示，而不是一堆原生 abort 噪音
+    if ((e as Error)?.name === "AbortError") {
+      throw new Error("请求超时，请稍后重试或检查网络");
+    }
+    throw e;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
-  throw await httpError(res);
+}
+
+/**
+ * 检索词校准预览（B3 接口）。**失败一律返回 null，绝不抛错。**
+ *
+ * 为什么和 api 里其它方法不一样：
+ * 这是一个"用户每打一句话就可能在后台跑一次"的辅助能力，不是用户主动发起的业务操作。
+ * 它挂在输入框上方，一旦限流（429）或超时就弹红字，用户会以为聊天坏了——
+ * 而实际上换词只是个增益，没有它检索照样跑。
+ *
+ * 所以：连不上、被限流、没登录，全部静默降级为"不提示"。
+ * 唯一例外是不传 signal：超时由 tryRequest 自己的 AbortController 管（8s），
+ * 这个接口是纯本地计算，正常都在 20ms 内返回。
+ */
+export async function previewEnhance(
+  text: string,
+  withClarify = true
+): Promise<EnhanceResult | null> {
+  const q = text.trim();
+  if (q.length < 2) return null;
+  try {
+    return await tryRequest<EnhanceResult>(
+      "/api/query/enhance",
+      { method: "POST", body: JSON.stringify({ text: q, with_clarify: withClarify }) },
+      { timeoutMs: 8000 }
+    );
+  } catch {
+    // 429 / 401 / 网络错误：提示条不出现就是了，不要打扰正在打字的人
+    return null;
+  }
 }
 
 export const api = {
@@ -302,12 +392,53 @@ export const api = {
   // ---------- 用量与反馈看板 ----------
   usageSummary: () => request<UsageSummary>("/api/usage/summary"),
 
+  // ---------- 用户反馈（DeepSeek 式：分类按钮 + 一段话）----------
+  // 与下面的 admin.* 分开：这个走 /api/user-feedback（登录即可、只看自己的），
+  // admin.* 走 /api/admin（非管理员后端直接 403）
+  feedbackDict: () => request<FeedbackDict>("/api/user-feedback/dict"),
+  submitFeedback: (body: { category: string; content: string; contact?: string; page?: string }) =>
+    request<{ ok: boolean; id: number }>("/api/user-feedback/", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  myFeedback: (limit = 20, offset = 0) =>
+    request<MyFeedbackResp>(`/api/user-feedback/mine?limit=${limit}&offset=${offset}`),
+
+  // ---------- 开发者数据看板（仅管理员）----------
+  admin: {
+    overview: (days = 7) => request<DashboardOverview>(`/api/admin/overview?days=${days}`),
+    apis: (days = 7, limit = 20, sort: "calls" | "slow" | "fail" = "calls") =>
+      request<ApiRankResp>(`/api/admin/apis?days=${days}&limit=${limit}&sort=${sort}`),
+    feedback: (status = "", limit = 20, offset = 0) =>
+      request<AdminFeedbackResp>(
+        `/api/admin/feedback?status=${encodeURIComponent(status)}&limit=${limit}&offset=${offset}`
+      ),
+    patchFeedback: (id: number, status: string) =>
+      request<{ ok: boolean; status: string }>(`/api/admin/feedback/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      }),
+    dict: () => request<FeedbackDict>("/api/admin/dict"),
+  },
+
   // ---------- 模板广场 ----------
   templates: () =>
-    request<{ templates: Template[] }>("/api/templates/"),
+    request<{ templates: Template[]; recommended?: TemplateRecommend[] }>("/api/templates/"),
   applyTemplate: (id: string) =>
     request<ApplyTemplateResult>(`/api/templates/${id}/apply`, {
       method: "POST",
+    }),
+
+  // ---------- 用户兴趣标签（画像）----------
+  //
+  // 路径不带尾斜杠：后端路由是 ""/"/tags"，带斜杠会先吃一个 308。
+  // saveTags 是覆盖式（PUT）：传什么就是最终选择，取消勾选靠"不传"表达。
+  tagTaxonomy: () => request<TagTaxonomy>("/api/profile/tags"),
+  myProfile: () => request<ProfileSnapshot>("/api/profile"),
+  saveTags: (tags: string[]) =>
+    request<ProfileSnapshot>("/api/profile/tags", {
+      method: "PUT",
+      body: JSON.stringify({ tags }),
     }),
 
   /* ==========================================================
@@ -336,11 +467,14 @@ export const api = {
     /**
      * dry_run=true = 只生成、不投递、不改 next_run_at。
      * 这是「先生成后确认」的落地：用户先看到内容，再决定投不投。
+     * 生成内容在响应的 `content` 字段（此前这里按 text/output 取，永远是 undefined
+     * ⇒ 预览弹层恒显示「后端未返回内容」）。
      */
     run: (id: string, dryRun: boolean) =>
-      tryRequest<{ text?: string; output?: string; delivered?: boolean }>(
+      tryRequest<{ content?: string; delivered?: boolean }>(
         `/api/delegate/${id}/run${dryRun ? "?dry_run=true" : ""}`,
-        { method: "POST" }
+        { method: "POST" },
+        { timeoutMs: 120000 }
       ),
   },
 
@@ -353,7 +487,7 @@ export const api = {
       tryRequest<DailyReport>("/api/report/generate", {
         method: "POST",
         body: JSON.stringify(date ? { date } : {}),
-      }),
+      }, { timeoutMs: 120000 }),
   },
 
   // ---------- P6 打卡 /api/checkin（4 端点）----------
@@ -371,9 +505,11 @@ export const api = {
       ),
     /** 触发今日总结（同步，约 20–40 秒）；返回 {date, status, points} */
     generate: () =>
-      request<{ date: string; status: string; points: number }>("/api/checkin/generate", {
-        method: "POST",
-      }),
+      request<{ date: string; status: string; points: number }>(
+        "/api/checkin/generate",
+        { method: "POST" },
+        { timeoutMs: 120000 }
+      ),
     /** 标记某天已分享（幂等 upsert） */
     share: (date: string) =>
       request<{ ok: boolean; date: string; shared: boolean }>("/api/checkin/share", {

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """定时任务底座自测（离线：不联网、不启动 APScheduler、不碰真实 data/）。
 
 覆盖 issue 04 的四条验收 + 端点契约：
@@ -21,15 +20,17 @@ import sqlite3
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import core.config  # noqa: E402  先让 chdir / load_dotenv 跑完
 import core.session  # noqa: E402
-from core import account  # noqa: E402
-from core import quota  # noqa: E402
+from core import (
+    account,  # noqa: E402
+    quota,  # noqa: E402
+)
 from core import scheduler as sched  # noqa: E402
 
 # 每台机器、每个用例一个独立临时目录：绝不写真实 data/
@@ -44,6 +45,8 @@ EXPECTED_CRONS = {
     "report.backfill": "0 4 * * *",
     "housekeeping": "15 4 * * *",
     "profile.aggregate": "30 2 * * *",
+    # Prompt 自进化（GEPA · issue #12）：默认每日 4 次，只产出 shadow 候选
+    "prompt.evolve": "20 */6 * * *",
 }
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -51,7 +54,7 @@ SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 def _next_db(tag: str) -> str:
     _SEQ[0] += 1
-    return os.path.join(_TMP, "sched_%s_%d.db" % (tag, _SEQ[0]))
+    return os.path.join(_TMP, f"sched_{tag}_{_SEQ[0]}.db")
 
 
 class TempDbCase(unittest.TestCase):
@@ -68,6 +71,7 @@ class TempDbCase(unittest.TestCase):
 
 
 # ==================== 1. 幂等 ====================
+
 
 class TestIdempotency(TempDbCase):
     def test_claim_same_idem_key_twice(self):
@@ -103,11 +107,13 @@ class TestIdempotency(TempDbCase):
         with self.assertRaises(sqlite3.IntegrityError):
             with sched._get_conn() as conn:
                 conn.execute(
-                    "INSERT INTO job_runs (run_id, job_key, subject_id, planned_at, idem_key, status) "
+                    "INSERT INTO job_runs (run_id, job_key, subject_id, "
+                    "planned_at, idem_key, status) "
                     "VALUES ('run_a', 'k', 's', 1, 'k|s|1', 'pending')"
                 )
                 conn.execute(
-                    "INSERT INTO job_runs (run_id, job_key, subject_id, planned_at, idem_key, status) "
+                    "INSERT INTO job_runs (run_id, job_key, subject_id, "
+                    "planned_at, idem_key, status) "
                     "VALUES ('run_b', 'k', 's', 1, 'k|s|1', 'pending')"
                 )
 
@@ -126,6 +132,7 @@ class TestIdempotency(TempDbCase):
 
 
 # ==================== 2. 重试分级 ====================
+
 
 class TestRetryGrading(TempDbCase):
     def _start(self, job_key="delegate.dispatch", subject="d1", planned=1760311000):
@@ -227,6 +234,7 @@ class TestRetryGrading(TempDbCase):
 
 # ==================== 3. 心跳与健康 ====================
 
+
 class TestHeartbeatHealth(TempDbCase):
     def test_age_advances_and_flips_down(self):
         self.assertIsNone(sched.heartbeat_age(), "从未心跳 → None")
@@ -261,7 +269,7 @@ class TestHeartbeatHealth(TempDbCase):
         planned = 1760311000
         for i in range(3):
             rid = sched.new_run_id()
-            sched.claim_job("report.daily", "s%d" % i, planned + i, run_id=rid)
+            sched.claim_job("report.daily", f"s{i}", planned + i, run_id=rid)
             sched.finish_job(rid, ok=False, error="boom", error_class=sched.CLASS_RETRY)
         st = sched.job_stats("report.daily")
         self.assertEqual(st["consecutive_failures"], 3, "连续 3 次失败 = 外发告警阈值")
@@ -276,7 +284,7 @@ class TestHeartbeatHealth(TempDbCase):
     def test_purge_keeps_failed_by_default(self):
         for i, ok in enumerate((True, False)):
             rid = sched.new_run_id()
-            sched.claim_job("housekeeping", "h%d" % i, 1000 + i, run_id=rid)
+            sched.claim_job("housekeeping", f"h{i}", 1000 + i, run_id=rid)
             sched.finish_job(rid, ok=ok, error=None if ok else "boom")
         self.assertEqual(sched.purge_runs(99999), 1, "只清成功行")
         self.assertEqual(sched.count_runs("failed"), 1)
@@ -284,6 +292,7 @@ class TestHeartbeatHealth(TempDbCase):
 
 
 # ==================== 4. 时区与 cron ====================
+
 
 class TestCronTimezone(TempDbCase):
     def test_cron_table_matches_spec(self):
@@ -298,8 +307,10 @@ class TestCronTimezone(TempDbCase):
         default_db = self._orig_path().replace("\\", "/")
         self.assertTrue(default_db.endswith("/data/scheduler.db"), default_db)
         self.assertEqual(worker.jobstore_url(), "sqlite:///" + self.path.replace("\\", "/"))
-        self.assertEqual(sched.JOB_DEFS["report.daily"]["cron"],
-                         "%d %d * * *" % (core.config.REPORT_MINUTE, core.config.REPORT_HOUR))
+        self.assertEqual(
+            sched.JOB_DEFS["report.daily"]["cron"],
+            f"{core.config.REPORT_MINUTE} {core.config.REPORT_HOUR} * * *",
+        )
 
     def test_apscheduler_cron_is_shanghai(self):
         from apscheduler.triggers.cron import CronTrigger
@@ -310,12 +321,14 @@ class TestCronTimezone(TempDbCase):
         self.assertEqual((nxt.hour, nxt.minute), (23, 30))
         self.assertEqual(nxt.utcoffset(), timedelta(hours=8))
         # 上海 23:30 == UTC 15:30，说明它确实是「上海时间」而不是「UTC 时间」
-        self.assertEqual(nxt.astimezone(timezone.utc).hour, 15)
+        self.assertEqual(nxt.astimezone(UTC).hour, 15)
 
         # 07:00 就是 07:00：不带时区会被当成本机/UTC，带上才是上海的早上七点
         seven = datetime(2026, 10, 12, 7, 0, tzinfo=SHANGHAI)
-        self.assertEqual(int(seven.timestamp()),
-                         int(datetime(2026, 10, 11, 23, 0, tzinfo=timezone.utc).timestamp()))
+        self.assertEqual(
+            int(seven.timestamp()),
+            int(datetime(2026, 10, 11, 23, 0, tzinfo=UTC).timestamp()),
+        )
 
     def test_estimate_matches_apscheduler(self):
         from apscheduler.triggers.cron import CronTrigger
@@ -336,11 +349,16 @@ class TestCronTimezone(TempDbCase):
     def test_day_bounds_are_shanghai_midnight(self):
         start, end = sched.day_bounds("2026-10-12")
         self.assertEqual(end - start, 86400)
-        self.assertEqual(datetime.fromtimestamp(start, SHANGHAI).strftime("%Y-%m-%d %H:%M"), "2026-10-12 00:00")
-        self.assertEqual(datetime.fromtimestamp(end, SHANGHAI).strftime("%Y-%m-%d %H:%M"), "2026-10-13 00:00")
+        self.assertEqual(
+            datetime.fromtimestamp(start, SHANGHAI).strftime("%Y-%m-%d %H:%M"), "2026-10-12 00:00"
+        )
+        self.assertEqual(
+            datetime.fromtimestamp(end, SHANGHAI).strftime("%Y-%m-%d %H:%M"), "2026-10-13 00:00"
+        )
 
 
 # ==================== 5. 端点 ====================
+
 
 class TestScheduleApi(unittest.TestCase):
     """`/api/schedule/*` 五个端点：鉴权、形状、管理员口径、分页、重试。
@@ -373,7 +391,7 @@ class TestScheduleApi(unittest.TestCase):
         # users / usage 表建在临时库里：不建的话第一次注册会撞 "no such table"
         account._ensure_tables()
         quota._ensure_tables()
-        core.config._AUTH_SECRET_FILE = os.path.join(_TMP, "auth_secret_%d" % _SEQ[0])
+        core.config._AUTH_SECRET_FILE = os.path.join(_TMP, f"auth_secret_{_SEQ[0]}")
         core.config.ALLOW_SIGNUP = True
         core.config.RATE_PER_MINUTE = 0  # 端点测试不受每分钟限流干扰
         core.config.ADMIN_USERNAMES = ["alice"]
@@ -449,7 +467,9 @@ class TestScheduleApi(unittest.TestCase):
             self.assertTrue(j["enabled"])
             self.assertEqual(j["tz"], "Asia/Shanghai")
             self.assertIn("description", j)
-        self.assertEqual(self.client.get("/api/schedule/jobs", params={"enabled": "false"}).json(), [])
+        self.assertEqual(
+            self.client.get("/api/schedule/jobs", params={"enabled": "false"}).json(), []
+        )
 
     # ---- run-now ----
 
@@ -461,12 +481,15 @@ class TestScheduleApi(unittest.TestCase):
         ts = self._freeze_now()
         r = self.client.post("/api/schedule/run-now", json={"job_key": "report.daily"})
         self.assertEqual(r.status_code, 202, r.text)
-        self.assertEqual(r.json(), {
-            "accepted": True,
-            "job_key": "report.daily",
-            "queued": 1,
-            "idem_key": "report.daily|*|%d" % ts,
-        })
+        self.assertEqual(
+            r.json(),
+            {
+                "accepted": True,
+                "job_key": "report.daily",
+                "queued": 1,
+                "idem_key": f"report.daily|*|{ts}",
+            },
+        )
         r2 = self.client.post("/api/schedule/run-now", json={"job_key": "report.daily"})
         self.assertEqual(r2.json()["queued"], 0, "同一秒重复点只排一次")
         self.assertEqual(sched.count_runs("pending"), 1)
@@ -484,7 +507,7 @@ class TestScheduleApi(unittest.TestCase):
             "/api/schedule/run-now",
             json={"job_key": "report.daily", "subject_id": "2026-10-12"},
         )
-        self.assertEqual(r4.json()["idem_key"], "report.daily|2026-10-12|%d" % ts)
+        self.assertEqual(r4.json()["idem_key"], f"report.daily|2026-10-12|{ts}")
         self.assertEqual(sched.count_runs("pending"), 2)
 
     def test_run_now_errors(self):
@@ -504,7 +527,7 @@ class TestScheduleApi(unittest.TestCase):
     def test_runs_pagination_and_filters(self):
         for i in range(3):
             rid = sched.new_run_id()
-            sched.claim_job("report.daily", "s%d" % i, 1760311000 + i, run_id=rid)
+            sched.claim_job("report.daily", f"s{i}", 1760311000 + i, run_id=rid)
             sched.finish_job(rid, ok=(i != 1), error=None if i != 1 else "boom")
 
         page1 = self.client.get("/api/schedule/runs", params={"limit": 2}).json()
@@ -539,7 +562,9 @@ class TestScheduleApi(unittest.TestCase):
         self.assertEqual(r.json()["next_attempt_at"], ts)
         self.assertEqual(len(sched.due_retries(now=ts)), 1, "重排后立刻可被 worker 扫到")
 
-        self.assertEqual(self.client.post("/api/schedule/retry", json={"run_id": "run_nope"}).status_code, 404)
+        self.assertEqual(
+            self.client.post("/api/schedule/retry", json={"run_id": "run_nope"}).status_code, 404
+        )
         # 成功过的执行：409
         rid2 = sched.new_run_id()
         sched.claim_job("delegate.dispatch", "d2", 1760311001, run_id=rid2)
@@ -551,9 +576,7 @@ class TestScheduleApi(unittest.TestCase):
         # 非管理员 403
         bob = self.TestClient(self.main.app)
         self._register(bob, "bob")
-        self.assertEqual(
-            bob.post("/api/schedule/retry", json={"run_id": rid}).status_code, 403
-        )
+        self.assertEqual(bob.post("/api/schedule/retry", json={"run_id": rid}).status_code, 403)
 
 
 if __name__ == "__main__":

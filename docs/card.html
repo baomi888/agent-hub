@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>每日规矩速查卡</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    width:1000px; background:#eef1f5;
+    font-family:"Microsoft YaHei","PingFang SC",sans-serif;
+    color:#1e2a38; -webkit-font-smoothing:antialiased;
+  }
+  .wrap { width:1000px; padding:38px 44px 34px; background:#eef1f5; }
+
+  /* ---------- header ---------- */
+  .hd { display:flex; align-items:flex-end; justify-content:space-between;
+        border-bottom:3px solid #1f3a5f; padding-bottom:14px; margin-bottom:8px; }
+  .hd h1 { font-size:38px; letter-spacing:2px; color:#1f3a5f; }
+  .hd .sub { font-size:14px; color:#5b6b7f; padding-bottom:6px; }
+  .motto { font-size:15px; color:#8a5a2b; background:#fbf1de; display:inline-block;
+           padding:5px 14px; border-radius:14px; margin:12px 0 4px; }
+  .legend { font-size:13px; color:#5b6b7f; margin:10px 0 20px; }
+  .dot { display:inline-block; width:11px; height:11px; border-radius:3px;
+         vertical-align:-1px; margin:0 4px 0 12px; }
+  .dot.do { background:#2e7d52; } .dot.dont { background:#c0392b; }
+
+  /* ---------- section title ---------- */
+  .sec { display:flex; align-items:center; margin:0 0 16px; }
+  .sec .tag { background:#1f3a5f; color:#fff; font-size:17px; font-weight:700;
+              padding:7px 16px; border-radius:6px; letter-spacing:1px; }
+  .sec .line { flex:1; height:2px; background:#c8d2dd; margin-left:14px; }
+  .sec .note { font-size:13px; color:#7b8a9c; margin-left:12px; }
+
+  /* ---------- timeline ---------- */
+  .tl { position:relative; padding-left:132px; margin-bottom:34px; }
+  .tl::before { content:""; position:absolute; left:112px; top:6px; bottom:6px;
+                width:3px; background:linear-gradient(#1f3a5f,#8fa6c0); border-radius:2px; }
+  .row { position:relative; margin-bottom:11px; }
+  .row .time { position:absolute; left:-132px; top:10px; width:100px; text-align:right;
+               font-size:16px; font-weight:700; color:#1f3a5f; font-variant-numeric:tabular-nums; }
+  .row .node { position:absolute; left:-26px; top:14px; width:13px; height:13px;
+               border-radius:50%; background:#fff; border:3px solid #1f3a5f; }
+  .row .card { background:#fff; border-radius:9px; padding:11px 16px;
+               box-shadow:0 1px 3px rgba(30,42,56,.10); border-left:5px solid #1f3a5f; }
+  .row .card h3 { font-size:17px; color:#1f3a5f; margin-bottom:6px; }
+  .row .card h3 em { font-style:normal; font-size:12px; color:#9aa8b8; font-weight:400; margin-left:8px; }
+  .li { font-size:14px; line-height:1.65; display:flex; }
+  .li .k { flex:none; width:58px; font-size:12px; font-weight:700; padding-top:3px; }
+  .li.do .k { color:#2e7d52; } .li.dont .k { color:#c0392b; }
+  .li .v { flex:1; }
+  .li .v b { color:#1e2a38; }
+  .src { font-size:11px; color:#a3b0bf; }
+  .hl { background:#fbf1de; border-left-color:#d99a2b; }
+  .hl h3 { color:#8a5a2b; }
+
+  /* ---------- places ---------- */
+  .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-bottom:16px; }
+  .p { background:#fff; border-radius:10px; padding:14px 16px;
+       box-shadow:0 1px 3px rgba(30,42,56,.10); border-top:4px solid #1f3a5f; }
+  .p .ph { font-size:17px; font-weight:700; color:#1f3a5f; margin-bottom:3px; }
+  .p .pm { font-size:12px; color:#9aa8b8; margin-bottom:9px; }
+  .p .li { font-size:13.5px; }
+  .p .li .k { width:30px; }
+  .p.run { border-top-color:#2e7d52; } .p.run .ph { color:#2e7d52; }
+  .p.eat { border-top-color:#d99a2b; } .p.eat .ph { color:#8a5a2b; }
+
+  /* ---------- footer ---------- */
+  .ban { background:#fdeceb; border:1px solid #f2c5c0; border-radius:9px;
+         padding:13px 18px; margin-bottom:14px; }
+  .ban .bt { font-size:15px; font-weight:700; color:#c0392b; margin-bottom:7px; }
+  .ban .bc { font-size:13.5px; color:#7d3b34; line-height:1.8; }
+  .ft { display:flex; justify-content:space-between; align-items:center;
+        border-top:2px solid #c8d2dd; padding-top:12px; font-size:12.5px; color:#8a99a9; }
+  .ft strong { color:#1f3a5f; font-size:14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hd">
+    <h1>每日规矩速查卡</h1>
+    <div class="sub">时间主线 · 地点主线 ｜ 10 条规矩的可执行版</div>
+  </div>
+  <div class="motto">总原则：过着才不烧心</div>
+  <div class="legend">
+    <span class="dot do"></span>该做的
+    <span class="dot dont"></span>绝对别做
+    <span style="margin-left:12px">高亮行 = 最容易破防的时段</span>
+  </div>
+
+  <div class="sec"><span class="tag">一、时间主线</span><span class="line"></span><span class="note">起床 7:30</span></div>
+
+  <div class="tl">
+    <div class="row">
+      <div class="time">07:30</div><div class="node"></div>
+      <div class="card">
+        <h3>起床 · 早饭</h3>
+        <div class="li do"><div class="k">做</div><div class="v">洗漱收拾，吃饱再出门，把当天要学的章节先翻一眼</div></div>
+        <div class="li dont"><div class="k">禁</div><div class="v">躺床上刷手机"醒神"——一刷就是半小时</div></div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="time">08:30</div><div class="node"></div>
+      <div class="card">
+        <h3>上午 = 学知识 <em>输入为主</em></h3>
+        <div class="li do"><div class="k">做</div><div class="v">啃新知识、记笔记、搭框架；没懂的地方标红，留给下午</div></div>
+        <div class="li dont"><div class="k">禁</div><div class="v">手机收发消息，一律走电脑 <span class="src">（规矩3）</span>；电脑上装 B 站桌面版 <span class="src">（规矩4）</span></div></div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="time">课表时段</div><div class="node"></div>
+      <div class="card hl">
+        <h3>数学课 <em>插空执行</em></h3>
+        <div class="li do"><div class="k">做</div><div class="v">不去上课，自己学、自己做题，<b>做完一大节即可</b> <span class="src">（规矩7）</span></div></div>
+        <div class="li dont"><div class="k">禁</div><div class="v">以"去上课"的名义打断上午的输入节奏</div></div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="time">12:00</div><div class="node"></div>
+      <div class="card">
+        <h3>午饭 · 午休</h3>
+        <div class="li do"><div class="k">做</div><div class="v">吃饭，闭眼休息 20–30 分钟，给下午存体力</div></div>
+        <div class="li dont"><div class="k">禁</div><div class="v">累了就刷视频"放松一下" <span class="src">（规矩5）</span></div></div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="time">13:30</div><div class="node"></div>
+      <div class="card">
+        <h3>下午 = 刷题 <em>输出为主</em></h3>
+        <div class="li do"><div class="k">做</div><div class="v">集中刷题，错题归类，回补上午标红的知识点</div></div>
+        <div class="li dont"><div class="k">禁</div><div class="v">手机收发消息 <span class="src">（规矩3）</span>；题目卡住就掏手机</div></div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="time">17:30</div><div class="node"></div>
+      <div class="card">
+        <h3>操场 · 跑步</h3>
+        <div class="li do"><div class="k">做</div><div class="v">六点多去跑步 <span class="src">（规矩6）</span>——这才是"累了"的正确解法</div></div>
+        <div class="li dont"><div class="k">禁</div><div class="v">用"今天太累了"把跑步砍掉</div></div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="time">18:30</div><div class="node"></div>
+      <div class="card hl">
+        <h3>一饭 · 晚饭</h3>
+        <div class="li do"><div class="k">做</div><div class="v">晚上<b>必须</b>去一饭吃 <span class="src">（规矩2）</span></div></div>
+        <div class="li dont"><div class="k">禁</div><div class="v">随便对付、干脆不吃——晚上崩盘多半从这里开始</div></div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="time">19:30</div><div class="node"></div>
+      <div class="card">
+        <h3>晚上 = vibe / 琐碎 / 总结 <em>规矩8</em></h3>
+        <div class="li do"><div class="k">做</div><div class="v">做点自己的项目、处理杂事、写当日总结与复盘</div></div>
+        <div class="li dont"><div class="k">禁</div><div class="v">把刷视频当娱乐 <span class="src">（规矩9）</span>；累了刷视频放松 <span class="src">（规矩5）</span></div></div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="time">22:00</div><div class="node"></div>
+      <div class="card">
+        <h3>收尾 · 洗漱</h3>
+        <div class="li do"><div class="k">做</div><div class="v">收拾桌面和书包，翻几页书，把明天第一节要用的东西备好</div></div>
+        <div class="li dont"><div class="k">禁</div><div class="v">手机带进被窝"看一眼"</div></div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="time">23:00 后</div><div class="node"></div>
+      <div class="card hl">
+        <h3>睡觉 <em>硬红线</em></h3>
+        <div class="li do"><div class="k">做</div><div class="v">十一点之后尽量不碰手机，可以看看书，早睡觉 <span class="src">（规矩1）</span></div></div>
+        <div class="li dont"><div class="k">禁</div><div class="v">碰手机；<b>关掉自动关机</b> <span class="src">（规矩10）</span></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec"><span class="tag">二、地点主线</span><span class="line"></span><span class="note">进门先对号入座</span></div>
+
+  <div class="grid">
+    <div class="p">
+      <div class="ph">实验室</div>
+      <div class="pm">上午学知识 · 下午刷题</div>
+      <div class="li do"><div class="k">做</div><div class="v">消息收发统一用电脑，手机静音放一边</div></div>
+      <div class="li dont"><div class="k">禁</div><div class="v">用手机收/发消息 <span class="src">（3）</span>；装 B 站桌面版 <span class="src">（4）</span></div></div>
+    </div>
+
+    <div class="p">
+      <div class="ph">教室</div>
+      <div class="pm">数学课</div>
+      <div class="li do"><div class="k">做</div><div class="v">自己学、自己做题，做完一大节即可 <span class="src">（7）</span></div></div>
+      <div class="li dont"><div class="k">禁</div><div class="v">跟着课堂走、把进度交给别人安排</div></div>
+    </div>
+
+    <div class="p eat">
+      <div class="ph">一饭</div>
+      <div class="pm">晚饭固定点</div>
+      <div class="li do"><div class="k">做</div><div class="v">晚上必须来吃，别让吃饭变成随机事件 <span class="src">（2）</span></div></div>
+      <div class="li dont"><div class="k">禁</div><div class="v">跳过晚饭或边走边对付</div></div>
+    </div>
+
+    <div class="p run">
+      <div class="ph">操场</div>
+      <div class="pm">傍晚六点多</div>
+      <div class="li do"><div class="k">做</div><div class="v">跑步——累了的正确出口 <span class="src">（6）</span></div></div>
+      <div class="li dont"><div class="k">禁</div><div class="v">用刷视频代替运动来"恢复"</div></div>
+    </div>
+
+    <div class="p">
+      <div class="ph">宿舍</div>
+      <div class="pm">晚 23:00 之后</div>
+      <div class="li do"><div class="k">做</div><div class="v">不碰手机，看看书，早点睡 <span class="src">（1）</span></div></div>
+      <div class="li dont"><div class="k">禁</div><div class="v">关掉自动关机 <span class="src">（10）</span>；刷视频当娱乐 <span class="src">（9）</span></div></div>
+    </div>
+
+    <div class="p">
+      <div class="ph">电脑前（任何地点）</div>
+      <div class="pm">全天生效</div>
+      <div class="li do"><div class="k">做</div><div class="v">要放松就起来走走、喝水、跑步</div></div>
+      <div class="li dont"><div class="k">禁</div><div class="v">B 站桌面版 <span class="src">（4）</span>；累了刷视频 <span class="src">（5）</span></div></div>
+    </div>
+  </div>
+
+  <div class="ban">
+    <div class="bt">三条不分时间地点的硬红线</div>
+    <div class="bc">
+      ① 累了绝不用刷视频来放松 <span style="color:#a3b0bf">（5）</span> —— 换成跑步 / 走动 / 闭眼<br>
+      ② 电脑上不能下载 B 站桌面版 <span style="color:#a3b0bf">（4）</span> —— 装了就等于给自己开了口子<br>
+      ③ 绝对不能关闭自动关机 <span style="color:#a3b0bf">（10）</span> —— 它是 23:00 那条线的最后一道锁
+    </div>
+  </div>
+
+  <div class="ft">
+    <div><strong>过着才不烧心</strong>　规矩不是约束，是让第二天不后悔</div>
+    <div>来源：给自己立个规矩.md ｜ 共 10 条</div>
+  </div>
+
+</div>
+</body>
+</html>

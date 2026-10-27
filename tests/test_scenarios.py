@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """P1 轻量版：场景预设的纯逻辑单测（不依赖 DB / LLM）。
 
 验证点：
@@ -6,13 +5,14 @@
 - 三个已知场景返回非空且带场景标记行
 - 场景标记行能被四分支拼装逻辑共用（这里只验证函数本身，拼装是字符串拼接已编译校验）
 """
-import sys
+
 import os
+import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.scenarios import get_scenario_prompt, SCENARIOS, SCENARIO_IDS
+from core.scenarios import SCENARIO_IDS, SCENARIOS, get_scenario_prompt
 
 
 class TestScenarios(unittest.TestCase):

@@ -118,6 +118,8 @@ export interface UserOut {
 export interface MeOut {
   user: UserOut;
   quota: Record<string, QuotaInfo>;
+  /** 是否开发者（后端 ADMIN_USERNAMES）。老后端不返回这个字段 → undefined → 按 false 处理 */
+  is_admin?: boolean;
 }
 
 // ---------- 用量与反馈看板（P2）----------
@@ -180,6 +182,64 @@ export interface ApplyTemplateResult {
 }
 
 /* ============================================================
+   用户兴趣标签（/api/profile）
+   ────────────────────────────────────────────────────────────
+   词表权威在 core/tag_taxonomy.py（30 条定稿，4 位组员清单合并）。
+   前端**不硬编码任何标签名**：大类、可选项、说明全部由 /api/profile/tags 下发，
+   加标签只改后端一处。这里的类型只描述形状。
+   ============================================================ */
+
+/** 单个标签的定义。type 是"目标/身份/任务/学科/方向/考试/场景/能力/状态"之一 */
+export interface TagDef {
+  name: string;
+  category: string;
+  type: string;
+  /** 父标签名（如"考研数学"的父级是"考研备考"）；顶层为 null */
+  parent: string | null;
+  desc: string;
+}
+
+export interface TagGroup {
+  category: string;
+  tags: TagDef[];
+}
+
+export interface TagTaxonomy {
+  categories: string[];
+  types: string[];
+  groups: TagGroup[];
+  /** 首屏可选标签（已排除"能力/状态"两类） */
+  pickable: string[];
+  total: number;
+}
+
+/** 画像里的一条标签（带权重与元数据；词表外的自由主题 category/type 为 null） */
+export interface ProfileTag {
+  tag: string;
+  weight: number;
+  category: string | null;
+  type: string | null;
+  desc: string | null;
+}
+
+export interface ProfileSnapshot {
+  /** 用户亲手勾选过的标签（覆盖式保存，前端据此回显已选状态） */
+  picks: string[];
+  /** 按权重降序的全部标签（含对话自动抽的） */
+  tags: ProfileTag[];
+  /** 按大类聚合的权重，权重降序 */
+  categories: { category: string; weight: number }[];
+  has_tags: boolean;
+}
+
+/** 「为你推荐」的一条：模板 id + 得分 + 命中的标签（前端拿来显示"因为你在准备英语四六级"） */
+export interface TemplateRecommend {
+  id: string;
+  score: number;
+  matched: string[];
+}
+
+/* ============================================================
    以下四组类型对应「队友分支 feat/ai-module-20261013」新增的端点。
    ────────────────────────────────────────────────────────────
    ⚠️ 契约来源是 `docs/前端页面与接口映射_v0.2.md`（按分支代码反推的字段清单），
@@ -190,7 +250,7 @@ export interface ApplyTemplateResult {
 // ---------- P4 每日委托 /api/delegate ----------
 
 export type DelegateFreq = "daily" | "weekdays" | "weekly" | "interval";
-export type DelegateKind = "study" | "review" | "encourage" | "custom";
+export type DelegateKind = "study_plan" | "review" | "encourage" | "custom";
 
 /**
  * 触发计划。注意**不是 cron**：后端用的是结构化字段，
@@ -200,7 +260,7 @@ export interface DelegateSchedule {
   freq: DelegateFreq;
   /** 触发时刻 HH:MM；interval 频率下可为空 */
   at?: string | null;
-  /** weekly 用：0=周日 … 6=周六 */
+  /** weekly 用：0=周一 … 6=周日（与后端 ScheduleIn.weekday 对齐） */
   weekday?: number | null;
   /** interval 用：每多少分钟 */
   every_minutes?: number | null;
@@ -226,6 +286,8 @@ export interface Delegate {
   enabled: boolean;
   /** 暂停时为 null —— 页面上要能看出「它不会再来了」 */
   next_run_at: number | null;
+  /** 被 worker 自动停用时记录的原因（如投递目标会话失效）；手动暂停时为 null */
+  last_error?: string | null;
   created_at?: number | null;
 }
 
@@ -535,4 +597,153 @@ export interface HybridLogRow {
   /** 摘要级数据，后端序列化后截断 2000 字符 */
   payload?: Record<string, unknown>;
   ts: number;
+}
+
+// ---------- 开发者数据看板（/dashboard）----------
+// 口径定义见 docs/数据看板_2026-10-27/口径与数据字典.md，
+// 这里的字段名与后端 api/admin.py 的响应一一对应，改名要两边一起改。
+
+export interface DashboardRange {
+  days: number;
+  /** Unix 秒 */
+  start: number;
+  end: number;
+  tz: string;
+}
+
+export interface DashboardUsers {
+  /** 注册总数。**当前快照，不随 days 变化** */
+  total: number;
+  /** 区间内新增 */
+  new: number;
+}
+
+export interface DashboardCalls {
+  total: number;
+  ok: number;
+  failed: number;
+  /** 分母为 0 时为 null —— 不是 0，也不是 100 */
+  success_rate: number | null;
+  avg_ms: number;
+  max_ms: number;
+}
+
+export interface DashboardSeriesItem {
+  /** YYYY-MM-DD（业务时区） */
+  day: string;
+  calls: number;
+  failed: number;
+}
+
+export type FeedbackStatus = "open" | "doing" | "done" | "closed";
+
+export interface DashboardOverview {
+  range: DashboardRange;
+  users: DashboardUsers;
+  calls: DashboardCalls;
+  feedback: Record<FeedbackStatus, number>;
+  series: DashboardSeriesItem[];
+}
+
+export interface ApiRankItem {
+  path: string;
+  method: string;
+  calls: number;
+  failed: number;
+  avg_ms: number;
+  max_ms: number;
+}
+
+export interface ApiRankResp {
+  items: ApiRankItem[];
+  total_paths: number;
+  sort: "calls" | "slow" | "fail";
+  range: { days: number; start: number; end: number };
+}
+
+export interface UserFeedbackItem {
+  id: number;
+  uid: string;
+  username: string;
+  category: string;
+  category_label: string;
+  content: string;
+  contact: string;
+  page: string;
+  status: FeedbackStatus;
+  status_label: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface AdminFeedbackResp {
+  items: UserFeedbackItem[];
+  total: number;
+  counts: Record<FeedbackStatus, number>;
+}
+
+export interface MyFeedbackResp {
+  items: UserFeedbackItem[];
+  total: number;
+}
+
+export interface FeedbackDict {
+  categories: { value: string; label: string }[];
+  statuses: { value: string; label: string }[];
+  transitions: Record<string, string[]>;
+  limits: {
+    min_content: number;
+    max_content: number;
+    max_contact: number;
+    max_page: number;
+  };
+}
+
+// ---------- 检索词校准（B3 预览接口 / B5 输入框提示条）----------
+
+/**
+ * 一次命中：raw 是用户原话里的口语词，canonical 是它对应的规范术语。
+ *
+ * ★ 增强是**追加**不是替换：原话里的 raw 一个字母都不会被改掉，
+ *   只是检索时额外带上 canonical（口语词和术语都能被命中）。
+ *
+ * `start` / `end` 是**在 `original` 上的下标**，前端直接切片做高亮。
+ * 千万不要拿 `raw` 去 `indexOf` —— 同一个词在一句话里出现两次时，
+ * 两次都会定位到第一个位置，高亮就会错位。
+ */
+export interface EnhanceHit {
+  raw: string;
+  canonical: string;
+  start: number;
+  end: number;
+}
+
+/** 命中但故意没换的词（反例 / 歧义词），只给排障看，界面上不展示。 */
+export interface EnhanceSkipped {
+  raw: string;
+  canonical: string;
+  reason: string;
+}
+
+export interface EnhanceResult {
+  /** 用户原话（可能与输入有前后空白差异，后端会 strip） */
+  original: string;
+  /**
+   * 检索用文本 = **原话 + 空格 + `added` 里的术语**。
+   *
+   * 原话恒为前缀，后端只追加不改写（替换会造病句：`查重率`→`重复率检测率`）。
+   * 界面上不要整行渲染它 —— 那等于把用户原话再念一遍。
+   * 要展示"多加了什么"，渲染 `added`。
+   */
+  retrieval: string;
+  /** 追加给检索的规范术语（已去重、保持出现顺序）。空数组 = 无需增强。 */
+  added: string[];
+  changed: boolean;
+  hits: EnhanceHit[];
+  skipped: EnhanceSkipped[];
+  /** 歧义词的追问句，可直接渲染 */
+  clarify: string[];
+  /** 当前生效的词表（截图报 bug 时看这个就知道是哪版） */
+  vocab: { file: string; terms: number };
+  warnings: string[];
 }

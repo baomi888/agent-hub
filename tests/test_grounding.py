@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """依据强度判定（P0 可信度）离线回归。
 
 盯的是"让模型敢说不知道"这条链路里最容易退化的三件事：
@@ -11,6 +10,7 @@
 
 不联网、不建库，纯函数级验证。
 """
+
 import os
 import sys
 
@@ -22,7 +22,6 @@ from kb.rag_core import (  # noqa: E402
     STRENGTH_LOW,
     STRENGTH_MEDIUM,
     STRENGTH_NONE,
-    _to_similarity,
     assess_grounding,
     grounding_note,
 )

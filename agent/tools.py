@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Agent 工具集（LangChain v1 @tool 装饰器）。
 
 5 个工具：
@@ -36,6 +35,7 @@ def _runtime(config) -> tuple[str | None, str | None]:
 
 # ==================== 1. KB 检索 ====================
 
+
 @tool
 def kb_search(query: str, top_k: int = 3, config: RunnableConfig = None) -> str:
     """从当前会话绑定的知识库中检索最相关的资料片段。
@@ -61,11 +61,11 @@ def kb_search(query: str, top_k: int = 3, config: RunnableConfig = None) -> str:
 
     try:
         from kb import pipelines
-        from core import config as _cfg
+
         # 距离 → 余弦相似度，和 RAG 链路（build_sources / _format_refs）保持同一口径。
         # 直接把 Chroma 距离打出来会显示成 >1 的"相似度"（线上见过 1.237），
         # 和同一条数据在 RAG 卡片上的 0.558 对不上。
-        from kb.rag_core import _to_similarity, assess_grounding
+        from kb.rag_core import _to_similarity, assess_grounding, grounding_note
 
         # 归属在这一行校验：不是自己的库直接抛 NotOwned，落到下面的 except 里
         pipe = pipelines.get_or_create(owner, kb_id)
@@ -89,24 +89,23 @@ def kb_search(query: str, top_k: int = 3, config: RunnableConfig = None) -> str:
             lines.append(f"**[{i + 1}]** {src}{loc}{score_txt} | {preview}...")
 
         body = "\n\n".join(lines)
-        if assessment.get("weak"):
-            # 这段是写给**模型**看的，措辞必须是可执行的下一步指令。
-            # 只写"可能不相关"会被忽略——Observation 里的语气会被当成资料本身来用，
-            # 必须明说"这些片段不足以作答"，把行为钉死。
-            return (
-                "⚠️ 检索到的片段相似度全部偏低，**不足以支撑对这个问题的回答**。\n"
-                "这些片段只能作为线索参考，不要据此拼凑答案，也不要把它们当作依据编号引用。\n"
-                "请直接告诉用户：知识库里暂时没有和这个问题直接相关的资料，"
-                "并建议补充相关文档，或者改用 web_search 联网查询。\n\n"
-                f"（以下为低相关度片段，仅供你判断是否真的不相关）\n{body}"
-            )
+        # 与纯 RAG 链路共用同一套 grounding 注释：检索偏弱（low / medium）时，
+        # 由 rag_core.grounding_note 产出"必须遵守"的约束，且受 GROUNDING_NOTICE
+        # 开关统一控制。单来源、措辞与 RAG 路径完全一致，避免两套话术各写各的。
+        note = grounding_note(assessment)
+        if note:
+            return f"{note}\n\n（以下为检索到的片段，仅供你判断是否真的不相关）\n{body}"
         return body
     except Exception:
         # 给 LLM 看的话要写清楚"这是确定性失败，别重试"（见 docs 第 8 轮第 20 条）
-        return "知识库检索不可用：当前会话绑定的知识库无法访问。请改用 web_search，不要重复调用本工具。"
+        return (
+            "知识库检索不可用：当前会话绑定的知识库无法访问。"
+            "请改用 web_search，不要重复调用本工具。"
+        )
 
 
 # ==================== 2. 联网搜索 ====================
+
 
 @tool
 def web_search(query: str, max_results: int = 5) -> str:
@@ -161,9 +160,9 @@ def web_search(query: str, max_results: int = 5) -> str:
 
 # ==================== 3. 计算器 ====================
 
-_CALC_ALLOWED = set("0123456789+-*/%()., **")  # 白名单字符
-_CALC_MAX_LEN = 64          # 表达式长度上限
-_CALC_MAX_DIGITS = 12       # 单个数字字面量的最大位数
+_CALC_ALLOWED = set("0123456789+-*/%(). ")  # 白名单字符（**没有逗号**，见下方校验处注释）
+_CALC_MAX_LEN = 64  # 表达式长度上限
+_CALC_MAX_DIGITS = 12  # 单个数字字面量的最大位数
 _CALC_MAX_EXPONENT = 10000  # ** 右侧指数上限：2**999999999999 会 OOM
 _CALC_MAX_RESULT_BITS = 14000  # ≈4215 位十进制；低于 Python 3.11+ int→str 的 4300 位硬限制
 
@@ -185,8 +184,13 @@ def calculator(expression: str) -> str:
     expr = expression.strip()
     if len(expr) > _CALC_MAX_LEN:
         return f"表达式过长（>{_CALC_MAX_LEN} 字符），请拆分后再算。"
-    # 白名单校验：只允许数字、运算符、括号、空格、点
-    if not re.fullmatch(r"[\d+\-*/%()., \*]+", expr):
+    # 白名单校验：直接用常量判断，不再维护第二条等价正则。
+    # 这里原来有两个问题：
+    #   1) `_CALC_ALLOWED` 定义了却**从未被使用**（全文件只出现定义那一行），
+    #      真正生效的是正则；注释描述的和代码执行的不是同一件事。
+    #   2) 两处都放行了英文逗号 ⇒ `1,2` 被 eval 当成元组，返回 "1,2 = (1, 2)"，
+    #      学生问"这两个数加起来多少"时会收到一个元组。
+    if not expr or not set(expr) <= _CALC_ALLOWED:
         return f"非法表达式（包含不允许的字符）：{expression}"
     # 连续幂会让 eval 直接打满 CPU/内存（如 9**9**9），直接拒
     if expr.count("**") > 1:
@@ -220,9 +224,11 @@ def calculator(expression: str) -> str:
 
 # ==================== 4. 天气 ====================
 
+
 def _get_amap_key() -> str:
     """获取高德 API Key。"""
     from core import config
+
     return config.AMAP_API_KEY
 
 
@@ -239,12 +245,13 @@ def reverse_geocode_city(lat: float, lon: float) -> str | None:
     if not key:
         return None
     try:
-        url = (
-            "https://restapi.amap.com/v3/geocode/regeo?"
-            + urllib.parse.urlencode({
-                "location": f"{lon},{lat}", "radius": "1000",
-                "extensions": "base", "key": key,
-            })
+        url = "https://restapi.amap.com/v3/geocode/regeo?" + urllib.parse.urlencode(
+            {
+                "location": f"{lon},{lat}",
+                "radius": "1000",
+                "extensions": "base",
+                "key": key,
+            }
         )
         req = urllib.request.Request(url, headers={"User-Agent": "agent/1.0"})
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -273,23 +280,71 @@ OPEN_METEO = "https://api.open-meteo.com/v1/forecast"
 # 拼音 → 中文地名。用户手输 "beijing" 这类拼音时先折成中文再查地理编码，
 # 否则高德地理编码对纯拼音的命中率很不稳定。
 CITY_ALIASES = {
-    "beijing": "北京", "tianjin": "天津", "xian": "西安", "harbin": "哈尔滨",
-    "shanghai": "上海", "hangzhou": "杭州", "nanjing": "南京", "suzhou": "苏州",
-    "wuhan": "武汉", "chengdu": "成都", "chongqing": "重庆", "guangzhou": "广州",
-    "shenzhen": "深圳", "haikou": "海口", "kunming": "昆明", "lhasa": "拉萨",
-    "maoming": "茂名", "xiamen": "厦门", "fuzhou": "福州", "jinan": "济南",
-    "qingdao": "青岛", "zhengzhou": "郑州", "changsha": "长沙", "guiyang": "贵阳",
-    "nanning": "南宁", "urumqi": "乌鲁木齐", "taiyuan": "太原", "xining": "西宁",
-    "lanzhou": "兰州", "yinchuan": "银川", "changchun": "长春", "shenyang": "沈阳",
-    "dalian": "大连", "taipei": "台北", "hongkong": "香港", "macau": "澳门",
+    "beijing": "北京",
+    "tianjin": "天津",
+    "xian": "西安",
+    "harbin": "哈尔滨",
+    "shanghai": "上海",
+    "hangzhou": "杭州",
+    "nanjing": "南京",
+    "suzhou": "苏州",
+    "wuhan": "武汉",
+    "chengdu": "成都",
+    "chongqing": "重庆",
+    "guangzhou": "广州",
+    "shenzhen": "深圳",
+    "haikou": "海口",
+    "kunming": "昆明",
+    "lhasa": "拉萨",
+    "maoming": "茂名",
+    "xiamen": "厦门",
+    "fuzhou": "福州",
+    "jinan": "济南",
+    "qingdao": "青岛",
+    "zhengzhou": "郑州",
+    "changsha": "长沙",
+    "guiyang": "贵阳",
+    "nanning": "南宁",
+    "urumqi": "乌鲁木齐",
+    "taiyuan": "太原",
+    "xining": "西宁",
+    "lanzhou": "兰州",
+    "yinchuan": "银川",
+    "changchun": "长春",
+    "shenyang": "沈阳",
+    "dalian": "大连",
+    "taipei": "台北",
+    "hongkong": "香港",
+    "macau": "澳门",
 }
 
 # WMO 天气码 → 中文（Open-Meteo 返回的就是这套码）
-WMO_CN = {0: "晴", 1: "基本晴", 2: "局部多云", 3: "阴", 45: "雾",
-          48: "雾凇", 51: "毛毛雨", 53: "小雨", 55: "中雨", 56: "冻毛毛雨",
-          61: "小雨", 63: "中雨", 65: "大雨", 66: "冻雨", 71: "小雪",
-          73: "中雪", 75: "大雪", 80: "阵雨", 81: "阵雨", 82: "强阵雨",
-          85: "阵雪", 95: "雷阵雨", 96: "雷阵雨伴冰雹", 99: "强雷暴冰雹"}
+WMO_CN = {
+    0: "晴",
+    1: "基本晴",
+    2: "局部多云",
+    3: "阴",
+    45: "雾",
+    48: "雾凇",
+    51: "毛毛雨",
+    53: "小雨",
+    55: "中雨",
+    56: "冻毛毛雨",
+    61: "小雨",
+    63: "中雨",
+    65: "大雨",
+    66: "冻雨",
+    71: "小雪",
+    73: "中雪",
+    75: "大雪",
+    80: "阵雨",
+    81: "阵雨",
+    82: "强阵雨",
+    85: "阵雪",
+    95: "雷阵雨",
+    96: "雷阵雨伴冰雹",
+    99: "强雷暴冰雹",
+}
 
 
 @tool
@@ -350,12 +405,19 @@ def get_weather(city: str = "", days: int = 1, lat: float = None, lon: float = N
         except Exception:
             pass
         try:
-            data = _http_get(OPEN_METEO, {
-                "latitude": lat, "longitude": lon,
-                "current": "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m",
-                "daily": "weather_code,temperature_2m_max,temperature_2m_min",
-                "timezone": "auto", "forecast_days": days,
-            }, amap=False)
+            data = _http_get(
+                OPEN_METEO,
+                {
+                    "latitude": lat,
+                    "longitude": lon,
+                    "current": "temperature_2m,relative_humidity_2m,apparent_temperature,"
+                    "weather_code,wind_speed_10m,wind_direction_10m",
+                    "daily": "weather_code,temperature_2m_max,temperature_2m_min",
+                    "timezone": "auto",
+                    "forecast_days": days,
+                },
+                amap=False,
+            )
             lines = [f"{label}（{lat:.2f},{lon:.2f}）未来 {days} 天天气（Open-Meteo）："]
             if days == 1:
                 cur = data.get("current") or {}
@@ -376,7 +438,9 @@ def get_weather(city: str = "", days: int = 1, lat: float = None, lon: float = N
                 codes = daily.get("weather_code") or []
                 for i in range(min(days, len(times))):
                     y, m, d = map(int, times[i].split("-"))
-                    weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][dt.date(y, m, d).weekday()]
+                    weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][
+                        dt.date(y, m, d).weekday()
+                    ]
                     desc = WMO_CN.get(codes[i], "未知") if codes else "?"
                     lines.append(f"{m}月{d}日 {weekday}：{desc}，{tmin[i]}~{tmax[i]}℃。")
             return "\n".join(lines)
@@ -428,63 +492,91 @@ def get_weather(city: str = "", days: int = 1, lat: float = None, lon: float = N
         try:
             data = _http_get(AMAP_WEATHER, {"city": adcode, "extensions": "base"})
             live = (data.get("lives") or [{}])[0]
-            return (f"{std}当前{live.get('weather', '未知')}，"
-                    f"气温 {live.get('temperature', '?')}℃，"
-                    f"湿度 {live.get('humidity', '?')}%，"
-                    f"{live.get('winddirection', '?')}风 {live.get('windpower', '?')}级。"
-                    f"（高德实时数据）")
+            return (
+                f"{std}当前{live.get('weather', '未知')}，"
+                f"气温 {live.get('temperature', '?')}℃，"
+                f"湿度 {live.get('humidity', '?')}%，"
+                f"{live.get('winddirection', '?')}风 {live.get('windpower', '?')}级。"
+                f"（高德实时数据）"
+            )
         except Exception:
             return "天气查询暂时不可用，请稍后再试。"
 
-    # ---- 2~4 天：高德预报 ----
+    # ---- 2 天以上：先问高德（免费版只给 4 天：今天 + 3 天）----
+    # amap_lines 只在"拿到了但不够 days"时保留，作为 Open-Meteo 也失败时的兜底。
+    amap_lines: list[str] | None = None
     try:
         data = _http_get(AMAP_WEATHER, {"city": adcode, "extensions": "all"})
         casts = ((data.get("forecasts") or [{}])[0].get("casts") or [])
-        if casts:
-            lines = [f"{std}未来 {days} 天天气预报："]
-            for cast in casts[:days]:
+        got = casts[:days]
+        if got:
+            # ⚠️ 标题里的天数必须等于**实际给出的行数**。
+            # 这里曾经写的是请求的 days，而高德 casts 恒为 4 条 ⇒ 问 6 天时输出
+            # "未来 6 天天气预报：" 下面只有 4 行，模型会照标题补两天编出来。
+            lines = [f"{std}未来 {len(got)} 天天气预报："]
+            for cast in got:
                 d = cast.get("date", "")
                 y, m, day = map(int, d.split("-"))
-                weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][dt.date(y, m, day).weekday()]
+                weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][
+                    dt.date(y, m, day).weekday()
+                ]
                 lines.append(
                     f"{m}月{day}日 {weekday}："
                     f"白天{cast.get('dayweather', '?')}，夜间{cast.get('nightweather', '?')}，"
                     f"{cast.get('nighttemp', '?')}~{cast.get('daytemp', '?')}℃，"
                     f"{cast.get('daywind', '?')}风 {cast.get('daypower', '?')}级。"
                 )
-            lines.append("（高德天气预报）")
-            return "\n".join(lines)
+            if len(got) >= days:
+                lines.append("（高德天气预报）")
+                return "\n".join(lines)
+            amap_lines = lines  # 不够 ≥days，先留着当兜底
     except Exception:
         pass
 
-    # ---- 5~7 天：Open-Meteo ----
+    # ---- 5~7 天：高德给不了这么多，改走 Open-Meteo ----
+    # 必须先判断 len(got) >= days 才能用高德：原来的 `if casts:` 恒为真（casts 恒 4 条），
+    # 直接 return，这段 Open-Meteo 兜底**永远到不了**（描述里承诺的 5~7 天是空话）。
     try:
         lon_s, lat_s = location.split(",")
-        data = _http_get(OPEN_METEO, {
-            "latitude": lat_s.strip(), "longitude": lon_s.strip(),
-            "daily": "weather_code,temperature_2m_max,temperature_2m_min",
-            "timezone": "Asia/Shanghai", "forecast_days": days,
-        }, amap=False)
+        data = _http_get(
+            OPEN_METEO,
+            {
+                "latitude": lat_s.strip(),
+                "longitude": lon_s.strip(),
+                "daily": "weather_code,temperature_2m_max,temperature_2m_min",
+                "timezone": "Asia/Shanghai",
+                "forecast_days": days,
+            },
+            amap=False,
+        )
         daily = data.get("daily") or {}
         times = daily.get("time") or []
         tmax = daily.get("temperature_2m_max") or []
         tmin = daily.get("temperature_2m_min") or []
         if times:
             codes = daily.get("weather_code") or []
-            lines = [f"{std}未来 {days} 天天气预报（Open-Meteo）："]
+            lines = [f"{std}未来 {min(days, len(times))} 天天气预报（Open-Meteo）："]
             for i in range(min(days, len(times))):
                 y, m, d = map(int, times[i].split("-"))
-                weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][dt.date(y, m, d).weekday()]
+                weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][
+                    dt.date(y, m, d).weekday()
+                ]
                 desc = WMO_CN.get(codes[i], "未知") if codes else "?"
                 lines.append(f"{m}月{d}日 {weekday}：{desc}，{tmin[i]}~{tmax[i]}℃。")
             return "\n".join(lines)
     except Exception:
-        return "天气预报暂时不可用，请稍后再试。"
+        pass
 
-    return "未获取到天气数据。"
+    # Open-Meteo 也失败：退回高德实际拿到的天数（标题已按实际天数写，不会撒谎）
+    if amap_lines:
+        amap_lines.append(f"（高德天气预报，仅能覆盖 {len(amap_lines) - 1} 天）")
+        return "\n".join(amap_lines)
+
+    return "天气预报暂时不可用，请稍后再试。"
 
 
 # ==================== 5. 文件下载 ====================
+
 
 @tool
 def download_file(url: str, config: RunnableConfig = None) -> str:
@@ -503,17 +595,24 @@ def download_file(url: str, config: RunnableConfig = None) -> str:
     """
     try:
         from kb import importer
+
         owner, kb_id = _runtime(config)
         if owner and kb_id:
             info = importer.download_and_index(owner, kb_id, url)
             if info.get("chunks"):
-                return (f"下载并入库成功：{info['filename']}（{info['ext']}，{info['size']} 字节）\n"
-                        f"已入库 {info['chunks']} 条片段，文件保存于 {info['path']}")
-            return (f"文件已下载：{info['filename']}（{info['ext']}，{info['size']} 字节）\n"
-                    f"保存于 {info['path']}（该格式暂不支持自动入库）")
+                return (
+                    f"下载并入库成功：{info['filename']}（{info['ext']}，{info['size']} 字节）\n"
+                    f"已入库 {info['chunks']} 条片段，文件保存于 {info['path']}"
+                )
+            return (
+                f"文件已下载：{info['filename']}（{info['ext']}，{info['size']} 字节）\n"
+                f"保存于 {info['path']}（该格式暂不支持自动入库）"
+            )
         info = importer.download_file(url)
-        return (f"下载成功：{info['filename']}（{info['ext']}，{info['size']} 字节）\n"
-                f"已保存到：{info['path']}")
+        return (
+            f"下载成功：{info['filename']}（{info['ext']}，{info['size']} 字节）\n"
+            f"已保存到：{info['path']}"
+        )
     except ValueError as e:
         return f"下载失败：{e}"
     except Exception:
@@ -523,3 +622,8 @@ def download_file(url: str, config: RunnableConfig = None) -> str:
 # ==================== 工具清单 ====================
 
 AGENT_TOOLS = [kb_search, web_search, calculator, get_weather, download_file]
+
+# 注：工具守卫（core/tool_guard.py 的截断/审批/封禁）**不在工具对象上做包装**。
+# 原因：LangChain 的 StructuredTool 会在 `_run` 与 `func` 两层做签名内省并注入
+# config/run_manager，从外面再包一层会破坏注入（实测两次踩坑，见 tool_guard 的注释）。
+# 守卫逻辑本身保留为可单测的纯函数，由调用方（api/chat.py）在执行前显式施加。

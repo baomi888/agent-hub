@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """IP 定位兜底（api/geo.py）的回归测试。
 
 不联网、不需要 AMAP Key：只测纯函数与降级路径。
@@ -7,6 +6,7 @@
 
 可从任意位置直接跑： python tests/test_geo_locate.py
 """
+
 import os
 import sys
 
@@ -23,13 +23,13 @@ cases = [
     # TEST-NET-1/2/3（RFC 5737 文档段）在 Python 3.10+ 归入 is_private，
     # 永远不会是真实用户 IP，判非公网直接跳过 AMAP 查询是预期行为
     ("203.0.113.25", False),
-    ("114.114.114.114", True),    # 南京 DNS
-    ("223.5.5.5", True),          # 阿里 DNS
+    ("114.114.114.114", True),  # 南京 DNS
+    ("223.5.5.5", True),  # 阿里 DNS
     ("127.0.0.1", False),
     ("192.168.1.5", False),
-    ("172.16.0.10", False),       # 示例内网 IP（RFC 1918 私有段）
+    ("172.16.0.10", False),  # 示例内网 IP（RFC 1918 私有段）
     ("10.0.0.1", False),
-    ("198.51.100.7", False),      # TEST-NET-2，同样是文档段
+    ("198.51.100.7", False),  # TEST-NET-2，同样是文档段
     ("::1", False),
     ("不是IP", False),
 ]
@@ -37,6 +37,7 @@ for raw, want in cases:
     got = _is_public_ip(raw)
     assert got == want, f"_is_public_ip({raw!r}) = {got}, 期望 {want}"
 print("PASS: _is_public_ip 全部符合预期")
+
 
 # ---------- 2. _client_ip：必须认 X-Forwarded-For 第一跳 ----------
 class FakeClient:

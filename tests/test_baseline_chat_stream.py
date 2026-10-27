@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """行为基线（characterization tests）：流式问答的 SSE 事件序列。
 
 走真 HTTP 层（TestClient），但把外部依赖全部换掉：鉴权用 dependency_overrides
@@ -8,8 +7,8 @@
 `_stream_llm` 里那个"每帧查一次断连"的调优最容易被这类断言挡住——一旦帧序列
 或少一帧，前端就会缺一段渲染。
 """
+
 import os
-import re
 import sys
 import tempfile
 
@@ -27,19 +26,24 @@ import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from langchain_core.documents import Document  # noqa: E402
 
-import core.session as session  # noqa: E402
-from core.auth import get_current_user  # noqa: E402
-
 import api.chat as chat  # noqa: E402
+import core.session as session  # noqa: E402
 import kb.rag_core as rc  # noqa: E402
 import main as m  # noqa: E402
+from core.auth import get_current_user  # noqa: E402
 
 OWNER = "u_stream"
 SID = "conv_stream"
 
 DOCS = [
     (Document(page_content="强相关片段", metadata={"source": "资料.txt"}), 0.4),
-    (Document(page_content="沾边片段", metadata={"source": "别的.txt"}, ), 1.4),
+    (
+        Document(
+            page_content="沾边片段",
+            metadata={"source": "别的.txt"},
+        ),
+        1.4,
+    ),
 ]
 
 
@@ -75,9 +79,9 @@ def _frames(body: str):
         data = ""
         for line in raw.split("\n"):
             if line.startswith("event:"):
-                name = line[len("event:"):].strip()
+                name = line[len("event:") :].strip()
             elif line.startswith("data:"):
-                data += line[len("data:"):].strip()
+                data += line[len("data:") :].strip()
         out.append((name, data))
     return out
 
@@ -87,7 +91,9 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(session, "_db_path", lambda: os.path.join(str(tmp_path), "sessions.db"))
     session._init_db()
 
-    monkeypatch.setattr(chat.store, "get_conversation", lambda uid, sid: {"id": sid, "kb_id": "kb_x"})
+    monkeypatch.setattr(
+        chat.store, "get_conversation", lambda uid, sid: {"id": sid, "kb_id": "kb_x"}
+    )
     monkeypatch.setattr(chat.store, "count_messages", lambda uid, sid: 1)
     monkeypatch.setattr(chat.store, "get_messages", lambda *a, **k: [])
     monkeypatch.setattr(chat.store, "add_message", lambda *a, **k: 123)
@@ -120,17 +126,20 @@ def _body(client, **payload):
 
 # ==================== RAG 路径 ====================
 
+
 def test_rag_stream_event_sequence(client):
     frames = _frames(_body(client, mode="rag"))
     names = [n for n, _ in frames]
 
     assert names == [
-        "status",    # RAG 模式，正在检索知识库
-        "sources",   # 引用溯源条目
+        "status",  # RAG 模式，正在检索知识库
+        "sources",  # 引用溯源条目
         "grounding",  # 依据强度（前端据此挂"依据较弱"提示条）
-        "status",    # 检索到 N 条片段
-        "status",    # 正在生成答案...
-        "token", "token", "token",
+        "status",  # 检索到 N 条片段
+        "status",  # 正在生成答案...
+        "token",
+        "token",
+        "token",
         "title",
         "done",
     ]
@@ -138,8 +147,21 @@ def test_rag_stream_event_sequence(client):
     import json
 
     done = json.loads([d for n, d in frames if n == "done"][0])
-    # plan_topic 为 2026-10-16 合入「计划主题识别」特性后新增的 done 字段
-    assert set(done) == {"answer", "refs", "title", "mode", "message_id", "run_id", "plan_topic"}
+    # plan_topic 为 2026-10-16 合入「计划主题识别」特性后新增的 done 字段；
+    # truncated 为 2026-10-20 审计 A1 新增：本条回答是否被长度上限截断。
+    # 这是**契约变更**，所以这里同步放宽期望集合并单独断言取值——
+    # 只删断言不改期望值等于把契约测试改成摆设。
+    assert set(done) == {
+        "answer",
+        "refs",
+        "title",
+        "mode",
+        "message_id",
+        "run_id",
+        "plan_topic",
+        "truncated",
+    }
+    assert done["truncated"] is False  # 这个假 LLM 不带 finish_reason=length
     assert done["answer"] == "你好呀"
     assert done["mode"] == "rag"
     assert done["message_id"] == 123
@@ -158,17 +180,48 @@ def test_rag_stream_event_sequence(client):
 
 
 def test_rag_stream_rewrite_frame_only_when_query_changes(client, monkeypatch):
-    """追问被改写时才多发一帧 status；没有历史时不改写、也不发这帧。"""
+    """追问被改写时才多发一帧 status；没有历史时不改写、也不发这帧。
+
+    B4（2026-10-23）起这条 status 的文案把「做了什么」和「最终检索词」
+    合成了一句（以前只说改写）。状态条是覆盖式的，拆成两条用户只看到最后一条。
+    """
     monkeypatch.setattr(chat, "rewrite_query", lambda q, h: "改写后的问题")
     frames = _frames(_body(client, mode="rag"))
     texts = [__import__("json").loads(d)["text"] for n, d in frames if n == "status"]
-    assert texts[1] == "已结合上下文改写检索词：改写后的问题"
+    assert texts[1] == "已结合上下文改写，检索词：改写后的问题"
+
+
+def test_rag_stream_enhance_frame_reports_swapped_terms(client, monkeypatch, tmp_path):
+    """B4 端到端：口语词在真实 SSE 链路上被换掉，并在状态条里报出来。
+
+    走真 HTTP + 真帧解析，只把词表换成临时文件——否则要依赖仓库里那份
+    每天在改的 data/vocab，断言第二天就红。
+    """
+    import json
+
+    import core.config as cfg
+    from service import enhance as enhance_svc
+
+    vocab = tmp_path / "vocab.csv"
+    vocab.write_text("canonical,aliases\n高等数学,高数\n", encoding="utf-8-sig")
+    monkeypatch.setattr(cfg, "ENHANCE_VOCAB_PATH", str(vocab))
+    monkeypatch.setattr(cfg, "ENHANCE_CHAT_ENABLED", True)
+    enhance_svc.reset_cache()
+
+    frames = _frames(_body(client, mode="rag", question="高数怎么复习"))
+    texts = [json.loads(d)["text"] for n, d in frames if n == "status"]
+    assert any("高数→高等数学" in t for t in texts), texts
 
 
 def test_llm_stream_event_sequence(client):
     frames = _frames(_body(client, mode="llm", kb_id_override=None))
     assert [n for n, _ in frames] == [
-        "status", "token", "token", "token", "title", "done",
+        "status",
+        "token",
+        "token",
+        "token",
+        "title",
+        "done",
     ]
     import json
 

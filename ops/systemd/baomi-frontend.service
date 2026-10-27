@@ -1,0 +1,23 @@
+[Unit]
+Description=Zhisui frontend (Next.js, :3000)
+After=network-online.target baomi-backend.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/frontend
+# 若 `which npm` 不是 /usr/bin/npm（比如用 nvm 装的），把下面这行改成实际路径
+ExecStart=/usr/bin/npm run start
+Environment=PORT=3000
+Environment=NODE_ENV=production
+Environment=NEXT_TELEMETRY_DISABLED=1
+Restart=always
+RestartSec=3
+LimitNOFILE=65535
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=baomi-front
+
+[Install]
+WantedBy=multi-user.target

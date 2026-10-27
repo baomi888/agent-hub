@@ -1,0 +1,35 @@
+groups:
+  - name: agent-hub
+    rules:
+      # 规则 1：业务组件静默死亡（后端 / 前端 / worker 任一挂掉）
+      # 指标由 monitoring/probe-health.sh 每分钟写入 node_exporter textfile
+      - alert: AgentHubComponentDown
+        expr: agent_hub_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "知穗组件不可用：{{ $labels.component }}"
+          description: "component={{ $labels.component }} 连续 2 分钟为 0，检查 systemctl status agent-hub-*"
+
+      # 规则 2：主机级宕机 / node_exporter 失联
+      - alert: InstanceDown
+        expr: up{job="node"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "主机失联（node_exporter 抓不到）"
+          description: "如果应用还活着，说明只是 exporter 挂了；如果全站不可访问，说明主机/网络出事。"
+
+      # 规则 3：磁盘可用不足 10%（ECS 云盘写满会导致 SQLite/Chroma 直接崩）
+      - alert: DiskSpaceLow
+        expr: |
+          node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"}
+            / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"} < 0.10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "磁盘可用不足 10%（{{ $labels.mountpoint }}）"
+          description: "清理日志/旧构建，或扩容云盘。"

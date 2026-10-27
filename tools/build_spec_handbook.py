@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """把 规范/团队研发规范_Word手册.md 转成一份排版过的 .docx。
 
 设计取舍：
@@ -16,7 +15,7 @@ import sys
 
 from docx import Document
 from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
@@ -85,7 +84,9 @@ def add_inline(paragraph, text: str, size=BODY_SIZE, base_bold=False):
 
 def strip_md(text: str) -> str:
     """给表格单元格用：去掉行内标记，保留纯文本。"""
-    return INLINE_RE.sub(lambda m: m.group(0)[2:-2] if m.group(0).startswith("**") else m.group(0)[1:-1], text)
+    return INLINE_RE.sub(
+        lambda m: m.group(0)[2:-2] if m.group(0).startswith("**") else m.group(0)[1:-1], text
+    )
 
 
 # ---------------------------------------------------------------- 块级解析

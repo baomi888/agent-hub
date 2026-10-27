@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
 from __future__ import annotations
+
 """流式问答接口（SSE）。
 
 三条路径（由 req.mode 决定，默认 auto 自动判断）：
@@ -36,6 +36,7 @@ SSE 事件协议：
 
 import asyncio
 import base64
+import contextlib
 import json
 import mimetypes
 import os
@@ -46,13 +47,23 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 
-from core import config, quota, session as store, upload
+from core import config, llm_gate, metrics, quota, tag_taxonomy, tool_registry, upload
+from core import context_compress as ctxcompress
+from core import scenarios as scenarios_mod
+from core import session as store
 from core.auth import get_current_user
 from core.llm import get_llm, get_vision_llm
-from core import scenarios as scenarios_mod
 from kb import pipelines
-from kb.rag_core import SYSTEM_PROMPT, assess_grounding, describe_api_error, grounding_note, rewrite_query
+from kb.rag_core import (
+    SYSTEM_PROMPT,
+    assess_grounding,
+    describe_api_error,
+    grounding_note,
+    rewrite_query,
+)
+from service import enhance as enhance_svc
 
 # 默认要登录：整组路由统一挂鉴权，新增端点时不会漏
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -66,15 +77,10 @@ MAX_CHAT_FILES = 9
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 
 # B 块：对话级用户画像标签（受控词表，防标签表爆炸）。
-# 模型只许从这几十个里选，超出一律丢弃；既能沉淀"这个用户关心什么"，
-# 又不会让 user_tags 表无限膨胀。后续 C2 聚合 / D 检索偏置可直接消费这些标签。
-USER_PROFILE_TAGS = [
-    "考研备考", "考研数学", "考研英语", "考研政治", "保研", "求职面试", "实习",
-    "课程作业", "期末考试", "论文写作", "毕业设计", "编程开发", "Python",
-    "前端开发", "后端开发", "算法竞赛", "操作系统", "计算机网络", "数据库",
-    "机器学习", "深度学习", "英语四六级", "文献阅读", "实验操作", "考证",
-    "公务员", "留学申请", "社团活动", "时间管理", "心态调节",
-]
+# 词表与"大类/父子/类型"元数据已抽到 core/tag_taxonomy.py（30 条定稿，4 位组员合并）。
+# 这里保留 USER_PROFILE_TAGS 这个名字，因为它是**受控词表**的语义，
+# 和"标签体系"（含大类、同义词）不是一回事：抽标签时只该看到词表。
+USER_PROFILE_TAGS = tag_taxonomy.USER_PROFILE_TAGS
 
 # 计划类请求的格式要求：由服务端拼到"本轮提问"末尾（req.plan=true 时），
 # 不落库、不参与历史——避免像旧前端那样把格式块写进历史污染后续轮次。
@@ -94,7 +100,18 @@ PLAN_DEFAULT_HINT = "时间轴建议按「第1周 / 第N天 / DAY N」划分，�
 PLAN_TOPICS: list[dict] = [
     {
         "name": "营销活动",
-        "keys": ["营销", "发布会", "推广", "上市", "促销", "品牌", "市场", "宣发", "campaign", "活动策划"],
+        "keys": [
+            "营销",
+            "发布会",
+            "推广",
+            "上市",
+            "促销",
+            "品牌",
+            "市场",
+            "宣发",
+            "campaign",
+            "活动策划",
+        ],
         "hint": "时间轴建议按「第1周 筹备期 / 第2周 预热期 / 第3周 爆发期」划分。",
     },
     {
@@ -105,10 +122,33 @@ PLAN_TOPICS: list[dict] = [
         # 退回通用 hint（计划里混出 DAY 1/DAY 2）、前端卡片抬头也变通用。
         # 知穗面向大学生，考试名是最常见的学习计划入口，必须直命中。
         "keys": [
-            "学习", "备考", "复习", "考研", "考公", "雅思", "托福",
-            "六级", "四级", "四六级", "cet", "gre", "专四", "专八",
-            "期末", "期中", "考证", "证书", "刷题", "真题", "单词", "英语",
-            "读书", "课程", "培训", "考试", "study",
+            "学习",
+            "备考",
+            "复习",
+            "考研",
+            "考公",
+            "雅思",
+            "托福",
+            "六级",
+            "四级",
+            "四六级",
+            "cet",
+            "gre",
+            "专四",
+            "专八",
+            "期末",
+            "期中",
+            "考证",
+            "证书",
+            "刷题",
+            "真题",
+            "单词",
+            "英语",
+            "读书",
+            "课程",
+            "培训",
+            "考试",
+            "study",
         ],
         "hint": "时间轴建议按「第1周 ~ 第N周」划分，阶段按科目或模块编号。",
     },
@@ -134,7 +174,21 @@ PLAN_TOPICS: list[dict] = [
     },
     {
         "name": "内容创作",
-        "keys": ["内容", "写作", "文案", "脚本", "公众号", "小红书", "直播", "自媒体", "专栏", "书籍", "论文", "content", "video"],
+        "keys": [
+            "内容",
+            "写作",
+            "文案",
+            "脚本",
+            "公众号",
+            "小红书",
+            "直播",
+            "自媒体",
+            "专栏",
+            "书籍",
+            "论文",
+            "content",
+            "video",
+        ],
         "hint": "时间轴建议按「第N周」或「选题 / 撰写 / 发布 / 复盘」阶段划分。",
     },
     {
@@ -182,16 +236,12 @@ async def _resolve_plan_topic(uid: str, sid: str, question: str) -> dict | None:
     if topic is not None or config.PLAN_TOPIC_HISTORY_MESSAGES <= 0:
         return topic
     try:
-        recent = await asyncio.to_thread(
-            store.get_messages, uid, sid, include_system=False
-        )
+        recent = await asyncio.to_thread(store.get_messages, uid, sid, include_system=False)
     except Exception:
         return None
-    texts = [
-        m.get("content") or ""
-        for m in reversed(recent)
-        if m.get("role") == "user"
-    ][: config.PLAN_TOPIC_HISTORY_MESSAGES]
+    texts = [m.get("content") or "" for m in reversed(recent) if m.get("role") == "user"][
+        : config.PLAN_TOPIC_HISTORY_MESSAGES
+    ]
     return detect_plan_topic(*texts)
 
 
@@ -204,6 +254,7 @@ def _augment_plan(question: str, plan: bool, topic: dict | None = None) -> str:
         return question
     hint = (topic or {}).get("hint") or PLAN_DEFAULT_HINT
     return question + PLAN_FORMAT_HEADER + hint
+
 
 # 上传件保留时长：图片理解完就不需要了，超时自动清，避免目录无限增长
 UPLOAD_TTL_HOURS = 24
@@ -248,6 +299,7 @@ class ChatRequest(BaseModel):
 
 # ==================== SSE 帧 ====================
 
+
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
@@ -270,7 +322,59 @@ def _pick_mode(req_mode: str, kb_id: str | None, kb_exists: bool) -> str:
     return "agent"
 
 
+def _retrieval_query(question: str, history) -> tuple[str, list[dict], bool]:
+    """把用户原话变成「检索用文本」：先补全指代，再追加规范术语。
+
+    为什么合成一个函数
+    ------------------
+    图片理解模式（554 行）和 RAG 模式（831 行）都要这一步。分开写就是两份口径，
+    改一处忘一处，最后"同一句话在图片模式下检索命中的片段不一样"。
+
+    为什么顺序不能反
+    ----------------
+    rewrite_query 是用 LLM 补全指代（"那它呢" → "RRF 融合算法有什么缺点"），
+    补出来的文本里可能又冒出新的口语词，所以 enhance 必须排在它后面。
+    反过来先换词再交给 LLM 改写，LLM 改写完还可能把术语说回口语。
+
+    ★ 返回的是**检索用文本**，绝不回写 req.question。
+      界面展示与聊天记录永远是用户原话——这是三个原则里最不能破的一条。
+    ★ 增强是**追加**（原话 + 术语）而不是替换。替换在真实短句上每 3 条就有 1 条
+      造出病句（`查重率`→`重复率检测率`），追加式原文一字不动，不存在这个问题。
+
+    返回 (检索词, 命中列表, 是否发生过指代改写)。
+    命中列表只用于发一条"已补充哪几个术语"的提示，**不含 start/end**：
+    这里的文本可能已被 LLM 改写，偏移在原话上没有意义（要高亮走 /api/query/enhance）。
+    """
+    query = rewrite_query(question, history)
+    rewritten = query != question
+    if not config.ENHANCE_CHAT_ENABLED:
+        # 关掉开关时退回旧行为：只有改写，一个词都不换
+        return query, [], rewritten
+    text, changes = enhance_svc.enhance_for_retrieval(query)
+    return text, changes, rewritten
+
+
+def _enhance_note(changes: list[dict], rewritten: bool, query: str) -> str:
+    """拼一条状态条文案：做了什么 + 最终用哪个检索词。
+
+    只发**一条**：状态条是覆盖式的，连发两条用户只看得到最后一条，
+    第一条等于白发。所以改写和增强都发生时合成一句。
+
+    措辞用「补充规范术语检索」而不是「校准」：增强是**追加**，用户原话没有被改掉。
+    说成"校准"会让人以为自己的问题被动手脚了，而这正是三原则要避免的观感。
+    """
+    bits = []
+    if rewritten:
+        bits.append("结合上下文改写")
+    if changes:
+        pairs = "、".join(f"{c['raw']}→{c['canonical']}" for c in changes[:2])
+        more = f" 等 {len(changes)} 处" if len(changes) > 2 else ""
+        bits.append(f"补充规范术语检索（{pairs}{more}）")
+    return f"已{'，'.join(bits)}，检索词：{query}"
+
+
 # ==================== 附件上传 ====================
+
 
 def _cleanup_old_uploads() -> None:
     """清掉超过 TTL 的历史上传件（目录只在上传时顺带扫一次，不做常驻任务）。"""
@@ -289,7 +393,9 @@ def _cleanup_old_uploads() -> None:
 
 
 @router.post("/upload")
-async def upload_attachments(files: list[UploadFile] = File(...)) -> dict:
+async def upload_attachments(
+    files: list[UploadFile] = File(...),  # noqa: B008 -- FastAPI 依赖注入惯例
+) -> dict:
     """上传聊天附件（图片），返回服务端路径供图片理解使用。
 
     只收图片；其他格式即使上传成功也不会参与回答，直接拒绝省磁盘省流量。
@@ -317,12 +423,14 @@ async def upload_attachments(files: list[UploadFile] = File(...)) -> dict:
         # 分块写盘：以前是 await f.read() 整份读进内存再判大小，
         # 1GB 的附件在 2G 内存的机器上等判出来时进程已经被 OOM killer 带走了
         size = await upload.save_stream(f, path, MAX_CHAT_UPLOAD_MB * 1024 * 1024)
-        results.append({
-            "filename": f.filename,
-            "path": path,
-            "size": size,
-            "type": f.content_type or "application/octet-stream",
-        })
+        results.append(
+            {
+                "filename": f.filename,
+                "path": path,
+                "size": size,
+                "type": f.content_type or "application/octet-stream",
+            }
+        )
     return {"files": results}
 
 
@@ -337,6 +445,7 @@ def _is_supported_image(filename: str | None, content_type: str | None) -> bool:
 
 
 # ==================== 图片理解辅助 ====================
+
 
 def _has_image(attachments: list[dict]) -> bool:
     """附件中是否包含图片。"""
@@ -406,14 +515,17 @@ def _build_vision_user_message(question: str, attachments: list[dict]) -> HumanM
         resolved = _resolve_upload_path(path) if isinstance(path, str) else None
         if not resolved or not os.path.exists(resolved):
             continue
-        content.append({
-            "type": "image_url",
-            "image_url": {"url": _image_to_data_url(resolved)},
-        })
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": _image_to_data_url(resolved)},
+            }
+        )
     return HumanMessage(content=content)
 
 
 # ==================== 流式输出 ====================
+
 
 class _Acc:
     """流式累计器：异步生成器没法 return 值，用对象把结果带出去。"""
@@ -421,45 +533,192 @@ class _Acc:
     def __init__(self) -> None:
         self.text = ""
         self.error: str | None = None
+        # 因客户端断开而中断（不是错误，但绝不能把半截回答当完整答案落库）
+        self.aborted = False
+        # 上游给的结束原因（最后一帧才是终值）。None = 上游没给，或没收到。
+        self.finish_reason: str | None = None
+        # 被长度上限截断：文本合法、结构完整、但**内容不完整**
+        self.truncated = False
 
 
-async def _stream_llm(llm, messages, request: Request, acc: _Acc) -> None:
+# 各供应商对"被长度上限截断"的叫法。OpenAI 兼容接口用 length，
+# Anthropic 叫 max_tokens，Gemini 类似 max_output_tokens——写成集合而不是单值比较，
+# 是为了换供应商时不用回来改判断。
+_TRUNCATED_REASONS = frozenset({"length", "max_tokens", "max_output_tokens", "max_tokens_reached"})
+
+
+def _finish_reason_of(chunk) -> str | None:
+    """从流式帧里取 finish_reason。取不到返回 None。
+
+    为什么要在三个地方找：LangChain 不同版本的 ChatModel 把上游的结束原因放在
+    `response_metadata` / `generation_info` / `additional_kwargs` 里的位置不一样，
+    而且同一家的不同模型也可能不同。全找一遍比"猜哪一个是"稳。
+
+    ⚠️ 取不到时**必须当作"未截断"**。反过来（取不到就报警）会让所有正常回答
+    被标成残缺，比不检测更糟——这类"防御性误报"是最容易把新机制做废的方式。
+    """
+    for attr in ("response_metadata", "generation_info", "additional_kwargs"):
+        meta = getattr(chunk, attr, None)
+        if not isinstance(meta, dict):
+            continue
+        for key in ("finish_reason", "stop_reason", "finishReason"):
+            val = meta.get(key)
+            if val:
+                return str(val)
+    return None
+
+
+def _truncation_frame(reason: str | None) -> str:
+    """截断提示帧。带一句可操作的话——只说"被截断"用户不知道该怎么办。"""
+    return _sse(
+        "truncation",
+        {
+            "reason": reason or "length",
+            "hint": "回答达到长度上限被截断，内容可能不完整。可以回复「继续」让它接着写。",
+        },
+    )
+
+
+def _is_truncation(reason: str | None, path: str) -> bool:
+    """上游的结束原因是否表示"被长度上限截断"。是则记一笔指标。"""
+    if not getattr(config, "TRUNCATION_DETECT_ENABLED", True):
+        return False
+    if (reason or "").lower() not in _TRUNCATED_REASONS:
+        return False
+    metrics.inc("chat_truncated", {"path": path})
+    return True
+
+
+def _mark_truncated(acc: _Acc, reason: str | None, path: str) -> bool:
+    """记一次截断（标记 + 指标）。返回是否真的截断了。"""
+    if not _is_truncation(reason, path):
+        return False
+    acc.truncated = True
+    acc.finish_reason = reason
+    return True
+
+
+class _Upstreams:
+    """本轮问答打开的上游异步生成器，收尾时统一关闭。
+
+    为什么需要显式登记：跳出 `async for` **不会**立刻 aclose 上游生成器
+    （要等 GC 触发 asyncgen 终结器），这期间上游 HTTP 流还在跑、还在烧 token。
+    「200 人同时点开又关掉」会留下 200 个幽灵请求，所以关闭必须**确定发生**。
+
+    关闭点挂在 `StreamingResponse(background=...)` 上：Starlette 无论正常结束、
+    抛异常还是被取消，都会在 body 迭代结束后执行 background —— 这是唯一
+    100% 会跑到的位置（`finally` 在生成器被遗弃时都可能不执行）。
+    """
+
+    __slots__ = ("_items",)
+
+    def __init__(self) -> None:
+        self._items: list = []
+
+    def track(self, agen):
+        """登记一个上游生成器，返回它本身（写法上可以就地串起来）。"""
+        self._items.append(agen)
+        return agen
+
+    async def aclose(self) -> None:
+        while self._items:
+            agen = self._items.pop()
+            with contextlib.suppress(Exception):
+                await agen.aclose()
+
+
+async def _finish_turn(upstreams: _Upstreams, ticket) -> None:
+    """收尾：关上游 → 还名额。两件事都必须幂等，且不能抛。"""
+    try:
+        await upstreams.aclose()
+    finally:
+        ticket.release()
+
+
+async def _stream_llm(
+    llm, messages, request: Request, acc: _Acc, upstreams=None, path: str = "llm"
+) -> None:
     """逐 token 产出增量 SSE。
 
     早期实现每帧回传"累计全文"，千 token 的回答会产生 O(n²) 的传输量；
     这里只发 delta，由前端自己累加。
 
     断连检测改成每 16 帧查一次（首帧仍然查）：is_disconnected() 要读 asgi 状态，
-    逐帧调用等于千 token 回答白付上千次开销。连接正常时帧序列一模一样，
-    代价只是"客户端已经走了"最多晚几十毫秒被发现。
+    逐帧调用等于千 token 回答白付上千次开销。**确定性由关闭动作保证，不靠检测频率**：
+    无论走哪条出口（正常结束 / 断连 return / 上游异常），`aclosing` 都会 aclose 上游。
     """
+    agen = upstreams.track(llm.astream(messages)) if upstreams is not None else llm.astream(messages)
     try:
         seen = 0
-        async for chunk in llm.astream(messages):
-            seen += 1
-            if (seen == 1 or seen % 16 == 0) and await request.is_disconnected():
-                return
-            delta = chunk.content or ""
-            if isinstance(delta, list):
-                # 多模态 content list，只取文本
-                delta = "".join(
-                    p.get("text", "")
-                    for p in delta
-                    if isinstance(p, dict) and p.get("type") == "text"
-                )
-            if not isinstance(delta, str) or not delta:
-                continue
-            acc.text += delta
-            yield _sse("token", {"text": delta})
+        async with contextlib.aclosing(agen) as stream:
+            async for chunk in stream:
+                seen += 1
+                if (seen == 1 or seen % 16 == 0) and await request.is_disconnected():
+                    acc.aborted = True
+                    metrics.inc("chat_client_disconnect")
+                    return
+                # 结束原因**每帧都读**：它通常挂在最后一帧，而那一帧的 content 常常是空的
+                # （下面会因为 `not delta` 被 continue 掉）。只在有 delta 时读 = 永远读不到。
+                reason = _finish_reason_of(chunk)
+                if reason:
+                    acc.finish_reason = reason
+                delta = chunk.content or ""
+                if isinstance(delta, list):
+                    # 多模态 content list，只取文本
+                    delta = "".join(
+                        p.get("text", "")
+                        for p in delta
+                        if isinstance(p, dict) and p.get("type") == "text"
+                    )
+                if not isinstance(delta, str) or not delta:
+                    continue
+                acc.text += delta
+                yield _sse("token", {"text": delta})
+        # 正常结束才判截断：走到这里说明上游把流跑完了（不是断连、不是异常）。
+        # 截断帧放在 token 之后、done 之前——前端读到时正文已经渲染完，
+        # 提示条出现在最后，符合"先给内容再给限制"的顺序。
+        if _mark_truncated(acc, acc.finish_reason, path):
+            yield _truncation_frame(acc.finish_reason)
     except Exception as e:
         acc.error = describe_api_error(e)
+        metrics.inc("llm_error", {"class": type(e).__name__})
         yield _sse("error", {"detail": acc.error})
 
 
 # ==================== 主路由 ====================
 
+
 @router.post("/stream")
-async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get_current_user)) -> StreamingResponse:
+async def chat_stream(
+    req: ChatRequest, request: Request, uid: str = Depends(get_current_user)
+) -> StreamingResponse:
+    """问答入口：先抢一个 LLM 并发名额，抢不到直接 429。
+
+    闸为什么抢在这里：SSE 一旦发出 200 响应头，就再也没机会回 429 了
+    （与下面「限流放在 event_generator 外面」是同一个理由）。且必须抢在
+    `quota.consume` 之前 —— 排队失败的人不该被白扣一次每日额度。
+    """
+    try:
+        ticket = await llm_gate.acquire()
+    except llm_gate.Busy as e:
+        raise HTTPException(
+            status_code=429,
+            detail=str(e),
+            headers={"Retry-After": str(e.retry_after)},
+        ) from e
+
+    try:
+        return await _chat_stream_impl(req, request, uid, ticket)
+    except BaseException:
+        # 没走到 StreamingResponse（会话不存在 / 配额超限 / 参数错）：名额当场还掉。
+        # 漏还一次就永久少一个位置，攒一夜闸就废了，所以这里必须兜住。
+        ticket.release()
+        raise
+
+
+async def _chat_stream_impl(
+    req: ChatRequest, request: Request, uid: str, ticket
+) -> StreamingResponse:
     # 限流 + 每日问答额度。放在 event_generator 外面是对的：
     # 流一旦开始，响应头（200）就发出去了，那时候再想回 429 已经来不及，
     # 只会变成一条断掉的 SSE 流，前端读不出任何提示。
@@ -528,25 +787,33 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
     await asyncio.to_thread(store.add_message, uid, req.sid, "user", req.question)
     should_gen_title = (await asyncio.to_thread(store.count_messages, uid, req.sid)) <= 2
 
+    # 本轮打开的上游异步生成器登记处：收尾统一关闭（见 _Upstreams 的说明）
+    upstreams = _Upstreams()
+
     async def event_generator() -> None:
         refs_md = ""
         hybrid_run_id: str | None = None  # 仅 hybrid 模式有值，随 done 回传给前端
+        metrics.inc("chat_total", {"path": mode})
+        # A1：本轮回答是否被长度上限截断。默认 False，只有真的读到上游给的
+        # finish_reason ∈ {length, max_tokens, ...} 才会变 True——
+        # 取不到上游信号时一律按"未截断"处理（见 _finish_reason_of 的注释）。
+        truncated = False
 
         # 标题只依赖用户问题（提示词里答案根本没用到），所以一开始就和答案流式
         # 生成并行跑：收尾时它多半已经算完，省掉原来在 done 之前干等的一次
         # LLM 往返（约 1~2s）。错误/中断提前 return 时结果丢弃，标题保持默认。
         title_task: asyncio.Task | None = None
         if should_gen_title:
-            title_task = asyncio.create_task(
-                asyncio.to_thread(_generate_title, req.question)
-            )
+            title_task = asyncio.create_task(asyncio.to_thread(_generate_title, req.question))
             _BG_TASKS.add(title_task)
             title_task.add_done_callback(_BG_TASKS.discard)
 
         # ---- 0. 图片理解模式：有图片附件时用视觉模型直接回答 ----
         if _has_image(req.attachments):
             yield _sse("status", {"text": "图片理解模式，正在分析图片..."})
-            history = store.get_messages(uid, req.sid, include_system=False)[:-1]
+            history = (
+                await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False)
+            )[:-1]
             # RAG 模式下顺带检索知识库，拼入文本
             vision_question = req.question
             vision_system = "你是一个能理解图片的 AI 助手。请结合图片内容用中文简洁作答。"
@@ -555,7 +822,7 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 try:
                     # 同步检索会堵事件循环（embed_query 实测约 250ms），必须丢线程
                     pipe = await asyncio.to_thread(pipelines.get_or_create, uid, kb_id)
-                    query = await asyncio.to_thread(rewrite_query, req.question, history)
+                    query, _, _ = await asyncio.to_thread(_retrieval_query, req.question, history)
                     docs_scores = await asyncio.to_thread(
                         pipe.retrieve_with_score, query, req.top_k, uid
                     )
@@ -570,13 +837,15 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                             f"[{i + 1}] （来源：{d.metadata.get('source', '?')}）\n{d.page_content}"
                             for i, (d, _) in enumerate(docs_scores)
                         )
-                        vision_question = f"【参考资料】\n{references}\n\n【用户问题】\n{req.question}"
+                        vision_question = (
+                            f"【参考资料】\n{references}\n\n【用户问题】\n{req.question}"
+                        )
                         vision_system += grounding_note(g)
                 except Exception:
                     yield _sse("status", {"text": "知识库检索失败，已仅按图片作答"})
 
             messages = [SystemMessage(content=vision_system)]
-            for m in history:
+            for m in ctxcompress.assemble_history(uid, req.sid, history):
                 if m["role"] == "user":
                     messages.append(HumanMessage(content=m["content"]))
                 elif m["role"] == "assistant":
@@ -585,36 +854,54 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
 
             acc = _Acc()
             try:
-                async for frame in _stream_llm(get_vision_llm(max_tokens=2048), messages, request, acc):
+                async for frame in _stream_llm(
+                    get_vision_llm(max_tokens=2048), messages, request, acc, upstreams,
+                    path="vision",
+                ):
                     yield frame
             except Exception as e:
                 yield _sse("error", {"detail": describe_api_error(e)})
                 return
-            if acc.error:
+            # 上游出错，或客户端已断开（aborted）：两种情况都**不能**往下走收尾，
+            # 否则会把半截回答当成完整答案 add_message 落库 —— 用户刷新后看到的
+            # 是一条没有任何中断痕迹的残缺回答。
+            if acc.aborted or acc.error:
                 return
             acc_text = acc.text
 
             # 收尾：标题并行任务多半已完成，这里 await 基本零等待
-            msg_id = await asyncio.to_thread(store.add_message, uid, req.sid, "assistant", acc_text, refs=refs_md)
+            msg_id = await asyncio.to_thread(
+                store.add_message,
+                uid,
+                req.sid,
+                "assistant",
+                acc_text,
+                refs=refs_md,
+                truncated=acc.truncated,
+            )
 
             # B 块：对话级用户画像标签（fire-and-forget，不阻塞 SSE；失败静默）
             if config.USER_TAG_HOOK_ENABLED and acc_text:
                 _t = asyncio.create_task(_record_user_tags(uid, req.question, acc_text))
                 _BG_TASKS.add(_t)
                 _t.add_done_callback(_BG_TASKS.discard)
+            _schedule_compress(uid, req.sid)
 
             gen_title = await _take_title(title_task, acc_text)
             if gen_title:
                 await asyncio.to_thread(store.rename_conversation, uid, req.sid, gen_title)
                 yield _sse("title", {"title": gen_title})
             # message_id 回给前端：赞踩要按消息 id 落库，前端自己生成的 uid 后端不认
-            yield _sse("done", {
-                "answer": acc_text,
-                "refs": refs_md,
-                "title": gen_title,
-                "mode": "vision",
-                "message_id": msg_id,
-            })
+            yield _sse(
+                "done",
+                {
+                    "answer": acc_text,
+                    "refs": refs_md,
+                    "title": gen_title,
+                    "mode": "vision",
+                    "message_id": msg_id,
+                },
+            )
             return
 
         # ---- 1. 混合模式（工作流 × 自主 Agent 动态切换）----
@@ -642,7 +929,9 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                     wf_id = req.workflow_id
                     start_mode = "workflow"
                 elif classify_task(req.question) == "flow":
-                    row = await asyncio.to_thread(hstore.get_workflow, uid, hstore.DEFAULT_WORKFLOW_ID)
+                    row = await asyncio.to_thread(
+                        hstore.get_workflow, uid, hstore.DEFAULT_WORKFLOW_ID
+                    )
                     if row:
                         wf_def = validate_definition(row["definition"])
                         wf_id = hstore.DEFAULT_WORKFLOW_ID
@@ -661,19 +950,21 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 # 对话历史注入：修复"混合模式每轮失忆"（2026-10-16 线上复现）。
                 # 其它三种模式都读历史，唯独 hybrid 过去只拿当前一句 → 模型看不到上下文。
                 # 历史放 shared（跨模式数据通道），Agent/Workflow 引擎拼 prompt 时前置。
-                hist_raw = (await asyncio.to_thread(
-                    store.get_messages, uid, req.sid, include_system=False
-                ))[:-1]
-                ctx.shared["history"] = [
-                    {"role": m["role"], "content": m["content"]}
-                    for m in hist_raw
-                    if m.get("role") in ("user", "assistant") and m.get("content")
-                ]
+                hist_raw = (
+                    await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False)
+                )[:-1]
+                ctx.shared["history"] = ctxcompress.assemble_history(uid, req.sid, hist_raw)
 
                 rules = await asyncio.to_thread(hstore.list_rules, uid)
                 orch = HybridOrchestrator(
-                    ctx, workflow_def=wf_def, rules=rules,
-                    has_kb=bool(kb_id and kb_exists), location=location_ctx,
+                    ctx,
+                    workflow_def=wf_def,
+                    rules=rules,
+                    has_kb=bool(kb_id and kb_exists),
+                    location=location_ctx,
+                    # #7：激活集在请求开始取定、整轮不变（与下面 Agent 路径同源），
+                    # hybrid 段的 build_agent 才能绑定本用户已 discover 的延迟工具。
+                    activated=tool_registry.activated_for(uid),
                 )
 
                 # run_id 先给前端：人工切换 / 执行日志查询都按它寻址
@@ -681,7 +972,9 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                 yield _sse("hybrid_start", {"run_id": ctx.run_id, "mode": start_mode})
 
                 full_text = ""
-                async for ev in orch.stream():
+                # 上游生成器登记到本轮，收尾统一 aclose（跳出循环不会自己关闭）
+                orch_events = upstreams.track(orch.stream())
+                async for ev in orch_events:
                     if await request.is_disconnected():
                         return
                     et = ev.event_type
@@ -700,17 +993,26 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                         yield _sse("tool", frame)
                     elif et in ("node_enter", "node_exit"):
                         # 工作流节点进出：前端执行轨迹侧栏的时间轴事件
-                        yield _sse("workflow_node", {
-                            "phase": "enter" if et == "node_enter" else "exit",
-                            "node_id": ev.node_id,
-                            **ev.payload,
-                        })
+                        yield _sse(
+                            "workflow_node",
+                            {
+                                "phase": "enter" if et == "node_enter" else "exit",
+                                "node_id": ev.node_id,
+                                **ev.payload,
+                            },
+                        )
                     elif et == "switch":
                         yield _sse("mode_switch", ev.decision or {})
                     elif et == "human_intervention":
-                        yield _sse("status", {
-                            "text": f"人工节点 {ev.node_id}：{ev.payload.get('prompt', '') or '已自动通过'}"
-                        })
+                        yield _sse(
+                            "status",
+                            {
+                                "text": (
+                                    f"人工节点 {ev.node_id}："
+                                    f"{ev.payload.get('prompt', '') or '已自动通过'}"
+                                )
+                            },
+                        )
                     elif et == "status":
                         yield _sse("status", {"text": ev.payload.get("text", "")})
                     elif et == "error":
@@ -735,20 +1037,40 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
         elif mode == "agent":
             yield _sse("status", {"text": "Agent 模式，正在规划任务..."})
             try:
-                from agent.builder import build_agent
+                from agent.builder import build_agent, location_note
+
                 # 只告诉模型"有没有绑库"，不告诉它是哪个库：
                 # kb_id 走下面的 configurable 注入，模型没有机会改写它
-                agent = await asyncio.to_thread(build_agent, bool(kb_id and kb_exists), location_ctx, req.scenario)
+                agent = await asyncio.to_thread(
+                    build_agent,
+                    bool(kb_id and kb_exists),
+                    location_ctx,
+                    req.scenario,
+                    tool_registry.activated_for(uid),
+                )
 
-                # 组装历史 + 当前问题
-                history = (await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False))[:-1]
+                # 组装历史 + 当前问题（P0-2：压缩块前置 + 最近 K 轮原文）
+                history = (
+                    await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False)
+                )[:-1]
                 messages = []
-                for m in history:
+                for m in ctxcompress.assemble_history(uid, req.sid, history):
                     if m["role"] == "user":
                         messages.append(HumanMessage(content=m["content"]))
                     elif m["role"] == "assistant":
                         messages.append(AIMessage(content=m["content"]))
                 messages.append(HumanMessage(content=prompt_question))
+
+                # P0-1：定位是**动态信息**，追加在末尾而不是拼进 system prompt。
+                # 拼进 system 会让前缀随城市变化 → KV 缓存命中率掉到 0（实测 90%→0%）。
+                # 合并进最后一条用户消息而不是再追加一条 HumanMessage：
+                # 部分 chat template 对"连续两条 human"敏感，合并是最稳的形态。
+                if location_ctx:
+                    _loc_note = location_note(location_ctx)
+                    if _loc_note:
+                        messages[-1] = HumanMessage(
+                            content=prompt_question + "\n\n" + _loc_note.strip()
+                        )
 
                 # LangGraph checkpoint thread_id = 会话 id，天然多轮记忆。
                 # owner_id / kb_id 一并注入：工具内部只认这里的值，
@@ -764,15 +1086,19 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                     },
                 }
                 full_text = ""
+                agent_reason: str | None = None
 
                 # stream_mode=["updates","messages"] 事件为 (mode字符串, payload)
                 # 必须走 astream：同步 stream() 会把整个事件循环堵住，
                 # 一次 Agent 回答十几秒，期间建库/上传/切会话全部排队
-                async for event in agent.astream(
-                    {"messages": messages},
-                    config=config_,
-                    stream_mode=["updates", "messages"],
-                ):
+                agent_events = upstreams.track(
+                    agent.astream(
+                        {"messages": messages},
+                        config=config_,
+                        stream_mode=["updates", "messages"],
+                    )
+                )
+                async for event in agent_events:
                     if await request.is_disconnected():
                         return
 
@@ -783,12 +1109,18 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                     # -- messages 模式：payload=(chunk, metadata)，逐 token --
                     if mode_name == "messages":
                         chunk, _meta = payload
+                        # A1：结束原因可能在**任何**一帧上（通常最后一帧、content 为空），
+                        # 所以先读再判 delta
+                        _r = _finish_reason_of(chunk)
+                        if _r:
+                            agent_reason = _r
                         if hasattr(chunk, "content") and chunk.content:
                             delta = chunk.content
                             if isinstance(delta, list):
                                 # 多模态 content list，只取文本
                                 delta = "".join(
-                                    p.get("text", "") for p in delta
+                                    p.get("text", "")
+                                    for p in delta
                                     if isinstance(p, dict) and p.get("type") == "text"
                                 )
                             if isinstance(delta, str) and delta:
@@ -804,18 +1136,29 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
                                 # 模型发起工具调用：AIMessage 带 tool_calls
                                 if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
                                     for tc in msg.tool_calls:
-                                        yield _sse("tool", {
-                                            "name": tc.get("name", "?"),
-                                            "input": str(tc.get("args", {}))[:200],
-                                        })
+                                        yield _sse(
+                                            "tool",
+                                            {
+                                                "name": tc.get("name", "?"),
+                                                "input": str(tc.get("args", {}))[:200],
+                                            },
+                                        )
                                 # 工具返回结果：ToolMessage
                                 elif isinstance(msg, ToolMessage):
-                                    yield _sse("tool", {
-                                        "name": getattr(msg, "name", "?"),
-                                        "output": str(getattr(msg, "content", ""))[:300],
-                                    })
+                                    yield _sse(
+                                        "tool",
+                                        {
+                                            "name": getattr(msg, "name", "?"),
+                                            "output": str(getattr(msg, "content", ""))[:300],
+                                        },
+                                    )
 
                 acc_text = full_text
+                # A1：Agent 路径不走 _stream_llm，截断要在这里单独判一次。
+                # 判断用的是同一个 _TRUNCATED_REASONS 集合，换供应商时口径不会分叉。
+                if _is_truncation(agent_reason, "agent"):
+                    truncated = True
+                    yield _truncation_frame(agent_reason)
 
             except ImportError as e:
                 acc_text = f"Agent 模式未初始化：{e}"
@@ -831,13 +1174,20 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             yield _sse("status", {"text": f"RAG 模式，正在检索知识库（{kb_id}）..."})
             # 追问（"那它呢"）先结合上下文改写成独立问题再检索；不需要/失败时原样返回。
             # 用改写后的问题当检索词，检索结果缓存的键也随之正确，不会跨上下文串结果。
-            history = store.get_messages(uid, req.sid, include_system=False)[:-1]
-            query = await asyncio.to_thread(rewrite_query, req.question, history)
-            if query != req.question:
-                yield _sse("status", {"text": f"已结合上下文改写检索词：{query}"})
+            # 再把口语词（"高数""线代"）换成规范术语（"高等数学""线性代数"）——只改检索词。
+            history = (
+                await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False)
+            )[:-1]
+            query, changes, rewritten = await asyncio.to_thread(
+                _retrieval_query, req.question, history
+            )
+            if changes or rewritten:
+                yield _sse("status", {"text": _enhance_note(changes, rewritten, query)})
             try:
                 pipe = await asyncio.to_thread(pipelines.get_or_create, uid, kb_id)
-                docs_scores = await asyncio.to_thread(pipe.retrieve_with_score, query, req.top_k, uid)
+                docs_scores = await asyncio.to_thread(
+                    pipe.retrieve_with_score, query, req.top_k, uid
+                )
             except Exception as e:
                 yield _sse("error", {"detail": describe_api_error(e)})
                 return
@@ -861,25 +1211,48 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
             yield _sse("status", {"text": "正在生成答案..."})
             # 复用上面已经检索到的结果，不重复检索（早期实现在这里又检了一次，
             # 而且用的是默认 top_k，等于前端调的检索条数被悄悄忽略）
-            messages = await _build_messages(uid, req.sid, prompt_question, kb_id, docs_scores, grounding, req.scenario, history)
+            messages = await _build_messages(
+                uid,
+                req.sid,
+                prompt_question,
+                kb_id,
+                docs_scores,
+                grounding,
+                req.scenario,
+                # 查询改写用原文（改写要看逐轮字面），喂模型用压缩后的上下文
+                ctxcompress.assemble_history(uid, req.sid, history),
+            )
 
             acc = _Acc()
             try:
-                async for frame in _stream_llm(get_llm(max_tokens=2048), messages, request, acc):
+                async for frame in _stream_llm(
+                    get_llm(max_tokens=2048), messages, request, acc, upstreams, path="rag"
+                ):
                     yield frame
             except Exception as e:
                 yield _sse("error", {"detail": describe_api_error(e)})
                 return
-            if acc.error:
+            # 上游出错，或客户端已断开（aborted）：两种情况都**不能**往下走收尾，
+            # 否则会把半截回答当成完整答案 add_message 落库 —— 用户刷新后看到的
+            # 是一条没有任何中断痕迹的残缺回答。
+            if acc.aborted or acc.error:
                 return
             acc_text = acc.text
+            truncated = acc.truncated
 
         # ---- 4. 纯 LLM 模式 ----
         else:
             yield _sse("status", {"text": "纯 LLM 模式..."})
-            history = (await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False))[:-1]
-            messages = [SystemMessage(content="你是一个友好、专业的 AI 助手。用中文简洁作答。" + scenarios_mod.get_scenario_prompt(req.scenario))]
-            for m in history:
+            history = (
+                await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False)
+            )[:-1]
+            messages = [
+                SystemMessage(
+                    content="你是一个友好、专业的 AI 助手。用中文简洁作答。"
+                    + scenarios_mod.get_scenario_prompt(req.scenario)
+                )
+            ]
+            for m in ctxcompress.assemble_history(uid, req.sid, history):
                 if m["role"] == "user":
                     messages.append(HumanMessage(content=m["content"]))
                 elif m["role"] == "assistant":
@@ -888,23 +1261,42 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
 
             acc = _Acc()
             try:
-                async for frame in _stream_llm(get_llm(max_tokens=2048), messages, request, acc):
+                async for frame in _stream_llm(
+                    get_llm(max_tokens=2048), messages, request, acc, upstreams, path="llm"
+                ):
                     yield frame
             except Exception as e:
                 yield _sse("error", {"detail": describe_api_error(e)})
                 return
-            if acc.error:
+            # 上游出错，或客户端已断开（aborted）：两种情况都**不能**往下走收尾，
+            # 否则会把半截回答当成完整答案 add_message 落库 —— 用户刷新后看到的
+            # 是一条没有任何中断痕迹的残缺回答。
+            if acc.aborted or acc.error:
                 return
             acc_text = acc.text
+            truncated = acc.truncated
 
         # ---- 收尾：存 assistant 消息 + 取回并行生成的标题 ----
-        msg_id = await asyncio.to_thread(store.add_message, uid, req.sid, "assistant", acc_text, refs=refs_md)
+        msg_id = await asyncio.to_thread(
+            store.add_message,
+            uid,
+            req.sid,
+            "assistant",
+            acc_text,
+            refs=refs_md,
+            truncated=truncated,
+        )
 
         # B 块：对话级用户画像标签（fire-and-forget，不阻塞 SSE；失败静默）
         if config.USER_TAG_HOOK_ENABLED and acc_text:
             _t = asyncio.create_task(_record_user_tags(uid, req.question, acc_text))
             _BG_TASKS.add(_t)
             _t.add_done_callback(_BG_TASKS.discard)
+
+        # P0-2 写入侧：回答结束后在两轮之间做一次压缩判定（fire-and-forget）。
+        # 必须放在 assistant 消息落库**之后**：否则本轮这一问一答会被算进"旧轮次"，
+        # 刚回答完就被压成摘要，下一轮追问细节时模型已经看不到原文了。
+        _schedule_compress(uid, req.sid)
 
         gen_title = await _take_title(title_task, acc_text)
         if gen_title:
@@ -913,26 +1305,47 @@ async def chat_stream(req: ChatRequest, request: Request, uid: str = Depends(get
 
         # message_id 回给前端：赞踩要按消息 id 落库，前端自己生成的 uid 后端不认
         # run_id 仅 hybrid 模式有值：人工切换 / 执行日志查询按它寻址
-        yield _sse("done", {
-            "answer": acc_text,
-            "refs": refs_md,
-            "title": gen_title,
-            "mode": mode,
-            "message_id": msg_id,
-            "run_id": hybrid_run_id,
-            # P2：主题名回给前端，卡片抬头才能显示"PLAN · 学习计划"。
-            # 主题可能是从历史推断出来的，前端自己那份关键词匹配猜不到，必须由后端给。
-            "plan_topic": plan_topic["name"] if plan_topic else None,
-        })
+        yield _sse(
+            "done",
+            {
+                "answer": acc_text,
+                "refs": refs_md,
+                "title": gen_title,
+                "mode": mode,
+                "message_id": msg_id,
+                "run_id": hybrid_run_id,
+                # A1：本条回答是否被长度上限截断。前端据此在正文末尾挂"内容可能不完整"，
+                # 也用于事后统计（messages.truncated 同样记了一位）。
+                "truncated": truncated,
+                # P2：主题名回给前端，卡片抬头才能显示"PLAN · 学习计划"。
+                # 主题可能是从历史推断出来的，前端自己那份关键词匹配猜不到，必须由后端给。
+                "plan_topic": plan_topic["name"] if plan_topic else None,
+            },
+        )
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream", headers=SSE_HEADERS)
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
+        # 收尾兜底：关上游 + 还并发名额。Starlette 在 body 迭代结束后**一定**执行
+        # background —— 正常结束、抛异常、客户端断连被取消都一样。
+        # 这是全链路里唯一 100% 会跑到的收尾点，所以两件事都挂在它上面。
+        background=BackgroundTask(_finish_turn, upstreams, ticket),
+    )
 
 
 # ==================== 辅助 ====================
 
+
 async def _build_messages(
-    owner: str, sid: str, question: str, kb_id: str | None, docs_scores,
-    grounding: dict | None = None, scenario: str | None = None, history=None
+    owner: str,
+    sid: str,
+    question: str,
+    kb_id: str | None,
+    docs_scores,
+    grounding: dict | None = None,
+    scenario: str | None = None,
+    history=None,
 ) -> list:
     """组装 LLM 输入：历史 + 已检索到的参考资料。
 
@@ -944,10 +1357,29 @@ async def _build_messages(
     哪怕相似度只有 0.3 也会顺着往下编；单独再压一遍才压得住。
     history 同理：调用方（RAG 路径做查询改写时）已取过就直接复用，不再重复查库。
     """
-    history_raw = (
-        history if history is not None
-        else (await asyncio.to_thread(store.get_messages, owner, sid, include_system=False))[:-1]
-    )
+    if history is not None:
+        # 调用方传入的已是 assemble_history 的结果（含压缩块前置）
+        history_raw = history
+    else:
+        raw = (
+            await asyncio.to_thread(store.get_messages, owner, sid, include_system=False)
+        )[:-1]
+        history_raw = ctxcompress.assemble_history(owner, sid, raw)
+    # 输入侧字符预算：窗口放宽到 30 轮（最多 70 条）后，超长会话会把 prompt 推过
+    # 模型上下文（实测最重会话 76k tok > 64K，会让 DeepSeek 直接 500）。
+    # 从最新往旧累计，超预算就丢最旧的（保留"最近的上下文"），而不是截断最新一轮——
+    # 截断最新一轮会让模型答非所问。参考 core/config.CHAT_HISTORY_MAX_CHARS。
+    budget = config.CHAT_HISTORY_MAX_CHARS
+    if budget and budget > 0:
+        kept: list = []
+        total = 0
+        for m in reversed(history_raw):
+            c = len(m.get("content") or "")
+            if kept and total + c > budget:
+                break
+            kept.append(m)
+            total += c
+        history_raw = list(reversed(kept))
     messages = []
     references = ""
     if kb_id and docs_scores:
@@ -956,9 +1388,16 @@ async def _build_messages(
             for i, (d, _) in enumerate(docs_scores)
         )
     if references:
-        system = SYSTEM_PROMPT + grounding_note(grounding or {}) + scenarios_mod.get_scenario_prompt(scenario)
+        system = (
+            SYSTEM_PROMPT
+            + grounding_note(grounding or {})
+            + scenarios_mod.get_scenario_prompt(scenario)
+        )
     else:
-        system = "你是一个友好、专业的 AI 助手。用中文简洁作答。" + scenarios_mod.get_scenario_prompt(scenario)
+        system = (
+            "你是一个友好、专业的 AI 助手。用中文简洁作答。"
+            + scenarios_mod.get_scenario_prompt(scenario)
+        )
     messages.append(SystemMessage(content=system))
     for m in history_raw:
         if m["role"] == "user":
@@ -984,19 +1423,39 @@ def _generate_title(question: str) -> str:
         一次标题生成就吃掉几千 token 输入，而标题只反映开头主题，截断不损质量；
       - max_tokens=32：标题只要 ≤15 字，给输出兜底，防止模型跑偏成复述正文。
     """
-    llm = get_llm(temperature=0, max_tokens=32)
+    fallback = question[:15] if len(question) > 15 else question
+    # 闸满就跳过标题（退回截断的问题文本）：后台活绝不能排队，
+    # 它跑在 anyio 线程池里，排队会把 40 个线程占满、连带堵死前台业务的 DB 读。
+    _ticket = llm_gate.try_ticket()
+    if _ticket is None:
+        return fallback
     try:
+        # ⚠️ get_llm 必须在 try 里面：它会构造 ChatOpenAI，而构造阶段就会校验凭证，
+        # 缺 Key / base_url 写错时**在构造时**抛 OpenAIError。
+        # 这一行原本在 try 外面，于是这个后台任务会带着未取回的异常结束，
+        # 进程日志里留下一条 "Task exception was never retrieved" + 完整 traceback
+        # （2026-10-20 端到端验收时暴露）。标题是装饰性功能，任何失败都该静默降级。
+        llm = get_llm(temperature=0, max_tokens=32)
         q = (question or "")[:200]
-        resp = llm.invoke([HumanMessage(content=f"请为以下对话生成简短中文标题（≤15字），直接输出：用户提问：{q}")])
+        resp = llm.invoke(
+            [
+                HumanMessage(
+                    content=f"请为以下对话生成简短中文标题（≤15字），直接输出：用户提问：{q}"
+                )
+            ]
+        )
         title = (resp.content or "").strip().strip('"').strip("'")
         if len(title) > 20:
             title = title[:15] + "..."
-        return title or question[:15]
+        return title or fallback
     except Exception:
-        return question[:15] if len(question) > 15 else question
+        metrics.inc("llm_error", {"class": "title"})
+        return fallback
+    finally:
+        _ticket.release()
 
 
-async def _take_title(task: "asyncio.Task | None", acc_text: str) -> str:
+async def _take_title(task: asyncio.Task | None, acc_text: str) -> str:
     """取回并行生成的标题；无任务 / 无答案 / 失败都返回空串。"""
     if task is None or not acc_text:
         return ""
@@ -1007,6 +1466,7 @@ async def _take_title(task: "asyncio.Task | None", acc_text: str) -> str:
 
 
 # ==================== 用户画像标签（方案 C · B 块）====================
+
 
 def _extract_user_tags(question: str, answer: str) -> list[str]:
     """从"用户提问 + AI 回答"里挑 0~3 个最贴切的用户画像标签（受控词表）。
@@ -1024,13 +1484,17 @@ def _extract_user_tags(question: str, answer: str) -> list[str]:
     if not q and not a:
         return []
     vocab = "、".join(USER_PROFILE_TAGS)
+    # 闸满就跳过画像标签（空列表）：它只是辅助信息，排队会把线程池堵死
+    _ticket = llm_gate.try_ticket()
+    if _ticket is None:
+        return []
     try:
         llm = get_llm(temperature=0, max_tokens=48)
         prompt = (
             "你是用户画像标注器。根据下面的「用户提问 + AI 回答（节选）」，判断该用户当前"
             "关注的主题，从给定词表里挑选 0~3 个最贴切的标签。\n"
             "只允许输出词表中的标签；若都贴不上就输出空数组 []。"
-            "只输出一个 JSON 数组（如 [\"考研数学\",\"编程开发\"]），不要解释、不要 Markdown。\n\n"
+            '只输出一个 JSON 数组（如 ["考研数学","编程开发"]），不要解释、不要 Markdown。\n\n'
             f"【可选标签】\n{vocab}\n\n"
             f"【用户提问】\n{q[:300]}\n\n"
             f"【AI 回答（节选）】\n{a[:800]}"
@@ -1043,12 +1507,16 @@ def _extract_user_tags(question: str, answer: str) -> list[str]:
                 raw = raw[4:]
             raw = raw.strip()
         import json as _json
+
         tags = _json.loads(raw)
-        vocab_set = set(USER_PROFILE_TAGS)
-        out = [str(t).strip() for t in tags if str(t).strip() in vocab_set]
-        return out[:3]
+        # filter_known_tags 而不是 set 交集：它会先把 "CET6 / 六级 / 英语四六级"
+        # 归一成同一条再判断命中。此前直接做集合交集，"六级"会被当成越界标签丢掉，
+        # 30 条词表等于白摆——归一字典的价值就在这里。
+        return tag_taxonomy.filter_known_tags(tags, limit=3)
     except Exception:
         return []
+    finally:
+        _ticket.release()
 
 
 async def _record_user_tags(uid: str, question: str, answer: str) -> None:
@@ -1059,6 +1527,42 @@ async def _record_user_tags(uid: str, question: str, answer: str) -> None:
             await asyncio.to_thread(store.add_user_tags, uid, tags)
     except Exception:
         pass
+
+
+async def _compress_after_turn(uid: str, sid: str) -> None:
+    """后台钩子：回答结束后做一次上下文压缩判定（P0-2 写入侧）。
+
+    为什么异步：压缩要做全量历史读取 + 规则抽取，压一次是几十毫秒级，
+    放在 SSE 收尾路径上会拖慢 done 帧；而它压的是"用户已经看完的旧轮次"，
+    晚几十毫秒完全没有影响。
+
+    失败一律静默：压缩是优化项，任何异常都不能让用户看到错误、
+    更不能影响下一轮对话（读取侧 `assemble_history` 自带降级）。
+    """
+    # 闸满就跳过本轮压缩（下一轮还会再判一次，不会永久漏压）
+    _ticket = llm_gate.try_ticket()
+    if _ticket is None:
+        return
+    try:
+        await asyncio.to_thread(ctxcompress.maybe_compress, uid, sid)
+    except Exception:
+        pass
+    finally:
+        _ticket.release()
+
+
+def _schedule_compress(uid: str, sid: str) -> None:
+    """把压缩判定丢到后台（fire-and-forget，不阻塞 SSE）。"""
+    if not getattr(config, "COMPRESS_ENABLED", True):
+        return
+    try:
+        _t = asyncio.create_task(_compress_after_turn(uid, sid))
+    except RuntimeError:
+        # 没有运行中的事件循环（同步调用场景，如单测直接调 handler）：
+        # 压缩不是必需动作，直接跳过
+        return
+    _BG_TASKS.add(_t)
+    _t.add_done_callback(_BG_TASKS.discard)
 
 
 # 后台任务强引用：任务完成前被 GC 会报 "Task was destroyed but it is pending"。

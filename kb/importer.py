@@ -1,15 +1,14 @@
-# -*- coding: utf-8 -*-
 """联网资料导入：URL 抓取 + Serper 搜索预览 + 文件下载 + 批量入库。"""
 
 import os
 import re
 import time
 from contextlib import contextmanager
-from pathlib import Path
 from html import unescape as _unescape
+from pathlib import Path
+from urllib.parse import urljoin
 
 import httpx
-from urllib.parse import urljoin
 
 from core.netsafe import assert_safe_url
 from core.serper import search_serper
@@ -20,7 +19,7 @@ _HTTP_TIMEOUT = 15
 _MAX_REDIRECTS = 5
 _HTTP_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/124.0 Agent/1.0",
+    "(KHTML, like Gecko) Chrome/124.0 Agent/1.0",
 }
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
@@ -129,6 +128,7 @@ def _decode_html(resp: httpx.Response, raw: bytes) -> str:
             pass
     try:
         from charset_normalizer import detect
+
         enc = (detect(raw) or {}).get("encoding") or "utf-8"
     except ImportError:
         enc = "utf-8"
@@ -146,8 +146,15 @@ def fetch_url_text(url: str) -> tuple[str, str]:
     return _strip_html(html), title
 
 
-def _index_into_kb(owner: str, kb_id: str, dest: str, name: str, chunk_size: int,
-                   chunk_overlap: int, empty_msg: str) -> int:
+def _index_into_kb(
+    owner: str,
+    kb_id: str,
+    dest: str,
+    name: str,
+    chunk_size: int,
+    chunk_overlap: int,
+    empty_msg: str,
+) -> int:
     """把已落档的来源切片入库；同名来源已在库内则跳过。返回本次写入的切片数（跳过 0）。
 
     抓网页正文与下载文档这两条入口，后段流程完全一致（加锁 → 去重 → 加载 → 切片 →
@@ -170,16 +177,24 @@ def _index_into_kb(owner: str, kb_id: str, dest: str, name: str, chunk_size: int
         # 换成 get_or_open() 会在 _vs=None 上 add_documents ⇒ AttributeError，
         # 而且失败在建 collection 之前，重试永远不可能成功。
         pipe.add_chunks(chunks)
-        pipelines.add_file_records(owner, kb_id, [{
-            "name": name,
-            "chunks": len(chunks),
-            "added_at": int(time.time()),
-            "origin": "web",
-        }])
+        pipelines.add_file_records(
+            owner,
+            kb_id,
+            [
+                {
+                    "name": name,
+                    "chunks": len(chunks),
+                    "added_at": int(time.time()),
+                    "origin": "web",
+                }
+            ],
+        )
         return len(chunks)
 
 
-def import_url(owner: str, kb_id: str, url: str, chunk_size: int = 500, chunk_overlap: int = 50) -> dict:
+def import_url(
+    owner: str, kb_id: str, url: str, chunk_size: int = 500, chunk_overlap: int = 50
+) -> dict:
     """抓 URL 正文追加到指定知识库（正文留档 + 登记文件，便于后续单条删除/重建）。
 
     归属在 pipelines 层校验，这里只是把 owner 透传下去。
@@ -207,6 +222,7 @@ def _safe_name(title: str, ext: str) -> str:
 
 # ==================== App 搜索优化 ====================
 
+
 def search_preview(keyword: str, max_results: int = 10) -> list[dict]:
     """Serper 联网搜索预览（走 core.serper 统一入口：连接复用 + 缓存 + App 查询补官网）。"""
     from core import config
@@ -219,14 +235,33 @@ def search_preview(keyword: str, max_results: int = 10) -> list[dict]:
         raise RuntimeError("联网搜索暂时不可用，请稍后再试。")
     items = data.get("organic") or []
 
-    return [{"title": r.get("title", "?"), "body": (r.get("snippet") or "")[:300], "href": r.get("link", "")}
-            for r in items]
+    return [
+        {
+            "title": r.get("title", "?"),
+            "body": (r.get("snippet") or "")[:300],
+            "href": r.get("link", ""),
+        }
+        for r in items
+    ]
 
 
 # ==================== 文件下载 ====================
 
-_DOWNLOAD_EXTS = {".pdf", ".doc", ".docx", ".txt", ".md", ".pptx", ".xlsx",
-                  ".apk", ".zip", ".exe", ".dmg", ".msi", ".iso"}
+_DOWNLOAD_EXTS = {
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".txt",
+    ".md",
+    ".pptx",
+    ".xlsx",
+    ".apk",
+    ".zip",
+    ".exe",
+    ".dmg",
+    ".msi",
+    ".iso",
+}
 
 _MAX_DOWNLOAD_MB = 200  # 下载大小上限：防 OOM，超限删半成品
 
@@ -288,11 +323,12 @@ def download_file(url: str, save_dir: str | None = None) -> dict:
             except OSError:
                 pass
             raise
-    return {"url": url, "filename": os.path.basename(path), "path": path,
-            "ext": ext, "size": size}
+    return {"url": url, "filename": os.path.basename(path), "path": path, "ext": ext, "size": size}
 
 
-def download_and_index(owner: str, kb_id: str, url: str, chunk_size: int = 500, chunk_overlap: int = 50) -> dict:
+def download_and_index(
+    owner: str, kb_id: str, url: str, chunk_size: int = 500, chunk_overlap: int = 50
+) -> dict:
     """下载文档类文件，若为 pdf/txt/md 则一并索引入库。"""
     from core import config
 
@@ -309,7 +345,12 @@ def download_and_index(owner: str, kb_id: str, url: str, chunk_size: int = 500, 
         out.write(Path(info["path"]).read_bytes())
 
     n = _index_into_kb(
-        owner, kb_id, dest, info["filename"], chunk_size, chunk_overlap,
+        owner,
+        kb_id,
+        dest,
+        info["filename"],
+        chunk_size,
+        chunk_overlap,
         "文档内容切片为空，无法入库",
     )
     info["chunks"] = n
@@ -318,7 +359,9 @@ def download_and_index(owner: str, kb_id: str, url: str, chunk_size: int = 500, 
     return info
 
 
-def import_urls_batch(owner: str, kb_id: str, urls: list[str], chunk_size: int = 500, chunk_overlap: int = 50) -> list[dict]:
+def import_urls_batch(
+    owner: str, kb_id: str, urls: list[str], chunk_size: int = 500, chunk_overlap: int = 50
+) -> list[dict]:
     """批量抓 URL 追加入库。"""
     results = []
     for url in urls:

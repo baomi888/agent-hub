@@ -15,6 +15,7 @@ import { ABILITIES, EXAMPLES, MODE_LABELS, PRIMARY_ENTRIES, SECONDARY_ENTRIES, T
 import { isPlanRequest, stripPlanHint } from "./chat/plan";
 import Bubble from "./chat/Bubble";
 import BubbleErrorBoundary from "./chat/BubbleErrorBoundary";
+import QueryEnhance from "./chat/QueryEnhance";
 import type { ChatAttachment, UiMessage } from "./chat/types";
 import FilePreviewModal from "./FilePreviewModal";
 
@@ -416,6 +417,13 @@ export default function ChatArea({
   );
   // 从引用角标跳到全文预览：引用块只给文件名，kb 用当前会话绑定的那个
   const openPreviewFile = useCallback((source: string) => setPreviewFile(source), []);
+
+  /**
+   * 只有真会走检索的模式才提示"检索词会被怎么理解"。
+   * llm 模式不检索、agent 模式走工具调用，在它们下面提示换词是纯粹的噪音。
+   * auto 要看有没有绑库——后端也是这么路由的（见 _pick_mode）。
+   */
+  const willRetrieve = mode === "rag" || mode === "hybrid" || (mode === "auto" && !!boundKb);
 
   return (
     <section className="book-spine flex h-full min-w-0 flex-1 flex-col">
@@ -859,6 +867,13 @@ export default function ChatArea({
             <span>
               {geoCity ? `定位已开启 · 当前 ${geoCity}` : "定位已开启"}
             </span>
+          </div>
+        )}
+
+        {/* 检索词校准（B5）：锚点高度 0，面板向上弹出，不推挤输入框 */}
+        {willRetrieve && (
+          <div className="qe-anchor">
+            <QueryEnhance text={input} />
           </div>
         )}
 

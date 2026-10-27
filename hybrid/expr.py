@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """受限表达式求值器：工作流条件分支与切换规则的 condition 都走这里。
 
 为什么不用 eval/exec：
@@ -60,7 +59,18 @@ def _wrap(value: Any) -> Any:
     return DictView(value) if isinstance(value, dict) else value
 
 
-_ALLOWED_OPS = (ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.In, ast.NotIn, ast.Is, ast.IsNot)
+_ALLOWED_OPS = (
+    ast.Eq,
+    ast.NotEq,
+    ast.Lt,
+    ast.LtE,
+    ast.Gt,
+    ast.GtE,
+    ast.In,
+    ast.NotIn,
+    ast.Is,
+    ast.IsNot,
+)
 _ALLOWED_BOOL = (ast.And, ast.Or)
 _ALLOWED_BIN = (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod)
 

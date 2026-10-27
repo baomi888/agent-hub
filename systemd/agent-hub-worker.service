@@ -1,0 +1,17 @@
+[Unit]
+Description=ZhiSui Agent - scheduler worker (no port)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__APP_DIR__
+Environment=PYTHONUTF8=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=__APP_DIR__/venv/bin/python -m worker.scheduler
+Restart=always
+RestartSec=10
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

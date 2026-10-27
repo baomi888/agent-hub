@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
 from __future__ import annotations
+
 """RAG 核心逻辑（文档加载 → 切片 → Embedding → Chroma → 检索 → 提示词组装 → LLM 生成）
 
 与界面完全分离，可被 Agent / FastAPI / 后续前端复用。
@@ -26,7 +26,7 @@ from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from core import config
+from core import config, embed_guard, metrics, prompt_store
 from core.llm import get_embeddings, get_llm
 
 SUPPORTED_EXT = (".txt", ".md", ".pdf")  # .md 按纯文本加载，Markdown 语法不影响切片
@@ -56,11 +56,14 @@ def chroma_client():
                 _CHROMA_CLIENT = chromadb.PersistentClient(path=config.PERSIST_DIR)
     return _CHROMA_CLIENT
 
+
 # RAG 系统提示词：仅依据参考资料回答；资料不足时说明情况并给出下一步，不做冷拒答
 SYSTEM_PROMPT = """你是一个严谨的问答助手，必须遵守以下规则：
 1. 仅依据【参考资料】回答用户问题，不得使用资料之外的任何知识；
 2. 回答末尾注明依据的片段编号，例如（依据：[1][3]）；
-3. 如果参考资料不足以回答问题，不要只甩一句冷冰冰的拒答。先一句话说明「知识库里暂时没有这段内容，所以我不能按资料乱答」，再给出下一步（把相关文档放进这个知识库，或者换成联网搜索），语气自然、简短；
+3. 如果参考资料不足以回答问题，不要只甩一句冷冰冰的拒答。
+   先一句话说明「知识库里暂时没有这段内容，所以我不能按资料乱答」，
+   再给出下一步（把相关文档放进这个知识库，或者换成联网搜索），语气自然、简短；
 4. 用中文简洁作答，不要编造任何资料中没有的信息；
 5. 如果用户输入的是词语或短语（而非完整问题），则根据参考资料围绕该主题做简要介绍。"""
 
@@ -71,7 +74,10 @@ def describe_api_error(e: Exception) -> str:
     # openai 认证/网络/限额类异常
     if cls_name == "AuthenticationError" or "401" in str(e):
         return "401 认证失败：密钥无效，请检查 .env 中各接口对应的 Key 与 BASE_URL"
-    if cls_name in ("APIConnectionError", "ConnectError", "ConnectionError") or "connect" in str(e).lower():
+    if (
+        cls_name in ("APIConnectionError", "ConnectError", "ConnectionError")
+        or "connect" in str(e).lower()
+    ):
         return "网络连接失败：请检查网络/代理以及各 BASE_URL 配置"
     if cls_name == "RateLimitError" or "429" in str(e):
         return "429 请求受限：请求过于频繁或额度不足，请稍后再试"
@@ -224,6 +230,9 @@ def _get_bm25(vs, collection_name: str):
             neg = _BM25_NEG.get(collection_name)
             if neg is not None:
                 if time.monotonic() < neg:
+                    # A5：负缓存命中也算一次"关键词通道没参与"。
+                    # 不记的话，我们会误以为混合检索一直在生效，而实际上大库早就退化了。
+                    metrics.inc("retrieval_cache", {"kind": "neg"})
                     return None  # 已确认超大，TTL 内不再重复全库拉取
                 del _BM25_NEG[collection_name]
             if collection_name not in _BM25_INFLIGHT:
@@ -242,7 +251,7 @@ def _get_bm25(vs, collection_name: str):
         ids = got.get("ids") or []
         docs = [
             Document(page_content=t or "", metadata=m or {}, id=i)
-            for t, m, i in zip(texts, metas, ids)
+            for t, m, i in zip(texts, metas, ids, strict=False)
         ]
         index = _BM25([_tokenize(d.page_content) for d in docs])
         entry = (docs, index)
@@ -295,10 +304,10 @@ def _rrf_merge(vec_cands, kw_pairs, kw_docs, rrf_k: int) -> list:
 # ==================== 可信度判定（P0）====================
 
 # 依据强度分级。前端按这个字段决定要不要给回答加"依据较弱"的提示条。
-STRENGTH_HIGH = "high"      # 至少一条强相关：可以正常回答
+STRENGTH_HIGH = "high"  # 至少一条强相关：可以正常回答
 STRENGTH_MEDIUM = "medium"  # 有相关但不强：正常回答，但标注依据强度
-STRENGTH_LOW = "low"        # 全都不够格：必须示弱，不许硬答
-STRENGTH_NONE = "none"      # 什么都没检索到
+STRENGTH_LOW = "low"  # 全都不够格：必须示弱，不许硬答
+STRENGTH_NONE = "none"  # 什么都没检索到
 
 
 def assess_grounding(docs_scores) -> dict:
@@ -339,6 +348,12 @@ def assess_grounding(docs_scores) -> dict:
         strength = STRENGTH_MEDIUM
     else:
         strength = STRENGTH_LOW
+
+    # A5 埋点：这里同时是"top1 相似度"和"依据强度分级"的唯一产出点，
+    # 所以两个指标都记在这里，别在别处再记一遍（两处记一定会漂）。
+    # 有了这条分布，下次调 RETRIEVE_LOW_SIM=0.45 才是基于数据的判断。
+    metrics.inc("retrieval_grounding", {"level": strength})
+    metrics.observe("retrieval_top1_similarity", best)
 
     # ★ medium 也算"没找到硬证据"，必须一起 weak。
     # medium 的语义是"留下了，但都不够格"——它和 low 的区别只是"有没有沾点边"，
@@ -382,14 +397,19 @@ def grounding_note(assessment: dict) -> str:
 
     medium 和 low 都要追加，只是话术不同——两者都表示"没有硬证据"。
     见 assess_grounding 里对 medium 为什么也算 weak 的说明。
+
+    模板走 `core/prompt_store` 的 active 版本（path = rag_note_low /
+    rag_note_medium），没有 active 时退回本文件的常量。这条路径和 Agent 路径
+    共用同一个版本化入口：P0 修复（2026-10-17）刚把双路径的防编造约束合成同源，
+    进化时不能又分叉（方案 §4 的要求）。
     """
     if not config.GROUNDING_NOTICE:
         return ""
     strength = (assessment or {}).get("strength")
     if strength == STRENGTH_LOW:
-        return LOW_CONFIDENCE_NOTE
+        return prompt_store.resolve("rag_note_low", LOW_CONFIDENCE_NOTE)[0]
     if strength == STRENGTH_MEDIUM:
-        return MARGINAL_CONFIDENCE_NOTE
+        return prompt_store.resolve("rag_note_medium", MARGINAL_CONFIDENCE_NOTE)[0]
     return ""
 
 
@@ -433,6 +453,11 @@ def select_diverse(docs_scores, top_k: int, lambda_mult: float | None = None) ->
         vec_sims = [sim for c, sim in scored if _dist(c) is not None]
         if vec_sims and all(sim is not None for sim in vec_sims):
             kept = [c for c, sim in scored if _dist(c) is None or sim >= min_sim]
+            # A5：闸门拦掉多少条，这是判断 RETRIEVE_MIN_SIM=0.25 是否过狠的唯一依据。
+            # 记在这里而不是调用方：只有这儿知道"过滤前多少条、过滤后多少条"。
+            dropped = len(cands) - len(kept)
+            if dropped > 0:
+                metrics.inc("retrieval_gate_blocked", n=dropped)
             # 别把结果砍空：一条不剩时至少留最相关的那条，让模型自己说"资料里没有"
             cands = kept or [
                 min(cands, key=lambda c: _dist(c) if _dist(c) is not None else float("inf"))
@@ -541,8 +566,9 @@ def _cache_get(collection_name: str, question: str, top_k: int, owner: str | Non
     return None
 
 
-def _cache_set(collection_name: str, question: str, top_k: int, result,
-              owner: str | None = None) -> None:
+def _cache_set(
+    collection_name: str, question: str, top_k: int, result, owner: str | None = None
+) -> None:
     key = (collection_name, question, top_k, owner)
     with _RETRIEVE_CACHE_LOCK:
         _RETRIEVE_CACHE[key] = list(result)
@@ -554,6 +580,7 @@ def _cache_set(collection_name: str, question: str, top_k: int, result,
 def _apply_profile_bias(docs_scores, owner):
     """D 块：读取用户画像标签，对命中主题的片段做减距离偏置并重排。"""
     from core import session as _session
+
     profile = _session.get_user_tags(owner, limit=config.RETRIEVAL_BIAS_TOP)
     if not profile:
         return docs_scores
@@ -666,8 +693,23 @@ def _embed_query(question: str) -> list[float]:
 # 一次 LLM 调用，其余问题零额外开销（这是它跟"每题都改写"的关键区别）。
 
 _REWRITE_CUES = (
-    "它", "他", "她", "这个", "那个", "这些", "那些", "该", "此", "其",
-    "上述", "前者", "后者", "这样", "那样", "这里", "那里",
+    "它",
+    "他",
+    "她",
+    "这个",
+    "那个",
+    "这些",
+    "那些",
+    "该",
+    "此",
+    "其",
+    "上述",
+    "前者",
+    "后者",
+    "这样",
+    "那样",
+    "这里",
+    "那里",
 )
 
 
@@ -719,6 +761,7 @@ def rewrite_query(question: str, history) -> str:
 
 # ==================== 文档加载 ====================
 
+
 def load_document(file_path: str, source_name: str | None = None):
     """加载单个文档，返回 Document 列表。
 
@@ -747,7 +790,7 @@ def load_document(file_path: str, source_name: str | None = None):
             raise ValueError(
                 f"PDF 解析失败：{e}。可能原因：① 扫描版 PDF（无文字层）需先 OCR；"
                 f"② 文件加密或损坏；③ 文件过大。建议转换为 TXT/Markdown 后再上传。"
-            )
+            ) from e
     if not docs or all(not (d.page_content or "").strip() for d in docs):
         raise ValueError(
             "PDF 未提取到任何文字内容。若为扫描件请先 OCR，或导出为 TXT/Markdown 后再上传。"
@@ -768,6 +811,7 @@ def split_documents(docs, chunk_size: int, chunk_overlap: int):
 
 # ==================== 主题标签（方案 C · A 块）====================
 
+
 def _extract_topics_one(text: str) -> list[str]:
     """用 LLM 从一段文档文本里抽 3~6 个简短中文主题标签。
 
@@ -786,7 +830,7 @@ def _extract_topics_one(text: str) -> list[str]:
         prompt = (
             "你是文档主题标注器。请阅读下面这段文档内容，提取最能概括它主题的 "
             "3~6 个简短中文标签（每个标签不超过 6 个字，如：线性代数、考研数学、操作系统）。\n"
-            "只输出一个 JSON 数组，例如 [\"线性代数\",\"考研数学\"]，"
+            '只输出一个 JSON 数组，例如 ["线性代数","考研数学"]，'
             "不要解释，不要 Markdown 代码块，不要多余文字。\n\n"
             f"【文档内容】\n{text[:4000]}"
         )
@@ -799,6 +843,7 @@ def _extract_topics_one(text: str) -> list[str]:
                 raw = raw[4:]
             raw = raw.strip()
         import json as _json
+
         tags = _json.loads(raw)
         out: list[str] = []
         for t in tags:
@@ -848,7 +893,7 @@ def _inject_topics(chunks) -> None:
         src = c.metadata.get("source") or ""
         if src:
             by_source.setdefault(src, []).append(c)
-    for src, group in by_source.items():
+    for _src, group in by_source.items():
         text = _join_head(group)
         tags = _extract_topics_one(text)
         if not tags:
@@ -915,8 +960,12 @@ def _embed_pool() -> ThreadPoolExecutor:
         return _EMBED_POOL
 
 
-def _embed_and_store(vs, chunks) -> None:
-    """并发 embedding + 串行 upsert（分窗，峰值内存受限）。
+def _embed_and_store(vs, chunks) -> int | None:
+    """并发 embedding + 串行 upsert（分窗，峰值内存受限）。返回向量维度（拿不到为 None）。
+
+    返回值是给 core/embed_guard.py 用的：向量空间指纹里记的 dim 要来自
+    **真实的向量长度**，而不是模型文档上写的维度——文档与实际不一致的情况
+    真会发生（接口截断、兼容层补齐），记错了反而会让校验形同虚设。
 
     入库的真正瓶颈是 embedding 的网络往返：每批 EMBED_BATCH_SIZE 条一次请求，
     原实现一批批串行等待，N 批就是 N 个 RTT 首尾相接。这里把各批的
@@ -933,7 +982,7 @@ def _embed_and_store(vs, chunks) -> None:
     EMBED_BATCH_SIZE 语义不变：每批仍按该大小切，只是批与批之间不再排队。
     """
     if not chunks:
-        return
+        return None
     # A 块：入库级主题标签（失败静默降级，不影响入库）
     _inject_topics(chunks)
     bs = max(1, config.EMBED_BATCH_SIZE)
@@ -941,15 +990,18 @@ def _embed_and_store(vs, chunks) -> None:
     batches = []
     for i in range(0, len(chunks), bs):
         part = chunks[i : i + bs]
-        batches.append((
-            [c.page_content for c in part],
-            [c.metadata for c in part],
-            [str(uuid.uuid4()) for _ in part],
-        ))
+        batches.append(
+            (
+                [c.page_content for c in part],
+                [c.metadata for c in part],
+                [str(uuid.uuid4()) for _ in part],
+            )
+        )
     emb = vs._embedding_function
     workers = max(1, min(config.EMBED_CONCURRENCY, len(batches)))
 
     pool = _embed_pool() if workers > 1 else None
+    dim: int | None = None
     for w in range(0, len(batches), workers):
         window = batches[w : w + workers]
         if pool is None:
@@ -958,10 +1010,12 @@ def _embed_and_store(vs, chunks) -> None:
         else:
             # 同一窗口内的各批并发发出；list() 会等齐并按提交顺序返回
             vectors = list(pool.map(lambda b: emb.embed_documents(b[0]), window))
-        for (texts, metadatas, ids), vecs in zip(window, vectors):
-            vs._collection.upsert(
-                ids=ids, embeddings=vecs, documents=texts, metadatas=metadatas
-            )
+        for (texts, metadatas, ids), vecs in zip(window, vectors, strict=False):
+            if dim is None and vecs and vecs[0]:
+                # 维度取自**真实向量**而不是模型文档：文档与实际不一致的情况真会发生
+                dim = len(vecs[0])
+            vs._collection.upsert(ids=ids, embeddings=vecs, documents=texts, metadatas=metadatas)
+    return dim
 
 
 class RagPipeline:
@@ -969,8 +1023,8 @@ class RagPipeline:
 
     def __init__(self, collection_name: str) -> None:
         self.collection_name = collection_name  # 如 kb_001 / kb_nba
-        self._vs = None          # Chroma 实例缓存
-        self._params = None      # 当前库对应的 (chunk_size, chunk_overlap)
+        self._vs = None  # Chroma 实例缓存
+        self._params = None  # 当前库对应的 (chunk_size, chunk_overlap)
 
     # ---------- 建库 ----------
     def _ensure_vs(self):
@@ -1004,7 +1058,10 @@ class RagPipeline:
             return 0
         vs = self._ensure_vs()
         # 并发 embedding、串行写入，避免超出单次批量限制（百炼为 10）
-        _embed_and_store(vs, chunks)
+        dim = _embed_and_store(vs, chunks)
+        # 记下"这个库的向量是哪个模型、多少维算的"。检索前会比这个指纹，
+        # 防止换了 EMBEDDING_MODEL 却还在查旧库（详见 core/embed_guard.py）
+        embed_guard.stamp(self.collection_name, dim)
         _cache_invalidate(self.collection_name)
         return len(chunks)
 
@@ -1050,7 +1107,10 @@ class RagPipeline:
 
         vs = self._ensure_vs()
         # 并发 embedding、串行写入，避免超出单次批量限制（百炼为 10）
-        _embed_and_store(vs, chunks)
+        dim = _embed_and_store(vs, chunks)
+        # rebuild 会删掉 collection 重建，metadata 指纹也一起没了 → 这里重新盖一个
+        embed_guard.invalidate(self.collection_name)
+        embed_guard.stamp(self.collection_name, dim)
 
         self._params = (chunk_size, chunk_overlap)
         _cache_invalidate(self.collection_name)
@@ -1106,17 +1166,21 @@ class RagPipeline:
         except Exception:
             return []
         items: list[dict] = []
-        for text, md in zip(got.get("documents") or [], got.get("metadatas") or []):
+        for text, md in zip(got.get("documents") or [], got.get("metadatas") or [], strict=False):
             md = md or {}
-            items.append({
-                "page": md.get("page"),
-                "chunk_index": md.get("chunk_index"),
-                "text": text or "",
-            })
-        items.sort(key=lambda x: (
-            x["page"] if isinstance(x["page"], int) else 0,
-            x["chunk_index"] if isinstance(x["chunk_index"], int) else 0,
-        ))
+            items.append(
+                {
+                    "page": md.get("page"),
+                    "chunk_index": md.get("chunk_index"),
+                    "text": text or "",
+                }
+            )
+        items.sort(
+            key=lambda x: (
+                x["page"] if isinstance(x["page"], int) else 0,
+                x["chunk_index"] if isinstance(x["chunk_index"], int) else 0,
+            )
+        )
         return items
 
     def list_sources(self) -> list[dict]:
@@ -1221,8 +1285,14 @@ class RagPipeline:
         相同 (问题, top_k, owner) 的检索结果按库缓存，命中时省掉一次 embedding + 向量查询。
         owner 不为空时按用户画像做检索偏置（D 块），且缓存 key 含 owner 避免串结果。
         """
+        # A4：向量空间指纹校验必须放在**最前面**，包括缓存之前。
+        # 缓存里存的是"用旧模型检索出来的结果"，换了模型后它一样是错的——
+        # 把校验放在缓存之后等于给错结果开了一条捷径。
+        embed_guard.check(self.collection_name)
+
         cached = _cache_get(self.collection_name, question, top_k, owner)
         if cached is not None:
+            metrics.inc("retrieval_cache", {"kind": "hit"})
             return cached
 
         if not self._vs:
@@ -1246,9 +1316,7 @@ class RagPipeline:
             result = None
             if config.HYBRID_ENABLED:
                 try:
-                    merged = self._hybrid_candidates(
-                        question, vec_cands, config.HYBRID_KEYWORD_TOP
-                    )
+                    merged = self._hybrid_candidates(question, vec_cands, config.HYBRID_KEYWORD_TOP)
                 except Exception:
                     merged = None  # 关键词通道是增益不是必需：出错就退回纯向量
                 if merged:
@@ -1259,6 +1327,9 @@ class RagPipeline:
         # D 块：按用户画像偏置（仅重排，不改原始 distance；含 owner 避免跨用户串缓存）
         if owner and config.RETRIEVAL_BIAS_ENABLED and result:
             result = _apply_profile_bias(result, owner)
+
+        if not result:
+            metrics.inc("retrieval_empty")
 
         _cache_set(self.collection_name, question, top_k, result, owner)
         return result
@@ -1285,12 +1356,14 @@ class RagPipeline:
                 strength = STRENGTH_MEDIUM
             else:
                 strength = STRENGTH_LOW
-            metas.append({
-                "source": os.path.basename(d.metadata.get("source", "?")),
-                "page": d.metadata.get("page"),
-                "sim": sim,
-                "strength": strength,
-            })
+            metas.append(
+                {
+                    "source": os.path.basename(d.metadata.get("source", "?")),
+                    "page": d.metadata.get("page"),
+                    "sim": sim,
+                    "strength": strength,
+                }
+            )
         return metas
 
     @staticmethod
@@ -1302,16 +1375,18 @@ class RagPipeline:
         """
         metas = RagPipeline._source_meta(docs_scores)
         out = []
-        for i, ((d, _distance), m) in enumerate(zip(docs_scores, metas)):
-            out.append({
-                "id": i + 1,
-                "source": m["source"],
-                "page": (m["page"] + 1) if isinstance(m["page"], int) else None,
-                "score": round(m["sim"], 4) if m["sim"] is not None else None,
-                "strength": m["strength"],
-                "preview": d.page_content.replace("\n", " ")[:80],
-                "text": d.page_content[:1500],
-            })
+        for i, ((d, _distance), m) in enumerate(zip(docs_scores, metas, strict=False)):
+            out.append(
+                {
+                    "id": i + 1,
+                    "source": m["source"],
+                    "page": (m["page"] + 1) if isinstance(m["page"], int) else None,
+                    "score": round(m["sim"], 4) if m["sim"] is not None else None,
+                    "strength": m["strength"],
+                    "preview": d.page_content.replace("\n", " ")[:80],
+                    "text": d.page_content[:1500],
+                }
+            )
         return out
 
     @staticmethod
@@ -1319,7 +1394,7 @@ class RagPipeline:
         """参考片段格式化：来源文件名 + 页码 + 相似度 + 60 字预览。"""
         metas = RagPipeline._source_meta(docs_scores)
         lines = []
-        for i, ((d, _distance), m) in enumerate(zip(docs_scores, metas)):
+        for i, ((d, _distance), m) in enumerate(zip(docs_scores, metas, strict=False)):
             # 页码与相似度取自 _source_meta，与 build_sources 同一口径
             loc = f" 第{m['page'] + 1}页" if m["page"] is not None else ""
             head = f"**[{i + 1}]** {m['source']}{loc}"

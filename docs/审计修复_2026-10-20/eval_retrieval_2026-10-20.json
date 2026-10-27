@@ -1,0 +1,242 @@
+{
+  "mode": "fake",
+  "summary": {
+    "auc_related_vs_offtopic": 0.7917,
+    "auc_fair": 0.9,
+    "relevant_weak_rate": 1.0,
+    "questions": 16,
+    "relevant": 12,
+    "literal_blind": 7,
+    "off_topic": 4,
+    "recall@1": 0.75,
+    "recall@3": 0.75,
+    "recall@5": 0.75,
+    "mrr": 0.75,
+    "recall_fair": {
+      "recall@1": 1.0,
+      "recall@3": 1.0,
+      "recall@5": 1.0
+    },
+    "mrr_fair": 1.0,
+    "top1_sim_mean": 0.1286,
+    "top1_sim_min": 0.0588,
+    "top1_sim_max": 0.286,
+    "rel_sim_mean": 0.1441,
+    "off_sim_mean": 0.0823,
+    "strength": {
+      "medium": 1,
+      "low": 15
+    },
+    "off_topic_weak_rate": 1.0
+  },
+  "rows": [
+    {
+      "question": "nginx 把根路径和接口分别转发到哪个端口？",
+      "expect": "nginx-https.md",
+      "sources": [
+        "nginx-https.md"
+      ],
+      "hit_rank": 1,
+      "top1_sim": 0.28603997700953476,
+      "strength": "medium",
+      "weak": true,
+      "literal_overlap": 0.395,
+      "literal_blind": false
+    },
+    {
+      "question": "证书到期前多久会自动续期？",
+      "expect": "nginx-https.md",
+      "sources": [
+        "nginx-https.md"
+      ],
+      "hit_rank": 1,
+      "top1_sim": 0.11367029607563173,
+      "strength": "low",
+      "weak": true,
+      "literal_overlap": 0.261,
+      "literal_blind": false
+    },
+    {
+      "question": "流式输出在网关上要关掉什么配置？",
+      "expect": "nginx-https.md",
+      "sources": [
+        "nginx-https.md"
+      ],
+      "hit_rank": 1,
+      "top1_sim": 0.07488631321792849,
+      "strength": "low",
+      "weak": true,
+      "literal_overlap": 0.207,
+      "literal_blind": true
+    },
+    {
+      "question": "备案还没下来的时候怎么先让服务能被访问？",
+      "expect": "nginx-https.md",
+      "sources": [
+        "quota-rate-limit.md"
+      ],
+      "hit_rank": 0,
+      "top1_sim": 0.05876824436326811,
+      "strength": "low",
+      "weak": true,
+      "literal_overlap": 0.054,
+      "literal_blind": true
+    },
+    {
+      "question": "每天能提问几次，超了会怎样？",
+      "expect": "quota-rate-limit.md",
+      "sources": [
+        "nginx-https.md"
+      ],
+      "hit_rank": 0,
+      "top1_sim": 0.14464670908148036,
+      "strength": "low",
+      "weak": true,
+      "literal_overlap": 0.04,
+      "literal_blind": true
+    },
+    {
+      "question": "多进程部署时进程内的计数为什么不准？",
+      "expect": "quota-rate-limit.md",
+      "sources": [
+        "quota-rate-limit.md"
+      ],
+      "hit_rank": 1,
+      "top1_sim": 0.14934523041732117,
+      "strength": "low",
+      "weak": true,
+      "literal_overlap": 0.156,
+      "literal_blind": true
+    },
+    {
+      "question": "并发名额要在什么时候抢占？",
+      "expect": "quota-rate-limit.md",
+      "sources": [
+        "quota-rate-limit.md"
+      ],
+      "hit_rank": 1,
+      "top1_sim": 0.21014116364842106,
+      "strength": "low",
+      "weak": true,
+      "literal_overlap": 0.304,
+      "literal_blind": false
+    },
+    {
+      "question": "无效的会话请求会不会消耗额度？",
+      "expect": "quota-rate-limit.md",
+      "sources": [
+        "quota-rate-limit.md"
+      ],
+      "hit_rank": 1,
+      "top1_sim": 0.16105358143531145,
+      "strength": "low",
+      "weak": true,
+      "literal_overlap": 0.185,
+      "literal_blind": true
+    },
+    {
+      "question": "换了向量化模型会有什么后果？",
+      "expect": "embed-vector.md",
+      "sources": [
+        "embed-vector.md"
+      ],
+      "hit_rank": 1,
+      "top1_sim": 0.08277964799941362,
+      "strength": "low",
+      "weak": true,
+      "literal_overlap": 0.12,
+      "literal_blind": true
+    },
+    {
+      "question": "距离和相似度的换算关系是什么？",
+      "expect": "embed-vector.md",
+      "sources": [
+        "embed-vector.md"
+      ],
+      "hit_rank": 1,
+      "top1_sim": 0.2302885871044824,
+      "strength": "low",
+      "weak": true,
+      "literal_overlap": 0.333,
+      "literal_blind": false
+    },
+    {
+      "question": "怎样避免把重复的片段都塞进提示词？",
+      "expect": "embed-vector.md",
+      "sources": [
+        "embed-vector.md"
+      ],
+      "hit_rank": 1,
+      "top1_sim": 0.08942553651723739,
+      "strength": "low",
+      "weak": true,
+      "literal_overlap": 0.29,
+      "literal_blind": false
+    },
+    {
+      "question": "缓存的键里为什么要带上用户标识？",
+      "expect": "embed-vector.md",
+      "sources": [
+        "quota-rate-limit.md"
+      ],
+      "hit_rank": 0,
+      "top1_sim": 0.127666965552778,
+      "strength": "low",
+      "weak": true,
+      "literal_overlap": 0.241,
+      "literal_blind": true
+    },
+    {
+      "question": "公司年会在哪个酒店举办？",
+      "expect": null,
+      "sources": [
+        "embed-vector.md"
+      ],
+      "hit_rank": 0,
+      "top1_sim": 0.06162802427844061,
+      "strength": "low",
+      "weak": true,
+      "literal_overlap": null,
+      "literal_blind": false
+    },
+    {
+      "question": "红烧肉要放多少冰糖？",
+      "expect": null,
+      "sources": [
+        "quota-rate-limit.md"
+      ],
+      "hit_rank": 0,
+      "top1_sim": 0.11090809435869664,
+      "strength": "low",
+      "weak": true,
+      "literal_overlap": null,
+      "literal_blind": false
+    },
+    {
+      "question": "打印机卡纸要怎么处理？",
+      "expect": null,
+      "sources": [
+        "nginx-https.md"
+      ],
+      "hit_rank": 0,
+      "top1_sim": 0.06673450271167569,
+      "strength": "low",
+      "weak": true,
+      "literal_overlap": null,
+      "literal_blind": false
+    },
+    {
+      "question": "下周的航班时刻表在哪查？",
+      "expect": null,
+      "sources": [
+        "embed-vector.md"
+      ],
+      "hit_rank": 0,
+      "top1_sim": 0.08973737756995726,
+      "strength": "low",
+      "weak": true,
+      "literal_overlap": null,
+      "literal_blind": false
+    }
+  ]
+}

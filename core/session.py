@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
 from __future__ import annotations
+
 """SQLite 多会话管理。
 
 设计：
@@ -9,7 +9,7 @@ from __future__ import annotations
     feedbacks      —— 消息赞踩
 
   所有 SQL 用参数化查询防注入；窗口截断：加载历史时只取最近
-  MAX_HISTORY_TURNS 轮（默认 10 轮 = 20 条消息），避免长会话爆 token。
+  MAX_HISTORY_TURNS 轮（默认 30 轮 = 60 条消息），避免长会话爆 token。
 
 归属隔离（多用户改造 P1）
 ------------------------
@@ -32,9 +32,9 @@ import uuid
 from contextlib import contextmanager
 from typing import Literal
 
-from core import config
+from core import config, tag_taxonomy
 
-MAX_HISTORY_TURNS = 10  # 每个会话最多保留的对话轮数（1 轮 = user + assistant 两条）
+MAX_HISTORY_TURNS = 30  # 每个会话最多保留的对话轮数（1 轮 = user + assistant 两条）
 
 
 # ---------- 数据库路径 ----------
@@ -45,6 +45,12 @@ def _db_path() -> str:
     此前顺带一次 `os.makedirs(exist_ok=True)`，等于每条 SQL 前都白做一次系统调用。
     测试 monkeypatch 本函数到临时目录时，建目录仍会跟着新路径走。
     """
+    # 库路径覆盖：给"起真进程但用独立库"的场景用（tools/dashboard_e2e.py）。
+    # 这是**测试缝**，不是配置项：默认不设，行为与只返回 PROJECT_ROOT 时完全一致。
+    # 有它才能在没有生产库副本的机器上跑端到端，且不可能污染真实数据。
+    override = os.getenv("AGENT_HUB_DB")
+    if override:
+        return override
     return os.path.join(config.PROJECT_ROOT, "data", "sessions.db")
 
 
@@ -67,12 +73,14 @@ def _conn() -> sqlite3.Connection:
             conn.close()
         except Exception:
             pass
-    os.makedirs(os.path.dirname(path), exist_ok=True)  # 建连前确保目录存在（路径可能被测试改到临时目录）
+    os.makedirs(
+        os.path.dirname(path), exist_ok=True
+    )  # 建连前确保目录存在（路径可能被测试改到临时目录）
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row  # 让 cursor 返回 dict-like 对象
-    conn.execute("PRAGMA journal_mode=WAL")    # 写前日志，提升并发读性能
+    conn.execute("PRAGMA journal_mode=WAL")  # 写前日志，提升并发读性能
     conn.execute("PRAGMA synchronous=NORMAL")  # WAL 下不必每次 fsync，写更快
-    conn.execute("PRAGMA busy_timeout=5000")   # 撞上并发写时等待而不是立刻报错
+    conn.execute("PRAGMA busy_timeout=5000")  # 撞上并发写时等待而不是立刻报错
     _LOCAL.conn = conn
     _LOCAL.path = path
     return conn
@@ -96,6 +104,17 @@ def _init_db() -> None:
     新建库直接带 owner_id；老库靠后面的 ALTER 补列。
     两种路径得到同一套结构，省得迁移脚本和建表语句各写一遍。
     """
+    with _get_conn() as conn:
+        # 令牌吊销名单：JWT 是无状态的，退出登录 / 强制下线只能靠这份黑名单。
+        # 只存 jti + 过期时间，过期行由 core/token_store.py 顺手清掉，
+        # 所以这张表不会无限长。
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS revoked_tokens (
+                jti TEXT PRIMARY KEY,
+                exp INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_revoked_exp ON revoked_tokens(exp);
+        """)
     with _get_conn() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS conversations (
@@ -153,11 +172,95 @@ def _init_db() -> None:
                 tag_count  INTEGER NOT NULL DEFAULT 0,
                 updated_at INTEGER NOT NULL
             );
+
+            -- ========== Prompt 自进化（GEPA 式 · issue #12）==========
+            -- ⑤ 存储层：每条提示词快照一行。version=0 是内置基线（不落库），
+            -- 所以这里从 1 开始；同一 path 内 version 唯一。
+            CREATE TABLE IF NOT EXISTS prompt_variants (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                path        TEXT NOT NULL,          -- 'agent' | 'rag_note_low' | 'rag_note_medium'
+                version     INTEGER NOT NULL,
+                parent_id   INTEGER,                -- 变异来源（基线用 NULL）
+                diff_json   TEXT,                   -- 结构化 diff（可读可审计）
+                prompt_text TEXT NOT NULL,          -- 全量快照：retired 也能一键回退
+                metrics_json TEXT,                  -- {M1..M6, gate:{...}, pareto:bool}
+                status      TEXT NOT NULL DEFAULT 'candidate',
+                created_by  TEXT NOT NULL,          -- 'evolve:<run_id>' | 'manual:<uid>'
+                created_at  INTEGER NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_prompt_variant
+                ON prompt_variants(path, version);
+            CREATE INDEX IF NOT EXISTS idx_prompt_variant_status
+                ON prompt_variants(path, status, id DESC);
+
+            -- ③ 评估层明细：每条 case 的判分都留档，指标能复盘到样本。
+            -- variant_id=0 表示内置基线（基线每次回放也存一份，否则"相对谁下降"不可查）。
+            CREATE TABLE IF NOT EXISTS prompt_evals (
+                id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                path               TEXT NOT NULL,
+                variant_id         INTEGER NOT NULL DEFAULT 0,
+                replay_set_version INTEGER NOT NULL,
+                per_case_json      TEXT NOT NULL,
+                summary_json       TEXT NOT NULL,
+                elapsed_ms         INTEGER NOT NULL DEFAULT 0,
+                created_at         INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_prompt_eval
+                ON prompt_evals(path, variant_id, replay_set_version);
+
+            -- 回放集版本表 + 明细。只增不改：要改就升版本，老版本的样本原样留着，
+            -- 这样两轮指标永远能对上"当时那批题"。
+            CREATE TABLE IF NOT EXISTS prompt_replay_sets (
+                path       TEXT NOT NULL,
+                version    INTEGER NOT NULL,
+                seed       INTEGER NOT NULL,
+                size       INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                note       TEXT,
+                PRIMARY KEY (path, version)
+            );
+            CREATE TABLE IF NOT EXISTS prompt_replay_items (
+                path        TEXT NOT NULL,
+                set_version INTEGER NOT NULL,
+                case_key    TEXT NOT NULL,
+                question    TEXT NOT NULL,          -- 已脱敏
+                gold        TEXT,
+                tags        TEXT,                   -- 失败模式标签（逗号分隔）
+                source      TEXT NOT NULL,          -- 'down' | 'up'
+                meta_json   TEXT,
+                created_at  INTEGER NOT NULL,
+                PRIMARY KEY (path, set_version, case_key)
+            );
+
+            -- 用户**亲手勾选**的兴趣标签（与 user_tags 分工不同）：
+            --   user_tags  = 权重事实（对话自动抽的 + 手选的，都只是权重，分不出谁是谁）
+            --   user_tag_picks = "他明确声明过什么"，只用于前端回显"我选过哪些"，
+            --                    以及让"取消勾选"能被记住（user_tags 里那条不删，
+            --                    因为它可能同时是聊出来的证据）。
+            -- 加这张表而不是给 user_tags 加 source 列：主键是 (owner_id, tag)，
+            -- 同一个标签两种来源在物理上就只能存一行。
+            CREATE TABLE IF NOT EXISTS user_tag_picks (
+                owner_id   TEXT NOT NULL,
+                tag        TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY (owner_id, tag)
+            );
+            CREATE INDEX IF NOT EXISTS idx_tagpick_owner ON user_tag_picks(owner_id);
         """)
 
         # 迁移：老库补 refs 列（已存在则忽略）
         try:
             conn.execute("ALTER TABLE messages ADD COLUMN refs TEXT")
+        except Exception:
+            pass
+
+        # 迁移（审计 A1）：老库补 truncated 列。
+        # 1 = 这条回答因 max_tokens / 上下文上限被截断（上游 finish_reason=length）。
+        # 为什么要落库而不是只在 SSE 里提示一下：这是唯一能回答
+        # 「我们有多少回答其实是残缺的」的数据。塞进 refs 会污染来源引用，
+        # 另建表又不值得——一个 BOOLEAN 语义的整数列，成本一行。
+        try:
+            conn.execute("ALTER TABLE messages ADD COLUMN truncated INTEGER NOT NULL DEFAULT 0")
         except Exception:
             pass
 
@@ -169,6 +272,22 @@ def _init_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_conv_owner ON conversations(owner_id, updated_at DESC)"
         )
+
+        # 迁移（P0-2 上下文压缩）：老库补三个字段。
+        #   compressed_summary     当前压缩块（含 [COMPRESSED-n] 分段标记）
+        #   compressed_summary_prev 上一版压缩块（L1 安全阀回退用；方案文档指出
+        #                           单 TEXT 字段无法回退，故显式存一份）
+        #   compressed_upto        已压缩到的 message id；build 时以此过滤原文，
+        #                           避免"压缩块 + 原文"重复进上下文
+        for col, decl in (
+            ("compressed_summary", "TEXT"),
+            ("compressed_summary_prev", "TEXT"),
+            ("compressed_upto", "INTEGER"),
+        ):
+            try:
+                conn.execute(f"ALTER TABLE conversations ADD COLUMN {col} {decl}")
+            except Exception:
+                pass  # 已存在
 
 
 # 模块加载时自动建表
@@ -185,6 +304,7 @@ def _owned(owner: str, sid: str) -> bool:
 
 
 # ==================== 会话 CRUD ====================
+
 
 def create_conversation(owner: str, title: str = "新对话", kb_id: str | None = None) -> dict:
     """新建会话，返回会话 dict。"""
@@ -253,9 +373,7 @@ def delete_conversation(owner: str, sid: str) -> bool:
         # ON DELETE CASCADE 会自动删 messages，但保险起见先删消息
         conn.execute("DELETE FROM messages WHERE conversation_id = ?", (sid,))
         conn.execute("DELETE FROM feedbacks WHERE conversation_id = ?", (sid,))
-        cur = conn.execute(
-            "DELETE FROM conversations WHERE id = ? AND owner_id = ?", (sid, owner)
-        )
+        cur = conn.execute("DELETE FROM conversations WHERE id = ? AND owner_id = ?", (sid, owner))
         return cur.rowcount > 0
 
 
@@ -266,13 +384,12 @@ def claim_orphan_conversations(owner: str) -> int:
     否则第一个注册的人就把别人的历史数据认领走了。返回实际认领条数。
     """
     with _get_conn() as conn:
-        cur = conn.execute(
-            "UPDATE conversations SET owner_id = ? WHERE owner_id IS NULL", (owner,)
-        )
+        cur = conn.execute("UPDATE conversations SET owner_id = ? WHERE owner_id IS NULL", (owner,))
         return cur.rowcount
 
 
 # ==================== 消息管理 ====================
+
 
 class NotOwned(Exception):
     """会话不属于当前用户。
@@ -289,15 +406,21 @@ def add_message(
     role: Literal["user", "assistant", "system"],
     content: str,
     refs: str = "",
+    truncated: bool = False,
 ) -> int:
-    """追加一条消息，返回 message id。同时更新会话的 updated_at。"""
+    """追加一条消息，返回 message id。同时更新会话的 updated_at。
+
+    truncated=True 表示这条回答被长度上限截断了（见 core/session.py 的迁移注释与
+    审计报告 A1）。默认 False，所有既有调用方不需要改。
+    """
     if not _owned(owner, sid):
         raise NotOwned(sid)
     now = int(time.time())
     with _get_conn() as conn:
         conn.execute(
-            "INSERT INTO messages (conversation_id, role, content, refs, created_at) VALUES (?, ?, ?, ?, ?)",
-            (sid, role, content, refs, now),
+            "INSERT INTO messages (conversation_id, role, content, refs, truncated, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (sid, role, content, refs, 1 if truncated else 0, now),
         )
         conn.execute(
             "UPDATE conversations SET updated_at = ? WHERE id = ?",
@@ -310,11 +433,16 @@ def add_message(
 
 # ==================== 用户画像标签（方案 C · B 块）====================
 
+
 def add_user_tags(owner: str, tags: list[str], delta: float = 1.0) -> None:
     """累加用户的画像标签权重（同一标签多次出现 → 权重 +delta）。
 
     调用方（api/chat.py 后台钩子）只传词表内的标签，这里再兜底一次去重与清洗。
     失败静默：画像只是辅助，绝不能因为写标签失败而把正常问答搞崩。
+
+    ★ 落库前先过 `tag_taxonomy.normalize_tag`：把"CET6 / 六级 / 英语四六级"
+      统一成"英语四六级"。**这里只归一、不过滤** —— 词表外的主题词（"数学""英语"）
+      原样保留，因为检索偏置那边也会写词表外的主题；硬闸门在抽标签那一侧。
     """
     if not owner or not tags:
         return
@@ -322,7 +450,7 @@ def add_user_tags(owner: str, tags: list[str], delta: float = 1.0) -> None:
     clean: list[str] = []
     seen: set[str] = set()
     for t in tags:
-        t = str(t).strip().strip("|").strip()
+        t = tag_taxonomy.normalize_tag(t).strip("|").strip()
         if t and t not in seen:
             seen.add(t)
             clean.append(t)
@@ -340,6 +468,70 @@ def add_user_tags(owner: str, tags: list[str], delta: float = 1.0) -> None:
         pass
 
 
+# 手选标签的权重：一次声明 ≈ 3 次对话证据。
+# 太低会被聊天的噪声盖过，太高则用户改主意后旧标签赖着不走。
+PICK_WEIGHT = 3.0
+# 单次手选上限。汇总文档的建议是"选 1~3 个"，留到 6 是给跨方向的同学余地，
+# 再多就变成"全选"，推荐会退化成"什么都有"，等于没选。
+MAX_PICKS = 6
+
+
+def pick_user_tags(owner: str, tags: list[str], weight: float = PICK_WEIGHT) -> list[str]:
+    """保存用户**手选**的兴趣标签（覆盖式），返回实际生效的标签名列表。
+
+    两个必须满足的性质：
+
+    1. **幂等**：同一个标签反复提交不会把权重越堆越高。做法是
+       `ON CONFLICT DO NOTHING` —— 已存在的标签（不管是手选的还是聊出来的）
+       权重一律不动，只补新标签。
+    2. **可取消**：这次没选的、上次手选过的，从 picks 表里删掉（前端不再回显），
+       但 `user_tags` 里那条记录**保留** —— 它可能同时是"聊出来"的证据，
+       删了等于替用户抹掉他真实问过的问题。
+
+    词表外的标签直接丢弃：手选只发生在 30 条定稿清单里
+    （前端渲染的就是这份清单，脏值必然来自被改过的请求）。
+    """
+    if not owner:
+        return []
+    chosen = tag_taxonomy.filter_known_tags(tags, limit=MAX_PICKS)
+    now = int(time.time())
+    try:
+        with _get_conn() as conn:
+            for t in chosen:
+                conn.execute(
+                    "INSERT INTO user_tags (owner_id, tag, weight, updated_at) VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(owner_id, tag) DO UPDATE SET updated_at = ?",
+                    (owner, t, weight, now, now),
+                )
+            # 覆盖式：先清掉旧的手选记录，再写入本次的
+            conn.execute("DELETE FROM user_tag_picks WHERE owner_id = ?", (owner,))
+            # created_at 加序号偏移：同一秒内写入的多条 created_at 全等，
+            # 排序会退化成按 tag 的字节序，回显顺序就和用户勾选顺序对不上了
+            for i, t in enumerate(chosen):
+                conn.execute(
+                    "INSERT INTO user_tag_picks (owner_id, tag, created_at) VALUES (?, ?, ?)",
+                    (owner, t, now + i),
+                )
+    except Exception:
+        return []
+    return chosen
+
+
+def get_user_tag_picks(owner: str) -> list[str]:
+    """取用户手选过的标签（前端回显已选状态用）。"""
+    if not owner:
+        return []
+    try:
+        with _get_conn() as conn:
+            rows = conn.execute(
+                "SELECT tag FROM user_tag_picks WHERE owner_id = ? ORDER BY created_at ASC, tag ASC",
+                (owner,),
+            ).fetchall()
+    except Exception:
+        return []
+    return [r["tag"] for r in rows]
+
+
 def get_user_tags(owner: str, limit: int = 30) -> list[dict]:
     """取用户画像标签，按权重降序。"""
     with _get_conn() as conn:
@@ -353,6 +545,7 @@ def get_user_tags(owner: str, limit: int = 30) -> list[dict]:
 
 # ==================== 用户画像快照（方案 C · C2 块）====================
 
+
 def get_owners_with_tags(limit: int | None = None) -> list[str]:
     """返回所有沉淀过画像标签的 owner（供 worker 枚举聚合对象）。"""
     with _get_conn() as conn:
@@ -364,21 +557,28 @@ def get_owners_with_tags(limit: int | None = None) -> list[str]:
     return [r["owner_id"] for r in rows]
 
 
-def save_user_profile(owner: str, top_tags: list[dict], weight_sum: float,
-                      tag_count: int, updated_at: int) -> None:
+def save_user_profile(
+    owner: str, top_tags: list[dict], weight_sum: float, tag_count: int, updated_at: int
+) -> None:
     """upsert 用户画像快照（C2 聚合结果）。失败静默。"""
     if not owner:
         return
     try:
         import json
+
         with _get_conn() as conn:
             conn.execute(
                 "INSERT INTO user_profiles (owner_id, top_tags, weight_sum, tag_count, updated_at) "
                 "VALUES (?, ?, ?, ?, ?) ON CONFLICT(owner_id) DO UPDATE SET "
                 "top_tags=excluded.top_tags, weight_sum=excluded.weight_sum, "
                 "tag_count=excluded.tag_count, updated_at=excluded.updated_at",
-                (owner, json.dumps(top_tags, ensure_ascii=False), float(weight_sum),
-                 int(tag_count), int(updated_at)),
+                (
+                    owner,
+                    json.dumps(top_tags, ensure_ascii=False),
+                    float(weight_sum),
+                    int(tag_count),
+                    int(updated_at),
+                ),
             )
     except Exception:
         pass
@@ -389,11 +589,13 @@ def get_user_profile(owner: str) -> dict | None:
     with _get_conn() as conn:
         row = conn.execute(
             "SELECT owner_id, top_tags, weight_sum, tag_count, updated_at "
-            "FROM user_profiles WHERE owner_id = ?", (owner,)
+            "FROM user_profiles WHERE owner_id = ?",
+            (owner,),
         ).fetchone()
     if not row:
         return None
     import json
+
     return {
         "owner_id": row["owner_id"],
         "top_tags": json.loads(row["top_tags"]),
@@ -484,7 +686,8 @@ def get_message(owner: str, sid: str, msg_id: int) -> dict | None:
         return None
     with _get_conn() as conn:
         row = conn.execute(
-            "SELECT id, role, content, refs, created_at FROM messages WHERE conversation_id = ? AND id = ?",
+            "SELECT id, role, content, refs, created_at FROM messages "
+            "WHERE conversation_id = ? AND id = ?",
             (sid, msg_id),
         ).fetchone()
         return dict(row) if row else None
@@ -495,7 +698,8 @@ def find_turn_ids(owner: str, sid: str, msg_id: int) -> list[int]:
 
     规则：
       - 若目标是 user 消息：包含该 user 及其后连续的所有 assistant 消息，直到下一条 user 前。
-      - 若目标是 assistant 消息：包含其前最近一条 user 消息，以及该 user 与目标之间的所有 assistant。
+      - 若目标是 assistant 消息：包含其前最近一条 user 消息，
+        以及该 user 与目标之间的所有 assistant。
     这样前端点 user 或 assistant 的删除，都能整轮移除。
     """
     if not _owned(owner, sid):
@@ -528,6 +732,7 @@ def find_turn_ids(owner: str, sid: str, msg_id: int) -> list[int]:
 
 
 # ==================== 消息反馈（赞 / 踩）====================
+
 
 def add_feedback(
     owner: str,
