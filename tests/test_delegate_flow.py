@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """每日委托 HTTP 全链路回归（离线：TestClient + 临时库，不联网、不碰真实 data/）。
 
 本轮修复的是什么（"异常"的根因）
@@ -34,8 +33,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import core.config  # noqa: E402  先让 chdir / load_dotenv 跑完
 import core.session  # noqa: E402
-from core import account  # noqa: E402
-from core import quota  # noqa: E402
+from core import (
+    account,  # noqa: E402
+    quota,  # noqa: E402
+)
 from service import daily  # noqa: E402
 
 # 每台机器、每个用例一个独立临时目录：绝不写真实 data/
@@ -45,7 +46,7 @@ _SEQ = [0]
 
 def _next(tag: str) -> str:
     _SEQ[0] += 1
-    return os.path.join(_TMP, "%s_%d.db" % (tag, _SEQ[0]))
+    return os.path.join(_TMP, f"{tag}_{_SEQ[0]}.db")
 
 
 class TestDelegateFlow(unittest.TestCase):

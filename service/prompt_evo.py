@@ -30,7 +30,8 @@ import logging
 import random
 import re
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from core import config, prompt_guard, prompt_stats, prompt_store
 from core import session as store

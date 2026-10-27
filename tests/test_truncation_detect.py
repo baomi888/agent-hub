@@ -21,7 +21,7 @@ import asyncio
 
 import pytest
 
-from api.chat import _Acc, _is_truncation, _stream_llm, _TRUNCATED_REASONS
+from api.chat import _TRUNCATED_REASONS, _Acc, _is_truncation, _stream_llm
 from core import config
 
 

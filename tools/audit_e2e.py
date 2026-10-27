@@ -229,7 +229,6 @@ def run(keep: bool) -> int:
                 with urllib.request.urlopen(req, timeout=60) as resp:
                     ctype = resp.headers.get("content-type", "")
                     rep.check("SSE 响应头正确", "text/event-stream" in ctype, ctype)
-                    buf = ""
                     deadline = time.time() + 45
                     while time.time() < deadline:
                         chunk = resp.readline()

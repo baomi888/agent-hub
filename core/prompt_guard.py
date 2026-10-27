@@ -128,7 +128,6 @@ def apply_diff(
     base = base_text or ""
     limit = max_lines() if limit_lines is None else max(1, int(limit_lines))
 
-    base_lines = base.splitlines()
     changed = 0
     text = base
     applied: list[dict] = []

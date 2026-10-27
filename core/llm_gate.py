@@ -37,8 +37,8 @@ different loop」。所以闸放在业务层：一轮问答一个名额，语义
 import asyncio
 import threading
 import time
+from collections.abc import Iterator
 from contextlib import asynccontextmanager, contextmanager
-from typing import Iterator
 
 from core import config
 
@@ -150,7 +150,7 @@ async def acquire(timeout: float | None = None) -> Ticket:
     _bump(waiting=1)
     try:
         await asyncio.wait_for(sem.acquire(), max(0.0, wait))
-    except (asyncio.TimeoutError, TimeoutError):
+    except TimeoutError:
         _bump(rejected=1)
         raise Busy(
             waited=time.monotonic() - started,

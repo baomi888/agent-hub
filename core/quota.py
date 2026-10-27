@@ -216,7 +216,6 @@ def hit(uid: str, limit: int | None = None) -> int:
     n = config.RATE_PER_MINUTE if limit is None else limit
     now = time.monotonic()
     now_wall = int(time.time())
-    to_write: tuple[int, int] | None = None
     allowed = 0
 
     with _lock:

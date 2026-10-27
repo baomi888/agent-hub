@@ -66,7 +66,6 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from kb import rag_core  # noqa: E402
 from kb.rag_core import RagPipeline, assess_grounding  # noqa: E402
 
 CORPUS_DIR = os.path.join(ROOT, "tools", "eval_corpus")
@@ -374,13 +373,11 @@ def _print(rows: list[dict], summary: dict, mode: str) -> None:
 
     print(f"\n向量来源：{mode}")
     print(
-        "检索参数：MIN_SIM={} LOW_SIM={} FETCH_MULT={} MMR_LAMBDA={} HYBRID={}".format(
-            config.RETRIEVE_MIN_SIM,
-            config.RETRIEVE_LOW_SIM,
-            config.RETRIEVE_FETCH_MULT,
-            config.RETRIEVE_MMR_LAMBDA,
-            config.HYBRID_ENABLED,
-        )
+        f"检索参数：MIN_SIM={config.RETRIEVE_MIN_SIM} "
+        f"LOW_SIM={config.RETRIEVE_LOW_SIM} "
+        f"FETCH_MULT={config.RETRIEVE_FETCH_MULT} "
+        f"MMR_LAMBDA={config.RETRIEVE_MMR_LAMBDA} "
+        f"HYBRID={config.HYBRID_ENABLED}"
     )
     print("=" * 92)
     print(f"{'问题':<24} {'期望来源':<20} {'命中':<4} {'top1':<7} {'强度':<7} 字面重叠")

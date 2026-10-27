@@ -18,7 +18,6 @@ from fastapi.testclient import TestClient
 import core.account as account_mod
 import core.session as session_mod
 import main
-from core import auth as auth_mod
 from core import config
 from core.auth import (
     CLAIM_JTI,

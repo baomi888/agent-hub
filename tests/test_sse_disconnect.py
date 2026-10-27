@@ -20,7 +20,6 @@ import pytest
 import api.chat as chat_mod
 import core.account as account_mod
 import core.session as session_mod
-from core import llm_gate
 
 
 @pytest.fixture(autouse=True)
