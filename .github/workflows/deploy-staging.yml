@@ -16,9 +16,11 @@ jobs:
     name: Deploy to staging
     runs-on: ubuntu-latest
     # environment 用于在 GitHub 上记录部署历史（可选设置审批门）
+    # 注意：environment.url 不允许使用 secrets / env 上下文，写了会让整个 workflow 文件
+    # 解析失败（"Unrecognized named-value: 'secrets'"），从而每次 push 都挂一条失败记录。
+    # 需要展示部署链接时改用仓库变量 vars.STAGING_URL（Settings → Variables）。
     environment:
       name: staging
-      url: ${{ secrets.STAGING_URL }}
     steps:
       - name: 部署到 staging（SSH）
         uses: appleboy/ssh-action@v1
