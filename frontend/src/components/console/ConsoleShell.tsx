@@ -15,7 +15,15 @@ import CornIcon from "../CornIcon";
 import { useAuth } from "@/lib/hooks/useAuth";
 import type { MeOut } from "@/lib/types";
 
-export type ConsolePage = "delegate" | "report" | "checkin" | "settings" | "flow" | "dashboard";
+export type ConsolePage =
+  | "delegate"
+  | "report"
+  | "checkin"
+  | "cet"
+  | "path"
+  | "settings"
+  | "flow"
+  | "dashboard";
 
 interface NavItem {
   key: ConsolePage | null;
@@ -32,6 +40,10 @@ const NAV: NavItem[] = [
   { key: "delegate", href: "/delegate", icon: "clock", label: "每日委托" },
   { key: "report", href: "/report", icon: "calendar", label: "总结" },
   { key: "checkin", href: "/checkin", icon: "star", label: "打卡" },
+  // 四六级备考工作区：计划 / 词汇本 / 模考分数（申报书 B3 的专项模块入口）
+  { key: "cet", href: "/cet", icon: "globe", label: "四六级" },
+  // 关卡式学习路径：12 关由真实学习数据判定（申报书 3.4 / 2.8）
+  { key: "path", href: "/path", icon: "target", label: "路径" },
   // 混合架构：工作流定义 + 切换规则。后端 API 由林宏亮提供，界面这一侧由前端做
   { key: "flow", href: "/flow", icon: "target", label: "工作流" },
   // 数据看板：开发者看"有多少人、在调什么接口、反馈堆了多少"。

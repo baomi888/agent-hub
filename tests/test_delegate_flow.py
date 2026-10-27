@@ -27,6 +27,7 @@ JS 把数组转成字符串 ⇒ 页面上就是一个 **"[object Object]"** 气�
 import os
 import sys
 import tempfile
+import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -76,6 +77,9 @@ class TestDelegateFlow(unittest.TestCase):
         # daily 的 delegations 表用模块级 _daily_tables_ready 做"只建一次"短路，
         # 每个用例换库后必须复位，否则第二个用例会撞 "no such table: delegations"
         daily._daily_tables_ready = False
+        # 注册按用户名分桶限 10 次/分（auth:deleg_user），本文件所有用例复用同一用户名，
+        # 跨用例累积会撑爆限流 → setUp 每次清空进程内滑动窗口，恢复隔离
+        quota._HITS.clear()
 
         core.config._AUTH_SECRET_FILE = _next("secret")
         core.config.ALLOW_SIGNUP = True
@@ -185,6 +189,114 @@ class TestDelegateFlow(unittest.TestCase):
         assert [d["id"] for d in items] == [did]
         assert self.client.delete(f"/api/delegate/{did}").status_code == 200
         assert self.client.get("/api/delegate").json() == []
+
+    def test_patch_preserves_next_run_and_created_at(self):
+        """编辑/切开关不能把 next_run_at 重置成"立刻到期"，也不能改写 created_at。
+
+        此前 save_delegation 硬编码 next_run_at=None，导致 PATCH 一次（或切一下开关）
+        就触发一次立即派发——白白烧一次 LLM + 推一条消息（见
+        docs/前后端可更新点_2026-10-19.md 后端 #1）。
+        """
+        d = self._create()
+        did = d["id"]
+        future = int(time.time()) + 86400
+        daily._bump_next_run(did, future)  # 模拟一次定时投递后"下次=明天"
+        # 编辑指令 + 切 enabled（此前会触发"改一下就多投一次"）
+        r = self.client.patch(
+            f"/api/delegate/{did}",
+            json={"instruction": "换个说法，仍每天复盘", "enabled": True},
+        )
+        assert r.status_code == 200, r.text
+        # next_run_at 必须保留为"明天"，而不是被重置成 NULL（立刻到期）
+        self.assertEqual(r.json()["next_run_at"], future)
+        # created_at 不被改写成今天
+        got = self.client.get(f"/api/delegate/{did}").json()
+        self.assertEqual(got["created_at"], d["created_at"])
+
+    def test_compute_next_run_covers_all_freqs(self):
+        """compute_next_run 按 freq 真算下次时间（修『每周/间隔是假功能』的核心）。"""
+        after = time.mktime(time.struct_time((2026, 10, 19, 14, 0, 0, 0, 0, -1)))
+
+        # daily at 09:00：今天 09:00 已过 → 次日 09:00（时刻对齐 at 且严格晚于 after）
+        nxt = daily.compute_next_run({"freq": "daily", "at": "09:00"}, int(after))
+        lt = time.localtime(nxt)
+        self.assertEqual((lt.tm_hour, lt.tm_min), (9, 0))
+        self.assertGreater(nxt, after)
+
+        # at 在当天未来：今天 21:00 > 14:00 → 今天 21:00（< 1 天）
+        nxt = daily.compute_next_run({"freq": "daily", "at": "21:00"}, int(after))
+        self.assertTrue(0 < nxt - after < 86400)
+        self.assertEqual((time.localtime(nxt).tm_hour, time.localtime(nxt).tm_min), (21, 0))
+
+        # weekdays at 09:00：落在工作日(周一..周五)、时刻对齐
+        nxt = daily.compute_next_run({"freq": "weekdays", "at": "09:00"}, int(after))
+        lt = time.localtime(nxt)
+        self.assertEqual((lt.tm_hour, lt.tm_min), (9, 0))
+        self.assertLessEqual(lt.tm_wday, 4)
+
+        # weekly weekday=0(周一) at 09:00：输出星期必须等于请求值、时刻对齐、是下一个(≤7天)
+        nxt = daily.compute_next_run({"freq": "weekly", "at": "09:00", "weekday": 0}, int(after))
+        lt = time.localtime(nxt)
+        self.assertEqual((lt.tm_hour, lt.tm_min), (9, 0))
+        self.assertEqual(lt.tm_wday, 0)
+        self.assertTrue(0 < nxt - after <= 7 * 86400 + 60)
+        # 步进性：再算一次必须更晚，证明是「下一个」而非「今天已过的那次」
+        self.assertGreater(daily.compute_next_run({"freq": "weekly", "at": "09:00", "weekday": 0}, nxt), nxt)
+
+        # interval every_minutes=60：now + 3600，与 at 无关
+        nxt = daily.compute_next_run({"freq": "interval", "every_minutes": 60}, int(after))
+        self.assertEqual(nxt, int(after) + 3600)
+
+        # 兜底：无 schedule → after + 86400（维持旧行为，不破坏既有委托）
+        self.assertEqual(daily.compute_next_run(None, int(after)), int(after) + 86400)
+
+    def test_patch_schedule_recomputes_next_run(self):
+        """改 schedule 时 next_run_at 按新节奏重算（使 api.delegate 的 docstring 承诺成真）。"""
+        out = self._create()  # daily at 21:00，启用，next_run_at 初始 None
+        did = out["id"]
+        # 模拟「已经派发过、排到了一个未来的 daily 时间」
+        future = int(time.time()) + 86400
+        daily._bump_next_run(did, future)
+        # 改成 weekly(周一) at 09:00
+        r = self.client.patch(
+            f"/api/delegate/{did}",
+            json={"schedule": {"freq": "weekly", "at": "09:00", "weekday": 0,
+                              "every_minutes": None, "tz": "Asia/Shanghai"}},
+        )
+        assert r.status_code == 200, r.text
+        nr = r.json()["next_run_at"]
+        assert nr is not None and nr != future, (nr, future)
+        lt = time.localtime(nr)
+        assert (lt.tm_hour, lt.tm_min) == (9, 0)
+        assert lt.tm_wday == 0
+        assert nr > int(time.time())
+
+    def test_auto_disable_records_last_error(self):
+        """后7：worker 调 on_failure 自动停用时，要留下原因而非静默消失。"""
+        out = self._create()  # 启用中的委托
+        did = out["id"]
+        # 模拟 worker 因投递目标会话失效而致命失败
+        daily.on_failure("delegate.dispatch", did, True, "NotOwned: conversation gone")
+        d = daily._load_delegation(did)
+        self.assertFalse(d["enabled"])
+        self.assertIsNotNone(d["last_error"])
+        self.assertIn("NotOwned", d["last_error"])
+        # API 也会把这个原因透传给前端
+        got = self.client.get(f"/api/delegate/{did}").json()
+        self.assertFalse(got["enabled"])
+        self.assertIn("NotOwned", got["last_error"])
+
+    def test_reenable_clears_last_error(self):
+        """重新打开开关时清掉自动停用的告警，避免开起来还显示旧错误。"""
+        out = self._create()
+        did = out["id"]
+        daily.on_failure("delegate.dispatch", did, True, "some fatal error")
+        self.assertIsNotNone(daily._load_delegation(did)["last_error"])
+        # 通过 PATCH 重新启用
+        r = self.client.patch(f"/api/delegate/{did}", json={"enabled": True})
+        assert r.status_code == 200, r.text
+        self.assertIsNone(daily._load_delegation(did)["last_error"])
+        self.assertIsNone(self.client.get(f"/api/delegate/{did}").json()["last_error"])
 
 
 if __name__ == "__main__":

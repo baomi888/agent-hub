@@ -235,6 +235,11 @@ TOOL_OUTPUT_HARD_LIMIT = int(os.getenv("TOOL_OUTPUT_HARD_LIMIT", "8000"))
 # Agent/Workflow 引擎在拼 prompt 时前置，从而获得多轮上下文。
 HYBRID_HISTORY_MAX_MESSAGES = int(os.getenv("HYBRID_HISTORY_MAX_MESSAGES", "60"))
 
+# 主链路历史注入的「输入侧字符预算」：窗口放宽到 30 轮（70 条）后，最重真实会话
+# 会把 prompt 推过 DeepSeek 64K 上下文（实测 76k tok > 64K）。从最新往旧累计、
+# 超预算就丢最旧的，而不是截断最新一轮（那会让模型答非所问）。≈15k tok。
+CHAT_HISTORY_MAX_CHARS = int(os.getenv("CHAT_HISTORY_MAX_CHARS", "24000"))
+
 # ---------- 标签钩子（方案 C：入库级主题 + 对话级用户画像）----------
 # A 块：文件入库时对每个来源抽主题标签，写入每片 metadata["topics"]（"|t1|t2|" 分隔串），
 #   后续检索（D 块）可用 Chroma `where: {"topics": {"$contains": "|t1|"}}` 精确过滤。
@@ -254,6 +259,20 @@ PROFILE_TOP_TAGS = int(os.getenv("PROFILE_TOP_TAGS", "30"))
 RETRIEVAL_BIAS_ENABLED = bool(int(os.getenv("RETRIEVAL_BIAS_ENABLED", "1")))
 RETRIEVAL_BIAS_ALPHA = float(os.getenv("RETRIEVAL_BIAS_ALPHA", "0.08"))
 RETRIEVAL_BIAS_TOP = int(os.getenv("RETRIEVAL_BIAS_TOP", "8"))
+
+# ---------- 检索词增强（roadmap B2 匹配器 / B3 预览接口）----------
+# 词表路径。留空 = 自动挑：优先 vocab_v1.csv（X1 正式词表），没有再退回从金标集
+# 派生的临时词表。**故意不写死默认路径**：X1 到货那天只需要把文件放进 data/vocab/，
+# 不用改 .env、不用重启（service/enhance.py 按 mtime 热加载）。
+ENHANCE_VOCAB_PATH = os.getenv("ENHANCE_VOCAB_PATH", "")
+ENHANCE_ADJUDICATION_PATH = os.getenv(
+    "ENHANCE_ADJUDICATION_PATH", os.path.join(DATA_DIR, "vocab", "adjudication.csv"))
+# 预览接口的文本上限。这是"一句话的口语词"场景，不是长文改写，
+# 放开长度只会让单次请求变慢，没有收益。
+ENHANCE_MAX_CHARS = int(os.getenv("ENHANCE_MAX_CHARS", "2000"))
+# B4：把换词接进聊天检索链路。默认开——不接进链路等于没人用；
+# 但它会改变检索用文本进而影响召回，所以必须留一个能当场关掉的开关（置 0 即回到旧行为）。
+ENHANCE_CHAT_ENABLED = bool(int(os.getenv("ENHANCE_CHAT_ENABLED", "1")))
 
 # ---------- 计划主题识别加固（P2）----------
 # 计划请求命不中主题词时不直接退化成通用模板，回看最近 N 条用户消息续上主题

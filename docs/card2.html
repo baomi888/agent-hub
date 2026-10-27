@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>专项突破速查卡</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    width:1000px; background:#eef1f5;
+    font-family:"Microsoft YaHei","PingFang SC",sans-serif;
+    color:#1e2a38; -webkit-font-smoothing:antialiased;
+  }
+  .wrap { width:1000px; padding:38px 44px 30px; background:#eef1f5; }
+
+  /* header */
+  .hd { display:flex; align-items:flex-end; justify-content:space-between;
+        border-bottom:3px solid #1f3a5f; padding-bottom:13px; }
+  .hd h1 { font-size:36px; letter-spacing:2px; color:#1f3a5f; }
+  .hd h1 span { font-size:17px; color:#9aa8b8; letter-spacing:0; margin-left:12px; }
+  .hd .sub { font-size:13px; color:#5b6b7f; padding-bottom:5px; }
+  .define { background:#e7eef7; border-left:5px solid #1f3a5f; border-radius:8px;
+            padding:12px 18px; margin:16px 0 6px; font-size:13.5px; line-height:1.75; }
+  .define b { color:#1f3a5f; }
+  .define .tagm { display:inline-block; background:#1f3a5f; color:#fff; font-size:11.5px;
+                  padding:2px 8px; border-radius:4px; margin-right:6px; vertical-align:1px; }
+  .define .tagm.no { background:#9aa8b8; }
+
+  /* section */
+  .sec { display:flex; align-items:center; margin:26px 0 14px; }
+  .sec .tag { background:#1f3a5f; color:#fff; font-size:16px; font-weight:700;
+              padding:6px 14px; border-radius:6px; letter-spacing:1px; white-space:nowrap; }
+  .sec .line { flex:1; height:2px; background:#c8d2dd; margin-left:12px; }
+  .sec .note { font-size:12.5px; color:#7b8a9c; margin-left:12px; white-space:nowrap; }
+
+  /* mode cards */
+  .mode { background:#fff; border-radius:10px; box-shadow:0 1px 3px rgba(30,42,56,.10);
+          display:grid; grid-template-columns:158px 1fr 208px; gap:0;
+          margin-bottom:11px; overflow:hidden; }
+  .mode .l { padding:14px 14px 12px 16px; border-right:1px dashed #dfe5ec; }
+  .mode .num { font-size:26px; font-weight:800; line-height:1; color:#c8d2dd; }
+  .mode .nm { font-size:16.5px; font-weight:700; margin:4px 0 5px; }
+  .mode .eg { font-size:11.5px; color:#8a99a9; line-height:1.6; }
+  .mode .m { padding:13px 16px; }
+  .mode .pain { font-size:12.5px; color:#7d3b34; background:#fdeceb; border-radius:5px;
+                padding:5px 9px; margin-bottom:9px; line-height:1.55; }
+  .mode .step { font-size:13px; line-height:1.7; display:flex; margin-bottom:3px; }
+  .mode .step i { font-style:normal; flex:none; width:17px; height:17px; border-radius:50%;
+                  background:#e7eef7; color:#1f3a5f; font-size:11px; font-weight:700;
+                  text-align:center; line-height:17px; margin:3px 7px 0 0; }
+  .mode .step b { color:#1f3a5f; }
+  .mode .r { padding:13px 15px; background:#f4f9f5; border-left:1px dashed #dfe5ec; }
+  .mode .r .rt { font-size:11.5px; font-weight:700; color:#2e7d52; margin-bottom:6px;
+                 letter-spacing:1px; }
+  .mode .r .rc { font-size:12.5px; line-height:1.7; color:#2c4a3a; }
+
+  .m1 .num,.m1 .nm { color:#1f3a5f; }
+  .m2 .num,.m2 .nm { color:#5b4b8a; }
+  .m3 .num,.m3 .nm { color:#2e7d52; }
+  .m4 .num,.m4 .nm { color:#a06a1c; }
+  .m1 { border-left:5px solid #1f3a5f; } .m2 { border-left:5px solid #5b4b8a; }
+  .m3 { border-left:5px solid #2e7d52; } .m4 { border-left:5px solid #d99a2b; }
+
+  /* cycle */
+  .cyc { display:grid; grid-template-columns:repeat(5,1fr); gap:9px; }
+  .cy { background:#fff; border-radius:9px; padding:11px 12px; box-shadow:0 1px 3px rgba(30,42,56,.10);
+        border-top:3px solid #1f3a5f; }
+  .cy .d { font-size:11.5px; font-weight:700; color:#9aa8b8; letter-spacing:1px; }
+  .cy .t { font-size:14.5px; font-weight:700; color:#1f3a5f; margin:2px 0 6px; }
+  .cy .c { font-size:12px; line-height:1.65; color:#44536680; color:#445366; }
+  .cy.hot { border-top-color:#c0392b; }
+  .cy.hot .t { color:#a5342a; }
+
+  /* pitfalls */
+  .pits { display:grid; grid-template-columns:repeat(3,1fr); gap:11px; }
+  .pit { background:#fff; border-radius:9px; padding:12px 14px; border-top:3px solid #c0392b;
+         box-shadow:0 1px 3px rgba(30,42,56,.10); }
+  .pit .t { font-size:14.5px; font-weight:700; color:#a5342a; margin-bottom:5px; }
+  .pit .c { font-size:12.5px; line-height:1.7; color:#445366; }
+  .pit .c b { color:#1e2a38; }
+
+  /* when */
+  .when { margin-top:12px; background:#fbf1de; border:1px solid #f0dcb8; border-radius:9px;
+          padding:12px 18px; font-size:13px; line-height:1.75; color:#6b4a1e; }
+  .when b { color:#8a5a2b; }
+
+  /* table */
+  table { width:100%; border-collapse:separate; border-spacing:0 6px; }
+  th { font-size:12px; color:#7b8a9c; font-weight:400; text-align:left; padding:0 12px 2px; }
+  td { background:#fff; font-size:12.8px; line-height:1.65; padding:10px 12px; vertical-align:top; }
+  tr td:first-child { border-radius:8px 0 0 8px; font-weight:700; color:#1f3a5f; width:126px; }
+  tr td:last-child { border-radius:0 8px 8px 0; color:#5b6b7f; font-size:12px; width:300px; }
+  tr td b { color:#1e2a38; }
+  tr.hl td { background:#fdf7ea; }
+  tr.hl td:first-child { color:#8a5a2b; }
+
+  /* three needs */
+  .needs { display:grid; grid-template-columns:repeat(3,1fr); gap:11px; }
+  .nd { background:#fff; border-radius:10px; padding:13px 15px; box-shadow:0 1px 3px rgba(30,42,56,.10); }
+  .nd .nh { font-size:14.5px; font-weight:700; color:#1f3a5f; padding-bottom:7px;
+            border-bottom:2px solid #e7eef7; margin-bottom:8px; }
+  .nd .nh em { font-style:normal; font-size:11.5px; color:#9aa8b8; font-weight:400; display:block; margin-top:2px; }
+  .nd ul { list-style:none; }
+  .nd li { font-size:12.5px; line-height:1.65; color:#445366; padding-left:13px; position:relative; margin-bottom:6px; }
+  .nd li::before { content:""; position:absolute; left:0; top:8px; width:5px; height:5px;
+                   border-radius:50%; background:#1f3a5f; }
+  .nd li b { color:#1e2a38; }
+  .nd li .src { color:#a3b0bf; font-size:11px; }
+
+  /* boundary */
+  .bd { background:#2b3949; border-radius:10px; padding:16px 20px; margin-top:6px; color:#dfe6ee; }
+  .bd .bt { font-size:15px; font-weight:700; color:#fff; margin-bottom:9px; }
+  .bd .bc { font-size:12.8px; line-height:1.8; }
+  .bd .bc b { color:#ffd28a; }
+  .bd .bc span { color:#9fb0c4; }
+
+  .ft { display:flex; justify-content:space-between; align-items:center; margin-top:16px;
+        border-top:2px solid #c8d2dd; padding-top:11px; font-size:12px; color:#8a99a9; }
+  .ft strong { color:#1f3a5f; font-size:13.5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hd">
+    <h1>专项突破<span>02 卡</span></h1>
+    <div class="sub">打破平衡 ｜ 4 种模式 · 5 天周期 · 3 条防坑 · Plan B 执行框架</div>
+  </div>
+
+  <div class="define">
+    <span class="tagm">核心</span>暂时牺牲其他维度的进度，把<b>时间、精力、认知带宽</b>高度聚焦在一个极难啃的硬骨头或高价值目标上。认知科学里叫<b>集中式学习（Massed Practice）</b>——它不适合日常知识，但对<b>构建复杂底层心智模型、攻克大型工程难题、短期突击面试或项目上线</b>最有效。<br>
+    <span class="tagm no">不适用</span>背单词、日常算法保温、零散阅读——这些靠分散练习，不靠集中轰炸。
+  </div>
+
+  <div class="sec"><span class="tag">一、4 种突破模式</span><span class="line"></span><span class="note">左：痛点 ｜ 中：动作 ｜ 右：过线标准</span></div>
+
+  <div class="mode m1">
+    <div class="l">
+      <div class="num">01</div>
+      <div class="nm">理论极客型</div>
+      <div class="eg">拜占庭将军<br>Paxos / Raft 一致性算法</div>
+    </div>
+    <div class="m">
+      <div class="pain">看书觉得懂了，一合上书全忘；各种状态机错综复杂。</div>
+      <div class="step"><i>1</i><div><b>纸笔推演</b>：清空桌面，只留纸笔，不看屏幕。</div></div>
+      <div class="step"><i>2</i><div><b>手画拓扑</b>：二忠一叛、二忠二叛，每个节点发出的消息、收到的消息、伪造的签名，用不同颜色一点点画出来。</div></div>
+      <div class="step"><i>3</i><div><b>模拟攻防</b>：先自己扮演叛将，想怎么发消息能搞死忠将；再切回忠将，想怎么破局。</div></div>
+    </div>
+    <div class="r">
+      <div class="rt">验收标准</div>
+      <div class="rc">一张白纸、不看书，完整默写出 <b>3 将军（含 1 叛徒）</b>与 <b>4 将军（含 2 叛徒）</b>的达成一致推导树。</div>
+    </div>
+  </div>
+
+  <div class="mode m2">
+    <div class="l">
+      <div class="num">02</div>
+      <div class="nm">源码重构型</div>
+      <div class="eg">ReAct 动态 Prompt<br>工具拦截</div>
+    </div>
+    <div class="m">
+      <div class="pain">书本上的架构图很漂亮，自己写代码时依赖报错、生命周期打架。</div>
+      <div class="step"><i>1</i><div><b>先跑通再拆解</b>：把 <b>DynamicPromptBuilder</b>、<b>MilestoneTracker</b> 原封不动敲一遍，跑通。</div></div>
+      <div class="step"><i>2</i><div><b>破坏性测试</b>：故意注入非法参数，故意让 <b>terminalSessionId</b> 为空，看它崩在哪；打断点跟数据流转。</div></div>
+      <div class="step"><i>3</i><div><b>剥离重构</b>：把 MilestoneTracker 里的硬编码正则抽到 YAML，自己实现一套热加载。</div></div>
+    </div>
+    <div class="r">
+      <div class="rt">验收标准</div>
+      <div class="rc">不借助原书代码，在自己项目里新建模块，写出一个简化版<b>「带记忆拦截的 Agent 节点」</b>。</div>
+    </div>
+  </div>
+
+  <div class="mode m3">
+    <div class="l">
+      <div class="num">03</div>
+      <div class="nm">算法暴力破局</div>
+      <div class="eg">卡死一整天的<br>Hard 题</div>
+    </div>
+    <div class="m">
+      <div class="pain">看题解秒懂，自己写秒跪；换个条件又不会了。</div>
+      <div class="step"><i>1</i><div><b>闭卷死磕</b>：60 分钟闹钟，绝不开任何网页，连伪代码都要在编辑器里敲出来。</div></div>
+      <div class="step"><i>2</i><div><b>默写重构</b>：看高赞题解理解核心（如 DP 的状态转移方程），然后关掉题解，自己默写。</div></div>
+      <div class="step"><i>3</i><div><b>寻找变种</b>：去 LeetCode 找同类题（如同族股票问题），只说思路不写码，检验是否真掌握了模板。</div></div>
+    </div>
+    <div class="r">
+      <div class="rt">验收标准</div>
+      <div class="rc">过三天再做一遍原题，能在 <b>15 分钟内 Bug-free</b> 写出。</div>
+    </div>
+  </div>
+
+  <div class="mode m4">
+    <div class="l">
+      <div class="num">04</div>
+      <div class="nm">工程架构型</div>
+      <div class="eg">P0 报告<br>系统级性能优化与安全控制</div>
+    </div>
+    <div class="m">
+      <div class="pain">不知道大佬为什么要这么重构，东一榔头西一棒子。</div>
+      <div class="step"><i>1</i><div><b>逆向推演</b>：读 P0 报告不要记"它怎么写的"，只问一句话——<b>如果不这么做，系统会死在哪里？</b></div></div>
+      <div class="step"><i>2</i><div><b>新旧对照</b>：滑动窗口（旧）vs 上下文压缩（新）；正则拦截（旧）vs 机器策略（新）。</div></div>
+      <div class="step"><i>3</i><div><b>画对比表</b>：什么并发量、什么业务场景下，旧方案引发灾难、新方案能救命。</div></div>
+    </div>
+    <div class="r">
+      <div class="rt">验收标准</div>
+      <div class="rc">写一篇 <b>2000 字复盘</b>：假设你是负责人，下周要重构另一个模块（如多 Agent 协调），会把哪些设计思想（缓存穿透 / 安全兜底 / 幻觉防御）用上去。</div>
+    </div>
+  </div>
+
+  <div class="sec"><span class="tag">二、执行周期 3–5 天</span><span class="line"></span><span class="note">别天天搞，人受不了</span></div>
+
+  <div class="cyc">
+    <div class="cy"><div class="d">DAY 1</div><div class="t">扒底裤</div>
+      <div class="c">暂时停掉背单词、普通算法。全天只做一件事：把资料（书 / 源码 / 视频 / 文档）全拉出来，画一张宏观思维导图——先知道这头大象由哪几部分组成。</div></div>
+    <div class="cy hot"><div class="d">DAY 2–3</div><div class="t">啃骨头</div>
+      <div class="c">每天 6–8 小时。走「输入 → 动手 → 输出」微循环：看一章 Agent 记忆机制 → 立刻本地敲几十行验证 → 马上写 100 字总结。</div></div>
+    <div class="cy"><div class="d">DAY 4</div><div class="t">拼图</div>
+      <div class="c">把前两天零碎的点串起来。找一个大厂真实场景或面试题，用你所学去解决它。</div></div>
+    <div class="cy"><div class="d">DAY 5</div><div class="t">复盘与交接</div>
+      <div class="c">写一份像《RAG 与 AI 核心重构_回归测试报告》那样的复盘文档，然后回归原有日常轨道。</div></div>
+    <div class="cy"><div class="d">之后</div><div class="t">回归均衡</div>
+      <div class="c">专项突破是"冲刺"，不是常态。结束后立刻回到 01 卡的日常轨道，别把冲刺期当默认强度。</div></div>
+  </div>
+
+  <div class="sec"><span class="tag">三、3 条致命防坑</span><span class="line"></span><span class="note">每条都对应一个真实崩盘点</span></div>
+
+  <div class="pits">
+    <div class="pit"><div class="t">① 防「收藏吃灰」</div>
+      <div class="c">期间<b>绝不为了搜集而搜集</b>。搜到一篇好文章：立刻读 → 立刻提炼 → 立刻用它。不要存进"稍后阅读"——突破结束后你大概率再也不会看。</div></div>
+    <div class="pit"><div class="t">② 防「钻牛角尖」</div>
+      <div class="c">工程类问题（环境配不通、底层源码看不懂）给自己设 <b>2 小时止损点</b>。到点立刻求助、绕路、或跳过下一章。别让一颗螺丝钉卡死整个工程。</div></div>
+    <div class="pit"><div class="t">③ 防「虚假顿悟」</div>
+      <div class="c">兴奋期觉得"完全懂了"时立刻打住：<b>合上电脑，拿出纸笔</b>，讲给空气听或手写一段代码。讲不清、写不出，就只是熟悉感，不是理解。</div></div>
+  </div>
+
+  <div class="when">
+    <b>什么时候做 →</b> 日常已经很满，不要天天搞。固定<b>每周五或周末选一天</b>当「专项突破日」：忘掉均衡，挑这周最感兴趣、或者卡得你最难受的那一个点（"我非要把二忠一叛自己推出来不可"），用尽精力吃透它。这一天结束时你拿到的不只是知识，是极致的成就感——它会反哺下一周的枯燥日常。
+  </div>
+
+  <div class="sec"><span class="tag">四、Plan B 每日执行框架</span><span class="line"></span><span class="note">按认知负荷排，不按意志力硬塞</span></div>
+
+  <table>
+    <tr><th>时段</th><th>核心动作</th><th>生理 / 认知逻辑</th></tr>
+    <tr class="hl"><td>晨间 30–45′</td>
+      <td>单词 / 听力 <b>+ 对昨日核心内容做 10 分钟无材料主动回忆</b>（先巩固旧知，再输入新知）</td>
+      <td>利用清醒后的提取窗口</td></tr>
+    <tr><td>上午块 1<br>90–120′</td>
+      <td>最硬核的专业文档 / 算法推导。<b>番茄节奏</b>（25+5 或 50+10）</td>
+      <td>大脑黄金时段处理最高认知负荷</td></tr>
+    <tr><td>过渡 10–15′</td>
+      <td>起身、走动、闭眼，<b>不碰手机</b></td>
+      <td>减少注意力残留，防止被动休息加重疲劳</td></tr>
+    <tr><td>上午块 2<br>90′</td>
+      <td>工程代码 / 作业实操，同样做时间块隔离</td>
+      <td>与块 1 属不同认知类型，但边界清晰，减少切换损耗</td></tr>
+    <tr class="hl"><td>午餐<br>+ 有氧 20–40′</td>
+      <td><b>低 GI 饮食</b>（燕麦 / 糙米 / 红薯 + 蛋 / 鱼 / 瘦肉），餐后快走或拉伸</td>
+      <td>稳定血糖；低认知负荷运动重置下午的注意力</td></tr>
+    <tr><td>下午块<br>90–120′</td>
+      <td>算法训练（<b>限时，不贪多</b>）或文档里较轻的部分</td>
+      <td>有氧后存在短期认知增益窗口</td></tr>
+    <tr class="hl"><td>傍晚 30′</td>
+      <td><b>今日核心内容的第二次主动回忆</b>：无材料复述</td>
+      <td>在遗忘临界点前强制提取，为睡眠巩固提供原材料</td></tr>
+    <tr><td>晚间 45–60′</td>
+      <td>英语阅读 / 产品思维等相对放松的输入，<b>之后不再安排高难度新内容</b></td>
+      <td>避免睡前认知过载，给慢波睡眠的记忆重放留空间</td></tr>
+  </table>
+
+  <div class="sec"><span class="tag">五、三个诉求的落地动作</span><span class="line"></span><span class="note">吸收 · 稳定 · 留存</span></div>
+
+  <div class="needs">
+    <div class="nd">
+      <div class="nh">吸收更多<em>把被动输入改成任务驱动检索</em></div>
+      <ul>
+        <li><b>带问题读</b>：先看架构图和结论，自问"要给现在的项目加个动态记忆拦截，我会卡在哪"，再带着痛读。</li>
+        <li><b>下午先写 5 分钟伪代码</b>再动手，把最耗能的 Debug 留给清醒时刻。</li>
+        <li><b>先给 AI 一个简陋方案</b>（哪怕是错的）让它挑刺，别直接要答案——生成效应，错的也比抄的留存高。</li>
+        <li><b>路上费曼</b>：吃饭路上用大白话把今天最难的概念讲给不懂技术的朋友，卡壳处就是没吸收处。</li>
+      </ul>
+    </div>
+    <div class="nd">
+      <div class="nh">稳定持续<em>能量管理 + 保底机制</em></div>
+      <ul>
+        <li><b>下午 3 点保卫战</b>：午餐别吃一大碗面 / 盖饭（饭气攻心），多蛋白蔬菜；2:50 一杯黑咖啡 + 3 分钟拉伸。</li>
+        <li><b>算法 45 分钟止损</b>：到点直接看题解，然后关掉默写一遍。<span class="src">看题解后默写也是巨大进步，别有负罪感。</span></li>
+        <li><b>晚上 3 个番茄钟</b>：时间一到，不管代码跑没跑通，强制停下写总结——这是防熬夜的唯一开关。</li>
+        <li><b>设「最低标准日」</b>：真累就只背 10 个单词、只做半道题、只写 50 字。<b>连续性比单日爆发力重要一万倍。</b></li>
+      </ul>
+    </div>
+    <div class="nd">
+      <div class="nh">留存可用<em>日志 → 知识</em></div>
+      <ul>
+        <li><b>三行卡片法</b>：❓今天解决什么痛点 / 💡一句话提炼解法原理 / 🛠️下次什么场景调用它。不写流水账。</li>
+        <li><b>按问题建索引</b>：打完标签进库（#Agent记忆 #防呆设计 #LRU缓存），按"问题类型"记，不按时间记。</li>
+        <li><b>晨间 5 分钟扫卡片</b>：只看"前天"和"上周同一天"，不求死记，只求重新激活。</li>
+        <li><b>间隔窗口</b>：20 分钟 / 1 小时 / 1 天 / 3 天各做一次无材料回忆；时间从"低效重复阅读"里挤。</li>
+        <li><b>以用代学</b>：这周看了一致性算法，下周就在项目里写个几十行的极简主从同步 / 防并发组件。</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="sec"><span class="tag">六、一条不能越的边界</span><span class="line"></span><span class="note">高强度必须配高巩固</span></div>
+
+  <div class="bd">
+    <div class="bt">这些是学习流程里的步骤，不是可选项</div>
+    <div class="bc">
+      <b>睡眠 7–8 小时</b> <span>—— 慢波睡眠期间海马体会"重放"白天编码的信息，把它转成稳定记忆。熬夜增加的学习时间，是在破坏白天输入的巩固机制，长期负收益。</span><br>
+      <b>运动 20–40 分钟</b> <span>—— 中低强度有氧提升执行功能与注意力，且不占用"认知控制资源"，是下一个深度块之前的重置键。</span><br>
+      <b>出现这个信号就减量</b> <span>—— 连续两天傍晚的主动回忆出现明显「提取空白」，说明输入密度已超过巩固系统的处理能力。正确动作是<b>缩边缘任务、扩核心提取时间</b>，绝不是砍睡眠或运动去补时长。</span>
+    </div>
+  </div>
+
+  <div class="ft">
+    <div><strong>任何「再加一点量」的冲动，都该被理解为对留存率的威胁</strong></div>
+    <div>02 卡 ｜ 配套 01 卡（作息红线）</div>
+  </div>
+
+</div>
+</body>
+</html>

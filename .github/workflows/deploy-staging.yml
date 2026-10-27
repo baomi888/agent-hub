@@ -1,12 +1,10 @@
 name: Deploy Staging
 
-# 触发：合并/推送到 dev 后自动部署 staging。
+# 触发：仅手动（workflow_dispatch）。staging 部署能力保留，需要时到 Actions 页 Run workflow。
 # staging 与生产在同一台 ECS 上分端口并存（staging 3001/8001，生产 3000/8000），
 # 部署细节见 规范/04_环境与部署.md 第 5 节。
 on:
-  push:
-    branches: [dev]
-  workflow_dispatch:        # 也支持手动触发（用于重跑或部署指定提交）
+  workflow_dispatch:        # 仅手动触发（推 dev 不再自动跑，避免无 secrets 报“没有运行作业”；需要部署时在 Actions 页点 Run workflow）
 
 concurrency:
   # 同一时间只允许一次 staging 部署，避免两个部署互相打断

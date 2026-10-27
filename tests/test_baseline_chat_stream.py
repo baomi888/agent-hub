@@ -180,11 +180,37 @@ def test_rag_stream_event_sequence(client):
 
 
 def test_rag_stream_rewrite_frame_only_when_query_changes(client, monkeypatch):
-    """追问被改写时才多发一帧 status；没有历史时不改写、也不发这帧。"""
+    """追问被改写时才多发一帧 status；没有历史时不改写、也不发这帧。
+
+    B4（2026-10-23）起这条 status 的文案把「做了什么」和「最终检索词」
+    合成了一句（以前只说改写）。状态条是覆盖式的，拆成两条用户只看到最后一条。
+    """
     monkeypatch.setattr(chat, "rewrite_query", lambda q, h: "改写后的问题")
     frames = _frames(_body(client, mode="rag"))
     texts = [__import__("json").loads(d)["text"] for n, d in frames if n == "status"]
-    assert texts[1] == "已结合上下文改写检索词：改写后的问题"
+    assert texts[1] == "已结合上下文改写，检索词：改写后的问题"
+
+
+def test_rag_stream_enhance_frame_reports_swapped_terms(client, monkeypatch, tmp_path):
+    """B4 端到端：口语词在真实 SSE 链路上被换掉，并在状态条里报出来。
+
+    走真 HTTP + 真帧解析，只把词表换成临时文件——否则要依赖仓库里那份
+    每天在改的 data/vocab，断言第二天就红。
+    """
+    import json
+
+    import core.config as cfg
+    from service import enhance as enhance_svc
+
+    vocab = tmp_path / "vocab.csv"
+    vocab.write_text("canonical,aliases\n高等数学,高数\n", encoding="utf-8-sig")
+    monkeypatch.setattr(cfg, "ENHANCE_VOCAB_PATH", str(vocab))
+    monkeypatch.setattr(cfg, "ENHANCE_CHAT_ENABLED", True)
+    enhance_svc.reset_cache()
+
+    frames = _frames(_body(client, mode="rag", question="高数怎么复习"))
+    texts = [json.loads(d)["text"] for n, d in frames if n == "status"]
+    assert any("高数→高等数学" in t for t in texts), texts
 
 
 def test_llm_stream_event_sequence(client):

@@ -160,7 +160,7 @@ flowchart TB
 
     RAG --> VS[("Chroma 向量库<br/>多库进程级单例")]
     AGENT --> TOOLS[工具集<br/>知识库检索 · 联网搜索<br/>计算器 · 天气 · 下载入库]
-    TOOLS --> TR[工具执行元数据<br/>TOOL_META 七字段<br/>导入时强制校验]
+    TOOLS --> TR[工具执行元数据<br/>TOOL_META 六字段<br/>导入时强制校验]
     TOOLS --> EXT[外部服务<br/>DeepSeek · 百炼 · 高德 · Serper]
     VS --> EMB[Embedding 向量化 · 百炼]
 
@@ -246,7 +246,7 @@ flowchart TB
 ```
 ├── core/
 │   ├── scheduler.py       # 调度底座：schedule_jobs / job_runs / worker_heartbeat 三表
-│   └── tool_registry.py   # TOOL_META 七字段，导入时强制校验
+│   └── tool_registry.py   # TOOL_META 六字段，导入时强制校验
 ├── worker/
 │   └── scheduler.py       # 独立 APScheduler 进程（Asia/Shanghai）
 ├── service/

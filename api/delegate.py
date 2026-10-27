@@ -5,7 +5,7 @@
   GET    /api/delegate/{delegation_id}        取单条
   PATCH  /api/delegate/{delegation_id}        局部更新
   DELETE /api/delegate/{delegation_id}        删除
-  POST   /api/delegate/{delegation_id}/run    立即执行一次（调试用，不改 next_run_at）
+  POST   /api/delegate/{delegation_id}/run    立即执行一次（dry_run 不改 next_run_at；否则顺延到次日）
   GET    /api/delegate/{delegation_id}/runs   执行历史
 
 路由一律不带尾斜杠，与项目其余端点（约 35 条）保持一致；带尾斜杠的旧写法
@@ -209,6 +209,7 @@ def _out(d: dict) -> dict:
         "max_chars": d.get("max_chars"),
         "enabled": bool(d.get("enabled")),
         "next_run_at": d.get("next_run_at"),
+        "last_error": d.get("last_error"),
         "created_at": d.get("created_at"),
         "updated_at": d.get("updated_at"),
     }
@@ -315,6 +316,15 @@ async def update_delegation(
         int(merged["max_chars"] or 600),
         bool(merged["enabled"]),
     )
+    # 改了 schedule 且委托处于启用、并且已有未来的下次时间：按新节奏重算 next_run_at，
+    # 让「下次触发」立即反映新频次，而不必等下一次派发才更正（也使本端点 docstring 的承诺成真）。
+    if (
+        data.get("schedule")
+        and merged.get("enabled")
+        and cur.get("next_run_at") is not None
+    ):
+        await asyncio.to_thread(daily.reschedule_if_needed, delegation_id, merged["schedule"])
+        d = await asyncio.to_thread(_must_own, uid, delegation_id)
     out = _out(d)
     return {
         "delegation_id": out["delegation_id"],
@@ -341,6 +351,8 @@ async def run_delegation(
     dry_run=true：只生成内容、不投递、不改 next_run_at（前端预览用）。
     否则走 `service.daily.run_one()`——与 worker 定时触发的**同一条路径**，
     并消耗一次 kind="auto" 的自动调用额度（超限由全局处理器转 429）。
+    非 dry_run 会顺延"下次定时"到次日（见 service.daily._dispatch_one），
+    即"今天手动跑过就不再自动投递"，避免重复。
     """
     await asyncio.to_thread(quota.hit, uid)
     d = await asyncio.to_thread(_must_own, uid, delegation_id)

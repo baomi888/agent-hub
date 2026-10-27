@@ -17,6 +17,7 @@ import { useRouter } from "next/navigation";
 import ConsoleShell, { useConsoleUser } from "@/components/console/ConsoleShell";
 import CornIcon from "@/components/CornIcon";
 import FeedbackCard from "@/components/FeedbackCard";
+import TagPicker from "@/components/profile/TagPicker";
 import { Callout, NotReady, Seg, SkeletonLines, Switch } from "@/components/console/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
@@ -33,7 +34,14 @@ import {
 import { DEMO_HEALTH, DEMO_JOBS, DEMO_TOOLS } from "@/lib/consoleDemo";
 import { errProbe, toProbe, type ProbeState } from "@/lib/probe";
 import { fmtNum } from "@/lib/time";
-import type { AgentTool, KbInfo, ScheduleHealth, ScheduleJob, UsageSummary } from "@/lib/types";
+import type {
+  AgentTool,
+  KbInfo,
+  ProfileSnapshot,
+  ScheduleHealth,
+  ScheduleJob,
+  UsageSummary,
+} from "@/lib/types";
 
 /** 配额维度的中文名。顺序即展示顺序 */
 const QUOTA_META: { key: string; label: string; unit: string }[] = [
@@ -64,6 +72,9 @@ export default function SettingsPage() {
   const [dark, setDark] = useState(false);
   const [fontScale, setFontScale] = useState<FontScale>("m");
   const [topK, setTopK] = useState(String(DEFAULT_TOP_K));
+  // 兴趣标签：画像快照 + 是否展开选择器
+  const [profile, setProfile] = useState<ProfileSnapshot | null>(null);
+  const [tagEdit, setTagEdit] = useState(false);
 
   useEffect(() => {
     // 本地偏好在挂载后读，避免 SSR/CSR 首帧不一致。
@@ -95,6 +106,11 @@ export default function SettingsPage() {
         /* 资料库拉不到不影响其他卡片 */
       })
       .finally(() => setKbsLoading(false));
+    // 兴趣标签：拉不到就整块不显示（画像只是辅助，不该在设置页报错刷存在感）
+    api
+      .myProfile()
+      .then(setProfile)
+      .catch(() => setProfile(null));
   }, [authedId]);
 
   const onToggleDark = useCallback((next: boolean) => {
@@ -140,6 +156,92 @@ export default function SettingsPage() {
             <p className="hint">
               「修改密码」还缺后端端点 <code>/api/auth/password</code>（跨 3 轮未修），先置灰。
             </p>
+          </section>
+
+          {/* 兴趣方向：30 条定稿词表（core/tag_taxonomy.py）。
+              放在账号下面、外观上面 —— 它是"我是谁"的一部分，不是外观偏好。
+              标签名一律由后端下发，这里不硬编码任何一个词。 */}
+          <section id="tags">
+            <p className="sec-label">兴趣方向</p>
+            <div className="card card-pad">
+              <div className="card-head">
+                <span className="card-title">我的标签</span>
+                <span className="meta">
+                  {profile ? `${profile.picks.length} 个已选` : "读取中…"}
+                </span>
+              </div>
+
+              {!profile ? (
+                <div style={{ marginTop: 12 }}>
+                  <SkeletonLines widths={["70%", "48%"]} />
+                </div>
+              ) : tagEdit ? (
+                <div style={{ marginTop: 8 }}>
+                  <TagPicker
+                    initialPicks={profile.picks}
+                    onSaved={(snap) => {
+                      setProfile(snap);
+                      setTagEdit(false);
+                    }}
+                    onCancel={() => setTagEdit(false)}
+                  />
+                </div>
+              ) : profile.picks.length === 0 ? (
+                <>
+                  <p className="hint" style={{ marginTop: 8 }}>
+                    还没选过。选 1~3 个方向后，模板广场会按你的兴趣排序，
+                    每日委托也会默认用对应方向 —— 省掉每次重新自我介绍。
+                  </p>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    style={{ marginTop: 10 }}
+                    onClick={() => setTagEdit(true)}
+                  >
+                    <CornIcon name="target" />
+                    选方向
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+                    {profile.picks.map((name) => {
+                      const meta = profile.tags.find((t) => t.tag === name);
+                      return (
+                        <span
+                          key={name}
+                          className="ctag gold"
+                          title={meta?.desc ?? undefined}
+                          style={{ fontSize: "var(--fs-sm)", padding: "3px 10px" }}
+                        >
+                          {name}
+                        </span>
+                      );
+                    })}
+                  </div>
+                  <div className="row" style={{ gap: 8, marginTop: 12 }}>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setTagEdit(true)}
+                    >
+                      <CornIcon name="pencil" />
+                      修改方向
+                    </button>
+                  </div>
+                  {profile.categories.length > 0 && (
+                    <p className="hint" style={{ marginTop: 8 }}>
+                      当前重心：
+                      {profile.categories
+                        .slice(0, 3)
+                        .map((c) => `${c.category}（权重 ${c.weight}）`)
+                        .join("、")}
+                      。权重来自手选（每次 +3）与对话中自动识别的主题（每次 +1）。
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
           </section>
 
           <section>

@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse
 from api.admin import router as admin_router
 from api.agent import router as agent_router
 from api.auth import router as auth_router
+from api.cet import router as cet_router
 from api.chat import router as chat_router
 from api.checkin import router as checkin_router
 from api.delegate import router as delegate_router
@@ -31,7 +32,10 @@ from api.geo import router as geo_router
 from api.hybrid import router as hybrid_router
 from api.kb import router as kb_router
 from api.metrics import router as metrics_router
+from api.path import router as path_router
+from api.profile import router as profile_router
 from api.prompt_evo import router as prompt_evo_router
+from api.query import router as query_router
 from api.report import router as report_router
 from api.schedule import router as schedule_router
 from api.sessions import router as sessions_router
@@ -40,6 +44,7 @@ from api.usage import router as usage_router
 from api.user_feedback import router as user_feedback_router
 from core import apilog, config, llm_gate, quota
 from kb import pipelines
+from service import daily
 
 
 async def _apilog_flush_loop() -> None:
@@ -64,8 +69,15 @@ async def _apilog_flush_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """启动事件：预热 + 配置检查。"""
+    """启动事件：预热 + 配置检查 + 数据表迁移。"""
     pipelines.warmup()
+    # 部署后免手动触发：在启动时把 daily_reports / delegations 两张表建好、补列（幂等）。
+    # 否则 _ensure_daily_tables 是懒执行的，刚部署完没人访问过 delegation 时会查不到新列。
+    # 兜 try/except：迁移失败（如库被锁）只告警不阻断启动——懒执行那条路仍会在首次访问时自愈。
+    try:
+        await asyncio.to_thread(daily._ensure_daily_tables)
+    except Exception as e:  # noqa: BLE001
+        print(f"[启动警告] 数据表迁移失败（首次访问时会自动重试）：{e}")
     missing = config.validate()
     if missing:
         print(f"[启动警告] 配置缺失：{'；'.join(missing)}")
@@ -152,6 +164,14 @@ app.include_router(user_feedback_router, prefix="/api/user-feedback", tags=["用
 # 开发者数据看板：口径见 docs/数据看板_2026-10-27/口径与数据字典.md。
 # 未登录 401（路由级依赖）、非管理员 403（函数内判定）—— 两层顺序不能反
 app.include_router(admin_router, prefix="/api/admin", tags=["开发者看板"])
+# 四六级备考工作区：计划 / 任务 / 词汇本 / 模考分数（申报书 B3 承诺的专项模块）
+app.include_router(cet_router, prefix="/api/cet", tags=["四六级"])
+# 关卡式学习路径（申报书 3.4 关卡式学习路径 + 2.8 输出层「学习路径进度」）
+app.include_router(path_router, prefix="/api/path", tags=["学习路径"])
+# 用户兴趣标签（画像）：30 条定稿词表 / 手选标签 / 按大类聚合的权重
+app.include_router(profile_router, prefix="/api/profile", tags=["用户画像"])
+# 检索词增强（roadmap B3）：预览"把口语词换成标准词"的结果，只读、不写库、不调模型
+app.include_router(query_router, prefix="/api/query", tags=["检索词增强"])
 
 
 # ---------- 修复：前后端尾部斜杠不一致导致的重定向黑洞 ----------

@@ -49,7 +49,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
-from core import config, llm_gate, metrics, quota, tool_registry, upload
+from core import config, llm_gate, metrics, quota, tag_taxonomy, tool_registry, upload
 from core import context_compress as ctxcompress
 from core import scenarios as scenarios_mod
 from core import session as store
@@ -63,6 +63,7 @@ from kb.rag_core import (
     grounding_note,
     rewrite_query,
 )
+from service import enhance as enhance_svc
 
 # 默认要登录：整组路由统一挂鉴权，新增端点时不会漏
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -76,40 +77,10 @@ MAX_CHAT_FILES = 9
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 
 # B 块：对话级用户画像标签（受控词表，防标签表爆炸）。
-# 模型只许从这几十个里选，超出一律丢弃；既能沉淀"这个用户关心什么"，
-# 又不会让 user_tags 表无限膨胀。后续 C2 聚合 / D 检索偏置可直接消费这些标签。
-USER_PROFILE_TAGS = [
-    "考研备考",
-    "考研数学",
-    "考研英语",
-    "考研政治",
-    "保研",
-    "求职面试",
-    "实习",
-    "课程作业",
-    "期末考试",
-    "论文写作",
-    "毕业设计",
-    "编程开发",
-    "Python",
-    "前端开发",
-    "后端开发",
-    "算法竞赛",
-    "操作系统",
-    "计算机网络",
-    "数据库",
-    "机器学习",
-    "深度学习",
-    "英语四六级",
-    "文献阅读",
-    "实验操作",
-    "考证",
-    "公务员",
-    "留学申请",
-    "社团活动",
-    "时间管理",
-    "心态调节",
-]
+# 词表与"大类/父子/类型"元数据已抽到 core/tag_taxonomy.py（30 条定稿，4 位组员合并）。
+# 这里保留 USER_PROFILE_TAGS 这个名字，因为它是**受控词表**的语义，
+# 和"标签体系"（含大类、同义词）不是一回事：抽标签时只该看到词表。
+USER_PROFILE_TAGS = tag_taxonomy.USER_PROFILE_TAGS
 
 # 计划类请求的格式要求：由服务端拼到"本轮提问"末尾（req.plan=true 时），
 # 不落库、不参与历史——避免像旧前端那样把格式块写进历史污染后续轮次。
@@ -349,6 +320,57 @@ def _pick_mode(req_mode: str, kb_id: str | None, kb_exists: bool) -> str:
     if kb_id and kb_exists:
         return "rag"
     return "agent"
+
+
+def _retrieval_query(question: str, history) -> tuple[str, list[dict], bool]:
+    """把用户原话变成「检索用文本」：先补全指代，再追加规范术语。
+
+    为什么合成一个函数
+    ------------------
+    图片理解模式（554 行）和 RAG 模式（831 行）都要这一步。分开写就是两份口径，
+    改一处忘一处，最后"同一句话在图片模式下检索命中的片段不一样"。
+
+    为什么顺序不能反
+    ----------------
+    rewrite_query 是用 LLM 补全指代（"那它呢" → "RRF 融合算法有什么缺点"），
+    补出来的文本里可能又冒出新的口语词，所以 enhance 必须排在它后面。
+    反过来先换词再交给 LLM 改写，LLM 改写完还可能把术语说回口语。
+
+    ★ 返回的是**检索用文本**，绝不回写 req.question。
+      界面展示与聊天记录永远是用户原话——这是三个原则里最不能破的一条。
+    ★ 增强是**追加**（原话 + 术语）而不是替换。替换在真实短句上每 3 条就有 1 条
+      造出病句（`查重率`→`重复率检测率`），追加式原文一字不动，不存在这个问题。
+
+    返回 (检索词, 命中列表, 是否发生过指代改写)。
+    命中列表只用于发一条"已补充哪几个术语"的提示，**不含 start/end**：
+    这里的文本可能已被 LLM 改写，偏移在原话上没有意义（要高亮走 /api/query/enhance）。
+    """
+    query = rewrite_query(question, history)
+    rewritten = query != question
+    if not config.ENHANCE_CHAT_ENABLED:
+        # 关掉开关时退回旧行为：只有改写，一个词都不换
+        return query, [], rewritten
+    text, changes = enhance_svc.enhance_for_retrieval(query)
+    return text, changes, rewritten
+
+
+def _enhance_note(changes: list[dict], rewritten: bool, query: str) -> str:
+    """拼一条状态条文案：做了什么 + 最终用哪个检索词。
+
+    只发**一条**：状态条是覆盖式的，连发两条用户只看得到最后一条，
+    第一条等于白发。所以改写和增强都发生时合成一句。
+
+    措辞用「补充规范术语检索」而不是「校准」：增强是**追加**，用户原话没有被改掉。
+    说成"校准"会让人以为自己的问题被动手脚了，而这正是三原则要避免的观感。
+    """
+    bits = []
+    if rewritten:
+        bits.append("结合上下文改写")
+    if changes:
+        pairs = "、".join(f"{c['raw']}→{c['canonical']}" for c in changes[:2])
+        more = f" 等 {len(changes)} 处" if len(changes) > 2 else ""
+        bits.append(f"补充规范术语检索（{pairs}{more}）")
+    return f"已{'，'.join(bits)}，检索词：{query}"
 
 
 # ==================== 附件上传 ====================
@@ -800,7 +822,7 @@ async def _chat_stream_impl(
                 try:
                     # 同步检索会堵事件循环（embed_query 实测约 250ms），必须丢线程
                     pipe = await asyncio.to_thread(pipelines.get_or_create, uid, kb_id)
-                    query = await asyncio.to_thread(rewrite_query, req.question, history)
+                    query, _, _ = await asyncio.to_thread(_retrieval_query, req.question, history)
                     docs_scores = await asyncio.to_thread(
                         pipe.retrieve_with_score, query, req.top_k, uid
                     )
@@ -1152,12 +1174,15 @@ async def _chat_stream_impl(
             yield _sse("status", {"text": f"RAG 模式，正在检索知识库（{kb_id}）..."})
             # 追问（"那它呢"）先结合上下文改写成独立问题再检索；不需要/失败时原样返回。
             # 用改写后的问题当检索词，检索结果缓存的键也随之正确，不会跨上下文串结果。
+            # 再把口语词（"高数""线代"）换成规范术语（"高等数学""线性代数"）——只改检索词。
             history = (
                 await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False)
             )[:-1]
-            query = await asyncio.to_thread(rewrite_query, req.question, history)
-            if query != req.question:
-                yield _sse("status", {"text": f"已结合上下文改写检索词：{query}"})
+            query, changes, rewritten = await asyncio.to_thread(
+                _retrieval_query, req.question, history
+            )
+            if changes or rewritten:
+                yield _sse("status", {"text": _enhance_note(changes, rewritten, query)})
             try:
                 pipe = await asyncio.to_thread(pipelines.get_or_create, uid, kb_id)
                 docs_scores = await asyncio.to_thread(
@@ -1340,6 +1365,21 @@ async def _build_messages(
             await asyncio.to_thread(store.get_messages, owner, sid, include_system=False)
         )[:-1]
         history_raw = ctxcompress.assemble_history(owner, sid, raw)
+    # 输入侧字符预算：窗口放宽到 30 轮（最多 70 条）后，超长会话会把 prompt 推过
+    # 模型上下文（实测最重会话 76k tok > 64K，会让 DeepSeek 直接 500）。
+    # 从最新往旧累计，超预算就丢最旧的（保留"最近的上下文"），而不是截断最新一轮——
+    # 截断最新一轮会让模型答非所问。参考 core/config.CHAT_HISTORY_MAX_CHARS。
+    budget = config.CHAT_HISTORY_MAX_CHARS
+    if budget and budget > 0:
+        kept: list = []
+        total = 0
+        for m in reversed(history_raw):
+            c = len(m.get("content") or "")
+            if kept and total + c > budget:
+                break
+            kept.append(m)
+            total += c
+        history_raw = list(reversed(kept))
     messages = []
     references = ""
     if kb_id and docs_scores:
@@ -1469,9 +1509,10 @@ def _extract_user_tags(question: str, answer: str) -> list[str]:
         import json as _json
 
         tags = _json.loads(raw)
-        vocab_set = set(USER_PROFILE_TAGS)
-        out = [str(t).strip() for t in tags if str(t).strip() in vocab_set]
-        return out[:3]
+        # filter_known_tags 而不是 set 交集：它会先把 "CET6 / 六级 / 英语四六级"
+        # 归一成同一条再判断命中。此前直接做集合交集，"六级"会被当成越界标签丢掉，
+        # 30 条词表等于白摆——归一字典的价值就在这里。
+        return tag_taxonomy.filter_known_tags(tags, limit=3)
     except Exception:
         return []
     finally:

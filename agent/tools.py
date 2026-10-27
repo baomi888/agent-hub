@@ -160,7 +160,7 @@ def web_search(query: str, max_results: int = 5) -> str:
 
 # ==================== 3. 计算器 ====================
 
-_CALC_ALLOWED = set("0123456789+-*/%()., **")  # 白名单字符
+_CALC_ALLOWED = set("0123456789+-*/%(). ")  # 白名单字符（**没有逗号**，见下方校验处注释）
 _CALC_MAX_LEN = 64  # 表达式长度上限
 _CALC_MAX_DIGITS = 12  # 单个数字字面量的最大位数
 _CALC_MAX_EXPONENT = 10000  # ** 右侧指数上限：2**999999999999 会 OOM
@@ -184,8 +184,13 @@ def calculator(expression: str) -> str:
     expr = expression.strip()
     if len(expr) > _CALC_MAX_LEN:
         return f"表达式过长（>{_CALC_MAX_LEN} 字符），请拆分后再算。"
-    # 白名单校验：只允许数字、运算符、括号、空格、点
-    if not re.fullmatch(r"[\d+\-*/%()., \*]+", expr):
+    # 白名单校验：直接用常量判断，不再维护第二条等价正则。
+    # 这里原来有两个问题：
+    #   1) `_CALC_ALLOWED` 定义了却**从未被使用**（全文件只出现定义那一行），
+    #      真正生效的是正则；注释描述的和代码执行的不是同一件事。
+    #   2) 两处都放行了英文逗号 ⇒ `1,2` 被 eval 当成元组，返回 "1,2 = (1, 2)"，
+    #      学生问"这两个数加起来多少"时会收到一个元组。
+    if not expr or not set(expr) <= _CALC_ALLOWED:
         return f"非法表达式（包含不允许的字符）：{expression}"
     # 连续幂会让 eval 直接打满 CPU/内存（如 9**9**9），直接拒
     if expr.count("**") > 1:
@@ -497,13 +502,19 @@ def get_weather(city: str = "", days: int = 1, lat: float = None, lon: float = N
         except Exception:
             return "天气查询暂时不可用，请稍后再试。"
 
-    # ---- 2~4 天：高德预报 ----
+    # ---- 2 天以上：先问高德（免费版只给 4 天：今天 + 3 天）----
+    # amap_lines 只在"拿到了但不够 days"时保留，作为 Open-Meteo 也失败时的兜底。
+    amap_lines: list[str] | None = None
     try:
         data = _http_get(AMAP_WEATHER, {"city": adcode, "extensions": "all"})
-        casts = (data.get("forecasts") or [{}])[0].get("casts") or []
-        if casts:
-            lines = [f"{std}未来 {days} 天天气预报："]
-            for cast in casts[:days]:
+        casts = ((data.get("forecasts") or [{}])[0].get("casts") or [])
+        got = casts[:days]
+        if got:
+            # ⚠️ 标题里的天数必须等于**实际给出的行数**。
+            # 这里曾经写的是请求的 days，而高德 casts 恒为 4 条 ⇒ 问 6 天时输出
+            # "未来 6 天天气预报：" 下面只有 4 行，模型会照标题补两天编出来。
+            lines = [f"{std}未来 {len(got)} 天天气预报："]
+            for cast in got:
                 d = cast.get("date", "")
                 y, m, day = map(int, d.split("-"))
                 weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][
@@ -515,12 +526,16 @@ def get_weather(city: str = "", days: int = 1, lat: float = None, lon: float = N
                     f"{cast.get('nighttemp', '?')}~{cast.get('daytemp', '?')}℃，"
                     f"{cast.get('daywind', '?')}风 {cast.get('daypower', '?')}级。"
                 )
-            lines.append("（高德天气预报）")
-            return "\n".join(lines)
+            if len(got) >= days:
+                lines.append("（高德天气预报）")
+                return "\n".join(lines)
+            amap_lines = lines  # 不够 ≥days，先留着当兜底
     except Exception:
         pass
 
-    # ---- 5~7 天：Open-Meteo ----
+    # ---- 5~7 天：高德给不了这么多，改走 Open-Meteo ----
+    # 必须先判断 len(got) >= days 才能用高德：原来的 `if casts:` 恒为真（casts 恒 4 条），
+    # 直接 return，这段 Open-Meteo 兜底**永远到不了**（描述里承诺的 5~7 天是空话）。
     try:
         lon_s, lat_s = location.split(",")
         data = _http_get(
@@ -540,7 +555,7 @@ def get_weather(city: str = "", days: int = 1, lat: float = None, lon: float = N
         tmin = daily.get("temperature_2m_min") or []
         if times:
             codes = daily.get("weather_code") or []
-            lines = [f"{std}未来 {days} 天天气预报（Open-Meteo）："]
+            lines = [f"{std}未来 {min(days, len(times))} 天天气预报（Open-Meteo）："]
             for i in range(min(days, len(times))):
                 y, m, d = map(int, times[i].split("-"))
                 weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][
@@ -550,9 +565,14 @@ def get_weather(city: str = "", days: int = 1, lat: float = None, lon: float = N
                 lines.append(f"{m}月{d}日 {weekday}：{desc}，{tmin[i]}~{tmax[i]}℃。")
             return "\n".join(lines)
     except Exception:
-        return "天气预报暂时不可用，请稍后再试。"
+        pass
 
-    return "未获取到天气数据。"
+    # Open-Meteo 也失败：退回高德实际拿到的天数（标题已按实际天数写，不会撒谎）
+    if amap_lines:
+        amap_lines.append(f"（高德天气预报，仅能覆盖 {len(amap_lines) - 1} 天）")
+        return "\n".join(amap_lines)
+
+    return "天气预报暂时不可用，请稍后再试。"
 
 
 # ==================== 5. 文件下载 ====================

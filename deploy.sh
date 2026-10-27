@@ -58,8 +58,26 @@ detect_workers() {
 # ------------------------------------------------------------
 # 子命令：stop / status / logs
 # ------------------------------------------------------------
+
+# 是否已把三个进程交给 systemd 托管（ops/install-systemd.sh 装完即为 1）。
+# ★ 为什么必须先判断：unit 装好之后若这里还用 nohup 再起一份，同一份代码就会出现
+#   两个进程抢同一个端口；更麻烦的是 Restart=always 会把刚被 pkill 掉的进程立刻拉
+#   回来，两边互相打架，表现成「部署成功但页面 502，日志里两个 pid 交替报错」。
+# ★ 判断依据用「unit 是否已 enable」而不是「文件是否存在」：文件拷进去了但没 enable，
+#   说明还没打算切换，此时继续走原来的 nohup 路径 —— 打这段补丁前后行为完全一致。
+USE_SYSTEMD=0
+if command -v systemctl >/dev/null 2>&1 && systemctl is-enabled baomi-backend >/dev/null 2>&1; then
+  USE_SYSTEMD=1
+fi
+
 do_stop() {
   log "停止服务"
+  if [ "$USE_SYSTEMD" = "1" ]; then
+    systemctl stop baomi-backend baomi-frontend baomi-worker >/dev/null 2>&1 || true
+    ok "三个 unit 已停止（systemd）"
+    rm -f /tmp/baomi-back.pid /tmp/baomi-front.pid /tmp/baomi-worker.pid
+    return 0
+  fi
   pkill -f "uvicorn main:app" >/dev/null 2>&1 && ok "后端已停" || warn "后端本来就没在跑"
   pkill -f "next start"       >/dev/null 2>&1 && ok "前端已停" || warn "前端本来就没在跑"
   pkill -f "next-server"      >/dev/null 2>&1 || true
@@ -76,16 +94,25 @@ do_status() {
   printf '  后端 :%s  ->  HTTP %s\n' "$BACK_PORT" "$bc"
   printf '  前端 :%s  ->  HTTP %s\n' "$FRONT_PORT" "$fc"
   echo "  --- 进程 ---"
-  printf '  后端进程数：%s（uvicorn --workers）\n' "$(pgrep -f "uvicorn main:app" 2>/dev/null | wc -l)"
-  pgrep -af "uvicorn main:app" || echo "  (无后端进程)"
-  pgrep -af "next start"      || echo "  (无前端进程)"
-  pgrep -af "worker.scheduler" || echo "  (无 worker 进程 —— 委托/总结不会自动执行)"
+  if [ "$USE_SYSTEMD" = "1" ]; then
+    # 托管模式下看的是 unit 状态，不是 pid：is-active 会逐行输出 active/failed
+    systemctl is-active baomi-backend baomi-frontend baomi-worker
+  else
+    printf '  后端进程数：%s（uvicorn --workers）\n' "$(pgrep -f "uvicorn main:app" 2>/dev/null | wc -l)"
+    pgrep -af "uvicorn main:app" || echo "  (无后端进程)"
+    pgrep -af "next start"      || echo "  (无前端进程)"
+    pgrep -af "worker.scheduler" || echo "  (无 worker 进程 —— 委托/总结不会自动执行)"
+  fi
   echo "  内存："; free -h | head -3
   echo "  磁盘："; df -h "$ROOT" | tail -1
 }
 
 do_logs() {
   log "日志（Ctrl+C 退出）"
+  if [ "$USE_SYSTEMD" = "1" ]; then
+    journalctl -u baomi-backend -u baomi-frontend -u baomi-worker -n 60 -f
+    return 0
+  fi
   tail -n 60 -F /tmp/baomi-back.log /tmp/baomi-front.log /tmp/baomi-worker.log 2>/dev/null
 }
 
@@ -319,45 +346,52 @@ fi
 log "7. 启动服务"
 do_stop >/dev/null 2>&1 || true
 
-cd "$ROOT"
-# WORKERS 可以直接 export 给脚本，也可以写进 .env（.env 里的值由这里读，
-# 因为 deploy.sh 不像后端那样 load_dotenv）。优先级：环境变量 > .env > 自动探测。
-if [ -z "$WORKERS" ] && [ -f "$ROOT/.env" ]; then
-  WORKERS="$(awk -F= '/^WORKERS=/{print $2}' "$ROOT/.env" | tail -1 | tr -d '[:space:]')"
+if [ "$USE_SYSTEMD" = "1" ]; then
+  # 托管模式：重启交给 systemd，日志走 journald，开机自启与崩溃拉起都不再依赖本脚本。
+  systemctl restart baomi-backend baomi-frontend baomi-worker
+  ok "三个 unit 已 restart（崩溃/重启由 systemd 兜住）"
+else
+  # 非托管模式（默认）：nohup 后台常驻，pid 落 /tmp。
+  cd "$ROOT"
+  # WORKERS 可以直接 export 给脚本，也可以写进 .env（.env 里的值由这里读，
+  # 因为 deploy.sh 不像后端那样 load_dotenv）。优先级：环境变量 > .env > 自动探测。
+  if [ -z "$WORKERS" ] && [ -f "$ROOT/.env" ]; then
+    WORKERS="$(awk -F= '/^WORKERS=/{print $2}' "$ROOT/.env" | tail -1 | tr -d '[:space:]')"
+  fi
+  if [ -z "$WORKERS" ]; then WORKERS="$(detect_workers)"; fi
+  case "$WORKERS" in
+    ''|*[!0-9]*) die "WORKERS 必须是正整数，当前是：$WORKERS" ;;
+  esac
+  if [ "$WORKERS" -lt 1 ]; then die "WORKERS 至少为 1，当前是：$WORKERS"; fi
+
+  # --host 127.0.0.1：后端没有任何鉴权，不对外暴露。
+  # 前端靠 next.config.ts 的 /api/* rewrite 从本机访问它，功能不受影响；
+  # 需要临时对外调试时用 `venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000` 手动起。
+  # --workers N：多进程吃多核。注意 N 个进程各自有独立的进程内状态：
+  #   · 每分钟限流已改双层（进程内滑窗 + DB 秒桶），不再随 worker 数放大
+  #   · LLM 并发闸仍是每进程一份，全局上限 = N × LLM_MAX_CONCURRENCY
+  PYTHONUTF8=1 PYTHONDONTWRITEBYTECODE=1 \
+    nohup venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port "$BACK_PORT" \
+    --workers "$WORKERS" \
+    > /tmp/baomi-back.log 2>&1 &
+  echo $! > /tmp/baomi-back.pid
+  ok "后端已启动（pid $(cat /tmp/baomi-back.pid)，workers=$WORKERS）"
+
+  cd "$ROOT/frontend"
+  PORT="$FRONT_PORT" nohup npm run start > /tmp/baomi-front.log 2>&1 &
+  echo $! > /tmp/baomi-front.pid
+  cd "$ROOT"
+  ok "前端已启动（pid $(cat /tmp/baomi-front.pid)）"
+
+  # 调度 worker：第三个常驻进程（不监听端口）。五个 job（委托投递/重试/日报/补报/清理）
+  # 都靠它跑；它没起来 = 页面全正常、用户只是「今天没收到提醒」——最隐蔽的静默故障。
+  # 与 web 彻底隔离（总结生成 20~40s 不能拖慢在线问答），见 规范/guides/调度与Agent开发指南.md §2.2。
+  PYTHONUTF8=1 PYTHONDONTWRITEBYTECODE=1 \
+    nohup venv/bin/python -m worker.scheduler \
+    > /tmp/baomi-worker.log 2>&1 &
+  echo $! > /tmp/baomi-worker.pid
+  ok "调度 worker 已启动（pid $(cat /tmp/baomi-worker.pid)）"
 fi
-if [ -z "$WORKERS" ]; then WORKERS="$(detect_workers)"; fi
-case "$WORKERS" in
-  ''|*[!0-9]*) die "WORKERS 必须是正整数，当前是：$WORKERS" ;;
-esac
-if [ "$WORKERS" -lt 1 ]; then die "WORKERS 至少为 1，当前是：$WORKERS"; fi
-
-# --host 127.0.0.1：后端没有任何鉴权，不对外暴露。
-# 前端靠 next.config.ts 的 /api/* rewrite 从本机访问它，功能不受影响；
-# 需要临时对外调试时用 `venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000` 手动起。
-# --workers N：多进程吃多核。注意 N 个进程各自有独立的进程内状态：
-#   · 每分钟限流（core/quota.py 的字典）实际强度会变成 N 倍 —— 已知遗留，见 issue #15
-#   · LLM 并发闸同样是每进程一份，全局上限 = N × LLM_MAX_CONCURRENCY
-PYTHONUTF8=1 PYTHONDONTWRITEBYTECODE=1 \
-  nohup venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port "$BACK_PORT" \
-  --workers "$WORKERS" \
-  > /tmp/baomi-back.log 2>&1 &
-echo $! > /tmp/baomi-back.pid
-ok "后端已启动（pid $(cat /tmp/baomi-back.pid)，workers=$WORKERS）"
-
-cd "$ROOT/frontend"
-PORT="$FRONT_PORT" nohup npm run start > /tmp/baomi-front.log 2>&1 &
-echo $! > /tmp/baomi-front.pid
-cd "$ROOT"
-ok "前端已启动（pid $(cat /tmp/baomi-front.pid)）"
-
-# 调度 worker：第三个常驻进程（不监听端口）。五个 job（委托投递/重试/日报/补报/清理）
-# 都靠它跑；它没起来 = 页面全正常、用户只是「今天没收到提醒」——最隐蔽的静默故障。
-# 与 web 彻底隔离（总结生成 20~40s 不能拖慢在线问答），见 规范/guides/调度与Agent开发指南.md §2.2。
-PYTHONUTF8=1 PYTHONDONTWRITEBYTECODE=1 \
-  nohup venv/bin/python -m worker.scheduler \
-  > /tmp/baomi-worker.log 2>&1 &
-echo $! > /tmp/baomi-worker.pid
-ok "调度 worker 已启动（pid $(cat /tmp/baomi-worker.pid)）"
 
 # ------------------------------------------------------------
 # 8. 本机防火墙（安全组之外的第二道门，很多人卡在这）
@@ -386,11 +420,17 @@ BC=$(curl -s -m 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:${BACK_PORT}/
 FC=$(curl -s -m 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:${FRONT_PORT}/"      2>/dev/null || echo 000)
 printf '  后端 /health  -> HTTP %s\n' "$BC"
 printf '  前端 /        -> HTTP %s\n' "$FC"
-WPID="$(cat /tmp/baomi-worker.pid 2>/dev/null || true)"
-if [ -n "$WPID" ] && kill -0 "$WPID" 2>/dev/null; then
-  printf '  调度 worker   -> 存活（pid %s）\n' "$WPID"
+if [ "$USE_SYSTEMD" = "1" ]; then
+  WST="$(systemctl is-active baomi-worker 2>/dev/null || true)"
+  printf '  调度 worker   -> %s（systemd）\n' "$WST"
+  [ "$WST" = "active" ] || warn "调度 worker 不在跑，日志： journalctl -u baomi-worker -n 40"
 else
-  warn "调度 worker 没活着，日志： tail -20 /tmp/baomi-worker.log"
+  WPID="$(cat /tmp/baomi-worker.pid 2>/dev/null || true)"
+  if [ -n "$WPID" ] && kill -0 "$WPID" 2>/dev/null; then
+    printf '  调度 worker   -> 存活（pid %s）\n' "$WPID"
+  else
+    warn "调度 worker 没活着，日志： tail -20 /tmp/baomi-worker.log"
+  fi
 fi
 
 echo

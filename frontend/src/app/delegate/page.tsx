@@ -336,7 +336,7 @@ export default function DelegatePage() {
   };
 
   const doRemove = async (d: Delegate) => {
-    if (!window.confirm(`删除「${d.name}」？它的执行历史会一并消失。`)) return;
+    if (!window.confirm(`删除「${d.name}」？委托本身会被移除，但它的执行记录会保留，便于回看。`)) return;
     if (demoGuard("删除")) return;
     setBusy(`del-${d.id}`);
     try {
@@ -497,6 +497,8 @@ export default function DelegatePage() {
                                   {fmtWhen(d.next_run_at)}（{fmtRemaining(d.next_run_at)}）
                                 </span>
                               </>
+                            ) : d.last_error ? (
+                              <span className="text-red-ink">{d.last_error}</span>
                             ) : (
                               <>已暂停 · 不会再触发，直到你重新打开开关</>
                             )}

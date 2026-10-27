@@ -1,0 +1,23 @@
+[Unit]
+Description=Zhisui scheduler worker (delegations / daily reports, no port)
+After=network-online.target baomi-backend.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root
+# 这个进程不监听任何端口，因此它挂了页面上完全看不出来 ——
+# 只是委托不再投递、每日总结不再生成，用户以为"今天没提醒"。
+# 交给 systemd 之后，崩溃 3 秒内自动拉起，不需要人发现。
+Environment=PYTHONUTF8=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/root/venv/bin/python -m worker.scheduler
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=baomi-worker
+
+[Install]
+WantedBy=multi-user.target

@@ -133,3 +133,120 @@ def test_weather_day_range_validation(monkeypatch):
         tools.get_weather.invoke({"days": 8, "lat": 1.0, "lon": 1.0})
         == "天数必须是 1~7 的整数，收到的是 8。"
     )
+
+
+# ==================== 城市路径：5~7 天必须走 Open-Meteo ====================
+# 这一段是 2026-10-23 审计补的回归。此前的测试**全部走坐标路径**（lat/lon），
+# 城市路径的 5~7 天分支一次都没被执行过，于是下面这个 bug 活了很久：
+#   `if casts:` 恒为真（高德 free 版 casts 恒 4 条）⇒ 直接 return ⇒
+#   描述里承诺的"5~7 天自动走 Open-Meteo"那段代码**永远到不了**；
+#   更糟的是标题写的是请求的 days（如 6），下面只有 4 行，模型会照标题补两天。
+
+_DATES = ["2026-10-23", "2026-10-24", "2026-10-25", "2026-10-26",
+          "2026-10-27", "2026-10-28", "2026-10-29"]
+
+
+def _amap_casts(n: int = 4) -> list[dict]:
+    """高德 extensions=all 的真实形状：免费版最多给 4 天。"""
+    return [{"date": d, "dayweather": "晴", "nightweather": "晴",
+             "daytemp": "20", "nighttemp": "10", "daywind": "南", "daypower": "3"}
+            for d in _DATES[:n]]
+
+
+def _city_payload(amap_days: int = 4, open_meteo: bool = True):
+    """构造一份完整的城市路径应答（geocode 必须带 location，否则 _resolve 会判未找到）。"""
+
+    def _payload(url: str) -> dict:
+        if "/geocode/geo" in url:
+            return {"status": "1", "geocodes": [{
+                "adcode": "110000", "province": "北京市", "city": "北京市",
+                "district": "", "location": "116.407,39.904",
+            }]}
+        if "weatherInfo" in url:
+            if "extensions=base" in url:
+                return {"status": "1", "lives": [{
+                    "weather": "晴", "temperature": "20", "humidity": "40",
+                    "winddirection": "南", "windpower": "3",
+                }]}
+            return {"status": "1", "forecasts": [{"casts": _amap_casts(amap_days)}]}
+        if "open-meteo" in url:
+            if not open_meteo:
+                raise RuntimeError("open-meteo 模拟故障")
+            return {"daily": {
+                "time": _DATES,
+                "weather_code": [0, 1, 2, 3, 61, 63, 65],
+                "temperature_2m_max": [25, 24, 23, 22, 21, 20, 19],
+                "temperature_2m_min": [15, 14, 13, 12, 11, 10, 9],
+            }}
+        raise RuntimeError("未预期的 URL: " + url)
+
+    return _payload
+
+
+def _date_rows(out: str) -> list[str]:
+    return [ln for ln in out.split("\n") if "月" in ln and "日" in ln]
+
+
+def test_weather_city_5days_uses_open_meteo(monkeypatch):
+    """★ P0：高德只给 4 天时，问 5 天必须改走 Open-Meteo，且真的给 5 行。"""
+    monkeypatch.setattr(tools, "_get_amap_key", lambda: "fake-key")
+    tools._AMAP_CACHE.clear()
+    seen = _stub_urlopen(monkeypatch, _city_payload(amap_days=4))
+
+    out = tools.get_weather.invoke({"city": "北京", "days": 5})
+
+    assert any("open-meteo" in u for u in seen), f"没走 Open-Meteo，请求了：{seen}"
+    assert out.split("\n")[0] == "北京市未来 5 天天气预报（Open-Meteo）："
+    assert len(_date_rows(out)) == 5, out
+
+
+def test_weather_city_7days_gives_7_rows(monkeypatch):
+    """上界也要钉住：问 7 天得 7 行（别只测 5 天就以为好了）。"""
+    monkeypatch.setattr(tools, "_get_amap_key", lambda: "fake-key")
+    tools._AMAP_CACHE.clear()
+    _stub_urlopen(monkeypatch, _city_payload(amap_days=4))
+
+    out = tools.get_weather.invoke({"city": "北京", "days": 7})
+
+    assert len(_date_rows(out)) == 7, out
+
+
+def test_weather_city_4days_still_uses_amap(monkeypatch):
+    """回归：4 天以内仍走高德，不要为了修 5~7 天把 2~4 天也改走 Open-Meteo。"""
+    monkeypatch.setattr(tools, "_get_amap_key", lambda: "fake-key")
+    tools._AMAP_CACHE.clear()
+    seen = _stub_urlopen(monkeypatch, _city_payload(amap_days=4))
+
+    out = tools.get_weather.invoke({"city": "北京", "days": 4})
+
+    assert not any("open-meteo" in u for u in seen), f"4 天不该走 Open-Meteo：{seen}"
+    assert "（高德天气预报）" in out
+    assert len(_date_rows(out)) == 4, out
+
+
+def test_weather_city_title_never_lies(monkeypatch):
+    """★ 最狠的一条：两个源都拿不全时，标题的天数必须等于实际行数。
+
+    以前标题写请求的 days（6），下面 4 行 ⇒ 模型会照"未来 6 天"补两天编出来。
+    """
+    monkeypatch.setattr(tools, "_get_amap_key", lambda: "fake-key")
+    tools._AMAP_CACHE.clear()
+    _stub_urlopen(monkeypatch, _city_payload(amap_days=4, open_meteo=False))
+
+    out = tools.get_weather.invoke({"city": "北京", "days": 6})
+
+    assert "未来 6 天" not in out, f"标题不能写 6 天：{out}"
+    assert "未来 4 天天气预报" in out, out
+    assert len(_date_rows(out)) == 4, out
+    assert "仅能覆盖 4 天" in out, out
+
+
+def test_weather_city_1day_unaffected(monkeypatch):
+    """1 天是实时接口，不能被这次改动碰到。"""
+    monkeypatch.setattr(tools, "_get_amap_key", lambda: "fake-key")
+    tools._AMAP_CACHE.clear()
+    _stub_urlopen(monkeypatch, _city_payload())
+
+    out = tools.get_weather.invoke({"city": "北京", "days": 1})
+
+    assert "当前晴" in out and "（高德实时数据）" in out, out
