@@ -15,9 +15,18 @@ import CornIcon from "../CornIcon";
 import { useAuth } from "@/lib/hooks/useAuth";
 import type { MeOut } from "@/lib/types";
 
-export type ConsolePage = "delegate" | "report" | "checkin" | "settings" | "flow";
+export type ConsolePage = "delegate" | "report" | "checkin" | "settings" | "flow" | "dashboard";
 
-const NAV: { key: ConsolePage | null; href: string; icon: string; label: string }[] = [
+interface NavItem {
+  key: ConsolePage | null;
+  href: string;
+  icon: string;
+  label: string;
+  /** 只有开发者看得到（后端仍会二次校验，这里只是不给入口） */
+  adminOnly?: boolean;
+}
+
+const NAV: NavItem[] = [
   { key: null, href: "/", icon: "notes", label: "对话" },
   { key: null, href: "/?kb=1", icon: "book", label: "知识库" },
   { key: "delegate", href: "/delegate", icon: "clock", label: "每日委托" },
@@ -25,6 +34,10 @@ const NAV: { key: ConsolePage | null; href: string; icon: string; label: string 
   { key: "checkin", href: "/checkin", icon: "star", label: "打卡" },
   // 混合架构：工作流定义 + 切换规则。后端 API 由林宏亮提供，界面这一侧由前端做
   { key: "flow", href: "/flow", icon: "target", label: "工作流" },
+  // 数据看板：开发者看"有多少人、在调什么接口、反馈堆了多少"。
+  // 只在 is_admin 时渲染入口 —— 但**真正的权限在后端**（非管理员 403），
+  // 前端隐藏只是不给误点的机会，不是安全边界
+  { key: "dashboard", href: "/dashboard", icon: "briefcase", label: "看板", adminOnly: true },
   { key: "settings", href: "/settings", icon: "settings", label: "设置" },
 ];
 
@@ -87,7 +100,7 @@ export default function ConsoleShell({ active, eyebrow, title, sub, actions, chi
               <b>知穗</b>
             </div>
             <nav aria-label="主导航">
-              {NAV.map((it) => {
+              {NAV.filter((it) => !it.adminOnly || auth.me?.is_admin).map((it) => {
                 const current = it.key !== null && it.key === active;
                 return (
                   <Link

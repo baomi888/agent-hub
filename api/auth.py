@@ -49,6 +49,10 @@ class UserOut(BaseModel):
 class MeOut(BaseModel):
     user: UserOut
     quota: dict
+    # 是否开发者（ADMIN_USERNAMES）。前端据此决定「数据看板」入口要不要显示。
+    # 默认 False：老前端拿到不带这个字段的响应也不会崩，未知一律当"不是管理员"
+    # —— 权限判定的默认值必须是拒绝的那一侧。
+    is_admin: bool = False
 
 
 def _reject(msg: str, status: int = 400) -> None:
@@ -167,4 +171,8 @@ async def me(uid: str = Depends(get_current_user)):
         # 账号被删了但 token 还有效（7 天内）——别当作系统错误，直接判未登录
         raise HTTPException(status_code=401, detail="账号不存在，请重新登录")
     snap = await asyncio.to_thread(quota.snapshot, uid)
-    return MeOut(user=UserOut(id=uid, username=row["username"]), quota=snap)
+    return MeOut(
+        user=UserOut(id=uid, username=row["username"]),
+        quota=snap,
+        is_admin=quota._is_admin(uid),
+    )

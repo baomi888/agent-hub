@@ -16,6 +16,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ConsoleShell, { useConsoleUser } from "@/components/console/ConsoleShell";
 import CornIcon from "@/components/CornIcon";
+import FeedbackCard from "@/components/FeedbackCard";
 import { Callout, NotReady, Seg, SkeletonLines, Switch } from "@/components/console/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
@@ -254,6 +255,14 @@ export default function SettingsPage() {
                 <NotReady what="用量接口（/api/usage/summary）" />
               )}
             </div>
+          </section>
+
+          {/* 反馈入口：产品建议要有落点。和上面的"用量"分开一节 ——
+              前者是"我用了多少"（只读），后者是"我要说什么"（可写），
+              混在一张卡片里用户会以为反馈是只读展示。 */}
+          <section>
+            <p className="sec-label">反馈</p>
+            <FeedbackCard page="/settings" />
           </section>
         </div>
 

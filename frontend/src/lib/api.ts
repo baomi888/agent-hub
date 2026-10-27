@@ -18,6 +18,12 @@ import type {
   WorkflowRow,
   CheckinStreak,
   CheckinHistoryItem,
+  DashboardOverview,
+  ApiRankResp,
+  AdminFeedbackResp,
+  MyFeedbackResp,
+  FeedbackDict,
+  UserFeedbackItem,
 } from "./types";
 
 /**
@@ -309,6 +315,35 @@ export const api = {
 
   // ---------- 用量与反馈看板 ----------
   usageSummary: () => request<UsageSummary>("/api/usage/summary"),
+
+  // ---------- 用户反馈（DeepSeek 式：分类按钮 + 一段话）----------
+  // 与下面的 admin.* 分开：这个走 /api/user-feedback（登录即可、只看自己的），
+  // admin.* 走 /api/admin（非管理员后端直接 403）
+  feedbackDict: () => request<FeedbackDict>("/api/user-feedback/dict"),
+  submitFeedback: (body: { category: string; content: string; contact?: string; page?: string }) =>
+    request<{ ok: boolean; id: number }>("/api/user-feedback/", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  myFeedback: (limit = 20, offset = 0) =>
+    request<MyFeedbackResp>(`/api/user-feedback/mine?limit=${limit}&offset=${offset}`),
+
+  // ---------- 开发者数据看板（仅管理员）----------
+  admin: {
+    overview: (days = 7) => request<DashboardOverview>(`/api/admin/overview?days=${days}`),
+    apis: (days = 7, limit = 20, sort: "calls" | "slow" | "fail" = "calls") =>
+      request<ApiRankResp>(`/api/admin/apis?days=${days}&limit=${limit}&sort=${sort}`),
+    feedback: (status = "", limit = 20, offset = 0) =>
+      request<AdminFeedbackResp>(
+        `/api/admin/feedback?status=${encodeURIComponent(status)}&limit=${limit}&offset=${offset}`
+      ),
+    patchFeedback: (id: number, status: string) =>
+      request<{ ok: boolean; status: string }>(`/api/admin/feedback/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      }),
+    dict: () => request<FeedbackDict>("/api/admin/dict"),
+  },
 
   // ---------- 模板广场 ----------
   templates: () =>

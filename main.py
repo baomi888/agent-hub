@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
@@ -18,6 +20,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from api.admin import router as admin_router
 from api.agent import router as agent_router
 from api.auth import router as auth_router
 from api.chat import router as chat_router
@@ -34,8 +37,29 @@ from api.schedule import router as schedule_router
 from api.sessions import router as sessions_router
 from api.templates import router as templates_router
 from api.usage import router as usage_router
-from core import config, llm_gate, quota
+from api.user_feedback import router as user_feedback_router
+from core import apilog, config, llm_gate, quota
 from kb import pipelines
+
+
+async def _apilog_flush_loop() -> None:
+    """每 3 秒把采集缓冲落一次库（文档 §5 承诺的"准实时 ≤ 3 秒"靠它兜底）。
+
+    **为什么必须有这个循环**：只靠"请求结束时判断是否该 flush"是不够的 ——
+    零星的最后几个请求会把数据留在缓冲里，直到**下一个请求**才被带走。
+    真机验证时踩到了：4 个请求过后，只有 1 条落了库，剩下 1 条一直悬着。
+    这类问题在单测里测不出来（TestClient 每次手动 flush），只有真起进程才会暴露。
+
+    多 worker 时每个进程各跑一个，各清自己的缓冲，互不干扰。
+    """
+    while True:
+        try:
+            await asyncio.sleep(apilog.INTERVAL)
+            await asyncio.to_thread(apilog.flush)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 —— 采集循环挂了也不能拖垮服务
+            pass
 
 
 @asynccontextmanager
@@ -47,7 +71,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         print(f"[启动警告] 配置缺失：{'；'.join(missing)}")
     else:
         print("[启动 OK] 配置完整，RAG 链路就绪")
-    yield
+    # API 调用采集的定时落库：低流量下没有它，最后几条会一直卡在内存缓冲里
+    flush_task = asyncio.create_task(_apilog_flush_loop())
+    try:
+        yield
+    finally:
+        flush_task.cancel()
+        try:
+            await flush_task
+        except asyncio.CancelledError:
+            pass
+        # 退出前最后落一次：否则正常停机时缓冲里那几十条就丢了
+        try:
+            await asyncio.to_thread(apilog.flush)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 app = FastAPI(
@@ -108,6 +146,12 @@ app.include_router(prompt_evo_router, prefix="/api/prompt-evo", tags=["Prompt �
 # 权限是「管理员 或 带正确 X-Metrics-Token」——**不能靠回环地址判定**，
 # 因为 Next 的 rewrite 让所有请求看起来都来自 127.0.0.1（api/metrics.py 有说明）。
 app.include_router(metrics_router, prefix="/api/metrics", tags=["指标"])
+# 用户反馈（DeepSeek 式分类按钮 + 一段话）。与 /api/feedback（消息赞踩）是两张表、
+# 两个语义：这里提的是"产品哪里要改"，那条是"这个回答好不好"（后者喂给提示词进化）
+app.include_router(user_feedback_router, prefix="/api/user-feedback", tags=["用户反馈"])
+# 开发者数据看板：口径见 docs/数据看板_2026-10-27/口径与数据字典.md。
+# 未登录 401（路由级依赖）、非管理员 403（函数内判定）—— 两层顺序不能反
+app.include_router(admin_router, prefix="/api/admin", tags=["开发者看板"])
 
 
 # ---------- 修复：前后端尾部斜杠不一致导致的重定向黑洞 ----------
@@ -186,6 +230,76 @@ async def normalize_api_slash(request: Request, call_next: Callable[[Request], A
             if request.scope.get("raw_path") is not None:
                 request.scope["raw_path"] = alt.encode()
     return await call_next(request)
+
+
+# ---------- API 调用采集（开发者看板的数据源）----------
+# 口径与取舍见 docs/数据看板_2026-10-27/口径与数据字典.md §3 / §5，
+# 实现说明见 core/apilog.py。
+#
+# 放在中间件链最外层（后注册 = 先进入）：能包住 normalize 的路径归一与后续全部处理；
+# 且 `call_next` 之后 `scope["route"]` 已被 router 填好，可以直接取**路由模板**
+# 作为聚合键 —— 不用从真实路径猜 id（猜不准会把真接口并成一条，比不归一化更糟）。
+
+
+def _route_template(request: Request) -> str:
+    """这次请求命中的路由模板（如 `/api/sessions/{sid}`）。
+
+    **一个坑**：`include_router` 进来的路由，它的 `route.path` 是**相对前缀**的
+    （`/api/auth/me/` 的 route.path 是 `/me/`，不含 `/api/auth`）。
+    直接拿它当结果，会被"只记 /api/ 前缀"的规则整批过滤掉——
+    表现为"中间件明明跑了，但一条日志都没有"。所以这里按**段**把前缀接回去：
+    模板段数 ≤ 真实段数，且从尾部逐段匹配（`{x}` 视为通配）才认为对齐。
+
+    拿不到模板或对不齐时（404、静态挂载），退回按段归一化：
+    至少把 uuid/纯数字换成 `{id}`，否则 404 的噪声会以成千上万个
+    不同路径的形式占满排行。
+    """
+    raw = str(request.scope.get("path") or "")
+    tmpl = getattr(request.scope.get("route"), "path", None)
+    if isinstance(tmpl, str) and tmpl:
+        rs = [x for x in raw.split("/") if x]
+        ts = [x for x in tmpl.split("/") if x]
+        if ts and len(ts) <= len(rs):
+            tail = rs[len(rs) - len(ts) :]
+            if all(
+                t == r or (t.startswith("{") and t.endswith("}"))
+                for t, r in zip(ts, tail, strict=False)
+            ):
+                head = "/".join(rs[: len(rs) - len(ts)] + ts)
+                return "/" + head + ("/" if raw.endswith("/") else "")
+    return apilog.normalize_path(raw)
+
+
+def _spawn_flush() -> None:
+    """把批量落库丢进线程池，不 await。
+
+    统计绝不能成为响应变慢的原因：这里只 create_task，本次请求立刻结束。
+    没有运行中的事件循环时（同步测试）就地写 —— 否则测试断言看不到数据。
+    """
+    try:
+        asyncio.create_task(asyncio.to_thread(apilog.flush))
+    except RuntimeError:
+        apilog.flush()
+
+
+@app.middleware("http")
+async def collect_api_call(request: Request, call_next: Callable[[Request], Any]) -> Response:
+    t0 = time.perf_counter()
+    status = 500  # 下游抛异常时的兜底：这次调用确实发生了，且没有正常响应
+    try:
+        response = await call_next(request)
+        status = response.status_code
+        return response
+    finally:
+        # 用 finally 而不是 except：业务异常要继续往上抛（不能吞），
+        # 但"这次调用发生过"这个事实仍要记下来
+        try:
+            dur_ms = int((time.perf_counter() - t0) * 1000)
+            uid = str(getattr(request.state, "uid", "") or "") or None
+            if apilog.record(request.method, _route_template(request), status, dur_ms, uid):
+                _spawn_flush()
+        except Exception:  # noqa: BLE001 —— 采集失败绝不能让请求失败
+            pass
 
 
 # ---------- 配额 / 限流 → 429 ----------

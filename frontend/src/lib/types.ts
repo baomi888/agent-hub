@@ -118,6 +118,8 @@ export interface UserOut {
 export interface MeOut {
   user: UserOut;
   quota: Record<string, QuotaInfo>;
+  /** 是否开发者（后端 ADMIN_USERNAMES）。老后端不返回这个字段 → undefined → 按 false 处理 */
+  is_admin?: boolean;
 }
 
 // ---------- 用量与反馈看板（P2）----------
@@ -535,4 +537,104 @@ export interface HybridLogRow {
   /** 摘要级数据，后端序列化后截断 2000 字符 */
   payload?: Record<string, unknown>;
   ts: number;
+}
+
+// ---------- 开发者数据看板（/dashboard）----------
+// 口径定义见 docs/数据看板_2026-10-27/口径与数据字典.md，
+// 这里的字段名与后端 api/admin.py 的响应一一对应，改名要两边一起改。
+
+export interface DashboardRange {
+  days: number;
+  /** Unix 秒 */
+  start: number;
+  end: number;
+  tz: string;
+}
+
+export interface DashboardUsers {
+  /** 注册总数。**当前快照，不随 days 变化** */
+  total: number;
+  /** 区间内新增 */
+  new: number;
+}
+
+export interface DashboardCalls {
+  total: number;
+  ok: number;
+  failed: number;
+  /** 分母为 0 时为 null —— 不是 0，也不是 100 */
+  success_rate: number | null;
+  avg_ms: number;
+  max_ms: number;
+}
+
+export interface DashboardSeriesItem {
+  /** YYYY-MM-DD（业务时区） */
+  day: string;
+  calls: number;
+  failed: number;
+}
+
+export type FeedbackStatus = "open" | "doing" | "done" | "closed";
+
+export interface DashboardOverview {
+  range: DashboardRange;
+  users: DashboardUsers;
+  calls: DashboardCalls;
+  feedback: Record<FeedbackStatus, number>;
+  series: DashboardSeriesItem[];
+}
+
+export interface ApiRankItem {
+  path: string;
+  method: string;
+  calls: number;
+  failed: number;
+  avg_ms: number;
+  max_ms: number;
+}
+
+export interface ApiRankResp {
+  items: ApiRankItem[];
+  total_paths: number;
+  sort: "calls" | "slow" | "fail";
+  range: { days: number; start: number; end: number };
+}
+
+export interface UserFeedbackItem {
+  id: number;
+  uid: string;
+  username: string;
+  category: string;
+  category_label: string;
+  content: string;
+  contact: string;
+  page: string;
+  status: FeedbackStatus;
+  status_label: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface AdminFeedbackResp {
+  items: UserFeedbackItem[];
+  total: number;
+  counts: Record<FeedbackStatus, number>;
+}
+
+export interface MyFeedbackResp {
+  items: UserFeedbackItem[];
+  total: number;
+}
+
+export interface FeedbackDict {
+  categories: { value: string; label: string }[];
+  statuses: { value: string; label: string }[];
+  transitions: Record<string, string[]>;
+  limits: {
+    min_content: number;
+    max_content: number;
+    max_contact: number;
+    max_page: number;
+  };
 }

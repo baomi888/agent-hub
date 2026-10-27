@@ -1,0 +1,512 @@
+"use client";
+
+// P8 · 开发者数据看板
+//
+// 页面任务：回答开发者的四个问题 ——
+//   **有多少人 / 在调什么接口 / 哪里慢 / 哪里在报错**（外加反馈堆了多少）。
+//
+// 口径定义见 docs/数据看板_2026-10-27/口径与数据字典.md，
+// 页面上每一处数字的算法都能在那份文档里查到对应章节。
+//
+// 三条必须显式标注的口径（不标用户会误判"筛选坏了"）：
+//   ① 总用户数是**当前快照**，不随时间筛选变化
+//   ② 平均耗时是**均值，不是 p95**（p95 要给每个接口分组算，代价不划算）
+//   ③ `/api/chat/stream` 的耗时是**整条流的时长**，会把均值拉高
+//
+// 本期**不做导出**（2026-10-27 决定）：看板定位是"开发者在浏览器里看数"，
+// 把数据搬进 Excel 属于另一种工作流（要权限、要脱敏、要留痕），不在这里顺手做。
+//
+// 权限：非管理员整页挡住。但这不是安全边界 —— 后端每个端点都会返回 403，
+// 这里只是不让普通用户看到一堆报错卡片。
+import { useCallback, useEffect, useState } from "react";
+import ConsoleShell from "@/components/console/ConsoleShell";
+import CornIcon from "@/components/CornIcon";
+import { Callout, Seg, SkeletonLines } from "@/components/console/ui";
+import { api } from "@/lib/api";
+import { useAuth } from "@/lib/hooks/useAuth";
+import { fmtNum } from "@/lib/time";
+import type {
+  AdminFeedbackResp,
+  ApiRankResp,
+  DashboardOverview,
+  FeedbackDict,
+  FeedbackStatus,
+  UserFeedbackItem,
+} from "@/lib/types";
+
+const DAY_OPTIONS = [
+  { value: "1", label: "今日", hint: "自然日 00:00 起（不是滚动 24 小时）" },
+  { value: "7", label: "近 7 天", hint: "含今日的 7 个自然日" },
+  { value: "30", label: "近 30 天", hint: "含今日的 30 个自然日" },
+];
+
+// 三种排序对应三个真实问题，不是"多给几个选项"：
+// 调用量看依赖面、最慢看体感、失败看稳定性。只给一个排行榜，
+// 开发者还得自己脑内排序。
+type SortKey = "calls" | "slow" | "fail";
+
+const SORT_OPTIONS: { value: SortKey; label: string; hint: string }[] = [
+  { value: "calls", label: "调用量", hint: "哪个接口被调得最多" },
+  {
+    value: "slow",
+    label: "最慢",
+    hint: "平均耗时最高（只算调用 ≥ 3 次的接口：首次冷启动的偶发慢不该上榜）",
+  },
+  { value: "fail", label: "失败", hint: "4xx / 5xx 最多的接口" },
+];
+
+const STATUS_CLASS: Record<string, string> = {
+  open: "warn",
+  doing: "info",
+  done: "ok",
+  closed: "",
+};
+
+const STATUS_ORDER: FeedbackStatus[] = ["open", "doing", "done", "closed"];
+
+const AUTO_REFRESH_MS = 30_000;
+
+function fmtTime(ts: number): string {
+  if (!ts) return "";
+  const d = new Date(ts * 1000);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function fmtClock(d: Date | null): string {
+  if (!d) return "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+export default function DashboardPage() {
+  const auth = useAuth();
+  const isAdmin = Boolean(auth.me?.is_admin);
+
+  const [days, setDays] = useState(7);
+  const [sort, setSort] = useState<SortKey>("calls");
+  const [auto, setAuto] = useState(true);
+  const [ov, setOv] = useState<DashboardOverview | null>(null);
+  const [ovErr, setOvErr] = useState("");
+  const [apis, setApis] = useState<ApiRankResp | null>(null);
+  const [fb, setFb] = useState<AdminFeedbackResp | null>(null);
+  const [fbStatus, setFbStatus] = useState("");
+  const [dict, setDict] = useState<FeedbackDict | null>(null);
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const [fetchedAt, setFetchedAt] = useState<Date | null>(null);
+
+  const load = useCallback(() => {
+    if (!isAdmin) return;
+    setOvErr("");
+    api.admin
+      .overview(days)
+      .then((d) => {
+        setOv(d);
+        setFetchedAt(new Date());
+      })
+      .catch((e) => setOvErr(e instanceof Error ? e.message : "读取失败"));
+    api.admin
+      .apis(days, 20, sort)
+      .then(setApis)
+      .catch(() => setApis(null));
+    api.admin
+      .feedback(fbStatus, 30, 0)
+      .then(setFb)
+      .catch(() => setFb(null));
+  }, [days, sort, fbStatus, isAdmin]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    api.admin
+      .dict()
+      .then(setDict)
+      .catch(() => setDict(null));
+  }, [isAdmin]);
+
+  // 准实时：采集侧 3 秒落库，页面侧 30 秒自动拉一次。
+  // 两个约束：① 页面在后台时不拉（省资源，也避免回来时看到一串串数字跳变）；
+  //          ② 切回前台立刻补一次，否则最长要等 30 秒才更新。
+  useEffect(() => {
+    if (!auto || !isAdmin) return;
+    const tick = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    const id = window.setInterval(tick, AUTO_REFRESH_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [auto, isAdmin, load]);
+
+  const move = useCallback(
+    async (item: UserFeedbackItem, next: string) => {
+      setBusyId(item.id);
+      try {
+        await api.admin.patchFeedback(item.id, next);
+        load();
+      } catch (e) {
+        setOvErr(e instanceof Error ? e.message : "状态更新失败");
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [load]
+  );
+
+  if (!auth.loading && !isAdmin) {
+    return (
+      <ConsoleShell active="dashboard" eyebrow="P8 · /dashboard" title="数据看板" sub="仅开发者可见。">
+        <Callout icon="warn">
+          这个页面只有开发者能看。当前账号不是管理员 —— 若你确实需要，请让开发者在
+          <code>.env</code> 的 <code>ADMIN_USERNAMES</code> 里加上你的用户名。
+        </Callout>
+      </ConsoleShell>
+    );
+  }
+
+  const noCalls = ov !== null && ov.calls.total === 0;
+  const peakCalls = ov ? Math.max(1, ...ov.series.map((x) => x.calls)) : 1;
+
+  return (
+    <ConsoleShell
+      active="dashboard"
+      eyebrow="P8 · /dashboard"
+      title="数据看板"
+      sub={
+        <>
+          有多少人、在调什么、哪里慢、哪里在报错。
+          <span className="meta">
+            {" "}
+            口径见 口径与数据字典.md；采集延迟 ≤ 3 秒{auto ? "，页面每 30 秒自动刷新" : ""}
+            {fetchedAt ? `（上次 ${fmtClock(fetchedAt)}）` : ""}。
+          </span>
+        </>
+      }
+      actions={
+        <>
+          <Seg
+            ariaLabel="时间范围"
+            options={DAY_OPTIONS}
+            value={String(days)}
+            onChange={(v) => setDays(Number(v))}
+          />
+          <button
+            type="button"
+            className={`btn btn-sm ${auto ? "btn-primary" : "btn-ghost"}`}
+            aria-pressed={auto}
+            onClick={() => setAuto((v) => !v)}
+            title="每 30 秒自动拉一次；页面在后台时暂停"
+          >
+            <CornIcon name="refresh" />
+            {auto ? "自动刷新 开" : "自动刷新 关"}
+          </button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={load} title="立刻重新拉一次">
+            刷新
+          </button>
+        </>
+      }
+    >
+      <div className="stack-20">
+        {ovErr ? <Callout icon="warn">读取失败：{ovErr}</Callout> : null}
+
+        {noCalls ? (
+          <Callout icon="info">
+            这个区间还没有调用记录。刚上线时是正常的 —— 采集是批量落库，最多滞后 3 秒；
+            若持续为空，检查 <code>api_call_logs</code> 表是否有行、以及访问是否走了
+            <code>/api/</code> 前缀。
+          </Callout>
+        ) : null}
+
+        {/* ============ 第一排：用户与调用总量 ============ */}
+        <div className="grid4">
+          <div className="card card-pad stat">
+            <div className="n">{ov ? fmtNum(ov.users.total) : "—"}</div>
+            <div className="l">
+              注册用户 <span className="meta">（当前快照，不随筛选变化）</span>
+            </div>
+          </div>
+          <div className="card card-pad stat">
+            <div className="n">{ov ? fmtNum(ov.users.new) : "—"}</div>
+            <div className="l">区间新增用户</div>
+          </div>
+          <div className="card card-pad stat">
+            <div className="n">{ov ? fmtNum(ov.calls.total) : "—"}</div>
+            <div className="l">API 调用次数</div>
+          </div>
+          <div className="card card-pad stat">
+            <div className="n">
+              {ov
+                ? ov.calls.success_rate === null
+                  ? "—"
+                  : `${(ov.calls.success_rate * 100).toFixed(1)}%`
+                : "—"}
+            </div>
+            <div className="l">
+              成功率 <span className="meta">（含 4xx/5xx，分母为全部调用）</span>
+            </div>
+          </div>
+        </div>
+
+        {/* ============ 第二排：耗时与反馈 ============ */}
+        <div className="grid4">
+          <div className="card card-pad stat">
+            <div className="n">{ov ? `${fmtNum(ov.calls.avg_ms)} ms` : "—"}</div>
+            <div className="l">
+              平均耗时 <span className="meta">（均值，非 p95）</span>
+            </div>
+          </div>
+          <div className="card card-pad stat">
+            <div className="n">{ov ? `${fmtNum(ov.calls.max_ms)} ms` : "—"}</div>
+            <div className="l">最大耗时</div>
+          </div>
+          <div className="card card-pad stat">
+            <div className="n">{ov ? fmtNum(ov.calls.failed) : "—"}</div>
+            <div className="l">失败次数（状态码 ≥ 400）</div>
+          </div>
+          <div className="card card-pad stat">
+            <div className="n">{ov ? fmtNum(ov.feedback.open) : "—"}</div>
+            <div className="l">
+              待处理反馈 <span className="meta">（全量，不受筛选影响）</span>
+            </div>
+          </div>
+        </div>
+
+        {/* ============ 趋势 ============ */}
+        <section>
+          <p className="sec-label">每日调用量</p>
+          <div className="card card-pad">
+            {!ov ? (
+              <SkeletonLines widths={["100%", "88%", "72%"]} />
+            ) : ov.series.every((s) => s.calls === 0) ? (
+              <p className="hint" style={{ marginTop: 0 }}>
+                区间内没有调用，趋势图暂无数据。
+              </p>
+            ) : (
+              <>
+                {ov.series.map((s) => {
+                  const failPct = s.calls ? Math.round((s.failed / s.calls) * 100) : 0;
+                  return (
+                    <div
+                      className="row"
+                      key={s.day}
+                      style={{ alignItems: "center", gap: 10, marginBottom: 6 }}
+                    >
+                      <span className="meta" style={{ width: 52, flex: "0 0 52px" }}>
+                        {s.day.slice(5)}
+                      </span>
+                      <div className="bar" style={{ flex: 1 }}>
+                        <i style={{ width: `${Math.round((s.calls / peakCalls) * 100)}%` }} />
+                      </div>
+                      <span className="meta" style={{ width: 84, textAlign: "right" }}>
+                        {fmtNum(s.calls)}
+                        {s.failed ? ` · 失败${failPct}%` : ""}
+                      </span>
+                    </div>
+                  );
+                })}
+                <p className="hint">
+                  按<b>自然日</b>切分（业务时区 {ov.range.tz}）。全部为 0 的日子也画出来 ——
+                  跳过空日子会让趋势看起来比实际更连贯。
+                </p>
+              </>
+            )}
+          </div>
+        </section>
+
+        <div className="grid2">
+          {/* ============ 接口排行 ============ */}
+          <section>
+            <p className="sec-label">
+              接口排行 {apis ? <span className="meta">共 {apis.total_paths} 个接口</span> : null}
+            </p>
+            <div className="card card-pad">
+              <div className="row" style={{ gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+                {SORT_OPTIONS.map((o) => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    className={`btn btn-sm ${sort === o.value ? "btn-primary" : "btn-ghost"}`}
+                    aria-pressed={sort === o.value}
+                    title={o.hint}
+                    onClick={() => setSort(o.value)}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+
+              {!apis ? (
+                <SkeletonLines widths={["100%", "90%", "80%", "70%"]} />
+              ) : apis.items.length === 0 ? (
+                <p className="hint" style={{ marginTop: 0 }}>
+                  {sort === "fail"
+                    ? "这个区间没有失败请求 —— 是好事。"
+                    : sort === "slow"
+                      ? "没有调用次数 ≥ 3 的接口，算不出有意义的平均耗时。"
+                      : "这个区间还没有调用记录。"}
+                </p>
+              ) : (
+                <>
+                  <div
+                    className="tr apis th"
+                    style={{ display: "grid", gridTemplateColumns: "1fr 52px 52px 60px", gap: 8 }}
+                  >
+                    <span>接口（路由模板）</span>
+                    <span>次数</span>
+                    <span>失败</span>
+                    <span>均值</span>
+                  </div>
+                  {apis.items.map((it) => (
+                    <div
+                      className="tr apis"
+                      key={`${it.method} ${it.path}`}
+                      style={{ display: "grid", gridTemplateColumns: "1fr 52px 52px 60px", gap: 8 }}
+                    >
+                      <span
+                        className="mono"
+                        title={`${it.method} ${it.path}`}
+                        style={{
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        <span className={`ctag ${it.method === "GET" ? "info" : ""}`}>
+                          {it.method}
+                        </span>{" "}
+                        {it.path}
+                      </span>
+                      <span>{fmtNum(it.calls)}</span>
+                      <span className="meta" style={{ color: it.failed ? "var(--red-ink)" : undefined }}>
+                        {it.failed || "—"}
+                      </span>
+                      <span className="meta">{it.avg_ms}ms</span>
+                    </div>
+                  ))}
+                  <p className="hint">
+                    按<b>路由模板</b>聚合（<code>/api/sessions/{"{sid}"}</code>），不是真实路径 ——
+                    否则每个会话 id 都会变成一个"只调用过 1 次"的接口，排行就没意义了。
+                    打开本页的请求不计入统计（否则越刷新数字越大）。
+                  </p>
+                </>
+              )}
+            </div>
+          </section>
+
+          {/* ============ 反馈 ============ */}
+          <section>
+            <p className="sec-label" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              用户反馈 {fb ? <span className="meta">共 {fb.total} 条</span> : null}
+            </p>
+            <div className="card card-pad">
+              <div className="row" style={{ gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${fbStatus === "" ? "btn-primary" : "btn-ghost"}`}
+                  onClick={() => setFbStatus("")}
+                >
+                  全部
+                </button>
+                {STATUS_ORDER.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    className={`btn btn-sm ${fbStatus === s ? "btn-primary" : "btn-ghost"}`}
+                    onClick={() => setFbStatus(s)}
+                  >
+                    {dict?.statuses.find((x) => x.value === s)?.label ?? s}
+                    {fb ? ` ${fb.counts[s] ?? 0}` : ""}
+                  </button>
+                ))}
+              </div>
+
+              {!fb ? (
+                <SkeletonLines widths={["100%", "86%", "70%"]} />
+              ) : fb.items.length === 0 ? (
+                <p className="hint" style={{ marginTop: 0 }}>
+                  {fbStatus
+                    ? "这个状态下没有反馈，切「全部」看看。"
+                    : "还没有反馈。用户在「设置」页可以提交，分类、文案、来源页面都会记下来。"}
+                </p>
+              ) : (
+                <div style={{ maxHeight: 460, overflowY: "auto" }}>
+                  {fb.items.map((it) => (
+                    <div
+                      key={it.id}
+                      style={{ padding: "9px 0", borderBottom: "1px solid var(--line)" }}
+                    >
+                      <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                        <span className="ctag info">{it.category_label}</span>
+                        <span className={`ctag ${STATUS_CLASS[it.status] ?? ""}`}>
+                          {it.status_label}
+                        </span>
+                        <span className="meta" style={{ marginLeft: "auto" }}>
+                          {it.username || it.uid.slice(0, 8)} · {fmtTime(it.created_at)}
+                        </span>
+                      </div>
+                      <div style={{ marginTop: 5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                        {it.content}
+                      </div>
+                      {it.contact || it.page ? (
+                        <div className="meta" style={{ marginTop: 4 }}>
+                          {it.page ? `来自 ${it.page}` : ""}
+                          {it.contact ? ` · 联系 ${it.contact}` : ""}
+                        </div>
+                      ) : null}
+                      {/* 只渲染流转表允许的下一步：不允许回退（done 不能退回 doing），
+                          前端不给按钮，后端也会 409 兜住 */}
+                      <div className="row" style={{ gap: 6, marginTop: 6 }}>
+                        {(dict?.transitions[it.status] ?? []).map((next) => (
+                          <button
+                            key={next}
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            disabled={busyId === it.id}
+                            onClick={() => void move(it, next)}
+                          >
+                            → {dict?.statuses.find((x) => x.value === next)?.label ?? next}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+
+        {/* ============ 口径说明（放在页尾，不占首屏） ============ */}
+        <section>
+          <p className="sec-label">这张表在记什么</p>
+          <div className="card card-pad">
+            <p className="hint" style={{ marginTop: 0 }}>
+              只记录 <code>/api/</code> 下的请求；排除 <code>/health</code>、
+              <code>/api/metrics</code>（采集器自己会打，记进去等于自己统计自己）、
+              以及 <code>/api/admin/*</code>（看板自己刷新不该产生业务数据）。
+              请求以<b>路由模板</b>为键聚合，所以 <code>/api/sessions/8f3a…</code> 与
+              <code>/api/sessions/1c2b…</code> 算同一个接口。
+            </p>
+            <p className="hint">
+              采集走内存缓冲 + 批量写库（每 3 秒或攒够 50 条），所以数字最多滞后 3 秒；
+              <code>kill -9</code> 时缓冲里最多丢 50 条 —— 这是统计，不是账本。
+              平均值是<b>算术平均</b>：个别长连接（如 <code>/api/chat/stream</code> 的整条流时长）
+              会把它拉高，看单接口时请以排行里的"均值"列为准。
+            </p>
+            <p className="hint" style={{ marginBottom: 0 }}>
+              本页不提供导出：需要明细请直接查 <code>api_call_logs</code> 表（口径与字段见文档 §3.3）。
+            </p>
+          </div>
+        </section>
+      </div>
+    </ConsoleShell>
+  );
+}
