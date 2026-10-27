@@ -43,9 +43,13 @@ const NAV: NavItem[] = [
   // 四六级备考工作区：计划 / 词汇本 / 模考分数（申报书 B3 的专项模块入口）
   { key: "cet", href: "/cet", icon: "globe", label: "四六级" },
   // 关卡式学习路径：12 关由真实学习数据判定（申报书 3.4 / 2.8）
-  { key: "path", href: "/path", icon: "target", label: "路径" },
-  // 混合架构：工作流定义 + 切换规则。后端 API 由林宏亮提供，界面这一侧由前端做
-  { key: "flow", href: "/flow", icon: "target", label: "工作流" },
+  { key: "path", href: "/path", icon: "target", label: "学习路径" },
+  // 混合架构：工作流定义 + 切换规则。**这是开发者调试面，不是用户功能**
+  // —— 界面上摊着 UUID、任务 id、日志入口和可编辑的 JSON 定义。
+  // 2026-10-27 内测反馈："这个为啥要给用户看"。与 /dashboard 同一性质，
+  // 因此同样加 adminOnly。注意：这只是不给误点的机会，不是安全边界
+  // （真隐藏需要后端也返 404，本期没做 —— 用户确认"前端看不到就行"）。
+  { key: "flow", href: "/flow", icon: "target", label: "工作流", adminOnly: true },
   // 数据看板：开发者看"有多少人、在调什么接口、反馈堆了多少"。
   // 只在 is_admin 时渲染入口 —— 但**真正的权限在后端**（非管理员返回 404，
   // 伪装成接口不存在，见 api/admin.py）。

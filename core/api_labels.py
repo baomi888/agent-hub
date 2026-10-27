@@ -116,7 +116,9 @@ _LABELS: dict[tuple[str, str], str] = {
     ("POST", "/api/report/generate"): "日报 · 生成",
     # ---------- 四六级 ----------
     ("GET", "/api/cet/overview"): "四六级 · 学习概览",
-    ("POST", "/api/cet/plan"): "四六级 · 生成备考计划",
+    ("POST", "/api/cet/plan"): "四六级 · 建立备考档案",
+    ("PATCH", "/api/cet/plan"): "四六级 · 调整备考设置",
+    ("DELETE", "/api/cet/plan"): "四六级 · 结束备考计划",
     ("GET", "/api/cet/scores"): "四六级 · 成绩列表",
     ("POST", "/api/cet/scores"): "四六级 · 记录一次成绩",
     ("DELETE", "/api/cet/scores/{}"): "四六级 · 删除成绩",
