@@ -182,7 +182,7 @@ export default function DashboardPage() {
   return (
     <ConsoleShell
       active="dashboard"
-      eyebrow="P8 · /dashboard"
+      eyebrow="管理 · 内部"
       title="数据看板"
       sub={
         <>

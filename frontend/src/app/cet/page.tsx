@@ -627,7 +627,7 @@ export default function CetPage() {
   return (
     <ConsoleShell
       active="cet"
-      eyebrow="P7 · 四六级"
+      eyebrow="专项备考"
       title="四六级备考工作区"
       sub="按你的考试日期和每天能练的内容生成任务，随时可改。词卡按遗忘曲线复习，分数画成趋势。"
       actions={

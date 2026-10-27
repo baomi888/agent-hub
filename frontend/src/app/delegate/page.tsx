@@ -382,7 +382,7 @@ export default function DelegatePage() {
   return (
     <ConsoleShell
       active="delegate"
-      eyebrow="P4 · /delegate"
+      eyebrow="自动替你干活"
       title="每日委托"
       sub={
         <>

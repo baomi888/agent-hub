@@ -183,7 +183,7 @@ export default function FlowPage() {
   return (
     <ConsoleShell
       active="flow"
-      eyebrow="P6 · 混合架构"
+      eyebrow="管理 · 内部"
       title="工作流与切换规则"
       sub={
         <>

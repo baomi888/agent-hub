@@ -255,8 +255,135 @@
   color: var(--accent-ink);
 }
 
-/* 首屏四宫格能力卡：呼应设计稿「四个等大的圆角白色卡片」，像贴在纸上的功能便签 */
-.ability-card {
+/* ============ 新手引导条（L2）：首次进入的三步走 ============
+   视觉上是"贴在欢迎页上的一张提示卡"：淡金底 + 虚线金边。
+   虚线在站内已有语义 ——「还差一步、可以补」（见未绑定资料库胶囊），
+   正好对上这里"你还没开始，先做这三件事"。
+   它挂在欢迎页内部，开始对话后就随空态一起消失，不是常驻公告条。 */
+.onboard {
+  width: 100%;
+  margin-top: 18px;
+  padding: 11px 13px 12px;
+  text-align: left;
+  background: var(--accent-soft);
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius-lg);
+}
+
+.onboard-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.onboard-title {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-serif);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  letter-spacing: var(--ls-tight);
+  color: var(--accent-ink);
+}
+
+/* 「知道了」用文字按钮而不是右上角 ✕：这条是给人看的提示，不是需要收拾的浮层，
+   一个明确的动词更好点，也更好读屏。 */
+.onboard-close {
+  flex: none;
+  padding: 3px 9px;
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  background: var(--card-bg);
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.onboard-close:hover,
+.onboard-close:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  outline: none;
+}
+
+.onboard-steps {
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 7px 12px;
+}
+@media (min-width: 760px) {
+  .onboard-steps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.onboard-steps li {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 序号用空心描边而非实心金块：实心金底压白字在纸底只有 2.6:1（过不了 AA），
+   而且三颗实心金点会和下面三张卡抢注意力。 */
+.ob-n {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--accent-ink);
+  /* baseline 对齐时图形会浮在文字上沿，压回中线 */
+  transform: translateY(2px);
+}
+
+/* 可点的那一步：实线下划线（淡底 + 下划线在深色主题下看不见，10-24 踩过） */
+.ob-act {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-1);
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.ob-act:hover,
+.ob-act:focus-visible {
+  color: var(--accent-ink);
+  outline: none;
+}
+
+/* 已经做到的那一步（如"已有 2 个资料库"）：不引诱点击，只报事实 */
+.ob-done {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.ob-hint {
+  flex: 1 1 100%;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-tight);
+  color: var(--text-3);
+}
+
+/* 首屏四宫格能力卡：呼应设计稿「四个等大的圆角白色卡片」，像贴在纸上的功能便签 */.ability-card {
   display: flex;
   flex-direction: column;
   align-items: center;

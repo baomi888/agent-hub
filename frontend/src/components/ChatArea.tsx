@@ -16,6 +16,7 @@ import { isPlanRequest, stripPlanHint } from "./chat/plan";
 import Bubble from "./chat/Bubble";
 import BubbleErrorBoundary from "./chat/BubbleErrorBoundary";
 import QueryEnhance from "./chat/QueryEnhance";
+import OnboardBar from "./chat/OnboardBar";
 import type { ChatAttachment, UiMessage } from "./chat/types";
 import FilePreviewModal from "./FilePreviewModal";
 
@@ -68,6 +69,10 @@ interface Props {
   onUnbindKb?: () => void;
   kbPanelOpen?: boolean;
   onToggleKbPanel?: () => void;
+  /** 幂等地「打开」资料库面板。
+   *  新手引导第 2 步要点它 —— 用 onToggleKbPanel 会在宽屏（面板本来就开着）上
+   *  把面板关掉：用户照着「建一个知识库」点一下，面板反而消失了。 */
+  onOpenKbPanel?: () => void;
   /** 窄屏下打开会话列表抽屉 */
   onOpenSidebar?: () => void;
   /** 外部把建议问题预填进输入框（如联网建库后），不自动发送 */
@@ -88,6 +93,8 @@ interface Props {
   quota?: Record<string, QuotaInfo>;
   /** 打开「用量与反馈」看板；不传则不显示顶栏胶囊 */
   onOpenUsage?: () => void;
+  /** 当前用户 id：新手引导条的「已关闭」状态按人存，换人登录要重新看到 */
+  userId?: string | null;
 }
 
 export default function ChatArea({
@@ -108,6 +115,7 @@ export default function ChatArea({
   onUnbindKb,
   kbPanelOpen,
   onToggleKbPanel,
+  onOpenKbPanel,
   onOpenSidebar,
   prefill,
   onDeleteTurn,
@@ -118,6 +126,7 @@ export default function ChatArea({
   sessionId = null,
   quota,
   onOpenUsage,
+  userId = null,
 }: Props) {
   const [input, setInput] = useState("");
   const [showParams, setShowParams] = useState(false);
@@ -585,6 +594,15 @@ export default function ChatArea({
               <p className="mt-1.5 max-w-[30rem] text-msg leading-relaxed text-muted">
                 一句话就行。直接问我——我会自己决定怎么帮你。
               </p>
+
+              {/* 新手引导（L2）：只在"还没开始问"的欢迎页出现，关掉后按人永久记住。
+                  放在这里而不是页面顶部：它是给新用户的，老用户一开口就该消失。 */}
+              <OnboardBar
+                userId={userId}
+                kbCount={kbCount ?? 0}
+                onOpenKb={onOpenKbPanel ?? onToggleKbPanel}
+                onAsk={() => inputRef.current?.focus()}
+              />
 
               {/* ② 主线：三个持续陪伴功能。原来这里是四宫格，四件平级，
                   结果「模板广场」这种一次性动作和「每日委托」这种天天用的能力

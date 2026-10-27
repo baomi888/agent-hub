@@ -143,9 +143,9 @@ export default function SettingsPage() {
   return (
     <ConsoleShell
       active="settings"
-      eyebrow="P7 · /settings"
+      eyebrow="你的偏好"
       title="设置"
-      sub="账号、外观、检索、隐私、用量，以及知穗当前能调用哪些工具、调度进程活着没有。"
+      sub="账号、外观、检索、隐私、用量，以及知穗现在会哪些工具、后台任务有没有在跑。"
     >
       <div className="grid2">
         {/* ============ 左列：可改的设置 ============ */}

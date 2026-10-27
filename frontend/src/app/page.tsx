@@ -740,6 +740,9 @@ export default function Home() {
           kbNameMap={kbNameMap}
           onUnbindKb={() => bindKb(null)}
           onToggleKbPanel={() => setKbPanelOpen(!kbPanelOpen)}
+          // 新手引导第 2 步要的是「打开」，不是「切换」：宽屏上面板本来就常驻，
+          // 传 toggle 会让用户点「建一个知识库」时面板反而收起来。
+          onOpenKbPanel={() => setKbPanelOpen(true)}
           kbPanelOpen={kbPanelOpen}
           onOpenSidebar={viewport === "narrow" ? () => setSidebarOpen(true) : undefined}
           prefill={prefill ?? undefined}
@@ -751,6 +754,7 @@ export default function Home() {
           sessionId={activeSid}
           quota={auth.me?.quota}
           onOpenUsage={() => setUsageOpen(true)}
+          userId={authedId}
         />
       </div>
 
