@@ -302,24 +302,71 @@ def _spawn_flush() -> None:
         apilog.flush()
 
 
+def _is_streaming(response: Response) -> bool:
+    """这个响应是不是"边算边发"的流。
+
+    **不要用 `isinstance(response, StreamingResponse)`**：`BaseHTTPMiddleware`
+    交回来的实际是 Starlette 内部的 `_StreamingResponse`，它的 MRO 里根本没有
+    `StreamingResponse`（只有 `Response`），isinstance 恒为 False，
+    判断会静默失效 —— 表现为流式接口的耗时永远是 0，而且没有任何报错。
+    只有 `_StreamingResponse` 带 `body_iterator`，普通 `Response` 不带，
+    所以按属性判断既准确又不依赖内部类名。
+    """
+    return hasattr(response, "body_iterator")
+
+
 @app.middleware("http")
 async def collect_api_call(request: Request, call_next: Callable[[Request], Any]) -> Response:
+    """采集一次调用。**流式与非流式的记录时机不同，这是本函数唯一的复杂点**。
+
+    非流式：`call_next` 返回时响应已经做好，此刻记时长就是真实时长（文档 §2.5）。
+
+    流式（SSE / 文件下载）：`call_next` 在**第一帧产生之前**就返回了 —— 这层
+    中间件看到的是"响应头已就绪"，body 还没开始生成。此刻记时长会得到 0~30ms，
+    而真实时长可能是几十秒。于是 `/api/chat/stream` 会在"最慢接口"榜上消失
+    （实测客户端 15851ms，看板记 29ms，差 546 倍）。所以这里把 `body_iterator`
+    包一层计时，等生成器跑完再记。
+
+    记在 `finally` 而不是 else：客户端中途断开（浏览器关页、网络断）时生成器
+    被 close，照样会走到 finally —— 那次调用确实发生过，不该漏统计。
+    """
     t0 = time.perf_counter()
     status = 500  # 下游抛异常时的兜底：这次调用确实发生了，且没有正常响应
-    try:
-        response = await call_next(request)
-        status = response.status_code
-        return response
-    finally:
-        # 用 finally 而不是 except：业务异常要继续往上抛（不能吞），
-        # 但"这次调用发生过"这个事实仍要记下来
+
+    def _emit(code: int) -> None:
+        """统一出口：算时长 → 归一化路径 → 塞缓冲。任何异常都吞掉。"""
         try:
             dur_ms = int((time.perf_counter() - t0) * 1000)
             uid = str(getattr(request.state, "uid", "") or "") or None
-            if apilog.record(request.method, _route_template(request), status, dur_ms, uid):
+            if apilog.record(request.method, _route_template(request), code, dur_ms, uid):
                 _spawn_flush()
         except Exception:  # noqa: BLE001 —— 采集失败绝不能让请求失败
             pass
+
+    try:
+        response = await call_next(request)
+        status = response.status_code
+    except BaseException:
+        # 业务异常要继续往上抛（不能吞），但"这次调用发生过"这个事实仍要记下来
+        _emit(status)
+        raise
+
+    if _is_streaming(response):
+        inner = response.body_iterator
+        final_status = status
+
+        async def _timed_body():
+            try:
+                async for chunk in inner:
+                    yield chunk
+            finally:
+                _emit(final_status)
+
+        response.body_iterator = _timed_body()
+        return response
+
+    _emit(status)
+    return response
 
 
 # ---------- 配额 / 限流 → 429 ----------

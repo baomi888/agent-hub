@@ -3,8 +3,9 @@
 口径依据：`docs/数据看板_2026-10-27/口径与数据字典.md`（下文简称"字典 §N"）。
 本文件锁死的不只是"功能能跑"，还有三件最容易静默坏掉的事：
 
-  1. **权限两层顺序**：未登录必须 401（不是 403），非管理员必须 403（不是 401）。
-     反了的话前端会把"权限不够"当成"登录态过期"，引导用户做一次无意义的登录。
+  1. **权限两层顺序**：未登录必须 401（不是 404），非管理员必须 404（不是 401）。
+     反了的话，"登录态过期"会被伪装成"路径不存在"，用户不知道该去登录，
+     排查时也会误判成路由被删了。
   2. **观际者效应**：看板自己的请求不能进统计。否则"打开看板"本身推高数字，
      看到的数据永远比真实多一截，而且越刷新越多。
   3. **CSV 公式注入**：用户反馈是自由文本，以 `=` 开头的单元格 Excel 会当公式执行。
@@ -142,18 +143,41 @@ _ADMIN_PATHS = [
 
 
 def test_admin_endpoints_require_login(env, client):
-    """未登录 → 401（不是 403）。"""
+    """未登录 → 401（不是 404）。登录态过期必须能与"路径不存在"区分开。"""
     for p in _ADMIN_PATHS:
         r = client.get(p)
         assert r.status_code == 401, f"{p} 未登录返回 {r.status_code}"
 
 
 def test_admin_endpoints_reject_normal_user(env, client):
-    """登录但不是管理员 → 403（不是 401）。"""
+    """登录但不是管理员 → **404**（伪装成接口不存在，不是 403）。
+
+    403 等于向对方确认"这个路径存在、你只是权限不够"，对只有开发者自己用的
+    看板来说这本身就是泄露。404 不给任何确认。
+    """
     _login(client, USER_NAME)
     for p in _ADMIN_PATHS:
         r = client.get(p)
-        assert r.status_code == 403, f"{p} 普通用户返回 {r.status_code}"
+        assert r.status_code == 404, f"{p} 普通用户返回 {r.status_code}"
+        # 连 detail 都不能有中文/权限字样，否则等于换了种方式承认接口存在
+        assert r.json() == {"detail": "Not Found"}, f"{p} 泄露了：{r.text[:80]}"
+
+
+def test_normal_user_404_is_indistinguishable(env, client):
+    """非管理员访问看板接口，与访问一个**真的不存在**的路径完全无法区分。
+
+    这是"彻底隐藏"的硬判据：状态码、detail 文案、响应头里有意义的字段
+    都得一致。只要有一处不同，就能被用来确认"这里有个后台"。
+    """
+    _login(client, USER_NAME)
+    fake = client.get("/api/admin/__definitely_not_a_route__")
+    real = client.get("/api/admin/overview")
+    assert fake.status_code == real.status_code == 404
+    assert fake.json() == real.json()
+
+    # 唯一允许的差异是响应体长度之类无关项；关键头必须一致
+    for h in ("content-type",):
+        assert fake.headers.get(h) == real.headers.get(h)
 
 
 def test_admin_can_open_dashboard(env, client):
@@ -415,3 +439,91 @@ def test_purge_removes_old_rows(env):
     with session._get_conn() as conn:
         left = [r["path"] for r in conn.execute("SELECT path FROM api_call_logs")]
     assert left == ["/api/new/"]
+
+
+# ==================== E. 流式响应耗时（2026-10-27 修的 P1 口径缺陷）====================
+#
+# 缺陷原貌：`BaseHTTPMiddleware` 的 `call_next` 对 StreamingResponse 在**首帧产生
+# 之前**就返回，中间件拿到的 dur_ms 是"建流耗时"。实测 `/api/chat/stream`
+# 客户端 15851ms、看板记 29ms，差 546 倍 —— 于是 `sort=slow` 的榜首变成 85ms 的
+# 注册接口，真正最慢的聊天接口既算错又不上榜。
+#
+# 这两个用例锁死两件事：
+#   ① 流式要测到**整条流**（不是首帧前）
+#   ② 包计时不能改变响应体内容（少一帧就是事故，不是统计问题）
+
+
+def _temp_stream_route(main_mod, path: str, frames: int, gap: float):
+    """临时往 app 上挂一个流式端点，返回 (route, 清理函数)。"""
+    import asyncio
+
+    from fastapi.responses import StreamingResponse
+    from fastapi.routing import APIRoute
+
+    async def _gen():
+        for i in range(frames):
+            await asyncio.sleep(gap)
+            yield f"data: {i}\n\n"
+
+    async def _endpoint():
+        return StreamingResponse(_gen(), media_type="text/event-stream")
+
+    route = APIRoute(path, _endpoint, methods=["GET"])
+    main_mod.app.router.routes.append(route)
+    return route, lambda: main_mod.app.router.routes.remove(route)
+
+
+def test_streaming_response_records_whole_stream(env, client, monkeypatch):
+    """流式响应必须记整条流的时长，而不是首帧之前。"""
+    import main
+
+    # 关键：别让 record 触发真实落库，否则 _BUF 被清空、断言读不到行
+    monkeypatch.setattr(main, "_spawn_flush", lambda: None)
+
+    frames, gap = 4, 0.05  # 真实时长 ≈ 200ms
+    path = "/api/_probe/stream"
+    _, cleanup = _temp_stream_route(main, path, frames, gap)
+    try:
+        apilog._BUF.clear()
+        with client.stream("GET", path) as r:
+            body = b"".join(r.iter_bytes())
+    finally:
+        cleanup()
+
+    # ② 响应体没被计时包装破坏
+    assert body.count(b"data:") == frames, f"帧数不对：{body!r}"
+
+    rows = [r for r in apilog._BUF if r[1] == path]
+    assert len(rows) == 1, f"流式响应应记 1 条，实际 {len(rows)} 条"
+    dur = rows[0][4]
+    floor = int(frames * gap * 1000 * 0.8)
+    assert dur >= floor, f"只测到 {dur}ms（应 ≥{floor}ms）—— body_iterator 没被包上计时"
+
+
+def test_non_streaming_duration_unchanged(env, client, monkeypatch):
+    """非流式响应不能被这次改动带坏：该测多久还是多久。"""
+    import asyncio
+
+    import main
+    from fastapi.routing import APIRoute
+
+    monkeypatch.setattr(main, "_spawn_flush", lambda: None)
+
+    gap = 0.1
+    path = "/api/_probe/plain"
+
+    async def _endpoint():
+        await asyncio.sleep(gap)
+        return {"ok": True}
+
+    route = APIRoute(path, _endpoint, methods=["GET"])
+    main.app.router.routes.append(route)
+    try:
+        apilog._BUF.clear()
+        assert client.get(path).json() == {"ok": True}
+    finally:
+        main.app.router.routes.remove(route)
+
+    rows = [r for r in apilog._BUF if r[1] == path]
+    assert len(rows) == 1
+    assert rows[0][4] >= int(gap * 1000 * 0.8), f"非流式耗时异常：{rows[0][4]}ms"

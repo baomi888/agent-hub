@@ -394,7 +394,7 @@ export const api = {
 
   // ---------- 用户反馈（DeepSeek 式：分类按钮 + 一段话）----------
   // 与下面的 admin.* 分开：这个走 /api/user-feedback（登录即可、只看自己的），
-  // admin.* 走 /api/admin（非管理员后端直接 403）
+  // admin.* 走 /api/admin（非管理员后端返回 404，伪装成接口不存在）
   feedbackDict: () => request<FeedbackDict>("/api/user-feedback/dict"),
   submitFeedback: (body: { category: string; content: string; contact?: string; page?: string }) =>
     request<{ ok: boolean; id: number }>("/api/user-feedback/", {

@@ -47,7 +47,8 @@ const NAV: NavItem[] = [
   // 混合架构：工作流定义 + 切换规则。后端 API 由林宏亮提供，界面这一侧由前端做
   { key: "flow", href: "/flow", icon: "target", label: "工作流" },
   // 数据看板：开发者看"有多少人、在调什么接口、反馈堆了多少"。
-  // 只在 is_admin 时渲染入口 —— 但**真正的权限在后端**（非管理员 403），
+  // 只在 is_admin 时渲染入口 —— 但**真正的权限在后端**（非管理员返回 404，
+  // 伪装成接口不存在，见 api/admin.py）。
   // 前端隐藏只是不给误点的机会，不是安全边界
   { key: "dashboard", href: "/dashboard", icon: "briefcase", label: "看板", adminOnly: true },
   { key: "settings", href: "/settings", icon: "settings", label: "设置" },

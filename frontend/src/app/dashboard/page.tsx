@@ -11,13 +11,17 @@
 // 三条必须显式标注的口径（不标用户会误判"筛选坏了"）：
 //   ① 总用户数是**当前快照**，不随时间筛选变化
 //   ② 平均耗时是**均值，不是 p95**（p95 要给每个接口分组算，代价不划算）
-//   ③ `/api/chat/stream` 的耗时是**整条流的时长**，会把均值拉高
+//   ③ `/api/chat/stream` 的耗时是**整条流的时长**（含模型生成时间），会把均值拉高。
+//      这个数曾经是错的 —— 中间件只测到首帧之前，记成 29ms（真实 15851ms），
+//      2026-10-27 已修（包装 body_iterator 计时），`sort=slow` 才第一次真的正确
 //
 // 本期**不做导出**（2026-10-27 决定）：看板定位是"开发者在浏览器里看数"，
 // 把数据搬进 Excel 属于另一种工作流（要权限、要脱敏、要留痕），不在这里顺手做。
 //
-// 权限：非管理员整页挡住。但这不是安全边界 —— 后端每个端点都会返回 403，
-// 这里只是不让普通用户看到一堆报错卡片。
+// 权限：非管理员**当作页面不存在**（notFound），不做"有权限门"式遮挡 ——
+// 那样等于告诉对方这里有个开发者看板。后端同名接口对非管理员也返回 404，
+// 两层配合才叫真隐藏。真正的安全边界永远在后端。
+import { notFound } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import ConsoleShell from "@/components/console/ConsoleShell";
 import CornIcon from "@/components/CornIcon";
@@ -161,16 +165,16 @@ export default function DashboardPage() {
     [load]
   );
 
-  if (!auth.loading && !isAdmin) {
-    return (
-      <ConsoleShell active="dashboard" eyebrow="P8 · /dashboard" title="数据看板" sub="仅开发者可见。">
-        <Callout icon="warn">
-          这个页面只有开发者能看。当前账号不是管理员 —— 若你确实需要，请让开发者在
-          <code>.env</code> 的 <code>ADMIN_USERNAMES</code> 里加上你的用户名。
-        </Callout>
-      </ConsoleShell>
-    );
-  }
+  // 登录态还没确定：先什么都不渲染。
+  // 不能"先画骨架再判断"—— 骨架里带着"数据看板"标题，非管理员会看到它闪一下，
+  // 那也是一次泄露。宁可空白一瞬。
+  if (auth.loading) return null;
+
+  // 非管理员：**当成这个页面不存在**。
+  // 不渲染"仅开发者可见"的提示页 —— 那句话反而在告诉对方"这里有个开发者看板"。
+  // notFound() 让它和访问任意不存在的路径表现完全一致（见 app/not-found.tsx），
+  // 后端同名接口对非管理员也返回 404（见 api/admin.py）。
+  if (!isAdmin) notFound();
 
   const noCalls = ov !== null && ov.calls.total === 0;
   const peakCalls = ov ? Math.max(1, ...ov.series.map((x) => x.calls)) : 1;
