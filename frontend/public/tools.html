@@ -898,7 +898,7 @@ async function wBoot(){
     const levels=Array.isArray(idx.levels)?idx.levels:[];
     if(!levels.length) throw new Error('词库清单为空');
     WS.levels=levels;
-    if(idx.source) wShowSource(idx.source);
+    if(idx.source) wShowSource(idx.source, idx.source_examples);
     const want=levels.some(l=>l.id===WP.lvl) ? WP.lvl : levels[0].id;
     WS.ready=true;
     await wSetLevel(want, WP.last[want]||1);
@@ -952,10 +952,16 @@ function wStartGroup(g){
   wRender();
 }
 
-function wShowSource(s){
-  const name=String(s.repo||'').replace('https://github.com/','');
-  $w.src.innerHTML='词库 '+String(s.license||'')+' · <a href="'+s.repo+
-    '" target="_blank" rel="noopener">'+name+'</a>';
+/* 页脚署名。**两个上游都得署**：词条来自 BSD-3 那份，例句来自 CC-BY-NC-SA 那份，
+   后者的许可证明确要求署名 —— 只写第一个不合规，也会让人以为例句是我们凭空写的。 */
+function wShowSource(s, ex){
+  const credit=(o, tag)=>{
+    if(!o || !o.repo) return '';
+    const name=String(o.repo).replace('https://github.com/','');
+    return tag+' '+String(o.license||'')+' · <a href="'+o.repo+
+      '" target="_blank" rel="noopener">'+name+'</a>';
+  };
+  $w.src.innerHTML=[credit(s,'词库'), credit(ex,'例句')].filter(Boolean).join(' · ');
 }
 
 function wChips(){
