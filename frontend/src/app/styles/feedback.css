@@ -1,32 +1,85 @@
-/* ============ 顶栏「反馈」按钮 + 反馈弹窗 ============
+/* ============ 内测反馈入口 + 反馈弹窗 ============
    组件：components/feedback/FeedbackModal.tsx（内容复用 FeedbackCard）
    语言与 .guide-* 同一套：纸底 + 顶上一条金线 + 半透暖墨遮罩。
    两个弹窗不共用类名 —— 引导弹窗是"读"（整段说明、方向键翻页），
    这个弹窗是"写"（分类 + 文本框 + 历史），共用一套类名以后必然互相牵连。 */
 
-/* 顶栏那颗按钮：形态借 .ability-trigger（同一排、同一种胶囊），
-   图标换成"对话气泡 + 一个点"—— 提意见 = 说一句话，不是"能力"那种星形 */
-/* .ability-trigger 给 svg 定了 fill:currentColor;stroke:none（星形是实心的），
-   气泡图标要描边不要填充 —— 用双类名压过它，不靠 import 顺序（顺序一改就翻） */
-.ability-trigger.fb-trigger svg {
-  width: 13px;
-  height: 13px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+/* 入口位置：紧贴模式条右侧，就在「混合」旁边。
+   它是内测期唯一的意见通道，所以不能做成顶栏那种灰胶囊里的一个小图标：
+   淡金底 + 金边 + 深金字 + 呼吸点 —— 扫一眼就能看见，但仍在暖色系里
+   （不用荧光黄、不上大面积实心金，那是提醒条的语汇，不是这个产品的）。 */
+.fb-mode-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: var(--ls-tight);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
 }
-.ability-trigger.fb-trigger svg circle {
-  fill: currentColor;
+/* hover 走主按钮那套交互语言：金底 + 深墨字 */
+.fb-mode-cta:hover {
+  background: var(--accent);
+  color: #2e2416;
+  box-shadow: 0 2px 8px rgba(200, 137, 42, 0.26);
 }
-/* 窄屏只留图标：顶栏右侧还要放用量胶囊和资料库开关，塞不下第三个带字的 */
-@media (max-width: 720px) {
-  .fb-trigger .fb-trigger-text {
+.fb-mode-cta:active {
+  transform: translateY(0.5px);
+}
+.fb-mode-cta:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-accent);
+}
+.fb-mode-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: fbDot 2.6s ease-out infinite;
+}
+.fb-mode-cta:hover .fb-mode-dot {
+  background: #2e2416;
+  animation: none;
+}
+@keyframes fbDot {
+  0% {
+    box-shadow: 0 0 0 0 rgba(200, 137, 42, 0.5);
+  }
+  55% {
+    box-shadow: 0 0 0 5px rgba(200, 137, 42, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(200, 137, 42, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fb-mode-dot {
+    animation: none;
+  }
+}
+/* 窄屏把「内测反馈」缩成「反馈」：这一行左边还有 5 个模式按钮。
+   ★ 不能只留圆点 —— 一个孤零零的金色圆点会被读成状态指示灯，没人会去点它。 */
+.fb-mode-text-sm {
+  display: none;
+}
+@media (max-width: 560px) {
+  .fb-mode-cta {
+    padding: 0 9px;
+  }
+  .fb-mode-cta .fb-mode-text {
     display: none;
   }
-  .fb-trigger {
-    padding: 5px 7px;
+  .fb-mode-cta .fb-mode-text-sm {
+    display: inline;
   }
 }
 

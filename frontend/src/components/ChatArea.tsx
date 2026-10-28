@@ -537,25 +537,6 @@ export default function ChatArea({
           </svg>
           <span>能力</span>
         </button>
-        {/* 顶栏反馈入口：提意见的那一刻人正在对话里（刚被答错、刚发现按钮不好用），
-            把他送去设置页，中间要重新定位"说的是哪件事"，多半就不提了。
-            内容和设置页共用 FeedbackCard，只是装在弹窗里。 */}
-        <button
-          type="button"
-          onClick={() => setFbOpen(true)}
-          title="提点意见，开发者会看到"
-          aria-label="提点意见"
-          aria-haspopup="dialog"
-          className="ability-trigger fb-trigger"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M21 11.8c0 3.7-3.8 6.7-8.5 6.7-1 0-2-.1-2.9-.4L5 20l1.3-3.2C4.9 15.6 4 13.8 4 11.8 4 8.1 7.8 5.1 12.5 5.1S21 8.1 21 11.8z" />
-            <circle cx="8.6" cy="11.8" r="0.9" fill="currentColor" stroke="none" />
-            <circle cx="12.5" cy="11.8" r="0.9" fill="currentColor" stroke="none" />
-            <circle cx="16.4" cy="11.8" r="0.9" fill="currentColor" stroke="none" />
-          </svg>
-          <span className="fb-trigger-text">反馈</span>
-        </button>
         {abOpen && (
           <>
             <div className="pop-backdrop" onClick={() => setAbOpen(false)} aria-hidden="true" />
@@ -831,7 +812,7 @@ export default function ChatArea({
             校园工具集
           </a>
         </div>
-        <div className="mb-2 flex items-center gap-3">
+        <div className="mb-2 flex items-center gap-2 sm:gap-3">
           <div className="mode-tabs" role="group" aria-label="对话模式" ref={modeTabsRef}>
             <span
               className="mode-thumb"
@@ -857,6 +838,23 @@ export default function ChatArea({
               </button>
             ))}
           </div>
+          {/* 内测反馈：紧贴模式条右侧（就在「混合」旁边），不塞回顶栏那排灰图标里。
+              理由：想说话的那一刻人正在输入框这儿（刚被答错、刚发现按钮不好用），
+              顶栏右上的小图标太不显眼，内测第一批人的意见最容易在这里丢掉。
+              内容和设置页共用 FeedbackCard，只是装在弹窗里。 */}
+          <button
+            type="button"
+            onClick={() => setFbOpen(true)}
+            title="内测期间，每条意见开发者都会看"
+            aria-label="提交内测反馈"
+            aria-haspopup="dialog"
+            className="fb-mode-cta"
+          >
+            <span className="fb-mode-dot" aria-hidden="true" />
+            <span className="fb-mode-text">内测反馈</span>
+            {/* 窄屏只留「反馈」两个字：光一个圆点会被当成状态指示灯，点了才知道是按钮 */}
+            <span className="fb-mode-text-sm">反馈</span>
+          </button>
           <button
             onClick={() => setShowParams((s) => !s)}
             title="检索参数设置"
