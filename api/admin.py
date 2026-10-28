@@ -117,6 +117,47 @@ async def feedback_patch(
     return {"ok": True, "status": req.status}
 
 
+class ReplyRequest(BaseModel):
+    reply: str = Field(
+        default="", description=f"给提意见的人的回复，{user_feedback.MIN_REPLY}~{user_feedback.MAX_REPLY} 字；空串表示撤回"
+    )
+
+
+@router.post("/feedback/{fid}/reply")
+async def feedback_reply(
+    fid: int, req: ReplyRequest, uid: str = Depends(get_current_user)
+) -> dict:
+    """给一条反馈回复（管理员 → 用户）。
+
+    为什么是 `POST .../reply` 而不是在 PATCH 里塞一个 reply 字段：
+      PATCH `/feedback/{fid}` 的语义是"改这条反馈的属性"，它的错误契约是
+      409 + 状态流转；回复是另一件事（还带着"顺手把 open 推到 doing"的副作用），
+      两件事共用一个端点，将来想给回复加审计（谁回的、什么时候改过）就无处落脚。
+
+    400 / 409 分工与 PATCH 一致：长度超限是"请求写错了"（400），
+    反馈不存在是"和当前数据冲突"（409）—— 前端拿到 409 会去刷新列表。
+    """
+    _require_admin(uid)
+    text = (req.reply or "").strip()
+    if len(text) > user_feedback.MAX_REPLY:
+        raise HTTPException(
+            status_code=400, detail=f"回复最多 {user_feedback.MAX_REPLY} 个字"
+        )
+    ok, err = await asyncio.to_thread(user_feedback.set_reply, fid, text)
+    if not ok:
+        raise HTTPException(status_code=409, detail=err)
+    # 回读一次最新状态：set_reply 可能在 open 时把它推到 doing，
+    # 前端要按新状态重画按钮，不能让前端自己猜。
+    row = await asyncio.to_thread(user_feedback.get, fid)
+    return {
+        "ok": True,
+        "reply": text,
+        "status": (row or {}).get("status", ""),
+        "status_label": (row or {}).get("status_label", ""),
+        "replied_at": (row or {}).get("replied_at"),
+    }
+
+
 @router.get("/dict")
 async def dict_api(uid: str = Depends(get_current_user)) -> dict:
     """分类 / 状态字典 + 流转表 + 长度限制。前端按钮与校验全部从这里取。"""

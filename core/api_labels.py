@@ -63,6 +63,7 @@ _LABELS: dict[tuple[str, str], str] = {
     ("GET", "/api/admin/dict"): "看板 · 指标说明",
     ("GET", "/api/admin/feedback"): "看板 · 反馈列表",
     ("PATCH", "/api/admin/feedback/{}"): "看板 · 处理反馈",
+    ("POST", "/api/admin/feedback/{}/reply"): "看板 · 回复反馈",
     # ---------- 账号 ----------
     ("GET", "/api/auth/config"): "账号 · 登录方式",
     ("POST", "/api/auth/login"): "账号 · 登录",

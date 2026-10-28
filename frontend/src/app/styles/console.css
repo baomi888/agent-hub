@@ -969,3 +969,28 @@ textarea.input {
     display: none;
   }
 }
+
+/* ============ 反馈的开发者回复（看板 / 用户侧共用）============
+   形态上像"写在纸边的批注"：左侧一道金线 + 淡金底，不做成气泡对话框。
+   理由：这里是工单的一条结果，不是聊天气泡；做成气泡会让人以为还能你来我往。 */
+.fb-reply {
+  margin-top: 6px;
+  padding: 7px 10px 8px;
+  border-left: 2px solid var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--accent-soft);
+}
+.fb-reply-head {
+  font-size: var(--fs-xs);
+  letter-spacing: var(--ls-tight);
+  color: var(--accent-ink);
+}
+.fb-reply-body {
+  margin-top: 3px;
+  font-size: var(--fs-md);
+  line-height: var(--lh-body);
+  color: var(--text-1);
+  white-space: pre-wrap;
+  /* 用户可能贴很长的 URL 或一长串英文，不换行会把卡片撑破 */
+  overflow-wrap: anywhere;
+}

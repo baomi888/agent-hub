@@ -43,8 +43,10 @@ export default function FeedbackCard({ page }: { page: string }) {
   const [mine, setMine] = useState<UserFeedbackItem[]>([]);
 
   const loadMine = useCallback(() => {
+    // 取 5 条而不是 3 条：开发者回复可能落在稍早的那一条上，
+    // 列表太短会让"他回我了"这件事用户根本看不到，整个回复功能就白做了。
     api
-      .myFeedback(3, 0)
+      .myFeedback(5, 0)
       .then((r) => setMine(r.items))
       .catch(() => {
         /* 拉不到历史不影响提交 */
@@ -67,7 +69,14 @@ export default function FeedbackCard({ page }: { page: string }) {
           ],
           statuses: [],
           transitions: {},
-          limits: { min_content: 5, max_content: 2000, max_contact: 120, max_page: 120 },
+          limits: {
+            min_content: 5,
+            max_content: 2000,
+            max_contact: 120,
+            max_page: 120,
+            min_reply: 1,
+            max_reply: 1000,
+          },
         });
       });
     loadMine();
@@ -94,7 +103,7 @@ export default function FeedbackCard({ page }: { page: string }) {
       });
       setContent("");
       setContact("");
-      setMsg({ kind: "ok", text: "已收到，谢谢你。处理进度会显示在下面。" });
+      setMsg({ kind: "ok", text: "已收到，谢谢你。处理进度和开发者回复会显示在下面。" });
       loadMine();
     } catch (e) {
       setMsg({ kind: "err", text: e instanceof Error ? e.message : "提交失败，请稍后再试" });
@@ -184,12 +193,32 @@ export default function FeedbackCard({ page }: { page: string }) {
             我提过的
           </p>
           {mine.map((it) => (
-            <div className="run" key={it.id} style={{ gridTemplateColumns: "1fr auto auto" }}>
-              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {it.content}
-              </span>
-              <span className="meta">{fmtTime(it.created_at)}</span>
-              <span className={`ctag ${STATUS_CLASS[it.status] ?? ""}`}>{it.status_label}</span>
+            <div key={it.id} style={{ padding: "5px 0" }}>
+              <div className="run" style={{ gridTemplateColumns: "1fr auto auto" }}>
+                <span
+                  style={{
+                    minWidth: 0,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {it.content}
+                </span>
+                <span className="meta">{fmtTime(it.created_at)}</span>
+                <span className={`ctag ${STATUS_CLASS[it.status] ?? ""}`}>{it.status_label}</span>
+              </div>
+              {/* 开发者回复：这是用户判断"我提的有没有人管"的唯一凭据，
+                  所以给它比"状态标签"更显眼的位置，而不是再塞进一行小字 */}
+              {it.reply ? (
+                <div className="fb-reply">
+                  <div className="fb-reply-head">
+                    开发者回复
+                    {it.replied_at ? ` · ${fmtTime(it.replied_at)}` : ""}
+                  </div>
+                  <div className="fb-reply-body">{it.reply}</div>
+                </div>
+              ) : null}
             </div>
           ))}
         </>

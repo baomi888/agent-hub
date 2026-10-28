@@ -97,6 +97,11 @@ export default function DashboardPage() {
   const [fbStatus, setFbStatus] = useState("");
   const [dict, setDict] = useState<FeedbackDict | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
+  // 正在回复哪一条（null = 没有展开的回复框）。
+  // 与 busyId 分开：busyId 表示"这条正在提交"，replyFor 表示"这条的输入框开着"，
+  // 合成一个 state 就会出现"提交时输入框自己收起来又弹开"的抽搐。
+  const [replyFor, setReplyFor] = useState<number | null>(null);
+  const [replyText, setReplyText] = useState("");
   const [fetchedAt, setFetchedAt] = useState<Date | null>(null);
 
   const load = useCallback(() => {
@@ -158,6 +163,31 @@ export default function DashboardPage() {
         load();
       } catch (e) {
         setOvErr(e instanceof Error ? e.message : "状态更新失败");
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [load]
+  );
+
+  /**
+   * 回复某条反馈。
+   *
+   * 传空串 = 撤回（后端 set_reply 允许清空，但状态不回退）。
+   * 成功后重拉列表而不是本地改 state：回复可能顺手把 open 推成 doing，
+   * 本地改就得把"状态也会变"这条规则复制一份到前端 —— 那正是上个月
+   * 「前端能点、后端 400」的成因。让后端说完，前端照着画。
+   */
+  const sendReply = useCallback(
+    async (item: UserFeedbackItem, text: string) => {
+      setBusyId(item.id);
+      try {
+        await api.admin.replyFeedback(item.id, text.trim());
+        setReplyFor(null);
+        setReplyText("");
+        load();
+      } catch (e) {
+        setOvErr(e instanceof Error ? e.message : "回复失败");
       } finally {
         setBusyId(null);
       }
@@ -484,9 +514,22 @@ export default function DashboardPage() {
                           {it.contact ? ` · 联系 ${it.contact}` : ""}
                         </div>
                       ) : null}
+                      {/* 已回复的先把回复摆出来：管理员最常问的是"我上次回过他什么"。
+                          正在编辑这条时藏起来 —— 否则同一段话会在上面显示一遍、
+                          又在下面的输入框里出现一遍，看着像重复渲染的 bug。 */}
+                      {it.reply && replyFor !== it.id ? (
+                        <div className="fb-reply">
+                          <div className="fb-reply-head">
+                            我的回复
+                            {it.replied_at ? ` · ${fmtTime(it.replied_at)}` : ""}
+                          </div>
+                          <div className="fb-reply-body">{it.reply}</div>
+                        </div>
+                      ) : null}
+
                       {/* 只渲染流转表允许的下一步：不允许回退（done 不能退回 doing），
                           前端不给按钮，后端也会 409 兜住 */}
-                      <div className="row" style={{ gap: 6, marginTop: 6 }}>
+                      <div className="row" style={{ gap: 6, marginTop: 6, flexWrap: "wrap" }}>
                         {(dict?.transitions[it.status] ?? []).map((next) => (
                           <button
                             key={next}
@@ -498,7 +541,66 @@ export default function DashboardPage() {
                             → {dict?.statuses.find((x) => x.value === next)?.label ?? next}
                           </button>
                         ))}
+                        {/* 回复按钮对任何状态都开放：已经关掉的反馈也可能需要回一句
+                            「这个不做，原因是…」，那正是最该回的一类。 */}
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          disabled={busyId === it.id}
+                          onClick={() => {
+                            const opening = replyFor !== it.id;
+                            setReplyFor(opening ? it.id : null);
+                            setReplyText(opening ? it.reply : "");
+                          }}
+                        >
+                          {replyFor === it.id ? "收起" : it.reply ? "改回复" : "回复用户"}
+                        </button>
                       </div>
+
+                      {replyFor === it.id ? (
+                        <div style={{ marginTop: 8 }}>
+                          <textarea
+                            className="input"
+                            value={replyText}
+                            rows={3}
+                            placeholder="回给提意见的人。会显示在他「设置 → 我提过的」那一列表里。"
+                            disabled={busyId === it.id}
+                            onChange={(e) =>
+                              setReplyText(e.target.value.slice(0, dict?.limits.max_reply ?? 1000))
+                            }
+                          />
+                          <div
+                            className="row"
+                            style={{ gap: 8, marginTop: 4, alignItems: "center" }}
+                          >
+                            <span className="meta">
+                              {replyText.trim().length} / {dict?.limits.max_reply ?? 1000}
+                              {it.reply && !replyText.trim() ? " · 清空后发送 = 撤回回复" : ""}
+                            </span>
+                            <div style={{ marginLeft: "auto" }} className="row">
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm"
+                                disabled={busyId === it.id}
+                                onClick={() => {
+                                  setReplyFor(null);
+                                  setReplyText("");
+                                }}
+                              >
+                                取消
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-primary btn-sm"
+                                disabled={busyId === it.id || replyText.trim() === it.reply}
+                                onClick={() => void sendReply(it, replyText)}
+                              >
+                                {busyId === it.id ? "发送中…" : "发送"}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   ))}
                 </div>

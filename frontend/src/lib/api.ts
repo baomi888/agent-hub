@@ -418,6 +418,20 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify({ status }),
       }),
+    // 回复某条反馈。**单独一个 POST 而不是并进 patchFeedback**：
+    // 改状态和"回一句话"是两件事，前者有流转表约束（会 409），后者没有。
+    // 传空串 = 撤回回复。
+    replyFeedback: (id: number, reply: string) =>
+      request<{
+        ok: boolean;
+        reply: string;
+        status: string;
+        status_label: string;
+        replied_at: number | null;
+      }>(`/api/admin/feedback/${id}/reply`, {
+        method: "POST",
+        body: JSON.stringify({ reply }),
+      }),
     dict: () => request<FeedbackDict>("/api/admin/dict"),
   },
 

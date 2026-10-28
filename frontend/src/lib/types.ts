@@ -676,6 +676,10 @@ export interface UserFeedbackItem {
   status_label: string;
   created_at: number;
   updated_at: number;
+  /** 开发者回复。空串 = 还没回。用户侧「我提过的」靠它显示 */
+  reply: string;
+  /** 回复时间；没回过就是 null */
+  replied_at: number | null;
 }
 
 export interface AdminFeedbackResp {
@@ -698,6 +702,9 @@ export interface FeedbackDict {
     max_content: number;
     max_contact: number;
     max_page: number;
+    /** 回复长度（管理员 → 用户）。后端下发的，前端不硬编码 */
+    min_reply: number;
+    max_reply: number;
   };
 }
 
