@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "group_size": 20,
+  "levels": [
+    {
+      "id": "CET4",
+      "name": "四级核心",
+      "count": 4543,
+      "groups": 228
+    },
+    {
+      "id": "CET6",
+      "name": "六级扩展",
+      "count": 2118,
+      "groups": 106
+    }
+  ],
+  "source": {
+    "repo": "https://github.com/KyleBing/english-vocabulary",
+    "license": "BSD-3-Clause",
+    "copyright": "Copyright (c) 2022-2026, KyleBing"
+  }
+}

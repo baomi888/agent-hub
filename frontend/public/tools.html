@@ -166,6 +166,26 @@
   .wkeys{text-align:center;font-size:var(--fs-xs);color:var(--text-3);margin-top:4px;}
   .wkeys kbd{font-family:var(--font-sans);font-size:10px;padding:1px 5px;border:1px solid var(--line-strong);
     border-radius:4px;color:var(--text-2);background:var(--card-bg);}
+  /* 级别 + 组选择：词库有几千词，一次只发一组 20 个。
+     视觉压到最轻（细边框、无填充），否则会和卡片抢注意力。 */
+  .w-picker{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    flex-wrap:wrap;margin-bottom:10px;}
+  .w-chips{display:flex;gap:6px;flex-wrap:wrap;}
+  .w-chip{border:1px solid var(--line-strong);background:transparent;color:var(--text-2);
+    font-family:var(--font-sans);font-size:var(--fs-badge);padding:4px 11px;border-radius:999px;
+    cursor:pointer;transition:var(--t-color);letter-spacing:var(--ls-tight);}
+  .w-chip:hover{border-color:var(--accent);color:var(--accent-ink);}
+  .w-chip.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-ink);font-weight:600;}
+  .w-chip small{opacity:.65;margin-left:4px;font-weight:400;}
+  .w-nav{display:flex;align-items:center;gap:7px;}
+  .w-arrow{width:26px;height:26px;line-height:1;border:1px solid var(--line-strong);background:transparent;
+    color:var(--text-2);border-radius:50%;cursor:pointer;font-size:15px;transition:var(--t-color);}
+  .w-arrow:hover:not(:disabled){border-color:var(--accent);color:var(--accent-ink);}
+  .w-arrow:disabled{opacity:.35;cursor:not-allowed;}
+  .w-groupno{font-size:var(--fs-sm);color:var(--text-2);white-space:nowrap;}
+  .w-groupno b{color:var(--accent-ink);}
+  .w-src{margin-top:9px;text-align:center;font-size:var(--fs-xs);color:var(--text-3);}
+  .w-src a{color:var(--text-3);text-decoration:underline;text-underline-offset:2px;}
   .progress{text-align:center;color:var(--text-2);font-size:var(--fs-sm);margin-bottom:10px;}
 
   /* 倒计时 */
@@ -432,8 +452,16 @@
   <section class="tool" id="words">
     <div class="card">
       <div class="row-head">
-        <div><div class="eyebrow">记忆</div><h2 class="serif">四六级高频词卡</h2></div>
-        <div class="w-round" id="wRound">第 <b>1</b> 轮 · 0 / 40</div>
+        <div><div class="eyebrow">记忆</div><h2 class="serif">四六级词卡</h2></div>
+        <div class="w-round" id="wRound">正在加载词库…</div>
+      </div>
+      <div class="w-picker">
+        <div class="w-chips" id="wLevels"></div>
+        <div class="w-nav">
+          <button class="w-arrow" id="wPrev" type="button" aria-label="上一组" disabled>‹</button>
+          <span class="w-groupno" id="wGroupNo">—</span>
+          <button class="w-arrow" id="wNext" type="button" aria-label="下一组" disabled>›</button>
+        </div>
       </div>
       <div class="wbar"><div class="wbar-fill" id="wBar"></div></div>
       <div class="flip-card" id="wCard" role="button" tabindex="0" aria-label="词卡，点击翻转看释义">
@@ -445,13 +473,15 @@
         <button class="btn-import btn-sm" id="wFlip">翻转</button>
         <button class="btn-new btn-sm" id="wKnow">认识<span class="ico-inline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12h14.5"/><path d="M13 6.2l5.8 5.8-5.8 5.8"/></svg></span></button>
         <button class="btn-import btn-sm" id="wUnknow">不认识，复习</button>
-        <button class="btn-import btn-sm" id="wReset">重来</button>
+        <button class="btn-import btn-sm" id="wReset">重来这组</button>
+        <button class="btn-new btn-sm" id="wGoNext" style="display:none">下一组<span class="ico-inline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12h14.5"/><path d="M13 6.2l5.8 5.8-5.8 5.8"/></svg></span></button>
       </div>
       <div class="wstat" id="wStat"></div>
       <div class="wkeys">
         <kbd>空格</kbd> 翻转 <span class="sep">·</span> <kbd>→</kbd> 认识 <span class="sep">·</span> <kbd>←</kbd> 不认识
       </div>
-      <p class="note" id="wNote">一轮会把全部词过完。点「不认识」的词会进复习堆，但这一轮照样往下走 —— 等整轮过完，再单独练它们。</p>
+      <p class="note" id="wNote">一组 20 个词。点「不认识」的词会进这一组的复习堆，但这一轮照样往下走 —— 等整组过完，再单独练它们。</p>
+      <div class="w-src" id="wSrc"></div>
     </div>
   </section>
 
@@ -711,179 +741,337 @@ addCourse({name:'数据结构',dayOfWeek:5,sections:[5,6],classroom:'机房-A'})
 
 /* ---------- 单词卡 ----------
  *
- * ★★ 10-28 重写。旧实现只有一个 idx + 一个 wrong 数组，池子按
- *   `wrong.length ? wrong : WORDS` 取值，结果有三个致命问题：
+ * ★★ 10-28 二次重写。第一版（同一天早些时候）修的是"池子中途换"的 bug：
+ *   旧实现只有一个 idx + 一个 wrong 数组，池子按 `wrong.length ? wrong : WORDS`
+ *   取值，于是点第一张「不认识」之后池子立刻变成「只有这一张」，剩下 15 个词
+ *   用户再也看不到 —— 反馈里的「必须全部都是认识才能走」就是这么来的。
+ *   那版把池子改成"一轮开始时确定，轮内绝不改动"，问题解决。
  *
- *   1. 点第一张「不认识」之后，池子立刻变成「只有这一张」——
- *      剩下 15 个词用户再也看不到。反馈里的「必须全部都是认识才能走」
- *      就是这个：不是他不想走，是池子里只剩他刚说不认识的那张。
- *   2. 复习轮走完一遍时 idx 归零但 wrong 不清空，于是无限重来同一批。
- *   3. 复习轮里最后一个词点「认识」把 wrong 清空后，池子瞬间切回 WORDS、
- *      而 idx 停在中途 —— 表现为「点了认识就重来了」。
+ *   但用户接着问「就只有 40 个单词吗，这么少」。40 个确实不够，所以这一版把
+ *   词库抽成 /data/words/*.json（四级 4543 词、六级扩展 2118 词，来自 BSD-3
+ *   许可的公开中英词表），页面一次只取一组 20 个。
  *
- *   新模型：**池子只在一轮开始时确定**，轮内绝不改变。
- *     一轮 = 一次性把这批词从头走到尾；不认识的记进下一轮的池子。
- *     这样「能不能走完一轮」变成结构上必然的事，不依赖任何边界判断。
- *
- *   同时补上：轮次标签、进度条、本轮统计、键盘快捷键。
+ * ★ 仍然保留第一版的核心不变量：**池子只在一轮开始时确定，轮内绝不改动**。
+ *   现在有两层：组（group）= 哪些词；轮（round）= 这组走到第几遍。
+ *   点「不认识」只影响下一轮，不影响当前这一轮能不能走完。
  */
-const WORDS=[
-  {w:'abandon',m:'v. 放弃，抛弃',ex:'He had to abandon his plan.'},
-  {w:'abundant',m:'adj. 丰富的，大量的',ex:'abundant natural resources'},
-  {w:'accessible',m:'adj. 可接近的；易懂的',ex:'The library is accessible to everyone.'},
-  {w:'accumulate',m:'v. 积累，积聚',ex:'Dust accumulated on the shelf.'},
-  {w:'acknowledge',m:'v. 承认；致谢',ex:'He acknowledged the mistake.'},
-  {w:'adequate',m:'adj. 足够的，适当的',ex:'adequate preparation'},
-  {w:'advocate',m:'v. 提倡；n. 拥护者',ex:'She advocates reform.'},
-  {w:'alter',m:'v. 改变，修改',ex:'We altered the plan slightly.'},
-  {w:'ambiguous',m:'adj. 模棱两可的',ex:'an ambiguous answer'},
-  {w:'anticipate',m:'v. 预期，期望',ex:'We anticipate a rise in price.'},
-  {w:'appropriate',m:'adj. 合适的',ex:'appropriate behavior'},
-  {w:'assess',m:'v. 评估，估价',ex:'assess the risk'},
-  {w:'coherent',m:'adj. 连贯的，条理清楚的',ex:'a coherent argument'},
-  {w:'compel',m:'v. 强迫，迫使',ex:'The evidence compelled him to admit it.'},
-  {w:'comprehensive',m:'adj. 综合的，全面的',ex:'a comprehensive review'},
-  {w:'consecutive',m:'adj. 连续的，不间断的',ex:'three consecutive wins'},
-  {w:'contemporary',m:'adj. 当代的；同时代的',ex:'contemporary art'},
-  {w:'deliberate',m:'adj. 故意的；v. 仔细考虑',ex:'a deliberate mistake'},
-  {w:'deteriorate',m:'v. 恶化，变坏',ex:'His health deteriorated.'},
-  {w:'diminish',m:'v. 减少，削弱',ex:'His influence diminished.'},
-  {w:'distinguish',m:'v. 区分，辨别',ex:'distinguish right from wrong'},
-  {w:'elaborate',m:'adj. 精心制作的；v. 详尽阐述',ex:'elaborate on the point'},
-  {w:'emphasize',m:'v. 强调，着重',ex:'emphasize the importance'},
-  {w:'fragile',m:'adj. 脆弱的，易碎的',ex:'a fragile relationship'},
-  {w:'gradual',m:'adj. 逐渐的，逐步的',ex:'a gradual improvement'},
-  {w:'impose',m:'v. 强加；征收',ex:'impose a tax on imports'},
-  {w:'inevitable',m:'adj. 不可避免的',ex:'an inevitable result'},
-  {w:'indicate',m:'v. 表明，指示',ex:'The data indicate a clear trend.'},
-  {w:'maintain',m:'v. 维持；坚持认为',ex:'maintain a balance'},
-  {w:'necessitate',m:'v. 使成为必要',ex:'The cut necessitates a redo.'},
-  {w:'perceive',m:'v. 察觉；认为',ex:'perceive a change'},
-  {w:'phenomenon',m:'n. 现象（复数 phenomena）',ex:'a natural phenomenon'},
-  {w:'prominent',m:'adj. 显著的；杰出的',ex:'a prominent figure'},
-  {w:'reinforce',m:'v. 加强，巩固',ex:'reinforce the idea'},
-  {w:'reluctant',m:'adj. 不情愿的',ex:'a reluctant smile'},
-  {w:'restrain',m:'v. 抑制，克制',ex:'restrain one\'s anger'},
-  {w:'scrutinize',m:'v. 仔细检查',ex:'scrutinize the data'},
-  {w:'sustain',m:'v. 维持；承受',ex:'sustain growth'},
-  {w:'tremendous',m:'adj. 巨大的，极大的',ex:'tremendous effort'},
-  {w:'vulnerable',m:'adj. 易受伤害的，脆弱的',ex:'a vulnerable group'}
+
+/* 词库加载失败时的兜底：宁可给 40 个词，也不能让页面白屏 */
+const FALLBACK_WORDS=[
+  ['abandon','v. 放弃，抛弃'],
+  ['abundant','adj. 丰富的，大量的'],
+  ['accessible','adj. 可接近的；易懂的'],
+  ['accumulate','v. 积累，积聚'],
+  ['acknowledge','v. 承认；致谢'],
+  ['adequate','adj. 足够的，适当的'],
+  ['advocate','v. 提倡；n. 拥护者'],
+  ['alter','v. 改变，修改'],
+  ['ambiguous','adj. 模棱两可的'],
+  ['anticipate','v. 预期，期望'],
+  ['appropriate','adj. 合适的'],
+  ['assess','v. 评估，估价'],
+  ['coherent','adj. 连贯的，条理清楚的'],
+  ['compel','v. 强迫，迫使'],
+  ['comprehensive','adj. 综合的，全面的'],
+  ['consecutive','adj. 连续的，不间断的'],
+  ['contemporary','adj. 当代的；同时代的'],
+  ['deliberate','adj. 故意的；v. 仔细考虑'],
+  ['deteriorate','v. 恶化，变坏'],
+  ['diminish','v. 减少，削弱'],
+  ['distinguish','v. 区分，辨别'],
+  ['elaborate','adj. 精心制作的；v. 详尽阐述'],
+  ['emphasize','v. 强调，着重'],
+  ['fragile','adj. 脆弱的，易碎的'],
+  ['gradual','adj. 逐渐的，逐步的'],
+  ['impose','v. 强加；征收'],
+  ['inevitable','adj. 不可避免的'],
+  ['indicate','v. 表明，指示'],
+  ['maintain','v. 维持；坚持认为'],
+  ['necessitate','v. 使成为必要'],
+  ['perceive','v. 察觉；认为'],
+  ['phenomenon','n. 现象（复数 phenomena）'],
+  ['prominent','adj. 显著的；杰出的'],
+  ['reinforce','v. 加强，巩固'],
+  ['reluctant','adj. 不情愿的'],
+  ['restrain','v. 抑制，克制'],
+  ['scrutinize','v. 仔细检查'],
+  ['sustain','v. 维持；承受'],
+  ['tremendous','adj. 巨大的，极大的'],
+  ['vulnerable','adj. 易受伤害的，脆弱的']
 ];
+
+const W_GROUP=20;
+const W_KEY='baomi_words_v2';
 
 const $w={
   word:document.getElementById('wWord'), meta:document.getElementById('wMeta'),
   hint:document.getElementById('wHint'), card:document.getElementById('wCard'),
   round:document.getElementById('wRound'), bar:document.getElementById('wBar'),
   stat:document.getElementById('wStat'), note:document.getElementById('wNote'),
+  src:document.getElementById('wSrc'),
   flip:document.getElementById('wFlip'), know:document.getElementById('wKnow'),
-  unknow:document.getElementById('wUnknow'), reset:document.getElementById('wReset')
+  unknow:document.getElementById('wUnknow'), reset:document.getElementById('wReset'),
+  goNext:document.getElementById('wGoNext'),
+  levels:document.getElementById('wLevels'), prev:document.getElementById('wPrev'),
+  next:document.getElementById('wNext'), groupno:document.getElementById('wGroupNo'),
+  keys:document.querySelector('#words .wkeys')
 };
 
-let wRound=1;      // 第几轮
-let wPool=[];      // 本轮要过的词。**只在一轮开始时确定，轮内绝不改动**
-let wHeavy=[];     // 下一轮的池子（本轮点了「不认识」的词）
-let wIdx=0;        // 本轮走到第几张
-let wFlipped=false;
-let wDone=false;
-let wSeen=0;       // 累计判断过的次数（同一个人重复练的也算）
-let wKnown=0;
+/* 运行时状态。字段全在这里，渲染函数只读它、不顺手改它 ——
+   第一版就是因为"改状态"和"画界面"混在一起才出的循环问题。 */
+const WS={
+  levels:[],      // [{id,name,count,groups}]
+  data:{},        // lvl -> [[词, 释义], ...]
+  lvl:'',
+  ready:false,
+  failed:false,
+  group:1,
+  pool:[],        // 本轮要过的词（只在一轮开始时确定）
+  heavy:[],       // 下一轮的池子（本轮点了「不认识」的）
+  idx:0,
+  round:1,        // 组内第几遍（复习轮）
+  flipped:false,
+  done:false,
+  seen:0,         // 累计判断次数
+  known:0
+};
 
-function wStartRound(pool){
-  wPool=pool.slice();
-  wHeavy=[];
-  wIdx=0;
-  wDone=wPool.length===0;
+/* 进度：记住每个级别练到第几组、哪几组已经练完 */
+const WP={lvl:'', last:{}, done:{}};
+
+function wpLoad(){
+  try{
+    const raw=localStorage.getItem(W_KEY);
+    if(!raw) return;
+    const o=JSON.parse(raw);
+    if(!o||typeof o!=='object') return;
+    if(typeof o.lvl==='string') WP.lvl=o.lvl;
+    if(o.last&&typeof o.last==='object') WP.last=o.last;
+    if(o.done&&typeof o.done==='object') WP.done=o.done;
+  }catch(e){}
+}
+function wpSave(){
+  try{ localStorage.setItem(W_KEY, JSON.stringify(WP)); }catch(e){}
+}
+function wpDone(lvl){ return Array.isArray(WP.done[lvl]) ? WP.done[lvl] : []; }
+function wpMarkDone(lvl,g){
+  const arr=wpDone(lvl).slice();
+  if(arr.indexOf(g)<0){ arr.push(g); arr.sort((a,b)=>a-b); }
+  WP.done[lvl]=arr;
+  wpSave();
+}
+
+/* ---- 词库读取 ---- */
+function wWords(lvl){
+  const d=WS.data[lvl];
+  return (d&&d.length) ? d : FALLBACK_WORDS;
+}
+function wGroupCount(lvl){
+  return Math.max(1, Math.ceil(wWords(lvl).length/W_GROUP));
+}
+function wGroupSlice(lvl,g){
+  const s=(g-1)*W_GROUP;
+  return wWords(lvl).slice(s, s+W_GROUP);
+}
+
+/* ---- 启动：先拿级别清单，再拿当前级别的词 ---- */
+async function wBoot(){
+  wpLoad();
+  try{
+    const r=await fetch('data/words/index.json',{cache:'no-cache'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const idx=await r.json();
+    const levels=Array.isArray(idx.levels)?idx.levels:[];
+    if(!levels.length) throw new Error('词库清单为空');
+    WS.levels=levels;
+    if(idx.source) wShowSource(idx.source);
+    const want=levels.some(l=>l.id===WP.lvl) ? WP.lvl : levels[0].id;
+    WS.ready=true;
+    await wSetLevel(want, WP.last[want]||1);
+  }catch(e){
+    // 兜底路径：词库文件缺失/断网。页面上必须说清楚，不能让人以为词库就这么点
+    WS.failed=true;
+    WS.levels=[{id:'FALLBACK',name:'内置 40 词',count:FALLBACK_WORDS.length,
+                groups:Math.ceil(FALLBACK_WORDS.length/W_GROUP)}];
+    WS.data={FALLBACK:FALLBACK_WORDS};
+    WS.ready=true;
+    wStartGroup(1);
+    wChips();
+    $w.src.textContent='词库没加载上（'+e.message+'），先用内置的 40 个词顶着。';
+  }
+}
+
+async function wSetLevel(lvl,group){
+  WS.lvl=lvl;
+  if(lvl!=='FALLBACK' && !WS.data[lvl]){
+    $w.round.textContent='正在加载词库…';
+    try{
+      const r=await fetch('data/words/'+lvl.toLowerCase()+'.json',{cache:'no-cache'});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const d=await r.json();
+      WS.data[lvl]=Array.isArray(d.words)?d.words:[];
+      if(!WS.data[lvl].length) throw new Error('这个词库是空的');
+    }catch(e){
+      WS.data[lvl]=FALLBACK_WORDS;
+      $w.src.textContent='「'+lvl+'」词库没加载上，先用内置的 40 个词顶着。';
+    }
+  }
+  const g=Math.min(Math.max(1, group|0 || 1), wGroupCount(lvl));
+  wStartGroup(g);
+  wChips();
+}
+
+/* ---- 开一组 ---- */
+function wStartGroup(g){
+  WS.group=g;
+  WS.pool=wGroupSlice(WS.lvl,g);
+  WS.heavy=[];
+  WS.idx=0;
+  WS.round=1;
+  WS.flipped=false;
+  WS.done=WS.pool.length===0;
+  WS.seen=0;
+  WS.known=0;
+  WP.lvl=WS.lvl;
+  WP.last[WS.lvl]=g;
+  wpSave();
   wRender();
 }
 
-/* 渲染当前状态。所有分支都只读 wIdx / wPool，不修改它们 ——
-   把"改状态"和"画界面"分开，是旧版混在一起写才出的循环问题。 */
-function wRender(){
-  const total=wPool.length;
+function wShowSource(s){
+  const name=String(s.repo||'').replace('https://github.com/','');
+  $w.src.innerHTML='词库 '+String(s.license||'')+' · <a href="'+s.repo+
+    '" target="_blank" rel="noopener">'+name+'</a>';
+}
 
-  if(wDone){
+function wChips(){
+  $w.levels.innerHTML=WS.levels.map(l=>{
+    const on=(l.id===WS.lvl)?' on':'';
+    const n=(l.count!=null)?'<small>'+l.count+'</small>':'';
+    return '<button type="button" class="w-chip'+on+'" data-lvl="'+l.id+'">'+l.name+n+'</button>';
+  }).join('');
+}
+
+function wNav(){
+  const G=wGroupCount(WS.lvl);
+  const done=wpDone(WS.lvl).length;
+  $w.groupno.innerHTML='第 <b>'+WS.group+'</b> / '+G+' 组'+
+    (done?' · 已练 <b>'+done+'</b> 组':'');
+  $w.prev.disabled=(WS.group<=1);
+  $w.next.disabled=(WS.group>=G);
+}
+
+/* ---- 渲染。只读 WS，不修改它 ---- */
+function wRender(){
+  const total=WS.pool.length;
+
+  if(WS.done){
     $w.card.classList.add('done');
-    $w.word.textContent='这一轮认完了';
+    $w.word.textContent='这组认完了';
     $w.meta.textContent='';
     $w.hint.textContent='';
-    $w.round.innerHTML='完成 · 共 '+wRound+' 轮';
+    $w.round.innerHTML='第 <b>'+WS.group+'</b> 组 · 完成';
     $w.bar.style.width='100%';
-    wWordStat();
-    $w.flip.disabled=true; $w.know.disabled=true; $w.unknow.disabled=true;
-    $w.reset.textContent='再来一轮';
-    $w.note.textContent='点「再来一轮」从第一个词重新开始，复习堆会清空。';
+    $w.flip.disabled=true;
+    $w.know.disabled=true;
+    $w.unknow.disabled=true;
+    $w.reset.textContent='再练这组';
+    // 完成态只剩「空格 = 再练这组」这一个有效键，键位提示整行留着会误导
+    if($w.keys) $w.keys.style.visibility='hidden';
+    const last=WS.group>=wGroupCount(WS.lvl);
+    $w.goNext.style.display=last?'none':'';
+    $w.note.textContent=last
+      ? '这个级别的词库已经练到最后一组了。点「再练这组」可以重来。'
+      : '这一组过了。点「下一组」接着走，练到第几组会记住。';
+    wStat();
+    wNav();
     return;
   }
 
   $w.card.classList.remove('done');
-  $w.round.innerHTML='第 <b>'+wRound+'</b> 轮 · '+(wIdx+1)+' / '+total;
-  $w.bar.style.width=(wIdx/total*100).toFixed(1)+'%';
+  $w.round.innerHTML=(WS.round>1)
+    ? '第 <b>'+WS.group+'</b> 组 · 复习 '+WS.round+' · '+(WS.idx+1)+' / '+total
+    : '第 <b>'+WS.group+'</b> 组 · '+(WS.idx+1)+' / '+total;
+  $w.bar.style.width=(WS.idx/total*100).toFixed(1)+'%';
 
-  const it=wPool[wIdx];
-  wFlipped=false;
-  $w.word.textContent=it.w;
+  const it=WS.pool[WS.idx];
+  WS.flipped=false;
+  $w.word.textContent=it[0];
   $w.meta.textContent='';
-  $w.hint.textContent=(wIdx===0&&wRound>1)
+  $w.hint.textContent=(WS.idx===0&&WS.round>1)
     ? '这一轮只练刚才没记住的 '+total+' 个词 · 点击卡片翻转'
     : '点击卡片（或按空格）翻转看释义';
-  $w.flip.disabled=false; $w.know.disabled=false; $w.unknow.disabled=false;
-  $w.reset.textContent='重来';
-  $w.note.textContent='一轮会把全部词过完。点「不认识」的词会进复习堆，但这一轮照样往下走 —— 等整轮过完，再单独练它们。';
-  wWordStat();
+  $w.flip.disabled=false;
+  $w.know.disabled=false;
+  $w.unknow.disabled=false;
+  $w.reset.textContent='重来这组';
+  $w.goNext.style.display='none';
+  if($w.keys) $w.keys.style.visibility='';
+  $w.note.textContent='一组 '+W_GROUP+' 个词。点「不认识」的词会进这一组的复习堆，但这一轮照样往下走 —— 等整组过完，再单独练它们。';
+  wStat();
+  wNav();
 }
 
-function wWordStat(){
-  const left=wPool.length-wIdx;
-  const parts=['累计判断 <b>'+wSeen+'</b> 次'];
-  parts.push('其中认识 <b>'+wKnown+'</b>');
-  if(!wDone){
-    parts.push('本轮还剩 <b>'+left+'</b>');
-    if(wHeavy.length) parts.push('待复习 <b>'+wHeavy.length+'</b>');
+function wStat(){
+  const left=WS.pool.length-WS.idx;
+  const parts=['累计判断 <b>'+WS.seen+'</b> 次','其中认识 <b>'+WS.known+'</b>'];
+  if(!WS.done){
+    parts.push('本组还剩 <b>'+left+'</b>');
+    if(WS.heavy.length) parts.push('待复习 <b>'+WS.heavy.length+'</b>');
   }
   $w.stat.innerHTML=parts.join('<span class="sep">·</span>');
 }
 
 function wFlip(){
-  if(wDone) return;
-  const it=wPool[wIdx];
-  wFlipped=true;
-  $w.meta.textContent=it.m+'\n'+it.ex;
+  if(WS.done || !WS.pool.length) return;
+  const it=WS.pool[WS.idx];
+  WS.flipped=true;
+  $w.meta.textContent=it[1];
   $w.hint.textContent='认识就按 → ，不认识按 ←';
 }
 
-/* 判断。know=true 表示"认识"，false 表示"不认识"。
-   ★ 两个分支都必须前进 —— 这正是旧版最缺的一条。 */
+/* 判断。know=true 表示「认识」。
+   ★ 两个分支都必须前进 —— 这是第一版最缺的一条。 */
 function wJudge(know){
-  if(wDone) return;
-  const it=wPool[wIdx];
-  wSeen++;
-  if(know){ wKnown++; }
-  else if(!wHeavy.some(x=>x.w===it.w)){ wHeavy.push(it); }
+  if(WS.done || !WS.pool.length) return;
+  const it=WS.pool[WS.idx];
+  WS.seen++;
+  if(know){ WS.known++; }
+  else if(!WS.heavy.some(x=>x[0]===it[0])){ WS.heavy.push(it); }
 
-  wIdx++;
-  if(wIdx>=wPool.length){
-    // 一轮走完：复习堆还有东西就开新一轮，否则收工
-    if(wHeavy.length){
-      wRound++;
-      wStartRound(wHeavy);
+  WS.idx++;
+  if(WS.idx>=WS.pool.length){
+    if(WS.heavy.length){
+      // 这一遍走完还有没记住的：拿它们开下一轮（注意先取再清）
+      WS.round++;
+      WS.pool=WS.heavy.slice();
+      WS.heavy=[];
+      WS.idx=0;
+      wRender();
       return;
     }
-    wIdx=wPool.length;
-    wDone=true;
+    WS.idx=WS.pool.length;
+    WS.done=true;
+    wpMarkDone(WS.lvl, WS.group);
   }
   wRender();
 }
 
-function wResetAll(){
-  wRound=1; wSeen=0; wKnown=0;
-  wStartRound(WORDS);
-}
-
+$w.levels.onclick=(e)=>{
+  const b=e.target.closest ? e.target.closest('.w-chip') : null;
+  if(!b) return;
+  const lvl=b.dataset.lvl;
+  if(!lvl || lvl===WS.lvl) return;
+  wSetLevel(lvl, WP.last[lvl]||1);
+};
+$w.prev.onclick=()=>{ if(WS.group>1) wStartGroup(WS.group-1); };
+$w.next.onclick=()=>{ if(WS.group<wGroupCount(WS.lvl)) wStartGroup(WS.group+1); };
+$w.goNext.onclick=()=>{ if(WS.group<wGroupCount(WS.lvl)) wStartGroup(WS.group+1); };
 $w.flip.onclick=wFlip;
-$w.card.onclick=()=>{ if(!wFlipped) wFlip(); };
+$w.card.onclick=()=>{ if(!WS.flipped) wFlip(); };
 $w.know.onclick=()=>wJudge(true);
 $w.unknow.onclick=()=>wJudge(false);
-$w.reset.onclick=wResetAll;
+$w.reset.onclick=()=>wStartGroup(WS.group);
 
 /* 键盘：只在单词卡这一屏可见时生效，否则在别的工具里按方向键会被这里抢走 */
 document.addEventListener('keydown',(e)=>{
@@ -891,16 +1079,17 @@ document.addEventListener('keydown',(e)=>{
   if(!panel || !panel.classList.contains('active')) return;
   const tag=(e.target && e.target.tagName) || '';
   if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT') return;
-  if(wDone){
-    if(e.key===' '||e.key==='Enter'){ e.preventDefault(); wResetAll(); }
+  if(!WS.ready) return;
+  if(WS.done){
+    if(e.key===' '||e.key==='Enter'){ e.preventDefault(); wStartGroup(WS.group); }
     return;
   }
-  if(e.key===' '||e.key==='Enter'){ e.preventDefault(); if(wFlipped) wJudge(true); else wFlip(); }
+  if(e.key===' '||e.key==='Enter'){ e.preventDefault(); if(WS.flipped) wJudge(true); else wFlip(); }
   else if(e.key==='ArrowRight'){ e.preventDefault(); wJudge(true); }
   else if(e.key==='ArrowLeft'){ e.preventDefault(); wJudge(false); }
 });
 
-wStartRound(WORDS);
+wBoot();
 
 /* ---------- 倒计时 ---------- */
 const dlList=document.getElementById('dlList'); let dls=[];
