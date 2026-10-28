@@ -229,9 +229,18 @@ export default function ChatArea({
     };
   }, [mode]);
 
+  // 新消息进来时贴住底部。
+  // ★ 空态（欢迎页）必须跳过：欢迎页比可视区高，滚到底会把吉祥物、眉题、
+  //   标题整块推到视口外 —— 打开就是"半截页面"，用户以为首页就长那样（10-28 实测：
+  //   1080×629 下欢迎页 616px、可视区 340px，一进来 scrollTop 就是 316）。
   useEffect(() => {
     const el = scrollRef.current;
-    if (el && stickRef.current) el.scrollTop = el.scrollHeight;
+    if (!el || !stickRef.current) return;
+    if (messages.length === 0) {
+      el.scrollTop = 0;
+      return;
+    }
+    el.scrollTop = el.scrollHeight;
   }, [messages]);
 
   // 切换会话（首条消息换了）时强制回到底部，否则会停在上一会话的滚动位置
@@ -591,7 +600,7 @@ export default function ChatArea({
               <h1 className="hero-title font-serif font-bold leading-snug text-ink">
                 {greeting}，我是<span className="hero-name">知穗</span>
               </h1>
-              <p className="mt-1.5 max-w-[30rem] text-msg leading-relaxed text-muted">
+              <p className="welcome-sub mt-1.5 max-w-[30rem] text-msg leading-relaxed text-muted">
                 一句话就行。直接问我——我会自己决定怎么帮你。
               </p>
 
@@ -608,7 +617,7 @@ export default function ChatArea({
                   结果「模板广场」这种一次性动作和「每日委托」这种天天用的能力
                   一样醒目 —— 而知穗的差别恰恰在后面那类。改成两层之后，
                   主线是大卡 + 有标题栏，辅路缩成一行小胶囊。 */}
-              <div className="mt-4 w-full">
+              <div className="welcome-daily mt-4 w-full">
                 <div className="welcome-section-head">
                   <span className="eyebrow">让知穗每天做点什么</span>
                   <span className="rule" />
@@ -632,7 +641,7 @@ export default function ChatArea({
               </div>
 
               {/* ③ 辅路：一次性动作，收成一行小入口 */}
-              <div className="mt-2.5 flex w-full flex-wrap justify-center gap-2">
+              <div className="welcome-mini mt-2.5 flex w-full flex-wrap justify-center gap-2">
                 {SECONDARY_ENTRIES.map((e) => (
                   <button
                     key={e.key}
@@ -647,8 +656,9 @@ export default function ChatArea({
                 ))}
               </div>
 
-              {/* ③ 次级示例：三句能立刻点的话，三列等宽便签；min-w-0 让长句在卡内截断不溢出 */}
-              <div className="mt-3 grid w-full grid-cols-1 gap-2 sm:grid-cols-3">
+              {/* ③ 次级示例：三句能立刻点的话，三列等宽便签；min-w-0 让长句在卡内截断不溢出
+                  矮屏（≤700px 高）整行让位：一屏放得下「品牌 + 三张日更大卡」比多摆三句示例更值 */}
+              <div className="welcome-egs mt-3 grid w-full grid-cols-1 gap-2 sm:grid-cols-3">
                 {EXAMPLES.map((e) => (
                   <button
                     key={e.q}

@@ -994,3 +994,60 @@ textarea.input {
   /* 用户可能贴很长的 URL 或一长串英文，不换行会把卡片撑破 */
   overflow-wrap: anywhere;
 }
+
+/* ============ 学习路径页 ·「这条路是什么」说明卡 ============
+   新用户进 /path 看到的是「12 关」「已通过 4/12」「进行中」—— 数字齐全，
+   但没有一处告诉他这些数字是干什么的（10-28 用户原话："新用户可能不知道这个是干什么的"）。
+   所以先给一段规则说明，再给进度。
+   壳子复用首页引导条 .onboard（同一套"贴在纸上的提示卡"语言：淡金底 + 虚线金边），
+   内部换成三条一句一条的短句 —— 这里解释的是"规则"，不是"三个动作"，
+   所以用 ol 而不是首页那种三步宫格。 */
+.path-note {
+  /* .onboard 自带 margin-top:18px（挂在欢迎页标题下面用的），这里是 flex 列表里的一项 */
+  margin-top: 0;
+}
+.path-intro {
+  margin: 9px 0 0;
+  padding-left: 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: var(--fs-md);
+  line-height: 1.6;
+  color: var(--text-2);
+}
+.path-intro li {
+  /* 长句在窄屏要能换行，不能顶破卡片 */
+  overflow-wrap: anywhere;
+}
+.path-intro li::marker {
+  font-size: 11px;
+  color: var(--accent);
+}
+.path-intro b {
+  font-weight: 600;
+  color: var(--text-1);
+}
+/* 页头「这是什么？」：关掉说明之后重新翻开的入口。
+   做成虚线下划线的文字按钮 —— 它是个辅助动作，不该和右边的「已通过 N 关」抢视线 */
+.path-intro-btn {
+  padding: 2px 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+  white-space: nowrap;
+  transition: var(--t-color);
+}
+.path-intro-btn:hover,
+.path-intro-btn:focus-visible {
+  color: var(--accent-ink);
+  text-decoration-style: solid;
+  outline: none;
+}

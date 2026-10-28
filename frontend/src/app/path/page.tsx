@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useState } from "react";
 import ConsoleShell from "@/components/console/ConsoleShell";
 import { useAuth } from "@/lib/hooks/useAuth";
+import { useDismissed } from "@/lib/hooks/useDismissed";
 import CornIcon from "@/components/CornIcon";
 
 type Status = "done" | "current" | "locked";
@@ -128,7 +129,7 @@ function LevelCard({ lv, onOpen }: { lv: Level; onOpen: (lv: Level) => void }) {
           {new Date(lv.done_at * 1000).getMonth() + 1}/{new Date(lv.done_at * 1000).getDate()} 通过
         </div>
       ) : (
-        <div style={{ height: 2, background: "var(--fill-3)", borderRadius: 2, marginTop: "auto", overflow: "hidden" }}>
+        <div style={{ height: 2, background: "var(--fill-1)", borderRadius: 2, marginTop: "auto", overflow: "hidden" }}>
           <div
             style={{
               width: `${cur ? Math.max(3, Math.min(100, lv.percent)) : 0}%`,
@@ -171,6 +172,10 @@ export default function PathPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [open, setOpen] = useState<Level | null>(null);
+  // 「这条路是什么」：按用户记住关闭状态。首进必看，看过之后页头留一个「这是什么」能再翻开
+  const [introGone, dismissIntro, reopenIntro] = useDismissed(
+    `baomi.path.intro.v1.${authedId ?? "anon"}`
+  );
 
   const load = useCallback(async () => {
     setErr("");
@@ -196,18 +201,52 @@ export default function PathPage() {
       active="path"
       eyebrow="学习路径"
       title="12 关，一关一关过"
-      sub="每关的完成条件都来自你自己的真实数据，不是手动打勾。"
+      sub="从「把资料放进来」走到「让它每天替你跑」——走完这 12 关，知穗才算真的配成你自己的。"
       actions={
-        p ? (
-          <span style={{ fontSize: 12, color: "var(--text-2)" }}>
-            已通过 {p.done} / {p.total} 关 · {p.percent}%
-          </span>
-        ) : null
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {p && (
+            <span style={{ fontSize: 12, color: "var(--text-2)" }}>
+              已通过 {p.done} / {p.total} 关 · {p.percent}%
+            </span>
+          )}
+          {introGone && (
+            <button type="button" onClick={reopenIntro} className="path-intro-btn">
+              这是什么？
+            </button>
+          )}
+        </div>
       }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 16, paddingBottom: 24 }}>
         {err && (
           <div style={{ ...card, borderColor: "var(--red-ink)", color: "var(--red-ink)", fontSize: 13 }}>{err}</div>
+        )}
+
+        {/* 新用户第一眼看到的是「12 关」「已通过 4/12」——数字有了，但没人告诉他这是干什么的。
+            这段说明只在第一次进来看得见，关掉后页头留「这是什么？」可以再翻开。 */}
+        {!introGone && (
+          <section className="onboard path-note" role="note" aria-label="学习路径说明">
+            <div className="onboard-head">
+              <span className="onboard-title">这条路是什么？</span>
+              <button type="button" className="onboard-close" onClick={dismissIntro}>
+                知道了
+              </button>
+            </div>
+            <ol className="path-intro">
+              <li>
+                <b>12 关，按顺序走。</b>
+                前一关没过，后面的关卡不亮——它是关卡，不是可以随便勾的待办清单。
+              </li>
+              <li>
+                <b>过关条件都是你真做出来的数据。</b>
+                资料份数、连续打卡、掌握词数、模考分数……系统自己算，到线就自动亮，你什么都不用填。
+              </li>
+              <li>
+                <b>「当前这一关」就是你现在该做的那件事。</b>
+                点它右边的按钮直接去做，做完回来这里会自己变成已通过。
+              </li>
+            </ol>
+          </section>
         )}
 
         {loading && !ov && (
@@ -224,7 +263,7 @@ export default function PathPage() {
                   <span style={{ fontSize: 16, color: "var(--text-2)", fontWeight: 400 }}> / {p.total} 关</span>
                 </div>
                 <div style={{ flex: 1, minWidth: 180 }}>
-                  <div style={{ height: 8, background: "var(--fill-3)", borderRadius: 6, overflow: "hidden" }}>
+                  <div style={{ height: 8, background: "var(--fill-1)", borderRadius: 6, overflow: "hidden" }}>
                     <div
                       style={{
                         width: `${Math.max(2, p.percent)}%`,
@@ -379,7 +418,7 @@ export default function PathPage() {
                       {c.value} / {c.target} {c.unit}
                     </span>
                   </div>
-                  <div style={{ height: 5, background: "var(--fill-3)", borderRadius: 4, overflow: "hidden" }}>
+                  <div style={{ height: 5, background: "var(--fill-1)", borderRadius: 4, overflow: "hidden" }}>
                     <div
                       style={{
                         width: `${c.target > 0 ? Math.min(100, Math.max(0, (c.value / c.target) * 100)) : 100}%`,
