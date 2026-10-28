@@ -20,6 +20,46 @@ from __future__ import annotations
 
 from core import apilog, api_labels, timeutil, user_feedback
 
+# ---------- 失败口径（唯一一处定义，别在 SQL 里各写一遍） ----------
+#
+# 内测第一天实测：183 次"失败"里 178 是 401、17 是 /api/report 的 404，
+# 真正的故障（5xx）是 0。两类都不是"系统报错"：
+#   · 401  = 打开页面还没登录，前端探测 /api/auth/me —— 预期行为
+#   · 404 on /api/report/*  = 今天还没跑过对话，总结自然不存在 —— 业务空态
+# 所以「失败」只留**需要人处理**的：401 之外的状态码 ≥400，且报告空态除外。
+_FAILED_SQL = "(status >= 400 AND status != 401 AND NOT (status = 404 AND path LIKE '/api/report/%'))"
+_EXPECTED_SQL = f"(status >= 400 AND NOT {_FAILED_SQL})"
+
+
+def explain_status(status: int, path: str = "", method: str = "") -> tuple[str, bool]:
+    """把一条失败翻成人话：返回 (原因, 是否可忽略)。
+
+    看板要能直接回答"这条为什么失败"，否则每次都得 ssh 上去 grep 日志
+    （用户 2026-10-28 的原话）。`expected=True` 表示预期行为，不用管。
+    """
+    p = path or ""
+    if status == 401:
+        return "未登录：打开页面时的身份探测，属于预期行为", True
+    if status == 404 and p.startswith("/api/report/"):
+        return "今天还没跑完一轮对话，总结尚未生成（空态）", True
+    if status == 400 and "auth/register" in p:
+        return "注册参数不合格：用户名 3~32 字符、密码 6~128 位", False
+    if status == 409 and "auth/register" in p:
+        return "该用户名已被占用，用户换个名字即可", False
+    if status == 404:
+        return "接口不存在：前端可能请求了错误的地址", False
+    if status == 400:
+        return "参数校验未通过（请求内容不符合接口要求）", False
+    if status == 403:
+        return "无权限：账号被停用或功能开关关闭", False
+    if status == 422:
+        return "参数格式不对（缺字段或类型不符）", False
+    if status == 429:
+        return "触发限流：同一账号短时间内请求过多", False
+    if 500 <= status < 600:
+        return "服务端异常：需要看 journalctl 定位堆栈", False
+    return "其他失败，建议看日志确认", False
+
 
 def range_of(days: int = 7) -> dict:
     """把 `days` 解释成一个左闭右开的 Unix 秒区间（文档 §1）。
@@ -54,11 +94,8 @@ def _call_stats(start: int, end_excl: int) -> dict:
         row = conn.execute(
             "SELECT COUNT(*) AS total, "
             "       COALESCE(SUM(status < 400), 0) AS ok, "
-            # 401 是"还没登录"的探测（打开页面就打 /api/auth/me），不是故障。
-            # 算进失败会把成功率压低好几个点、把"哪里在报错"榜刷满 /api/auth/me，
-            # 所以失败口径显式剔除 401，并把分母也换成 total - unauthorized。
-            "       COALESCE(SUM(status = 401), 0) AS unauthorized, "
-            "       COALESCE(SUM(status >= 400 AND status != 401), 0) AS failed, "
+            f"       COALESCE(SUM({_EXPECTED_SQL}), 0) AS expected, "
+            f"       COALESCE(SUM({_FAILED_SQL}), 0) AS failed, "
             "       COALESCE(AVG(dur_ms), 0) AS avg_ms, "
             "       COALESCE(MAX(dur_ms), 0) AS max_ms "
             "FROM api_call_logs WHERE ts >= ? AND ts < ?",
@@ -66,12 +103,14 @@ def _call_stats(start: int, end_excl: int) -> dict:
         ).fetchone()
     total = int(row["total"] or 0)
     ok = int(row["ok"] or 0)
-    unauth = int(row["unauthorized"] or 0)
-    denom = total - unauth
+    expected = int(row["expected"] or 0)
+    denom = total - expected
     return {
         "total": total,
         "ok": ok,
-        "unauthorized": unauth,
+        # expected = 401 未登录探测 + 报告空态 404。可忽略，但要说出来，
+        # 否则"总数 ≠ ok + failed"会让人以为数字对不上
+        "expected": expected,
         "failed": int(row["failed"] or 0),
         # 分母为 0 时返回 None（前端显示 —），不返回 0.0 假装算出个 0%
         "success_rate": round(ok / denom, 4) if denom else None,
@@ -110,8 +149,7 @@ def _series(day_list: list[str]) -> list[dict]:
         for day in day_list:
             s, e = timeutil.day_bounds(day)
             row = conn.execute(
-                "SELECT COUNT(*) AS n, "
-                "       COALESCE(SUM(status >= 400 AND status != 401), 0) AS bad "
+                f"SELECT COUNT(*) AS n, COALESCE(SUM({_FAILED_SQL}), 0) AS bad "
                 "FROM api_call_logs WHERE ts >= ? AND ts < ?",
                 (s, e),
             ).fetchone()
@@ -145,7 +183,7 @@ def overview(days: int = 7) -> dict:
 _SORTS = {
     "calls": ("calls DESC, path ASC, method ASC", ""),
     "slow": ("avg_ms DESC, calls DESC, path ASC", "HAVING COUNT(*) >= 3 "),
-    "fail": ("failed DESC, calls DESC, path ASC", "HAVING SUM(status >= 400 AND status != 401) > 0 "),
+    "fail": ("failed DESC, calls DESC, path ASC", f"HAVING SUM({_FAILED_SQL}) > 0 "),
 }
 
 
@@ -172,7 +210,7 @@ def api_ranking(days: int = 7, limit: int = 20, sort: str = "calls") -> dict:
     with store._get_conn() as conn:  # noqa: SLF001
         rows = conn.execute(
             "SELECT path, method, COUNT(*) AS calls, "
-            "       COALESCE(SUM(status >= 400 AND status != 401), 0) AS failed, "
+            f"       COALESCE(SUM({_FAILED_SQL}), 0) AS failed, "
             "       CAST(COALESCE(AVG(dur_ms), 0) AS INTEGER) AS avg_ms, "
             "       COALESCE(MAX(dur_ms), 0) AS max_ms "
             "FROM api_call_logs WHERE ts >= ? AND ts < ? "
@@ -204,6 +242,70 @@ def api_ranking(days: int = 7, limit: int = 20, sort: str = "calls") -> dict:
         ],
         "total_paths": int(total_paths or 0),
         "sort": sort,
+        "range": {"days": r["days"], "start": r["start"], "end": r["end"]},
+    }
+
+
+# ==================== 失败明细（带人话原因） ====================
+
+
+def failures(days: int = 7, limit: int = 20) -> dict:
+    """区间内最近的失败调用 + 中文原因，让看板自己回答"为什么失败"。
+
+    分两栏给：`need_attention`（要处理的）和 `ignorable`（预期行为，如未登录
+    探测、报告空态）。**不做成"全部混在一起"**：混着看，17 条预期行为会把
+    1 条真故障淹掉 —— 这正是内测第一天"183 次报错"吓人的原因。
+
+    另外按 (路径, 状态码) 聚合出 `top`，用来回答"哪类错最多、要修哪一个"。
+    """
+    r = range_of(days)
+    limit = max(1, min(100, int(limit)))
+    apilog.ensure()
+    from core import session as store
+
+    with store._get_conn() as conn:  # noqa: SLF001
+        rows = conn.execute(
+            "SELECT ts, path, method, status, dur_ms FROM api_call_logs "
+            "WHERE ts >= ? AND ts < ? AND status >= 400 "
+            # rowid 做第二排序键：ts 是秒级，同一秒常常有上百条失败，
+            # 只按 ts 排会把"刚刚那条 404"随机挤出前 20（实测踩到过）
+            "ORDER BY ts DESC, rowid DESC LIMIT ?",
+            (r["start"], r["end_exclusive"], limit),
+        ).fetchall()
+        agg = conn.execute(
+            "SELECT path, method, status, COUNT(*) AS n FROM api_call_logs "
+            "WHERE ts >= ? AND ts < ? AND status >= 400 "
+            "GROUP BY path, method, status ORDER BY n DESC LIMIT ?",
+            (r["start"], r["end_exclusive"], limit),
+        ).fetchall()
+
+    def item(row, with_ts: bool) -> dict:
+        path, method, status = str(row["path"]), str(row["method"]), int(row["status"])
+        hint, expected = explain_status(status, path, method)
+        out = {
+            "path": path,
+            "method": method,
+            "status": status,
+            "label": api_labels.label_for(method, path),
+            "hint": hint,
+            "expected": expected,
+        }
+        if with_ts:
+            ts = int(row["ts"])
+            out["ts"] = ts
+            out["day"] = timeutil.day_str(ts)
+            out["dur_ms"] = int(row["dur_ms"] or 0)
+        else:
+            out["calls"] = int(row["n"] or 0)
+        return out
+
+    recent = [item(x, True) for x in rows]
+    return {
+        "days": r["days"],
+        "recent": recent,
+        "need_attention": [x for x in recent if not x["expected"]],
+        "ignorable": [x for x in recent if x["expected"]],
+        "top": [item(x, False) for x in agg],
         "range": {"days": r["days"], "start": r["start"], "end": r["end"]},
     }
 

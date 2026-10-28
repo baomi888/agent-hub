@@ -33,6 +33,7 @@ import type {
   AdminFeedbackResp,
   ApiRankResp,
   DashboardOverview,
+  FailuresResp,
   FeedbackDict,
   FeedbackStatus,
   UserFeedbackItem,
@@ -56,7 +57,7 @@ const SORT_OPTIONS: { value: SortKey; label: string; hint: string }[] = [
     label: "最耗时",
     hint: "平均等待时间最长（只算用过 3 次以上的：第一次启动时的偶发慢不算）",
   },
-  { value: "fail", label: "出过错", hint: "返回过错误（4xx/5xx，不含未登录）的功能" },
+  { value: "fail", label: "出过错", hint: "返回过错误（4xx/5xx，不含未登录与报告空态）的功能" },
 ];
 
 const STATUS_CLASS: Record<string, string> = {
@@ -93,6 +94,8 @@ export default function DashboardPage() {
   const [ov, setOv] = useState<DashboardOverview | null>(null);
   const [ovErr, setOvErr] = useState("");
   const [apis, setApis] = useState<ApiRankResp | null>(null);
+  // 失败明细：让页面自己回答"为什么失败"，不用去服务器 grep 日志
+  const [fails, setFails] = useState<FailuresResp | null>(null);
   const [fb, setFb] = useState<AdminFeedbackResp | null>(null);
   const [fbStatus, setFbStatus] = useState("");
   const [dict, setDict] = useState<FeedbackDict | null>(null);
@@ -118,6 +121,10 @@ export default function DashboardPage() {
       .apis(days, 20, sort)
       .then(setApis)
       .catch(() => setApis(null));
+    api.admin
+      .failures(days, 20)
+      .then(setFails)
+      .catch(() => setFails(null));
     api.admin
       .feedback(fbStatus, 30, 0)
       .then(setFb)
@@ -284,7 +291,7 @@ export default function DashboardPage() {
                 : "—"}
             </div>
             <div className="l">
-              成功率 <span className="meta">（不含 401 未登录探测）</span>
+              成功率 <span className="meta">（不含未登录探测、报告空态）</span>
             </div>
           </div>
         </div>
@@ -303,7 +310,7 @@ export default function DashboardPage() {
           </div>
           <div className="card card-pad stat">
             <div className="n">{ov ? fmtNum(ov.calls.failed) : "—"}</div>
-            <div className="l">失败次数（≥400，不含未登录）</div>
+            <div className="l">失败次数（不含未登录、空总结）</div>
           </div>
           <div className="card card-pad stat">
             <div className="n">{ov ? fmtNum(ov.feedback.open) : "—"}</div>
@@ -350,6 +357,76 @@ export default function DashboardPage() {
                   按<b>自然日</b>切分（业务时区 {ov.range.tz}）。全部为 0 的日子也画出来 ——
                   跳过空日子会让趋势看起来比实际更连贯。
                 </p>
+              </>
+            )}
+          </div>
+        </section>
+
+        {/* ============ 失败原因（不用去服务器 grep 日志） ============ */}
+        <section>
+          <p className="sec-label">
+            失败原因{" "}
+            <span className="meta">（每条都标了是什么错；预期行为不算系统报错）</span>
+          </p>
+          <div className="card card-pad">
+            {!fails ? (
+              <SkeletonLines widths={["100%", "92%", "80%"]} />
+            ) : fails.recent.length === 0 ? (
+              <p className="hint" style={{ marginTop: 0 }}>
+                这个区间没有任何失败调用 —— 干净。
+              </p>
+            ) : (
+              <>
+                <p className="hint" style={{ marginTop: 0 }}>
+                  需要处理 <b>{fails.need_attention.length}</b> 条
+                  {fails.ignorable.length > 0 ? (
+                    <>
+                      {" "}
+                      · 可忽略 <b>{fails.ignorable.length}</b> 条（未登录探测 / 今天还没跑完对话所以没有总结）
+                    </>
+                  ) : null}
+                </p>
+
+                {fails.need_attention.length === 0 ? (
+                  <p className="hint">没有需要处理的问题。</p>
+                ) : (
+                  fails.need_attention.slice(0, 8).map((f) => (
+                    <div
+                      key={`${f.method} ${f.path} ${f.ts ?? 0}`}
+                      className="row"
+                      style={{ alignItems: "flex-start", gap: 10, padding: "7px 0" }}
+                    >
+                      <span className="ctag bad">{f.status}</span>
+                      <span style={{ minWidth: 0, flex: 1 }}>
+                        <span style={{ display: "block", fontSize: 13, color: "var(--text-1)" }}>
+                          {f.label}
+                        </span>
+                        <span
+                          className="mono"
+                          style={{ display: "block", fontSize: 11, color: "var(--text-3)" }}
+                        >
+                          {f.ts ? `${fmtTime(f.ts)} · ` : ""}
+                          {f.method} {f.path}
+                        </span>
+                        <span className="hint" style={{ display: "block", margin: "2px 0 0" }}>
+                          {f.hint}
+                        </span>
+                      </span>
+                    </div>
+                  ))
+                )}
+
+                {fails.ignorable.length > 0 ? (
+                  <p className="hint" style={{ marginBottom: 0 }}>
+                    可忽略的：
+                    {fails.top
+                      .filter((x) => x.expected)
+                      .slice(0, 3)
+                      .map((x) => `${x.label}（${x.status}）× ${x.calls ?? 1}`)
+                      .join("、") || "见上"}
+                    。这些是打开页面时的身份探测、以及总结还没生成时的空态，不是系统报错。
+                  </p>
+                ) : null}
               </>
             )}
           </div>

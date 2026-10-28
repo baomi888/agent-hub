@@ -83,6 +83,21 @@ async def apis(
     return await asyncio.to_thread(dashboard.api_ranking, days, limit, sort)
 
 
+@router.get("/failures")
+async def failures(
+    days: int = Query(7, ge=1, le=90),
+    limit: int = Query(20, ge=1, le=100),
+    uid: str = Depends(get_current_user),
+) -> dict:
+    """最近的失败调用 + 中文原因（看板自己回答"为什么失败"，不用去 grep 日志）。
+
+    分 `need_attention` / `ignorable` 两栏：401 未登录、报告空态 404 属于预期行为，
+    和真故障混在一起看会把真问题淹掉。
+    """
+    _require_admin(uid)
+    return await asyncio.to_thread(dashboard.failures, days, limit)
+
+
 @router.get("/feedback")
 async def feedback_list(
     status: str = Query("", description="按状态筛；空表示全部"),

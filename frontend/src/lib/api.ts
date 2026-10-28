@@ -22,6 +22,7 @@ import type {
   CheckinHistoryItem,
   DashboardOverview,
   ApiRankResp,
+  FailuresResp,
   AdminFeedbackResp,
   MyFeedbackResp,
   FeedbackDict,
@@ -409,6 +410,9 @@ export const api = {
     overview: (days = 7) => request<DashboardOverview>(`/api/admin/overview?days=${days}`),
     apis: (days = 7, limit = 20, sort: "calls" | "slow" | "fail" = "calls") =>
       request<ApiRankResp>(`/api/admin/apis?days=${days}&limit=${limit}&sort=${sort}`),
+    /** 失败明细 + 原因。分 需处理 / 可忽略 两栏，看板不用再去翻日志 */
+    failures: (days = 7, limit = 20) =>
+      request<FailuresResp>(`/api/admin/failures?days=${days}&limit=${limit}`),
     feedback: (status = "", limit = 20, offset = 0) =>
       request<AdminFeedbackResp>(
         `/api/admin/feedback?status=${encodeURIComponent(status)}&limit=${limit}&offset=${offset}`

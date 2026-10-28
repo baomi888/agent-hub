@@ -238,11 +238,12 @@ def test_overview_matches_raw_sql(env, client):
     assert d["calls"]["max_ms"] == 300
 
 
-def test_401_is_noise_not_failure(env, client):
-    """401（未登录探测）不计入失败，也不计入成功率分母。
+def test_expected_errors_are_not_failures(env, client):
+    """401（未登录探测）与 /api/report 的 404（今天还没总结）都不算失败。
 
-    内测第一天实测：178 条 401 把成功率压到 90.7%、把"出过错"榜刷满
-    /api/auth/me。401 代表"还没登录"，不是故障——但 403/404/5xx 照旧算失败。
+    内测第一天实测：178 条 401 + 17 条报告空态把成功率压到 90.7%、
+    把"出过错"榜刷满 /api/auth/me。两者都是预期行为——但 500、普通 404、
+    注册 400 照旧算失败，不能一刀切"4xx 都不算"。
     """
     now = int(time.time())
     _seed_calls(
@@ -250,6 +251,8 @@ def test_401_is_noise_not_failure(env, client):
             (now, "/api/auth/me/", "GET", 401, 5, None),
             (now, "/api/auth/me/", "GET", 401, 5, None),
             (now, "/api/auth/me/", "GET", 401, 5, None),
+            (now, "/api/report/today", "GET", 404, 8, "u1"),
+            (now, "/api/report/{date}", "GET", 404, 8, "u1"),
             (now, "/api/a/", "GET", 200, 100, "u1"),
             (now, "/api/a/", "GET", 500, 300, "u1"),
             (now, "/api/b/", "GET", 404, 20, "u1"),
@@ -258,19 +261,52 @@ def test_401_is_noise_not_failure(env, client):
     _login(client, ADMIN_NAME)
     d = client.get("/api/admin/overview?days=7").json()
 
-    assert d["calls"]["unauthorized"] == 3
-    assert d["calls"]["failed"] == 2  # 500 + 404；三条 401 不算
-    # 分母 = 6 - 3 = 3，分子 ok 只有 1 条 200
+    # 5 条预期（3 个 401 + 2 个报告空态）都不进 failed
+    assert d["calls"]["expected"] == 5
+    assert d["calls"]["failed"] == 2  # 500 + 普通 404
+    # 分母 = 8 - 5 = 3，分子 ok 只有 1 条 200
     assert d["calls"]["success_rate"] == pytest.approx(1 / 3, abs=1e-4)
 
     s = client.get("/api/admin/overview?days=7").json()["series"]
     today = [x for x in s if x["failed"] > 0]
-    assert today and today[0]["failed"] == 2, "趋势里的失败也必须剔除 401"
+    assert today and today[0]["failed"] == 2, "趋势里的失败也必须剔除预期行为"
 
     fail = client.get("/api/admin/apis?days=7&sort=fail").json()
     paths = [i["path"] for i in fail["items"]]
     assert "/api/auth/me/" not in paths, "全 401 的接口不该进'出过错'榜"
+    assert "/api/report/today" not in paths, "报告空态不该进'出过错'榜"
     assert fail["items"][0]["path"] == "/api/a/"
+
+
+def test_failures_explain_reason(env, client):
+    """看板要能自己说清"为什么失败"，并按 需处理 / 可忽略 分栏。"""
+    now = int(time.time())
+    _seed_calls(
+        [
+            (now, "/api/auth/me/", "GET", 401, 5, None),
+            (now, "/api/report/today", "GET", 404, 8, "u1"),
+            (now, "/api/auth/register/", "POST", 409, 10, None),
+            (now, "/api/kb/", "GET", 500, 900, "u1"),
+        ]
+    )
+    _login(client, ADMIN_NAME)
+    d = client.get("/api/admin/failures?days=7").json()
+
+    assert len(d["recent"]) == 4
+    assert all({"path", "status", "hint", "expected", "label"} <= set(x) for x in d["recent"])
+
+    ign = {x["path"] for x in d["ignorable"]}
+    need = {x["path"] for x in d["need_attention"]}
+    assert ign == {"/api/auth/me/", "/api/report/today"}
+    assert need == {"/api/auth/register/", "/api/kb/"}
+
+    by_path = {x["path"]: x for x in d["recent"]}
+    assert "未登录" in by_path["/api/auth/me/"]["hint"]
+    assert "总结" in by_path["/api/report/today"]["hint"]
+    assert "占用" in by_path["/api/auth/register/"]["hint"]
+    assert "服务端异常" in by_path["/api/kb/"]["hint"]
+    # 聚合榜：按 (路径, 状态) 计数，最上面就是"哪类错最多"
+    assert d["top"] and "calls" in d["top"][0]
 
 
 def test_users_total_is_snapshot_new_is_ranged(env, client):

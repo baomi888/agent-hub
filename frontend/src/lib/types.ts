@@ -621,6 +621,8 @@ export interface DashboardUsers {
 export interface DashboardCalls {
   total: number;
   ok: number;
+  /** 预期行为（401 未登录探测 + 报告空态 404）：不算失败，也不进成功率分母 */
+  expected: number;
   failed: number;
   /** 分母为 0 时为 null —— 不是 0，也不是 100 */
   success_rate: number | null;
@@ -660,6 +662,34 @@ export interface ApiRankResp {
   items: ApiRankItem[];
   total_paths: number;
   sort: "calls" | "slow" | "fail";
+  range: { days: number; start: number; end: number };
+}
+
+/** 一条失败调用 + 人话原因（后端 core/dashboard.explain_status 是唯一来源） */
+export interface FailureItem {
+  path: string;
+  method: string;
+  status: number;
+  /** 中文业务名 */
+  label: string;
+  /** 为什么失败 */
+  hint: string;
+  /** 是否为预期行为（未登录探测 / 报告空态）—— 不算系统报错 */
+  expected: boolean;
+  /** 仅 recent 里有 */
+  ts?: number;
+  day?: string;
+  dur_ms?: number;
+  /** 仅 top 聚合里有 */
+  calls?: number;
+}
+
+export interface FailuresResp {
+  days: number;
+  recent: FailureItem[];
+  need_attention: FailureItem[];
+  ignorable: FailureItem[];
+  top: FailureItem[];
   range: { days: number; start: number; end: number };
 }
 

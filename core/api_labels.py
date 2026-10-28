@@ -60,6 +60,7 @@ _LABELS: dict[tuple[str, str], str] = {
     # ---------- 看板 ----------
     ("GET", "/api/admin/overview"): "看板 · 今日总览",
     ("GET", "/api/admin/apis"): "看板 · 接口排行",
+    ("GET", "/api/admin/failures"): "看板 · 失败明细",
     ("GET", "/api/admin/dict"): "看板 · 指标说明",
     ("GET", "/api/admin/feedback"): "看板 · 反馈列表",
     ("PATCH", "/api/admin/feedback/{}"): "看板 · 处理反馈",
