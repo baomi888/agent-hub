@@ -20,6 +20,7 @@ import FeedbackCard from "@/components/FeedbackCard";
 import TagPicker from "@/components/profile/TagPicker";
 import { Callout, NotReady, Seg, SkeletonLines, Switch } from "@/components/console/ui";
 import { api } from "@/lib/api";
+import { openGuide } from "@/lib/guide";
 import { useAuth } from "@/lib/hooks/useAuth";
 import {
   DEFAULT_TOP_K,
@@ -153,6 +154,18 @@ export default function SettingsPage() {
           <section>
             <p className="sec-label">账号</p>
             <AccountCard onLogout={logout} />
+            {/* 首次进平台那张上手说明只弹一次。入口放账号下面而不是另起一块：
+                它属于"我这个账号的事"，和改密码 / 退出登录同一类。 */}
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              style={{ marginTop: 10 }}
+              onClick={openGuide}
+              title="重新打开首次进入时的四步说明"
+            >
+              <CornIcon name="bulb" />
+              再看一次上手说明
+            </button>
             <p className="hint">
               「修改密码」还缺后端端点 <code>/api/auth/password</code>（跨 3 轮未修），先置灰。
             </p>

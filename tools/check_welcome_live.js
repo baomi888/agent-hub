@@ -71,6 +71,15 @@ const check = (n, c, e = "") => {
     }, USER, PASS);
     await sleep(3500);
   }
+  // 2026-10-28 起登录后会弹一次「上手说明」。puppeteer 每次都是新 profile，
+  // localStorage 是空的 ⇒ 一定会弹，而且它会挡住整页（后面 page.click("button.btn-new")
+  // 会直接报 not clickable）。这个脚本验的是欢迎页布局，不是引导本身，先关掉它。
+  await page.evaluate(() => {
+    const skip = document.querySelector(".guide-skip");
+    if (skip) skip.click();
+  });
+  await sleep(400);
+
   // 拿一个空会话才能看到欢迎页：登录后会默认落进最近一个会话（useSessions 的
   // 自动选中），里面已有历史消息 → 不新建的话消息区是聊天视图，三卡/示例断言
   // 会全挂（10-14 首跑踩过：5 条 FAIL 全源于此）。

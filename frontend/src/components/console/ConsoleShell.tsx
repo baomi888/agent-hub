@@ -12,6 +12,7 @@ import Link from "next/link";
 import { createContext, useContext, type ReactNode } from "react";
 import AuthGate from "../AuthGate";
 import CornIcon from "../CornIcon";
+import GuideModal from "../guide/GuideModal";
 import { useAuth } from "@/lib/hooks/useAuth";
 import type { MeOut } from "@/lib/types";
 
@@ -146,6 +147,11 @@ export default function ConsoleShell({ active, eyebrow, title, sub, actions, chi
             <div style={{ marginTop: 18 }}>{children}</div>
           </div>
         </div>
+
+        {/* 首次进平台的上手说明也挂在这里：用户可能登录后直接落在 /path、/delegate，
+            不一定先看到首页。和 ChatArea 那处不会重复 —— 首页不走 ConsoleShell，
+            而 localStorage 的"已读"标记本身也是幂等的（两边同读一个 key）。 */}
+        <GuideModal userId={auth.me.user.id} />
       </div>
     </UserCtx.Provider>
   );

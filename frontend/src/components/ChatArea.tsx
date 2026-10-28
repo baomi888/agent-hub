@@ -17,6 +17,7 @@ import Bubble from "./chat/Bubble";
 import BubbleErrorBoundary from "./chat/BubbleErrorBoundary";
 import QueryEnhance from "./chat/QueryEnhance";
 import OnboardBar from "./chat/OnboardBar";
+import GuideModal from "./guide/GuideModal";
 import type { ChatAttachment, UiMessage } from "./chat/types";
 import FilePreviewModal from "./FilePreviewModal";
 
@@ -1050,6 +1051,10 @@ export default function ChatArea({
           onClose={() => setPreviewFile(null)}
         />
       )}
+
+      {/* 首次进平台的上手说明：portal 到 body，和有没有对话无关；
+          未登录（userId 为空）时它自己不渲染 */}
+      <GuideModal userId={userId} />
     </section>
   );
 }
