@@ -32,7 +32,15 @@ function fmtTime(ts: number): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-export default function FeedbackCard({ page }: { page: string }) {
+export default function FeedbackCard({
+  page,
+  chrome = true,
+}: {
+  page: string;
+  /** false = 不带外层卡片与标题，供弹窗内嵌用。
+   *  弹窗自己已经有标题栏，再套一层「告诉我们哪里不对」就成了标题套标题。 */
+  chrome?: boolean;
+}) {
   const [dict, setDict] = useState<FeedbackDict | null>(null);
   const [category, setCategory] = useState("bug");
   const [content, setContent] = useState("");
@@ -114,13 +122,8 @@ export default function FeedbackCard({ page }: { page: string }) {
 
   const options = (dict?.categories ?? []).map((c) => ({ value: c.value, label: c.label }));
 
-  return (
-    <div className="card card-pad">
-      <div className="card-head">
-        <span className="card-title">告诉我们哪里不对</span>
-        <span className="meta">开发者会看到</span>
-      </div>
-
+  const inner = (
+    <>
       <div style={{ marginTop: 10 }}>
         <Seg
           ariaLabel="反馈分类"
@@ -223,6 +226,19 @@ export default function FeedbackCard({ page }: { page: string }) {
           ))}
         </>
       ) : null}
+    </>
+  );
+
+  // 弹窗里不套卡片：卡片边距 + 标题栏会和弹窗自己的外壳重复
+  if (!chrome) return <div className="fb-bare">{inner}</div>;
+
+  return (
+    <div className="card card-pad">
+      <div className="card-head">
+        <span className="card-title">告诉我们哪里不对</span>
+        <span className="meta">开发者会看到</span>
+      </div>
+      {inner}
     </div>
   );
 }

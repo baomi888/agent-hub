@@ -15,6 +15,8 @@
 /* 上手说明弹窗：全站一次性浮层，按钮借用 console.css 的 .btn 系列，
    所以必须排在它后面（同类名同特异性时后写的胜） */
 @import "./styles/guide.css";
+/* 反馈弹窗：内嵌 FeedbackCard，同样借 .btn / .seg 系列，排在 console.css 之后 */
+@import "./styles/feedback.css";
 @import "./styles/hybrid.css";
 @import "./styles/refs.css";
 @import "./styles/interactions.css";

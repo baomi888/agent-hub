@@ -18,6 +18,7 @@ import BubbleErrorBoundary from "./chat/BubbleErrorBoundary";
 import QueryEnhance from "./chat/QueryEnhance";
 import OnboardBar from "./chat/OnboardBar";
 import GuideModal from "./guide/GuideModal";
+import FeedbackModal from "./feedback/FeedbackModal";
 import type { ChatAttachment, UiMessage } from "./chat/types";
 import FilePreviewModal from "./FilePreviewModal";
 
@@ -158,6 +159,10 @@ export default function ChatArea({
   const [previewFile, setPreviewFile] = useState<string | null>(null);
   // 顶栏「能力」快捷弹层：对话进行中也能一键切到常用能力（欢迎页四宫格的随身版）
   const [abOpen, setAbOpen] = useState(false);
+  // 顶栏「反馈」弹窗。**必须是 useCallback**：FeedbackModal 的 Esc / 焦点 effect
+  // 依赖 onClose，每次渲染都换引用会让 effect 反复重跑、把焦点从文本框里抢回来。
+  const [fbOpen, setFbOpen] = useState(false);
+  const closeFeedback = useCallback(() => setFbOpen(false), []);
   // 联网建库后把建议问题预填进输入框：渲染期基于 prop 调整 state（用 state 去重，避免 ref 在渲染期被读写），
   // 不自动发送，让用户确认/补充后再发
   const [appliedPrefillTs, setAppliedPrefillTs] = useState<number>(-1);
@@ -531,6 +536,25 @@ export default function ChatArea({
             <path d="M18.5 14.5l.8 2.4 2.4.8-2.4.8-.8 2.4-.8-2.4-2.4-.8 2.4-.8.8-2.4z" />
           </svg>
           <span>能力</span>
+        </button>
+        {/* 顶栏反馈入口：提意见的那一刻人正在对话里（刚被答错、刚发现按钮不好用），
+            把他送去设置页，中间要重新定位"说的是哪件事"，多半就不提了。
+            内容和设置页共用 FeedbackCard，只是装在弹窗里。 */}
+        <button
+          type="button"
+          onClick={() => setFbOpen(true)}
+          title="提点意见，开发者会看到"
+          aria-label="提点意见"
+          aria-haspopup="dialog"
+          className="ability-trigger fb-trigger"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M21 11.8c0 3.7-3.8 6.7-8.5 6.7-1 0-2-.1-2.9-.4L5 20l1.3-3.2C4.9 15.6 4 13.8 4 11.8 4 8.1 7.8 5.1 12.5 5.1S21 8.1 21 11.8z" />
+            <circle cx="8.6" cy="11.8" r="0.9" fill="currentColor" stroke="none" />
+            <circle cx="12.5" cy="11.8" r="0.9" fill="currentColor" stroke="none" />
+            <circle cx="16.4" cy="11.8" r="0.9" fill="currentColor" stroke="none" />
+          </svg>
+          <span className="fb-trigger-text">反馈</span>
         </button>
         {abOpen && (
           <>
@@ -1055,6 +1079,10 @@ export default function ChatArea({
       {/* 首次进平台的上手说明：portal 到 body，和有没有对话无关；
           未登录（userId 为空）时它自己不渲染 */}
       <GuideModal userId={userId} />
+
+      {/* 顶栏「反馈」打开的弹窗：内容与设置页是同一个 FeedbackCard，
+          区别只是这里没有外层卡片（chrome=false） */}
+      <FeedbackModal open={fbOpen} onClose={closeFeedback} page="/" />
     </section>
   );
 }
