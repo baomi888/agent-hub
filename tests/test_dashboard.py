@@ -238,6 +238,41 @@ def test_overview_matches_raw_sql(env, client):
     assert d["calls"]["max_ms"] == 300
 
 
+def test_401_is_noise_not_failure(env, client):
+    """401（未登录探测）不计入失败，也不计入成功率分母。
+
+    内测第一天实测：178 条 401 把成功率压到 90.7%、把"出过错"榜刷满
+    /api/auth/me。401 代表"还没登录"，不是故障——但 403/404/5xx 照旧算失败。
+    """
+    now = int(time.time())
+    _seed_calls(
+        [
+            (now, "/api/auth/me/", "GET", 401, 5, None),
+            (now, "/api/auth/me/", "GET", 401, 5, None),
+            (now, "/api/auth/me/", "GET", 401, 5, None),
+            (now, "/api/a/", "GET", 200, 100, "u1"),
+            (now, "/api/a/", "GET", 500, 300, "u1"),
+            (now, "/api/b/", "GET", 404, 20, "u1"),
+        ]
+    )
+    _login(client, ADMIN_NAME)
+    d = client.get("/api/admin/overview?days=7").json()
+
+    assert d["calls"]["unauthorized"] == 3
+    assert d["calls"]["failed"] == 2  # 500 + 404；三条 401 不算
+    # 分母 = 6 - 3 = 3，分子 ok 只有 1 条 200
+    assert d["calls"]["success_rate"] == pytest.approx(1 / 3, abs=1e-4)
+
+    s = client.get("/api/admin/overview?days=7").json()["series"]
+    today = [x for x in s if x["failed"] > 0]
+    assert today and today[0]["failed"] == 2, "趋势里的失败也必须剔除 401"
+
+    fail = client.get("/api/admin/apis?days=7&sort=fail").json()
+    paths = [i["path"] for i in fail["items"]]
+    assert "/api/auth/me/" not in paths, "全 401 的接口不该进'出过错'榜"
+    assert fail["items"][0]["path"] == "/api/a/"
+
+
 def test_users_total_is_snapshot_new_is_ranged(env, client):
     """`users.total` 不随 days 变，`users.new` 才随（字典 §2.1）。"""
     account.create_user("u_old", PASSWORD)

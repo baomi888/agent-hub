@@ -54,7 +54,11 @@ def _call_stats(start: int, end_excl: int) -> dict:
         row = conn.execute(
             "SELECT COUNT(*) AS total, "
             "       COALESCE(SUM(status < 400), 0) AS ok, "
-            "       COALESCE(SUM(status >= 400), 0) AS failed, "
+            # 401 是"还没登录"的探测（打开页面就打 /api/auth/me），不是故障。
+            # 算进失败会把成功率压低好几个点、把"哪里在报错"榜刷满 /api/auth/me，
+            # 所以失败口径显式剔除 401，并把分母也换成 total - unauthorized。
+            "       COALESCE(SUM(status = 401), 0) AS unauthorized, "
+            "       COALESCE(SUM(status >= 400 AND status != 401), 0) AS failed, "
             "       COALESCE(AVG(dur_ms), 0) AS avg_ms, "
             "       COALESCE(MAX(dur_ms), 0) AS max_ms "
             "FROM api_call_logs WHERE ts >= ? AND ts < ?",
@@ -62,12 +66,15 @@ def _call_stats(start: int, end_excl: int) -> dict:
         ).fetchone()
     total = int(row["total"] or 0)
     ok = int(row["ok"] or 0)
+    unauth = int(row["unauthorized"] or 0)
+    denom = total - unauth
     return {
         "total": total,
         "ok": ok,
+        "unauthorized": unauth,
         "failed": int(row["failed"] or 0),
         # 分母为 0 时返回 None（前端显示 —），不返回 0.0 假装算出个 0%
-        "success_rate": round(ok / total, 4) if total else None,
+        "success_rate": round(ok / denom, 4) if denom else None,
         "avg_ms": int(row["avg_ms"] or 0),
         "max_ms": int(row["max_ms"] or 0),
     }
@@ -103,7 +110,8 @@ def _series(day_list: list[str]) -> list[dict]:
         for day in day_list:
             s, e = timeutil.day_bounds(day)
             row = conn.execute(
-                "SELECT COUNT(*) AS n, COALESCE(SUM(status >= 400), 0) AS bad "
+                "SELECT COUNT(*) AS n, "
+                "       COALESCE(SUM(status >= 400 AND status != 401), 0) AS bad "
                 "FROM api_call_logs WHERE ts >= ? AND ts < ?",
                 (s, e),
             ).fetchone()
@@ -137,7 +145,7 @@ def overview(days: int = 7) -> dict:
 _SORTS = {
     "calls": ("calls DESC, path ASC, method ASC", ""),
     "slow": ("avg_ms DESC, calls DESC, path ASC", "HAVING COUNT(*) >= 3 "),
-    "fail": ("failed DESC, calls DESC, path ASC", "HAVING SUM(status >= 400) > 0 "),
+    "fail": ("failed DESC, calls DESC, path ASC", "HAVING SUM(status >= 400 AND status != 401) > 0 "),
 }
 
 
@@ -164,7 +172,7 @@ def api_ranking(days: int = 7, limit: int = 20, sort: str = "calls") -> dict:
     with store._get_conn() as conn:  # noqa: SLF001
         rows = conn.execute(
             "SELECT path, method, COUNT(*) AS calls, "
-            "       COALESCE(SUM(status >= 400), 0) AS failed, "
+            "       COALESCE(SUM(status >= 400 AND status != 401), 0) AS failed, "
             "       CAST(COALESCE(AVG(dur_ms), 0) AS INTEGER) AS avg_ms, "
             "       COALESCE(MAX(dur_ms), 0) AS max_ms "
             "FROM api_call_logs WHERE ts >= ? AND ts < ? "

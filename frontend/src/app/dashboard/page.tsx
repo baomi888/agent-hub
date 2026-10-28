@@ -56,7 +56,7 @@ const SORT_OPTIONS: { value: SortKey; label: string; hint: string }[] = [
     label: "最耗时",
     hint: "平均等待时间最长（只算用过 3 次以上的：第一次启动时的偶发慢不算）",
   },
-  { value: "fail", label: "出过错", hint: "返回过错误（4xx / 5xx）的功能" },
+  { value: "fail", label: "出过错", hint: "返回过错误（4xx/5xx，不含未登录）的功能" },
 ];
 
 const STATUS_CLASS: Record<string, string> = {
@@ -284,7 +284,7 @@ export default function DashboardPage() {
                 : "—"}
             </div>
             <div className="l">
-              成功率 <span className="meta">（含 4xx/5xx，分母为全部调用）</span>
+              成功率 <span className="meta">（不含 401 未登录探测）</span>
             </div>
           </div>
         </div>
@@ -303,7 +303,7 @@ export default function DashboardPage() {
           </div>
           <div className="card card-pad stat">
             <div className="n">{ov ? fmtNum(ov.calls.failed) : "—"}</div>
-            <div className="l">失败次数（状态码 ≥ 400）</div>
+            <div className="l">失败次数（≥400，不含未登录）</div>
           </div>
           <div className="card card-pad stat">
             <div className="n">{ov ? fmtNum(ov.feedback.open) : "—"}</div>
