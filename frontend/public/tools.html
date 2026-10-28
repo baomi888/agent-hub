@@ -143,11 +143,26 @@
      （"我在哪一轮""还剩多少""点不认识怎么没动"）。现在补三样东西：
      轮次标签、进度条、本轮统计。视觉上仍只有一张卡是主角。 */
   .flip-card{background:var(--bg-canvas);border:2px solid var(--accent-soft);border-radius:var(--radius-md);
-    padding:26px 20px;text-align:center;min-height:170px;display:flex;flex-direction:column;justify-content:center;
+    padding:26px 20px;text-align:center;min-height:230px;display:flex;flex-direction:column;justify-content:center;
     cursor:pointer;user-select:none;margin-bottom:12px;transition:var(--t-move);}
+  /* min-height 给到 230 是为了「翻转前后高度别跳」：
+     正面只有单词，翻面多出释义 + 例句 + 译文，空间不够会把下面按钮顶下去。 */
   .flip-card:hover{border-color:var(--accent);transform:translateY(-2px);}
   .flip-card .word{font-family:var(--font-serif);font-size:30px;font-weight:700;color:var(--ink);}
   .flip-card .meta{margin-top:10px;font-size:var(--fs-md);color:var(--text-2);white-space:pre-line;line-height:1.7;}
+  /* 翻转后：释义 + 一句例句 + 译文。
+     例句做成「写在释义下面的一行批注」：左侧一道金线 + 淡金底，
+     不做成第二个气泡或第二张卡 —— 卡片翻一次只该给一层新信息。 */
+  .flip-card .meta .w-def{display:block;font-size:var(--fs-xl);color:var(--ink);line-height:1.55;}
+  .flip-card .meta .w-eg{display:block;margin:12px auto 0;max-width:30rem;padding:9px 12px 10px;
+    border-left:2px solid var(--accent);border-radius:0 var(--radius-sm) var(--radius-sm) 0;
+    background:var(--accent-soft);text-align:left;white-space:normal;}
+  .flip-card .meta .w-eg-en{display:block;font-family:var(--font-serif);font-size:var(--fs-md);
+    color:var(--ink);line-height:1.65;overflow-wrap:anywhere;}
+  .flip-card .meta .w-eg-zh{display:block;margin-top:4px;font-size:var(--fs-sm);color:var(--text-2);
+    line-height:1.6;overflow-wrap:anywhere;}
+  .flip-card .meta .w-eg-tag{display:block;margin-bottom:5px;font-size:var(--fs-badge);
+    letter-spacing:var(--ls-wide);color:var(--accent-ink);}
   .flip-card .hint{margin-top:14px;font-size:var(--fs-badge);color:var(--text-3);letter-spacing:var(--ls-mid);}
   /* 完成态：不再是一张"可以点的卡"，去掉手型与 hover 位移 */
   .flip-card.done{cursor:default;border-color:var(--accent);background:var(--accent-soft);}
@@ -758,46 +773,45 @@ addCourse({name:'数据结构',dayOfWeek:5,sections:[5,6],classroom:'机房-A'})
 
 /* 词库加载失败时的兜底：宁可给 40 个词，也不能让页面白屏 */
 const FALLBACK_WORDS=[
-  ['abandon','v. 放弃，抛弃'],
-  ['abundant','adj. 丰富的，大量的'],
-  ['accessible','adj. 可接近的；易懂的'],
-  ['accumulate','v. 积累，积聚'],
-  ['acknowledge','v. 承认；致谢'],
-  ['adequate','adj. 足够的，适当的'],
-  ['advocate','v. 提倡；n. 拥护者'],
-  ['alter','v. 改变，修改'],
-  ['ambiguous','adj. 模棱两可的'],
-  ['anticipate','v. 预期，期望'],
-  ['appropriate','adj. 合适的'],
-  ['assess','v. 评估，估价'],
-  ['coherent','adj. 连贯的，条理清楚的'],
-  ['compel','v. 强迫，迫使'],
-  ['comprehensive','adj. 综合的，全面的'],
-  ['consecutive','adj. 连续的，不间断的'],
-  ['contemporary','adj. 当代的；同时代的'],
-  ['deliberate','adj. 故意的；v. 仔细考虑'],
-  ['deteriorate','v. 恶化，变坏'],
-  ['diminish','v. 减少，削弱'],
-  ['distinguish','v. 区分，辨别'],
-  ['elaborate','adj. 精心制作的；v. 详尽阐述'],
-  ['emphasize','v. 强调，着重'],
-  ['fragile','adj. 脆弱的，易碎的'],
-  ['gradual','adj. 逐渐的，逐步的'],
-  ['impose','v. 强加；征收'],
-  ['inevitable','adj. 不可避免的'],
-  ['indicate','v. 表明，指示'],
-  ['maintain','v. 维持；坚持认为'],
-  ['necessitate','v. 使成为必要'],
-  ['perceive','v. 察觉；认为'],
-  ['phenomenon','n. 现象（复数 phenomena）'],
-  ['prominent','adj. 显著的；杰出的'],
-  ['reinforce','v. 加强，巩固'],
-  ['reluctant','adj. 不情愿的'],
-  ['restrain','v. 抑制，克制'],
-  ['scrutinize','v. 仔细检查'],
-  ['sustain','v. 维持；承受'],
-  ['tremendous','adj. 巨大的，极大的'],
-  ['vulnerable','adj. 易受伤害的，脆弱的']
+  ['abandon','v. 放弃，抛弃','They had to abandon the plan because of the sudden storm.','由于突如其来的暴风雨，他们不得不放弃这个计划。'],
+  ['abundant','adj. 丰富的，大量的','The region has abundant natural resources, which support the development of local agriculture.','该地区拥有丰富的自然资源，这支撑了当地农业的发展。'],
+  ['accessible','adj. 可接近的；易懂的','The new library is easily accessible to all students, even those without a car.','新图书馆对所有学生都很方便到达，即使是没有车的学生也是如此。'],
+  ['accumulate','v. 积累，积聚','Over the years, he accumulated a large collection of old books.','多年来，他积累了大量的旧书。'],
+  ['acknowledge','v. 承认；致谢','She acknowledged her mistake and promised to correct it immediately.','她承认了自己的错误，并承诺立即改正。'],
+  ['adequate','adj. 足够的，适当的','The training was not adequate for the difficult tasks ahead.','对于前方艰巨的任务来说，这次培训并不充分。'],
+  ['advocate','v. 提倡；n. 拥护者','Many doctors advocate a healthy diet and regular exercise for people of all ages.','许多医生提倡各年龄段的人都要健康饮食和规律锻炼。'],
+  ['alter','v. 改变，修改','We had to alter our plans when the weather suddenly turned bad.','天气突然变坏时，我们不得不改变计划。'],
+  ['ambiguous','adj. 模棱两可的','The manager\'s ambiguous answer left everyone unsure about what to do next.','经理含糊其辞的回答让大家都不确定接下来该做什么。'],
+  ['anticipate','v. 预期，期望','We anticipate that the new policy will reduce costs for most families.','我们预计新政策将为大多数家庭降低成本。'],
+  ['appropriate','adj. 合适的','Please choose an appropriate time to discuss this issue with your professor.','请选择一个合适的时间与你的教授讨论这个问题。'],
+  ['assess','v. 评估，估价','Teachers assess students\' progress through regular quizzes and final exams.','教师通过定期的测验和期末考试来评估学生的进步。'],
+  ['coherent','adj. 连贯的，条理清楚的','Her essay was so coherent that readers easily followed every step of her argument.','她的文章如此连贯，读者很容易跟上她论证的每一步。'],
+  ['compel','v. 强迫，迫使','The heavy rain compelled us to cancel the outdoor meeting and stay inside.','大雨迫使我们取消了户外会议，待在室内。'],
+  ['comprehensive','adj. 综合的，全面的','The report offers a comprehensive analysis of the problems facing local schools.','这份报告对当地学校面临的问题进行了全面的分析。'],
+  ['consecutive','adj. 连续的，不间断的','The team won three consecutive games last season.','该队上赛季连续赢了三场比赛。'],
+  ['contemporary','adj. 当代的；同时代的','Many contemporary artists use digital tools to express their ideas about modern life.','许多当代艺术家使用数字工具来表达他们对现代生活的想法。'],
+  ['deliberate','adj. 故意的；v. 仔细考虑','She spoke in a slow, deliberate way so everyone could follow her argument.','她说话缓慢而从容，以便每个人都能跟上她的论证。'],
+  ['deteriorate','v. 恶化，变坏','His health deteriorated rapidly after he stopped taking the medicine.','停药之后，他的健康状况迅速恶化。'],
+  ['diminish','v. 减少，削弱','The noise from the street gradually diminished as the night went on.','随着夜色渐深，街上的噪音逐渐减弱了。'],
+  ['distinguish','v. 区分，辨别','It is often hard to distinguish between the twins because they look so similar.','人们常常很难分辨这对双胞胎，因为他们长得太像了。'],
+  ['elaborate','adj. 精心制作的；v. 详尽阐述','She asked the waiter to elaborate on how the dish was prepared.','她请服务员详细说明这道菜是怎么做的。'],
+  ['emphasize','v. 强调，着重','The professor emphasized the importance of reviewing notes before the final exam.','教授强调了在期末考试前复习笔记的重要性。'],
+  ['fragile','adj. 脆弱的，易碎的','The old wooden bridge is so fragile that only one person can cross it at a time.','这座旧木桥非常脆弱，一次只能让一个人通过。'],
+  ['gradual','adj. 逐渐的，逐步的','The patient made a gradual recovery after several weeks of rest and treatment.','经过几周的休息和治疗，病人逐渐康复了。'],
+  ['impose','v. 强加；征收','The government decided to impose stricter rules on companies that pollute the environment.','政府决定对污染环境的公司实施更严格的规定。'],
+  ['inevitable','adj. 不可避免的','With so many delays, it was inevitable that the project would finish late.','由于出现了这么多延误，项目推迟完成是不可避免的。'],
+  ['indicate','v. 表明，指示','The sudden drop in sales indicates that customers are losing interest in this product.','销量的突然下降表明顾客正在对这款产品失去兴趣。'],
+  ['maintain','v. 维持；坚持认为','It is important to maintain a healthy balance between work and rest.','保持工作与休息之间的健康平衡很重要。'],
+  ['necessitate','v. 使成为必要','The heavy rain will necessitate changing the outdoor event to next week.','大雨将使得户外活动不得不改到下周举行。'],
+  ['perceive','v. 察觉；认为','Many students perceive the exam as a threat rather than a challenge.','许多学生把考试视为威胁而不是挑战。'],
+  ['phenomenon','n. 现象（复数 phenomena）','Scientists are still trying to explain this strange natural phenomenon.','科学家们仍在努力解释这一奇怪的自然现象。'],
+  ['prominent','adj. 显著的；杰出的','She played a prominent role in the campaign to protect the old town.','她在保护古镇的那场运动中发挥了重要作用。'],
+  ['reinforce','v. 加强，巩固','The new evidence only served to reinforce our belief that the plan would work.','新的证据只是进一步增强了我们对这个计划会奏效的信心。'],
+  ['reluctant','adj. 不情愿的','She was reluctant to admit that her study plan had failed.','她不愿承认自己的学习计划已经失败了。'],
+  ['restrain','v. 抑制，克制','Governments must restrain spending to control inflation.','政府必须抑制支出以控制通货膨胀。'],
+  ['sustain','v. 维持；承受','She could not sustain her attention on the lecture for more than ten minutes.','她无法把注意力集中在讲座上超过十分钟。'],
+  ['tremendous','adj. 巨大的，极大的','The new policy brought tremendous benefits to students and teachers alike.','这项新政策给学生和教师都带来了巨大的好处。'],
+  ['vulnerable','adj. 易受伤害的，脆弱的','Older people living alone are often more vulnerable to illness during cold winters.','在寒冷的冬天，独居的老年人往往更容易患病。'],
 ];
 
 const W_GROUP=20;
@@ -891,13 +905,13 @@ async function wBoot(){
   }catch(e){
     // 兜底路径：词库文件缺失/断网。页面上必须说清楚，不能让人以为词库就这么点
     WS.failed=true;
-    WS.levels=[{id:'FALLBACK',name:'内置 40 词',count:FALLBACK_WORDS.length,
+    WS.levels=[{id:'FALLBACK',name:'内置 '+FALLBACK_WORDS.length+' 词',count:FALLBACK_WORDS.length,
                 groups:Math.ceil(FALLBACK_WORDS.length/W_GROUP)}];
     WS.data={FALLBACK:FALLBACK_WORDS};
     WS.ready=true;
     wStartGroup(1);
     wChips();
-    $w.src.textContent='词库没加载上（'+e.message+'），先用内置的 40 个词顶着。';
+    $w.src.textContent='词库没加载上（'+e.message+'），先用内置的 '+FALLBACK_WORDS.length+' 个词顶着。';
   }
 }
 
@@ -913,7 +927,7 @@ async function wSetLevel(lvl,group){
       if(!WS.data[lvl].length) throw new Error('这个词库是空的');
     }catch(e){
       WS.data[lvl]=FALLBACK_WORDS;
-      $w.src.textContent='「'+lvl+'」词库没加载上，先用内置的 40 个词顶着。';
+      $w.src.textContent='「'+lvl+'」词库没加载上，先用内置的 '+FALLBACK_WORDS.length+' 个词顶着。';
     }
   }
   const g=Math.min(Math.max(1, group|0 || 1), wGroupCount(lvl));
@@ -1022,11 +1036,29 @@ function wStat(){
   $w.stat.innerHTML=parts.join('<span class="sep">·</span>');
 }
 
+function wEsc(s){
+  return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* 翻面内容：释义在上，例句 + 译文在下。
+   ★ 为什么用 innerHTML 拼而不用三次 textContent：例句块要做成有边框和底色的
+     「批注」，纯文本塞不进结构；所有字段都过 wEsc，词库是我们自己生成的文件，
+     但拼 HTML 就必须转义 —— 一次偷懒以后换个词源就是 XSS。 */
+function wCardBody(it){
+  let html='<span class="w-def">'+wEsc(it[1])+'</span>';
+  if(it[2]&&it[3]){
+    html+='<span class="w-eg"><span class="w-eg-tag">例句</span>'
+        + '<span class="w-eg-en">'+wEsc(it[2])+'</span>'
+        + '<span class="w-eg-zh">'+wEsc(it[3])+'</span></span>';
+  }
+  return html;
+}
+
 function wFlip(){
   if(WS.done || !WS.pool.length) return;
   const it=WS.pool[WS.idx];
   WS.flipped=true;
-  $w.meta.textContent=it[1];
+  $w.meta.innerHTML=wCardBody(it);
   $w.hint.textContent='认识就按 → ，不认识按 ←';
 }
 

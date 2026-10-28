@@ -1,23 +1,31 @@
 {
-  "version": 2,
+  "version": 3,
   "group_size": 20,
   "levels": [
     {
       "id": "CET4",
       "name": "四级核心",
       "count": 4543,
-      "groups": 228
+      "groups": 228,
+      "with_examples": 4543
     },
     {
       "id": "CET6",
       "name": "六级扩展",
       "count": 2118,
-      "groups": 106
+      "groups": 106,
+      "with_examples": 2118
     }
   ],
   "source": {
     "repo": "https://github.com/KyleBing/english-vocabulary",
     "license": "BSD-3-Clause",
-    "copyright": "Copyright (c) 2022-2026, KyleBing"
+    "copyright": "Copyright (c) 2022-2026, KyleBing",
+    "covers": "词条与中文释义"
+  },
+  "source_examples": {
+    "repo": "https://github.com/exam-data/CETVocabulary",
+    "license": "CC-BY-NC-SA-4.0",
+    "covers": "真题例句与译文"
   }
 }
