@@ -101,7 +101,7 @@
   color: var(--accent-ink);
 }
 .nav-sec {
-  font-size: var(--fs-badge);
+  font-size: var(--fs-xs);
   letter-spacing: var(--ls-wide);
   color: var(--text-3);
   padding: var(--space-16) var(--space-10) var(--space-6);
@@ -573,7 +573,7 @@ textarea.input {
 .del-group-note {
   flex: 1;
   min-width: 0;
-  font-size: var(--fs-badge);
+  font-size: var(--fs-xs);
   color: var(--text-3);
   /* 手机上「按下次触发时间，最快来的在前」会很长，允许截断但不许挤掉右侧的展开 */
   overflow: hidden;
@@ -582,7 +582,7 @@ textarea.input {
 }
 .del-group-toggle {
   flex: none;
-  font-size: var(--fs-badge);
+  font-size: var(--fs-xs);
   color: var(--accent-ink);
   text-decoration: underline;
   text-underline-offset: 2px;
@@ -674,7 +674,7 @@ textarea.input {
   padding: var(--space-12) var(--space-14);
 }
 .stat .n {
-  font-size: 22px;
+  font-size: var(--fs-title);
   font-weight: 600;
   font-family: var(--font-serif);
   line-height: 1.2;
@@ -707,7 +707,9 @@ textarea.input {
   display: flex;
   gap: var(--space-3);
   margin-top: var(--space-5);
-  font-size: 9px;
+  /* 9 → 12px：9px 是全站最小的一处字，刻度数字也是信息、不是装饰，
+     不该低于 --fs-badge。四个刻度各占 1/4 宽，12px 仍放得下 */
+  font-size: var(--fs-badge);
   color: var(--text-3);
 }
 .hours-x span {
@@ -895,7 +897,7 @@ textarea.input {
 }
 .streak .n {
   font-family: var(--font-serif);
-  font-size: 32px;
+  font-size: var(--fs-num);
   font-weight: 600;
   color: var(--accent-ink);
   line-height: 1;
@@ -942,7 +944,7 @@ textarea.input {
   grid-template-columns: 1.1fr 1.3fr 0.7fr 0.9fr;
 }
 .tr.th {
-  font-size: var(--fs-badge);
+  font-size: var(--fs-xs);
   letter-spacing: var(--ls-mid);
   color: var(--text-3);
   font-weight: 600;
@@ -1005,7 +1007,7 @@ textarea.input {
   margin-top: var(--space-2);
 }
 .not-ready .badge {
-  font-size: var(--fs-badge);
+  font-size: var(--fs-xs);
   letter-spacing: var(--ls-mid);
   color: var(--warning-ink);
   font-weight: 700;
@@ -1130,7 +1132,7 @@ textarea.input {
   overflow-wrap: anywhere;
 }
 .path-intro li::marker {
-  font-size: 11px;
+  font-size: var(--fs-badge);
   color: var(--accent);
 }
 .path-intro b {
@@ -1144,7 +1146,7 @@ textarea.input {
   border: none;
   background: none;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-2);
   cursor: pointer;
   text-decoration: underline;

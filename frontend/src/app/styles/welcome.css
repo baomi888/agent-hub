@@ -7,7 +7,9 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 20px 0;
+  /* R3 字号 +1px 之后，原来 20px 的上下留白会把首屏顶出 15px。
+     按方案里的口径用**间距**补偿而不是把字退回去：留白 20 → 12 */
+  padding: 12px 0;
   text-align: center;
   /* Logo 与标题后方一层极淡的暖金光晕，让首屏有个柔和的视觉锚点
      （大半径 + 晚收尾，避免出现边缘可辨的"云块"） */
@@ -324,14 +326,16 @@
    而且三颗实心金点会和下面三张卡抢注意力。 */
 .ob-n {
   flex: none;
-  width: 16px;
-  height: 16px;
+  /* 16 → 18px：字从 10 抬到 12（--fs-badge）后，16px 的圆圈只剩 2px 余量，
+     笔画挤在描边上像缺了口。圆圈跟着放大一圈，视觉比例才对 */
+  width: 18px;
+  height: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--accent);
   border-radius: 999px;
-  font-size: 10px;
+  font-size: var(--fs-badge);
   font-weight: 700;
   line-height: 1;
   color: var(--accent-ink);
@@ -650,21 +654,26 @@
      · 字号、间距收到最小，但仍然保持 8px 以上的行距，不做挤成一坨的省法
    实测 629 高：内容 324 + 容器 16 = 340，正好等于可用高度（改前是 616 / 340）。 */
 @media (max-height: 720px) {
-  .chat-measure:has(.welcome) { padding-top: 10px; padding-bottom: 6px; }
+  /* R3 字号 +1px 后这一档又差 14px。全部从留白里出，一个字都不往回压 ——
+     「字太小」本来就是这一档最容易犯的错，把字退回去等于把需求做反 */
+  .chat-measure:has(.welcome) { padding-top: 4px; padding-bottom: 2px; }
   .welcome { padding: 2px 0 0; }
   .welcome .hero-logo { height: 38px; width: 38px; margin-bottom: 2px; }
-  .welcome .eyebrow { font-size: 11px; margin-bottom: 1px; }
+  /* 眉题不再单独压字号：它已经落在 --fs-xs（13px）的下限上，
+     再压就破 R3 的「可读文字不小于 13px」。这一档只收留白 */
+  .welcome .eyebrow { margin-bottom: 1px; }
   .welcome .eyebrow::before,
   .welcome .eyebrow::after { width: 18px; }
-  .hero-title { font-size: 25px; line-height: 1.28; }
-  .welcome-sub { margin-top: 0; font-size: 13px; line-height: 1.45; }
-  .onboard { margin-top: 8px; padding: 7px 10px 8px; }
+  /* 主标题从 --hero-fs 派生而不是写死 25px，否则调档位时这里不跟着变 */
+  .hero-title { font-size: calc(var(--hero-fs) * 0.72); line-height: 1.28; }
+  .welcome-sub { margin-top: 0; font-size: var(--fs-sm); line-height: 1.45; }
+  .onboard { margin-top: 6px; padding: 6px 10px 7px; }
   .onboard-head { gap: 6px; }
   .onboard-title { font-size: var(--fs-sm); }
   .onboard-steps { margin-top: 5px; gap: 2px 10px; }
   .ob-act, .ob-done { font-size: var(--fs-sm); }
   .ob-hint { display: none; }
-  .welcome-daily { margin-top: 8px; }
+  .welcome-daily { margin-top: 6px; }
   .entry-card { gap: 3px; padding: 8px 11px 9px; border-radius: var(--radius-md); }
   .entry-card .ec-icon { width: 24px; height: 24px; }
   .entry-card .ec-icon svg { width: 17px; height: 17px; }

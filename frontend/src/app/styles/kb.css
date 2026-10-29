@@ -1,7 +1,7 @@
 /* ============ 知识库文件级管理 ============ */
 .kb-manage {
   margin-left: auto;
-  font-size: var(--fs-badge);
+  font-size: var(--fs-xs);
   color: var(--accent-ink);
   background: none;
   border: none;
@@ -60,7 +60,7 @@
 }
 .kb-file-meta {
   flex-shrink: 0;
-  font-size: var(--fs-badge);
+  font-size: var(--fs-xs);
   color: var(--text-3);
 }
 .kb-file-confirm {
@@ -73,7 +73,7 @@
 }
 .kb-rebuild {
   width: 100%;
-  font-size: var(--fs-badge);
+  font-size: var(--fs-xs);
   color: var(--text-3);
   background: none;
   border: 1px dashed var(--line-strong);

@@ -10,11 +10,12 @@
 // 且用户不会有任何提示。**新增字段时，读端与写端必须同时改。**
 import { useEffect, useRef, useState } from "react";
 import type { ChatMode } from "@/lib/types";
-import { DEFAULT_TOP_K, patchPrefs, readPrefs } from "@/lib/consolePrefs";
-
-/** 聊天正文字号档位：跟随系统 / 小 / 标准 / 大（CSS 侧映射为 --msg-fs） */
-export type FontScale = "auto" | "s" | "m" | "l";
-const FONT_SCALES: FontScale[] = ["auto", "s", "m", "l"];
+import { DEFAULT_TOP_K, normalizeFontScale, patchPrefs, readPrefs } from "@/lib/consolePrefs";
+// FontScale 从 consolePrefs 取，**不要在这个文件里再定义一份**：
+// 之前两处各写一个 "auto"|"s"|"m"|"l"，改档位时漏一处就是类型能过、UI 对不上的隐性 bug。
+import type { FontScale } from "@/lib/consolePrefs";
+/** 转发一下：Sidebar 等处一直从 usePrefs 引这个类型，保留出口免得各处改 import */
+export type { FontScale };
 
 /**
  * 模式入口收敛（2026-10-29）：历史存过 agent / hybrid 的一律回到 auto。
@@ -56,7 +57,9 @@ export function usePrefs() {
     if (typeof saved.chunkSize === "number") setChunkSize(saved.chunkSize);
     if (typeof saved.chunkOverlap === "number") setChunkOverlap(saved.chunkOverlap);
     if (typeof saved.kbPanel === "boolean") setKbPanelPref(saved.kbPanel);
-    if (FONT_SCALES.includes(saved.fontScale as FontScale)) setFontScale(saved.fontScale as FontScale);
+    // 收敛而不是直接赋值：老用户本地存的是已取消的 "s" 档，
+    // 直接塞进 state 会让 data-fs="s" + 三个按钮都不高亮（看起来像坏了）
+    if (saved.fontScale) setFontScale(normalizeFontScale(saved.fontScale));
     setPrefsReady(true);
   }, []);
 

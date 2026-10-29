@@ -13,14 +13,23 @@ const THEME_KEY = "theme";
 /** 检索条数默认值。须与后端 core/config.py::TOP_K_DEFAULT 一致，改一处要改两处 */
 export const DEFAULT_TOP_K = 3;
 
-export type FontScale = "auto" | "s" | "m" | "l";
+/** 字号档位（2026-10-29 R3 改）：从「小/标准/大」改为「标准/大/特大」。
+ *  取消「小」是因为它把正文压到 13px 以下，正好和「字太小」的反馈相反。
+ *  档位现在缩放**根字号**（见 tokens.css），全站 rem 字号一次生效。 */
+export type FontScale = "auto" | "m" | "l" | "xl";
 
 export const FONT_SCALE_OPTIONS: { value: FontScale; label: string }[] = [
   { value: "auto", label: "跟随系统" },
-  { value: "s", label: "小" },
   { value: "m", label: "标准" },
   { value: "l", label: "大" },
+  { value: "xl", label: "特大" },
 ];
+
+/** 把任何来源的档位值收敛到合法值。"s" 是旧档位名，等价于标准。 */
+export function normalizeFontScale(v: unknown): FontScale {
+  if (v === "l" || v === "xl" || v === "auto") return v;
+  return "m";
+}
 
 function read(): Record<string, unknown> {
   try {

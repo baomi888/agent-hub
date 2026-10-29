@@ -398,12 +398,12 @@ export default function DashboardPage() {
                     >
                       <span className="ctag bad">{f.status}</span>
                       <span style={{ minWidth: 0, flex: 1 }}>
-                        <span style={{ display: "block", fontSize: 13, color: "var(--text-1)" }}>
+                        <span style={{ display: "block", fontSize: "var(--fs-xs)", color: "var(--text-1)" }}>
                           {f.label}
                         </span>
                         <span
                           className="mono"
-                          style={{ display: "block", fontSize: 11, color: "var(--text-3)" }}
+                          style={{ display: "block", fontSize: "var(--fs-xs)", color: "var(--text-3)" }}
                         >
                           {f.ts ? `${fmtTime(f.ts)} · ` : ""}
                           {f.method} {f.path}
@@ -490,7 +490,7 @@ export default function DashboardPage() {
                         <span
                           style={{
                             display: "block",
-                            fontSize: 13,
+                            fontSize: "var(--fs-xs)",
                             color: "var(--ink)",
                             overflow: "hidden",
                             textOverflow: "ellipsis",
@@ -503,7 +503,7 @@ export default function DashboardPage() {
                           className="mono"
                           style={{
                             display: "block",
-                            fontSize: 11,
+                            fontSize: "var(--fs-xs)",
                             color: "var(--text-3)",
                             overflow: "hidden",
                             textOverflow: "ellipsis",

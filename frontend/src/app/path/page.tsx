@@ -74,7 +74,7 @@ const card: React.CSSProperties = {
   borderRadius: 14,
   padding: 18,
 };
-const label: React.CSSProperties = { fontSize: 12, color: "var(--text-2)" };
+const label: React.CSSProperties = { fontSize: "var(--fs-xs)", color: "var(--text-2)" };
 
 /** 关卡卡片：三态靠底色 + 描边区分，不靠图标，缩略时也能分辨 */
 function LevelCard({ lv, onOpen }: { lv: Level; onOpen: (lv: Level) => void }) {
@@ -107,12 +107,12 @@ function LevelCard({ lv, onOpen }: { lv: Level; onOpen: (lv: Level) => void }) {
       }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontSize: 11, letterSpacing: "0.08em", color: locked ? "var(--text-3)" : "var(--accent-ink)" }}>
+        <span style={{ fontSize: "var(--fs-xs)", letterSpacing: "0.08em", color: locked ? "var(--text-3)" : "var(--accent-ink)" }}>
           {lv.id.slice(1)}
         </span>
         <span
           style={{
-            fontSize: 11,
+            fontSize: "var(--fs-xs)",
             color: done ? "var(--accent-ink)" : cur ? "var(--accent-ink)" : "var(--text-3)",
             fontWeight: cur ? 600 : 400,
           }}
@@ -120,12 +120,12 @@ function LevelCard({ lv, onOpen }: { lv: Level; onOpen: (lv: Level) => void }) {
           {done ? "已通过" : cur ? "进行中" : "未开始"}
         </span>
       </div>
-      <div style={{ fontSize: 15, fontWeight: 600, color: titleColor, lineHeight: 1.3 }}>{lv.name}</div>
-      <div style={{ fontSize: 12, color: locked ? "var(--text-3)" : "var(--text-2)", lineHeight: 1.45 }}>
+      <div style={{ fontSize: "var(--fs-lg)", fontWeight: 600, color: titleColor, lineHeight: 1.3 }}>{lv.name}</div>
+      <div style={{ fontSize: "var(--fs-xs)", color: locked ? "var(--text-3)" : "var(--text-2)", lineHeight: 1.45 }}>
         {lv.detail || lv.desc}
       </div>
       {done && lv.done_at ? (
-        <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: "auto" }}>
+        <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-3)", marginTop: "auto" }}>
           {new Date(lv.done_at * 1000).getMonth() + 1}/{new Date(lv.done_at * 1000).getDate()} 通过
         </div>
       ) : (
@@ -205,7 +205,7 @@ export default function PathPage() {
       actions={
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {p && (
-            <span style={{ fontSize: 12, color: "var(--text-2)" }}>
+            <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-2)" }}>
               已通过 {p.done} / {p.total} 关 · {p.percent}%
             </span>
           )}
@@ -219,7 +219,7 @@ export default function PathPage() {
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 16, paddingBottom: 24 }}>
         {err && (
-          <div style={{ ...card, borderColor: "var(--red-ink)", color: "var(--red-ink)", fontSize: 13 }}>{err}</div>
+          <div style={{ ...card, borderColor: "var(--red-ink)", color: "var(--red-ink)", fontSize: "var(--fs-xs)" }}>{err}</div>
         )}
 
         {/* 新用户第一眼看到的是「12 关」「已通过 4/12」——数字有了，但没人告诉他这是干什么的。
@@ -250,7 +250,7 @@ export default function PathPage() {
         )}
 
         {loading && !ov && (
-          <div style={{ ...card, color: "var(--text-2)", fontSize: 13 }}>正在读取你的学习记录…</div>
+          <div style={{ ...card, color: "var(--text-2)", fontSize: "var(--fs-xs)" }}>正在读取你的学习记录…</div>
         )}
 
         {ov && p && (
@@ -258,9 +258,9 @@ export default function PathPage() {
             {/* 总进度 + 当前该做的一关 */}
             <section style={card}>
               <div style={{ display: "flex", alignItems: "flex-end", gap: 14, flexWrap: "wrap" }}>
-                <div style={{ fontSize: 34, fontWeight: 700, color: "var(--accent-ink)", lineHeight: 1 }}>
+                <div style={{ fontSize: "var(--hero-fs)", fontWeight: 700, color: "var(--accent-ink)", lineHeight: 1 }}>
                   {p.done}
-                  <span style={{ fontSize: 16, color: "var(--text-2)", fontWeight: 400 }}> / {p.total} 关</span>
+                  <span style={{ fontSize: "var(--fs-xl)", color: "var(--text-2)", fontWeight: 400 }}> / {p.total} 关</span>
                 </div>
                 <div style={{ flex: 1, minWidth: 180 }}>
                   <div style={{ height: 8, background: "var(--fill-1)", borderRadius: 6, overflow: "hidden" }}>
@@ -294,11 +294,11 @@ export default function PathPage() {
                   }}
                 >
                   <div style={{ flex: 1, minWidth: 200 }}>
-                    <div style={{ fontSize: 12, color: "var(--accent-ink)", marginBottom: 3 }}>当前这一关</div>
-                    <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text-1)" }}>
+                    <div style={{ fontSize: "var(--fs-xs)", color: "var(--accent-ink)", marginBottom: 3 }}>当前这一关</div>
+                    <div style={{ fontSize: "var(--fs-lg)", fontWeight: 600, color: "var(--text-1)" }}>
                       {ov.current.id.slice(1)} · {ov.current.name}
                     </div>
-                    <div style={{ fontSize: 12, color: "var(--text-2)", marginTop: 3 }}>
+                    <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-2)", marginTop: 3 }}>
                       {ov.current.detail} —— {ov.current.desc}
                     </div>
                   </div>
@@ -309,7 +309,7 @@ export default function PathPage() {
                       color: "var(--solid-text)",
                       borderRadius: 8,
                       padding: "9px 16px",
-                      fontSize: 13,
+                      fontSize: "var(--fs-xs)",
                       fontWeight: 600,
                       textDecoration: "none",
                       whiteSpace: "nowrap",
@@ -320,7 +320,7 @@ export default function PathPage() {
                 </div>
               )}
               {!ov.current && p.done === p.total && (
-                <div style={{ marginTop: 14, fontSize: 13, color: "var(--text-2)" }}>
+                <div style={{ marginTop: 14, fontSize: "var(--fs-xs)", color: "var(--text-2)" }}>
                   全部通关。接着把节奏交给「每日委托」，它会在你不在的时候继续跑。
                 </div>
               )}
@@ -330,10 +330,10 @@ export default function PathPage() {
             {ov.chapters.map((ch, ci) => (
               <section key={ch.id} style={card}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 11, letterSpacing: "0.1em", color: "var(--accent-ink)" }}>
+                  <span style={{ fontSize: "var(--fs-xs)", letterSpacing: "0.1em", color: "var(--accent-ink)" }}>
                     第 {ci + 1} 章
                   </span>
-                  <span style={{ fontSize: 15, fontWeight: 600, color: "var(--text-1)" }}>{ch.name}</span>
+                  <span style={{ fontSize: "var(--fs-lg)", fontWeight: 600, color: "var(--text-1)" }}>{ch.name}</span>
                   <span style={{ ...label, flex: 1 }}>{ch.desc}</span>
                   <span style={{ ...label, color: ch.done === ch.total ? "var(--accent-ink)" : "var(--text-2)" }}>
                     {ch.done} / {ch.total}
@@ -388,7 +388,7 @@ export default function PathPage() {
                 <div style={{ ...label, marginBottom: 4 }}>
                   {open.id.slice(1)} · {open.status === "done" ? "已通过" : open.status === "current" ? "进行中" : "未开始"}
                 </div>
-                <div style={{ fontSize: 17, fontWeight: 600, color: "var(--text-1)" }}>{open.name}</div>
+                <div style={{ fontSize: "var(--fs-xl)", fontWeight: 600, color: "var(--text-1)" }}>{open.name}</div>
               </div>
               <button
                 type="button"
@@ -407,12 +407,12 @@ export default function PathPage() {
               </button>
             </div>
 
-            <p style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.65, margin: "10px 0 14px" }}>{open.desc}</p>
+            <p style={{ fontSize: "var(--fs-xs)", color: "var(--text-2)", lineHeight: 1.65, margin: "10px 0 14px" }}>{open.desc}</p>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
               {open.checks.map((c) => (
                 <div key={c.key}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "var(--fs-xs)", marginBottom: 4 }}>
                     <span style={{ color: "var(--text-2)" }}>{c.label}</span>
                     <span style={{ color: c.passed ? "var(--accent-ink)" : "var(--text-2)" }}>
                       {c.value} / {c.target} {c.unit}
@@ -440,7 +440,7 @@ export default function PathPage() {
                   color: "var(--solid-text)",
                   borderRadius: 8,
                   padding: "9px 16px",
-                  fontSize: 13,
+                  fontSize: "var(--fs-xs)",
                   fontWeight: 600,
                   textDecoration: "none",
                 }}
@@ -456,7 +456,7 @@ export default function PathPage() {
                   border: "1px solid var(--line)",
                   borderRadius: 8,
                   padding: "9px 16px",
-                  fontSize: 13,
+                  fontSize: "var(--fs-xs)",
                   cursor: "pointer",
                 }}
               >

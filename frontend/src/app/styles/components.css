@@ -1,7 +1,10 @@
 /* ============ 编辑式组件类 ============ */
 
 .eyebrow {
-  font-size: var(--fs-badge);
+  /* ★ 这里原来是 --fs-badge（= 10px）。但眉题是**词**不是数字
+     （「苞米地 · 智能体工作台」「今日额度」「我的文件」），属于要读的信息，
+     不该落在装饰档上。--fs-badge 现在只留给序号/徽章/角标里的数字。 */
+  font-size: var(--fs-xs);
   letter-spacing: var(--ls-wide);
   color: var(--accent-ink);
   font-weight: 500;
@@ -17,7 +20,7 @@
 }
 
 .brand-sub {
-  font-size: var(--fs-badge);
+  font-size: var(--fs-xs);
   color: var(--text-3);
   letter-spacing: var(--ls-mid);
   margin-top: 1px;

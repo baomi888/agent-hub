@@ -26,6 +26,7 @@ import {
   DEFAULT_TOP_K,
   FONT_SCALE_OPTIONS,
   applyFontScale,
+  normalizeFontScale,
   patchPrefs,
   readPrefs,
   readTheme,
@@ -84,8 +85,9 @@ export default function SettingsPage() {
     const t = window.setTimeout(() => {
       setDark(readTheme());
       const saved = readPrefs();
-      const fs = saved.fontScale;
-      if (fs === "auto" || fs === "s" || fs === "m" || fs === "l") setFontScale(fs);
+      // 走 normalize：老用户存的是已取消的 "s" 档，这里直接判等会漏读，
+      // 表现为「设置页显示标准、工作台却按别的档渲染」
+      if (saved.fontScale) setFontScale(normalizeFontScale(saved.fontScale));
       const tk = saved.topK;
       if (typeof tk === "number") setTopK(String(tk));
     }, 0);
@@ -261,9 +263,9 @@ export default function SettingsPage() {
             <p className="sec-label">外观</p>
             <div className="card card-pad">
               <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: "var(--fs-lg)" }}>正文字号</span>
+                <span style={{ fontSize: "var(--fs-lg)" }}>字号</span>
                 <Seg
-                  ariaLabel="正文字号"
+                  ariaLabel="字号"
                   options={FONT_SCALE_OPTIONS}
                   value={fontScale}
                   onChange={onFontScale}
@@ -277,8 +279,11 @@ export default function SettingsPage() {
                 <Switch checked={dark} onChange={onToggleDark} label="深色纸面" />
               </div>
               <p className="hint">
-                字号档位存本地，正文与标题按比例联动（由 <code>--msg-fs</code> 派生出{" "}
-                <code>--hero-fs</code>）。
+                整站文字（正文、标题、按钮）一起变，卡片和栏宽不动，所以调大不会把布局挤乱。
+                「跟随系统」用的是浏览器自己设的默认字号。
+              </p>
+              <p className="hint">
+                校园工具页（单词卡、课表、GPA）是独立的单页，<b>不跟随</b>这个档位。
               </p>
             </div>
           </section>

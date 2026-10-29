@@ -153,7 +153,7 @@
 .guide-title {
   margin: 13px 0 0;
   font-family: var(--font-serif);
-  font-size: 21px;
+  font-size: var(--fs-title);
   font-weight: 700;
   line-height: 1.35;
   letter-spacing: var(--ls-tight);

@@ -32,7 +32,7 @@ export default function NotFound() {
       >
         <div
           style={{
-            fontSize: 56,
+            fontSize: "calc(var(--fs-num) * 1.75)",
             fontWeight: 600,
             lineHeight: 1,
             letterSpacing: "-0.03em",
@@ -42,7 +42,7 @@ export default function NotFound() {
         >
           404
         </div>
-        <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>这条路走不通</h1>
+        <h1 style={{ fontSize: "var(--fs-title)", fontWeight: 600, margin: 0 }}>这条路走不通</h1>
         <p style={{ margin: 0, color: "var(--ink)", opacity: 0.7, lineHeight: 1.7 }}>
           页面不存在，或者它已经不在这儿了。
         </p>

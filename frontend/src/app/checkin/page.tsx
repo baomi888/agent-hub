@@ -272,6 +272,16 @@ export default function CheckinPage() {
      链接带 ?from=card，将来能统计「多少人是从别人的卡片进来的」。 */
   const SHARE_URL = "https://myzhisui.cn/?from=card";
 
+  /* 码的几何常量提到组件作用域：探针要拿它算「每个模块占几个像素」——
+     这是二维码能不能被扫出来的**物理指标**（低于 2px/格 任何解码器都不可靠），
+     留在 buildCardSvg 里就只能靠"碰巧解出来了"反推，那不算验收。 */
+  const QBOX = 214;
+  const QPAD = 9;
+  const QR_SIZE = QBOX - QPAD * 2;
+  let _qrModules: number | null = null;
+  const qrModules = (): number =>
+    (_qrModules ??= QRCode.create(SHARE_URL, { errorCorrectionLevel: "H" }).modules.size);
+
   /** 二维码 → 一堆 <rect>，直接画进卡片 SVG，导出时跟着一起走（不依赖外链图片） */
   const qrRects = (size: number): string => {
     const qr = QRCode.create(SHARE_URL, { errorCorrectionLevel: "H" });
@@ -288,6 +298,7 @@ export default function CheckinPage() {
     }
     return out;
   };
+
 
   /**
    * 卡片源码。PNG 与 SVG 两条导出共用这一份 —— 各画一份必然慢慢长得不一样。
@@ -322,17 +333,17 @@ export default function CheckinPage() {
       y += 10;
     }
 
-    /* 底部：居中一个大码 + 一行说明。
-       ★ 尺寸是被实测逼出来的，不是审美选出来的：
-         第一版把码做成 100px 放在右下角（和统计文字并排），导出 1040px 的 PNG
-         原图能扫，但**整张卡缩到 390px（微信里打开的正常显示宽度）就扫不出来** ——
-         码只有 75px、33 个模块，2.2px 一格，相机拿不到。
-         现在码本体 160px：整卡缩到 390 时仍有约 120px、3.6px 一格，
-         390 / 300 / 195 三档都能解出来（见 checkin_qr_probe 的反解断言）。 */
+    /* 底部：居中一个大码 + 一行说明。尺寸是被实测逼出来的，两次：
+       ① 第一版 100px 放右下角（和统计文字并排），导出 1040px 的 PNG 原图能扫，
+         但整卡缩到 390px（微信里打开的正常显示宽度）就扫不出来 —— 码只有 75px、
+         33 个模块，2.2px 一格，相机拿不到。
+       ② 改成 160px 居中后 390/300/260 都稳，但 **195px 档是碰运气的**：
+         60px ÷ 33 模块 = 1.8px/格，已低于可靠解码的 2px 下限；同一个文件在
+         AREA/LINEAR/NEAREST 三种插值下通断结果互相打架（240 通、220 不通、210 又通）
+         —— 那是在临界点上掷骰子，不是真能扫。
+       现在 196px（QBOX 214 − 静区 9×2）：整卡缩到 195px 仍有 73px、2.2px 一格。
+       代价是白底方块高了 36px，但分享卡的码本来就是主角，大一点不吃亏。 */
     const DIV = y + 6;
-    const QBOX = 178;
-    const QPAD = 9; // 静区：160px 的码 33 模块，9px ≈ 1.9 个模块（白底方块的 12px 圆角再算上，够）
-    const QR = QBOX - QPAD * 2;
     const boxX = Math.round((520 - QBOX) / 2);
     const statY = DIV + 30;
     const boxY = statY + 14;
@@ -351,7 +362,7 @@ export default function CheckinPage() {
   <text x="48" y="${statY}" font-size="13" fill="#5A4C33">共 ${pointCount} 个知识点${streakNote}</text>
   <text x="472" y="${statY}" font-size="12" fill="#6F6044" text-anchor="end">知穗 · 每天进步一点点</text>
   <rect x="${boxX}" y="${boxY}" width="${QBOX}" height="${QBOX}" rx="12" fill="#FFFFFF" stroke="#E4D6B8"/>
-  <g transform="translate(${boxX + QPAD} ${boxY + QPAD})" fill="#2E2416">${qrRects(QR)}</g>
+  <g transform="translate(${boxX + QPAD} ${boxY + QPAD})" fill="#2E2416">${qrRects(QR_SIZE)}</g>
   <text x="260" y="${capY}" font-size="12" fill="#6F6044" text-anchor="middle">扫码打开知穗 · 在手机上接着记</text>
 </svg>`;
     return { svg, height };
@@ -466,6 +477,10 @@ export default function CheckinPage() {
             className="btn btn-primary"
             disabled={busy}
             onClick={() => void downloadCard("png")}
+            /* 给验收探针算「每模块几个像素」用：卡片画布宽 520，码 QR_SIZE 见常量。
+               低于 2px/格 时机器解码不可靠，这是物理下限，不是口味问题。 */
+            data-qr-size={QR_SIZE}
+            data-qr-modules={qrModules()}
           >
             <CornIcon name="download" />
             保存这张图

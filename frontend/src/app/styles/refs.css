@@ -110,7 +110,7 @@
 .ref-meta {
   display: inline-flex;
   align-items: center;
-  font-size: var(--fs-badge);
+  font-size: var(--fs-xs);
   color: var(--text-3);
   margin-left: 6px;
   font-weight: 400;
@@ -130,7 +130,7 @@
 /* ============ 引用溯源：展开原文核对依据 ============ */
 .ref-head-hint {
   margin-left: auto;
-  font-size: var(--fs-badge);
+  font-size: var(--fs-xs);
   letter-spacing: var(--ls-tight);
   color: var(--text-3);
 }
@@ -192,7 +192,7 @@
 .ref-strength {
   display: inline-flex;
   align-items: center;
-  font-size: var(--fs-badge);
+  font-size: var(--fs-xs);
   font-weight: 500;
   padding: 0 5px;
   margin-left: 6px;

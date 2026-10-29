@@ -360,8 +360,12 @@ export default function KnowledgePanel({
         )}
       </div>
 
-      {/* 两种进料入口：我上传 / 它去搜 —— 主路径「直接问」在左侧对话区 */}
-      <div className="mt-4 grid grid-cols-2 gap-2">
+      {/* 两种进料入口：我上传 / 它去搜 —— 主路径「直接问」在左侧对话区。
+          ★ 原来是 grid-cols-2。R3 把字号抬到 14px 后，「网上的资料」在 80px 宽的
+            格子里折成「网上的资 / 料」，最后一个字孤零零挂在第二行，加上图标
+            还对不齐。侧栏只有 190px，两列永远是紧的；改成整行排，
+            字号再大一档也不会散架。 */}
+      <div className="mt-4 grid grid-cols-1 gap-2">
         <button
           onClick={() => setFeed(feed === "upload" ? null : "upload")}
           className={`feed-btn ${feed === "upload" ? "on" : ""}`}

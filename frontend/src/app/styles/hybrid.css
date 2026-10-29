@@ -349,7 +349,7 @@
   padding: 0 var(--space-5);
   border-radius: 999px;
   font-family: var(--font-sans);
-  font-size: var(--fs-badge);
+  font-size: var(--fs-xs);
   font-style: normal;
   border: 1px solid var(--line);
 }

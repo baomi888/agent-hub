@@ -96,7 +96,7 @@
   }
 }
 .plan-eyebrow {
-  font-size: var(--fs-badge);
+  font-size: var(--fs-xs);
   letter-spacing: var(--ls-wide);
   color: var(--accent-ink);
   font-weight: 600;
@@ -237,12 +237,17 @@
 }
 .fs-picker-opts {
   display: flex;
+  /* 四个档位按钮在「特大」档会把「标准」折成「标 / 准」（每行一个汉字）。
+     允许换行 + 按钮按内容定宽，挤不下时整体掉到第二行，而不是把词劈开 */
+  flex-wrap: wrap;
   gap: var(--space-2);
 }
 .fs-picker-opts button {
   border: none;
   background: none;
   cursor: pointer;
+  flex: 0 0 auto;
+  white-space: nowrap;
   font-size: var(--fs-sm);
   color: var(--text-2);
   padding: 4px 7px;
@@ -261,6 +266,18 @@
 .fs-picker-opts button:focus-visible {
   outline: none;
   box-shadow: var(--ring-accent);
+}
+/* 「大」和「特大」两档，四个标签一行放不下（字号本身变大了，容器宽度没变）。
+   光靠 flex-wrap 会变成「标准 大 特大」+「系统」独占一行，左右不齐；
+   按档位改成 2×2 网格，四块等宽、读起来像一组。 */
+html[data-fs="l"] .fs-picker-opts,
+html[data-fs="xl"] .fs-picker-opts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+html[data-fs="l"] .fs-picker-opts button,
+html[data-fs="xl"] .fs-picker-opts button {
+  text-align: center;
 }
 .dark .fs-picker {
   background: var(--panel);

@@ -432,9 +432,9 @@ export default function Sidebar({
             <div className="fs-picker-opts">
               {(
                 [
-                  { v: "s", label: "小", title: "" },
                   { v: "m", label: "标准", title: "" },
                   { v: "l", label: "大", title: "" },
+                  { v: "xl", label: "特大", title: "" },
                   { v: "auto", label: "系统", title: "跟随浏览器默认字号设置" },
                 ] as const
               ).map((o) => (

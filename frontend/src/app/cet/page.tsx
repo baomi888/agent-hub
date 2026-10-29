@@ -84,14 +84,14 @@ const card: React.CSSProperties = {
   borderRadius: 14,
   padding: 18,
 };
-const label: React.CSSProperties = { fontSize: 12, color: "var(--text-2)", marginBottom: 6 };
+const label: React.CSSProperties = { fontSize: "var(--fs-xs)", color: "var(--text-2)", marginBottom: 6 };
 const input: React.CSSProperties = {
   border: "1px solid var(--input-border)",
   borderRadius: 8,
   background: "var(--surface)",
   color: "var(--text-1)",
   padding: "8px 10px",
-  fontSize: 14,
+  fontSize: "var(--fs-md)",
   outline: "none",
 };
 const btn: React.CSSProperties = {
@@ -100,7 +100,7 @@ const btn: React.CSSProperties = {
   border: "none",
   borderRadius: 8,
   padding: "8px 14px",
-  fontSize: 13,
+  fontSize: "var(--fs-xs)",
   fontWeight: 600,
   cursor: "pointer",
 };
@@ -109,7 +109,7 @@ const pill: React.CSSProperties = {
   border: "1px solid var(--line)",
   borderRadius: 999,
   padding: "6px 14px",
-  fontSize: 12,
+  fontSize: "var(--fs-xs)",
   cursor: "pointer",
   background: "var(--surface)",
   color: "var(--text-3)",
@@ -165,7 +165,7 @@ function ScoreChart({ scores }: { scores: Score[] }) {
   const pad = 34;
   const pts = scores;
   if (pts.length === 0) {
-    return <p style={{ color: "var(--text-2)", fontSize: 13 }}>还没有分数记录，先在下面记一条。</p>;
+    return <p style={{ color: "var(--text-2)", fontSize: "var(--fs-xs)" }}>还没有分数记录，先在下面记一条。</p>;
   }
   const values = pts.map((p) => p.score);
   const target = pts.find((p) => p.target != null)?.target ?? null;
@@ -221,7 +221,7 @@ function diffDays(from: string, to: string): number {
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 14, flexWrap: "wrap" }}>
-      <span style={{ fontSize: 12, color: "var(--text-2)", width: 76, flex: "0 0 auto", paddingTop: 7 }}>
+      <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-2)", width: 76, flex: "0 0 auto", paddingTop: 7 }}>
         {label}
       </span>
       <div style={{ flex: "1 1 260px", minWidth: 0 }}>{children}</div>
@@ -307,10 +307,10 @@ function PlanEditor({
 
   return (
     <div style={card}>
-      <b style={{ color: "var(--text-1)", fontSize: 15 }}>
+      <b style={{ color: "var(--text-1)", fontSize: "var(--fs-lg)" }}>
         {initial ? "调整备考设置" : "建立你的备考档案"}
       </b>
-      <p style={{ color: "var(--text-2)", fontSize: 12, margin: "4px 0 16px" }}>
+      <p style={{ color: "var(--text-2)", fontSize: "var(--fs-xs)", margin: "4px 0 16px" }}>
         选好之后按你的选择生成每日任务，之后随时能改 —— 改设置不会动你已经勾过的历史记录。
       </p>
 
@@ -351,7 +351,7 @@ function PlanEditor({
         </div>
         <p
           style={{
-            fontSize: 12,
+            fontSize: "var(--fs-xs)",
             margin: "8px 0 0",
             color: spanDays >= 1 ? "var(--accent-ink)" : "var(--red-ink)",
           }}
@@ -360,7 +360,7 @@ function PlanEditor({
             ? `共 ${spanDays} 天（含今天）· 每天 ${mods.length} 个任务，共 ${spanDays * mods.length} 项`
             : "考试日不能早于今天"}
         </p>
-        <p style={{ fontSize: 11, color: "var(--text-3)", margin: "4px 0 0" }}>
+        <p style={{ fontSize: "var(--fs-xs)", color: "var(--text-3)", margin: "4px 0 0" }}>
           上面三个日期按"6 月 / 12 月第二个周六"的惯例推算，请以官方通知为准；也可以直接选一个日期。
         </p>
       </Row>
@@ -389,7 +389,7 @@ function PlanEditor({
           })}
         </div>
         {mods.length === 0 ? (
-          <p style={{ fontSize: 12, margin: "8px 0 0", color: "var(--red-ink)" }}>
+          <p style={{ fontSize: "var(--fs-xs)", margin: "8px 0 0", color: "var(--red-ink)" }}>
             至少选一个模块，否则每天没有任务可做。
           </p>
         ) : null}
@@ -416,7 +416,7 @@ function PlanEditor({
             }}
             style={{ ...input, width: 88, textAlign: "center" }}
           />
-          <span style={{ fontSize: 12, color: "var(--text-3)" }}>
+          <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-3)" }}>
             {level === "CET4" ? "四级" : "六级"}建议 {levelDefault} · 425 及格 / 500 良好 / 550 优秀
           </span>
         </div>
@@ -635,7 +635,7 @@ export default function CetPage() {
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <span
               style={{
-                fontSize: 12,
+                fontSize: "var(--fs-xs)",
                 padding: "2px 9px",
                 borderRadius: 999,
                 background: "var(--accent-soft)",
@@ -645,15 +645,15 @@ export default function CetPage() {
             >
               {plan.exam_type_label}
             </span>
-            <span style={{ fontSize: 12, color: "var(--text-2)" }}>{plan.exam_date}</span>
-            <span style={{ fontSize: 12, color: "var(--text-3)" }}>·</span>
-            <span style={{ fontSize: 12, color: examOver ? "var(--text-3)" : "var(--text-2)" }}>
+            <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-2)" }}>{plan.exam_date}</span>
+            <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-3)" }}>·</span>
+            <span style={{ fontSize: "var(--fs-xs)", color: examOver ? "var(--text-3)" : "var(--text-2)" }}>
               {daysLeftText()}
             </span>
             {plan.target_score ? (
               <>
-                <span style={{ fontSize: 12, color: "var(--text-3)" }}>·</span>
-                <span style={{ fontSize: 12, color: "var(--text-2)" }}>目标 {plan.target_score}</span>
+                <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-3)" }}>·</span>
+                <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-2)" }}>目标 {plan.target_score}</span>
               </>
             ) : null}
             <button
@@ -668,7 +668,7 @@ export default function CetPage() {
       }
     >
       {err ? (
-        <div style={{ ...card, borderColor: "var(--red)", color: "var(--red-ink)", marginBottom: 16, fontSize: 13 }}>
+        <div style={{ ...card, borderColor: "var(--red)", color: "var(--red-ink)", marginBottom: 16, fontSize: "var(--fs-xs)" }}>
           {err}
         </div>
       ) : null}
@@ -700,7 +700,7 @@ export default function CetPage() {
             archiveDanger={confirmArchive}
           />
           {!plan ? (
-            <p style={{ fontSize: 12, color: "var(--text-3)", marginTop: 12, textAlign: "center" }}>
+            <p style={{ fontSize: "var(--fs-xs)", color: "var(--text-3)", marginTop: 12, textAlign: "center" }}>
               还没有档案时会显示这个配置向导；建档之后在这里随时能改。
             </p>
           ) : null}
@@ -713,21 +713,21 @@ export default function CetPage() {
               <Ring percent={progress.percent} />
               <div>
                 <div style={{ ...label, marginBottom: 2 }}>总进度</div>
-                <b style={{ fontSize: 20, color: "var(--text-1)" }}>
+                <b style={{ fontSize: "var(--fs-title)", color: "var(--text-1)" }}>
                   {progress.done}/{progress.total}
                 </b>
-                <div style={{ fontSize: 12, color: "var(--text-2)" }}>已完成任务</div>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-2)" }}>已完成任务</div>
               </div>
             </div>
             <div style={card}>
               <div style={label}>连续学习</div>
-              <b style={{ fontSize: 30, color: "var(--accent-ink)" }}>{ov?.streak ?? 0}</b>
-              <div style={{ fontSize: 12, color: "var(--text-2)" }}>天（有勾选即算）</div>
+              <b style={{ fontSize: "var(--fs-num)", color: "var(--accent-ink)" }}>{ov?.streak ?? 0}</b>
+              <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-2)" }}>天（有勾选即算）</div>
             </div>
             <div style={card}>
               <div style={label}>今日待复习</div>
-              <b style={{ fontSize: 30, color: "var(--accent-ink)" }}>{ov?.vocab_due ?? 0}</b>
-              <div style={{ fontSize: 12, color: "var(--text-2)" }}>个词卡到期</div>
+              <b style={{ fontSize: "var(--fs-num)", color: "var(--accent-ink)" }}>{ov?.vocab_due ?? 0}</b>
+              <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-2)" }}>个词卡到期</div>
             </div>
           </div>
 
@@ -735,14 +735,14 @@ export default function CetPage() {
           <div style={card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
               <b style={{ color: "var(--text-1)" }}>今日任务 · {ov?.today}</b>
-              <span style={{ fontSize: 12, color: "var(--text-3)" }}>
+              <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-3)" }}>
                 {ov?.today_tasks.filter((t) => t.done).length ?? 0}/{ov?.today_tasks.length ?? 0}
               </span>
             </div>
             {ov && ov.today_tasks.length === 0 ? (
               examOver ? (
                 <div>
-                  <p style={{ color: "var(--text-2)", fontSize: 13, margin: "0 0 10px" }}>
+                  <p style={{ color: "var(--text-2)", fontSize: "var(--fs-xs)", margin: "0 0 10px" }}>
                     这场考试已经结束了。已完成 {progress.done}/{progress.total} 项（
                     {progress.percent}%）——
                     记录都还在，随时可以开始下一次备考。
@@ -752,7 +752,7 @@ export default function CetPage() {
                   </button>
                 </div>
               ) : (
-                <p style={{ color: "var(--text-2)", fontSize: 13 }}>
+                <p style={{ color: "var(--text-2)", fontSize: "var(--fs-xs)" }}>
                   今天不在计划区间内（计划尚未开始）。
                 </p>
               )
@@ -785,7 +785,7 @@ export default function CetPage() {
                           border: "1.5px solid var(--accent)",
                           background: t.done ? "var(--accent)" : "transparent",
                           color: "var(--solid-text)",
-                          fontSize: 12,
+                          fontSize: "var(--fs-xs)",
                           lineHeight: "16px",
                           textAlign: "center",
                           flex: "0 0 auto",
@@ -793,8 +793,8 @@ export default function CetPage() {
                       >
                         {t.done ? "✓" : ""}
                       </span>
-                      <span style={{ fontSize: 12, color: "var(--accent-ink)", flex: "0 0 auto" }}>{t.module}</span>
-                      <span style={{ fontSize: 13, overflowWrap: "anywhere" }}>{t.title}</span>
+                      <span style={{ fontSize: "var(--fs-xs)", color: "var(--accent-ink)", flex: "0 0 auto" }}>{t.module}</span>
+                      <span style={{ fontSize: "var(--fs-xs)", overflowWrap: "anywhere" }}>{t.title}</span>
                     </button>
                   </li>
                 ))}
@@ -806,16 +806,16 @@ export default function CetPage() {
           <div style={card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
               <b style={{ color: "var(--text-1)" }}>词汇本 · 今日到期</b>
-              <span style={{ fontSize: 12, color: "var(--text-3)" }}>1 / 3 / 7 / 15 / 30 天间隔</span>
+              <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-3)" }}>1 / 3 / 7 / 15 / 30 天间隔</span>
             </div>
             {vocab.length === 0 ? (
-              <p style={{ color: "var(--text-2)", fontSize: 13 }}>今天没有到期的词卡，先加几个词吧。</p>
+              <p style={{ color: "var(--text-2)", fontSize: "var(--fs-xs)" }}>今天没有到期的词卡，先加几个词吧。</p>
             ) : (
               <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
                 {vocab.map((v) => (
                   <div key={v.id} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12, background: "var(--surface)" }}>
-                    <b style={{ fontSize: 16, color: "var(--text-1)", overflowWrap: "anywhere" }}>{v.word}</b>
-                    <div style={{ fontSize: 12, color: "var(--text-2)", margin: "4px 0 10px", overflowWrap: "anywhere" }}>
+                    <b style={{ fontSize: "var(--fs-xl)", color: "var(--text-1)", overflowWrap: "anywhere" }}>{v.word}</b>
+                    <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-2)", margin: "4px 0 10px", overflowWrap: "anywhere" }}>
                       {v.meaning || "（未填释义）"}
                     </div>
                     <div style={{ display: "flex", gap: 8 }}>
@@ -861,7 +861,7 @@ export default function CetPage() {
           <div style={card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
               <b style={{ color: "var(--text-1)" }}>模考 / 真考分数</b>
-              <span style={{ fontSize: 12, color: "var(--text-3)" }}>共 {scores.length} 条</span>
+              <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-3)" }}>共 {scores.length} 条</span>
             </div>
             <ScoreChart scores={scores} />
             <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap", alignItems: "center" }}>
