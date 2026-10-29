@@ -279,10 +279,14 @@ def _init_db() -> None:
         #                           单 TEXT 字段无法回退，故显式存一份）
         #   compressed_upto        已压缩到的 message id；build 时以此过滤原文，
         #                           避免"压缩块 + 原文"重复进上下文
+        # v2 追加 compressed_meta：压缩段的结构化元数据（kind/salience/refs/staged，
+        #                           报告 §4.2）。文本列保持旧格式不变，旧库该列
+        #                           为 NULL 时按默认 meta 处理（kind=其它）。
         for col, decl in (
             ("compressed_summary", "TEXT"),
             ("compressed_summary_prev", "TEXT"),
             ("compressed_upto", "INTEGER"),
+            ("compressed_meta", "TEXT"),
         ):
             try:
                 conn.execute(f"ALTER TABLE conversations ADD COLUMN {col} {decl}")

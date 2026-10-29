@@ -32,6 +32,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -51,6 +52,173 @@ KEEP_TURNS_EXPANDED = int(getattr(config, "COMPRESS_KEEP_TURNS_EXPANDED", 12))
 MAX_SEGMENTS = int(getattr(config, "COMPRESS_MAX_SEGMENTS", 12))
 
 SEG_PREFIX = "[COMPRESSED-"
+
+# v2 折叠开关：False 时完全回到 v1 行为（折最早段，不看 salience / staged）。
+FOLD_BY_SALIENCE = bool(getattr(config, "COMPRESS_V2_FOLD", True))
+
+
+# ==================== v2：分流与 salience（零 LLM，规则信号）====================
+#
+# 设计出自《建议报告_2026-10-26_对话提取与记忆压缩.md》(v2) §4.3/4.4/4.5：
+# 压缩段需要 kind / salience / staged 等结构化元数据，才能回答两个问题：
+#   1) 这段知识值不值得沉淀进知识库（链③准入）
+#   2) 预算不够时先折谁（链②折叠：只折已 staged 的最低 salience 段）
+# 全部规则信号、零 LLM 成本，冷启动即可用。
+
+# kind 先验权重：约束/待办/偏好/纠正 > 目标 > 结论 > 事实 > 其它
+KIND_WEIGHTS: dict[str, float] = {
+    "约束": 1.0,
+    "待办": 1.0,
+    "偏好": 1.0,
+    "纠正": 1.0,
+    "目标": 0.9,
+    "结论": 0.8,
+    "事实": 0.6,
+    "其它": 0.3,
+}
+
+# 情感强度信号（报告 §4.5：用高置信度规则，不引情感模型）
+_RE_CORRECTION = re.compile(r"(不对|不是这个|我说的是|你理解错了|重新说|搞错了)")
+_RE_MEMORIZE = re.compile(r"(记住|别忘了|以后都|记一下|务必记)")
+_RE_ABSOLUTE = re.compile(r"(必须|绝对|千万|一定|永远|再也|无论如何)")
+_RE_NEGATIVE = re.compile(r"(不要|别|禁止|不许|不能|不可以)")
+_RE_PREFERENCE = re.compile(r"(我喜欢|我不喜欢|我偏好|我习惯|我讨厌|我倾向)")
+_RE_GOAL = re.compile(r"(目标是|我打算|我的目标|准备考|计划在|争取)")
+
+# salience 四信号权重（报告 §4.4 公式）
+_W_TYPE, _W_SINGLETON, _W_OUTLIER, _W_EMOTION = 0.4, 0.25, 0.2, 0.15
+
+
+def classify_text(text: str) -> tuple[str, float]:
+    """零 LLM 分流：返回 (kind, emotion)。
+
+    kind 是"这段话属于哪类知识"（决定 type_weight 与入库候选资格），
+    emotion 是 0~1 的强调强度（纠正/显式记住最高）。规则顺序即优先级：
+    纠正 > 显式记住 > 约束/待办 > 偏好 > 目标 > 事实（硬实体）> 其它。
+    """
+    if not text:
+        return "其它", 0.0
+    if _RE_CORRECTION.search(text):
+        return "纠正", 1.0
+    if _RE_MEMORIZE.search(text):
+        # 显式要求记住：kind 归"事实"（内容本身未必是约束），emotion 顶格
+        return "事实", 1.0
+    if _RE_ABSOLUTE.search(text) or _RE_NEGATIVE.search(text):
+        return "约束", 0.8
+    if _RE_TODO.search(text):
+        return "待办", 0.7
+    if _RE_PREFERENCE.search(text):
+        return "偏好", 0.6
+    if _RE_GOAL.search(text):
+        return "目标", 0.5
+    if extract_entities(text):
+        return "事实", 0.3
+    return "其它", 0.0
+
+
+def singleton_ratio(text: str, corpus: str) -> float:
+    """首现且唯一信号（报告 §4.4）：段内实体在全会话只出现一次的比例。
+
+    "只说一次"意味着没有别的段落能兜住它——折掉就真的丢了。
+    corpus 必须包含 text 自身（否则所有实体都"只出现一次"）。
+    """
+    ents = extract_entities(text)
+    if not ents:
+        return 0.0
+    unique = sum(1 for e in ents if corpus.count(e) <= 1)
+    return unique / len(ents)
+
+
+def jaccard_sim(a: str, b: str) -> float:
+    """字符 2-gram Jaccard 相似度。零依赖近似，与检索侧 MMR 去重同源。"""
+    if not a or not b:
+        return 0.0
+    ga = {a[i : i + 2] for i in range(len(a) - 1)}
+    gb = {b[i : i + 2] for i in range(len(b) - 1)}
+    union = ga | gb
+    if not union:
+        return 0.0
+    return len(ga & gb) / len(union)
+
+
+def outlier_score(text: str, others: list[str]) -> float:
+    """离群度信号（报告 §4.4）：`1 - max_sim(该段, 其它段)`。
+
+    与其它内容都不像 → 不可从别处推导 → 必须自留。
+    相似度用字符 2-gram Jaccard（避免为打分去调 embedding）。
+    """
+    if not others:
+        return 1.0
+    max_sim = max(jaccard_sim(text, o) for o in others if o)
+    return max(0.0, min(1.0, 1.0 - max_sim))
+
+
+def compute_salience(
+    kind: str, emotion: float, singleton: float, outlier: float
+) -> float:
+    """salience = 0.4·type_weight + 0.25·singleton + 0.2·outlier + 0.15·emotion。
+
+    取值 0~1。约束句 > 闲聊句、singleton 句 > 重复句，是 §6-4 的验收口径。
+    """
+    w = KIND_WEIGHTS.get(kind, 0.3)
+    val = (
+        _W_TYPE * w
+        + _W_SINGLETON * max(0.0, min(1.0, singleton))
+        + _W_OUTLIER * max(0.0, min(1.0, outlier))
+        + _W_EMOTION * max(0.0, min(1.0, emotion))
+    )
+    return round(max(0.0, min(1.0, val)), 4)
+
+
+@dataclass
+class SegmentMeta:
+    """压缩段的元数据（与 segments 按下标一一对应）。
+
+    存储在 conversations.compressed_meta（JSON 数组），压缩块文本本身保持
+    `[COMPRESSED-n] 文本` 格式不变——prompt 里不出现元数据噪声，KV 前缀不受影响。
+    旧数据没有 meta 列，或数组长度对不齐时，一律补默认值（kind=其它）。
+    """
+
+    kind: str = "其它"
+    refs: list[int] = field(default_factory=list)  # 来源 message id，入库溯源用
+    role: str = "user"
+    ts: int = 0
+    salience: float = 0.5
+    hits: int = 0
+    staged: bool = False  # 已沉淀进知识库 → 允许被折叠释放
+    superseded: bool = False  # 被纠正过的旧说法（报告 §5.2）
+    sid: str = ""  # 来源会话 id
+    conv_title: str = ""  # 来源会话标题（入库 metadata.source 用）
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": self.kind,
+            "refs": list(self.refs),
+            "role": self.role,
+            "ts": self.ts,
+            "salience": self.salience,
+            "hits": self.hits,
+            "staged": self.staged,
+            "superseded": self.superseded,
+            "sid": self.sid,
+            "conv_title": self.conv_title,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict | None) -> SegmentMeta:
+        d = d or {}
+        return cls(
+            kind=str(d.get("kind") or "其它"),
+            refs=[int(r) for r in (d.get("refs") or [])],
+            role=str(d.get("role") or "user"),
+            ts=int(d.get("ts") or 0),
+            salience=float(d.get("salience", 0.5)),
+            hits=int(d.get("hits") or 0),
+            staged=bool(d.get("staged", False)),
+            superseded=bool(d.get("superseded", False)),
+            sid=str(d.get("sid") or ""),
+            conv_title=str(d.get("conv_title") or ""),
+        )
 
 
 # ==================== 实体抽取（L0 的原料，零 LLM）====================
@@ -98,18 +266,32 @@ def missing_entities(source_text: str, summary_text: str) -> list[str]:
 
 @dataclass
 class SummaryBlock:
-    """压缩块：分段存储，增量追加不改旧段。"""
+    """压缩块：分段存储，增量追加不改旧段。
+
+    v2：与 segments 平行维护一份 SegmentMeta（metas），折叠时按
+    "salience 最低且已 staged"选择牺牲段；meta 缺失（旧数据）时行为与 v1 完全一致。
+    """
 
     segments: list[str] = field(default_factory=list)
+    metas: list[SegmentMeta] = field(default_factory=list)
 
     # ---- 序列化 ----
     def render(self) -> str:
         """渲染成落库文本：每段一行 `[COMPRESSED-n] ...`。"""
         return "\n".join(f"{SEG_PREFIX}{i + 1}] {seg}" for i, seg in enumerate(self.segments))
 
+    def meta_json(self) -> str:
+        """metas 序列化成 JSON（落 conversations.compressed_meta 列）。"""
+        return json.dumps([m.to_dict() for m in self.metas], ensure_ascii=False)
+
     @classmethod
-    def parse(cls, text: str | None) -> SummaryBlock:
-        """从落库文本还原。解析失败时退回"整块一段"，不丢内容。"""
+    def parse(cls, text: str | None, meta_json: str | None = None) -> SummaryBlock:
+        """从落库文本还原。解析失败时退回"整块一段"，不丢内容。
+
+        旧格式兼容（报告 §4.2 硬约束）：`[COMPRESSED-n] 文本` 无任何 kind 信息
+        → 补默认 meta（kind=其它 / salience=0.5 / role=user），老会话不废。
+        meta 数量与 segments 对不齐时同样补默认，绝不让结构化改造丢内容。
+        """
         if not text:
             return cls([])
         segs: list[str] = []
@@ -125,47 +307,166 @@ class SummaryBlock:
                 segs[-1] = (segs[-1] + " " + line).strip()
             else:
                 segs.append(line)
-        return cls(segs)
+        metas: list[SegmentMeta] = []
+        if meta_json:
+            try:
+                raw = json.loads(meta_json)
+                if isinstance(raw, list):
+                    metas = [SegmentMeta.from_dict(d) for d in raw]
+            except (ValueError, TypeError):
+                metas = []
+        while len(metas) < len(segs):
+            metas.append(SegmentMeta())
+        return cls(segs, metas[: len(segs)])
 
     # ---- 预算管理 ----
     @property
     def chars(self) -> int:
         return len(self.render())
 
-    def append(self, segment: str) -> str:
-        """追加一段（**不改旧段**）。超预算或超段数时折叠最早的段。"""
+    def append(self, segment: str, meta: SegmentMeta | None = None) -> str:
+        """追加一段（**不改旧段**）。超预算或超段数时按 v2 规则折叠。"""
         segment = (segment or "").strip()
         if segment:
             self.segments.append(segment)
+            self.metas.append(meta or SegmentMeta())
         self._enforce_budget()
         return self.render()
 
-    def _enforce_budget(self) -> None:
-        """压缩块自身的预算：段数超限 / 字符超限时折叠最早的部分。
+    def _pick_fold_indices(self, fold_n: int) -> list[int]:
+        """选折叠对象：v2 折"已 staged 里 salience 最低的"，退化到折最早的。
 
-        折叠而不是直接丢弃：保留"更早的对话涉及 X/Y/Z 主题"这一类概述，
-        否则模型会以为更早的内容从未发生过（评审提到的"膨胀源"问题）。
+        - FOLD_BY_SALIENCE 关闭 → 永远走 v1 行为
+        - meta 齐全且存在 staged 段 → 从 staged（且未被作废）里挑 salience 最低的
+          fold_n 段——**已入库的内容折掉只是释放，信息还在知识库里**
+        - 否则（旧数据 / 还没有任何段入库）→ 折最早的 fold_n 段（v1 行为）
+        """
+        n = min(fold_n, len(self.segments) - 1)
+        if n <= 0:
+            return []
+        idx_all = list(range(len(self.segments)))
+        if not FOLD_BY_SALIENCE or len(self.metas) != len(self.segments):
+            return idx_all[:n]
+        staged = [
+            i
+            for i, m in enumerate(self.metas)
+            if m.staged and not m.superseded
+        ]
+        if not staged:
+            return idx_all[:n]
+        # 概述段（"[早期内容已折叠] …"）排到最后：反复折叠它自己只会嵌套前缀、
+        # 不净减字符；只有当 staged 里全是概述时才允许（此时走收缩路径）
+        non_overview = [i for i in staged if not self.segments[i].startswith("[早期内容已折叠]")]
+        pool = non_overview or staged
+        pool.sort(key=lambda i: (self.metas[i].salience, i))
+        return sorted(pool[:n])
+
+    def _merge_meta(self, indices: list[int]) -> SegmentMeta:
+        """被折叠各段的 meta 合并：kind 取 salience 最高段的，refs 并集。"""
+        parts = [self.metas[i] for i in indices if i < len(self.metas)]
+        if not parts:
+            return SegmentMeta()
+        top = max(parts, key=lambda m: m.salience)
+        merged_refs: list[int] = []
+        for m in parts:
+            for r in m.refs:
+                if r not in merged_refs:
+                    merged_refs.append(r)
+        return SegmentMeta(
+            kind=top.kind,
+            refs=merged_refs,
+            role=parts[0].role,
+            ts=min(m.ts for m in parts if m.ts) if any(m.ts for m in parts) else 0,
+            # 折叠概述是残余信息：salience 取最低，但已备份 → 标 staged
+            salience=min(m.salience for m in parts),
+            hits=sum(m.hits for m in parts),
+            staged=all(m.staged for m in parts) if parts else False,
+            superseded=all(m.superseded for m in parts) if parts else False,
+            sid=top.sid,
+            conv_title=top.conv_title,
+        )
+
+    def _fold(self, fold_n: int) -> None:
+        """把选中的 fold_n 段折成一段概述，放回原最早选中位置。"""
+        indices = self._pick_fold_indices(fold_n)
+        if not indices:
+            return
+        # 只选中一个"已折叠概述"段时：收缩它自己，而不是重建嵌套概述
+        if len(indices) == 1 and self.segments[indices[0]].startswith("[早期内容已折叠]"):
+            i = indices[0]
+            self.segments[i] = "[早期内容已折叠] " + self.segments[i][:200]
+            if i < len(self.metas):
+                self.metas[i].salience = min(self.metas[i].salience, 0.1)
+            return
+        folded_texts = [self.segments[i] for i in indices]
+        overview = f"[早期内容已折叠] {' '.join(folded_texts)[:300]}"
+        merged_meta = self._merge_meta(indices)
+        # staged 由 _merge_meta 的 all() 语义决定：只有全部来源段都已入库，
+        # 概述才允许被标记为"已备份"；未入库内容折成的概述不谎报 staged
+        keep_texts: list[str] = []
+        keep_metas: list[SegmentMeta] = []
+        inserted = False
+        for i, (t, m) in enumerate(zip(self.segments, self.metas, strict=True)):
+            if i in indices:
+                if not inserted:
+                    keep_texts.append(overview)
+                    keep_metas.append(merged_meta)
+                    inserted = True
+                continue
+            keep_texts.append(t)
+            keep_metas.append(m)
+        if not inserted:  # 理论不可达（indices 非空），防御
+            keep_texts.append(overview)
+            keep_metas.append(merged_meta)
+        self.segments = keep_texts
+        self.metas = keep_metas
+
+    def _fold_head_v1(self) -> None:
+        """v1 的字符超限动作：第一段收缩成概述、第二段直接删除。
+
+        保留 v1 精确行为是为了旧数据/旧测试的兼容：无 meta 或没有 staged 段时，
+        字符超限仍然走这条路径（每轮净减"第二段"的字符）。
+        """
+        first = self.segments[0]
+        had_meta = len(self.metas) == len(self.segments)
+        if first.startswith("[早期内容已折叠]"):
+            # 已经折叠过：继续压缩这一段本身
+            self.segments[0] = "[早期内容已折叠] " + first[:200]
+            if len(self.segments) == 1:
+                return
+            self.segments.pop(1)
+            if had_meta and len(self.metas) > 1:
+                self.metas.pop(1)
+        else:
+            self.segments[0] = f"[早期内容已折叠] {first[:200]}"
+            self.segments.pop(1)
+            if had_meta and len(self.metas) > 1:
+                self.metas.pop(1)
+
+    def _enforce_budget(self) -> None:
+        """压缩块自身的预算：段数超限 / 字符超限时折叠。
+
+        v2（报告 §4.4）：从"折最早的"改成"折 salience 最低且已 staged 的"——
+        只有已经沉淀进知识库的段才允许被折叠释放，没入库的段折了就真的没了。
+        全部未 staged（或旧数据无 meta）时退回 v1 的"折最早"，宁可折也不要让
+        预算失控；真正的安全底座是 L3 硬截断与入库后的释放。
         """
         # 段数超限：把最早的几段折成一段
         if len(self.segments) > MAX_SEGMENTS:
-            fold_n = len(self.segments) - MAX_SEGMENTS + 1
-            folded = " ".join(self.segments[:fold_n])
-            overview = f"[早期内容已折叠] {folded[:300]}"
-            self.segments = [overview] + self.segments[fold_n:]
-        # 字符超限：从头折叠直到进预算
+            self._fold(len(self.segments) - MAX_SEGMENTS + 1)
+        # 字符超限：折叠直到进预算
         guard = 0
         while self.chars > MAX_SUMMARY_CHARS and len(self.segments) > 1 and guard < 50:
             guard += 1
-            first = self.segments[0]
-            if first.startswith("[早期内容已折叠]"):
-                # 已经折叠过：继续压缩这一段本身
-                self.segments[0] = "[早期内容已折叠] " + first[:200]
-                if len(self.segments) == 1:
-                    break
-                self.segments.pop(1)
+            can_v2 = (
+                FOLD_BY_SALIENCE
+                and len(self.metas) == len(self.segments)
+                and any(m.staged and not m.superseded for m in self.metas)
+            )
+            if can_v2:
+                self._fold(1)
             else:
-                self.segments[0] = f"[早期内容已折叠] {first[:200]}"
-                self.segments.pop(1)
+                self._fold_head_v1()
 
 
 # ==================== 安全阀（分级，替代二值回退）====================
@@ -235,6 +536,7 @@ def commit_summary(
     new_summary: str,
     upto_message_id: int,
     expected_upto: int | None,
+    meta_json: str | None = None,
 ) -> bool:
     """乐观锁写入压缩块。返回 False 表示并发冲突（放弃本轮压缩）。
 
@@ -242,16 +544,28 @@ def commit_summary(
     如果两边都认为自己该写 `compressed_upto`，就会出现
     "压缩块 + 被压缩的原文同时进上下文"的重复（评审指出的竞态）。
     以 `compressed_upto` 做 CAS：不匹配就放弃，下次压缩再试。
+
+    v2：`meta_json` 是 SegmentMeta 数组（落 compressed_meta 列）。
+    传 None 时不改动已有 meta（保持旧调用方行为不变）。
     """
     from core import session as store
 
     with store._get_conn() as conn:  # noqa: SLF001 —— 同模块内的既定用法
-        cur = conn.execute(
-            "UPDATE conversations SET compressed_summary = ?, compressed_upto = ?, "
-            "compressed_summary_prev = COALESCE(compressed_summary, compressed_summary_prev) "
-            "WHERE id = ? AND owner_id = ? AND COALESCE(compressed_upto, 0) = COALESCE(?, 0)",
-            (new_summary, upto_message_id, sid, owner, expected_upto),
-        )
+        if meta_json is None:
+            cur = conn.execute(
+                "UPDATE conversations SET compressed_summary = ?, compressed_upto = ?, "
+                "compressed_summary_prev = COALESCE(compressed_summary, compressed_summary_prev) "
+                "WHERE id = ? AND owner_id = ? AND COALESCE(compressed_upto, 0) = COALESCE(?, 0)",
+                (new_summary, upto_message_id, sid, owner, expected_upto),
+            )
+        else:
+            cur = conn.execute(
+                "UPDATE conversations SET compressed_summary = ?, compressed_upto = ?, "
+                "compressed_meta = ?, "
+                "compressed_summary_prev = COALESCE(compressed_summary, compressed_summary_prev) "
+                "WHERE id = ? AND owner_id = ? AND COALESCE(compressed_upto, 0) = COALESCE(?, 0)",
+                (new_summary, upto_message_id, meta_json, sid, owner, expected_upto),
+            )
         return cur.rowcount > 0
 
 
@@ -266,19 +580,22 @@ def load_summary_state(owner: str, sid: str) -> tuple[SummaryBlock, int, str | N
 
     多返回一个 prev，是因为 L1 安全阀要拿它来回退；`load_summary` 保持二元签名
     不变（调用方只关心"现在是什么"），需要回退依据的写入侧才用这个。
+
+    v2：同时读取 compressed_meta 列并交给 parse——旧库该列为 NULL，
+    parse 会补默认 meta（kind=其它 / salience=0.5），行为不变。
     """
     from core import session as store
 
     with store._get_conn() as conn:  # noqa: SLF001
         row = conn.execute(
-            "SELECT compressed_summary, compressed_summary_prev, compressed_upto "
-            "FROM conversations WHERE id = ? AND owner_id = ?",
+            "SELECT compressed_summary, compressed_summary_prev, compressed_upto, "
+            "compressed_meta FROM conversations WHERE id = ? AND owner_id = ?",
             (sid, owner),
         ).fetchone()
     if not row:
         return SummaryBlock([]), 0, None
     return (
-        SummaryBlock.parse(row["compressed_summary"]),
+        SummaryBlock.parse(row["compressed_summary"], row["compressed_meta"]),
         int(row["compressed_upto"] or 0),
         row["compressed_summary_prev"],
     )
@@ -526,9 +843,13 @@ def maybe_compress(
     if not seg:
         return {"ok": False, "reason": "compressor_empty", "upto": upto}
 
+    # v2：为这一段构建元数据（kind / salience / refs），入库侧与折叠都依赖它
+    seg_meta = build_segment_meta(old, seg, block.segments)
+    seg_meta.sid = sid
+
     # 增量：在旧块上追加一段（不改旧段，前缀只增长）
-    new_block = SummaryBlock(list(block.segments))
-    new_text = new_block.append(seg)
+    new_block = SummaryBlock(list(block.segments), list(block.metas))
+    new_text = new_block.append(seg, seg_meta)
 
     recent = pending[-kt * 2 :] if kt > 0 else []
     est_after = estimate_tokens(new_text) + estimate_tokens(
@@ -564,11 +885,86 @@ def maybe_compress(
         return {"ok": False, "reason": decision.reason, "upto": upto, "action": decision.action}
 
     new_upto = int(old[-1].get("id") or 0)
-    ok = commit_summary(owner, sid, new_text, new_upto, expected_upto=upto)
+    ok = commit_summary(
+        owner, sid, new_text, new_upto, expected_upto=upto, meta_json=new_block.meta_json()
+    )
     return {
         "ok": ok,
         "reason": decision.reason if ok else "race_lost（并发压缩，本轮放弃）",
         "upto": new_upto if ok else upto,
         "action": decision.action,
     }
+
+
+def build_segment_meta(
+    old_messages: list[dict], seg_text: str, existing_segments: list[str]
+) -> SegmentMeta:
+    """为一个压缩段构建元数据（报告 §4.2 Segment 的落库形态）。
+
+    kind 与 salience 由批内的**候选知识句**决定（句级判定比整段判定准）：
+    kind 取批内权重最高的，salience 取候选里最高的；整批没有候选时
+    按段文本本身判定。refs 记录批内全部 message id——入库溯源与 staged
+    回写都靠它把"段"和"消息"对上。
+    """
+    from kb import dialogue_import  # 函数内导入：dialogue_import 依赖本模块的分类器
+
+    refs = [int(m.get("id") or 0) for m in old_messages]
+    roles = [m.get("role") or "user" for m in old_messages]
+    role = "assistant" if roles.count("assistant") > roles.count("user") else "user"
+    ts = max((int(m.get("created_at") or 0) for m in old_messages), default=0)
+    corpus = "\n".join(m.get("content") or "" for m in old_messages)
+    try:
+        cands = dialogue_import.extract_candidates(old_messages)
+    except Exception:  # noqa: BLE001 —— 元数据缺失只降级不致命
+        cands = []
+    if cands:
+        kind = max((c["kind"] for c in cands), key=lambda k: KIND_WEIGHTS.get(k, 0.0))
+        salience = max(c["salience"] for c in cands)
+    else:
+        kind, emotion = classify_text(seg_text)
+        salience = compute_salience(
+            kind,
+            emotion,
+            singleton_ratio(seg_text, corpus),
+            outlier_score(seg_text, [s for s in existing_segments if s]),
+        )
+    return SegmentMeta(kind=kind, refs=refs, role=role, ts=ts, salience=salience)
+
+
+def mark_segments_staged(owner: str, sid: str, ingested_refs: set[int]) -> int:
+    """入库成功后回写 staged（报告 §4.2 的 staged 字段 / §6-5 的"已备份才可释放"）。
+
+    判定口径（刻意保守）：按**整条消息** classify 出 kind != 其它 视为知识消息；
+    段内的知识消息 id 全部已入库（⊆ ingested_refs）时该段才标 staged。
+    偏保守是安全的：少标只是晚一点折叠，错标会丢掉未入库的内容。
+
+    CAS 写回（与压缩同一条乐观锁），失败放弃——下次入库会再标。
+    返回本次新标记的段数。
+    """
+    from core import session as store
+
+    try:
+        msgs = store.get_messages(owner, sid, limit_turns=None, include_system=False)
+    except Exception:  # noqa: BLE001
+        return 0
+    knowledge_ids = {
+        int(m.get("id") or 0)
+        for m in msgs
+        if classify_text(m.get("content") or "")[0] != "其它"
+    }
+    knowledge_ids.discard(0)
+    block, upto, _prev = load_summary_state(owner, sid)
+    changed = 0
+    ingested = set(ingested_refs)
+    for meta in block.metas:
+        seg_knowledge = knowledge_ids & set(meta.refs)
+        if seg_knowledge and seg_knowledge <= ingested and not meta.staged:
+            meta.staged = True
+            changed += 1
+    if not changed:
+        return 0
+    ok = commit_summary(
+        owner, sid, block.render(), upto, expected_upto=upto, meta_json=block.meta_json()
+    )
+    return changed if ok else 0
 

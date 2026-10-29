@@ -7,6 +7,8 @@ from __future__ import annotations
   POST   /api/kb/import-search        联网搜索预览（返回候选列表供勾选）
   POST   /api/kb/{kb_id}/import-url   直接抓 URL 入库
   POST   /api/kb/{kb_id}/import-batch 批量抓 URL 入库（搜索勾选结果）
+  GET    /api/kb/dialogue-candidates/{sid}  对话知识候选预览（报告 v2 §4.1）
+  POST   /api/kb/{kb_id}/import-dialogue    勾选的对话知识句沉淀入库
   GET    /api/kb/download             代理下载远程文档到浏览器
   GET    /api/kb/{kb_id}/files         列出库内文件
   GET    /api/kb/{kb_id}/file-content  预览单个文件正文
@@ -29,9 +31,11 @@ from pydantic import BaseModel, Field
 
 from api.schemas import KBQueryResponse
 from core import config, quota, upload
+from core import session as store
 from core.auth import get_current_user
+from core.context_compress import mark_segments_staged
 from core.netsafe import assert_safe_url
-from kb import pipelines
+from kb import dialogue_import, pipelines
 from kb.importer import import_url, import_urls_batch, search_preview
 from kb.rag_core import describe_api_error, load_document
 
@@ -500,6 +504,85 @@ async def import_batch_urls(
         "ok": ok_count,
         "failed": len(results) - ok_count,
         "details": results,
+    }
+
+
+# ==================== 对话沉淀入库（报告 v2 §4.1 P0「开通路」）====================
+
+
+class ImportDialogueRequest(BaseModel):
+    sid: str
+    # 勾选的候选下标（按 candidates 接口返回顺序）；空 = 全部
+    indexes: list[int] = Field(default_factory=list)
+
+
+def _load_dialogue(uid: str, sid: str) -> tuple[list[dict], str]:
+    """读会话消息与标题；不是自己的会话统一 404（不泄露存在性）。"""
+    msgs = store.get_messages(uid, sid, limit_turns=None, include_system=False)
+    conv = store.get_conversation(uid, sid)
+    if not conv or not msgs:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return msgs, conv.get("title") or "未命名会话"
+
+
+@router.get("/dialogue-candidates/{sid}")
+async def dialogue_candidates(sid: str, uid: str = Depends(get_current_user)) -> dict:
+    """预览：这个会话里有哪些规则判定的知识候选（只列清单，不入库）。
+
+    报告 §4.1 的设计红线：**不做自动入库**——寒暄、试错、错误中间态
+    一旦自动写入就不可逆污染检索，必须人工确认 + 可预览 + 可勾选。
+    """
+    msgs, title = _load_dialogue(uid, sid)
+    cands = await asyncio.to_thread(dialogue_import.extract_candidates, msgs)
+    return {
+        "sid": sid,
+        "conv_title": title,
+        "total": len(cands),
+        "candidates": dialogue_import.rank_for_preview(cands),
+    }
+
+
+@router.post("/{kb_id}/import-dialogue")
+async def import_dialogue(
+    kb_id: str, req: ImportDialogueRequest, uid: str = Depends(get_current_user)
+) -> dict:
+    """把勾选的对话知识句沉淀进知识库（人工确认制）。
+
+    防伪造：候选一律由后端从会话消息**重新提取**，前端只传下标——
+    想入库的内容必须真的在这个会话里，不能凭空捏造一条塞进来。
+    入库成功后回写压缩段的 staged 标记：已备份的段才允许被折叠释放
+    （报告 §4.4"折叠 = 已备份后的释放"）。
+    """
+    _must_own(uid, kb_id)
+    await asyncio.to_thread(quota.guard, uid, "embed")
+    msgs, title = _load_dialogue(uid, req.sid)
+    cands = await asyncio.to_thread(dialogue_import.extract_candidates, msgs)
+    if not cands:
+        raise HTTPException(status_code=400, detail="这个会话没有可沉淀的知识候选")
+    idx = list(dict.fromkeys(req.indexes)) if req.indexes else list(range(len(cands)))
+    bad = [i for i in idx if i < 0 or i >= len(cands)]
+    if bad:
+        raise HTTPException(status_code=400, detail=f"候选下标越界：{bad[:5]}")
+    picked = [c for i in idx if (c := cands[i]).get("text", "").strip()]
+    if not picked:
+        raise HTTPException(status_code=400, detail="没有勾选任何有效候选")
+
+    docs = dialogue_import.build_documents(picked, req.sid, title)
+    pipe = pipelines.get_or_create(uid, kb_id)
+    try:
+        n = await asyncio.to_thread(pipe.add_chunks, docs)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=describe_api_error(e)) from e
+    if n:
+        await asyncio.to_thread(quota.bump_usage, uid, "embed", n)
+
+    ingested_refs = {r for c in picked for r in (c.get("refs") or [])}
+    staged = await asyncio.to_thread(mark_segments_staged, uid, req.sid, ingested_refs)
+    return {
+        "imported": n,
+        "staged_segments": staged,
+        "kb_id": kb_id,
+        "sid": req.sid,
     }
 
 
