@@ -380,6 +380,7 @@ class TestScheduleApi(unittest.TestCase):
         self._orig_session_path = core.session._db_path
         self._orig_secret = core.config._AUTH_SECRET_FILE
         self._orig_admins = list(core.config.ADMIN_USERNAMES)
+        self._orig_admin_uids = list(core.config.ADMIN_UIDS)
         self._orig_signup = core.config.ALLOW_SIGNUP
         self._orig_rate = core.config.RATE_PER_MINUTE
         self._orig_sched_path = sched._db_path
@@ -394,19 +395,25 @@ class TestScheduleApi(unittest.TestCase):
         core.config._AUTH_SECRET_FILE = os.path.join(_TMP, f"auth_secret_{_SEQ[0]}")
         core.config.ALLOW_SIGNUP = True
         core.config.RATE_PER_MINUTE = 0  # 端点测试不受每分钟限流干扰
-        core.config.ADMIN_USERNAMES = ["alice"]
+        # 2026-10-29：ADMIN_USERNAMES 里的名字在自助注册入口被保留（防抢注提权），
+        # 所以不能"先配名单再注册同名账号"。改成推荐做法：先普通注册，再按 uid 授权。
+        core.config.ADMIN_USERNAMES = []
+        core.config.ADMIN_UIDS = []
 
         self.sched_db = _next_db("api")
         sched._db_path = lambda: self.sched_db
         sched.ensure_tables()
 
         self.client = self.TestClient(self.main.app)
-        self._register(self.client, "alice")
+        alice = self._register(self.client, "alice")
+        # uid 授权：不可猜、不可抢注，也是本次加固推荐的生产配置
+        core.config.ADMIN_UIDS = [alice["id"]]
 
     def tearDown(self):
         core.session._db_path = self._orig_session_path
         core.config._AUTH_SECRET_FILE = self._orig_secret
         core.config.ADMIN_USERNAMES = self._orig_admins
+        core.config.ADMIN_UIDS = self._orig_admin_uids
         core.config.ALLOW_SIGNUP = self._orig_signup
         core.config.RATE_PER_MINUTE = self._orig_rate
         sched._db_path = self._orig_sched_path
@@ -416,6 +423,7 @@ class TestScheduleApi(unittest.TestCase):
     def _register(client, name):
         r = client.post("/api/auth/register/", json={"username": name, "password": "secret123"})
         assert r.status_code == 200, r.text
+        return r.json()
 
     # ---- 鉴权 ----
 

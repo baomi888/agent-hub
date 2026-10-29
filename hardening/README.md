@@ -3,7 +3,28 @@
 > ⚠️ 这一组动作**风险不对称**：做对了收益很大，做错了会把自己锁在服务器外面。
 > 所以脚本设计成「一次只做一件事 + 带锁死守卫」，请**严格按顺序**执行，每步都另开终端验证。
 
-## 推荐顺序
+## 一条命令修复 S-01（2026-10-29 新增，推荐）
+
+`fix-s01-ssh.sh` 把「装公钥 → 建 deploy → NOPASSWD sudo → fail2ban → 禁 root 密码登录」
+串成两条命令，且带 `--dry-run` / `--status` / `--rollback`。
+
+```bash
+# 第一次（不会关密码通道，不会锁死）
+bash hardening/fix-s01-ssh.sh --pubkey "ssh-ed25519 AAAA... you@host"
+
+# 另开终端验证：ssh deploy@<公网IP> 能登录、sudo -v 能过
+# 验证通过后再执行（彻底关密码 / 禁 root）
+bash hardening/fix-s01-ssh.sh --i-verified --disable-password --disable-root
+```
+
+要点：
+
+- `--disable-password` / `--disable-root` **必须**带 `--i-verified`，否则脚本拒绝执行；
+- drop-in 用 `00-` 前缀，避免 Ubuntu 云镜像的 `50-cloud-init.conf` 把 `PasswordAuthentication yes` 压回来；
+- 改完用 `sshd -T` 校验**生效值**，不一致自动回滚；
+- `--status` 看状态，`--rollback` 恢复发行版默认。
+
+## 推荐顺序（分步版，仍然可用）
 
 | 步骤 | 命令 | 为什么这个顺序 |
 | --- | --- | --- |

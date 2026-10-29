@@ -55,6 +55,7 @@ from core import scenarios as scenarios_mod
 from core import session as store
 from core.auth import get_current_user
 from core.llm import get_llm, get_vision_llm
+from core.urltools import extract_urls
 from kb import pipelines
 from kb.rag_core import (
     SYSTEM_PROMPT,
@@ -1083,6 +1084,12 @@ async def _chat_stream_impl(
                         "thread_id": req.sid,
                         "owner_id": uid,
                         "kb_id": kb_id if (kb_id and kb_exists) else None,
+                        # 下载允许清单（见 core/urltools.py）：
+                        #   download_allowlist 由 web_search 执行时写入；
+                        #   user_urls 从用户原话里抽。
+                        # 键存在即严格模式——模型现编的地址一律拒绝。
+                        "download_allowlist": [],
+                        "user_urls": extract_urls(req.question),
                     },
                 }
                 full_text = ""

@@ -26,7 +26,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from core import config
+from core import config, tool_guard
+from core.tool_registry import TOOL_META
+from core.urltools import extract_urls
 from hybrid.context import ExecEvent, TaskContext, shared_set
 from hybrid.engine import AgentEngineFactory, ControlFn, EngineResult
 from hybrid.expr import eval_condition
@@ -502,6 +504,43 @@ class WorkflowEngine:
                 payload={"error": f"未知工具：{tool_name}"},
             )
             return
+        meta = TOOL_META.get(tool_name)
+
+        # ① 危险动作审批：工作流没有"问用户"的交互位，直接拒绝，而不是静默放行。
+        #    Agent 路径的 download_file 会先回确认串；工作流里没有这条回路，
+        #    所以唯一安全的做法是不执行（见 2026-10-29 安全评估 #4）。
+        if meta is not None and meta.needs_approval and config.TOOL_APPROVAL_ENABLED:
+            yield ExecEvent(
+                event_type="error",
+                mode="workflow",
+                node_id=node.id,
+                payload={
+                    "error": (
+                        f"工具 {tool_name} 需要人工确认，工作流模式不支持。"
+                        "请改用 Agent 模式，或改用 /api/kb/download 由用户主动下载。"
+                    )
+                },
+            )
+            return
+
+        # ② 单次运行的 tool 节点调用次数上限：防"一个工作流里塞循环节点"
+        #    把服务器当下载器用（每次 download_file 最多 200MB）。
+        used = int(ctx.workflow_state.get("tool_calls") or 0) + 1
+        if used > config.HYBRID_MAX_TOOL_CALLS:
+            yield ExecEvent(
+                event_type="error",
+                mode="workflow",
+                node_id=node.id,
+                payload={
+                    "error": (
+                        f"本次工作流工具调用已达上限（{config.HYBRID_MAX_TOOL_CALLS} 次），"
+                        "后续调用被拒绝"
+                    )
+                },
+            )
+            return
+        ctx.workflow_state["tool_calls"] = used
+
         args = {
             k: render_template(str(v), ctx) if isinstance(v, str) else v
             for k, v in (node.config.get("args") or {}).items()
@@ -513,9 +552,19 @@ class WorkflowEngine:
             payload={"name": tool_name, "input": args},
         )
         cfg: RunnableConfig = {
-            "configurable": {"owner_id": ctx.owner_id, "kb_id": ctx.agent_state.get("kb_id")}
+            "configurable": {
+                "owner_id": ctx.owner_id,
+                "kb_id": ctx.agent_state.get("kb_id"),
+                # 与 Agent 路径同一套下载闸门：只认用户目标里原样出现的链接。
+                # 即使 TOOL_APPROVAL_ENABLED=0，模型/配置也编不出新的外带地址。
+                "download_allowlist": [],
+                "user_urls": extract_urls(ctx.goal),
+            }
         }
         out = await tool.ainvoke(args, config=cfg)
+        # ③ 输出截断：与 Agent 路径同一个上限，防单次工具返回吃满上下文
+        if meta is not None and isinstance(out, str):
+            out = tool_guard.truncate_output(tool_name, out, meta.max_output_chars)
         key = node.config.get("output_key") or f"node_{node.id}"
         ctx.shared[key] = str(out)
 

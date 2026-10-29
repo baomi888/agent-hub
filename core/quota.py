@@ -326,12 +326,20 @@ _LIMITS = {
 
 
 def _is_admin(uid: str) -> bool:
-    """管理员（config.ADMIN_USERNAMES）不受配额与每分钟限流约束。
+    """管理员（config.ADMIN_UIDS / ADMIN_USERNAMES）不受配额与每分钟限流约束。
 
-    按 uid 反查用户名再比对：名单写的是人能读懂的名字，
-    而配额系统全程只拿得到 uid。每次多一次 users 表点查，
-    频率极低（仅建库/问答这类用户主动操作），可接受。
+    判定顺序（2026-10-29 安全加固）：
+      1. **ADMIN_UIDS**（首选）——uid 是注册时生成的 uuid，不可猜、不可抢注；
+      2. ADMIN_USERNAMES（旧配置兼容）——按 uid 反查用户名再比对。
+
+    为什么不再只认用户名：用户名是用户可选的，默认管理员名若写在公开仓库里，
+    账号尚未创建时第一个抢注的人就会拿到管理员。uid 没有这个问题。
     """
+    if not uid:
+        return False
+    uids = getattr(config, "ADMIN_UIDS", None) or ()
+    if uid in uids:
+        return True
     names = getattr(config, "ADMIN_USERNAMES", None)
     if not names:
         return False

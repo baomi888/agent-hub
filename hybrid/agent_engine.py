@@ -26,6 +26,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from core import config
+from core.urltools import extract_urls
 from hybrid.context import ExecEvent, TaskContext
 from hybrid.engine import ControlFn, EngineResult
 
@@ -146,6 +147,10 @@ class AgentEngine:
                     "thread_id": f"hybrid-{ctx.run_id}-{len(ctx.mode_trace)}",
                     "owner_id": ctx.owner_id,
                     "kb_id": st.get("kb_id"),
+                    # 与 api/chat.py 的 agent 分支同一套下载闸门：
+                    # 只允许下载本段搜索返回的链接或用户目标里原样出现的链接。
+                    "download_allowlist": [],
+                    "user_urls": extract_urls(goal) + extract_urls(ctx.goal),
                 },
             }
             # 跨轮记忆：把历史消息前置到本轮 goal 之前（历史为空则退化为单轮）。

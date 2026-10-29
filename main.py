@@ -42,7 +42,7 @@ from api.sessions import router as sessions_router
 from api.templates import router as templates_router
 from api.usage import router as usage_router
 from api.user_feedback import router as user_feedback_router
-from core import apilog, config, llm_gate, quota
+from core import account, apilog, config, llm_gate, quota
 from kb import pipelines
 from service import daily
 
@@ -83,6 +83,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         print(f"[启动警告] 配置缺失：{'；'.join(missing)}")
     else:
         print("[启动 OK] 配置完整，RAG 链路就绪")
+
+    # 管理员配置自检（2026-10-29 安全加固）：
+    # ADMIN_USERNAMES 里的名字已被自助注册保留（见 api/auth.py），
+    # 若账号还没建，这里把"下一步该做什么"直接打出来，避免部署后以为注册坏了。
+    try:
+        for _name in config.ADMIN_USERNAMES:
+            if not account.get_user_by_username(_name):
+                print(
+                    f"[启动警告] 管理员用户名 {_name!r} 尚无账号；该名字已被自助注册保留。"
+                    f"请用 `python tools/create_user.py {_name}` 创建，"
+                    "或改用不可猜的 ADMIN_UIDS。"
+                )
+        if not config.ADMIN_UIDS and not config.ADMIN_USERNAMES:
+            print(
+                "[启动提示] 未配置管理员（ADMIN_UIDS / ADMIN_USERNAMES 均为空）："
+                "数据看板、调度手动触发与指标导出不可用。"
+            )
+    except Exception as e:  # noqa: BLE001 —— 自检失败不阻断启动
+        print(f"[启动警告] 管理员配置自检失败：{e}")
     # API 调用采集的定时落库：低流量下没有它，最后几条会一直卡在内存缓冲里
     flush_task = asyncio.create_task(_apilog_flush_loop())
     try:

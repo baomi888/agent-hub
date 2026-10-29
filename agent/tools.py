@@ -23,13 +23,20 @@ kb_search / download_file **不再接受 kb_id 参数**，改成从 RunnableConf
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
+from core.urltools import url_allowed
+
+
+def _configurable(config) -> dict:
+    """取服务端注入的 configurable 段（模型无法写入这里）。"""
+    return (config or {}).get("configurable") or {}
+
 
 def _runtime(config) -> tuple[str | None, str | None]:
     """取出服务端注入的 (owner_id, kb_id)。
 
     注意这是**唯一**的身份来源，模型给什么都不作数。
     """
-    cfg = (config or {}).get("configurable") or {}
+    cfg = _configurable(config)
     return cfg.get("owner_id"), cfg.get("kb_id")
 
 
@@ -108,7 +115,7 @@ def kb_search(query: str, top_k: int = 3, config: RunnableConfig = None) -> str:
 
 
 @tool
-def web_search(query: str, max_results: int = 5) -> str:
+def web_search(query: str, max_results: int = 5, config: RunnableConfig = None) -> str:
     """联网搜索信息（Serper 引擎）。
 
     当知识库中没有相关内容，需要从互联网补充信息时调用。
@@ -136,6 +143,16 @@ def web_search(query: str, max_results: int = 5) -> str:
         if data is None:
             return "联网搜索暂时不可用，请稍后再试或换个问法。"
         organic = data.get("organic") or []
+
+        # 记录本轮检索到的链接，供 download_file 的允许清单使用。
+        # 这是**服务端写入**（configurable 由 api/chat.py 注入），模型改不了；
+        # download_file 只认这份清单 + 用户原话里的链接，见 core/urltools.py。
+        allow = _configurable(config).get("download_allowlist")
+        if isinstance(allow, list):
+            for r in organic:
+                link = r.get("link")
+                if isinstance(link, str) and link:
+                    allow.append(link)
 
         if not organic:
             kg = data.get("knowledgeGraph") or {}
@@ -593,6 +610,21 @@ def download_file(url: str, config: RunnableConfig = None) -> str:
     Returns:
         下载结果说明（含保存路径、文件大小；入库时含切片数）。
     """
+    # 外带闸门：只允许下载「本轮搜索返回的」或「用户原话里出现的」链接。
+    # configurable 里带 download_allowlist 这个键即视为严格模式（生产链路都会带，
+    # 哪怕是空列表）——空列表意味着"本轮没有任何可信链接"，模型现编的地址一律拒绝。
+    # 这样提示注入最多让模型重放一个本来就公开的 URL，无法把内容拼进 query 带走。
+    from core import config as _cfg
+
+    cfg = _configurable(config)
+    if _cfg.DOWNLOAD_ALLOWLIST_ENABLED and "download_allowlist" in cfg:
+        allowed = list(cfg.get("download_allowlist") or []) + list(cfg.get("user_urls") or [])
+        if not url_allowed(url, allowed):
+            return (
+                "下载失败：该链接不是本轮联网搜索或用户提问中出现的地址。"
+                "为避免把内容带往任意地址，只允许下载搜索结果或用户原话里的直链。"
+            )
+
     try:
         from kb import importer
 

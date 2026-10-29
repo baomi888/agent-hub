@@ -60,8 +60,27 @@ def _reject(msg: str, status: int = 400) -> None:
 
 
 def _auth_rate_bucket(name: str) -> str:
-    """登录/注册单独限流：按用户名分桶，避免整站共用限流把正常问答也挡了。"""
-    return "auth:%s" % (name or "-")
+    """登录/注册单独限流：按用户名分桶，避免整站共用限流把正常问答也挡了。
+
+    **先归一化大小写**：users 表是 `COLLATE NOCASE`，`Admin` / `ADMIN` 是同一个账号；
+    若按原始串分桶，攻击者换大小写就能拿到 N 个独立的 10 次/分钟额度，
+    等于给撞库开了后门。
+    """
+    return "auth:%s" % (account.normalize_name(name).casefold() or "-")
+
+
+def _is_reserved_admin_name(name: str) -> bool:
+    """该用户名是否被配置为管理员（注册时保留，防抢注）。
+
+    背景：ADMIN_USERNAMES 里的名字是"可猜的权限"。若账号尚未创建，
+    自助注册的第一个抢注者就会直接变成管理员。这里把名单里的名字从
+    注册入口封掉——管理员账号只能由运维用 tools/create_user.py 创建，
+    或改用不可猜的 ADMIN_UIDS。
+    """
+    n = account.normalize_name(name).casefold()
+    if not n:
+        return False
+    return any(n == str(x).casefold() for x in (config.ADMIN_USERNAMES or ()))
 
 
 def _issue_session(user: dict, request: Request, response: Response) -> UserOut:
@@ -101,6 +120,11 @@ def register(body: Credentials, request: Request, response: Response):
     err = account.check_name(body.username) or account.check_password(body.password)
     if err:
         _reject(err)
+
+    # 管理员用户名保留：自助注册不能抢注（2026-10-29 安全加固）。
+    # 文案与"重名"保持一致，不确认该名字是否真的是管理员。
+    if _is_reserved_admin_name(body.username):
+        _reject("该用户名不可用，请更换一个", 403)
 
     # 注册/登录单独限流：撞库脚本最爱的就是这两个端点
     try:

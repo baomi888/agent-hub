@@ -180,11 +180,19 @@ SCHEDULER_TZ = os.getenv("SCHEDULER_TZ", "Asia/Shanghai")
 REPORT_HOUR = int(os.getenv("REPORT_HOUR", "23"))
 REPORT_MINUTE = int(os.getenv("REPORT_MINUTE", "30"))
 
-# 管理员用户名（逗号分隔）。管理员不受配额与每分钟限流约束，相当于主账号。
-# 默认把项目作者账号设为管理员；其他部署在 .env 里改成自己的用户名即可
-# （例如 ADMIN_USERNAMES=admin,alice）。名单为空则没有管理员。
+# ---------- 管理员（2026-10-29 安全加固）----------
+# **优先用 ADMIN_UIDS**：uid 是注册时生成的 uuid，不可猜、不可抢注。
+# 获取方式：登录后 GET /api/auth/me/ 看 user.id，或 `python tools/create_user.py --show-uid`。
+#   ADMIN_UIDS=0f3c...9a,7b21...c4
+#
+# ADMIN_USERNAMES 仅作**旧配置兼容**，默认空（原默认值 "苞米呀" 已移除：
+# 它写在公开仓库里，若该账号尚未注册，第一个抢注的人会直接变成管理员）。
+# 名单里的用户名在自助注册时被**保留**，任何人都不能注册；若账号还没建，
+# 请用 `python tools/create_user.py <用户名>` 创建（或改用 ADMIN_UIDS）。
+#   ADMIN_USERNAMES=admin,alice
+ADMIN_UIDS = [x.strip() for x in os.getenv("ADMIN_UIDS", "").split(",") if x.strip()]
 ADMIN_USERNAMES = [
-    x.strip() for x in os.getenv("ADMIN_USERNAMES", "苞米呀").split(",") if x.strip()
+    x.strip() for x in os.getenv("ADMIN_USERNAMES", "").split(",") if x.strip()
 ]
 
 # ---------- 可选：天气工具 ----------
@@ -210,6 +218,18 @@ HYBRID_WORKFLOW_TIMEOUT = int(os.getenv("HYBRID_WORKFLOW_TIMEOUT", "600"))
 HYBRID_NODE_TIMEOUT = int(os.getenv("HYBRID_NODE_TIMEOUT", "120"))
 # 工作流内 LLM 节点的 max_tokens 上限（project memory 硬约束：内部推理调用必须显式限长）
 HYBRID_LLM_MAX_TOKENS = int(os.getenv("HYBRID_LLM_MAX_TOKENS", "2048"))
+# 单次工作流运行允许的 tool 节点调用次数上限（2026-10-29 安全加固）。
+# 防"循环节点 + download_file"把服务器当下载器：一次 200MB × N 次可打满磁盘。
+HYBRID_MAX_TOOL_CALLS = int(os.getenv("HYBRID_MAX_TOOL_CALLS", "20"))
+
+# 下载允许清单开关（2026-10-29 安全加固）：1=只允许下载本轮 web_search 返回的
+# 链接或用户原话里的链接（防提示注入把内容拼进 URL 外带）；0=退回旧行为。
+# 出问题时可一行 env 回退，不用回滚代码。
+DOWNLOAD_ALLOWLIST_ENABLED = os.getenv("DOWNLOAD_ALLOWLIST_ENABLED", "1") not in (
+    "0",
+    "false",
+    "False",
+)
 
 # ---------- Agent 主循环（api/chat.py 的 agent 模式 / hybrid 的 Agent 引擎）----------
 # Agent 一次回答的 max_tokens 上限。0 = 用平台默认（保持改造前行为）。
