@@ -32,6 +32,8 @@
     --noise:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.04' numOctaves='2' seed='5'/%3E%3CfeColorMatrix values='0 0 0 0 0.55 0 0 0 0 0.45 0 0 0 0 0.28 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   }
   *{box-sizing:border-box;}
+  /* hidden 属性必须真的隐藏：.wkbar 一类是 display:flex，UA 的 [hidden] 打不过类选择器 */
+  [hidden]{display:none !important;}
   html,body{margin:0;padding:0;}
   body{
     background:
@@ -260,6 +262,60 @@
   .sched-block.one .bn{-webkit-line-clamp:1;}
   .sched-block.one .bt{display:none;}
 
+
+  /* ---- 周次条（10-29 二次反馈加）----
+     原来只有"这一周"一张图：别的周既看不到、也没有入口。week 数据一直在库里，
+     只是画的时候没人看它。 */
+  .wkbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 8px;}
+  .wk-btn{width:28px;height:28px;display:flex;align-items:center;justify-content:center;padding:0;
+    border:1px solid var(--line-strong);background:transparent;color:var(--ink);border-radius:var(--radius-sm);
+    font-size:16px;line-height:1;font-family:inherit;cursor:pointer;transition:var(--t-color);}
+  .wk-btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent-ink);background:var(--fill-2);}
+  .wk-btn:disabled{opacity:.32;cursor:default;}
+  .wk-sel{border:1px solid var(--line-strong);background:var(--card-bg);color:var(--ink);
+    border-radius:var(--radius-sm);padding:5px 8px;max-width:176px;font-family:inherit;font-size:var(--fs-sm);
+    font-weight:600;letter-spacing:var(--ls-tight);cursor:pointer;transition:var(--t-color);}
+  .wk-sel:hover{border-color:var(--accent);}
+  .wk-sel:focus{outline:none;border-color:var(--accent);box-shadow:var(--ring-accent);}
+  /* 金色胶囊：跟首页那个「内测反馈」同一套语言，用来喊人点一下校准 */
+  .wk-this{border:1px solid var(--accent);background:var(--accent-soft);color:var(--accent-ink);
+    border-radius:999px;padding:4px 11px;font-family:inherit;font-size:var(--fs-xs);font-weight:600;
+    letter-spacing:var(--ls-tight);cursor:pointer;transition:var(--t-color);white-space:nowrap;}
+  .wk-this:hover{background:var(--accent);color:#2E2416;}
+  .wk-seg{margin-left:auto;display:flex;border:1px solid var(--line-strong);border-radius:999px;overflow:hidden;}
+  .wk-tab{border:0;background:transparent;color:var(--text-2);font-family:inherit;font-size:var(--fs-xs);
+    padding:5px 12px;cursor:pointer;letter-spacing:var(--ls-tight);transition:var(--t-color);}
+  .wk-tab:hover{color:var(--accent-ink);}
+  .wk-tab.on{background:var(--ink);color:var(--card-bg);}
+  .wk-tip{flex:1 1 100%;font-size:var(--fs-xs);color:var(--text-3);line-height:1.6;margin-top:2px;}
+
+  /* 同一格里有多门课：左右分栏，谁也不盖谁。栏窄了只留课名，教室/老师在 title 里 */
+  .sched-block.split{padding:3px 3px;}
+  .sched-block.split .bn{font-size:9px;line-height:1.22;-webkit-line-clamp:3;}
+  .sched-block.split .br,.sched-block.split .bt{display:none;}
+
+  /* 学期一览：一行一周、一列一天，把十几周摊在一屏 */
+  .ov-wrap{margin-top:6px;}
+  .ov-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;
+    border:1px solid var(--line);border-radius:var(--radius-md);padding:6px;background:var(--bg-canvas);}
+  .ov{border-collapse:separate;border-spacing:4px;min-width:560px;width:100%;table-layout:fixed;}
+  .ov th{font-size:10px;font-weight:600;color:var(--text-3);padding:2px 0;text-align:center;letter-spacing:var(--ls-tight);}
+  .ov th.ov-w{width:34px;padding:0;}
+  .ov-wt{font-size:10px;color:var(--text-3);}
+  .ov td{background:var(--card-bg);border:1px solid var(--line);border-radius:6px;padding:3px;
+    vertical-align:top;height:26px;}
+  .ov td.empty{background:transparent;border-style:dashed;}
+  /* 名字允许两行：一览表本来就窄，硬挤一行只会看到「大学生创新与…」 */
+  .ov-c{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:9px;line-height:1.35;
+    color:var(--ink);border-left:2px solid;border-radius:3px;padding:1px 3px;margin-bottom:2px;
+    overflow:hidden;overflow-wrap:anywhere;}
+  .ov-c:last-child{margin-bottom:0;}
+  .ov-wk{width:100%;border:0;background:transparent;color:var(--text-2);font-family:inherit;font-size:10px;
+    font-weight:600;cursor:pointer;border-radius:5px;padding:3px 0;transition:var(--t-color);}
+  .ov-wk:hover{background:var(--fill-2);color:var(--accent-ink);}
+  .ov-wk.cur{background:var(--accent-soft);color:var(--accent-ink);}
+  .ov-wk.me{box-shadow:inset 0 0 0 1px var(--accent);}
+
   /* 导入弹窗里的 JSON 框：够高看到整段，又不至于把弹窗顶出屏幕 */
   #cJson{min-height:110px;max-height:34vh;}
   body.cmodal-open{overflow:hidden;}
@@ -437,8 +493,20 @@
          导入收进右上角一颗按钮，其余都进弹窗。 -->
     <div class="card">
       <div class="row-head">
-        <div><div class="eyebrow">周视图</div><h2 class="serif">本周课表</h2></div>
+        <div><div class="eyebrow">周视图</div><h2 class="serif">我的课表</h2></div>
         <button class="btn-new btn-sm" id="cOpenImport" type="button">导入课表</button>
+      </div>
+      <!-- 周次条：能前后翻、能直接选周、能记一次"这周是第几周"（之后自动跟着日历走） -->
+      <div class="wkbar" id="wkBar" hidden>
+        <button class="wk-btn" id="wkPrev" type="button" aria-label="上一周">‹</button>
+        <select class="wk-sel" id="wkSel" aria-label="选择周次"></select>
+        <button class="wk-btn" id="wkNext" type="button" aria-label="下一周">›</button>
+        <button class="wk-this" id="wkThis" type="button">设本周</button>
+        <div class="wk-seg" role="group" aria-label="课表视图">
+          <button class="wk-tab on" id="wkModeWeek" type="button" aria-pressed="true">按周</button>
+          <button class="wk-tab" id="wkModeAll" type="button" aria-pressed="false">一览</button>
+        </div>
+        <div class="wk-tip" id="wkTip" hidden></div>
       </div>
       <div class="sched-wrap">
         <div class="sched">
@@ -446,6 +514,7 @@
           <div class="sched-days" id="schedDays"></div>
         </div>
       </div>
+      <div class="ov-wrap" id="ovWrap" hidden></div>
       <p class="note" id="cHint">点任意课块可删除该课程。课块按节次高度自动拉伸；格子放不下时左右滑。</p>
     </div>
 
@@ -459,6 +528,7 @@
         <div style="flex:1.2;min-width:104px"><input id="cSec" placeholder="节次，如 1,2 或 1-3" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
         <div style="flex:1;min-width:84px"><input id="cRoom" placeholder="教室(可选)" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
         <div style="flex:1;min-width:84px"><input id="cTeach" placeholder="老师(可选)" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
+        <div style="flex:1;min-width:96px"><input id="cWeeks" placeholder="周次 1-16(可选)" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
         <button class="btn-new btn-sm" id="cAdd" type="button">添加</button>
       </div>
       <div class="add-row" style="margin-top:8px;align-items:center">
@@ -478,7 +548,7 @@
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg>
         </button>
       </div>
-      <p class="note" style="margin:0 0 10px">把知穗 AI 整理好的 JSON 粘进来，或者选一个 <b>.json</b> 文件。课名 + 星期 + 节次都相同的课不会重复导入。</p>
+      <p class="note" style="margin:0 0 10px">把知穗 AI 整理好的 JSON 粘进来，或者选一个 <b>.json</b> 文件。课名 + 星期 + 节次 + 周次都相同的课不会重复导入；带了 <b>weeks</b> 的课只在对应周次出现，没带的当作每周都上。</p>
       <textarea id="cJson" placeholder='粘贴形如 {"courses":[{&quot;name&quot;:&quot;高等数学&quot;,&quot;dayOfWeek&quot;:1,&quot;sections&quot;:[1,2]}]} 的 JSON'></textarea>
       <div class="add-row" style="align-items:center">
         <button class="btn-new btn-sm" id="cImport" type="button">导入</button>
@@ -755,6 +825,15 @@ function normSections(s){
   if(Array.isArray(s)) return s.map(Number).filter(n=>n>=1&&n<=PERIODS);
   return [];
 }
+/* 周次：数组或 "1-16" / "1,3,5" 这类字符串都收。没写就是 null = 每周都上 */
+function normWeeks(s){
+  if(s==null||s==='') return null;
+  let a=[];
+  if(typeof s==='string') a=normSections(s.replace(/[第周]/g,''));
+  else if(Array.isArray(s)) a=s.map(Number);
+  a=a.filter(n=>n>=1&&n<=30).sort((x,y)=>x-y);
+  return a.length?a:null;
+}
 /* ---------- 课表本地存储（10-29 新增） ----------
    用户反馈：「校园工具集没有本地存储，特别从课表就能看出」——单词卡、倒计时的
    进度都记得住，唯独课表刷新就回到三门示例课。现在增删改导入清空全部落盘。
@@ -764,7 +843,8 @@ let cSample=false;   // 首访塞的三门示例课；真导入/添加后就不�
 
 function saveSched(){
   try{
-    localStorage.setItem(C_KEY, JSON.stringify({v:1,cseq:cseq,sample:cSample,updated:Date.now(),
+    /* v2：day 的含义从"dayOfWeek%7"改成"(dayOfWeek-1)%7"（修错位一天） */
+    localStorage.setItem(C_KEY, JSON.stringify({v:2,cseq:cseq,sample:cSample,updated:Date.now(),
       courses:courses.map(c=>({id:c.id,name:c.name,color:c.color,day:c.day,sections:c.sections,
         teacher:c.teacher,classroom:c.classroom,weeks:c.weeks,notes:c.notes}))}));
   }catch(e){ /* 隐私模式/配额满：存不下也不能让页面挂掉，只是这次记不住 */ }
@@ -774,89 +854,303 @@ function loadSched(){
     const raw=localStorage.getItem(C_KEY); if(!raw) return false;
     const d=JSON.parse(raw);
     if(!d||!Array.isArray(d.courses)) return false;
+    /* 老数据（v1 或更早）的 day 是"少减 1"写进去的，读的时候往回拨一天，
+       否则一升级整张表又错位一天。迁移只做一次，存回去就变成 v2 了。 */
+    const legacy=(+d.v||1)<2;
     courses=d.courses.filter(c=>c&&c.name&&Array.isArray(c.sections)&&c.sections.length)
-      .map(c=>({
-        id:+c.id||0,
-        name:String(c.name),
-        color:/^#[0-9a-f]{6}$/i.test(c.color||'')?c.color:CCOLORS[0],
-        day:(((+c.day||0)%7)+7)%7,
-        sections:c.sections.map(Number).filter(n=>n>=1&&n<=PERIODS).sort((x,y)=>x-y),
-        teacher:c.teacher||'',classroom:c.classroom||'',weeks:c.weeks||null,notes:c.notes||''
-      })).filter(c=>c.sections.length);
+      .map(c=>{
+        let nd=((+c.day||0)%7+7)%7;
+        if(legacy) nd=(nd+6)%7;
+        return {
+          id:+c.id||0,
+          name:String(c.name),
+          color:/^#[0-9a-f]{6}$/i.test(c.color||'')?c.color:CCOLORS[0],
+          day:nd,
+          sections:c.sections.map(Number).filter(n=>n>=1&&n<=PERIODS).sort((x,y)=>x-y),
+          teacher:c.teacher||'',classroom:c.classroom||'',weeks:normWeeks(c.weeks),notes:c.notes||''
+        };
+      }).filter(c=>c.sections.length);
     cseq=Math.max(+d.cseq||0,0,...courses.map(c=>c.id));
     cSample=!!d.sample;
+    if(legacy&&courses.length) saveSched();
     return true;
   }catch(e){ return false; }
 }
 function setHint(extra){
   const el=document.getElementById('cHint'); if(!el) return;
   if(extra){ el.textContent=extra; return; }
-  el.textContent=cSample
-    ? '下面 3 门是示例课，点课块可以删掉。导入或添加的课表会存在这台设备上，刷新不丢。'
-    : '点任意课块可删除该课程。课表存在这台设备上，刷新不丢；格子放不下时左右滑。';
+  if(hasWeeks()&&wkMode==='week'){
+    const n=wkCount(curWk);
+    el.textContent = n
+      ? '第 '+curWk+' 周共 '+n+' 门课。点课块可删除；同一格有多门课时左右分栏，切「一览」看全名。'
+      : '第 '+curWk+' 周没有排课，翻一下周次或点「设本周」跳到当前周。';
+  } else if(hasWeeks()){
+    el.textContent='整学期一览：一行一周、一列一天。点左边周号直接看那一周的课表。';
+  } else {
+    el.textContent=cSample
+      ? '下面 3 门是示例课，点课块可以删掉。导入或添加的课表会存在这台设备上，刷新不丢。'
+      : '点任意课块可删除该课程。课表存在这台设备上，刷新不丢；格子放不下时左右滑。';
+  }
 }
 
+/* ★★ 10-29 修正：dayOfWeek(1=周一…7=周日) 换成 0 基列号必须减 1。
+   老写法 `dayOfWeek%7` 少减了这一下，于是整张表**错位一天**：周一 3-4 节的课被画在
+   「周二」列下，周一那列永远是空的，周日直接消失。用户看到的"乱排"里有一半是它。
+   ⇒ 列号 = (dayOfWeek-1) mod 7。toDay 只收 1..7 的语义输入。 */
+function toDay(v){
+  const n=Math.round(Number(v));
+  if(!isFinite(n)||!n) return 0;
+  return ((n-1)%7+7)%7;
+}
 function addCourse(c,opt){
   const id=++cseq;
   const name=(typeof c==='string')?c:(c&&c.name)||('课程'+id);
   courses.push({id,name:(name&&name.trim())||('课程'+id),color:CCOLORS[(id-1)%CCOLORS.length],
-    day:((((c&&c.dayOfWeek!=null?c.dayOfWeek:c.day)||1)%7)+7)%7,
+    day:toDay(c&&c.dayOfWeek!=null?c.dayOfWeek:c.day),
     sections:normSections(c&&c.sections!=null?c.sections:(c&&c.section!=null?c.section:[])),
-    teacher:(c&&c.teacher)||'',classroom:(c&&c.classroom)||'',weeks:(c&&c.weeks)||null,notes:(c&&c.notes)||''});
+    teacher:(c&&c.teacher)||'',classroom:(c&&c.classroom)||'',weeks:normWeeks(c&&c.weeks),notes:(c&&c.notes)||''});
   cSample=false;
   saveSched();
   if(!(opt&&opt.silent)) renderSched();
 }
-/* 判重：课名 + 星期 + 节次全一样就算同一门。重复导入同一份课表不会变成两份 */
+/* 判重：课名 + 星期 + 节次 + 周次全一样才算同一门。
+   ★ 10-29 修：原来不含 weeks，于是"第 2 周在二教A-501、第 3-10 周一教东304"这两行
+     被判成重复，第二行直接丢掉（他导 27 行只进来 26 条，教室里少一个）。 */
 function courseKey(c){
-  return [String(c.name||'').trim().toLowerCase(),c.day,[...(c.sections||[])].sort((a,b)=>a-b).join(',')].join('|');
+  return [String(c.name||'').trim().toLowerCase(),c.day,
+    [...(c.sections||[])].sort((a,b)=>a-b).join(','),
+    [...(c.weeks||[])].map(Number).sort((a,b)=>a-b).join(',')].join('|');
 }
+/* ---------- 周次：视图状态 + 日历校准 ----------
+   ★★ 10-29 二次反馈「为什么还是会这样」。根因不在排版，在 renderSched 压根不看 weeks：
+      weeks 一直存着、导出也带着，画的时候却全画上了。于是"只在第 16 周上"的
+      计算机综合实验被塞进每一周，和"每周都上"的大学物理撞在同一格 ——
+      两块都是 position:absolute、同一个 top/height，后画的把先画的整块盖住，
+      看着就是乱码/文字重叠。
+      现在：① 按周筛课（没标 weeks 的课 = 每周都上）② 同格多课左右分栏，谁也不盖谁
+            ③ 周次条能前后翻、能直接选 ④ 另给一张"学期一览"，十几周摊一屏。 */
+const WK_KEY='baomi_tools_week_v1';
+let curWk=1, wkAnchor=null, wkMode='week', wkStored=false;
+
+function weeksOf(c){ return (Array.isArray(c&&c.weeks)?c.weeks:[]).map(Number).filter(w=>w>=1&&w<=30).sort((a,b)=>a-b); }
+function hasWeeks(){ return courses.some(c=>weeksOf(c).length>0); }
+function maxWk(){ let m=0; courses.forEach(c=>weeksOf(c).forEach(w=>{ if(w>m) m=w; })); return m||1; }
+/* 没写 weeks 的课当作"每周都上"：手动画上去的课不该只出现一次 */
+function inWk(c,w){ const ws=weeksOf(c); return !ws.length || ws.indexOf(w)>=0; }
+function wkCount(w){ let n=0; courses.forEach(c=>{ if(inWk(c,w)) n++; }); return n; }
+
+function ymd(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function dayIdx(d){ return Math.round(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())/86400000); }
+function mondayOf(d){ const x=new Date(d.getFullYear(),d.getMonth(),d.getDate()); x.setDate(x.getDate()-((x.getDay()+6)%7)); return x; }
+/* 校准一次就够：记下 {n:当时第几周, at:那天}，以后一律按"周一为界差几周"推当前周 */
+function wkNow(){
+  if(!wkAnchor||!wkAnchor.n||!wkAnchor.at) return 0;
+  const at=new Date(wkAnchor.at+'T00:00:00');
+  if(isNaN(at.getTime())) return 0;
+  return wkAnchor.n+Math.round((dayIdx(mondayOf(new Date()))-dayIdx(mondayOf(at)))/7);
+}
+function saveWk(){
+  try{ localStorage.setItem(WK_KEY,JSON.stringify({v:1,cur:curWk,mode:wkMode,anchor:wkAnchor})); }catch(e){}
+}
+function loadWk(){
+  try{
+    const d=JSON.parse(localStorage.getItem(WK_KEY)||'null'); if(!d) return;
+    if(+d.cur>0){ curWk=+d.cur; wkStored=true; }
+    if(d.mode==='all') wkMode='all';
+    if(d.anchor&&+d.anchor.n>0) wkAnchor={n:+d.anchor.n,at:String(d.anchor.at||ymd(new Date()))};
+  }catch(e){}
+}
+function clampWk(){ const mx=maxWk(); if(curWk<1) curWk=1; if(curWk>mx) curWk=mx; }
+/* 没校准过、也没存过"看到第几周"：从课程最密的那一周起步，比死磕第 1 周更接近
+   用户打开时想看的东西（开学第 1 周通常只有半张表） */
+function defaultWk(){
+  const now=wkNow(); if(now>0) return now;
+  const cnt={}; courses.forEach(c=>weeksOf(c).forEach(w=>{ cnt[w]=(cnt[w]||0)+1; }));
+  let best=0,bn=-1;
+  Object.keys(cnt).forEach(k=>{ const w=+k; if(cnt[w]>bn){ bn=cnt[w]; best=w; } });
+  return best||1;
+}
+/* 周次压缩成"第3-10周"、"第2,4,6周" */
+function fmtWeeks(c){
+  const ws=weeksOf(c); if(!ws.length) return '每周';
+  const out=[]; let i=0;
+  while(i<ws.length){
+    let j=i; while(j+1<ws.length&&ws[j+1]===ws[j]+1) j++;
+    out.push(i===j?String(ws[i]):(ws[i]+'-'+ws[j]));
+    i=j+1;
+  }
+  return '第'+out.join(',')+'周';
+}
+
+/* 同一天里按节次分簇，簇内贪心分列：重叠的课并排，谁也不盖谁 */
+function layoutDay(list){
+  const items=list.map(c=>{
+    const sec=c.sections.slice().sort((a,b)=>a-b);
+    return {c:c,s0:sec[0],s1:sec[sec.length-1]||sec[0]};
+  }).sort((a,b)=>a.s0-b.s0||(b.s1-b.s0)-(a.s1-a.s0));
+  const clusters=[]; let g=[], end=0;
+  items.forEach(it=>{
+    if(g.length && it.s0>end){ clusters.push(g); g=[]; end=0; }
+    g.push(it); end=Math.max(end,it.s1);
+  });
+  if(g.length) clusters.push(g);
+  clusters.forEach(gr=>{
+    const colEnd=[];                       // colEnd[i] = 第 i 列已经占到第几节
+    gr.forEach(it=>{
+      let ci=-1;
+      for(let i=0;i<colEnd.length;i++){ if(colEnd[i]<it.s0){ ci=i; break; } }
+      if(ci<0){ ci=colEnd.length; colEnd.push(it.s1); } else { colEnd[ci]=it.s1; }
+      it.col=ci;
+    });
+    gr.forEach(it=>{ it.cols=colEnd.length; });
+  });
+  return items;
+}
+
 function renderRail(){
   let h='<div class="pr" style="height:'+HEAD_H+'px"></div>';
   for(let p=1;p<=PERIODS;p++) h+='<div class="pr">'+p+'</div>';
   schedRail.innerHTML=h;
 }
+
+function renderWkBar(){
+  const bar=document.getElementById('wkBar'), tip=document.getElementById('wkTip');
+  if(!bar) return;
+  const on=hasWeeks();
+  bar.hidden=!on; if(tip) tip.hidden=!on;
+  if(!on) return;
+  const mx=maxWk(), sel=document.getElementById('wkSel');
+  /* 手机上放不下"第 3 周 · 16 门"这么长的选项，缩成"第 3 周"，门数下面那行会写 */
+  const narrow=window.matchMedia&&window.matchMedia('(max-width:560px)').matches;
+  let h='';
+  for(let w=1;w<=mx;w++){
+    const n=wkCount(w);
+    h+='<option value="'+w+'"'+(w===curWk?' selected':'')+'>第 '+w+' 周'+(narrow?'':(' · '+(n?(n+' 门'):'没课')))+'</option>';
+  }
+  sel.innerHTML=h;
+  document.getElementById('wkPrev').disabled=(curWk<=1);
+  document.getElementById('wkNext').disabled=(curWk>=mx);
+  const now=wkNow(), btn=document.getElementById('wkThis');
+  btn.textContent = now>0 ? '本周' : '设本周';
+  btn.title = now>0 ? ('跳到第 '+now+' 周（现在这周）') : '把正在看的这周记为"本周"，以后自动跟着日期走';
+  if(tip){
+    tip.textContent = now>0
+      ? (now===curWk ? '日历上现在就是第 '+now+' 周。' : '日历上现在是第 '+now+' 周，点「本周」跳回去。')
+      : '第 '+curWk+' 周就是现在这周吗？点「设本周」记一次，以后打开自动跳到当前周。';
+  }
+  document.getElementById('wkModeWeek').classList.toggle('on',wkMode!=='all');
+  document.getElementById('wkModeAll').classList.toggle('on',wkMode==='all');
+  document.getElementById('wkModeWeek').setAttribute('aria-pressed',String(wkMode!=='all'));
+  document.getElementById('wkModeAll').setAttribute('aria-pressed',String(wkMode==='all'));
+}
+
+/* 唯一的对外入口：调用方只认 renderSched()，视图切换/周次条都在里面收拾干净 */
 function renderSched(){
+  renderWkBar();
+  const ov=hasWeeks()&&wkMode==='all';
+  const wrap=document.querySelector('.sched-wrap'), ovWrap=document.getElementById('ovWrap');
+  if(wrap) wrap.hidden=ov;
+  if(ovWrap) ovWrap.hidden=!ov;
+  if(ov) renderOverview(); else drawWeek();
+  const el=document.getElementById('cCount'); if(el) el.textContent='共 '+courses.length+' 门课';
+  setHint();
+}
+
+function drawWeek(){
   const bodyH=HEAD_H+PERIODS*ROW_H;
+  const showAll=!hasWeeks();          // 一条周次信息都没有：退回"全部画上"的老行为
+  const list=showAll?courses:courses.filter(c=>inWk(c,curWk));
   let h='';
   for(let d=0;d<7;d++){
-    const blocks=courses.filter(c=>c.day===d).sort((a,b)=>a.sections[0]-b.sections[0]);
+    const blocks=layoutDay(list.filter(c=>c.day===d));
     let bh='';
-    blocks.forEach(c=>{
-      const s0=c.sections[0], sl=c.sections.length;
-      const top=HEAD_H+(s0-1)*ROW_H+1, hgt=sl*ROW_H-2;
-      // one = 只占一节：44px 里塞不下课名 + 教室 + 老师，CSS 里会把老师那行收掉
-      const cls='sched-block'+(sl===1?' one':'');
-      const full=esc(c.name)+'（第'+s0+(sl>1?('-'+(s0+sl-1)):'')+'节）'
+    blocks.forEach(it=>{
+      const c=it.c, s0=it.s0, sl=it.s1-it.s0+1, n=it.cols||1;
+      const top=HEAD_H+(s0-1)*ROW_H+1, hgt=sl*ROW_H-2, wPct=100/n;
+      const st='top:'+top+'px;height:'+hgt+'px;'
+        +'left:calc('+(it.col*wPct).toFixed(4)+'% + 1px);width:calc('+wPct.toFixed(4)+'% - 2px);'
+        +'background:'+c.color+'1f;border-color:'+c.color+';';
+      const cls='sched-block'+(sl===1?' one':'')+(n>1?' split':'');
+      const full=esc(c.name)+'（第'+s0+(sl>1?('-'+(s0+sl-1)):'')+'节 · '+fmtWeeks(c)+'）'
         +(c.classroom?(' @'+c.classroom):'')+(c.teacher?(' · '+c.teacher):'');
-      bh+='<div class="'+cls+'" data-id="'+c.id+'" style="top:'+top+'px;height:'+hgt+'px;background:'+c.color+'1f;border-color:'+c.color+'" title="'+full+'">'
-        +'<div class="bn">'+esc(c.name)+'</div>'+(c.classroom?'<div class="br">'+esc(c.classroom)+'</div>':'')+(c.teacher?'<div class="bt">'+esc(c.teacher)+'</div>':'')+'</div>';
+      bh+='<div class="'+cls+'" data-id="'+c.id+'" style="'+st+'" title="'+full+'">'
+        +'<div class="bn">'+esc(c.name)+'</div>'
+        +(c.classroom?'<div class="br">'+esc(c.classroom)+'</div>':'')
+        +(c.teacher?'<div class="bt">'+esc(c.teacher)+'</div>':'')
+        +'</div>';
     });
     h+='<div class="sched-day" style="height:'+bodyH+'px"><div class="dh">周'+DAYS[d]+'</div>'+bh+'</div>';
   }
   schedDays.innerHTML=h;
   schedDays.querySelectorAll('.sched-block').forEach(b=>b.onclick=()=>{
     const id=+b.dataset.id, c=courses.find(x=>x.id===id);
-    if(c&&confirm('删除《'+c.name+'》？')){
+    if(!c) return;
+    if(confirm('删除《'+c.name+'》'+(weeksOf(c).length?('（'+fmtWeeks(c)+'）'):'')+'？')){
       courses=courses.filter(x=>x.id!==id);
-      saveSched(); renderSched(); setHint();
+      saveSched(); clampWk(); renderSched();
     }
   });
-  const el=document.getElementById('cCount'); if(el) el.textContent='共 '+courses.length+' 门课';
   syncSchedFade();
 }
+
+/* 学期一览：一行一周、一列一天。手机上横滑（min-width 560），点周号跳回按周视图 */
+function renderOverview(){
+  const wrap=document.getElementById('ovWrap'); if(!wrap) return;
+  const mx=maxWk(), now=wkNow();
+  let h='<div class="ov-scroll"><table class="ov"><thead><tr><th class="ov-w"><span class="ov-wt">周</span></th>';
+  for(let d=0;d<7;d++) h+='<th>周'+DAYS[d]+'</th>';
+  h+='</tr></thead><tbody>';
+  for(let w=1;w<=mx;w++){
+    h+='<tr><th class="ov-w"><button class="ov-wk'+(w===now?' cur':'')+(w===curWk?' me':'')
+      +'" data-w="'+w+'" type="button" title="看第 '+w+' 周的课表">'+w+'</button></th>';
+    for(let d=0;d<7;d++){
+      const cs=courses.filter(c=>c.day===d&&inWk(c,w)).sort((a,b)=>a.sections[0]-b.sections[0]);
+      h+='<td'+(cs.length?'':' class="empty"')+'>'+cs.map(c=>{
+        const sec=c.sections.slice().sort((a,b)=>a-b);
+        const t=esc(c.name)+' · 第'+sec[0]+(sec.length>1?('-'+sec[sec.length-1]):'')+'节 · '+fmtWeeks(c)
+          +(c.classroom?(' · '+esc(c.classroom)):'');
+        return '<span class="ov-c" style="border-color:'+c.color+';background:'+c.color+'1f" title="'+t+'">'+esc(c.name)+'</span>';
+      }).join('')+'</td>';
+    }
+    h+='</tr>';
+  }
+  h+='</tbody></table></div>';
+  wrap.innerHTML=h;
+  wrap.querySelectorAll('.ov-wk').forEach(b=>b.onclick=()=>{
+    curWk=+b.dataset.w; wkMode='week'; saveWk(); renderSched();
+  });
+}
+
 /* 右边缘渐隐只在"真的滑得动"时出现：1280px 宽屏一屏放得下 7 天，
    还盖着一道影子反而像把周日裁掉了。滚到最右也收起来。 */
 function syncSchedFade(){
   const sc=document.querySelector('.sched');
   const wrap=document.querySelector('.sched-wrap');
   if(!sc||!wrap) return;
+  /* 一览模式下 .sched 是 display:none，量出来是 0，别给它挂上渐隐 */
+  if(wrap.hidden||!sc.clientWidth){ wrap.classList.remove('can-scroll','at-end'); return; }
   const canScroll=sc.scrollWidth-sc.clientWidth>2;
   wrap.classList.toggle('can-scroll',canScroll);
   wrap.classList.toggle('at-end',canScroll && sc.scrollLeft+sc.clientWidth>=sc.scrollWidth-2);
 }
 document.querySelector('.sched').addEventListener('scroll',syncSchedFade,{passive:true});
 window.addEventListener('resize',syncSchedFade);
+
+/* 周次条交互 */
+function goWk(w){ const mx=maxWk(); curWk=Math.min(Math.max(+w||1,1),mx); saveWk(); renderSched(); }
+document.getElementById('wkPrev').onclick=()=>{ if(curWk>1) goWk(curWk-1); };
+document.getElementById('wkNext').onclick=()=>{ if(curWk<maxWk()) goWk(curWk+1); };
+document.getElementById('wkSel').onchange=e=>goWk(e.target.value);
+document.getElementById('wkThis').onclick=()=>{
+  const now=wkNow();
+  if(now>0){ goWk(now); }
+  else { wkAnchor={n:curWk,at:ymd(new Date())}; saveWk(); renderSched(); }
+};
+document.getElementById('wkModeWeek').onclick=()=>{ wkMode='week'; saveWk(); renderSched(); };
+document.getElementById('wkModeAll').onclick=()=>{ wkMode='all'; saveWk(); renderSched(); };
+/* 手机/桌面横竖屏切换时选项文案会变长短（窄屏不写"· 16 门"），重画一次周次条 */
+let wkRzT=null;
+window.addEventListener('resize',()=>{ clearTimeout(wkRzT); wkRzT=setTimeout(renderWkBar,180); });
 function importSchedule(jsonText){
   let data;
   try{ data=JSON.parse(jsonText); }catch(e){ return 'JSON 格式有误：'+e.message; }
@@ -869,13 +1163,17 @@ function importSchedule(jsonText){
     const name=co.name||co.course||co.title; if(!name)return;
     if(co.dayOfWeek==null&&co.day==null)return;
     if(!co.sections&&!co.section)return;
-    const k=courseKey({name,day:((((co.dayOfWeek!=null?co.dayOfWeek:co.day)||1)%7)+7)%7,
-      sections:normSections(co.sections!=null?co.sections:co.section)});
+    const k=courseKey({name,day:toDay(co.dayOfWeek!=null?co.dayOfWeek:co.day),
+      sections:normSections(co.sections!=null?co.sections:co.section),weeks:normWeeks(co.weeks)});
     if(seen[k]){ dup++; return; }
     seen[k]=1;
     addCourse(co,{silent:true}); n++;
   });
-  renderSched(); saveSched();
+  /* 刚导进来的课如果不在当前看的那一周（比如他停在第 1 周，课从第 2 周才开始），
+     直接跳到有课的那周，别让人以为没导进来。
+     ★ 只看"带周次的课"：没写周次的课（示例/手动添加）每周都画，不能拿它们当"这周有课"。 */
+  if(hasWeeks() && !courses.some(c=>weeksOf(c).length&&inWk(c,curWk))){ curWk=defaultWk(); clampWk(); }
+  renderSched(); saveSched(); saveWk();
   if(!n) return dup?('这 '+dup+' 门已经在课表里了，没有新增。'):'没解析到有效课程，请检查 name / dayOfWeek / sections 字段。';
   return '已导入 '+n+' 门课程'+(dup?('（跳过重复 '+dup+' 门）'):'')+'，已存在这台设备上。';
 }
@@ -958,11 +1256,13 @@ document.getElementById('cAdd').onclick=()=>{
   const secs=normSections(document.getElementById('cSec').value);
   const room=document.getElementById('cRoom').value.trim();
   const teach=document.getElementById('cTeach').value.trim();
+  const weeks=normWeeks(document.getElementById('cWeeks').value.trim());
   if(!name){ alert('请填写课程名'); return; }
   if(secs.length===0){ alert('请填写节次，如 1,2 或 1-3'); return; }
-  addCourse({name,dayOfWeek:day,sections:secs,classroom:room,teacher:teach});
+  addCourse({name,dayOfWeek:day,sections:secs,classroom:room,teacher:teach,weeks:weeks});
   document.getElementById('cName').value=''; document.getElementById('cSec').value='';
   document.getElementById('cRoom').value=''; document.getElementById('cTeach').value='';
+  document.getElementById('cWeeks').value='';
   setHint('已添加《'+name+'》，存在这台设备上。');
   document.getElementById('cName').focus();
 };
@@ -980,8 +1280,10 @@ if(!loadSched()){
   addCourse({name:'数据结构',dayOfWeek:5,sections:[5,6],classroom:'机房-A'},{silent:true});
   cSample=true; saveSched();
 }
+loadWk();
+if(!wkStored) curWk=defaultWk();
+clampWk();
 renderSched();
-setHint();
 
 /* ---------- 单词卡 ----------
  *
