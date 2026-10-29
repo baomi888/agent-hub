@@ -22,6 +22,8 @@ execute 失败，最后一个值就是 plan 写进去的规划稿，于是：
 from __future__ import annotations
 
 import asyncio
+import os
+import tempfile
 
 import pytest
 
@@ -233,3 +235,106 @@ def test_plan_only_falls_back_to_llm(monkeypatch):
 
     answers = [a[3] for a, _kw in saved if len(a) >= 4 and a[2] == "assistant"]
     assert answers and "直接回答" in answers[-1], f"落库的应是兜底答案，实际：{answers}"
+
+
+# ==================== 4. 两段真连起来 ====================
+
+
+class _TmpHybridStore:
+    """把 hybrid store 指到临时库（同 test_hybrid_orchestrator 的做法）：
+    不为一条测试改进程级 config.DATA_DIR，避免踩到别的用例。"""
+
+    def __enter__(self):
+        import hybrid.store as hs
+
+        self._orig = hs._db_path
+        self._dir = tempfile.mkdtemp(prefix="hybrid_pick_")
+        hs._db_path = lambda: os.path.join(self._dir, "hybrid.db")
+        hs._init_db()
+        return self
+
+    def __exit__(self, *a):
+        import hybrid.store as hs
+
+        hs._db_path = self._orig
+
+
+def test_real_engine_wires_output_key_into_chat(monkeypatch):
+    """真编排器 + 真工作流引擎 + 真 chat 分支，只把 LLM 与 Agent 换成假的。
+
+    这条补的是**测试缝隙**：前面两条用例分别证明"引擎会带 output_key"和
+    "chat 会按 output_key 取答案"，却没证明两边**字段名对得上**。
+
+    注意不能只看"最终有没有兜底"来验收 —— `plan` 已被黑名单挡掉，所以
+    即使 output_key 整个丢了，兜底也照样触发，用例照样绿（实测过：把
+    payload 的 `output_key` 改成 `key`，本用例当时仍是 passed）。因此这里
+    直接 spy `_pick_hybrid_answer` 的入参，断言 chat 真的从事件里读到了
+    `plan` 这个键 —— 只有这样才能把"读写两侧的字段名"钉死。
+    """
+    import hybrid.orchestrator as orch_mod
+    import hybrid.store as hs
+
+    real_orch = orch_mod.HybridOrchestrator
+
+    def _make(ctx, **kw):
+        # 只在构造时注入假件，其余逻辑（起跑、降级、收尾）全走真编排器
+        return real_orch(
+            ctx,
+            llm=_PlanLLM(),
+            agent_engine_factory=lambda: _FailAgentEngine(),
+            **kw,
+        )
+
+    monkeypatch.setattr(orch_mod, "HybridOrchestrator", _make)
+    monkeypatch.setattr(
+        hs, "get_workflow", lambda uid, wid: {"definition": DEFAULT_WORKFLOW_DEF}
+    )
+    monkeypatch.setattr(hs, "list_rules", lambda uid: [])
+
+    monkeypatch.setattr(chat_mod.store, "get_conversation", lambda uid, sid: {"kb_id": None})
+    monkeypatch.setattr(chat_mod.quota, "consume", lambda uid, kind: 0)
+    monkeypatch.setattr(chat_mod.store, "get_messages", lambda *a, **kw: [])
+    monkeypatch.setattr(chat_mod.store, "count_messages", lambda *a, **kw: 10)
+    monkeypatch.setattr(chat_mod.store, "add_message", lambda *a, **kw: 1)
+    monkeypatch.setattr(chat_mod.store, "rename_conversation", lambda *a, **kw: None)
+    monkeypatch.setattr(chat_mod.ctxcompress, "assemble_history", lambda *a, **kw: [])
+    monkeypatch.setattr(chat_mod, "get_llm", lambda **kw: _FakeLLM(["真实链路", "兜底"]))
+    monkeypatch.setattr(chat_mod, "_schedule_compress", lambda uid, sid: None)
+    monkeypatch.setattr(chat_mod.config, "USER_TAG_HOOK_ENABLED", False)
+    monkeypatch.setattr(chat_mod.config, "HYBRID_LLM_FALLBACK", True)
+
+    seen: list[str | None] = []
+    real_pick = chat_mod._pick_hybrid_answer
+
+    def _spy(shared, last_key=None):
+        seen.append(last_key)
+        return real_pick(shared, last_key)
+
+    monkeypatch.setattr(chat_mod, "_pick_hybrid_answer", _spy)
+
+    frames: list[str] = []
+
+    async def main_() -> None:
+        ticket = _Ticket()
+        resp = await chat_mod._chat_stream_impl(
+            chat_mod.ChatRequest(
+                sid="s-real",
+                question="帮我整理笔记",
+                mode="hybrid",
+                workflow_id="builtin_plan_execute",
+            ),
+            _Req(),
+            "u-real",
+            ticket,
+        )
+        async for frame in resp.body_iterator:
+            frames.append(frame)
+        await resp.background()
+
+    with _TmpHybridStore():
+        asyncio.run(main_())
+
+    body = "".join(frames)
+    assert seen == ["plan"], f"chat 应从 node_exit 读到 output_key=plan，实际：{seen}"
+    assert "真实链路" in body and "兜底" in body, f"真链路应触发 LLM 兜底，实际：{body}"
+    assert "打开文档" not in body, "规划稿不能出现在回给用户的内容里"
