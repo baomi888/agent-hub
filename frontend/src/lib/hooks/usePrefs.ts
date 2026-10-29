@@ -16,6 +16,16 @@ import { DEFAULT_TOP_K, patchPrefs, readPrefs } from "@/lib/consolePrefs";
 export type FontScale = "auto" | "s" | "m" | "l";
 const FONT_SCALES: FontScale[] = ["auto", "s", "m", "l"];
 
+/**
+ * 模式入口收敛（2026-10-29）：历史存过 agent / hybrid 的一律回到 auto。
+ *
+ * 不归一会出两个问题：① 这两个值在界面上已经没有按钮，刷新后没有任何档位高亮；
+ * ② 请求会一直带着一个用户无法撤销的模式，等于被旧偏好绑架。
+ * 后端仍接受这两个值（内部脚本与演示用），所以只在读偏好这一层做归一。
+ */
+const LEGACY_MODES = new Set<string>(["agent", "hybrid"]);
+const normalizeMode = (m: ChatMode): ChatMode => (LEGACY_MODES.has(m) ? "auto" : m);
+
 export interface Prefs {
   mode?: ChatMode;
   topK?: number;
@@ -41,7 +51,7 @@ export function usePrefs() {
     const saved = readPrefs() as Prefs;
     savedRef.current = saved;
     // ⚠️ 六项都要读回来。漏读某项 = 该项在挂载后立刻被下面的写 effect 用默认值覆盖
-    if (saved.mode) setMode(saved.mode);
+    if (saved.mode) setMode(normalizeMode(saved.mode));
     if (typeof saved.topK === "number" && saved.topK > 0) setTopK(saved.topK);
     if (typeof saved.chunkSize === "number") setChunkSize(saved.chunkSize);
     if (typeof saved.chunkOverlap === "number") setChunkOverlap(saved.chunkOverlap);

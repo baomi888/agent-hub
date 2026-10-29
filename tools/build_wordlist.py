@@ -131,9 +131,9 @@ def clean_def(raw: str) -> str:
     return s[:cut].rstrip("；，; ,") + "…"
 
 
-def parse(path: Path) -> "OrderedDict[str, list[str]]":
+def parse(path: Path) -> OrderedDict[str, list[str]]:
     """返回 小写词 -> [候选释义...]，保留首次出现顺序。"""
-    out: "OrderedDict[str, list[str]]" = OrderedDict()
+    out: OrderedDict[str, list[str]] = OrderedDict()
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue

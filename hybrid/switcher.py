@@ -100,51 +100,23 @@ class SwitchEngine:
 
 
 # ==================== 入口任务分类（决定初始模式）====================
-
-# 轻量关键词打分，刻意不上 LLM：分类只决定"从哪个模式起跑"，
-# 跑起来之后还有一整套切换规则兜底，分类错了代价很低，不值一次 LLM 往返
-_FLOW_HINTS = (
-    "先",
-    "然后",
-    "接着",
-    "依次",
-    "步骤",
-    "流程",
-    "第一步",
-    "第二步",
-    "按照",
-    "最后",
-    "整理成",
-    "汇总",
-    "生成报告",
-    "制成",
-    "批量",
-    "并保存",
-    "并下载",
-)
-_OPEN_HINTS = (
-    "调研",
-    "研究",
-    "分析",
-    "比较",
-    "怎么看",
-    "如何",
-    "为什么",
-    "哪些",
-    "建议",
-    "聊聊",
-    "介绍",
-    "解释",
-    "探索",
-)
+# 2026-10-29：词表与打分逻辑搬到 `core/router.py`。
+#
+# 为什么搬走：原来只有 mode=hybrid 会调用它，规则错了也只影响手动选混合的人；
+# 现在 auto 也要用它（"规则直接走工作流"），影响面变成全部提问，所以
+#   ① 加固了词表（删单字弱词、加顺序配对、按强弱分档、阈值提到 2 分）；
+#   ② 归位到 core，避免 core → hybrid 的反向依赖（hybrid 本来就依赖 core）。
+#
+# 这里保留 `classify_task` 这个名字：api/chat.py 的混合分支与既有测试都用它，
+# 改名只会制造无谓的改动面。新代码请直接用 core.router。
 
 
 def classify_task(goal: str) -> Literal["flow", "open"]:
     """把用户目标粗分为 流程型(flow→工作流起跑) / 开放型(open→Agent 起跑)。
 
-    打分持平或都不命中归 open：简单问答直接 Agent 零编排开销，
-    多步任务的关键词通常足够显眼，宁可漏判给 Agent 也不让闲聊背流程壳。
+    实现见 `core.router.classify_flow_open`：高精度取向，拿不准就判 open
+    交给执行前路由的模型判断，避免给闲聊/单步任务背工作流壳。
     """
-    flow = sum(1 for w in _FLOW_HINTS if w in goal)
-    open_ = sum(1 for w in _OPEN_HINTS if w in goal)
-    return "flow" if flow > open_ else "open"
+    from core.router import classify_flow_open
+
+    return classify_flow_open(goal)

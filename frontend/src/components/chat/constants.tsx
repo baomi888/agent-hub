@@ -4,15 +4,14 @@ import type { ReactNode } from "react";
 import type { ChatMode } from "@/lib/types";
 import type { CornIconName } from "@/components/CornIcon";
 
+// 模式入口（2026-10-29 收敛）：只剩三档。
+// 「智能体」「混合」不再是用户选项 —— 它们是 auto 判断出来的执行方式：
+// 规则命中顺序/批量特征 → 工作流起跑（内部即混合引擎），否则由模型判断
+// 走检索、调工具还是直接答（见后端 core/router.py）。
 export const MODE_LABELS: { value: ChatMode; label: string; hint: string }[] = [
-  { value: "auto", label: "自动", hint: "绑定知识库后自动优先检索" },
+  { value: "auto", label: "自动", hint: "由系统判断：查资料、调工具还是直接答" },
   { value: "rag", label: "检索", hint: "强制从知识库检索回答" },
-  { value: "agent", label: "智能体", hint: "可调用工具：联网搜索 / 计算 / 天气" },
   { value: "llm", label: "纯对话", hint: "纯大模型对话，不检索" },
-  // 混合：流程型任务走工作流（步骤确定、不会漏），开放型任务交给智能体（灵活），
-  // 两种模式在**一次任务内**自动换手，轨迹可见。
-  // ⚠️ 后端开关关掉时会静默退回「智能体」，所以 hint 里说明了它可能不出现轨迹。
-  { value: "hybrid", label: "混合", hint: "流程与智能体自动换手，过程可见" },
 ];
 
 // 首屏示例：三条都是「现在就能点、点了就有结果」的问题，
@@ -108,7 +107,13 @@ export const toolLabel = (name: string) => TOOL_META[name]?.label ?? name;
 // 后端 core/scenarios.py 的 prompt 机制保留（旧前端兼容 + 模板联动可复用）。
 
 // 首屏四宫格：呼应设计稿「查资料 / 联网搜索 / 数学计算 / 查天气」，
-// 点一下直接切到对应模式并预填一句能立刻发的问题（不用先去顶部切模式）
+// 点一下预填一句能立刻发的问题。
+//
+// ⚠️ 2026-10-29：四张卡的 mode 一律是 auto，不再替用户选「智能体」。
+// 之前点"查天气"会把档位切到 agent，等于删了按钮又偷偷替你选了一次。
+// 现在切成 auto：由路由判断该调工具还是该检索，用户不需要理解区别。
+// 为什么仍要 onModeChange 而不是"只填字"：用户可能先切到了「纯对话」，
+// 点"查天气"却不切回来，就会出现"我点的是天气，它偏不查"的错配。
 export const ABILITIES: {
   mode: ChatMode;
   label: string;
@@ -117,28 +122,28 @@ export const ABILITIES: {
   icon: ReactNode;
 }[] = [
   {
-    mode: "rag",
+    mode: "auto",
     label: "查资料",
     hint: "从你的知识库里找答案",
     example: "帮我从资料里找一下项目的里程碑",
     icon: TOOL_META.kb_search.icon,
   },
   {
-    mode: "agent",
+    mode: "auto",
     label: "联网搜索",
     hint: "实时搜最新的信息",
     example: "上网搜一下最近一周的 AI 行业新闻",
     icon: TOOL_META.web_search.icon,
   },
   {
-    mode: "agent",
+    mode: "auto",
     label: "数学计算",
     hint: "算账、换算、解方程",
     example: "帮我算一下 (128 + 64) × 0.85 等于多少",
     icon: TOOL_META.calculator.icon,
   },
   {
-    mode: "agent",
+    mode: "auto",
     label: "查天气",
     hint: "问任意城市的天气",
     example: "上海明天天气怎么样？",

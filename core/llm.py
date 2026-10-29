@@ -32,15 +32,21 @@ _EMBEDDINGS: OpenAIEmbeddings | None = None
 # ---------- 大模型（DeepSeek Chat）----------
 
 
-def get_llm(temperature: float = 0.1, max_tokens: int | None = None) -> ChatOpenAI:
+def get_llm(
+    temperature: float = 0.1, max_tokens: int | None = None, timeout: float | None = None
+) -> ChatOpenAI:
     """返回 DeepSeek Chat 客户端（OpenAI 兼容），按参数缓存复用。
 
     Args:
         temperature: 生成温度，RAG 场景建议 0.1，Agent 场景可调高
         max_tokens: 单次回答的 token 上限。不传时用平台默认；
             传了就给回答长度兜底，防止失控长文烧 token
+        timeout: 单次请求超时（秒）。None = 用 config.LLM_TIMEOUT。
+            只有执行前路由这类"慢一点就不值得做"的调用才需要单独指定，
+            业务调用一律不传，避免两套超时口径。
     """
-    key = (temperature, max_tokens)
+    request_timeout = config.LLM_TIMEOUT if timeout is None else timeout
+    key = (temperature, max_tokens, request_timeout)
     with _CLIENT_LOCK:
         llm = _LLM_CACHE.get(key)
         if llm is None:
@@ -50,7 +56,7 @@ def get_llm(temperature: float = 0.1, max_tokens: int | None = None) -> ChatOpen
                 model=config.DEEPSEEK_MODEL,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                request_timeout=config.LLM_TIMEOUT,
+                request_timeout=request_timeout,
                 max_retries=config.LLM_MAX_RETRIES,
             )
             _LLM_CACHE[key] = llm

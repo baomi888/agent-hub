@@ -145,7 +145,6 @@ _IRREGULAR = {
 def mentions_word(word: str, sentence: str) -> bool:
     """这句话里到底有没有出现目标词（容忍常见变形）。"""
     w = re.sub(r"[^a-z]", "", (word or "").lower())
-    got = re.sub(r"[^a-z]", " ", (sentence or "").lower())
     if not w:
         return False
     if _stem(w) and _stem(w) in re.sub(r"[^a-z]", "", (sentence or "").lower()):

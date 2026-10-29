@@ -452,8 +452,9 @@ export default function ChatArea({
 
   /**
    * 只有真会走检索的模式才提示"检索词会被怎么理解"。
-   * llm 模式不检索、agent 模式走工具调用，在它们下面提示换词是纯粹的噪音。
-   * auto 要看有没有绑库——后端也是这么路由的（见 _pick_mode）。
+   * llm 模式不检索、工具路径走工具调用，在它们下面提示换词是纯粹的噪音。
+   * auto 目前按"有没有绑库"估：绑了库时后端会强制检索（含闲聊），
+   * 没绑库只可能走工具或直接答，不会检索。判断口径见 core/router.py。
    */
   const willRetrieve = mode === "rag" || mode === "hybrid" || (mode === "auto" && !!boundKb);
 

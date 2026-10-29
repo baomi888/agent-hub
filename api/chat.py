@@ -3,11 +3,15 @@ from __future__ import annotations
 """流式问答接口（SSE）。
 
 三条路径（由 req.mode 决定，默认 auto 自动判断）：
-  auto   — 绑定 kb_id 且知识库非空 → RAG；否则 → Agent
+  auto   — 执行前路由（core/router.py）：规则命中顺序/批量特征 → 工作流起跑；
+           否则由模型判断走 rag / agent / llm。绑了库时强制检索（含闲聊）
   rag    — 强制 RAG 模式（检索 + 提示词组装 + LLM，不走 Agent 工具链）
-  agent  — 强制 Agent 模式（create_agent + 4 工具 + LangGraph checkpoint）
+  agent  — 强制 Agent 模式（create_agent + 5 工具 + LangGraph checkpoint）
   llm    — 强制纯 LLM（多轮对话，不调工具不检索）
   hybrid — 混合模式（工作流 × 自主 Agent 动态切换，hybrid/ 包编排）
+
+  2026-10-29 起前端不再展示「智能体」「混合」两个按钮：它们不是"用户该选的东西"，
+  而是 auto 判断出来的结果。后端仍接受这两个值（内部脚本、答辩演示、能力卡兼容）。
 
 SSE 事件协议：
   event: status     { text: "..." }           状态提示
@@ -51,6 +55,7 @@ from starlette.background import BackgroundTask
 
 from core import config, llm_gate, metrics, quota, tag_taxonomy, tool_registry, upload
 from core import context_compress as ctxcompress
+from core import router as route_engine
 from core import scenarios as scenarios_mod
 from core import session as store
 from core.auth import get_current_user
@@ -310,17 +315,66 @@ def _sse(event: str, data: dict) -> str:
 VALID_MODES = ("auto", "rag", "agent", "llm")
 
 
-def _pick_mode(req_mode: str, kb_id: str | None, kb_exists: bool) -> str:
-    """auto → rag / agent 自动路由；hybrid 不受知识库影响，只认功能开关；
-    其它值先过白名单再放行。"""
+async def _pick_mode(req_mode: str, question: str, kb_id: str | None, kb_exists: bool) -> str:
+    """决定这一轮走哪条执行路径。
+
+    显式值直通（hybrid 只认功能开关）；`auto` 交给执行前路由。
+
+    为什么是 async：路由的模型判断要发一次网络请求。放在事件循环里会阻塞
+    其它请求，所以用 `await` + 短超时，而不是 `to_thread`（后者会占线程池，
+    200 并发下把 `asyncio.to_thread` 的活全堵住）。
+    """
     if req_mode == "hybrid":
         # 功能开关关闭时静默回退 Agent：前端看到 mode=agent 的 done 就知道没走混合
         return "hybrid" if config.HYBRID_MODE_ENABLED else "agent"
     if req_mode in VALID_MODES and req_mode != "auto":
         return req_mode
-    if kb_id and kb_exists:
-        return "rag"
-    return "agent"
+
+    has_kb = bool(kb_id and kb_exists)
+    decision = await route_engine.decide(question, has_kb=has_kb)
+    # flow 只能由混合引擎承载（它才有"工作流起跑"的能力）；引擎关掉就退回 agent
+    if decision.route == "flow":
+        return "hybrid" if config.HYBRID_MODE_ENABLED else "agent"
+    return decision.route
+
+
+# 混合执行时 shared 里"不像答案"的键：
+#   plan     —— 内置工作流的第一个节点，写的是"打算怎么做"的规划稿；
+#   history  —— chat 自己塞进去的历史，值是 list（str 化后是一大坨 JSON）；
+#   score / retries / goal / question —— 运行时状态。
+# 以前这里是"取 shared 最后一个值"，于是 plan 成功 + execute 失败时，
+# 规划稿会被当成答案：既污染展示，又让 LLM 兜底永远不触发。
+_HYBRID_NON_ANSWER_KEYS = frozenset(
+    {"plan", "history", "score", "retries", "goal", "question"}
+)
+
+
+def _pick_hybrid_answer(shared: dict, last_key: str | None = None) -> str:
+    """从混合执行的 shared 里挑出「真正该回给用户的答案」。
+
+    优先级：最后一个成功节点声明的 output_key → 约定汇总键 agent_result →
+    shared 里从后往前第一个非中间产物的字符串。
+
+    为什么以 last_key 为先：自定义工作流的末节点未必叫 agent_result
+    （可以是 ka / summary 之类），只有节点自己声明的 output_key 才是权威。
+    工作流引擎在 node_exit 里带出它（hybrid/workflow.py），这里直接采用，
+    不再靠"插入顺序最后一条"猜。
+    """
+    order: list[str] = []
+    if last_key:
+        order.append(last_key)
+    order.append("agent_result")
+    for k in reversed(list(shared)):
+        if k not in order:
+            order.append(k)
+
+    for k in order:
+        if k in _HYBRID_NON_ANSWER_KEYS or str(k).startswith("node:"):
+            continue
+        val = shared.get(k)
+        if isinstance(val, str) and val.strip():
+            return val
+    return ""
 
 
 def _retrieval_query(question: str, history) -> tuple[str, list[dict], bool]:
@@ -717,6 +771,30 @@ async def chat_stream(
         raise
 
 
+async def _plain_llm_messages(
+    uid: str, sid: str, question: str, scenario: str | None
+) -> list:
+    """纯对话口径的 messages：system + 压缩后的历史 + 本轮问题。
+
+    llm 模式与 hybrid 的兜底共用这一份，不各写一套：兜底自己拼的话最容易
+    漏掉压缩块，长会话兜底时会"忘了前面聊过什么"，答得比不兜底还离谱。
+    """
+    history = (await asyncio.to_thread(store.get_messages, uid, sid, include_system=False))[:-1]
+    messages: list = [
+        SystemMessage(
+            content="你是一个友好、专业的 AI 助手。用中文简洁作答。"
+            + scenarios_mod.get_scenario_prompt(scenario)
+        )
+    ]
+    for m in ctxcompress.assemble_history(uid, sid, history):
+        if m["role"] == "user":
+            messages.append(HumanMessage(content=m["content"]))
+        elif m["role"] == "assistant":
+            messages.append(AIMessage(content=m["content"]))
+    messages.append(HumanMessage(content=question))
+    return messages
+
+
 async def _chat_stream_impl(
     req: ChatRequest, request: Request, uid: str, ticket
 ) -> StreamingResponse:
@@ -737,7 +815,7 @@ async def _chat_stream_impl(
         kb_id = None
     # exists() → peek() 要读 sqlite，是同步 I/O，别卡住事件循环
     kb_exists = bool(kb_id and await asyncio.to_thread(pipelines.exists, uid, kb_id))
-    mode = _pick_mode(req.mode, kb_id, kb_exists)
+    mode = await _pick_mode(req.mode, req.question, kb_id, kb_exists)
 
     # RAG 模式如果知识库不存在 → 降级为 agent
     if mode == "rag" and not kb_exists:
@@ -973,6 +1051,10 @@ async def _chat_stream_impl(
                 yield _sse("hybrid_start", {"run_id": ctx.run_id, "mode": start_mode})
 
                 full_text = ""
+                # 最后一个**成功**节点把产出写在了哪个键。节点退出时由工作流引擎
+                # 在 node_exit 里带出（见 hybrid/workflow.py）——用它取答案，
+                # 比"shared 里最后一个值"精确，也不会把 plan 的规划稿当答案。
+                last_ok_key: str | None = None
                 # 上游生成器登记到本轮，收尾统一 aclose（跳出循环不会自己关闭）
                 orch_events = upstreams.track(orch.stream())
                 async for ev in orch_events:
@@ -994,12 +1076,18 @@ async def _chat_stream_impl(
                         yield _sse("tool", frame)
                     elif et in ("node_enter", "node_exit"):
                         # 工作流节点进出：前端执行轨迹侧栏的时间轴事件
+                        if et == "node_exit" and ev.payload.get("status") == "ok":
+                            last_ok_key = ev.payload.get("output_key") or last_ok_key
+                        # output_key 只用于服务端取答案，不透传给前端：
+                        # 前端的时间轴只关心 节点/状态，多塞字段等于把内部结构漏出去
+                        payload = dict(ev.payload)
+                        payload.pop("output_key", None)
                         yield _sse(
                             "workflow_node",
                             {
                                 "phase": "enter" if et == "node_enter" else "exit",
                                 "node_id": ev.node_id,
-                                **ev.payload,
+                                **payload,
                             },
                         )
                     elif et == "switch":
@@ -1020,13 +1108,48 @@ async def _chat_stream_impl(
                         # 引擎级错误事件留痕但不打断：终态由 ctx.status 统一落锤
                         yield _sse("status", {"text": f"执行异常：{ev.payload.get('error', '')}"})
 
-                if ctx.status in ("failed", "timeout"):
+                # 取答案：流式累积优先；没有流式输出（纯工作流 + 全非流式节点）时
+                # 按 _pick_hybrid_answer 的优先级回 shared 里找，**不取 plan**。
+                acc_text = (
+                    full_text if full_text.strip() else _pick_hybrid_answer(ctx.shared, last_ok_key)
+                )
+
+                # P1（2026-10-29）：工作流与 Agent 都没吐出任何字 → 纯 LLM 兜底。
+                # 改造前这里直接回一条 error，用户看到的是「混合执行失败」＋空白；
+                # 实际上模型完全能基于上下文给出一句话，比空白有用得多。
+                # 只在**完全没有产出**时兜底：有半截答案就不覆盖，那等于把已经
+                # 做出来的活扔掉。
+                used_fallback = False
+                if not acc_text.strip() and config.HYBRID_LLM_FALLBACK:
+                    yield _sse("status", {"text": "流程未产出结果，改用直接作答..."})
+                    acc = _Acc()
+                    try:
+                        fb_messages = await _plain_llm_messages(
+                            uid, req.sid, prompt_question, req.scenario
+                        )
+                        async for frame in _stream_llm(
+                            get_llm(max_tokens=2048),
+                            fb_messages,
+                            request,
+                            acc,
+                            upstreams,
+                            path="hybrid_fallback",
+                        ):
+                            yield frame
+                    except Exception as e:  # noqa: BLE001
+                        yield _sse("error", {"detail": describe_api_error(e)})
+                        return
+                    if acc.aborted or acc.error:
+                        return
+                    acc_text = acc.text
+                    # 兜底同样是 LLM 生成，也会撞长度上限；不带上这个标记，
+                    # 前端就不会挂"内容可能不完整"，等于把截断藏起来。
+                    truncated = acc.truncated
+                    used_fallback = True
+
+                if ctx.status in ("failed", "timeout") and not used_fallback:
                     yield _sse("error", {"detail": ctx.error or "混合执行失败"})
                     return
-                acc_text = full_text or str(ctx.shared.get("agent_result") or "")
-                if not acc_text and ctx.shared:
-                    # 纯工作流 + 全非流式节点：取最后写入 shared 的产出作为答案
-                    acc_text = str(next(reversed(ctx.shared.values())))
             except ValueError as e:
                 yield _sse("error", {"detail": str(e)})
                 return
@@ -1250,21 +1373,8 @@ async def _chat_stream_impl(
         # ---- 4. 纯 LLM 模式 ----
         else:
             yield _sse("status", {"text": "纯 LLM 模式..."})
-            history = (
-                await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False)
-            )[:-1]
-            messages = [
-                SystemMessage(
-                    content="你是一个友好、专业的 AI 助手。用中文简洁作答。"
-                    + scenarios_mod.get_scenario_prompt(req.scenario)
-                )
-            ]
-            for m in ctxcompress.assemble_history(uid, req.sid, history):
-                if m["role"] == "user":
-                    messages.append(HumanMessage(content=m["content"]))
-                elif m["role"] == "assistant":
-                    messages.append(AIMessage(content=m["content"]))
-            messages.append(HumanMessage(content=prompt_question))
+            # 与 hybrid 兜底共用一份拼装口径（system + 压缩块 + 最近 K 轮原文）
+            messages = await _plain_llm_messages(uid, req.sid, prompt_question, req.scenario)
 
             acc = _Acc()
             try:

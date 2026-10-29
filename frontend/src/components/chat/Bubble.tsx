@@ -162,7 +162,7 @@ const Bubble = memo(function Bubble({
               放在正文之前 —— 与下面的依据提示条同一个道理：用户边流边读，
               「这一步是谁在执行」必须先于答案出现，否则读完整段答案才发现
               中途换了执行者，就来不及判断这段结果可不可信了。
-              fallback = 用户选了「混合」但后端静默退回智能体（开关关闭），
+              fallback = auto 判成「工作流起跑」但后端引擎开关关闭，静默退回智能体，
               必须明说，否则用户以为看到的就是混合轨迹。 */}
           {(m.hybridTrace?.length || m.hybridMode || m.hybridRunId) && (
             <HybridTraceView

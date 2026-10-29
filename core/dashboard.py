@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from core import apilog, api_labels, timeutil, user_feedback
+from core import api_labels, apilog, timeutil, user_feedback
 
 # ---------- 失败口径（唯一一处定义，别在 SQL 里各写一遍） ----------
 #

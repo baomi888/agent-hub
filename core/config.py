@@ -222,6 +222,21 @@ HYBRID_LLM_MAX_TOKENS = int(os.getenv("HYBRID_LLM_MAX_TOKENS", "2048"))
 # 防"循环节点 + download_file"把服务器当下载器：一次 200MB × N 次可打满磁盘。
 HYBRID_MAX_TOOL_CALLS = int(os.getenv("HYBRID_MAX_TOOL_CALLS", "20"))
 
+# 混合执行全流程无产出时，用纯 LLM 基于上下文兜底作答（2026-10-29 新增）。
+# 典型场景：工作流节点失败 + Agent 预算耗尽，两条路都没吐字——改造前用户拿到
+# 一条空回答。开启后多花一次主模型调用，换"至少给一句话"。
+HYBRID_LLM_FALLBACK = bool(int(os.getenv("HYBRID_LLM_FALLBACK", "1")))
+
+# ---------- 执行前路由（2026-10-29：模式入口收敛）----------
+# auto 模式的路由开关。0 = 退回改造前行为（有库 → rag / 无库 → agent），
+# 前端三档在旧逻辑下依然可用，所以前端不需要跟着回滚。
+ROUTER_ENABLED = bool(int(os.getenv("ROUTER_ENABLED", "1")))
+# 路由调用的硬超时（秒）。超时即回落规则，不阻塞主请求。
+# 不值得为"选路"让用户多等一下：2 秒拿不到答案就当它不存在。
+ROUTER_TIMEOUT = float(os.getenv("ROUTER_TIMEOUT", "2.0"))
+# 路由输出只有一行 JSON（route + reason），48 token 足够；限长防跑偏烧钱
+ROUTER_MAX_TOKENS = int(os.getenv("ROUTER_MAX_TOKENS", "48"))
+
 # 下载允许清单开关（2026-10-29 安全加固）：1=只允许下载本轮 web_search 返回的
 # 链接或用户原话里的链接（防提示注入把内容拼进 URL 外带）；0=退回旧行为。
 # 出问题时可一行 env 回退，不用回滚代码。

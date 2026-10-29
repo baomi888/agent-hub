@@ -134,7 +134,11 @@ async def feedback_patch(
 
 class ReplyRequest(BaseModel):
     reply: str = Field(
-        default="", description=f"给提意见的人的回复，{user_feedback.MIN_REPLY}~{user_feedback.MAX_REPLY} 字；空串表示撤回"
+        default="",
+        description=(
+            f"给提意见的人的回复，{user_feedback.MIN_REPLY}~{user_feedback.MAX_REPLY} 字；"
+            "空串表示撤回"
+        ),
     )
 
 

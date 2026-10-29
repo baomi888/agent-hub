@@ -575,8 +575,9 @@ def test_non_streaming_duration_unchanged(env, client, monkeypatch):
     """非流式响应不能被这次改动带坏：该测多久还是多久。"""
     import asyncio
 
-    import main
     from fastapi.routing import APIRoute
+
+    import main
 
     monkeypatch.setattr(main, "_spawn_flush", lambda: None)
 

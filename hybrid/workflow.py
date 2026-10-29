@@ -291,11 +291,14 @@ class WorkflowEngine:
                             error=error,
                         )
                         return
+                    # output_key 一起带出去：万一后续节点失败，上层才知道
+                    # "最后一个真正跑完的节点把产出写在了哪个键"，而不是
+                    # 从 shared 里盲取最后一个值（那会取到 plan 的规划稿）。
                     yield ExecEvent(
                         event_type="node_exit",
                         mode="workflow",
                         node_id=current,
-                        payload={"status": "ok"},
+                        payload={"status": "ok", "output_key": node.config.get("output_key")},
                     )
                     wf_state["completed"].append(current)
 
