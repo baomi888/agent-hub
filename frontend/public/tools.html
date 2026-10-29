@@ -240,7 +240,10 @@
     padding:6px;background:var(--bg-canvas);overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;}
   /* 节次栏吸左：横向滑动看后面的星期时，第几节还留在视野里 */
   .sched-rail{flex:0 0 26px;display:flex;flex-direction:column;position:sticky;left:0;z-index:3;background:var(--bg-canvas);}
-  .sched-rail .pr{height:44px;display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:10px;}
+  /* flex:0 0 auto：节次栏是 flex 列、行高由 JS 给。不加这句，屏幕矮时 12 行会被 shrink
+     压矮（横屏 390 高实测压到 25px，右侧格子还是 34px），整条节次就和课块对不上了。 */
+  .sched-rail .pr{height:44px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+    color:var(--text-3);font-size:10px;}
   .sched-days{flex:1;display:grid;grid-template-columns:repeat(7,minmax(66px,1fr));gap:4px;min-width:462px;}
   .sched-day{position:relative;background:var(--card-bg);border:1px solid var(--line);border-radius:8px;overflow:hidden;}
   .sched-day .dh{position:absolute;top:0;left:0;right:0;height:22px;text-align:center;color:var(--text-3);
@@ -262,6 +265,69 @@
   .sched-block.one .bn{-webkit-line-clamp:1;}
   .sched-block.one .bt{display:none;}
 
+  /* ---- 周几下面标日期 + 今天那列标红（10-29 三次反馈）----
+     日期用 ::after + attr(data-dd) 画，**不往 DOM 里塞节点**：旧探针按「周一」三个字
+     对账列头，多一个文本节点就把它们全弄瞎（自证那次的教训）。
+     ::after 的 content 不进 textContent，两全。 */
+  .sched-day .dh{display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:1px;line-height:1;font-size:9px;font-weight:600;padding:0;letter-spacing:0;}
+  .sched-day .dh::after{content:attr(data-dd);font-size:10px;font-weight:700;line-height:1;}
+  .sched-day .dh:not([data-dd])::after,
+  .sched-day .dh[data-dd=""]::after{display:none;}
+  /* 今天：整条表头换砖红（#A03E28 是课程色板里的暖红，不是荧光红），下面那列淡淡垫一层 */
+  .sched-day.today{background:#FDF6F0;border-color:#D9A78F;}
+  .sched-day.today .dh{background:#A03E28;color:#FFF6E8;}
+  .sched-day.today .dh::after{color:#FFF6E8;}
+
+  /* ---- 学期设置弹窗（10-29 三次反馈）---- */
+  .t-field{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+  .t-field>label{flex:0 0 104px;font-size:var(--fs-sm);color:var(--text-2);letter-spacing:var(--ls-tight);}
+  .t-field>input{flex:1;min-width:0;border:1px solid var(--input-border);background:var(--bg-canvas);
+    border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit;}
+  .t-field>input:focus{outline:none;border-color:var(--accent);box-shadow:var(--ring-accent);}
+  .t-sep{display:flex;align-items:center;gap:8px;margin:0 0 10px;color:var(--text-3);font-size:var(--fs-xs);}
+  .t-sep::before,.t-sep::after{content:"";flex:1;height:1px;background:var(--line);}
+  #tMsg{font-size:var(--fs-sm);margin-top:8px;line-height:1.6;min-height:1.2em;}
+
+  /* ---- 全屏课表（10-29 三次反馈）----
+     页面里的课表列宽下限 66px（不然课名被压成竖排），手机一屏只放得下 5 天，得横滑。
+     用户给的参考是日历 App：七天全摊一屏、左边带上课时间、今天标红。
+     全屏时列宽改成 minmax(0,1fr) 自适应、行高按屏高算，绝不横向滚动。 */
+  .fs{position:fixed;inset:0;z-index:70;display:flex;flex-direction:column;
+    background:var(--bg-canvas);
+    padding:calc(10px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom));}
+  .fs[hidden]{display:none;}
+  .fs-bar{flex:0 0 auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;}
+  .fs-date{font-family:var(--font-serif);font-size:var(--fs-lg);color:var(--ink);letter-spacing:var(--ls-tight);}
+  .fs-date em{font-style:normal;font-family:var(--font-sans);font-size:var(--fs-xs);font-weight:600;
+    color:var(--accent-ink);background:var(--accent-soft);border:1px solid var(--accent);
+    border-radius:999px;padding:2px 8px;margin-left:6px;vertical-align:2px;white-space:nowrap;}
+  .fs-ctrl{margin-left:auto;display:flex;align-items:center;gap:6px;}
+  .fs-body{flex:1 1 auto;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;}
+  .fs .sched{height:100%;min-height:0;overflow:visible;box-sizing:border-box;}
+  .fs .sched-days{grid-template-columns:repeat(7,minmax(0,1fr));min-width:0;gap:3px;}
+  .fs .sched-rail{flex:0 0 34px;}
+  .fs .sched-rail .pr{flex-direction:column;justify-content:center;gap:1px;line-height:1.1;font-size:10px;}
+  .fs .sched-rail .pr .pt{font-size:8px;font-weight:400;color:var(--text-3);opacity:.85;letter-spacing:0;}
+  .fs .sched-block{padding:2px 3px;}
+  .fs .sched-block .bn{font-size:9px;line-height:1.2;-webkit-line-clamp:3;}
+  .fs .sched-block .br{font-size:8px;line-height:1.15;white-space:normal;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
+  .fs .sched-block.split .bn{font-size:8px;}
+  .fs .sched-block.split .br{display:none;}
+  /* 宽屏全屏：列宽 140px+，9px 字只会留一大片空白，按屏幕宽度把字放大 */
+  @media (min-width:900px){
+    .fs .sched-block .bn{font-size:12px;line-height:1.3;}
+    .fs .sched-block .br,.fs .sched-block .bt{font-size:10px;}
+    .fs .sched-block.split .bn{font-size:11px;}
+    .fs .sched-rail{flex:0 0 44px;}
+    .fs .sched-rail .pr{font-size:12px;}
+    .fs .sched-rail .pr .pt{font-size:9px;}
+    .fs .sched-day .dh{font-size:11px;}
+    .fs .sched-day .dh::after{font-size:13px;}
+  }
+  body.fs-open{overflow:hidden;}
+
 
   /* ---- 周次条（10-29 二次反馈加）----
      原来只有"这一周"一张图：别的周既看不到、也没有入口。week 数据一直在库里，
@@ -282,12 +348,22 @@
     border-radius:999px;padding:4px 11px;font-family:inherit;font-size:var(--fs-xs);font-weight:600;
     letter-spacing:var(--ls-tight);cursor:pointer;transition:var(--t-color);white-space:nowrap;}
   .wk-this:hover{background:var(--accent);color:#2E2416;}
+  .wk-term{border:1px solid var(--line-strong);background:transparent;color:var(--text-2);
+    border-radius:999px;padding:4px 11px;font-family:inherit;font-size:var(--fs-xs);font-weight:600;
+    letter-spacing:var(--ls-tight);cursor:pointer;white-space:nowrap;transition:var(--t-color);}
+  .wk-term:hover{border-color:var(--accent);color:var(--accent-ink);background:var(--fill-2);}
   .wk-seg{margin-left:auto;display:flex;border:1px solid var(--line-strong);border-radius:999px;overflow:hidden;}
   .wk-tab{border:0;background:transparent;color:var(--text-2);font-family:inherit;font-size:var(--fs-xs);
     padding:5px 12px;cursor:pointer;letter-spacing:var(--ls-tight);transition:var(--t-color);}
   .wk-tab:hover{color:var(--accent-ink);}
   .wk-tab.on{background:var(--ink);color:var(--card-bg);}
   .wk-tip{flex:1 1 100%;font-size:var(--fs-xs);color:var(--text-3);line-height:1.6;margin-top:2px;}
+  /* 窄屏：‹ 第9周 › 本周 占第一行，「学期 + 按周/一览/全屏」占第二行并把剩余宽度吃干净。
+     不这么分，seg 会飘在右边、左边单留一颗「学期」，中间空一大块。 */
+  @media (max-width:560px){
+    .wk-seg{flex:1 1 auto;margin-left:0;}
+    .wk-tab{flex:1;text-align:center;padding:5px 4px;}
+  }
 
   /* 同一格里有多门课：左右分栏，谁也不盖谁。栏窄了只留课名，教室/老师在 title 里 */
   .sched-block.split{padding:3px 3px;}
@@ -501,10 +577,12 @@
         <button class="wk-btn" id="wkPrev" type="button" aria-label="上一周">‹</button>
         <select class="wk-sel" id="wkSel" aria-label="选择周次"></select>
         <button class="wk-btn" id="wkNext" type="button" aria-label="下一周">›</button>
-        <button class="wk-this" id="wkThis" type="button">设本周</button>
+        <button class="wk-this" id="wkThis" type="button">本周</button>
+        <button class="wk-term" id="wkTerm" type="button" title="设置开学日期和学期总周数">学期</button>
         <div class="wk-seg" role="group" aria-label="课表视图">
           <button class="wk-tab on" id="wkModeWeek" type="button" aria-pressed="true">按周</button>
           <button class="wk-tab" id="wkModeAll" type="button" aria-pressed="false">一览</button>
+          <button class="wk-tab" id="wkModeFull" type="button" aria-pressed="false">全屏</button>
         </div>
         <div class="wk-tip" id="wkTip" hidden></div>
       </div>
@@ -537,6 +615,54 @@
       </div>
     </div>
   </section>
+
+  <!-- ===== 全屏课表：七天全摊一屏（参考用户给的日历 App） ===== -->
+  <div class="fs" id="fsSched" hidden>
+    <div class="fs-bar">
+      <div class="fs-date" id="fsDate">—</div>
+      <div class="fs-ctrl">
+        <button class="wk-btn" id="fsPrev" type="button" aria-label="上一周">‹</button>
+        <button class="wk-this" id="fsThis" type="button">本周</button>
+        <button class="wk-btn" id="fsNext" type="button" aria-label="下一周">›</button>
+        <button class="wk-term" id="fsClose" type="button">退出全屏</button>
+      </div>
+    </div>
+    <div class="fs-body">
+      <div class="sched"><div class="sched-rail" id="fsRail"></div><div class="sched-days" id="fsDays"></div></div>
+    </div>
+  </div>
+
+  <!-- ===== 学期设置弹窗（开学日期 + 总周数） ===== -->
+  <div class="cmodal" id="tModal" hidden>
+    <div class="cmodal-mask" data-close="1"></div>
+    <div class="cmodal-card" role="dialog" aria-modal="true" aria-labelledby="tTitle" style="max-width:440px">
+      <div class="cmodal-head">
+        <h3 id="tTitle">本学期设置</h3>
+        <button class="icon-btn" id="tX" type="button" aria-label="关闭学期设置">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg>
+        </button>
+      </div>
+      <p class="note" style="margin:0 0 12px">课表要配上日历，才知道「这周是第几周」，也才能在周几下面标上日期。两种填法选一种就行。</p>
+      <div class="t-field">
+        <label for="tStart">开学日期</label>
+        <input type="date" id="tStart" />
+      </div>
+      <div class="t-sep">或者，直接告诉我现在是第几周</div>
+      <div class="t-field">
+        <label for="tNowWk">今天是第几周</label>
+        <input type="number" id="tNowWk" min="1" max="30" inputmode="numeric" placeholder="例如 9" />
+      </div>
+      <div class="t-field">
+        <label for="tWeeks">学期总周数</label>
+        <input type="number" id="tWeeks" min="6" max="30" inputmode="numeric" value="20" />
+      </div>
+      <div class="add-row" style="align-items:center">
+        <button class="btn-new btn-sm" id="tSave" type="button">保存</button>
+        <button class="btn-import btn-sm" id="tLater" type="button">稍后再说</button>
+      </div>
+      <div id="tMsg" role="status" aria-live="polite"></div>
+    </div>
+  </div>
 
   <!-- ===== 导入课表弹窗（从「本周课表」右上角打开） ===== -->
   <div class="cmodal" id="cModal" hidden>
@@ -691,6 +817,8 @@ tabs.addEventListener('click',e=>{
   window.scrollTo({top:0,left:0,behavior:'auto'});
   // 切过去时整块才从 display:none 变可见，宽度到这一刻才量得准
   if(typeof syncSchedFade==='function') syncSchedFade();
+  /* 切到课表就顺手检查学期填了没：没填的话周次和日期都是空的，问一次的转化率最高 */
+  if(b.dataset.tab==='conflict'&&typeof maybeAskTerm==='function') setTimeout(maybeAskTerm,120);
 });
 
 /* ---------- GPA ---------- */
@@ -784,6 +912,9 @@ pUpdate();
 /* ---------- 课程表（仿小律 · 周视图 + 小律同款 JSON 导入） ---------- */
 const DAYS=['一','二','三','四','五','六','日'];
 const PERIODS=12, ROW_H=44, HEAD_H=22;
+/* 12 节的开始时间。全屏视图里显示在节次下面（参考用户给的日历 App），
+   页面里的窄节次栏放不下就隐藏。改作息直接改这里。 */
+const P_TIME=['08:00','08:55','10:00','10:55','14:30','15:25','16:20','17:15','19:40','20:35','21:30','22:25'];
 const CCOLORS=['#C8892A','#7C9A54','#EF8A56','#2A5A8A','#875B10','#1E7A46','#8A5A0A','#A03E28'];
 let courses=[],cseq=0;
 const schedDays=document.getElementById('schedDays'),schedRail=document.getElementById('schedRail');
@@ -930,7 +1061,10 @@ function courseKey(c){
       现在：① 按周筛课（没标 weeks 的课 = 每周都上）② 同格多课左右分栏，谁也不盖谁
             ③ 周次条能前后翻、能直接选 ④ 另给一张"学期一览"，十几周摊一屏。 */
 const WK_KEY='baomi_tools_week_v1';
+const TERM_KEY='baomi_tools_term_v1';
 let curWk=1, wkAnchor=null, wkMode='week', wkStored=false;
+/* term = {start:'YYYY-MM-DD'(第1周周一), weeks:20}；null = 还没填过 */
+let term=null, termPrompted=false;
 
 function weeksOf(c){ return (Array.isArray(c&&c.weeks)?c.weeks:[]).map(Number).filter(w=>w>=1&&w<=30).sort((a,b)=>a-b); }
 function hasWeeks(){ return courses.some(c=>weeksOf(c).length>0); }
@@ -942,8 +1076,32 @@ function wkCount(w){ let n=0; courses.forEach(c=>{ if(inWk(c,w)) n++; }); return
 function ymd(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function dayIdx(d){ return Math.round(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())/86400000); }
 function mondayOf(d){ const x=new Date(d.getFullYear(),d.getMonth(),d.getDate()); x.setDate(x.getDate()-((x.getDay()+6)%7)); return x; }
+
+/* ---------- 学期：开学日期 + 总周数 ----------
+   ★ 10-29 三次反馈：「为什么你的默认是第三周」「要用户先确认这学期有多少周、从什么时候开始」。
+   老 defaultWk() 在没校准时挑「课最多的一周」当默认 —— 对课多的学期那往往是第 3 周或
+   第 15 周，跟今天毫无关系，所以他一打开就停在第 3 周。现在：有学期就按日期精算，
+   没学期就先请用户填一次（两种填法：开学日期 / 今天是第几周）。 */
+function termStartDate(){
+  if(!term||!term.start) return null;
+  const d=new Date(term.start+'T00:00:00');
+  if(isNaN(d.getTime())) return null;
+  return mondayOf(d);
+}
+function termWeeks(){ const n=term&&term.weeks?+term.weeks:0; return Math.min(Math.max(n||20,1),30); }
+/* 这张表能翻到第几周：有学期就按学期总周数（没课的周也能翻到），否则取课程里最晚的一周 */
+function viewWeeks(){ return term?termWeeks():Math.max(maxWk(),1); }
+/* 第 w 周第 d 天（d:0=周一）的日期；没填学期就返回 null，不标日期 */
+function dateOfCell(w,d){
+  const st=termStartDate(); if(!st) return null;
+  return new Date(st.getFullYear(),st.getMonth(),st.getDate()+(w-1)*7+d);
+}
+function mdLabel(d){ return (d.getMonth()+1)+'月'+d.getDate()+'日'; }
 /* 校准一次就够：记下 {n:当时第几周, at:那天}，以后一律按"周一为界差几周"推当前周 */
 function wkNow(){
+  /* 有学期日期就精算：今天离第 1 周周一隔了几个整周 */
+  const st=termStartDate();
+  if(st) return Math.round((dayIdx(mondayOf(new Date()))-dayIdx(st))/7)+1;
   if(!wkAnchor||!wkAnchor.n||!wkAnchor.at) return 0;
   const at=new Date(wkAnchor.at+'T00:00:00');
   if(isNaN(at.getTime())) return 0;
@@ -951,6 +1109,17 @@ function wkNow(){
 }
 function saveWk(){
   try{ localStorage.setItem(WK_KEY,JSON.stringify({v:1,cur:curWk,mode:wkMode,anchor:wkAnchor})); }catch(e){}
+}
+function saveTerm(){
+  try{ localStorage.setItem(TERM_KEY,JSON.stringify({v:1,start:term?term.start:'',weeks:term?term.weeks:0,prompted:!!termPrompted})); }catch(e){}
+}
+function loadTerm(){
+  try{
+    const d=JSON.parse(localStorage.getItem(TERM_KEY)||'null');
+    if(!d) return;
+    if(d.start){ term={start:String(d.start),weeks:+d.weeks||20}; }
+    termPrompted=!!d.prompted;
+  }catch(e){}
 }
 function loadWk(){
   try{
@@ -960,11 +1129,12 @@ function loadWk(){
     if(d.anchor&&+d.anchor.n>0) wkAnchor={n:+d.anchor.n,at:String(d.anchor.at||ymd(new Date()))};
   }catch(e){}
 }
-function clampWk(){ const mx=maxWk(); if(curWk<1) curWk=1; if(curWk>mx) curWk=mx; }
+function clampWk(){ const mx=viewWeeks(); if(curWk<1) curWk=1; if(curWk>mx) curWk=mx; }
 /* 没校准过、也没存过"看到第几周"：从课程最密的那一周起步，比死磕第 1 周更接近
    用户打开时想看的东西（开学第 1 周通常只有半张表） */
 function defaultWk(){
-  const now=wkNow(); if(now>0) return now;
+  /* ★ 有学期（或校准过）就一定是"今天那周"，不再猜"课最多的一周" */
+  const now=wkNow(); if(now>0) return Math.min(Math.max(now,1),viewWeeks());
   const cnt={}; courses.forEach(c=>weeksOf(c).forEach(w=>{ cnt[w]=(cnt[w]||0)+1; }));
   let best=0,bn=-1;
   Object.keys(cnt).forEach(k=>{ const w=+k; if(cnt[w]>bn){ bn=cnt[w]; best=w; } });
@@ -1007,36 +1177,45 @@ function layoutDay(list){
   return items;
 }
 
-function renderRail(){
+/* 节次栏也参数化：全屏时行高按屏高算、并且多显示一列上课时间 */
+function renderRail(el,rowH,showTime){
   let h='<div class="pr" style="height:'+HEAD_H+'px"></div>';
-  for(let p=1;p<=PERIODS;p++) h+='<div class="pr">'+p+'</div>';
-  schedRail.innerHTML=h;
+  for(let p=1;p<=PERIODS;p++){
+    h+='<div class="pr" style="height:'+rowH+'px">'+p
+      +(showTime?'<span class="pt">'+P_TIME[p-1]+'</span>':'')+'</div>';
+  }
+  el.innerHTML=h;
 }
 
 function renderWkBar(){
   const bar=document.getElementById('wkBar'), tip=document.getElementById('wkTip');
   if(!bar) return;
-  const on=hasWeeks();
+  /* 有学期日期就一定能显示周次条（哪怕课还没导进来），这样"第几周/共几周"有地方看 */
+  const on=hasWeeks()||!!term;
   bar.hidden=!on; if(tip) tip.hidden=!on;
   if(!on) return;
-  const mx=maxWk(), sel=document.getElementById('wkSel');
+  const mx=viewWeeks(), sel=document.getElementById('wkSel'), now=wkNow();
   /* 手机上放不下"第 3 周 · 16 门"这么长的选项，缩成"第 3 周"，门数下面那行会写 */
   const narrow=window.matchMedia&&window.matchMedia('(max-width:560px)').matches;
   let h='';
   for(let w=1;w<=mx;w++){
     const n=wkCount(w);
-    h+='<option value="'+w+'"'+(w===curWk?' selected':'')+'>第 '+w+' 周'+(narrow?'':(' · '+(n?(n+' 门'):'没课')))+'</option>';
+    h+='<option value="'+w+'"'+(w===curWk?' selected':'')+'>第 '+w+' 周'
+      +(w===now?' · 本周':(narrow?'':(' · '+(n?(n+' 门'):'没课'))))+'</option>';
   }
   sel.innerHTML=h;
   document.getElementById('wkPrev').disabled=(curWk<=1);
   document.getElementById('wkNext').disabled=(curWk>=mx);
-  const now=wkNow(), btn=document.getElementById('wkThis');
-  btn.textContent = now>0 ? '本周' : '设本周';
-  btn.title = now>0 ? ('跳到第 '+now+' 周（现在这周）') : '把正在看的这周记为"本周"，以后自动跟着日期走';
+  const btn=document.getElementById('wkThis');
+  btn.title = now>0 ? ('跳到第 '+now+' 周（现在这周）') : '还没设学期，点一下填一次';
   if(tip){
-    tip.textContent = now>0
-      ? (now===curWk ? '日历上现在就是第 '+now+' 周。' : '日历上现在是第 '+now+' 周，点「本周」跳回去。')
-      : '第 '+curWk+' 周就是现在这周吗？点「设本周」记一次，以后打开自动跳到当前周。';
+    const st=termStartDate();
+    if(st){
+      tip.textContent='第 1 周从 '+mdLabel(st)+' 开始，一学期 '+termWeeks()+' 周。'
+        +(now===curWk?'日历上现在就是第 '+now+' 周。':('日历上现在是第 '+now+' 周，点「本周」跳回去。'));
+    } else {
+      tip.textContent='还不知道这学期哪天开学？点「学期」填一次（开学日期或「现在是第几周」都行），周次和日期就自动跟日历对齐。';
+    }
   }
   document.getElementById('wkModeWeek').classList.toggle('on',wkMode!=='all');
   document.getElementById('wkModeAll').classList.toggle('on',wkMode==='all');
@@ -1054,19 +1233,30 @@ function renderSched(){
   if(ov) renderOverview(); else drawWeek();
   const el=document.getElementById('cCount'); if(el) el.textContent='共 '+courses.length+' 门课';
   setHint();
+  if(fsOpen()) paintFull();        // 全屏开着的时候翻周/导入，全屏那张也得跟着变
 }
 
-function drawWeek(){
-  const bodyH=HEAD_H+PERIODS*ROW_H;
+/* 画一张周视图。railEl/daysEl 参数化，是为了同一套逻辑能同时画在页面里和全屏层里；
+   rowH 由调用方给：页面里 44，全屏里按屏高算。两份 DOM 永远由同一次渲染产出，不会各说各话。 */
+function paintWeek(railEl, daysEl, rowH, opt){
+  opt=opt||{};
+  const bodyH=HEAD_H+PERIODS*rowH;
   const showAll=!hasWeeks();          // 一条周次信息都没有：退回"全部画上"的老行为
   const list=showAll?courses:courses.filter(c=>inWk(c,curWk));
+  /* 今天那列只在"正在看本周"时标红：翻到第 3 周还标着红，会让人以为今天是第 3 周 */
+  const todayIdx=(wkNow()===curWk)?((new Date().getDay()+6)%7):-1;
+
+  renderRail(railEl,rowH,!!opt.time);
+
   let h='';
   for(let d=0;d<7;d++){
     const blocks=layoutDay(list.filter(c=>c.day===d));
+    const dd=dateOfCell(curWk,d);
+    const isToday=(d===todayIdx);
     let bh='';
     blocks.forEach(it=>{
       const c=it.c, s0=it.s0, sl=it.s1-it.s0+1, n=it.cols||1;
-      const top=HEAD_H+(s0-1)*ROW_H+1, hgt=sl*ROW_H-2, wPct=100/n;
+      const top=HEAD_H+(s0-1)*rowH+1, hgt=sl*rowH-2, wPct=100/n;
       const st='top:'+top+'px;height:'+hgt+'px;'
         +'left:calc('+(it.col*wPct).toFixed(4)+'% + 1px);width:calc('+wPct.toFixed(4)+'% - 2px);'
         +'background:'+c.color+'1f;border-color:'+c.color+';';
@@ -1079,10 +1269,12 @@ function drawWeek(){
         +(c.teacher?'<div class="bt">'+esc(c.teacher)+'</div>':'')
         +'</div>';
     });
-    h+='<div class="sched-day" style="height:'+bodyH+'px"><div class="dh">周'+DAYS[d]+'</div>'+bh+'</div>';
+    /* data-dd 交给 CSS ::after 画日期，不进 textContent（旧探针按「周一」对账，不能被污染） */
+    h+='<div class="sched-day'+(isToday?' today':'')+'" style="height:'+bodyH+'px">'
+      +'<div class="dh"'+(dd?(' data-dd="'+dd.getDate()+'"'):'')+'>周'+DAYS[d]+'</div>'+bh+'</div>';
   }
-  schedDays.innerHTML=h;
-  schedDays.querySelectorAll('.sched-block').forEach(b=>b.onclick=()=>{
+  daysEl.innerHTML=h;
+  daysEl.querySelectorAll('.sched-block').forEach(b=>b.onclick=()=>{
     const id=+b.dataset.id, c=courses.find(x=>x.id===id);
     if(!c) return;
     if(confirm('删除《'+c.name+'》'+(weeksOf(c).length?('（'+fmtWeeks(c)+'）'):'')+'？')){
@@ -1090,13 +1282,16 @@ function drawWeek(){
       saveSched(); clampWk(); renderSched();
     }
   });
+}
+function drawWeek(){
+  paintWeek(schedRail,schedDays,ROW_H,{});
   syncSchedFade();
 }
 
 /* 学期一览：一行一周、一列一天。手机上横滑（min-width 560），点周号跳回按周视图 */
 function renderOverview(){
   const wrap=document.getElementById('ovWrap'); if(!wrap) return;
-  const mx=maxWk(), now=wkNow();
+  const mx=viewWeeks(), now=wkNow();
   let h='<div class="ov-scroll"><table class="ov"><thead><tr><th class="ov-w"><span class="ov-wt">周</span></th>';
   for(let d=0;d<7;d++) h+='<th>周'+DAYS[d]+'</th>';
   h+='</tr></thead><tbody>';
@@ -1137,20 +1332,149 @@ document.querySelector('.sched').addEventListener('scroll',syncSchedFade,{passiv
 window.addEventListener('resize',syncSchedFade);
 
 /* 周次条交互 */
-function goWk(w){ const mx=maxWk(); curWk=Math.min(Math.max(+w||1,1),mx); saveWk(); renderSched(); }
+function goWk(w){ const mx=viewWeeks(); curWk=Math.min(Math.max(+w||1,1),mx); saveWk(); renderSched(); }
 document.getElementById('wkPrev').onclick=()=>{ if(curWk>1) goWk(curWk-1); };
-document.getElementById('wkNext').onclick=()=>{ if(curWk<maxWk()) goWk(curWk+1); };
+document.getElementById('wkNext').onclick=()=>{ if(curWk<viewWeeks()) goWk(curWk+1); };
 document.getElementById('wkSel').onchange=e=>goWk(e.target.value);
 document.getElementById('wkThis').onclick=()=>{
   const now=wkNow();
-  if(now>0){ goWk(now); }
-  else { wkAnchor={n:curWk,at:ymd(new Date())}; saveWk(); renderSched(); }
+  /* 没设学期就没有"本周"可跳：直接把学期设置弹出来，比留一个点了没反应的按钮强 */
+  if(now>0){ goWk(now); } else { openTerm(true); }
 };
 document.getElementById('wkModeWeek').onclick=()=>{ wkMode='week'; saveWk(); renderSched(); };
 document.getElementById('wkModeAll').onclick=()=>{ wkMode='all'; saveWk(); renderSched(); };
+
+/* ---------- 全屏：七天全摊一屏 ----------
+   手机上一屏只放得下 5 天（列宽下限 66px，不然课名被压成竖排），得横着滑。
+   参考用户给的日历 App：全屏时列宽自适应、行高按屏高算，七列一屏看全，
+   左边节次栏顺带标上课时间。全屏是"临时放大的同一张表"，不另存状态：
+   curWk 一变，renderSched() 末尾会把全屏这张一起重画。 */
+const fsEl=document.getElementById('fsSched');
+function fsOpen(){ return !!fsEl && !fsEl.hidden; }
+function openFull(){
+  if(!fsEl) return;
+  fsEl.hidden=false;
+  document.body.classList.add('fs-open');
+  paintFull();
+  const body=fsEl.querySelector('.fs-body'); if(body) body.scrollTop=0;
+}
+function closeFull(){
+  if(!fsEl) return;
+  fsEl.hidden=true;
+  document.body.classList.remove('fs-open');
+  syncSchedFade();
+}
+function paintFull(){
+  const box=document.getElementById('fsSched');
+  if(!box||box.hidden) return;
+  const body=box.querySelector('.fs-body');
+  /* ★ 顺序要紧：先把标题写好、再量高度。
+     标题从初始的「—」变成「10月29日，周四 + 第9周/共18周」，窄屏上顶栏会从一行变两行；
+     先量后写就少算 30px，表格底下溢出（360 宽实测溢 24px）。 */
+  const t=document.getElementById('fsDate');
+  if(t){
+    const now=wkNow(), isNow=(now===curWk), d=new Date();
+    const s0=dateOfCell(curWk,0), e0=dateOfCell(curWk,6);
+    let label;
+    if(isNow) label=mdLabel(d)+'，周'+DAYS[(d.getDay()+6)%7];
+    else if(s0&&e0) label=mdLabel(s0)+' - '+mdLabel(e0);
+    else label='第 '+curWk+' 周';
+    /* 没填学期时“共几周”是假数字（只有 1 周），干脆写「未设学期」，别报个假总周数 */
+    t.innerHTML=esc(label)+(term?('<em>第 '+curWk+' 周 / 共 '+viewWeeks()+' 周</em>'):'<em>未设学期</em>');
+  }
+  /* 行高按可用高度算：12 节要塞进一屏，还得留住"最小 34px 一行"的可读性；
+     塞不下就让 .fs-body 纵向滚（横屏手机），绝不把字压成一条线。
+     用小数行高而不是取整：取整后 12 节加起来比可用高度少一截，卡片底下会留一条空。 */
+  const avail=(body&&body.clientHeight)||0;
+  let rowH=Math.round(((avail-HEAD_H-14)/PERIODS)*10)/10;
+  rowH=Math.max(34,Math.min(rowH||ROW_H,86));
+  paintWeek(document.getElementById('fsRail'),document.getElementById('fsDays'),rowH,{time:true});
+  document.getElementById('fsPrev').disabled=(curWk<=1);
+  document.getElementById('fsNext').disabled=(curWk>=viewWeeks());
+}
+document.getElementById('wkModeFull').onclick=openFull;
+document.getElementById('fsClose').onclick=closeFull;
+document.getElementById('fsPrev').onclick=()=>{ if(curWk>1) goWk(curWk-1); };
+document.getElementById('fsNext').onclick=()=>{ if(curWk<viewWeeks()) goWk(curWk+1); };
+document.getElementById('fsThis').onclick=()=>{ const n=wkNow(); if(n>0) goWk(n); else openTerm(true); };
+window.addEventListener('keydown',e=>{ if(e.key==='Escape'&&fsOpen()) closeFull(); });
+
+/* ---------- 学期设置 ---------- */
+const tModal=document.getElementById('tModal');
+const tMsgEl=document.getElementById('tMsg');
+function tMsg(t,ok){ if(!tMsgEl) return; tMsgEl.textContent=t||''; tMsgEl.style.color=ok?'var(--success-ink)':'var(--red-ink)'; }
+function openTerm(first){
+  if(!tModal) return;
+  const st=termStartDate(), now=wkNow();
+  document.getElementById('tStart').value=st?ymd(st):'';
+  /* 已经填过就把它反显出来，用户只想改总周数时不用重新想一遍 */
+  document.getElementById('tNowWk').value=st?String(now):'';
+  document.getElementById('tWeeks').value=String(term?termWeeks():20);
+  document.getElementById('tLater').textContent=first?'稍后再说':'取消';
+  tMsg('');
+  tModal.hidden=false;
+  document.body.classList.add('cmodal-open');
+  setTimeout(()=>{ try{ (first?document.getElementById('tNowWk'):document.getElementById('tStart')).focus(); }catch(e){} },80);
+}
+function closeTerm(skip){
+  if(!tModal) return;
+  tModal.hidden=true;
+  document.body.classList.remove('cmodal-open');
+  if(skip){ termPrompted=true; saveTerm(); renderWkBar(); }
+}
+function saveTermForm(){
+  const nowV=+document.getElementById('tNowWk').value;
+  const startV=document.getElementById('tStart').value;
+  const w=Math.min(Math.max(+document.getElementById('tWeeks').value||20,1),30);
+  let st=null;
+  if(nowV>0){
+    /* 用户只知道"现在第几周"：把今天所在那周的周一往前推 (nowV-1) 周，就是第 1 周周一 */
+    st=mondayOf(new Date());
+    st.setDate(st.getDate()-(nowV-1)*7);
+  } else if(startV){
+    const d=new Date(startV+'T00:00:00');
+    if(isNaN(d.getTime())){ tMsg('开学日期看不懂，用日历选一天。',false); return; }
+    st=mondayOf(d);
+  }
+  if(!st){ tMsg('填开学日期，或者告诉我"今天是第几周"，填一个就行。',false); return; }
+  if(nowV>w){ tMsg('「今天是第 '+nowV+' 周」已经超过一学期 '+w+' 周了，检查一下总周数。',false); return; }
+  const probe={start:ymd(st),weeks:w};
+  const old=term; term=probe;
+  const now=wkNow();
+  if(now<1||now>w){
+    term=old;
+    tMsg('按这个开学日期算，今天落在第 '+now+' 周，不在 1-'+w+' 周里。检查一下日期，或者直接填"今天是第几周"。',false);
+    return;
+  }
+  termPrompted=true;
+  saveTerm();
+  curWk=now;                       // 填完立刻站到"今天那周"
+  saveWk(); closeTerm(false); renderSched();
+}
+document.getElementById('wkTerm').onclick=()=>openTerm(false);
+document.getElementById('tX').onclick=()=>closeTerm(true);
+document.getElementById('tLater').onclick=()=>closeTerm(true);
+document.getElementById('tSave').onclick=saveTermForm;
+if(tModal) tModal.querySelectorAll('[data-close]').forEach(el=>el.onclick=()=>closeTerm(true));
+/* 两个输入互斥：填了开学日期就不该再留着"今天是第几周"，反之亦然 */
+document.getElementById('tStart').onchange=()=>{ document.getElementById('tNowWk').value=''; };
+document.getElementById('tNowWk').oninput=()=>{ document.getElementById('tStart').value=''; };
+/* 有课、没填过学期、人正看着课表：问一次。问过（点了稍后/保存）就不再烦 */
+function maybeAskTerm(){
+  if(term||termPrompted) return;
+  if(!courses.length) return;
+  const sec=document.getElementById('conflict');
+  if(!sec||!sec.classList.contains('active')) return;
+  openTerm(true);
+}
+
 /* 手机/桌面横竖屏切换时选项文案会变长短（窄屏不写"· 16 门"），重画一次周次条 */
 let wkRzT=null;
 window.addEventListener('resize',()=>{ clearTimeout(wkRzT); wkRzT=setTimeout(renderWkBar,180); });
+/* 全屏那张表的高度依赖屏高，横竖屏切换必须重算行高，否则不是压扁就是留一大条空白 */
+let fsRzT=null;
+window.addEventListener('resize',()=>{ clearTimeout(fsRzT); fsRzT=setTimeout(()=>{ if(fsOpen()) paintFull(); },150); });
+window.addEventListener('orientationchange',()=>{ setTimeout(()=>{ if(fsOpen()) paintFull(); },260); });
 function importSchedule(jsonText){
   let data;
   try{ data=JSON.parse(jsonText); }catch(e){ return 'JSON 格式有误：'+e.message; }
@@ -1172,7 +1496,13 @@ function importSchedule(jsonText){
   /* 刚导进来的课如果不在当前看的那一周（比如他停在第 1 周，课从第 2 周才开始），
      直接跳到有课的那周，别让人以为没导进来。
      ★ 只看"带周次的课"：没写周次的课（示例/手动添加）每周都画，不能拿它们当"这周有课"。 */
-  if(hasWeeks() && !courses.some(c=>weeksOf(c).length&&inWk(c,curWk))){ curWk=defaultWk(); clampWk(); }
+  /* 导完直接站到"今天那周"：有学期就精算，没有就退回"有课且最近的一周"。
+     用户的原话是"导入课表后自动跳转到对应的周的那一天"。 */
+  const _now=wkNow();
+  if(_now>0){ curWk=Math.min(Math.max(_now,1),viewWeeks()); }
+  else if(hasWeeks() && !courses.some(c=>weeksOf(c).length&&inWk(c,curWk))){ curWk=defaultWk(); clampWk(); }
+  /* 有课但还没填学期：导完顺手问一次，填完立刻能标上日期和今天 */
+  setTimeout(maybeAskTerm,160);
   renderSched(); saveSched(); saveWk();
   if(!n) return dup?('这 '+dup+' 门已经在课表里了，没有新增。'):'没解析到有效课程，请检查 name / dayOfWeek / sections 字段。';
   return '已导入 '+n+' 门课程'+(dup?('（跳过重复 '+dup+' 门）'):'')+'，已存在这台设备上。';
@@ -1273,17 +1603,25 @@ document.getElementById('cClear').onclick=()=>{
 };
 
 /* 首次进来才放示例课；之后一律读本机存的（哪怕用户把它清空了，也不再塞回来） */
-renderRail();
+renderRail(schedRail,ROW_H,false);
 if(!loadSched()){
   addCourse({name:'高等数学',dayOfWeek:1,sections:[1,2],classroom:'教三-201',teacher:'张教授'},{silent:true});
   addCourse({name:'大学英语',dayOfWeek:3,sections:[3,4],classroom:'外语楼-305'},{silent:true});
   addCourse({name:'数据结构',dayOfWeek:5,sections:[5,6],classroom:'机房-A'},{silent:true});
   cSample=true; saveSched();
 }
+loadTerm();
 loadWk();
-if(!wkStored) curWk=defaultWk();
+/* ★ 有学期就每次打开都站"今天那周"：用户抱怨的就是「一进来停在第 3 周」。
+   记住上次翻到第几周听着贴心，实际是灾难 —— 昨天翻到第 12 周，今天打开看到的
+   是没有今天的表，日期也没有一列标红，他只会觉得"又不对了"。
+   没学期时才退回老规则（记上次看到的周 / 挑有课的一周）。 */
+if(termStartDate()) curWk=wkNow();
+else if(!wkStored) curWk=defaultWk();
 clampWk();
 renderSched();
+/* 打开就落在课表页签时（比如直接从 /tools.html#conflict 进来）也问一次 */
+if(document.getElementById('conflict').classList.contains('active')) setTimeout(maybeAskTerm,420);
 
 /* ---------- 单词卡 ----------
  *
