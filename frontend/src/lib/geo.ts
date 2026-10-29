@@ -11,10 +11,29 @@
 export interface GeoPoint {
   lat?: number;
   lon?: number;
+  /** 地级市，已去掉末尾「市」（「茂名」） */
   city?: string;
+  /** 区/县（「茂南区」「电白区」「化州市」）。只有浏览器定位拿得到；
+   *  IP 兜底是高德城市级数据，这里**永远为空** —— 不给假精度 */
+  district?: string;
   /** 定位来源：browser = 浏览器（精确）；ip = 服务端按 IP 推断（城市级） */
   source?: "browser" | "ip";
   ts: number;
+}
+
+/**
+ * 两级地名：「茂名 · 茂南区」。
+ *
+ * 为什么两级都显示：区县名对本地人很清楚，但重名和生僻的也不少
+ * （「新兴县」「电白区」），只给区名有人反而不知道自己在哪；
+ * 只给市名又回到"看不出定位准不准"的老问题。中间点一颗 · 就够。
+ */
+export function formatPlace(p: { city?: string; district?: string } | null | undefined): string {
+  if (!p) return "";
+  const city = (p.city || "").trim();
+  const district = (p.district || "").trim();
+  if (city && district && city !== district) return `${city} · ${district}`;
+  return district || city;
 }
 
 const ENABLED_KEY = "baomi.geo.enabled";
@@ -43,10 +62,12 @@ export function getCachedGeo(): GeoPoint | null {
     if (!s) return null;
     const g = JSON.parse(s) as GeoPoint;
     if (!g) return null;
-    // IP 定位只有城市名没有坐标，所以「有坐标」和「有城市名」满足其一即可
+    // IP 定位只有城市名没有坐标，所以「有坐标」和「有地名」满足其一即可
     const hasXY = typeof g.lat === "number" && typeof g.lon === "number";
-    const hasCity = typeof g.city === "string" && g.city.length > 0;
-    if (!hasXY && !hasCity) return null;
+    const hasName =
+      (typeof g.city === "string" && g.city.length > 0) ||
+      (typeof g.district === "string" && g.district.length > 0);
+    if (!hasXY && !hasName) return null;
     if (Date.now() - (g.ts || 0) > TTL) return null;
     return g;
   } catch {
@@ -105,9 +126,12 @@ export async function requestIpGeo(): Promise<GeoPoint | null> {
     };
     // 接口失败时不抛异常，只回 ok=false（原因在 reason 字段），这里统一当没定位到
     if (!d.ok) return null;
-    const city = d.city || d.province || "";
-    if (!city) return null;
-    const g: GeoPoint = { city, source: "ip", ts: Date.now() };
+    // 与 reverseGeocodePlace 保持一致，去掉末尾「市」：
+    // 否则浏览器定位显示「茂名」、IP 兜底显示「茂名市」，同一处角标两种写法，
+    // 用户会以为定位在两套系统之间反复横跳
+    const raw = (d.city || d.province || "").trim().replace(/市$/, "");
+    if (!raw) return null;
+    const g: GeoPoint = { city: raw, source: "ip", ts: Date.now() };
     cacheGeo(g);
     return g;
   } catch {
@@ -145,27 +169,47 @@ export function getSendGeo(): { lat?: number; lon?: number; city?: string } | nu
     out.lat = g.lat;
     out.lon = g.lon;
   }
+  /* ⚠️ 这里只送**市级**，不带区县，尽管缓存里有 district。
+     原因在 agent/builder.py::location_note —— 它会把 city 原样拼成
+     `get_weather(city='{city}')` 写进 system prompt。若这里送「茂名 · 茂南区」，
+     模型就会拿这个带分隔符的串去查高德地理编码，必然解析不到城市。
+     真精度靠 lat/lon（Open-Meteo 按坐标查，1~11km 网格），区县只用于展示。 */
   if (g.city) out.city = g.city;
   return Object.keys(out).length ? out : null;
 }
 
-/** 把解析到的城市名写回本地缓存（让角标/提示能显示当前城市）。 */
-export function updateCachedCity(city: string): void {
+/** 把逆地理解析到的市/区县写回本地缓存（让角标/提示能显示当前位置）。 */
+export function updateCachedPlace(place: { city?: string; district?: string }): void {
   const g = getCachedGeo();
   if (!g) return;
-  g.city = city;
+  if (place.city) g.city = place.city;
+  g.district = place.district || "";
   cacheGeo(g);
 }
 
 // 免 Key、支持 CORS 的客户端逆地理服务（高德逆地理只在后端用，不回传前端）。
-// 仅用于界面角标展示当前城市，失败不影响定位本身。
+// 仅用于界面角标展示当前城市/区县，失败不影响定位本身。
 const REVERSE_URL = "https://api.bigdatacloud.net/data/reverse-geocode-client";
 
-/** 坐标 -> 中文城市名（如「杭州市」），网络失败返回 null。 */
-export async function reverseGeocodeCity(
+/** 比区县还细的行政级别：乡镇/村/社区/街道。显示出来用户反倒不知道在哪，一律不用 */
+const TOO_FINE = /(村|社区|街道|镇|乡)$/;
+
+/**
+ * 坐标 → 市 + 区县。网络失败返回 null。
+ *
+ * ⚠️ 取值顺序踩过坑：这个接口同时给 `city`（地级市）和 `locality`（区县），
+ * 原来写 `city || locality || ...`，`city` 在前 ⇒ **区县名永远取不到**，
+ * 角标只显示「茂名市」。实测同一坐标返回 city=茂名市 / locality=茂南区
+ * / administrative[adminLevel=6].name=茂南区，能力一直有，是被这行顺序吃掉的。
+ *
+ * 现在优先从 `localityInfo.administrative` 里挑 adminLevel=6 的那一级
+ * （= 区县级，`chinaAdminCode` 到这里是三段），比盲取 `locality` 稳：
+ * 直辖市的 `city` 常为空，而 locality 有时会一路细到街道。
+ */
+export async function reverseGeocodePlace(
   lat: number,
   lon: number
-): Promise<string | null> {
+): Promise<{ city: string; district: string } | null> {
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 8000);
@@ -179,9 +223,33 @@ export async function reverseGeocodeCity(
       city?: string;
       locality?: string;
       principalSubdivision?: string;
+      localityInfo?: {
+        administrative?: { name?: string; adminLevel?: number; chinaAdminCode?: string }[];
+      };
     };
-    const raw = data.city || data.locality || data.principalSubdivision || "";
-    return raw ? raw.replace(/市$/, "") : null;
+
+    const rawCity = (data.city || data.principalSubdivision || "").trim();
+    const city = rawCity.replace(/市$/, "");
+
+    let district = "";
+    const adm = data.localityInfo?.administrative;
+    if (Array.isArray(adm)) {
+      // 取 adminLevel 最大的那一级里「最像区县」的：6 = 区/县，7 往往已是街道
+      const lv = adm
+        .filter((x) => x && typeof x.name === "string" && x.name.trim())
+        .filter((x) => x.adminLevel === 6)
+        .pop();
+      if (lv?.name) district = lv.name.trim();
+    }
+    if (!district) {
+      const loc = (data.locality || "").trim();
+      if (loc && !TOO_FINE.test(loc)) district = loc;
+    }
+    // 县级市会出现 city=district=「义乌市」：重复就只留一个
+    if (district && (district === rawCity || district === city)) district = "";
+
+    if (!city && !district) return null;
+    return { city, district };
   } catch {
     return null;
   }

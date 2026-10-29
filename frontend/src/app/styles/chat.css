@@ -184,11 +184,14 @@
   transform-origin: 50% 50%;
 }
 
-/* 输入框上方的定位状态角标：开启后才出现，提示当前城市 */
+/* 输入框上方的定位状态角标：开启后才出现，提示当前城市/区县 */
 .geo-badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  /* 地名升级成两级（「茂名 · 茂南区」）后比原来长，390 屏要把最大宽度锁死，
+     否则长区名 + 「定位已开启 · 当前」前缀会把这一行顶出屏幕 */
+  max-width: 100%;
   margin-bottom: 8px;
   padding: 3px 10px 3px 8px;
   border-radius: 999px;
@@ -198,6 +201,11 @@
   line-height: 1.4;
   letter-spacing: var(--ls-mid);
   border: 1px solid var(--fill-3);
+}
+/* 图标不参与压缩，文字可以用掉剩下的宽度并允许折行 */
+.geo-badge > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .geo-badge svg {
   width: 13px;

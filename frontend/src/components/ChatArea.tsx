@@ -919,7 +919,10 @@ export default function ChatArea({
               <circle cx="12" cy="10" r="2.6" />
             </svg>
             <span>
-              {geoCity ? `定位已开启 · 当前 ${geoCity}` : "定位已开启"}
+              {/* geoCity 由上层用 formatPlace() 拼成两级：「茂名 · 茂南区」。
+                  前缀用逗号而不是「·」：否则一行里出现两个间隔点
+                  （定位已开启 · 当前在 茂名 · 茂南区），读起来像标点没打完 */}
+              {geoCity ? `定位已开启，当前在 ${geoCity}` : "定位已开启"}
             </span>
           </div>
         )}
