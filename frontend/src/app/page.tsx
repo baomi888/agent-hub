@@ -12,7 +12,7 @@ import { api } from "@/lib/api";
 import { streamChat } from "@/lib/sse";
 import { uid } from "@/lib/id";
 import { useToast } from "@/lib/hooks/useToast";
-import { getSendGeo, getCachedGeo, isGeoEnabled, acquireGeo, reverseGeocodeCity, setGeoEnabled, updateCachedCity } from "@/lib/geo";
+import { getSendGeo, getCachedGeo, isGeoEnabled, acquireGeo, reverseGeocodePlace, setGeoEnabled, updateCachedPlace, formatPlace } from "@/lib/geo";
 import { usePrefs } from "@/lib/hooks/usePrefs";
 import { useSessions } from "@/lib/hooks/useSessions";
 import { useKnowledge } from "@/lib/hooks/useKnowledge";
@@ -137,8 +137,8 @@ export default function Home() {
   const [sending, setSending] = useState(false);
   // 地理定位开关：开启后发送消息自动附带坐标，天气/本地问答免手输城市
   const [geoEnabled, setGeoEnabledState] = useState(isGeoEnabled());
-  // 当前定位城市（角标展示用）；从缓存里读出，避免刷新后角标丢失城市名
-  const [geoCity, setGeoCity] = useState<string | null>(() => getCachedGeo()?.city ?? null);
+  // 当前定位地名（角标展示用）；从缓存里读出，避免刷新后角标丢失。两级：「茂名 · 茂南区」
+  const [geoCity, setGeoCity] = useState<string | null>(() => formatPlace(getCachedGeo()) || null);
   // 定位请求进行中：授权弹窗 + IP 兜底最长 18s，期间按钮转圈，否则看着像没反应
   const [geoPending, setGeoPending] = useState(false);
   // 场景预设（scenario state + localStorage 随会话保存）已随「场景选择撤出
@@ -520,28 +520,34 @@ export default function Home() {
       );
       return;
     }
-    // IP 定位直接带城市名；浏览器定位只有坐标，要逆地理补一下（仅角标展示用，失败不影响）
-    let city: string | null = r.geo.city ?? null;
-    if (!city && typeof r.geo.lat === "number" && typeof r.geo.lon === "number") {
+    // IP 定位只有市级名（高德 IP 接口的上限）；浏览器定位只有坐标，
+    // 要逆地理补出「市 + 区县」——仅角标展示用，失败不影响定位本身。
+    // ★ 区县只用于**展示**，绝不进 getSendGeo 的 city 字段：
+    //   agent/builder.py 会把它拼成 get_weather(city='...')，带「·」的串查不到城市。
+    let place: { city: string; district: string } | null = null;
+    if (r.geo.city) {
+      place = { city: r.geo.city, district: "" }; // IP 兜底：城市级就到此为止，不编区县
+    } else if (typeof r.geo.lat === "number" && typeof r.geo.lon === "number") {
       try {
-        city = await reverseGeocodeCity(r.geo.lat, r.geo.lon);
+        place = await reverseGeocodePlace(r.geo.lat, r.geo.lon);
       } catch {
-        city = null;
+        place = null;
       }
     }
-    if (city) {
-      updateCachedCity(city);
-      setGeoCity(city);
+    const label = formatPlace(place);
+    if (place) {
+      updateCachedPlace(place);
+      setGeoCity(label || null);
     }
     setGeoEnabled(true);
     setGeoEnabledState(true);
     setGeoPending(false);
     showToast(
       "success",
-      city
+      label
         ? r.source === "ip"
-          ? `已按 IP 定位到${city}（城市级），问天气无需再输城市`
-          : `定位已开启（${city}），问天气无需再输城市`
+          ? `已按 IP 定位到${label}（城市级），问天气无需再输城市`
+          : `定位已开启（${label}），问天气无需再输城市`
         : "定位已开启，问天气无需再输城市"
     );
   };
