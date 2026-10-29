@@ -175,6 +175,10 @@
   align-items: center;
   gap: var(--space-4);
   margin-top: 8px;
+  /* 390px 的屏上「复制 / 转发 / 重试 / 删除」+ 点赞点踩一行放不下，
+     原来不换行就顶出容器（被 overflow 裁掉一半，看着像画幅歪了）。
+     窄屏换行比裁掉好：多一行也不影响阅读。 */
+  flex-wrap: wrap;
   opacity: 0;
   transform: translateY(-3px);
   pointer-events: none;

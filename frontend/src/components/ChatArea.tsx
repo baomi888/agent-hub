@@ -590,7 +590,10 @@ export default function ChatArea({
 
       {/* 消息区 */}
       <div className="relative min-h-0 flex-1">
-        <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto">
+        {/* overflow-x-hidden 是兜底：一长串不可断的字符（文件名、URL、表格）
+            只要把子元素顶宽，移动端整页就能横向拖动、观感像“画幅歪了”。
+            宁可在这里裁掉，也不许把文档撑宽。 */}
+        <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto overflow-x-hidden">
           <div className="chat-measure mx-auto flex min-h-full flex-col px-6 pb-4 pt-6">
           {messages.length === 0 ? (
             // 欢迎页：主路径是「直接问」，首屏摆两块——

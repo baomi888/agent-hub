@@ -219,25 +219,70 @@
     font-family:var(--font-sans);font-size:var(--fs-xs);line-height:1.7;color:var(--ink);white-space:pre-wrap;word-break:break-word;
     max-height:280px;overflow:auto;margin:0;}
 
-  /* 课程表 · 仿小律周视图 */
-  .sched{display:flex;gap:5px;margin-top:6px;border:1px solid var(--line);border-radius:var(--radius-md);padding:8px;background:var(--bg-canvas);overflow-x:auto;}
-  .sched-rail{flex:0 0 30px;display:flex;flex-direction:column;}
+  /* 课程表 · 仿小律周视图
+     ── 10-29 重排。原来列宽下限只有 40px，中文课名一行只放得下 3 个字，
+        「大学生创新创业基础」被压成 5 行竖排、教室名再挤一节，看着就是乱码。
+        现在：列宽下限 66px（一行 5 个字）+ 最长两行 + 超出打省略号；
+        单节课块（44px）只留课名，不去硬塞教室和老师。
+        放不下就横向滑（教务 App 都这么干），绝不把字挤成竖排。
+        ★ 66px 是实测出来的下限：58px 时"大学生创新创业基础"仍会被折成
+          「大学生 / 创新…」，66px 才够 5 字一行、9 字课名正好两行放完。 */
+  .sched-wrap{position:relative;margin-top:6px;}
+  /* 右边缘一道渐隐：手机上一屏放不下 7 天，没有这道影子就没人知道能往右滑 */
+  .sched-wrap::after{content:"";display:none;position:absolute;top:1px;right:1px;width:22px;bottom:1px;pointer-events:none;
+    border-radius:0 var(--radius-md) var(--radius-md) 0;
+    background:linear-gradient(90deg,transparent,var(--bg-canvas) 82%);}
+  .sched-wrap.can-scroll::after{display:block;}
+  .sched-wrap.at-end::after{display:none;}
+  .sched{display:flex;gap:5px;margin-top:0;border:1px solid var(--line);border-radius:var(--radius-md);
+    padding:6px;background:var(--bg-canvas);overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;}
+  /* 节次栏吸左：横向滑动看后面的星期时，第几节还留在视野里 */
+  .sched-rail{flex:0 0 26px;display:flex;flex-direction:column;position:sticky;left:0;z-index:3;background:var(--bg-canvas);}
   .sched-rail .pr{height:44px;display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:10px;}
-  .sched-days{flex:1;display:grid;grid-template-columns:repeat(7,minmax(40px,1fr));gap:5px;min-width:330px;}
+  .sched-days{flex:1;display:grid;grid-template-columns:repeat(7,minmax(66px,1fr));gap:4px;min-width:462px;}
   .sched-day{position:relative;background:var(--card-bg);border:1px solid var(--line);border-radius:8px;overflow:hidden;}
   .sched-day .dh{position:absolute;top:0;left:0;right:0;height:22px;text-align:center;color:var(--text-3);
     font-size:10px;font-weight:600;line-height:22px;background:var(--fill-2);z-index:2;}
-  .sched-block{position:absolute;left:2px;right:2px;border-radius:6px;padding:3px 4px;overflow:hidden;cursor:pointer;
-    border-left:3px solid;transition:var(--t-color);box-shadow:var(--shadow-1);}
+  /* 左右各让 1px、竖线 2px、内边距 4px：把省下的 5px 全给文字。
+     66px 的列减去这些还剩 54px，10px 字号正好一行 5 个汉字——
+     "大学生创新创业基础" 9 个字两行放得下，不再出现「大学生创 / 新创业…」 */
+  .sched-block{position:absolute;left:1px;right:1px;border-radius:6px;padding:3px 4px;overflow:hidden;cursor:pointer;
+    border-left:2px solid;transition:var(--t-color);box-shadow:var(--shadow-1);
+    display:flex;flex-direction:column;min-height:0;}
   .sched-block:hover{filter:brightness(.96);}
-  .sched-block .bn{font-weight:600;font-size:10px;line-height:1.15;color:var(--ink);}
-  .sched-block .br{font-size:9px;color:var(--text-2);line-height:1.1;margin-top:1px;}
-  .sched-block .bt{font-size:9px;color:var(--text-3);line-height:1.1;margin-top:1px;}
+  .sched-block .bn{font-weight:600;font-size:10px;line-height:1.25;color:var(--ink);
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;}
+  .sched-block .br,.sched-block .bt{font-size:9px;line-height:1.2;margin-top:1px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .sched-block .br{color:var(--text-2);}
+  .sched-block .bt{color:var(--text-3);}
+  /* 单节课块只有 44px：课名一行 + 教室一行正好填满，老师那行留着就会被裁掉半截 */
+  .sched-block.one .bn{-webkit-line-clamp:1;}
+  .sched-block.one .bt{display:none;}
 
-  /* JSON 导入面板（小律同款） */
-  .import-panel{border:1px dashed var(--accent);border-radius:var(--radius-md);padding:14px;margin:12px 0;background:var(--accent-soft);}
-  .import-head{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
-  .import-panel textarea{min-height:96px;}
+  /* 导入弹窗里的 JSON 框：够高看到整段，又不至于把弹窗顶出屏幕 */
+  #cJson{min-height:110px;max-height:34vh;}
+  body.cmodal-open{overflow:hidden;}
+
+  /* 导入课表弹窗：入口收进「本周课表」右上角，粘 JSON / 选文件 / 复制提示词都在里面 */
+  .cmodal{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;padding:16px;}
+  .cmodal[hidden]{display:none;}
+  .cmodal-mask{position:absolute;inset:0;background:rgba(46,36,22,.42);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);}
+  .cmodal-card{position:relative;width:100%;max-width:520px;max-height:calc(100dvh - 32px);overflow-y:auto;
+    background:var(--card-bg);border:1px solid var(--line-strong);border-radius:var(--radius-lg);
+    box-shadow:0 18px 48px rgba(46,36,22,.28);padding:18px 18px 16px;}
+  .cmodal-head{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+  .cmodal-head h3{font-family:var(--font-serif);font-size:var(--fs-xl);margin:0;flex:1;letter-spacing:var(--ls-tight);}
+  .cmodal-guide{margin-top:14px;border-top:1px dashed var(--line-strong);padding-top:10px;}
+  .cmodal-guide summary{font-size:var(--fs-sm);color:var(--accent-ink);cursor:pointer;letter-spacing:var(--ls-tight);}
+  .cmodal-guide .guide-h{margin:10px 0 6px;}
+  #cImportMsg{font-size:var(--fs-sm);margin-top:8px;line-height:1.6;min-height:1.2em;}
+
+  /* iOS Safari 聚焦字号 <16px 的输入框会把整页放大，且失焦不还原（10-29 实测）。
+     本页输入框是 13px，落在雷区里；移动端一律抬到 16px，别让人打一次字画幅就变。 */
+  @media (max-width:900px){
+    input:not([type=checkbox]):not([type=radio]),textarea,select{font-size:16px !important;}
+  }
 
   /* 抽签 · 群抽签 */
   textarea{width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);
@@ -387,18 +432,65 @@
 
   <!-- ===== 课程表（仿小律 · 周视图 + 小律同款 JSON 导入） ===== -->
   <section class="tool" id="conflict">
+    <!-- 周视图放最前：这才是用户打开「课程表」想看的东西。
+         原来第一屏是教程 + JSON 面板 + 手动添加，手机上要滑过三屏才看到课表（10-29 反馈）。
+         导入收进右上角一颗按钮，其余都进弹窗。 -->
     <div class="card">
-      <div class="row-head"><div><div class="eyebrow">课表</div><h2 class="serif">我的课程表</h2></div></div>
-      <p class="note" style="margin-top:0">仿小律课程的极简周视图。两种录入方式：① 把教务导出的课表文本丢给 <b>知穗 AI</b>，让它生成标准 JSON 粘进来一键导入（见下方教程）；② 在「添加一门课」里手动填。</p>
-
-      <!-- 教程：用 AI 生成课表 JSON -->
-      <div class="guide">
-        <div class="guide-h">
-          <span class="eyebrow">教程</span>
-          <span style="flex:1"></span>
-          <button class="btn-import btn-sm" id="copyPrompt">复制提示词</button>
+      <div class="row-head">
+        <div><div class="eyebrow">周视图</div><h2 class="serif">本周课表</h2></div>
+        <button class="btn-new btn-sm" id="cOpenImport" type="button">导入课表</button>
+      </div>
+      <div class="sched-wrap">
+        <div class="sched">
+          <div class="sched-rail" id="schedRail"></div>
+          <div class="sched-days" id="schedDays"></div>
         </div>
-        <p class="note" style="margin:0 0 8px">把下面这段提示词，连同一份你的课表（教务导出文字 / 截图转文字 / 手写都行）一起发给知穗 AI，它会返回标准 JSON；再把 JSON 粘到「导入」框即可。</p>
+      </div>
+      <p class="note" id="cHint">点任意课块可删除该课程。课块按节次高度自动拉伸；格子放不下时左右滑。</p>
+    </div>
+
+    <div class="card">
+      <div class="row-head"><div><div class="eyebrow">手动</div><h2 class="serif">添加一门课</h2></div></div>
+      <div class="add-row" style="align-items:flex-end">
+        <div style="flex:1.4;min-width:120px"><input id="cName" placeholder="课程名，如：高等数学" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
+        <div style="flex:1;min-width:84px"><select id="cDay" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit">
+          <option value="1">周一</option><option value="2">周二</option><option value="3">周三</option><option value="4">周四</option><option value="5">周五</option><option value="6">周六</option><option value="7">周日</option>
+        </select></div>
+        <div style="flex:1.2;min-width:104px"><input id="cSec" placeholder="节次，如 1,2 或 1-3" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
+        <div style="flex:1;min-width:84px"><input id="cRoom" placeholder="教室(可选)" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
+        <div style="flex:1;min-width:84px"><input id="cTeach" placeholder="老师(可选)" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
+        <button class="btn-new btn-sm" id="cAdd" type="button">添加</button>
+      </div>
+      <div class="add-row" style="margin-top:8px;align-items:center">
+        <button class="btn-import btn-sm" id="cClear" type="button">清空课表</button>
+        <span id="cCount" class="note" style="margin:0"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 导入课表弹窗（从「本周课表」右上角打开） ===== -->
+  <div class="cmodal" id="cModal" hidden>
+    <div class="cmodal-mask" data-close="1"></div>
+    <div class="cmodal-card" role="dialog" aria-modal="true" aria-labelledby="cModalTitle">
+      <div class="cmodal-head">
+        <h3 id="cModalTitle">导入课表</h3>
+        <button class="icon-btn" id="cModalX" type="button" aria-label="关闭导入">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg>
+        </button>
+      </div>
+      <p class="note" style="margin:0 0 10px">把知穗 AI 整理好的 JSON 粘进来，或者选一个 <b>.json</b> 文件。课名 + 星期 + 节次都相同的课不会重复导入。</p>
+      <textarea id="cJson" placeholder='粘贴形如 {"courses":[{&quot;name&quot;:&quot;高等数学&quot;,&quot;dayOfWeek&quot;:1,&quot;sections&quot;:[1,2]}]} 的 JSON'></textarea>
+      <div class="add-row" style="align-items:center">
+        <button class="btn-new btn-sm" id="cImport" type="button">导入</button>
+        <button class="btn-import btn-sm" id="cFileBtn" type="button">选文件…</button>
+        <input type="file" id="cFile" accept=".json,.txt,application/json,text/plain" hidden />
+        <button class="btn-import btn-sm" id="cSample" type="button">填示例</button>
+        <button class="btn-import btn-sm" id="cExport" type="button">导出我的课表</button>
+      </div>
+      <div id="cImportMsg" role="status" aria-live="polite"></div>
+      <details class="cmodal-guide">
+        <summary>手上还没有课表草稿？点开复制这段提示词去问知穗 AI</summary>
+        <div class="guide-h"><span style="flex:1"></span><button class="btn-import btn-sm" id="copyPrompt" type="button">复制提示词</button></div>
         <pre class="prompt" id="promptBox">你是一个课程表整理助手。请把我给的课表整理成如下 JSON，只输出 JSON、不要解释：
 
 {
@@ -417,51 +509,9 @@
 
 我的课表如下：
 （把教务导出 / 截图转文字 / 手写的课表粘贴到这里）</pre>
-      </div>
-
-      <!-- JSON 导入面板 -->
-      <div class="import-panel">
-        <div class="import-head">
-          <span class="eyebrow">小律同款 · JSON 导入</span>
-          <span style="flex:1"></span>
-          <button class="btn-import btn-sm" id="cSample">下载示例</button>
-          <button class="btn-import btn-sm" id="cExport">导出我的课表</button>
-        </div>
-        <textarea id="cJson" placeholder="把 AI 生成的课程表 JSON 粘贴到这里，点「导入」即可。"></textarea>
-        <div class="add-row" style="align-items:center">
-          <button class="btn-new btn-sm" id="cImport">导入</button>
-          <span id="cImportMsg" class="note" style="margin:0"></span>
-        </div>
-      </div>
+      </details>
     </div>
-
-    <div class="card">
-      <div class="row-head"><div><div class="eyebrow">手动</div><h2 class="serif">添加一门课</h2></div></div>
-      <div class="add-row" style="align-items:flex-end">
-        <div style="flex:1.4;min-width:120px"><input id="cName" placeholder="课程名，如：高等数学" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
-        <div style="flex:1;min-width:84px"><select id="cDay" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit">
-          <option value="1">周一</option><option value="2">周二</option><option value="3">周三</option><option value="4">周四</option><option value="5">周五</option><option value="6">周六</option><option value="7">周日</option>
-        </select></div>
-        <div style="flex:1.2;min-width:104px"><input id="cSec" placeholder="节次，如 1,2 或 1-3" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
-        <div style="flex:1;min-width:84px"><input id="cRoom" placeholder="教室(可选)" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
-        <div style="flex:1;min-width:84px"><input id="cTeach" placeholder="老师(可选)" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
-        <button class="btn-new btn-sm" id="cAdd">添加</button>
-      </div>
-      <div class="add-row" style="margin-top:8px;align-items:center">
-        <button class="btn-import btn-sm" id="cClear">清空课表</button>
-        <span id="cCount" class="note" style="margin:0"></span>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="row-head"><div><div class="eyebrow">周视图</div><h2 class="serif">本周课表</h2></div></div>
-      <div class="sched">
-        <div class="sched-rail" id="schedRail"></div>
-        <div class="sched-days" id="schedDays"></div>
-      </div>
-      <p class="note">点任意课块可删除该课程。课程块按节次高度自动拉伸，和手机上的课表 App 一样。</p>
-    </div>
-  </section>
+  </div>
 
   <!-- ===== 单词卡 ===== -->
   <section class="tool" id="words">
@@ -565,6 +615,12 @@ tabs.addEventListener('click',e=>{
   document.querySelectorAll('.tool').forEach(t=>t.classList.remove('active'));
   b.classList.add('active');
   document.getElementById(b.dataset.tab).classList.add('active');
+  // 回到顶部：切换前滚到哪，切换后浏览器会原样停在那个偏移量。
+  // 上一个是长页面（单词卡）、课程表短得多时，落地就被夹到最底 —— 用户看到的
+  // 就是「课表得滑到最下面才有」（10-29 反馈）。切完统一回到顶部最稳。
+  window.scrollTo({top:0,left:0,behavior:'auto'});
+  // 切过去时整块才从 display:none 变可见，宽度到这一刻才量得准
+  if(typeof syncSchedFade==='function') syncSchedFade();
 });
 
 /* ---------- GPA ---------- */
@@ -587,9 +643,35 @@ function makeRow(n='',c='',s=''){
     <td><input class="r-score" type="number" min="0" max="100" step="1" placeholder="85" value="${s}"></td>
     <td style="text-align:center"><span class="r-gpa">—</span></td>
     <td style="text-align:center"><button class="del" title="删除" aria-label="删除该行">${icoTrash}</button></td>`;
-  tr.querySelector('.del').onclick=()=>{tr.remove();recalc();};
-  tr.querySelectorAll('input').forEach(i=>i.addEventListener('input',recalc));
+  tr.querySelector('.del').onclick=()=>{tr.remove();recalc();saveGpa();};
+  tr.querySelectorAll('input').forEach(i=>i.addEventListener('input',()=>{recalc();saveGpa();}));
   rowsEl.appendChild(tr);
+}
+/* GPA 明细也存本机（10-29）：一学期十几门课，刷新清空等于让人重输一遍。
+   同一份工具集里单词卡、倒计时早就存了，就课表和 GPA 这两张"手填表"没存 */
+const G_KEY='baomi_tools_gpa_v1';
+function saveGpa(){
+  try{
+    const rows=[...rowsEl.querySelectorAll('tr')].map(tr=>({
+      n:tr.querySelector('.r-name').value,
+      c:tr.querySelector('.r-credit').value,
+      s:tr.querySelector('.r-score').value
+    }));
+    localStorage.setItem(G_KEY,JSON.stringify({v:1,algo:getAlgo(),rows}));
+  }catch(e){}
+}
+function loadGpa(){
+  try{
+    const d=JSON.parse(localStorage.getItem(G_KEY)||'null');
+    if(!d||!Array.isArray(d.rows)||!d.rows.length) return false;
+    rowsEl.innerHTML='';
+    d.rows.forEach(r=>makeRow(r.n==null?'':r.n,r.c==null?'':r.c,r.s==null?'':r.s));
+    if(d.algo){
+      const el=algoEl.querySelector('input[value="'+d.algo+'"]');
+      if(el) el.checked=true;
+    }
+    return true;
+  }catch(e){ return false; }
 }
 function recalc(){
   const a=getAlgo(); let sg=0,sc=0,ss=0;
@@ -605,11 +687,14 @@ function recalc(){
   document.getElementById('sAvg').textContent=sc>0?(ss/sc).toFixed(1):'—';
   document.getElementById('sCredit').textContent=sc.toFixed(1);
 }
-document.getElementById('add').onclick=()=>makeRow();
+document.getElementById('add').onclick=()=>{makeRow();saveGpa();};
 document.getElementById('sample').onclick=()=>{rowsEl.innerHTML='';
-  [['高等数学',5,88],['大学英语',3,76],['数据结构',4,92],['线性代数',3,81],['思想道德',2,69]].forEach(([n,c,s])=>makeRow(n,c,s));recalc();};
-algoEl.querySelectorAll('input').forEach(i=>i.addEventListener('change',()=>{algoDesc.textContent=ALGO_DESC[getAlgo()];recalc();}));
-algoDesc.textContent=ALGO_DESC.std4; document.getElementById('sample').onclick();
+  [['高等数学',5,88],['大学英语',3,76],['数据结构',4,92],['线性代数',3,81],['思想道德',2,69]].forEach(([n,c,s])=>makeRow(n,c,s));recalc();saveGpa();};
+algoEl.querySelectorAll('input').forEach(i=>i.addEventListener('change',()=>{algoDesc.textContent=ALGO_DESC[getAlgo()];recalc();saveGpa();}));
+// 有存过的就用存过的（连算法档位一起），没有才铺示例数据
+if(!loadGpa()) document.getElementById('sample').onclick();
+algoDesc.textContent=ALGO_DESC[getAlgo()];
+recalc();
 
 /* ---------- 番茄钟 ---------- */
 let pTimer=null,pRemain=25*60,pRunning=false,pDone=0;
@@ -670,14 +755,61 @@ function normSections(s){
   if(Array.isArray(s)) return s.map(Number).filter(n=>n>=1&&n<=PERIODS);
   return [];
 }
-function addCourse(c){
+/* ---------- 课表本地存储（10-29 新增） ----------
+   用户反馈：「校园工具集没有本地存储，特别从课表就能看出」——单词卡、倒计时的
+   进度都记得住，唯独课表刷新就回到三门示例课。现在增删改导入清空全部落盘。
+   key 带版本号：将来改结构就换 v，老数据自然作废，不会读出一堆 undefined。 */
+const C_KEY='baomi_tools_sched_v1';
+let cSample=false;   // 首访塞的三门示例课；真导入/添加后就不再是"示例"
+
+function saveSched(){
+  try{
+    localStorage.setItem(C_KEY, JSON.stringify({v:1,cseq:cseq,sample:cSample,updated:Date.now(),
+      courses:courses.map(c=>({id:c.id,name:c.name,color:c.color,day:c.day,sections:c.sections,
+        teacher:c.teacher,classroom:c.classroom,weeks:c.weeks,notes:c.notes}))}));
+  }catch(e){ /* 隐私模式/配额满：存不下也不能让页面挂掉，只是这次记不住 */ }
+}
+function loadSched(){
+  try{
+    const raw=localStorage.getItem(C_KEY); if(!raw) return false;
+    const d=JSON.parse(raw);
+    if(!d||!Array.isArray(d.courses)) return false;
+    courses=d.courses.filter(c=>c&&c.name&&Array.isArray(c.sections)&&c.sections.length)
+      .map(c=>({
+        id:+c.id||0,
+        name:String(c.name),
+        color:/^#[0-9a-f]{6}$/i.test(c.color||'')?c.color:CCOLORS[0],
+        day:(((+c.day||0)%7)+7)%7,
+        sections:c.sections.map(Number).filter(n=>n>=1&&n<=PERIODS).sort((x,y)=>x-y),
+        teacher:c.teacher||'',classroom:c.classroom||'',weeks:c.weeks||null,notes:c.notes||''
+      })).filter(c=>c.sections.length);
+    cseq=Math.max(+d.cseq||0,0,...courses.map(c=>c.id));
+    cSample=!!d.sample;
+    return true;
+  }catch(e){ return false; }
+}
+function setHint(extra){
+  const el=document.getElementById('cHint'); if(!el) return;
+  if(extra){ el.textContent=extra; return; }
+  el.textContent=cSample
+    ? '下面 3 门是示例课，点课块可以删掉。导入或添加的课表会存在这台设备上，刷新不丢。'
+    : '点任意课块可删除该课程。课表存在这台设备上，刷新不丢；格子放不下时左右滑。';
+}
+
+function addCourse(c,opt){
   const id=++cseq;
   const name=(typeof c==='string')?c:(c&&c.name)||('课程'+id);
   courses.push({id,name:(name&&name.trim())||('课程'+id),color:CCOLORS[(id-1)%CCOLORS.length],
     day:((((c&&c.dayOfWeek!=null?c.dayOfWeek:c.day)||1)%7)+7)%7,
     sections:normSections(c&&c.sections!=null?c.sections:(c&&c.section!=null?c.section:[])),
     teacher:(c&&c.teacher)||'',classroom:(c&&c.classroom)||'',weeks:(c&&c.weeks)||null,notes:(c&&c.notes)||''});
-  renderSched();
+  cSample=false;
+  saveSched();
+  if(!(opt&&opt.silent)) renderSched();
+}
+/* 判重：课名 + 星期 + 节次全一样就算同一门。重复导入同一份课表不会变成两份 */
+function courseKey(c){
+  return [String(c.name||'').trim().toLowerCase(),c.day,[...(c.sections||[])].sort((a,b)=>a-b).join(',')].join('|');
 }
 function renderRail(){
   let h='<div class="pr" style="height:'+HEAD_H+'px"></div>';
@@ -693,7 +825,11 @@ function renderSched(){
     blocks.forEach(c=>{
       const s0=c.sections[0], sl=c.sections.length;
       const top=HEAD_H+(s0-1)*ROW_H+1, hgt=sl*ROW_H-2;
-      bh+='<div class="sched-block" data-id="'+c.id+'" style="top:'+top+'px;height:'+hgt+'px;background:'+c.color+'1f;border-color:'+c.color+'" title="'+esc(c.name)+(c.classroom?(' @'+c.classroom):'')+(c.teacher?(' · '+c.teacher):'')+'">'
+      // one = 只占一节：44px 里塞不下课名 + 教室 + 老师，CSS 里会把老师那行收掉
+      const cls='sched-block'+(sl===1?' one':'');
+      const full=esc(c.name)+'（第'+s0+(sl>1?('-'+(s0+sl-1)):'')+'节）'
+        +(c.classroom?(' @'+c.classroom):'')+(c.teacher?(' · '+c.teacher):'');
+      bh+='<div class="'+cls+'" data-id="'+c.id+'" style="top:'+top+'px;height:'+hgt+'px;background:'+c.color+'1f;border-color:'+c.color+'" title="'+full+'">'
         +'<div class="bn">'+esc(c.name)+'</div>'+(c.classroom?'<div class="br">'+esc(c.classroom)+'</div>':'')+(c.teacher?'<div class="bt">'+esc(c.teacher)+'</div>':'')+'</div>';
     });
     h+='<div class="sched-day" style="height:'+bodyH+'px"><div class="dh">周'+DAYS[d]+'</div>'+bh+'</div>';
@@ -701,40 +837,121 @@ function renderSched(){
   schedDays.innerHTML=h;
   schedDays.querySelectorAll('.sched-block').forEach(b=>b.onclick=()=>{
     const id=+b.dataset.id, c=courses.find(x=>x.id===id);
-    if(c&&confirm('删除《'+c.name+'》？')){ courses=courses.filter(x=>x.id!==id); renderSched(); }
+    if(c&&confirm('删除《'+c.name+'》？')){
+      courses=courses.filter(x=>x.id!==id);
+      saveSched(); renderSched(); setHint();
+    }
   });
   const el=document.getElementById('cCount'); if(el) el.textContent='共 '+courses.length+' 门课';
+  syncSchedFade();
 }
+/* 右边缘渐隐只在"真的滑得动"时出现：1280px 宽屏一屏放得下 7 天，
+   还盖着一道影子反而像把周日裁掉了。滚到最右也收起来。 */
+function syncSchedFade(){
+  const sc=document.querySelector('.sched');
+  const wrap=document.querySelector('.sched-wrap');
+  if(!sc||!wrap) return;
+  const canScroll=sc.scrollWidth-sc.clientWidth>2;
+  wrap.classList.toggle('can-scroll',canScroll);
+  wrap.classList.toggle('at-end',canScroll && sc.scrollLeft+sc.clientWidth>=sc.scrollWidth-2);
+}
+document.querySelector('.sched').addEventListener('scroll',syncSchedFade,{passive:true});
+window.addEventListener('resize',syncSchedFade);
 function importSchedule(jsonText){
   let data;
   try{ data=JSON.parse(jsonText); }catch(e){ return 'JSON 格式有误：'+e.message; }
   const list=Array.isArray(data)?data:(data&&data.courses?data.courses:null);
   if(!list) return '没找到课程数组：顶层应为 {"courses":[...]} 或直接是数组。';
-  let n=0;
+  const seen={}; courses.forEach(c=>{ seen[courseKey(c)]=1; });
+  let n=0,dup=0;
   list.forEach(co=>{
     if(!co||typeof co!=='object')return;
     const name=co.name||co.course||co.title; if(!name)return;
     if(co.dayOfWeek==null&&co.day==null)return;
     if(!co.sections&&!co.section)return;
-    addCourse(co); n++;
+    const k=courseKey({name,day:((((co.dayOfWeek!=null?co.dayOfWeek:co.day)||1)%7)+7)%7,
+      sections:normSections(co.sections!=null?co.sections:co.section)});
+    if(seen[k]){ dup++; return; }
+    seen[k]=1;
+    addCourse(co,{silent:true}); n++;
   });
-  renderSched();
-  return n?('已导入 '+n+' 门课程（缺 dayOfWeek/sections 的会被跳过）。'):'没解析到有效课程，请检查 name / dayOfWeek / sections 字段。';
+  renderSched(); saveSched();
+  if(!n) return dup?('这 '+dup+' 门已经在课表里了，没有新增。'):'没解析到有效课程，请检查 name / dayOfWeek / sections 字段。';
+  return '已导入 '+n+' 门课程'+(dup?('（跳过重复 '+dup+' 门）'):'')+'，已存在这台设备上。';
 }
 function exportSchedule(){
   const out=courses.map(c=>{const o={name:c.name,dayOfWeek:c.day+1,sections:[...c.sections].sort((a,b)=>a-b)};
     if(c.teacher)o.teacher=c.teacher; if(c.classroom)o.classroom=c.classroom; if(c.weeks)o.weeks=c.weeks; if(c.notes)o.notes=c.notes; return o;});
   return JSON.stringify({courses:out},null,2);
 }
+
+/* ---------- 导入弹窗 ---------- */
+const cModal=document.getElementById('cModal');
+const cMsgEl=document.getElementById('cImportMsg');
+function cMsg(t,ok){ cMsgEl.textContent=t; cMsgEl.style.color=ok?'var(--success-ink)':'var(--red-ink)'; }
+function openImport(){
+  cModal.hidden=false;
+  document.body.classList.add('cmodal-open');
+  cMsgEl.textContent='';            // 上次的「已导入 N 门」不要留在这次的表单里
+  const t=document.getElementById('cJson');
+  setTimeout(()=>{ try{ t.focus(); }catch(e){} },60);
+}
+function closeImport(){
+  cModal.hidden=true;
+  document.body.classList.remove('cmodal-open');
+  const b=document.getElementById('cOpenImport');
+  if(b) b.focus();
+}
+document.getElementById('cOpenImport').onclick=openImport;
+document.getElementById('cModalX').onclick=closeImport;
+cModal.addEventListener('click',e=>{ if(e.target&&e.target.dataset&&e.target.dataset.close==='1') closeImport(); });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!cModal.hidden) closeImport(); });
+
 document.getElementById('copyPrompt').onclick=()=>{
   const t=document.getElementById('promptBox').innerText;
   if(navigator.clipboard) navigator.clipboard.writeText(t).then(()=>{
     const b=document.getElementById('copyPrompt'), o=b.textContent; b.textContent='已复制'; setTimeout(()=>b.textContent=o,1500);
   }).catch(()=>{});
 };
-document.getElementById('cImport').onclick=()=>{ const m=importSchedule(document.getElementById('cJson').value); const el=document.getElementById('cImportMsg'); el.textContent=m; el.style.color=m.indexOf('已导入')===0?'var(--success-ink)':'var(--red-ink)'; };
-document.getElementById('cSample').onclick=()=>{ document.getElementById('cJson').value=SAMPLE_JSON; document.getElementById('cJson').focus(); };
-document.getElementById('cExport').onclick=()=>{ const t=exportSchedule(); document.getElementById('cJson').value=t; if(navigator.clipboard)navigator.clipboard.writeText(t).catch(()=>{}); const el=document.getElementById('cImportMsg'); el.textContent='已导出到上方文本框（并尝试复制到剪贴板）。'; el.style.color='var(--success-ink)'; };
+document.getElementById('cImport').onclick=()=>{
+  const m=importSchedule(document.getElementById('cJson').value);
+  const ok=m.indexOf('已导入')===0||m.indexOf('这门')===0;
+  cMsg(m,ok);
+  if(ok){
+    setTimeout(()=>{ closeImport(); setHint('已导入 '+courses.length+' 门课程，存在这台设备上。点任意课块可删除。'); },700);
+  }
+};
+document.getElementById('cSample').onclick=()=>{
+  const t=document.getElementById('cJson');
+  t.value=SAMPLE_JSON; t.focus();
+  cMsg('已填入示例，点「导入」就能看到效果。',true);
+};
+document.getElementById('cFileBtn').onclick=()=>document.getElementById('cFile').click();
+document.getElementById('cFile').onchange=e=>{
+  const f=e.target.files&&e.target.files[0];
+  e.target.value='';
+  if(!f) return;
+  const r=new FileReader();
+  r.onload=()=>{
+    const t=document.getElementById('cJson');
+    t.value=String(r.result||'');
+    document.getElementById('cImport').click();
+  };
+  r.onerror=()=>cMsg('读不了这个文件，试试把内容直接粘进来。',false);
+  r.readAsText(f,'utf-8');
+};
+document.getElementById('cExport').onclick=()=>{
+  const t=exportSchedule();
+  document.getElementById('cJson').value=t;
+  try{
+    const blob=new Blob([t],{type:'application/json'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download='我的课表.json';
+    document.body.appendChild(a); a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },0);
+  }catch(e){}
+  cMsg('已导出为「我的课表.json」，内容也填在上面的框里了。',true);
+};
 document.getElementById('cAdd').onclick=()=>{
   const name=document.getElementById('cName').value.trim();
   const day=parseInt(document.getElementById('cDay').value);
@@ -746,13 +963,25 @@ document.getElementById('cAdd').onclick=()=>{
   addCourse({name,dayOfWeek:day,sections:secs,classroom:room,teacher:teach});
   document.getElementById('cName').value=''; document.getElementById('cSec').value='';
   document.getElementById('cRoom').value=''; document.getElementById('cTeach').value='';
+  setHint('已添加《'+name+'》，存在这台设备上。');
   document.getElementById('cName').focus();
 };
-document.getElementById('cClear').onclick=()=>{ if(confirm('清空整张课表？')){ courses=[]; cseq=0; renderSched(); } };
+document.getElementById('cClear').onclick=()=>{
+  if(confirm('清空整张课表？这台设备上存的也会一起删掉。')){
+    courses=[]; cseq=0; cSample=false; saveSched(); renderSched(); setHint();
+  }
+};
+
+/* 首次进来才放示例课；之后一律读本机存的（哪怕用户把它清空了，也不再塞回来） */
 renderRail();
-addCourse({name:'高等数学',dayOfWeek:1,sections:[1,2],classroom:'教三-201',teacher:'张教授'});
-addCourse({name:'大学英语',dayOfWeek:3,sections:[3,4],classroom:'外语楼-305'});
-addCourse({name:'数据结构',dayOfWeek:5,sections:[5,6],classroom:'机房-A'});
+if(!loadSched()){
+  addCourse({name:'高等数学',dayOfWeek:1,sections:[1,2],classroom:'教三-201',teacher:'张教授'},{silent:true});
+  addCourse({name:'大学英语',dayOfWeek:3,sections:[3,4],classroom:'外语楼-305'},{silent:true});
+  addCourse({name:'数据结构',dayOfWeek:5,sections:[5,6],classroom:'机房-A'},{silent:true});
+  cSample=true; saveSched();
+}
+renderSched();
+setHint();
 
 /* ---------- 单词卡 ----------
  *
