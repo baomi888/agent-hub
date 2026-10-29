@@ -339,7 +339,7 @@ export default function CheckinPage() {
   return (
     <ConsoleShell
       active="checkin"
-      eyebrow="P6 · /checkin"
+      eyebrow="把今天记下来"
       title="打卡"
       sub={
         <>

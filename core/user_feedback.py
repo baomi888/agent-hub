@@ -56,6 +56,11 @@ MIN_CONTENT = 5
 MAX_CONTENT = 2000
 MAX_CONTACT = 120
 MAX_PAGE = 120
+# 回复长度上限 1000：回复是"告诉提意见的人我们做了什么"，不是写文档。
+# 下限只要 1 个字而不是 5 ——「已修复，感谢」这种短回复是正常且应当鼓励的，
+# 拿反馈正文的下限去卡回复，会逼着人凑字数。
+MIN_REPLY = 1
+MAX_REPLY = 1000
 
 
 def category_label(value: str) -> str:
@@ -77,6 +82,8 @@ def dict_payload() -> dict:
             "max_content": MAX_CONTENT,
             "max_contact": MAX_CONTACT,
             "max_page": MAX_PAGE,
+            "min_reply": MIN_REPLY,
+            "max_reply": MAX_REPLY,
         },
     }
 
@@ -84,6 +91,26 @@ def dict_payload() -> dict:
 # ==================== 建表 ====================
 
 _READY: set[str] = set()
+
+# 后续追加的列。**只走 ALTER，不改上面的 CREATE TABLE** ——
+# 两边都写会变成两条并行的 DDL 路径：老库靠 ALTER、新库靠 CREATE，
+# 一旦哪边漏了一个，新旧库的列就对不上，而这种差异平时完全看不出来。
+# 写法照 `service/daily.py` 给 delegations 补 last_error 那一套（幂等）。
+_EXTRA_COLUMNS: dict[str, str] = {
+    # 开发者给这条反馈的回复。空串 = 还没回。
+    # 存在反馈行上而不是单开一张 replies 表：一个工单一次正式回复就够了，
+    # 多轮对话式的来回是"客服系统"的形态，这里不是。
+    "reply": "TEXT NOT NULL DEFAULT ''",
+    "replied_at": "INTEGER",
+}
+
+
+def _migrate_columns(conn) -> None:
+    """给老库补列（幂等，跑多少次都一样）。"""
+    have = {r["name"] for r in conn.execute("PRAGMA table_info(user_feedback)")}
+    for name, ddl in _EXTRA_COLUMNS.items():
+        if name not in have:
+            conn.execute(f"ALTER TABLE user_feedback ADD COLUMN {name} {ddl}")
 
 
 def ensure() -> None:
@@ -112,6 +139,7 @@ def ensure() -> None:
             CREATE INDEX IF NOT EXISTS idx_uf_status ON user_feedback(status, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_uf_created ON user_feedback(created_at DESC);
         """)
+        _migrate_columns(conn)
     _READY.add(path)
 
 
@@ -178,9 +206,55 @@ def set_status(fid: int, status: str) -> tuple[bool, str]:
             (status, int(time.time()), fid),
         )
         return True, ""
+def set_reply(fid: int, reply: str) -> tuple[bool, str]:
+    """给一条反馈写回复。返回 (成功, 失败原因)。
+
+    ★ 为什么回复要顺手改状态：站在提意见的人那边，"有人回我了"就是他判断
+      "这条被处理了"的全部依据。回复完状态还停在「待处理」，用户下次打开
+      「我提过的」看到的仍是"待处理"，会以为回复是系统自动回的模板。
+
+    ★ 为什么只在 open 时才推进到 doing、且**不走 `_TRANSITIONS` 校验**：
+      回复不是"改状态"这个动作，它是另一件事。拿状态流转表去卡它，会得到
+      「已处理 → 已处理」这类无意义的 409，让管理员回不了话。所以：
+        · open   → 顺手推到 doing（表示"已接手并答复"）
+        · 其它状态 → 原样不动（done/closed 已经有结论，不该被回复改写）
+
+    清空回复（传空串）是合法的：回错了要能撤回，撤回后状态不回退
+    （状态流转本身不允许回退，见 `_TRANSITIONS` 的注释）。
+    """
+    ensure()
+    text = (reply or "").strip()
+    if len(text) > MAX_REPLY:
+        return False, f"回复太长，最多 {MAX_REPLY} 个字"
+
+    from core import session as store
+
+    with store._get_conn() as conn:  # noqa: SLF001
+        row = conn.execute("SELECT status FROM user_feedback WHERE id = ?", (fid,)).fetchone()
+        if not row:
+            return False, f"反馈不存在：{fid}"
+        old = str(row["status"])
+        now = int(time.time())
+        new_status = "doing" if old == "open" and text else old
+        conn.execute(
+            "UPDATE user_feedback SET reply = ?, replied_at = ?, status = ?, updated_at = ? "
+            "WHERE id = ?",
+            (text, now if text else None, new_status, now, fid),
+        )
+        return True, ""
 
 
 # ==================== 读 ====================
+
+def get(fid: int) -> dict | None:
+    """按 id 取一条（管理员回复后回读用：回复可能顺手改了状态，
+    前端需要拿到改完的结果，而不是自己猜）。"""
+    ensure()
+    from core import session as store
+
+    with store._get_conn() as conn:  # noqa: SLF001
+        row = conn.execute("SELECT * FROM user_feedback WHERE id = ?", (fid,)).fetchone()
+    return _row(row) if row else None
 
 
 def list_mine(uid: str, limit: int = 20, offset: int = 0) -> tuple[list[dict], int]:

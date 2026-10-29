@@ -13,9 +13,10 @@
 
 鉴权两层（文档 §6）：
   1. `router` 挂了 `Depends(get_current_user)` → 未登录一律 **401**
-  2. 函数内 `_require_admin` → 登录但不是管理员一律 **403**
-两层顺序不能反：先判身份再判权限，否则未登录用户会拿到 403，
-前端会以为"该重新登录"，而被引导去做一次无意义的登录。
+  2. 函数内 `_require_admin` → 登录但不是管理员一律 **404**（伪装成接口不存在，见该函数）
+两层顺序不能反：先判身份再判权限。若顺序反了，未登录用户会先撞上"无权"
+那条分支，拿到的是一个伪造的 404 —— 明明只是没登录，却表现得像路径错了，
+用户永远不知道该去登录，排查时也会误判成"路由被删了"。
 
 判据用 `quota._is_admin`（按 `ADMIN_USERNAMES` 用户名比对），不新增角色表：
 现在是单机自用部署，多一张角色表就多一套同步问题。将来要多角色改这一个函数即可。
@@ -38,8 +39,22 @@ router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 def _require_admin(uid: str) -> None:
+    """非管理员一律按"**这个接口不存在**"处理 —— 返回 404，不是 403。
+
+    403 等于向对方确认两件事：这个路径存在、你的身份不够。对一个只有开发者
+    自己用的看板来说，这本身就是泄露（扫到 403 就知道这里有后台）。
+    404 不给任何确认：分不清是"没有这个接口"还是"你无权访问"。
+
+    **未登录仍然是 401**（由 router 上的 `Depends(get_current_user)` 拦下，
+    走不到这里）：那是 HTTP 语义正确的"需要先认证"，而且前端要靠它区分
+    "该去登录"和"这条路不存在"。把未登录也改成 404，会让登录态过期时的
+    表现和"页面被删了"混在一起，没法排查。
+
+    detail 固定写英文 `Not Found`：与 FastAPI 自己的 404 文案一致，
+    不留"中文错误信息"这种能被用来区分真假的特征。
+    """
     if not quota._is_admin(uid):
-        raise HTTPException(status_code=403, detail="该页面仅开发者可见")
+        raise HTTPException(status_code=404, detail="Not Found")
 
 
 # ==================== 看板 ====================
@@ -66,6 +81,21 @@ async def apis(
     """接口排行（口径见文档 §2.6）。`sort=slow` 只统计调用 ≥ 3 次的接口。"""
     _require_admin(uid)
     return await asyncio.to_thread(dashboard.api_ranking, days, limit, sort)
+
+
+@router.get("/failures")
+async def failures(
+    days: int = Query(7, ge=1, le=90),
+    limit: int = Query(20, ge=1, le=100),
+    uid: str = Depends(get_current_user),
+) -> dict:
+    """最近的失败调用 + 中文原因（看板自己回答"为什么失败"，不用去 grep 日志）。
+
+    分 `need_attention` / `ignorable` 两栏：401 未登录、报告空态 404 属于预期行为，
+    和真故障混在一起看会把真问题淹掉。
+    """
+    _require_admin(uid)
+    return await asyncio.to_thread(dashboard.failures, days, limit)
 
 
 @router.get("/feedback")
@@ -100,6 +130,47 @@ async def feedback_patch(
     if not ok:
         raise HTTPException(status_code=409, detail=err)
     return {"ok": True, "status": req.status}
+
+
+class ReplyRequest(BaseModel):
+    reply: str = Field(
+        default="", description=f"给提意见的人的回复，{user_feedback.MIN_REPLY}~{user_feedback.MAX_REPLY} 字；空串表示撤回"
+    )
+
+
+@router.post("/feedback/{fid}/reply")
+async def feedback_reply(
+    fid: int, req: ReplyRequest, uid: str = Depends(get_current_user)
+) -> dict:
+    """给一条反馈回复（管理员 → 用户）。
+
+    为什么是 `POST .../reply` 而不是在 PATCH 里塞一个 reply 字段：
+      PATCH `/feedback/{fid}` 的语义是"改这条反馈的属性"，它的错误契约是
+      409 + 状态流转；回复是另一件事（还带着"顺手把 open 推到 doing"的副作用），
+      两件事共用一个端点，将来想给回复加审计（谁回的、什么时候改过）就无处落脚。
+
+    400 / 409 分工与 PATCH 一致：长度超限是"请求写错了"（400），
+    反馈不存在是"和当前数据冲突"（409）—— 前端拿到 409 会去刷新列表。
+    """
+    _require_admin(uid)
+    text = (req.reply or "").strip()
+    if len(text) > user_feedback.MAX_REPLY:
+        raise HTTPException(
+            status_code=400, detail=f"回复最多 {user_feedback.MAX_REPLY} 个字"
+        )
+    ok, err = await asyncio.to_thread(user_feedback.set_reply, fid, text)
+    if not ok:
+        raise HTTPException(status_code=409, detail=err)
+    # 回读一次最新状态：set_reply 可能在 open 时把它推到 doing，
+    # 前端要按新状态重画按钮，不能让前端自己猜。
+    row = await asyncio.to_thread(user_feedback.get, fid)
+    return {
+        "ok": True,
+        "reply": text,
+        "status": (row or {}).get("status", ""),
+        "status_label": (row or {}).get("status_label", ""),
+        "replied_at": (row or {}).get("replied_at"),
+    }
 
 
 @router.get("/dict")

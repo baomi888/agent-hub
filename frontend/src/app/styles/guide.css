@@ -1,0 +1,250 @@
+/* ============ 首次进入 · 上手说明弹窗 ============
+   组件：components/guide/GuideModal.tsx
+   语言对齐「贴在纸上的一张说明卡」：纸底 + 一条金线 + 衬线标题，
+   不用玻璃拟态 / 不用大面积深色 / 不用 emoji 图标（玉米金只做点缀）。
+
+   遮罩用半透暖墨（46,36,22）而不是纯黑：纯黑压在暖米黄上会发灰，
+   和全站的纸感是两套东西；用墨色等于"把灯调暗一点看这张纸"。 */
+
+.guide-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(46, 36, 22, 0.5);
+  animation: guideFade 0.18s ease;
+}
+@keyframes guideFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.guide-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  /* 矮屏（629 高那种笔记本窗口）不能顶出视口：上限跟着视口走，
+     内容超出时由 .guide-body 自己滚，头尾按钮永远看得见 */
+  max-height: calc(100dvh - 40px);
+  background: var(--card-bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 48px rgba(61, 47, 26, 0.22);
+  overflow: hidden;
+  animation: guideRise 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@keyframes guideRise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+/* 顶上一条金线：和卡片里的 .ec-icon、引导条的虚线金边是同一种"点一下"的语言 */
+.guide-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-line));
+}
+/* 卡片本身拿焦点（读屏念整段），但不要描边圈 */
+.guide-card:focus {
+  outline: none;
+}
+
+.guide-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 17px 20px 0;
+}
+.guide-eyebrow {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--accent-ink);
+}
+.guide-brand {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.guide-skip {
+  margin-left: auto;
+  padding: 3px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.guide-skip:hover,
+.guide-skip:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  outline: none;
+}
+
+.guide-body {
+  flex: 1;
+  min-height: 0;
+  padding: 14px 20px 2px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.guide-figure {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.guide-icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  flex: none;
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+}
+.guide-icon svg {
+  width: 30px;
+  height: 30px;
+}
+
+/* 进度点：当前位置拉成短横。纯点阵在小屏上好认，但"走到第几个"要读，
+   所以当前那个给长度差异，不靠颜色深浅（暗色下深浅差别很小）。 */
+.guide-dots {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.guide-dots i {
+  display: block;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--fill-1);
+  transition: width 0.2s ease, background-color 0.2s ease;
+}
+.guide-dots i.done {
+  background: var(--accent-line);
+}
+.guide-dots i.on {
+  width: 18px;
+  background: var(--accent);
+}
+
+.guide-title {
+  margin: 13px 0 0;
+  font-family: var(--font-serif);
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: var(--ls-tight);
+  color: var(--text-1);
+}
+.guide-lead {
+  margin: 8px 0 0;
+  font-size: var(--fs-md);
+  line-height: 1.72;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.guide-points {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 13px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.guide-points li {
+  position: relative;
+  padding-left: 14px;
+  font-size: var(--fs-sm);
+  line-height: 1.62;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+/* 小圆点而不是 ✓：这两条是"要知道的事"，不是"做到了的事" */
+.guide-points li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0.62em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.guide-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 13px 20px 16px;
+  border-top: 1px solid var(--line);
+}
+.guide-count {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+  color: var(--text-2);
+}
+.guide-count span {
+  display: block;
+  color: var(--text-3);
+}
+.guide-acts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+@media (max-width: 560px) {
+  .guide-mask {
+    padding: 10px;
+  }
+  .guide-card {
+    max-height: calc(100dvh - 20px);
+  }
+  .guide-head {
+    padding: 15px 15px 0;
+  }
+  .guide-body {
+    padding: 12px 15px 2px;
+  }
+  .guide-title {
+    font-size: var(--fs-lg);
+  }
+  .guide-foot {
+    padding: 11px 15px 13px;
+    /* 窄屏竖排：计数在上、按钮占满一行，避免两个按钮挤成一条 */
+    flex-wrap: wrap;
+  }
+  .guide-acts {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}

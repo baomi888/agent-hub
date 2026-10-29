@@ -433,3 +433,20 @@
   color: #FFF9EE;
 }
 
+
+/* 窄屏：模式条后面还跟着「内测反馈」胶囊和齿轮，一行要塞下三样。
+   5 个模式按钮的内边距是主要开销（5×24px），从这里省，别去缩字号缩到看不清 */
+@media (max-width: 560px) {
+  .mode {
+    padding: 4px 8px;
+    font-size: var(--fs-sm);
+  }
+}
+
+/* 再窄一档（iPhone SE / 小屏安卓）：模式按钮还得再让 4px，
+   否则「反馈」胶囊 + 齿轮会把这一行顶出横向滚动条 */
+@media (max-width: 420px) {
+  .mode {
+    padding: 4px 6px;
+  }
+}

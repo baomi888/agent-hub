@@ -22,6 +22,7 @@ import type {
   CheckinHistoryItem,
   DashboardOverview,
   ApiRankResp,
+  FailuresResp,
   AdminFeedbackResp,
   MyFeedbackResp,
   FeedbackDict,
@@ -394,7 +395,7 @@ export const api = {
 
   // ---------- 用户反馈（DeepSeek 式：分类按钮 + 一段话）----------
   // 与下面的 admin.* 分开：这个走 /api/user-feedback（登录即可、只看自己的），
-  // admin.* 走 /api/admin（非管理员后端直接 403）
+  // admin.* 走 /api/admin（非管理员后端返回 404，伪装成接口不存在）
   feedbackDict: () => request<FeedbackDict>("/api/user-feedback/dict"),
   submitFeedback: (body: { category: string; content: string; contact?: string; page?: string }) =>
     request<{ ok: boolean; id: number }>("/api/user-feedback/", {
@@ -409,6 +410,9 @@ export const api = {
     overview: (days = 7) => request<DashboardOverview>(`/api/admin/overview?days=${days}`),
     apis: (days = 7, limit = 20, sort: "calls" | "slow" | "fail" = "calls") =>
       request<ApiRankResp>(`/api/admin/apis?days=${days}&limit=${limit}&sort=${sort}`),
+    /** 失败明细 + 原因。分 需处理 / 可忽略 两栏，看板不用再去翻日志 */
+    failures: (days = 7, limit = 20) =>
+      request<FailuresResp>(`/api/admin/failures?days=${days}&limit=${limit}`),
     feedback: (status = "", limit = 20, offset = 0) =>
       request<AdminFeedbackResp>(
         `/api/admin/feedback?status=${encodeURIComponent(status)}&limit=${limit}&offset=${offset}`
@@ -417,6 +421,20 @@ export const api = {
       request<{ ok: boolean; status: string }>(`/api/admin/feedback/${id}`, {
         method: "PATCH",
         body: JSON.stringify({ status }),
+      }),
+    // 回复某条反馈。**单独一个 POST 而不是并进 patchFeedback**：
+    // 改状态和"回一句话"是两件事，前者有流转表约束（会 409），后者没有。
+    // 传空串 = 撤回回复。
+    replyFeedback: (id: number, reply: string) =>
+      request<{
+        ok: boolean;
+        reply: string;
+        status: string;
+        status_label: string;
+        replied_at: number | null;
+      }>(`/api/admin/feedback/${id}/reply`, {
+        method: "POST",
+        body: JSON.stringify({ reply }),
       }),
     dict: () => request<FeedbackDict>("/api/admin/dict"),
   },

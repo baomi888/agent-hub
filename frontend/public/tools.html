@@ -32,6 +32,8 @@
     --noise:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.04' numOctaves='2' seed='5'/%3E%3CfeColorMatrix values='0 0 0 0 0.55 0 0 0 0 0.45 0 0 0 0 0.28 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   }
   *{box-sizing:border-box;}
+  /* hidden 属性必须真的隐藏：.wkbar 一类是 display:flex，UA 的 [hidden] 打不过类选择器 */
+  [hidden]{display:none !important;}
   html,body{margin:0;padding:0;}
   body{
     background:
@@ -138,15 +140,69 @@
   .pomo-meta{text-align:center;color:var(--text-2);font-size:var(--fs-md);margin-top:8px;display:inline-flex;align-items:center;gap:6px;}
   .pomo-meta b{color:var(--accent-ink);}
 
-  /* 单词卡 */
+  /* 单词卡
+     10-28 改版：原来只有一张卡 + 一行文字进度，用户在里面会迷路
+     （"我在哪一轮""还剩多少""点不认识怎么没动"）。现在补三样东西：
+     轮次标签、进度条、本轮统计。视觉上仍只有一张卡是主角。 */
   .flip-card{background:var(--bg-canvas);border:2px solid var(--accent-soft);border-radius:var(--radius-md);
-    padding:26px 20px;text-align:center;min-height:170px;display:flex;flex-direction:column;justify-content:center;
+    padding:26px 20px;text-align:center;min-height:230px;display:flex;flex-direction:column;justify-content:center;
     cursor:pointer;user-select:none;margin-bottom:12px;transition:var(--t-move);}
+  /* min-height 给到 230 是为了「翻转前后高度别跳」：
+     正面只有单词，翻面多出释义 + 例句 + 译文，空间不够会把下面按钮顶下去。 */
   .flip-card:hover{border-color:var(--accent);transform:translateY(-2px);}
   .flip-card .word{font-family:var(--font-serif);font-size:30px;font-weight:700;color:var(--ink);}
   .flip-card .meta{margin-top:10px;font-size:var(--fs-md);color:var(--text-2);white-space:pre-line;line-height:1.7;}
+  /* 翻转后：释义 + 一句例句 + 译文。
+     例句做成「写在释义下面的一行批注」：左侧一道金线 + 淡金底，
+     不做成第二个气泡或第二张卡 —— 卡片翻一次只该给一层新信息。 */
+  .flip-card .meta .w-def{display:block;font-size:var(--fs-xl);color:var(--ink);line-height:1.55;}
+  .flip-card .meta .w-eg{display:block;margin:12px auto 0;max-width:30rem;padding:9px 12px 10px;
+    border-left:2px solid var(--accent);border-radius:0 var(--radius-sm) var(--radius-sm) 0;
+    background:var(--accent-soft);text-align:left;white-space:normal;}
+  .flip-card .meta .w-eg-en{display:block;font-family:var(--font-serif);font-size:var(--fs-md);
+    color:var(--ink);line-height:1.65;overflow-wrap:anywhere;}
+  .flip-card .meta .w-eg-zh{display:block;margin-top:4px;font-size:var(--fs-sm);color:var(--text-2);
+    line-height:1.6;overflow-wrap:anywhere;}
+  .flip-card .meta .w-eg-tag{display:block;margin-bottom:5px;font-size:var(--fs-badge);
+    letter-spacing:var(--ls-wide);color:var(--accent-ink);}
   .flip-card .hint{margin-top:14px;font-size:var(--fs-badge);color:var(--text-3);letter-spacing:var(--ls-mid);}
+  /* 完成态：不再是一张"可以点的卡"，去掉手型与 hover 位移 */
+  .flip-card.done{cursor:default;border-color:var(--accent);background:var(--accent-soft);}
+  .flip-card.done:hover{transform:none;}
   .word-ctrl{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;}
+  /* 这两个按钮是 answer 动作，视觉上要比「翻转 / 重来」重一档 */
+  .word-ctrl button:disabled{opacity:.4;cursor:not-allowed;}
+  .w-round{font-size:var(--fs-sm);color:var(--text-2);white-space:nowrap;}
+  .w-round b{color:var(--accent-ink);}
+  .wbar{height:5px;border-radius:999px;background:var(--fill-3);overflow:hidden;margin:2px 0 12px;}
+  .wbar-fill{height:100%;width:0;background:var(--accent);border-radius:999px;
+    transition:width .28s cubic-bezier(.4,0,.2,1);}
+  .wstat{text-align:center;font-size:var(--fs-xs);color:var(--text-3);margin-top:9px;line-height:1.7;}
+  .wstat b{color:var(--accent-ink);font-weight:700;}
+  .wstat .sep{margin:0 6px;color:var(--line-strong);}
+  .wkeys{text-align:center;font-size:var(--fs-xs);color:var(--text-3);margin-top:4px;}
+  .wkeys kbd{font-family:var(--font-sans);font-size:10px;padding:1px 5px;border:1px solid var(--line-strong);
+    border-radius:4px;color:var(--text-2);background:var(--card-bg);}
+  /* 级别 + 组选择：词库有几千词，一次只发一组 20 个。
+     视觉压到最轻（细边框、无填充），否则会和卡片抢注意力。 */
+  .w-picker{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    flex-wrap:wrap;margin-bottom:10px;}
+  .w-chips{display:flex;gap:6px;flex-wrap:wrap;}
+  .w-chip{border:1px solid var(--line-strong);background:transparent;color:var(--text-2);
+    font-family:var(--font-sans);font-size:var(--fs-badge);padding:4px 11px;border-radius:999px;
+    cursor:pointer;transition:var(--t-color);letter-spacing:var(--ls-tight);}
+  .w-chip:hover{border-color:var(--accent);color:var(--accent-ink);}
+  .w-chip.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-ink);font-weight:600;}
+  .w-chip small{opacity:.65;margin-left:4px;font-weight:400;}
+  .w-nav{display:flex;align-items:center;gap:7px;}
+  .w-arrow{width:26px;height:26px;line-height:1;border:1px solid var(--line-strong);background:transparent;
+    color:var(--text-2);border-radius:50%;cursor:pointer;font-size:15px;transition:var(--t-color);}
+  .w-arrow:hover:not(:disabled){border-color:var(--accent);color:var(--accent-ink);}
+  .w-arrow:disabled{opacity:.35;cursor:not-allowed;}
+  .w-groupno{font-size:var(--fs-sm);color:var(--text-2);white-space:nowrap;}
+  .w-groupno b{color:var(--accent-ink);}
+  .w-src{margin-top:9px;text-align:center;font-size:var(--fs-xs);color:var(--text-3);}
+  .w-src a{color:var(--text-3);text-decoration:underline;text-underline-offset:2px;}
   .progress{text-align:center;color:var(--text-2);font-size:var(--fs-sm);margin-bottom:10px;}
 
   /* 倒计时 */
@@ -165,25 +221,124 @@
     font-family:var(--font-sans);font-size:var(--fs-xs);line-height:1.7;color:var(--ink);white-space:pre-wrap;word-break:break-word;
     max-height:280px;overflow:auto;margin:0;}
 
-  /* 课程表 · 仿小律周视图 */
-  .sched{display:flex;gap:5px;margin-top:6px;border:1px solid var(--line);border-radius:var(--radius-md);padding:8px;background:var(--bg-canvas);overflow-x:auto;}
-  .sched-rail{flex:0 0 30px;display:flex;flex-direction:column;}
+  /* 课程表 · 仿小律周视图
+     ── 10-29 重排。原来列宽下限只有 40px，中文课名一行只放得下 3 个字，
+        「大学生创新创业基础」被压成 5 行竖排、教室名再挤一节，看着就是乱码。
+        现在：列宽下限 66px（一行 5 个字）+ 最长两行 + 超出打省略号；
+        单节课块（44px）只留课名，不去硬塞教室和老师。
+        放不下就横向滑（教务 App 都这么干），绝不把字挤成竖排。
+        ★ 66px 是实测出来的下限：58px 时"大学生创新创业基础"仍会被折成
+          「大学生 / 创新…」，66px 才够 5 字一行、9 字课名正好两行放完。 */
+  .sched-wrap{position:relative;margin-top:6px;}
+  /* 右边缘一道渐隐：手机上一屏放不下 7 天，没有这道影子就没人知道能往右滑 */
+  .sched-wrap::after{content:"";display:none;position:absolute;top:1px;right:1px;width:22px;bottom:1px;pointer-events:none;
+    border-radius:0 var(--radius-md) var(--radius-md) 0;
+    background:linear-gradient(90deg,transparent,var(--bg-canvas) 82%);}
+  .sched-wrap.can-scroll::after{display:block;}
+  .sched-wrap.at-end::after{display:none;}
+  .sched{display:flex;gap:5px;margin-top:0;border:1px solid var(--line);border-radius:var(--radius-md);
+    padding:6px;background:var(--bg-canvas);overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;}
+  /* 节次栏吸左：横向滑动看后面的星期时，第几节还留在视野里 */
+  .sched-rail{flex:0 0 26px;display:flex;flex-direction:column;position:sticky;left:0;z-index:3;background:var(--bg-canvas);}
   .sched-rail .pr{height:44px;display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:10px;}
-  .sched-days{flex:1;display:grid;grid-template-columns:repeat(7,minmax(40px,1fr));gap:5px;min-width:330px;}
+  .sched-days{flex:1;display:grid;grid-template-columns:repeat(7,minmax(66px,1fr));gap:4px;min-width:462px;}
   .sched-day{position:relative;background:var(--card-bg);border:1px solid var(--line);border-radius:8px;overflow:hidden;}
   .sched-day .dh{position:absolute;top:0;left:0;right:0;height:22px;text-align:center;color:var(--text-3);
     font-size:10px;font-weight:600;line-height:22px;background:var(--fill-2);z-index:2;}
-  .sched-block{position:absolute;left:2px;right:2px;border-radius:6px;padding:3px 4px;overflow:hidden;cursor:pointer;
-    border-left:3px solid;transition:var(--t-color);box-shadow:var(--shadow-1);}
+  /* 左右各让 1px、竖线 2px、内边距 4px：把省下的 5px 全给文字。
+     66px 的列减去这些还剩 54px，10px 字号正好一行 5 个汉字——
+     "大学生创新创业基础" 9 个字两行放得下，不再出现「大学生创 / 新创业…」 */
+  .sched-block{position:absolute;left:1px;right:1px;border-radius:6px;padding:3px 4px;overflow:hidden;cursor:pointer;
+    border-left:2px solid;transition:var(--t-color);box-shadow:var(--shadow-1);
+    display:flex;flex-direction:column;min-height:0;}
   .sched-block:hover{filter:brightness(.96);}
-  .sched-block .bn{font-weight:600;font-size:10px;line-height:1.15;color:var(--ink);}
-  .sched-block .br{font-size:9px;color:var(--text-2);line-height:1.1;margin-top:1px;}
-  .sched-block .bt{font-size:9px;color:var(--text-3);line-height:1.1;margin-top:1px;}
+  .sched-block .bn{font-weight:600;font-size:10px;line-height:1.25;color:var(--ink);
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;}
+  .sched-block .br,.sched-block .bt{font-size:9px;line-height:1.2;margin-top:1px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .sched-block .br{color:var(--text-2);}
+  .sched-block .bt{color:var(--text-3);}
+  /* 单节课块只有 44px：课名一行 + 教室一行正好填满，老师那行留着就会被裁掉半截 */
+  .sched-block.one .bn{-webkit-line-clamp:1;}
+  .sched-block.one .bt{display:none;}
 
-  /* JSON 导入面板（小律同款） */
-  .import-panel{border:1px dashed var(--accent);border-radius:var(--radius-md);padding:14px;margin:12px 0;background:var(--accent-soft);}
-  .import-head{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
-  .import-panel textarea{min-height:96px;}
+
+  /* ---- 周次条（10-29 二次反馈加）----
+     原来只有"这一周"一张图：别的周既看不到、也没有入口。week 数据一直在库里，
+     只是画的时候没人看它。 */
+  .wkbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 8px;}
+  .wk-btn{width:28px;height:28px;display:flex;align-items:center;justify-content:center;padding:0;
+    border:1px solid var(--line-strong);background:transparent;color:var(--ink);border-radius:var(--radius-sm);
+    font-size:16px;line-height:1;font-family:inherit;cursor:pointer;transition:var(--t-color);}
+  .wk-btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent-ink);background:var(--fill-2);}
+  .wk-btn:disabled{opacity:.32;cursor:default;}
+  .wk-sel{border:1px solid var(--line-strong);background:var(--card-bg);color:var(--ink);
+    border-radius:var(--radius-sm);padding:5px 8px;max-width:176px;font-family:inherit;font-size:var(--fs-sm);
+    font-weight:600;letter-spacing:var(--ls-tight);cursor:pointer;transition:var(--t-color);}
+  .wk-sel:hover{border-color:var(--accent);}
+  .wk-sel:focus{outline:none;border-color:var(--accent);box-shadow:var(--ring-accent);}
+  /* 金色胶囊：跟首页那个「内测反馈」同一套语言，用来喊人点一下校准 */
+  .wk-this{border:1px solid var(--accent);background:var(--accent-soft);color:var(--accent-ink);
+    border-radius:999px;padding:4px 11px;font-family:inherit;font-size:var(--fs-xs);font-weight:600;
+    letter-spacing:var(--ls-tight);cursor:pointer;transition:var(--t-color);white-space:nowrap;}
+  .wk-this:hover{background:var(--accent);color:#2E2416;}
+  .wk-seg{margin-left:auto;display:flex;border:1px solid var(--line-strong);border-radius:999px;overflow:hidden;}
+  .wk-tab{border:0;background:transparent;color:var(--text-2);font-family:inherit;font-size:var(--fs-xs);
+    padding:5px 12px;cursor:pointer;letter-spacing:var(--ls-tight);transition:var(--t-color);}
+  .wk-tab:hover{color:var(--accent-ink);}
+  .wk-tab.on{background:var(--ink);color:var(--card-bg);}
+  .wk-tip{flex:1 1 100%;font-size:var(--fs-xs);color:var(--text-3);line-height:1.6;margin-top:2px;}
+
+  /* 同一格里有多门课：左右分栏，谁也不盖谁。栏窄了只留课名，教室/老师在 title 里 */
+  .sched-block.split{padding:3px 3px;}
+  .sched-block.split .bn{font-size:9px;line-height:1.22;-webkit-line-clamp:3;}
+  .sched-block.split .br,.sched-block.split .bt{display:none;}
+
+  /* 学期一览：一行一周、一列一天，把十几周摊在一屏 */
+  .ov-wrap{margin-top:6px;}
+  .ov-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;
+    border:1px solid var(--line);border-radius:var(--radius-md);padding:6px;background:var(--bg-canvas);}
+  .ov{border-collapse:separate;border-spacing:4px;min-width:560px;width:100%;table-layout:fixed;}
+  .ov th{font-size:10px;font-weight:600;color:var(--text-3);padding:2px 0;text-align:center;letter-spacing:var(--ls-tight);}
+  .ov th.ov-w{width:34px;padding:0;}
+  .ov-wt{font-size:10px;color:var(--text-3);}
+  .ov td{background:var(--card-bg);border:1px solid var(--line);border-radius:6px;padding:3px;
+    vertical-align:top;height:26px;}
+  .ov td.empty{background:transparent;border-style:dashed;}
+  /* 名字允许两行：一览表本来就窄，硬挤一行只会看到「大学生创新与…」 */
+  .ov-c{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:9px;line-height:1.35;
+    color:var(--ink);border-left:2px solid;border-radius:3px;padding:1px 3px;margin-bottom:2px;
+    overflow:hidden;overflow-wrap:anywhere;}
+  .ov-c:last-child{margin-bottom:0;}
+  .ov-wk{width:100%;border:0;background:transparent;color:var(--text-2);font-family:inherit;font-size:10px;
+    font-weight:600;cursor:pointer;border-radius:5px;padding:3px 0;transition:var(--t-color);}
+  .ov-wk:hover{background:var(--fill-2);color:var(--accent-ink);}
+  .ov-wk.cur{background:var(--accent-soft);color:var(--accent-ink);}
+  .ov-wk.me{box-shadow:inset 0 0 0 1px var(--accent);}
+
+  /* 导入弹窗里的 JSON 框：够高看到整段，又不至于把弹窗顶出屏幕 */
+  #cJson{min-height:110px;max-height:34vh;}
+  body.cmodal-open{overflow:hidden;}
+
+  /* 导入课表弹窗：入口收进「本周课表」右上角，粘 JSON / 选文件 / 复制提示词都在里面 */
+  .cmodal{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;padding:16px;}
+  .cmodal[hidden]{display:none;}
+  .cmodal-mask{position:absolute;inset:0;background:rgba(46,36,22,.42);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);}
+  .cmodal-card{position:relative;width:100%;max-width:520px;max-height:calc(100dvh - 32px);overflow-y:auto;
+    background:var(--card-bg);border:1px solid var(--line-strong);border-radius:var(--radius-lg);
+    box-shadow:0 18px 48px rgba(46,36,22,.28);padding:18px 18px 16px;}
+  .cmodal-head{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+  .cmodal-head h3{font-family:var(--font-serif);font-size:var(--fs-xl);margin:0;flex:1;letter-spacing:var(--ls-tight);}
+  .cmodal-guide{margin-top:14px;border-top:1px dashed var(--line-strong);padding-top:10px;}
+  .cmodal-guide summary{font-size:var(--fs-sm);color:var(--accent-ink);cursor:pointer;letter-spacing:var(--ls-tight);}
+  .cmodal-guide .guide-h{margin:10px 0 6px;}
+  #cImportMsg{font-size:var(--fs-sm);margin-top:8px;line-height:1.6;min-height:1.2em;}
+
+  /* iOS Safari 聚焦字号 <16px 的输入框会把整页放大，且失焦不还原（10-29 实测）。
+     本页输入框是 13px，落在雷区里；移动端一律抬到 16px，别让人打一次字画幅就变。 */
+  @media (max-width:900px){
+    input:not([type=checkbox]):not([type=radio]),textarea,select{font-size:16px !important;}
+  }
 
   /* 抽签 · 群抽签 */
   textarea{width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);
@@ -333,18 +488,79 @@
 
   <!-- ===== 课程表（仿小律 · 周视图 + 小律同款 JSON 导入） ===== -->
   <section class="tool" id="conflict">
+    <!-- 周视图放最前：这才是用户打开「课程表」想看的东西。
+         原来第一屏是教程 + JSON 面板 + 手动添加，手机上要滑过三屏才看到课表（10-29 反馈）。
+         导入收进右上角一颗按钮，其余都进弹窗。 -->
     <div class="card">
-      <div class="row-head"><div><div class="eyebrow">课表</div><h2 class="serif">我的课程表</h2></div></div>
-      <p class="note" style="margin-top:0">仿小律课程的极简周视图。两种录入方式：① 把教务导出的课表文本丢给 <b>知穗 AI</b>，让它生成标准 JSON 粘进来一键导入（见下方教程）；② 在「添加一门课」里手动填。</p>
-
-      <!-- 教程：用 AI 生成课表 JSON -->
-      <div class="guide">
-        <div class="guide-h">
-          <span class="eyebrow">教程</span>
-          <span style="flex:1"></span>
-          <button class="btn-import btn-sm" id="copyPrompt">复制提示词</button>
+      <div class="row-head">
+        <div><div class="eyebrow">周视图</div><h2 class="serif">我的课表</h2></div>
+        <button class="btn-new btn-sm" id="cOpenImport" type="button">导入课表</button>
+      </div>
+      <!-- 周次条：能前后翻、能直接选周、能记一次"这周是第几周"（之后自动跟着日历走） -->
+      <div class="wkbar" id="wkBar" hidden>
+        <button class="wk-btn" id="wkPrev" type="button" aria-label="上一周">‹</button>
+        <select class="wk-sel" id="wkSel" aria-label="选择周次"></select>
+        <button class="wk-btn" id="wkNext" type="button" aria-label="下一周">›</button>
+        <button class="wk-this" id="wkThis" type="button">设本周</button>
+        <div class="wk-seg" role="group" aria-label="课表视图">
+          <button class="wk-tab on" id="wkModeWeek" type="button" aria-pressed="true">按周</button>
+          <button class="wk-tab" id="wkModeAll" type="button" aria-pressed="false">一览</button>
         </div>
-        <p class="note" style="margin:0 0 8px">把下面这段提示词，连同一份你的课表（教务导出文字 / 截图转文字 / 手写都行）一起发给知穗 AI，它会返回标准 JSON；再把 JSON 粘到「导入」框即可。</p>
+        <div class="wk-tip" id="wkTip" hidden></div>
+      </div>
+      <div class="sched-wrap">
+        <div class="sched">
+          <div class="sched-rail" id="schedRail"></div>
+          <div class="sched-days" id="schedDays"></div>
+        </div>
+      </div>
+      <div class="ov-wrap" id="ovWrap" hidden></div>
+      <p class="note" id="cHint">点任意课块可删除该课程。课块按节次高度自动拉伸；格子放不下时左右滑。</p>
+    </div>
+
+    <div class="card">
+      <div class="row-head"><div><div class="eyebrow">手动</div><h2 class="serif">添加一门课</h2></div></div>
+      <div class="add-row" style="align-items:flex-end">
+        <div style="flex:1.4;min-width:120px"><input id="cName" placeholder="课程名，如：高等数学" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
+        <div style="flex:1;min-width:84px"><select id="cDay" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit">
+          <option value="1">周一</option><option value="2">周二</option><option value="3">周三</option><option value="4">周四</option><option value="5">周五</option><option value="6">周六</option><option value="7">周日</option>
+        </select></div>
+        <div style="flex:1.2;min-width:104px"><input id="cSec" placeholder="节次，如 1,2 或 1-3" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
+        <div style="flex:1;min-width:84px"><input id="cRoom" placeholder="教室(可选)" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
+        <div style="flex:1;min-width:84px"><input id="cTeach" placeholder="老师(可选)" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
+        <div style="flex:1;min-width:96px"><input id="cWeeks" placeholder="周次 1-16(可选)" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
+        <button class="btn-new btn-sm" id="cAdd" type="button">添加</button>
+      </div>
+      <div class="add-row" style="margin-top:8px;align-items:center">
+        <button class="btn-import btn-sm" id="cClear" type="button">清空课表</button>
+        <span id="cCount" class="note" style="margin:0"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 导入课表弹窗（从「本周课表」右上角打开） ===== -->
+  <div class="cmodal" id="cModal" hidden>
+    <div class="cmodal-mask" data-close="1"></div>
+    <div class="cmodal-card" role="dialog" aria-modal="true" aria-labelledby="cModalTitle">
+      <div class="cmodal-head">
+        <h3 id="cModalTitle">导入课表</h3>
+        <button class="icon-btn" id="cModalX" type="button" aria-label="关闭导入">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg>
+        </button>
+      </div>
+      <p class="note" style="margin:0 0 10px">把知穗 AI 整理好的 JSON 粘进来，或者选一个 <b>.json</b> 文件。课名 + 星期 + 节次 + 周次都相同的课不会重复导入；带了 <b>weeks</b> 的课只在对应周次出现，没带的当作每周都上。</p>
+      <textarea id="cJson" placeholder='粘贴形如 {"courses":[{&quot;name&quot;:&quot;高等数学&quot;,&quot;dayOfWeek&quot;:1,&quot;sections&quot;:[1,2]}]} 的 JSON'></textarea>
+      <div class="add-row" style="align-items:center">
+        <button class="btn-new btn-sm" id="cImport" type="button">导入</button>
+        <button class="btn-import btn-sm" id="cFileBtn" type="button">选文件…</button>
+        <input type="file" id="cFile" accept=".json,.txt,application/json,text/plain" hidden />
+        <button class="btn-import btn-sm" id="cSample" type="button">填示例</button>
+        <button class="btn-import btn-sm" id="cExport" type="button">导出我的课表</button>
+      </div>
+      <div id="cImportMsg" role="status" aria-live="polite"></div>
+      <details class="cmodal-guide">
+        <summary>手上还没有课表草稿？点开复制这段提示词去问知穗 AI</summary>
+        <div class="guide-h"><span style="flex:1"></span><button class="btn-import btn-sm" id="copyPrompt" type="button">复制提示词</button></div>
         <pre class="prompt" id="promptBox">你是一个课程表整理助手。请把我给的课表整理成如下 JSON，只输出 JSON、不要解释：
 
 {
@@ -363,69 +579,44 @@
 
 我的课表如下：
 （把教务导出 / 截图转文字 / 手写的课表粘贴到这里）</pre>
-      </div>
-
-      <!-- JSON 导入面板 -->
-      <div class="import-panel">
-        <div class="import-head">
-          <span class="eyebrow">小律同款 · JSON 导入</span>
-          <span style="flex:1"></span>
-          <button class="btn-import btn-sm" id="cSample">下载示例</button>
-          <button class="btn-import btn-sm" id="cExport">导出我的课表</button>
-        </div>
-        <textarea id="cJson" placeholder="把 AI 生成的课程表 JSON 粘贴到这里，点「导入」即可。"></textarea>
-        <div class="add-row" style="align-items:center">
-          <button class="btn-new btn-sm" id="cImport">导入</button>
-          <span id="cImportMsg" class="note" style="margin:0"></span>
-        </div>
-      </div>
+      </details>
     </div>
-
-    <div class="card">
-      <div class="row-head"><div><div class="eyebrow">手动</div><h2 class="serif">添加一门课</h2></div></div>
-      <div class="add-row" style="align-items:flex-end">
-        <div style="flex:1.4;min-width:120px"><input id="cName" placeholder="课程名，如：高等数学" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
-        <div style="flex:1;min-width:84px"><select id="cDay" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit">
-          <option value="1">周一</option><option value="2">周二</option><option value="3">周三</option><option value="4">周四</option><option value="5">周五</option><option value="6">周六</option><option value="7">周日</option>
-        </select></div>
-        <div style="flex:1.2;min-width:104px"><input id="cSec" placeholder="节次，如 1,2 或 1-3" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
-        <div style="flex:1;min-width:84px"><input id="cRoom" placeholder="教室(可选)" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
-        <div style="flex:1;min-width:84px"><input id="cTeach" placeholder="老师(可选)" style="width:100%;border:1px solid var(--input-border);background:var(--bg-canvas);border-radius:var(--radius-sm);padding:7px 8px;color:var(--ink);font-size:var(--fs-md);font-family:inherit" /></div>
-        <button class="btn-new btn-sm" id="cAdd">添加</button>
-      </div>
-      <div class="add-row" style="margin-top:8px;align-items:center">
-        <button class="btn-import btn-sm" id="cClear">清空课表</button>
-        <span id="cCount" class="note" style="margin:0"></span>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="row-head"><div><div class="eyebrow">周视图</div><h2 class="serif">本周课表</h2></div></div>
-      <div class="sched">
-        <div class="sched-rail" id="schedRail"></div>
-        <div class="sched-days" id="schedDays"></div>
-      </div>
-      <p class="note">点任意课块可删除该课程。课程块按节次高度自动拉伸，和手机上的课表 App 一样。</p>
-    </div>
-  </section>
+  </div>
 
   <!-- ===== 单词卡 ===== -->
   <section class="tool" id="words">
     <div class="card">
-      <div class="row-head"><div><div class="eyebrow">记忆</div><h2 class="serif">四六级高频词卡</h2></div></div>
-      <div class="progress" id="wProgress">第 1 / 1 张</div>
-      <div class="flip-card" id="wCard">
+      <div class="row-head">
+        <div><div class="eyebrow">记忆</div><h2 class="serif">四六级词卡</h2></div>
+        <div class="w-round" id="wRound">正在加载词库…</div>
+      </div>
+      <div class="w-picker">
+        <div class="w-chips" id="wLevels"></div>
+        <div class="w-nav">
+          <button class="w-arrow" id="wPrev" type="button" aria-label="上一组" disabled>‹</button>
+          <span class="w-groupno" id="wGroupNo">—</span>
+          <button class="w-arrow" id="wNext" type="button" aria-label="下一组" disabled>›</button>
+        </div>
+      </div>
+      <div class="wbar"><div class="wbar-fill" id="wBar"></div></div>
+      <div class="flip-card" id="wCard" role="button" tabindex="0" aria-label="词卡，点击翻转看释义">
         <div class="word" id="wWord">—</div>
         <div class="meta" id="wMeta"></div>
-        <div class="hint">点击卡片翻转看释义</div>
+        <div class="hint" id="wHint">点击卡片（或按空格）翻转看释义</div>
       </div>
       <div class="word-ctrl">
         <button class="btn-import btn-sm" id="wFlip">翻转</button>
         <button class="btn-new btn-sm" id="wKnow">认识<span class="ico-inline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12h14.5"/><path d="M13 6.2l5.8 5.8-5.8 5.8"/></svg></span></button>
         <button class="btn-import btn-sm" id="wUnknow">不认识，复习</button>
-        <button class="btn-import btn-sm" id="wReset">重来</button>
+        <button class="btn-import btn-sm" id="wReset">重来这组</button>
+        <button class="btn-new btn-sm" id="wGoNext" style="display:none">下一组<span class="ico-inline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12h14.5"/><path d="M13 6.2l5.8 5.8-5.8 5.8"/></svg></span></button>
       </div>
-      <p class="note">内置一批四六级高频词。点「不认识」会把它收进复习堆，一轮过后优先重练。</p>
+      <div class="wstat" id="wStat"></div>
+      <div class="wkeys">
+        <kbd>空格</kbd> 翻转 <span class="sep">·</span> <kbd>→</kbd> 认识 <span class="sep">·</span> <kbd>←</kbd> 不认识
+      </div>
+      <p class="note" id="wNote">一组 20 个词。点「不认识」的词会进这一组的复习堆，但这一轮照样往下走 —— 等整组过完，再单独练它们。</p>
+      <div class="w-src" id="wSrc"></div>
     </div>
   </section>
 
@@ -494,6 +685,12 @@ tabs.addEventListener('click',e=>{
   document.querySelectorAll('.tool').forEach(t=>t.classList.remove('active'));
   b.classList.add('active');
   document.getElementById(b.dataset.tab).classList.add('active');
+  // 回到顶部：切换前滚到哪，切换后浏览器会原样停在那个偏移量。
+  // 上一个是长页面（单词卡）、课程表短得多时，落地就被夹到最底 —— 用户看到的
+  // 就是「课表得滑到最下面才有」（10-29 反馈）。切完统一回到顶部最稳。
+  window.scrollTo({top:0,left:0,behavior:'auto'});
+  // 切过去时整块才从 display:none 变可见，宽度到这一刻才量得准
+  if(typeof syncSchedFade==='function') syncSchedFade();
 });
 
 /* ---------- GPA ---------- */
@@ -516,9 +713,35 @@ function makeRow(n='',c='',s=''){
     <td><input class="r-score" type="number" min="0" max="100" step="1" placeholder="85" value="${s}"></td>
     <td style="text-align:center"><span class="r-gpa">—</span></td>
     <td style="text-align:center"><button class="del" title="删除" aria-label="删除该行">${icoTrash}</button></td>`;
-  tr.querySelector('.del').onclick=()=>{tr.remove();recalc();};
-  tr.querySelectorAll('input').forEach(i=>i.addEventListener('input',recalc));
+  tr.querySelector('.del').onclick=()=>{tr.remove();recalc();saveGpa();};
+  tr.querySelectorAll('input').forEach(i=>i.addEventListener('input',()=>{recalc();saveGpa();}));
   rowsEl.appendChild(tr);
+}
+/* GPA 明细也存本机（10-29）：一学期十几门课，刷新清空等于让人重输一遍。
+   同一份工具集里单词卡、倒计时早就存了，就课表和 GPA 这两张"手填表"没存 */
+const G_KEY='baomi_tools_gpa_v1';
+function saveGpa(){
+  try{
+    const rows=[...rowsEl.querySelectorAll('tr')].map(tr=>({
+      n:tr.querySelector('.r-name').value,
+      c:tr.querySelector('.r-credit').value,
+      s:tr.querySelector('.r-score').value
+    }));
+    localStorage.setItem(G_KEY,JSON.stringify({v:1,algo:getAlgo(),rows}));
+  }catch(e){}
+}
+function loadGpa(){
+  try{
+    const d=JSON.parse(localStorage.getItem(G_KEY)||'null');
+    if(!d||!Array.isArray(d.rows)||!d.rows.length) return false;
+    rowsEl.innerHTML='';
+    d.rows.forEach(r=>makeRow(r.n==null?'':r.n,r.c==null?'':r.c,r.s==null?'':r.s));
+    if(d.algo){
+      const el=algoEl.querySelector('input[value="'+d.algo+'"]');
+      if(el) el.checked=true;
+    }
+    return true;
+  }catch(e){ return false; }
 }
 function recalc(){
   const a=getAlgo(); let sg=0,sc=0,ss=0;
@@ -534,11 +757,14 @@ function recalc(){
   document.getElementById('sAvg').textContent=sc>0?(ss/sc).toFixed(1):'—';
   document.getElementById('sCredit').textContent=sc.toFixed(1);
 }
-document.getElementById('add').onclick=()=>makeRow();
+document.getElementById('add').onclick=()=>{makeRow();saveGpa();};
 document.getElementById('sample').onclick=()=>{rowsEl.innerHTML='';
-  [['高等数学',5,88],['大学英语',3,76],['数据结构',4,92],['线性代数',3,81],['思想道德',2,69]].forEach(([n,c,s])=>makeRow(n,c,s));recalc();};
-algoEl.querySelectorAll('input').forEach(i=>i.addEventListener('change',()=>{algoDesc.textContent=ALGO_DESC[getAlgo()];recalc();}));
-algoDesc.textContent=ALGO_DESC.std4; document.getElementById('sample').onclick();
+  [['高等数学',5,88],['大学英语',3,76],['数据结构',4,92],['线性代数',3,81],['思想道德',2,69]].forEach(([n,c,s])=>makeRow(n,c,s));recalc();saveGpa();};
+algoEl.querySelectorAll('input').forEach(i=>i.addEventListener('change',()=>{algoDesc.textContent=ALGO_DESC[getAlgo()];recalc();saveGpa();}));
+// 有存过的就用存过的（连算法档位一起），没有才铺示例数据
+if(!loadGpa()) document.getElementById('sample').onclick();
+algoDesc.textContent=ALGO_DESC[getAlgo()];
+recalc();
 
 /* ---------- 番茄钟 ---------- */
 let pTimer=null,pRemain=25*60,pRunning=false,pDone=0;
@@ -599,132 +825,840 @@ function normSections(s){
   if(Array.isArray(s)) return s.map(Number).filter(n=>n>=1&&n<=PERIODS);
   return [];
 }
-function addCourse(c){
+/* 周次：数组或 "1-16" / "1,3,5" 这类字符串都收。没写就是 null = 每周都上 */
+function normWeeks(s){
+  if(s==null||s==='') return null;
+  let a=[];
+  if(typeof s==='string') a=normSections(s.replace(/[第周]/g,''));
+  else if(Array.isArray(s)) a=s.map(Number);
+  a=a.filter(n=>n>=1&&n<=30).sort((x,y)=>x-y);
+  return a.length?a:null;
+}
+/* ---------- 课表本地存储（10-29 新增） ----------
+   用户反馈：「校园工具集没有本地存储，特别从课表就能看出」——单词卡、倒计时的
+   进度都记得住，唯独课表刷新就回到三门示例课。现在增删改导入清空全部落盘。
+   key 带版本号：将来改结构就换 v，老数据自然作废，不会读出一堆 undefined。 */
+const C_KEY='baomi_tools_sched_v1';
+let cSample=false;   // 首访塞的三门示例课；真导入/添加后就不再是"示例"
+
+function saveSched(){
+  try{
+    /* v2：day 的含义从"dayOfWeek%7"改成"(dayOfWeek-1)%7"（修错位一天） */
+    localStorage.setItem(C_KEY, JSON.stringify({v:2,cseq:cseq,sample:cSample,updated:Date.now(),
+      courses:courses.map(c=>({id:c.id,name:c.name,color:c.color,day:c.day,sections:c.sections,
+        teacher:c.teacher,classroom:c.classroom,weeks:c.weeks,notes:c.notes}))}));
+  }catch(e){ /* 隐私模式/配额满：存不下也不能让页面挂掉，只是这次记不住 */ }
+}
+function loadSched(){
+  try{
+    const raw=localStorage.getItem(C_KEY); if(!raw) return false;
+    const d=JSON.parse(raw);
+    if(!d||!Array.isArray(d.courses)) return false;
+    /* 老数据（v1 或更早）的 day 是"少减 1"写进去的，读的时候往回拨一天，
+       否则一升级整张表又错位一天。迁移只做一次，存回去就变成 v2 了。 */
+    const legacy=(+d.v||1)<2;
+    courses=d.courses.filter(c=>c&&c.name&&Array.isArray(c.sections)&&c.sections.length)
+      .map(c=>{
+        let nd=((+c.day||0)%7+7)%7;
+        if(legacy) nd=(nd+6)%7;
+        return {
+          id:+c.id||0,
+          name:String(c.name),
+          color:/^#[0-9a-f]{6}$/i.test(c.color||'')?c.color:CCOLORS[0],
+          day:nd,
+          sections:c.sections.map(Number).filter(n=>n>=1&&n<=PERIODS).sort((x,y)=>x-y),
+          teacher:c.teacher||'',classroom:c.classroom||'',weeks:normWeeks(c.weeks),notes:c.notes||''
+        };
+      }).filter(c=>c.sections.length);
+    cseq=Math.max(+d.cseq||0,0,...courses.map(c=>c.id));
+    cSample=!!d.sample;
+    if(legacy&&courses.length) saveSched();
+    return true;
+  }catch(e){ return false; }
+}
+function setHint(extra){
+  const el=document.getElementById('cHint'); if(!el) return;
+  if(extra){ el.textContent=extra; return; }
+  if(hasWeeks()&&wkMode==='week'){
+    const n=wkCount(curWk);
+    el.textContent = n
+      ? '第 '+curWk+' 周共 '+n+' 门课。点课块可删除；同一格有多门课时左右分栏，切「一览」看全名。'
+      : '第 '+curWk+' 周没有排课，翻一下周次或点「设本周」跳到当前周。';
+  } else if(hasWeeks()){
+    el.textContent='整学期一览：一行一周、一列一天。点左边周号直接看那一周的课表。';
+  } else {
+    el.textContent=cSample
+      ? '下面 3 门是示例课，点课块可以删掉。导入或添加的课表会存在这台设备上，刷新不丢。'
+      : '点任意课块可删除该课程。课表存在这台设备上，刷新不丢；格子放不下时左右滑。';
+  }
+}
+
+/* ★★ 10-29 修正：dayOfWeek(1=周一…7=周日) 换成 0 基列号必须减 1。
+   老写法 `dayOfWeek%7` 少减了这一下，于是整张表**错位一天**：周一 3-4 节的课被画在
+   「周二」列下，周一那列永远是空的，周日直接消失。用户看到的"乱排"里有一半是它。
+   ⇒ 列号 = (dayOfWeek-1) mod 7。toDay 只收 1..7 的语义输入。 */
+function toDay(v){
+  const n=Math.round(Number(v));
+  if(!isFinite(n)||!n) return 0;
+  return ((n-1)%7+7)%7;
+}
+function addCourse(c,opt){
   const id=++cseq;
   const name=(typeof c==='string')?c:(c&&c.name)||('课程'+id);
   courses.push({id,name:(name&&name.trim())||('课程'+id),color:CCOLORS[(id-1)%CCOLORS.length],
-    day:((((c&&c.dayOfWeek!=null?c.dayOfWeek:c.day)||1)%7)+7)%7,
+    day:toDay(c&&c.dayOfWeek!=null?c.dayOfWeek:c.day),
     sections:normSections(c&&c.sections!=null?c.sections:(c&&c.section!=null?c.section:[])),
-    teacher:(c&&c.teacher)||'',classroom:(c&&c.classroom)||'',weeks:(c&&c.weeks)||null,notes:(c&&c.notes)||''});
-  renderSched();
+    teacher:(c&&c.teacher)||'',classroom:(c&&c.classroom)||'',weeks:normWeeks(c&&c.weeks),notes:(c&&c.notes)||''});
+  cSample=false;
+  saveSched();
+  if(!(opt&&opt.silent)) renderSched();
 }
+/* 判重：课名 + 星期 + 节次 + 周次全一样才算同一门。
+   ★ 10-29 修：原来不含 weeks，于是"第 2 周在二教A-501、第 3-10 周一教东304"这两行
+     被判成重复，第二行直接丢掉（他导 27 行只进来 26 条，教室里少一个）。 */
+function courseKey(c){
+  return [String(c.name||'').trim().toLowerCase(),c.day,
+    [...(c.sections||[])].sort((a,b)=>a-b).join(','),
+    [...(c.weeks||[])].map(Number).sort((a,b)=>a-b).join(',')].join('|');
+}
+/* ---------- 周次：视图状态 + 日历校准 ----------
+   ★★ 10-29 二次反馈「为什么还是会这样」。根因不在排版，在 renderSched 压根不看 weeks：
+      weeks 一直存着、导出也带着，画的时候却全画上了。于是"只在第 16 周上"的
+      计算机综合实验被塞进每一周，和"每周都上"的大学物理撞在同一格 ——
+      两块都是 position:absolute、同一个 top/height，后画的把先画的整块盖住，
+      看着就是乱码/文字重叠。
+      现在：① 按周筛课（没标 weeks 的课 = 每周都上）② 同格多课左右分栏，谁也不盖谁
+            ③ 周次条能前后翻、能直接选 ④ 另给一张"学期一览"，十几周摊一屏。 */
+const WK_KEY='baomi_tools_week_v1';
+let curWk=1, wkAnchor=null, wkMode='week', wkStored=false;
+
+function weeksOf(c){ return (Array.isArray(c&&c.weeks)?c.weeks:[]).map(Number).filter(w=>w>=1&&w<=30).sort((a,b)=>a-b); }
+function hasWeeks(){ return courses.some(c=>weeksOf(c).length>0); }
+function maxWk(){ let m=0; courses.forEach(c=>weeksOf(c).forEach(w=>{ if(w>m) m=w; })); return m||1; }
+/* 没写 weeks 的课当作"每周都上"：手动画上去的课不该只出现一次 */
+function inWk(c,w){ const ws=weeksOf(c); return !ws.length || ws.indexOf(w)>=0; }
+function wkCount(w){ let n=0; courses.forEach(c=>{ if(inWk(c,w)) n++; }); return n; }
+
+function ymd(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function dayIdx(d){ return Math.round(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())/86400000); }
+function mondayOf(d){ const x=new Date(d.getFullYear(),d.getMonth(),d.getDate()); x.setDate(x.getDate()-((x.getDay()+6)%7)); return x; }
+/* 校准一次就够：记下 {n:当时第几周, at:那天}，以后一律按"周一为界差几周"推当前周 */
+function wkNow(){
+  if(!wkAnchor||!wkAnchor.n||!wkAnchor.at) return 0;
+  const at=new Date(wkAnchor.at+'T00:00:00');
+  if(isNaN(at.getTime())) return 0;
+  return wkAnchor.n+Math.round((dayIdx(mondayOf(new Date()))-dayIdx(mondayOf(at)))/7);
+}
+function saveWk(){
+  try{ localStorage.setItem(WK_KEY,JSON.stringify({v:1,cur:curWk,mode:wkMode,anchor:wkAnchor})); }catch(e){}
+}
+function loadWk(){
+  try{
+    const d=JSON.parse(localStorage.getItem(WK_KEY)||'null'); if(!d) return;
+    if(+d.cur>0){ curWk=+d.cur; wkStored=true; }
+    if(d.mode==='all') wkMode='all';
+    if(d.anchor&&+d.anchor.n>0) wkAnchor={n:+d.anchor.n,at:String(d.anchor.at||ymd(new Date()))};
+  }catch(e){}
+}
+function clampWk(){ const mx=maxWk(); if(curWk<1) curWk=1; if(curWk>mx) curWk=mx; }
+/* 没校准过、也没存过"看到第几周"：从课程最密的那一周起步，比死磕第 1 周更接近
+   用户打开时想看的东西（开学第 1 周通常只有半张表） */
+function defaultWk(){
+  const now=wkNow(); if(now>0) return now;
+  const cnt={}; courses.forEach(c=>weeksOf(c).forEach(w=>{ cnt[w]=(cnt[w]||0)+1; }));
+  let best=0,bn=-1;
+  Object.keys(cnt).forEach(k=>{ const w=+k; if(cnt[w]>bn){ bn=cnt[w]; best=w; } });
+  return best||1;
+}
+/* 周次压缩成"第3-10周"、"第2,4,6周" */
+function fmtWeeks(c){
+  const ws=weeksOf(c); if(!ws.length) return '每周';
+  const out=[]; let i=0;
+  while(i<ws.length){
+    let j=i; while(j+1<ws.length&&ws[j+1]===ws[j]+1) j++;
+    out.push(i===j?String(ws[i]):(ws[i]+'-'+ws[j]));
+    i=j+1;
+  }
+  return '第'+out.join(',')+'周';
+}
+
+/* 同一天里按节次分簇，簇内贪心分列：重叠的课并排，谁也不盖谁 */
+function layoutDay(list){
+  const items=list.map(c=>{
+    const sec=c.sections.slice().sort((a,b)=>a-b);
+    return {c:c,s0:sec[0],s1:sec[sec.length-1]||sec[0]};
+  }).sort((a,b)=>a.s0-b.s0||(b.s1-b.s0)-(a.s1-a.s0));
+  const clusters=[]; let g=[], end=0;
+  items.forEach(it=>{
+    if(g.length && it.s0>end){ clusters.push(g); g=[]; end=0; }
+    g.push(it); end=Math.max(end,it.s1);
+  });
+  if(g.length) clusters.push(g);
+  clusters.forEach(gr=>{
+    const colEnd=[];                       // colEnd[i] = 第 i 列已经占到第几节
+    gr.forEach(it=>{
+      let ci=-1;
+      for(let i=0;i<colEnd.length;i++){ if(colEnd[i]<it.s0){ ci=i; break; } }
+      if(ci<0){ ci=colEnd.length; colEnd.push(it.s1); } else { colEnd[ci]=it.s1; }
+      it.col=ci;
+    });
+    gr.forEach(it=>{ it.cols=colEnd.length; });
+  });
+  return items;
+}
+
 function renderRail(){
   let h='<div class="pr" style="height:'+HEAD_H+'px"></div>';
   for(let p=1;p<=PERIODS;p++) h+='<div class="pr">'+p+'</div>';
   schedRail.innerHTML=h;
 }
+
+function renderWkBar(){
+  const bar=document.getElementById('wkBar'), tip=document.getElementById('wkTip');
+  if(!bar) return;
+  const on=hasWeeks();
+  bar.hidden=!on; if(tip) tip.hidden=!on;
+  if(!on) return;
+  const mx=maxWk(), sel=document.getElementById('wkSel');
+  /* 手机上放不下"第 3 周 · 16 门"这么长的选项，缩成"第 3 周"，门数下面那行会写 */
+  const narrow=window.matchMedia&&window.matchMedia('(max-width:560px)').matches;
+  let h='';
+  for(let w=1;w<=mx;w++){
+    const n=wkCount(w);
+    h+='<option value="'+w+'"'+(w===curWk?' selected':'')+'>第 '+w+' 周'+(narrow?'':(' · '+(n?(n+' 门'):'没课')))+'</option>';
+  }
+  sel.innerHTML=h;
+  document.getElementById('wkPrev').disabled=(curWk<=1);
+  document.getElementById('wkNext').disabled=(curWk>=mx);
+  const now=wkNow(), btn=document.getElementById('wkThis');
+  btn.textContent = now>0 ? '本周' : '设本周';
+  btn.title = now>0 ? ('跳到第 '+now+' 周（现在这周）') : '把正在看的这周记为"本周"，以后自动跟着日期走';
+  if(tip){
+    tip.textContent = now>0
+      ? (now===curWk ? '日历上现在就是第 '+now+' 周。' : '日历上现在是第 '+now+' 周，点「本周」跳回去。')
+      : '第 '+curWk+' 周就是现在这周吗？点「设本周」记一次，以后打开自动跳到当前周。';
+  }
+  document.getElementById('wkModeWeek').classList.toggle('on',wkMode!=='all');
+  document.getElementById('wkModeAll').classList.toggle('on',wkMode==='all');
+  document.getElementById('wkModeWeek').setAttribute('aria-pressed',String(wkMode!=='all'));
+  document.getElementById('wkModeAll').setAttribute('aria-pressed',String(wkMode==='all'));
+}
+
+/* 唯一的对外入口：调用方只认 renderSched()，视图切换/周次条都在里面收拾干净 */
 function renderSched(){
+  renderWkBar();
+  const ov=hasWeeks()&&wkMode==='all';
+  const wrap=document.querySelector('.sched-wrap'), ovWrap=document.getElementById('ovWrap');
+  if(wrap) wrap.hidden=ov;
+  if(ovWrap) ovWrap.hidden=!ov;
+  if(ov) renderOverview(); else drawWeek();
+  const el=document.getElementById('cCount'); if(el) el.textContent='共 '+courses.length+' 门课';
+  setHint();
+}
+
+function drawWeek(){
   const bodyH=HEAD_H+PERIODS*ROW_H;
+  const showAll=!hasWeeks();          // 一条周次信息都没有：退回"全部画上"的老行为
+  const list=showAll?courses:courses.filter(c=>inWk(c,curWk));
   let h='';
   for(let d=0;d<7;d++){
-    const blocks=courses.filter(c=>c.day===d).sort((a,b)=>a.sections[0]-b.sections[0]);
+    const blocks=layoutDay(list.filter(c=>c.day===d));
     let bh='';
-    blocks.forEach(c=>{
-      const s0=c.sections[0], sl=c.sections.length;
-      const top=HEAD_H+(s0-1)*ROW_H+1, hgt=sl*ROW_H-2;
-      bh+='<div class="sched-block" data-id="'+c.id+'" style="top:'+top+'px;height:'+hgt+'px;background:'+c.color+'1f;border-color:'+c.color+'" title="'+esc(c.name)+(c.classroom?(' @'+c.classroom):'')+(c.teacher?(' · '+c.teacher):'')+'">'
-        +'<div class="bn">'+esc(c.name)+'</div>'+(c.classroom?'<div class="br">'+esc(c.classroom)+'</div>':'')+(c.teacher?'<div class="bt">'+esc(c.teacher)+'</div>':'')+'</div>';
+    blocks.forEach(it=>{
+      const c=it.c, s0=it.s0, sl=it.s1-it.s0+1, n=it.cols||1;
+      const top=HEAD_H+(s0-1)*ROW_H+1, hgt=sl*ROW_H-2, wPct=100/n;
+      const st='top:'+top+'px;height:'+hgt+'px;'
+        +'left:calc('+(it.col*wPct).toFixed(4)+'% + 1px);width:calc('+wPct.toFixed(4)+'% - 2px);'
+        +'background:'+c.color+'1f;border-color:'+c.color+';';
+      const cls='sched-block'+(sl===1?' one':'')+(n>1?' split':'');
+      const full=esc(c.name)+'（第'+s0+(sl>1?('-'+(s0+sl-1)):'')+'节 · '+fmtWeeks(c)+'）'
+        +(c.classroom?(' @'+c.classroom):'')+(c.teacher?(' · '+c.teacher):'');
+      bh+='<div class="'+cls+'" data-id="'+c.id+'" style="'+st+'" title="'+full+'">'
+        +'<div class="bn">'+esc(c.name)+'</div>'
+        +(c.classroom?'<div class="br">'+esc(c.classroom)+'</div>':'')
+        +(c.teacher?'<div class="bt">'+esc(c.teacher)+'</div>':'')
+        +'</div>';
     });
     h+='<div class="sched-day" style="height:'+bodyH+'px"><div class="dh">周'+DAYS[d]+'</div>'+bh+'</div>';
   }
   schedDays.innerHTML=h;
   schedDays.querySelectorAll('.sched-block').forEach(b=>b.onclick=()=>{
     const id=+b.dataset.id, c=courses.find(x=>x.id===id);
-    if(c&&confirm('删除《'+c.name+'》？')){ courses=courses.filter(x=>x.id!==id); renderSched(); }
+    if(!c) return;
+    if(confirm('删除《'+c.name+'》'+(weeksOf(c).length?('（'+fmtWeeks(c)+'）'):'')+'？')){
+      courses=courses.filter(x=>x.id!==id);
+      saveSched(); clampWk(); renderSched();
+    }
   });
-  const el=document.getElementById('cCount'); if(el) el.textContent='共 '+courses.length+' 门课';
+  syncSchedFade();
 }
+
+/* 学期一览：一行一周、一列一天。手机上横滑（min-width 560），点周号跳回按周视图 */
+function renderOverview(){
+  const wrap=document.getElementById('ovWrap'); if(!wrap) return;
+  const mx=maxWk(), now=wkNow();
+  let h='<div class="ov-scroll"><table class="ov"><thead><tr><th class="ov-w"><span class="ov-wt">周</span></th>';
+  for(let d=0;d<7;d++) h+='<th>周'+DAYS[d]+'</th>';
+  h+='</tr></thead><tbody>';
+  for(let w=1;w<=mx;w++){
+    h+='<tr><th class="ov-w"><button class="ov-wk'+(w===now?' cur':'')+(w===curWk?' me':'')
+      +'" data-w="'+w+'" type="button" title="看第 '+w+' 周的课表">'+w+'</button></th>';
+    for(let d=0;d<7;d++){
+      const cs=courses.filter(c=>c.day===d&&inWk(c,w)).sort((a,b)=>a.sections[0]-b.sections[0]);
+      h+='<td'+(cs.length?'':' class="empty"')+'>'+cs.map(c=>{
+        const sec=c.sections.slice().sort((a,b)=>a-b);
+        const t=esc(c.name)+' · 第'+sec[0]+(sec.length>1?('-'+sec[sec.length-1]):'')+'节 · '+fmtWeeks(c)
+          +(c.classroom?(' · '+esc(c.classroom)):'');
+        return '<span class="ov-c" style="border-color:'+c.color+';background:'+c.color+'1f" title="'+t+'">'+esc(c.name)+'</span>';
+      }).join('')+'</td>';
+    }
+    h+='</tr>';
+  }
+  h+='</tbody></table></div>';
+  wrap.innerHTML=h;
+  wrap.querySelectorAll('.ov-wk').forEach(b=>b.onclick=()=>{
+    curWk=+b.dataset.w; wkMode='week'; saveWk(); renderSched();
+  });
+}
+
+/* 右边缘渐隐只在"真的滑得动"时出现：1280px 宽屏一屏放得下 7 天，
+   还盖着一道影子反而像把周日裁掉了。滚到最右也收起来。 */
+function syncSchedFade(){
+  const sc=document.querySelector('.sched');
+  const wrap=document.querySelector('.sched-wrap');
+  if(!sc||!wrap) return;
+  /* 一览模式下 .sched 是 display:none，量出来是 0，别给它挂上渐隐 */
+  if(wrap.hidden||!sc.clientWidth){ wrap.classList.remove('can-scroll','at-end'); return; }
+  const canScroll=sc.scrollWidth-sc.clientWidth>2;
+  wrap.classList.toggle('can-scroll',canScroll);
+  wrap.classList.toggle('at-end',canScroll && sc.scrollLeft+sc.clientWidth>=sc.scrollWidth-2);
+}
+document.querySelector('.sched').addEventListener('scroll',syncSchedFade,{passive:true});
+window.addEventListener('resize',syncSchedFade);
+
+/* 周次条交互 */
+function goWk(w){ const mx=maxWk(); curWk=Math.min(Math.max(+w||1,1),mx); saveWk(); renderSched(); }
+document.getElementById('wkPrev').onclick=()=>{ if(curWk>1) goWk(curWk-1); };
+document.getElementById('wkNext').onclick=()=>{ if(curWk<maxWk()) goWk(curWk+1); };
+document.getElementById('wkSel').onchange=e=>goWk(e.target.value);
+document.getElementById('wkThis').onclick=()=>{
+  const now=wkNow();
+  if(now>0){ goWk(now); }
+  else { wkAnchor={n:curWk,at:ymd(new Date())}; saveWk(); renderSched(); }
+};
+document.getElementById('wkModeWeek').onclick=()=>{ wkMode='week'; saveWk(); renderSched(); };
+document.getElementById('wkModeAll').onclick=()=>{ wkMode='all'; saveWk(); renderSched(); };
+/* 手机/桌面横竖屏切换时选项文案会变长短（窄屏不写"· 16 门"），重画一次周次条 */
+let wkRzT=null;
+window.addEventListener('resize',()=>{ clearTimeout(wkRzT); wkRzT=setTimeout(renderWkBar,180); });
 function importSchedule(jsonText){
   let data;
   try{ data=JSON.parse(jsonText); }catch(e){ return 'JSON 格式有误：'+e.message; }
   const list=Array.isArray(data)?data:(data&&data.courses?data.courses:null);
   if(!list) return '没找到课程数组：顶层应为 {"courses":[...]} 或直接是数组。';
-  let n=0;
+  const seen={}; courses.forEach(c=>{ seen[courseKey(c)]=1; });
+  let n=0,dup=0;
   list.forEach(co=>{
     if(!co||typeof co!=='object')return;
     const name=co.name||co.course||co.title; if(!name)return;
     if(co.dayOfWeek==null&&co.day==null)return;
     if(!co.sections&&!co.section)return;
-    addCourse(co); n++;
+    const k=courseKey({name,day:toDay(co.dayOfWeek!=null?co.dayOfWeek:co.day),
+      sections:normSections(co.sections!=null?co.sections:co.section),weeks:normWeeks(co.weeks)});
+    if(seen[k]){ dup++; return; }
+    seen[k]=1;
+    addCourse(co,{silent:true}); n++;
   });
-  renderSched();
-  return n?('已导入 '+n+' 门课程（缺 dayOfWeek/sections 的会被跳过）。'):'没解析到有效课程，请检查 name / dayOfWeek / sections 字段。';
+  /* 刚导进来的课如果不在当前看的那一周（比如他停在第 1 周，课从第 2 周才开始），
+     直接跳到有课的那周，别让人以为没导进来。
+     ★ 只看"带周次的课"：没写周次的课（示例/手动添加）每周都画，不能拿它们当"这周有课"。 */
+  if(hasWeeks() && !courses.some(c=>weeksOf(c).length&&inWk(c,curWk))){ curWk=defaultWk(); clampWk(); }
+  renderSched(); saveSched(); saveWk();
+  if(!n) return dup?('这 '+dup+' 门已经在课表里了，没有新增。'):'没解析到有效课程，请检查 name / dayOfWeek / sections 字段。';
+  return '已导入 '+n+' 门课程'+(dup?('（跳过重复 '+dup+' 门）'):'')+'，已存在这台设备上。';
 }
 function exportSchedule(){
   const out=courses.map(c=>{const o={name:c.name,dayOfWeek:c.day+1,sections:[...c.sections].sort((a,b)=>a-b)};
     if(c.teacher)o.teacher=c.teacher; if(c.classroom)o.classroom=c.classroom; if(c.weeks)o.weeks=c.weeks; if(c.notes)o.notes=c.notes; return o;});
   return JSON.stringify({courses:out},null,2);
 }
+
+/* ---------- 导入弹窗 ---------- */
+const cModal=document.getElementById('cModal');
+const cMsgEl=document.getElementById('cImportMsg');
+function cMsg(t,ok){ cMsgEl.textContent=t; cMsgEl.style.color=ok?'var(--success-ink)':'var(--red-ink)'; }
+function openImport(){
+  cModal.hidden=false;
+  document.body.classList.add('cmodal-open');
+  cMsgEl.textContent='';            // 上次的「已导入 N 门」不要留在这次的表单里
+  const t=document.getElementById('cJson');
+  setTimeout(()=>{ try{ t.focus(); }catch(e){} },60);
+}
+function closeImport(){
+  cModal.hidden=true;
+  document.body.classList.remove('cmodal-open');
+  const b=document.getElementById('cOpenImport');
+  if(b) b.focus();
+}
+document.getElementById('cOpenImport').onclick=openImport;
+document.getElementById('cModalX').onclick=closeImport;
+cModal.addEventListener('click',e=>{ if(e.target&&e.target.dataset&&e.target.dataset.close==='1') closeImport(); });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!cModal.hidden) closeImport(); });
+
 document.getElementById('copyPrompt').onclick=()=>{
   const t=document.getElementById('promptBox').innerText;
   if(navigator.clipboard) navigator.clipboard.writeText(t).then(()=>{
     const b=document.getElementById('copyPrompt'), o=b.textContent; b.textContent='已复制'; setTimeout(()=>b.textContent=o,1500);
   }).catch(()=>{});
 };
-document.getElementById('cImport').onclick=()=>{ const m=importSchedule(document.getElementById('cJson').value); const el=document.getElementById('cImportMsg'); el.textContent=m; el.style.color=m.indexOf('已导入')===0?'var(--success-ink)':'var(--red-ink)'; };
-document.getElementById('cSample').onclick=()=>{ document.getElementById('cJson').value=SAMPLE_JSON; document.getElementById('cJson').focus(); };
-document.getElementById('cExport').onclick=()=>{ const t=exportSchedule(); document.getElementById('cJson').value=t; if(navigator.clipboard)navigator.clipboard.writeText(t).catch(()=>{}); const el=document.getElementById('cImportMsg'); el.textContent='已导出到上方文本框（并尝试复制到剪贴板）。'; el.style.color='var(--success-ink)'; };
+document.getElementById('cImport').onclick=()=>{
+  const m=importSchedule(document.getElementById('cJson').value);
+  const ok=m.indexOf('已导入')===0||m.indexOf('这门')===0;
+  cMsg(m,ok);
+  if(ok){
+    setTimeout(()=>{ closeImport(); setHint('已导入 '+courses.length+' 门课程，存在这台设备上。点任意课块可删除。'); },700);
+  }
+};
+document.getElementById('cSample').onclick=()=>{
+  const t=document.getElementById('cJson');
+  t.value=SAMPLE_JSON; t.focus();
+  cMsg('已填入示例，点「导入」就能看到效果。',true);
+};
+document.getElementById('cFileBtn').onclick=()=>document.getElementById('cFile').click();
+document.getElementById('cFile').onchange=e=>{
+  const f=e.target.files&&e.target.files[0];
+  e.target.value='';
+  if(!f) return;
+  const r=new FileReader();
+  r.onload=()=>{
+    const t=document.getElementById('cJson');
+    t.value=String(r.result||'');
+    document.getElementById('cImport').click();
+  };
+  r.onerror=()=>cMsg('读不了这个文件，试试把内容直接粘进来。',false);
+  r.readAsText(f,'utf-8');
+};
+document.getElementById('cExport').onclick=()=>{
+  const t=exportSchedule();
+  document.getElementById('cJson').value=t;
+  try{
+    const blob=new Blob([t],{type:'application/json'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download='我的课表.json';
+    document.body.appendChild(a); a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },0);
+  }catch(e){}
+  cMsg('已导出为「我的课表.json」，内容也填在上面的框里了。',true);
+};
 document.getElementById('cAdd').onclick=()=>{
   const name=document.getElementById('cName').value.trim();
   const day=parseInt(document.getElementById('cDay').value);
   const secs=normSections(document.getElementById('cSec').value);
   const room=document.getElementById('cRoom').value.trim();
   const teach=document.getElementById('cTeach').value.trim();
+  const weeks=normWeeks(document.getElementById('cWeeks').value.trim());
   if(!name){ alert('请填写课程名'); return; }
   if(secs.length===0){ alert('请填写节次，如 1,2 或 1-3'); return; }
-  addCourse({name,dayOfWeek:day,sections:secs,classroom:room,teacher:teach});
+  addCourse({name,dayOfWeek:day,sections:secs,classroom:room,teacher:teach,weeks:weeks});
   document.getElementById('cName').value=''; document.getElementById('cSec').value='';
   document.getElementById('cRoom').value=''; document.getElementById('cTeach').value='';
+  document.getElementById('cWeeks').value='';
+  setHint('已添加《'+name+'》，存在这台设备上。');
   document.getElementById('cName').focus();
 };
-document.getElementById('cClear').onclick=()=>{ if(confirm('清空整张课表？')){ courses=[]; cseq=0; renderSched(); } };
-renderRail();
-addCourse({name:'高等数学',dayOfWeek:1,sections:[1,2],classroom:'教三-201',teacher:'张教授'});
-addCourse({name:'大学英语',dayOfWeek:3,sections:[3,4],classroom:'外语楼-305'});
-addCourse({name:'数据结构',dayOfWeek:5,sections:[5,6],classroom:'机房-A'});
-
-/* ---------- 单词卡 ---------- */
-const WORDS=[
-  {w:'abandon',m:'v. 放弃，抛弃',ex:'He had to abandon his plan.'},
-  {w:'accumulate',m:'v. 积累，积聚',ex:'Dust accumulated on the shelf.'},
-  {w:'ambiguous',m:'adj. 模棱两可的',ex:'an ambiguous answer'},
-  {w:'anticipate',m:'v. 预期，期望',ex:'We anticipate a rise in price.'},
-  {w:'appropriate',m:'adj. 合适的',ex:'appropriate behavior'},
-  {w:'comprehensive',m:'adj. 综合的，全面的',ex:'a comprehensive review'},
-  {w:'contemporary',m:'adj. 当代的',ex:'contemporary art'},
-  {w:'deliberate',m:'adj. 故意的；v. 仔细考虑',ex:'a deliberate mistake'},
-  {w:'diminish',m:'v. 减少，削弱',ex:'His influence diminished.'},
-  {w:'elaborate',m:'adj. 精心制作的；v. 详尽阐述',ex:'elaborate on the point'},
-  {w:'fragile',m:'adj. 脆弱的',ex:'a fragile relationship'},
-  {w:'inevitable',m:'adj. 不可避免的',ex:'an inevitable result'},
-  {w:'necessitate',m:'v. 使成为必要',ex:'The cut necessitates a redo.'},
-  {w:'phenomenon',m:'n. 现象',ex:'a natural phenomenon'},
-  {w:'reluctant',m:'adj. 不情愿的',ex:'a reluctant smile'},
-  {w:'scrutinize',m:'v. 仔细检查',ex:'scrutinize the data'}
-];
-let wIdx=0,wFlipped=false,wWrong=[];
-const wWord=document.getElementById('wWord'),wMeta=document.getElementById('wMeta'),wProgress=document.getElementById('wProgress');
-function wShow(){
-  const pool=wWrong.length?wWrong:WORDS;
-  if(wIdx>=pool.length){
-    if(wWrong.length){wIdx=0;wProgress.textContent='复习轮：第 1 / '+wWrong.length;}
-    else{wWord.textContent='全部认完';wMeta.textContent='点「重来」再来一轮。';wProgress.textContent='完成';return;}
+document.getElementById('cClear').onclick=()=>{
+  if(confirm('清空整张课表？这台设备上存的也会一起删掉。')){
+    courses=[]; cseq=0; cSample=false; saveSched(); renderSched(); setHint();
   }
-  const it=wWrong.length?wWrong[wIdx]:WORDS[wIdx];
-  wFlipped=false;wWord.textContent=it.w;wMeta.textContent='';
-  wProgress.textContent=(wWrong.length?'复习 ':'')+'第 '+(wIdx+1)+' / '+pool.length+' 张';
+};
+
+/* 首次进来才放示例课；之后一律读本机存的（哪怕用户把它清空了，也不再塞回来） */
+renderRail();
+if(!loadSched()){
+  addCourse({name:'高等数学',dayOfWeek:1,sections:[1,2],classroom:'教三-201',teacher:'张教授'},{silent:true});
+  addCourse({name:'大学英语',dayOfWeek:3,sections:[3,4],classroom:'外语楼-305'},{silent:true});
+  addCourse({name:'数据结构',dayOfWeek:5,sections:[5,6],classroom:'机房-A'},{silent:true});
+  cSample=true; saveSched();
 }
-function wFlip(){ const it=wWrong.length?wWrong[wIdx]:WORDS[wIdx]; wFlipped=true;
-  wWord.textContent=it.w; wMeta.textContent=it.m+'\n'+it.ex; }
-document.getElementById('wFlip').onclick=wFlip;
-document.getElementById('wCard').onclick=()=>{ if(!wFlipped)wFlip(); };
-document.getElementById('wKnow').onclick=()=>{ if(wWrong.length){wWrong.splice(wIdx,1);} else {wIdx++;} wShow(); };
-document.getElementById('wUnknow').onclick=()=>{
-  if(wWrong.length){ wIdx++; }
-  else { const it=WORDS[wIdx]; if(!wWrong.includes(it))wWrong.push(it); wIdx++; }
-  wShow(); };
-document.getElementById('wReset').onclick=()=>{wIdx=0;wWrong=[];wShow();};
-wShow();
+loadWk();
+if(!wkStored) curWk=defaultWk();
+clampWk();
+renderSched();
+
+/* ---------- 单词卡 ----------
+ *
+ * ★★ 10-28 二次重写。第一版（同一天早些时候）修的是"池子中途换"的 bug：
+ *   旧实现只有一个 idx + 一个 wrong 数组，池子按 `wrong.length ? wrong : WORDS`
+ *   取值，于是点第一张「不认识」之后池子立刻变成「只有这一张」，剩下 15 个词
+ *   用户再也看不到 —— 反馈里的「必须全部都是认识才能走」就是这么来的。
+ *   那版把池子改成"一轮开始时确定，轮内绝不改动"，问题解决。
+ *
+ *   但用户接着问「就只有 40 个单词吗，这么少」。40 个确实不够，所以这一版把
+ *   词库抽成 /data/words/*.json（四级 4543 词、六级扩展 2118 词，来自 BSD-3
+ *   许可的公开中英词表），页面一次只取一组 20 个。
+ *
+ * ★ 仍然保留第一版的核心不变量：**池子只在一轮开始时确定，轮内绝不改动**。
+ *   现在有两层：组（group）= 哪些词；轮（round）= 这组走到第几遍。
+ *   点「不认识」只影响下一轮，不影响当前这一轮能不能走完。
+ */
+
+/* 词库加载失败时的兜底：宁可给 40 个词，也不能让页面白屏 */
+const FALLBACK_WORDS=[
+  ['abandon','v. 放弃，抛弃','They had to abandon the plan because of the sudden storm.','由于突如其来的暴风雨，他们不得不放弃这个计划。'],
+  ['abundant','adj. 丰富的，大量的','The region has abundant natural resources, which support the development of local agriculture.','该地区拥有丰富的自然资源，这支撑了当地农业的发展。'],
+  ['accessible','adj. 可接近的；易懂的','The new library is easily accessible to all students, even those without a car.','新图书馆对所有学生都很方便到达，即使是没有车的学生也是如此。'],
+  ['accumulate','v. 积累，积聚','Over the years, he accumulated a large collection of old books.','多年来，他积累了大量的旧书。'],
+  ['acknowledge','v. 承认；致谢','She acknowledged her mistake and promised to correct it immediately.','她承认了自己的错误，并承诺立即改正。'],
+  ['adequate','adj. 足够的，适当的','The training was not adequate for the difficult tasks ahead.','对于前方艰巨的任务来说，这次培训并不充分。'],
+  ['advocate','v. 提倡；n. 拥护者','Many doctors advocate a healthy diet and regular exercise for people of all ages.','许多医生提倡各年龄段的人都要健康饮食和规律锻炼。'],
+  ['alter','v. 改变，修改','We had to alter our plans when the weather suddenly turned bad.','天气突然变坏时，我们不得不改变计划。'],
+  ['ambiguous','adj. 模棱两可的','The manager\'s ambiguous answer left everyone unsure about what to do next.','经理含糊其辞的回答让大家都不确定接下来该做什么。'],
+  ['anticipate','v. 预期，期望','We anticipate that the new policy will reduce costs for most families.','我们预计新政策将为大多数家庭降低成本。'],
+  ['appropriate','adj. 合适的','Please choose an appropriate time to discuss this issue with your professor.','请选择一个合适的时间与你的教授讨论这个问题。'],
+  ['assess','v. 评估，估价','Teachers assess students\' progress through regular quizzes and final exams.','教师通过定期的测验和期末考试来评估学生的进步。'],
+  ['coherent','adj. 连贯的，条理清楚的','Her essay was so coherent that readers easily followed every step of her argument.','她的文章如此连贯，读者很容易跟上她论证的每一步。'],
+  ['compel','v. 强迫，迫使','The heavy rain compelled us to cancel the outdoor meeting and stay inside.','大雨迫使我们取消了户外会议，待在室内。'],
+  ['comprehensive','adj. 综合的，全面的','The report offers a comprehensive analysis of the problems facing local schools.','这份报告对当地学校面临的问题进行了全面的分析。'],
+  ['consecutive','adj. 连续的，不间断的','The team won three consecutive games last season.','该队上赛季连续赢了三场比赛。'],
+  ['contemporary','adj. 当代的；同时代的','Many contemporary artists use digital tools to express their ideas about modern life.','许多当代艺术家使用数字工具来表达他们对现代生活的想法。'],
+  ['deliberate','adj. 故意的；v. 仔细考虑','She spoke in a slow, deliberate way so everyone could follow her argument.','她说话缓慢而从容，以便每个人都能跟上她的论证。'],
+  ['deteriorate','v. 恶化，变坏','His health deteriorated rapidly after he stopped taking the medicine.','停药之后，他的健康状况迅速恶化。'],
+  ['diminish','v. 减少，削弱','The noise from the street gradually diminished as the night went on.','随着夜色渐深，街上的噪音逐渐减弱了。'],
+  ['distinguish','v. 区分，辨别','It is often hard to distinguish between the twins because they look so similar.','人们常常很难分辨这对双胞胎，因为他们长得太像了。'],
+  ['elaborate','adj. 精心制作的；v. 详尽阐述','She asked the waiter to elaborate on how the dish was prepared.','她请服务员详细说明这道菜是怎么做的。'],
+  ['emphasize','v. 强调，着重','The professor emphasized the importance of reviewing notes before the final exam.','教授强调了在期末考试前复习笔记的重要性。'],
+  ['fragile','adj. 脆弱的，易碎的','The old wooden bridge is so fragile that only one person can cross it at a time.','这座旧木桥非常脆弱，一次只能让一个人通过。'],
+  ['gradual','adj. 逐渐的，逐步的','The patient made a gradual recovery after several weeks of rest and treatment.','经过几周的休息和治疗，病人逐渐康复了。'],
+  ['impose','v. 强加；征收','The government decided to impose stricter rules on companies that pollute the environment.','政府决定对污染环境的公司实施更严格的规定。'],
+  ['inevitable','adj. 不可避免的','With so many delays, it was inevitable that the project would finish late.','由于出现了这么多延误，项目推迟完成是不可避免的。'],
+  ['indicate','v. 表明，指示','The sudden drop in sales indicates that customers are losing interest in this product.','销量的突然下降表明顾客正在对这款产品失去兴趣。'],
+  ['maintain','v. 维持；坚持认为','It is important to maintain a healthy balance between work and rest.','保持工作与休息之间的健康平衡很重要。'],
+  ['necessitate','v. 使成为必要','The heavy rain will necessitate changing the outdoor event to next week.','大雨将使得户外活动不得不改到下周举行。'],
+  ['perceive','v. 察觉；认为','Many students perceive the exam as a threat rather than a challenge.','许多学生把考试视为威胁而不是挑战。'],
+  ['phenomenon','n. 现象（复数 phenomena）','Scientists are still trying to explain this strange natural phenomenon.','科学家们仍在努力解释这一奇怪的自然现象。'],
+  ['prominent','adj. 显著的；杰出的','She played a prominent role in the campaign to protect the old town.','她在保护古镇的那场运动中发挥了重要作用。'],
+  ['reinforce','v. 加强，巩固','The new evidence only served to reinforce our belief that the plan would work.','新的证据只是进一步增强了我们对这个计划会奏效的信心。'],
+  ['reluctant','adj. 不情愿的','She was reluctant to admit that her study plan had failed.','她不愿承认自己的学习计划已经失败了。'],
+  ['restrain','v. 抑制，克制','Governments must restrain spending to control inflation.','政府必须抑制支出以控制通货膨胀。'],
+  ['sustain','v. 维持；承受','She could not sustain her attention on the lecture for more than ten minutes.','她无法把注意力集中在讲座上超过十分钟。'],
+  ['tremendous','adj. 巨大的，极大的','The new policy brought tremendous benefits to students and teachers alike.','这项新政策给学生和教师都带来了巨大的好处。'],
+  ['vulnerable','adj. 易受伤害的，脆弱的','Older people living alone are often more vulnerable to illness during cold winters.','在寒冷的冬天，独居的老年人往往更容易患病。'],
+];
+
+const W_GROUP=20;
+const W_KEY='baomi_words_v2';
+
+const $w={
+  word:document.getElementById('wWord'), meta:document.getElementById('wMeta'),
+  hint:document.getElementById('wHint'), card:document.getElementById('wCard'),
+  round:document.getElementById('wRound'), bar:document.getElementById('wBar'),
+  stat:document.getElementById('wStat'), note:document.getElementById('wNote'),
+  src:document.getElementById('wSrc'),
+  flip:document.getElementById('wFlip'), know:document.getElementById('wKnow'),
+  unknow:document.getElementById('wUnknow'), reset:document.getElementById('wReset'),
+  goNext:document.getElementById('wGoNext'),
+  levels:document.getElementById('wLevels'), prev:document.getElementById('wPrev'),
+  next:document.getElementById('wNext'), groupno:document.getElementById('wGroupNo'),
+  keys:document.querySelector('#words .wkeys')
+};
+
+/* 运行时状态。字段全在这里，渲染函数只读它、不顺手改它 ——
+   第一版就是因为"改状态"和"画界面"混在一起才出的循环问题。 */
+const WS={
+  levels:[],      // [{id,name,count,groups}]
+  data:{},        // lvl -> [[词, 释义], ...]
+  lvl:'',
+  ready:false,
+  failed:false,
+  group:1,
+  pool:[],        // 本轮要过的词（只在一轮开始时确定）
+  heavy:[],       // 下一轮的池子（本轮点了「不认识」的）
+  idx:0,
+  round:1,        // 组内第几遍（复习轮）
+  flipped:false,
+  done:false,
+  seen:0,         // 累计判断次数
+  known:0
+};
+
+/* 进度：记住每个级别练到第几组、哪几组已经练完 */
+const WP={lvl:'', last:{}, done:{}};
+
+function wpLoad(){
+  try{
+    const raw=localStorage.getItem(W_KEY);
+    if(!raw) return;
+    const o=JSON.parse(raw);
+    if(!o||typeof o!=='object') return;
+    if(typeof o.lvl==='string') WP.lvl=o.lvl;
+    if(o.last&&typeof o.last==='object') WP.last=o.last;
+    if(o.done&&typeof o.done==='object') WP.done=o.done;
+  }catch(e){}
+}
+function wpSave(){
+  try{ localStorage.setItem(W_KEY, JSON.stringify(WP)); }catch(e){}
+}
+function wpDone(lvl){ return Array.isArray(WP.done[lvl]) ? WP.done[lvl] : []; }
+function wpMarkDone(lvl,g){
+  const arr=wpDone(lvl).slice();
+  if(arr.indexOf(g)<0){ arr.push(g); arr.sort((a,b)=>a-b); }
+  WP.done[lvl]=arr;
+  wpSave();
+}
+
+/* ---- 词库读取 ---- */
+function wWords(lvl){
+  const d=WS.data[lvl];
+  return (d&&d.length) ? d : FALLBACK_WORDS;
+}
+function wGroupCount(lvl){
+  return Math.max(1, Math.ceil(wWords(lvl).length/W_GROUP));
+}
+function wGroupSlice(lvl,g){
+  const s=(g-1)*W_GROUP;
+  return wWords(lvl).slice(s, s+W_GROUP);
+}
+
+/* ---- 启动：先拿级别清单，再拿当前级别的词 ---- */
+async function wBoot(){
+  wpLoad();
+  try{
+    const r=await fetch('data/words/index.json',{cache:'no-cache'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const idx=await r.json();
+    const levels=Array.isArray(idx.levels)?idx.levels:[];
+    if(!levels.length) throw new Error('词库清单为空');
+    WS.levels=levels;
+    if(idx.source) wShowSource(idx.source, idx.source_examples);
+    const want=levels.some(l=>l.id===WP.lvl) ? WP.lvl : levels[0].id;
+    WS.ready=true;
+    await wSetLevel(want, WP.last[want]||1);
+  }catch(e){
+    // 兜底路径：词库文件缺失/断网。页面上必须说清楚，不能让人以为词库就这么点
+    WS.failed=true;
+    WS.levels=[{id:'FALLBACK',name:'内置 '+FALLBACK_WORDS.length+' 词',count:FALLBACK_WORDS.length,
+                groups:Math.ceil(FALLBACK_WORDS.length/W_GROUP)}];
+    WS.data={FALLBACK:FALLBACK_WORDS};
+    WS.ready=true;
+    wStartGroup(1);
+    wChips();
+    $w.src.textContent='词库没加载上（'+e.message+'），先用内置的 '+FALLBACK_WORDS.length+' 个词顶着。';
+  }
+}
+
+async function wSetLevel(lvl,group){
+  WS.lvl=lvl;
+  if(lvl!=='FALLBACK' && !WS.data[lvl]){
+    $w.round.textContent='正在加载词库…';
+    try{
+      const r=await fetch('data/words/'+lvl.toLowerCase()+'.json',{cache:'no-cache'});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const d=await r.json();
+      WS.data[lvl]=Array.isArray(d.words)?d.words:[];
+      if(!WS.data[lvl].length) throw new Error('这个词库是空的');
+    }catch(e){
+      WS.data[lvl]=FALLBACK_WORDS;
+      $w.src.textContent='「'+lvl+'」词库没加载上，先用内置的 '+FALLBACK_WORDS.length+' 个词顶着。';
+    }
+  }
+  const g=Math.min(Math.max(1, group|0 || 1), wGroupCount(lvl));
+  wStartGroup(g);
+  wChips();
+}
+
+/* ---- 开一组 ---- */
+function wStartGroup(g){
+  WS.group=g;
+  WS.pool=wGroupSlice(WS.lvl,g);
+  WS.heavy=[];
+  WS.idx=0;
+  WS.round=1;
+  WS.flipped=false;
+  WS.done=WS.pool.length===0;
+  WS.seen=0;
+  WS.known=0;
+  WP.lvl=WS.lvl;
+  WP.last[WS.lvl]=g;
+  wpSave();
+  wRender();
+}
+
+/* 页脚署名。**两个上游都得署**：词条来自 BSD-3 那份，例句来自 CC-BY-NC-SA 那份，
+   后者的许可证明确要求署名 —— 只写第一个不合规，也会让人以为例句是我们凭空写的。 */
+function wShowSource(s, ex){
+  const credit=(o, tag)=>{
+    if(!o || !o.repo) return '';
+    const name=String(o.repo).replace('https://github.com/','');
+    return tag+' '+String(o.license||'')+' · <a href="'+o.repo+
+      '" target="_blank" rel="noopener">'+name+'</a>';
+  };
+  $w.src.innerHTML=[credit(s,'词库'), credit(ex,'例句')].filter(Boolean).join(' · ');
+}
+
+function wChips(){
+  $w.levels.innerHTML=WS.levels.map(l=>{
+    const on=(l.id===WS.lvl)?' on':'';
+    const n=(l.count!=null)?'<small>'+l.count+'</small>':'';
+    return '<button type="button" class="w-chip'+on+'" data-lvl="'+l.id+'">'+l.name+n+'</button>';
+  }).join('');
+}
+
+function wNav(){
+  const G=wGroupCount(WS.lvl);
+  const done=wpDone(WS.lvl).length;
+  $w.groupno.innerHTML='第 <b>'+WS.group+'</b> / '+G+' 组'+
+    (done?' · 已练 <b>'+done+'</b> 组':'');
+  $w.prev.disabled=(WS.group<=1);
+  $w.next.disabled=(WS.group>=G);
+}
+
+/* ---- 渲染。只读 WS，不修改它 ---- */
+function wRender(){
+  const total=WS.pool.length;
+
+  if(WS.done){
+    $w.card.classList.add('done');
+    $w.word.textContent='这组认完了';
+    $w.meta.textContent='';
+    $w.hint.textContent='';
+    $w.round.innerHTML='第 <b>'+WS.group+'</b> 组 · 完成';
+    $w.bar.style.width='100%';
+    $w.flip.disabled=true;
+    $w.know.disabled=true;
+    $w.unknow.disabled=true;
+    $w.reset.textContent='再练这组';
+    // 完成态只剩「空格 = 再练这组」这一个有效键，键位提示整行留着会误导
+    if($w.keys) $w.keys.style.visibility='hidden';
+    const last=WS.group>=wGroupCount(WS.lvl);
+    $w.goNext.style.display=last?'none':'';
+    $w.note.textContent=last
+      ? '这个级别的词库已经练到最后一组了。点「再练这组」可以重来。'
+      : '这一组过了。点「下一组」接着走，练到第几组会记住。';
+    wStat();
+    wNav();
+    return;
+  }
+
+  $w.card.classList.remove('done');
+  $w.round.innerHTML=(WS.round>1)
+    ? '第 <b>'+WS.group+'</b> 组 · 复习 '+WS.round+' · '+(WS.idx+1)+' / '+total
+    : '第 <b>'+WS.group+'</b> 组 · '+(WS.idx+1)+' / '+total;
+  $w.bar.style.width=(WS.idx/total*100).toFixed(1)+'%';
+
+  const it=WS.pool[WS.idx];
+  WS.flipped=false;
+  $w.word.textContent=it[0];
+  $w.meta.textContent='';
+  $w.hint.textContent=(WS.idx===0&&WS.round>1)
+    ? '这一轮只练刚才没记住的 '+total+' 个词 · 点击卡片翻转'
+    : '点击卡片（或按空格）翻转看释义';
+  $w.flip.disabled=false;
+  $w.know.disabled=false;
+  $w.unknow.disabled=false;
+  $w.reset.textContent='重来这组';
+  $w.goNext.style.display='none';
+  if($w.keys) $w.keys.style.visibility='';
+  $w.note.textContent='一组 '+W_GROUP+' 个词。点「不认识」的词会进这一组的复习堆，但这一轮照样往下走 —— 等整组过完，再单独练它们。';
+  wStat();
+  wNav();
+}
+
+function wStat(){
+  const left=WS.pool.length-WS.idx;
+  const parts=['累计判断 <b>'+WS.seen+'</b> 次','其中认识 <b>'+WS.known+'</b>'];
+  if(!WS.done){
+    parts.push('本组还剩 <b>'+left+'</b>');
+    if(WS.heavy.length) parts.push('待复习 <b>'+WS.heavy.length+'</b>');
+  }
+  $w.stat.innerHTML=parts.join('<span class="sep">·</span>');
+}
+
+function wEsc(s){
+  return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* 翻面内容：释义在上，例句 + 译文在下。
+   ★ 为什么用 innerHTML 拼而不用三次 textContent：例句块要做成有边框和底色的
+     「批注」，纯文本塞不进结构；所有字段都过 wEsc，词库是我们自己生成的文件，
+     但拼 HTML 就必须转义 —— 一次偷懒以后换个词源就是 XSS。 */
+function wCardBody(it){
+  let html='<span class="w-def">'+wEsc(it[1])+'</span>';
+  if(it[2]&&it[3]){
+    html+='<span class="w-eg"><span class="w-eg-tag">例句</span>'
+        + '<span class="w-eg-en">'+wEsc(it[2])+'</span>'
+        + '<span class="w-eg-zh">'+wEsc(it[3])+'</span></span>';
+  }
+  return html;
+}
+
+function wFlip(){
+  if(WS.done || !WS.pool.length) return;
+  const it=WS.pool[WS.idx];
+  WS.flipped=true;
+  $w.meta.innerHTML=wCardBody(it);
+  $w.hint.textContent='认识就按 → ，不认识按 ←';
+}
+
+/* 判断。know=true 表示「认识」。
+   ★ 两个分支都必须前进 —— 这是第一版最缺的一条。 */
+function wJudge(know){
+  if(WS.done || !WS.pool.length) return;
+  const it=WS.pool[WS.idx];
+  WS.seen++;
+  if(know){ WS.known++; }
+  else if(!WS.heavy.some(x=>x[0]===it[0])){ WS.heavy.push(it); }
+
+  WS.idx++;
+  if(WS.idx>=WS.pool.length){
+    if(WS.heavy.length){
+      // 这一遍走完还有没记住的：拿它们开下一轮（注意先取再清）
+      WS.round++;
+      WS.pool=WS.heavy.slice();
+      WS.heavy=[];
+      WS.idx=0;
+      wRender();
+      return;
+    }
+    WS.idx=WS.pool.length;
+    WS.done=true;
+    wpMarkDone(WS.lvl, WS.group);
+  }
+  wRender();
+}
+
+$w.levels.onclick=(e)=>{
+  const b=e.target.closest ? e.target.closest('.w-chip') : null;
+  if(!b) return;
+  const lvl=b.dataset.lvl;
+  if(!lvl || lvl===WS.lvl) return;
+  wSetLevel(lvl, WP.last[lvl]||1);
+};
+$w.prev.onclick=()=>{ if(WS.group>1) wStartGroup(WS.group-1); };
+$w.next.onclick=()=>{ if(WS.group<wGroupCount(WS.lvl)) wStartGroup(WS.group+1); };
+$w.goNext.onclick=()=>{ if(WS.group<wGroupCount(WS.lvl)) wStartGroup(WS.group+1); };
+$w.flip.onclick=wFlip;
+$w.card.onclick=()=>{ if(!WS.flipped) wFlip(); };
+$w.know.onclick=()=>wJudge(true);
+$w.unknow.onclick=()=>wJudge(false);
+$w.reset.onclick=()=>wStartGroup(WS.group);
+
+/* 键盘：只在单词卡这一屏可见时生效，否则在别的工具里按方向键会被这里抢走 */
+document.addEventListener('keydown',(e)=>{
+  const panel=document.getElementById('words');
+  if(!panel || !panel.classList.contains('active')) return;
+  const tag=(e.target && e.target.tagName) || '';
+  if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT') return;
+  if(!WS.ready) return;
+  if(WS.done){
+    if(e.key===' '||e.key==='Enter'){ e.preventDefault(); wStartGroup(WS.group); }
+    return;
+  }
+  if(e.key===' '||e.key==='Enter'){ e.preventDefault(); if(WS.flipped) wJudge(true); else wFlip(); }
+  else if(e.key==='ArrowRight'){ e.preventDefault(); wJudge(true); }
+  else if(e.key==='ArrowLeft'){ e.preventDefault(); wJudge(false); }
+});
+
+wBoot();
 
 /* ---------- 倒计时 ---------- */
 const dlList=document.getElementById('dlList'); let dls=[];

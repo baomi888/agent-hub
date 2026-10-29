@@ -16,14 +16,6 @@
   animation: fadeUp 0.5s cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 
-/* 一屏放全：欢迎页 + 输入框要在一屏内完整可见。
-   矮视口（小笔记本 / 手机横屏）进一步压缩呼吸感，内容优先 */
-@media (max-height: 800px) {
-  .welcome { padding: 12px 0; }
-  .hero-title { font-size: calc(var(--hero-fs, 34px) * 0.88); }
-  .welcome-foot { margin-top: 10px; }
-}
-
 /* ============ 首屏 Hero 签名区 ============ */
 /* logo 不再做慢速浮息：无事发生时页面应该是静止的。
    和首屏同时存在的 status 状态点、kb-chip 闪光点、绑定呼吸线一起，
@@ -255,8 +247,135 @@
   color: var(--accent-ink);
 }
 
-/* 首屏四宫格能力卡：呼应设计稿「四个等大的圆角白色卡片」，像贴在纸上的功能便签 */
-.ability-card {
+/* ============ 新手引导条（L2）：首次进入的三步走 ============
+   视觉上是"贴在欢迎页上的一张提示卡"：淡金底 + 虚线金边。
+   虚线在站内已有语义 ——「还差一步、可以补」（见未绑定资料库胶囊），
+   正好对上这里"你还没开始，先做这三件事"。
+   它挂在欢迎页内部，开始对话后就随空态一起消失，不是常驻公告条。 */
+.onboard {
+  width: 100%;
+  margin-top: 18px;
+  padding: 11px 13px 12px;
+  text-align: left;
+  background: var(--accent-soft);
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius-lg);
+}
+
+.onboard-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.onboard-title {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-serif);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  letter-spacing: var(--ls-tight);
+  color: var(--accent-ink);
+}
+
+/* 「知道了」用文字按钮而不是右上角 ✕：这条是给人看的提示，不是需要收拾的浮层，
+   一个明确的动词更好点，也更好读屏。 */
+.onboard-close {
+  flex: none;
+  padding: 3px 9px;
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  background: var(--card-bg);
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.onboard-close:hover,
+.onboard-close:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  outline: none;
+}
+
+.onboard-steps {
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 7px 12px;
+}
+@media (min-width: 760px) {
+  .onboard-steps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.onboard-steps li {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 序号用空心描边而非实心金块：实心金底压白字在纸底只有 2.6:1（过不了 AA），
+   而且三颗实心金点会和下面三张卡抢注意力。 */
+.ob-n {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--accent-ink);
+  /* baseline 对齐时图形会浮在文字上沿，压回中线 */
+  transform: translateY(2px);
+}
+
+/* 可点的那一步：实线下划线（淡底 + 下划线在深色主题下看不见，10-24 踩过） */
+.ob-act {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-1);
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.ob-act:hover,
+.ob-act:focus-visible {
+  color: var(--accent-ink);
+  outline: none;
+}
+
+/* 已经做到的那一步（如"已有 2 个资料库"）：不引诱点击，只报事实 */
+.ob-done {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.ob-hint {
+  flex: 1 1 100%;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-tight);
+  color: var(--text-3);
+}
+
+/* 首屏四宫格能力卡：呼应设计稿「四个等大的圆角白色卡片」，像贴在纸上的功能便签 */.ability-card {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -485,3 +604,71 @@
   color: var(--text-3);
 }
 
+/* ============ 按窗口高度分档：先保证「一屏放得全」 ============
+   ★ 起因（2026-10-28 用户截图）：1080×629 的笔记本窗口打开首页，看到的是
+     「标题下半截 + 三张卡」，吉祥物和眉题整块不见。两个原因叠在一起：
+       1) 欢迎页整体 616px，而留给它的只有 340px（629 − 顶栏 55 − 输入区 204）；
+       2) 挂载时那段"新消息贴底"的副作用对空态也生效，一进来 scrollTop 就是 316。
+     2) 已在 ChatArea.tsx 里按空态跳过；1) 用下面两档解决。
+   ★ 断点不是拍脑袋：完整版要 616 + 容器上下 40 = 656px，
+     所以窗口高过 656 + 259 ≈ 915px 才可能一屏放全；低于这个高度就必须让东西。
+   ★ 层级规矩：这两段必须放在文件末尾 —— 它们和上面的基样式特异性相同，
+     写在前面会被覆盖（第一版就这么翻车，量出来的高度一个都没变）。 */
+
+/* 溢出时不要裁掉顶部：justify-content:center 在内容高于容器时会把两头都切掉，
+   safe 关键字让它退化成 flex-start。老浏览器读不到第二行，退回普通 center。 */
+.welcome {
+  justify-content: center;
+  justify-content: safe center;
+}
+
+/* 档 A（≤919px）：窗口已放不下完整版。
+   让掉三样最占地方、又不是"必须第一眼看到"的东西：
+     · 三句示例（点一句就能问，但它只是辅助；模板广场仍是常驻入口）
+     · 页脚那句信任文案
+     · 「让知穗每天做点什么」的分区小标题（三张卡自己有标题）
+   留下的正好是用户那张目标截图的东西：吉祥物 / 眉题 / 标题 / 副标题 /
+   三步引导 / 三张日更大卡 / 一行小胶囊。 */
+@media (max-height: 919px) {
+  .welcome { padding: 10px 0 6px; }
+  .welcome .hero-logo { height: 44px; width: 44px; margin-bottom: 2px; }
+  .hero-title { font-size: calc(var(--hero-fs, 34px) * 0.88); }
+  .welcome-sub { margin-top: 4px; }
+  .onboard { margin-top: 12px; padding: 9px 12px 10px; }
+  .onboard-steps { margin-top: 7px; }
+  .welcome-daily { margin-top: 10px; }
+  .welcome-section-head { display: none; }
+  .entry-card { gap: 3px; padding: 11px 13px 12px; }
+  .welcome-mini { margin-top: 8px; }
+  .welcome-egs,
+  .welcome-foot { display: none; }
+}
+
+/* 档 B（≤720px）：再让一层 —— 给 1080×629 那种小窗口用。
+   这一步开始动"内容本身"而不只是留白：
+     · 三步引导每步下面那半句"怎么做"收起来，只留动作名（选个学习方向 / 已经有库 / 在下面问一句）
+     · 字号、间距收到最小，但仍然保持 8px 以上的行距，不做挤成一坨的省法
+   实测 629 高：内容 324 + 容器 16 = 340，正好等于可用高度（改前是 616 / 340）。 */
+@media (max-height: 720px) {
+  .chat-measure:has(.welcome) { padding-top: 10px; padding-bottom: 6px; }
+  .welcome { padding: 2px 0 0; }
+  .welcome .hero-logo { height: 38px; width: 38px; margin-bottom: 2px; }
+  .welcome .eyebrow { font-size: 11px; margin-bottom: 1px; }
+  .welcome .eyebrow::before,
+  .welcome .eyebrow::after { width: 18px; }
+  .hero-title { font-size: 25px; line-height: 1.28; }
+  .welcome-sub { margin-top: 0; font-size: 13px; line-height: 1.45; }
+  .onboard { margin-top: 8px; padding: 7px 10px 8px; }
+  .onboard-head { gap: 6px; }
+  .onboard-title { font-size: var(--fs-sm); }
+  .onboard-steps { margin-top: 5px; gap: 2px 10px; }
+  .ob-act, .ob-done { font-size: var(--fs-sm); }
+  .ob-hint { display: none; }
+  .welcome-daily { margin-top: 8px; }
+  .entry-card { gap: 3px; padding: 8px 11px 9px; border-radius: var(--radius-md); }
+  .entry-card .ec-icon { width: 24px; height: 24px; }
+  .entry-card .ec-icon svg { width: 17px; height: 17px; }
+  .entry-card .ec-label { font-size: var(--fs-md); }
+  .entry-mini { padding: 2px 10px; }
+  .welcome-mini { margin-top: 4px; }
+}

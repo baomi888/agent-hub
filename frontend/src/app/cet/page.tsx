@@ -4,17 +4,22 @@
 //
 // 为什么单独做一屏：申报书 B3 写「四六级备考模块已实际落地」，如果只有模板广场里
 // 一张卡片，评委点进来找不到东西。这一屏把三件事做成可点、可勾、可回看的数据：
-//   1. 备考计划（54 天 × 5 模块）—— 任务落库，可勾选、算进度、算连续天数；
+//   1. 备考档案 —— 考几级 / 哪天考 / 每天练什么 / 练多少 / 目标分，**都可自定义**
+//      （2026-10-27 前是写死的 54 天 × 5 模块，内测反馈"连四级六级都不能选"）；
 //   2. 词汇本 —— SRS（1/3/7/15/30 天）间隔复习，记得/忘记驱动下一档；
 //   3. 分数曲线 —— 每次模考/真考记一条，画趋势与目标线。
 //
+// ★ 关键交互取舍：**天数不是输入项**，由考试日推导。用户关心的是"12 月 12 号考试"，
+//   而不是"我要 54 天"；让他填天数再反算考试日，等于让他做一道减法。
+//
 // 数据全部来自 /api/cet/*（后端 owner 强制隔离）。本页不造演示数据：
-// 没有计划就显示「生成计划」的空状态，避免出现「看起来有、其实是假的」。
+// 没有档案就显示配置向导，避免出现「看起来有、其实是假的」。
+// 选项（级别 / 模块 / 强度 / 日期候选）全部由后端 overview.options 下发，前端不硬编码。
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import ConsoleShell from "@/components/console/ConsoleShell";
+import { Seg } from "@/components/console/ui";
 import { useAuth } from "@/lib/hooks/useAuth";
-import CornIcon from "@/components/CornIcon";
 
 interface Plan {
   id: string;
@@ -22,6 +27,22 @@ interface Plan {
   start_date: string;
   exam_date: string | null;
   total_days: number;
+  exam_type: string;
+  exam_type_label: string;
+  target_score: number | null;
+  modules: string[];
+  intensity: string;
+  intensity_label: string;
+  /** 距离考试还有几天（0=今天考，负数=已过）。后端算好，前端不自己推时区 */
+  days_left: number | null;
+}
+interface PlanOptions {
+  exam_types: { value: string; label: string; default_target: number }[];
+  modules: string[];
+  intensities: { value: string; label: string; hint: string }[];
+  exam_date_suggestions: { date: string; label: string }[];
+  min_days: number;
+  max_days: number;
 }
 interface Task {
   id: string;
@@ -45,6 +66,7 @@ interface Overview {
   vocab_due: number;
   scores: Score[];
   today: string;
+  options: PlanOptions;
 }
 interface Vocab {
   id: string;
@@ -81,6 +103,17 @@ const btn: React.CSSProperties = {
   fontSize: 13,
   fontWeight: 600,
   cursor: "pointer",
+};
+/** 可勾选的胶囊按钮（模块 / 考试日期候选共用） */
+const pill: React.CSSProperties = {
+  border: "1px solid var(--line)",
+  borderRadius: 999,
+  padding: "6px 14px",
+  fontSize: 12,
+  cursor: "pointer",
+  background: "var(--surface)",
+  color: "var(--text-3)",
+  lineHeight: 1.4,
 };
 
 async function jfetch<T>(url: string, init?: RequestInit): Promise<T> {
@@ -168,6 +201,256 @@ function ScoreChart({ scores }: { scores: Score[] }) {
   );
 }
 
+/** 申报档案的提交载荷（与 api/cet.py 的 PATCH/POST 白名单一一对应） */
+interface PlanPayload {
+  exam_type: string;
+  exam_date: string;
+  modules: string[];
+  intensity: string;
+  target_score?: number;
+}
+
+/** 两个 yyyy-mm-dd 之间差几天。用 UTC 解析：本地时区解析会让"今天"偏移一天 */
+function diffDays(from: string, to: string): number {
+  const [ay, am, ad] = from.split("-").map(Number);
+  const [by, bm, bd] = to.split("-").map(Number);
+  if (!ay || !by) return 0;
+  return Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / 86400000);
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 14, flexWrap: "wrap" }}>
+      <span style={{ fontSize: 12, color: "var(--text-2)", width: 76, flex: "0 0 auto", paddingTop: 7 }}>
+        {label}
+      </span>
+      <div style={{ flex: "1 1 260px", minWidth: 0 }}>{children}</div>
+    </div>
+  );
+}
+
+/**
+ * 备考档案编辑器。空状态（建立档案）与"调整设置"**复用同一个组件**。
+ *
+ * 不做成两套界面：同一份配置用两种控件填写，用户会以为它们是两回事，
+ * 然后问"为什么新建时能选六级、改的时候不能"。
+ *
+ * 天数不再是输入项 —— 由考试日推导。用户关心的是"12 月 12 号考试"，
+ * 而不是"我要 54 天"；让他填天数再反算考试日，等于让他做一道减法。
+ */
+function PlanEditor({
+  options,
+  today,
+  initial,
+  busy,
+  onSubmit,
+  onArchive,
+  archiveLabel,
+  archiveDanger,
+}: {
+  options: PlanOptions;
+  today: string;
+  initial?: Plan | null;
+  busy: boolean;
+  onSubmit: (p: PlanPayload) => void;
+  onArchive?: () => void;
+  /** 两步确认的文案由外层控制（第一次"结束这个计划"，第二次"确定结束？"） */
+  archiveLabel?: string;
+  archiveDanger?: boolean;
+}) {
+  const [level, setLevel] = useState(initial?.exam_type ?? options.exam_types[1]?.value ?? "CET6");
+  const [examDate, setExamDate] = useState(
+    initial?.exam_date ?? options.exam_date_suggestions[0]?.date ?? "",
+  );
+  const [mods, setMods] = useState<string[]>(initial?.modules ?? options.modules);
+  const [inten, setInten] = useState(initial?.intensity ?? "standard");
+  const [target, setTarget] = useState(
+    String(
+      initial?.target_score ??
+        options.exam_types.find((x) => x.value === (initial?.exam_type ?? "CET6"))?.default_target ??
+        425,
+    ),
+  );
+  // 用户手动改过目标分之后，切换级别就不再覆盖他的输入
+  const [targetTouched, setTargetTouched] = useState(Boolean(initial?.target_score));
+
+  // 天数有两个口径，**不能混用**：
+  //   spanDays = 含今天的天数（决定要生成多少条任务）
+  //   leftDays = 距考试还有几天（不含今天，与摘要行的"还剩 N 天"一致）
+  // 混用会出现"向导说还剩 47 天、摘要行说 46 天"这种自相矛盾。
+  const spanDays = examDate ? diffDays(today, examDate) + 1 : 0;
+  const valid = spanDays >= 1 && mods.length > 0;
+  const levelDefault = options.exam_types.find((x) => x.value === level)?.default_target ?? 425;
+
+  const switchLevel = (v: string) => {
+    setLevel(v);
+    if (!targetTouched) {
+      const next = options.exam_types.find((x) => x.value === v)?.default_target;
+      if (next) setTarget(String(next));
+    }
+  };
+
+  const toggleMod = (m: string) =>
+    setMods((prev) => (prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]));
+
+  const submit = () => {
+    if (!valid || busy) return;
+    const n = Number(target);
+    onSubmit({
+      exam_type: level,
+      exam_date: examDate,
+      modules: mods,
+      intensity: inten,
+      target_score: Number.isFinite(n) && n > 0 ? n : undefined,
+    });
+  };
+
+  return (
+    <div style={card}>
+      <b style={{ color: "var(--text-1)", fontSize: 15 }}>
+        {initial ? "调整备考设置" : "建立你的备考档案"}
+      </b>
+      <p style={{ color: "var(--text-2)", fontSize: 12, margin: "4px 0 16px" }}>
+        选好之后按你的选择生成每日任务，之后随时能改 —— 改设置不会动你已经勾过的历史记录。
+      </p>
+
+      <Row label="考哪一级">
+        <Seg
+          options={options.exam_types.map((x) => ({ value: x.value, label: x.label }))}
+          value={level}
+          onChange={switchLevel}
+          ariaLabel="考试级别"
+        />
+      </Row>
+
+      <Row label="考试日期">
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          {options.exam_date_suggestions.map((s) => (
+            <button
+              key={s.date}
+              type="button"
+              onClick={() => setExamDate(s.date)}
+              aria-pressed={examDate === s.date}
+              style={{
+                ...pill,
+                background: examDate === s.date ? "var(--accent-soft)" : "var(--surface)",
+                borderColor: examDate === s.date ? "var(--accent)" : "var(--line)",
+                color: examDate === s.date ? "var(--accent-ink)" : "var(--text-3)",
+              }}
+            >
+              {s.label}
+            </button>
+          ))}
+          <input
+            type="date"
+            aria-label="考试日期"
+            value={examDate}
+            onChange={(e) => setExamDate(e.target.value)}
+            style={{ ...input, padding: "6px 8px" }}
+          />
+        </div>
+        <p
+          style={{
+            fontSize: 12,
+            margin: "8px 0 0",
+            color: spanDays >= 1 ? "var(--accent-ink)" : "var(--red-ink)",
+          }}
+        >
+          {spanDays >= 1
+            ? `共 ${spanDays} 天（含今天）· 每天 ${mods.length} 个任务，共 ${spanDays * mods.length} 项`
+            : "考试日不能早于今天"}
+        </p>
+        <p style={{ fontSize: 11, color: "var(--text-3)", margin: "4px 0 0" }}>
+          上面三个日期按"6 月 / 12 月第二个周六"的惯例推算，请以官方通知为准；也可以直接选一个日期。
+        </p>
+      </Row>
+
+      <Row label="每天练什么">
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {options.modules.map((m) => {
+            const on = mods.includes(m);
+            return (
+              <button
+                key={m}
+                type="button"
+                onClick={() => toggleMod(m)}
+                aria-pressed={on}
+                style={{
+                  ...pill,
+                  background: on ? "var(--accent-soft)" : "var(--surface)",
+                  borderColor: on ? "var(--accent)" : "var(--line)",
+                  color: on ? "var(--accent-ink)" : "var(--text-3)",
+                }}
+              >
+                {on ? "✓ " : ""}
+                {m}
+              </button>
+            );
+          })}
+        </div>
+        {mods.length === 0 ? (
+          <p style={{ fontSize: 12, margin: "8px 0 0", color: "var(--red-ink)" }}>
+            至少选一个模块，否则每天没有任务可做。
+          </p>
+        ) : null}
+      </Row>
+
+      <Row label="练多少">
+        <Seg
+          options={options.intensities.map((x) => ({ value: x.value, label: x.label, hint: x.hint }))}
+          value={inten}
+          onChange={setInten}
+          ariaLabel="每天练习强度"
+        />
+      </Row>
+
+      <Row label="目标分">
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <input
+            aria-label="目标分"
+            inputMode="numeric"
+            value={target}
+            onChange={(e) => {
+              setTarget(e.target.value.replace(/[^\d]/g, ""));
+              setTargetTouched(true);
+            }}
+            style={{ ...input, width: 88, textAlign: "center" }}
+          />
+          <span style={{ fontSize: 12, color: "var(--text-3)" }}>
+            {level === "CET4" ? "四级" : "六级"}建议 {levelDefault} · 425 及格 / 500 良好 / 550 优秀
+          </span>
+        </div>
+      </Row>
+
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+        {onArchive ? (
+          <button
+            type="button"
+            onClick={onArchive}
+            disabled={busy}
+            style={{
+              ...btn,
+              background: "transparent",
+              color: archiveDanger ? "var(--red-ink)" : "var(--text-3)",
+              border: `1px solid ${archiveDanger ? "var(--red)" : "var(--line)"}`,
+            }}
+          >
+            {archiveLabel ?? "结束这个计划"}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={submit}
+          disabled={busy || !valid}
+          style={{ ...btn, opacity: busy || !valid ? 0.5 : 1 }}
+        >
+          {busy ? "保存中…" : initial ? "保存修改" : "建立我的备考档案"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function CetPage() {
   // 身份必须从 useAuth 拿：useConsoleUser 读的是 ConsoleShell 内部的 Context，
   // 而页面组件是 ConsoleShell 的**父级**，在它外面读永远拿到 null ——
@@ -180,7 +463,8 @@ export default function CetPage() {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const [days, setDays] = useState("54");
+  const [editing, setEditing] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState(false);
   const [newWord, setNewWord] = useState("");
   const [newMeaning, setNewMeaning] = useState("");
   const [scoreType, setScoreType] = useState("CET6");
@@ -209,18 +493,42 @@ export default function CetPage() {
     void load();
   }, [authedId, load]);
 
-  const createPlan = async () => {
+  // 新建与修改走同一个回调：靠 ov.plan 是否存在决定用 POST 还是 PATCH。
+  // 分成两个函数会让"编辑时点了新建"这种错位悄悄发生（生成第二份档案）。
+  const submitPlan = async (payload: PlanPayload) => {
     setBusy(true);
     setErr("");
     try {
       await jfetch("/api/cet/plan", {
-        method: "POST",
+        method: ov?.plan ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ days: Number(days) || 54 }),
+        body: JSON.stringify(payload),
       });
+      setEditing(false);
       await load();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "生成失败");
+      setErr(e instanceof Error ? e.message : "保存失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const archivePlan = async () => {
+    if (!confirmArchive) {
+      // 两步确认：第一次点击变成"确定结束？"，再点才真执行。
+      // 不用 window.confirm —— 它在移动端会弹系统框，和页面风格割裂。
+      setConfirmArchive(true);
+      return;
+    }
+    setBusy(true);
+    setErr("");
+    try {
+      await jfetch("/api/cet/plan", { method: "DELETE" });
+      setConfirmArchive(false);
+      setEditing(false);
+      await load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "结束失败");
     } finally {
       setBusy(false);
     }
@@ -306,18 +614,56 @@ export default function CetPage() {
   const plan = ov?.plan ?? null;
   const progress = ov?.progress ?? { done: 0, total: 0, percent: 0 };
   const scores = useMemo(() => ov?.scores ?? [], [ov]);
+  // 考试日过去之后，今日任务区不该只剩一句"今天不在计划区间内"
+  const examOver = plan?.days_left != null && plan.days_left < 0;
+  const daysLeftText = () => {
+    const d = plan?.days_left;
+    if (d == null) return "考试日未设置";
+    if (d > 0) return `还剩 ${d} 天`;
+    if (d === 0) return "今天考试";
+    return `考试已结束 ${-d} 天`;
+  };
 
   return (
     <ConsoleShell
       active="cet"
-      eyebrow="P7 · 四六级"
+      eyebrow="专项备考"
       title="四六级备考工作区"
-      sub="计划可勾选、词卡按遗忘曲线复习、分数画成趋势。数据全部属于你本人。"
+      sub="按你的考试日期和每天能练的内容生成任务，随时可改。词卡按遗忘曲线复习，分数画成趋势。"
       actions={
-        plan ? (
-          <span style={{ fontSize: 12, color: "var(--text-2)" }}>
-            考试日 {plan.exam_date ?? "未设置"} · 共 {plan.total_days} 天
-          </span>
+        plan && !editing ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span
+              style={{
+                fontSize: 12,
+                padding: "2px 9px",
+                borderRadius: 999,
+                background: "var(--accent-soft)",
+                color: "var(--accent-ink)",
+                fontWeight: 600,
+              }}
+            >
+              {plan.exam_type_label}
+            </span>
+            <span style={{ fontSize: 12, color: "var(--text-2)" }}>{plan.exam_date}</span>
+            <span style={{ fontSize: 12, color: "var(--text-3)" }}>·</span>
+            <span style={{ fontSize: 12, color: examOver ? "var(--text-3)" : "var(--text-2)" }}>
+              {daysLeftText()}
+            </span>
+            {plan.target_score ? (
+              <>
+                <span style={{ fontSize: 12, color: "var(--text-3)" }}>·</span>
+                <span style={{ fontSize: 12, color: "var(--text-2)" }}>目标 {plan.target_score}</span>
+              </>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              style={{ ...pill, padding: "4px 12px", marginLeft: 2 }}
+            >
+              调整设置
+            </button>
+          </div>
         ) : null
       }
     >
@@ -327,28 +673,38 @@ export default function CetPage() {
         </div>
       ) : null}
 
-      {loading ? (
+      {loading || !ov ? (
         <p style={{ color: "var(--text-2)" }}>正在加载…</p>
-      ) : !plan ? (
-        <div style={{ ...card, textAlign: "center", padding: "40px 20px" }}>
-          <CornIcon name="globe" className="logo" />
-          <h3 style={{ margin: "10px 0 6px", color: "var(--text-1)" }}>还没有备考计划</h3>
-          <p style={{ color: "var(--text-2)", fontSize: 13, marginBottom: 16 }}>
-            先生成一份计划：每天 5 个模块（听力 / 词汇 / 阅读 / 写作翻译 / 真题），之后每天勾选即可。
-          </p>
-          <div style={{ display: "flex", gap: 10, justifyContent: "center", alignItems: "center", flexWrap: "wrap" }}>
-            <input
-              aria-label="计划天数"
-              value={days}
-              onChange={(e) => setDays(e.target.value)}
-              style={{ ...input, width: 90, textAlign: "center" }}
-            />
-            <span style={{ fontSize: 13, color: "var(--text-2)" }}>天</span>
-            <button style={btn} onClick={createPlan} disabled={busy}>
-              {busy ? "生成中…" : "生成备考计划"}
+      ) : !plan || editing ? (
+        <>
+          {editing ? (
+            <button
+              type="button"
+              onClick={() => {
+                setEditing(false);
+                setConfirmArchive(false);
+              }}
+              style={{ ...pill, marginBottom: 12 }}
+            >
+              ← 返回工作区（不保存修改）
             </button>
-          </div>
-        </div>
+          ) : null}
+          <PlanEditor
+            options={ov.options}
+            today={ov.today}
+            initial={plan}
+            busy={busy}
+            onSubmit={submitPlan}
+            onArchive={plan ? archivePlan : undefined}
+            archiveLabel={confirmArchive ? "确定结束？再点一次" : "结束这个计划"}
+            archiveDanger={confirmArchive}
+          />
+          {!plan ? (
+            <p style={{ fontSize: 12, color: "var(--text-3)", marginTop: 12, textAlign: "center" }}>
+              还没有档案时会显示这个配置向导；建档之后在这里随时能改。
+            </p>
+          ) : null}
+        </>
       ) : (
         <div style={{ display: "grid", gap: 16 }}>
           {/* 统计三卡 */}
@@ -384,7 +740,22 @@ export default function CetPage() {
               </span>
             </div>
             {ov && ov.today_tasks.length === 0 ? (
-              <p style={{ color: "var(--text-2)", fontSize: 13 }}>今天不在计划区间内（计划已结束或尚未开始）。</p>
+              examOver ? (
+                <div>
+                  <p style={{ color: "var(--text-2)", fontSize: 13, margin: "0 0 10px" }}>
+                    这场考试已经结束了。已完成 {progress.done}/{progress.total} 项（
+                    {progress.percent}%）——
+                    记录都还在，随时可以开始下一次备考。
+                  </p>
+                  <button type="button" style={btn} onClick={() => setEditing(true)}>
+                    开始新的备考
+                  </button>
+                </div>
+              ) : (
+                <p style={{ color: "var(--text-2)", fontSize: 13 }}>
+                  今天不在计划区间内（计划尚未开始）。
+                </p>
+              )
             ) : (
               <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
                 {ov?.today_tasks.map((t) => (

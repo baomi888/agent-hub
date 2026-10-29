@@ -11,13 +11,17 @@
 // 三条必须显式标注的口径（不标用户会误判"筛选坏了"）：
 //   ① 总用户数是**当前快照**，不随时间筛选变化
 //   ② 平均耗时是**均值，不是 p95**（p95 要给每个接口分组算，代价不划算）
-//   ③ `/api/chat/stream` 的耗时是**整条流的时长**，会把均值拉高
+//   ③ `/api/chat/stream` 的耗时是**整条流的时长**（含模型生成时间），会把均值拉高。
+//      这个数曾经是错的 —— 中间件只测到首帧之前，记成 29ms（真实 15851ms），
+//      2026-10-27 已修（包装 body_iterator 计时），`sort=slow` 才第一次真的正确
 //
 // 本期**不做导出**（2026-10-27 决定）：看板定位是"开发者在浏览器里看数"，
 // 把数据搬进 Excel 属于另一种工作流（要权限、要脱敏、要留痕），不在这里顺手做。
 //
-// 权限：非管理员整页挡住。但这不是安全边界 —— 后端每个端点都会返回 403，
-// 这里只是不让普通用户看到一堆报错卡片。
+// 权限：非管理员**当作页面不存在**（notFound），不做"有权限门"式遮挡 ——
+// 那样等于告诉对方这里有个开发者看板。后端同名接口对非管理员也返回 404，
+// 两层配合才叫真隐藏。真正的安全边界永远在后端。
+import { notFound } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import ConsoleShell from "@/components/console/ConsoleShell";
 import CornIcon from "@/components/CornIcon";
@@ -29,6 +33,7 @@ import type {
   AdminFeedbackResp,
   ApiRankResp,
   DashboardOverview,
+  FailuresResp,
   FeedbackDict,
   FeedbackStatus,
   UserFeedbackItem,
@@ -46,13 +51,13 @@ const DAY_OPTIONS = [
 type SortKey = "calls" | "slow" | "fail";
 
 const SORT_OPTIONS: { value: SortKey; label: string; hint: string }[] = [
-  { value: "calls", label: "调用量", hint: "哪个接口被调得最多" },
+  { value: "calls", label: "用得最多", hint: "哪个功能被调得最多" },
   {
     value: "slow",
-    label: "最慢",
-    hint: "平均耗时最高（只算调用 ≥ 3 次的接口：首次冷启动的偶发慢不该上榜）",
+    label: "最耗时",
+    hint: "平均等待时间最长（只算用过 3 次以上的：第一次启动时的偶发慢不算）",
   },
-  { value: "fail", label: "失败", hint: "4xx / 5xx 最多的接口" },
+  { value: "fail", label: "出过错", hint: "返回过错误（4xx/5xx，不含未登录与报告空态）的功能" },
 ];
 
 const STATUS_CLASS: Record<string, string> = {
@@ -89,10 +94,17 @@ export default function DashboardPage() {
   const [ov, setOv] = useState<DashboardOverview | null>(null);
   const [ovErr, setOvErr] = useState("");
   const [apis, setApis] = useState<ApiRankResp | null>(null);
+  // 失败明细：让页面自己回答"为什么失败"，不用去服务器 grep 日志
+  const [fails, setFails] = useState<FailuresResp | null>(null);
   const [fb, setFb] = useState<AdminFeedbackResp | null>(null);
   const [fbStatus, setFbStatus] = useState("");
   const [dict, setDict] = useState<FeedbackDict | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
+  // 正在回复哪一条（null = 没有展开的回复框）。
+  // 与 busyId 分开：busyId 表示"这条正在提交"，replyFor 表示"这条的输入框开着"，
+  // 合成一个 state 就会出现"提交时输入框自己收起来又弹开"的抽搐。
+  const [replyFor, setReplyFor] = useState<number | null>(null);
+  const [replyText, setReplyText] = useState("");
   const [fetchedAt, setFetchedAt] = useState<Date | null>(null);
 
   const load = useCallback(() => {
@@ -109,6 +121,10 @@ export default function DashboardPage() {
       .apis(days, 20, sort)
       .then(setApis)
       .catch(() => setApis(null));
+    api.admin
+      .failures(days, 20)
+      .then(setFails)
+      .catch(() => setFails(null));
     api.admin
       .feedback(fbStatus, 30, 0)
       .then(setFb)
@@ -161,16 +177,41 @@ export default function DashboardPage() {
     [load]
   );
 
-  if (!auth.loading && !isAdmin) {
-    return (
-      <ConsoleShell active="dashboard" eyebrow="P8 · /dashboard" title="数据看板" sub="仅开发者可见。">
-        <Callout icon="warn">
-          这个页面只有开发者能看。当前账号不是管理员 —— 若你确实需要，请让开发者在
-          <code>.env</code> 的 <code>ADMIN_USERNAMES</code> 里加上你的用户名。
-        </Callout>
-      </ConsoleShell>
-    );
-  }
+  /**
+   * 回复某条反馈。
+   *
+   * 传空串 = 撤回（后端 set_reply 允许清空，但状态不回退）。
+   * 成功后重拉列表而不是本地改 state：回复可能顺手把 open 推成 doing，
+   * 本地改就得把"状态也会变"这条规则复制一份到前端 —— 那正是上个月
+   * 「前端能点、后端 400」的成因。让后端说完，前端照着画。
+   */
+  const sendReply = useCallback(
+    async (item: UserFeedbackItem, text: string) => {
+      setBusyId(item.id);
+      try {
+        await api.admin.replyFeedback(item.id, text.trim());
+        setReplyFor(null);
+        setReplyText("");
+        load();
+      } catch (e) {
+        setOvErr(e instanceof Error ? e.message : "回复失败");
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [load]
+  );
+
+  // 登录态还没确定：先什么都不渲染。
+  // 不能"先画骨架再判断"—— 骨架里带着"数据看板"标题，非管理员会看到它闪一下，
+  // 那也是一次泄露。宁可空白一瞬。
+  if (auth.loading) return null;
+
+  // 非管理员：**当成这个页面不存在**。
+  // 不渲染"仅开发者可见"的提示页 —— 那句话反而在告诉对方"这里有个开发者看板"。
+  // notFound() 让它和访问任意不存在的路径表现完全一致（见 app/not-found.tsx），
+  // 后端同名接口对非管理员也返回 404（见 api/admin.py）。
+  if (!isAdmin) notFound();
 
   const noCalls = ov !== null && ov.calls.total === 0;
   const peakCalls = ov ? Math.max(1, ...ov.series.map((x) => x.calls)) : 1;
@@ -178,7 +219,7 @@ export default function DashboardPage() {
   return (
     <ConsoleShell
       active="dashboard"
-      eyebrow="P8 · /dashboard"
+      eyebrow="管理 · 内部"
       title="数据看板"
       sub={
         <>
@@ -250,7 +291,7 @@ export default function DashboardPage() {
                 : "—"}
             </div>
             <div className="l">
-              成功率 <span className="meta">（含 4xx/5xx，分母为全部调用）</span>
+              成功率 <span className="meta">（不含未登录探测、报告空态）</span>
             </div>
           </div>
         </div>
@@ -269,7 +310,7 @@ export default function DashboardPage() {
           </div>
           <div className="card card-pad stat">
             <div className="n">{ov ? fmtNum(ov.calls.failed) : "—"}</div>
-            <div className="l">失败次数（状态码 ≥ 400）</div>
+            <div className="l">失败次数（不含未登录、空总结）</div>
           </div>
           <div className="card card-pad stat">
             <div className="n">{ov ? fmtNum(ov.feedback.open) : "—"}</div>
@@ -321,11 +362,82 @@ export default function DashboardPage() {
           </div>
         </section>
 
+        {/* ============ 失败原因（不用去服务器 grep 日志） ============ */}
+        <section>
+          <p className="sec-label">
+            失败原因{" "}
+            <span className="meta">（每条都标了是什么错；预期行为不算系统报错）</span>
+          </p>
+          <div className="card card-pad">
+            {!fails ? (
+              <SkeletonLines widths={["100%", "92%", "80%"]} />
+            ) : fails.recent.length === 0 ? (
+              <p className="hint" style={{ marginTop: 0 }}>
+                这个区间没有任何失败调用 —— 干净。
+              </p>
+            ) : (
+              <>
+                <p className="hint" style={{ marginTop: 0 }}>
+                  需要处理 <b>{fails.need_attention.length}</b> 条
+                  {fails.ignorable.length > 0 ? (
+                    <>
+                      {" "}
+                      · 可忽略 <b>{fails.ignorable.length}</b> 条（未登录探测 / 今天还没跑完对话所以没有总结）
+                    </>
+                  ) : null}
+                </p>
+
+                {fails.need_attention.length === 0 ? (
+                  <p className="hint">没有需要处理的问题。</p>
+                ) : (
+                  fails.need_attention.slice(0, 8).map((f) => (
+                    <div
+                      key={`${f.method} ${f.path} ${f.ts ?? 0}`}
+                      className="row"
+                      style={{ alignItems: "flex-start", gap: 10, padding: "7px 0" }}
+                    >
+                      <span className="ctag bad">{f.status}</span>
+                      <span style={{ minWidth: 0, flex: 1 }}>
+                        <span style={{ display: "block", fontSize: 13, color: "var(--text-1)" }}>
+                          {f.label}
+                        </span>
+                        <span
+                          className="mono"
+                          style={{ display: "block", fontSize: 11, color: "var(--text-3)" }}
+                        >
+                          {f.ts ? `${fmtTime(f.ts)} · ` : ""}
+                          {f.method} {f.path}
+                        </span>
+                        <span className="hint" style={{ display: "block", margin: "2px 0 0" }}>
+                          {f.hint}
+                        </span>
+                      </span>
+                    </div>
+                  ))
+                )}
+
+                {fails.ignorable.length > 0 ? (
+                  <p className="hint" style={{ marginBottom: 0 }}>
+                    可忽略的：
+                    {fails.top
+                      .filter((x) => x.expected)
+                      .slice(0, 3)
+                      .map((x) => `${x.label}（${x.status}）× ${x.calls ?? 1}`)
+                      .join("、") || "见上"}
+                    。这些是打开页面时的身份探测、以及总结还没生成时的空态，不是系统报错。
+                  </p>
+                ) : null}
+              </>
+            )}
+          </div>
+        </section>
+
         <div className="grid2">
           {/* ============ 接口排行 ============ */}
           <section>
             <p className="sec-label">
-              接口排行 {apis ? <span className="meta">共 {apis.total_paths} 个接口</span> : null}
+              功能使用排行{" "}
+              {apis ? <span className="meta">共 {apis.total_paths} 个功能被调用过</span> : null}
             </p>
             <div className="card card-pad">
               <div className="row" style={{ gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
@@ -348,41 +460,58 @@ export default function DashboardPage() {
               ) : apis.items.length === 0 ? (
                 <p className="hint" style={{ marginTop: 0 }}>
                   {sort === "fail"
-                    ? "这个区间没有失败请求 —— 是好事。"
+                    ? "这个区间没有出过错 —— 是好事。"
                     : sort === "slow"
-                      ? "没有调用次数 ≥ 3 的接口，算不出有意义的平均耗时。"
+                      ? "这个区间里没有用过 3 次以上的功能，还算不出有参考价值的平均耗时。"
                       : "这个区间还没有调用记录。"}
                 </p>
               ) : (
                 <>
                   <div
                     className="tr apis th"
-                    style={{ display: "grid", gridTemplateColumns: "1fr 52px 52px 60px", gap: 8 }}
+                    style={{ display: "grid", gridTemplateColumns: "1fr 44px 44px 66px", gap: 8 }}
                   >
-                    <span>接口（路由模板）</span>
+                    <span>功能</span>
                     <span>次数</span>
                     <span>失败</span>
-                    <span>均值</span>
+                    <span>平均耗时</span>
                   </div>
                   {apis.items.map((it) => (
                     <div
                       className="tr apis"
                       key={`${it.method} ${it.path}`}
-                      style={{ display: "grid", gridTemplateColumns: "1fr 52px 52px 60px", gap: 8 }}
+                      style={{ display: "grid", gridTemplateColumns: "1fr 44px 44px 66px", gap: 8 }}
+                      title={`${it.method} ${it.path}`}
                     >
-                      <span
-                        className="mono"
-                        title={`${it.method} ${it.path}`}
-                        style={{
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        <span className={`ctag ${it.method === "GET" ? "info" : ""}`}>
-                          {it.method}
-                        </span>{" "}
-                        {it.path}
+                      {/* 中文业务名是主信息（评委/老师看这行），
+                          原始路由路径退成第二行的浅色小字（开发者排查用）。
+                          这一层分工在后端 core/api_labels.py 里做，前端不拼中文。 */}
+                      <span style={{ minWidth: 0, overflow: "hidden" }}>
+                        <span
+                          style={{
+                            display: "block",
+                            fontSize: 13,
+                            color: "var(--ink)",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {it.label}
+                        </span>
+                        <span
+                          className="mono"
+                          style={{
+                            display: "block",
+                            fontSize: 11,
+                            color: "var(--text-3)",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {it.method} {it.path}
+                        </span>
                       </span>
                       <span>{fmtNum(it.calls)}</span>
                       <span className="meta" style={{ color: it.failed ? "var(--red-ink)" : undefined }}>
@@ -392,9 +521,10 @@ export default function DashboardPage() {
                     </div>
                   ))}
                   <p className="hint">
-                    按<b>路由模板</b>聚合（<code>/api/sessions/{"{sid}"}</code>），不是真实路径 ——
-                    否则每个会话 id 都会变成一个"只调用过 1 次"的接口，排行就没意义了。
-                    打开本页的请求不计入统计（否则越刷新数字越大）。
+                    同一个功能的多次调用合并计数 —— 比如打开不同会话都算「对话 · 打开会话」，
+                    不会因为换了个 id 就变成一个新功能。打开本页本身的请求不计入。
+                    其中「账号 · 登录方式」「账号 · 当前用户」这类是打开页面时自动发起的，
+                    不代表用户主动操作。
                   </p>
                 </>
               )}
@@ -461,9 +591,22 @@ export default function DashboardPage() {
                           {it.contact ? ` · 联系 ${it.contact}` : ""}
                         </div>
                       ) : null}
+                      {/* 已回复的先把回复摆出来：管理员最常问的是"我上次回过他什么"。
+                          正在编辑这条时藏起来 —— 否则同一段话会在上面显示一遍、
+                          又在下面的输入框里出现一遍，看着像重复渲染的 bug。 */}
+                      {it.reply && replyFor !== it.id ? (
+                        <div className="fb-reply">
+                          <div className="fb-reply-head">
+                            我的回复
+                            {it.replied_at ? ` · ${fmtTime(it.replied_at)}` : ""}
+                          </div>
+                          <div className="fb-reply-body">{it.reply}</div>
+                        </div>
+                      ) : null}
+
                       {/* 只渲染流转表允许的下一步：不允许回退（done 不能退回 doing），
                           前端不给按钮，后端也会 409 兜住 */}
-                      <div className="row" style={{ gap: 6, marginTop: 6 }}>
+                      <div className="row" style={{ gap: 6, marginTop: 6, flexWrap: "wrap" }}>
                         {(dict?.transitions[it.status] ?? []).map((next) => (
                           <button
                             key={next}
@@ -475,7 +618,66 @@ export default function DashboardPage() {
                             → {dict?.statuses.find((x) => x.value === next)?.label ?? next}
                           </button>
                         ))}
+                        {/* 回复按钮对任何状态都开放：已经关掉的反馈也可能需要回一句
+                            「这个不做，原因是…」，那正是最该回的一类。 */}
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          disabled={busyId === it.id}
+                          onClick={() => {
+                            const opening = replyFor !== it.id;
+                            setReplyFor(opening ? it.id : null);
+                            setReplyText(opening ? it.reply : "");
+                          }}
+                        >
+                          {replyFor === it.id ? "收起" : it.reply ? "改回复" : "回复用户"}
+                        </button>
                       </div>
+
+                      {replyFor === it.id ? (
+                        <div style={{ marginTop: 8 }}>
+                          <textarea
+                            className="input"
+                            value={replyText}
+                            rows={3}
+                            placeholder="回给提意见的人。会显示在他「设置 → 我提过的」那一列表里。"
+                            disabled={busyId === it.id}
+                            onChange={(e) =>
+                              setReplyText(e.target.value.slice(0, dict?.limits.max_reply ?? 1000))
+                            }
+                          />
+                          <div
+                            className="row"
+                            style={{ gap: 8, marginTop: 4, alignItems: "center" }}
+                          >
+                            <span className="meta">
+                              {replyText.trim().length} / {dict?.limits.max_reply ?? 1000}
+                              {it.reply && !replyText.trim() ? " · 清空后发送 = 撤回回复" : ""}
+                            </span>
+                            <div style={{ marginLeft: "auto" }} className="row">
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm"
+                                disabled={busyId === it.id}
+                                onClick={() => {
+                                  setReplyFor(null);
+                                  setReplyText("");
+                                }}
+                              >
+                                取消
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-primary btn-sm"
+                                disabled={busyId === it.id || replyText.trim() === it.reply}
+                                onClick={() => void sendReply(it, replyText)}
+                              >
+                                {busyId === it.id ? "发送中…" : "发送"}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   ))}
                 </div>

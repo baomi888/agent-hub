@@ -16,6 +16,9 @@ import { isPlanRequest, stripPlanHint } from "./chat/plan";
 import Bubble from "./chat/Bubble";
 import BubbleErrorBoundary from "./chat/BubbleErrorBoundary";
 import QueryEnhance from "./chat/QueryEnhance";
+import OnboardBar from "./chat/OnboardBar";
+import GuideModal from "./guide/GuideModal";
+import FeedbackModal from "./feedback/FeedbackModal";
 import type { ChatAttachment, UiMessage } from "./chat/types";
 import FilePreviewModal from "./FilePreviewModal";
 
@@ -68,6 +71,10 @@ interface Props {
   onUnbindKb?: () => void;
   kbPanelOpen?: boolean;
   onToggleKbPanel?: () => void;
+  /** 幂等地「打开」资料库面板。
+   *  新手引导第 2 步要点它 —— 用 onToggleKbPanel 会在宽屏（面板本来就开着）上
+   *  把面板关掉：用户照着「建一个知识库」点一下，面板反而消失了。 */
+  onOpenKbPanel?: () => void;
   /** 窄屏下打开会话列表抽屉 */
   onOpenSidebar?: () => void;
   /** 外部把建议问题预填进输入框（如联网建库后），不自动发送 */
@@ -88,6 +95,8 @@ interface Props {
   quota?: Record<string, QuotaInfo>;
   /** 打开「用量与反馈」看板；不传则不显示顶栏胶囊 */
   onOpenUsage?: () => void;
+  /** 当前用户 id：新手引导条的「已关闭」状态按人存，换人登录要重新看到 */
+  userId?: string | null;
 }
 
 export default function ChatArea({
@@ -108,6 +117,7 @@ export default function ChatArea({
   onUnbindKb,
   kbPanelOpen,
   onToggleKbPanel,
+  onOpenKbPanel,
   onOpenSidebar,
   prefill,
   onDeleteTurn,
@@ -118,6 +128,7 @@ export default function ChatArea({
   sessionId = null,
   quota,
   onOpenUsage,
+  userId = null,
 }: Props) {
   const [input, setInput] = useState("");
   const [showParams, setShowParams] = useState(false);
@@ -148,6 +159,10 @@ export default function ChatArea({
   const [previewFile, setPreviewFile] = useState<string | null>(null);
   // 顶栏「能力」快捷弹层：对话进行中也能一键切到常用能力（欢迎页四宫格的随身版）
   const [abOpen, setAbOpen] = useState(false);
+  // 顶栏「反馈」弹窗。**必须是 useCallback**：FeedbackModal 的 Esc / 焦点 effect
+  // 依赖 onClose，每次渲染都换引用会让 effect 反复重跑、把焦点从文本框里抢回来。
+  const [fbOpen, setFbOpen] = useState(false);
+  const closeFeedback = useCallback(() => setFbOpen(false), []);
   // 联网建库后把建议问题预填进输入框：渲染期基于 prop 调整 state（用 state 去重，避免 ref 在渲染期被读写），
   // 不自动发送，让用户确认/补充后再发
   const [appliedPrefillTs, setAppliedPrefillTs] = useState<number>(-1);
@@ -220,9 +235,18 @@ export default function ChatArea({
     };
   }, [mode]);
 
+  // 新消息进来时贴住底部。
+  // ★ 空态（欢迎页）必须跳过：欢迎页比可视区高，滚到底会把吉祥物、眉题、
+  //   标题整块推到视口外 —— 打开就是"半截页面"，用户以为首页就长那样（10-28 实测：
+  //   1080×629 下欢迎页 616px、可视区 340px，一进来 scrollTop 就是 316）。
   useEffect(() => {
     const el = scrollRef.current;
-    if (el && stickRef.current) el.scrollTop = el.scrollHeight;
+    if (!el || !stickRef.current) return;
+    if (messages.length === 0) {
+      el.scrollTop = 0;
+      return;
+    }
+    el.scrollTop = el.scrollHeight;
   }, [messages]);
 
   // 切换会话（首条消息换了）时强制回到底部，否则会停在上一会话的滚动位置
@@ -566,7 +590,10 @@ export default function ChatArea({
 
       {/* 消息区 */}
       <div className="relative min-h-0 flex-1">
-        <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto">
+        {/* overflow-x-hidden 是兜底：一长串不可断的字符（文件名、URL、表格）
+            只要把子元素顶宽，移动端整页就能横向拖动、观感像“画幅歪了”。
+            宁可在这里裁掉，也不许把文档撑宽。 */}
+        <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto overflow-x-hidden">
           <div className="chat-measure mx-auto flex min-h-full flex-col px-6 pb-4 pt-6">
           {messages.length === 0 ? (
             // 欢迎页：主路径是「直接问」，首屏摆两块——
@@ -582,15 +609,24 @@ export default function ChatArea({
               <h1 className="hero-title font-serif font-bold leading-snug text-ink">
                 {greeting}，我是<span className="hero-name">知穗</span>
               </h1>
-              <p className="mt-1.5 max-w-[30rem] text-msg leading-relaxed text-muted">
+              <p className="welcome-sub mt-1.5 max-w-[30rem] text-msg leading-relaxed text-muted">
                 一句话就行。直接问我——我会自己决定怎么帮你。
               </p>
+
+              {/* 新手引导（L2）：只在"还没开始问"的欢迎页出现，关掉后按人永久记住。
+                  放在这里而不是页面顶部：它是给新用户的，老用户一开口就该消失。 */}
+              <OnboardBar
+                userId={userId}
+                kbCount={kbCount ?? 0}
+                onOpenKb={onOpenKbPanel ?? onToggleKbPanel}
+                onAsk={() => inputRef.current?.focus()}
+              />
 
               {/* ② 主线：三个持续陪伴功能。原来这里是四宫格，四件平级，
                   结果「模板广场」这种一次性动作和「每日委托」这种天天用的能力
                   一样醒目 —— 而知穗的差别恰恰在后面那类。改成两层之后，
                   主线是大卡 + 有标题栏，辅路缩成一行小胶囊。 */}
-              <div className="mt-4 w-full">
+              <div className="welcome-daily mt-4 w-full">
                 <div className="welcome-section-head">
                   <span className="eyebrow">让知穗每天做点什么</span>
                   <span className="rule" />
@@ -614,7 +650,7 @@ export default function ChatArea({
               </div>
 
               {/* ③ 辅路：一次性动作，收成一行小入口 */}
-              <div className="mt-2.5 flex w-full flex-wrap justify-center gap-2">
+              <div className="welcome-mini mt-2.5 flex w-full flex-wrap justify-center gap-2">
                 {SECONDARY_ENTRIES.map((e) => (
                   <button
                     key={e.key}
@@ -629,8 +665,9 @@ export default function ChatArea({
                 ))}
               </div>
 
-              {/* ③ 次级示例：三句能立刻点的话，三列等宽便签；min-w-0 让长句在卡内截断不溢出 */}
-              <div className="mt-3 grid w-full grid-cols-1 gap-2 sm:grid-cols-3">
+              {/* ③ 次级示例：三句能立刻点的话，三列等宽便签；min-w-0 让长句在卡内截断不溢出
+                  矮屏（≤700px 高）整行让位：一屏放得下「品牌 + 三张日更大卡」比多摆三句示例更值 */}
+              <div className="welcome-egs mt-3 grid w-full grid-cols-1 gap-2 sm:grid-cols-3">
                 {EXAMPLES.map((e) => (
                   <button
                     key={e.q}
@@ -778,7 +815,7 @@ export default function ChatArea({
             校园工具集
           </a>
         </div>
-        <div className="mb-2 flex items-center gap-3">
+        <div className="mb-2 flex items-center gap-2 sm:gap-3">
           <div className="mode-tabs" role="group" aria-label="对话模式" ref={modeTabsRef}>
             <span
               className="mode-thumb"
@@ -804,6 +841,23 @@ export default function ChatArea({
               </button>
             ))}
           </div>
+          {/* 内测反馈：紧贴模式条右侧（就在「混合」旁边），不塞回顶栏那排灰图标里。
+              理由：想说话的那一刻人正在输入框这儿（刚被答错、刚发现按钮不好用），
+              顶栏右上的小图标太不显眼，内测第一批人的意见最容易在这里丢掉。
+              内容和设置页共用 FeedbackCard，只是装在弹窗里。 */}
+          <button
+            type="button"
+            onClick={() => setFbOpen(true)}
+            title="内测期间，每条意见开发者都会看"
+            aria-label="提交内测反馈"
+            aria-haspopup="dialog"
+            className="fb-mode-cta"
+          >
+            <span className="fb-mode-dot" aria-hidden="true" />
+            <span className="fb-mode-text">内测反馈</span>
+            {/* 窄屏只留「反馈」两个字：光一个圆点会被当成状态指示灯，点了才知道是按钮 */}
+            <span className="fb-mode-text-sm">反馈</span>
+          </button>
           <button
             onClick={() => setShowParams((s) => !s)}
             title="检索参数设置"
@@ -1022,6 +1076,14 @@ export default function ChatArea({
           onClose={() => setPreviewFile(null)}
         />
       )}
+
+      {/* 首次进平台的上手说明：portal 到 body，和有没有对话无关；
+          未登录（userId 为空）时它自己不渲染 */}
+      <GuideModal userId={userId} />
+
+      {/* 顶栏「反馈」打开的弹窗：内容与设置页是同一个 FeedbackCard，
+          区别只是这里没有外层卡片（chrome=false） */}
+      <FeedbackModal open={fbOpen} onClose={closeFeedback} page="/" />
     </section>
   );
 }

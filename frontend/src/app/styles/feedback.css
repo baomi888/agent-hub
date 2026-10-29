@@ -1,0 +1,239 @@
+/* ============ 内测反馈入口 + 反馈弹窗 ============
+   组件：components/feedback/FeedbackModal.tsx（内容复用 FeedbackCard）
+   语言与 .guide-* 同一套：纸底 + 顶上一条金线 + 半透暖墨遮罩。
+   两个弹窗不共用类名 —— 引导弹窗是"读"（整段说明、方向键翻页），
+   这个弹窗是"写"（分类 + 文本框 + 历史），共用一套类名以后必然互相牵连。 */
+
+/* 入口位置：紧贴模式条右侧，就在「混合」旁边。
+   它是内测期唯一的意见通道，所以不能做成顶栏那种灰胶囊里的一个小图标：
+   淡金底 + 金边 + 深金字 + 呼吸点 —— 扫一眼就能看见，但仍在暖色系里
+   （不用荧光黄、不上大面积实心金，那是提醒条的语汇，不是这个产品的）。 */
+.fb-mode-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: var(--ls-tight);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
+}
+/* hover 走主按钮那套交互语言：金底 + 深墨字 */
+.fb-mode-cta:hover {
+  background: var(--accent);
+  color: #2e2416;
+  box-shadow: 0 2px 8px rgba(200, 137, 42, 0.26);
+}
+.fb-mode-cta:active {
+  transform: translateY(0.5px);
+}
+.fb-mode-cta:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-accent);
+}
+.fb-mode-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: fbDot 2.6s ease-out infinite;
+}
+.fb-mode-cta:hover .fb-mode-dot {
+  background: #2e2416;
+  animation: none;
+}
+@keyframes fbDot {
+  0% {
+    box-shadow: 0 0 0 0 rgba(200, 137, 42, 0.5);
+  }
+  55% {
+    box-shadow: 0 0 0 5px rgba(200, 137, 42, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(200, 137, 42, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fb-mode-dot {
+    animation: none;
+  }
+}
+/* 窄屏把「内测反馈」缩成「反馈」：这一行左边还有 5 个模式按钮。
+   ★ 不能只留圆点 —— 一个孤零零的金色圆点会被读成状态指示灯，没人会去点它。 */
+.fb-mode-text-sm {
+  display: none;
+}
+@media (max-width: 560px) {
+  .fb-mode-cta {
+    padding: 0 9px;
+  }
+  .fb-mode-cta .fb-mode-text {
+    display: none;
+  }
+  .fb-mode-cta .fb-mode-text-sm {
+    display: inline;
+  }
+}
+
+.fbx-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 96; /* 比引导弹窗（95）高一层：从引导里点进反馈时不该被压在下面 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(46, 36, 22, 0.42);
+  animation: fbxFade 0.16s ease;
+}
+@keyframes fbxFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.fbx-card {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  /* 矮屏（1080×629 那种）不能顶出视口：内容超出时让 .fbx-body 自己滚，
+     标题和底部说明永远看得见 */
+  max-height: calc(100dvh - 40px);
+  background: var(--card-bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 48px rgba(61, 47, 26, 0.22);
+  overflow: hidden;
+  position: relative;
+  animation: fbxRise 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@keyframes fbxRise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.fbx-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-line));
+}
+.fbx-card:focus {
+  outline: none;
+}
+
+.fbx-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 16px 18px 0;
+}
+.fbx-eyebrow {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--accent-ink);
+}
+.fbx-title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: var(--ls-tight);
+  color: var(--text-1);
+  min-width: 0;
+}
+.fbx-close {
+  margin-left: auto;
+  align-self: center;
+  padding: 3px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.fbx-close:hover,
+.fbx-close:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  outline: none;
+}
+
+.fbx-sub {
+  margin: 6px 18px 0;
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  color: var(--text-2);
+}
+.fbx-sub b {
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.fbx-body {
+  flex: 1;
+  min-height: 0;
+  padding: 4px 18px 2px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* 内嵌的 FeedbackCard 已经不带卡片外壳（chrome=false），
+   这里把它的第一行 margin 收掉，避免弹窗上方多出一截空隙 */
+.fbx-body .fb-bare > div:first-child {
+  margin-top: 6px !important;
+}
+
+.fbx-foot {
+  padding: 10px 18px 14px;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+@media (max-width: 560px) {
+  .fbx-mask {
+    padding: 10px;
+  }
+  .fbx-card {
+    max-height: calc(100dvh - 20px);
+  }
+  .fbx-head {
+    padding: 14px 14px 0;
+    flex-wrap: wrap;
+  }
+  .fbx-title {
+    font-size: var(--fs-lg);
+  }
+  .fbx-sub {
+    margin: 5px 14px 0;
+  }
+  .fbx-body {
+    padding: 2px 14px;
+  }
+  .fbx-foot {
+    padding: 9px 14px 12px;
+  }
+}

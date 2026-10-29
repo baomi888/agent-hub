@@ -3,8 +3,9 @@
 口径依据：`docs/数据看板_2026-10-27/口径与数据字典.md`（下文简称"字典 §N"）。
 本文件锁死的不只是"功能能跑"，还有三件最容易静默坏掉的事：
 
-  1. **权限两层顺序**：未登录必须 401（不是 403），非管理员必须 403（不是 401）。
-     反了的话前端会把"权限不够"当成"登录态过期"，引导用户做一次无意义的登录。
+  1. **权限两层顺序**：未登录必须 401（不是 404），非管理员必须 404（不是 401）。
+     反了的话，"登录态过期"会被伪装成"路径不存在"，用户不知道该去登录，
+     排查时也会误判成路由被删了。
   2. **观际者效应**：看板自己的请求不能进统计。否则"打开看板"本身推高数字，
      看到的数据永远比真实多一截，而且越刷新越多。
   3. **CSV 公式注入**：用户反馈是自由文本，以 `=` 开头的单元格 Excel 会当公式执行。
@@ -142,18 +143,41 @@ _ADMIN_PATHS = [
 
 
 def test_admin_endpoints_require_login(env, client):
-    """未登录 → 401（不是 403）。"""
+    """未登录 → 401（不是 404）。登录态过期必须能与"路径不存在"区分开。"""
     for p in _ADMIN_PATHS:
         r = client.get(p)
         assert r.status_code == 401, f"{p} 未登录返回 {r.status_code}"
 
 
 def test_admin_endpoints_reject_normal_user(env, client):
-    """登录但不是管理员 → 403（不是 401）。"""
+    """登录但不是管理员 → **404**（伪装成接口不存在，不是 403）。
+
+    403 等于向对方确认"这个路径存在、你只是权限不够"，对只有开发者自己用的
+    看板来说这本身就是泄露。404 不给任何确认。
+    """
     _login(client, USER_NAME)
     for p in _ADMIN_PATHS:
         r = client.get(p)
-        assert r.status_code == 403, f"{p} 普通用户返回 {r.status_code}"
+        assert r.status_code == 404, f"{p} 普通用户返回 {r.status_code}"
+        # 连 detail 都不能有中文/权限字样，否则等于换了种方式承认接口存在
+        assert r.json() == {"detail": "Not Found"}, f"{p} 泄露了：{r.text[:80]}"
+
+
+def test_normal_user_404_is_indistinguishable(env, client):
+    """非管理员访问看板接口，与访问一个**真的不存在**的路径完全无法区分。
+
+    这是"彻底隐藏"的硬判据：状态码、detail 文案、响应头里有意义的字段
+    都得一致。只要有一处不同，就能被用来确认"这里有个后台"。
+    """
+    _login(client, USER_NAME)
+    fake = client.get("/api/admin/__definitely_not_a_route__")
+    real = client.get("/api/admin/overview")
+    assert fake.status_code == real.status_code == 404
+    assert fake.json() == real.json()
+
+    # 唯一允许的差异是响应体长度之类无关项；关键头必须一致
+    for h in ("content-type",):
+        assert fake.headers.get(h) == real.headers.get(h)
 
 
 def test_admin_can_open_dashboard(env, client):
@@ -212,6 +236,77 @@ def test_overview_matches_raw_sql(env, client):
     assert d["calls"]["failed"] == 1
     assert d["calls"]["success_rate"] == pytest.approx(2 / 3, abs=1e-4)
     assert d["calls"]["max_ms"] == 300
+
+
+def test_expected_errors_are_not_failures(env, client):
+    """401（未登录探测）与 /api/report 的 404（今天还没总结）都不算失败。
+
+    内测第一天实测：178 条 401 + 17 条报告空态把成功率压到 90.7%、
+    把"出过错"榜刷满 /api/auth/me。两者都是预期行为——但 500、普通 404、
+    注册 400 照旧算失败，不能一刀切"4xx 都不算"。
+    """
+    now = int(time.time())
+    _seed_calls(
+        [
+            (now, "/api/auth/me/", "GET", 401, 5, None),
+            (now, "/api/auth/me/", "GET", 401, 5, None),
+            (now, "/api/auth/me/", "GET", 401, 5, None),
+            (now, "/api/report/today", "GET", 404, 8, "u1"),
+            (now, "/api/report/{date}", "GET", 404, 8, "u1"),
+            (now, "/api/a/", "GET", 200, 100, "u1"),
+            (now, "/api/a/", "GET", 500, 300, "u1"),
+            (now, "/api/b/", "GET", 404, 20, "u1"),
+        ]
+    )
+    _login(client, ADMIN_NAME)
+    d = client.get("/api/admin/overview?days=7").json()
+
+    # 5 条预期（3 个 401 + 2 个报告空态）都不进 failed
+    assert d["calls"]["expected"] == 5
+    assert d["calls"]["failed"] == 2  # 500 + 普通 404
+    # 分母 = 8 - 5 = 3，分子 ok 只有 1 条 200
+    assert d["calls"]["success_rate"] == pytest.approx(1 / 3, abs=1e-4)
+
+    s = client.get("/api/admin/overview?days=7").json()["series"]
+    today = [x for x in s if x["failed"] > 0]
+    assert today and today[0]["failed"] == 2, "趋势里的失败也必须剔除预期行为"
+
+    fail = client.get("/api/admin/apis?days=7&sort=fail").json()
+    paths = [i["path"] for i in fail["items"]]
+    assert "/api/auth/me/" not in paths, "全 401 的接口不该进'出过错'榜"
+    assert "/api/report/today" not in paths, "报告空态不该进'出过错'榜"
+    assert fail["items"][0]["path"] == "/api/a/"
+
+
+def test_failures_explain_reason(env, client):
+    """看板要能自己说清"为什么失败"，并按 需处理 / 可忽略 分栏。"""
+    now = int(time.time())
+    _seed_calls(
+        [
+            (now, "/api/auth/me/", "GET", 401, 5, None),
+            (now, "/api/report/today", "GET", 404, 8, "u1"),
+            (now, "/api/auth/register/", "POST", 409, 10, None),
+            (now, "/api/kb/", "GET", 500, 900, "u1"),
+        ]
+    )
+    _login(client, ADMIN_NAME)
+    d = client.get("/api/admin/failures?days=7").json()
+
+    assert len(d["recent"]) == 4
+    assert all({"path", "status", "hint", "expected", "label"} <= set(x) for x in d["recent"])
+
+    ign = {x["path"] for x in d["ignorable"]}
+    need = {x["path"] for x in d["need_attention"]}
+    assert ign == {"/api/auth/me/", "/api/report/today"}
+    assert need == {"/api/auth/register/", "/api/kb/"}
+
+    by_path = {x["path"]: x for x in d["recent"]}
+    assert "未登录" in by_path["/api/auth/me/"]["hint"]
+    assert "总结" in by_path["/api/report/today"]["hint"]
+    assert "占用" in by_path["/api/auth/register/"]["hint"]
+    assert "服务端异常" in by_path["/api/kb/"]["hint"]
+    # 聚合榜：按 (路径, 状态) 计数，最上面就是"哪类错最多"
+    assert d["top"] and "calls" in d["top"][0]
 
 
 def test_users_total_is_snapshot_new_is_ranged(env, client):
@@ -415,3 +510,165 @@ def test_purge_removes_old_rows(env):
     with session._get_conn() as conn:
         left = [r["path"] for r in conn.execute("SELECT path FROM api_call_logs")]
     assert left == ["/api/new/"]
+
+
+# ==================== E. 流式响应耗时（2026-10-27 修的 P1 口径缺陷）====================
+#
+# 缺陷原貌：`BaseHTTPMiddleware` 的 `call_next` 对 StreamingResponse 在**首帧产生
+# 之前**就返回，中间件拿到的 dur_ms 是"建流耗时"。实测 `/api/chat/stream`
+# 客户端 15851ms、看板记 29ms，差 546 倍 —— 于是 `sort=slow` 的榜首变成 85ms 的
+# 注册接口，真正最慢的聊天接口既算错又不上榜。
+#
+# 这两个用例锁死两件事：
+#   ① 流式要测到**整条流**（不是首帧前）
+#   ② 包计时不能改变响应体内容（少一帧就是事故，不是统计问题）
+
+
+def _temp_stream_route(main_mod, path: str, frames: int, gap: float):
+    """临时往 app 上挂一个流式端点，返回 (route, 清理函数)。"""
+    import asyncio
+
+    from fastapi.responses import StreamingResponse
+    from fastapi.routing import APIRoute
+
+    async def _gen():
+        for i in range(frames):
+            await asyncio.sleep(gap)
+            yield f"data: {i}\n\n"
+
+    async def _endpoint():
+        return StreamingResponse(_gen(), media_type="text/event-stream")
+
+    route = APIRoute(path, _endpoint, methods=["GET"])
+    main_mod.app.router.routes.append(route)
+    return route, lambda: main_mod.app.router.routes.remove(route)
+
+
+def test_streaming_response_records_whole_stream(env, client, monkeypatch):
+    """流式响应必须记整条流的时长，而不是首帧之前。"""
+    import main
+
+    # 关键：别让 record 触发真实落库，否则 _BUF 被清空、断言读不到行
+    monkeypatch.setattr(main, "_spawn_flush", lambda: None)
+
+    frames, gap = 4, 0.05  # 真实时长 ≈ 200ms
+    path = "/api/_probe/stream"
+    _, cleanup = _temp_stream_route(main, path, frames, gap)
+    try:
+        apilog._BUF.clear()
+        with client.stream("GET", path) as r:
+            body = b"".join(r.iter_bytes())
+    finally:
+        cleanup()
+
+    # ② 响应体没被计时包装破坏
+    assert body.count(b"data:") == frames, f"帧数不对：{body!r}"
+
+    rows = [r for r in apilog._BUF if r[1] == path]
+    assert len(rows) == 1, f"流式响应应记 1 条，实际 {len(rows)} 条"
+    dur = rows[0][4]
+    floor = int(frames * gap * 1000 * 0.8)
+    assert dur >= floor, f"只测到 {dur}ms（应 ≥{floor}ms）—— body_iterator 没被包上计时"
+
+
+def test_non_streaming_duration_unchanged(env, client, monkeypatch):
+    """非流式响应不能被这次改动带坏：该测多久还是多久。"""
+    import asyncio
+
+    import main
+    from fastapi.routing import APIRoute
+
+    monkeypatch.setattr(main, "_spawn_flush", lambda: None)
+
+    gap = 0.1
+    path = "/api/_probe/plain"
+
+    async def _endpoint():
+        await asyncio.sleep(gap)
+        return {"ok": True}
+
+    route = APIRoute(path, _endpoint, methods=["GET"])
+    main.app.router.routes.append(route)
+    try:
+        apilog._BUF.clear()
+        assert client.get(path).json() == {"ok": True}
+    finally:
+        main.app.router.routes.remove(route)
+
+    rows = [r for r in apilog._BUF if r[1] == path]
+    assert len(rows) == 1
+    assert rows[0][4] >= int(gap * 1000 * 0.8), f"非流式耗时异常：{rows[0][4]}ms"
+
+
+# ==================== 接口中文名（展示层） ====================
+
+_IGNORED_METHODS = {"HEAD", "OPTIONS", "TRACE"}
+
+
+def test_every_route_has_chinese_label():
+    """所有已注册的 /api 路由都必须在 `core/api_labels.py` 里登记中文名。
+
+    这条断言的作用不是"测功能"，而是**防止看板悄悄退化成技术界面**：
+    新加接口忘了登记时，`label_for` 会兜底成「知识库 · 其他提交」——
+    页面仍然能跑、仍然有中文，但信息量为零，评审看到的是"其他操作"。
+    没有这条断言，这种退化要等到有人翻看板才会发现。
+    """
+    import main
+    from core import api_labels
+
+    missing: list[str] = []
+    for r in main.app.routes:
+        path = str(getattr(r, "path", "") or "")
+        if not path.startswith("/api"):
+            continue
+        for m in getattr(r, "methods", set()) or set():
+            if m in _IGNORED_METHODS:
+                continue
+            if not api_labels.is_known(m, path):
+                missing.append(f"{m} {path}")
+
+    assert not missing, (
+        "以下接口没有中文名，去看板「功能使用排行」会显示成「其他操作」，"
+        "请在 core/api_labels.py 补上：\n  " + "\n  ".join(sorted(missing))
+    )
+
+
+def test_label_lookup_ignores_param_names():
+    """路由改参数名（`{sid}` → `{id}`）不能让中文名失效。
+
+    日志表里存的是历史模板，路由改名后旧行仍带旧参数名；
+    查表时若按字面匹配，改一次名就会让整类历史数据掉进兜底。
+    """
+    from core import api_labels
+
+    assert api_labels.label_for("GET", "/api/sessions/{sid}") == "对话 · 打开会话"
+    assert api_labels.label_for("GET", "/api/sessions/{id}") == "对话 · 打开会话"
+    assert api_labels.label_for("GET", "/api/sessions/{anything}/") == "对话 · 打开会话"
+    # 尾斜杠同理：项目里 `/api/kb/` 与 `/api/sessions` 两种风格并存
+    assert api_labels.label_for("GET", "/api/auth/me/") == api_labels.label_for("GET", "/api/auth/me")
+
+
+def test_unknown_route_falls_back_with_module_name():
+    """真查不到时也不能吐英文路径 —— 兜底至少要给出中文模块名。"""
+    from core import api_labels
+
+    label = api_labels.label_for("POST", "/api/kb/{id}/not-a-real-thing")
+    assert label.startswith("知识库 · 其他")
+    assert "/" not in label  # 中文名里不该出现路径碎片
+
+
+def test_ranking_items_carry_labels(env, client):
+    """排行接口下发的每一行都带中文名，且和 path 对应得上（不是错位）。"""
+    now = int(time.time())
+    _seed_calls(
+        [
+            (now, "/api/chat/stream", "POST", 200, 1200, None),
+            (now, "/api/kb/{sid}/upload", "POST", 200, 300, None),
+        ]
+    )
+    _login(client, ADMIN_NAME)
+    r = client.get("/api/admin/apis?days=1&limit=50")
+    assert r.status_code == 200
+    labels = {it["path"]: it["label"] for it in r.json()["items"]}
+    assert labels["/api/chat/stream"] == "对话 · 提问（逐字回复）"
+    assert labels["/api/kb/{sid}/upload"] == "知识库 · 上传文件"

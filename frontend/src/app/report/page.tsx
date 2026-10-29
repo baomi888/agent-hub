@@ -156,7 +156,7 @@ export default function ReportPage() {
   return (
     <ConsoleShell
       active="report"
-      eyebrow="P5 · /report"
+      eyebrow="学完回头看"
       title="每日总结"
       sub={
         <>

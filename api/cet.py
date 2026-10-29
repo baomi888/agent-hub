@@ -1,7 +1,9 @@
 """四六级备考工作区的 HTTP 端点。
 
-  GET    /api/cet/overview        首屏聚合数据（计划 / 进度 / 今日任务 / 连续天数 / 待复习词 / 分数）
-  POST   /api/cet/plan            生成一份 N 天备考计划（确定性生成，不调用大模型）
+  GET    /api/cet/overview        首屏聚合数据（档案 / 进度 / 今日任务 / 连续天数 / 待复习词 / 分数）
+  POST   /api/cet/plan            建立备考档案（确定性生成任务，不调用大模型）
+  PATCH  /api/cet/plan            修改档案设置（考期 / 模块 / 强度 / 目标分）
+  DELETE /api/cet/plan            结束当前计划（归档，不物理删除）
   PATCH  /api/cet/task            勾选 / 取消某条任务
   GET    /api/cet/vocab           词汇本（?due=1 只看今天该复习的）
   POST   /api/cet/vocab           加入词汇本（同词去重，已存在则提前到今天复习）
@@ -33,14 +35,49 @@ async def cet_overview(uid: str = Depends(get_current_user)) -> dict:
 
 @router.post("/plan")
 async def cet_create_plan(body: dict, uid: str = Depends(get_current_user)) -> dict:
-    title = str(body.get("title") or "六级 54 天备考计划")[:60]
-    exam_date = body.get("exam_date") or None
-    days = body.get("days") or 54
+    """建立备考档案。参数全部可选（不传就取默认值），因此旧的 `{days: 54}` 调用仍然可用。"""
     try:
-        days = int(days)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="days 必须是整数") from None
-    return await asyncio.to_thread(svc.create_plan, uid, title, exam_date, days)
+        return await asyncio.to_thread(
+            svc.create_plan,
+            uid,
+            title=body.get("title"),
+            exam_date=body.get("exam_date"),
+            days=body.get("days") or 54,
+            exam_type=body.get("exam_type") or "CET6",
+            modules=body.get("modules"),
+            intensity=body.get("intensity") or "standard",
+            target_score=body.get("target_score"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+# 只允许 PATCH 改这几个字段：白名单而不是黑名单，
+# 防止把 `id` / `owner_id` / `archived_at` 这类不该由客户端控制的列带进来。
+_PLAN_PATCHABLE = {"exam_type", "exam_date", "modules", "intensity", "target_score"}
+
+
+@router.patch("/plan")
+async def cet_update_plan(body: dict, uid: str = Depends(get_current_user)) -> dict:
+    changes = {k: v for k, v in (body or {}).items() if k in _PLAN_PATCHABLE}
+    if not changes:
+        raise HTTPException(status_code=400, detail="没有可修改的字段")
+    try:
+        return await asyncio.to_thread(svc.update_plan, uid, changes)
+    except LookupError as e:
+        # 没有生效中的档案 → 404（与项目"归属/不存在一律 404"的约定一致）
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.delete("/plan")
+async def cet_archive_plan(uid: str = Depends(get_current_user)) -> dict:
+    """结束当前计划。归档而非删除：连续天数与学习路径关卡都不受影响。"""
+    ok = await asyncio.to_thread(svc.archive_plan, uid)
+    if not ok:
+        raise HTTPException(status_code=404, detail="没有进行中的备考计划")
+    return {"ok": True}
 
 
 @router.patch("/task")

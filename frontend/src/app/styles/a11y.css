@@ -17,6 +17,24 @@ summary:focus-visible,
   outline: none;
 }
 
+/* ============ 移动端输入框最小 16px（行为修复，不是审美） ============
+   iOS Safari 的规矩：聚焦到 font-size < 16px 的 input/textarea/select 时会
+   自动把页面放大，而且**失焦、关键盘、发完消息都不会还原**。用户看到的就是
+   「在手机上打过一次字之后，整个画幅一直偏大，缩不回去」（10-29 实测反馈）。
+   本站正文 15px、--fs-md 14px，正好落在雷区里，所以发过言就中招。
+
+   这里用 !important 是有意的：输入框字号分散在 Tailwind 的 text-msg /
+   .input / .console-* 等处，逐处改既漏又容易回退；这一条是平台行为的硬约束，
+   必须压过所有排版偏好。上限仍尊重父级：本来就是大字号的地方（>=1em）不缩小。 */
+@media (max-width: 900px) {
+  input:not([type="checkbox"]):not([type="radio"]),
+  textarea,
+  select,
+  [contenteditable="true"] {
+    font-size: max(16px, 1em) !important;
+  }
+}
+
 /* ============ 滚动条：补 Firefox，避免只有 -webkit- 生效 ============ */
 * {
   scrollbar-width: thin;

@@ -162,12 +162,19 @@ def main() -> int:
 
         # ---------- 权限矩阵 ----------
         # 必须用一个**全新的** opener：注册接口会顺手下发 Cookie（注册即登录），
-        # 上面那个 anon 已经带上了 e2e_user 的登录态，拿它测"未登录"会得到 403。
+        # 上面那个 anon 已经带上了 e2e_user 的登录态，拿它测"未登录"会得到 404
+        # （非管理员的响应被刻意伪装成"接口不存在"，见 api/admin.py::_require_admin）。
         fresh = _opener()
         code, _ = _http(fresh, "GET", f"{base}/api/admin/overview")
         rep.check("未登录 → 401", code == 401, str(code))
-        code, _ = _http(normal, "GET", f"{base}/api/admin/overview")
-        rep.check("非管理员 → 403", code == 403, str(code))
+        code, body_normal = _http(normal, "GET", f"{base}/api/admin/overview")
+        rep.check("非管理员 → 404（伪装成不存在，不是 403）", code == 404, str(code))
+        code2, body_fake = _http(normal, "GET", f"{base}/api/admin/__not_a_route__")
+        rep.check(
+            "非管理员 404 与真不存在无法区分",
+            code == code2 == 404 and body_normal == body_fake,
+            f"{code}/{code2} {body_normal[:48]!r}",
+        )
         code, _ = _http(admin, "GET", f"{base}/api/admin/overview")
         rep.check("管理员 → 200", code == 200, str(code))
         code, _ = _http(admin, "GET", f"{base}/api/admin/export?kind=users")
