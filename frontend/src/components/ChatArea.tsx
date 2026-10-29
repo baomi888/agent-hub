@@ -89,6 +89,11 @@ interface Props {
   geoPending?: boolean;
   /** 切换定位开关（请求权限 / 关闭），由页面层处理权限与缓存 */
   onToggleGeo?: () => void;
+  /** 手填城市的输入框是否展开（定位拿不到时由页面层直接展开，不弹报错） */
+  cityEditOpen?: boolean;
+  onCityEditOpenChange?: (v: boolean) => void;
+  /** 保存手填的城市；传空串表示撤销手填，回到自动定位 */
+  onSaveCity?: (name: string) => void;
   /** 当前会话 id：赞踩要按「会话 + 消息 id」落库，否则后端无从归档 */
   sessionId?: string | null;
   /** 当前账号配额概览：顶栏常驻胶囊用它显示今日用量 */
@@ -125,6 +130,9 @@ export default function ChatArea({
   geoCity = null,
   geoPending = false,
   onToggleGeo,
+  cityEditOpen = false,
+  onCityEditOpenChange,
+  onSaveCity,
   sessionId = null,
   quota,
   onOpenUsage,
@@ -912,19 +920,64 @@ export default function ChatArea({
           </div>
         )}
 
-        {geoEnabled && (
-          <div className="geo-badge" role="status" aria-live="polite">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 21s7-6.4 7-11a7 7 0 1 0-14 0c0 4.6 7 11 7 11z" />
-              <circle cx="12" cy="10" r="2.6" />
-            </svg>
-            <span>
-              {/* geoCity 由上层用 formatPlace() 拼成两级：「茂名 · 茂南区」。
-                  前缀用逗号而不是「·」：否则一行里出现两个间隔点
-                  （定位已开启 · 当前在 茂名 · 茂南区），读起来像标点没打完 */}
-              {geoCity ? `定位已开启，当前在 ${geoCity}` : "定位已开启"}
-            </span>
-          </div>
+        {/* 手填城市的一行输入。定位拿不到时页面层直接把它展开 ——
+            不弹「定位失败」，因为那是环境限制（http 下浏览器不给坐标 / 服务端没配 key），
+            不是用户做错事，红字只会让人以为应用坏了。给出路比说原因有用。 */}
+        {cityEditOpen ? (
+          <form
+            className="geo-edit"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const el = e.currentTarget.elements.namedItem("city") as HTMLInputElement | null;
+              onSaveCity?.((el?.value || "").trim());
+            }}
+          >
+            <label htmlFor="geo-city">你在哪个城市？</label>
+            <input
+              id="geo-city"
+              name="city"
+              defaultValue={(geoCity || "").split("·")[0].trim()}
+              placeholder="例如 茂名 / 大理 / 北京"
+              maxLength={20}
+              autoComplete="off"
+              autoFocus
+            />
+            <button type="submit" className="geo-edit-ok">
+              用这个
+            </button>
+            <button
+              type="button"
+              className="geo-edit-cancel"
+              onClick={() => onCityEditOpenChange?.(false)}
+            >
+              取消
+            </button>
+          </form>
+        ) : (
+          geoEnabled && (
+            <div className="geo-badge" role="status" aria-live="polite">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 21s7-6.4 7-11a7 7 0 1 0-14 0c0 4.6 7 11 7 11z" />
+                <circle cx="12" cy="10" r="2.6" />
+              </svg>
+              <span>
+                {/* geoCity 由上层用 formatPlace() 拼成两级：「茂名 · 茂南区」。
+                    前缀用逗号而不是「·」：否则一行里出现两个间隔点
+                    （定位已开启 · 当前在 茂名 · 茂南区），读起来像标点没打完 */}
+                {geoCity ? `定位已开启，当前在 ${geoCity}` : "定位已开启"}
+              </span>
+              {onCityEditOpenChange && (
+                <button
+                  type="button"
+                  className="geo-badge-edit"
+                  onClick={() => onCityEditOpenChange(true)}
+                  title="定位不准？自己填一个城市"
+                >
+                  改
+                </button>
+              )}
+            </div>
+          )
         )}
 
         {/* 检索词校准（B5）：锚点高度 0，面板向上弹出，不推挤输入框 */}

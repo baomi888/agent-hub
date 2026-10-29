@@ -12,7 +12,7 @@ import { api } from "@/lib/api";
 import { streamChat } from "@/lib/sse";
 import { uid } from "@/lib/id";
 import { useToast } from "@/lib/hooks/useToast";
-import { getSendGeo, getCachedGeo, isGeoEnabled, acquireGeo, reverseGeocodePlace, setGeoEnabled, updateCachedPlace, formatPlace } from "@/lib/geo";
+import { getSendGeo, getCachedGeo, isGeoEnabled, acquireGeo, reverseGeocodePlace, setGeoEnabled, updateCachedPlace, formatPlace, getManualCity, setManualCity } from "@/lib/geo";
 import { usePrefs } from "@/lib/hooks/usePrefs";
 import { useSessions } from "@/lib/hooks/useSessions";
 import { useKnowledge } from "@/lib/hooks/useKnowledge";
@@ -141,6 +141,8 @@ export default function Home() {
   const [geoCity, setGeoCity] = useState<string | null>(() => formatPlace(getCachedGeo()) || null);
   // 定位请求进行中：授权弹窗 + IP 兜底最长 18s，期间按钮转圈，否则看着像没反应
   const [geoPending, setGeoPending] = useState(false);
+  // 「手填城市」小输入框是否展开。定位拿不到时直接展开它 —— 不弹报错，给出路
+  const [cityEdit, setCityEdit] = useState(false);
   // 场景预设（scenario state + localStorage 随会话保存）已随「场景选择撤出
   // 主界面」整体删除（10-14 晚）：场景化入口统一走模板广场（完整启动包），
   // 工作台不再给对话贴场景标签；后端 /api/chat 的 scenario 字段保留兼容。
@@ -514,16 +516,27 @@ export default function Home() {
     const r = await acquireGeo();
     if (!r) {
       setGeoPending(false);
-      showToast(
-        "error",
-        "定位失败：当前环境不支持浏览器定位，后端也未能按 IP 推断城市（需 AMAP_API_KEY）"
-      );
+      /* ★ 这里以前弹一句「定位失败：当前环境不支持浏览器定位，后端也未能按 IP 推断城市
+         （需 AMAP_API_KEY）」—— 这是把服务端的配置缺失念给用户听。他既看不懂也修不了，
+         只会得出"这应用坏了"的结论。定位拿不到绝大多数是环境限制（http 下浏览器不给坐标、
+         服务端没配高德 key），不是用户做错了什么。
+         现在改成：不报错，直接把「你在哪个城市」的输入框展开。给出路比说原因有用。 */
+      setCityEdit(true);
       return;
     }
     // IP 定位只有市级名（高德 IP 接口的上限）；浏览器定位只有坐标，
     // 要逆地理补出「市 + 区县」——仅角标展示用，失败不影响定位本身。
     // ★ 区县只用于**展示**，绝不进 getSendGeo 的 city 字段：
     //   agent/builder.py 会把它拼成 get_weather(city='...')，带「·」的串查不到城市。
+    const manual = getManualCity();
+    if (manual) {
+      // 用户手填过城市：定位照开（坐标对天气精度仍有价值），但**地名不覆盖他改的**
+      setGeoEnabled(true);
+      setGeoEnabledState(true);
+      setGeoPending(false);
+      showToast("success", `定位已开启，城市沿用你手填的${manual}`);
+      return;
+    }
     let place: { city: string; district: string } | null = null;
     if (r.geo.city) {
       place = { city: r.geo.city, district: "" }; // IP 兜底：城市级就到此为止，不编区县
@@ -550,6 +563,25 @@ export default function Home() {
           : `定位已开启（${label}），问天气无需再输城市`
         : "定位已开启，问天气无需再输城市"
     );
+  };
+
+  /**
+   * 手填城市：用户说了算。
+   * 只保存城市名、不保存坐标 —— getSendGeo 会在有手填值时只送 city，
+   * 否则后端拿坐标重新逆地理，会把用户改的结果又推回原样，等于没得改。
+   */
+  const saveCity = (name: string) => {
+    const v = setManualCity(name);
+    setCityEdit(false);
+    if (!v) {
+      // 清空 = 撤销手填，角标回到自动定位的结果（可能为空，那就只显示「定位已开启」）
+      setGeoCity(formatPlace(getCachedGeo()) || null);
+      return;
+    }
+    setGeoEnabled(true);
+    setGeoEnabledState(true);
+    setGeoCity(v);
+    showToast("success", `已设为${v}，问天气不用再输城市`);
   };
 
   // 绑定/解绑知识库（跨域：改会话，所以留在编排层）
@@ -757,6 +789,9 @@ export default function Home() {
           geoCity={geoCity}
           geoPending={geoPending}
           onToggleGeo={toggleGeo}
+          cityEditOpen={cityEdit}
+          onCityEditOpenChange={setCityEdit}
+          onSaveCity={saveCity}
           sessionId={activeSid}
           quota={auth.me?.quota}
           onOpenUsage={() => setUsageOpen(true)}

@@ -76,6 +76,20 @@ function scheduleText(d: Delegate): string {
   return `每周${WEEKDAYS[s.weekday ?? 0]} ${at}`;
 }
 
+/** 列表里的一行：要么是分组标题，要么是一条委托。拍平成一个数组，
+ *  渲染时只写一次委托卡 JSX —— 分层嵌套写两遍最容易两边改漏一边。 */
+type DelRow =
+  | {
+      kind: "head";
+      key: string;
+      title: string;
+      note: string;
+      count: number;
+      collapsible: boolean;
+      open: boolean;
+    }
+  | { kind: "item"; key: string; d: Delegate; i: number };
+
 interface FormState {
   /** null = 新建 */
   id: string | null;
@@ -139,6 +153,30 @@ export default function DelegatePage() {
   const [preview, setPreview] = useState<{ name: string; text: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const formRef = useRef<HTMLDivElement>(null);
+
+  /* ---- 首次进委托页的一次性提示 ----
+     用户 B 的原话：「创建委托需要先创建一个对话，我找了一分钟左右才知道这个创建对话
+     是什么玩意」。首选方案（点按钮直接出表单）已经做了，但**他不知道**，所以点之前
+     仍在原地找"先建对话"的入口。这条提示只解决一件事：告他不用先建任何东西。
+     每个账号只出现一次，点 × 或建完第一条委托都算看过。 */
+  const tipKey = authedId ? `baomi.delegate.tip.v1.${authedId}` : "";
+  const [tip, setTip] = useState(false);
+  useEffect(() => {
+    if (!tipKey) return;
+    try {
+      if (!localStorage.getItem(tipKey)) setTip(true);
+    } catch {
+      /* 隐私模式：读不到就当没看过，提示多出现几次不算问题 */
+    }
+  }, [tipKey]);
+  const dismissTip = useCallback(() => {
+    setTip(false);
+    try {
+      if (tipKey) localStorage.setItem(tipKey, "1");
+    } catch {
+      /* ignore */
+    }
+  }, [tipKey]);
 
   const loadList = useCallback(() => {
     api.delegate
@@ -255,6 +293,49 @@ export default function DelegatePage() {
 
   const activeCount = useMemo(() => items.filter((d) => d.enabled).length, [items]);
 
+  /* ---- 列表分组 ----
+     原来是一张平铺的单子，用户看不出「哪些还在跑、哪些已经停了」——
+     而这一页的全部价值就是"它会自己来找我"，看不出在不在跑，等于看不出有没有用。
+     ★ 后端没有 status 字段，只有 enabled / next_run_at：委托是**周期性**的，
+       不存在"已完成"这种终态。所以只分「正在跑」「停下来了」两组，
+       不硬造一个永远为空的"已完成"组 —— 空的分类比没有分类更让人困惑。 */
+  const [openPaused, setOpenPaused] = useState(false);
+  const rows = useMemo(() => {
+    const running = items.filter((d) => d.enabled);
+    const paused = items.filter((d) => !d.enabled);
+    // 组内排序：正在跑的按下次触发升序（最快来的在前，还没算出下次的垫底）；
+    // 停下来的按创建时间倒序（刚停的最可能被找回来）
+    const FAR = Number.MAX_SAFE_INTEGER;
+    running.sort((a, b) => (a.next_run_at ?? FAR) - (b.next_run_at ?? FAR));
+    paused.sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
+    const out: DelRow[] = [];
+    if (running.length) {
+      out.push({
+        kind: "head",
+        key: "g-run",
+        title: "正在跑",
+        note: "按下次触发时间，最快来的在前",
+        count: running.length,
+        collapsible: false,
+        open: true,
+      });
+      running.forEach((d, i) => out.push({ kind: "item", key: d.id, d, i }));
+    }
+    if (paused.length) {
+      out.push({
+        kind: "head",
+        key: "g-pause",
+        title: "停下来了",
+        note: openPaused ? "不会再触发，直到你重新打开开关" : "不会再触发 · 点这里展开",
+        count: paused.length,
+        collapsible: true,
+        open: openPaused,
+      });
+      if (openPaused) paused.forEach((d, i) => out.push({ kind: "item", key: d.id, d, i }));
+    }
+    return out;
+  }, [items, openPaused]);
+
   /** 演示模式下所有写操作都要明说没生效，不能假装成功 */
   const demoGuard = useCallback(
     (what: string): boolean => {
@@ -310,6 +391,8 @@ export default function DelegatePage() {
         showToast("success", `已创建「${form.name.trim()}」`);
       }
       setForm(BLANK_FORM);
+      // 能成功建成一条，说明他早就过了"要不要先建对话"这道坎，这条提示不用再出现
+      dismissTip();
       loadList();
     } catch (e) {
       showToast("error", e instanceof Error ? e.message : "提交失败，请稍后重试");
@@ -367,7 +450,7 @@ export default function DelegatePage() {
       if (dryRun) {
         setPreview({ name: d.name, text: r?.content ?? "（后端未返回内容）" });
       } else {
-        showToast("success", "已投递到会话，打开对话即可看到");
+        showToast("success", "已执行，结果存好了，回首页就能看到");
         loadList();
       }
     } catch (e) {
@@ -386,8 +469,8 @@ export default function DelegatePage() {
       title="每日委托"
       sub={
         <>
-          让知穗在固定时间替你复盘、提醒、打招呼。触发后它会把内容
-          <b>投递到你指定的会话里</b>，你打开对话就能看到。
+          让知穗在固定时间替你复盘、提醒、打招呼。触发后内容
+          <b>会替你存下来</b>，你随时能翻回去看。
         </>
       }
       actions={
@@ -402,6 +485,22 @@ export default function DelegatePage() {
         </>
       }
     >
+      {tip && (
+        <div className="del-tip" role="status">
+          <div className="del-tip-body">
+            <b>直接说你要做什么就行。</b>
+            比如「每天早上 7 点提醒我背 20 个单词」。点「新建委托」直接出表单，不用先建别的。
+          </div>
+          <button
+            type="button"
+            className="del-tip-x"
+            onClick={dismissTip}
+            aria-label="知道了，不再提示"
+          >
+            ×
+          </button>
+        </div>
+      )}
       {list.state === "loading" && (
         <div className="card card-pad">
           <SkeletonLines widths={["70%", "50%", "84%"]} />
@@ -443,7 +542,7 @@ export default function DelegatePage() {
                       <div>
                         <div className="card-title">让知穗每天主动找你一次</div>
                         <div className="meta" style={{ marginTop: 3 }}>
-                          比如每晚 21:00 把当天学过的东西复盘成一段话，投递到你的复习会话。
+                          比如每晚 21:00 把当天学过的东西复盘成一段话，存到你的复习记录里。
                         </div>
                       </div>
                     </div>
@@ -466,9 +565,33 @@ export default function DelegatePage() {
                     </button>
                   </div>
                 ) : (
-                  items.map((d, i) => (
+                  rows.map((r) => {
+                    if (r.kind === "head") {
+                      return (
+                        <button
+                          key={r.key}
+                          type="button"
+                          className={`del-group-head${r.collapsible ? " is-collapsible" : ""}`}
+                          aria-expanded={r.open}
+                          onClick={() => {
+                            if (r.collapsible) setOpenPaused((v) => !v);
+                          }}
+                        >
+                          <span className="del-group-title">
+                            {r.title}
+                            <em>{r.count}</em>
+                          </span>
+                          <span className="del-group-note">{r.note}</span>
+                          {r.collapsible && (
+                            <span className="del-group-toggle">{r.open ? "收起" : "展开"}</span>
+                          )}
+                        </button>
+                      );
+                    }
+                    const d = r.d;
+                    return (
                     <div key={d.id}>
-                      {i > 0 && <div className="divide" />}
+                      {r.i > 0 && <div className="divide" />}
                       <div className="dele">
                         <div className="dele-main">
                           <div className="dele-name">
@@ -478,11 +601,19 @@ export default function DelegatePage() {
                           <div className="kv">
                             <span className="sched">
                               <CornIcon name={d.schedule.freq === "weekly" ? "calendar" : "clock"} />
-                              {scheduleText(d)} · {d.schedule.tz}
+                              {scheduleText(d)}
+                              {d.schedule.tz && d.schedule.tz !== "Asia/Shanghai"
+                                ? ` · ${d.schedule.tz}`
+                                : ""}
                             </span>
-                            <span>
-                              投递到：<b>{d.session_title || "默认会话"}</b>
-                            </span>
+                            {/* 只有用户自己给对话起过名字，才提"结果放回哪"。
+                                默认位置是内部实现，说出来他只会多问一句"那是什么"——
+                                B 原话就是"委托栏有很多与用户无关的信息"。 */}
+                            {d.session_title && (
+                              <span>
+                                结果放回 <b>{d.session_title}</b>
+                              </span>
+                            )}
                             {d.kb_name && (
                               <span>
                                 知识库：<b>{d.kb_name}</b>
@@ -553,7 +684,8 @@ export default function DelegatePage() {
                         </div>
                       </div>
                     </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
 
@@ -561,7 +693,7 @@ export default function DelegatePage() {
                 <Callout>
                   <b>「预览」不投递。</b>它走{" "}
                   <code>POST /api/delegate/{"{id}"}/run?dry_run=true</code>，只生成内容给你看一遍；
-                  「立即执行」才真的投递到会话，并消耗一次 <code>auto</code> 自动额度。
+                  「立即执行」才会真的跑一次，并消耗一次 <code>auto</code> 自动额度。
                 </Callout>
               </div>
 
@@ -680,13 +812,13 @@ export default function DelegatePage() {
                   </div>
                 )}
 
-                <Field label="投递到会话">
+                <Field label="结果放在哪" hint="不选就放默认位置">
                   <select
                     className="input"
                     value={form.sessionId}
                     onChange={(e) => patch({ sessionId: e.target.value })}
                   >
-                    <option value="">默认会话</option>
+                    <option value="">默认位置（不用选）</option>
                     {sessions.map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.title}
@@ -822,7 +954,7 @@ export default function DelegatePage() {
               </button>
             </div>
             <p className="hint" style={{ marginTop: 4 }}>
-              这是 <code>dry_run</code> 的结果：没有投递到会话，也没有改下次触发时间。
+              这是 <code>dry_run</code> 的结果：没有真的执行，也没有改下次触发时间。
             </p>
             <div
               style={{

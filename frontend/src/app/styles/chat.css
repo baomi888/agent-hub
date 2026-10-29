@@ -214,6 +214,78 @@
   fill: var(--accent);
   stroke-width: 1.6;
 }
+/* 角标右侧的「改」：定位不准时唯一的出路。
+   做成下划线小字而不是按钮 —— 角标本身是状态提示，不是操作区，
+   一个描边按钮会把「当前在哪」这句信息抢掉。 */
+.geo-badge-edit {
+  flex: none;
+  margin-left: 2px;
+  padding: 0 1px;
+  background: none;
+  border: 0;
+  color: var(--accent-ink);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.geo-badge-edit:hover {
+  opacity: 1;
+}
+
+/* 手填城市的一行。定位失败时直接展开它，替代原来的红色报错 toast。
+   宽度上限锁住，390 屏四个元素（标签/输入/用这个/取消）必须挤在一行还能用 */
+.geo-edit {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 100%;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--fill-2);
+  border: 1px solid var(--fill-3);
+  font-size: var(--fs-xs);
+  color: var(--accent-ink);
+}
+.geo-edit label {
+  flex: none;
+  letter-spacing: var(--ls-mid);
+}
+.geo-edit input {
+  flex: 1 1 120px;
+  min-width: 0;
+  padding: 4px 8px;
+  border-radius: var(--radius-xs, 4px);
+  border: 1px solid var(--fill-3);
+  background: var(--panel);
+  color: var(--ink);
+  /* 手机上 16px 才不会被 iOS 聚焦放大（见 a11y.css 的同一条约束） */
+  font-size: var(--fs-md);
+  line-height: 1.5;
+}
+.geo-edit-ok,
+.geo-edit-cancel {
+  flex: none;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  cursor: pointer;
+}
+.geo-edit-ok {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: #2e2416;
+}
+.geo-edit-cancel {
+  background: none;
+  border: 1px solid var(--fill-3);
+  color: var(--text-2);
+}
 
 /* 发送：圆 40px 金色按钮。全站另一个保留 hover 位移的组件 —— 它是唯一的主操作。
    改用平涂色，去掉 radial 高光球和右下角的反向高光伪元素 */

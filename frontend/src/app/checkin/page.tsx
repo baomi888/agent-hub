@@ -23,6 +23,7 @@ import { toProbe, type ProbeState } from "@/lib/probe";
 import { fmtDate } from "@/lib/time";
 import { useToast } from "@/lib/hooks/useToast";
 import { copyText } from "@/lib/useCopy";
+import QRCode from "qrcode";
 import type { CheckinHistoryItem, CheckinStreak, DailyReport } from "@/lib/types";
 
 /** 与报告页共用同一份本地记录 */
@@ -264,64 +265,162 @@ export default function CheckinPage() {
     if (ok) markSharedToday();
   };
 
-  /**
-   * 导出 SVG。
-   * 为什么是 SVG 而不是 PNG：矢量无损、体积小，且不需要把中文字体打包进位图；
-   * 真要 PNG 的话还得在前端做 canvas 栅格化，收益不明显。
-   */
-  const downloadSvg = () => {
-    setBusy(true);
-    try {
-      const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      // SVG 的 <text> 不换行：一行放不下就整段溢出画布。
-      // 按 26 个全角字符手动折行（520px 宽、14px 字号下的安全值）
-      const wrap = (s: string, per = 26): string[] => {
-        if (s.length <= per) return [s];
-        const out: string[] = [];
-        for (let i = 0; i < s.length; i += per) out.push(s.slice(i, i + per));
-        return out;
-      };
-      const lines: string[] = [];
-      let y = 150;
-      for (const n of nodes) {
-        lines.push(
-          `<text x="48" y="${y}" font-size="17" font-weight="700" fill="#3D2F1A">${esc(n.name)}${
-            n.level === "warn" ? "   （待加强）" : ""
-          }</text>`,
-        );
-        y += 26;
-        for (const c of n.children) {
-          for (const seg of wrap(c)) {
-            lines.push(`<text x="72" y="${y}" font-size="14" fill="#5A4C33">- ${esc(seg)}</text>`);
-            y += 22;
-          }
-        }
-        y += 10;
+  /* ============ 分享卡上的二维码 ============
+     为什么把码放在这张卡上：它是全站唯一会**离开屏幕**的东西 ——
+     用户会把卡片发进群、发朋友圈，别人看到卡就能扫进来，这才是拉新。
+     首页放码只有自己看得见，意义小得多（所以那一处这次不做）。
+     链接带 ?from=card，将来能统计「多少人是从别人的卡片进来的」。 */
+  const SHARE_URL = "https://myzhisui.cn/?from=card";
+
+  /** 二维码 → 一堆 <rect>，直接画进卡片 SVG，导出时跟着一起走（不依赖外链图片） */
+  const qrRects = (size: number): string => {
+    const qr = QRCode.create(SHARE_URL, { errorCorrectionLevel: "H" });
+    const n = qr.modules.size;
+    const cell = size / n;
+    let out = "";
+    for (let row = 0; row < n; row++) {
+      for (let col = 0; col < n; col++) {
+        if (!qr.modules.get(row, col)) continue;
+        out +=
+          `<rect x="${(col * cell).toFixed(2)}" y="${(row * cell).toFixed(2)}"` +
+          ` width="${cell.toFixed(2)}" height="${cell.toFixed(2)}"/>`;
       }
-      const height = y + 90;
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="520" height="${height}" viewBox="0 0 520 ${height}">
+    }
+    return out;
+  };
+
+  /**
+   * 卡片源码。PNG 与 SVG 两条导出共用这一份 —— 各画一份必然慢慢长得不一样。
+   * ★ 二维码必须**白底深码**：卡片底色是米白 #FDFAF2，码直接画上去对比度不够，
+   *   扫码率会掉（做宣传图那次踩过：纯白挖空会跟底色糊成一片，边界不成立）。
+   */
+  const buildCardSvg = () => {
+    const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    // SVG 的 <text> 不换行：一行放不下就整段溢出画布。
+    // 按 26 个全角字符手动折行（520px 宽、14px 字号下的安全值）
+    const wrap = (s: string, per = 26): string[] => {
+      if (s.length <= per) return [s];
+      const out: string[] = [];
+      for (let i = 0; i < s.length; i += per) out.push(s.slice(i, i + per));
+      return out;
+    };
+    const lines: string[] = [];
+    let y = 150;
+    for (const n of nodes) {
+      lines.push(
+        `<text x="48" y="${y}" font-size="17" font-weight="700" fill="#3D2F1A">${esc(n.name)}${
+          n.level === "warn" ? "   （待加强）" : ""
+        }</text>`,
+      );
+      y += 26;
+      for (const c of n.children) {
+        for (const seg of wrap(c)) {
+          lines.push(`<text x="72" y="${y}" font-size="14" fill="#5A4C33">- ${esc(seg)}</text>`);
+          y += 22;
+        }
+      }
+      y += 10;
+    }
+
+    /* 底部：居中一个大码 + 一行说明。
+       ★ 尺寸是被实测逼出来的，不是审美选出来的：
+         第一版把码做成 100px 放在右下角（和统计文字并排），导出 1040px 的 PNG
+         原图能扫，但**整张卡缩到 390px（微信里打开的正常显示宽度）就扫不出来** ——
+         码只有 75px、33 个模块，2.2px 一格，相机拿不到。
+         现在码本体 160px：整卡缩到 390 时仍有约 120px、3.6px 一格，
+         390 / 300 / 195 三档都能解出来（见 checkin_qr_probe 的反解断言）。 */
+    const DIV = y + 6;
+    const QBOX = 178;
+    const QPAD = 9; // 静区：160px 的码 33 模块，9px ≈ 1.9 个模块（白底方块的 12px 圆角再算上，够）
+    const QR = QBOX - QPAD * 2;
+    const boxX = Math.round((520 - QBOX) / 2);
+    const statY = DIV + 30;
+    const boxY = statY + 14;
+    const capY = boxY + QBOX + 22;
+    const height = capY + 22;
+    const streakNote = dataSource !== "演示数据" ? ` · 已连续 ${streak} 天` : "";
+
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="520" height="${height}" viewBox="0 0 520 ${height}">
   <rect width="520" height="${height}" rx="16" fill="#FDFAF2" stroke="#D8CCB0"/>
   <text x="48" y="60" font-size="24" font-weight="700" fill="#3D2F1A" font-family="serif">今日所学</text>
   <text x="472" y="60" font-size="12" fill="#6F6044" text-anchor="end">${esc(todayStr)}</text>
   <line x1="48" y1="82" x2="472" y2="82" stroke="#D8CCB0" stroke-dasharray="6 5"/>
   <text x="48" y="112" font-size="15" font-weight="700" fill="#875B10">${esc(root)}</text>
   ${lines.join("\n  ")}
-  <line x1="48" y1="${height - 60}" x2="472" y2="${height - 60}" stroke="#D8CCB0" stroke-dasharray="6 5"/>
-  <text x="48" y="${height - 32}" font-size="12" fill="#6F6044">共 ${pointCount} 个知识点${
-    dataSource !== "演示数据" ? ` · 已连续 ${streak} 天` : ""
-  }</text>
-  <text x="472" y="${height - 32}" font-size="12" fill="#6F6044" text-anchor="end">知穗 · 每天进步一点点</text>
+  <line x1="48" y1="${DIV}" x2="472" y2="${DIV}" stroke="#D8CCB0" stroke-dasharray="6 5"/>
+  <text x="48" y="${statY}" font-size="13" fill="#5A4C33">共 ${pointCount} 个知识点${streakNote}</text>
+  <text x="472" y="${statY}" font-size="12" fill="#6F6044" text-anchor="end">知穗 · 每天进步一点点</text>
+  <rect x="${boxX}" y="${boxY}" width="${QBOX}" height="${QBOX}" rx="12" fill="#FFFFFF" stroke="#E4D6B8"/>
+  <g transform="translate(${boxX + QPAD} ${boxY + QPAD})" fill="#2E2416">${qrRects(QR)}</g>
+  <text x="260" y="${capY}" font-size="12" fill="#6F6044" text-anchor="middle">扫码打开知穗 · 在手机上接着记</text>
 </svg>`;
-      const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `知穗打卡-${todayStr || "today"}.svg`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      showToast("success", "已保存 SVG，可直接拿去分享");
+    return { svg, height };
+  };
+
+  const saveBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  /**
+   * SVG → PNG。
+   * ★ 必须做：微信不认 SVG（聊天、朋友圈都发不出去），原来只给 SVG 等于
+   *   「能下载但传不出去」。卡片上加了二维码之后这一条变得致命 ——
+   *   卡传不出去，码就是白印。
+   * scale=2 是为了看清：520 宽的卡出 1040px 的图，缩略图也不糊。
+   */
+  const svgToPng = (svg: string, w: number, h: number, scale = 2): Promise<Blob | null> =>
+    new Promise((resolve) => {
+      const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.round(w * scale);
+          canvas.height = Math.round(h * scale);
+          const ctx = canvas.getContext("2d");
+          if (!ctx) {
+            URL.revokeObjectURL(url);
+            resolve(null);
+            return;
+          }
+          ctx.scale(scale, scale);
+          ctx.drawImage(img, 0, 0, w, h);
+          URL.revokeObjectURL(url);
+          canvas.toBlob((b) => resolve(b), "image/png");
+        } catch {
+          URL.revokeObjectURL(url);
+          resolve(null);
+        }
+      };
+      // 加载失败也要落地，否则 busy 永远转下去
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve(null);
+      };
+      img.src = url;
+    });
+
+  const downloadCard = async (fmt: "png" | "svg") => {
+    setBusy(true);
+    try {
+      const { svg, height } = buildCardSvg();
+      const base = `知穗打卡-${todayStr || "today"}`;
+      if (fmt === "svg") {
+        saveBlob(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }), `${base}.svg`);
+        showToast("success", "已保存 SVG（矢量版，适合再排版；微信里发不出去）");
+      } else {
+        const blob = await svgToPng(svg, 520, height, 2);
+        if (!blob) throw new Error("png");
+        saveBlob(blob, `${base}.png`);
+        showToast("success", "已保存 PNG，可以直接发微信/朋友圈");
+      }
       markSharedToday();
     } catch {
       showToast("error", "导出失败，可先用「复制文字版」");
@@ -362,9 +461,24 @@ export default function CheckinPage() {
             <CornIcon name="link" />
             复制文字版
           </button>
-          <button type="button" className="btn btn-primary" disabled={busy} onClick={downloadSvg}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={busy}
+            onClick={() => void downloadCard("png")}
+          >
             <CornIcon name="download" />
             保存这张图
+          </button>
+          {/* PNG 是主路径（微信只认 PNG）；SVG 留给要再排版的人 */}
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            disabled={busy}
+            title="矢量版，适合再排版；微信里发不出去"
+            onClick={() => void downloadCard("svg")}
+          >
+            SVG
           </button>
         </>
       }

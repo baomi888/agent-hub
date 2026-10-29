@@ -16,8 +16,9 @@ export interface GeoPoint {
   /** 区/县（「茂南区」「电白区」「化州市」）。只有浏览器定位拿得到；
    *  IP 兜底是高德城市级数据，这里**永远为空** —— 不给假精度 */
   district?: string;
-  /** 定位来源：browser = 浏览器（精确）；ip = 服务端按 IP 推断（城市级） */
-  source?: "browser" | "ip";
+  /** 定位来源：browser = 浏览器（精确）；ip = 服务端按 IP 推断（城市级）；
+   *  manual = 用户自己填的城市（没有坐标，但优先级最高） */
+  source?: "browser" | "ip" | "manual";
   ts: number;
 }
 
@@ -38,7 +39,34 @@ export function formatPlace(p: { city?: string; district?: string } | null | und
 
 const ENABLED_KEY = "baomi.geo.enabled";
 const CACHE_KEY = "baomi.geo.cache";
+/**
+ * 用户手填的城市。**单独一个 key、不带 TTL**，因为它和自动定位是两种性质：
+ * 自动定位是「猜的」，一小时过期合理；手填是「用户明确说的」，过期就等于把他的
+ * 修正偷偷撤销掉 —— 他会看到角标过一小时又变回错的城市。
+ */
+const MANUAL_KEY = "baomi.geo.manual";
 const TTL = 1000 * 60 * 60; // 1 小时
+
+/** 取用户手填的城市（没有则空串）。 */
+export function getManualCity(): string {
+  try {
+    return (localStorage.getItem(MANUAL_KEY) || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+/** 记下用户手填的城市；传空串等于清掉。返回规范化后的值。 */
+export function setManualCity(name: string): string {
+  const v = (name || "").trim().replace(/市$/, "");
+  try {
+    if (v) localStorage.setItem(MANUAL_KEY, v);
+    else localStorage.removeItem(MANUAL_KEY);
+  } catch {
+    /* 隐私模式：存不下只是这次记不住，不能让页面挂掉 */
+  }
+  return v;
+}
 
 export function isGeoEnabled(): boolean {
   try {
@@ -58,6 +86,10 @@ export function setGeoEnabled(v: boolean): void {
 
 export function getCachedGeo(): GeoPoint | null {
   try {
+    // 手填城市优先，且不信 TTL：用户明确改过，一小时后自动变回去等于白改
+    const manual = getManualCity();
+    if (manual) return { city: manual, source: "manual", ts: Date.now() };
+
     const s = localStorage.getItem(CACHE_KEY);
     if (!s) return null;
     const g = JSON.parse(s) as GeoPoint;
@@ -162,6 +194,13 @@ export async function acquireGeo(): Promise<AcquiredGeo | null> {
 /** 取可发送的定位：开启且缓存有效才返回，否则 null。坐标与城市名有哪个带哪个。 */
 export function getSendGeo(): { lat?: number; lon?: number; city?: string } | null {
   if (!isGeoEnabled()) return null;
+  /* 手填城市：只送城市名，**不送坐标**。
+     因为后端有坐标时会自己按坐标重新逆地理（agent/tools.py::reverse_geocode_city），
+     那个结果会覆盖用户手填的 —— 用户明明改成了「大理」，传坐标过去又被推回「茂名」，
+     等于没得改。没有坐标时后端直接用我们给的城市名，这才是"手填优先"真正生效的条件。 */
+  const manual = getManualCity();
+  if (manual) return { city: manual };
+
   const g = getCachedGeo();
   if (!g) return null;
   const out: { lat?: number; lon?: number; city?: string } = {};
