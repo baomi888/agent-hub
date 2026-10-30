@@ -273,6 +273,56 @@ class TestDelegateFlow(unittest.TestCase):
         # 坏 JSON 仍然走兜底，不抛异常（worker 不能因为一条脏数据停摆）
         self.assertEqual(daily.compute_next_run("{不是 json", after), after + 86400)
 
+    def test_dispatch_one_reads_schedule_from_db_and_reschedules(self):
+        """★ 端到端：worker 派发一次后，下次触发必须按频次算，不能变成「执行时刻 +24h」。
+
+        上面 test_compute_next_run_accepts_json_string 只证明**函数本身**能吃字符串。
+        本用例证明**调用点真的把库里的字符串传进去了** —— 这两件事是分开的：
+        `_dispatch_one` 若哪天改成 `json.loads(d["schedule_json"])` 而库里存的是
+        已解析的 dict，或者反过来漏了一层，单测再绿也拦不住。
+
+        用 weekly 是为了让「按频次」和「+86400」两者给出的结果**必然不同**：
+        daily 的频率下 +86400 恰好等于次日同刻，与正确结果重合，测不出问题。
+        """
+        import json as _json
+
+        out = self._create(
+            schedule={
+                "freq": "weekly",
+                "at": "09:00",
+                "weekday": 0,
+                "every_minutes": None,
+                "tz": "Asia/Shanghai",
+            }
+        )
+        did = out["delegation_id"]
+
+        # 前提钉住：库里这一段确实是**文本**，不是 dict。
+        # 若哪天存储层改成 JSON 列（自动解析），这条会红 —— 那是提醒去改注释，不是回归。
+        raw = daily._load_delegation(did)["schedule_json"]
+        self.assertIsInstance(raw, str, "schedule_json 已是 dict，说明存储层变了，本用例前提失效")
+        self.assertEqual(_json.loads(raw)["freq"], "weekly")
+
+        # plan_today 会真的调模型，替换掉（本用例只关心排期，不关心生成内容）
+        orig_plan = daily.plan_today
+        daily.plan_today = lambda d, ctx: "（测试）本周复盘"
+        try:
+            planned = int(time.time())
+            res = daily._dispatch_one(did, planned)
+        finally:
+            daily.plan_today = orig_plan
+
+        self.assertEqual(res["status"], "succeeded")
+
+        nxt = daily._load_delegation(did)["next_run_at"]
+        # 负向断言优先：不能落进 +86400 兜底
+        self.assertNotEqual(nxt, planned + 86400, "下次触发退化成「执行时刻 +24h」")
+        # 正向：落在指定的星期一 09:00
+        self.assertEqual(time.localtime(nxt).tm_wday, 0, "weekly 没落在周一")
+        self.assertEqual(time.localtime(nxt).tm_hour, 9)
+        self.assertEqual(time.localtime(nxt).tm_min, 0)
+        self.assertLess(nxt - planned, 8 * 86400)
+
     def test_patch_schedule_recomputes_next_run(self):
         """改 schedule 时 next_run_at 按新节奏重算（使 api.delegate 的 docstring 承诺成真）。"""
         out = self._create()  # daily at 21:00，启用，next_run_at 初始 None

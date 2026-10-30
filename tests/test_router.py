@@ -132,12 +132,17 @@ class TestModelDecision:
         decision = _decide("我笔记里的里程碑", has_kb=False, llm=fake)
         assert decision.route == "agent"
 
-    def test_model_llm_with_kb_forces_rag(self):
-        """2026-10-29 决定：绑了库一律给引用，闲聊也去检索。"""
+    def test_model_llm_with_kb_is_respected(self):
+        """2026-10-30 改：绑库时模型判 llm **不再**被强制改判 rag。
+
+        原约束（10-29）是"绑了库一律给引用，闲聊也去检索"，前提是 auto 是唯一入口。
+        现在 agent 有 kb_search、用户也能手选「纯对话」，强制改判的收益没了，
+        代价却还在：闲聊白等约 700ms，还会挂上无关引用。
+        """
         fake = _FakeLLM('{"route":"llm","reason":"寒暄"}')
         decision = _decide("你好", has_kb=True, llm=fake)
-        assert decision.route == "rag"
-        assert "强制检索" in decision.reason
+        assert (decision.route, decision.source) == ("llm", "model")
+        assert "强制检索" not in decision.reason
 
     def test_model_llm_without_kb(self):
         fake = _FakeLLM('{"route":"llm","reason":"寒暄"}')
@@ -163,12 +168,17 @@ class TestModelDecision:
 
 
 class TestFallback:
-    def test_timeout_falls_back(self, monkeypatch):
+    def test_timeout_falls_back_to_agent_even_with_kb(self, monkeypatch):
+        """超时回落：**有库也走 agent**（2026-10-30 改）。
+
+        旧行为是「有库 → rag」，于是绑库用户只要碰到一次超时就被打进检索，
+        问天气也会去翻资料库。agent 自带 kb_search，回落 agent 不会丢引用能力。
+        """
         monkeypatch.setattr(config, "ROUTER_TIMEOUT", 0.05)
         fake = _FakeLLM('{"route":"rag"}', delay=0.3)
         decision = _decide("我资料里的东西", has_kb=True, llm=fake)
         assert decision.source == "fallback"
-        assert decision.route == "rag"
+        assert decision.route == "agent"
 
     def test_timeout_without_kb_falls_back_to_agent(self, monkeypatch):
         monkeypatch.setattr(config, "ROUTER_TIMEOUT", 0.05)
@@ -196,12 +206,19 @@ class TestFallback:
         fake = _FakeLLM(raw)
         decision = _decide("随便问问", has_kb=True, llm=fake)
         assert decision.source == "fallback"
-        assert decision.route == "rag"
+        # 输出格式不对同样回落 agent（有库也一样，理由见 _fallback_route）
+        assert decision.route == "agent"
 
     def test_router_disabled_restores_old_behavior(self, monkeypatch):
+        """应急开关语义：关掉路由 ＝ 退回改造前，**连方向也不能变**。
+
+        这条和上面的回落是两件事：`ROUTER_ENABLED=0` 表示"当作没有路由"，
+        此时有库仍应 rag；而判断失败是"路由在、只是没判断出来"，回落 agent。
+        """
         monkeypatch.setattr(config, "ROUTER_ENABLED", False)
         fake = _FakeLLM('{"route":"agent"}')
         assert _decide("上海天气", has_kb=False, llm=fake).route == "agent"
+        assert _decide("上海天气", has_kb=True, llm=fake).route == "rag"
         assert _decide("我笔记里写了啥", has_kb=True, llm=fake).route == "rag"
         assert fake.calls == 0, "关闭路由后不该再调模型"
 

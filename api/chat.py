@@ -332,6 +332,9 @@ async def _pick_mode(req_mode: str, question: str, kb_id: str | None, kb_exists:
 
     has_kb = bool(kb_id and kb_exists)
     decision = await route_engine.decide(question, has_kb=has_kb)
+    # 路由判断失败（超时/异常/输出不成格式）时 decide 内部一律回落 agent ——
+    # 不再"有库就 rag"，否则绑库用户碰到一次超时就被打进检索，问天气也去翻资料。
+    # 回落 agent 不丢引用能力：agent 自带 kb_search，提示词在 has_kb 时会明确提示调用。
     # flow 只能由混合引擎承载（它才有"工作流起跑"的能力）；引擎关掉就退回 agent
     if decision.route == "flow":
         return "hybrid" if config.HYBRID_MODE_ENABLED else "agent"

@@ -143,9 +143,34 @@ class RouteDecision:
     reason: str = ""
 
 
-def _fallback_route(has_kb: bool) -> str:
-    """任何异常下的回落：有库先查库，没库放开工具。"""
+def _legacy_route(has_kb: bool) -> str:
+    """**关闭路由**时的行为：退回改造前（有库检索 / 没库放开工具）。
+
+    只在 `ROUTER_ENABLED=0` 这条应急开关上使用。它代表"把路由整个摘掉"，
+    所以行为必须和引入路由之前一模一样，不能顺手改观感。
+    """
     return "rag" if has_kb else "agent"
+
+
+def _fallback_route(has_kb: bool) -> str:
+    """**路由判断失败**（超时 / 网络异常 / 输出格式不对）时的回落：一律 agent。
+
+    为什么不再「有库就 rag」（2026-10-30 改）：
+
+    * agent **自带 `kb_search`**，而 `agent/builder.py` 在 `has_kb` 时会在提示词里写明
+      「当前会话已绑定知识库，需要查资料时调用 kb_search」—— 绑库用户走 agent
+      **仍然查得到库**，引用能力不会丢；
+    * 反过来，rag **只会检索**：问天气、算数、要链接、闲聊时落进 rag 就是答非所问。
+      这正是用户反馈「自动模式只能检索」的主因 —— 一旦模型判断慢或出错，
+      绑库用户（也就是主力用户）全部被打进检索，且没有任何补救；
+    * 两种回落失败的方向不对称：检索不到只有一种结局（空答案），
+      而 agent 至少还能换工具、或退回直接作答。
+
+    `has_kb` 目前**没有被使用**（回落不再看有没有库）。保留它有两个原因：
+    一是调用点读起来仍是「按 has_kb 决定回落」，语义自解释；二是将来若要按库
+    差异化（例如无库时有别的更好选择），不必再改一遍签名和四个调用点。
+    """
+    return "agent"
 
 
 def _parse(raw: str) -> tuple[str, str] | None:
@@ -170,10 +195,15 @@ def _post_check(route: str, reason: str, has_kb: bool) -> RouteDecision:
     if route == "rag" and not has_kb:
         # 没有可用知识库却要检索：必然检索不到，直接改判 agent
         return RouteDecision("agent", "model", "无可用知识库，rag 改判 agent")
-    if route == "llm" and has_kb:
-        # 绑了库一律给引用（2026-10-29 决定："你好"也去检索也无所谓）。
-        # 代价是闲聊会慢一点，收益是"绑库却无引用"这件事从结构上不会发生。
-        return RouteDecision("rag", "model", "绑库强制检索（原判 llm）")
+    # ⚠️ 2026-10-30 取消「绑库时 llm 一律改判 rag」这条约束。
+    #
+    # 原意是"绑了库就给引用，'你好'也去检索也无所谓"。它建立在「auto 是唯一入口」的
+    # 前提上 —— 那时不给引用就等于用户永远看不到库。现在前提不成立了：
+    #   ① agent 有 kb_search，rag 不再是"唯一能出引用"的路径；
+    #   ② 用户可手动选「纯对话」，说明"有时候不要引用"是个合法诉求；
+    #   ③ 实测 9 条问题模型判断全对（含'根据我的资料总结重点'→rag），
+    #      强制改判等于推翻一个准确的判断，代价是闲聊白等约 700ms 并带上无关引用。
+    # 保留的边界：判 rag 但没库 → 上面那条改判 agent 依然有效。
     return RouteDecision(route, "model", reason)
 
 
@@ -202,7 +232,7 @@ async def decide(question: str, *, has_kb: bool, llm=None) -> RouteDecision:
     最坏情况退回改造前的行为（有库 rag / 无库 agent），用户无感。
     """
     if not config.ROUTER_ENABLED:
-        return RouteDecision(_fallback_route(has_kb), "fallback", "router_disabled")
+        return RouteDecision(_legacy_route(has_kb), "fallback", "router_disabled")
 
     # 一级：规则。命中就不问模型（"规则直接走工作流"）
     if classify_flow_open(question) == "flow":
@@ -238,3 +268,28 @@ async def decide(question: str, *, has_kb: bool, llm=None) -> RouteDecision:
         decision.reason,
     )
     return decision
+
+
+def warmup() -> None:
+    """预建路由用的 LLM 客户端（启动时调用一次）。
+
+    为什么值得单独做一次：`decide()` 里的 `from core.llm import get_llm` 是**首次
+    导入**，实测 2.56s；构造 ChatOpenAI 再 1.73s。这两笔加起来 4.3s，原本一分不少地
+    落在**第一个发起 auto 请求的用户**头上 —— 他比后来者多等 4 秒才看到第一个字。
+
+    ⚠️ 这不是"超时失效"。当时看到首条 5.4s、而 ROUTER_TIMEOUT=2s，一度以为
+    `asyncio.wait_for` 没生效；分离计时后确认：模型调用本身 400–950ms，
+    `wait_for` 工作正常，慢的全部是导入与构造，而它们发生在 wait_for **外面**。
+
+    失败只告警不抛：没有 key 时构造会异常，但启动不能因此失败 —— 路由自己会回落。
+    """
+    if not config.ROUTER_ENABLED:
+        return
+    try:
+        from core.llm import get_llm
+
+        # 参数必须与 decide() 里完全一致，否则 _LLM_CACHE 的 key 不同，等于没预热
+        get_llm(temperature=0.0, max_tokens=config.ROUTER_MAX_TOKENS)
+        log.info("router warmup ok")
+    except Exception as e:  # noqa: BLE001 —— 预热失败不影响可用性，只在首次请求时补
+        log.warning("router warmup 失败（首次请求会重新尝试）：%s", e)

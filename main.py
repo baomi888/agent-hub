@@ -43,6 +43,7 @@ from api.templates import router as templates_router
 from api.usage import router as usage_router
 from api.user_feedback import router as user_feedback_router
 from core import account, apilog, config, llm_gate, quota
+from core import router as route_engine
 from kb import pipelines
 from service import daily
 
@@ -71,6 +72,12 @@ async def _apilog_flush_loop() -> None:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """启动事件：预热 + 配置检查 + 数据表迁移。"""
     pipelines.warmup()
+    # 路由的 LLM 客户端也预热：`import core.llm` 首次 2.56s + 构造 1.73s（实测），
+    # 这两笔原本全落在第一个发起 auto 请求的用户身上。放线程里跑，别堵启动。
+    try:
+        await asyncio.to_thread(route_engine.warmup)
+    except Exception as e:  # noqa: BLE001
+        print(f"[启动警告] 路由预热失败（首次请求会重试）：{e}")
     # 部署后免手动触发：在启动时把 daily_reports / delegations 两张表建好、补列（幂等）。
     # 否则 _ensure_daily_tables 是懒执行的，刚部署完没人访问过 delegation 时会查不到新列。
     # 兜 try/except：迁移失败（如库被锁）只告警不阻断启动——懒执行那条路仍会在首次访问时自愈。
