@@ -53,17 +53,19 @@ def test_sections_constant_is_used():
 def test_assertion_rejects_missing_playbook(monkeypatch):
     """去掉一个 playbook → 校验必须抛（证明它不再是恒真）。"""
     broken = dict(tr.TOOL_PLAYBOOK)
-    broken.pop("calculator")
+    broken.pop("get_weather")
     monkeypatch.setattr(tr, "TOOL_PLAYBOOK", broken)
     with pytest.raises(RuntimeError) as e:
         tr.assert_playbook_complete()
-    assert "calculator" in str(e.value)
+    assert "get_weather" in str(e.value)
 
 
 def test_assertion_rejects_incomplete_sections(monkeypatch):
-    broken = {"calculator": "查计算器用的。"}
+    broken = {"get_weather": "查天气用的。"}
     monkeypatch.setattr(
-        tr, "TOOL_PLAYBOOK", {**{k: tr.TOOL_PLAYBOOK[k] for k in tr.TOOL_META}, "calculator": broken["calculator"]}
+        tr,
+        "TOOL_PLAYBOOK",
+        {**{k: tr.TOOL_PLAYBOOK[k] for k in tr.TOOL_META}, "get_weather": broken["get_weather"]},
     )
     with pytest.raises(RuntimeError) as e:
         tr.assert_playbook_complete()

@@ -111,6 +111,9 @@ class HybridOrchestrator:
             # #7：激活集透传给 AgentEngine（最终进 build_agent 的缓存键与 bind_tools），
             # 与 Agent 直连路径同源——请求开始由调用方 activated_for(uid) 取定。
             activated=self._engine_kwargs.get("activated", frozenset()),
+            # 能力开关：execute 节点绑哪些工具由它决定（2026-10-30）
+            use_kb=self._engine_kwargs.get("use_kb", True),
+            use_web=self._engine_kwargs.get("use_web", True),
         )
 
     async def stream(self) -> AsyncIterator[ExecEvent]:

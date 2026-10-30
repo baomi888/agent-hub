@@ -1,11 +1,10 @@
 """Agent 工具集（LangChain v1 @tool 装饰器）。
 
-5 个工具：
+4 个工具：
   1. kb_search      — 从指定知识库检索 top-k 片段
   2. web_search     — Serper 联网搜索
-  3. calculator     — 安全数学计算器（支持 +-*/% ** 括号）
-  4. get_weather    — 中国城市实时天气（高德 + Open-Meteo 双数据源）
-  5. download_file  — 下载文件（文档 / 应用安装包等），文档可并入知识库
+  3. get_weather    — 中国城市实时天气（高德 + Open-Meteo 双数据源）
+  4. download_file  — 下载文件（文档 / 应用安装包等），文档可并入知识库
 
 所有工具函数返回 str（Agent 框架把它作为 Observation 回灌给模型）。
 
@@ -191,72 +190,7 @@ def web_search(query: str, max_results: int = 5, config: RunnableConfig = None) 
         return "联网搜索暂时不可用，请稍后再试或换个问法。"
 
 
-# ==================== 3. 计算器 ====================
-
-_CALC_ALLOWED = set("0123456789+-*/%(). ")  # 白名单字符（**没有逗号**，见下方校验处注释）
-_CALC_MAX_LEN = 64  # 表达式长度上限
-_CALC_MAX_DIGITS = 12  # 单个数字字面量的最大位数
-_CALC_MAX_EXPONENT = 10000  # ** 右侧指数上限：2**999999999999 会 OOM
-_CALC_MAX_RESULT_BITS = 14000  # ≈4215 位十进制；低于 Python 3.11+ int→str 的 4300 位硬限制
-
-
-@tool
-def calculator(expression: str) -> str:
-    """安全数学计算器。支持 + - * / % ** （括号）和小数。
-
-    当用户问数学计算时调用。例如 "3 + 5 * 2"、"(10 + 5) * 3"、"2 ** 10"。
-
-    Args:
-        expression: 数学表达式字符串。
-
-    Returns:
-        计算结果（字符串）；非法表达式返回错误说明。
-    """
-    import re
-
-    expr = expression.strip()
-    if len(expr) > _CALC_MAX_LEN:
-        return f"表达式过长（>{_CALC_MAX_LEN} 字符），请拆分后再算。"
-    # 白名单校验：直接用常量判断，不再维护第二条等价正则。
-    # 这里原来有两个问题：
-    #   1) `_CALC_ALLOWED` 定义了却**从未被使用**（全文件只出现定义那一行），
-    #      真正生效的是正则；注释描述的和代码执行的不是同一件事。
-    #   2) 两处都放行了英文逗号 ⇒ `1,2` 被 eval 当成元组，返回 "1,2 = (1, 2)"，
-    #      学生问"这两个数加起来多少"时会收到一个元组。
-    if not expr or not set(expr) <= _CALC_ALLOWED:
-        return f"非法表达式（包含不允许的字符）：{expression}"
-    # 连续幂会让 eval 直接打满 CPU/内存（如 9**9**9），直接拒
-    if expr.count("**") > 1:
-        return "不支持连续幂运算（如 a**b**c），请分步计算。"
-    # 超大字面量同样会把内存吃光
-    if any(len(n) > _CALC_MAX_DIGITS for n in re.findall(r"\d+", expr)):
-        return f"数字过大（单个数字不能超过 {_CALC_MAX_DIGITS} 位）。"
-    # 指数上限：12 位字面量 + ** 组合（如 2**999999999999）会让 eval
-    # 试图生成约 10^12 位的整数直接 OOM，白名单和字面量检查都挡不住它
-    for exp_part in re.findall(r"\*\*\s*(\d+)", expr):
-        if int(exp_part) > _CALC_MAX_EXPONENT:
-            return f"指数过大（不能超过 {_CALC_MAX_EXPONENT}），请分步计算。"
-
-    try:
-        # 用 eval 但在受限 __builtins__ 下执行，防止注入
-        result = eval(expr, {"__builtins__": {}}, {})
-        # 结果位数守卫：999999999999**10000 这类字面量组合合法但会算出
-        # 几十万位的整数，展示不了也没意义。用 bit_length 估算位数——
-        # len(str(int)) 在 Python 3.11+ 超过 4300 位会直接抛 ValueError
-        if isinstance(result, int) and result.bit_length() > _CALC_MAX_RESULT_BITS:
-            return "结果过大，无法展示，请拆分计算。"
-        # 格式化：大数加千分位，浮点数保留 4 位小数
-        if isinstance(result, float):
-            result = round(result, 4)
-        return f"{expression} = {result}"
-    except ZeroDivisionError:
-        return "错误：除数不能为零。"
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("calculator 异常 expr=%r: %s: %s", expression, type(exc).__name__, exc)
-        return "计算暂时无法完成，请稍后再试。"
-
-
-# ==================== 4. 天气 ====================
+# ==================== 3. 天气 ====================
 
 
 def _get_amap_key() -> str:
@@ -611,7 +545,7 @@ def get_weather(city: str = "", days: int = 1, lat: float = None, lon: float = N
     return "天气预报暂时不可用，请稍后再试。"
 
 
-# ==================== 5. 文件下载 ====================
+# ==================== 4. 文件下载 ====================
 
 
 @tool
@@ -673,7 +607,7 @@ def download_file(url: str, config: RunnableConfig = None) -> str:
 
 # ==================== 工具清单 ====================
 
-AGENT_TOOLS = [kb_search, web_search, calculator, get_weather, download_file]
+AGENT_TOOLS = [kb_search, web_search, get_weather, download_file]
 
 # 注：工具守卫（core/tool_guard.py 的截断/审批/封禁）**不在工具对象上做包装**。
 # 原因：LangChain 的 StructuredTool 会在 `_run` 与 `func` 两层做签名内省并注入

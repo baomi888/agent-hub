@@ -42,6 +42,19 @@ _FAKE = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _fake_api_key(monkeypatch):
+    """钉一个假 key，让这几条用例不依赖本机 / CI 的 `.env`。
+
+    没有 key 时 `web_search` 会在**发请求之前**就返回「需要 SERPER_API_KEY」，
+    于是四条用例全挂在最前面那道守卫上，测不到它们真正想测的形参遮蔽。
+    `search_serper` 本来就被每条用例 mock 掉了，这个 key 不会真的被用出去。
+    """
+    from core import config
+
+    monkeypatch.setattr(config, "SERPER_API_KEY", "test-key-not-used")
+
+
 def _invoke(query: str, configurable: dict):
     from agent.tools import web_search
 

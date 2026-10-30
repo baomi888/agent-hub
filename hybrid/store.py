@@ -30,7 +30,7 @@ from hybrid.context import ExecEvent, TaskContext
 LOG_TEXT_MAX = 2000
 
 # ---------- 内置工作流：规划 → 执行 ----------
-# hybrid 模式且 classify_task=flow 又没指定 workflow_id 时的默认起跑流程：
+# 执行前路由判为 workflow、又没指定 workflow_id 时的默认起跑流程：
 # LLM 节点先把目标拆成步骤（非流式，产物进 shared.plan），
 # Agent 节点拿规划做自主执行（流式，产物进 shared.agent_result）。
 # seed 进 workflow_defs（owner_id NULL = 系统内置，前端可见、只读）。

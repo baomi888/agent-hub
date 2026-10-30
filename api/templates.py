@@ -69,9 +69,19 @@ async def apply_template(tid: str, uid: str = Depends(get_current_user)) -> dict
     title = t.get("session_title") or t["name"]
     conv = await asyncio.to_thread(store.create_conversation, uid, title, kb_id)
 
-    # 推荐模式先过白名单，脏值一律回落 auto，绝不让它穿透到下游路由分支
+    # recommended_mode：**已废弃**，仅为旧前端缓存版本保留。
+    # 2026-10-30 起前端不再有"模式"，只有两个能力开关，所以下面同时给出
+    # use_kb / use_web 两个派生字段，新前端请读这两个。
+    #
+    # 为什么不直接删字段：模板目录是纯数据（core/templates_catalog.py 里 8 处），
+    # 删字段要同时改数据与消费方；这轮前端不动，先让两套字段并存一个版本。
     raw_mode = t.get("recommended_mode", "auto")
-    mode = raw_mode if raw_mode in VALID_MODES else "auto"
+    mode = raw_mode if raw_mode in VALID_MODES + ("hybrid",) else "auto"
+
+    # 旧值 → 开关的映射口径与 api/chat.py::_resolve_switches 保持一致：
+    #   rag    = 只检索；llm = 都不用；agent/hybrid = 检索 + 联网；auto = 看有没有库
+    use_kb = mode in ("rag", "agent", "hybrid") or (mode == "auto" and bool(kb_id))
+    use_web = mode in ("agent", "hybrid", "auto")
 
     return {
         "session_id": conv["id"],
@@ -79,4 +89,6 @@ async def apply_template(tid: str, uid: str = Depends(get_current_user)) -> dict
         "title": title,
         "starter_prompt": t.get("starter_prompt") or None,
         "recommended_mode": mode,
+        "use_kb": use_kb,
+        "use_web": use_web,
     }

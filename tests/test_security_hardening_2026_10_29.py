@@ -176,16 +176,21 @@ def test_workflow_rejects_approval_required_tool(monkeypatch):
 
 
 def test_workflow_tool_call_cap(monkeypatch):
-    """两次 calculator 调用，上限设 1：第二次必须被拒。"""
+    """同一工具连调两次、上限设 1：第二次必须被拒，且第一次确实跑过。
+
+    用 kb_search 而不是原先的 calculator：算数工具已于 2026-10-30 移除，
+    而 kb_search 在没有注入 kb_id 时会立即返回说明文案（不发网络请求），
+    是剩下几个工具里唯一适合离线跑上限断言的。
+    """
     monkeypatch.setattr(config, "HYBRID_MAX_TOOL_CALLS", 1)
-    wf = _wf_tool("calculator", {"expression": "1+1"}, n_nodes=2)
+    wf = _wf_tool("kb_search", {"query": "测试"}, n_nodes=2)
     events, ctx = _run_workflow(wf)
 
     errors = [e for e in events if e.event_type == "error"]
     assert errors, [e.event_type for e in events]
     assert "上限" in errors[0].payload.get("error", "")
-    # 第一次执行成功并有产物；第二次被上限拦下
-    assert ctx.shared.get("o0") == "1+1 = 2"
+    # 第一次执行成功并有产物（无库时是一段说明文案）；第二次被上限拦下
+    assert "o0" in ctx.shared
     assert "o1" not in ctx.shared
 
 

@@ -46,6 +46,7 @@ import mimetypes
 import os
 import time
 import uuid
+from dataclasses import dataclass
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
@@ -277,11 +278,28 @@ class ChatRequest(BaseModel):
     question: str = Field(...)
     top_k: int = Field(default=config.TOP_K_DEFAULT, gt=0, le=config.TOP_K_MAX)
     kb_id_override: str | None = Field(default=None)
-    mode: str = Field(default="auto", description="auto / rag / agent / llm / hybrid")
+    # ---- 能力开关（2026-10-30 新契约）----
+    # None 与 False 必须区分：None = 调用方没传这个字段（老前端/脚本），
+    # 此时回落到下面的 mode 兼容映射；False = 明确关掉。
+    use_kb: bool | None = Field(
+        default=None,
+        description="能力开关：这一轮是否使用知识库（有库时先检索一轮，之后模型可补检索）。"
+        "None 表示未传，按旧 mode 字段兼容映射。",
+    )
+    use_web: bool | None = Field(
+        default=None,
+        description="能力开关：这一轮是否允许智能联网（web_search 交给模型自主决定搜不搜）。"
+        "None 表示未传，按旧 mode 字段兼容映射。",
+    )
+    mode: str = Field(
+        default="auto",
+        description="【兼容字段，前端已不再发送】auto / rag / agent / llm / hybrid。"
+        "仅在 use_kb / use_web 都没传时使用：按下方 _resolve_switches 映射成两个开关。",
+    )
     workflow_id: str | None = Field(
         default=None,
-        description="仅 hybrid 模式有效：指定工作流定义 id 起跑；"
-        "缺省时按 classify_task 自动选择内置流程或 Agent 裸跑",
+        description="仅混合执行有效：指定工作流定义 id 起跑；"
+        "缺省时以内置「规划-执行」流程起跑",
     )
     scenario: str | None = Field(
         default=None,
@@ -310,35 +328,103 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-# 允许进入路由表的对话模式。白名单之外一律按 auto 自动路由，
-# 避免模板目录 / 前端误带脏值直接穿透到下游分支。
+# 兼容白名单：旧 mode 字段的取值。新前端只发 use_kb/use_web，这里是给
+# 旧前端缓存版本、内部脚本、模板跳转留的过渡口。白名单之外的脏值按 auto 处理，
+# 不让它直接穿透到下游分支。
 VALID_MODES = ("auto", "rag", "agent", "llm")
 
 
-async def _pick_mode(req_mode: str, question: str, kb_id: str | None, kb_exists: bool) -> str:
-    """决定这一轮走哪条执行路径。
+@dataclass(frozen=True)
+class PlannedRoute:
+    """这一轮的执行计划：走哪个分支 + 携带哪两个能力开关。
 
-    显式值直通（hybrid 只认功能开关）；`auto` 交给执行前路由。
-
-    为什么是 async：路由的模型判断要发一次网络请求。放在事件循环里会阻塞
-    其它请求，所以用 `await` + 短超时，而不是 `to_thread`（后者会占线程池，
-    200 并发下把 `asyncio.to_thread` 的活全堵住）。
+    mode    : 执行分支 —— hybrid / agent / rag / llm（决定进 async for 里哪个 elif）
+    route   : 路由判定 —— workflow / agent（只在 hybrid 分支里决定起跑方向）
+    use_kb  : 是否使用知识库（有库时先检索一轮）
+    use_web : 是否允许智能联网（web_search 交给模型自主决定搜不搜）
+    source  : 决策来源，只进日志：fields（新契约）/ mode:xxx（旧的兼容映射）/ router
     """
-    if req_mode == "hybrid":
-        # 功能开关关闭时静默回退 Agent：前端看到 mode=agent 的 done 就知道没走混合
-        return "hybrid" if config.HYBRID_MODE_ENABLED else "agent"
-    if req_mode in VALID_MODES and req_mode != "auto":
-        return req_mode
 
+    mode: str
+    route: str
+    use_kb: bool
+    use_web: bool
+    source: str
+
+
+def _resolve_switches(req: ChatRequest, has_kb: bool) -> tuple[bool, bool, str]:
+    """把「两个能力开关」或「旧 mode」统一成 (use_kb, use_web, source)。
+
+    为什么旧 mode 要映射成开关而不是直接继续用：两个概念不是一回事。旧 mode 的
+    五个值把「要不要检索」「要不要用工具」「要不要走流程」混在一个字段里，而新
+    契约只让用户回答前两个里的一半（检索/联网），流程交给模型判。所以这里做的是
+    **翻译**，不是改语义。
+
+    旧值映射规则（保证前端不改也不退化）：
+
+    | 旧 mode | use_kb | use_web | 依据 |
+    |---|---|---|---|
+    | rag    | True   | False   | 用户明确只检索 |
+    | llm    | False  | False   | 明确什么都不用 |
+    | agent  | has_kb | True    | 旧 agent 本来就绑了全部工具 |
+    | hybrid | has_kb | True    | 工作流里也能检索/联网 |
+    | auto   | has_kb | True    | 绑库仍会检索（和旧 auto 一致），无库时保留联网 |
+    """
+    if req.use_kb is not None or req.use_web is not None:
+        return bool(req.use_kb), bool(req.use_web), "fields"
+
+    mode = req.mode if req.mode in VALID_MODES + ("hybrid",) else "auto"
+    if mode == "rag":
+        return True, False, "mode:rag"
+    if mode == "llm":
+        return False, False, "mode:llm"
+    if mode == "agent":
+        return has_kb, True, "mode:agent"
+    if mode == "hybrid":
+        return has_kb, True, "mode:hybrid"
+    # auto 及未知值：绑库就检索，并保留联网能力
+    return has_kb, True, "mode:auto"
+
+
+async def _plan_route(
+    req: ChatRequest, question: str, kb_id: str | None, kb_exists: bool
+) -> PlannedRoute:
+    """决定这一轮走哪条执行路径、带哪两个开关。
+
+    分三种情况，风险从低到高：
+
+    1. **显式旧值**（rag / llm / agent）：直通对应分支，不问路由。这是零行为变化
+       的兼容口——前端还没改造时点「检索」「纯对话」走的仍是老路。
+    2. **hybrid**：判一次 workflow / agent 决定起跑方向；引擎关掉就退 agent。
+    3. **auto / 新契约**：判 workflow → 混合；否则进统一智能体。智能体没有任何
+       开关时退化成纯 LLM 分支（省掉一层 ReAct 循环）。
+
+    为什么是 async：路由的模型判断要发一次网络请求。用 `await` + 短超时，而不是
+    `to_thread`——后者会占线程池，200 并发下把别的阻塞任务全堵住。
+    """
     has_kb = bool(kb_id and kb_exists)
-    decision = await route_engine.decide(question, has_kb=has_kb)
-    # 路由判断失败（超时/异常/输出不成格式）时 decide 内部一律回落 agent ——
-    # 不再"有库就 rag"，否则绑库用户碰到一次超时就被打进检索，问天气也去翻资料。
-    # 回落 agent 不丢引用能力：agent 自带 kb_search，提示词在 has_kb 时会明确提示调用。
-    # flow 只能由混合引擎承载（它才有"工作流起跑"的能力）；引擎关掉就退回 agent
-    if decision.route == "flow":
-        return "hybrid" if config.HYBRID_MODE_ENABLED else "agent"
-    return decision.route
+    use_kb, use_web, source = _resolve_switches(req, has_kb)
+
+    # ① 显式旧值：直通，不判路由
+    if source == "mode:rag":
+        # 库不存在时旧逻辑降级 agent（检索必然空），这个判断移到 _chat_stream_impl 里
+        return PlannedRoute("rag", "agent", use_kb, use_web, source)
+    if source == "mode:llm":
+        return PlannedRoute("llm", "agent", use_kb, use_web, source)
+    if source == "mode:agent":
+        return PlannedRoute("agent", "agent", use_kb, use_web, source)
+
+    # ②③ 判 workflow / agent
+    decision = await route_engine.decide(question, has_kb=has_kb, use_web=use_web)
+    if decision.route == "workflow" and config.HYBRID_MODE_ENABLED:
+        return PlannedRoute(
+            "hybrid", "workflow", use_kb, use_web, f"{source}:{decision.source}"
+        )
+
+    # 工作流不可用，或模型判的就是 agent：
+    # 两个开关都关 = 没有工具可绑，直接走纯 LLM 分支，省掉一层 ReAct 循环。
+    mode = "agent" if (use_kb or use_web) else "llm"
+    return PlannedRoute(mode, decision.route, use_kb, use_web, f"{source}:{decision.source}")
 
 
 # 混合执行时 shared 里"不像答案"的键：
@@ -818,9 +904,10 @@ async def _chat_stream_impl(
         kb_id = None
     # exists() → peek() 要读 sqlite，是同步 I/O，别卡住事件循环
     kb_exists = bool(kb_id and await asyncio.to_thread(pipelines.exists, uid, kb_id))
-    mode = await _pick_mode(req.mode, req.question, kb_id, kb_exists)
+    plan = await _plan_route(req, req.question, kb_id, kb_exists)
+    mode = plan.mode
 
-    # RAG 模式如果知识库不存在 → 降级为 agent
+    # RAG 分支但知识库不存在 → 降级为 agent（检索必然空，别让用户等一次空检索）
     if mode == "rag" and not kb_exists:
         mode = "agent"
 
@@ -993,13 +1080,15 @@ async def _chat_stream_impl(
                 from hybrid import store as hstore
                 from hybrid.context import TaskContext
                 from hybrid.orchestrator import HybridOrchestrator
-                from hybrid.switcher import classify_task
                 from hybrid.workflow import validate_definition
 
-                # 起跑模式决策：
-                #   显式 workflow_id → 指定工作流起跑（用户说了算）；
-                #   否则 classify_task 粗分：flow → 内置"规划-执行"工作流，
-                #   open → Agent 裸跑（跑起来后还有切换规则兜底，分错代价低）
+                # 起跑模式决策（三选一，越靠前越权威）：
+                #   ① 显式 workflow_id → 指定工作流起跑（用户说了算）；
+                #   ② 执行前路由已判 workflow → 内置「规划-执行」工作流；
+                #   ③ 其余 → Agent 裸跑。
+                # ② 之所以直接用 plan.route 而不是再判一次：路由在进入分支之前
+                # 就已经问过模型了，这里再用词表或再问一次，等于同一句话判两遍，
+                # 两次结论不一致时行为取决于谁后跑（2026-10-30 删除 classify_task）。
                 wf_def = None
                 wf_id: str | None = None
                 if req.workflow_id:
@@ -1010,7 +1099,7 @@ async def _chat_stream_impl(
                     wf_def = validate_definition(row["definition"])
                     wf_id = req.workflow_id
                     start_mode = "workflow"
-                elif classify_task(req.question) == "flow":
+                elif plan.route == "workflow":
                     row = await asyncio.to_thread(
                         hstore.get_workflow, uid, hstore.DEFAULT_WORKFLOW_ID
                     )
@@ -1028,7 +1117,10 @@ async def _chat_stream_impl(
                     workflow_id=wf_id,
                 )
                 # kb_id 走私有段注入（与 agent 分支同一安全边界：模型没机会改写它）
-                ctx.agent_state["kb_id"] = kb_id if (kb_id and kb_exists) else None
+                # 与 Agent 路径同一条边界：没开检索就不把库交给工具层
+                ctx.agent_state["kb_id"] = (
+                    kb_id if (plan.use_kb and kb_id and kb_exists) else None
+                )
                 # 对话历史注入：修复"混合模式每轮失忆"（2026-10-16 线上复现）。
                 # 其它三种模式都读历史，唯独 hybrid 过去只拿当前一句 → 模型看不到上下文。
                 # 历史放 shared（跨模式数据通道），Agent/Workflow 引擎拼 prompt 时前置。
@@ -1047,6 +1139,10 @@ async def _chat_stream_impl(
                     # #7：激活集在请求开始取定、整轮不变（与下面 Agent 路径同源），
                     # hybrid 段的 build_agent 才能绑定本用户已 discover 的延迟工具。
                     activated=tool_registry.activated_for(uid),
+                    # 能力开关同样透传到 Agent 段：工作流里的 execute 节点也是
+                    # 同一个 build_agent，不给它开关的话「关了联网却仍在搜」。
+                    use_kb=plan.use_kb,
+                    use_web=plan.use_web,
                 )
 
                 # run_id 先给前端：人工切换 / 执行日志查询都按它寻址
@@ -1160,44 +1256,78 @@ async def _chat_stream_impl(
                 yield _sse("error", {"detail": f"混合执行失败：{describe_api_error(e)}"})
                 return
 
-        # ---- 2. Agent 模式 ----
+        # ---- 2. Agent 模式（统一智能体：工具由开关决定、调用由模型自主）----
         elif mode == "agent":
             yield _sse("status", {"text": "Agent 模式，正在规划任务..."})
             try:
                 from agent.builder import build_agent, location_note
 
                 # 只告诉模型"有没有绑库"，不告诉它是哪个库：
-                # kb_id 走下面的 configurable 注入，模型没有机会改写它
+                # kb_id 走下面的 configurable 注入，模型没有机会改写它。
+                # use_kb / use_web 决定这一轮绑哪几个工具——见 builder._tool_allowed。
                 agent = await asyncio.to_thread(
                     build_agent,
                     bool(kb_id and kb_exists),
                     location_ctx,
                     req.scenario,
                     tool_registry.activated_for(uid),
+                    plan.use_kb,
+                    plan.use_web,
                 )
 
                 # 组装历史 + 当前问题（P0-2：压缩块前置 + 最近 K 轮原文）
                 history = (
                     await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False)
                 )[:-1]
+
+                # 勾了检索且有库：**结构上先检索一轮**，把片段直接交给模型。
+                # 为什么不把这件事也交给模型自己调 kb_search：
+                #   ① 用户明确开了「检索」，期望是"用了我的资料"，不能靠模型自觉；
+                #   ② 先检索才能把 sources/grounding 赶在正文前发给前端；
+                #   ③ 片段已经在上下文里，模型想补检索还能再调一次 kb_search。
+                # 检索失败不阻断：降级为没有参考资料，模型照常作答（已在提示词里
+                # 说明 kb_search 可用，它可以自己重试一次）。
+                refs_block = ""
+                if plan.use_kb and kb_exists and kb_id:
+                    try:
+                        pipe = await asyncio.to_thread(pipelines.get_or_create, uid, kb_id)
+                        rq, _changes, _rewritten = await asyncio.to_thread(
+                            _retrieval_query, req.question, history
+                        )
+                        docs_scores = await asyncio.to_thread(
+                            pipe.retrieve_with_score, rq, req.top_k, uid
+                        )
+                    except Exception as e:  # noqa: BLE001 —— 检索是增强项，失败不该让提问失败
+                        docs_scores = []
+                        yield _sse("status", {"text": f"知识库检索不可用：{describe_api_error(e)}"})
+                    if docs_scores:
+                        refs_md = pipe._format_refs(docs_scores)
+                        yield _sse("sources", {"items": pipe.build_sources(docs_scores)})
+                        # grounding 帧必须赶在正文前：前端要在回答上方挂"依据较弱"提示条
+                        grounding = assess_grounding(docs_scores)
+                        yield _sse("grounding", grounding)
+                        refs_block = _references_text(docs_scores)
+
                 messages = []
                 for m in ctxcompress.assemble_history(uid, req.sid, history):
                     if m["role"] == "user":
                         messages.append(HumanMessage(content=m["content"]))
                     elif m["role"] == "assistant":
                         messages.append(AIMessage(content=m["content"]))
-                messages.append(HumanMessage(content=prompt_question))
 
                 # P0-1：定位是**动态信息**，追加在末尾而不是拼进 system prompt。
                 # 拼进 system 会让前缀随城市变化 → KV 缓存命中率掉到 0（实测 90%→0%）。
                 # 合并进最后一条用户消息而不是再追加一条 HumanMessage：
                 # 部分 chat template 对"连续两条 human"敏感，合并是最稳的形态。
+                # 参考资料同理拼在**用户消息**里而不是 system：它是每轮都变的内容。
+                user_content = prompt_question
+                if refs_block:
+                    user_content = f"【参考资料】\n{refs_block}\n\n【用户问题】\n{prompt_question}"
                 if location_ctx:
                     _loc_note = location_note(location_ctx)
                     if _loc_note:
-                        messages[-1] = HumanMessage(
-                            content=prompt_question + "\n\n" + _loc_note.strip()
-                        )
+                        user_content = user_content + "\n\n" + _loc_note.strip()
+                messages.append(HumanMessage(content=user_content))
 
                 # LangGraph checkpoint thread_id = 会话 id，天然多轮记忆。
                 # owner_id / kb_id 一并注入：工具内部只认这里的值，
@@ -1209,7 +1339,9 @@ async def _chat_stream_impl(
                     "configurable": {
                         "thread_id": req.sid,
                         "owner_id": uid,
-                        "kb_id": kb_id if (kb_id and kb_exists) else None,
+                        # kb_id 只在「开了检索且有库」时注入：没开检索时不把库
+                        # 交给工具层，避免模型绕过开关拿到本不该用的资料。
+                        "kb_id": kb_id if (plan.use_kb and kb_id and kb_exists) else None,
                         # 下载允许清单（见 core/urltools.py）：
                         #   download_allowlist 由 web_search 执行时写入；
                         #   user_urls 从用户原话里抽。
@@ -1457,6 +1589,21 @@ async def _chat_stream_impl(
 # ==================== 辅助 ====================
 
 
+def _references_text(docs_scores) -> str:
+    """把检索到的片段拼成【参考资料】块的正文。
+
+    RAG 分支与「统一智能体的预检索」共用这一份口径：两处各写一遍的话，
+    同一份资料在两条路径里的编号顺序、来源标注迟早会对不上，用户看到的就是
+    "同一条问题，引用卡片和正文里的 [1] 指的不是同一段"。
+    """
+    if not docs_scores:
+        return ""
+    return "\n\n".join(
+        f"[{i + 1}] （来源：{d.metadata.get('source', '?')}）\n{d.page_content}"
+        for i, (d, _) in enumerate(docs_scores)
+    )
+
+
 async def _build_messages(
     owner: str,
     sid: str,
@@ -1501,12 +1648,7 @@ async def _build_messages(
             total += c
         history_raw = list(reversed(kept))
     messages = []
-    references = ""
-    if kb_id and docs_scores:
-        references = "\n\n".join(
-            f"[{i + 1}] （来源：{d.metadata.get('source', '?')}）\n{d.page_content}"
-            for i, (d, _) in enumerate(docs_scores)
-        )
+    references = _references_text(docs_scores) if kb_id else ""
     if references:
         system = (
             SYSTEM_PROMPT

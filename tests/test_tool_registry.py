@@ -88,17 +88,17 @@ check("kb_search 是 read", metas["kb_search"]["category"] == "read")
 check("download_file 是 write", metas["download_file"]["category"] == "write")
 check("download_file 需要审批", metas["download_file"]["needs_approval"] is True)
 check("download_file 成本档 expensive", metas["download_file"]["cost_hint"] == "expensive")
-check("calculator 不需要联网也能算", metas["calculator"]["cost_hint"] == "cheap")
+check("get_weather 不需要联网也能查", metas["get_weather"]["cost_hint"] == "cheap")
 
 print("\n[4] 元数据校验：漏配/多配都要抛错")
 _saved = dict(tr.TOOL_META)
 try:
-    tr.TOOL_META.pop("calculator")
+    tr.TOOL_META.pop("get_weather")
     try:
         tr.assert_meta_complete()
         check("漏配一个工具 -> 抛错", False, "竟然没抛")
     except RuntimeError as e:
-        check("漏配一个工具 -> 抛错", "calculator" in str(e), str(e)[:90])
+        check("漏配一个工具 -> 抛错", "get_weather" in str(e), str(e)[:90])
 finally:
     tr.TOOL_META.clear()
     tr.TOOL_META.update(_saved)
@@ -106,7 +106,7 @@ finally:
 try:
     from dataclasses import replace
 
-    tr.TOOL_META["__not_a_real_tool__"] = replace(_saved["calculator"])
+    tr.TOOL_META["__not_a_real_tool__"] = replace(_saved["get_weather"])
     try:
         tr.assert_meta_complete()
         check("多配一个工具 -> 抛错", False, "竟然没抛")
@@ -227,8 +227,8 @@ try:
     # 直接工具不该被搜索到（只搜延迟工具）
     tr.reset_activated()
     try:
-        tr.discover("calculator", _OWNER_A)
-        check("直接工具不进延迟搜索", False, "竟然命中了 calculator")
+        tr.discover("kb_search", _OWNER_A)
+        check("直接工具不进延迟搜索", False, "竟然命中了 kb_search")
     except tr.NoMatchError:
         check("直接工具不进延迟搜索", True)
 finally:

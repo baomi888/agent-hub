@@ -85,10 +85,35 @@ def test_kill_switch_returns_builtin(tmpdb, monkeypatch):
 def test_builder_cache_key_includes_prompt_version():
     from agent import builder
 
-    k0 = builder._cache_key(True, "scene", frozenset({"a"}), 0)
-    k1 = builder._cache_key(True, "scene", frozenset({"a"}), 1)
+    def key(kb_bound: bool, ver: int):
+        return builder._cache_key(
+            kb_bound=kb_bound,
+            use_web=True,
+            scene="scene",
+            activated=frozenset({"a"}),
+            prompt_version=ver,
+        )
+
+    k0, k1 = key(True, 0), key(True, 1)
     assert k0 != k1, "缓存键漏了提示词版本 —— promote 后编译图不会失效"
-    assert builder._cache_key(True, "scene", frozenset({"a"}), 1) == k1
+    assert key(True, 1) == k1
+
+
+def test_builder_cache_key_includes_switches():
+    """能力开关进缓存键：否则关了联网还会命中上一轮绑了 web_search 的图。"""
+    from agent import builder
+
+    def key(*, kb_bound: bool, use_web: bool):
+        return builder._cache_key(
+            kb_bound=kb_bound,
+            use_web=use_web,
+            scene="scene",
+            activated=frozenset(),
+            prompt_version=0,
+        )
+
+    assert key(kb_bound=True, use_web=True) != key(kb_bound=True, use_web=False)
+    assert key(kb_bound=True, use_web=True) != key(kb_bound=False, use_web=True)
 
 
 def _rag_wired() -> bool:
@@ -182,7 +207,7 @@ def test_guard_rejects_add_before_rules_section():
     ops = [
         {
             "action": "add",
-            "anchor": "  - 从知识库中检索资料（kb_search）",
+            "anchor": "  - 知识库检索（kb_search）",
             "new_text": "  - 新工具（evil_tool）",
         }
     ]
