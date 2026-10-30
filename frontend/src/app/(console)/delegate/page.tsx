@@ -691,9 +691,8 @@ export default function DelegatePage() {
 
               <div style={{ marginTop: 12 }}>
                 <Callout>
-                  <b>「预览」不投递。</b>它走{" "}
-                  <code>POST /api/delegate/{"{id}"}/run?dry_run=true</code>，只生成内容给你看一遍；
-                  「立即执行」才会真的跑一次，并消耗一次 <code>auto</code> 自动额度。
+                  <b>「预览」只生成内容给你看一遍</b>，不会发到会话里；
+                  「立即执行」才真的跑一次，并消耗一次自动额度。
                 </Callout>
               </div>
 

@@ -573,9 +573,8 @@ export default function CheckinPage() {
 
           <div style={{ marginTop: 12 }}>
             <Callout icon="ok">
-              <b>打卡已接入后端。</b>连续天数、最长连续与历史都由服务端
-              （<code>/api/checkin</code>）基于每日总结实时计算，不再依赖本机记录；
-              点「生成今日打卡」会触发当天的总结，这里立刻更新。
+              <b>连续天数按每天的总结自动算</b>，换设备也不会丢。
+              点「生成今日打卡」会先生成当天的总结，这里随即更新。
             </Callout>
           </div>
         </div>
@@ -634,9 +633,7 @@ export default function CheckinPage() {
 
           <div style={{ marginTop: 12 }}>
             <Callout icon="warn">
-              <b>为什么不做排行榜和连击奖励？</b>
-              竞争性激励会把人推去「刷天数」而不是「学会东西」。
-              这一页只回答一件事：今天我到底学到了什么。
+              <b>不做排行榜和连击奖励</b>：只回答「今天到底学到了什么」。
             </Callout>
           </div>
         </div>

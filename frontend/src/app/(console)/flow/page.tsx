@@ -182,12 +182,7 @@ export default function FlowPage() {
     <PageShell
       eyebrow="管理 · 内部"
       title="工作流与切换规则"
-      sub={
-        <>
-          工作流决定「按什么步骤走」，切换规则决定「什么时候换人执行」。
-          <strong> 这两块目前由后端提供接口，界面这一侧由前端实现。</strong>
-        </>
-      }
+      sub="工作流决定「按什么步骤走」，切换规则决定「什么时候换人执行」。"
       actions={
         <div className="flow-tabs">
           <Seg

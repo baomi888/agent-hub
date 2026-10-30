@@ -168,9 +168,7 @@ export default function SettingsPage() {
               <CornIcon name="bulb" />
               再看一次上手说明
             </button>
-            <p className="hint">
-              「修改密码」还缺后端端点 <code>/api/auth/password</code>（跨 3 轮未修），先置灰。
-            </p>
+            <p className="hint">「修改密码」还没做好，先置灰。</p>
           </section>
 
           {/* 兴趣方向：30 条定稿词表（core/tag_taxonomy.py）。
@@ -359,8 +357,8 @@ export default function SettingsPage() {
                 </button>
               </div>
               <p className="hint">
-                「选择性索引」（只让勾选的资料进索引）与「一键清空」都需要后端配合，
-                现在还没有对应端点 —— 放了开关却不生效，比不放更糟，所以这两项先置灰。
+                「选择性索引」（只让勾选的资料进索引）与「一键清空」还没做好，先置灰 ——
+                放了开关却不生效，比不放更糟。
               </p>
             </div>
           </section>
@@ -556,8 +554,8 @@ function ToolTable({ tools, demo }: { tools: AgentTool[]; demo?: boolean }) {
         </div>
       ))}
       <p className="hint">
-        延迟发现（<code>defer</code>）已建好但当前未启用：这 {tools.length} 个工具每轮都全量下发给模型。
-        等打卡 / 导图 / 定时投递这类工具加进来，才需要按需分发。
+        这些工具目前每轮都会全部交给模型判断，暂时没做按需分发 ——
+        等打卡、导图、定时投递这类工具多起来再优化。
       </p>
     </div>
   );
@@ -617,14 +615,13 @@ function ScheduleCard({
         </div>
       ))}
       <p className="hint">
-        健康判定只看<b>心跳年龄</b>：超过 300 秒 <code>stalled</code>、600 秒 <code>down</code>。
-        进程还在但被卡死同样会被抓到 —— 这是「静默故障」唯一的抓手。
+        后台任务每分钟报一次心跳：超过 5 分钟没报标<b>卡住</b>，10 分钟没报标<b>已停止</b>。
+        进程还在但被卡死同样会被抓出来。
       </p>
       <div className="callout" style={{ marginTop: 12 }}>
         <CornIcon name="warn" />
         <div>
-          手动触发（<code>run-now</code>）与重排（<code>retry</code>）<b>仅管理员可用</b>，
-          普通用户这一块只看状态。
+          手动执行和重新排队<b>仅管理员可用</b>，普通用户这里只看状态。
         </div>
       </div>
     </div>

@@ -1109,6 +1109,18 @@ textarea.input {
   .console-page {
     padding: var(--space-16) var(--space-14) var(--space-32);
   }
+  /* 手机端整体收一档间距。页头下沿、内容起始、卡片之间各让 4px ——
+     这三处每个页面都会出现，9 个页面累计起来就是"少滑一屏"的体感。
+     只动间距不动字号：手机上最容易犯的错就是靠压小字来省地方。 */
+  .pg-head {
+    padding-bottom: var(--space-12);
+  }
+  .pg-body {
+    margin-top: var(--space-14);
+  }
+  .card + .card {
+    margin-top: var(--space-10);
+  }
   .grid3,
   .grid4 {
     grid-template-columns: repeat(2, minmax(0, 1fr));

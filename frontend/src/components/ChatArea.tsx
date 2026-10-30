@@ -612,8 +612,10 @@ export default function ChatArea({
               <h1 className="hero-title font-serif font-bold leading-snug text-ink">
                 {greeting}，我是<span className="hero-name">知穗</span>
               </h1>
+              {/* 25 字在 390 宽下会折成两行、第二行只剩一个「你。」——
+                  收到 14 字就单行放下了（390 - 48 padding = 342px，14×15=210px）。 */}
               <p className="welcome-sub mt-1.5 max-w-[30rem] text-msg leading-relaxed text-muted">
-                一句话就行。直接问我——我会自己决定怎么帮你。
+                一句话就行，我来判断怎么帮你
               </p>
 
               {/* 原来的「第一次来？三步就能用起来」引导条（OnboardBar）已删除：
