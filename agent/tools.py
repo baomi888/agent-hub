@@ -107,7 +107,10 @@ def kb_search(query: str, top_k: int = 3, config: RunnableConfig = None) -> str:
         if note:
             return f"{note}\n\n（以下为检索到的片段，仅供你判断是否真的不相关）\n{body}"
         return body
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        # 与 web_search 同一条规矩：**只回文案不记日志，等于把排障入口焊死**。
+        # 这里尤其重要——kb_search 是绑库用户的主要路径，坏了用户只会说"检索不准"。
+        logger.warning("kb_search 异常 query=%r kb=%s: %s: %s", query, kb_id, type(exc).__name__, exc)
         # 给 LLM 看的话要写清楚"这是确定性失败，别重试"（见 docs 第 8 轮第 20 条）
         return (
             "知识库检索不可用：当前会话绑定的知识库无法访问。"
@@ -248,7 +251,8 @@ def calculator(expression: str) -> str:
         return f"{expression} = {result}"
     except ZeroDivisionError:
         return "错误：除数不能为零。"
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("calculator 异常 expr=%r: %s: %s", expression, type(exc).__name__, exc)
         return "计算暂时无法完成，请稍后再试。"
 
 
@@ -474,7 +478,8 @@ def get_weather(city: str = "", days: int = 1, lat: float = None, lon: float = N
                     desc = WMO_CN.get(codes[i], "未知") if codes else "?"
                     lines.append(f"{m}月{d}日 {weekday}：{desc}，{tmin[i]}~{tmax[i]}℃。")
             return "\n".join(lines)
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("get_weather 异常 city=%r days=%s: %s: %s", city, days, type(exc).__name__, exc)
             return "天气查询暂时不可用，请稍后再试。"
 
     # ---- 城市路径：需要高德 Key ----
@@ -529,7 +534,8 @@ def get_weather(city: str = "", days: int = 1, lat: float = None, lon: float = N
                 f"{live.get('winddirection', '?')}风 {live.get('windpower', '?')}级。"
                 f"（高德实时数据）"
             )
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("get_weather 异常 city=%r days=%s: %s: %s", city, days, type(exc).__name__, exc)
             return "天气查询暂时不可用，请稍后再试。"
 
     # ---- 2 天以上：先问高德（免费版只给 4 天：今天 + 3 天）----
@@ -660,7 +666,8 @@ def download_file(url: str, config: RunnableConfig = None) -> str:
         )
     except ValueError as e:
         return f"下载失败：{e}"
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("download_file 异常 url=%r: %s: %s", url, type(exc).__name__, exc)
         return "下载失败：该链接无法访问或不是可下载的文档文件。"
 
 
