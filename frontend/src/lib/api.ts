@@ -1,5 +1,6 @@
 // 后端 API 封装：统一错误处理 + 类型化（相对路径走 rewrites 代理）
 import type { Conversation, KbInfo, KbFile, FilePreview, SearchResult, Defaults, Message } from "./types";
+import type { KbProposalConfirmResult } from "./types";
 import { detailToMessage } from "./errors";
 import type { MeOut, UserOut, Template, ApplyTemplateResult, UsageSummary } from "./types";
 import type { ProfileSnapshot, TagTaxonomy, TemplateRecommend } from "./types";
@@ -64,15 +65,30 @@ function notifyAuthorized() {
 }
 
 /**
+ * 带 HTTP 状态码的错误。
+ *
+ * 为什么要它：普通 Error 只剩 message。可「建库建议」这类卡片交互必须分清
+ * **409 = 这条建议已经处理过了**、**410 = 建议过期**（两者都不该给"重试"）
+ * 和「网络抖了一下」（该给重试）。只靠中文文案去猜，是在赌后端不改措辞 ——
+ * 而这个仓库里 detail 的措辞是改过的（见 tryRequest 里那段注释）。
+ * 全站统一附上 status，读取方用 `(e as ApiStatusError).status`。
+ */
+export type ApiStatusError = Error & { status?: number };
+
+function httpErr(res: Response, message: string): ApiStatusError {
+  return Object.assign(new Error(message), { status: res.status });
+}
+
+/**
  * 统一解析后端错误体：`detail` 可能是字符串（业务错误）也可能是数组（FastAPI 422），
  * 交给 `errors.ts::detailToMessage` 归一成人话 —— 直接 `new Error(body.detail)` 会把
  * 数组/对象转成 "[object Object]"，这正是委托页那个看不懂的报错气泡的成因。
  */
-async function httpError(res: Response): Promise<Error> {
+async function httpError(res: Response): Promise<ApiStatusError> {
   let detail = `HTTP ${res.status}`;
   if (res.status === 401) {
     notifyUnauthorized();
-    return new Error("未登录或登录已过期，请重新登录");
+    return httpErr(res, "未登录或登录已过期，请重新登录");
   }
   // 429 有两种：每分钟限流带 retry_after，每日配额带 kind/limit。
   // 后端 detail 已是中文说明，这里只补一个"多久能再试"的可操作提示，
@@ -87,9 +103,9 @@ async function httpError(res: Response): Promise<Error> {
   }
   if (res.status === 429) {
     const wait = retryAfter && retryAfter > 0 ? `（约 ${Math.ceil(retryAfter)} 秒后可重试）` : "";
-    return new Error(`${detail}${wait}`);
+    return httpErr(res, `${detail}${wait}`);
   }
-  return new Error(detail);
+  return httpErr(res, detail);
 }
 
 // 默认请求超时（毫秒）。后端部分端点同步跑 LLM（打卡/总结/委托执行约 20–40s），
@@ -333,6 +349,31 @@ export const api = {
           chunk_overlap: chunkOverlap,
         }),
       }
+    ),
+
+  // ---------- 建库建议（板块 D，后端开发中）----------
+  // 这三个端点在板块 D 落地前会 404。卡片组件已写好但**尚未挂载**（等 SSE
+  // `kb_proposal` 上线再接），所以这里直接用 request 而不是 tryRequest ——
+  // 真接上之后 404 就是集成 bug，应该被看见，不该静默变成"接口待上线"。
+  //
+  // confirm 超时给到 120s：它要建库 + 切分 + 逐条嵌入，比普通接口慢一个量级。
+  // 用默认的 60s 会出现"前端报超时、后端其实成功了"——用户看到失败又点一次，
+  // 第二次吃 409「已经处理过」，体验比慢更糟。
+  confirmKbProposal: (proposalId: string, body?: { name?: string; bind?: boolean }) =>
+    request<KbProposalConfirmResult>(
+      `/api/kb/proposals/${encodeURIComponent(proposalId)}/confirm`,
+      { method: "POST", body: JSON.stringify(body ?? {}) },
+      { timeoutMs: 120_000 }
+    ),
+  dismissKbProposal: (proposalId: string) =>
+    request<{ proposal_id: string; status: string }>(
+      `/api/kb/proposals/${encodeURIComponent(proposalId)}/dismiss`,
+      { method: "POST", body: JSON.stringify({}) }
+    ),
+  // 刷新后恢复卡片用（后端标为可选端点）：404 说明没做，卡片就该当它不存在
+  getKbProposal: (proposalId: string) =>
+    request<{ proposal_id: string; status: string }>(
+      `/api/kb/proposals/${encodeURIComponent(proposalId)}`
     ),
 
   // ---------- 消息反馈（赞 / 踩）----------

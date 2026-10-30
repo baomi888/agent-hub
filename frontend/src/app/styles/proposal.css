@@ -1,0 +1,269 @@
+/* ============ 建库建议卡片（SSE kb_proposal 的落点）============
+   组件：components/chat/KbProposalCard.tsx
+
+   它出现在消息流里、紧跟在那一轮回答后面，所以视觉上必须是"一条系统提议"，
+   不能长成"又一条回答"。用卡片 + 顶上一条金线来区分：
+     · 卡片底（--card-bg）+ 1px 细边 —— 比消息正文"抬起一层"
+     · 顶上金线从左到右淡出 —— 和反馈卡/引导弹窗同一套语言，扫一眼就知道
+       这是"需要你做决定的东西"，而不是内容
+     · 金只出现在这条线和库名底色上，主按钮仍是深棕墨底（项目规矩：
+       金色实心留给 hover，不铺大面积） */
+
+.kbp-card {
+  position: relative;
+  max-width: 560px;
+  margin: 14px 0 0;
+  padding: 13px 15px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+}
+.kbp-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), transparent 72%);
+}
+
+/* 标题：图标 + 一句话。图标走 currentColor，金只给它一个（--accent-ink 保证
+   浅底上对比度够，纯 --accent 在米黄底上会发飘） */
+.kbp-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--ink);
+}
+.kbp-mark {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  color: var(--accent-ink);
+}
+.kbp-mark svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.kbp-reason {
+  margin: 6px 0 0;
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  color: var(--text-2);
+}
+
+/* 库名：淡金底 + 深金字。这是"要落成什么东西"的实体，必须比说明文字更显眼，
+   但它是名词不是按钮，所以没有 hover 态 */
+.kbp-kb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 9px 0 0;
+  min-width: 0;
+}
+.kbp-kb-name {
+  min-width: 0;
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  line-height: 1.5;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.kbp-rename {
+  flex: none;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-3);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.kbp-rename:hover:not(:disabled) {
+  color: var(--accent-ink);
+}
+.kbp-rename:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.kbp-rename:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-accent);
+  border-radius: 3px;
+}
+
+/* 改名输入：移动端 16px 由 a11y.css 的全局规则兜底（iOS 聚焦放大页面那条），
+   这里只负责桌面外观，不重复写字号压制 */
+.kbp-name-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 9px 0 0;
+}
+.kbp-name-label {
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.kbp-name-input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius-xs);
+  background: var(--step-1);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: var(--fs-md);
+}
+.kbp-name-input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--ring-accent);
+}
+
+.kbp-meta {
+  margin: 8px 0 0;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--text-3);
+}
+/* 窄屏折行时，整段"会绑到当前会话"一起换行，不许拆成单字落行 */
+.kbp-nowrap {
+  white-space: nowrap;
+}
+
+.kbp-err {
+  margin: 9px 0 0;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--red-ink);
+}
+
+/* 按钮：主 = 深棕墨底（hover 转金，与 .btn-new 同一条规矩），次 = 中性描边。
+   高度 30px 而不是 .btn-new 的 40px —— 这是消息流里的附属操作，
+   不该和输入框抢视觉重量。 */
+.kbp-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 11px;
+}
+.kbp-act,
+.kbp-act-ghost {
+  height: 30px;
+  padding: 0 14px;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  letter-spacing: var(--ls-tight);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.kbp-act {
+  border: none;
+  background: var(--solid);
+  color: var(--solid-text);
+  box-shadow: var(--shadow-1);
+}
+.kbp-act:hover:not(:disabled) {
+  background: var(--accent);
+}
+.kbp-act:active:not(:disabled) {
+  background: var(--accent-ink);
+}
+.kbp-act-ghost {
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--text-2);
+}
+.kbp-act-ghost:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.kbp-act:disabled,
+.kbp-act-ghost:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.kbp-act:focus-visible,
+.kbp-act-ghost:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-accent);
+}
+
+/* ---------- 已建库 ---------- */
+.kbp-card-ok::before {
+  background: linear-gradient(90deg, var(--success), transparent 72%);
+}
+.kbp-card-ok .kbp-mark {
+  color: var(--success-ink);
+}
+.kbp-links {
+  margin: 9px 0 0;
+}
+.kbp-link {
+  font-size: var(--fs-sm);
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.kbp-link:hover {
+  color: var(--accent);
+}
+
+.kbp-hint {
+  margin: 6px 0 0;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+/* ---------- 已忽略 / 已过期：一行小字，不再占注意力 ---------- */
+.kbp-done-line {
+  max-width: 560px;
+  margin: 12px 0 0;
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+  color: var(--text-3);
+}
+
+/* ★ media query 必须写在基样式之后（写在前面会被基样式覆盖）。 */
+@media (max-width: 640px) {
+  .kbp-card {
+    padding: 12px 13px 11px;
+  }
+  /* 窄屏两个按钮平分一行：一个 40% 宽的主按钮比"两个小胶囊挤在左边"好按 */
+  .kbp-act,
+  .kbp-act-ghost {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 0 8px;
+  }
+  .kbp-actions {
+    gap: 7px;
+  }
+}

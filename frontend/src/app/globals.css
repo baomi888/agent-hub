@@ -11,6 +11,9 @@
 @import "./styles/chat.css";
 @import "./styles/enhance.css";
 @import "./styles/kb.css";
+/* 建库建议卡片：消息流里的一条"系统提议"，视觉上要和回答区分开，
+   所以单独一份样式；它出现在 chat 区，排在 chat.css / kb.css 之后。 */
+@import "./styles/proposal.css";
 @import "./styles/console.css";
 /* 上手说明弹窗：全站一次性浮层，按钮借用 console.css 的 .btn 系列，
    所以必须排在它后面（同类名同特异性时后写的胜） */

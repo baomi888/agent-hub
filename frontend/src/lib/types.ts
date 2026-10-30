@@ -24,6 +24,48 @@ export interface KbInfo {
   files: KbFile[];
 }
 
+/**
+ * 建库建议的来源。两种场景共用一张卡片，但说法不一样：
+ *   web_search        —— 本轮联网答完了，把收集到的外部信息存下来
+ *   no_kb_retrieval   —— 勾了「检索」但会话没绑库，把这轮对话存成一个库
+ */
+export type KbProposalSource = "web_search" | "no_kb_retrieval";
+
+/**
+ * 服务端通过 SSE `kb_proposal` 下发的一条「要不要建个库」建议。
+ *
+ * ★ `expires_at` 是 **Unix 秒**（后端全站用秒），不是毫秒。
+ *   直接跟 `Date.now()` 比会晚 1000 倍 —— 卡片永远显示"还能点"，
+ *   点了才吃一个 410。组件里用 `expiresAtSec()` 归一，别在下游各写一遍。
+ */
+export interface KbProposal {
+  proposal_id: string;
+  /** 这轮聊的主题，给用户一个"它凭什么建议我建库"的锚点 */
+  topic: string;
+  source: KbProposalSource;
+  /** 可沉淀的知识句条数（web 场景可能含来源条数） */
+  candidates: number;
+  /** 后端建议的库名，用户可以在卡片里改掉 */
+  kb_hint: string;
+  /** Unix 秒 */
+  expires_at: number;
+  /** 后端生成的一句话说明（≤40 字），前端不拼接、不加工 */
+  reason: string;
+}
+
+/** confirm 的返回值：字段都是可选的 —— 建库成功但嵌入失败时 imported 可能是 0。 */
+export interface KbProposalConfirmResult {
+  proposal_id: string;
+  status: string;
+  kb_id?: string;
+  name?: string;
+  imported?: number;
+  chunks?: number;
+  staged_segments?: number;
+  bound?: boolean;
+  batch_id?: string;
+}
+
 export interface Message {
   id?: number;
   role: "user" | "assistant" | "system";
