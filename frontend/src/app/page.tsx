@@ -405,7 +405,12 @@ export default function Home() {
             const doneMode = String(ev.data.mode ?? "");
             const doneRunId = String(ev.data.run_id ?? "");
             hybrid.onDone(doneMode || null);
-            if (doneRunId || (doneMode === "workflow" || doneMode === "agent")) {
+            // 只有**本轮真的请求了 hybrid** 时，done.mode=agent 才代表"混合模式回落"。
+            // 模式入口收敛成 自动/检索/纯对话 之后，auto 常由后端路由到 agent，
+            // 那是正常执行，不是回落 —— 以前这里不看请求模式，于是每条 auto 回答
+            // 都挂一块「混合模式当前不可用」，用户看到的是假故障（2026-10-30 修）。
+            const requestedHybrid = mode === "hybrid";
+            if (doneRunId || (requestedHybrid && (doneMode === "workflow" || doneMode === "agent"))) {
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === asstId
@@ -414,8 +419,9 @@ export default function Home() {
                         hybridRunId: doneRunId || m.hybridRunId,
                         // 静默回退时这里是 agent：用户选了 hybrid 却没走混合，
                         // 界面要能据此提示，而不是假装一切正常
-                        hybridMode:
-                          doneMode === "workflow" || doneMode === "agent" ? doneMode : m.hybridMode ?? null,
+                        hybridMode: requestedHybrid
+                          ? (doneMode === "workflow" || doneMode === "agent" ? doneMode : m.hybridMode ?? null)
+                          : null,
                       }
                     : m
                 )

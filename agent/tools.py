@@ -20,10 +20,14 @@ kb_search / download_file **不再接受 kb_id 参数**，改成从 RunnableConf
 "查谁"由服务端说了算。
 """
 
+import logging
+
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
 from core.urltools import url_allowed
+
+logger = logging.getLogger(__name__)
 
 
 def _configurable(config) -> dict:
@@ -132,10 +136,16 @@ def web_search(query: str, max_results: int = 5, config: RunnableConfig = None) 
         max_results = 5
 
     try:
-        from core import config
+        # 必须用别名！本函数有个形参就叫 `config`（RunnableConfig，由框架注入）。
+        # 写成 `from core import config` 会在函数作用域内把形参**覆盖**成 core.config 模块，
+        # 于是下面 `_configurable(config)` 变成对模块调 .get() → AttributeError:
+        # module 'core.config' has no attribute 'get' → 被 except 吞成"联网搜索暂时不可用"。
+        # 表现是：搜索其实**成功了**（白扣费），却永远回给用户"不可用"。
+        # download_file 早已用 `as _cfg` 避开这个坑，web_search 这处漏了（2026-10-30 修）。
+        from core import config as app_config
         from core.serper import search_serper
 
-        if not config.SERPER_API_KEY:
+        if not app_config.SERPER_API_KEY:
             return "联网搜索需要 SERPER_API_KEY，请在 .env 中配置后重启服务。"
 
         # 统一入口：连接复用 + TTL 缓存 + App 查询补官网（与搜索预览同一套规则）
@@ -171,7 +181,10 @@ def web_search(query: str, max_results: int = 5, config: RunnableConfig = None) 
             lines.append(f"**[{i + 1}]** {title}\n   {snippet}\n   {link}")
 
         return "\n\n".join(lines)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        # 不能只回一句"暂时不可用"：模型会把它当成任务完成，用户拿到的是
+        # 一段"我搜不了"的解释而不是搜索结果。日志留痕，排查才有入口。
+        logger.warning("web_search 异常 query=%r: %s: %s", query, type(exc).__name__, exc)
         return "联网搜索暂时不可用，请稍后再试或换个问法。"
 
 

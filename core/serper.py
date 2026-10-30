@@ -15,6 +15,7 @@ httpx.post，重建 TLS 连接白丢 100~300ms。Serper 又**按次计费**—�
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections import OrderedDict
@@ -23,8 +24,17 @@ import httpx
 
 from core import config
 
+logger = logging.getLogger(__name__)
+
 _ENDPOINT = "https://google.serper.dev/search"
-_TIMEOUT = 15
+# 超时**分档**，不能一个 15 秒拍平。实测数据（2026-10-30，连续观测同一台机器）：
+#   · 命中 DNS/连接缓存时，整轮 1.5~3.5s；
+#   · 冷解析一次 google.serper.dev 就要 **11s**（跨境 DNS + TLS 握手），
+#     紧接着的首次 POST 实测 15.5s —— 正好卡在旧的 15s 总超时上，
+#     于是"慢一点"直接变成"暂时不可用"，用户看到的是功能坏了。
+# connect 覆盖 DNS 解析 + TCP + TLS，是这条链路上最容易超时的一段，单独放宽；
+# read 保持 20s（正常响应 1~4s，20s 已经很宽），避免真的挂死时一直占着线程。
+_TIMEOUT = httpx.Timeout(connect=20.0, read=20.0, write=10.0, pool=5.0)
 _CACHE_TTL = 600.0  # 10 分钟：热点窗口内重复查询不重复扣费
 _CACHE_MAX = 64
 
@@ -91,7 +101,17 @@ def search_serper(query: str, count: int = 10) -> dict | None:
             while len(_cache) > _CACHE_MAX:
                 _cache.popitem(last=False)
         return data
-    except Exception:
+    except Exception as exc:
+        # 以前这里 `return None` 一句话把异常吞干净了：线上用户只看到"联网搜索暂时
+        # 不可用"，日志里一个字都没有，排查时只能靠猜（2026-10-30 就是这么卡住的）。
+        # 统一入口是**唯一**能记这笔的地方，两处调用方不必各自写日志。
+        logger.warning(
+            "serper 请求失败 query=%r count=%s: %s: %s",
+            q,
+            count,
+            type(exc).__name__,
+            exc,
+        )
         return None
     finally:
         with _cond:
