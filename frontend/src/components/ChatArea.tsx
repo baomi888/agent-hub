@@ -651,8 +651,12 @@ export default function ChatArea({
                       <span className="ec-icon">
                         <CornIcon name={e.icon} className="h-6 w-6" title={e.label} />
                       </span>
-                      <span className="ec-label">{e.label}</span>
-                      <span className="ec-hint">{e.hint}</span>
+                      {/* 横排：图标在左、文字在右。label 与 hint 必须包成一列，
+                          否则三个 span 会并排站成三栏（横排改造时踩过）。 */}
+                      <span className="ec-text">
+                        <span className="ec-label">{e.label}</span>
+                        <span className="ec-hint">{e.hint}</span>
+                      </span>
                     </Link>
                   ))}
                 </div>

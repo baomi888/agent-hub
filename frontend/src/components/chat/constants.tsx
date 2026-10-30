@@ -39,9 +39,12 @@ export const PRIMARY_ENTRIES: {
   hint: string;
   icon: CornIconName;
 }[] = [
-  { href: "/delegate", label: "每日委托", hint: "定好时间，知穗自己去做", icon: "clock" },
-  { href: "/report", label: "每日总结", hint: "把今天的问答压成结论", icon: "calendar" },
-  { href: "/checkin", label: "打卡记录", hint: "把学到的东西分享出去", icon: "star" },
+  // ★ 说明文字控制在 9 字以内（约 108px）。桌面三列时单卡 217px，
+  //   44px 图标 + 两侧 13px 内边距 + 箭头之后只剩约 118px 给文字，
+  //   10 字（120px）就会折行并把「知穗」「问答」这类词拆到两行。
+  { href: "/delegate", label: "每日委托", hint: "定好时间，知穗去做", icon: "clock" },
+  { href: "/report", label: "每日总结", hint: "把今日问答压成结论", icon: "calendar" },
+  { href: "/checkin", label: "打卡记录", hint: "把学到的分享出去", icon: "star" },
 ];
 
 // 辅路动作。tools → 开校园工具集静态页、upload → 开资料库上传、

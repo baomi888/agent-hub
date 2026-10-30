@@ -159,16 +159,26 @@
 }
 
 /* 主线入口：三个持续陪伴功能（每日委托 / 每日总结 / 打卡）。
-   竖排卡片（图标在上 + 标题 + 一行说明），比下面那行小胶囊明显大一号 ——
-   层级本身就是"这两个不是一类东西"的表达（10-14 从四宫格改成主次两层）。 */
+   横排卡片：图标在左，标题与说明在右。
+
+   ★ 2026-10-30 批次 2 改版。原先是竖排（图标 / 标题 / 说明三行），
+     手机上三卡各 106px，3×106 + 间距把输入框顶出首屏（尾 852 > 视口 844）；
+     而且卡片全宽 342px 里图标只占左边 36px，右侧六成是空的。
+     改横排后单卡约 62px，三张一共省下约 130px，输入框回到首屏。
+
+   ★ 尺寸只走两个变量：各高度档（≤919 / ≤720）只改变量值，
+     不要再各写一份 width/height —— 竖排时代三处写死过 36/24/24，
+     改一处忘两处，档位之间就对不上了。 */
 .entry-card {
+  --ec-icon: 40px;
+  --ec-gap: 11px;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-5);
+  flex-direction: row;
+  align-items: center;
+  gap: var(--ec-gap);
   width: 100%;
   text-align: left;
-  padding: 14px 15px 15px;
+  padding: 11px 14px;
   background: var(--card-bg);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
@@ -192,8 +202,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: var(--ec-icon);
+  height: var(--ec-icon);
   flex-shrink: 0;
   border-radius: var(--radius-sm);
   background: var(--accent-soft);
@@ -204,6 +214,15 @@
   background: var(--fill-1);
   color: var(--accent-ink);
 }
+/* 文字列：label 与 hint 必须包成一列。不包的话三个 span 会并排站成三栏
+   —— 这是横排改造最容易踩的一步，改完全成了「图标 | 标题 | 说明」三列。 */
+.entry-card .ec-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0; /* 长文案要在卡内折行，不许把整卡顶宽（移动端会横向溢出） */
+}
 .entry-card .ec-label {
   font-family: var(--font-serif);
   font-size: var(--fs-lg);
@@ -213,8 +232,38 @@
 }
 .entry-card .ec-hint {
   font-size: var(--fs-xs);
-  line-height: var(--lh-tight);
+  line-height: 1.35;
   color: var(--text-3);
+  /* 桌面三列时单卡只有 217px，说明文字必然折两行；默认断行会把最后一个字
+     甩到第二行（「…压成结 / 论」「…分享出 / 去」），比拥挤更难看。
+     balance 让两行长度接近，中文也吃这套规则。手机上本来就单行，无副作用。 */
+  text-wrap: balance;
+}
+/* 右侧细箭头。横排之后文字只占左边一半，右边会剩一大片空 ——
+   这正是竖排时代「图标右边六成是空的」那个问题的翻版。
+   箭头把视觉重心拉到两端，并且明说「整行都可点」，
+   比把文字撑满或加大 padding 都更省地方。 */
+.entry-card::after {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-left: 2px;
+  border-top: 1.5px solid var(--line-strong);
+  border-right: 1.5px solid var(--line-strong);
+  transform: rotate(45deg);
+  transition: var(--t-color), transform 0.18s;
+}
+.entry-card:hover::after,
+.entry-card:focus-visible::after {
+  border-color: var(--accent);
+  transform: rotate(45deg) translate(2px, -2px);
+}
+
+/* 桌面三列并排，单卡变窄，图标给足 44 才撑得住视觉重量 */
+@media (min-width: 640px) {
+  .entry-card { --ec-icon: 44px; }
+  .entry-card .ec-icon svg { width: 26px; height: 26px; }
 }
 
 /* 辅路入口：一次性动作，一行小胶囊。
@@ -642,7 +691,17 @@
   .onboard-steps { margin-top: 7px; }
   .welcome-daily { margin-top: 10px; }
   .welcome-section-head { display: none; }
-  .entry-card { gap: 3px; padding: 11px 13px 12px; }
+  /* 横排后这里不能再只收 gap（那会变成图标与文字贴在一起 3px）：
+     省高度改从上下 padding 出。
+     ★ 图标在两个高度档里都**不再降档**：横排已经把单卡从 106 压到 58，
+       再回去压图标等于把刚做出来的"放大图标"又抵消掉。 */
+  .entry-card { --ec-gap: 10px; padding: 8px 13px; }
+  /* 引导条每步下面那半句"怎么做"让位。这一步原本留给 ≤720 档，
+     实测 390×844 也差 51px —— 三张卡摆好之后第三张正好被输入框盖住。
+     动作名本身自解释（选个学习方向 / 已有 1 个资料库 / 在下面问一句），
+     去掉解释不影响"三步就能用起来"这件事讲清楚。 */
+  .ob-hint { display: none; }
+  .onboard-steps { gap: 3px 10px; }
   .welcome-mini { margin-top: 8px; }
   .welcome-egs,
   .welcome-foot { display: none; }
@@ -674,9 +733,10 @@
   .ob-act, .ob-done { font-size: var(--fs-sm); }
   .ob-hint { display: none; }
   .welcome-daily { margin-top: 6px; }
-  .entry-card { gap: 3px; padding: 8px 11px 9px; border-radius: var(--radius-md); }
-  .entry-card .ec-icon { width: 24px; height: 24px; }
-  .entry-card .ec-icon svg { width: 17px; height: 17px; }
+  /* 档 B（1080×629 那种小窗口）：横排已经替这一档省掉一百多像素，
+     图标不必再压到 24（竖排时代的极限值，横排下会小到认不出） */
+  .entry-card { --ec-icon: 34px; --ec-gap: 9px; padding: 7px 11px; border-radius: var(--radius-md); }
+  .entry-card .ec-icon svg { width: 20px; height: 20px; }
   .entry-card .ec-label { font-size: var(--fs-md); }
   .entry-mini { padding: 2px 10px; }
   .welcome-mini { margin-top: 4px; }
