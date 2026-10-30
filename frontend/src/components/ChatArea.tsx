@@ -16,7 +16,6 @@ import { isPlanRequest, stripPlanHint } from "./chat/plan";
 import Bubble from "./chat/Bubble";
 import BubbleErrorBoundary from "./chat/BubbleErrorBoundary";
 import QueryEnhance from "./chat/QueryEnhance";
-import OnboardBar from "./chat/OnboardBar";
 import GuideModal from "./guide/GuideModal";
 import FeedbackModal from "./feedback/FeedbackModal";
 import type { ChatAttachment, UiMessage } from "./chat/types";
@@ -71,10 +70,6 @@ interface Props {
   onUnbindKb?: () => void;
   kbPanelOpen?: boolean;
   onToggleKbPanel?: () => void;
-  /** 幂等地「打开」资料库面板。
-   *  新手引导第 2 步要点它 —— 用 onToggleKbPanel 会在宽屏（面板本来就开着）上
-   *  把面板关掉：用户照着「建一个知识库」点一下，面板反而消失了。 */
-  onOpenKbPanel?: () => void;
   /** 窄屏下打开会话列表抽屉 */
   onOpenSidebar?: () => void;
   /** 外部把建议问题预填进输入框（如联网建库后），不自动发送 */
@@ -122,7 +117,6 @@ export default function ChatArea({
   onUnbindKb,
   kbPanelOpen,
   onToggleKbPanel,
-  onOpenKbPanel,
   onOpenSidebar,
   prefill,
   onDeleteTurn,
@@ -622,14 +616,11 @@ export default function ChatArea({
                 一句话就行。直接问我——我会自己决定怎么帮你。
               </p>
 
-              {/* 新手引导（L2）：只在"还没开始问"的欢迎页出现，关掉后按人永久记住。
-                  放在这里而不是页面顶部：它是给新用户的，老用户一开口就该消失。 */}
-              <OnboardBar
-                userId={userId}
-                kbCount={kbCount ?? 0}
-                onOpenKb={onOpenKbPanel ?? onToggleKbPanel}
-                onAsk={() => inputRef.current?.focus()}
-              />
+              {/* 原来的「第一次来？三步就能用起来」引导条（OnboardBar）已删除：
+                  它和首次进入的上手说明弹窗（GuideModal）讲的是同一件事，
+                  新用户先看弹窗、关掉又看到一张三步卡，属于重复告知；
+                  而老用户早就不需要它。删掉后 390×844 上首页不再需要滚动，
+                  三张主线卡和输入框能同屏。 */}
 
               {/* ② 主线：三个持续陪伴功能。原来这里是四宫格，四件平级，
                   结果「模板广场」这种一次性动作和「每日委托」这种天天用的能力

@@ -298,11 +298,15 @@
   color: var(--accent-ink);
 }
 
-/* ============ 新手引导条（L2）：首次进入的三步走 ============
-   视觉上是"贴在欢迎页上的一张提示卡"：淡金底 + 虚线金边。
-   虚线在站内已有语义 ——「还差一步、可以补」（见未绑定资料库胶囊），
-   正好对上这里"你还没开始，先做这三件事"。
-   它挂在欢迎页内部，开始对话后就随空态一起消失，不是常驻公告条。 */
+/* ============ 「提示卡」外壳（.onboard） ============
+   淡金底 + 虚线金边 = "贴在纸上的提示卡"。虚线在站内已有语义 ——
+   「还差一步、可以补」（见未绑定资料库胶囊）。
+
+   ★ 2026-10-30：原先首页的「第一次来？三步就能用起来」引导条已删除
+     （与首次进入的上手弹窗 GuideModal 重复），三步走的内部样式
+     （.onboard-steps / .ob-n / .ob-act / .ob-done / .ob-hint）一并清掉。
+     现在只剩 /path 页的「这条路是什么？」说明卡在用这个外壳，
+     所以这里只保留壳子（背景、虚线边、标题行、关闭按钮）。 */
 .onboard {
   width: 100%;
   margin-top: 18px;
@@ -348,84 +352,6 @@
   border-color: var(--accent);
   color: var(--accent-ink);
   outline: none;
-}
-
-.onboard-steps {
-  margin: 9px 0 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 7px 12px;
-}
-@media (min-width: 760px) {
-  .onboard-steps {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-.onboard-steps li {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 6px;
-  min-width: 0;
-}
-
-/* 序号用空心描边而非实心金块：实心金底压白字在纸底只有 2.6:1（过不了 AA），
-   而且三颗实心金点会和下面三张卡抢注意力。 */
-.ob-n {
-  flex: none;
-  /* 16 → 18px：字从 10 抬到 12（--fs-badge）后，16px 的圆圈只剩 2px 余量，
-     笔画挤在描边上像缺了口。圆圈跟着放大一圈，视觉比例才对 */
-  width: 18px;
-  height: 18px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--accent);
-  border-radius: 999px;
-  font-size: var(--fs-badge);
-  font-weight: 700;
-  line-height: 1;
-  color: var(--accent-ink);
-  /* baseline 对齐时图形会浮在文字上沿，压回中线 */
-  transform: translateY(2px);
-}
-
-/* 可点的那一步：实线下划线（淡底 + 下划线在深色主题下看不见，10-24 踩过） */
-.ob-act {
-  padding: 0;
-  border: none;
-  background: none;
-  font: inherit;
-  font-size: var(--fs-md);
-  font-weight: 600;
-  color: var(--text-1);
-  text-decoration: underline;
-  text-decoration-color: var(--accent);
-  text-decoration-thickness: 1.5px;
-  text-underline-offset: 3px;
-  cursor: pointer;
-  transition: var(--t-color);
-}
-.ob-act:hover,
-.ob-act:focus-visible {
-  color: var(--accent-ink);
-  outline: none;
-}
-
-/* 已经做到的那一步（如"已有 2 个资料库"）：不引诱点击，只报事实 */
-.ob-done {
-  font-size: var(--fs-md);
-  font-weight: 600;
-  color: var(--text-1);
-}
-
-.ob-hint {
-  flex: 1 1 100%;
-  font-size: var(--fs-xs);
-  line-height: var(--lh-tight);
-  color: var(--text-3);
 }
 
 /* 首屏四宫格能力卡：呼应设计稿「四个等大的圆角白色卡片」，像贴在纸上的功能便签 */.ability-card {
@@ -687,8 +613,9 @@
   .welcome .hero-logo { height: 44px; width: 44px; margin-bottom: 2px; }
   .hero-title { font-size: calc(var(--hero-fs, 34px) * 0.88); }
   .welcome-sub { margin-top: 4px; }
+  /* 这条仍服务于 /path 页的「这条路是什么」提示卡（复用了 .onboard 外壳）；
+     首页的引导条已删，不再有第二步 */
   .onboard { margin-top: 12px; padding: 9px 12px 10px; }
-  .onboard-steps { margin-top: 7px; }
   .welcome-daily { margin-top: 10px; }
   .welcome-section-head { display: none; }
   /* 横排后这里不能再只收 gap（那会变成图标与文字贴在一起 3px）：
@@ -696,12 +623,6 @@
      ★ 图标在两个高度档里都**不再降档**：横排已经把单卡从 106 压到 58，
        再回去压图标等于把刚做出来的"放大图标"又抵消掉。 */
   .entry-card { --ec-gap: 10px; padding: 8px 13px; }
-  /* 引导条每步下面那半句"怎么做"让位。这一步原本留给 ≤720 档，
-     实测 390×844 也差 51px —— 三张卡摆好之后第三张正好被输入框盖住。
-     动作名本身自解释（选个学习方向 / 已有 1 个资料库 / 在下面问一句），
-     去掉解释不影响"三步就能用起来"这件事讲清楚。 */
-  .ob-hint { display: none; }
-  .onboard-steps { gap: 3px 10px; }
   .welcome-mini { margin-top: 8px; }
   .welcome-egs,
   .welcome-foot { display: none; }
@@ -726,12 +647,10 @@
   /* 主标题从 --hero-fs 派生而不是写死 25px，否则调档位时这里不跟着变 */
   .hero-title { font-size: calc(var(--hero-fs) * 0.72); line-height: 1.28; }
   .welcome-sub { margin-top: 0; font-size: var(--fs-sm); line-height: 1.45; }
+  /* 同上：只服务 /path 页的提示卡 */
   .onboard { margin-top: 6px; padding: 6px 10px 7px; }
   .onboard-head { gap: 6px; }
   .onboard-title { font-size: var(--fs-sm); }
-  .onboard-steps { margin-top: 5px; gap: 2px 10px; }
-  .ob-act, .ob-done { font-size: var(--fs-sm); }
-  .ob-hint { display: none; }
   .welcome-daily { margin-top: 6px; }
   /* 档 B（1080×629 那种小窗口）：横排已经替这一档省掉一百多像素，
      图标不必再压到 24（竖排时代的极限值，横排下会小到认不出） */
