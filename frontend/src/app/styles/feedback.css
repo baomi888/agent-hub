@@ -66,20 +66,13 @@
     animation: none;
   }
 }
-/* 窄屏把「内测反馈」缩成「反馈」：这一行左边还有 5 个模式按钮。
-   ★ 不能只留圆点 —— 一个孤零零的金色圆点会被读成状态指示灯，没人会去点它。 */
-.fb-mode-text-sm {
-  display: none;
-}
+/* 窄屏只收紧内边距：这一行左边还有 5 个模式按钮。
+   以前这里还要把「内测反馈」换成更短的「反馈」（.fb-mode-text-sm），
+   现在文案本身就是「反馈」，两档宽度都放得下 —— 那份影子副本已删，
+   ★ 但不能退化成"只留圆点"：一个孤零零的金色圆点会被读成状态指示灯，没人会去点它。 */
 @media (max-width: 560px) {
   .fb-mode-cta {
     padding: 0 9px;
-  }
-  .fb-mode-cta .fb-mode-text {
-    display: none;
-  }
-  .fb-mode-cta .fb-mode-text-sm {
-    display: inline;
   }
 }
 

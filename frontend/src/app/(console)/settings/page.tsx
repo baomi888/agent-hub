@@ -63,6 +63,11 @@ export default function SettingsPage() {
   const router = useRouter();
   const auth = useAuth();
   const authedId = auth.me?.user.id ?? null;
+  // 工具表与调度进程是**开发者的调试面**，不是用户功能：普通用户看到
+  // 「知穗能调用哪些工具」只会冒出"我该不该管这个"的疑问，而调度进程里的
+  // job_key、下次运行时间对他没有任何可操作性。与 /flow、/dashboard 同一性质，
+  // 因此同样按 is_admin 收起来（真权限在后端，这里只是不给入口）。
+  const isAdmin = !!auth.me?.is_admin;
 
   const [usage, setUsage] = useState<ProbeState<UsageSummary>>({ state: "loading" });
   const [kbs, setKbs] = useState<KbInfo[]>([]);
@@ -100,9 +105,6 @@ export default function SettingsPage() {
     // 登录成功会经 AUTHORIZED_EVENT 同步进 auth.me（见 useAuth / api.ts）→ 依赖变化补加载
     if (!authedId) return;
     api.usageSummary().then((d) => setUsage(toProbe(d))).catch((e) => setUsage(errProbe(e)));
-    api.agent.tools().then((d) => setTools(toProbe(d))).catch((e) => setTools(errProbe(e)));
-    api.schedule.health().then((d) => setHealth(toProbe(d))).catch((e) => setHealth(errProbe(e)));
-    api.schedule.jobs().then((d) => setJobs(toProbe(d))).catch((e) => setJobs(errProbe(e)));
     api
       .listKbs()
       .then((r) => setKbs(r.kbs))
@@ -116,6 +118,17 @@ export default function SettingsPage() {
       .then(setProfile)
       .catch(() => setProfile(null));
   }, [authedId]);
+
+  // 工具表 + 调度进程只给管理员拉：普通用户看不到这一列，
+  // 就不该替他多打三个请求（其中一个还是他必然拿不到的）。
+  // 单独一个 effect 而不是并进上面那个 —— 并进去会让 isAdmin 变化时
+  // 用量、资料库、画像全部重拉一遍。
+  useEffect(() => {
+    if (!authedId || !isAdmin) return;
+    api.agent.tools().then((d) => setTools(toProbe(d))).catch((e) => setTools(errProbe(e)));
+    api.schedule.health().then((d) => setHealth(toProbe(d))).catch((e) => setHealth(errProbe(e)));
+    api.schedule.jobs().then((d) => setJobs(toProbe(d))).catch((e) => setJobs(errProbe(e)));
+  }, [authedId, isAdmin]);
 
   const onToggleDark = useCallback((next: boolean) => {
     writeTheme(next);
@@ -148,9 +161,15 @@ export default function SettingsPage() {
     <PageShell
       eyebrow="你的偏好"
       title="设置"
-      sub="账号、外观、检索、隐私、用量，以及知穗现在会哪些工具、后台任务有没有在跑。"
+      sub={
+        isAdmin
+          ? "账号、外观、检索、隐私、用量，以及知穗现在会哪些工具、后台任务有没有在跑。"
+          : "账号、外观、检索、隐私和用量。"
+      }
     >
-      <div className="grid2">
+      {/* 右列只有管理员有。只剩一列时不能再走 .grid2 的两条轨道 ——
+          左列占 1.25fr、右边空着 1fr，整页像被撕掉一半。 */}
+      <div className={isAdmin ? "grid2" : "grid2 one-col"}>
         {/* ============ 左列：可改的设置 ============ */}
         <div className="stack-20">
           <section>
@@ -386,7 +405,12 @@ export default function SettingsPage() {
           </section>
         </div>
 
-        {/* ============ 右列：只读的系统状态 ============ */}
+        {/* ============ 右列：只读的系统状态（仅管理员） ============
+            「知穗能调用哪些工具」摊的是接口名与调用量，「调度进程」摊的是
+            job_key 和下次运行时间 —— 都是开发者看的调试面，普通用户既看不懂
+            也改不动，只能多出"我该不该管这个"的疑问。
+            与 /flow、/dashboard 同一性质，按 is_admin 收起。 */}
+        {isAdmin && (
         <div className="stack-20">
           <section>
             <p className="sec-label">知穗能调用哪些工具</p>
@@ -439,6 +463,7 @@ export default function SettingsPage() {
             )}
           </section>
         </div>
+        )}
       </div>
     </PageShell>
   );

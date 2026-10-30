@@ -630,12 +630,6 @@ export default function CheckinPage() {
               ))
             )}
           </div>
-
-          <div style={{ marginTop: 12 }}>
-            <Callout icon="warn">
-              <b>不做排行榜和连击奖励</b>：只回答「今天到底学到了什么」。
-            </Callout>
-          </div>
         </div>
       </div>
 

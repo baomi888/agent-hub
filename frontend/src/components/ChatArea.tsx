@@ -879,15 +879,15 @@ export default function ChatArea({
           <button
             type="button"
             onClick={() => setFbOpen(true)}
-            title="内测期间，每条意见开发者都会看"
-            aria-label="提交内测反馈"
+            title="每条意见开发者都会看"
+            aria-label="提交反馈"
             aria-haspopup="dialog"
             className="fb-mode-cta"
           >
             <span className="fb-mode-dot" aria-hidden="true" />
-            <span className="fb-mode-text">内测反馈</span>
-            {/* 窄屏只留「反馈」两个字：光一个圆点会被当成状态指示灯，点了才知道是按钮 */}
-            <span className="fb-mode-text-sm">反馈</span>
+            {/* 只写「反馈」：原来 30px 宽的「内测反馈」在窄屏要缩成另一份文案，
+                现在两个宽度都放得下，就不必再留一份 .fb-mode-text-sm 的影子副本。 */}
+            <span className="fb-mode-text">反馈</span>
           </button>
           <button
             onClick={() => setShowParams((s) => !s)}

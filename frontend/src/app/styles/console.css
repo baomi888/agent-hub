@@ -341,6 +341,12 @@
   gap: var(--space-16);
   align-items: start;
 }
+/* 只剩一列时（设置页的右列是管理员专属）：把轨道收成一条，
+   否则左列仍按 1.25fr 渲染、右边空着 1fr，整页像被撕掉一半。
+   用选择器叠加而不是改 .grid2 本身的默认值 —— 默认两列是别的页面的前提。 */
+.grid2.one-col {
+  grid-template-columns: minmax(0, 1fr);
+}
 .grid3 {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
