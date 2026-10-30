@@ -534,7 +534,9 @@ export default function Home() {
       setGeoEnabled(true);
       setGeoEnabledState(true);
       setGeoPending(false);
-      showToast("success", `定位已开启，城市沿用你手填的${manual}`);
+      // 提示语不再说「定位已开启」：针已经变金色、角标已经出现，再说一遍是重复。
+      // 这句话只留一件用户真正想知道的事 —— 他手填的城市没被覆盖。
+      showToast("success", `城市用你填的${manual}，问天气不用再输`);
       return;
     }
     let place: { city: string; district: string } | null = null;
@@ -560,8 +562,10 @@ export default function Home() {
       label
         ? r.source === "ip"
           ? `已按 IP 定位到${label}（城市级），问天气无需再输城市`
-          : `定位已开启（${label}），问天气无需再输城市`
-        : "定位已开启，问天气无需再输城市"
+          : `定位到${label}，问天气无需再输城市`
+        : // 拿到了坐标但认不出城市名：角标不会出现，这句话是唯一的反馈，
+          // 所以不能吹「问天气无需再输城市」—— 直接告诉他下一步怎么做
+          "拿到了位置，但没认出城市名 —— 问天气时直接说城市就行"
     );
   };
 
@@ -574,7 +578,8 @@ export default function Home() {
     const v = setManualCity(name);
     setCityEdit(false);
     if (!v) {
-      // 清空 = 撤销手填，角标回到自动定位的结果（可能为空，那就只显示「定位已开启」）
+      // 清空 = 撤销手填，角标回到自动定位的结果（可能为空 —— 那就没有地名可显示，
+      // 角标整块不出现；定位针仍是金色，状态不丢）
       setGeoCity(formatPlace(getCachedGeo()) || null);
       return;
     }

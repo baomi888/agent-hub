@@ -92,6 +92,8 @@ _LABELS: dict[tuple[str, str], str] = {
     ("POST", "/api/kb/{}/upload"): "知识库 · 上传文件",
     ("POST", "/api/kb/{}/import-url"): "知识库 · 从网址导入",
     ("POST", "/api/kb/{}/import-batch"): "知识库 · 批量导入",
+    ("POST", "/api/kb/{}/import-dialogue"): "知识库 · 从对话导入",
+    ("GET", "/api/kb/dialogue-candidates/{}"): "知识库 · 可导入的对话",
     ("GET", "/api/kb/{}/file-content"): "知识库 · 预览文件原文",
     ("POST", "/api/kb/{}/rebuild"): "知识库 · 重建索引",
     ("POST", "/api/kb/{}/query"): "知识库 · 检索提问",

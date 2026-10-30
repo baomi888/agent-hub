@@ -38,6 +38,10 @@
 /* ---------- 应用外壳 ---------- */
 .console-shell {
   display: grid;
+  /* 至少占满一屏：内容短的页面（知识库空态、还没生成总结的那天）如果只有 400px 高，
+     一张薄卡贴在上沿、下面大片空纸，侧栏的背景也断在半腰 —— 看起来像没加载完。
+     减去的是 .console-scroll 的上下内边距（24 + 24），否则会多出一个滚动条。 */
+  min-height: calc(100dvh - 48px);
   /* minmax(0, 1fr) 而不是 1fr：1fr 展开是 minmax(auto, 1fr)，而 auto 的下界
      取「本列所有网格项的 min-content」——移动端导航那六个不可断的中文条目会
      把列撑到 453px（视口只有 390），.console-page 跟着变宽、右边被裁。
@@ -134,12 +138,48 @@
   font-size: var(--fs-md);
   color: var(--text-2);
   max-width: 64ch;
+  /* 窄屏上这段一行只放得下 22~23 个字，默认换行会把最后两三个字单独甩到
+     第二行（"…每条都标着出 / 处。"）。用 balance 让两行长度接近，
+     读起来像本来就这么排的；桌面端只有一行时它不起作用。 */
+  text-wrap: balance;
 }
 .pg-actions {
   display: flex;
   gap: var(--space-10);
   align-items: center;
   flex-wrap: wrap;
+}
+/* 页头与内容之间的固定间距。以前这一步写在 tsx 的 style={{marginTop:18}} 里，
+   现在由 PageShell 统一给（页面迁到 route group 后不再各自摆这一层） */
+.pg-wrap {
+  min-width: 0;
+}
+.pg-body {
+  margin-top: 18px;
+}
+
+/* ---------- 切页进场（app/(console)/template.tsx 用）----------
+   侧栏在 layout 里不重建，只有这层内容每次导航重新挂载，所以淡入只作用在这里。
+   180ms / 2px 是刻意的低幅度：再大就成了"过场动画"，翻页面会变慢。
+   fill-mode 用 backwards —— both 会把终态 transform:none 之外的值留成残值，
+   一旦以后改成 scale 就会持续创建 containing block，坑的是 fixed 定位的浮层。 */
+.page-enter {
+  animation: page-enter-in 0.18s cubic-bezier(0.22, 0.61, 0.36, 1) backwards;
+}
+@keyframes page-enter-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .page-enter {
+    animation: none;
+  }
 }
 
 /* ---------- 按钮（原型 .btn 系列；裸 .btn 在既有 11 个表里未被占用）---------- */
@@ -1028,24 +1068,40 @@ textarea.input {
   .console-nav {
     border-right: none;
     border-bottom: 1px solid var(--line);
-    padding: var(--space-12);
+    /* 手机上这块导航是"每次都要占的固定成本"：8 个入口按 3 列排是 3 行，
+       加上品牌区吃掉首屏三分之一（390×844 实测约 270px），真正的内容要往下滚才看得到。
+       改 4 列 2 行，并把品牌区和条目高度压掉一档 —— 省下的是首屏可见内容。
+       4 列在 390px 下每列约 83px，"每日委托""学习路径"这种 4 字标签放得下。 */
+    padding: var(--space-10);
   }
   .nav-brand {
-    padding-bottom: var(--space-10);
+    padding: var(--space-2) var(--space-4) var(--space-8);
+    gap: var(--space-6);
   }
-  /* 6 个入口（对话/知识库/委托/总结/打卡/设置）在 390px 下排不满一行，
-     原来靠 overflow-x:auto 横滚 —— 但手机上没有任何"右边还有"的提示，
-     「打卡」「设置」就是看不见（10-14 手机截图确认）。
-     改 3 列网格：正好 2 行 × 3 列，全部入口一次看全。 */
+  .nav-brand .logo {
+    width: 22px;
+    height: 22px;
+  }
+  .nav-brand b {
+    font-size: var(--fs-md);
+  }
   .console-nav nav {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: var(--space-6);
-    padding-bottom: var(--space-4);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--space-4);
+    padding-bottom: 0;
   }
   .console-nav nav .nav-item {
     width: 100%;
     flex: none;
+    justify-content: center;
+    gap: var(--space-5);
+    padding: var(--space-7) var(--space-4);
+    font-size: var(--fs-sm);
+  }
+  .console-nav nav .nav-item svg {
+    width: 16px;
+    height: 16px;
   }
   .nav-sec {
     display: none;

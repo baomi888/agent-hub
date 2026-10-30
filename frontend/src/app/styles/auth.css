@@ -1,0 +1,203 @@
+/* ============================================================
+   登录门（AuthGate）
+   ────────────────────────────────────────────────────────────
+   2026-10-30 改版，三条来自真实反馈：
+   ① **只做登录这一件事**。原版在标题下和卡片底部各挂一行解释
+      （"登录后使用你自己的会话与知识库" / "每人只能看到自己的会话与知识库"），
+      用户原话是"他们肯定是知道的" —— 这两句是写的人给自己看的隔离说明，
+      不是给回来登录的人看的信息，删掉。
+   ② **品牌要立住**。去掉两行小字后上半部只剩一个 48px 图标 + 22px 标题，
+      卡片显得空且小气。图标 72px、品牌名 28px，视觉重心回到这里。
+   ③ **卡片要浮在桌面上**。原先画布 step-1 与卡片 step-2 只差 ΔL* 3.5，
+      配 --shadow-2 那张极淡的投影，整块糊成一片（用户原话"太一体了"）。
+      现在背景退到更深的 --bg(step-0) 并叠一层左上受光，卡片留 step-2，
+      投影换成一档"抬起来"的量级 —— 三级纸面阶梯本来就是这个意思，
+      登录页是全站最该让人看见纸质层次的一屏。
+   ============================================================ */
+
+.auth-stage {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: var(--space-24) var(--space-16) calc(var(--space-24) + env(safe-area-inset-bottom, 0px));
+  /* 光从左上打过来：登录页没有别的景深线索，全靠这层渐变把卡片托起来 */
+  background:
+    radial-gradient(120% 78% at 50% -12%, var(--canvas-light) 0%, transparent 58%),
+    var(--bg);
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 404px;
+  padding: 34px 30px 30px;
+  border: 1px solid rgba(61, 47, 26, 0.14);
+  border-radius: var(--radius-lg);
+  background: var(--card-bg);
+  /* 两层：一层远而软的接触影，一层近而实的贴边影。单层重影会让纸看起来像塑料 */
+  box-shadow: 0 22px 44px -24px rgba(80, 60, 30, 0.42), 0 2px 6px rgba(80, 60, 30, 0.07);
+}
+.dark .auth-card {
+  border-color: rgba(237, 224, 196, 0.15);
+  box-shadow: 0 26px 52px -26px rgba(0, 0, 0, 0.72), 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+/* ---------- 品牌区 ---------- */
+.auth-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-14);
+  margin-bottom: var(--space-24);
+}
+.auth-logo {
+  width: 72px;
+  height: 72px;
+}
+.auth-name {
+  font-family: var(--font-serif);
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
+
+/* ---------- 登录 / 注册 分段 ---------- */
+.auth-seg {
+  display: flex;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border-radius: var(--radius-sm);
+  /* 比 fill-3 再深一档：卡片已经是纸的最亮面，分段槽要和它拉开才看得出是"槽" */
+  background: var(--fill-1);
+  opacity: 1;
+}
+.auth-seg button {
+  flex: 1;
+  padding: 7px 0;
+  border-radius: var(--radius-xs);
+  font-size: var(--fs-md);
+  color: var(--text-2);
+  transition: var(--t-color);
+}
+.auth-seg button:hover {
+  color: var(--ink);
+}
+.auth-seg button[aria-selected="true"] {
+  background: var(--card-bg);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(80, 60, 30, 0.12);
+}
+
+/* ---------- 表单 ---------- */
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  margin-top: var(--space-20);
+}
+.auth-label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+/* 原来的 .eyebrow 是 12px + 大写字距，在登录页这种只有两行的表单里偏小；
+   换成 13px 常规字距，仍然是次级信息但不费眼 */
+.auth-label > span {
+  font-size: var(--fs-sm);
+  letter-spacing: var(--ls-tight);
+  color: var(--text-2);
+  font-weight: 500;
+}
+.auth-input {
+  width: 100%;
+  padding: 11px 13px;
+  /* 边框比全局 --input-border 深一点：全局那档 #D8CCB0 是给"卡片里还有很多元素"
+     的场景用的，登录页只有两个框，太淡时未聚焦的那个会被读成"不可填的灰块"
+     （10-30 放大截图确认：密码框像 disabled）。 */
+  border: 1px solid rgba(61, 47, 26, 0.22);
+  border-radius: var(--radius-sm);
+  /* 输入框用画布纸（比卡片深一档）：在卡片里是"凹进去的格子"，
+     原先和卡片同色，边框一淡就分不清哪里能打字 */
+  background: var(--bg-canvas);
+  font-size: var(--fs-lg);
+  color: var(--ink);
+  outline: none;
+  transition: border-color 0.14s ease, box-shadow 0.14s ease, background-color 0.14s ease;
+}
+.dark .auth-input {
+  border-color: rgba(237, 224, 196, 0.2);
+}
+.auth-input::placeholder {
+  color: var(--text-3);
+}
+/* 聚焦：只留**一道**金边 + 一圈很淡的光。
+   原先 border 金 + --ring-accent(0.35/3px) 叠起来是"双圈"，放大看像输入框套了
+   一个描边框，是整个卡片里最扎眼的东西 —— 但它是焦点，不该比主按钮更响。 */
+.auth-input:focus {
+  border-color: var(--accent);
+  background: var(--card-bg);
+  box-shadow: 0 0 0 3px rgba(200, 137, 42, 0.14);
+}
+.dark .auth-input:focus {
+  box-shadow: 0 0 0 3px rgba(224, 160, 58, 0.16);
+}
+/* a11y.css 给所有 input 画了 `outline: 2px solid + offset 2px`。文本输入框
+   在 Chrome 里恒为 focus-visible，于是一个聚焦的输入框会同时有「金边框 + 2px
+   外描边 + 一圈光晕」= 放大看像套了两个框（10-30 实测）。这里按 a11y.css 自己
+   留的口子（容器已有聚焦提示就不重复画）去掉描边，聚焦信息由金边承担。 */
+.auth-input:focus-visible {
+  outline: none;
+}
+/* 浏览器密码管理器的自动填充会把输入框刷成淡蓝（截图里那两块），
+   在暖纸面上像贴了两张便利贴。用 inset 阴影盖掉系统底色，只保留文字 */
+.auth-card input:-webkit-autofill,
+.auth-card input:-webkit-autofill:hover,
+.auth-card input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--ink);
+  -webkit-box-shadow: 0 0 0 1000px var(--bg-canvas) inset;
+  caret-color: var(--ink);
+  transition: background-color 9999s ease-out 0s;
+}
+.auth-card input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px var(--card-bg) inset;
+}
+
+/* 主按钮：默认 .btn-new 是 40px 高，登录页只有一个主操作，
+   给到 48px（移动端手指更好按，桌面也不至于显得局促） */
+.auth-submit {
+  width: 100%;
+  min-height: 48px;
+  margin-top: var(--space-4);
+  font-size: var(--fs-lg);
+}
+/* 深色下「深棕墨底 + 浅字」这套不成立：--solid(#2E2618) 和卡片(#292217)几乎同明度，
+   按钮会陷进卡面里（实拍：整块只剩一圈若隐若现的轮廓）。
+   这一屏只有一个主操作，必须一眼看见，所以深色改用金底压深字 —— 明暗与浅色相反，
+   但"最强的那一下"是同一个。 */
+.dark .auth-submit {
+  background: var(--accent);
+  color: #2B2114;
+}
+.dark .auth-submit:hover {
+  background: #EFB44E;
+}
+.dark .auth-submit:active {
+  background: #D39428;
+}
+
+/* ---------- 小屏 ---------- */
+@media (max-width: 420px) {
+  .auth-card {
+    padding: 28px 20px 24px;
+  }
+  .auth-logo {
+    width: 64px;
+    height: 64px;
+  }
+  .auth-name {
+    font-size: 1.5rem;
+  }
+}

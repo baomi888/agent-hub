@@ -15,7 +15,7 @@
 // 所以：编辑期间不解析，只在**失焦/点保存**时解析并标红。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ConsoleShell from "@/components/console/ConsoleShell";
+import PageShell from "@/components/console/PageShell";
 import { Seg, ToastHost } from "@/components/console/ui";
 import CornIcon from "@/components/CornIcon";
 import { api } from "@/lib/api";
@@ -98,11 +98,9 @@ export default function FlowPage() {
     api.hybrid.runs(20).then((d) => setRuns(d)).catch(() => setRuns(null));
   }, []);
   useEffect(() => {
-    // 未登录不发请求：页面组件挂在 ConsoleShell 的登录门之外，登录前发的请求
-    // 必然是 401；而「登录完成」发生在 ConsoleShell 自己的 useAuth 实例里，
-    // 这里感知不到 —— 不守卫的话页面会一直停在登录前的失败结果上（登录后
-    // 界面还显示「接口待上线」，必须手动刷新才恢复；10-14 浏览器联调实测）。
-    // 登录成功会经 AUTHORIZED_EVENT 同步进本实例的 auth.me，依赖变化自动补加载。
+    // 未登录不发请求：这一页自己的 useAuth 实例挂载时还没确认完身份，
+    // 此时发出去必然 401，页面就会停在「接口待上线」那种失败结果上（10-14 实测）。
+    // 登录成功会经 AUTHORIZED_EVENT 同步进本实例的 auth.me，依赖变化后自动补加载。
     if (!authedId) return;
     load();
   }, [authedId, load]);
@@ -181,8 +179,7 @@ export default function FlowPage() {
   }, [demoGuard, editing, load, showToast]);
 
   return (
-    <ConsoleShell
-      active="flow"
+    <PageShell
       eyebrow="管理 · 内部"
       title="工作流与切换规则"
       sub={
@@ -390,6 +387,6 @@ export default function FlowPage() {
       )}
 
       <ToastHost toasts={toasts} />
-    </ConsoleShell>
+    </PageShell>
   );
 }

@@ -955,18 +955,24 @@ export default function ChatArea({
             </button>
           </form>
         ) : (
-          geoEnabled && (
+          geoEnabled &&
+          geoCity && (
+            /* 角标只说地名（「茂名 · 茂南区」）。原来前面挂着「定位已开启，当前在」——
+               定位开着这件事，左边那根定位针已经用金色实心说清楚了，再写一遍就是废话，
+               而且把地名挤到窄屏第二行。地名拿不到时整块不出现（针仍是金色，状态没丢）。 */
             <div className="geo-badge" role="status" aria-live="polite">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M12 21s7-6.4 7-11a7 7 0 1 0-14 0c0 4.6 7 11 7 11z" />
                 <circle cx="12" cy="10" r="2.6" />
               </svg>
               <span>
-                {/* geoCity 由上层用 formatPlace() 拼成两级：「茂名 · 茂南区」。
-                    前缀用逗号而不是「·」：否则一行里出现两个间隔点
-                    （定位已开启 · 当前在 茂名 · 茂南区），读起来像标点没打完 */}
-                {geoCity ? `定位已开启，当前在 ${geoCity}` : "定位已开启"}
+                {/* geoCity 由上层用 formatPlace() 拼成两级：「茂名 · 茂南区」 */}
+                {geoCity}
               </span>
+              {/* 屏幕上只剩地名，读屏仍要听得出这是什么 —— 补一句不可见的前缀。
+                  必须放在地名 span **之后**：视觉上靠 clip 隐藏、不占位，
+                  DOM 顺序上又不影响「第一个 span 就是地名」这条约定。 */}
+              <span className="geo-sr">当前定位</span>
               {onCityEditOpenChange && (
                 <button
                   type="button"

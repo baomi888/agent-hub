@@ -23,7 +23,7 @@
 // 两层配合才叫真隐藏。真正的安全边界永远在后端。
 import { notFound } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import ConsoleShell from "@/components/console/ConsoleShell";
+import PageShell from "@/components/console/PageShell";
 import CornIcon from "@/components/CornIcon";
 import { Callout, Seg, SkeletonLines } from "@/components/console/ui";
 import { api } from "@/lib/api";
@@ -217,8 +217,7 @@ export default function DashboardPage() {
   const peakCalls = ov ? Math.max(1, ...ov.series.map((x) => x.calls)) : 1;
 
   return (
-    <ConsoleShell
-      active="dashboard"
+    <PageShell
       eyebrow="管理 · 内部"
       title="数据看板"
       sub={
@@ -709,6 +708,6 @@ export default function DashboardPage() {
           </div>
         </section>
       </div>
-    </ConsoleShell>
+    </PageShell>
   );
 }

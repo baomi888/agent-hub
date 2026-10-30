@@ -1,0 +1,341 @@
+/* ============================================================
+   每日总结（/report）
+   ────────────────────────────────────────────────────────────
+   2026-10-30 重做。旧版的问题是"AI 味"，具体指三件事：
+   ① **把实现讲给用户听**：页头写「指不回原文的系统直接丢掉不显示」，右栏整块
+      「状态是怎么来的」（ready / empty / generating / 404），结论下面一条
+      「后端对每条结论做强制溯源：source_refs 指不到真实消息的，直接丢弃并记 warning」。
+      这些是这个功能**为什么可信**的说明，不是用户要看的东西 —— 全部收进
+      可折叠的一行小字里，默认不展开。
+   ② **旁边挂了一整列开发备注**：日期列表下面写着"后端目前没有历史列表端点，
+      所以这份日期清单先由本机记录"。用户不该读到这句话。
+   ③ **排版像仪表盘**：四格统计 + 柱状图 + 右栏三张卡，信息密度对"看一眼今天学了啥"
+      这个任务来说是过量的，手机上还要滚很久才能看到结论。
+
+   新版按"读一份小结"的顺序排：
+   日期条（横滑）→ 一句人话概览 + 三个数字 → 小结卡片流 → 一行折叠的出处说明。
+   桌面与手机是**同一套单列结构**，只在宽度上分档，避免两套布局各自维护。
+   ============================================================ */
+
+/* ---------- 日期条 ---------- */
+.rp-days {
+  display: flex;
+  gap: var(--space-6);
+  margin-top: var(--space-14);
+  /* 手机上日期多了要能横滑；桌面上也就几颗，不换行更整齐 */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  padding-bottom: var(--space-2);
+}
+.rp-days::-webkit-scrollbar {
+  display: none;
+}
+.rp-day {
+  flex: none;
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card-bg);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  white-space: nowrap;
+  transition: var(--t-color);
+  cursor: pointer;
+}
+.rp-day:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+/* 当前查看的日期 = 持久状态，可以用金 */
+.rp-day[aria-current="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+/* ---------- 概览卡 ---------- */
+.rp-hero {
+  padding: var(--space-16) 18px 14px;
+}
+.rp-hero-line {
+  /* 一句话说清今天：比四格数字先被读到 */
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+  color: var(--ink);
+}
+.rp-hero-kicker {
+  margin: 0 0 6px;
+  font-size: var(--fs-xs);
+  letter-spacing: var(--ls-mid);
+  color: var(--text-3);
+}
+.rp-figs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-8);
+  margin-top: var(--space-14);
+}
+.rp-fig {
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--fill-3);
+}
+.rp-fig b {
+  display: block;
+  font-size: 1.375rem;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--ink);
+  /* 数字用等宽字：三格并排时纵向对齐，读起来才像一组读数 */
+  font-variant-numeric: tabular-nums;
+}
+.rp-fig span {
+  display: block;
+  margin-top: 3px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+/* ---------- 活跃时段 ---------- */
+.rp-hours-wrap {
+  margin-top: var(--space-14);
+  padding-top: var(--space-12);
+  border-top: 1px solid var(--line);
+}
+.rp-hours-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-10);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.rp-hours-head .rp-hours-hint {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+/* 柱子用 grid 而不是 flex：列数由 --slots 传进来，柱宽上限 36px 并在自己那一列里居中。
+   flex + flex:1 时，只有 5 个小时的那天每根柱子会撑到 90px 宽，整排变成色块，
+   高度差反而看不出来 —— 柱状图的重点是"高度"，宽度必须被压住。
+   标签列与柱子列用同一套列模板，才能一一对齐。 */
+.rp-hours {
+  display: grid;
+  grid-template-columns: repeat(var(--slots, 6), minmax(0, 1fr));
+  align-items: end;
+  gap: 3px;
+  height: 52px;
+  margin-top: var(--space-8);
+}
+.rp-hours i {
+  width: 100%;
+  max-width: 36px;
+  justify-self: center;
+  border-radius: 2px 2px 1px 1px;
+  /* 柱子是"数据图形"，用金；全零那天会退成极淡的槽（见 .zero） */
+  background: var(--accent);
+  opacity: 0.85;
+}
+.rp-hours i.zero {
+  background: var(--fill-1);
+  opacity: 1;
+}
+.rp-hours-x {
+  display: grid;
+  grid-template-columns: repeat(var(--slots, 6), minmax(0, 1fr));
+  gap: 3px;
+  margin-top: 4px;
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+}
+.rp-hours-x span {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 小结列表 ---------- */
+.rp-sec {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  margin: var(--space-24) 0 var(--space-10);
+  font-size: var(--fs-xs);
+  letter-spacing: var(--ls-wide);
+  font-weight: 600;
+  color: var(--accent-ink);
+}
+.rp-sec .rp-sec-n {
+  letter-spacing: 0;
+  font-weight: 500;
+  color: var(--text-3);
+}
+
+.rp-note {
+  display: flex;
+  gap: var(--space-12);
+  padding: 15px 16px 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-1);
+  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+}
+.rp-note + .rp-note {
+  margin-top: var(--space-10);
+}
+.rp-note:hover {
+  border-color: var(--accent-line);
+  box-shadow: var(--shadow-2);
+}
+/* 序号不用圆圈徽章（那是最典型的模板味），用一枚金色小字，像笔记本的页码 */
+.rp-note .rp-no {
+  flex: none;
+  width: 18px;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  line-height: 1.9;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.rp-note-body {
+  min-width: 0;
+  flex: 1;
+}
+.rp-note-body p {
+  margin: 0;
+  font-size: var(--fs-lg);
+  line-height: 1.78;
+  color: var(--ink);
+  /* 用户可能贴很长的英文标识符，不换行会把卡片撑破 */
+  overflow-wrap: anywhere;
+}
+.rp-note-body b {
+  font-weight: 600;
+  /* 强调不用底色高亮，用一道淡金下划线，保持纸面干净 */
+  box-shadow: inset 0 -0.5em var(--accent-soft);
+}
+/* 出处：不是装饰，是这个功能的核心承诺（每条都能回到原话），
+   所以给它一个可点的实体，而不是灰字 */
+.rp-src {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: 9px;
+  padding: 3px 9px 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.rp-src svg {
+  width: 13px;
+  height: 13px;
+  color: var(--accent);
+}
+.rp-src:hover {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+/* 多处出处的小角标：一条小结引了两句话时，把 2 写在胶囊尾巴上，
+   比并排摆两个一模一样的按钮清楚 */
+.rp-src-n {
+  margin-left: 1px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  font-size: 10px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-ink);
+}
+
+/* ---------- 空 / 生成中 ---------- */
+.rp-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-10);
+  padding: 30px 20px 26px;
+  text-align: center;
+}
+.rp-empty .rp-empty-logo {
+  width: 60px;
+  height: 60px;
+  opacity: 0.95;
+}
+.rp-empty b {
+  font-family: var(--font-serif);
+  font-size: var(--fs-xl);
+  color: var(--ink);
+}
+.rp-empty p {
+  max-width: 34ch;
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: var(--lh-body);
+  color: var(--text-2);
+}
+
+/* 出处说明：默认折叠。它是"可信度"的注脚，不是正文 */
+.rp-foot {
+  margin-top: var(--space-16);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.rp-foot summary {
+  cursor: pointer;
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+}
+.rp-foot summary::-webkit-details-marker {
+  display: none;
+}
+.rp-foot summary:hover {
+  color: var(--text-2);
+}
+.rp-foot p {
+  margin: var(--space-8) 0 0;
+  line-height: var(--lh-body);
+  max-width: 60ch;
+}
+
+/* ---------- 小屏 ---------- */
+@media (max-width: 640px) {
+  .rp-hero {
+    padding: 14px 14px 12px;
+  }
+  .rp-hero-line {
+    font-size: 1.0625rem;
+  }
+  .rp-figs {
+    gap: var(--space-6);
+  }
+  .rp-fig {
+    padding: 8px 10px;
+  }
+  .rp-fig b {
+    font-size: 1.25rem;
+  }
+  .rp-note {
+    padding: 13px 13px 12px;
+    gap: var(--space-8);
+  }
+  .rp-note-body p {
+    font-size: var(--fs-md);
+    line-height: 1.75;
+  }
+}

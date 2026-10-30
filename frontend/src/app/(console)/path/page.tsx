@@ -10,7 +10,7 @@
 // 关卡严格线性——前一关没过，后面的关卡不亮，这是「关卡」和「清单」的区别。
 
 import { useCallback, useEffect, useState } from "react";
-import ConsoleShell from "@/components/console/ConsoleShell";
+import PageShell from "@/components/console/PageShell";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { useDismissed } from "@/lib/hooks/useDismissed";
 import CornIcon from "@/components/CornIcon";
@@ -164,8 +164,9 @@ function Connector({ on }: { on: boolean }) {
 }
 
 export default function PathPage() {
-  // 身份必须从 useAuth 拿：useConsoleUser 的 Context 在 ConsoleShell 内部，
-  // 页面是它的父级，在外面读永远是 null，页面就会永远停在「正在读取你的学习记录…」。
+  // 身份用 useAuth 自己查一份（不读外壳的 Context）：这一页挂着好几个带鉴权的请求，
+  // 自己掌握 me 的时序更好排。它与外壳那份是独立实例，挂载时还没确认完 ——
+  // 所以下面的加载必须等 authedId，否则首发是 401，页面会停在「正在读取…」。
   const auth = useAuth();
   const authedId = auth.me?.user.id ?? null;
   const [ov, setOv] = useState<Overview | null>(null);
@@ -197,8 +198,7 @@ export default function PathPage() {
   const p = ov?.progress;
 
   return (
-    <ConsoleShell
-      active="path"
+    <PageShell
       eyebrow="学习路径"
       title="12 关，一关一关过"
       sub="从「把资料放进来」走到「让它每天替你跑」——走完这 12 关，知穗才算真的配成你自己的。"
@@ -466,6 +466,6 @@ export default function PathPage() {
           </div>
         </div>
       )}
-    </ConsoleShell>
+    </PageShell>
   );
 }

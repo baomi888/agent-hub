@@ -11,7 +11,7 @@
 // 后端给的是 `POST /{id}/run?dry_run=true`（只生成、不改 next_run_at），
 // 这正好是产品方向文档要的「系统先跑一遍，人再确认」—— 先看到内容，再决定投不投。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ConsoleShell from "@/components/console/ConsoleShell";
+import PageShell from "@/components/console/PageShell";
 import CornIcon from "@/components/CornIcon";
 import { Callout, Field, NotReady, Seg, SkeletonLines, Switch, ToastHost } from "@/components/console/ui";
 import { api } from "@/lib/api";
@@ -191,9 +191,10 @@ export default function DelegatePage() {
   }, []);
 
   useEffect(() => {
-    // 未登录不发请求：页面组件挂在 ConsoleShell 的登录门之外，登录前发的请求
-    // 必然是 401，且登录后不会自动重来。登录成功会经 AUTHORIZED_EVENT 同步进
-    // auth.me（见 useAuth / api.ts），依赖变化后自动补加载。
+    // 未登录不发请求：这一页自己的 useAuth 实例挂载时还没确认完身份
+    // （外壳的登录门只保证「登录后才会挂载本页」，不解决这一份实例的时序），
+    // 此时发出去必然是 401。登录成功会经 AUTHORIZED_EVENT 同步进 auth.me
+    // （见 useAuth / api.ts），依赖变化后自动补加载。
     if (!authedId) return;
     loadList();
     api
@@ -463,8 +464,7 @@ export default function DelegatePage() {
   const editing = form.id !== null;
 
   return (
-    <ConsoleShell
-      active="delegate"
+    <PageShell
       eyebrow="自动替你干活"
       title="每日委托"
       sub={
@@ -971,6 +971,6 @@ export default function DelegatePage() {
       )}
 
       <ToastHost toasts={toasts} />
-    </ConsoleShell>
+    </PageShell>
   );
 }

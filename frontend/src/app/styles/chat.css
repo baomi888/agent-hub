@@ -184,13 +184,15 @@
   transform-origin: 50% 50%;
 }
 
-/* 输入框上方的定位状态角标：开启后才出现，提示当前城市/区县 */
+/* 输入框上方的定位角标：只说「茂名 · 茂南区」。
+   「定位已开启」不再写进角标 —— 左边那根定位针填充成金色就是在说这件事，
+   重复一遍只会把地名挤到第二行。地名拿不到时整块不渲染。 */
 .geo-badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   /* 地名升级成两级（「茂名 · 茂南区」）后比原来长，390 屏要把最大宽度锁死，
-     否则长区名 + 「定位已开启 · 当前」前缀会把这一行顶出屏幕 */
+     否则超长区县名会把这一行顶出屏幕 */
   max-width: 100%;
   margin-bottom: 8px;
   padding: 3px 10px 3px 8px;
@@ -201,6 +203,19 @@
   line-height: 1.4;
   letter-spacing: var(--ls-mid);
   border: 1px solid var(--fill-3);
+}
+/* 只给读屏的一句话：屏幕上不占位、不可见，但不能用 display:none
+   （那样读屏也听不到了） */
+.geo-badge .geo-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 /* 图标不参与压缩，文字可以用掉剩下的宽度并允许折行 */
 .geo-badge > span {

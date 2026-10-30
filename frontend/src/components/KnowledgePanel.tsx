@@ -3,6 +3,7 @@
 // 右侧资料库面板：标题 + 导入按钮 + 知识库列表
 // 视觉：暖米黄书本风格 · 大圆角 · 柔阴影 · 金色点缀
 import { useRef, useState, type RefObject } from "react";
+import Link from "next/link";
 import type { KbInfo, SearchResult } from "@/lib/types";
 import {
   CHUNK_PROFILES,
@@ -346,18 +347,30 @@ export default function KnowledgePanel({
           <span className="font-serif text-fs-xl font-bold text-ink">资料库</span>
           <span className="h-px w-6 bg-line-strong" />
         </h2>
-        {onCollapse && (
-          <button
-            onClick={onCollapse}
-            title="收起资料库"
-            aria-label="收起资料库"
-            className="icon-btn"
+        <div className="flex items-center gap-1">
+          {/* 这块面板管的是「当前对话用哪个库」，改名/删库/看每个库装了什么
+              都太挤（190px 宽）。这些事挪到了独立页 /knowledge，
+              这里只留一个入口，别让「找资料」和「管资料」在同一个 190px 里抢位置。 */}
+          <Link
+            href="/knowledge"
+            className="kb-manage"
+            title="在独立页面里管理所有资料库"
           >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="m15 18-6-6 6-6" />
-            </svg>
-          </button>
-        )}
+            管理
+          </Link>
+          {onCollapse && (
+            <button
+              onClick={onCollapse}
+              title="收起资料库"
+              aria-label="收起资料库"
+              className="icon-btn"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m15 18-6-6 6-6" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* 两种进料入口：我上传 / 它去搜 —— 主路径「直接问」在左侧对话区。

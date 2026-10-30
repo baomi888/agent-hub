@@ -17,7 +17,7 @@
 // 选项（级别 / 模块 / 强度 / 日期候选）全部由后端 overview.options 下发，前端不硬编码。
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import ConsoleShell from "@/components/console/ConsoleShell";
+import PageShell from "@/components/console/PageShell";
 import { Seg } from "@/components/console/ui";
 import { useAuth } from "@/lib/hooks/useAuth";
 
@@ -452,9 +452,10 @@ function PlanEditor({
 }
 
 export default function CetPage() {
-  // 身份必须从 useAuth 拿：useConsoleUser 读的是 ConsoleShell 内部的 Context，
-  // 而页面组件是 ConsoleShell 的**父级**，在它外面读永远拿到 null ——
-  // 结果就是 if (!authedId) return 一直命中，页面永远停在「正在加载…」。
+  // 身份用 useAuth 自己查一份（不读外壳的 Context）：这一页要连发好几个带鉴权的请求，
+  // 由它自己掌握 me 的时序更好排。注意这一份实例与外壳那份是**独立的**，
+  // 挂载时它自己的 me 还没回来 —— 所以下面的数据请求必须等 authedId 到位，
+  // 否则首发必然是 401（外壳的登录门只保证"登录后才会挂载本页"，不解决时序）。
   const auth = useAuth();
   const authedId = auth.me?.user.id ?? null;
   const [ov, setOv] = useState<Overview | null>(null);
@@ -625,8 +626,7 @@ export default function CetPage() {
   };
 
   return (
-    <ConsoleShell
-      active="cet"
+    <PageShell
       eyebrow="专项备考"
       title="四六级备考工作区"
       sub="按你的考试日期和每天能练的内容生成任务，随时可改。词卡按遗忘曲线复习，分数画成趋势。"
@@ -891,6 +891,6 @@ export default function CetPage() {
           </div>
         </div>
       )}
-    </ConsoleShell>
+    </PageShell>
   );
 }

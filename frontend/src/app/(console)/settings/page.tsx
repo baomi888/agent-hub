@@ -14,7 +14,8 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import ConsoleShell, { useConsoleUser } from "@/components/console/ConsoleShell";
+import PageShell from "@/components/console/PageShell";
+import { useConsoleUser } from "@/components/console/ConsoleLayout";
 import CornIcon from "@/components/CornIcon";
 import FeedbackCard from "@/components/FeedbackCard";
 import TagPicker from "@/components/profile/TagPicker";
@@ -144,8 +145,7 @@ export default function SettingsPage() {
   }, [router]);
 
   return (
-    <ConsoleShell
-      active="settings"
+    <PageShell
       eyebrow="你的偏好"
       title="设置"
       sub="账号、外观、检索、隐私、用量，以及知穗现在会哪些工具、后台任务有没有在跑。"
@@ -307,7 +307,9 @@ export default function SettingsPage() {
                 切片档位（精细 / 均衡 / 完整）是<b>按资料库</b>各自记的，在资料库面板里给每个库单独选 ——
                 教材和访谈实录本来就该用不同的切法，全局一套反而会互相迁就。
               </p>
-              <Link className="btn btn-ghost btn-sm" href="/?kb=1" style={{ marginTop: 10 }}>
+              {/* 指向独立的 /knowledge：切片档位是按库记的，得在库详情里设定；
+                  以前这里跳 /?kb=1 只是把首页右栏抽屉拉开（现在那一页已经不是资料管理的主场了）。 */}
+              <Link className="btn btn-ghost btn-sm" href="/knowledge" style={{ marginTop: 10 }}>
                 <CornIcon name="book" />
                 去资料库设定
               </Link>
@@ -440,18 +442,18 @@ export default function SettingsPage() {
           </section>
         </div>
       </div>
-    </ConsoleShell>
+    </PageShell>
   );
 }
 
 /* ---------------- 账号卡片 ---------------- */
 
 /**
- * 单独拆一个组件是**必须**的，不是风格问题。
- * `useConsoleUser()` 读的是 ConsoleShell 提供的 Context，而 SettingsPage 是
- * ConsoleShell 的**父**组件 —— 在它自己的函数体里调 useContext，读到的位置还在
- * Provider 外面，拿到的永远是 null（账号名会显示成「—」）。
- * 只有把读取动作放进 Provider 的子组件里，才能拿到值。
+ * 账号信息仍然拆成子组件，但理由已经从「读不到」变成了「职责分离」：
+ * `useConsoleUser()` 读的是 ConsoleLayout 提供的 Context —— 现在页面作为
+ * layout 的 children 渲染在 Provider **内部**，在页面函数体里也能读到值了。
+ * 保留这层拆分是因为账号卡自己还有退出登录、反馈入口等状态，
+ * 混在 SettingsPage 里会让那个组件的 state 更难读。
  */
 function AccountCard({ onLogout }: { onLogout: () => Promise<void> }) {
   const me = useConsoleUser();

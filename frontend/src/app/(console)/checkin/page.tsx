@@ -13,7 +13,7 @@
 // 知识结构图仍来自当日总结结论（真实）或演示内容（挂「演示数据」标记）。
 // 分享兜底：公网 http 下 navigator.clipboard 不可用，统一走项目里的 copyText()。
 import { useEffect, useState } from "react";
-import ConsoleShell from "@/components/console/ConsoleShell";
+import PageShell from "@/components/console/PageShell";
 import CornIcon from "@/components/CornIcon";
 import { Callout, SkeletonLines, ToastHost } from "@/components/console/ui";
 import { api } from "@/lib/api";
@@ -447,8 +447,7 @@ export default function CheckinPage() {
       : DEMO_CHECKIN_HISTORY;
 
   return (
-    <ConsoleShell
-      active="checkin"
+    <PageShell
       eyebrow="把今天记下来"
       title="打卡"
       sub={
@@ -644,6 +643,6 @@ export default function CheckinPage() {
       </div>
 
       <ToastHost toasts={toasts} />
-    </ConsoleShell>
+    </PageShell>
   );
 }
