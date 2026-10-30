@@ -18,13 +18,16 @@ import type { FontScale } from "@/lib/consolePrefs";
 export type { FontScale };
 
 /**
- * 模式入口收敛（2026-10-29）：历史存过 agent / hybrid 的一律回到 auto。
+ * 模式归一（2026-10-30 收窄）：只把 hybrid 归回 auto，「智能体」不再归一。
  *
- * 不归一会出两个问题：① 这两个值在界面上已经没有按钮，刷新后没有任何档位高亮；
- * ② 请求会一直带着一个用户无法撤销的模式，等于被旧偏好绑架。
- * 后端仍接受这两个值（内部脚本与演示用），所以只在读偏好这一层做归一。
+ * 10-29 那次把 agent + hybrid 一起归成 auto，理由是"界面上已经没有这两个按钮"。
+ * 现在「智能体」按钮回退了（见 components/chat/constants.tsx），再归一就等于
+ * 用户选了它、一刷新又变回自动 —— 按钮在、选择却不作数，比没按钮更糟。
+ *
+ * 仍然归一 hybrid：它是唯一会被后端开关静默降级的档位（开关关闭时退回 agent，
+ * 用户以为选了工作流、其实没走），留着只会制造"我选的不是它"的困惑。
  */
-const LEGACY_MODES = new Set<string>(["agent", "hybrid"]);
+const LEGACY_MODES = new Set<string>(["hybrid"]);
 const normalizeMode = (m: ChatMode): ChatMode => (LEGACY_MODES.has(m) ? "auto" : m);
 
 export interface Prefs {

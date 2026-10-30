@@ -4,13 +4,22 @@ import type { ReactNode } from "react";
 import type { ChatMode } from "@/lib/types";
 import type { CornIconName } from "@/components/CornIcon";
 
-// 模式入口（2026-10-29 收敛）：只剩三档。
-// 「智能体」「混合」不再是用户选项 —— 它们是 auto 判断出来的执行方式：
-// 规则命中顺序/批量特征 → 工作流起跑（内部即混合引擎），否则由模型判断
-// 走检索、调工具还是直接答（见后端 core/router.py）。
+// 模式入口（2026-10-30 回退「智能体」）：四档。
+//
+// 为什么回退：2026-10-29 那次把「智能体」收进 auto，理由是"是否调工具该由系统判断"。
+// 但实测下来 auto 到不了工具，用户体感就是"自动只会检索"——
+//   · 绑了库时，路由判 llm 会被强改 rag（core/router.py::_post_check）
+//   · 任何异常/超时都回落 rag（_fallback_route: 有库→rag）
+//   · ROUTER_TIMEOUT 只给 2 秒，冷启动实测 6.4 秒
+// 三条叠起来，绑库用户几乎没有机会走到 agent。按钮删了就等于把逃生口焊死：
+// 后端仍认 mode="agent"（api/chat.py::VALID_MODES），但前端一个都不发。
+//
+// 仍不回退「混合」：它的 hint 自己写着"后端开关关掉时会静默退回智能体"，
+// 是个会骗人的档位；而 flow 判定已经由后端 auto 承担，用户不需要手选。
 export const MODE_LABELS: { value: ChatMode; label: string; hint: string }[] = [
   { value: "auto", label: "自动", hint: "由系统判断：查资料、调工具还是直接答" },
   { value: "rag", label: "检索", hint: "强制从知识库检索回答" },
+  { value: "agent", label: "智能体", hint: "可调用工具：联网搜索 / 计算 / 天气" },
   { value: "llm", label: "纯对话", hint: "纯大模型对话，不检索" },
 ];
 
@@ -110,11 +119,13 @@ export const toolLabel = (name: string) => TOOL_META[name]?.label ?? name;
 // 后端 core/scenarios.py 的 prompt 机制保留（旧前端兼容 + 模板联动可复用）。
 
 // 首屏四宫格：呼应设计稿「查资料 / 联网搜索 / 数学计算 / 查天气」，
-// 点一下预填一句能立刻发的问题。
+// 点一下切到对应模式 + 预填一句能立刻发的问题。
 //
-// ⚠️ 2026-10-29：四张卡的 mode 一律是 auto，不再替用户选「智能体」。
-// 之前点"查天气"会把档位切到 agent，等于删了按钮又偷偷替你选了一次。
-// 现在切成 auto：由路由判断该调工具还是该检索，用户不需要理解区别。
+// ⚠️ 2026-10-30 恢复卡片的模式绑定：卡片**必须**把档位切到能兑现那句示例的模式。
+// 10-29 曾改成一律 auto，理由是"别替用户选"，结果是点了"查天气"却进了检索
+// （auto 绑库时偏 rag），用户看到的是答非所问。卡片是个承诺：点了就该真的去查。
+//   查资料 → rag（强制检索自己的库；没库时后端自己降级为 agent，见 api/chat.py）
+//   其余三张 → agent（直接调工具，不再赌 auto 判对）
 // 为什么仍要 onModeChange 而不是"只填字"：用户可能先切到了「纯对话」，
 // 点"查天气"却不切回来，就会出现"我点的是天气，它偏不查"的错配。
 export const ABILITIES: {
@@ -125,28 +136,28 @@ export const ABILITIES: {
   icon: ReactNode;
 }[] = [
   {
-    mode: "auto",
+    mode: "rag",
     label: "查资料",
     hint: "从你的知识库里找答案",
     example: "帮我从资料里找一下项目的里程碑",
     icon: TOOL_META.kb_search.icon,
   },
   {
-    mode: "auto",
+    mode: "agent",
     label: "联网搜索",
     hint: "实时搜最新的信息",
     example: "上网搜一下最近一周的 AI 行业新闻",
     icon: TOOL_META.web_search.icon,
   },
   {
-    mode: "auto",
+    mode: "agent",
     label: "数学计算",
     hint: "算账、换算、解方程",
     example: "帮我算一下 (128 + 64) × 0.85 等于多少",
     icon: TOOL_META.calculator.icon,
   },
   {
-    mode: "auto",
+    mode: "agent",
     label: "查天气",
     hint: "问任意城市的天气",
     example: "上海明天天气怎么样？",
