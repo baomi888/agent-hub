@@ -722,6 +722,18 @@ def compute_next_run(schedule: dict | None, after_ts: int) -> int:
     「每天一次」。worker 的 due_subjects 只认 next_run_at，所以只要这里算对，定时链路就真正按
     频次跑；前端「下次触发」读的是后端算出的 next_run_at，无需改动。
     """
+    # ★ schedule 可能是**JSON 字符串**：库里 delegations.schedule_json 存的是
+    #   json.dumps(...) 的文本，而 _dispatch_one 走 _load_delegation（直接 dict(row)），
+    #   取出来就是字符串。早期这里只判断 dict，字符串一律落进最后那行
+    #   `after_ts + 86400` 兜底 —— 于是委托执行一次之后，下次触发永远变成"执行时刻 +24h"，
+    #   weekly / weekdays / interval **全部退化成每天一次**（10-30 实测：
+    #   每天 21:00 的委托在 15:45 手动跑一次，next_run_at 变成次日 15:45）。
+    #   在这里兼容，比要求每个调用方自己 json.loads 更不容易再漏。
+    if isinstance(schedule, (str, bytes)):
+        try:
+            schedule = json.loads(schedule)
+        except (ValueError, TypeError):
+            schedule = None
     if not isinstance(schedule, dict):
         return after_ts + 86400
     freq = schedule.get("freq", "daily")

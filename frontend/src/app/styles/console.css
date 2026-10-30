@@ -628,13 +628,18 @@ textarea.input {
   text-underline-offset: 2px;
 }
 
+/* ---------- 委托行：任务型布局 ----------
+   一行任务应该先回答「它叫什么、什么时候跑、下次什么时候」，
+   再给「开关 + 立即执行」两个动作。原来的行内塞了 4 个按钮 + 5 行文字，
+   手机上单条 210px，三条就占满一屏还不一定看得全。
+   桌面：信息 | 开关 | 动作 三列一行；手机：开关留在第一行右侧，动作整行落到第二行。 */
 .dele {
-  display: flex;
-  gap: var(--space-14);
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--space-8) var(--space-14);
+  align-items: center;
 }
 .dele-main {
-  flex: 1;
   min-width: 0;
 }
 .dele-name {
@@ -645,11 +650,52 @@ textarea.input {
   gap: var(--space-8);
   flex-wrap: wrap;
 }
+/* 频率 · 下次触发：一行读完，不加「下次触发」四个字 —— 前面有时刻，语义已明 */
+.dele-when {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  /* 8px 是「同一行两项之间的分隔」。原先这里放一个「·」，但窄屏换行时
+     那个点会被留在行尾或跑到行首，变成「每天 21:00 ·」「· 下次 …」。
+     状态文字本身是金色加粗，与灰色的频率已经不是同一视觉层级，不需要点。 */
+  gap: var(--space-4) var(--space-8);
+  margin-top: var(--space-4);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.dele-off,
+.dele-wait,
+.dele-dim {
+  color: var(--text-3);
+}
+.dele-bad {
+  color: var(--red-ink);
+}
+.dele-last {
+  margin-top: var(--space-4);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.dele-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-12);
+  margin-top: var(--space-4);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.dele-sub b {
+  font-weight: 600;
+  color: var(--text-2);
+}
 .dele-side {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: var(--space-8);
+  align-items: center;
+}
+.dele-acts {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
 }
 .pos-actions {
   display: flex;
@@ -673,6 +719,26 @@ textarea.input {
   font-size: var(--fs-sm);
   color: var(--accent-ink);
   font-weight: 600;
+}
+
+/* 表单底部动作条。桌面就是卡片自带的一条底栏（右栏常驻表单，够用）。 */
+.form-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  /* 18px 与 .card-pad 的水平内边距一致（那里是字面量，没有对应的 space 令牌）；
+     垂直用 -space-16 抵消卡片的上内边距，底部贴齐卡片圆角 */
+  margin: var(--space-16) -18px calc(-1 * var(--space-16));
+  padding: var(--space-12) 18px;
+  background: var(--card-bg);
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+.form-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  margin-top: var(--space-16);
 }
 
 /* ---------- 行式列表（执行历史 / 日期列表 / 打卡历史）---------- */
@@ -1179,6 +1245,55 @@ textarea.input {
   }
   .acct-card .acct-actions .btn {
     width: 100%;
+  }
+  /* 委托行：开关留在第一行右侧，动作整行落到第二行。
+     390 屏上卡片内容宽只有 ~250px，名称后面再挂一个 34px 开关，
+     长名字（「每隔两小时提醒喝水」）会被压成两行 —— 见 10-30 截图。 */
+  .dele {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "main side"
+      "acts acts";
+    align-items: start;
+    gap: var(--space-10) var(--space-10);
+  }
+  .dele-main {
+    grid-area: main;
+  }
+  .dele-side {
+    grid-area: side;
+  }
+  .dele-acts {
+    grid-area: acts;
+    justify-content: flex-start;
+  }
+  .dele-acts .btn {
+    min-height: 36px;
+  }
+  /* 相对时间（还有 5 小时 7 分）在 390 屏上会把「每天 21:00 · 下次今天 21:00」
+     挤成两行，而它只是绝对时刻的另一种说法。窄屏让位给绝对时刻。 */
+  .dele-remain {
+    display: none;
+  }
+  /* 窄屏：表单可见时把动作条钉在视口底部（fixed）。
+     桌面不钉 —— 右栏常驻表单，一条横跨 1280px 的底栏比按钮本身更碍事。 */
+  .form-actions.is-fixed {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    margin: 0;
+    padding: var(--space-10) var(--space-14) calc(var(--space-10) + env(safe-area-inset-bottom, 0px));
+    background: var(--card-bg);
+    border-top: 1px solid var(--line);
+    border-radius: 0;
+    box-shadow: 0 -8px 18px rgba(80, 60, 30, 0.07);
+    z-index: 40;
+  }
+  /* 钉住后底部会盖住表单末尾那句提示 —— 用 :has 给页面补出等高留白。
+     不支持 :has 的浏览器只是少一点留白，不挡功能。 */
+  .console-page:has(.form-actions.is-fixed) {
+    padding-bottom: 96px;
   }
   /* 反馈分类胶囊：5 个按钮都是 white-space:nowrap，总宽 348 > 可视 290，
      外层 .seg 又是 overflow:hidden —— 第 5 个「其他」直接被裁掉一半（实测右溢 59px），

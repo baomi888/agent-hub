@@ -250,6 +250,29 @@ class TestDelegateFlow(unittest.TestCase):
         # 兜底：无 schedule → after + 86400（维持旧行为，不破坏既有委托）
         self.assertEqual(daily.compute_next_run(None, int(after)), int(after) + 86400)
 
+    def test_compute_next_run_accepts_json_string(self):
+        """schedule 是 JSON 文本时也要按 freq 真算，不能掉进 +86400 兜底。
+
+        库里的 delegations.schedule_json 存的是 json.dumps 的文本，_load_delegation
+        直接 dict(row) 取出来就是字符串。只判断 dict 的话，_dispatch_one 每次都会
+        走兜底，weekly / interval 全部退化成「每天一次」——实测：每天 21:00 的委托
+        在 15:45 手动跑一次，next_run_at 变成次日 15:45。
+        """
+        after = int(time.mktime(time.struct_time((2026, 10, 19, 14, 0, 0, 0, 0, -1))))
+        as_dict = daily.compute_next_run({"freq": "daily", "at": "21:00"}, after)
+        as_json = daily.compute_next_run('{"freq": "daily", "at": "21:00"}', after)
+        self.assertEqual(as_json, as_dict)
+        # 反向断言：不是「+86400 兜底」那条路
+        self.assertNotEqual(as_json, after + 86400)
+
+        # weekly 同样要认字符串，且落在指定星期
+        nxt = daily.compute_next_run('{"freq": "weekly", "at": "09:00", "weekday": 0}', after)
+        self.assertEqual(time.localtime(nxt).tm_wday, 0)
+        self.assertLess(nxt - after, 8 * 86400)
+
+        # 坏 JSON 仍然走兜底，不抛异常（worker 不能因为一条脏数据停摆）
+        self.assertEqual(daily.compute_next_run("{不是 json", after), after + 86400)
+
     def test_patch_schedule_recomputes_next_run(self):
         """改 schedule 时 next_run_at 按新节奏重算（使 api.delegate 的 docstring 承诺成真）。"""
         out = self._create()  # daily at 21:00，启用，next_run_at 初始 None

@@ -154,6 +154,28 @@ export default function DelegatePage() {
   const [busy, setBusy] = useState<string | null>(null);
   const formRef = useRef<HTMLDivElement>(null);
 
+  /* 「创建/保存」条：手机端表单约 1000px 高，提交按钮要一直挂在屏幕底部。
+     但只在**表单进入视口时**挂 —— 否则用户在看委托列表，屏幕底下永远压着一个
+     「创建」按钮，既突兀又挡住列表最后一条。
+
+     ★ 这里不能用 position: sticky 代替。sticky 只对「已经滚过视口底边」的元素生效，
+       元素还在视口下方时不会被提前拉上来（10-30 实测：滚到「生成指令」那一屏，
+       动作条 bottom 仍停在 736，视口 844）。 */
+  const [formInView, setFormInView] = useState(false);
+  useEffect(() => {
+    const el = formRef.current;
+    const root = document.querySelector(".console-scroll");
+    if (!el || !root || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(
+      ([entry]) => setFormInView(entry.isIntersecting),
+      // root 必须是真正的滚动容器（.console-scroll），默认 viewport 在这里永远为真
+      { root, threshold: 0.05 }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+    // list.state：表单要等列表加载完才渲染，首帧 formRef 还是 null
+  }, [list.state]);
+
   /* ---- 首次进委托页的一次性提示 ----
      用户 B 的原话：「创建委托需要先创建一个对话，我找了一分钟左右才知道这个创建对话
      是什么玩意」。首选方案（点按钮直接出表单）已经做了，但**他不知道**，所以点之前
@@ -293,6 +315,32 @@ export default function DelegatePage() {
   const runItems = runs.state === "ready" ? runs.data : isDemo ? DEMO_RUNS : [];
 
   const activeCount = useMemo(() => items.filter((d) => d.enabled).length, [items]);
+
+  /* 执行历史只对管理员整块展开：普通用户要的不是「第 37 次执行的 tokens_out」，
+     而是「它上次到底跑没跑成」—— 那一句已经并进每条委托的行内（见 .dele-last）。
+     整张历史表留给排障，普通用户看了只会多一个疑问。 */
+  const isAdmin = Boolean(auth.me?.is_admin);
+
+  /* 每条委托的「上次执行」：run 记录的 subject_id 就是 delegation_id
+     （见 service/daily.py 的 _dispatch_one）。取最近一条，
+     这样行内不用再单独请求一次，也不会和 runItems 的口径不一致。 */
+  const lastRunOf = useMemo(() => {
+    const m = new Map<string, DelegateRun>();
+    const at = (r: DelegateRun) => r.finished_at ?? r.started_at ?? r.planned_at ?? 0;
+    for (const r of runItems) {
+      const sid = r.subject_id;
+      if (!sid) continue;
+      const cur = m.get(sid);
+      if (!cur || at(r) > at(cur)) m.set(sid, r);
+    }
+    return (id: string) => m.get(id) ?? null;
+  }, [runItems]);
+
+  /** 正在编辑的那条（删除 / 预览要拿到完整对象，表单里只有字段） */
+  const editingItem = useMemo(
+    () => (form.id ? items.find((d) => d.id === form.id) ?? null : null),
+    [items, form.id]
+  );
 
   /* ---- 列表分组 ----
      原来是一张平铺的单子，用户看不出「哪些还在跑、哪些已经停了」——
@@ -589,6 +637,17 @@ export default function DelegatePage() {
                       );
                     }
                     const d = r.d;
+                    const last = lastRunOf(d.id);
+                    const [lastCls, lastLabel] = last
+                      ? RUN_TAG[last.status] ?? ["warn", last.status]
+                      : ["", ""];
+                    // 「下次什么时候」这件事有四种状态，必须分开说：
+                    //   · 关掉了 → 已暂停
+                    //   · worker 自动停用 → 说清原因（last_error）
+                    //   · 刚建好、还没派发过 → next_run_at 是 NULL，但**不是暂停**
+                    //   · 正常 → 下次时间 + 还有多久
+                    // ★ 第 3 种以前被错归到「已暂停」，开关明明是开的，用户以为坏了。
+                    //   next_run_at=NULL 在后端语义里是「待首次派发」（save_delegation 注释）。
                     return (
                     <div key={d.id}>
                       {r.i > 0 && <div className="divide" />}
@@ -598,42 +657,56 @@ export default function DelegatePage() {
                             {d.name}
                             <span className="ctag">{KIND_LABEL[d.kind] ?? d.kind}</span>
                           </div>
-                          <div className="kv">
+                          <div className="dele-when">
                             <span className="sched">
                               <CornIcon name={d.schedule.freq === "weekly" ? "calendar" : "clock"} />
                               {scheduleText(d)}
-                              {d.schedule.tz && d.schedule.tz !== "Asia/Shanghai"
-                                ? ` · ${d.schedule.tz}`
-                                : ""}
                             </span>
-                            {/* 只有用户自己给对话起过名字，才提"结果放回哪"。
-                                默认位置是内部实现，说出来他只会多问一句"那是什么"——
-                                B 原话就是"委托栏有很多与用户无关的信息"。 */}
-                            {d.session_title && (
-                              <span>
-                                结果放回 <b>{d.session_title}</b>
+                            {/* 中间那个「·」用 CSS 伪元素画在状态文字前面，不写成独立元素：
+                                独立 span 在 flex-wrap 下会被留在行尾，变成「每天 21:00 ·」
+                                然后下一行才开始「下次 …」（10-30 手机截图就是这个）。 */}
+                            {!d.enabled ? (
+                              <span className="dele-off">已暂停</span>
+                            ) : d.last_error ? (
+                              <span className="dele-bad">{d.last_error}</span>
+                            ) : d.next_run_at ? (
+                              <span className="next">
+                                下次 {fmtWhen(d.next_run_at)}
+                                {/* 相对时间（还有 5 小时）只有 24h 内才直观，
+                                    窄屏放不下就让位，绝对时刻已经说清了 */}
+                                <span className="dele-remain">（{fmtRemaining(d.next_run_at)}）</span>
                               </span>
-                            )}
-                            {d.kb_name && (
-                              <span>
-                                知识库：<b>{d.kb_name}</b>
-                              </span>
+                            ) : (
+                              <span className="dele-wait">已启用，等第一次执行</span>
                             )}
                           </div>
-                          <p className="hint">
-                            {d.enabled && d.next_run_at ? (
-                              <>
-                                下次触发{" "}
-                                <span className="next">
-                                  {fmtWhen(d.next_run_at)}（{fmtRemaining(d.next_run_at)}）
+                          {/* 上次执行：普通用户只需要这一行，不需要整张历史表 */}
+                          {last && (
+                            <div className="dele-last">
+                              上次 {last.planned_at ? fmtWhen(last.planned_at) : "—"}
+                              <span className={`ctag ${lastCls}`} style={{ marginLeft: 6 }}>
+                                {lastLabel}
+                              </span>
+                              {last.trigger === "manual" && (
+                                <span className="dele-dim">（你手动跑的）</span>
+                              )}
+                              {last.error && <span className="dele-bad"> · {last.error}</span>}
+                            </div>
+                          )}
+                          {(d.session_title || d.kb_name) && (
+                            <div className="dele-sub">
+                              {d.session_title && (
+                                <span>
+                                  结果放回 <b>{d.session_title}</b>
                                 </span>
-                              </>
-                            ) : d.last_error ? (
-                              <span className="text-red-ink">{d.last_error}</span>
-                            ) : (
-                              <>已暂停 · 不会再触发，直到你重新打开开关</>
-                            )}
-                          </p>
+                              )}
+                              {d.kb_name && (
+                                <span>
+                                  只参考 <b>{d.kb_name}</b>
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
                         <div className="dele-side">
                           <Switch
@@ -642,45 +715,26 @@ export default function DelegatePage() {
                             label={`${d.name} 启用`}
                             onChange={(v) => void toggleEnabled(d, v)}
                           />
-                          <div className="pos-actions">
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              disabled={busy === `run-${d.id}`}
-                              onClick={() => void doRun(d, true)}
-                            >
-                              预览
-                            </button>
-                            <button
-                              type="button"
-                              className="icon-btn"
-                              title="编辑"
-                              aria-label={`编辑 ${d.name}`}
-                              onClick={() => setForm(toForm(d))}
-                            >
-                              <CornIcon name="pencil" />
-                            </button>
-                            <button
-                              type="button"
-                              className="icon-btn"
-                              title="立即执行（会真的投递）"
-                              aria-label={`立即执行 ${d.name}`}
-                              disabled={busy === `run-${d.id}`}
-                              onClick={() => void doRun(d, false)}
-                            >
-                              <CornIcon name="bolt" />
-                            </button>
-                            <button
-                              type="button"
-                              className="icon-btn danger"
-                              title="删除"
-                              aria-label={`删除 ${d.name}`}
-                              disabled={busy === `del-${d.id}`}
-                              onClick={() => void doRemove(d)}
-                            >
-                              <CornIcon name="trash" />
-                            </button>
-                          </div>
+                        </div>
+                        <div className="dele-acts">
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            disabled={busy === `run-${d.id}`}
+                            onClick={() => void doRun(d, false)}
+                          >
+                            <CornIcon name="bolt" />
+                            立即执行
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            title="编辑"
+                            aria-label={`编辑 ${d.name}`}
+                            onClick={() => setForm(toForm(d))}
+                          >
+                            <CornIcon name="pencil" />
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -689,46 +743,50 @@ export default function DelegatePage() {
                 )}
               </div>
 
-              <div style={{ marginTop: 12 }}>
-                <Callout>
-                  <b>「预览」只生成内容给你看一遍</b>，不会发到会话里；
-                  「立即执行」才真的跑一次，并消耗一次自动额度。
-                </Callout>
-              </div>
-
-              {/* ---- 执行历史 ---- */}
-              <p className="sec-label" style={{ marginTop: 22 }}>
-                执行历史
-              </p>
-              <div className="card card-pad">
-                {runItems.length === 0 ? (
-                  <p className="hint" style={{ marginTop: 0 }}>
-                    还没有执行记录。第一次触发之后，这里会显示每次的结果、耗时和消耗。
+              {/* ---- 执行历史：只给管理员 ----
+                  普通用户要的是「它上次跑成没有」，那一句已经并进每条委托的行内；
+                  整张表的价值在排障（哪次定时、耗时多少、烧了多少 token），
+                  普通人翻到这里只会多一个「这跟我有什么关系」。
+                  「预览只生成内容」那句说明也一起搬进了编辑面板 —— 它讲的是
+                  预览按钮的行为，放在按钮旁边才有人看。 */}
+              {isAdmin && (
+                <>
+                  <p className="sec-label" style={{ marginTop: 22 }}>
+                    执行历史
                   </p>
-                ) : (
-                  runItems.map((r) => {
-                    const [cls, label] = RUN_TAG[r.status] ?? ["warn", r.status];
-                    const dur = fmtDuration(r.started_at, r.finished_at);
-                    return (
-                      <div className="run" key={r.run_id}>
-                        <span className="when">{r.planned_at ? fmtWhen(r.planned_at) : "—"}</span>
-                        <span>
-                          <span className={`ctag ${cls}`}>{label}</span>{" "}
-                          <span className="meta">
-                            {r.trigger === "manual" ? "你点了「立即执行」" : "定时触发"}
-                            {dur ? ` · ${dur}` : ""}
-                            {r.error ? ` · ${r.error}` : ""}
-                          </span>
-                        </span>
-                        <span className="meta">{fmtNum(r.tokens_out ?? 0)} tok</span>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-              <p className="hint">
-                历史按 <code>trigger</code> 区分「定时」与「手动」—— 排查「今天为什么没收到」先看这一列。
-              </p>
+                  <div className="card card-pad">
+                    {runItems.length === 0 ? (
+                      <p className="hint" style={{ marginTop: 0 }}>
+                        还没有执行记录。第一次触发之后，这里会显示每次的结果、耗时和消耗。
+                      </p>
+                    ) : (
+                      runItems.map((r) => {
+                        const [cls, label] = RUN_TAG[r.status] ?? ["warn", r.status];
+                        const dur = fmtDuration(r.started_at, r.finished_at);
+                        return (
+                          <div className="run" key={r.run_id}>
+                            <span className="when">{r.planned_at ? fmtWhen(r.planned_at) : "—"}</span>
+                            <span>
+                              <span className={`ctag ${cls}`}>{label}</span>{" "}
+                              <span className="meta">
+                                {r.trigger === "manual" ? "你点了「立即执行」" : "定时触发"}
+                                {dur ? ` · ${dur}` : ""}
+                                {r.error ? ` · ${r.error}` : ""}
+                              </span>
+                            </span>
+                            <span className="meta">
+                              {r.tokens_out ? `${fmtNum(r.tokens_out)} tok` : ""}
+                            </span>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                  <p className="hint">
+                    按「定时触发」和「你点的」分开记 —— 排查「今天为什么没收到」先看这一列。
+                  </p>
+                </>
+              )}
             </div>
 
             {/* ============ 右：新建 / 编辑表单（常驻） ============ */}
@@ -894,7 +952,41 @@ export default function DelegatePage() {
                   />
                 </div>
 
-                <div className="row" style={{ marginTop: 16 }}>
+                {/* 预览与删除：从行内挪到编辑面板里。
+                    行内只留「开关 + 立即执行」两件事（任务型布局），
+                    预览是「配置时验证」的动作、删除是不可逆的破坏性动作，
+                    两者都属于「打开这一条再动手」，摆在列表上每行重复一遍只是噪音。 */}
+                {editing && editingItem && (
+                  <div className="form-tools">
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      disabled={busy === `run-${editingItem.id}`}
+                      onClick={() => void doRun(editingItem, true)}
+                    >
+                      先预览一次
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-danger btn-sm"
+                      disabled={busy === `del-${editingItem.id}`}
+                      onClick={() => void doRemove(editingItem)}
+                    >
+                      <CornIcon name="trash" />
+                      删除这条
+                    </button>
+                  </div>
+                )}
+                {editing && (
+                  <p className="hint" style={{ marginTop: 8 }}>
+                    「先预览一次」只生成内容给你看一遍，不会发到会话里，也不会改下次触发时间。
+                  </p>
+                )}
+
+                {/* 手机上表单长约 1000px，提交按钮原来在最后一个字段之后 ——
+                    滑到中间时找不到它。is-fixed 只在窄屏固定到底部（桌面右栏常驻，
+                    一条横跨全屏的底栏反而更难用），且只在表单可见时挂上。 */}
+                <div className={`row form-actions${formInView ? " is-fixed" : ""}`}>
                   <button
                     type="button"
                     className="btn btn-primary"
@@ -910,7 +1002,7 @@ export default function DelegatePage() {
                   </button>
                 </div>
                 <p className="hint">
-                  启用中的委托上限 {MAX_ACTIVE} 条；同名会返回 409「同名委托已存在」。
+                  启用中的委托上限 {MAX_ACTIVE} 条；名字撞上已有的会自动提醒你换一个。
                 </p>
               </div>
             </div>
