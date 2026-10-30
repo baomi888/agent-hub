@@ -84,78 +84,66 @@ function LevelCard({ lv, onOpen }: { lv: Level; onOpen: (lv: Level) => void }) {
   const bg = done ? "var(--accent-soft)" : "var(--surface)";
   const bd = done || cur ? "var(--accent)" : "var(--line)";
   const titleColor = done ? "var(--accent-ink)" : locked ? "var(--text-3)" : "var(--text-1)";
+  // 布局交给 CSS 类：桌面是 172px 宽的竖卡，手机是整行一条（编号+名称+状态 / 说明）。
+  // 内联样式只留随状态变化的三项（底色、边框、外环），静态布局一律不写内联 ——
+  // 内联样式没法被媒体查询覆盖，之前泳道里的 overflowX 就是这么把窄屏卡死的。
   return (
     <button
       type="button"
       onClick={() => onOpen(lv)}
       title={lv.desc}
+      className={`lv-card${locked ? " is-locked" : ""}`}
       style={{
-        flex: "0 0 172px",
-        textAlign: "left",
         background: bg,
-        border: "1px solid", borderColor: bd,
+        borderColor: bd,
         boxShadow: cur ? "0 0 0 1px var(--accent)" : "none",
-        borderRadius: 12,
-        padding: "12px 13px 13px",
-        cursor: "pointer",
-        font: "inherit",
-        opacity: locked ? 0.75 : 1,
-        display: "flex",
-        flexDirection: "column",
-        gap: 6,
-        minHeight: 108,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontSize: "var(--fs-xs)", letterSpacing: "0.08em", color: locked ? "var(--text-3)" : "var(--accent-ink)" }}>
-          {lv.id.slice(1)}
-        </span>
-        <span
-          style={{
-            fontSize: "var(--fs-xs)",
-            color: done ? "var(--accent-ink)" : cur ? "var(--accent-ink)" : "var(--text-3)",
-            fontWeight: cur ? 600 : 400,
-          }}
-        >
-          {done ? "已通过" : cur ? "进行中" : "未开始"}
-        </span>
-      </div>
-      <div style={{ fontSize: "var(--fs-lg)", fontWeight: 600, color: titleColor, lineHeight: 1.3 }}>{lv.name}</div>
-      <div style={{ fontSize: "var(--fs-xs)", color: locked ? "var(--text-3)" : "var(--text-2)", lineHeight: 1.45 }}>
+      <span className="lv-no">{lv.id.slice(1)}</span>
+      <span
+        className="lv-state"
+        style={{
+          color: done ? "var(--accent-ink)" : cur ? "var(--accent-ink)" : "var(--text-3)",
+          fontWeight: cur ? 600 : 400,
+        }}
+      >
+        {done ? "已通过" : cur ? "进行中" : "未开始"}
+      </span>
+      <span className="lv-name" style={{ color: titleColor }}>
+        {lv.name}
+      </span>
+      <span className="lv-detail" style={{ color: locked ? "var(--text-3)" : "var(--text-2)" }}>
         {lv.detail || lv.desc}
-      </div>
+      </span>
       {done && lv.done_at ? (
-        <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-3)", marginTop: "auto" }}>
+        <span className="lv-foot">
           {new Date(lv.done_at * 1000).getMonth() + 1}/{new Date(lv.done_at * 1000).getDate()} 通过
-        </div>
+        </span>
       ) : (
-        <div style={{ height: 2, background: "var(--fill-1)", borderRadius: 2, marginTop: "auto", overflow: "hidden" }}>
-          <div
+        <span className="lv-bar">
+          <i
             style={{
               width: `${cur ? Math.max(3, Math.min(100, lv.percent)) : 0}%`,
-              height: "100%",
-              background: "var(--accent)",
             }}
           />
-        </div>
+        </span>
       )}
     </button>
   );
 }
 
-/** 关卡之间的连线：横线 + 箭头，用边框三角画，不引图标资源 */
+/** 关卡之间的连线：横线 + 箭头，用边框三角画，不引图标资源。
+ *  手机端泳道竖排，这条线跟着转 90°（见 .lv-conn 的媒体查询），
+ *  否则关卡之间会插进一根横线，把竖排的视觉节奏切断。 */
 function Connector({ on }: { on: boolean }) {
   const color = on ? "var(--accent)" : "var(--line)";
   return (
-    <div style={{ flex: "0 0 26px", display: "flex", alignItems: "center", minHeight: 108 }}>
-      <span style={{ flex: 1, height: 1, background: color, opacity: on ? 0.55 : 1 }} />
+    <div className="lv-conn">
+      <span className="lc-line" style={{ background: color, opacity: on ? 0.55 : 1 }} />
       <span
+        className="lc-arrow"
         style={{
-          width: 0,
-          height: 0,
-          borderTop: "4px solid transparent",
-          borderBottom: "4px solid transparent",
-          borderLeft: `6px solid ${color}`,
+          borderLeftColor: color,
           opacity: on ? 0.8 : 1,
         }}
       />
@@ -329,26 +317,24 @@ export default function PathPage() {
             {/* 章节泳道：每章一行，横向可滑（窄屏不会被压变形） */}
             {ov.chapters.map((ch, ci) => (
               <section key={ch.id} style={card}>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: "var(--fs-xs)", letterSpacing: "0.1em", color: "var(--accent-ink)" }}>
-                    第 {ci + 1} 章
-                  </span>
-                  <span style={{ fontSize: "var(--fs-lg)", fontWeight: 600, color: "var(--text-1)" }}>{ch.name}</span>
-                  <span style={{ ...label, flex: 1 }}>{ch.desc}</span>
-                  <span style={{ ...label, color: ch.done === ch.total ? "var(--accent-ink)" : "var(--text-2)" }}>
+                <div className="lv-head">
+                  <span className="lv-ch-no">第 {ci + 1} 章</span>
+                  <span className="lv-ch-name">{ch.name}</span>
+                  <span className="lv-ch-desc">{ch.desc}</span>
+                  <span
+                    className="lv-ch-count"
+                    style={{ color: ch.done === ch.total ? "var(--accent-ink)" : "var(--text-2)" }}
+                  >
                     {ch.done} / {ch.total}
                   </span>
                 </div>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "stretch",
-                    overflowX: "auto",
-                    paddingBottom: 4,
-                  }}
-                >
+                {/* 章节泳道：桌面横向可滑（窄屏不会被压变形），手机整段改成竖排清单。
+                    横滑在手机上等于把 6 关藏掉 4 关 —— 一屏只见 1.6 张卡，还必须
+                    横向拖才能看全，比纵向滚动难发现得多（10-30 实测 scrollWidth 766
+                    vs 可视 290）。 */}
+                <div className="lv-lane">
                   {ch.levels.map((lv, i) => (
-                    <div key={lv.id} style={{ display: "flex", alignItems: "stretch" }}>
+                    <div key={lv.id} className="lv-item">
                       {i > 0 && <Connector on={lv.status !== "locked"} />}
                       <LevelCard lv={lv} onOpen={setOpen} />
                     </div>

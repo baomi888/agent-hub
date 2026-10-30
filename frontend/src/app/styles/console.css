@@ -983,6 +983,11 @@ textarea.input {
 .tr.job {
   grid-template-columns: 1.1fr 1.3fr 0.7fr 0.9fr;
 }
+/* 表里「后几列」的容器。桌面 display:contents 让里面的字段直接成为外层 grid 的项，
+   与表头逐列对齐；窄屏才收成一行（见媒体查询），并靠 data-l 补回字段名。 */
+.tr-facts {
+  display: contents;
+}
 .tr.th {
   font-size: var(--fs-xs);
   letter-spacing: var(--ls-mid);
@@ -1058,9 +1063,28 @@ textarea.input {
 /* ---------- 响应式：单列 ---------- */
 @media (max-width: 1100px) {
   .grid2 {
-    grid-template-columns: 1fr;
+    /* 必须 minmax(0, 1fr)，不能写裸 1fr —— 裸 1fr 的上界是 minmax(auto, 1fr)，
+       下界取本列内容的 min-content。设置页右列里有 5 列的工具表和 4 列的调度表，
+       min-content 算出来 388px，于是 390 屏上整列被撑到 388、右缘出界 60px
+       （10-30 实测：.grid2 client 328 / scroll 388）。
+       上面那段注释当初只改了桌面档，这道断点漏了 —— 同一个坑踩第二次。 */
+    grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* 账号卡：桌面是「图标 + 名字/ID …… 两个按钮」一行排开。
+   布局写在这里而不是内联：窄屏要整块换成 grid 两行，内联样式媒体查询盖不住。 */
+.acct-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-14);
+}
+.acct-actions {
+  display: flex;
+  gap: var(--space-10);
+  margin-left: auto;
+}
+
 @media (max-width: 900px) {
   .console-shell {
     grid-template-columns: minmax(0, 1fr);
@@ -1129,20 +1153,74 @@ textarea.input {
     /* 「正文字号 + 段位选择」这类一行两件，窄屏放不下就换行，别横向溢出 */
     flex-wrap: wrap;
   }
-  /* 账号卡：图标 + 名字/ID + 两个按钮并排，窄屏挤不下（ID 是一串不可断的十六进制），
-     换行让按钮落到第二行、各占一半 —— 比把按钮裁掉好 */
+  /* 账号卡：图标 + 名字/ID + 两个按钮。
+     ★ 这里不能靠 flex-wrap 解决：宽 328 的卡里，文字块是 flex:1 1 0%（basis 0），
+     参与换行计算时的「假设尺寸」是 0，于是第一行看着还有空，两个按钮里第二个
+     才被挤到下一行 —— 剩下文字块被压成 48px，「probe1030」要 74px，名字被裁掉一半。
+     改 grid 两列：第一行图标 + 名字，第二行两个按钮各占一列，宽度由列宽决定，
+     跟内容多少无关。 */
   .acct-card {
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--space-12) var(--space-14);
+    align-items: center;
   }
-  .acct-card .btn {
-    flex: 1 1 40%;
+  .acct-card > div {
+    grid-column: 2;
+  }
+  /* 两个按钮整块落到第二行、各占一半。放不进第一行是因为第一行已经
+     被「图标 + 名字 + 32 位 ID」占满；单独包一层才不会被 auto 列宽挤成 74px */
+  .acct-card .acct-actions {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-10);
+    margin-left: 0;
+  }
+  .acct-card .acct-actions .btn {
+    width: 100%;
+  }
+  /* 反馈分类胶囊：5 个按钮都是 white-space:nowrap，总宽 348 > 可视 290，
+     外层 .seg 又是 overflow:hidden —— 第 5 个「其他」直接被裁掉一半（实测右溢 59px），
+     用户点不到这个分类。窄屏允许换行，按内容宽自排。
+     换行后行间不画分隔线：选中的一项是深底白字，本身就够当锚点；
+     加一条 border-top 会在单行时与外框那条线重成双线。 */
+  .seg {
+    flex-wrap: wrap;
   }
   .run {
     grid-template-columns: 1fr auto;
   }
+  /* 工具表 / 调度表：5 列硬塞进 2 列网格，字段会流成「kb_search / 读 / 否 / 否 /
+     4,000·normal」四行，两个「否」分别指什么完全看不出来。改成两行结构：
+     第一行「名称 + 读写标签」，第二行把其余字段横排并各自带出字段名。 */
   .tr.tool,
   .tr.job {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    row-gap: var(--space-4);
+  }
+  .tr.tool > span:first-child,
+  .tr.job > span:first-child {
+    grid-area: 1 / 1;
+  }
+  .tr.tool > span:nth-child(2) {
+    grid-area: 1 / 2;
+    justify-self: end;
+  }
+  .tr-facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3) var(--space-10);
+    grid-area: 2 / 1 / 3 / 3;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    min-width: 0;
+  }
+  /* 字段名只在窄屏补：桌面表头已经写着「可重试 / 需确认 / 上限·成本」 */
+  .tr-facts > span::before {
+    content: attr(data-l) " ";
+    opacity: 0.8;
   }
   .tr.th {
     display: none;
@@ -1229,4 +1307,213 @@ textarea.input {
   color: var(--accent-ink);
   text-decoration-style: solid;
   outline: none;
+}
+
+/* ============ 学习路径：章节泳道与关卡卡 ============
+   桌面是「横向泳道 + 172px 竖卡」，窄屏改成「竖排清单 + 整行一条」。
+   为什么手机不能横滑：390 上可视 290px，一节 6 关的泳道内容宽 766px，
+   一屏只见 1.6 张卡 —— 用户以为只有两关，横滑手势在纵向长页里也很难被发现。
+   改成竖排后每关一行（编号 / 名称 / 状态 + 说明），信息一样全，还少一次手势。 */
+.lv-lane {
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.lv-item {
+  display: flex;
+  align-items: stretch;
+}
+
+/* 章节头：第 N 章 / 章名 / 一句话说明 / 通关计数。
+   桌面四项一行（说明吃掉中间剩余宽度）；窄屏说明整段落到第二行 ——
+   挤在同一行时它会折成两行半，第二行只剩一个「题」（390 实测）。 */
+.lv-head {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  column-gap: 10px;
+  margin-bottom: 12px;
+}
+.lv-ch-no {
+  grid-column: 1;
+  font-size: var(--fs-xs);
+  letter-spacing: 0.1em;
+  color: var(--accent-ink);
+}
+.lv-ch-name {
+  grid-column: 2;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text-1);
+}
+.lv-ch-desc {
+  grid-column: 3;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.lv-ch-count {
+  grid-column: 4;
+  text-align: right;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+}
+
+.lv-card {
+  flex: 0 0 172px;
+  display: grid;
+  /* 双列：编号在左、状态在右；名称/说明/脚注各占整行。
+     第 3 行给 1fr，脚注自然被推到卡底，不需要 margin-top:auto */
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto 1fr auto;
+  gap: 6px;
+  min-height: 108px;
+  padding: 12px 13px 13px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  font: inherit;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.lv-card.is-locked {
+  opacity: 0.75;
+}
+.lv-no {
+  grid-area: 1 / 1;
+  font-size: var(--fs-xs);
+  letter-spacing: 0.08em;
+  color: var(--accent-ink);
+}
+.lv-card.is-locked .lv-no {
+  color: var(--text-3);
+}
+.lv-state {
+  grid-area: 1 / 2;
+  font-size: var(--fs-xs);
+  text-align: right;
+  white-space: nowrap;
+}
+.lv-name {
+  grid-area: 2 / 1 / 3 / 3;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  line-height: 1.3;
+}
+.lv-detail {
+  grid-area: 3 / 1 / 4 / 3;
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+}
+.lv-foot {
+  grid-area: 4 / 1 / 5 / 3;
+  align-self: end;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.lv-bar {
+  grid-area: 4 / 1 / 5 / 3;
+  align-self: end;
+  display: block;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--fill-1);
+  overflow: hidden;
+}
+.lv-bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+/* 关卡之间的连线。桌面横排是「横线 + 朝右三角」，高度对齐 108px 的卡身 */
+.lv-conn {
+  flex: 0 0 26px;
+  display: flex;
+  align-items: center;
+  min-height: 108px;
+}
+.lc-line {
+  flex: 1;
+  height: 1px;
+}
+.lc-arrow {
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 6px solid var(--line);
+}
+
+@media (max-width: 900px) {
+  /* 泳道竖排：overflow-x 必须显式改回 visible，否则上一行的 auto 会把
+     越出容器的内容裁掉（竖排后不再需要自己滚，页面统一纵向滚） */
+  .lv-lane {
+    flex-direction: column;
+    overflow-x: visible;
+    padding-bottom: 0;
+  }
+  .lv-head {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    row-gap: 3px;
+  }
+  .lv-ch-desc {
+    /* 只占前两列，第三列留给计数 —— 写成 1 / -1 会吃掉整行，
+       把「0 / 4」顶到第三行去（390 实测：计数孤零零右对齐在下面） */
+    grid-column: 1 / 3;
+  }
+  .lv-ch-count {
+    grid-column: 3;
+  }
+  .lv-item {
+    flex-direction: column;
+  }
+  /* 连线转 90°：竖线 + 朝下三角。三角靠 rotate 复用同一套 border 值，
+     比再写一份朝下的三角少两行、也不会两边颜色不同步 */
+  .lv-conn {
+    flex: 0 0 13px;
+    min-height: 0;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+  }
+  .lv-conn .lc-line {
+    display: none;
+  }
+  .lv-conn .lc-arrow {
+    transform: rotate(90deg);
+  }
+  /* 单行一条：编号 / 名称 / 状态 在一行，说明在第二行。
+     名称占中间那列并允许收缩（minmax(0,1fr)），长关卡名不会把状态挤出去 */
+  .lv-card {
+    flex: 0 0 auto;
+    width: 100%;
+    min-height: 0;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    column-gap: 10px;
+    row-gap: 3px;
+    align-items: baseline;
+    padding: 9px 12px;
+  }
+  .lv-no {
+    grid-area: 1 / 1;
+  }
+  .lv-name {
+    grid-area: 1 / 2;
+    font-size: var(--fs-md);
+    line-height: 1.25;
+  }
+  .lv-state {
+    grid-area: 1 / 3;
+  }
+  .lv-detail {
+    grid-area: 2 / 2 / 3 / 4;
+  }
+  /* 进度条与「X/Y 通过」在窄屏省掉：detail 里已经是同一组数字
+     （「已入库资料 2 / 3 份」），再画一条 2px 的条只是把同一信息说两遍 */
+  .lv-bar,
+  .lv-foot {
+    display: none;
+  }
 }

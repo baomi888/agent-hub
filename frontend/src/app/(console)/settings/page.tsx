@@ -456,23 +456,25 @@ export default function SettingsPage() {
 function AccountCard({ onLogout }: { onLogout: () => Promise<void> }) {
   const me = useConsoleUser();
   return (
-    <div className="card card-pad acct-card" style={{ display: "flex", alignItems: "center", gap: 14 }}>
+    <div className="card card-pad acct-card">
       <CornIcon name="user" className="h-9 w-9" />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div className="card-title">{me?.user.username ?? "—"}</div>
         <div className="meta">账号 ID {me?.user.id ?? "—"}</div>
       </div>
-      <button
-        type="button"
-        className="btn btn-ghost btn-sm"
-        disabled
-        title="后端尚无 /auth/password 端点"
-      >
-        修改密码
-      </button>
-      <button type="button" className="btn btn-ghost btn-sm" onClick={() => void onLogout()}>
-        退出登录
-      </button>
+      <div className="acct-actions">
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          disabled
+          title="后端尚无 /auth/password 端点"
+        >
+          修改密码
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => void onLogout()}>
+          退出登录
+        </button>
+      </div>
     </div>
   );
 }
@@ -511,9 +513,9 @@ function QuotaBars({ summary }: { summary: UsageSummary }) {
       </div>
       <p className="hint">
         {summary.rate_per_minute > 0
-          ? `另有每分钟 ${summary.rate_per_minute} 次的限流。`
-          : "未启用每分钟限流。"}
-        超限一律 429，前端会解析 <code>retry_after</code> 告诉你还差多少秒，而不是只转圈。
+          ? `另有每分钟 ${summary.rate_per_minute} 次的上限。`
+          : "没有每分钟上限。"}
+        连着问得太快会被暂时挡住，页面上会直接告诉你还差多少秒，不会只转圈。
       </p>
     </>
   );
@@ -546,10 +548,15 @@ function ToolTable({ tools, demo }: { tools: AgentTool[]; demo?: boolean }) {
               {t.category === "write" ? "写" : "读"}
             </span>
           </span>
-          <span>{t.retryable ? "是" : "否"}</span>
-          <span>{t.needs_approval ? "是" : "否"}</span>
-          <span className="meta">
-            {fmtNum(t.max_output_chars)} · {t.cost_hint}
+          {/* 后三列包一层 .tr-facts：桌面 display:contents 摊回 grid 的第 3/4/5 列，
+              手机折到第二行并带上字段名 —— 否则 5 列数据在 2 列网格里会流成
+              「kb_search / 读 / 否 / 否 / 4,000·normal」四行，没人看得懂哪个「否」是什么。 */}
+          <span className="tr-facts">
+            <span data-l="可重试">{t.retryable ? "是" : "否"}</span>
+            <span data-l="需确认">{t.needs_approval ? "是" : "否"}</span>
+            <span className="meta" data-l="上限">
+              {fmtNum(t.max_output_chars)} · {t.cost_hint}
+            </span>
           </span>
         </div>
       ))}
@@ -607,11 +614,15 @@ function ScheduleCard({
           <span className="mono" title={j.job_key}>
             {j.job_key}
           </span>
-          <span className="mono" title={j.cron ?? undefined}>
-            {j.cron ?? "—"}
+          <span className="tr-facts">
+            <span className="mono" title={j.cron ?? undefined} data-l="周期">
+              {j.cron ?? "—"}
+            </span>
+            <span data-l="启用">{j.enabled ? "开" : "关"}</span>
+            <span className="meta" data-l="上次">
+              {j.last_status ?? "—"}
+            </span>
           </span>
-          <span>{j.enabled ? "开" : "关"}</span>
-          <span className="meta">{j.last_status ?? "—"}</span>
         </div>
       ))}
       <p className="hint">
