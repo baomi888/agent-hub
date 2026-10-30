@@ -98,7 +98,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if not config.ADMIN_UIDS and not config.ADMIN_USERNAMES:
             print(
                 "[启动提示] 未配置管理员（ADMIN_UIDS / ADMIN_USERNAMES 均为空）："
-                "数据看板、调度手动触发与指标导出不可用。"
+                "数据看板、调度手动触发与指标导出不可用。\n"
+                "            若你是原管理员、升级后突然变成普通用户，"
+                "在 .env 追加 ADMIN_USERNAMES=<你的用户名> 或 ADMIN_UIDS=<你的uid>，"
+                "重启后端即可恢复。\n"
+                "            uid 查法：venv/bin/python tools/create_user.py <用户名> --show-uid"
             )
     except Exception as e:  # noqa: BLE001 —— 自检失败不阻断启动
         print(f"[启动警告] 管理员配置自检失败：{e}")

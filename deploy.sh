@@ -440,6 +440,19 @@ else
   warn "有一个服务没起来，先看日志： bash deploy.sh logs"
 fi
 
+# 管理员配置自检（2026-10-30）：ADMIN_* 默认值已从代码里移除，
+# .env 不写就没人有管理员权限 —— 表现是「数据看板」入口和 /dashboard 一起消失，
+# 看起来像账号被降级，其实是配置缺失。见《部署说明》第十七节。
+ADMIN_CONF="$(grep -E '^[[:space:]]*ADMIN_(UIDS|USERNAMES)[[:space:]]*=' "$ROOT/.env" 2>/dev/null | grep -vE '=[[:space:]]*$' || true)"
+if [ -z "$ADMIN_CONF" ]; then
+  warn "没有配置管理员（.env 里 ADMIN_UIDS / ADMIN_USERNAMES 都是空）"
+  printf '  后果：数据看板、调度手动触发、指标导出全部不可用\n'
+  printf '  恢复：在 .env 追加一行 ADMIN_USERNAMES=<你的用户名>\n'
+  printf '        然后 bash deploy.sh restart（只改 .env 不需要重新构建前端）\n'
+else
+  printf '  管理员配置 -> %s\n' "$(printf '%s' "$ADMIN_CONF" | tr '\n' ' ')"
+fi
+
 cat <<EOF
 
 ============================================================
