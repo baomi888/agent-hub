@@ -13,6 +13,7 @@ import { api } from "@/lib/api";
 import type { ChatMode, RefSource, QuotaInfo } from "@/lib/types";
 import { ABILITIES, EXAMPLES, MODE_LABELS, PRIMARY_ENTRIES, SECONDARY_ENTRIES, TOOLS_URL } from "./chat/constants";
 import { isPlanRequest, stripPlanHint } from "./chat/plan";
+import CapToggles, { CAP_DEFAULT, type CapValue } from "./chat/CapToggles";
 import Bubble from "./chat/Bubble";
 import BubbleErrorBoundary from "./chat/BubbleErrorBoundary";
 import QueryEnhance from "./chat/QueryEnhance";
@@ -53,6 +54,12 @@ interface Props {
   mode: ChatMode;
   sending: boolean;
   onModeChange: (m: ChatMode) => void;
+  /**
+   * 视觉预览：用两枚能力开关（检索 / 智能联网）替代四档模式条。
+   * 只在 `?caps=1` 时由页面层打开，默认 false —— 后端契约（use_kb/use_web）
+   * 还没上线，现在让它上线等于给用户一个点了没用的开关。
+   */
+  capToggles?: boolean;
   onSend: (question: string, attachments?: ChatAttachment[], display?: string, plan?: boolean) => void;
   onStop: () => void;
   /** 重新生成：传入目标助手消息 id 与原始问题，覆盖原答案而不是追加 */
@@ -104,6 +111,7 @@ export default function ChatArea({
   mode,
   sending,
   onModeChange,
+  capToggles = false,
   onSend,
   onStop,
   onRetry,
@@ -215,6 +223,19 @@ export default function ChatArea({
   const pendingOtherCount = pending.length - pendingImageCount;
 
   const currentMode = MODE_LABELS.find((m) => m.value === mode);
+  // 能力开关的本地状态（仅 ?caps=1 预览用）。放在这里而不是组件内部：
+  // 输入框下面那行提示要跟着变 —— 原来它显示的是 currentMode.hint，
+  // 挂着开关却还在说「由系统判断：查资料、调工具还是直接答」，自相矛盾。
+  const [capValue, setCapValue] = useState<CapValue>(CAP_DEFAULT);
+  // 每句都控制在 9 字以内：这行右侧还钉着「Enter 发送 · ↑ 上一条 · Esc 清空」，
+  // 390px 下超了就被截成「…」（第一版「先翻你的资料库，不够再上网」就被截）
+  const capHint = capValue.kb
+    ? capValue.web
+      ? "先查资料，再联网"
+      : "只查你的资料库"
+    : capValue.web
+      ? "会联网查最新信息"
+      : "都不勾＝纯对话";
 
   // Codex 式分段滑块：量出 active 按钮的位置，让 .mode-thumb 滑过去
   const modeTabsRef = useRef<HTMLDivElement | null>(null);
@@ -822,31 +843,35 @@ export default function ChatArea({
           </a>
         </div>
         <div className="mb-2 flex items-center gap-2 sm:gap-3">
-          <div className="mode-tabs" role="group" aria-label="对话模式" ref={modeTabsRef}>
-            <span
-              className="mode-thumb"
-              aria-hidden="true"
-              style={{
-                transform: `translateX(${thumb.x}px)`,
-                width: thumb.w,
-                opacity: thumb.ready ? 1 : 0,
-              }}
-            />
-            {MODE_LABELS.map((m) => (
-              <button
-                key={m.value}
-                ref={(el) => {
-                  modeBtnRefs.current[m.value] = el;
+          {capToggles ? (
+            <CapToggles value={capValue} onChange={setCapValue} />
+          ) : (
+            <div className="mode-tabs" role="group" aria-label="对话模式" ref={modeTabsRef}>
+              <span
+                className="mode-thumb"
+                aria-hidden="true"
+                style={{
+                  transform: `translateX(${thumb.x}px)`,
+                  width: thumb.w,
+                  opacity: thumb.ready ? 1 : 0,
                 }}
-                onClick={() => onModeChange(m.value)}
-                title={m.hint}
-                aria-pressed={mode === m.value}
-                className={`mode ${mode === m.value ? "active" : ""}`}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
+              />
+              {MODE_LABELS.map((m) => (
+                <button
+                  key={m.value}
+                  ref={(el) => {
+                    modeBtnRefs.current[m.value] = el;
+                  }}
+                  onClick={() => onModeChange(m.value)}
+                  title={m.hint}
+                  aria-pressed={mode === m.value}
+                  className={`mode ${mode === m.value ? "active" : ""}`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          )}
           {/* 内测反馈：紧贴模式条右侧（紧跟最后一个模式按钮），不塞回顶栏那排灰图标里。
               理由：想说话的那一刻人正在输入框这儿（刚被答错、刚发现按钮不好用），
               顶栏右上的小图标太不显眼，内测第一批人的意见最容易在这里丢掉。
@@ -1124,7 +1149,7 @@ export default function ChatArea({
 
         {/* 键盘提示从 placeholder 里挪出来：placeholder 要短，才像"随便问点什么" */}
         <div className="input-hint">
-          <span className="truncate">{currentMode?.hint}</span>
+          <span className="truncate">{capToggles ? capHint : currentMode?.hint}</span>
           <span className="ml-1 shrink-0 whitespace-nowrap">Enter 发送 · ↑ 上一条 · Esc 清空</span>
         </div>
       </div>

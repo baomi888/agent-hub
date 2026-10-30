@@ -80,6 +80,15 @@ export default function Home() {
     chunkOverlap, setChunkOverlap, kbPanelPref, setKbPanelPref, savedRef,
     fontScale, setFontScale,
   } = prefs;
+  // 能力开关（检索 / 智能联网）的**视觉预览**开关：`?caps=1`。
+  // 后端契约（use_kb / use_web）还没上线，两枚开关点了只改本地状态、不影响请求，
+  // 所以默认不显示 —— 不能给用户一个按了没反应的按钮。
+  // 读 query 放在 effect 里而不是 useState 初始化函数：页面会被预渲染，
+  // 初始化时读 window 会 hydration 不一致（服务端 false、客户端 true）。
+  const [capToggles, setCapToggles] = useState(false);
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("caps") === "1") setCapToggles(true);
+  }, []);
   const sessions_ = useSessions(showToast);
   const {
     sessions, setSessions, activeSid, setActiveSid, messages, setMessages,
@@ -777,6 +786,7 @@ export default function Home() {
           mode={mode}
           sending={sending}
           onModeChange={setMode}
+          capToggles={capToggles}
           onSend={sendMessage}
           onStop={stopSending}
           onRetry={retryMessage}
