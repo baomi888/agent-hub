@@ -48,6 +48,12 @@
      #875B10 在最暗的侧栏纸 #EDE4C8 上仍有 4.68:1，三个明度层都过 AA */
   --accent-ink: #875B10;
   --accent-soft: rgba(200, 137, 42, 0.10);
+  /* 金色的"选中底"：比 --accent-soft 重一档（.10 → .16）。
+     --accent-soft 是 hover 淡底（16% 的金铺满一片会像提醒条），
+     但能力开关「已开启」要在一片纸色里被一眼认出，10% 太淡、
+     --accent-line(.15) 是本该只做描边的值。多这一档，是为了让
+     "描边 = 未选 / 实底 = 已选"这套对比真的成立（见 chat.css 的 .cap-chip.on） */
+  --accent-tint: rgba(200, 137, 42, 0.18);
   --red: #B4472F;
   /* 语义红的可读版本：浅底上的正文/警示文字用它。
      与 --accent / --accent-ink 同一套分工 --red 只有 ~3.4:1，--red-ink 是 5.5:1 */
@@ -246,6 +252,7 @@ html[data-fs="xl"] {
   --accent: #E0A03A;
   --accent-ink: #E0A03A;
   --accent-soft: rgba(224, 160, 58, 0.12);
+  --accent-tint: rgba(224, 160, 58, 0.20);
   --red: #D9705A;
   --red-ink: #E08A6E;
   /* 深色：实心色压白字分别 5.32 / 3.25 / 5.08。
@@ -299,6 +306,7 @@ html[data-fs="xl"] {
   --color-faint: var(--text-3);
   --color-accent: var(--accent);
   --color-accent-soft: var(--accent-soft);
+  --color-accent-tint: var(--accent-tint);
   /* 和 --color-red-ink / --color-success-ink 同一套分工：浅底上的金字用它。
      之前漏了这条映射，tsx 里的 text-accent-ink 一直在静默失效（CSS 层却正常用了 var(--accent-ink)） */
   --color-accent-ink: var(--accent-ink);
