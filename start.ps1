@@ -7,7 +7,9 @@ $ErrorActionPreference = "Continue"
 $ROOT = $PSScriptRoot
 $FRONTEND = Join-Path $ROOT "frontend"
 $BACKEND_PORT = 8000
-$FRONTEND_PORT = 3000
+# ★ 前端不用 3000：这台机器的 3000 被 VMware 的 vmnat 服务占着（0.0.0.0:3000），
+#   next dev 绑不上会直接退出（EACCES）。3100 是空的，2026-10-30 改。
+$FRONTEND_PORT = 3100
 $BACKEND_URL = "http://localhost:$BACKEND_PORT"
 $FRONTEND_URL = "http://localhost:$FRONTEND_PORT"
 
@@ -96,6 +98,9 @@ Start-Sleep -Seconds 8
 Write-Host ""
 Write-Ok "后端: $BACKEND_URL/health"
 Write-Ok "前端: $FRONTEND_URL"
+Write-Host ""
+Write-Host "[i] 能力开关（检索/智能联网）还没上线，只在预览参数下出现：" -ForegroundColor DarkGray
+Write-Host "    $FRONTEND_URL/?caps=1" -ForegroundColor DarkGray
 Write-Host ""
 Write-Step "正在打开浏览器 ..."
 Start-Process $FRONTEND_URL
