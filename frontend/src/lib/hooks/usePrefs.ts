@@ -47,15 +47,32 @@ const normalizeMode = (m: ChatMode): ChatMode => (LEGACY_MODES.has(m) ? "auto" :
  * auto 这里给 useKb=true 而不是 has_kb：前端此刻并不知道用户有没有库，
  * 后端会再 and 一次 has_kb，所以给 true 是安全的（没库时等价于 false）。
  */
+/**
+ * 旧四档 → 两个开关。**全站唯一一份表**，三处消费：
+ *   ① 上面的老用户一次性迁移；② 模式条/模板 ?mode 改动时的同步写；③ 探针核对。
+ *
+ * 为什么必须唯一：批 A 之后后端 `_resolve_switches` 的优先级是 fields > mode ——
+ * 只要请求体带了 use_kb/use_web，`mode` 就被**完全忽略**。于是模式条（默认路径
+ * 下它就是用户能看到的唯一选择器）改 mode 而不改开关，等于按钮点了不生效：
+ * 实测点「纯对话」后请求体仍是 use_kb=true，用户要的纯对话变成了带检索的智能体。
+ * 修法是模式改变时按本表同步写开关；表和迁移用同一份，避免日后改一张忘一张。
+ */
+export const MODE_CAPS: Record<string, { kb: boolean; web: boolean }> = {
+  rag: { kb: true, web: false },
+  llm: { kb: false, web: false },
+  agent: { kb: true, web: true },
+  hybrid: { kb: true, web: true },
+  auto: { kb: true, web: true },
+};
+
 function migrateLegacyCaps(saved: Prefs): { useKb: boolean; useWeb: boolean } | null {
   // 已经是新偏好（存过任一开关）就不再迁移，否则用户手动关掉的会被旧 mode 覆盖回来
   if (typeof saved.useKb === "boolean" || typeof saved.useWeb === "boolean") return null;
   // 全新用户：没有旧 mode，直接走新默认（两个都不勾，符合决策 D3）
   if (!saved.mode) return null;
-  if (saved.mode === "rag") return { useKb: true, useWeb: false };
-  if (saved.mode === "llm") return { useKb: false, useWeb: false };
-  // auto / agent / hybrid：绑库就检索，并保留联网能力
-  return { useKb: true, useWeb: true };
+  // 未知旧值按 auto 处理（与后端 _resolve_switches 的兜底一致）
+  const c = MODE_CAPS[saved.mode] ?? MODE_CAPS.auto;
+  return { useKb: c.kb, useWeb: c.web };
 }
 
 export interface Prefs {

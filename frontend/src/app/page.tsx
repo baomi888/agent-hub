@@ -13,7 +13,7 @@ import { streamChat } from "@/lib/sse";
 import { uid } from "@/lib/id";
 import { useToast } from "@/lib/hooks/useToast";
 import { getSendGeo, getCachedGeo, isGeoEnabled, acquireGeo, reverseGeocodePlace, setGeoEnabled, updateCachedPlace, formatPlace, getManualCity, setManualCity } from "@/lib/geo";
-import { usePrefs } from "@/lib/hooks/usePrefs";
+import { usePrefs, MODE_CAPS } from "@/lib/hooks/usePrefs";
 import { useSessions } from "@/lib/hooks/useSessions";
 import { useKnowledge } from "@/lib/hooks/useKnowledge";
 import { useAuth } from "@/lib/hooks/useAuth";
@@ -93,6 +93,26 @@ export default function Home() {
   // 两枚开关的当前值。提到页面层是因为它要进请求体：原来它住在 ChatArea 内部
   // state 里，点了只改视觉、发不出去（`?caps=1` 那时只是预览）。
   const capValue = { kb: useKb, web: useWeb };
+  /**
+   * 旧四档改动时**同步**写两个开关。
+   *
+   * 批 A 之后后端 `_resolve_switches` 的优先级是 fields > mode：请求体只要带了
+   * use_kb/use_web，`mode` 就被完全忽略。而默认路径下（不带 ?caps=1）用户看到的
+   * 唯一选择器仍是四档模式条，模板链接也还带 ?mode= —— 它们只改 mode 不改开关，
+   * 结果就是「按钮点了不生效」。实测两条：
+   *   点「纯对话」→ prefs.mode=llm，但请求体 use_kb 仍是 true（纯对话变成了带检索的智能体）
+   *   模板 ?mode=llm → mode 落了，两个开关仍是 true（模板推荐整体失效）
+   * 映射表与 usePrefs 的迁移共用 MODE_CAPS，避免两张表日后漂移。
+   */
+  const handleModeChange = useCallback(
+    (m: ChatMode) => {
+      setMode(m);
+      const c = MODE_CAPS[m] ?? MODE_CAPS.auto;
+      setUseKb(c.kb);
+      setUseWeb(c.web);
+    },
+    [setMode, setUseKb, setUseWeb],
+  );
   const onCapChange = useCallback(
     (next: { kb: boolean; web: boolean }) => {
       setUseKb(next.kb);
@@ -193,14 +213,16 @@ export default function Home() {
     // 硬编码一份模式列表必然随新模式漏改。
     const validModes = MODE_LABELS.map((m) => m.value) as readonly string[];
     if (a.mode && validModes.includes(a.mode)) {
-      setMode(a.mode as ChatMode);
+      // 走 handleModeChange 而不是 setMode：模板推荐的模式也要同步到两个开关，
+      // 否则 ?mode=llm 只改了 mode（后端已不认），模板推荐等于没生效。
+      handleModeChange(a.mode as ChatMode);
     }
     if (activeSid !== a.sid) void selectSession(a.sid);
     void refreshKbs();
     applyRef.current = null;
     // 清掉 query，避免刷新又跳一次
     window.history.replaceState({}, "", "/");
-  }, [sessions, activeSid, selectSession, refreshKbs, setPrefill]);
+  }, [sessions, activeSid, selectSession, refreshKbs, setPrefill, handleModeChange]);
   // 抽屉容器：打开时把焦点送进去，关闭后还给触发按钮
   const sidebarRef = useRef<HTMLElement | null>(null);
   const kbRef = useRef<HTMLElement | null>(null);
@@ -801,7 +823,7 @@ export default function Home() {
           messages={messages}
           mode={mode}
           sending={sending}
-          onModeChange={setMode}
+          onModeChange={handleModeChange}
           capToggles={capToggles}
           capValue={capValue}
           onCapChange={onCapChange}
