@@ -56,3 +56,17 @@
 /core/quota.py                  @baomi888
 /main.py                        @baomi888
 /api/schemas.py                 @baomi888
+
+# ---------- 校园工具集：独立板块（2026-10-31 立） ----------
+# 归属与审核：@baomi888（项目负责人）
+#
+# 这个板块是「免登录纯前端小工具」，与主站业务解耦，有独立的版本号与迭代节奏
+# （见 campus/README.md）。把整块收口给一个人，是为了避免两边同时改造成边界模糊。
+#
+# ⚠️ 待补：开发者本人的 GitHub 账号。补上后把下面三行的 owner 改成 TA，
+#    审核仍由 @baomi888 承担（PR 需要负责人 approve 才可合并）。
+#    改法：整体替换 @baomi888 → @<你的GitHub账号>
+/campus/                        @baomi888
+/frontend/src/campus/           @baomi888
+/frontend/src/app/(campus)/     @baomi888
+
