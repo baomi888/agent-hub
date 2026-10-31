@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import Sidebar from "@/components/Sidebar";
 import ChatArea, { type ChatAttachment } from "@/components/ChatArea";
 import KnowledgePanel from "@/components/KnowledgePanel";
+import SedimentModal from "@/components/chat/SedimentModal";
 import UsagePanel from "@/components/UsagePanel";
 import { api } from "@/lib/api";
 import { streamChat } from "@/lib/sse";
@@ -196,6 +197,15 @@ export default function Home() {
   const [sidebarPref, setSidebarPref] = useState(false);
   // 用量与反馈看板（P2）：侧栏账号块点开
   const [usageOpen, setUsageOpen] = useState(false);
+  /**
+   * 「存进资料库」弹层。
+   *
+   * `focus` 是从哪条消息点进来的（消息 dbId）；右栏「对话里的内容」进来时为 null。
+   * 弹层放在页面层而不是面板里：两个入口要开的是同一个东西、共用同一份勾选状态。
+   */
+  const [sediment, setSediment] = useState<{ focus: number | null; text: string | null } | null>(
+    null
+  );
   const kbPanelOpen = kbPanelPref ?? viewport === "wide";
   const sidebarOpen = sidebarPref && viewport === "narrow";
 
@@ -803,6 +813,7 @@ export default function Home() {
           onOpenSidebar={viewport === "narrow" ? () => setSidebarOpen(true) : undefined}
           prefill={prefill ?? undefined}
           onDeleteTurn={deleteTurn}
+          onSediment={(dbId, text) => setSediment({ focus: dbId, text })}
           geoEnabled={geoEnabled}
           geoCity={geoCity}
           geoPending={geoPending}
@@ -841,7 +852,25 @@ export default function Home() {
         overlay={viewport !== "wide"}
         open={kbPanelOpen}
         sid={activeSid}
+        onOpenSediment={() => setSediment({ focus: null, text: null })}
       />
+
+      {sediment && (
+        <SedimentModal
+          sid={activeSid}
+          defaultKbId={boundKb}
+          boundKb={boundKb}
+          onBind={bindKb}
+          focusRef={sediment.focus}
+          focusText={sediment.text}
+          onClose={() => setSediment(null)}
+          onImported={() => {
+            // 库里多了几条，右栏的条目数要跟着变
+            void refreshKbs();
+            showToast("success", "存好了 —— 下次问到相关的事，会先翻这个库");
+          }}
+        />
+      )}
 
       {/* 抽屉遮罩：点击关闭浮层 */}
       <div

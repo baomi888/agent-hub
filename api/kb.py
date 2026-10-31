@@ -533,6 +533,42 @@ class ImportDialogueRequest(BaseModel):
     sid: str
     # 勾选的候选下标（按 candidates 接口返回顺序）；空 = 全部
     indexes: list[int] = Field(default_factory=list)
+    # 「就存这几条消息」——用户在界面上指着一句话按下保存时用。
+    #
+    # ★ 与 indexes 互斥，且**不走候选判据**：判据（`extract_candidates`）是零 LLM
+    #   正则在猜"哪句像知识"，它只是给批量预览排个序。用户明确点了某一句，
+    #   这份"我确定要存"本身就是确认，比正则更可信 —— 再拿正则去否掉它，
+    #   就会出现「我指着这句点保存，你说没挑出来」这种当面打脸。
+    #   仍然只收 user 自己的话（助手生成的不算资料，见 kb/dialogue_import.py 开头）。
+    message_ids: list[int] = Field(default_factory=list)
+
+
+def _messages_as_candidates(msgs: list[dict], ids: list[int]) -> list[dict]:
+    """把「指定的消息」直接当候选：原样一条消息 = 一条知识。
+
+    不切句：用户在界面上指的是这一整句消息，把它拆成几段存进去，
+    溯源时反而对不上他当时指的东西。
+    """
+    by_id = {int(m.get("id") or 0): m for m in msgs}
+    out: list[dict] = []
+    for mid in dict.fromkeys(int(i) for i in ids):
+        m = by_id.get(mid)
+        if not m or m.get("role") != "user":
+            continue
+        text = (m.get("content") or "").strip()
+        if not text:
+            continue
+        out.append(
+            {
+                "text": text,
+                # 走这条路的都是"用户自己讲的事实/规定"，没有分类器参与，统一按事实标
+                "kind": "事实",
+                "refs": [mid],
+                "role": "user",
+                "ts": int(m.get("created_at") or 0),
+            }
+        )
+    return out
 
 
 def _load_dialogue(uid: str, sid: str) -> tuple[list[dict], str]:
@@ -575,16 +611,28 @@ async def import_dialogue(
     _must_own(uid, kb_id)
     await asyncio.to_thread(quota.guard, uid, "embed")
     msgs, title = _load_dialogue(uid, req.sid)
-    cands = await asyncio.to_thread(dialogue_import.extract_candidates, msgs)
-    if not cands:
-        raise HTTPException(status_code=400, detail="这个会话没有可沉淀的知识候选")
-    idx = list(dict.fromkeys(req.indexes)) if req.indexes else list(range(len(cands)))
-    bad = [i for i in idx if i < 0 or i >= len(cands)]
-    if bad:
-        raise HTTPException(status_code=400, detail=f"候选下标越界：{bad[:5]}")
-    picked = [c for i in idx if (c := cands[i]).get("text", "").strip()]
-    if not picked:
-        raise HTTPException(status_code=400, detail="没有勾选任何有效候选")
+
+    if req.message_ids:
+        # 指着某句话存：不经过判据，但要真的属于这段会话、且是自己说的
+        picked = _messages_as_candidates(msgs, req.message_ids)
+        if not picked:
+            raise HTTPException(
+                status_code=400,
+                detail="这条消息存不了 —— 只能存你自己说过的话，而且得属于这段对话",
+            )
+        requested = len(dict.fromkeys(int(i) for i in req.message_ids))
+    else:
+        cands = await asyncio.to_thread(dialogue_import.extract_candidates, msgs)
+        if not cands:
+            raise HTTPException(status_code=400, detail="这个会话没有可沉淀的知识候选")
+        idx = list(dict.fromkeys(req.indexes)) if req.indexes else list(range(len(cands)))
+        bad = [i for i in idx if i < 0 or i >= len(cands)]
+        if bad:
+            raise HTTPException(status_code=400, detail=f"候选下标越界：{bad[:5]}")
+        picked = [c for i in idx if (c := cands[i]).get("text", "").strip()]
+        if not picked:
+            raise HTTPException(status_code=400, detail="没有勾选任何有效候选")
+        requested = len(idx)
 
     pipe = pipelines.get_or_create(uid, kb_id)
     # 去重：这段对话里已经沉过的原句不再写第二遍。
@@ -593,7 +641,7 @@ async def import_dialogue(
     # 过滤按原文精确比对：候选本来就是原句不改写，所以这里能直接对上。
     existing = await asyncio.to_thread(pipe.get_dialogue_texts, req.sid)
     picked = dialogue_import.drop_existing(picked, existing)
-    skipped = len(idx) - len(picked)
+    skipped = requested - len(picked)
     if not picked:
         # 全部存过：不算错误（用户可能是手滑点了第二次），但也不该静默返回成功
         return {

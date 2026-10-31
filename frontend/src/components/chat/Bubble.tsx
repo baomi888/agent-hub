@@ -23,6 +23,7 @@ const Bubble = memo(function Bubble({
   onFeedback,
   onPreviewFile,
   onDeleteTurn,
+  onSediment,
 }: {
   m: UiMessage;
   userQuestion?: string;
@@ -38,6 +39,15 @@ const Bubble = memo(function Bubble({
   onPreviewFile?: (source: string) => void;
   /** 删除该消息及其所在的一轮对话 */
   onDeleteTurn?: (msgDbId: number) => void;
+  /**
+   * 「存进资料库」：把这条消息里讲到的事收进知识库。
+   *
+   * ★ 只挂在**用户自己**的消息上，这是产品口径决定的（`kb/dialogue_import.py`
+   *   默认只收 user 的话）。助手的长回答是按句生成的段落，整段进库既不可溯源
+   *   也会把 top-k 占满；而用户说「负责的老陈工号 KX-3301」这种，才是资料。
+   *   所以不做「存这条回答」，免得按钮承诺了后端给不了的东西。
+   */
+  onSediment?: (msgDbId: number, text: string) => void;
 }) {
   const [feedback, setFeedback] = useState<"like" | "dislike" | null>(null);
   // 「踩」后展开的改进原因输入框：点踩即记一票，这里只收集可选的文字补充
@@ -97,21 +107,40 @@ const Bubble = memo(function Bubble({
               <div className="message-body">{renderContent(m.content)}</div>
             </div>
           )}
-          {m.dbId && onDeleteTurn && !m.streaming && (
-            <div className="mt-1.5 flex justify-end">
-              <button
-                type="button"
-                onClick={() => onDeleteTurn(m.dbId!)}
-                title="删除这轮对话"
-                aria-label="删除这轮对话"
-                className="msg-action-del"
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
-                  <polyline points="3 6 5 6 21 6" />
-                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                </svg>
-                <span>删除</span>
-              </button>
+          {/* 用户消息下的轻量动作。原来只有「删除」，整条消息下面空得很，
+              而「把自己刚说清楚的事记下来」这件事没有任何入口 —— 它长在这里
+              才符合时机：用户刚打完「工号 KX-3301 归老陈」，眼前就该有得点。
+              少于 6 个字的多半是「继续」「好的」，挂上去只是噪音。 */}
+          {!m.streaming && ((m.dbId && onDeleteTurn) || (m.dbId && onSediment)) && (
+            <div className="mt-1 flex items-center justify-end gap-0.5">
+              {m.dbId && onSediment && m.content.trim().length >= 6 && (
+                <button
+                  type="button"
+                  onClick={() => onSediment(m.dbId!, m.content)}
+                  title="把这句话收进资料库，以后提问能查到"
+                  className="msg-action-save"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                  </svg>
+                  <span>存进资料库</span>
+                </button>
+              )}
+              {m.dbId && onDeleteTurn && (
+                <button
+                  type="button"
+                  onClick={() => onDeleteTurn(m.dbId!)}
+                  title="删除这轮对话"
+                  aria-label="删除这轮对话"
+                  className="msg-action-del"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                  </svg>
+                  <span>删除</span>
+                </button>
+              )}
             </div>
           )}
         </div>

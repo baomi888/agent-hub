@@ -168,6 +168,29 @@
   border-color: var(--red);
 }
 
+/* 消息存库：与「删除」同一档视觉重量，但 hover 用玉米金 ——
+   「收起来」是正向动作，别用警示色。
+   常态比「删除」深一档（text-2 而不是 text-3）：这个按钮的职责一半是
+   让人知道功能存在，压到和删除一样淡就白挂了。 */
+.msg-action-save {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  padding: 2px 8px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.18s ease, background-color 0.18s ease, border-color 0.18s ease;
+}
+.msg-action-save:hover {
+  color: var(--accent-ink);
+  background: var(--fill-2);
+  border-color: var(--accent-line);
+}
+
 /* 消息操作条：平时收起，悬停/键盘聚焦到消息内才浮现，
    降低整条常显的视觉重量；触屏无 hover，始终显示 */
 .msg-actions {

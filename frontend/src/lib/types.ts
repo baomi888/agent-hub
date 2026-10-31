@@ -87,7 +87,14 @@ export interface Message {
 export interface DialogueCandidate {
   text: string;
   kind: string;
-  refs?: string[];
+  /**
+   * 这句出自哪条消息 —— 后端 `kb/dialogue_import.py` 写的是 `refs: [message_id]`，
+   * 是**数字**，和界面上 `UiMessage.dbId` 同一套 id。
+   *
+   * 有了它，「在消息下面点存」才能只勾这一句对应的候选，而不是让用户在
+   * 整段对话的候选里自己找。之前这里写成 `string[]`，是因为没人用过它。
+   */
+  refs?: number[];
   role?: string;
   ts?: number;
   salience?: number;

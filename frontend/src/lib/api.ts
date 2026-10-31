@@ -370,6 +370,18 @@ export const api = {
       { method: "POST", body: JSON.stringify({ sid, indexes }) },
       { timeoutMs: 120000 }
     ),
+  /**
+   * 存「指定的这几条消息」——用户指着某句话按了保存。
+   *
+   * 和上面那条的区别：不走候选判据。判据是给批量预览排序用的正则，
+   * 用户明确指定了哪一句时，它没有资格再否掉。
+   */
+  importDialogueMessages: (kbId: string, sid: string, messageIds: number[]) =>
+    request<ImportDialogueResult>(
+      `/api/kb/${encodeURIComponent(kbId)}/import-dialogue`,
+      { method: "POST", body: JSON.stringify({ sid, message_ids: messageIds }) },
+      { timeoutMs: 120000 }
+    ),
 
   // ---------- 建库建议（板块 D，后端开发中）----------
   // 这三个端点在板块 D 落地前会 404。卡片组件已写好但**尚未挂载**（等 SSE

@@ -254,3 +254,57 @@
     flex: 1 1 100%;
   }
 }
+
+/* ---------- 单句模式（从某条消息的「存进资料库」进来） ---------- */
+/* 只显示他指的那一句，字号比列表大一点 —— 这是要确认的对象，不是选项之一 */
+.sd-one {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+.sd-one-label {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.sd-one-text {
+  padding: 12px 14px;
+  font-size: var(--msg-fs);
+  line-height: 1.75;
+  color: var(--ink);
+  background: var(--fill-2);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius-sm);
+  word-break: break-word;
+}
+
+/* ---------- 没有库时就地建 ---------- */
+.sd-newkb {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+.sd-newkb-row {
+  display: flex;
+  gap: var(--space-8);
+  align-items: center;
+}
+.sd-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  font-size: var(--fs-sm);
+  color: var(--ink);
+  background: var(--card-bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+}
+.sd-input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+/* 底部那行在窄屏会换行，输入框要能独占一行 */
+@media (max-width: 560px) {
+  .sd-input {
+    font-size: 16px; /* iOS 聚焦 <16px 会放大整页且不还原 */
+  }
+}

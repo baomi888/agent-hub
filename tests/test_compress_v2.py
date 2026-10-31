@@ -404,3 +404,59 @@ class TestDialogueImport:
             json={"sid": sid, "indexes": [9999]},
         )
         assert resp.status_code == 400
+
+    # ---------- 指着某一句存（message_ids）----------
+    #
+    # 这条路刻意**不走候选判据**：判据是零 LLM 正则，认不出「周会固定在
+    # 每周四下午三点」这种没有编号的事实。用户已经指着那句话点了保存，
+    # 再拿正则否掉他，界面上就变成「我点了保存，它说没挑出来」。
+
+    def test_import_by_message_id_stores_that_sentence(self, client, monkeypatch):
+        c, added = client
+        from api import kb as kb_api
+
+        monkeypatch.setattr(kb_api.pipelines, "owner_of", lambda kb: UID)
+        sid = store.create_conversation(UID, "单句入库")["id"]
+        # 这句不含编号、不是待办，正规判据根本不会把它当候选
+        mid = store.add_message(UID, sid, "user", "我们实验室的周会固定在每周四下午三点，会议室是 B2-07。")
+        store.add_message(UID, sid, "assistant", "好的。")
+
+        cands = c.get(f"/api/kb/dialogue-candidates/{sid}").json()["candidates"]
+        assert all("每周四" not in x["text"] for x in cands), "前提失效：这句被判据收进来了"
+
+        resp = c.post("/api/kb/kb-test/import-dialogue", json={"sid": sid, "message_ids": [mid]})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["imported"] == 1, resp.text
+        assert len(added) == 1
+        assert added[0].page_content == "我们实验室的周会固定在每周四下午三点，会议室是 B2-07。"
+        assert added[0].metadata["message_id"] == mid
+
+    def test_import_by_message_id_rejects_assistant(self, client, monkeypatch):
+        """助手的话不算资料 —— 只挂用户消息是界面的事，后端也得拦一道。"""
+        c, added = client
+        from api import kb as kb_api
+
+        monkeypatch.setattr(kb_api.pipelines, "owner_of", lambda kb: UID)
+        sid = store.create_conversation(UID, "单句入库")["id"]
+        store.add_message(UID, sid, "user", "你好")
+        aid = store.add_message(UID, sid, "assistant", "助手生成的一大段内容，不该被当成用户的资料。")
+
+        resp = c.post("/api/kb/kb-test/import-dialogue", json={"sid": sid, "message_ids": [aid]})
+        assert resp.status_code == 400, resp.text
+        assert added == [], "被拒的请求不许往库里写东西"
+
+    def test_import_by_message_id_idempotent(self, client, monkeypatch):
+        c, added = client
+        from api import kb as kb_api
+
+        monkeypatch.setattr(kb_api.pipelines, "owner_of", lambda kb: UID)
+        sid = store.create_conversation(UID, "单句入库")["id"]
+        mid = store.add_message(UID, sid, "user", "负责人是老陈，工号 KX-3301。")
+
+        first = c.post("/api/kb/kb-test/import-dialogue", json={"sid": sid, "message_ids": [mid]})
+        assert first.json()["imported"] == 1, first.text
+        second = c.post("/api/kb/kb-test/import-dialogue", json={"sid": sid, "message_ids": [mid]})
+        body = second.json()
+        assert body["imported"] == 0, body
+        assert body["skipped"] == 1, body
+        assert len(added) == 1, "同一句第二次不该再写一份进库"

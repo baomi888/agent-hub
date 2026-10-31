@@ -83,6 +83,14 @@ interface Props {
   prefill?: { text: string; ts: number };
   /** 删除某条消息及其所在的一轮对话（user + 后续 assistant） */
   onDeleteTurn?: (msgDbId: number) => void;
+  /**
+   * 把某条用户消息收进资料库。
+   *
+   * 入口长在消息自己的动作排里（不是右栏、不是资料库页）——这个功能最难的地方
+   * 不是能不能存，而是用户想不起来它存在。它必须出现在「刚刚说清楚一件事」
+   * 的那一刻，而那一刻用户的视线就在自己那条消息下面。
+   */
+  onSediment?: (msgDbId: number, text: string) => void;
   /** 地理定位开关状态（开启后发送消息自动带坐标） */
   geoEnabled?: boolean;
   /** 当前定位城市（角标展示用，可能为 null） */
@@ -127,6 +135,7 @@ export default function ChatArea({
   onOpenSidebar,
   prefill,
   onDeleteTurn,
+  onSediment,
   geoEnabled = false,
   geoCity = null,
   geoPending = false,
@@ -656,6 +665,7 @@ export default function ChatArea({
                       onRetry={onRetry}
                       onPreviewFile={boundKb ? openPreviewFile : undefined}
                       onDeleteTurn={onDeleteTurn}
+                      onSediment={onSediment}
                     />
                   </BubbleErrorBoundary>
                 );
