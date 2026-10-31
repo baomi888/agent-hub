@@ -1,0 +1,364 @@
+/* ============================================================
+   校园工具集 · 板块样式
+   ------------------------------------------------------------
+   规则（见 campus/docs/01_板块边界与架构.md 第 4 节）：
+   1. 只用全局令牌（--ink / --card-bg / --line / --accent …），不自造色板；
+   2. 不写死 #fff / #000，深浅主题都要成立；
+   3. 板块专属变量统一 --campus- 前缀，避免和全局撞名；
+   4. 不修改 src/app/styles/tokens.css。
+
+   字号基准取 --fs-lg（14px）而不是更小的档：内测里被反复投诉「字太小」，
+   工具类页面是高频短停留场景，宁可牺牲一点信息密度。
+   ============================================================ */
+
+.campus-shell {
+  --campus-max: 880px;
+  --campus-gap: 12px;
+  --campus-radius: var(--radius-lg);
+
+  width: 100%;
+  max-width: var(--campus-max);
+  margin: 0 auto;
+  padding: 28px 16px 72px;
+  color: var(--ink);
+}
+
+/* ---------- 页头 ---------- */
+
+.campus-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 20px;
+}
+
+.campus-title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: var(--fs-title);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
+
+.campus-sub {
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: 1.7;
+  color: var(--text-3);
+}
+
+/* ---------- 工具切换（横向滚动，窄屏不换行挤压） ---------- */
+
+.campus-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  margin-bottom: 18px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.campus-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.campus-tab {
+  flex: 0 0 auto;
+  padding: 7px 14px;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--text-2);
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.campus-tab:hover {
+  color: var(--ink);
+  background: var(--fill-2);
+}
+
+.campus-tab.is-active {
+  color: var(--accent-ink);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-1);
+}
+
+/* 迁移中的工具：右侧点一个小标记，说明点进去仍是旧实现 */
+.campus-tab[data-migrated="false"]::after {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+  background: var(--text-3);
+  border-radius: 50%;
+}
+
+/* ---------- 卡片 ---------- */
+
+.campus-card {
+  padding: 18px;
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--campus-radius);
+  box-shadow: var(--shadow-1);
+}
+
+.campus-card + .campus-card {
+  margin-top: var(--campus-gap);
+}
+
+.campus-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.campus-card-title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.campus-card-note {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+/* ---------- 表单 ---------- */
+
+.campus-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.campus-input,
+.campus-select {
+  width: 100%;
+  padding: 7px 10px;
+  font-size: var(--fs-lg);
+  color: var(--ink);
+  background: var(--bg-canvas);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  outline-offset: 2px;
+}
+
+.campus-input:focus-visible,
+.campus-select:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent-soft);
+}
+
+/* 数字框去掉上下箭头：课程表里连点 6 次学分会误触 */
+.campus-input[type="number"]::-webkit-outer-spin-button,
+.campus-input[type="number"]::-webkit-inner-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
+
+/* ---------- 按钮 ---------- */
+
+.campus-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--text-2);
+  white-space: nowrap;
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.campus-btn:hover {
+  color: var(--ink);
+  background: var(--fill-2);
+  border-color: var(--line-strong);
+}
+
+.campus-btn.is-primary {
+  color: var(--solid-text);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.campus-btn.is-primary:hover {
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
+}
+
+.campus-btn.is-danger {
+  color: var(--red-ink);
+  background: transparent;
+  border-color: transparent;
+}
+
+.campus-btn.is-danger:hover {
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+}
+
+.campus-btn:disabled {
+  color: var(--text-3);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* ---------- 统计读数 ---------- */
+
+.campus-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--campus-gap);
+}
+
+.campus-stat {
+  padding: 12px 14px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.campus-stat-label {
+  display: block;
+  margin-bottom: 2px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.campus-stat-value {
+  font-family: var(--font-serif);
+  font-size: var(--fs-num);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+  color: var(--ink);
+}
+
+.campus-stat-value.is-accent {
+  color: var(--accent-ink);
+}
+
+/* 窄屏三列会挤成一团，直接堆叠 */
+@media (max-width: 560px) {
+  .campus-shell {
+    padding: 20px 12px 56px;
+  }
+
+  .campus-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .campus-stat-value {
+    font-size: var(--fs-xl);
+  }
+}
+
+/* ---------- 表格（GPA 明细） ---------- */
+
+.campus-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-md);
+}
+
+.campus-table th {
+  padding: 8px 6px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-3);
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+
+.campus-table td {
+  padding: 6px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.campus-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.campus-table .is-num {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  text-align: center;
+}
+
+/* ---------- 空态 ---------- */
+
+.campus-empty {
+  padding: 28px 16px;
+  font-size: var(--fs-md);
+  line-height: 1.7;
+  color: var(--text-3);
+  text-align: center;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-md);
+}
+
+/* ---------- 未迁移工具的占位提示 ---------- */
+
+.campus-pending {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 24px 18px;
+  background: var(--fill-3);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--campus-radius);
+}
+
+.campus-pending-title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.campus-pending-text {
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: 1.75;
+  color: var(--text-2);
+}
+
+.campus-pending a {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ---------- 无障碍：尊重减少动效偏好 ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .campus-tab,
+  .campus-btn {
+    transition: none;
+  }
+}
