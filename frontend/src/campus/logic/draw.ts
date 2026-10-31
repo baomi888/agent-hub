@@ -19,6 +19,32 @@ export function shuffle<T>(items: readonly T[], random: () => number = Math.rand
   return result;
 }
 
+/** 一次抽签的完整结果：中签者与剩下的人 */
+export interface DrawOutcome {
+  winners: string[];
+  rest: string[];
+}
+
+/**
+ * 抽签并保留「未中」名单。
+ *
+ * 只洗一次牌再切片 —— 这样 winners 和 rest 天然互补、不重不漏。
+ * 分开抽两次会出错：可能同一个人既中签又出现在未中名单里。
+ */
+export function drawOutcome(
+  names: readonly string[],
+  count: number,
+  random: () => number = Math.random,
+): DrawOutcome {
+  if (names.length === 0) return { winners: [], rest: [] };
+
+  const wanted = Math.max(0, Math.floor(count));
+  const take = Math.min(wanted, names.length);
+  const pool = shuffle(names, random);
+
+  return { winners: pool.slice(0, take), rest: pool.slice(take) };
+}
+
 /**
  * 抽取中签者。
  *
@@ -31,25 +57,33 @@ export function drawWinners(
   count: number,
   random: () => number = Math.random,
 ): string[] {
-  if (names.length === 0) return [];
-
-  const wanted = Math.max(0, Math.floor(count));
-  const take = Math.min(wanted, names.length);
-  if (take === 0) return [];
-
-  return shuffle(names, random).slice(0, take);
+  return drawOutcome(names, count, random).winners;
 }
 
 /**
- * 解析名单文本：按换行、中英文逗号、顿号、分号、空格切分。
+ * 解析名单文本。
  *
- * 去空、去重但**保持原顺序** —— 用户按学号或座位顺序输入，打乱顺序会让结果看着莫名其妙。
+ * 旧版按换行切分（`split('\n')`），这里**优先保留这个口径**：
+ * 名单是「每行一个」的接龙格式，若按空白切分，`Li Ming` 会被拆成两个人，
+ * 而抽签结果一旦多出不存在的人，比少几个更难看。
+ *
+ * 只有在整段**没有换行**、却写了逗号/顿号/分号时，才按这些分隔符切分 ——
+ * 这样「张三,李四,王五」这种一行黏贴也能用。
+ *
+ * 去空、去重，但保持原顺序：用户按学号或座位顺序输入，打乱会让结果看着莫名其妙。
  */
 export function parseNames(text: string): string[] {
+  const trimmed = text.trim();
+  if (trimmed === "") return [];
+
+  const lines = trimmed.split(/\r?\n/);
+  const pieces =
+    lines.length === 1 && /[,，、;；]/.test(trimmed) ? trimmed.split(/[,，、;；]+/) : lines;
+
   const seen = new Set<string>();
   const result: string[] = [];
 
-  for (const piece of text.split(/[\n\r,，、;；\s]+/)) {
+  for (const piece of pieces) {
     const name = piece.trim();
     if (name === "" || seen.has(name)) continue;
     seen.add(name);

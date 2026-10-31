@@ -11,7 +11,12 @@
 /** 板块存储前缀，调试时用它筛 localStorage */
 export const CAMPUS_PREFIX = "campus.";
 
-/** 新键：campus.<tool>.<purpose>.<version> */
+/**
+ * 新键：campus.<tool>.<purpose>.<version>
+ *
+ * `pomodoro` 没有对应的旧键 —— 旧版番茄钟的「今日已完成」只放内存，刷新就归零。
+ * 这次迁移顺手补上了持久化，属于新增能力，已在审核报告里单列。
+ */
 export const CAMPUS_KEYS = {
   gpa: "campus.gpa.rows.v1",
   schedule: "campus.schedule.courses.v2",
@@ -19,6 +24,7 @@ export const CAMPUS_KEYS = {
   term: "campus.schedule.term.v1",
   words: "campus.words.progress.v1",
   deadline: "campus.deadline.items.v1",
+  pomodoro: "campus.pomodoro.daily.v1",
 } as const;
 
 /** 旧键：线上 tools.html 实际使用的键名（已核对源码） */
