@@ -85,6 +85,14 @@ async def upload_and_build(
     if mode not in ("append", "rebuild"):
         raise HTTPException(status_code=400, detail="mode 只能是 append 或 rebuild")
 
+    # 单次请求的声明总大小（S-07）：N 个文件各 100MB 时，单文件闸挡不住整体。
+    declared = sum(f.size for f in files if isinstance(getattr(f, "size", None), int))
+    if config.UPLOAD_TOTAL_MB and declared > config.UPLOAD_TOTAL_MB * 1024 * 1024:
+        raise HTTPException(
+            status_code=400,
+            detail=f"本次上传总大小超过 {config.UPLOAD_TOTAL_MB}MB，请分批上传",
+        )
+
     now = int(time.time())
     limit = MAX_UPLOAD_MB * 1024 * 1024
     saved: list[tuple[str, str]] = []  # (落盘路径, 原始文件名)
@@ -116,6 +124,17 @@ async def upload_and_build(
         # 一个都还没入库，已落盘的必须清掉，否则它们成了没人认领的孤儿文件
         upload.cleanup(p for p, _ in saved)
         raise
+
+    # 每日上传流量配额（S-07）：按实际落盘字节记账，与聊天附件同一张账。
+    # 超限时先清掉刚落的文件再抛错（前面已入库的片段不受影响）。
+    upload_bytes = sum(os.path.getsize(p) for p, _ in saved)
+    if upload_bytes:
+        upload_mb = max(1, (upload_bytes + 1024 * 1024 - 1) // (1024 * 1024))
+        try:
+            await asyncio.to_thread(quota.consume, uid, "upload", upload_mb)
+        except quota.QuotaExceeded:
+            upload.cleanup(p for p, _ in saved)
+            raise
 
     def _build() -> tuple[int, list[str]]:
         """切片 + embedding + 写 Chroma，全程可能几十秒。

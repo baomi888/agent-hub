@@ -17,8 +17,9 @@ import os
 import pytest
 
 from agent.tools import download_file
-from api.auth import _auth_rate_bucket, _is_reserved_admin_name
-from core import config, quota
+from api.auth import _auth_rate_bucket, _client_ip, _is_reserved_admin_name
+from core import account, config, quota
+from core import session as session_mod
 from core.urltools import extract_urls, normalize_url, url_allowed
 from hybrid.context import TaskContext
 from hybrid.workflow import WorkflowEngine, validate_definition
@@ -203,3 +204,53 @@ def test_workflow_tool_call_cap(monkeypatch):
 )
 def test_normalize_url_scheme_kept(url):
     assert normalize_url(url).startswith(("http://", "https://"))
+
+
+# ==================== 5. 注册 / 登录防滥用（S-03）====================
+
+
+class _DummyRequest:
+    def __init__(self, headers: dict | None = None, host: str = "1.2.3.4") -> None:
+        self.headers = headers or {}
+        self.client = type("C", (), {"host": host})()
+
+
+def test_client_ip_prefers_forwarded_for():
+    req = _DummyRequest({"x-forwarded-for": "9.9.9.9, 10.0.0.1"})
+    assert _client_ip(req) == "9.9.9.9"
+    assert _client_ip(_DummyRequest()) == "1.2.3.4"
+
+
+def test_consume_key_daily_limit_and_no_overdraw(tmp_path, monkeypatch):
+    """IP / 全站维度的每日额度：超限抛错，且超限的那次不计数。"""
+    monkeypatch.setattr(session_mod, "_db_path", lambda: str(tmp_path / "q.db"))
+    monkeypatch.setattr(config, "SIGNUP_IP_PER_DAY", 2)
+    quota._ensure_tables()
+    key = "signup:ip:test"
+    quota.consume_key(key, "signup_ip", config.SIGNUP_IP_PER_DAY)
+    quota.consume_key(key, "signup_ip", config.SIGNUP_IP_PER_DAY)
+    with pytest.raises(quota.QuotaExceeded):
+        quota.consume_key(key, "signup_ip", config.SIGNUP_IP_PER_DAY)
+    assert quota.usage_today(key, "signup_ip") == 2
+
+
+def test_login_lockout_after_repeated_failures(tmp_path, monkeypatch):
+    """连续失败达到阈值后锁定；正确口令也进不来，且锁定期不再验口令。"""
+    monkeypatch.setattr(session_mod, "_db_path", lambda: str(tmp_path / "u.db"))
+    monkeypatch.setattr(config, "AUTH_MAX_FAILS", 3)
+    monkeypatch.setattr(config, "AUTH_LOCK_MINUTES", 15)
+    account._ensure_tables()
+
+    account.create_user("lockme", "correct-horse")
+    for _ in range(3):
+        user, reason = account.login("lockme", "wrong")
+        assert user is None and reason == account.LOGIN_BAD_PASSWORD
+
+    user, reason = account.login("lockme", "correct-horse")
+    assert user is None and reason == account.LOGIN_LOCKED
+
+    # 成功登录会清零；这里手动把解锁时刻拨回过去，验证"锁到期后可再登录"
+    with session_mod._get_conn() as conn:
+        conn.execute("UPDATE users SET lock_until = 0 WHERE username = 'lockme'")
+    user, reason = account.login("lockme", "correct-horse")
+    assert reason == account.LOGIN_OK and user["username"] == "lockme"

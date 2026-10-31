@@ -18,6 +18,7 @@ import re
 import time
 import uuid
 
+from core import config
 from core.auth import hash_password, verify_password
 from core.session import _get_conn
 
@@ -106,6 +107,14 @@ def _ensure_columns() -> None:
         cols = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
         if "status" not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN status INTEGER NOT NULL DEFAULT 1")
+        # 登录失败锁定（2026-10-29 安全加固 S-03）：连续失败计数与解锁时刻。
+        # 老库同样幂等补列，默认 0 表示"从未失败 / 未锁定"。
+        if "failed_count" not in cols:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN failed_count INTEGER NOT NULL DEFAULT 0"
+            )
+        if "lock_until" not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN lock_until INTEGER NOT NULL DEFAULT 0")
 
 
 _ensure_tables()
@@ -117,8 +126,8 @@ _ensure_tables()
 def get_user(uid: str) -> dict | None:
     with _get_conn() as conn:
         row = conn.execute(
-            "SELECT id, username, password_hash, created_at, last_login_at, status "
-            "FROM users WHERE id = ?",
+            "SELECT id, username, password_hash, created_at, last_login_at, status, "
+            "failed_count, lock_until FROM users WHERE id = ?",
             (uid,),
         ).fetchone()
         return dict(row) if row else None
@@ -127,8 +136,8 @@ def get_user(uid: str) -> dict | None:
 def get_user_by_username(name: str) -> dict | None:
     with _get_conn() as conn:
         row = conn.execute(
-            "SELECT id, username, password_hash, created_at, last_login_at, status "
-            "FROM users WHERE username = ?",
+            "SELECT id, username, password_hash, created_at, last_login_at, status, "
+            "failed_count, lock_until FROM users WHERE username = ?",
             (normalize_name(name),),
         ).fetchone()
         return dict(row) if row else None
@@ -163,6 +172,35 @@ STATUS_ENABLE = 1
 STATUS_DISABLE = 0
 
 
+def _record_login_failure(uid: str) -> None:
+    """记一次口令失败；达到阈值就锁定一段时间（S-03 撞库防护）。
+
+    只惩罚"连续"失败：成功登录会清零，锁到期后计数也已归零。
+    阈值 / 时长取 config，0 表示关闭（一键回退）。
+    """
+    max_fails = int(getattr(config, "AUTH_MAX_FAILS", 0) or 0)
+    lock_minutes = int(getattr(config, "AUTH_LOCK_MINUTES", 0) or 0)
+    if not max_fails or not lock_minutes:
+        return
+    with _get_conn() as conn:
+        conn.execute("UPDATE users SET failed_count = failed_count + 1 WHERE id = ?", (uid,))
+        row = conn.execute(
+            "SELECT failed_count FROM users WHERE id = ?", (uid,)
+        ).fetchone()
+        if row and int(row["failed_count"]) >= max_fails:
+            conn.execute(
+                "UPDATE users SET lock_until = ?, failed_count = 0 WHERE id = ?",
+                (int(time.time()) + lock_minutes * 60, uid),
+            )
+
+
+def _clear_login_failure(uid: str) -> None:
+    with _get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET failed_count = 0, lock_until = 0 WHERE id = ?", (uid,)
+        )
+
+
 def login(username: str, password: str) -> tuple[dict | None, str]:
     """按 sky-take-out 的顺序校验账号，返回 (用户, 原因)。
 
@@ -185,10 +223,20 @@ def login(username: str, password: str) -> tuple[dict | None, str]:
     if not row:
         verify_password(password, "pbkdf2_sha256$1$AA==$AA==")
         return None, LOGIN_NO_USER
+
+    # 连续失败锁定（S-03）：锁定期内直接拒，不再跑一次昂贵的 PBKDF2。
+    # 放在口令校验之前，撞库脚本连"试错"的机会都没有。
+    now = int(time.time())
+    lock_until = int(row.get("lock_until") or 0)
+    if lock_until > now:
+        return None, LOGIN_LOCKED
+
     if not verify_password(password, row["password_hash"]):
+        _record_login_failure(row["id"])
         return None, LOGIN_BAD_PASSWORD
     if int(row.get("status", STATUS_ENABLE) or 0) == STATUS_DISABLE:
         return None, LOGIN_LOCKED
+    _clear_login_failure(row["id"])
     touch_login(row["id"])
     return _public(row), LOGIN_OK
 

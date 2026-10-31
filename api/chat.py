@@ -539,6 +539,7 @@ def _cleanup_old_uploads() -> None:
 @router.post("/upload")
 async def upload_attachments(
     files: list[UploadFile] = File(...),  # noqa: B008 -- FastAPI 依赖注入惯例
+    uid: str = Depends(get_current_user),
 ) -> dict:
     """上传聊天附件（图片），返回服务端路径供图片理解使用。
 
@@ -546,6 +547,17 @@ async def upload_attachments(
     """
     if len(files) > MAX_CHAT_FILES:
         raise HTTPException(status_code=400, detail=f"一次最多上传 {MAX_CHAT_FILES} 个附件")
+
+    # 单次请求的声明总大小（S-06）：必须在第一个字节落盘前挡住。
+    # 单张上限 20MB × 9 张仍可能一次传 180MB，对 2G 内存的部署机是压力。
+    declared = sum(
+        f.size for f in files if isinstance(getattr(f, "size", None), int)
+    )
+    if config.UPLOAD_TOTAL_MB and declared > config.UPLOAD_TOTAL_MB * 1024 * 1024:
+        raise HTTPException(
+            status_code=400,
+            detail=f"本次上传总大小超过 {config.UPLOAD_TOTAL_MB}MB，请分批上传",
+        )
 
     # 整批先校验再落盘：有一张不合格就整个拒绝，
     # 否则前面几张写好了、后面报错，会留下一半的孤儿文件
@@ -575,6 +587,17 @@ async def upload_attachments(
                 "type": f.content_type or "application/octet-stream",
             }
         )
+
+    # 每日上传流量配额（S-06）：按实际落盘字节记账，按 MB 向上取整。
+    # 超限时把刚落的文件全删掉再抛错——否则"被拒绝的上传"照样占着磁盘。
+    total_bytes = sum(int(r["size"]) for r in results)
+    if total_bytes:
+        mb = max(1, (total_bytes + 1024 * 1024 - 1) // (1024 * 1024))
+        try:
+            await asyncio.to_thread(quota.consume, uid, "upload", mb)
+        except quota.QuotaExceeded:
+            upload.cleanup(r["path"] for r in results)
+            raise
     return {"files": results}
 
 

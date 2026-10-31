@@ -10,6 +10,7 @@ from __future__ import annotations
     在 v1.x 中签名不变，直接复用。
 """
 
+import logging
 import math
 import os
 import re
@@ -85,7 +86,10 @@ def describe_api_error(e: Exception) -> str:
         return "402 余额不足：请到对应平台充值"
     if cls_name == "NotFoundError" or "404" in str(e):
         return "404 模型不存在：请检查 EMBEDDING_MODEL / DEEPSEEK_MODEL 名称"
-    return f"{cls_name}: {e}"
+    # S-10：未知异常不再把内部类名 / 原文回显给调用方（可能含路径、密钥片段、
+    # 上游 response body）。原文只进日志，给用户一句可操作的通用提示。
+    logging.getLogger(__name__).warning("LLM/API 调用失败 [%s]：%s", cls_name, e)
+    return "服务暂时不可用，请稍后重试；若持续失败请联系管理员"
 
 
 # ==================== 检索结果挑选 ====================
