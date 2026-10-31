@@ -22,18 +22,19 @@ from core import config, prompt_store, tool_registry
 from core import scenarios as scenarios_mod
 from core.llm import get_llm
 
-SYSTEM_PROMPT = """你是一个智能问答助手，拥有以下能力：
-  - 从知识库中检索资料（kb_search）
-  - 联网搜索（web_search）
-  - 数学计算（calculator）
+SYSTEM_PROMPT = """你是一个智能问答助手。本轮实际可用的能力由用户开启的开关决定：
+  - 知识库检索（kb_search）：用户开了「检索」且当前会话有库时可用
+  - 联网搜索（web_search）：用户开了「智能联网」时可用
   - 查询中国城市天气（get_weather）
   - 下载文档类文件，可选并入知识库（download_file）
 
 行为准则：
-  1. 根据用户问题自主选择是否调用工具、调用哪个工具。
-  2. 需要知识库资料时用 kb_search；需要最新互联网信息时用 web_search。
-  3. 数学计算必须用 calculator 工具，禁止口算。
-  4. 天气查询优先用 get_weather，支持中文或拼音输入（如 北京 / beijing）。
+  1. 用不用工具、用哪个工具、用几次，由你根据问题自行判断，不需要征求许可。
+     工具清单里没有的能力就是本轮没开——如实说明，不要假装调用，也不要绕道实现。
+  2. 资料类问题优先查知识库：库内资料带出处，可信度高于网页摘要。库里确实没有，
+     且本轮允许联网时再上网补充。
+  3. 实时信息（新闻、价格、赛况、当日天气实况）必须联网获取，不许凭记忆作答。
+  4. 天气查询用 get_weather，支持中文或拼音输入（如 北京 / beijing）。
   5. 当用户要求"搜索并下载论文/文档/报告"时，先用 web_search 找到文件直链，再用 download_file 下载；
      若用户说明要入库，传入对应的 kb_id。
   6. 若某工具明确返回失败（如提示"暂时不可用"），不要用相同参数重复调用该工具，
@@ -43,7 +44,8 @@ SYSTEM_PROMPT = """你是一个智能问答助手，拥有以下能力：
      只用真正支撑了结论的片段当依据；kb_search 在检索偏弱（相似度过低或仅沾边）
      时会主动返回**必须遵守**的约束，请严格照它指示：如实告知用户知识库里没有
      直接相关资料、并给出下一步，不要拿低分片段硬凑答案。
-  9. 闲聊、身份、常识等无需工具的问题直接回答。
+  9. 闲聊、身份、常识等无需工具的问题直接回答。算术、换算、日期差自己算，
+     但要复核进位和运算优先级；结果是给用户看的数字时尤其别算错。
  10. web_search 返回的是**原始检索结果清单**（标题 / 摘要 / 链接），不是给用户看的成品。
      请消化后用自己的话作答：归纳成 3~5 条要点，每条说清"发生了什么、什么时间、谁说的"，
      来源用 [1][2] 角标标注；**不要把带粗体和链接的原始列表原样贴给用户**。
@@ -157,7 +159,12 @@ _AGENT_LOCK = threading.Lock()
 
 
 def _cache_key(
-    has_kb: bool, scene: str, activated: frozenset[str], prompt_version: int
+    *,
+    kb_state: int,
+    use_web: bool,
+    scene: str,
+    activated: frozenset[str],
+    prompt_version: int,
 ) -> tuple:
     """编译缓存的键。**prompt_version 必须在里面**。
 
@@ -165,8 +172,54 @@ def _cache_key(
     而编译好的图把 system prompt 固化了。键里不带版本号的话，
     promote 之后 `build_agent` 照样命中旧图 —— 库里版本号变了、线上一个字没变，
     表现为"进化不生效"，而且重启才恢复，最难查。
+
+    2026-10-30 起还要带两个能力开关：同一个用户在同一会话里可能这轮开检索、
+    下轮只联网。工具集和 system prompt 都随开关变，键里不带就会拿到上一轮的图
+    ——表现为"关了联网它还在搜"。
+
+    2026-10-31：kb 那一维从「`kb_bound` 合取」改成**三态 `kb_state`**
+    （0 = 本轮关检索 / 1 = 开检索但没有库 / 2 = 开检索且真有库）。
+    原来的合取 `use_kb and has_kb` 把 0 和 1 压成同一个 `False`，而下面 system
+    prompt 对这两态说的是**相反的话**（「本轮未开启检索」vs「当前会话没有绑定知识库」）
+    —— 于是"有库但没开检索"的人和"没库却开了检索"的人共享同一张编译图，
+    后编译的那一方拿到前一方那句错话。功能上不炸（两态的工具集里都没有 kb_search），
+    但提示词在撒谎，模型会据此编出"为什么查不到你的资料"的理由。
+    三态之后键的种类只是从 2 变 3，编译量几乎不变。
     """
-    return (bool(has_kb), scene, frozenset(activated), int(prompt_version or 0))
+    return (int(kb_state), bool(use_web), scene, frozenset(activated), int(prompt_version or 0))
+
+
+def _kb_state(*, use_kb: bool, has_kb: bool) -> int:
+    """知识库维度的三态。**别把它压回布尔**。
+
+    0 = 本轮没开检索      → 提示词说「本轮未开启知识库检索」
+    1 = 开了检索但没库    → 提示词说「当前会话没有绑定知识库」
+    2 = 开了检索且真有库  → 提示词说「已绑定知识库，需要时调 kb_search」
+
+    1 和 2 也决定 kb_search 挂不挂（只有 2 挂）。0 和 1 在工具维度上没区别，
+    但在提示词维度上是相反的两句话 —— 2026-10-31 之前缓存键用
+    `use_kb and has_kb` 的合取，把 0 和 1 压成同一个键，两者会互相串那句错话。
+    """
+    if not use_kb:
+        return 0
+    return 2 if has_kb else 1
+
+
+def _tool_allowed(name: str, *, kb_bound: bool, use_web: bool) -> bool:
+    """这一轮该不该把这个工具交给模型。
+
+    绑定规则只认能力开关，不认"用户选了哪个模式"——2026-10-30 之后用户只
+    回答两个问题：要不要查我的资料、要不要上网。具体调哪个工具由模型决定，
+    它不该看到本轮没开的那几个（看见了就会试着调，调了必然失败，白烧一轮）。
+
+    `get_weather` 不挂开关：它是只读感知工具，问天气才调，不会增加无谓开销。
+    """
+    if name == "kb_search":
+        return kb_bound
+    if name in ("web_search", "download_file"):
+        # download_file 依赖 web_search 产出的下载允许清单，两者同开同关
+        return use_web
+    return True
 
 
 def build_agent(
@@ -174,8 +227,10 @@ def build_agent(
     location: dict | None = None,
     scenario: str | None = None,
     activated: frozenset[str] = frozenset(),
+    use_kb: bool = True,
+    use_web: bool = True,
 ):
-    """构建集合式 Agent（带 5 个工具 + 多轮记忆）。
+    """构建集合式 Agent（按开关绑工具 + 多轮记忆）。
 
     这里刻意**不再把 kb_id 写进提示词**。旧版会把 "kb_id = xxx" 塞给模型、
     让模型拿着它去调 kb_search；但 kb_id 正是越权的入口 —— 一段网页正文里藏句
@@ -201,9 +256,21 @@ def build_agent(
     # ① 城市一多变 LRU 抖动、反复重编译图（原本 2×#城市×#场景×#激活集）；
     # ② 更贵的是 system prompt 前缀随城市变化，KV 缓存直接失效（实测命中率 90%→0%）。
     # 现在定位只作为**末尾**的动态消息追加（见 location_note 的调用方 api/chat.py），
-    # 前缀恒定，键的种类降为 2×#场景×#激活集×#提示词版本（版本极少变，实际仍是那几个）。
+    # 前缀恒定，键的种类降为 3×2×#场景×#激活集×#提示词版本（3 = kb 三态，2 = 联网开关）。
     base_prompt, prompt_version = prompt_store.resolve("agent", SYSTEM_PROMPT)
-    key = _cache_key(has_kb, scene, frozenset(activated), prompt_version)
+    # kb 这一维在代码里是**三态**，不是"开没开检索"一个布尔：
+    #   0 = 本轮没开检索        1 = 开了检索但这个会话没有库        2 = 开了检索且有库
+    # 工具维度只关心 0/1 之外的那条线（有没有库），提示词维度三个都不同，
+    # 所以缓存键必须用三态（见 _cache_key 的说明）。
+    kb_state = _kb_state(use_kb=use_kb, has_kb=has_kb)
+    kb_bound = kb_state == 2
+    key = _cache_key(
+        kb_state=kb_state,
+        use_web=use_web,
+        scene=scene,
+        activated=frozenset(activated),
+        prompt_version=prompt_version,
+    )
 
     with _AGENT_LOCK:
         cached = _AGENT_CACHE.get(key)
@@ -218,17 +285,29 @@ def build_agent(
         # 默认 0 = 用平台默认，保持改造前行为（见 core/config.py 的说明）。
         llm = get_llm(temperature=0.1, max_tokens=config.AGENT_LLM_MAX_TOKENS or None)
         system_prompt = base_prompt
-        if has_kb:
+        if kb_bound:
             system_prompt += (
                 "\n\n【当前会话已绑定知识库】\n"
                 "需要查资料时调用 kb_search（不需要也不接受 kb_id 参数，"
                 "系统会自动检索本会话绑定的库）。\n"
                 "需要把网页 / 文件存进库时用 download_file。"
             )
-        else:
+        elif use_kb:
             system_prompt += (
                 "\n\n【当前会话没有绑定知识库】\n"
-                "不要凭空猜测 kb_id 调用 kb_search；需要外部信息时用 web_search。"
+                "kb_search 不在工具清单里；需要外部信息时用 web_search。"
+            )
+        else:
+            system_prompt += (
+                "\n\n【本轮未开启知识库检索】\n"
+                "kb_search 不在工具清单里。用户问起之前聊过的资料时，"
+                "如实说明本轮没有开检索，不要凭印象编造文件内容。"
+            )
+        if not use_web:
+            system_prompt += (
+                "\n\n【本轮未开启智能联网】\n"
+                "web_search 不在工具清单里。涉及实时信息时如实说明无法联网，"
+                "不要编造新闻、价格、赛况或当日天气实况。"
             )
         # P0-1：定位不再拼进 system prompt。
         # 理由：system prompt 是**前缀**，动态内容拼进去 = 每换一个城市前缀全变，
@@ -251,7 +330,8 @@ def build_agent(
         enabled = [
             t
             for t in AGENT_TOOLS
-            if (not tool_registry.TOOL_META[t.name].defer) or (t.name in activated)
+            if _tool_allowed(t.name, kb_bound=kb_bound, use_web=use_web)
+            and ((not tool_registry.TOOL_META[t.name].defer) or (t.name in activated))
         ]
         tools_to_bind = build_guarded_tools(enabled)
         agent = create_agent(

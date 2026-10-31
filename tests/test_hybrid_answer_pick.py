@@ -205,6 +205,13 @@ def test_plan_only_falls_back_to_llm(monkeypatch):
     monkeypatch.setattr(chat_mod.config, "USER_TAG_HOOK_ENABLED", False)
     monkeypatch.setattr(chat_mod.config, "HYBRID_LLM_FALLBACK", True)
 
+    # 混合模式现在要先过执行前路由（判 workflow / agent）。这里钉死成 workflow：
+    # 本用例测的是"规划稿不能当答案"，不该让路由再花一次模型调用。
+    async def _fake_decide(*a, **kw):  # noqa: ARG001
+        return chat_mod.route_engine.RouteDecision("workflow", "model", "test")
+
+    monkeypatch.setattr(chat_mod.route_engine, "decide", _fake_decide)
+
     import hybrid.orchestrator as orch_mod
     import hybrid.store as hstore
 
@@ -302,6 +309,12 @@ def test_real_engine_wires_output_key_into_chat(monkeypatch):
     monkeypatch.setattr(chat_mod, "_schedule_compress", lambda uid, sid: None)
     monkeypatch.setattr(chat_mod.config, "USER_TAG_HOOK_ENABLED", False)
     monkeypatch.setattr(chat_mod.config, "HYBRID_LLM_FALLBACK", True)
+
+    # 同 test_plan_only_falls_back_to_llm：把执行前路由钉成 workflow。
+    async def _fake_decide(*a, **kw):  # noqa: ARG001
+        return chat_mod.route_engine.RouteDecision("workflow", "model", "test")
+
+    monkeypatch.setattr(chat_mod.route_engine, "decide", _fake_decide)
 
     seen: list[str | None] = []
     real_pick = chat_mod._pick_hybrid_answer

@@ -95,6 +95,8 @@ class AgentEngine:
         location: dict | None = None,
         agent: Any = None,
         activated: frozenset[str] = frozenset(),
+        use_kb: bool = True,
+        use_web: bool = True,
     ):
         self._has_kb = has_kb
         self._location = location
@@ -104,6 +106,10 @@ class AgentEngine:
         # 不传的话 hybrid 段 build_agent 拿到空集 → 已激活的延迟工具不进 bind_tools，
         # 甲用户明明 discover 过，混合模式里却"没学过"。
         self._activated = activated
+        # 能力开关（2026-10-30）：工作流的 execute 节点用的也是 build_agent，
+        # 不透传就会出现"用户关了联网，工作流里仍在联网"。
+        self._use_kb = use_kb
+        self._use_web = use_web
         self.result: EngineResult | None = None
 
     async def _get_agent(self) -> Any:
@@ -114,7 +120,13 @@ class AgentEngine:
 
             # 编译是 CPU 活，放线程里别堵事件循环
             self._agent = await asyncio.to_thread(
-                build_agent, self._has_kb, self._location, None, self._activated
+                build_agent,
+                self._has_kb,
+                self._location,
+                None,
+                self._activated,
+                self._use_kb,
+                self._use_web,
             )
         return self._agent
 

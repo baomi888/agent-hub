@@ -142,18 +142,22 @@ app = FastAPI(
 )
 
 # ---------- CORS ----------
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:5173",
-    ],
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# S-09：允许 localhost 任意端口 + credentials 是一道多余的暴露面
+# （任何本机程序都能带 Cookie 调后端）。生产同源部署不需要 CORS，
+# 用 CORS_ALLOW_LOCALHOST=0 关掉；本地前后端分离开发再打开。
+if config.CORS_ALLOW_LOCALHOST:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:5173",
+        ],
+        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # ---------- 路由挂载 ----------
 # 认证路由放最前面：它是唯一不带全局鉴权的（登录页总得能打开）。
@@ -441,9 +445,11 @@ async def health() -> dict:
     """健康检查端点。同样必须 async：探活/负载均衡器会高频打它，
     同步版会把线程池占满，连带把真正的业务请求一起拖慢。
 
-    附带 `llm_gate` 快照（每进程一份，多 worker 时各自报各自的）：
-    排查"是不是闸把请求挡在门外"时，第一眼看的就是 rejected / waiting。
+    S-10：默认只回 `{"status":"ok"}`。版本号与 llm_gate 快照属于免费的侦察
+    信息（未认证可访问），只在 HEALTH_DETAIL=1 时返回（排障 / 内网监控用）。
     """
+    if not config.HEALTH_DETAIL:
+        return {"status": "ok"}
     return {"status": "ok", "version": "0.3.0 (W3)", "llm_gate": llm_gate.snapshot()}
 
 

@@ -170,6 +170,45 @@ DAILY_ASK_LIMIT = int(os.getenv("DAILY_ASK_LIMIT", "60"))
 #   ⇒ 原来担心的「取值冲突」不是取舍问题，是对方算得更细，别退回 20。
 DAILY_AUTO_LIMIT = int(os.getenv("DAILY_AUTO_LIMIT", "120"))
 
+# ---------- 注册防滥用（2026-10-29 安全加固 S-03）----------
+# 自助注册是全站唯一无需登录就能写库的入口：脚本批量注册会撑爆用户表，
+# 抢注管理员名单，注册完还能立刻消耗问答 / embedding 额度（经济学 DoS）。
+# 三道闸全部落库、按天计：同一 IP 每分钟 / 同一 IP 每日 / 全站每日。0 = 不限。
+#
+# 默认值取"本机演示与测试不碍事"的宽松档；公网部署请按 .env.example 收紧
+# （例如 IP 每分钟 3、IP 每日 10、全站每日 50）。
+SIGNUP_IP_PER_MINUTE = int(os.getenv("SIGNUP_IP_PER_MINUTE", "10"))
+SIGNUP_IP_PER_DAY = int(os.getenv("SIGNUP_IP_PER_DAY", "50"))
+SIGNUP_GLOBAL_PER_DAY = int(os.getenv("SIGNUP_GLOBAL_PER_DAY", "500"))
+
+# 登录失败锁定：同一账号连续失败 N 次后锁 M 分钟。0 = 不锁。
+# 作用与"提高密码长度下限"不同：后者会误伤既有账号，这里只惩罚撞库行为。
+AUTH_MAX_FAILS = int(os.getenv("AUTH_MAX_FAILS", "5"))
+AUTH_LOCK_MINUTES = int(os.getenv("AUTH_LOCK_MINUTES", "15"))
+
+# ---------- 上传配额（2026-10-29 安全加固 S-06 / S-07）----------
+# 单次请求的声明总大小上限（MB），聊天附件与知识库文档共用。0 = 不限。
+UPLOAD_TOTAL_MB = int(os.getenv("UPLOAD_TOTAL_MB", "200"))
+# 每个用户每日上传总字节（MB）。0 = 不限。按实际落盘字节记账，失败会退款（不扣）。
+DAILY_UPLOAD_MB = int(os.getenv("DAILY_UPLOAD_MB", "2000"))
+
+# ---------- 跨域与健康检查（2026-10-29 安全加固 S-09 / S-10）----------
+# 是否允许 localhost / 127.0.0.1 的任意端口跨域（带 credentials）。
+# 生产环境前后端走同源 rewrite / 同域部署时不需要它，应设 0；
+# 允许"任何本机程序带 Cookie 调后端"在白名单之外多开了一扇门。
+CORS_ALLOW_LOCALHOST = os.getenv("CORS_ALLOW_LOCALHOST", "1").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+# /health 是否返回版本号与 llm_gate 快照。默认只回 {"status":"ok"}：
+# 探活接口无需登录，版本号与闸状态对攻击者是免费的侦察信息。
+HEALTH_DETAIL = os.getenv("HEALTH_DETAIL", "0").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
 # ---------- 定时任务（独立 worker 进程）----------
 # 调度与解释统一用这个时区。禁止裸 datetime.now()——容器镜像的 TZ 常常是 UTC，
 # 一旦漏带时区，「早上七点」会整体偏移 8 小时且不报错，只会安静地错。

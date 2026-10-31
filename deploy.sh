@@ -364,7 +364,7 @@ else
   esac
   if [ "$WORKERS" -lt 1 ]; then die "WORKERS 至少为 1，当前是：$WORKERS"; fi
 
-  # --host 127.0.0.1：后端没有任何鉴权，不对外暴露。
+  # --host 127.0.0.1：后端只监听回环，不对外暴露（鉴权在应用层，但少一层暴露面更稳）。
   # 前端靠 next.config.ts 的 /api/* rewrite 从本机访问它，功能不受影响；
   # 需要临时对外调试时用 `venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000` 手动起。
   # --workers N：多进程吃多核。注意 N 个进程各自有独立的进程内状态：
@@ -398,14 +398,14 @@ fi
 # ------------------------------------------------------------
 log "8. 本机防火墙放行"
 if command -v firewall-cmd >/dev/null 2>&1 && $SUDO firewall-cmd --state >/dev/null 2>&1; then
+  # S-08：只放行前端端口。后端只监听 127.0.0.1，放行 ${BACK_PORT} 是纯多余的暴露面
+  # （且会绕过 Next 的同源转发，让 X-Forwarded-For 可伪造）。
   $SUDO firewall-cmd --permanent --add-port=${FRONT_PORT}/tcp >/dev/null 2>&1 || true
-  $SUDO firewall-cmd --permanent --add-port=${BACK_PORT}/tcp  >/dev/null 2>&1 || true
   $SUDO firewall-cmd --reload >/dev/null 2>&1 || true
-  ok "firewalld 已放行 ${FRONT_PORT} / ${BACK_PORT}"
+  ok "firewalld 已放行 ${FRONT_PORT}（${BACK_PORT} 仅回环，不放行）"
 elif command -v ufw >/dev/null 2>&1 && $SUDO ufw status 2>/dev/null | grep -q "Status: active"; then
   $SUDO ufw allow ${FRONT_PORT}/tcp >/dev/null 2>&1 || true
-  $SUDO ufw allow ${BACK_PORT}/tcp  >/dev/null 2>&1 || true
-  ok "ufw 已放行 ${FRONT_PORT} / ${BACK_PORT}"
+  ok "ufw 已放行 ${FRONT_PORT}（${BACK_PORT} 仅回环，不放行）"
 else
   ok "本机没有启用 firewalld/ufw，无需处理"
 fi

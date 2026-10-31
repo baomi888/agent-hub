@@ -69,6 +69,22 @@ def _auth_rate_bucket(name: str) -> str:
     return "auth:%s" % (account.normalize_name(name).casefold() or "-")
 
 
+def _client_ip(request: Request) -> str:
+    """取客户端 IP 用于注册限流。
+
+    优先 X-Forwarded-For 的第一个地址（生产部署在后端前面有 Next/nginx 时，
+    真实 IP 只在这里）；回退到直连地址。
+
+    ⚠️ 只有"代理会重写 XFF"时才可信：后端默认只监听回环（main.py），
+    公网请求必须先经过代理，所以这个假设成立。若把 8000 直接暴露公网，
+    攻击者可以伪造 XFF 绕过 IP 限额——S-08（deploy.sh 不再放行 8000）就是在堵这条。
+    """
+    raw = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    if raw:
+        return raw
+    return getattr(getattr(request, "client", None), "host", "") or "unknown"
+
+
 def _is_reserved_admin_name(name: str) -> bool:
     """该用户名是否被配置为管理员（注册时保留，防抢注）。
 
@@ -129,7 +145,13 @@ def register(body: Credentials, request: Request, response: Response):
     # 注册/登录单独限流：撞库脚本最爱的就是这两个端点
     try:
         quota.hit(_auth_rate_bucket(body.username), limit=10)
-    except quota.RateLimited as e:
+        # 注册防滥用（S-03）：自助注册是唯一无需登录就能写库的入口。
+        # 三道闸按 IP / 全站维度落库计数，堵"脚本批量注册 → 抢注 + 烧额度"。
+        ip = _client_ip(request)
+        quota.hit(f"signup:ip:{ip}", limit=config.SIGNUP_IP_PER_MINUTE)
+        quota.consume_key(f"signup:ip:{ip}", "signup_ip", config.SIGNUP_IP_PER_DAY)
+        quota.consume_key("signup:global", "signup_global", config.SIGNUP_GLOBAL_PER_DAY)
+    except (quota.RateLimited, quota.QuotaExceeded) as e:
         _reject(str(e), 429)
 
     try:
@@ -157,7 +179,7 @@ def login(body: Credentials, request: Request, response: Response):
 
     if reason == account.LOGIN_LOCKED:
         # 必须与"密码错"区分：用户要知道是号被停了，而不是自己记错密码
-        _reject("账号已被停用，请联系管理员", 403)
+        _reject("账号已被停用或锁定，请稍后再试或联系管理员", 403)
 
     if not user:
         # no_user 与 bad_password 返回同一句话：自助注册的站点里，

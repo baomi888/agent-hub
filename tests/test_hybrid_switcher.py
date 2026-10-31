@@ -1,12 +1,13 @@
-"""切换引擎回归（混合架构要求 1/5）：规则命中、优先级、防抖、上限、入口分类。
+"""切换引擎回归（混合架构要求 1/5）：规则命中、优先级、防抖、上限。
 
-覆盖六项：
+覆盖五项：
   1. 规则命中与优先级：signal 匹配 + 数字小者先求值；
   2. condition 求值：对 {shared, signal, ctx} 的受限表达式，不成立不触发；
   3. 规则级防抖：同名规则 cooldown 内不重复触发；显式 0 冷却豁免；
   4. 方向级防抖：同方向 HYBRID_SWITCH_COOLDOWN 内只切一次（防乒乓）；
-  5. 硬上限：HYBRID_MAX_SWITCHES 次切换后强制 terminate；
-  6. classify_task：流程型 / 开放型 / 持平归 open。
+  5. 硬上限：HYBRID_MAX_SWITCHES 次切换后强制 terminate。
+
+（原第 6 项「入口分类」随 classify_task 于 2026-10-30 删除，见文末说明。）
 
 可从任意位置运行：python tests/test_hybrid_switcher.py
 """
@@ -19,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core import config  # noqa: E402
 from hybrid.context import ModeSwitch, TaskContext  # noqa: E402
-from hybrid.switcher import SwitchEngine, classify_task  # noqa: E402
+from hybrid.switcher import SwitchEngine  # noqa: E402
 
 FAILED: list[str] = []
 
@@ -261,29 +262,21 @@ def test_5_max_switches() -> None:
     check(eng.decide(ctx2, "node_failed").rule == "any", "未达上限正常判定")
 
 
-# ==================== 6. classify_task ====================
-
-
-def test_6_classify_task() -> None:
-    print("\n[6] classify_task 入口分类")
-    check(classify_task("先查一下天气，然后整理成周报") == "flow", "流程关键词多 → flow")
-    check(classify_task("按照以下步骤批量处理并保存") == "flow", "批量/步骤/保存 → flow")
-    check(classify_task("如何评价量子计算的发展前景") == "open", "开放关键词 → open")
-    check(classify_task("帮我调研一下竞品") == "open", "调研 → open")
-    check(classify_task("你好") == "open", "无关键词持平 → open（闲聊不背流程壳）")
-    check(classify_task("先做这个，然后呢？") == "flow", "流程词多于开放词 → flow")
+# ==================== 6. 入口分类（已移除）====================
+# classify_task 于 2026-10-30 删除：起跑方向改由 core.router.decide() 在
+# 进入分支之前判定，混合引擎不再自己猜。对应测试随函数一起删除，
+# 新的路由断言在 tests/test_router.py。
 
 
 def main() -> int:
     print("=" * 60)
-    print("切换引擎回归（命中 / 条件 / 防抖 / 上限 / 分类）")
+    print("切换引擎回归（命中 / 条件 / 防抖 / 上限）")
     print("=" * 60)
     test_1_match_and_priority()
     test_2_condition()
     test_3_rule_cooldown()
     test_4_direction_cooldown()
     test_5_max_switches()
-    test_6_classify_task()
     print("\n" + "=" * 60)
     if FAILED:
         print(f"失败 {len(FAILED)} 项：")

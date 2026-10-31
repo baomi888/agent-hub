@@ -99,24 +99,14 @@ class SwitchEngine:
         return any(sw.to_mode == target and now - sw.ts < seconds for sw in ctx.mode_trace)
 
 
-# ==================== 入口任务分类（决定初始模式）====================
-# 2026-10-29：词表与打分逻辑搬到 `core/router.py`。
+# ==================== 入口任务分类（已上移，此处不再提供）====================
+# `classify_task` 于 2026-10-30 删除。
 #
-# 为什么搬走：原来只有 mode=hybrid 会调用它，规则错了也只影响手动选混合的人；
-# 现在 auto 也要用它（"规则直接走工作流"），影响面变成全部提问，所以
-#   ① 加固了词表（删单字弱词、加顺序配对、按强弱分档、阈值提到 2 分）；
-#   ② 归位到 core，避免 core → hybrid 的反向依赖（hybrid 本来就依赖 core）。
+# 它原本是"进混合模式后，用关键词猜该从工作流还是智能体起跑"。规则层删掉
+# 之后，这个判断只剩一处源头：`core.router.decide()` 在进入任何一个执行
+# 分支**之前**就已经判完 workflow / agent。再保留一个同步的字符串分类器，
+# 等于让同一句话被两套逻辑判两次——auto 判了 workflow，进了 hybrid 又用
+# 旧词表判一遍，两次结论不一致时行为就取决于谁后跑。
 #
-# 这里保留 `classify_task` 这个名字：api/chat.py 的混合分支与既有测试都用它，
-# 改名只会制造无谓的改动面。新代码请直接用 core.router。
-
-
-def classify_task(goal: str) -> Literal["flow", "open"]:
-    """把用户目标粗分为 流程型(flow→工作流起跑) / 开放型(open→Agent 起跑)。
-
-    实现见 `core.router.classify_flow_open`：高精度取向，拿不准就判 open
-    交给执行前路由的模型判断，避免给闲聊/单步任务背工作流壳。
-    """
-    from core.router import classify_flow_open
-
-    return classify_flow_open(goal)
+# 需要这个判断的调用方请改用 `await core.router.decide(...)`；显式指定
+# `mode="hybrid"` 的请求由 api/chat.py 在分支内自行 await 一次。

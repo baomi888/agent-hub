@@ -662,9 +662,9 @@ _HEURISTIC_MUTATIONS: dict[str, dict[str, dict]] = {
             "rationale": "编造引用：明确编号来源只能是工具返回",
         },
         "tool_misroute": {
-            "anchor": "  4. 天气查询优先用 get_weather，支持中文或拼音输入（如 北京 / beijing）。",
-            "new_text": "  10. 需要精确数值（算术、换算、日期差）先调 calculator，"
-            "需要最新信息先调 web_search；不要凭记忆给结论。",
+            "anchor": "  4. 天气查询用 get_weather，支持中文或拼音输入（如 北京 / beijing）。",
+            "new_text": "  10. 需要最新信息先调 web_search，需要库内资料先调 kb_search；"
+            "不要凭记忆给结论。",
             "rationale": "工具选错：把「先调工具」写成可执行的判断条件",
         },
         "format": {

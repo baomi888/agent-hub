@@ -85,9 +85,14 @@ class QuotaExceeded(Exception):
     """超过每日上限。"""
 
     def __init__(self, kind: str, limit: int) -> None:
-        label = {"ask": "每日问答", "embed": "每日向量化分片", "auto": "每日自动任务"}.get(
-            kind, kind
-        )
+        label = {
+            "ask": "每日问答",
+            "embed": "每日向量化分片",
+            "auto": "每日自动任务",
+            "upload": "每日上传流量",
+            "signup_ip": "该 IP 每日注册",
+            "signup_global": "全站每日注册",
+        }.get(kind, kind)
         super().__init__(f"{label}已达上限（{limit}），明天再试或联系管理员调整配额")
         self.kind = kind
         self.limit = limit
@@ -322,6 +327,9 @@ _LIMITS = {
     # 定时任务（委托投递 / 每日总结）烧的 token 原本不在任何配额里：
     # 那条链路无人值守，必须单独卡一道，否则写错就是静默烧钱。
     "auto": "DAILY_AUTO_LIMIT",
+    # 上传流量（MB）：聊天附件与知识库文档共用一张账。挡的是"注册一个号就能
+    # 反复传 100MB 文档把磁盘写满"，与 embedding 配额（按分片计费）是两件事。
+    "upload": "DAILY_UPLOAD_MB",
 }
 
 
@@ -396,6 +404,22 @@ def consume(uid: str, kind: str, n: int = 1) -> int:
         metrics.inc("quota_rejected", {"kind": kind})
         raise QuotaExceeded(kind, limit)
     return bump_usage(uid, kind, n)
+
+
+def consume_key(key: str, kind: str, limit: int, n: int = 1) -> int:
+    """按任意维度扣当日额度（不是 uid）：注册按 IP / 全站计数用。
+
+    与 `consume` 的差别只有一处：这里**不豁免管理员**——IP 与全站维度没有
+    "管理员"概念，管理员用自己的账号注册同样占全站名额。
+    超限时不扣，避免重试把计数继续推高。
+    """
+    if not limit:
+        return bump_usage(key, kind, n)
+    used = usage_today(key, kind)
+    if used + n > limit:
+        metrics.inc("quota_rejected", {"kind": kind})
+        raise QuotaExceeded(kind, limit)
+    return bump_usage(key, kind, n)
 
 
 def history(uid: str, days: int = 7) -> list[dict]:

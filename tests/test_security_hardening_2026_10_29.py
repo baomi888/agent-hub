@@ -17,8 +17,9 @@ import os
 import pytest
 
 from agent.tools import download_file
-from api.auth import _auth_rate_bucket, _is_reserved_admin_name
-from core import config, quota
+from api.auth import _auth_rate_bucket, _client_ip, _is_reserved_admin_name
+from core import account, config, quota
+from core import session as session_mod
 from core.urltools import extract_urls, normalize_url, url_allowed
 from hybrid.context import TaskContext
 from hybrid.workflow import WorkflowEngine, validate_definition
@@ -176,16 +177,21 @@ def test_workflow_rejects_approval_required_tool(monkeypatch):
 
 
 def test_workflow_tool_call_cap(monkeypatch):
-    """两次 calculator 调用，上限设 1：第二次必须被拒。"""
+    """同一工具连调两次、上限设 1：第二次必须被拒，且第一次确实跑过。
+
+    用 kb_search 而不是原先的 calculator：算数工具已于 2026-10-30 移除，
+    而 kb_search 在没有注入 kb_id 时会立即返回说明文案（不发网络请求），
+    是剩下几个工具里唯一适合离线跑上限断言的。
+    """
     monkeypatch.setattr(config, "HYBRID_MAX_TOOL_CALLS", 1)
-    wf = _wf_tool("calculator", {"expression": "1+1"}, n_nodes=2)
+    wf = _wf_tool("kb_search", {"query": "测试"}, n_nodes=2)
     events, ctx = _run_workflow(wf)
 
     errors = [e for e in events if e.event_type == "error"]
     assert errors, [e.event_type for e in events]
     assert "上限" in errors[0].payload.get("error", "")
-    # 第一次执行成功并有产物；第二次被上限拦下
-    assert ctx.shared.get("o0") == "1+1 = 2"
+    # 第一次执行成功并有产物（无库时是一段说明文案）；第二次被上限拦下
+    assert "o0" in ctx.shared
     assert "o1" not in ctx.shared
 
 
@@ -198,3 +204,53 @@ def test_workflow_tool_call_cap(monkeypatch):
 )
 def test_normalize_url_scheme_kept(url):
     assert normalize_url(url).startswith(("http://", "https://"))
+
+
+# ==================== 5. 注册 / 登录防滥用（S-03）====================
+
+
+class _DummyRequest:
+    def __init__(self, headers: dict | None = None, host: str = "1.2.3.4") -> None:
+        self.headers = headers or {}
+        self.client = type("C", (), {"host": host})()
+
+
+def test_client_ip_prefers_forwarded_for():
+    req = _DummyRequest({"x-forwarded-for": "9.9.9.9, 10.0.0.1"})
+    assert _client_ip(req) == "9.9.9.9"
+    assert _client_ip(_DummyRequest()) == "1.2.3.4"
+
+
+def test_consume_key_daily_limit_and_no_overdraw(tmp_path, monkeypatch):
+    """IP / 全站维度的每日额度：超限抛错，且超限的那次不计数。"""
+    monkeypatch.setattr(session_mod, "_db_path", lambda: str(tmp_path / "q.db"))
+    monkeypatch.setattr(config, "SIGNUP_IP_PER_DAY", 2)
+    quota._ensure_tables()
+    key = "signup:ip:test"
+    quota.consume_key(key, "signup_ip", config.SIGNUP_IP_PER_DAY)
+    quota.consume_key(key, "signup_ip", config.SIGNUP_IP_PER_DAY)
+    with pytest.raises(quota.QuotaExceeded):
+        quota.consume_key(key, "signup_ip", config.SIGNUP_IP_PER_DAY)
+    assert quota.usage_today(key, "signup_ip") == 2
+
+
+def test_login_lockout_after_repeated_failures(tmp_path, monkeypatch):
+    """连续失败达到阈值后锁定；正确口令也进不来，且锁定期不再验口令。"""
+    monkeypatch.setattr(session_mod, "_db_path", lambda: str(tmp_path / "u.db"))
+    monkeypatch.setattr(config, "AUTH_MAX_FAILS", 3)
+    monkeypatch.setattr(config, "AUTH_LOCK_MINUTES", 15)
+    account._ensure_tables()
+
+    account.create_user("lockme", "correct-horse")
+    for _ in range(3):
+        user, reason = account.login("lockme", "wrong")
+        assert user is None and reason == account.LOGIN_BAD_PASSWORD
+
+    user, reason = account.login("lockme", "correct-horse")
+    assert user is None and reason == account.LOGIN_LOCKED
+
+    # 成功登录会清零；这里手动把解锁时刻拨回过去，验证"锁到期后可再登录"
+    with session_mod._get_conn() as conn:
+        conn.execute("UPDATE users SET lock_until = 0 WHERE username = 'lockme'")
+    user, reason = account.login("lockme", "correct-horse")
+    assert reason == account.LOGIN_OK and user["username"] == "lockme"

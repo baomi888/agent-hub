@@ -243,7 +243,9 @@ def test_ticket_released_when_response_never_streams(as_user, monkeypatch):
 # ---------- 6. /health 观测 ----------
 
 
-def test_health_exposes_gate_snapshot():
+def test_health_exposes_gate_snapshot(monkeypatch):
+    # S-10：/health 默认只回 status，详情必须显式打开（HEALTH_DETAIL=1）
+    monkeypatch.setattr(config, "HEALTH_DETAIL", True)
     r = client.get("/health")
     assert r.status_code == 200
     body = r.json()
@@ -251,3 +253,10 @@ def test_health_exposes_gate_snapshot():
     gate = body["llm_gate"]
     for key in ("enabled", "max", "inflight", "waiting", "peak", "rejected", "acquired"):
         assert key in gate
+
+
+def test_health_hides_gate_by_default(monkeypatch):
+    """默认不泄露版本号与闸状态：未认证的探活只需要一个 ok。"""
+    monkeypatch.setattr(config, "HEALTH_DETAIL", False)
+    body = client.get("/health").json()
+    assert body == {"status": "ok"}
