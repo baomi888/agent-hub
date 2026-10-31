@@ -1,27 +1,11 @@
-// 对话区静态常量：模式标签、首屏示例、工具元数据、能力卡数据
+// 对话区静态常量：首屏示例、工具元数据、能力入口
 // 从 ChatArea.tsx 拆出（2026-09 重构），纯数据 + 图标，无逻辑
 import type { ReactNode } from "react";
-import type { ChatMode } from "@/lib/types";
 import type { CornIconName } from "@/components/CornIcon";
 
-// 模式入口（2026-10-30 回退「智能体」）：四档。
-//
-// 为什么回退：2026-10-29 那次把「智能体」收进 auto，理由是"是否调工具该由系统判断"。
-// 但实测下来 auto 到不了工具，用户体感就是"自动只会检索"——
-//   · 绑了库时，路由判 llm 会被强改 rag（core/router.py::_post_check）
-//   · 任何异常/超时都回落 rag（_fallback_route: 有库→rag）
-//   · ROUTER_TIMEOUT 只给 2 秒，冷启动实测 6.4 秒
-// 三条叠起来，绑库用户几乎没有机会走到 agent。按钮删了就等于把逃生口焊死：
-// 后端仍认 mode="agent"（api/chat.py::VALID_MODES），但前端一个都不发。
-//
-// 仍不回退「混合」：它的 hint 自己写着"后端开关关掉时会静默退回智能体"，
-// 是个会骗人的档位；而 flow 判定已经由后端 auto 承担，用户不需要手选。
-export const MODE_LABELS: { value: ChatMode; label: string; hint: string }[] = [
-  { value: "auto", label: "自动", hint: "由系统判断：查资料、调工具还是直接答" },
-  { value: "rag", label: "检索", hint: "强制从知识库检索回答" },
-  { value: "agent", label: "智能体", hint: "可调用工具：联网搜索 / 计算 / 天气" },
-  { value: "llm", label: "纯对话", hint: "纯大模型对话，不检索" },
-];
+// 四档模式（MODE_LABELS）已于 2026-10-31 批 B 删除：模式条下架，能力由
+// 输入区上方的两枚开关（检索 / 智能联网）直接表达。留在这里只会让
+// 「哪些地方还在讲四档」变得看不出来。
 
 // 首屏示例：三条都是「现在就能点、点了就有结果」的问题，
 // 反映当前主力能力（资料库 / 场景化写作 / 出题），不再强调旧的四类工具
@@ -92,6 +76,10 @@ export const TOOL_META: Record<string, { label: string; icon: ReactNode }> = {
       </svg>
     ),
   },
+  // calculator 工具已在后端删除（2026-10-30 统一入口，agent/tools.py 不再注册），
+  // 但**展示映射保留**：老对话的气泡里存着 tool="calculator"，删掉这条会让历史记录
+  // 显示成英文名 "calculator"。这张表是"名称→中文标签"的字典，不是可用工具清单 ——
+  // 用户能不能用由后端决定，这里只负责把历史记录读得像人话。
   calculator: {
     label: "数学计算",
     icon: (
@@ -118,49 +106,7 @@ export const toolLabel = (name: string) => TOOL_META[name]?.label ?? name;
 // 且覆盖不到「求职」这类主打场景 —— 场景化入口统一收归模板广场。
 // 后端 core/scenarios.py 的 prompt 机制保留（旧前端兼容 + 模板联动可复用）。
 
-// 首屏四宫格：呼应设计稿「查资料 / 联网搜索 / 数学计算 / 查天气」，
-// 点一下切到对应模式 + 预填一句能立刻发的问题。
-//
-// ⚠️ 2026-10-30 恢复卡片的模式绑定：卡片**必须**把档位切到能兑现那句示例的模式。
-// 10-29 曾改成一律 auto，理由是"别替用户选"，结果是点了"查天气"却进了检索
-// （auto 绑库时偏 rag），用户看到的是答非所问。卡片是个承诺：点了就该真的去查。
-//   查资料 → rag（强制检索自己的库；没库时后端自己降级为 agent，见 api/chat.py）
-//   其余三张 → agent（直接调工具，不再赌 auto 判对）
-// 为什么仍要 onModeChange 而不是"只填字"：用户可能先切到了「纯对话」，
-// 点"查天气"却不切回来，就会出现"我点的是天气，它偏不查"的错配。
-export const ABILITIES: {
-  mode: ChatMode;
-  label: string;
-  hint: string;
-  example: string;
-  icon: ReactNode;
-}[] = [
-  {
-    mode: "rag",
-    label: "查资料",
-    hint: "从你的知识库里找答案",
-    example: "帮我从资料里找一下项目的里程碑",
-    icon: TOOL_META.kb_search.icon,
-  },
-  {
-    mode: "agent",
-    label: "联网搜索",
-    hint: "实时搜最新的信息",
-    example: "上网搜一下最近一周的 AI 行业新闻",
-    icon: TOOL_META.web_search.icon,
-  },
-  {
-    mode: "agent",
-    label: "数学计算",
-    hint: "算账、换算、解方程",
-    example: "帮我算一下 (128 + 64) × 0.85 等于多少",
-    icon: TOOL_META.calculator.icon,
-  },
-  {
-    mode: "agent",
-    label: "查天气",
-    hint: "问任意城市的天气",
-    example: "上海明天天气怎么样？",
-    icon: TOOL_META.get_weather.icon,
-  },
-];
+// 首屏四宫格（ABILITIES 四卡）已于 2026-10-31 批 B 删除：
+// 它和顶栏「能力」弹层是同一份数据，两者一起下架。用户要什么能力，
+// 现在由输入区上方的两枚开关直接回答（检索 / 智能联网），
+// 天气与算术这类具体工具交给模型在会话里自己调。

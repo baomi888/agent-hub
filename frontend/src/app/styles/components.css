@@ -351,7 +351,7 @@
 }
 
 /* 顶栏知识库 chip：胶囊形 —— 原来没写 border-radius，渲染成直角矩形，
-   跟紧挨着的 .ability-trigger / .theme-chip（都是 999px）形态打架 */
+   跟紧挨着的 .theme-chip（也是 999px）形态打架 */
 .kb-chip {
   display: inline-flex;
   align-items: center;
@@ -398,7 +398,7 @@ button.kb-chip-unbound:hover {
 }
 
 /* 顶栏用量胶囊：常驻把「今天用了多少」摆在明面上，点开看板。
-   形态与 .kb-chip / .ability-trigger 一致（999px），金只用于图标点缀。 */
+   形态与 .kb-chip 一致（999px），金只用于图标点缀。 */
 .usage-chip {
   display: inline-flex;
   align-items: center;

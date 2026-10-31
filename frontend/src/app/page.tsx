@@ -13,7 +13,7 @@ import { streamChat } from "@/lib/sse";
 import { uid } from "@/lib/id";
 import { useToast } from "@/lib/hooks/useToast";
 import { getSendGeo, getCachedGeo, isGeoEnabled, acquireGeo, reverseGeocodePlace, setGeoEnabled, updateCachedPlace, formatPlace, getManualCity, setManualCity } from "@/lib/geo";
-import { usePrefs, MODE_CAPS } from "@/lib/hooks/usePrefs";
+import { usePrefs } from "@/lib/hooks/usePrefs";
 import { useSessions } from "@/lib/hooks/useSessions";
 import { useKnowledge } from "@/lib/hooks/useKnowledge";
 import { useAuth } from "@/lib/hooks/useAuth";
@@ -21,7 +21,6 @@ import { detailToMessage } from "@/lib/errors";
 import AuthGate from "@/components/AuthGate";
 import type { UiMessage } from "@/components/chat/types";
 import type { ChatMode, Grounding, RefSource, ToolEvent } from "@/lib/types";
-import { MODE_LABELS } from "@/components/chat/constants";
 import { isPlanRequest } from "@/components/chat/plan";
 import { useHybridTrace } from "@/lib/useHybridTrace";
 import type { ChunkParams } from "@/lib/chunkProfiles";
@@ -76,43 +75,17 @@ export default function Home() {
   const auth = useAuth();
   const prefs = usePrefs();
   const {
-    mode, setMode, topK, setTopK, chunkSize, setChunkSize,
+    // mode 只剩「兼容字段」一个用途：照旧发给后端（后端在两个开关都在时忽略它），
+    // 以及老偏好迁移的输入。2026-10-31 批 B 起界面上已没有改它的入口。
+    mode, topK, setTopK, chunkSize, setChunkSize,
     chunkOverlap, setChunkOverlap, kbPanelPref, setKbPanelPref, savedRef,
     fontScale, setFontScale,
     useKb, setUseKb, useWeb, setUseWeb,
   } = prefs;
-  // 能力开关（检索 / 智能联网）的**演示闸门**：`?caps=1`。
-  // 2026-10-31 起这两个开关已真正进请求体（use_kb / use_web），但界面形态还在
-  // 分批切换（模式条尚未下架），所以默认仍不显示 —— 避免同一屏出现两套入口。
-  // 读 query 放在 effect 里而不是 useState 初始化函数：页面会被预渲染，
-  // 初始化时读 window 会 hydration 不一致（服务端 false、客户端 true）。
-  const [capToggles, setCapToggles] = useState(false);
-  useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("caps") === "1") setCapToggles(true);
-  }, []);
-  // 两枚开关的当前值。提到页面层是因为它要进请求体：原来它住在 ChatArea 内部
-  // state 里，点了只改视觉、发不出去（`?caps=1` 那时只是预览）。
+  // 两枚能力开关的当前值（2026-10-31 批 B 起常驻，不再是 ?caps=1 的预览）。
+  // 由页面层持有是必须的：它要进请求体（use_kb / use_web），
+  // 住在 ChatArea 内部的 state 里就发不出去。
   const capValue = { kb: useKb, web: useWeb };
-  /**
-   * 旧四档改动时**同步**写两个开关。
-   *
-   * 批 A 之后后端 `_resolve_switches` 的优先级是 fields > mode：请求体只要带了
-   * use_kb/use_web，`mode` 就被完全忽略。而默认路径下（不带 ?caps=1）用户看到的
-   * 唯一选择器仍是四档模式条，模板链接也还带 ?mode= —— 它们只改 mode 不改开关，
-   * 结果就是「按钮点了不生效」。实测两条：
-   *   点「纯对话」→ prefs.mode=llm，但请求体 use_kb 仍是 true（纯对话变成了带检索的智能体）
-   *   模板 ?mode=llm → mode 落了，两个开关仍是 true（模板推荐整体失效）
-   * 映射表与 usePrefs 的迁移共用 MODE_CAPS，避免两张表日后漂移。
-   */
-  const handleModeChange = useCallback(
-    (m: ChatMode) => {
-      setMode(m);
-      const c = MODE_CAPS[m] ?? MODE_CAPS.auto;
-      setUseKb(c.kb);
-      setUseWeb(c.web);
-    },
-    [setMode, setUseKb, setUseWeb],
-  );
   const onCapChange = useCallback(
     (next: { kb: boolean; web: boolean }) => {
       setUseKb(next.kb);
@@ -143,9 +116,6 @@ export default function Home() {
   // 所以订阅它变化，把 items 同步进当前那条助手消息。
   const [hybridItems, setHybridItems] = useState<import("@/lib/types").TraceItem[]>([]);
   useEffect(() => setHybridItems(hybrid.trace.items), [hybrid.trace.items]);
-  // 起跑前选中的工作流。用 ref 而不是 state：它是「发请求时要读一次」的值，
-  // 放进 state 会让改选择时多触发一次渲染，而它对 UI 没有独立展示需求。
-  const workflowIdRef = useRef<string | null>(null);
   // 本轮助手消息 id：轨迹同步要靠它定位「往哪条消息上写」
   const asstIdRef = useRef<string | null>(null);
 
@@ -194,11 +164,13 @@ export default function Home() {
   // 模板广场套用后跳回：?sid 自动选中新建会话，?q 预填引导问题
   // 放在 setPrefill 声明之后；依赖 sessions 列表先回来，列表没回来时这个
   // sid 还不在里面，过早 select 会选空。
-  const applyRef = useRef<{ sid: string; q: string | null; mode?: string } | null>(null);
+  // 2026-10-31 批 B：`?mode=` 已不再读取 —— 四档模式条下架后前端没有"模式"
+  // 这个概念，模板页也不再拼这个参数（改了只会带一个没人认的 query）。
+  const applyRef = useRef<{ sid: string; q: string | null } | null>(null);
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
     const sid = sp.get("sid");
-    if (sid) applyRef.current = { sid, q: sp.get("q"), mode: sp.get("mode") ?? undefined };
+    if (sid) applyRef.current = { sid, q: sp.get("q") };
     // 只跑一次：读 query 是幂等的，无需进 deps
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -208,21 +180,12 @@ export default function Home() {
     if (sessions.length === 0) return; // 列表还没回来
     if (!sessions.some((s) => s.id === a.sid)) return; // 这个会话还没进列表
     if (a.q) setPrefill({ text: a.q, ts: Date.now() });
-    // 模板推荐的对话模式：落进偏好，让新建会话默认走该模式。
-    // 白名单从 MODE_LABELS 派生（不再手写数组）—— 加 hybrid 那天就是漏了这里，
-    // 硬编码一份模式列表必然随新模式漏改。
-    const validModes = MODE_LABELS.map((m) => m.value) as readonly string[];
-    if (a.mode && validModes.includes(a.mode)) {
-      // 走 handleModeChange 而不是 setMode：模板推荐的模式也要同步到两个开关，
-      // 否则 ?mode=llm 只改了 mode（后端已不认），模板推荐等于没生效。
-      handleModeChange(a.mode as ChatMode);
-    }
     if (activeSid !== a.sid) void selectSession(a.sid);
     void refreshKbs();
     applyRef.current = null;
     // 清掉 query，避免刷新又跳一次
     window.history.replaceState({}, "", "/");
-  }, [sessions, activeSid, selectSession, refreshKbs, setPrefill, handleModeChange]);
+  }, [sessions, activeSid, selectSession, refreshKbs, setPrefill]);
   // 抽屉容器：打开时把焦点送进去，关闭后还给触发按钮
   const sidebarRef = useRef<HTMLElement | null>(null);
   const kbRef = useRef<HTMLElement | null>(null);
@@ -344,10 +307,10 @@ export default function Home() {
           mode,
           attachments: sentAttachments,
           location: getSendGeo(),
-          // 混合架构：只有 mode=hybrid 时这个字段才有意义。
-          // 发之前必须确认选中的工作流还在列表里（刷新后可能已被删），
-          // 否则后端会直接回 error 事件，整轮白跑。
-          workflow_id: mode === "hybrid" ? (workflowIdRef.current ?? null) : null,
+          // 混合工作流：前端已无「混合」档的入口（四档模式条里没有它，且
+          // usePrefs 读偏好时会把遗留的 hybrid 归一成 auto），所以恒为 null。
+          // 保留字段是为了不改后端契约；将来若重开，从偏好派生即可。
+          workflow_id: null,
           plan: plan ?? false,
         },
         controller.signal
@@ -821,10 +784,7 @@ export default function Home() {
       <div className="flex min-w-0 flex-1 flex-col">
         <ChatArea
           messages={messages}
-          mode={mode}
           sending={sending}
-          onModeChange={handleModeChange}
-          capToggles={capToggles}
           capValue={capValue}
           onCapChange={onCapChange}
           onSend={sendMessage}

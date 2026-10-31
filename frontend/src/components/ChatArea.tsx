@@ -5,15 +5,15 @@
 //
 // 2026-09 重构：消息类型/常量/正文渲染/计划卡片/Bubble/Field 拆到 ./chat/*，
 // 本文件只保留主组件（顶栏 + 欢迎页 + 消息区 + 输入区）。
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import MascotLogo from "./chat/MascotLogo";
 import CornIcon from "./CornIcon";
 import { api } from "@/lib/api";
-import type { ChatMode, RefSource, QuotaInfo } from "@/lib/types";
-import { ABILITIES, EXAMPLES, MODE_LABELS, PRIMARY_ENTRIES, SECONDARY_ENTRIES, TOOLS_URL } from "./chat/constants";
+import type { RefSource, QuotaInfo } from "@/lib/types";
+import { EXAMPLES, PRIMARY_ENTRIES, SECONDARY_ENTRIES, TOOLS_URL } from "./chat/constants";
 import { isPlanRequest, stripPlanHint } from "./chat/plan";
-import CapToggles, { CAP_DEFAULT, type CapValue } from "./chat/CapToggles";
+import CapToggles, { type CapValue } from "./chat/CapToggles";
 import Bubble from "./chat/Bubble";
 import BubbleErrorBoundary from "./chat/BubbleErrorBoundary";
 import QueryEnhance from "./chat/QueryEnhance";
@@ -51,18 +51,13 @@ function quotaLine(q: Record<string, QuotaInfo>): string {
 
 interface Props {
   messages: UiMessage[];
-  mode: ChatMode;
   sending: boolean;
-  onModeChange: (m: ChatMode) => void;
   /**
-   * 演示闸门：是否用两枚能力开关（检索 / 智能联网）替代四档模式条。
-   * 只在 `?caps=1` 时由页面层打开（批 B 之后会去掉闸门、常驻显示）。
-   * 开关的值本身由 capValue 从页面层传入 —— 因为它要进请求体（use_kb/use_web），
-   * 住在本组件内部就发不出去了。
+   * 两枚能力开关的当前值（受控）。2026-10-31 批 B：四档模式条下架后，
+   * 它成了输入区上方**唯一**的能力入口，所以是必填 —— 它要进请求体
+   * （use_kb / use_web），住在本组件内部的 state 里就发不出去了。
    */
-  capToggles?: boolean;
-  /** 两枚开关的当前值（受控） */
-  capValue?: CapValue;
+  capValue: CapValue;
   /** 开关变化。页面层写进 usePrefs，下一轮请求体生效 */
   onCapChange?: (next: CapValue) => void;
   onSend: (question: string, attachments?: ChatAttachment[], display?: string, plan?: boolean) => void;
@@ -113,11 +108,8 @@ interface Props {
 
 export default function ChatArea({
   messages,
-  mode,
   sending,
-  onModeChange,
-  capToggles = false,
-  capValue = CAP_DEFAULT,
+  capValue,
   onCapChange,
   onSend,
   onStop,
@@ -174,8 +166,6 @@ export default function ChatArea({
   const [atBottom, setAtBottom] = useState(true);
   // 从引用角标打开的全文预览（文件名来自 RefSource，kb 用当前会话绑定的）
   const [previewFile, setPreviewFile] = useState<string | null>(null);
-  // 顶栏「能力」快捷弹层：对话进行中也能一键切到常用能力（欢迎页四宫格的随身版）
-  const [abOpen, setAbOpen] = useState(false);
   // 顶栏「反馈」弹窗。**必须是 useCallback**：FeedbackModal 的 Esc / 焦点 effect
   // 依赖 onClose，每次渲染都换引用会让 effect 反复重跑、把焦点从文本框里抢回来。
   const [fbOpen, setFbOpen] = useState(false);
@@ -216,23 +206,12 @@ export default function ChatArea({
     );
   }, []);
 
-  // 能力弹层：Esc 关闭
-  useEffect(() => {
-    if (!abOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setAbOpen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [abOpen]);
-
   const pendingImageCount = pending.filter((a) => a.type.startsWith("image/")).length;
   const pendingOtherCount = pending.length - pendingImageCount;
 
-  const currentMode = MODE_LABELS.find((m) => m.value === mode);
   // capValue 是受控 props（页面层持有）：它要进请求体，住在这里就发不出去。
-  // 输入框下面那行提示跟着它变 —— 挂着开关却还在说「由系统判断：查资料、
-  // 调工具还是直接答」会自相矛盾。
+  // 输入框下面那行提示跟着它变 —— 这是四档模式条下架后用户唯一能看到的
+  // "这一轮会怎么答"的说明，所以两枚开关的四种组合都要说清楚。
   // 每句都控制在 9 字以内：这行右侧还钉着「Enter 发送 · ↑ 上一条 · Esc 清空」，
   // 390px 下超了就被截成「…」（第一版「先翻你的资料库，不够再上网」就被截）
   const capHint = capValue.kb
@@ -242,27 +221,6 @@ export default function ChatArea({
     : capValue.web
       ? "会联网查最新信息"
       : "都不勾＝纯对话";
-
-  // Codex 式分段滑块：量出 active 按钮的位置，让 .mode-thumb 滑过去
-  const modeTabsRef = useRef<HTMLDivElement | null>(null);
-  const modeBtnRefs = useRef<Partial<Record<ChatMode, HTMLButtonElement | null>>>({});
-  const [thumb, setThumb] = useState({ x: 0, w: 0, ready: false });
-  useLayoutEffect(() => {
-    const update = () => {
-      const el = modeBtnRefs.current[mode];
-      if (!el) return;
-      setThumb({ x: el.offsetLeft, w: el.offsetWidth, ready: true });
-    };
-    update();
-    // 字体加载、窗口缩放都会改变按钮宽度，跟着重算
-    const ro = new ResizeObserver(update);
-    if (modeTabsRef.current) ro.observe(modeTabsRef.current);
-    window.addEventListener("resize", update);
-    return () => {
-      ro.disconnect();
-      window.removeEventListener("resize", update);
-    };
-  }, [mode]);
 
   // 新消息进来时贴住底部。
   // ★ 空态（欢迎页）必须跳过：欢迎页比可视区高，滚到底会把吉祥物、眉题、
@@ -396,13 +354,6 @@ export default function ChatArea({
     inputRef.current?.focus();
   };
 
-  // 首屏四宫格：直接切到对应模式并预填示例，省掉「先去顶部切模式」这一步
-  const startAbility = (m: ChatMode, q: string) => {
-    onModeChange(m);
-    setInput(q);
-    requestAnimationFrame(() => inputRef.current?.focus());
-  };
-
   // 进料路径②：让它带着题目去联网研究——光标留在末尾，等用户补上题目
   const startResearch = () => {
     setInput("帮我研究一下：");
@@ -477,7 +428,10 @@ export default function ChatArea({
    * auto 目前按"有没有绑库"估：绑了库时后端会强制检索（含闲聊），
    * 没绑库只可能走工具或直接答，不会检索。判断口径见 core/router.py。
    */
-  const willRetrieve = mode === "rag" || mode === "hybrid" || (mode === "auto" && !!boundKb);
+  // 检索词校准面板只在「这一轮真的会检索」时出现：
+  // 开了开关 + 会话确实绑了库。只判断开关不够 —— 没绑库时检索必然空，
+  // 提前让用户校准检索词是空承诺。
+  const willRetrieve = capValue.kb && !!boundKb;
 
   return (
     <section className="book-spine flex h-full min-w-0 flex-1 flex-col">
@@ -551,47 +505,9 @@ export default function ChatArea({
             <span className="usage-chip-text">{quota ? quotaLine(quota) : "用量"}</span>
           </button>
         )}
-        {/* 顶栏能力快捷入口：对话进行中不用滚回欢迎页，点一下就切模式 + 预填示例 */}
-        <button
-          type="button"
-          onClick={() => setAbOpen((o) => !o)}
-          title="常用能力"
-          aria-label="常用能力"
-          aria-haspopup="true"
-          aria-expanded={abOpen}
-          className="ability-trigger"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 2.5l1.7 5 5 1.7-5 1.7L12 15.9l-1.7-5-5-1.7 5-1.7L12 2.5z" />
-            <path d="M18.5 14.5l.8 2.4 2.4.8-2.4.8-.8 2.4-.8-2.4-2.4-.8 2.4-.8.8-2.4z" />
-          </svg>
-          <span>能力</span>
-        </button>
-        {abOpen && (
-          <>
-            <div className="pop-backdrop" onClick={() => setAbOpen(false)} aria-hidden="true" />
-            <div className="ability-pop" role="menu" aria-label="常用能力">
-              {ABILITIES.map((a) => (
-                <button
-                  key={a.label}
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    startAbility(a.mode, a.example);
-                    setAbOpen(false);
-                  }}
-                  className="ability-pop-item"
-                >
-                  <span className="ab-pop-icon">{a.icon}</span>
-                  <span className="ab-pop-text">
-                    <span className="ab-pop-label">{a.label}</span>
-                    <span className="ab-pop-hint">{a.hint}</span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </>
-        )}
+        {/* 顶栏「能力」快捷弹层与它的触发按钮已在 2026-10-31 批 B 删除：
+            它提供的是「切模式 + 预填示例」，而模式条已下架、能力由两枚开关表达。
+            留着它等于教用户点一个已经不存在的概念（还带着"算数"这种已删工具）。 */}
         {onToggleKbPanel && (
           <button
             onClick={onToggleKbPanel}
@@ -633,7 +549,7 @@ export default function ChatArea({
               <MascotLogo
                 className="hero-logo mx-auto mb-2 h-[52px] w-[52px] object-contain"
                 mood={messages.some((m) => m.streaming) ? "thinking" : "idle"}
-                tiltKey={mode}
+                tiltKey={`${capValue.kb ? 1 : 0}${capValue.web ? 1 : 0}`}
               />
               <div className="eyebrow mb-1.5">苞米地 · 智能体工作台</div>
               <h1 className="hero-title font-serif font-bold leading-snug text-ink">
@@ -849,36 +765,12 @@ export default function ChatArea({
           </a>
         </div>
         <div className="mb-2 flex items-center gap-2 sm:gap-3">
-          {capToggles ? (
-            <CapToggles value={capValue} onChange={onCapChange ?? (() => {})} />
-          ) : (
-            <div className="mode-tabs" role="group" aria-label="对话模式" ref={modeTabsRef}>
-              <span
-                className="mode-thumb"
-                aria-hidden="true"
-                style={{
-                  transform: `translateX(${thumb.x}px)`,
-                  width: thumb.w,
-                  opacity: thumb.ready ? 1 : 0,
-                }}
-              />
-              {MODE_LABELS.map((m) => (
-                <button
-                  key={m.value}
-                  ref={(el) => {
-                    modeBtnRefs.current[m.value] = el;
-                  }}
-                  onClick={() => onModeChange(m.value)}
-                  title={m.hint}
-                  aria-pressed={mode === m.value}
-                  className={`mode ${mode === m.value ? "active" : ""}`}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
-          )}
-          {/* 内测反馈：紧贴模式条右侧（紧跟最后一个模式按钮），不塞回顶栏那排灰图标里。
+          {/* 2026-10-31 批 B：四档模式条下架，两枚能力开关常驻。
+              原因：模式条把「检索 / 联网 / 走流程」混在一个字段里，用户选「检索」
+              其实还想不想联网、允不允许调工具都说不清；后端新契约只有两个开关，
+              与其做四档→两开关的翻译，不如直接让用户回答这两个问题。 */}
+          <CapToggles value={capValue} onChange={onCapChange ?? (() => {})} />
+          {/* 反馈：紧贴能力开关右侧，不塞回顶栏那排灰图标里。
               理由：想说话的那一刻人正在输入框这儿（刚被答错、刚发现按钮不好用），
               顶栏右上的小图标太不显眼，内测第一批人的意见最容易在这里丢掉。
               内容和设置页共用 FeedbackCard，只是装在弹窗里。 */}
@@ -1155,7 +1047,7 @@ export default function ChatArea({
 
         {/* 键盘提示从 placeholder 里挪出来：placeholder 要短，才像"随便问点什么" */}
         <div className="input-hint">
-          <span className="truncate">{capToggles ? capHint : currentMode?.hint}</span>
+          <span className="truncate">{capHint}</span>
           <span className="ml-1 shrink-0 whitespace-nowrap">Enter 发送 · ↑ 上一条 · Esc 清空</span>
         </div>
       </div>

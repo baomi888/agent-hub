@@ -112,11 +112,11 @@ export default function TemplatesPage() {
       setUsingId(t.id);
       try {
         const r = await api.applyTemplate(t.id);
-        // 跳回工作台：?sid 让首页自动选中新建会话，?q 预填首个引导问题，
-        // ?mode 把模板推荐的对话模式带过去（白名单之外的值后端会回落 auto）
+        // 跳回工作台：?sid 让首页自动选中新建会话，?q 预填首个引导问题。
+        // 2026-10-31 起不再拼 ?mode= —— 四档模式条已下架，首页读到这个参数
+        // 也不会做任何事，带上只是让 URL 看起来还有功能。
         const q = r.starter_prompt ? `&q=${encodeURIComponent(r.starter_prompt)}` : "";
-        const m = r.recommended_mode ? `&mode=${encodeURIComponent(r.recommended_mode)}` : "";
-        router.push(`/?sid=${encodeURIComponent(r.session_id)}${q}${m}`);
+        router.push(`/?sid=${encodeURIComponent(r.session_id)}${q}`);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         setUsingId(null);

@@ -6,7 +6,7 @@ type Props = {
   title?: string;
   /** 思考态：嘴变○、摇摆加快；AI 正在生成时传入 */
   mood?: "idle" | "thinking";
-  /** 变化时歪一下头（如切换对话模式）；传会变的标识即可 */
+  /** 变化时歪一下头（如切换能力开关）；传会变的标识即可 */
   tiltKey?: string | number;
 };
 
@@ -16,7 +16,7 @@ type Props = {
  * 交互彩蛋：
  *  - mood="thinking" 时嘴变成○、整体摇摆加快（AI 正在生成）
  *  - mood 从 thinking 回落 idle（生成完成）时自动眨一次眼
- *  - tiltKey 变化时歪一下头（如切换对话模式）
+ *  - tiltKey 变化时歪一下头（如切换能力开关）
  */
 export default function MascotLogo({ className = "", title, mood = "idle", tiltKey }: Props) {
   const raw = useId();
@@ -37,7 +37,7 @@ export default function MascotLogo({ className = "", title, mood = "idle", tiltK
     prevMood.current = mood;
   }, [mood]);
 
-  // 标识变化（如模式切换）→ 歪一下头
+  // 标识变化（如能力开关切换）→ 歪一下头
   useEffect(() => {
     if (tiltKey !== undefined && prevTilt.current !== tiltKey) {
       prevTilt.current = tiltKey;
