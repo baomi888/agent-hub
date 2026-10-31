@@ -840,6 +840,7 @@ export default function Home() {
         onCollapse={() => setKbPanelOpen(false)}
         overlay={viewport !== "wide"}
         open={kbPanelOpen}
+        sid={activeSid}
       />
 
       {/* 抽屉遮罩：点击关闭浮层 */}

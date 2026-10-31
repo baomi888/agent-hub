@@ -215,3 +215,49 @@ class TestInvariants:
         texts = _texts(cands)
         assert not any("记住了" in t for t in texts)
         assert any("25 号" in t for t in texts)
+
+
+# ==================== 入库去重 ====================
+
+
+class TestDropExisting:
+    """去重是入库前的最后一道，判错的两个方向后果不同：
+
+    - 该丢的没丢 → 同一句话在库里多份，重复占用检索 top-k 名额，
+      表现为"存了很多但问它只答得出那一条"；
+    - 不该丢的丢了 → 用户勾了也白勾，而且他没法察觉（imported 少了他只会以为点漏了）。
+
+    所以这里两种方向都测。
+    """
+
+    def test_empty_existing_keeps_all(self):
+        picked = [{"text": "甲"}, {"text": "乙"}]
+        assert dialogue_import.drop_existing(picked, set()) == picked
+
+    def test_all_existing_drops_all(self):
+        picked = [{"text": "甲"}, {"text": "乙"}]
+        assert dialogue_import.drop_existing(picked, {"甲", "乙"}) == []
+
+    def test_partial_keeps_only_new(self):
+        picked = [{"text": "甲"}, {"text": "乙"}, {"text": "丙"}]
+        kept = dialogue_import.drop_existing(picked, {"甲"})
+        assert [c["text"] for c in kept] == ["乙", "丙"]
+
+    def test_whitespace_is_normalized(self):
+        """库里存的、候选里的都可能带首尾空白，比对前都要 strip。
+
+        不 strip 的话「甲 」和「甲」会被当成两句不同的知识，去重形同虚设。
+        """
+        picked = [{"text": "  甲  "}]
+        assert dialogue_import.drop_existing(picked, {"甲"}) == []
+
+    def test_near_miss_is_kept(self):
+        """只差一个字就是另一句话，必须保留 —— 精确比对的价值就在这里。"""
+        picked = [{"text": "提交截止是 25 号"}, {"text": "提交截止是 26 号"}]
+        kept = dialogue_import.drop_existing(picked, {"提交截止是 25 号"})
+        assert [c["text"] for c in kept] == ["提交截止是 26 号"]
+
+    def test_missing_text_key_does_not_crash(self):
+        """候选体缺 text 字段时按空串比对，不能抛异常（上层已过滤，但这层要自保）。"""
+        picked = [{"kind": "事实"}, {"text": "乙"}]
+        assert len(dialogue_import.drop_existing(picked, {"甲"})) == 2

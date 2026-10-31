@@ -29,6 +29,8 @@
 @import "./styles/summary.css";
 /* 知识库独立页（/knowledge）：与首页右栏的资料库抽屉是两套形态 */
 @import "./styles/kbpage.css";
+/* 放在 kb 系列之后：它复用 .pv-card 骨架，只覆盖宽度，同优先级靠顺序生效 */
+@import "./styles/sediment.css";
 @import "./styles/layout.css";
 @import "./styles/fx.css";
 @import "./styles/a11y.css";

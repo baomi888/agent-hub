@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageShell from "@/components/console/PageShell";
 import CornIcon from "@/components/CornIcon";
+import SedimentModal from "@/components/chat/SedimentModal";
 import { SkeletonLines, ToastHost } from "@/components/console/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
@@ -61,6 +62,8 @@ export default function KnowledgePage() {
   const [chunkMap, setChunkMap] = useState<KbChunkMap>({});
   const [urlOpen, setUrlOpen] = useState(false);
   const [url, setUrl] = useState("");
+  // 从对话里收几条：这一页进来时不知道是哪段对话，弹层第一步会让用户挑
+  const [sedimentOpen, setSedimentOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const detailRef = useRef<HTMLDivElement | null>(null);
 
@@ -509,6 +512,19 @@ export default function KnowledgePage() {
                       或者从一个网址收进来
                     </button>
                   )}
+                  {/* 第二个入料口：从对话里挑几条。跟上面那条并列而不是另起一块，
+                      因为用户在这一片的心智就是「往这个库再放点东西」。
+                      display:flex 是因为 .kbp-url 本身是 inline-flex，
+                      两个 inline 元素会挤在同一行。 */}
+                  <button
+                    type="button"
+                    className="kbp-url"
+                    style={{ display: "flex" }}
+                    onClick={() => setSedimentOpen(true)}
+                  >
+                    <CornIcon name="plus" />
+                    或者从对话里收几条
+                  </button>
                 </div>
 
                 {files.length === 0 ? (
@@ -564,6 +580,20 @@ export default function KnowledgePage() {
             )}
           </section>
         </div>
+      )}
+
+      {sedimentOpen && (
+        <SedimentModal
+          defaultKbId={activeId}
+          onClose={() => setSedimentOpen(false)}
+          onImported={(kbId) => {
+            // 存进了别的库就顺手切过去 —— 用户刚决定把东西放那儿，
+            // 结果界面还停在原来的库上，会以为没生效
+            void refresh(kbId);
+            const name = kbs.find((k) => k.kb_id === kbId)?.name ?? "资料库";
+            showToast("success", `已存进「${name}」`);
+          }}
+        />
       )}
 
       <ToastHost toasts={toasts} />

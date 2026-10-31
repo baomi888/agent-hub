@@ -586,8 +586,25 @@ async def import_dialogue(
     if not picked:
         raise HTTPException(status_code=400, detail="没有勾选任何有效候选")
 
-    docs = dialogue_import.build_documents(picked, req.sid, title)
     pipe = pipelines.get_or_create(uid, kb_id)
+    # 去重：这段对话里已经沉过的原句不再写第二遍。
+    # 向量库每条都用 uuid4 当 id，同一句话存两次就是两条独立片段，会重复
+    # 占掉检索 top-k 的名额（详见 kb/rag_core.py::get_dialogue_texts 的说明）。
+    # 过滤按原文精确比对：候选本来就是原句不改写，所以这里能直接对上。
+    existing = await asyncio.to_thread(pipe.get_dialogue_texts, req.sid)
+    picked = dialogue_import.drop_existing(picked, existing)
+    skipped = len(idx) - len(picked)
+    if not picked:
+        # 全部存过：不算错误（用户可能是手滑点了第二次），但也不该静默返回成功
+        return {
+            "imported": 0,
+            "skipped": skipped,
+            "staged_segments": 0,
+            "kb_id": kb_id,
+            "sid": req.sid,
+        }
+
+    docs = dialogue_import.build_documents(picked, req.sid, title)
     try:
         n = await asyncio.to_thread(pipe.add_chunks, docs)
     except Exception as e:
@@ -599,6 +616,7 @@ async def import_dialogue(
     staged = await asyncio.to_thread(mark_segments_staged, uid, req.sid, ingested_refs)
     return {
         "imported": n,
+        "skipped": skipped,
         "staged_segments": staged,
         "kb_id": kb_id,
         "sid": req.sid,

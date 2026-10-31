@@ -276,12 +276,30 @@ class TestDialogueImport:
         added: list[object] = []
 
         class FakePipe:
+            """假管道：够 true 到让 import_dialogue 跑通，不多做。
+
+            ★ `get_dialogue_texts` 不能省：入库前的去重要读它（真实的
+              `RAGPipeline.get_dialogue_texts` 按 dialogue_sid 从向量库捞已存原句，
+              见 kb/rag_core.py）。少了这个方法，端点在测试里直接 AttributeError。
+              这里用内存集合模拟同一个库的"已存原句"。
+            """
+
+            def __init__(self):
+                self.stored: set[str] = set()
+
             def add_chunks(self, docs):
                 added.extend(docs)
+                self.stored.update(d.page_content for d in docs)
                 return len(docs)
 
+            def get_dialogue_texts(self, sid):
+                return set(self.stored)
+
+        # 同一个库要沿用同一个实例：每次 new 一个的话 stored 永远是空的，
+        # 去重就测不出来了（真实场景里库是持久的，不是每次请求新建）
+        _pipe = FakePipe()
         monkeypatch.setattr(
-            kb_api.pipelines, "get_or_create", lambda owner, kb_id: FakePipe()
+            kb_api.pipelines, "get_or_create", lambda owner, kb_id: _pipe
         )
         token = create_token(UID, ttl_days=1, username="tester")
         # 不用 with：避免触发 lifespan 的 warmup（本组测试不需要真实向量库）
@@ -338,6 +356,33 @@ class TestDialogueImport:
         # staged 已回写：段内知识消息全部入库的段应被标记
         block2, _u2, _p2 = cc.load_summary_state(UID, sid)
         assert any(m.staged for m in block2.metas), "入库后至少应有一个段被标 staged"
+
+    def test_import_dialogue_twice_skips_second(self, client, monkeypatch):
+        """同一段对话勾同样的候选再存一次：一条都不再写进去。
+
+        ★ 为什么这条必须在 HTTP 层测，而不是只测纯函数 `drop_existing`：
+        向量库给每条都生成 `uuid4()` 当 id，去重没生效时**不会报错**，
+        只是库里悄悄多出几份一模一样的片段 —— 它们会重复占用检索 top-k 的
+        名额，表现为"我明明存了很多，问它却只答得出那一条"。
+        纯函数测试证明不了"真的没写"，只有数 `add_chunks` 收了几条才能。
+        """
+        c, added = client
+        from api import kb as kb_api
+
+        monkeypatch.setattr(kb_api.pipelines, "owner_of", lambda kb: UID)
+        sid = self._seed_conversation(n_pairs=2)
+
+        first = c.post("/api/kb/kb-test/import-dialogue", json={"sid": sid, "indexes": []})
+        assert first.status_code == 200, first.text
+        n1 = first.json()["imported"]
+        assert n1 > 0
+
+        second = c.post("/api/kb/kb-test/import-dialogue", json={"sid": sid, "indexes": []})
+        assert second.status_code == 200, second.text
+        body = second.json()
+        assert body["imported"] == 0, body
+        assert body["skipped"] == n1, body
+        assert len(added) == n1, "第二次不该再往库里写任何片段"
 
     def test_import_dialogue_bad_kb_404(self, client):
         c, _ = client

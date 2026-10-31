@@ -15,6 +15,7 @@ import {
   type ChunkProfileId,
 } from "@/lib/chunkProfiles";
 import FilePreviewModal, { shortName } from "./FilePreviewModal";
+import SedimentModal from "./chat/SedimentModal";
 import CornIcon from "./CornIcon";
 
 const MAX_UPLOAD_MB = 100;
@@ -168,6 +169,11 @@ interface Props {
   containerRef?: RefObject<HTMLElement | null>;
   /** 首屏还在拉资料库列表 */
   loading?: boolean;
+  /**
+   * 当前会话。给「从对话里收几条」用 —— 有这个才做得到「不先选会话、直接看候选」。
+   * 为空时弹层第一步会退化成让用户自己挑一段对话。
+   */
+  sid?: string | null;
 }
 
 export default function KnowledgePanel({
@@ -188,8 +194,12 @@ export default function KnowledgePanel({
   open = false,
   containerRef,
   loading = false,
+  sid = null,
 }: Props) {
   const [feed, setFeed] = useState<"upload" | "web" | null>(null);
+  // 沉淀弹层：单独一个开关，不塞进 feed —— feed 是「展开输入区」，
+  // 这个是直接开弹层，交互不同，混在一个 state 里会让 toggle 逻辑绕
+  const [sedimentOpen, setSedimentOpen] = useState(false);
   const [uploadKb, setUploadKb] = useState("");
   const [keyword, setKeyword] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -397,6 +407,21 @@ export default function KnowledgePanel({
           <span className="inline-flex items-center justify-center gap-1.5">
             <CornIcon name="plus" className="h-3.5 w-3.5" />
             网上的资料
+          </span>
+        </button>
+        {/* 第三个入料口：从对话里挑几句话。跟上面两个并列，因为用户在这一栏
+            的心智就是「往库里加东西」，加在这里不用教他另找地方。
+            它不是 toggle —— 点了直接开弹层，所以没有 on 态。
+            图标沿用「+」而不是 notes：这里三个都是"加内容"的动作，
+            换一个形近的图标反而像另一种东西。 */}
+        <button
+          onClick={() => setSedimentOpen(true)}
+          className="feed-btn"
+          aria-haspopup="dialog"
+        >
+          <span className="inline-flex items-center justify-center gap-1.5">
+            <CornIcon name="plus" className="h-3.5 w-3.5" />
+            对话里的内容
           </span>
         </button>
       </div>
@@ -871,6 +896,16 @@ export default function KnowledgePanel({
           </div>
         )}
       </div>
+
+      {sedimentOpen && (
+        <SedimentModal
+          sid={sid}
+          defaultKbId={boundKb}
+          boundKb={boundKb}
+          onBind={onBind}
+          onClose={() => setSedimentOpen(false)}
+        />
+      )}
 
       {preview && (
         <FilePreviewModal

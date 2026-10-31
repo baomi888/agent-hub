@@ -74,6 +74,52 @@ export interface Message {
   created_at?: number;
 }
 
+/**
+ * 对话里能存进资料库的一句话（`GET /api/kb/dialogue-candidates/{sid}`）。
+ *
+ * `text` 是**原句，不改写也不摘要** —— 后端注释写明理由：抽象会不可逆损失原文，
+ * 资料库的价值恰恰在可溯源。所以界面上只能原样显示，不要在前端做二次加工。
+ *
+ * `kind` 是后端正则判出来的类型（事实 / 约束 / 待办 / 偏好 / 目标 / 纠正）。
+ * 它是**零 LLM** 的规则判定，不是语义理解，所以只能当弱提示用：
+ * 界面上不要写「AI 识别为…」，那是在替一个正则吹牛。
+ */
+export interface DialogueCandidate {
+  text: string;
+  kind: string;
+  refs?: string[];
+  role?: string;
+  ts?: number;
+  salience?: number;
+}
+
+export interface DialogueCandidatesResp {
+  sid: string;
+  /** 会话标题，后端用它当建库的主题名（`topic_of()` 优先取它），所以界面直接展示 */
+  conv_title?: string;
+  total: number;
+  candidates: DialogueCandidate[];
+}
+
+/**
+ * 手工入库的结果。
+ *
+ * ★ `skipped` 是这次被跳过的条数：同一段对话里已经存过的原句不会写第二遍。
+ *   这个去重是 `GET/import-dialogue` 入库前做的（`kb/rag_core.py::get_dialogue_texts`），
+ *   因为向量库每条用 uuid4 当 id，不去重就是真重复 —— 重复片段会占掉检索
+ *   的 top-k 名额。
+ *
+ *   所以界面上必须把 `imported` 和 `skipped` 分开说：只说 imported 会让
+ *   "勾了 3 条只进 2 条"看起来像丢数据；只说 skipped 又像是失败了。
+ */
+export interface ImportDialogueResult {
+  imported: number;
+  skipped?: number;
+  staged_segments?: number;
+  kb_id: string;
+  batch_id?: string;
+}
+
 // 聊天模式：auto 自动 / rag 强制检索 / agent 强制工具 / llm 纯对话 / hybrid 混合编排
 //
 // hybrid（10-14 加）：工作流与自主 Agent 在**一次任务内**动态换手。

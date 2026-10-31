@@ -1,6 +1,7 @@
 // 后端 API 封装：统一错误处理 + 类型化（相对路径走 rewrites 代理）
 import type { Conversation, KbInfo, KbFile, FilePreview, SearchResult, Defaults, Message } from "./types";
 import type { KbProposalConfirmResult } from "./types";
+import type { DialogueCandidatesResp, ImportDialogueResult } from "./types";
 import { detailToMessage } from "./errors";
 import type { MeOut, UserOut, Template, ApplyTemplateResult, UsageSummary } from "./types";
 import type { ProfileSnapshot, TagTaxonomy, TemplateRecommend } from "./types";
@@ -349,6 +350,25 @@ export const api = {
           chunk_overlap: chunkOverlap,
         }),
       }
+    ),
+
+  // ---------- 对话沉淀（手工那条路）----------
+  // 这两个接口后端早就有、能跑通，和板块 D 的自动沉淀共用
+  // `service.sediment.ingest_candidates()` —— 换句话说这是「三条路同一套入库逻辑」
+  // 里最先能用的一条（见 docs/接口文档_…板块D… 第 179 行）。
+  //
+  // ★ 候选由后端拿 sid 重新提取，前端**只传下标**：这样前端伪造不了要入库的正文。
+  //   所以必须先拉 candidates 再存，不能自己把 text 传上去。
+  getDialogueCandidates: (sid: string) =>
+    request<DialogueCandidatesResp>(
+      `/api/kb/dialogue-candidates/${encodeURIComponent(sid)}`
+    ),
+  // 入库要现算向量，比普通接口慢，超时给到 120s（和下面的 confirm 同级）
+  importDialogue: (kbId: string, sid: string, indexes: number[]) =>
+    request<ImportDialogueResult>(
+      `/api/kb/${encodeURIComponent(kbId)}/import-dialogue`,
+      { method: "POST", body: JSON.stringify({ sid, indexes }) },
+      { timeoutMs: 120000 }
     ),
 
   // ---------- 建库建议（板块 D，后端开发中）----------

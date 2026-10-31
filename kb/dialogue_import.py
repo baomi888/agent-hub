@@ -176,6 +176,25 @@ def extract_candidates(
     return _suppress_superseded(out)
 
 
+def drop_existing(picked: list[dict], existing: set[str]) -> list[dict]:
+    """剔掉这个库里已经沉淀过的原句。
+
+    ★ 为什么需要：向量库给每条都生成 `uuid4()` 当 id，同一句话存第二次
+    就是两条互不相干的片段。而沉淀入口是「用户随时能再点一次」的交互，
+    不去重的话同一条知识会重复占用检索 top-k 的名额。
+
+    ★ 为什么按原文精确比对就够：候选是**原句不改写**的（见 extract_candidates
+    的注释），所以同一句话两次抽出来的字符串完全一致，不需要模糊匹配。
+
+    ★ 为什么不在这里判空：`picked` 为空要不要报 400 是 API 层的事
+    （全被跳过 ≠ 参数非法），这层只负责筛。
+    """
+    if not existing:
+        return picked
+    keep = [c for c in picked if (c.get("text") or "").strip() not in existing]
+    return keep
+
+
 def build_documents(items: list[dict], sid: str, conv_title: str) -> list[Document]:
     """把勾选的候选构造成入库 Document（metadata 全部可溯源）。
 

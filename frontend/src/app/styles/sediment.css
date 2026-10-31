@@ -1,0 +1,256 @@
+/* ============================================================
+   对话沉淀弹层（SedimentModal）
+   复用 kb.css 的 pv-mask / pv-card / pv-head / pv-body 骨架，
+   这里只加自己的窄卡宽度与候选列表。
+   ============================================================ */
+
+.sd-card {
+  width: min(620px, 100%);
+  max-height: min(80vh, 720px);
+}
+
+.sd-sub {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+/* ---------- 候选列表 ---------- */
+.sd-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+/* 整条可点，不是只有小方块能点 —— 拇指够得着 */
+.sd-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-10);
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+.sd-item:hover {
+  border-color: var(--line-strong);
+  background: var(--fill-4);
+}
+/* 选中态：金边 + 极淡金底。金色只标"这一条你选了"，不做装饰 */
+.sd-item.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.sd-box {
+  flex: none;
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  border: 1.5px solid var(--line-strong);
+  border-radius: var(--radius-xs);
+  background: var(--card-bg);
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+.sd-box:checked {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23FDFAF2' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 13l4 4L19 7'/%3E%3C/svg%3E");
+  background-size: 11px 11px;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+.sd-box:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.sd-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* 类型只是弱提示：后端正则判出来的，不要让它看起来像权威结论 */
+.sd-kind {
+  align-self: flex-start;
+  font-size: var(--fs-badge);
+  color: var(--accent-ink);
+  background: var(--accent-tint);
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  line-height: 1.5;
+}
+
+/* 原文原样，不摘要不改写：可溯源才是资料库的价值 */
+.sd-text {
+  font-size: var(--fs-md);
+  line-height: 1.65;
+  color: var(--ink);
+  word-break: break-word;
+}
+
+/* ---------- 说明句 ---------- */
+.sd-hint {
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+  color: var(--text-3);
+}
+.sd-tip {
+  margin-top: var(--space-10);
+}
+
+.sd-switch {
+  align-self: flex-start;
+  margin-top: var(--space-8);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.sd-switch:hover {
+  color: var(--accent-ink);
+}
+
+.sd-save-err {
+  font-size: var(--fs-xs);
+  color: var(--red-ink);
+  line-height: 1.7;
+}
+
+/* ---------- 会话选择（从资料库页进来的第一步）---------- */
+.sd-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+.sd-session {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-10);
+  width: 100%;
+  padding: 9px 12px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+.sd-session:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.sd-session-t {
+  font-size: var(--fs-md);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sd-session-d {
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+/* ---------- 空态 / 错误态 ---------- */
+.sd-empty,
+.sd-err,
+.sd-done {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: 8px 2px;
+  font-size: var(--fs-md);
+  color: var(--ink);
+  line-height: 1.7;
+}
+.sd-empty p,
+.sd-err p {
+  margin: 0;
+}
+.sd-empty-p,
+.sd-done-p {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.sd-done-n {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  margin: 0;
+}
+.sd-done-p {
+  margin: 0;
+}
+.sd-empty .btn,
+.sd-err .btn {
+  align-self: flex-start;
+}
+
+/* ---------- 底部：选库 + 提交 ---------- */
+.sd-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+.sd-target {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  min-width: 0;
+}
+.sd-select {
+  max-width: 220px;
+  padding: 4px 8px;
+  font-size: var(--fs-sm);
+  color: var(--ink);
+  background: var(--card-bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.sd-select:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+.sd-save {
+  margin-left: auto;
+  flex: none;
+}
+
+/* 窄屏：底部换两行，库下拉撑满一行 —— 否则「存进这个库（5 条）」会被挤成两行 */
+@media (max-width: 560px) {
+  .sd-foot {
+    flex-wrap: wrap;
+    gap: var(--space-8);
+  }
+  .sd-target {
+    flex: 1 1 100%;
+  }
+  .sd-select {
+    flex: 1;
+    max-width: none;
+    /* iOS 聚焦 < 16px 的字号会放大整页且不还原，select 一并避开 */
+    font-size: 16px;
+  }
+  .sd-save {
+    margin-left: 0;
+    flex: 1 1 100%;
+  }
+}

@@ -1187,6 +1187,33 @@ class RagPipeline:
         )
         return items
 
+    def get_dialogue_texts(self, sid: str) -> set[str]:
+        """这个库里已经沉淀过的、来自某段对话的原句（用于入库去重）。
+
+        ★ 为什么需要它：`_embed_and_store` 给每条都生成 `uuid4()` 当 id，
+        同一句话存两次就是两条互不相干的片段。而沉淀入口是"用户随时可以再点
+        一次"的交互 —— 不去重的话，同一条知识会重复占掉检索 top-k 的名额，
+        把别的片段挤出去，表现为"我明明存了很多，问它却只答得出那一条"。
+
+        ★ 这只是板块 D 上线前的等价物：D 的 `sediment_batches` 上有
+        `(owner_id, sid, content_hash)` 唯一索引，那才是正式的幂等层。
+        这里按 `dialogue_sid` 读已入库原句做比对，范围更窄（只覆盖对话沉淀，
+        不覆盖重复上传同一份文件），不要把它当成通用去重。
+
+        读失败一律返回空集：去重是优化，不能因为它让入库整体失败。
+        """
+        if self._vs is None:
+            self.get_or_open()
+        if self._vs is None:
+            return set()
+        try:
+            got = self._vs._collection.get(
+                where={"dialogue_sid": sid}, include=["documents"]
+            )
+        except Exception:
+            return set()
+        return {(t or "").strip() for t in (got.get("documents") or []) if (t or "").strip()}
+
     def list_sources(self) -> list[dict]:
         """统计库内每个来源文件的片段数（文件列表记录的兜底数据源）。
 
