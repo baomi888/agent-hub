@@ -30,8 +30,40 @@ export type { FontScale };
 const LEGACY_MODES = new Set<string>(["hybrid"]);
 const normalizeMode = (m: ChatMode): ChatMode => (LEGACY_MODES.has(m) ? "auto" : m);
 
+/**
+ * 老用户的「模式」→「两个能力开关」一次性迁移（2026-10-31）。
+ *
+ * 10-30 之后后端契约改成 use_kb / use_web，`mode` 降级为兼容字段。后端
+ * `_resolve_switches` 给出的等价关系是：
+ *   rag    → (use_kb=True,  use_web=False)
+ *   llm    → (use_kb=False, use_web=False)
+ *   auto   → (use_kb=has_kb, use_web=True)
+ *
+ * 如果升级后直接落到新默认「两个都不勾」，一个老用户（本地存着 auto）问资料库里
+ * 的东西，模型会答"我没有你的资料"——这是断崖式降级，而且没有任何提示。
+ * 所以首次读到「没有 useKb/useWeb 但有 mode」的旧偏好时，按上表翻译一次；
+ * 下面的写 effect 会把结果落盘，之后就不会再走这里。
+ *
+ * auto 这里给 useKb=true 而不是 has_kb：前端此刻并不知道用户有没有库，
+ * 后端会再 and 一次 has_kb，所以给 true 是安全的（没库时等价于 false）。
+ */
+function migrateLegacyCaps(saved: Prefs): { useKb: boolean; useWeb: boolean } | null {
+  // 已经是新偏好（存过任一开关）就不再迁移，否则用户手动关掉的会被旧 mode 覆盖回来
+  if (typeof saved.useKb === "boolean" || typeof saved.useWeb === "boolean") return null;
+  // 全新用户：没有旧 mode，直接走新默认（两个都不勾，符合决策 D3）
+  if (!saved.mode) return null;
+  if (saved.mode === "rag") return { useKb: true, useWeb: false };
+  if (saved.mode === "llm") return { useKb: false, useWeb: false };
+  // auto / agent / hybrid：绑库就检索，并保留联网能力
+  return { useKb: true, useWeb: true };
+}
+
 export interface Prefs {
   mode?: ChatMode;
+  /** 能力开关：本轮是否使用知识库。undefined = 老版本没存过（走迁移或新默认） */
+  useKb?: boolean;
+  /** 能力开关：本轮是否允许智能联网。undefined = 老版本没存过 */
+  useWeb?: boolean;
   topK?: number;
   chunkSize?: number;
   chunkOverlap?: number;
@@ -41,6 +73,9 @@ export interface Prefs {
 
 export function usePrefs() {
   const [mode, setMode] = useState<ChatMode>("auto");
+  // 两个能力开关：默认都不勾（决策 D3）。老用户由下面的迁移按旧 mode 翻译。
+  const [useKb, setUseKb] = useState(false);
+  const [useWeb, setUseWeb] = useState(false);
   const [topK, setTopK] = useState(DEFAULT_TOP_K);
   const [chunkSize, setChunkSize] = useState(500);
   const [chunkOverlap, setChunkOverlap] = useState(50);
@@ -54,8 +89,14 @@ export function usePrefs() {
   useEffect(() => {
     const saved = readPrefs() as Prefs;
     savedRef.current = saved;
-    // ⚠️ 六项都要读回来。漏读某项 = 该项在挂载后立刻被下面的写 effect 用默认值覆盖
+    // ⚠️ 每一项都要读回来。漏读某项 = 该项在挂载后立刻被下面的写 effect 用默认值覆盖
     if (saved.mode) setMode(normalizeMode(saved.mode));
+    // 能力开关：优先用存过的值；没有则按旧 mode 迁移（只对老用户生效）
+    const legacyCaps = migrateLegacyCaps(saved);
+    if (typeof saved.useKb === "boolean") setUseKb(saved.useKb);
+    else if (legacyCaps) setUseKb(legacyCaps.useKb);
+    if (typeof saved.useWeb === "boolean") setUseWeb(saved.useWeb);
+    else if (legacyCaps) setUseWeb(legacyCaps.useWeb);
     if (typeof saved.topK === "number" && saved.topK > 0) setTopK(saved.topK);
     if (typeof saved.chunkSize === "number") setChunkSize(saved.chunkSize);
     if (typeof saved.chunkOverlap === "number") setChunkOverlap(saved.chunkOverlap);
@@ -73,17 +114,23 @@ export function usePrefs() {
     if (!prefsReady) return;
     patchPrefs({
       mode,
+      useKb,
+      useWeb,
       topK,
       chunkSize,
       chunkOverlap,
       ...(kbPanelPref === null ? {} : { kbPanel: kbPanelPref }),
       fontScale,
     });
-  }, [prefsReady, mode, topK, chunkSize, chunkOverlap, kbPanelPref, fontScale]);
+  }, [prefsReady, mode, useKb, useWeb, topK, chunkSize, chunkOverlap, kbPanelPref, fontScale]);
 
   return {
     mode,
     setMode,
+    useKb,
+    setUseKb,
+    useWeb,
+    setUseWeb,
     topK,
     setTopK,
     chunkSize,

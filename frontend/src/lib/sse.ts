@@ -28,6 +28,19 @@ export async function* streamChat(
     sid: string;
     question: string;
     top_k?: number;
+    /**
+     * 能力开关（2026-10-30 后端新契约）：
+     * - `use_kb`  本轮是否使用知识库（有库时后端先跑一轮检索，模型可再补）
+     * - `use_web` 本轮是否允许模型自主联网
+     *
+     * ⚠️ **两个必须一起发**。后端 `_resolve_switches` 的判定是
+     * `if req.use_kb is not None or req.use_web is not None: return bool(use_kb), bool(use_web)`
+     * —— 只传一个时，另一个 `None` 会被 `bool()` 压成 `False`，静默改变语义。
+     * 两个都是 `undefined`（字段不出现）才回落到下面的 `mode`。
+     */
+    use_kb?: boolean;
+    use_web?: boolean;
+    /** 兼容字段：后端仅在 use_kb/use_web 都没传时使用。前端继续带着，作为兜底。 */
     mode?: string;
     kb_id_override?: string;
     /**

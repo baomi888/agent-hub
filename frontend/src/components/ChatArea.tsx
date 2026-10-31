@@ -55,11 +55,16 @@ interface Props {
   sending: boolean;
   onModeChange: (m: ChatMode) => void;
   /**
-   * 视觉预览：用两枚能力开关（检索 / 智能联网）替代四档模式条。
-   * 只在 `?caps=1` 时由页面层打开，默认 false —— 后端契约（use_kb/use_web）
-   * 还没上线，现在让它上线等于给用户一个点了没用的开关。
+   * 演示闸门：是否用两枚能力开关（检索 / 智能联网）替代四档模式条。
+   * 只在 `?caps=1` 时由页面层打开（批 B 之后会去掉闸门、常驻显示）。
+   * 开关的值本身由 capValue 从页面层传入 —— 因为它要进请求体（use_kb/use_web），
+   * 住在本组件内部就发不出去了。
    */
   capToggles?: boolean;
+  /** 两枚开关的当前值（受控） */
+  capValue?: CapValue;
+  /** 开关变化。页面层写进 usePrefs，下一轮请求体生效 */
+  onCapChange?: (next: CapValue) => void;
   onSend: (question: string, attachments?: ChatAttachment[], display?: string, plan?: boolean) => void;
   onStop: () => void;
   /** 重新生成：传入目标助手消息 id 与原始问题，覆盖原答案而不是追加 */
@@ -112,6 +117,8 @@ export default function ChatArea({
   sending,
   onModeChange,
   capToggles = false,
+  capValue = CAP_DEFAULT,
+  onCapChange,
   onSend,
   onStop,
   onRetry,
@@ -223,10 +230,9 @@ export default function ChatArea({
   const pendingOtherCount = pending.length - pendingImageCount;
 
   const currentMode = MODE_LABELS.find((m) => m.value === mode);
-  // 能力开关的本地状态（仅 ?caps=1 预览用）。放在这里而不是组件内部：
-  // 输入框下面那行提示要跟着变 —— 原来它显示的是 currentMode.hint，
-  // 挂着开关却还在说「由系统判断：查资料、调工具还是直接答」，自相矛盾。
-  const [capValue, setCapValue] = useState<CapValue>(CAP_DEFAULT);
+  // capValue 是受控 props（页面层持有）：它要进请求体，住在这里就发不出去。
+  // 输入框下面那行提示跟着它变 —— 挂着开关却还在说「由系统判断：查资料、
+  // 调工具还是直接答」会自相矛盾。
   // 每句都控制在 9 字以内：这行右侧还钉着「Enter 发送 · ↑ 上一条 · Esc 清空」，
   // 390px 下超了就被截成「…」（第一版「先翻你的资料库，不够再上网」就被截）
   const capHint = capValue.kb
@@ -844,7 +850,7 @@ export default function ChatArea({
         </div>
         <div className="mb-2 flex items-center gap-2 sm:gap-3">
           {capToggles ? (
-            <CapToggles value={capValue} onChange={setCapValue} />
+            <CapToggles value={capValue} onChange={onCapChange ?? (() => {})} />
           ) : (
             <div className="mode-tabs" role="group" aria-label="对话模式" ref={modeTabsRef}>
               <span

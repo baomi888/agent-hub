@@ -79,16 +79,27 @@ export default function Home() {
     mode, setMode, topK, setTopK, chunkSize, setChunkSize,
     chunkOverlap, setChunkOverlap, kbPanelPref, setKbPanelPref, savedRef,
     fontScale, setFontScale,
+    useKb, setUseKb, useWeb, setUseWeb,
   } = prefs;
-  // 能力开关（检索 / 智能联网）的**视觉预览**开关：`?caps=1`。
-  // 后端契约（use_kb / use_web）还没上线，两枚开关点了只改本地状态、不影响请求，
-  // 所以默认不显示 —— 不能给用户一个按了没反应的按钮。
+  // 能力开关（检索 / 智能联网）的**演示闸门**：`?caps=1`。
+  // 2026-10-31 起这两个开关已真正进请求体（use_kb / use_web），但界面形态还在
+  // 分批切换（模式条尚未下架），所以默认仍不显示 —— 避免同一屏出现两套入口。
   // 读 query 放在 effect 里而不是 useState 初始化函数：页面会被预渲染，
   // 初始化时读 window 会 hydration 不一致（服务端 false、客户端 true）。
   const [capToggles, setCapToggles] = useState(false);
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get("caps") === "1") setCapToggles(true);
   }, []);
+  // 两枚开关的当前值。提到页面层是因为它要进请求体：原来它住在 ChatArea 内部
+  // state 里，点了只改视觉、发不出去（`?caps=1` 那时只是预览）。
+  const capValue = { kb: useKb, web: useWeb };
+  const onCapChange = useCallback(
+    (next: { kb: boolean; web: boolean }) => {
+      setUseKb(next.kb);
+      setUseWeb(next.web);
+    },
+    [setUseKb, setUseWeb]
+  );
   const sessions_ = useSessions(showToast);
   const {
     sessions, setSessions, activeSid, setActiveSid, messages, setMessages,
@@ -303,6 +314,11 @@ export default function Home() {
           sid,
           question,
           top_k: topK,
+          // 能力开关优先于 mode：后端只有在这两个字段都不出现时才看 mode。
+          // 两个都显式发（哪怕都是 false），否则只发一个会把另一个压成 false。
+          use_kb: useKb,
+          use_web: useWeb,
+          // 兼容字段：留着兜底，后端在 use_kb/use_web 都在时忽略它。
           mode,
           attachments: sentAttachments,
           location: getSendGeo(),
@@ -488,7 +504,7 @@ export default function Home() {
       setSending(false);
       refreshSessions();
     }
-  }, [activeSid, mode, topK, setSessions, setActiveSid, setMessages, showToast, refreshSessions]);
+  }, [activeSid, mode, useKb, useWeb, topK, setSessions, setActiveSid, setMessages, showToast, refreshSessions]);
 
   // 消息镜像：重试需要读当前列表，但不能让回调依赖 messages，否则每个 token
   // 都会生成新的 onRetry，把 Bubble 的 memo 全部打穿
@@ -787,6 +803,8 @@ export default function Home() {
           sending={sending}
           onModeChange={setMode}
           capToggles={capToggles}
+          capValue={capValue}
+          onCapChange={onCapChange}
           onSend={sendMessage}
           onStop={stopSending}
           onRetry={retryMessage}
