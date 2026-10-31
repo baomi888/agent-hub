@@ -14,11 +14,11 @@ import type { ToolId, ToolMeta } from "../types";
 
 export const TOOL_LIST: readonly ToolMeta[] = [
   { id: "gpa", label: "GPA 分析", hint: "录入成绩，算加权绩点", migrated: true },
-  { id: "pomodoro", label: "番茄钟", hint: "25 分钟专注计时", migrated: false },
-  { id: "schedule", label: "课程表", hint: "周视图课表与冲突检测", migrated: false },
-  { id: "words", label: "单词卡", hint: "四六级词卡与复习队列", migrated: false },
-  { id: "deadline", label: "倒计时", hint: "截止日期与剩余天数", migrated: false },
-  { id: "draw", label: "群抽签", hint: "名单随机抽取", migrated: false },
+  { id: "pomodoro", label: "番茄钟", hint: "25 分钟专注计时", migrated: true },
+  { id: "schedule", label: "课程表", hint: "周视图课表与冲突检测", migrated: true },
+  { id: "words", label: "单词卡", hint: "四六级词卡与复习队列", migrated: true },
+  { id: "deadline", label: "倒计时", hint: "截止日期与剩余天数", migrated: true },
+  { id: "draw", label: "群抽签", hint: "名单随机抽取", migrated: true },
 ];
 
 interface ToolNavProps {

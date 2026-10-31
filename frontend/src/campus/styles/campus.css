@@ -354,11 +354,710 @@
   text-underline-offset: 2px;
 }
 
+/* ---------- 通用：行内表单 / 分段控件 / 弹窗 ---------- */
+
+.campus-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+  margin-top: 4px;
+}
+
+.campus-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: var(--fs-md);
+  line-height: 1.7;
+  color: var(--ink);
+  background: var(--bg-canvas);
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius-sm);
+  resize: vertical;
+}
+
+.campus-textarea:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 1px;
+}
+
+.campus-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.campus-seg-btn {
+  padding: 5px 12px;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+
+.campus-seg-btn.is-on {
+  color: var(--accent-ink);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-1);
+}
+
+.campus-details {
+  margin-top: 12px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+.campus-details summary {
+  cursor: pointer;
+}
+
+.campus-prompt {
+  max-height: 240px;
+  margin: 8px 0 0;
+  padding: 12px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  background: var(--fill-3);
+  border-radius: var(--radius-sm);
+}
+
+.campus-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.campus-modal-mask {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  background: var(--veil-strong);
+  border: 0;
+  cursor: pointer;
+}
+
+.campus-modal-card {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  max-height: calc(100vh - 48px);
+  padding: 18px;
+  overflow: auto;
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--campus-radius);
+  box-shadow: var(--shadow-2);
+}
+
+.campus-modal-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+/* ---------- 番茄钟 ---------- */
+
+.campus-pomo-clock {
+  margin: 8px 0 14px;
+  font-family: var(--font-serif);
+  font-size: clamp(48px, 14vw, 76px);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.05;
+  color: var(--ink);
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+
+.campus-pomo-bar {
+  height: 6px;
+  margin-bottom: 16px;
+  overflow: hidden;
+  background: var(--fill-3);
+  border-radius: 999px;
+}
+
+.campus-pomo-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.25s linear;
+}
+
+.campus-pomo-ctrl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.campus-pomo-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ---------- 倒计时 ---------- */
+
+.campus-dl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.campus-dl-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+}
+
+.campus-dl-item.is-urgent {
+  border-left-color: var(--red);
+}
+
+.campus-dl-item.is-today {
+  border-left-color: var(--red);
+  background: var(--accent-soft);
+}
+
+.campus-dl-item.is-past {
+  border-left-color: var(--line-strong);
+  opacity: 0.72;
+}
+
+.campus-dl-name {
+  flex: 1 1 140px;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.campus-dl-date {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.campus-dl-days {
+  min-width: 76px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.campus-dl-item.is-urgent .campus-dl-days,
+.campus-dl-item.is-today .campus-dl-days {
+  font-weight: 600;
+  color: var(--red-ink);
+}
+
+/* ---------- 课程表 ---------- */
+
+.campus-wkbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.campus-wk-btn {
+  width: 32px;
+  height: 32px;
+  font-family: inherit;
+  font-size: var(--fs-lg);
+  line-height: 1;
+  color: var(--text-2);
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.campus-wk-btn:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--fill-2);
+}
+
+.campus-wk-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.campus-week-wrap {
+  margin-top: 10px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.campus-week {
+  display: flex;
+  align-items: flex-start;
+  min-width: 560px;
+  background: var(--card-bg);
+}
+
+.campus-week-rail {
+  flex: 0 0 40px;
+  border-right: 1px solid var(--line);
+}
+
+.campus-week-rail-head {
+  border-bottom: 1px solid var(--line);
+}
+
+.campus-week-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid var(--line);
+}
+
+.campus-week-slot-no {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.campus-week-slot-time {
+  font-size: 10px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+.campus-week-days {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.campus-week-day {
+  position: relative;
+  border-right: 1px solid var(--line);
+}
+
+.campus-week-day:last-child {
+  border-right: 0;
+}
+
+.campus-week-day.is-today {
+  background: var(--accent-soft);
+}
+
+.campus-week-day-head {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.campus-week-day.is-today .campus-week-day-head {
+  font-weight: 600;
+  color: var(--accent-ink);
+}
+
+.campus-week-date {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+.campus-week-block {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-items: flex-start;
+  padding: 4px 5px;
+  overflow: hidden;
+  font-family: inherit;
+  text-align: left;
+  border: 1px solid;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+
+.campus-week-block:hover {
+  filter: brightness(1.06);
+  outline: 2px solid var(--accent-line);
+  outline-offset: -1px;
+}
+
+.campus-week-block-name {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--ink);
+}
+
+.campus-week-block-room,
+.campus-week-block-teacher {
+  font-size: 10px;
+  line-height: 1.25;
+  color: var(--text-2);
+}
+
+/* 单节课的格子放不下教室和老师，只留课名，避免文字被裁一半 */
+.campus-week-block.is-one .campus-week-block-room,
+.campus-week-block.is-one .campus-week-block-teacher {
+  display: none;
+}
+
+.campus-week-block.is-split .campus-week-block-name {
+  font-size: 10px;
+}
+
+.campus-ov-wrap {
+  margin-top: 10px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.campus-ov {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: collapse;
+  font-size: var(--fs-xs);
+}
+
+.campus-ov th,
+.campus-ov td {
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+  border: 1px solid var(--line);
+}
+
+.campus-ov thead th {
+  font-weight: 600;
+  color: var(--text-2);
+  background: var(--fill-3);
+  white-space: nowrap;
+}
+
+.campus-ov td {
+  max-width: 120px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.campus-ov tr.is-now td,
+.campus-ov tr.is-now th {
+  background: var(--accent-soft);
+}
+
+.campus-ov-week {
+  padding: 2px 6px;
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  color: var(--accent-ink);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+
+.campus-ov-week:hover {
+  background: var(--fill-2);
+}
+
+.campus-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.campus-fullscreen-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.campus-fullscreen-title {
+  font-family: var(--font-serif);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.campus-fullscreen-body {
+  flex: 1;
+  padding: 12px 16px 24px;
+  overflow: auto;
+}
+
+.campus-fullscreen .campus-week {
+  min-width: 720px;
+}
+
+/* ---------- 单词卡 ---------- */
+
+.campus-words-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.campus-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.campus-chip {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 5px 12px;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.campus-chip small {
+  font-size: 10px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.campus-chip.is-on {
+  color: var(--accent-ink);
+  background: var(--card-bg);
+  border-color: var(--accent-line);
+}
+
+.campus-words-group {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.campus-words-bar {
+  height: 4px;
+  margin-bottom: 14px;
+  overflow: hidden;
+  background: var(--fill-3);
+  border-radius: 999px;
+}
+
+.campus-words-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.2s ease;
+}
+
+.campus-flip {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 220px;
+  padding: 24px 18px;
+  font-family: inherit;
+  text-align: center;
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+}
+
+.campus-flip.is-flipped {
+  background: var(--card-bg);
+}
+
+.campus-flip.is-done {
+  border-style: dashed;
+}
+
+.campus-flip-word {
+  font-family: var(--font-serif);
+  font-size: clamp(28px, 8vw, 40px);
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--ink);
+  word-break: break-word;
+}
+
+.campus-flip-hint {
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+
+.campus-flip-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+}
+
+.campus-flip-def {
+  font-size: var(--fs-lg);
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+.campus-flip-eg {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 480px;
+  padding: 10px 12px;
+  text-align: left;
+  background: var(--card-bg);
+  border-left: 2px solid var(--accent-line);
+  border-radius: var(--radius-xs);
+}
+
+.campus-flip-eg-tag {
+  font-size: 10px;
+  color: var(--text-3);
+  letter-spacing: 0.08em;
+}
+
+.campus-flip-eg-en {
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
+.campus-flip-eg-zh {
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+.campus-words-keys kbd {
+  padding: 1px 5px;
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+}
+
+.campus-words-source {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.campus-words-source a {
+  color: var(--accent-ink);
+}
+
+/* ---------- 群抽签 ---------- */
+
+.campus-draw-col {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.campus-draw-head {
+  flex: 0 0 100%;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.campus-draw-head.is-ok {
+  color: var(--accent-ink);
+}
+
+.campus-draw-name {
+  padding: 4px 10px;
+  font-size: var(--fs-md);
+  color: var(--text-2);
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.campus-draw-name.is-win {
+  font-weight: 600;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
 /* ---------- 无障碍：尊重减少动效偏好 ---------- */
 
 @media (prefers-reduced-motion: reduce) {
   .campus-tab,
-  .campus-btn {
+  .campus-btn,
+  .campus-pomo-fill,
+  .campus-words-fill {
     transition: none;
+  }
+}
+
+/* ---------- 窄屏 ---------- */
+
+@media (max-width: 560px) {
+  .campus-modal-card {
+    padding: 14px;
+  }
+
+  .campus-dl-days {
+    min-width: 64px;
+    font-size: var(--fs-xs);
+  }
+
+  .campus-pomo-ctrl {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
