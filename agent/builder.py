@@ -160,7 +160,7 @@ _AGENT_LOCK = threading.Lock()
 
 def _cache_key(
     *,
-    kb_bound: bool,
+    kb_state: int,
     use_web: bool,
     scene: str,
     activated: frozenset[str],
@@ -177,10 +177,32 @@ def _cache_key(
     下轮只联网。工具集和 system prompt 都随开关变，键里不带就会拿到上一轮的图
     ——表现为"关了联网它还在搜"。
 
-    kb_bound 是「开了检索且真有库」的合取结果，不是单独的 use_kb：没库时
-    绑不绑 kb_search 的结果一样，没必要各占一个缓存位。
+    2026-10-31：kb 那一维从「`kb_bound` 合取」改成**三态 `kb_state`**
+    （0 = 本轮关检索 / 1 = 开检索但没有库 / 2 = 开检索且真有库）。
+    原来的合取 `use_kb and has_kb` 把 0 和 1 压成同一个 `False`，而下面 system
+    prompt 对这两态说的是**相反的话**（「本轮未开启检索」vs「当前会话没有绑定知识库」）
+    —— 于是"有库但没开检索"的人和"没库却开了检索"的人共享同一张编译图，
+    后编译的那一方拿到前一方那句错话。功能上不炸（两态的工具集里都没有 kb_search），
+    但提示词在撒谎，模型会据此编出"为什么查不到你的资料"的理由。
+    三态之后键的种类只是从 2 变 3，编译量几乎不变。
     """
-    return (bool(kb_bound), bool(use_web), scene, frozenset(activated), int(prompt_version or 0))
+    return (int(kb_state), bool(use_web), scene, frozenset(activated), int(prompt_version or 0))
+
+
+def _kb_state(*, use_kb: bool, has_kb: bool) -> int:
+    """知识库维度的三态。**别把它压回布尔**。
+
+    0 = 本轮没开检索      → 提示词说「本轮未开启知识库检索」
+    1 = 开了检索但没库    → 提示词说「当前会话没有绑定知识库」
+    2 = 开了检索且真有库  → 提示词说「已绑定知识库，需要时调 kb_search」
+
+    1 和 2 也决定 kb_search 挂不挂（只有 2 挂）。0 和 1 在工具维度上没区别，
+    但在提示词维度上是相反的两句话 —— 2026-10-31 之前缓存键用
+    `use_kb and has_kb` 的合取，把 0 和 1 压成同一个键，两者会互相串那句错话。
+    """
+    if not use_kb:
+        return 0
+    return 2 if has_kb else 1
 
 
 def _tool_allowed(name: str, *, kb_bound: bool, use_web: bool) -> bool:
@@ -234,13 +256,16 @@ def build_agent(
     # ① 城市一多变 LRU 抖动、反复重编译图（原本 2×#城市×#场景×#激活集）；
     # ② 更贵的是 system prompt 前缀随城市变化，KV 缓存直接失效（实测命中率 90%→0%）。
     # 现在定位只作为**末尾**的动态消息追加（见 location_note 的调用方 api/chat.py），
-    # 前缀恒定，键的种类降为 2×#场景×#激活集×#提示词版本（版本极少变，实际仍是那几个）。
+    # 前缀恒定，键的种类降为 3×2×#场景×#激活集×#提示词版本（3 = kb 三态，2 = 联网开关）。
     base_prompt, prompt_version = prompt_store.resolve("agent", SYSTEM_PROMPT)
-    # kb_bound = 开了检索且真有库。没库时绑不绑 kb_search 结果一样，
-    # 所以缓存键用合取结果，不单列 use_kb（少一半缓存位、少一半编译）。
-    kb_bound = bool(use_kb and has_kb)
+    # kb 这一维在代码里是**三态**，不是"开没开检索"一个布尔：
+    #   0 = 本轮没开检索        1 = 开了检索但这个会话没有库        2 = 开了检索且有库
+    # 工具维度只关心 0/1 之外的那条线（有没有库），提示词维度三个都不同，
+    # 所以缓存键必须用三态（见 _cache_key 的说明）。
+    kb_state = _kb_state(use_kb=use_kb, has_kb=has_kb)
+    kb_bound = kb_state == 2
     key = _cache_key(
-        kb_bound=kb_bound,
+        kb_state=kb_state,
         use_web=use_web,
         scene=scene,
         activated=frozenset(activated),

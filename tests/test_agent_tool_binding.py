@@ -57,20 +57,52 @@ def test_weather_not_gated_by_switches():
 
 def test_cache_key_distinguishes_switches():
     """开关进缓存键：否则换了开关仍命中上一轮编译好的图（工具集和 prompt 都是旧的）。"""
-    def key(*, kb_bound: bool, use_web: bool, ver: int = 0):
+    def key(*, kb_state: int, use_web: bool, ver: int = 0):
         return builder._cache_key(
-            kb_bound=kb_bound,
+            kb_state=kb_state,
             use_web=use_web,
             scene="",
             activated=frozenset(),
             prompt_version=ver,
         )
 
-    assert key(kb_bound=True, use_web=True) != key(kb_bound=True, use_web=False)
-    assert key(kb_bound=True, use_web=True) != key(kb_bound=False, use_web=True)
-    assert key(kb_bound=False, use_web=False) != key(kb_bound=False, use_web=True)
-    assert key(kb_bound=True, use_web=True, ver=0) != key(kb_bound=True, use_web=True, ver=1)
-    assert key(kb_bound=True, use_web=True) == key(kb_bound=True, use_web=True)
+    assert key(kb_state=2, use_web=True) != key(kb_state=2, use_web=False)
+    assert key(kb_state=2, use_web=True) != key(kb_state=0, use_web=True)
+    assert key(kb_state=0, use_web=False) != key(kb_state=0, use_web=True)
+    assert key(kb_state=2, use_web=True, ver=0) != key(kb_state=2, use_web=True, ver=1)
+    assert key(kb_state=2, use_web=True) == key(kb_state=2, use_web=True)
+
+
+def test_cache_key_separates_all_three_kb_states():
+    """★ 三态必须互不相同。
+
+    这是 2026-10-31 修的 bug：键原来用 `use_kb and has_kb` 的合取，把
+    「本轮没开检索」(0) 和「开了检索但没库」(1) 压成同一个 False。而 system prompt
+    对这两态说的是相反的两句话（「本轮未开启」vs「没有绑定知识库」），于是
+    "有库但关着检索"的人与"没库却开着检索"的人共享同一张编译图，
+    后编译的一方拿到前一方那句错话。
+
+    断言集合长度而不是两两 !=，是为了让"哪天又有人把某个态折回另一个"变成一条失败。
+    """
+    keys = {
+        builder._cache_key(kb_state=s, use_web=False, scene="", activated=frozenset(), prompt_version=0)
+        for s in (0, 1, 2)
+    }
+    assert len(keys) == 3
+
+
+@pytest.mark.parametrize(
+    ("use_kb", "has_kb", "expect"),
+    [
+        (False, False, 0),
+        (False, True, 0),   # 有库但没开检索 = 0，与"没库也没开"同态（提示词都说未开启）
+        (True, False, 1),
+        (True, True, 2),
+    ],
+)
+def test_kb_state_mapping(use_kb, has_kb, expect):
+    """三态映射钉死。工具只认 state==2，提示词三态各一句，映射错了就串。"""
+    assert builder._kb_state(use_kb=use_kb, has_kb=has_kb) == expect
 
 
 def test_build_agent_accepts_switch_kwargs():

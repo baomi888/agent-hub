@@ -150,16 +150,18 @@ async def decide(
     """判断这一轮走工作流还是智能体。任何失败都不抛异常，只降级。
 
     为什么不让异常穿透：路由只是"选路"，选路失败不该让整个提问失败。
+    调用方（`api/chat.py`）是裸 await，这里漏一个异常出去，整个提问就 500，
+    而额度往往已经扣了 —— 所以**连"建客户端"都必须在 try 里**：
+    `get_llm()` 在缺 key、base_url 写错、被杀软拦截出口时会直接抛。
     """
     if not config.ROUTER_ENABLED:
         return RouteDecision(_fallback_route(), "fallback", "router_disabled")
 
-    if llm is None:
-        from core.llm import get_llm
-
-        llm = get_llm(temperature=0.0, max_tokens=config.ROUTER_MAX_TOKENS)
-
     try:
+        if llm is None:
+            from core.llm import get_llm
+
+            llm = get_llm(temperature=0.0, max_tokens=config.ROUTER_MAX_TOKENS)
         raw = await _ask_model(question, has_kb, use_web, llm)
     except TimeoutError:
         log.info("route=fallback reason=timeout has_kb=%s use_web=%s", has_kb, use_web)

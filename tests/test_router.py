@@ -96,6 +96,24 @@ class TestFallback:
         decision = _decide("随便问问", has_kb=False, llm=fake)
         assert (decision.source, decision.route) == ("fallback", "agent")
 
+    def test_get_llm_failure_degrades_instead_of_raising(self, monkeypatch):
+        """★ 建客户端失败也属于"选路失败"，必须降级而不是抛。
+
+        2026-10-31 修的洞：`get_llm()` 原来在 try 外面，缺 key / base_url 写错 /
+        出口被防火墙拦时会直接抛；而调用方 `api/chat.py` 是裸 `await decide(...)`，
+        于是整个提问 500 —— 且额度往往已经扣了。docstring 写着"任何失败都不抛
+        异常"，实现却不满足，这类"注释比代码宽容"的洞最难被发现，因为正常环境
+        永远不会踩到。
+        """
+        import core.llm as llm_mod
+
+        def boom(**kwargs):
+            raise RuntimeError("no api key configured")
+
+        monkeypatch.setattr(llm_mod, "get_llm", boom)
+        decision = asyncio.run(route_engine.decide("随便问问", has_kb=False))
+        assert (decision.source, decision.route) == ("fallback", "agent")
+
     @pytest.mark.parametrize(
         "raw",
         [

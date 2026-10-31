@@ -85,35 +85,35 @@ def test_kill_switch_returns_builtin(tmpdb, monkeypatch):
 def test_builder_cache_key_includes_prompt_version():
     from agent import builder
 
-    def key(kb_bound: bool, ver: int):
+    def key(kb_state: int, ver: int):
         return builder._cache_key(
-            kb_bound=kb_bound,
+            kb_state=kb_state,
             use_web=True,
             scene="scene",
             activated=frozenset({"a"}),
             prompt_version=ver,
         )
 
-    k0, k1 = key(True, 0), key(True, 1)
+    k0, k1 = key(2, 0), key(2, 1)
     assert k0 != k1, "缓存键漏了提示词版本 —— promote 后编译图不会失效"
-    assert key(True, 1) == k1
+    assert key(2, 1) == k1
 
 
 def test_builder_cache_key_includes_switches():
     """能力开关进缓存键：否则关了联网还会命中上一轮绑了 web_search 的图。"""
     from agent import builder
 
-    def key(*, kb_bound: bool, use_web: bool):
+    def key(*, kb_state: int, use_web: bool):
         return builder._cache_key(
-            kb_bound=kb_bound,
+            kb_state=kb_state,
             use_web=use_web,
             scene="scene",
             activated=frozenset(),
             prompt_version=0,
         )
 
-    assert key(kb_bound=True, use_web=True) != key(kb_bound=True, use_web=False)
-    assert key(kb_bound=True, use_web=True) != key(kb_bound=False, use_web=True)
+    assert key(kb_state=2, use_web=True) != key(kb_state=2, use_web=False)
+    assert key(kb_state=2, use_web=True) != key(kb_state=0, use_web=True)
 
 
 def _rag_wired() -> bool:
