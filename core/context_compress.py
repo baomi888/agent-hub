@@ -914,7 +914,11 @@ def build_segment_meta(
     ts = max((int(m.get("created_at") or 0) for m in old_messages), default=0)
     corpus = "\n".join(m.get("content") or "" for m in old_messages)
     try:
-        cands = dialogue_import.extract_candidates(old_messages)
+        # 显式要两种角色：这里是给压缩段打 kind/salience（决定折叠顺序），
+        # 段的角色构成本就混着，不是"知识入库"的准入场景。
+        # `extract_candidates` 的默认值已改成只收 user（防止助手长回答淹没候选池），
+        # 不显式传就会静默改变每一段的 kind —— 折叠顺序跟着变。
+        cands = dialogue_import.extract_candidates(old_messages, roles=("user", "assistant"))
     except Exception:  # noqa: BLE001 —— 元数据缺失只降级不致命
         cands = []
     if cands:
