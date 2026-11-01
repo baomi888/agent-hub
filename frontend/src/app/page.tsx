@@ -207,9 +207,12 @@ export default function Home() {
    * `focus` 是从哪条消息点进来的（消息 dbId）；右栏「对话里的内容」进来时为 null。
    * 弹层放在页面层而不是面板里：两个入口要开的是同一个东西、共用同一份勾选状态。
    */
-  const [sediment, setSediment] = useState<{ focus: number | null; text: string | null } | null>(
-    null
-  );
+  const [sediment, setSediment] = useState<{
+    focus: number | null;
+    text: string | null;
+    /** 这条消息是谁说的：用户的短句原样存，助手的回答分节存 */
+    role: "user" | "assistant";
+  } | null>(null);
   const kbPanelOpen = kbPanelPref ?? viewport === "wide";
   const sidebarOpen = sidebarPref && viewport === "narrow";
 
@@ -828,7 +831,7 @@ export default function Home() {
           onOpenSidebar={viewport === "narrow" ? () => setSidebarOpen(true) : undefined}
           prefill={prefill ?? undefined}
           onDeleteTurn={deleteTurn}
-          onSediment={(dbId, text) => setSediment({ focus: dbId, text })}
+          onSediment={(dbId, text, role) => setSediment({ focus: dbId, text, role })}
           geoEnabled={geoEnabled}
           geoCity={geoCity}
           geoPending={geoPending}
@@ -867,7 +870,7 @@ export default function Home() {
         overlay={viewport !== "wide"}
         open={kbPanelOpen}
         sid={activeSid}
-        onOpenSediment={() => setSediment({ focus: null, text: null })}
+        onOpenSediment={() => setSediment({ focus: null, text: null, role: "user" })}
       />
 
       {sediment && (
@@ -878,6 +881,7 @@ export default function Home() {
           onBind={bindKb}
           focusRef={sediment.focus}
           focusText={sediment.text}
+          focusRole={sediment.role}
           onClose={() => setSediment(null)}
           onImported={() => {
             // 库里多了几条，右栏的条目数要跟着变

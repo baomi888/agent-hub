@@ -29,6 +29,33 @@ from kb import dialogue_import  # noqa: E402
 
 UID = "u-compress-v2"
 
+# 真实形态的助手回答（取自用户线上那张截图的同一段内容）。
+# 4 个 markdown 小节 + 一段不带标题的引言，用来锁住"整节进、碎片不进"。
+_ASST_LISTENING = """英语六级听力提分，核心是先解决听不懂的输入问题，再练做对题的应试技巧。分几块说：
+
+## 一、基础：把耳朵练开
+
+- **精听真题**：选一段 1-2 分钟的真题音频，逐句听写，听不出的地方反复听 3 遍再看原文，标出听不出的原因（生词？连读？弱读？）。
+- **跟读模仿**：对着原文跟读，重点模仿连读、失去爆破，比如 not at all 读成 nada-tall。
+
+## 二、题型技巧
+
+- **长对话 / 讲座**：先看选项，圈出关键词，预判话题和问题方向；听的时候抓转折词和因果词，答案常在这些词后面。
+- **新闻听力**：重点听首句，新闻导语通常概括全文；数字、时间、地点容易设题，边听边记。
+- **同义替换**：六级听力很少原词重现，选项往往是原文的改写，平时积累常见替换。
+
+## 三、应试细节
+
+- 利用读题时间快速扫选项，不要纠结上一题，错过就放。
+- 边听边在选项旁做标记，听到什么划什么。
+- 考前一个月整套限时模考，适应节奏和疲劳感。
+
+## 四、常见误区
+
+- 只泛听不精听，听再多也提不上去
+- 背单词只记拼写不记发音，听到也反应不过来
+- 追求听懂每个词，抓关键信息即可"""
+
 
 # ==================== §6-1 结构化 + 旧格式兼容 ====================
 
@@ -431,19 +458,57 @@ class TestDialogueImport:
         assert added[0].page_content == "我们实验室的周会固定在每周四下午三点，会议室是 B2-07。"
         assert added[0].metadata["message_id"] == mid
 
-    def test_import_by_message_id_rejects_assistant(self, client, monkeypatch):
-        """助手的话不算资料 —— 只挂用户消息是界面的事，后端也得拦一道。"""
+    def test_import_by_message_id_rejects_short_chatter(self, client, monkeypatch):
+        """短而空泛的助手回答仍然存不了。
+
+        ★ 语义已经变了：10-31 时这条测的是「助手的话一律不算资料」，
+          11-01 起助手整理过的内容**是**资料库的主要来源。所以它被拒的理由
+          从"角色不对"变成"没有成节的内容"—— 24 个字、没标题没列表，
+          切不出小节，整条存进去又只是噪音。见下一条正向测试。
+        """
         c, added = client
         from api import kb as kb_api
 
         monkeypatch.setattr(kb_api.pipelines, "owner_of", lambda kb: UID)
         sid = store.create_conversation(UID, "单句入库")["id"]
         store.add_message(UID, sid, "user", "你好")
-        aid = store.add_message(UID, sid, "assistant", "助手生成的一大段内容，不该被当成用户的资料。")
+        aid = store.add_message(UID, sid, "assistant", "好的，随时可以继续问我。")
 
         resp = c.post("/api/kb/kb-test/import-dialogue", json={"sid": sid, "message_ids": [aid]})
         assert resp.status_code == 400, resp.text
         assert added == [], "被拒的请求不许往库里写东西"
+
+    def test_import_by_message_id_splits_assistant_answer(self, client, monkeypatch):
+        """指一条助手的回答存：按小节入库，不是整条塞进去。
+
+        ★ 为什么要拆：一段 700 字整条进向量库后，召回一条就把整段灌进上下文，
+          top-k 的名额被一条占满，精度反而下降。拆成小节后每块自带标题，
+          问到具体的事能精确翻到那一节。
+        ★ 为什么 count 必须对上：这条路径的 `skipped = requested - len(picked)`，
+          用消息条数当分母就会算出负数（一条消息切 2 段 → 2 - 2 恰好没事，
+          但如果只切 1 段、用户指了 2 条消息，就会变成 2 - 1 之类）。
+          所以 requested 的口径改成"单元数"，这里同时锁住 skipped 不为负。
+        """
+        c, added = client
+        from api import kb as kb_api
+
+        monkeypatch.setattr(kb_api.pipelines, "owner_of", lambda kb: UID)
+        sid = store.create_conversation(UID, "听力提分")["id"]
+        store.add_message(UID, sid, "user", "给我分析英语六级听力提分技巧")
+        aid = store.add_message(UID, sid, "assistant", _ASST_LISTENING)
+
+        resp = c.post("/api/kb/kb-test/import-dialogue", json={"sid": sid, "message_ids": [aid]})
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["imported"] == 4, body
+        assert body["skipped"] == 0, body
+        assert len(added) == 4
+        # 每节以它自己的标题开头，且都挂在这条消息的 id 上（溯源要能对回去）
+        assert all(d.page_content.startswith("## ") for d in added), [d.page_content[:20] for d in added]
+        assert all(d.metadata["message_id"] == aid for d in added)
+        assert all(d.metadata["role"] == "assistant" for d in added)
+        # 引言「分几块说：」这类碎片不该单独成条
+        assert all("分几块说" not in d.page_content for d in added)
 
     def test_import_by_message_id_idempotent(self, client, monkeypatch):
         c, added = client
@@ -460,3 +525,126 @@ class TestDialogueImport:
         assert body["imported"] == 0, body
         assert body["skipped"] == 1, body
         assert len(added) == 1, "同一句第二次不该再写一份进库"
+
+
+# ==================== 助手回答的结构分块（2026-11-01）====================
+
+
+class TestAssistantBlocks:
+    """锁住「整节进、碎片不进」。
+
+    背景：10-31 把准入范围收成只收 user，理由是助手长回答占了 92% 的候选、
+    抽样全是排版垃圾。方向错了一半 —— 助手整理过的内容恰恰是沉淀功能最该收的。
+    实测那段 754 字的听力提分回答：只收 user 时提出 0 条；恢复双角色也只有 1 条
+    （靠「不要纠结上一题」命中否定规则）。所以改成按 markdown 结构切块。
+    """
+
+    def test_splits_by_section(self):
+        cs = dialogue_import.extract_blocks(
+            [{"id": 5, "role": "assistant", "content": _ASST_LISTENING, "created_at": 1}]
+        )
+        assert len(cs) == 4, [c["text"][:20] for c in cs]
+        assert [c["text"].splitlines()[0] for c in cs] == [
+            "## 一、基础：把耳朵练开",
+            "## 二、题型技巧",
+            "## 三、应试细节",
+            "## 四、常见误区",
+        ]
+        assert all(c["role"] == "assistant" for c in cs)
+        assert all(c["refs"] == [5] for c in cs)
+        # 引言碎片只有几十字、没有结构，不该单独成条
+        assert all("分几块说" not in c["text"] for c in cs)
+
+    def test_echo_and_followup_rejected(self):
+        """回声 / 追问 / 寒暄都不进库 —— 它们没有内容，只会占检索名额。"""
+        for txt in (
+            "好的，记下了：实验室周会——每周四下午 3 点。",
+            "需要我再展开讲讲吗？你说一句就行，我按你的方向细化。",
+            "没问题！随时可以继续问，我在。",
+        ):
+            got = dialogue_import.extract_blocks(
+                [{"id": 1, "role": "assistant", "content": txt, "created_at": 1}]
+            )
+            assert got == [], txt
+
+    def test_code_fence_kept_whole(self):
+        """代码围栏不能被切碎，也不能把代码里的 `#` 当标题。"""
+        txt = (
+            "可以这样写：\n\n```python\n# 加权平均\ndef gpa(scores):\n"
+            "    return sum(s * c for s, c in scores) / sum(c for _, c in scores)\n```\n\n"
+            "注意学分是权重，不能直接算术平均。"
+        )
+        cs = dialogue_import.extract_blocks(
+            [{"id": 1, "role": "assistant", "content": txt, "created_at": 1}]
+        )
+        assert len(cs) == 1, cs
+        assert "def gpa" in cs[0]["text"]
+        assert "不能直接算术平均" in cs[0]["text"], "代码后面的说明不该被切掉"
+
+    def test_long_block_is_capped(self):
+        """超长整块要再切，不然召回一条就占满 top-k。"""
+        body = "\n".join(f"- 第{i}条：这是一条很长的说明，用来把整块撑过上限。" for i in range(60))
+        cs = dialogue_import.extract_blocks(
+            [{"id": 1, "role": "assistant", "content": body, "created_at": 1}]
+        )
+        assert len(cs) > 1, "超过 1200 字没有切开"
+        assert all(len(c["text"]) <= 1300 for c in cs)
+
+    def test_user_side_unchanged(self):
+        """user 的部分必须与 extract_candidates 完全一致 —— 那套判据是调好的。"""
+        msgs = [
+            {"id": 1, "role": "user", "content": "负责人是老陈，工号 KX-3301。", "created_at": 1},
+            {"id": 2, "role": "user", "content": "嗯", "created_at": 2},
+        ]
+        got = dialogue_import.extract_blocks(msgs, roles=("user",))
+        want = dialogue_import.extract_candidates(msgs, roles=("user",))
+        assert got == want
+
+    def test_extract_candidates_default_still_user_only(self):
+        """压缩链路依赖的默认值不许变。
+
+        `core/context_compress.build_segment_meta` 显式传双角色；如果这个默认值
+        被顺手改宽，未来的调用方会静默拿到助手候选，kind 跟着变、折叠顺序也变 ——
+        这种错不会报错，只会让压缩质量悄悄下降。
+        """
+        msgs = [
+            {"id": 1, "role": "user", "content": "必须记住：周五交材料。", "created_at": 1},
+            {"id": 2, "role": "assistant", "content": _ASST_LISTENING, "created_at": 2},
+        ]
+        cands = dialogue_import.extract_candidates(msgs)
+        assert all(c["role"] == "user" for c in cands)
+
+    def test_preview_keeps_section_order(self):
+        """预览排序不许打乱章节顺序。
+
+        salience 是按块长度给的，「二、题型技巧」比「一、基础」长，按它排就会
+        把第二章排到第一章前面 —— 用户读到「二」才发现「一」在后面，逻辑是断的。
+
+        ★ 第二条断言是防假绿的关键：必须**先证明样本里存在长度倒挂**，
+          否则「顺序对了」可能只是因为长度恰好递增，改不改排序都能过。
+        """
+        cs = dialogue_import.extract_blocks(
+            [{"id": 5, "role": "assistant", "content": _ASST_LISTENING, "created_at": 1}]
+        )
+        by_len = sorted(cs, key=lambda c: len(c["text"]), reverse=True)
+        assert by_len[0] is not cs[0] or len(cs[1]["text"]) > len(cs[0]["text"]), (
+            "样本退化：本例必须出现「后者比前者长」，否则测不出排序问题"
+        )
+
+        ranked = dialogue_import.rank_for_preview(cs)
+        assert [c["text"].splitlines()[0] for c in ranked] == [
+            "## 一、基础：把耳朵练开",
+            "## 二、题型技巧",
+            "## 三、应试细节",
+            "## 四、常见误区",
+        ]
+
+    def test_preview_puts_user_before_assistant(self):
+        """用户候选排前面，助手块随后 —— 前端按 role 分组，顺序不能交错。"""
+        msgs = [
+            {"id": 1, "role": "user", "content": "负责人是老陈，工号 KX-3301。", "created_at": 1},
+            {"id": 2, "role": "assistant", "content": _ASST_LISTENING, "created_at": 2},
+        ]
+        ranked = dialogue_import.rank_for_preview(dialogue_import.extract_blocks(msgs))
+        roles = [c["role"] for c in ranked]
+        assert roles == ["user"] + ["assistant"] * 4, roles

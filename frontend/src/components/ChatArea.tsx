@@ -90,7 +90,7 @@ interface Props {
    * 不是能不能存，而是用户想不起来它存在。它必须出现在「刚刚说清楚一件事」
    * 的那一刻，而那一刻用户的视线就在自己那条消息下面。
    */
-  onSediment?: (msgDbId: number, text: string) => void;
+  onSediment?: (msgDbId: number, text: string, role: "user" | "assistant") => void;
   /** 地理定位开关状态（开启后发送消息自动带坐标） */
   geoEnabled?: boolean;
   /** 当前定位城市（角标展示用，可能为 null） */

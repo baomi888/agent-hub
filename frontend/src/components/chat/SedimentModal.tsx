@@ -58,6 +58,12 @@ interface Props {
    */
   focusRef?: number | null;
   focusText?: string | null;
+  /**
+   * 这条消息是谁说的。用户的短句走「单句原样存」，助手的回答走「分节列表」——
+   * 一段 700 字的回答整条塞进向量库，以后召回一条就占满检索 top-k，
+   * 所以按小节存，每节自带标题。
+   */
+  focusRole?: "user" | "assistant";
   onClose: () => void;
   /** 入库成功。调用方据此刷新库列表 / 提示 */
   onImported?: (kbId: string) => void;
@@ -67,6 +73,27 @@ interface Props {
 const subscribe = () => () => {};
 const mountedSnapshot = () => true;
 const serverSnapshot = () => false;
+
+/**
+ * 候选正文去掉排版标记（`## 一、基础` → `一、基础`，`- 精听真题…` → `精听真题…`）。
+ *
+ * 只作用于显示：入库的仍是原文。助手的小节标题需要保留层级感，
+ * 但把 `##` `**` 原样摊在弹层里，满屏符号会把内容本身吃掉。
+ */
+function tidy(text: string): string {
+  return text
+    .split("\n")
+    .map((l) =>
+      l
+        .replace(/^\s{0,3}#{1,6}\s+/, "")
+        .replace(/^\s*[-*+•]\s+/, "")
+        .replace(/^\s*\d{1,2}[.、)]\s+/, "")
+        .replace(/\*\*/g, "")
+        .trim()
+    )
+    .filter(Boolean)
+    .join("\n");
+}
 
 /** 秒 → 「12 月 3 日」。后端全站用 Unix 秒，直接喂 Date 会变成 1970 年。 */
 function dayLabel(ts?: number): string {
@@ -85,6 +112,7 @@ export default function SedimentModal({
   onBind,
   focusRef,
   focusText,
+  focusRole = "user",
   onClose,
   onImported,
 }: Props) {
@@ -133,11 +161,44 @@ export default function SedimentModal({
   // 「从这条消息进来」只作用于最初那段对话：用户点了「换一段对话」之后，
   // 再拿上一条消息去存就是张冠李戴了。
   const focusOn = focusRef != null && !!sid && curSid === sid;
-  /** 单句模式：只存这一条消息，不列候选 */
-  const one = focusOn && !!focusText && !focusOff;
+  /** 单句模式（只对用户的话）：他指的是这一整句，原样存，不列候选 */
+  const one = focusOn && focusRole === "user" && !!focusText && !focusOff;
 
-  // 还没动过勾选时默认空集；一旦用户点过任何一格，就用他自己的选择
-  const pickedIdx = picked.sid === curSid ? picked.idx : EMPTY_SET;
+  /** 从某条助手回答进来：这条回答切出来的全部小节（带全局下标，勾选要用） */
+  const focusBlocks = useMemo<number[]>(() => {
+    if (!focusOn || focusRole !== "assistant" || !cands) return [];
+    const target = Number(focusRef);
+    const out: number[] = [];
+    cands.forEach((c, i) => {
+      if ((c.refs ?? []).some((r) => Number(r) === target)) out.push(i);
+    });
+    return out;
+  }, [cands, focusOn, focusRole, focusRef]);
+
+  /** 助手回答默认全勾 —— 他点的是「存这条回答」，不是「帮我挑几节」 */
+  const defaultIdx = useMemo<ReadonlySet<number>>(
+    () => (focusRole === "assistant" && focusBlocks.length > 0 ? new Set(focusBlocks) : EMPTY_SET),
+    [focusRole, focusBlocks]
+  );
+
+  // 还没动过勾选时用默认值；一旦用户点过任何一格，就用他自己的选择
+  const pickedIdx = picked.sid === curSid ? picked.idx : defaultIdx;
+
+  /** 这次要展示的候选（带全局下标）。从某条回答点进来时只给这条的节 */
+  const visible = useMemo<Array<{ c: DialogueCandidate; i: number }>>(() => {
+    if (!cands) return [];
+    const arr = cands.map((c, i) => ({ c, i }));
+    if (focusOn && focusRole === "assistant" && !focusOff) {
+      // 空集也要落到空态：让他知道"这条回答没切出小节"，
+      // 而不是把整段对话的候选糊上来、看起来像点错了地方
+      const keep = new Set(focusBlocks);
+      return arr.filter(({ i }) => keep.has(i));
+    }
+    return arr;
+  }, [cands, focusOn, focusRole, focusOff, focusBlocks]);
+
+  const mine = visible.filter(({ c }) => c.role !== "assistant");
+  const theirs = visible.filter(({ c }) => c.role === "assistant");
 
   // 目标库列表
   useEffect(() => {
@@ -227,12 +288,27 @@ export default function SedimentModal({
   const toggle = (i: number) => {
     if (!curSid) return;
     setPicked((prev) => {
-      const base = prev.sid === curSid ? prev.idx : EMPTY_SET;
+      // 从「默认全勾」开始切，而不是从空集 —— 否则用户取消一节，
+      // 另外几节会一起被清空（他看到的勾是 defaultIdx，点掉的却是空集里的一格）
+      const base = prev.sid === curSid ? prev.idx : defaultIdx;
       const next = new Set(base);
       if (next.has(i)) next.delete(i);
       else next.add(i);
       return { sid: curSid, idx: next };
     });
+  };
+
+  const renderItem = ({ c, i }: { c: DialogueCandidate; i: number }) => {
+    const on = pickedIdx.has(i);
+    return (
+      <label key={`${c.ts ?? 0}-${i}`} className={`sd-item${on ? " on" : ""}`}>
+        <input type="checkbox" className="sd-box" checked={on} onChange={() => toggle(i)} />
+        <span className="sd-body">
+          <span className="sd-kind">{c.kind || "其它"}</span>
+          <span className="sd-text">{tidy(c.text)}</span>
+        </span>
+      </label>
+    );
   };
 
   const canSave = one
@@ -301,12 +377,16 @@ export default function SedimentModal({
     }
   };
 
+  /** 正看着「某条回答切出来的小节」这一屏 */
+  const focusBlockView = focusOn && focusRole === "assistant" && !focusOff;
+
   const title = useMemo(() => {
     if (done) return "已经存好了";
     // 单句模式不说"收几条"——他只指了一条，说"几条"会让人怀疑点错了
     if (one) return "存进资料库";
+    if (focusBlockView) return "存这条回答";
     return "从对话里收几条";
-  }, [done, one]);
+  }, [done, one, focusBlockView]);
 
   if (!mounted) return null;
 
@@ -314,11 +394,13 @@ export default function SedimentModal({
     ? `存进了「${done.kbName}」`
     : one
       ? "原样存，不改写"
-      : data && data.sid === curSid
-        ? `${data.title}${cands && cands.length > 0 ? ` · 找到 ${cands.length} 条` : ""}`
-        : !curSid
-          ? "先挑一段对话 —— 会从里面找出你说清楚过的事"
-          : "正在翻这段对话…";
+      : focusBlockView
+        ? `这条回答 · ${focusBlocks.length} 节`
+        : data && data.sid === curSid
+          ? `${data.title}${cands && cands.length > 0 ? ` · 找到 ${cands.length} 条` : ""}`
+          : !curSid
+            ? "先挑一段对话 —— 会从里面找出值得留的内容"
+            : "正在翻这段对话…";
 
   return createPortal(
     <div
@@ -429,10 +511,10 @@ export default function SedimentModal({
             <p className="sd-hint">正在翻这段对话…</p>
           ) : cands.length === 0 ? (
             <div className="sd-empty">
-              <p>这段对话里没找到能存的句子。</p>
+              <p>这段对话里没找到能存的内容。</p>
               <p className="sd-empty-p">
-                只有你自己说过的、讲清楚了事实或规定的话才会出现在这里 ——
-                助手的回答不算，它生成的内容不是你的资料。
+                值得留的是讲清楚的事实、规定、偏好，以及助手整理过的分析。
+                「帮我做个计划」这类交给助手去办的事不算。
               </p>
               {!sid && (
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => setCurSid(null)}>
@@ -440,52 +522,61 @@ export default function SedimentModal({
                 </button>
               )}
             </div>
-          ) : cands.length === 0 ? (
+          ) : visible.length === 0 ? (
+            /* 从某条回答点进来，但这条回答没切出小节 —— 说清楚为什么，
+               别把整段对话的候选糊上来，让人以为点错了地方 */
             <div className="sd-empty">
-              <p>这段对话里没找到能存的句子。</p>
+              <p>这条回答里没有能单独存下来的段落。</p>
               <p className="sd-empty-p">
-                只有你自己说过的、讲清楚了事实或规定的话才会出现在这里 ——
-                助手的回答不算，它生成的内容不是你的资料。
+                整条存进去会占掉检索的名额，所以按小节切；这条回答太短，没切出小节。
               </p>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFocusOff(true)}>
+                看看这段对话里其它的
+              </button>
+            </div>
+          ) : focusOn && focusRole === "assistant" && !focusOff ? (
+            /* 从某条回答点进来：只列这条回答切出来的小节，默认全勾 */
+            <>
+              <p className="sd-focus">
+                这条回答拆成 {visible.length} 节，每节单独存 ——
+                以后问到相关的事能直接翻到那一节，不会把整条灌进来。
+              </p>
+              <div className="sd-list">{visible.map(renderItem)}</div>
               {!sid && (
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setCurSid(null)}>
+                <button type="button" className="sd-switch" onClick={() => setCurSid(null)}>
                   换一段对话
                 </button>
               )}
-            </div>
+              <button type="button" className="sd-switch" onClick={() => setFocusOff(true)}>
+                这段对话里还有别的
+              </button>
+            </>
           ) : (
             <>
-              <div className="sd-list">
-                {cands.map((c, i) => {
-                  const on = pickedIdx.has(i);
-                  return (
-                    <label key={`${c.ts ?? 0}-${i}`} className={`sd-item${on ? " on" : ""}`}>
-                      <input
-                        type="checkbox"
-                        className="sd-box"
-                        checked={on}
-                        onChange={() => toggle(i)}
-                      />
-                      <span className="sd-body">
-                        <span className="sd-kind">{c.kind || "其它"}</span>
-                        <span className="sd-text">{c.text}</span>
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
+              {mine.length > 0 && (
+                <div className="sd-group">
+                  <p className="sd-group-t">你说的话</p>
+                  <div className="sd-list">{mine.map(renderItem)}</div>
+                </div>
+              )}
+              {theirs.length > 0 && (
+                <div className="sd-group">
+                  <p className="sd-group-t">助手的分析</p>
+                  <div className="sd-list">{theirs.map(renderItem)}</div>
+                </div>
+              )}
               <p className="sd-hint sd-tip">
-                勾你真正想留的。「帮我做个计划」这类是你说给助手的任务，
-                存进去也不会被当成资料问到。
+                助手整理过的要点最值得存 —— 下次问到相关的事，它能直接拿这些回答你。
+                你的原话是另一类：一手的事实和规定，改一个字就对不上。
               </p>
               {!sid && (
                 <button type="button" className="sd-switch" onClick={() => setCurSid(null)}>
                   换一段对话
                 </button>
               )}
-              {focusOn && !focusOff && (
-                <button type="button" className="sd-switch" onClick={() => setFocusOff(true)}>
-                  只看我指的那一句
+              {focusOn && focusOff && (
+                <button type="button" className="sd-switch" onClick={() => setFocusOff(false)}>
+                  只看我指的那一条
                 </button>
               )}
             </>

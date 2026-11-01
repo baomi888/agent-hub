@@ -47,7 +47,14 @@ const Bubble = memo(function Bubble({
    *   也会把 top-k 占满；而用户说「负责的老陈工号 KX-3301」这种，才是资料。
    *   所以不做「存这条回答」，免得按钮承诺了后端给不了的东西。
    */
-  onSediment?: (msgDbId: number, text: string) => void;
+  /**
+   * 打开「存进资料库」。
+   *
+   * 带 role 是因为两种消息的存法根本不同：用户的短句是「就这一句，
+   * 原样存」；助手的回答是「一条里有好几节，每节单独成段」。
+   * 弹层靠它决定显示单句还是分节列表。
+   */
+  onSediment?: (msgDbId: number, text: string, role: "user" | "assistant") => void;
 }) {
   const [feedback, setFeedback] = useState<"like" | "dislike" | null>(null);
   // 「踩」后展开的改进原因输入框：点踩即记一票，这里只收集可选的文字补充
@@ -116,7 +123,7 @@ const Bubble = memo(function Bubble({
               {m.dbId && onSediment && m.content.trim().length >= 6 && (
                 <button
                   type="button"
-                  onClick={() => onSediment(m.dbId!, m.content)}
+                  onClick={() => onSediment(m.dbId!, m.content, "user")}
                   title="把这句话收进资料库，以后提问能查到"
                   className="msg-action-save"
                 >
@@ -409,6 +416,27 @@ const Bubble = memo(function Bubble({
 
         {!m.streaming && !m.error && (
           <>
+            {/* ★ 常显，不放进 hover 工具条（2026-11-01）。
+                `.msg-actions` 默认 opacity:0，桌面端不悬停就什么都看不见——
+                把「存这条回答」藏进去，等于这个功能不存在。用户原话是
+                「得让用户能知晓」，不是「技术上有个按钮」。
+                复制/转发这类工具动作仍留在 hover 条里，它们不需要被发现。 */}
+            {m.dbId && onSediment && m.content.trim().length >= 80 && (
+              <div className="mt-2 flex">
+                <button
+                  type="button"
+                  onClick={() => onSediment(m.dbId!, m.content, "assistant")}
+                  title="把这条回答收进资料库，以后提问能查到"
+                  className="msg-action-save"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                  </svg>
+                  <span>存进资料库</span>
+                </button>
+              </div>
+            )}
+
             <div className="msg-actions text-faint">
             <button
               onClick={handleCopy}
