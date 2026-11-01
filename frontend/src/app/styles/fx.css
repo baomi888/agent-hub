@@ -241,6 +241,29 @@
   width: 14px;
   height: 14px;
 }
+/* 还在生成：按钮带一枚呼吸的金点。
+   用户上滚之后视野就冻结了（不再跟着新内容跑），这时候必须让他知道
+   "下面还在长东西"，否则看起来像卡死 —— 呼吸点比文案更早被余光扫到 */
+.scroll-down.is-live::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: livePulse 1.4s ease-in-out infinite;
+}
+@keyframes livePulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
 @keyframes scrollDownIn {
   from {
     opacity: 0;

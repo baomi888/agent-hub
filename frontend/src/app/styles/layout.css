@@ -7,6 +7,17 @@
   max-width: var(--measure);
 }
 
+/* 消息末尾的留白：让"把回答顶边滚到视口顶部"这条真的做得到。
+   没有它，内容总高不够时 maxScrollTop 太小，锚定会被浏览器 clamp 掉 ——
+   短回答永远贴在视口最下方，长回答干脆一上来就顶到末尾。
+   50vh 是折中：够一次锚定，又不至于滚到底时看到一大片空。
+   常驻而不是流式结束就撤：撤掉的一瞬间 scrollHeight 缩水，视口会跳一下。 */
+.chat-tail {
+  height: 50vh;
+  min-height: 160px;
+  flex: none;
+}
+
 /* 左栏：偏黄的左页（选择器改用语义类，不再依赖 DOM 顺序） */
 .side-left {
   width: 240px;

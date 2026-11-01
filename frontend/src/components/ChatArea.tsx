@@ -29,6 +29,12 @@ export { stripPlanHint } from "./chat/plan";
 const aid = () => Math.random().toString(36).slice(2, 10);
 
 /**
+ * 回答顶边与视口顶部之间留的空隙。
+ * 不留会顶到边框上，读第一行时眼睛没有落点；留太多又会显得内容被"推下去"。
+ */
+const ANCHOR_GAP = 14;
+
+/**
  * 检索条数也换成白话档位。
  * 「topK = 5」没人看得懂，「参考 5 段资料」一看就明白，
  * 顺带把「多参考 = 更全但更慢」的取舍讲清楚。
@@ -173,6 +179,15 @@ export default function ChatArea({
   const draftRef = useRef("");
   const stickRef = useRef(true);
   const [atBottom, setAtBottom] = useState(true);
+  /** 已经锚定过顶部的助理消息 id：锚定只做一次，之后回到正常跟随 */
+  const anchoredRef = useRef<string | null>(null);
+  /** 程序自己设的 scrollTop 目标：onScroll 靠它区分"用户在滚"和"我们在滚" */
+  const progTopRef = useRef<number | null>(null);
+  /** 平滑滚动的截止时刻：期间不把滚动事件算成用户意图 */
+  const smoothUntilRef = useRef(0);
+  /** 锚定后的开头保护截止时刻：这段时间内不跟随，让"开头"在视口里停一会儿 */
+  const anchorUntilRef = useRef(0);
+  const scrollRafRef = useRef<number | null>(null);
   // 从引用角标打开的全文预览（文件名来自 RefSource，kb 用当前会话绑定的）
   const [previewFile, setPreviewFile] = useState<string | null>(null);
   // 顶栏「反馈」弹窗。**必须是 useCallback**：FeedbackModal 的 Esc / 焦点 effect
@@ -231,19 +246,75 @@ export default function ChatArea({
       ? "会联网查最新信息"
       : "都不勾＝纯对话";
 
-  // 新消息进来时贴住底部。
-  // ★ 空态（欢迎页）必须跳过：欢迎页比可视区高，滚到底会把吉祥物、眉题、
-  //   标题整块推到视口外 —— 打开就是"半截页面"，用户以为首页就长那样（10-28 实测：
-  //   1080×629 下欢迎页 616px、可视区 340px，一进来 scrollTop 就是 316）。
+  // 程序滚动：同一帧里多次触发只落一次，且把目标值记下来供 onScroll 认领
+  const programScroll = useCallback((el: HTMLDivElement, top: number) => {
+    const max = Math.max(0, el.scrollHeight - el.clientHeight);
+    const target = Math.max(0, Math.min(top, max));
+    progTopRef.current = target;
+    if (scrollRafRef.current != null) cancelAnimationFrame(scrollRafRef.current);
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = null;
+      // 排队这一帧的工夫里用户可能已经接管了（手指比 rAF 快）——
+      // 这时候再把他按回底部，就成了"我往上翻它往下拽"
+      if (!stickRef.current) return;
+      el.scrollTop = target;
+    });
+  }, []);
+
+  // 新消息 / 新一段文字进来时的视野策略（2026-11-01 重写）
+  //
+  // 改动前是每来一个字 `scrollTop = scrollHeight` —— 实测 131 个采样点里 130 个
+  // 「距底 ≤2px」。1080×629 的窗口下可视区只有 350px，一条 953px 的回答从第一个字
+  // 开始，顶边就在视口上方 185px：用户从头到尾只看得见最后一行。这不是流式坏了，
+  // 是视野落点错了。
+  //
+  // 现在的策略（对齐豆包）：
+  //   ① 一条回答的**第一个字**出现时，把这条气泡的顶边放到视口顶部（留 14px），
+  //      而不是贴底 —— 贴底意味着第 1 行永远落在视口最下方，越写越往上跑；
+  //   ② 之后照常跟随。跟随之所以不再"刷屏"，是因为回答的文字由 typewriter
+  //      按阅读速度往外放（180 字/秒 → 30~120 字/秒），滚动才追得上眼睛；
+  //   ③ 用户一旦上滚（stickRef=false）就彻底冻结，视野归他。
+  //
+  // 空态（欢迎页）仍然跳过：欢迎页比可视区高，滚到底会把标题推出视口。
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el || !stickRef.current) return;
+    if (!el) return;
     if (messages.length === 0) {
-      el.scrollTop = 0;
+      anchoredRef.current = null;
+      programScroll(el, 0);
       return;
     }
-    el.scrollTop = el.scrollHeight;
-  }, [messages]);
+    if (!stickRef.current) return;
+
+    const last = messages[messages.length - 1];
+    const hasText = last?.role === "assistant" && (last.content ?? "").length > 0;
+    if (hasText && anchoredRef.current !== last.id) {
+      anchoredRef.current = last.id;
+      const node = el.querySelector<HTMLElement>(`[data-mid="${last.id}"]`);
+      if (node) {
+        const rel =
+          node.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
+        const max = Math.max(0, el.scrollHeight - el.clientHeight);
+        const target = Math.max(0, Math.min(rel - ANCHOR_GAP, max));
+        // ★ 必须同步落地，不能排进 rAF：下一个 token 通常 16ms 内就到，
+        //   进来又会调 programScroll(贴底) 把排队的这一帧 cancel 掉 ——
+        //   实测就是这样：锚定永远被取消，用户看到的仍是 -113px 的末尾。
+        progTopRef.current = target;
+        if (scrollRafRef.current != null) {
+          cancelAnimationFrame(scrollRafRef.current);
+          scrollRafRef.current = null;
+        }
+        el.scrollTop = target;
+        // 开头护住半秒：内容长得比视线快，刚锚好就被下一帧贴底顶走的话，
+        // 用户连"这行是开头"都没看清。600ms 里只长两行，追上时不明显。
+        anchorUntilRef.current = performance.now() + 600;
+        return;
+      }
+    }
+    // 还没到跟随时间：让开头留在视口里
+    if (performance.now() < anchorUntilRef.current) return;
+    programScroll(el, el.scrollHeight);
+  }, [messages, programScroll]);
 
   // 切换会话（首条消息换了）时强制回到底部，否则会停在上一会话的滚动位置
   const firstId = messages[0]?.id ?? "";
@@ -252,14 +323,39 @@ export default function ChatArea({
     if (firstId === prevFirstRef.current) return;
     prevFirstRef.current = firstId;
     stickRef.current = true;
+    anchoredRef.current = null;
     setAtBottom(true);
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [firstId]);
+    if (el) programScroll(el, el.scrollHeight);
+  }, [firstId, programScroll]);
 
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
+    // 平滑滚动途中：朝目标靠近的过程不该算成"用户接管"，否则点一下「回到最新」
+    // 按钮，按钮会在中途闪一下又冒出来
+    if (smoothUntilRef.current && performance.now() < smoothUntilRef.current) {
+      const goal = progTopRef.current ?? 0;
+      if (Math.abs(el.scrollTop - goal) <= 2) {
+        smoothUntilRef.current = 0;
+        progTopRef.current = null;
+      }
+      return;
+    }
+    // 程序滚的：落点没偏差就认领掉，不改变跟随状态。
+    // ★ 少了这一步，锚定（把视口拉到回答顶部）自己就会把 stick 关掉，
+    //   后面每个字都不再跟随 —— 光标还在写，页面却不动了。
+    const target = progTopRef.current;
+    if (target != null) {
+      progTopRef.current = null;
+      if (Math.abs(el.scrollTop - target) <= 4) return;
+      // 落点对不上 = 用户自己滚了。把还排在下一帧的程序滚动撤掉，
+      // 否则它会在 16ms 后把人按回原处（上滚 300px 被拽回去就是这么来的）。
+      if (scrollRafRef.current != null) {
+        cancelAnimationFrame(scrollRafRef.current);
+        scrollRafRef.current = null;
+      }
+    }
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     stickRef.current = near;
     setAtBottom((prev) => (prev === near ? prev : near));
@@ -270,7 +366,10 @@ export default function ChatArea({
     if (!el) return;
     stickRef.current = true;
     setAtBottom(true);
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    const target = Math.max(0, el.scrollHeight - el.clientHeight);
+    progTopRef.current = target;
+    smoothUntilRef.current = performance.now() + 700;
+    el.scrollTo({ top: target, behavior: "smooth" });
   }, []);
 
   const addFiles = (files: FileList | File[]) => {
@@ -655,21 +754,29 @@ export default function ChatArea({
                 }
                 return (
                   // 错误边界：一条坏消息渲染抛错时只降级这一条，不白屏整个会话
-                  <BubbleErrorBoundary key={m.id}>
-                    <Bubble
-                      m={m}
-                      userQuestion={userQ}
-                      onForward={handleForward}
-                      onCopyFail={handleCopyFail}
-                      onFeedback={handleFeedback}
-                      onRetry={onRetry}
-                      onPreviewFile={boundKb ? openPreviewFile : undefined}
-                      onDeleteTurn={onDeleteTurn}
-                      onSediment={onSediment}
-                    />
-                  </BubbleErrorBoundary>
+                  // data-mid：滚动锚定要按 id 找到这条气泡的顶边，没有它只能贴底
+                  <div key={m.id} data-mid={m.id} className="min-w-0">
+                    <BubbleErrorBoundary>
+                      <Bubble
+                        m={m}
+                        userQuestion={userQ}
+                        onForward={handleForward}
+                        onCopyFail={handleCopyFail}
+                        onFeedback={handleFeedback}
+                        onRetry={onRetry}
+                        onPreviewFile={boundKb ? openPreviewFile : undefined}
+                        onDeleteTurn={onDeleteTurn}
+                        onSediment={onSediment}
+                      />
+                    </BubbleErrorBoundary>
+                  </div>
                 );
               })}
+              {/* 尾巴留白：让"把回答顶边滚到视口顶部"真的做得到。
+                  没有它，内容高度不足时 maxScrollTop 太小，锚定会被 clamp 掉 ——
+                  短回答永远只能贴在视口最下方，长回答的值也一开始就顶到末尾。
+                  常驻而不是流式结束就撤，否则撤的瞬间 scrollHeight 缩、视口会跳。 */}
+              <div className="chat-tail" aria-hidden="true" />
             </div>
           )}
           </div>
@@ -678,14 +785,16 @@ export default function ChatArea({
           <button
             type="button"
             onClick={scrollToBottom}
-            className="scroll-down"
+            className={messages.some((m) => m.streaming) ? "scroll-down is-live" : "scroll-down"}
             aria-label="回到最新消息"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M12 5v14" />
               <path d="M19 12l-7 7-7-7" />
             </svg>
-            <span>回到最新</span>
+            {/* 还在生成时先说"正在生成"：用户上滚之后就冻结了，不告诉他有新内容
+                长在下面，他会以为卡住了 */}
+            <span>{messages.some((m) => m.streaming) ? "正在生成" : "回到最新"}</span>
           </button>
         )}
       </div>

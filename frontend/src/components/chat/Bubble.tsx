@@ -193,7 +193,10 @@ const Bubble = memo(function Bubble({
           )
         )}
 
-        <div className="bubble-ai whitespace-pre-wrap text-text">
+        <div
+          className="bubble-ai whitespace-pre-wrap text-text"
+          data-streaming={m.streaming && !!m.content ? "true" : undefined}
+        >
           {/* 混合架构执行轨迹（仅 mode=hybrid 的消息有）。
               放在正文之前 —— 与下面的依据提示条同一个道理：用户边流边读，
               「这一步是谁在执行」必须先于答案出现，否则读完整段答案才发现
@@ -271,14 +274,21 @@ const Bubble = memo(function Bubble({
                 <div className="thinking-dot" />
                 <div className="thinking-dot" />
               </div>
-              <span className="thinking-label">思考中...</span>
+              {/* 进度说明优先：带资料库提问时首帧要等十几秒，
+                  "思考中..." 说不了"我在翻你的资料库"。文案在 lib/chatStatus 里翻译过 */}
+              <span className="thinking-label">
+                {m.status || "思考中..."}
+              </span>
             </div>
           ) : (
             <>
               {/* AI 正文走 markdown 渲染：标题/列表/表格/代码块/链接都排出来 */}
               {renderMarkdown(m.content)}
               {m.stopped && <span className="stopped-tag">已停止生成</span>}
-              {m.streaming && <span className="cursor" />}
+              {/* 流式光标不在这里渲染：它不是一段文字，是"这一句还没写完"的记号。
+                  span 跟在 markdown 块后面会另起一行、单独挂个 ▍，很怪；
+                  改由 .bubble-ai[data-streaming] 的 :last-child::after 挂在最后一个
+                  句子的末尾（见 kb.css）。 */}
               {/* 引用角标：点一下跳到下面第 N 条参考片段 */}
               {!m.streaming && refItems.length > 0 && (
                 <span className="ml-1 inline-flex flex-wrap items-center gap-1">

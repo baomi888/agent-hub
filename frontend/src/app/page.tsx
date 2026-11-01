@@ -24,6 +24,8 @@ import type { UiMessage } from "@/components/chat/types";
 import type { ChatMode, Grounding, RefSource, ToolEvent } from "@/lib/types";
 import { isPlanRequest } from "@/components/chat/plan";
 import { useHybridTrace } from "@/lib/useHybridTrace";
+import { createTypewriter, type Typewriter } from "@/lib/typewriter";
+import { humanizeStatus } from "@/lib/chatStatus";
 import type { ChunkParams } from "@/lib/chunkProfiles";
 
 // ---- 断点订阅（matchMedia 作为外部数据源） ----
@@ -165,6 +167,8 @@ export default function Home() {
   // 联网建库后把建议问题预填进输入框（不自动发送），让用户确认/补充
   const [prefill, setPrefill] = useState<{ text: string; ts: number } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  /** 当前回答的播放器（把 token 按阅读速度往外放，见 lib/typewriter.ts） */
+  const playerRef = useRef<Typewriter | null>(null);
 
   // 模板广场套用后跳回：?sid 自动选中新建会话，?q 预填引导问题
   // 放在 setPrefill 声明之后；依赖 sessions 列表先回来，列表没回来时这个
@@ -288,6 +292,24 @@ export default function Home() {
       { id: userId, role: "user", content: display ?? question, attachments },
     ]);
     const asstId = uid();
+    // 上一轮可能还在播（用户没等它念完就发了新消息）：丢掉剩余缓冲，
+    // 并把那条消息的流式状态关掉，否则会卡在"还在写"的样子
+    if (playerRef.current) {
+      playerRef.current.cancel();
+      playerRef.current = null;
+      setMessages((prev) => prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)));
+    }
+    // 播放器：后端 180 字/秒、人读 6 字/秒，差 30 倍 —— 不控速就只能是刷屏。
+    // 控速后滚动才可能连续，落点（ChatArea 的锚定）也才有意义。
+    const player = createTypewriter({
+      onText: (full) =>
+        setMessages((prev) => prev.map((m) => (m.id === asstId ? { ...m, content: full } : m))),
+      onDone: () =>
+        setMessages((prev) =>
+          prev.map((m) => (m.id === asstId ? { ...m, streaming: false, status: undefined } : m))
+        ),
+    });
+    playerRef.current = player;
     // 新一轮开始：先把上一轮的轨迹归零，否则新旧两轮的节点会串在一条时间轴上
     hybrid.reset();
     setMessages((prev) => [
@@ -376,12 +398,18 @@ export default function Home() {
             // 后端现在只发增量，前端自己累加（以前每帧回传全文，长回答流量是平方级）
             const delta = String(ev.data.text ?? "");
             finalRefs = String(ev.data.refs ?? "") || finalRefs;
+            // 不直接塞进消息：交给播放器按阅读速度放。180 字/秒的吐字速度
+            // 会让页面变成"刷屏到底"，用户只看得见最后一行。
+            player.push(delta);
+            break;
+          }
+          case "status": {
+            // 检索/规划阶段的进度：带资料库时首帧要等 14 秒，
+            // 这期间最少要让人知道"它在干什么"。技术黑话在这里被翻译掉。
+            const say = humanizeStatus(String(ev.data.text ?? ""));
+            if (!say) break;
             setMessages((prev) =>
-              prev.map((m) =>
-                m.id === asstId
-                  ? { ...m, content: (m.content ?? "") + delta, refs: finalRefs || m.refs }
-                  : m
-              )
+              prev.map((m) => (m.id === asstId ? { ...m, status: say } : m))
             );
             break;
           }
@@ -465,10 +493,11 @@ export default function Home() {
             setMessages((prev) =>
               prev.map((m) => {
                 if (m.id === asstId) {
+                  // streaming 不在这里关：模型说完了，但播放器手里还有没念完的字。
+                  // 关早了光标会提前消失、文字停在半截；收尾交给 player.onDone。
                   return {
                     ...m,
-                    streaming: false,
-                    refs: refs || m.refs,
+                    refs: refs || finalRefs || m.refs,
                     dbId: dbId ?? m.dbId,
                     planTopic: planTopic || m.planTopic,
                   };
@@ -480,10 +509,14 @@ export default function Home() {
                 return m;
               })
             );
+            // 上游结束：把手里的字按节奏放完再收尾（"稳稳放完"）
+            player.finish();
             break;
           }
           case "error": {
             const detail = detailToMessage(ev.data.detail, "未知错误");
+            // 出错就别再慢放：把手里已有的字一次性落地，让错误信息马上可见
+            player.flush();
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === asstId ? { ...m, error: detail, streaming: false } : m
@@ -493,21 +526,21 @@ export default function Home() {
           }
         }
       }
-      // 兜底：结束流式状态
-      setMessages((prev) =>
-        prev.map((m) => (m.id === asstId ? { ...m, streaming: false } : m))
-      );
+      // 流断了但没收到 done 帧：让播放器把缓冲放完并收尾，不要留一条永远"正在写"
+      player.finish();
     } catch (e) {
       // 用户主动停止（AbortError）不视为错误
       if ((e as Error)?.name !== "AbortError") {
         const detail = e instanceof Error ? e.message : String(e);
+        player.flush();
         setMessages((prev) =>
           prev.map((m) =>
             m.id === asstId ? { ...m, error: detail, streaming: false } : m
           )
         );
       } else {
-        // 用户主动停止：标记一下，气泡上要显示"已停止生成"
+        // 用户主动停止：已经收到的字全部立刻显出来，再标"已停止生成"
+        player.flush();
         setMessages((prev) =>
           prev.map((m) => (m.id === asstId ? { ...m, streaming: false, stopped: true } : m))
         );
