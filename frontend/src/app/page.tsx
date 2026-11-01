@@ -119,6 +119,10 @@ export default function Home() {
   useEffect(() => setHybridItems(hybrid.trace.items), [hybrid.trace.items]);
   // 本轮助手消息 id：轨迹同步要靠它定位「往哪条消息上写」
   const asstIdRef = useRef<string | null>(null);
+  // 本轮用户消息 id（前端临时 id）：done 帧带回 user_message_id 时按它回填 dbId。
+  // 不回填的话，用户消息永远没有 dbId —— 消息下方的「存进资料库」和「删除」
+  // 都要 dbId 才渲染，表现为"刚发完看不见，刷新一下才有"。
+  const userMsgIdRef = useRef<string | null>(null);
 
   // 轨迹 → 消息。hybrid hook 内部持有 items，这里把它落到消息上，
   // 目的是让它随消息一起被持久化（刷新后还能拿到 hybridRunId 去 /logs 重建）。
@@ -273,9 +277,12 @@ export default function Home() {
       }
     }
 
+    // 先给用户消息一个临时 id 并记下来：done 帧回来时按它回填 dbId
+    const userId = uid();
+    userMsgIdRef.current = userId;
     setMessages((prev) => [
       ...prev,
-      { id: uid(), role: "user", content: display ?? question, attachments },
+      { id: userId, role: "user", content: display ?? question, attachments },
     ]);
     const asstId = uid();
     // 新一轮开始：先把上一轮的轨迹归零，否则新旧两轮的节点会串在一条时间轴上
@@ -449,18 +456,26 @@ export default function Home() {
             }
             // 计划主题名（P2）：主题可能是后端从历史推断的，前端猜不到，只能靠它回填
             const planTopic = String(ev.data.plan_topic ?? "");
+            // 用户那条消息的 id：回填后「存进资料库」不用刷新就能点
+            const userDbId = Number(ev.data.user_message_id ?? 0) || undefined;
+            const userMsgId = userMsgIdRef.current;
             setMessages((prev) =>
-              prev.map((m) =>
-                m.id === asstId
-                  ? {
-                      ...m,
-                      streaming: false,
-                      refs: refs || m.refs,
-                      dbId: dbId ?? m.dbId,
-                      planTopic: planTopic || m.planTopic,
-                    }
-                  : m
-              )
+              prev.map((m) => {
+                if (m.id === asstId) {
+                  return {
+                    ...m,
+                    streaming: false,
+                    refs: refs || m.refs,
+                    dbId: dbId ?? m.dbId,
+                    planTopic: planTopic || m.planTopic,
+                  };
+                }
+                // 后端没给（旧版本 / 异常分支）就保持原样，不要拿 undefined 覆盖
+                if (userMsgId && m.id === userMsgId && userDbId) {
+                  return { ...m, dbId: userDbId };
+                }
+                return m;
+              })
             );
             break;
           }
