@@ -13,8 +13,11 @@ export interface KbFile {
   name: string;
   chunks: number | null;
   added_at: number | null;
-  /** 这条资料怎么进库的：upload=用户上传，web=联网抓的 */
-  origin?: "upload" | "web";
+  /**
+   * 这条资料怎么进库的：upload=用户上传，web=联网抓的，dialogue=从对话里沉淀的。
+   * dialogue 的 name 形如 `对话·<会话标题>`，没有原始文件，正文只能从向量片段拼回。
+   */
+  origin?: "upload" | "web" | "dialogue";
 }
 
 export interface KbInfo {

@@ -323,10 +323,17 @@
   border-radius: var(--radius-md);
   background: var(--card-bg);
   transition: border-color 0.14s ease, box-shadow 0.14s ease;
+  /* 整张卡可点：点开看正文。以前卡片是死的，用户只能读到文件名和段数，
+     对话沉淀进来的东西更是连条目都没有 */
+  cursor: pointer;
 }
 .kbp-file:hover {
   border-color: var(--accent-line);
   box-shadow: var(--shadow-1);
+}
+.kbp-file:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-accent);
 }
 /* 文件类型标：只有这四处用语义色（与 .ctag 同一套 12% alpha 底），
    其余一律中性 —— 一屏卡片如果每个都染一个色，就成了便利贴墙 */
@@ -352,6 +359,13 @@
 .kbp-ext[data-kind="text"] {
   background: rgba(30, 122, 70, 0.12);
   color: var(--success-ink);
+}
+/* 对话沉淀进来的资料：它不是一种文件格式，而是"从聊天里挑出来的"这件事本身，
+   所以用玉米金 —— 与 pdf/doc/text 三档语义色区分开，也不跟"删除"的红抢 */
+.kbp-ext[data-kind="dialogue"] {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  text-transform: none;
 }
 .kbp-file .fn {
   display: -webkit-box;
@@ -453,6 +467,82 @@
   color: var(--text-2);
 }
 
+/* ---------- 正文预览弹层 ----------
+   居中卡片而不是右侧抽屉：这一页两栏已经很满，再挤一条 400px 的抽屉会把
+   文件网格压窄。弹层只做一件事 —— 让人确认"我存进来的到底是这段话"。 */
+.kbp-prev-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(45, 35, 20, 0.34);
+}
+.kbp-prev {
+  width: min(760px, 100%);
+  max-height: min(78vh, 720px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-2);
+}
+.kbp-prev-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-12);
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.kbp-prev-t {
+  font-size: var(--fs-md);
+  font-weight: 650;
+  line-height: 1.4;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.kbp-prev-m {
+  margin-top: 4px;
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+}
+.kbp-prev-x {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-xs);
+  color: var(--text-3);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.kbp-prev-x:hover {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+.kbp-prev-x svg {
+  width: 13px;
+  height: 13px;
+}
+.kbp-prev-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px 18px;
+  font-size: var(--fs-sm);
+  line-height: 1.75;
+  color: var(--text-2);
+  /* 片段拼回来的正文靠空行分段，PDF 抽出的文字也自带断行 —— 必须保留，
+     否则一整篇挤成一坨，看不出哪句是标题 */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* ---------- 响应式 ----------
    窄屏改成上下堆叠：库列表在上（不再限高），选中库后由页面把详情滚进视野。 */
 @media (max-width: 900px) {
@@ -473,6 +563,13 @@
   .kbp-files {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--space-8);
+  }
+  /* 手机上没有 760px 可挥霍：弹层铺开到边缘，正文区给足高度 */
+  .kbp-prev-mask {
+    padding: 12px;
+  }
+  .kbp-prev {
+    max-height: 86vh;
   }
 }
 /* 触屏没有 hover：删除按钮必须常显，否则手机上永远删不掉文件 */

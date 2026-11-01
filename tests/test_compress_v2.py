@@ -293,11 +293,18 @@ class TestDialogueImport:
         # 这里对当前隔离库显式补建（都幂等），否则 auth 一查就
         # "no such table: users"、入库计额度就 "no such table: usage"。
         from core import quota as _quota
+        from core import config as _config
         from main import app
 
         account._ensure_tables()
         _quota._ensure_tables()
         _quota._ensure_rate_table()
+        # 限流按 uid 分桶、窗口 60 秒：这一组用例会对同一个 uid 连着打十几次
+        # import-dialogue，累计超过 RATE_PER_MINUTE 就变成 429 —— 拦的是"手速"，
+        # 跟业务对不对无关。两边都要关：_HITS 是进程内窗口，RATE_LIMIT_SHARED
+        # 那一层落在 SQLite 的 rate_buckets 里，清内存清不掉，跨用例照样会累加。
+        _quota._HITS.clear()
+        monkeypatch.setattr(_config, "RATE_LIMIT_SHARED", False, raising=False)
 
         # 只隔离"真正往 Chroma 写"的那一步：其余（提取/回写/配额）全部走真实现
         added: list[object] = []
@@ -313,14 +320,30 @@ class TestDialogueImport:
 
             def __init__(self):
                 self.stored: set[str] = set()
+                # list_sources 的替身：真实现从 Chroma 元数据里按 source 聚合，
+                # 这里按入库的 Document 累加，好让 /files 的合并逻辑跑真分支
+                self.sources: list[dict] = []
 
             def add_chunks(self, docs):
                 added.extend(docs)
                 self.stored.update(d.page_content for d in docs)
+                for d in docs:
+                    src = (d.metadata or {}).get("source") or "未知来源"
+                    hit = next((x for x in self.sources if x["name"] == src), None)
+                    if hit:
+                        hit["chunks"] += 1
+                    else:
+                        self.sources.append({"name": src, "chunks": 1, "added_at": None})
                 return len(docs)
 
             def get_dialogue_texts(self, sid):
                 return set(self.stored)
+
+            def list_sources(self) -> list[dict]:
+                return [dict(x) for x in self.sources]
+
+            def count(self) -> int:
+                return sum(int(x.get("chunks") or 0) for x in self.sources)
 
         # 同一个库要沿用同一个实例：每次 new 一个的话 stored 永远是空的，
         # 去重就测不出来了（真实场景里库是持久的，不是每次请求新建）
@@ -333,6 +356,27 @@ class TestDialogueImport:
         c = TestClient(app)
         c.headers.update({"X-Auth-Token": token})
         return c, added
+
+    @pytest.fixture()
+    def pipe(self, client):
+        """取回 client fixture 里那个 FakePipe。
+
+        `pipelines.get_or_create` 已被 patch 成恒定返回同一实例，
+        所以再调一次拿到的就是它 —— 不必为测试改 client 的返回值（会动到既有用例）。
+        """
+        from api import kb as kb_api
+
+        return kb_api.pipelines.get_or_create(UID, "kb-test")
+
+    @pytest.fixture()
+    def files_registry(self, monkeypatch, tmp_path):
+        """把 kb_files.json 挪到 tmp：登记会真的落盘，不隔离就写脏仓库里的 data/。"""
+        from api import kb as kb_api
+
+        path = tmp_path / "kb_files.json"
+        monkeypatch.setattr(kb_api.pipelines, "_files_path", lambda: str(path))
+        monkeypatch.setattr(kb_api.pipelines, "_KB_FILES", {})
+        return path
 
     def _seed_conversation(self, n_pairs: int = 12):
         sid = store.create_conversation(UID, "压缩测试会话")["id"]
@@ -410,6 +454,71 @@ class TestDialogueImport:
         assert body["imported"] == 0, body
         assert body["skipped"] == n1, body
         assert len(added) == n1, "第二次不该再往库里写任何片段"
+
+    # ---------- 沉淀完必须"看得见"（2026-11-01 用户实测缺口）----------
+    #
+    # 用户把 AI 的整段分析存进六级资料库，收到"已存入"，回到 /knowledge 却
+    # 一条新资料都没有。根因不是没写进向量库，而是资料列表读的是 kb_files.json
+    # 登记表，而对话沉淀只写向量库、从不登记。
+
+    def test_import_dialogue_shows_up_in_file_list(
+        self, client, pipe, files_registry, monkeypatch
+    ):
+        c, added = client
+        from api import kb as kb_api
+
+        monkeypatch.setattr(kb_api.pipelines, "owner_of", lambda kb: UID)
+        sid = self._seed_conversation(n_pairs=2)
+
+        resp = c.post("/api/kb/kb-test/import-dialogue", json={"sid": sid, "indexes": []})
+        assert resp.status_code == 200, resp.text
+        n = resp.json()["imported"]
+        assert n > 0 and len(added) == n
+
+        body = c.get("/api/kb/kb-test/files").json()
+        names = [f["name"] for f in body["files"]]
+        rec = next((f for f in body["files"] if f["name"] == "对话·压缩测试会话"), None)
+        assert rec is not None, f"沉淀完资料列表里没有这条：{names}"
+        assert rec["origin"] == "dialogue"
+        assert rec["chunks"] == n
+        # 负向：登记过的 source 不能被下面的 Chroma 兜底再补一遍
+        assert names.count("对话·压缩测试会话") == 1
+
+        # 同名会话（现实里很容易建出两个「周会安排」）存进同一条资料：
+        # 段数要累加，不能被同名覆盖成"只有最后一次的几条"
+        sid2 = store.create_conversation(UID, "压缩测试会话")["id"]
+        mid2 = store.add_message(UID, sid2, "user", "另外补充：服务器到期日是十二月三号。")
+        r2 = c.post(
+            "/api/kb/kb-test/import-dialogue", json={"sid": sid2, "message_ids": [mid2]}
+        )
+        assert r2.status_code == 200, r2.text
+        assert r2.json()["imported"] == 1, r2.text
+        body2 = c.get("/api/kb/kb-test/files").json()
+        rec2 = next(f for f in body2["files"] if f["name"] == "对话·压缩测试会话")
+        assert rec2["chunks"] == n + 1, rec2
+
+    def test_file_list_recovers_unregistered_source(
+        self, client, pipe, files_registry, monkeypatch
+    ):
+        """向量库里有、登记表里没有的 source 也要列出来。
+
+        这是给**已经踩过坑的用户**兜底：他们以前存进去的对话片段没有登记记录，
+        不该逼他们重新存一遍才看得见。
+        """
+        c, _ = client
+        from api import kb as kb_api
+
+        monkeypatch.setattr(kb_api.pipelines, "owner_of", lambda kb: UID)
+        pipe.sources.append({"name": "对话·旧会话", "chunks": 3, "added_at": None})
+        pipe.sources.append({"name": "C:\\tmp\\kb_up_abcd.pdf", "chunks": 2, "added_at": None})
+
+        body = c.get("/api/kb/kb-test/files").json()
+        got = {f["name"]: f for f in body["files"]}
+        assert got["对话·旧会话"]["chunks"] == 3
+        assert got["对话·旧会话"]["origin"] == "dialogue"
+        # 不认识的 source（老库的临时绝对路径）默认按 upload，标签猜错不影响存取
+        assert got["C:\\tmp\\kb_up_abcd.pdf"]["origin"] == "upload"
+        assert body["chunks"] == 5
 
     def test_import_dialogue_bad_kb_404(self, client):
         c, _ = client
@@ -519,8 +628,10 @@ class TestDialogueImport:
         mid = store.add_message(UID, sid, "user", "负责人是老陈，工号 KX-3301。")
 
         first = c.post("/api/kb/kb-test/import-dialogue", json={"sid": sid, "message_ids": [mid]})
+        assert first.status_code == 200, first.text
         assert first.json()["imported"] == 1, first.text
         second = c.post("/api/kb/kb-test/import-dialogue", json={"sid": sid, "message_ids": [mid]})
+        assert second.status_code == 200, second.text
         body = second.json()
         assert body["imported"] == 0, body
         assert body["skipped"] == 1, body

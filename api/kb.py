@@ -277,14 +277,20 @@ async def delete_kb(kb_id: str, uid: str = Depends(get_current_user)) -> dict:
 
 @router.get("/{kb_id}/files")
 async def list_files(kb_id: str, uid: str = Depends(get_current_user)):
-    """列出库内文件（文件名 + 片段数）。记录缺失时用 Chroma 元数据兜底。"""
+    """列出库内资料（名称 + 片段数）。
+
+    ★ 与 `GET /api/kb/` 共用 `pipelines.list_files_view`：这两条路以前各写一份
+      兜底逻辑，都写成 `get_files(...) or pipe.list_sources()` —— 登记表非空时
+      Chroma 兜底永远不执行，对话沉淀进来的内容就永远看不见。抽成一处实现，
+      以后只改一个地方，不会再一条路修好、另一条路还漏。
+    """
     _must_own(uid, kb_id)
 
     def _list() -> dict:
         # list_sources → get_or_open → peek，要读 sqlite，别在事件循环里做
         pipe = pipelines.get_or_create(uid, kb_id)
-        records = pipelines.get_files(uid, kb_id) or pipe.list_sources()
-        return {"kb_id": kb_id, "chunks": pipe.count(), "files": records}
+        files = pipelines.list_files_view(uid, kb_id, pipe)
+        return {"kb_id": kb_id, "chunks": pipe.count(), "files": files}
 
     return await asyncio.to_thread(_list)
 
@@ -675,6 +681,29 @@ async def import_dialogue(
         raise HTTPException(status_code=500, detail=describe_api_error(e)) from e
     if n:
         await asyncio.to_thread(quota.bump_usage, uid, "embed", n)
+        # 登记成一条「资料」，否则资料库页面看不到它（2026-11-01 用户实测）：
+        # /files 的数据源是 kb_files.json 登记表，而这里以前只写向量库 ——
+        # 用户收到"存入成功"，回到 /knowledge 却一条新资料都没有。
+        # 同名会话复用同一条记录并累加段数（add_file_records 是同名覆盖），
+        # 所以同一段对话存两次，卡片上显示的是累计段数，不是最后一次的。
+        doc_name = f"对话·{title}"
+        prev = next(
+            (x for x in pipelines.get_files(uid, kb_id) if x.get("name") == doc_name),
+            None,
+        )
+        pipelines.add_file_records(
+            uid,
+            kb_id,
+            [
+                {
+                    "name": doc_name,
+                    "chunks": int((prev or {}).get("chunks") or 0) + n,
+                    "added_at": int(time.time()),
+                    "origin": "dialogue",
+                    "sid": req.sid,
+                }
+            ],
+        )
 
     ingested_refs = {r for c in picked for r in (c.get("refs") or [])}
     staged = await asyncio.to_thread(mark_segments_staged, uid, req.sid, ingested_refs)
