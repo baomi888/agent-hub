@@ -35,6 +35,12 @@ const aid = () => Math.random().toString(36).slice(2, 10);
 const ANCHOR_GAP = 14;
 
 /**
+ * 跟随阶段回答底边与视口底部之间留的空隙。
+ * 贴死会显得最后一行被裁掉半截，留 18px 读起来有收尾感。
+ */
+const TAIL_PAD = 18;
+
+/**
  * 检索条数也换成白话档位。
  * 「topK = 5」没人看得懂，「参考 5 段资料」一看就明白，
  * 顺带把「多参考 = 更全但更慢」的取舍讲清楚。
@@ -187,7 +193,11 @@ export default function ChatArea({
   const smoothUntilRef = useRef(0);
   /** 锚定后的开头保护截止时刻：这段时间内不跟随，让"开头"在视口里停一会儿 */
   const anchorUntilRef = useRef(0);
+  /** 锚定落地的 scrollTop：跟随阶段不能比它更靠上，否则回答还没长满一屏开头就被顶走 */
+  const anchoredPosRef = useRef<number | null>(null);
   const scrollRafRef = useRef<number | null>(null);
+  /** 消息末尾的留白元素：高度按"流式中且回答不足一屏"动态给（见 layout.css 注释） */
+  const tailRef = useRef<HTMLDivElement | null>(null);
   // 从引用角标打开的全文预览（文件名来自 RefSource，kb 用当前会话绑定的）
   const [previewFile, setPreviewFile] = useState<string | null>(null);
   // 顶栏「反馈」弹窗。**必须是 useCallback**：FeedbackModal 的 Esc / 焦点 effect
@@ -261,6 +271,31 @@ export default function ChatArea({
     });
   }, []);
 
+  // 尾部留白的高度（详细理由见 layout.css 里 .chat-tail 的注释）
+  //
+  // 为什么不是写死的 50vh：那段留白对"锚定"确实是必需的（内容不够高时
+  // maxScrollTop 撑不到回答顶边，浏览器会 clamp 掉），但它一旦常驻，
+  // **两三条消息的短对话也能往下滚出一屏空白** —— 用户看到的是"页面空了"。
+  //
+  // 现在只在「正在流式输出、且这条回答还没填满一屏」时补足到一屏：
+  // 这既是锚定唯一需要余量的时刻，也正好是"下方空白会被文字逐渐填满"的
+  // 那段时间。回答长到一屏、或生成结束，留白立刻归零。
+  const syncTail = useCallback(() => {
+    const el = scrollRef.current;
+    const tail = tailRef.current;
+    if (!el || !tail) return;
+    const last = messages[messages.length - 1];
+    let h = 0;
+    if (last?.role === "assistant" && last.streaming && (last.content ?? "").length > 0) {
+      const node = el.querySelector<HTMLElement>(`[data-mid="${last.id}"]`);
+      const bh = node ? node.getBoundingClientRect().height : 0;
+      h = Math.max(0, Math.round(el.clientHeight - bh));
+    }
+    if (Math.abs((parseFloat(tail.style.height) || 0) - h) > 1) {
+      tail.style.height = `${h}px`;
+    }
+  }, [messages]);
+
   // 新消息 / 新一段文字进来时的视野策略（2026-11-01 重写）
   //
   // 改动前是每来一个字 `scrollTop = scrollHeight` —— 实测 131 个采样点里 130 个
@@ -281,9 +316,13 @@ export default function ChatArea({
     if (!el) return;
     if (messages.length === 0) {
       anchoredRef.current = null;
+      anchoredPosRef.current = null;
+      syncTail();
       programScroll(el, 0);
       return;
     }
+    // ★ 先定留白、再量滚动范围：锚定的 target 能不能落地，取决于这一步。
+    syncTail();
     if (!stickRef.current) return;
 
     const last = messages[messages.length - 1];
@@ -305,16 +344,37 @@ export default function ChatArea({
           scrollRafRef.current = null;
         }
         el.scrollTop = target;
-        // 开头护住半秒：内容长得比视线快，刚锚好就被下一帧贴底顶走的话，
-        // 用户连"这行是开头"都没看清。600ms 里只长两行，追上时不明显。
-        anchorUntilRef.current = performance.now() + 600;
+        anchoredPosRef.current = target;
+        // 开头护住一会儿：内容长得比视线快，刚锚好就被下一帧顶走的话，
+        // 用户连"这行是开头"都没看清。
+        anchorUntilRef.current = performance.now() + 320;
         return;
       }
     }
     // 还没到跟随时间：让开头留在视口里
     if (performance.now() < anchorUntilRef.current) return;
+
+    // 跟随：目标是让这条回答的**底边**贴住视口底部，而不是无脑滚到 scrollHeight。
+    //
+    // ★ 为什么不能用 scrollHeight：尾巴留白把内容撑高了，滚到 scrollHeight 等于
+    //   比锚定位还往下多走十几像素 —— 实测锚定刚落地的 y=14，两个采样点后就变成
+    //   -40，看着还是"从半截开始读"。改用"气泡底边对齐视口底"后，回答不足一屏时
+    //   这个值小于锚定位，被 Math.max 挡住，开头就钉在视口顶部不动。
+    //
+    // 另外 tail 是动态的（syncTail），scrollHeight 会随回答变长而缩小，
+    // 拿它当目标本身也不稳定。
+    const node = last ? el.querySelector<HTMLElement>(`[data-mid="${last.id}"]`) : null;
+    if (node) {
+      const box = node.getBoundingClientRect();
+      const elBox = el.getBoundingClientRect();
+      const bottom = box.bottom - elBox.top + el.scrollTop;
+      const want = bottom - el.clientHeight + TAIL_PAD;
+      const floor = anchoredPosRef.current ?? 0;
+      programScroll(el, Math.max(floor, want));
+      return;
+    }
     programScroll(el, el.scrollHeight);
-  }, [messages, programScroll]);
+  }, [messages, programScroll, syncTail]);
 
   // 切换会话（首条消息换了）时强制回到底部，否则会停在上一会话的滚动位置
   const firstId = messages[0]?.id ?? "";
@@ -324,10 +384,19 @@ export default function ChatArea({
     prevFirstRef.current = firstId;
     stickRef.current = true;
     anchoredRef.current = null;
+    anchoredPosRef.current = null;
     setAtBottom(true);
     const el = scrollRef.current;
     if (el) programScroll(el, el.scrollHeight);
-  }, [firstId, programScroll]);
+  }, [firstId, programScroll, syncTail]);
+
+  // 窗口改高（转屏 / 拖窗口 / 手机地址栏收起）后一屏高度变了，留白要跟着重算，
+  // 否则留着上一屏的余量，又变回"短对话能滚一大片空白"
+  useEffect(() => {
+    const onResize = () => syncTail();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [syncTail]);
 
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -773,10 +842,9 @@ export default function ChatArea({
                 );
               })}
               {/* 尾巴留白：让"把回答顶边滚到视口顶部"真的做得到。
-                  没有它，内容高度不足时 maxScrollTop 太小，锚定会被 clamp 掉 ——
-                  短回答永远只能贴在视口最下方，长回答的值也一开始就顶到末尾。
-                  常驻而不是流式结束就撤，否则撤的瞬间 scrollHeight 缩、视口会跳。 */}
-              <div className="chat-tail" aria-hidden="true" />
+                  高度由 syncTail 按需写入（流式中且回答不足一屏才给），
+                  平时是 0 —— 写死会害得短对话也能滚出一屏空白。 */}
+              <div className="chat-tail" ref={tailRef} aria-hidden="true" />
             </div>
           )}
           </div>
