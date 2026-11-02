@@ -24,7 +24,17 @@ export const CAMPUS_KEYS = {
   term: "campus.schedule.term.v1",
   words: "campus.words.progress.v1",
   deadline: "campus.deadline.items.v1",
+  /**
+   * 番茄钟当日计数。0.3.0 起统计改由 focusSessions 聚合得出，
+   * 这个键只作为「旧数据兜底」保留，不再写入新值。
+   */
   pomodoro: "campus.pomodoro.daily.v1",
+  /** 长期任务库 */
+  focusTasks: "campus.pomodoro.tasks.v1",
+  /** 专注会话流水（统计唯一数据源），保留最近 5000 条 */
+  focusSessions: "campus.pomodoro.sessions.v1",
+  /** 提示音偏好：音色、音量（0.3.3 起不再有自定义音频链接字段） */
+  focusSound: "campus.pomodoro.sound.v1",
 } as const;
 
 /** 旧键：线上 tools.html 实际使用的键名（已核对源码） */
