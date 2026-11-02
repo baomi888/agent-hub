@@ -156,3 +156,4 @@ npm run build
 
 每次功能交付另附一份审核报告，放在 `campus/reviews/`（命名 `YYYY-MM-DD_主题.md`），
 模板见 `campus/reviews/TEMPLATE.md`。报告结论只有三种：通过 / 有条件通过 / 打回。
+按天收尾时另写一份工作日报，放 `campus/reports/`（需求核对 + 交付 + 未完成项）。
