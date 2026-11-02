@@ -380,6 +380,19 @@ export default function ChatArea({
       anchoredRef.current = last.id;
       const node = el.querySelector<HTMLElement>(`[data-mid="${last.id}"]`);
       if (node) {
+        // ★ 先把留白**同步**补上，再算滚动范围（2026-11-02 关键修复）。
+        //   留白平时由 ResizeObserver 异步设置，第一个 token 落地那一帧它还是 0，
+        //   于是这一刻的 scrollHeight 少了一段，max 不够，锚定被 clamp ——
+        //   实测回答顶停在 y=503（视口 580）而不是 y=76，看起来就是"贴着最底下写"。
+        //   写 style 后立刻读 scrollHeight 会强制一次同步 layout，取到的就是新值。
+        const tailEl = tailRef.current;
+        if (tailEl) {
+          const th = Math.max(
+            0,
+            Math.round(el.clientHeight - node.getBoundingClientRect().height)
+          );
+          tailEl.style.height = `${th}px`;
+        }
         const rect = node.getBoundingClientRect();
         const rel = rect.top - el.getBoundingClientRect().top + el.scrollTop;
         const max = Math.max(0, el.scrollHeight - el.clientHeight);
