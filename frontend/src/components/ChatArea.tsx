@@ -374,7 +374,12 @@ export default function ChatArea({
     if (!stickRef.current) return;
 
     const last = messages[messages.length - 1];
-    const hasText = last?.role === "assistant" && (last.content ?? "").length > 0;
+    // ★ 只有「正在流式」的那条才锚定（2026-11-02 第四次修正）。
+    //   之前只看"有文字"，打开会话时会对**最后一条历史回答**也锚一次，
+    //   scrollTop 从 0 直接甩到 25231 —— 用户看到的就是"一打开就跳到底部"。
+    //   历史消息的落点由下面的"切会话回到底部"逻辑负责，不该走锚定。
+    const hasText =
+      last?.role === "assistant" && last.streaming && (last.content ?? "").length > 0;
     if (hasText && anchoredRef.current !== last.id) {
       const node = el.querySelector<HTMLElement>(`[data-mid="${last.id}"]`);
       if (node) {
@@ -397,15 +402,27 @@ export default function ChatArea({
           tailEl.style.height = `${th}px`;
         }
         const rect = node.getBoundingClientRect();
-        const rel = rect.top - el.getBoundingClientRect().top + el.scrollTop;
+        const elRect = el.getBoundingClientRect();
         const max = Math.max(0, el.scrollHeight - el.clientHeight);
-        // ★ 不要按"气泡高没高一屏"分支（2026-11-02 试过，错了）：
-        //   回答总是从很小开始长，第一帧必然"不足一屏"，分支会走成
-        //   target=max 也就是直接滚到底，anchoredPosRef 被钉在底部 →
-        //   实测贴底率 95%、单帧跳 1850px，比改之前还糟。
-        //   直接锚 rel-ANCHOR_GAP 就对了：内容总高不足一屏时 max=0，
-        //   clamp 后就是 0（内容贴顶、全部可见）；够高时能精确落到回答顶边。
-        const target = Math.max(0, Math.min(rel - ANCHOR_GAP, max));
+        // ★ 用「相对当前位置的增量」而不是「绝对 scrollTop」（2026-11-02 第三次修正）。
+        //   绝对值的算法依赖 rel 与 max 的精确对齐，tail 是异步写入的，
+        //   差一截就被 clamp，实测偏移 428px（回答顶停在 504 而不是 76）。
+        //   增量只关心"回答顶边现在在视口哪儿、要上移多少"，不受 scrollHeight 影响。
+        const delta = rect.top - elRect.top - ANCHOR_GAP;
+        const target = Math.max(0, Math.min(el.scrollTop + delta, max));
+        if (typeof window !== "undefined") {
+          (window as unknown as Record<string, unknown>).__anchorDbg = {
+            rectTop: Math.round(rect.top),
+            elTop: Math.round(elRect.top),
+            delta: Math.round(delta),
+            from: Math.round(el.scrollTop),
+            to: Math.round(target),
+            max,
+            sh: el.scrollHeight,
+            ch: el.clientHeight,
+            tail: tailEl ? tailEl.style.height : "no-tail",
+          };
+        }
         // ★ 必须同步落地，不能排进 rAF：下一个 token 通常 16ms 内就到，
         //   进来又会调 programScroll 把排队的这一帧 cancel 掉 ——
         //   实测就是这样：锚定永远被取消，用户看到的仍是 -113px 的末尾。
