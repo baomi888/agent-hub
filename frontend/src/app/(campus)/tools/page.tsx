@@ -14,7 +14,7 @@ import "@/campus/styles/campus.css";
 
 export const metadata: Metadata = {
   title: "校园工具集 · 知穗",
-  description: "GPA 分析、番茄钟、课程表、单词卡等校园小工具，免登录、数据只存本机。",
+  description: "GPA 分析、番茄钟、课程表、单词卡等校园小工具，免登录即可用；不登录时数据只存本机。",
 };
 
 export default function CampusToolsPage() {
