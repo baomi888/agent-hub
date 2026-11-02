@@ -327,12 +327,15 @@ export default function ChatArea({
       const node = el.querySelector<HTMLElement>(`[data-mid="${last.id}"]`);
       if (node) {
         const rect = node.getBoundingClientRect();
-        const bh = rect.height;
         const rel = rect.top - el.getBoundingClientRect().top + el.scrollTop;
         const max = Math.max(0, el.scrollHeight - el.clientHeight);
-        // 只有回答高过一个视口才锚到顶；否则滚到范围末端（内容全可见）。
-        const target =
-          bh > el.clientHeight ? Math.max(0, Math.min(rel - ANCHOR_GAP, max)) : max;
+        // ★ 不要按"气泡高没高一屏"分支（2026-11-02 试过，错了）：
+        //   回答总是从很小开始长，第一帧必然"不足一屏"，分支会走成
+        //   target=max 也就是直接滚到底，anchoredPosRef 被钉在底部 →
+        //   实测贴底率 95%、单帧跳 1850px，比改之前还糟。
+        //   直接锚 rel-ANCHOR_GAP 就对了：内容总高不足一屏时 max=0，
+        //   clamp 后就是 0（内容贴顶、全部可见）；够高时能精确落到回答顶边。
+        const target = Math.max(0, Math.min(rel - ANCHOR_GAP, max));
         // ★ 必须同步落地，不能排进 rAF：下一个 token 通常 16ms 内就到，
         //   进来又会调 programScroll 把排队的这一帧 cancel 掉 ——
         //   实测就是这样：锚定永远被取消，用户看到的仍是 -113px 的末尾。
