@@ -50,17 +50,16 @@ const TAIL_PAD = 18;
 const ANCHOR_HOLD_MS = 1400;
 
 /**
- * 跟随阶段每帧走剩余量的比例（0~1）。
+ * 跟随滚动的缓动时间常数（毫秒）。
  *
- * 2026-11-02 第二轮：从 0.34 降到 0.12。手机上一行中文约 33px、每 0.4 秒来一行，
- * 0.34 会在 100ms 内走完一行然后停 300ms —— 节奏是"弹一下、静一下"，
- * 用户原话"一抽一抽"。0.12 让 33px 约 400ms 走完，和来行的节奏同拍，
- * 观感是内容缓缓往上淌。
+ * 2026-11-02 第二轮：从「每帧走剩余量 0.34、最多 6 帧」改成按时间衰减。
+ * 手机上一行中文约 33px、每 0.4 秒来一行，原来会在 100ms 内走完一行然后停
+ * 300ms —— 节奏是"弹一下、静一下"，用户原话"一抽一抽"。
+ *
+ * τ=110ms ⇒ 33px 约 330ms 走完，和来行节奏同拍，观感是内容缓缓上淌。
+ * 必须按 dt 算而不是按帧数：60/120/240Hz 下同样的"每帧比例"速度差 4 倍。
  */
-const SCROLL_SMOOTH = 0.12;
-
-/** 单帧位移上限（px）。只用于大落差（切会话、重新锚定）时防止瞬移。 */
-const SCROLL_MAX_STEP = 24;
+const SCROLL_TAU_MS = 110;
 
 /**
  * 检索条数也换成白话档位。
@@ -291,10 +290,16 @@ export default function ChatArea({
   //   实测位移分布：一共 732 个 50ms 采样点，只有 108 个点在动（15%），
   //   动的那些中位 16.5px、90 分位 25px —— 典型的"脉冲式"位移。
   //
-  //   现在的做法：**慢速漂移**。每帧只走剩余量的 12%，不设帧数上限。
-  //   33px 的落差要 ~400ms 才走完，正好和"下一行什么时候来"同拍 ——
-  //   视线感觉是内容在缓缓往上淌，而不是一行一行地弹。
-  //   为了防止大落差（切会话、锚定偏移）时变瞬移，单帧最多 24px。
+  //   现在的做法：**按时间衰减的漂移**（指数缓动）。
+  //   每帧走「剩余量 × (1 − e^(−dt/τ))」，τ = 110ms。这样 33px 的落差约 330ms
+  //   走完，正好和"下一行 0.4 秒来一次"同拍 —— 视线感觉是内容缓缓上淌，
+  //   而不是一行一行地弹。
+  //
+  //   ★ 为什么必须按 dt 算、不能按帧数算：手机 60fps、ProMotion 120fps、
+  //     无头浏览器甚至 240fps，同一个"每帧走 12%"在不同设备上的实际速度差 4 倍。
+  //     按 dt 算才能保证"任何刷新率下都是 330ms 走完 33px"。
+  //     （这条是踩出来的：探针里量到帧间隔中位 4.2ms ≈ 240fps，
+  //      按帧算的动画在探针里只要 168ms，在真机却是 660ms —— 两边对不上。）
   const programScroll = useCallback((el: HTMLDivElement, top: number) => {
     const max = Math.max(0, el.scrollHeight - el.clientHeight);
     const target = Math.max(0, Math.min(top, max));
@@ -303,12 +308,17 @@ export default function ChatArea({
     // 走了一半的位移丢掉，反而更抖）
     if (scrollRafRef.current != null) return;
 
-    const tick = () => {
+    let lastT = 0;
+    const tick = (now: number) => {
       scrollRafRef.current = null;
       const goal = progTopRef.current;
       if (goal == null) return;
       // 追赶途中用户可能已经接管了（手指比 rAF 快），这时立刻让开
       if (!stickRef.current) return;
+      // 首帧没有上一帧时间，按 16ms 估；切后台再回来 dt 可能上千毫秒，
+      // 夹到 64ms 免得一下子跳过头
+      const dt = lastT ? Math.min(now - lastT, 64) : 16;
+      lastT = now;
       const cur = el.scrollTop;
       const diff = goal - cur;
       if (Math.abs(diff) <= 0.6) {
@@ -316,10 +326,10 @@ export default function ChatArea({
         appliedTopRef.current = el.scrollTop;
         return;
       }
-      const step = Math.max(-SCROLL_MAX_STEP, Math.min(SCROLL_MAX_STEP, diff * SCROLL_SMOOTH));
+      const step = diff * (1 - Math.exp(-dt / SCROLL_TAU_MS));
       el.scrollTop = cur + step;
       // 记下"我们刚把它设成了多少"，onScroll 靠这个认领自己的位移。
-      // 比时间窗可靠：手机上 rAF 慢、scroll 事件有延迟，60ms 窗口经常过期。
+      // 比时间窗可靠：手机上 rAF 慢、scroll 事件有延迟，时间窗经常开错。
       appliedTopRef.current = el.scrollTop;
       scrollRafRef.current = requestAnimationFrame(tick);
     };
