@@ -35,17 +35,25 @@ export default function CampusToolsHub() {
   const Panel = PANELS[active] ?? GpaTool;
 
   return (
-    <main className="campus-shell">
-      <header className="campus-head">
-        <h1 className="campus-title">校园工具集</h1>
-        <p className="campus-sub">
-          不用登录、不连教务，打开就能用。所有数据只存在这台设备的浏览器里。
-        </p>
-      </header>
+    /*
+     * 外层这一圈是滚动容器，不是装饰。
+     * 全局 base.css 把 html/body 设成 height:100% + overflow:hidden（工作台是固定视口的外壳），
+     * 所以这一页如果不自己滚，内容一变高下半截就永远够不到 —— 番茄钟加了统计与同步之后
+     * 就撞上了这个坑。滚动条放在最外层，才不会卡在 880px 的栏目边上。
+     */
+    <div className="campus-scroll">
+      <main className="campus-shell">
+        <header className="campus-head">
+          <h1 className="campus-title">校园工具集</h1>
+          <p className="campus-sub">
+            不用登录、不连教务，打开就能用。所有数据只存在这台设备的浏览器里。
+          </p>
+        </header>
 
-      <ToolNav active={active} onChange={setActive} />
+        <ToolNav active={active} onChange={setActive} />
 
-      <Panel />
-    </main>
+        <Panel />
+      </main>
+    </div>
   );
 }
