@@ -34,10 +34,14 @@
 | 资产 | 位置 | 状态 |
 | --- | --- | --- |
 | 线上实现 | `frontend/public/tools.html`（132 KB 单文件） | **在跑，是用户此刻看到的版本** |
+| 板块新实现 | `frontend/src/campus/` + 路由 `/tools` | 6 个工具已全部迁移完成，**尚未接线上入口**（切换属 S2） |
 | 早期原型 | `prototypes/校园工具集.html`（59 KB） | 历史留档，已被线上版覆盖 |
 | 板块原型快照 | `campus/prototypes/校园工具集_v1_原型_20261029.html` | 本分区内的基线，不再改动 |
 | 词库数据 | `frontend/public/data/words/cet4.json`、`cet6.json` | 已从 40 词扩到 6661 词，可用 |
 | 入口 | `frontend/src/components/chat/constants.tsx` 的 `TOOLS_URL = "/tools.html"` | 挂在对话栏，不在侧栏 |
+
+> 新实现已经能跑完 6 个工具的全流程，但**入口常量仍指向 `/tools.html`**。
+> 这是刻意的：先让新实现完整可用、评审通过，再单独一次提交切入口，出问题只需还原一行常量。
 
 **已知遗留问题**（来自 `docs/内测反馈_2026-10-27/问题清单与优先级.md`）：
 
@@ -152,3 +156,4 @@ npm run build
 
 每次功能交付另附一份审核报告，放在 `campus/reviews/`（命名 `YYYY-MM-DD_主题.md`），
 模板见 `campus/reviews/TEMPLATE.md`。报告结论只有三种：通过 / 有条件通过 / 打回。
+按天收尾时另写一份工作日报，放 `campus/reports/`（需求核对 + 交付 + 未完成项）。

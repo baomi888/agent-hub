@@ -1,0 +1,589 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>校园工具集 · 双端体验</title>
+<style>
+  :root {
+    --paper: #F6F0E0;
+    --card: #FDFAF2;
+    --ink: #3D2F1A;
+    --text-2: #5A4C33;
+    --text-3: #6F6044;
+    --accent: #C8892A;
+    --accent-ink: #875B10;
+    --line: rgba(61, 47, 26, 0.12);
+    --line-strong: rgba(61, 47, 26, 0.22);
+    --bezel: #2E2618;
+  }
+
+  * { box-sizing: border-box; }
+
+  /* 页面照常滚动：不设固定高度、不锁 overflow、不 sticky。
+     画面里默认不接管滚轮（见 .veil），所以滚轮永远先滚这页。 */
+  html, body {
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    min-height: 100vh;
+    padding: 16px 20px 28px;
+    color: var(--ink);
+    background:
+      radial-gradient(1200px 600px at 50% -10%, #FBF6E9 0%, transparent 60%),
+      var(--paper);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---------- 工具条 ---------- */
+
+  .bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 20px;
+    align-items: center;
+    justify-content: space-between;
+    max-width: 1600px;
+    margin: 0 auto 16px;
+  }
+
+  .bar-title {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    align-items: baseline;
+    min-width: 0;
+  }
+
+  .bar h1 {
+    margin: 0;
+    font-family: "Songti SC", "Noto Serif SC", Georgia, serif;
+    font-size: 19px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+  }
+
+  .bar p {
+    margin: 0;
+    max-width: 40em;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-3);
+  }
+
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .seg {
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+  }
+
+  .seg button,
+  .controls select,
+  .controls > a,
+  .controls > button {
+    padding: 6px 12px;
+    font: inherit;
+    font-size: 13px;
+    color: var(--text-2);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background-color .15s ease, color .15s ease;
+  }
+
+  .seg button:hover,
+  .controls > button:hover,
+  .controls > a:hover {
+    color: var(--ink);
+    background: rgba(61, 47, 26, 0.05);
+  }
+
+  .seg button.is-on {
+    color: var(--accent-ink);
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(61, 47, 26, 0.12);
+  }
+
+  .controls select {
+    padding-right: 26px;
+    background: var(--card);
+    border-color: var(--line);
+    appearance: none;
+    background-image: linear-gradient(45deg, transparent 50%, var(--text-3) 50%),
+                      linear-gradient(135deg, var(--text-3) 50%, transparent 50%);
+    background-position: calc(100% - 14px) 14px, calc(100% - 9px) 14px;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+  }
+
+  .controls > a {
+    color: var(--accent-ink);
+    text-decoration: none;
+    border-color: var(--line);
+    background: var(--card);
+  }
+
+  /* ---------- 舞台 ---------- */
+
+  #stage {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 28px;
+    align-items: flex-start;
+    justify-content: center;
+    max-width: 1600px;
+    margin: 0 auto;
+  }
+
+  .device {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .device.is-hidden { display: none; }
+
+  .device[data-device="desktop"] { flex: 1 1 560px; }
+  .device[data-device="phone"] { flex: 0 0 auto; }
+
+  .device-label {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    font-size: 12px;
+    color: var(--text-3);
+    white-space: nowrap;
+  }
+
+  .device-label b { font-weight: 600; color: var(--ink); }
+
+  /* 「操作中」小徽标：点一下退出操作，滚轮回到这页 */
+  .arm-chip {
+    padding: 2px 8px;
+    font: inherit;
+    font-size: 11px;
+    color: var(--accent-ink);
+    background: rgba(200, 137, 42, 0.14);
+    border: 1px solid rgba(200, 137, 42, 0.34);
+    border-radius: 99px;
+    cursor: pointer;
+  }
+
+  .arm-chip[hidden] { display: none; }
+
+  /*
+   * .fit 是画面「缩放后占多大地方」的盒子；里面的 .plate 保持真实尺寸
+   * （1440×900 / 390×844），只用 transform 缩 —— iframe 里的媒体查询看到的
+   * 仍是真实视口宽度，预览不会骗过断点。
+   */
+  .fit {
+    position: relative;
+    min-width: 0;
+    overflow: hidden;
+    border-radius: 12px;
+  }
+
+  .device[data-device="desktop"] .fit { align-self: stretch; }
+
+  .plate {
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform-origin: top left;
+  }
+
+  /*
+   * 关键：默认在画面上盖一层「点击开始操作」的透明遮罩，并让 iframe 不接收指针。
+   * 这样滚轮在画面上就是滚这页，不会被 iframe 吃掉 —— 页面永远不会被钉住。
+   * 想真正点按钮时，点一下遮罩，遮罩撤掉，那一侧才变成可操作。
+   */
+  .veil {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    text-align: center;
+    background: rgba(246, 240, 224, 0.28);
+    border-radius: inherit;
+    cursor: pointer;
+    transition: background-color .15s ease;
+  }
+
+  .veil span {
+    padding: 8px 16px;
+    font-size: 13px;
+    color: var(--ink);
+    background: rgba(253, 250, 242, 0.94);
+    border: 1px solid var(--line-strong);
+    border-radius: 99px;
+    box-shadow: 0 6px 16px -10px rgba(61, 47, 26, 0.6);
+  }
+
+  .veil:hover { background: rgba(246, 240, 224, 0.12); }
+
+  .device[data-armed="1"] .veil { display: none; }
+
+  iframe { display: block; border: 0; background: var(--paper); }
+
+  .device:not([data-armed="1"]) iframe { pointer-events: none; }
+
+  /* 电脑：一层很薄的窗框，像把浏览器窗口放在桌上 */
+  .window {
+    overflow: hidden;
+    background: var(--card);
+    border: 1px solid var(--line-strong);
+    border-radius: 12px;
+    box-shadow: 0 18px 40px -24px rgba(61, 47, 26, 0.45), 0 2px 6px rgba(61, 47, 26, 0.06);
+  }
+
+  .window-bar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 8px 12px;
+    background: #F1E9D6;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .dots { display: inline-flex; gap: 5px; }
+
+  .dots i {
+    width: 8px;
+    height: 8px;
+    background: rgba(61, 47, 26, 0.18);
+    border-radius: 50%;
+  }
+
+  .url {
+    flex: 1 1 auto;
+    padding: 3px 10px;
+    overflow: hidden;
+    font-size: 11px;
+    color: var(--text-3);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+
+  .screen-wrap {
+    position: relative;
+    overflow: hidden;
+    background: var(--paper);
+  }
+
+  /* 手机：只留一圈窄边框，不做花哨机身 —— 重点是里面的页面 */
+  .phone {
+    position: relative;
+    padding: 10px;
+    background: var(--bezel);
+    border-radius: 30px;
+    box-shadow: 0 22px 48px -26px rgba(61, 47, 26, 0.55), 0 2px 8px rgba(61, 47, 26, 0.12);
+  }
+
+  .phone::before {
+    content: "";
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    z-index: 2;
+    width: 64px;
+    height: 5px;
+    background: rgba(255, 255, 255, 0.18);
+    border-radius: 99px;
+    transform: translateX(-50%);
+  }
+
+  .phone .screen-wrap {
+    overflow: hidden;
+    background: var(--paper);
+    border-radius: 21px;
+  }
+
+  .phone .veil { border-radius: 21px; }
+
+  .note {
+    max-width: 74ch;
+    margin: 22px auto 0;
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: var(--text-3);
+  }
+
+  .note b { font-weight: 600; color: var(--text-2); }
+
+  @media (max-width: 1080px) {
+    .device[data-device="desktop"] { flex: 1 1 100%; }
+    .device[data-device="phone"] { align-self: center; }
+  }
+
+  @media (max-width: 760px) {
+    body { padding: 12px 12px 24px; }
+    .bar h1 { font-size: 17px; }
+    .bar p { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="bar-title">
+    <h1>校园工具集 · 双端体验</h1>
+    <p>整页随便滚，画面不会抢滚轮。要真正点按钮时，点一下画面上的「点击开始操作」；按 Esc 或点页面空白处退出操作。</p>
+  </div>
+
+  <div class="controls">
+    <div class="seg" role="group" aria-label="显示方式">
+      <button type="button" data-mode="both" class="is-on">并排</button>
+      <button type="button" data-mode="desktop">只看电脑</button>
+      <button type="button" data-mode="phone">只看手机</button>
+    </div>
+
+    <select id="size" aria-label="电脑尺寸">
+      <option value="1440x900">1440 × 900</option>
+      <option value="1280x800">1280 × 800</option>
+      <option value="1024x768">1024 × 768</option>
+    </select>
+
+    <button type="button" id="reload">重新加载</button>
+    <a id="open" href="http://localhost:3000/tools" target="_blank" rel="noreferrer">新窗口打开</a>
+  </div>
+</header>
+
+<main id="stage">
+  <section class="device" data-device="desktop">
+    <div class="device-label">
+      <b>电脑</b><span id="desktop-meta">1440 × 900</span>
+      <button type="button" class="arm-chip" data-disarm hidden>操作中 · 点此退出</button>
+    </div>
+    <div class="fit" id="desktop-fit">
+      <div class="window plate" id="desktop-plate">
+        <div class="window-bar">
+          <span class="dots"><i></i><i></i><i></i></span>
+          <span class="url" id="desktop-url">localhost:3000/tools</span>
+        </div>
+        <div class="screen-wrap" id="desktop-screen"></div>
+      </div>
+      <div class="veil" data-veil><span>点击开始操作</span></div>
+    </div>
+  </section>
+
+  <section class="device" data-device="phone">
+    <div class="device-label">
+      <b>手机</b><span id="phone-meta">390 × 844</span>
+      <button type="button" class="arm-chip" data-disarm hidden>操作中 · 点此退出</button>
+    </div>
+    <div class="fit" id="phone-fit">
+      <div class="phone plate" id="phone-plate">
+        <div class="screen-wrap" id="phone-screen"></div>
+      </div>
+      <div class="veil" data-veil><span>点击开始操作</span></div>
+    </div>
+  </section>
+</main>
+
+<p class="note">
+  <b>默认不动画面</b>：滚轮和拖动都在滚这一页，画面只是「看」。点一下画面才进入操作，这时滚轮滚的是画面里的内容。<br />
+  <b>两端共用同一份本地数据</b>：一边新建任务，另一边刷新即可见。地址取自 <code>?url=</code>，默认 <code>http://localhost:3000/tools</code>。
+</p>
+
+<script>
+(function () {
+  var PHONE_W = 390;
+  var PHONE_H = 844;
+  var PHONE_BEZEL = 20; // 左右各 10px 的机身
+
+  var params = new URLSearchParams(location.search);
+  var APP_URL = params.get("url") || "http://localhost:3000/tools";
+
+  /*
+   * 主题透传：`dual.html?theme=dark` 让两边一起进深色。
+   * 深浅两套配色是两套对比度，只在浅色下看过不算看过双端 ——
+   * 这里不自己画一套深色，只把参数带进 iframe，看到的就是应用里真实的那一套。
+   */
+  function withTheme(url, theme) {
+    if (!theme) return url;
+    try {
+      var parsed = new URL(url, location.href);
+      parsed.searchParams.set("theme", theme);
+      return parsed.toString();
+    } catch (error) {
+      return url;
+    }
+  }
+
+  var FRAME_URL = withTheme(APP_URL, params.get("theme"));
+
+  var stage = document.getElementById("stage");
+  var desktopScreen = document.getElementById("desktop-screen");
+  var phoneScreen = document.getElementById("phone-screen");
+  var desktopFit = document.getElementById("desktop-fit");
+  var phoneFit = document.getElementById("phone-fit");
+  var desktopPlate = document.getElementById("desktop-plate");
+  var phonePlate = document.getElementById("phone-plate");
+  var desktopMeta = document.getElementById("desktop-meta");
+  var desktopUrl = document.getElementById("desktop-url");
+  var phoneMeta = document.getElementById("phone-meta");
+  var sizeSelect = document.getElementById("size");
+
+  var desktopDevice = document.querySelector('[data-device="desktop"]');
+  var phoneDevice = document.querySelector('[data-device="phone"]');
+
+  document.getElementById("open").href = FRAME_URL;
+  desktopUrl.textContent = FRAME_URL.replace(/^https?:\/\//, "");
+
+  var desktopFrame = null;
+  var phoneFrame = null;
+  var desktopSize = { w: 1440, h: 900 };
+
+  function makeFrame(w, h) {
+    var iframe = document.createElement("iframe");
+    iframe.setAttribute("title", "校园工具集");
+    iframe.setAttribute("loading", "eager");
+    iframe.style.width = w + "px";
+    iframe.style.height = h + "px";
+    iframe.src = FRAME_URL;
+    return iframe;
+  }
+
+  /* 电脑：按容器的实际宽度等比缩，高度随之；手机：真实 1:1，屏幕太窄时才整只缩 */
+  function layout() {
+    if (desktopFrame) {
+      var natW = desktopPlate.offsetWidth;
+      var natH = desktopPlate.offsetHeight;
+      var availW = desktopFit.clientWidth;
+      if (natW && availW) {
+        var s = Math.min(1, availW / natW);
+        desktopPlate.style.transform = s >= 0.999 ? "none" : "scale(" + s + ")";
+        desktopFit.style.height = Math.round(natH * s) + "px";
+        desktopMeta.textContent =
+          desktopSize.w + " × " + desktopSize.h + (s >= 0.999 ? " · 1:1" : " · " + Math.round(s * 100) + "%");
+      }
+    }
+
+    if (phoneFrame) {
+      var pw = PHONE_W + PHONE_BEZEL;
+      var ph = PHONE_H + PHONE_BEZEL;
+      // 手机上整只手机缩到放得下，不做只缩内容那种变形
+      var ps = stage.clientWidth < pw + 8 ? Math.min(1, (stage.clientWidth - 8) / pw) : 1;
+      phonePlate.style.transform = ps >= 0.999 ? "none" : "scale(" + ps + ")";
+      phoneFit.style.width = Math.round(pw * ps) + "px";
+      phoneFit.style.height = Math.round(ph * ps) + "px";
+      phoneMeta.textContent = PHONE_W + " × " + PHONE_H + (ps >= 0.999 ? " · 1:1" : " · " + Math.round(ps * 100) + "%");
+    }
+  }
+
+  function mount() {
+    desktopFrame = makeFrame(desktopSize.w, desktopSize.h);
+    desktopScreen.appendChild(desktopFrame);
+    phoneFrame = makeFrame(PHONE_W, PHONE_H);
+    phoneScreen.appendChild(phoneFrame);
+    requestAnimationFrame(layout);
+  }
+
+  /* ---------- 进入 / 退出操作 ---------- */
+
+  function arm(device) {
+    device.dataset.armed = "1";
+    device.querySelector("[data-disarm]").hidden = false;
+  }
+
+  function disarm(device) {
+    delete device.dataset.armed;
+    device.querySelector("[data-disarm]").hidden = true;
+  }
+
+  function disarmAll() {
+    disarm(desktopDevice);
+    disarm(phoneDevice);
+  }
+
+  [desktopDevice, phoneDevice].forEach(function (device) {
+    device.querySelector("[data-veil]").addEventListener("click", function () {
+      disarmAll();
+      arm(device);
+    });
+    device.querySelector("[data-disarm]").addEventListener("click", function (event) {
+      event.stopPropagation();
+      disarm(device);
+    });
+  });
+
+  // 点到页面别处就退出操作，滚轮立刻回到这页
+  document.addEventListener("pointerdown", function (event) {
+    [desktopDevice, phoneDevice].forEach(function (device) {
+      if (device.dataset.armed && !device.contains(event.target)) disarm(device);
+    });
+  });
+
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") disarmAll();
+  });
+
+  /* ---------- 控件 ---------- */
+
+  sizeSelect.addEventListener("change", function () {
+    var parts = sizeSelect.value.split("x");
+    desktopSize = { w: parseInt(parts[0], 10), h: parseInt(parts[1], 10) };
+    if (desktopFrame) {
+      desktopFrame.style.width = desktopSize.w + "px";
+      desktopFrame.style.height = desktopSize.h + "px";
+    }
+    layout();
+  });
+
+  document.querySelectorAll(".seg button").forEach(function (button) {
+    button.addEventListener("click", function () {
+      document.querySelectorAll(".seg button").forEach(function (other) {
+        other.classList.toggle("is-on", other === button);
+      });
+      var mode = button.dataset.mode;
+      disarmAll();
+      desktopDevice.classList.toggle("is-hidden", mode === "phone");
+      phoneDevice.classList.toggle("is-hidden", mode === "desktop");
+      layout();
+    });
+  });
+
+  /* 用 location.reload 而不是重设 src：src 没变时部分浏览器不会真的重载，
+     点了「刷新」却什么都没发生，多半就是这个原因 */
+  document.getElementById("reload").addEventListener("click", function () {
+    [desktopFrame, phoneFrame].forEach(function (frame) {
+      if (!frame || !frame.contentWindow) return;
+      try {
+        frame.contentWindow.location.reload();
+      } catch (error) {
+        frame.src = FRAME_URL;
+      }
+    });
+  });
+
+  window.addEventListener("resize", layout);
+  window.addEventListener("load", layout);
+  if ("ResizeObserver" in window) new ResizeObserver(layout).observe(stage);
+
+  mount();
+})();
+</script>
+</body>
+</html>

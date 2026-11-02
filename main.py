@@ -28,6 +28,7 @@ from api.chat import router as chat_router
 from api.checkin import router as checkin_router
 from api.delegate import router as delegate_router
 from api.feedback import router as feedback_router
+from api.focus import router as focus_router
 from api.geo import router as geo_router
 from api.hybrid import router as hybrid_router
 from api.kb import router as kb_router
@@ -206,6 +207,9 @@ app.include_router(path_router, prefix="/api/path", tags=["学习路径"])
 app.include_router(profile_router, prefix="/api/profile", tags=["用户画像"])
 # 检索词增强（roadmap B3）：预览"把口语词换成标准词"的结果，只读、不写库、不调模型
 app.include_router(query_router, prefix="/api/query", tags=["检索词增强"])
+# 校园工具集 · 番茄钟专注记录同步（B6）：会话幂等追加 + 任务后写胜。
+# 只存「学什么、多久」，不存任何对话内容
+app.include_router(focus_router, prefix="/api/campus/focus", tags=["校园工具集"])
 
 
 # ---------- 修复：前后端尾部斜杠不一致导致的重定向黑洞 ----------

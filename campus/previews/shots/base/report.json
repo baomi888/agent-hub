@@ -1,0 +1,36 @@
+[
+  {
+    "file": "page-1440x900.png",
+    "state": null,
+    "size": "1440x900",
+    "zoom": 1,
+    "animationWaitMs": 0,
+    "issues": [
+      "加载错误：Failed to load resource: the server responded with a status of 500 (Internal Server Error) http://localhost:3000/api/auth/me",
+      "加载错误：Failed to load resource: the server responded with a status of 500 (Internal Server Error) http://localhost:3000/api/auth/me"
+    ],
+    "lint": []
+  },
+  {
+    "file": "page-390x844.png",
+    "state": null,
+    "size": "390x844",
+    "zoom": 1,
+    "animationWaitMs": 0,
+    "issues": [
+      "加载错误：Failed to load resource: the server responded with a status of 500 (Internal Server Error) http://localhost:3000/api/auth/me",
+      "加载错误：Failed to load resource: the server responded with a status of 500 (Internal Server Error) http://localhost:3000/api/auth/me"
+    ],
+    "lint": [
+      {
+        "rule": "smallText",
+        "label": "正文小于 13px",
+        "count": 2,
+        "examples": [
+          "p.campus-card-note「还没有任务。先建一个，之后每天点「开始」就能计时」（12px）",
+          "p.campus-card-note.campus-stats-io-note「数据存在这台设备的浏览器里。换设备前导出一份，在」（12px）"
+        ]
+      }
+    ]
+  }
+]
