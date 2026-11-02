@@ -50,6 +50,19 @@ const TAIL_PAD = 18;
 const ANCHOR_HOLD_MS = 1400;
 
 /**
+ * 跟随阶段每帧走剩余量的比例（0~1）。
+ *
+ * 2026-11-02 第二轮：从 0.34 降到 0.12。手机上一行中文约 33px、每 0.4 秒来一行，
+ * 0.34 会在 100ms 内走完一行然后停 300ms —— 节奏是"弹一下、静一下"，
+ * 用户原话"一抽一抽"。0.12 让 33px 约 400ms 走完，和来行的节奏同拍，
+ * 观感是内容缓缓往上淌。
+ */
+const SCROLL_SMOOTH = 0.12;
+
+/** 单帧位移上限（px）。只用于大落差（切会话、重新锚定）时防止瞬移。 */
+const SCROLL_MAX_STEP = 24;
+
+/**
  * 检索条数也换成白话档位。
  * 「topK = 5」没人看得懂，「参考 5 段资料」一看就明白，
  * 顺带把「多参考 = 更全但更慢」的取舍讲清楚。
@@ -200,14 +213,14 @@ export default function ChatArea({
   const progTopRef = useRef<number | null>(null);
   /** 平滑滚动的截止时刻：期间不把滚动事件算成用户意图 */
   const smoothUntilRef = useRef(0);
-  /** 程序平滑追赶的豁免截止时刻。用时间窗而不是布尔标记 ——
-   *  布尔一旦漏清（rAF 被取消、组件切走），用户的滚动会被永久忽略。 */
-  const progUntilRef = useRef(0);
   /** 锚定后的开头保护截止时刻：这段时间内不跟随，让"开头"在视口里停一会儿 */
   const anchorUntilRef = useRef(0);
   /** 锚定落地的 scrollTop：跟随阶段不能比它更靠上，否则回答还没长满一屏开头就被顶走 */
   const anchoredPosRef = useRef<number | null>(null);
   const scrollRafRef = useRef<number | null>(null);
+  /** 我们最后一次把 scrollTop 设成的值。onScroll 用它认领"这是我们自己滚的" ——
+   *  比时间窗可靠：手机上 rAF 慢、scroll 事件有延迟，时间窗经常开错。 */
+  const appliedTopRef = useRef<number | null>(null);
   /** 消息末尾的留白元素：让"回答不足一屏"时也滚得到顶部（详见下方 effect） */
   const tailRef = useRef<HTMLDivElement | null>(null);
   // 从引用角标打开的全文预览（文件名来自 RefSource，kb 用当前会话绑定的）
@@ -269,6 +282,19 @@ export default function ChatArea({
       : "都不勾＝纯对话";
 
   // 程序滚动：同一帧里多次触发只落一次，且把目标值记下来供 onScroll 认领
+  //
+  // ★ 2026-11-02 第二次重做（手机端「还是在底部一抽一抽」）：
+  //   上一版是「每帧走剩余量的 1/3，最多 6 帧后直接 snap 到位」。线上采样暴露了问题：
+  //   一行中文约 33px，先在 ~100ms 内一口气走完 6 帧，然后停 300ms 等下一行 ——
+  //   节奏是「弹一下、静一下、弹一下」。桌面一行字多（~40 字），0.9 秒才弹一次，
+  //   察觉不到；手机一行只有 21 字，0.4 秒弹一次，就成了"一抽一抽"。
+  //   实测位移分布：一共 732 个 50ms 采样点，只有 108 个点在动（15%），
+  //   动的那些中位 16.5px、90 分位 25px —— 典型的"脉冲式"位移。
+  //
+  //   现在的做法：**慢速漂移**。每帧只走剩余量的 12%，不设帧数上限。
+  //   33px 的落差要 ~400ms 才走完，正好和"下一行什么时候来"同拍 ——
+  //   视线感觉是内容在缓缓往上淌，而不是一行一行地弹。
+  //   为了防止大落差（切会话、锚定偏移）时变瞬移，单帧最多 24px。
   const programScroll = useCallback((el: HTMLDivElement, top: number) => {
     const max = Math.max(0, el.scrollHeight - el.clientHeight);
     const target = Math.max(0, Math.min(top, max));
@@ -277,7 +303,6 @@ export default function ChatArea({
     // 走了一半的位移丢掉，反而更抖）
     if (scrollRafRef.current != null) return;
 
-    let steps = 0;
     const tick = () => {
       scrollRafRef.current = null;
       const goal = progTopRef.current;
@@ -286,15 +311,16 @@ export default function ChatArea({
       if (!stickRef.current) return;
       const cur = el.scrollTop;
       const diff = goal - cur;
-      // 每帧最多走剩余量的 1/3，65px 的突增约 4 帧（~66ms）走完 ——
-      // 肉眼看是"滑过去"而不是"抽一下"。超过 6 帧就收尾，防止追不上时拖尾。
-      if (Math.abs(diff) <= 1.5 || steps >= 6) {
+      if (Math.abs(diff) <= 0.6) {
         el.scrollTop = goal;
+        appliedTopRef.current = el.scrollTop;
         return;
       }
-      steps++;
-      progUntilRef.current = performance.now() + 80;
-      el.scrollTop = cur + diff * 0.34;
+      const step = Math.max(-SCROLL_MAX_STEP, Math.min(SCROLL_MAX_STEP, diff * SCROLL_SMOOTH));
+      el.scrollTop = cur + step;
+      // 记下"我们刚把它设成了多少"，onScroll 靠这个认领自己的位移。
+      // 比时间窗可靠：手机上 rAF 慢、scroll 事件有延迟，60ms 窗口经常过期。
+      appliedTopRef.current = el.scrollTop;
       scrollRafRef.current = requestAnimationFrame(tick);
     };
     scrollRafRef.current = requestAnimationFrame(tick);
@@ -432,6 +458,9 @@ export default function ChatArea({
           scrollRafRef.current = null;
         }
         el.scrollTop = target;
+        // 同上：这一下也是我们自己设的，onScroll 必须认得，否则锚定刚落地的
+        // scroll 事件会把 stick 关掉，后面每个字都不再跟随。
+        appliedTopRef.current = el.scrollTop;
         anchoredPosRef.current = target;
         // 开头护住一会儿：内容长得比视线快，刚锚好就被下一帧顶走的话，
         // 用户连"这行是开头"都没看清。
@@ -478,11 +507,17 @@ export default function ChatArea({
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
-    // 程序正在平滑追赶：这几帧的 scroll 事件是我们自己发的，
-    // 算成"用户接管"会立刻把跟随关掉，反而变成滚一半停住。
-    if (performance.now() < progUntilRef.current) return;
-    // 平滑滚动途中：朝目标靠近的过程不该算成"用户接管"，否则点一下「回到最新」
-    // 按钮，按钮会在中途闪一下又冒出来
+    // ① 这就是我们上一帧刚设进去的值 —— 认领，直接返回。
+    //   ★ 原来判的是「落点离目标 <= 4px」，但平滑追赶途中 scrollTop 离目标
+    //     还有几十像素，判定必然失败 → 被当成"用户接管" → cancelAnimationFrame
+    //     把正在跑的动画掐掉。手机上 rAF 慢，动画本来就跑不完，于是每次都是
+    //     「挪一点 → 被掐 → 攒够再挪一点」，这就是底部那种一抽一抽。
+    //     改成比对"我们设过的值"，和动画进行到哪一步无关。
+    const applied = appliedTopRef.current;
+    if (applied != null && Math.abs(el.scrollTop - applied) <= 2) return;
+
+    // 平滑滚动途中（点「回到最新」）：朝目标靠近的过程不该算成"用户接管"，
+    // 否则按钮会在中途闪一下又冒出来
     if (smoothUntilRef.current && performance.now() < smoothUntilRef.current) {
       const goal = progTopRef.current ?? 0;
       if (Math.abs(el.scrollTop - goal) <= 2) {
@@ -491,19 +526,14 @@ export default function ChatArea({
       }
       return;
     }
-    // 程序滚的：落点没偏差就认领掉，不改变跟随状态。
-    // ★ 少了这一步，锚定（把视口拉到回答顶部）自己就会把 stick 关掉，
-    //   后面每个字都不再跟随 —— 光标还在写，页面却不动了。
-    const target = progTopRef.current;
-    if (target != null) {
-      progTopRef.current = null;
-      if (Math.abs(el.scrollTop - target) <= 4) return;
-      // 落点对不上 = 用户自己滚了。把还排在下一帧的程序滚动撤掉，
-      // 否则它会在 16ms 后把人按回原处（上滚 300px 被拽回去就是这么来的）。
-      if (scrollRafRef.current != null) {
-        cancelAnimationFrame(scrollRafRef.current);
-        scrollRafRef.current = null;
-      }
+
+    // ② 落点和我们设的对不上 = 用户真的动了。把还排着的程序滚动撤掉，
+    //    否则它会在 16ms 后把人按回原处（上滚 300px 被拽回去就是这么来的）。
+    appliedTopRef.current = null;
+    progTopRef.current = null;
+    if (scrollRafRef.current != null) {
+      cancelAnimationFrame(scrollRafRef.current);
+      scrollRafRef.current = null;
     }
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     stickRef.current = near;
@@ -795,8 +825,16 @@ export default function ChatArea({
       <div className="relative min-h-0 flex-1">
         {/* overflow-x-hidden 是兜底：一长串不可断的字符（文件名、URL、表格）
             只要把子元素顶宽，移动端整页就能横向拖动、观感像“画幅歪了”。
-            宁可在这里裁掉，也不许把文档撑宽。 */}
-        <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto overflow-x-hidden">
+            宁可在这里裁掉，也不许把文档撑宽。
+
+            [overflow-anchor:none] 关掉浏览器的「滚动锚定」：流式时内容每帧都在长，
+            浏览器会自作主张微调 scrollTop 来保持可见位置，和我们自己的平滑滚动互相拉扯，
+            也是手机端抖动的来源之一。 */}
+        <div
+          ref={scrollRef}
+          onScroll={onScroll}
+          className="h-full overflow-y-auto overflow-x-hidden [overflow-anchor:none]"
+        >
           <div className="chat-measure mx-auto flex min-h-full flex-col px-6 pb-4 pt-6">
           {messages.length === 0 ? (
             // 欢迎页：主路径是「直接问」，首屏摆两块——
