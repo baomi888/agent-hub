@@ -200,6 +200,9 @@ export default function ChatArea({
   const progTopRef = useRef<number | null>(null);
   /** 平滑滚动的截止时刻：期间不把滚动事件算成用户意图 */
   const smoothUntilRef = useRef(0);
+  /** 程序平滑追赶的豁免截止时刻。用时间窗而不是布尔标记 ——
+   *  布尔一旦漏清（rAF 被取消、组件切走），用户的滚动会被永久忽略。 */
+  const progUntilRef = useRef(0);
   /** 锚定后的开头保护截止时刻：这段时间内不跟随，让"开头"在视口里停一会儿 */
   const anchorUntilRef = useRef(0);
   /** 锚定落地的 scrollTop：跟随阶段不能比它更靠上，否则回答还没长满一屏开头就被顶走 */
@@ -268,14 +271,31 @@ export default function ChatArea({
     const max = Math.max(0, el.scrollHeight - el.clientHeight);
     const target = Math.max(0, Math.min(top, max));
     progTopRef.current = target;
-    if (scrollRafRef.current != null) cancelAnimationFrame(scrollRafRef.current);
-    scrollRafRef.current = requestAnimationFrame(() => {
+    // 已经在追赶：让循环自己读最新的 progTopRef，不要重排（重排会把
+    // 走了一半的位移丢掉，反而更抖）
+    if (scrollRafRef.current != null) return;
+
+    let steps = 0;
+    const tick = () => {
       scrollRafRef.current = null;
-      // 排队这一帧的工夫里用户可能已经接管了（手指比 rAF 快）——
-      // 这时候再把他按回底部，就成了"我往上翻它往下拽"
+      const goal = progTopRef.current;
+      if (goal == null) return;
+      // 追赶途中用户可能已经接管了（手指比 rAF 快），这时立刻让开
       if (!stickRef.current) return;
-      el.scrollTop = target;
-    });
+      const cur = el.scrollTop;
+      const diff = goal - cur;
+      // 每帧最多走剩余量的 1/3，65px 的突增约 4 帧（~66ms）走完 ——
+      // 肉眼看是"滑过去"而不是"抽一下"。超过 6 帧就收尾，防止追不上时拖尾。
+      if (Math.abs(diff) <= 1.5 || steps >= 6) {
+        el.scrollTop = goal;
+        return;
+      }
+      steps++;
+      progUntilRef.current = performance.now() + 80;
+      el.scrollTop = cur + diff * 0.34;
+      scrollRafRef.current = requestAnimationFrame(tick);
+    };
+    scrollRafRef.current = requestAnimationFrame(tick);
   }, []);
 
   // 尾部动态留白已移除（2026-11-02）
@@ -391,6 +411,9 @@ export default function ChatArea({
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
+    // 程序正在平滑追赶：这几帧的 scroll 事件是我们自己发的，
+    // 算成"用户接管"会立刻把跟随关掉，反而变成滚一半停住。
+    if (performance.now() < progUntilRef.current) return;
     // 平滑滚动途中：朝目标靠近的过程不该算成"用户接管"，否则点一下「回到最新」
     // 按钮，按钮会在中途闪一下又冒出来
     if (smoothUntilRef.current && performance.now() < smoothUntilRef.current) {
