@@ -5,7 +5,8 @@
  * 判断标准：这个文件超过 30 行，说明实现写错地方了（见 campus/docs/01）。
  *
  * URL：/tools
- * 旧版仍可通过 /tools.html 访问，切换入口前两者并存。
+ * 旧静态页 frontend/public/tools.html 已由 next.config.ts 的 redirects 301 到 /tools
+ * （2026-11-02）；文件本身保留，作为 campus/logic 里多处算法对照的源码依据。
  */
 
 import type { Metadata } from "next";
