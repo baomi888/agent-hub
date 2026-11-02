@@ -86,7 +86,11 @@ function httpErr(res: Response, message: string): ApiStatusError {
  * 数组/对象转成 "[object Object]"，这正是委托页那个看不懂的报错气泡的成因。
  */
 async function httpError(res: Response): Promise<ApiStatusError> {
-  let detail = `HTTP ${res.status}`;
+  // 5xx 是服务端自己的事。用户看到「HTTP 500」只会以为自己填错了用户名密码，
+  // 或者以为站点坏了——两种都不对。给一句能理解的话，真实状态码留给控制台。
+  // 后端若在 5xx 里带了可读的 detail（如"上游模型超时"），下面那次解析会覆盖掉这句兜底。
+  let detail = res.status >= 500 ? "服务暂时连不上，稍后再试" : `HTTP ${res.status}`;
+  if (res.status >= 500) console.warn(`[api] ${res.status} ${res.url}`);
   if (res.status === 401) {
     notifyUnauthorized();
     return httpErr(res, "未登录或登录已过期，请重新登录");

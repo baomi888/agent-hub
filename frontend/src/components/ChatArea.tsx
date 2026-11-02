@@ -19,6 +19,7 @@ import BubbleErrorBoundary from "./chat/BubbleErrorBoundary";
 import TurnOutline from "./chat/TurnOutline";
 import QueryEnhance from "./chat/QueryEnhance";
 import GuideModal from "./guide/GuideModal";
+import AnnounceModal from "./announce/AnnounceModal";
 import FeedbackModal from "./feedback/FeedbackModal";
 import type { ChatAttachment, UiMessage } from "./chat/types";
 import FilePreviewModal from "./FilePreviewModal";
@@ -1423,6 +1424,10 @@ export default function ChatArea({
       {/* 首次进平台的上手说明：portal 到 body，和有没有对话无关；
           未登录（userId 为空）时它自己不渲染 */}
       <GuideModal userId={userId} />
+
+      {/* 更新公告：同一处挂载。它自己判断「引导还没读完就先不弹」，
+          所以两者不会叠在一起；并且它比 GuideModal 高一层（z 96 / 95） */}
+      <AnnounceModal userId={userId} />
 
       {/* 顶栏「反馈」打开的弹窗：内容与设置页是同一个 FeedbackCard，
           区别只是这里没有外层卡片（chrome=false） */}

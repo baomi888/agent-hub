@@ -38,3 +38,6 @@
 @import "./styles/turnnav.css";
 @import "./styles/a11y.css";
 @import "./styles/mascot.css";
+/* 更新公告：全屏强制页，不参与任何页面布局，放最后一块，避免被别处的
+   同名类或全局 input/button 规则改掉 */
+@import "./styles/announce.css";

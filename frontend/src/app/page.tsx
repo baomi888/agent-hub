@@ -20,6 +20,7 @@ import { useKnowledge } from "@/lib/hooks/useKnowledge";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { detailToMessage } from "@/lib/errors";
 import AuthGate from "@/components/AuthGate";
+import AnnounceModal from "@/components/announce/AnnounceModal";
 import type { UiMessage } from "@/components/chat/types";
 import type { ChatMode, Grounding, RefSource, ToolEvent } from "@/lib/types";
 import { isPlanRequest } from "@/components/chat/plan";
@@ -802,11 +803,16 @@ export default function Home() {
   }
   if (!auth.me) {
     return (
-      <AuthGate
-        allowSignup={auth.allowSignup}
-        onLogin={auth.login}
-        onRegister={auth.register}
-      />
+      <>
+        <AuthGate
+          allowSignup={auth.allowSignup}
+          onLogin={auth.login}
+          onRegister={auth.register}
+        />
+        {/* 登录门之外也挂一个：?ann=<期号> 是拿来给人看版式的预览入口，
+            没账号也该看得见。不带这个参数时它自己什么都不渲染（见组件里的 open 判定） */}
+        <AnnounceModal userId={null} />
+      </>
     );
   }
 

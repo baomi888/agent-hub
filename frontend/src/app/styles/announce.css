@@ -1,0 +1,429 @@
+/* ============ 更新公告 · 全屏强制页 ============
+   组件：components/announce/AnnounceModal.tsx
+
+   版式的目标不是"好看"，是**让人愿意读完并且读得动**：
+   一屏全是同一个字重、同一个灰色的长文，眼睛没有落脚点，用户只会本能地找关闭按钮。
+   所以这里靠三样东西建立层级，全篇只有这三样：
+     ① 字号差（32 → 21 → 15 → 14），相邻两级差得有肉眼可见的台阶；
+     ② 粗细差（700 / 600 / 400），粗体只给"这一条讲什么"和少数几个关键词；
+     ③ 颜色差（墨 → 深棕 → 浅棕 → 玉米金），金色只给"变了"的地方和编号。
+
+   全屏而不是卡片 + 遮罩：这一期是强制的，没有关闭途径，就没必要露出背景。
+   留一层看得见却点不动的界面，只会让人反复去点它。 */
+
+.ann-page {
+  position: fixed;
+  inset: 0;
+  /* 比全站所有浮层都高（反馈 96 / 引导 95 / toast 100）：
+     这一层是强制阅读，被任何东西压住都会漏出背后的界面 */
+  z-index: 110;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-canvas);
+  /* 滚到底之后继续滑，不要让滚动"穿透"到背后那层页面 */
+  overscroll-behavior: contain;
+  animation: annIn 0.2s ease;
+}
+@keyframes annIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.ann-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.ann-shell:focus {
+  outline: none;
+}
+
+/* 顶上这条金线是"读到哪了"，也是整页唯一贯穿的边缘装饰 */
+.ann-progress {
+  flex: none;
+  height: 2px;
+  background: var(--fill-2);
+}
+.ann-progress-bar {
+  height: 100%;
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-line));
+  transition: transform 0.09s linear;
+}
+
+/* ---------- 头部：期号 + 品牌 ---------- */
+/* 头部要有一层不透明的底 + 一条细线：正文滚到最上面时会紧贴过来，
+   没有边界的话，期号和第一条内容看起来像连成一段 */
+.ann-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(760px, 100%);
+  margin: 0 auto;
+  padding: 16px 28px 13px;
+  border-bottom: 1px solid var(--line);
+}
+.ann-eyebrow {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--accent-ink);
+  font-variant-numeric: tabular-nums;
+}
+.ann-brand {
+  /* 每期强制、没有关闭按钮之后，这里靠 auto 边距自己顶到最右 */
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+}
+.ann-brand-corn {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  /* 玉米身是固定品牌色，描边跟文字色走；深色下描边会变成浅色，正好 */
+  color: var(--text-2);
+}
+
+/* ---------- 正文滚动区 ---------- */
+.ann-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 30px 28px 4px;
+  scrollbar-width: thin;
+}
+.ann-body:focus,
+.ann-body:focus-visible {
+  outline: none;
+}
+.ann-inner {
+  width: min(760px, 100%);
+  margin: 0 auto;
+}
+
+.ann-kicker {
+  margin: 0;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  color: var(--text-3);
+}
+
+/* 大标题：全篇最大的一处字号跳跃（15 → 32），一眼就知道"这是一次更新" */
+.ann-title {
+  margin: 8px 0 0;
+  font-size: 2rem;
+  line-height: 1.24;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-1);
+}
+/* 标题下面一小截金线，把"标题区"和"正文区"切开，比整条分隔线轻 */
+.ann-title::after {
+  content: "";
+  display: block;
+  width: 28px;
+  height: 2px;
+  margin-top: 16px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+/* 摘要块：淡金底 + 左侧金边，是全篇第二个"停一下"的地方 */
+.ann-lead {
+  margin: 18px 0 0;
+  padding: 13px 16px;
+  border-left: 2px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  background: var(--accent-soft);
+  /* 图标与文字并排：图标定宽，文字自己折行，不参与 flex 伸缩 */
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+}
+.ann-lead-icon {
+  flex: none;
+  width: 27px;
+  height: 27px;
+  /* 与首行基对齐：行高 1.85 × 0.9375rem ≈ 27.8px，图标顶到略高于首行中线 */
+  margin-top: 1px;
+  color: var(--accent-ink);
+}
+.ann-lead-text {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.85;
+  color: var(--text-2);
+}
+
+/* ---------- 编号条目 ---------- */
+.ann-list {
+  margin: 34px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.ann-item {
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  gap: 16px;
+  padding: 24px 0;
+  border-top: 1px solid var(--line);
+}
+/* 编号：金色、错位一点点，像书页边上的章节号。
+   用 tabular-nums 是为了 01/02 两位数字宽一致，右缘能对齐成一条竖线 */
+.ann-no {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  line-height: 1.7;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.ann-item-title {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 700;
+  line-height: 1.5;
+  letter-spacing: -0.005em;
+  color: var(--text-1);
+}
+.ann-item-body {
+  margin: 7px 0 0;
+  font-size: 0.9375rem;
+  line-height: 1.85;
+  color: var(--text-2);
+}
+
+/* 补充条目：行首一道短横线，比圆点更像"笔记里的附注" */
+.ann-points {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.ann-points li {
+  position: relative;
+  padding-left: 14px;
+  font-size: 0.875rem;
+  line-height: 1.8;
+  color: var(--text-3);
+}
+.ann-points li + li {
+  margin-top: 4px;
+}
+.ann-points li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.82em;
+  width: 6px;
+  height: 1px;
+  background: var(--line-strong);
+}
+
+/* ---------- 行内强调 ---------- */
+/* 加粗：只改粗细和颜色，不改字号——字号一变，行高就跟着跳，整段会抖 */
+.ann-strong {
+  font-weight: 600;
+  color: var(--text-1);
+}
+/* 着色：玉米金 + 一层极淡的底，像用荧光笔划了一道。
+   底色用 accent-soft（0.10 透明）而不是实色：压在纸面上不脏，深色模式下也不用另换 */
+.ann-em {
+  font-weight: 600;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-radius: 3px;
+  padding: 0 2px;
+  /* 两端各收回半格，避免底色把标点也框进去显得生硬 */
+  margin: 0 -1px;
+  /* ★ 在手机上，一段高亮经常被折成两行。默认（slice）只在整段的首尾画圆角，
+     折行处会切成两个直角、还少半格内边距；clone 让每一段都自带完整圆角 */
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+/* ---------- 细改动 ---------- */
+.ann-minor {
+  margin-top: 10px;
+  padding-top: 26px;
+  border-top: 1px dashed var(--line-strong);
+}
+.ann-minor-title {
+  margin: 0 0 14px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+}
+.ann-minor-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ann-minor-list li {
+  position: relative;
+  padding-left: 15px;
+  font-size: 0.875rem;
+  line-height: 1.95;
+  color: var(--text-2);
+}
+.ann-minor-list li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.92em;
+  width: 6px;
+  height: 1px;
+  background: var(--accent);
+  opacity: 0.55;
+}
+
+.ann-sign {
+  margin: 30px 0 28px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  font-size: 0.8125rem;
+  line-height: 1.9;
+  color: var(--text-3);
+}
+
+/* ---------- 底部：唯一的出口 ---------- */
+.ann-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  width: min(760px, 100%);
+  margin: 0 auto;
+  padding: 14px 28px calc(14px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line-strong);
+  /* 底部栏半透纸色压住正文，滚过的内容不会在按钮后面糊成一片；
+     再加一道向上的极淡投影，让"这一条是固定的"看得出来 */
+  background: var(--bg-canvas);
+  box-shadow: 0 -6px 14px -10px rgba(80, 60, 30, 0.28);
+}
+.ann-hint {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.8125rem;
+  color: var(--text-3);
+}
+.ann-hint-ok {
+  font-weight: 600;
+  color: var(--accent-ink);
+}
+/* 还差一点读完时，箭头轻轻动一下，提示"往下"这件事 */
+.ann-hint-arrow {
+  display: inline-block;
+  color: var(--accent);
+  animation: annBob 1.4s ease-in-out infinite;
+}
+@keyframes annBob {
+  0%,
+  100% {
+    transform: translateY(-1px);
+  }
+  50% {
+    transform: translateY(2px);
+  }
+}
+
+.ann-go {
+  flex: none;
+  min-width: 136px;
+  height: 42px;
+  font-size: 0.875rem;
+  border-radius: 999px;
+}
+/* 未读完：留形不留神。做成灰色描边而不是直接隐藏，用户才知道"这里有个按钮，
+   还差一步"，也就知道公告是要读完的 */
+.ann-go.is-locked,
+.ann-go:disabled {
+  opacity: 1;
+  background: var(--fill-2);
+  color: var(--text-3);
+  border: 1px solid var(--line-strong);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+/* ---------- 手机 ---------- */
+@media (max-width: 900px) {
+  .ann-head {
+    padding: 14px 18px 0;
+  }
+  .ann-body {
+    padding: 22px 18px 4px;
+  }
+  .ann-title {
+    font-size: 1.625rem;
+  }
+  .ann-lead {
+    font-size: 0.9375rem;
+    padding: 12px 13px;
+  }
+  .ann-list {
+    margin-top: 26px;
+  }
+  .ann-item {
+    grid-template-columns: 30px 1fr;
+    gap: 11px;
+    padding: 20px 0;
+  }
+  .ann-no {
+    font-size: 0.8125rem;
+  }
+  .ann-item-title {
+    font-size: 1rem;
+  }
+  .ann-foot {
+    /* 手机上横排会把提示挤成两行，改成"提示在上、按钮满宽在下" */
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 12px 18px calc(12px + env(safe-area-inset-bottom));
+  }
+  .ann-hint {
+    justify-content: center;
+  }
+  .ann-go {
+    width: 100%;
+    height: 46px;
+  }
+}
+
+/* 深色：--accent-soft 在深底上会糊掉，金黄也得压一点，否则整段在夜里刺眼 */
+.dark .ann-em {
+  background: rgba(200, 137, 42, 0.16);
+  color: #E0B36A;
+}
+.dark .ann-lead {
+  background: rgba(200, 137, 42, 0.09);
+}
+
+/* 系统开了「减少动态效果」就别让箭头一直跳 */
+@media (prefers-reduced-motion: reduce) {
+  .ann-hint-arrow {
+    animation: none;
+  }
+  .ann-page {
+    animation: none;
+  }
+}

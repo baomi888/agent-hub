@@ -21,6 +21,7 @@ import { createContext, useContext, useEffect, useRef, type ReactNode } from "re
 import AuthGate from "../AuthGate";
 import CornIcon from "../CornIcon";
 import GuideModal from "../guide/GuideModal";
+import AnnounceModal from "../announce/AnnounceModal";
 import { useAuth } from "@/lib/hooks/useAuth";
 import type { MeOut } from "@/lib/types";
 
@@ -139,6 +140,7 @@ export default function ConsoleLayout({ children }: { children: ReactNode }) {
             不一定先看到首页。和 ChatArea 那处不会重复 —— 首页不走这个 layout，
             而 localStorage 的"已读"标记本身也是幂等的（两边同读一个 key）。 */}
         <GuideModal userId={auth.me.user.id} />
+        <AnnounceModal userId={auth.me.user.id} />
       </div>
     </UserCtx.Provider>
   );
