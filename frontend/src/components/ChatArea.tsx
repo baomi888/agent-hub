@@ -208,6 +208,8 @@ export default function ChatArea({
   /** 锚定落地的 scrollTop：跟随阶段不能比它更靠上，否则回答还没长满一屏开头就被顶走 */
   const anchoredPosRef = useRef<number | null>(null);
   const scrollRafRef = useRef<number | null>(null);
+  /** 消息末尾的留白元素：让"回答不足一屏"时也滚得到顶部（详见下方 effect） */
+  const tailRef = useRef<HTMLDivElement | null>(null);
   // 从引用角标打开的全文预览（文件名来自 RefSource，kb 用当前会话绑定的）
   const [previewFile, setPreviewFile] = useState<string | null>(null);
   // 顶栏「反馈」弹窗。**必须是 useCallback**：FeedbackModal 的 Esc / 焦点 effect
@@ -298,19 +300,51 @@ export default function ChatArea({
     scrollRafRef.current = requestAnimationFrame(tick);
   }, []);
 
-  // 尾部动态留白已移除（2026-11-02）
+  // 尾部留白：让「回答不足一屏」时也滚得到顶部（2026-11-02 重做版）
   //
-  // 它原来的作用：内容总高不足一屏时 maxScrollTop 太小，把回答顶边锚到视口顶
-  // 会被浏览器 clamp 掉。但那个场景（回答不足一屏）**全部内容本来就可见**，
-  // 根本不需要锚定 —— 为了一个不需要的效果，换来了流式时最严重的问题：
+  // 为什么必须有它：内容总高不足一屏时 maxScrollTop 太小，把回答顶边锚到视口顶
+  // 会被浏览器 clamp 掉 —— 结果回答只能贴在视口最下方一字一字长出来，
+  // 用户看到的就是"回答一直在屏幕最下面"。实测（390×844）：回答 121px 时
+  // 顶边停在 y=505（视口 580），而不是应有的 y=75。
   //
-  //   tail 高度 = clientHeight - 气泡高度，每帧都在变（实测最大一次跳 517px），
-  //   它一改 scrollHeight，浏览器就把 scrollTop 夹回去 —— 用户看到的就是
-  //   "页面一抽一抽"。线上实测：50ms 采样里单帧 scrollTop 跳 326px，留白突变 20 次。
+  // ★ 为什么上一版会"一抽一抽"、这一版不会：
+  //   上一版在渲染 effect 里每帧 `getBoundingClientRect()` 量一次气泡高度。
+  //   DOM 还没更新时量到旧值或 0，tail 就瞬间跳几百像素（实测单次 517px）；
+  //   tail 一改 scrollHeight，浏览器立刻把 scrollTop 夹回去 —— 这就是抽搐。
+  //   这版改用 ResizeObserver：只在气泡**尺寸真的变了**之后才回调，量的是新值。
+  //   于是「气泡高度 + 留白 = 一屏」恒成立，scrollHeight 恒定，scrollTop 不动。
   //
-  // 现在的规则：留白恒为 0（.chat-tail 的 CSS 本来就写死 height:0），
-  // 锚定只在"回答已经比视口高"时才做 —— 那时 maxScrollTop 天然够，不需要补。
-
+  //   效果：回答在下方"填满"这段留白，顶边稳稳停在视口顶部，一直到写满一屏
+  //   才开始跟随 —— 正是豆包那种从上往下淌的观感。
+  const lastMsg = messages[messages.length - 1];
+  const lastId = lastMsg?.id ?? "";
+  const lastStreaming = !!lastMsg?.streaming;
+  useEffect(() => {
+    const el = scrollRef.current;
+    const tail = tailRef.current;
+    if (!el || !tail) return;
+    const node =
+      lastStreaming && lastId
+        ? el.querySelector<HTMLElement>(`[data-mid="${lastId}"]`)
+        : null;
+    if (!node) {
+      tail.style.height = "0px";
+      return;
+    }
+    const apply = () => {
+      const bh = node.getBoundingClientRect().height;
+      const h = Math.max(0, Math.round(el.clientHeight - bh));
+      if (Math.abs((parseFloat(tail.style.height) || 0) - h) > 1) {
+        tail.style.height = `${h}px`;
+      }
+    };
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(node);
+    return () => ro.disconnect();
+    // 只在「哪一条在流式」变化时重建，内容增长交给 ResizeObserver ——
+    // 依赖 messages 会让每个 token 都重建一次 observer。
+  }, [lastId, lastStreaming]);
 
   // 新消息 / 新一段文字进来时的视野策略（2026-11-01 重写）
   //
@@ -854,6 +888,10 @@ export default function ChatArea({
                   </div>
                 );
               })}
+              {/* 尾部留白：高度 = 一屏 − 本条回答高度，只在流式且不足一屏时给。
+                  没有它，回答不足一屏就没有滚动余量，只能贴在视口最下方 ——
+                  用户看到的就是"回答一直在屏幕最下面长出来"。 */}
+              <div className="chat-tail" ref={tailRef} aria-hidden="true" />
             </div>
           )}
           </div>
