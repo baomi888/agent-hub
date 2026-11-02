@@ -356,8 +356,7 @@ export default function ChatArea({
   // 现在的策略（对齐豆包）：
   //   ① 一条回答的**第一个字**出现时，把这条气泡的顶边放到视口顶部（留 14px），
   //      而不是贴底 —— 贴底意味着第 1 行永远落在视口最下方，越写越往上跑。
-  //      **前提是这条回答本身高过一个视口**；不足一屏时全部可见，滚到范围末端即可，
-  //      硬锚到顶反而会把内容整体推出视口上半部。
+  //      回答不足一屏时靠尾部留白（见上方 effect）补出滚动余量，同样能锚到顶。
   //   ② 锚完先停 ANCHOR_HOLD_MS，让开头在视口里待够，再转入跟随；
   //   ③ 跟随阶段让回答底边贴视口底，文字由 typewriter 按阅读速度往外放；
   //   ④ 用户一旦上滚（stickRef=false）就彻底冻结，视野归他。
@@ -377,9 +376,13 @@ export default function ChatArea({
     const last = messages[messages.length - 1];
     const hasText = last?.role === "assistant" && (last.content ?? "").length > 0;
     if (hasText && anchoredRef.current !== last.id) {
-      anchoredRef.current = last.id;
       const node = el.querySelector<HTMLElement>(`[data-mid="${last.id}"]`);
       if (node) {
+        // ★ 标记必须放在"确认拿到节点"之后（2026-11-02）：
+        //   原来先设 anchoredRef 再找节点，第一个 token 那一帧如果 DOM 还没挂上
+        //   （querySelector 返回 null），这次锚定机会就**永久丢掉**了 ——
+        //   后续每一帧都因为 id 相同而跳过锚定，回答只能贴在最底下长出来。
+        anchoredRef.current = last.id;
         // ★ 先把留白**同步**补上，再算滚动范围（2026-11-02 关键修复）。
         //   留白平时由 ResizeObserver 异步设置，第一个 token 落地那一帧它还是 0，
         //   于是这一刻的 scrollHeight 少了一段，max 不够，锚定被 clamp ——
