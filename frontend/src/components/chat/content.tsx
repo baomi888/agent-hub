@@ -1,6 +1,7 @@
 // 消息正文渲染：URL 自动 linkify + **粗体** + 换行；引用 refs 文本解析
 // 从 ChatArea.tsx 拆出（2026-09 重构），全部是纯函数，适合单测
 import type { ReactNode } from "react";
+import LinkCluster, { type LinkItem } from "./LinkCluster";
 
 // 排除空白与常见分隔符；中文标点也要排除，否则「https://xxx。」会把句号吞进链接
 const URL_RE = /https?:\/\/[^\s<>"{}|\\^`\[\]。，、；：！？（）【】《》「」『』]+/gi;
@@ -154,8 +155,84 @@ function splitTableRow(line: string): string[] {
 
 const isTableSep = (line: string) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/.test(line);
 
-export function renderMarkdown(text: string): ReactNode {
+// ============ 末尾链接收口 ============
+// 联网搜完之后，模型常把整排检索结果贴在回答最后（有时夹在要点之间）。
+// 一整屏 https://… 会把结论挤没，用户也分不出哪条值得点。
+// 做法：只把**末尾**那一串摘出来折成「N 个链接」胶囊，内容一条不丢。
+
+const URL_ONLY_RE = /https?:\/\/[^\s<>"{}|\\^`\[\]。，、；：！？（）【】《》「」『』]+/g;
+
+/** 一行是不是「几乎只有一条链接」：去掉链接与列表符号后，剩下的字很少 */
+function asLinkLine(line: string): LinkItem | null {
+  const t = line.trim();
+  if (!t) return null;
+  const hits = t.match(URL_ONLY_RE);
+  // 一行里有两条以上链接时判断不了该留哪条做标题，交给行内渲染，别硬收
+  if (!hits || hits.length !== 1) return null;
+  const url = hits[0];
+  if (!safeHref(url)) return null;
+  const label = t
+    .replace(URL_ONLY_RE, " ")
+    .replace(/^[-*•]\s*/, "")
+    .replace(/^\d+[.、)]\s*/, "")
+    .trim()
+    // 「（链接）」「详见：」这类前缀是噪声，去掉
+    .replace(/^[（(【\[]?\s*(链接|原文|来源|详见|参考|点击此处|点击)[：:]?\s*/, "")
+    .replace(/[：:，,。.、;；\-—|]+$/g, "")
+    .trim();
+  // 剩下的字数超过 16：说明这行有实质内容，是一句话而不是一条链接
+  if (label.length > 16) return null;
+  return { url, label };
+}
+
+/** 链接上一行若是「- 日華琪爽炊（茂南区…）：这是它的页面」，取括号/冒号前那截当标题 */
+function guessLabel(prev?: string): string {
+  const t = (prev ?? "").trim();
+  if (!t || !/^([-*•]|\d+[.、)])\s/.test(t)) return "";
+  const body = t.replace(/^([-*•]|\d+[.、)])\s*/, "");
+  const m = /^([^（(：:]{2,14})/.exec(body);
+  return m ? m[1].trim() : "";
+}
+
+/**
+ * 把回答末尾成串的裸链接摘出来。
+ *
+ * 只处理末尾：这是「先讲结论、末尾排来源」的典型形态。
+ * 中途成串的链接不摘 —— 那里信息密度最高，硬收会把论点一起藏起来。
+ * 摘不满 2 条就整体放弃：单条链接是正文的一部分，不是「一堆链接」。
+ */
+export function splitTrailingLinks(text: string): { body: string; links: LinkItem[] } {
+  const empty = { body: text, links: [] as LinkItem[] };
+  if (!text) return empty;
   const lines = text.split("\n");
+  const links: LinkItem[] = [];
+  let cut = lines.length;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const t = lines[i].trim();
+    if (!t) continue; // 链接之间 / 末尾的空行不算阻断
+    const hit = asLinkLine(t);
+    if (!hit) break;
+    if (!hit.label) hit.label = guessLabel(lines[i - 1]);
+    links.unshift(hit);
+    cut = i;
+  }
+  if (links.length < 2) return empty;
+  // 末尾常还挂着一行「参考资料：」，一起收掉，否则正文里留个突兀的冒号
+  let end = cut;
+  while (end > 0 && !lines[end - 1].trim()) end--;
+  if (
+    end > 0 &&
+    /^[#>*\s]*(参考(资料|来源|链接)?|来源|相关链接|网页来源|引用|链接)[：:]?\s*$/.test(lines[end - 1].trim())
+  ) {
+    end--;
+  }
+  return { body: lines.slice(0, end).join("\n"), links };
+}
+
+export function renderMarkdown(text: string, streaming = false): ReactNode {
+  // 流式期间不摘：最后一条链接还在一个字一个字地长，摘了会来回跳（胶囊数字乱变）
+  const split = streaming ? { body: text, links: [] as LinkItem[] } : splitTrailingLinks(text);
+  const lines = split.body.split("\n");
   const out: ReactNode[] = [];
   let i = 0;
   let key = 0;
@@ -292,7 +369,12 @@ export function renderMarkdown(text: string): ReactNode {
     }
   }
 
-  return <div className="md">{out}</div>;
+  return (
+    <div className="md">
+      {out}
+      {split.links.length > 0 && <LinkCluster items={split.links} />}
+    </div>
+  );
 }
 
 // ============ 引用角标：解析后端 refs 字符串 ============

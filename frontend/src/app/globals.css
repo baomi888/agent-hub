@@ -33,5 +33,8 @@
 @import "./styles/sediment.css";
 @import "./styles/layout.css";
 @import "./styles/fx.css";
+/* 对话目录（页边刻度 / 手机半屏目录）+ 回答末尾链接收口：
+   两者都浮在正文之上，且目录在 900px 上要切形态，独立成表便于整块调 */
+@import "./styles/turnnav.css";
 @import "./styles/a11y.css";
 @import "./styles/mascot.css";

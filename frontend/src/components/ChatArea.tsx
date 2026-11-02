@@ -5,7 +5,7 @@
 //
 // 2026-09 重构：消息类型/常量/正文渲染/计划卡片/Bubble/Field 拆到 ./chat/*，
 // 本文件只保留主组件（顶栏 + 欢迎页 + 消息区 + 输入区）。
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import MascotLogo from "./chat/MascotLogo";
 import CornIcon from "./CornIcon";
@@ -16,6 +16,7 @@ import { isPlanRequest, stripPlanHint } from "./chat/plan";
 import CapToggles, { type CapValue } from "./chat/CapToggles";
 import Bubble from "./chat/Bubble";
 import BubbleErrorBoundary from "./chat/BubbleErrorBoundary";
+import TurnOutline from "./chat/TurnOutline";
 import QueryEnhance from "./chat/QueryEnhance";
 import GuideModal from "./guide/GuideModal";
 import FeedbackModal from "./feedback/FeedbackModal";
@@ -565,8 +566,45 @@ export default function ChatArea({
     el.scrollTo({ top: target, behavior: "smooth" });
   }, []);
 
-  const addFiles = (files: FileList | File[]) => {
-    const arr = Array.from(files);
+  // ---- 对话目录（跳回前面某一问）----
+  // 只把「用户提问」当锚点：回答归到它上面那一问，和 DeepSeek 的目录一致。
+  const turns = useMemo(
+    () =>
+      messages
+        .filter((m) => m.role === "user")
+        .map((m, i) => ({
+          mid: m.id,
+          n: i + 1,
+          text: (m.content || "").replace(/\s+/g, " ").trim() || "（附件提问）",
+        })),
+    [messages]
+  );
+  // 刻度位置随内容变化，流式期间每来一批 token 都得重量（组件内防抖 120ms）
+  const outlineKey = `${messages.length}:${messages[messages.length - 1]?.content?.length ?? 0}`;
+
+  const jumpToTurn = useCallback((mid: string) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const node = el.querySelector<HTMLElement>(`[data-mid="${mid}"]`);
+    if (!node) return;
+    const top = node.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
+    const target = Math.max(0, Math.min(top - ANCHOR_GAP, el.scrollHeight - el.clientHeight));
+    // ★ 先把「跟随」关掉再滚：回答还在流式时，跟随逻辑每来一个字就会把视野拽回底部,
+    //   不关的话用户刚跳上去立刻被拉下来 —— 这正是最容易回归的地方。
+    stickRef.current = false;
+    anchoredRef.current = null;
+    anchorUntilRef.current = 0;
+    if (scrollRafRef.current != null) {
+      cancelAnimationFrame(scrollRafRef.current);
+      scrollRafRef.current = null;
+    }
+    progTopRef.current = null;
+    // 清掉「上一帧是我们设的」那条豁免，让 onScroll 按新位置重算 stick
+    appliedTopRef.current = null;
+    el.scrollTo({ top: target, behavior: "smooth" });
+  }, []);
+
+  const addFiles = (files: FileList | File[]) => {    const arr = Array.from(files);
     if (arr.length === 0) return;
     setPending((prev) => {
       const next = [...prev];
@@ -981,6 +1019,9 @@ export default function ChatArea({
           )}
           </div>
         </div>
+        {/* 对话目录：桌面走右侧页边刻度，手机走右下胶囊 + 半屏目录。
+            放在滚动容器外面 —— 它要贴住视口，不能跟着内容滚走 */}
+        <TurnOutline turns={turns} scrollRef={scrollRef} onJump={jumpToTurn} layoutKey={outlineKey} />
         {!atBottom && (
           <button
             type="button"

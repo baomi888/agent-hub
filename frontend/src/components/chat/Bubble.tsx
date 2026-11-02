@@ -283,7 +283,7 @@ const Bubble = memo(function Bubble({
           ) : (
             <>
               {/* AI 正文走 markdown 渲染：标题/列表/表格/代码块/链接都排出来 */}
-              {renderMarkdown(m.content)}
+              {renderMarkdown(m.content, !!m.streaming)}
               {m.stopped && <span className="stopped-tag">已停止生成</span>}
               {/* 流式光标不在这里渲染：它不是一段文字，是"这一句还没写完"的记号。
                   span 跟在 markdown 块后面会另起一行、单独挂个 ▍，很怪；
