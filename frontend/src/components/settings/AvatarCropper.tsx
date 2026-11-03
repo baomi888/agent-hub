@@ -58,6 +58,8 @@ const AvatarCropper = forwardRef<CropperHandle, Props>(function AvatarCropper(
   const pinchRef = useRef<{ d: number; zoom: number } | null>(null);
 
   const [zoom, setZoom] = useState(1);
+  /** 平移或缩放是否离开初始值；只用于复位按钮，不能只看 zoom（1 倍也能左右拖） */
+  const [dirty, setDirty] = useState(false);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -99,6 +101,7 @@ const AvatarCropper = forwardRef<CropperHandle, Props>(function AvatarCropper(
         bmpRef.current = bmp;
         tRef.current = { zoom: 1, ox: 0, oy: 0 };
         setZoom(1);
+        setDirty(false);
         draw();
         setReady(true);
       } catch {
@@ -127,6 +130,7 @@ const AvatarCropper = forwardRef<CropperHandle, Props>(function AvatarCropper(
       clampTransform(tRef.current, bmp);
       draw();
       setZoom(z);
+      setDirty(true);
     },
     [draw],
   );
@@ -136,6 +140,7 @@ const AvatarCropper = forwardRef<CropperHandle, Props>(function AvatarCropper(
     if (!bmp) return;
     tRef.current = { zoom: 1, ox: 0, oy: 0 };
     setZoom(1);
+    setDirty(false);
     draw();
   }, [draw]);
 
@@ -208,6 +213,7 @@ const AvatarCropper = forwardRef<CropperHandle, Props>(function AvatarCropper(
     dragRef.current = { x: e.clientX, y: e.clientY };
     clampTransform(tRef.current, bmp);
     draw();
+    setDirty(true);
   };
 
   const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -257,7 +263,7 @@ const AvatarCropper = forwardRef<CropperHandle, Props>(function AvatarCropper(
           type="button"
           className="acct-crop-reset"
           onClick={reset}
-          disabled={busy || !ready || zoom === MIN_ZOOM}
+          disabled={busy || !ready || !dirty}
           title="回到居中、原始大小"
         >
           复位

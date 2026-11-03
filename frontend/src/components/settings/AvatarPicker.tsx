@@ -11,7 +11,7 @@
 // 两种状态共用同一个 DialogShell（不是两个 if 各 return 一份）：
 // DialogShell 里那段 effect 只在 `open` 变化时跑，重挂会重新抓 opener、重新抢焦点，
 // 表现为"选完图，光标跳了一下"。
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import CornIcon from "@/components/CornIcon";
 import { MAX_SOURCE_BYTES, MAX_UPLOAD_BYTES } from "@/lib/imageCrop";
@@ -116,6 +116,19 @@ export default function AvatarPicker({
 
   const cropping = crop !== null;
   const busy = saving !== null || phase !== "idle";
+
+  // 上传成功时父组件只把 open 改成 false，不会替本组件清内部状态。
+  // 不在这里清，下一次打开会直接回到上一张图的裁剪页。延到宏任务里做，
+  // 避开本仓库 react-hooks/set-state-in-effect 的同步级联渲染判定。
+  useEffect(() => {
+    if (open) return;
+    const t = window.setTimeout(() => {
+      setCrop(null);
+      setErr(null);
+      setPhase("idle");
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, [open]);
 
   /** 回到"挑图案"那一屏。裁剪态下先退这一步，再按一次才关整个弹窗 */
   const backToPicker = useCallback(() => {
