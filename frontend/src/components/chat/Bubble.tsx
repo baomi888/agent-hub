@@ -10,6 +10,8 @@ import { parseRefs, renderContent, renderMarkdown } from "./content";
 import CornIcon from "../CornIcon";
 import PlanCard, { detectPlanTopic, isPlanRequest, parsePlan } from "./plan";
 import { HybridTraceView } from "@/components/HybridTrace";
+import WebSources from "./WebSources";
+import type { WebSource } from "@/lib/types";
 import { useCopy } from "@/lib/useCopy";
 import HubMark from "./HubMark";
 
@@ -156,6 +158,15 @@ const Bubble = memo(function Bubble({
   }
 
   const refId = (idx: string) => `${m.id}-ref-${idx}`;
+  // 联网来源按 id 建索引：正文里的 [n] 要能直接找到对应网址。
+  // 不用 useMemo —— 这里在用户消息的 early return 之后，放 hook 会违反调用规则；
+  // 来源最多十来条，每次建 Map 的成本远小于一次依赖比较。
+  const cites = new Map<number, WebSource>();
+  const knownUrls = new Set<string>();
+  for (const s of m.webSources ?? []) {
+    cites.set(s.id, s);
+    knownUrls.add(s.url);
+  }
   const toolNames = m.toolCalls
     ? Array.from(new Set(m.toolCalls.map((t) => toolLabel(t.name))))
     : [];
@@ -256,7 +267,7 @@ const Bubble = memo(function Bubble({
           ) : !m.streaming && isPlanRequest(userQuestion) ? (
             (() => {
               const plan = parsePlan(m.content);
-              if (!plan) return renderMarkdown(m.content);
+              if (!plan) return renderMarkdown(m.content, false, cites, knownUrls);
               // 优先用后端回传的主题（能从历史推断）；没有才退回本句关键词匹配。
               // PlanCard 只用到 topic.name（抬头文案），hint 在这里给空串即可。
               const topic = m.planTopic
@@ -283,7 +294,7 @@ const Bubble = memo(function Bubble({
           ) : (
             <>
               {/* AI 正文走 markdown 渲染：标题/列表/表格/代码块/链接都排出来 */}
-              {renderMarkdown(m.content, !!m.streaming)}
+              {renderMarkdown(m.content, !!m.streaming, cites, knownUrls)}
               {m.stopped && <span className="stopped-tag">已停止生成</span>}
               {/* 流式光标不在这里渲染：它不是一段文字，是"这一句还没写完"的记号。
                   span 跟在 markdown 块后面会另起一行、单独挂个 ▍，很怪；
@@ -307,6 +318,13 @@ const Bubble = memo(function Bubble({
             </>
           )}
         </div>
+
+        {/* 联网来源：与下面的资料库引用块并列，但不合并 ——
+            那边每条带页码和相似度（本地文件），这边每条是网址（网页），
+            混在一个列表里必然出现「文件名 + 外链」这种自相矛盾的条目 */}
+        {!m.streaming && (m.webSources?.length ?? 0) > 0 && (
+          <WebSources items={m.webSources ?? []} />
+        )}
 
         {(m.refs && refItems.length > 0) || (m.sources?.length ?? 0) > 0 ? (
           <div className="ref-block">

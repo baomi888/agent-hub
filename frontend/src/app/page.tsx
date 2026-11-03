@@ -22,7 +22,7 @@ import { detailToMessage } from "@/lib/errors";
 import AuthGate from "@/components/AuthGate";
 import AnnounceModal from "@/components/announce/AnnounceModal";
 import type { UiMessage } from "@/components/chat/types";
-import type { ChatMode, Grounding, RefSource, ToolEvent } from "@/lib/types";
+import type { ChatMode, Grounding, RefSource, ToolEvent, WebSource } from "@/lib/types";
 import { isPlanRequest } from "@/components/chat/plan";
 import { useHybridTrace } from "@/lib/useHybridTrace";
 import { createTypewriter, type Typewriter } from "@/lib/typewriter";
@@ -425,6 +425,18 @@ export default function Home() {
             if (items.length > 0) {
               setMessages((prev) =>
                 prev.map((m) => (m.id === asstId ? { ...m, sources: items } : m))
+              );
+            }
+            break;
+          }
+          case "web_sources": {
+            // 联网来源：web_search 真实返回的网页，收尾时一次性下发。
+            // 单独一条事件而不是塞进 sources —— 那条帧是给资料库检索的，
+            // 前端按"整条覆盖"处理，挤进去会把知识库来源顶掉。
+            const items = (ev.data.items ?? []) as WebSource[];
+            if (items.length > 0) {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === asstId ? { ...m, webSources: items } : m))
               );
             }
             break;

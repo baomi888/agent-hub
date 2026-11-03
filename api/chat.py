@@ -1008,6 +1008,15 @@ async def _chat_stream_impl(
     async def event_generator() -> None:
         refs_md = ""
         hybrid_run_id: str | None = None  # 仅 hybrid 模式有值，随 done 回传给前端
+        # 本轮联网来源：web_search 执行时往里 append（服务端注入，模型改不了），
+        # 收尾统一发给前端渲染「来源卡片」。
+        # 为什么不用 sources 帧：那条帧是给知识库检索用的，必须在正文**之前**发出
+        # （用户边流边读，sources 早到才有意义），而联网结果要等工具真的被调用才有。
+        # 挤同一个事件名会让前端后到的覆盖先到的——知识库来源会凭空消失。
+        # ★ 必须定义在**这个内嵌生成器里**：下面 hybrid 分支会重新赋值，一旦写在
+        #   外层函数，Python 会把它当成生成器的局部变量，agent / 纯对话路径从未
+        #   赋值就读取 → UnboundLocalError（ruff F841 当时就是这么报出来的）。
+        web_sources: list[dict] = []
         metrics.inc("chat_total", {"path": mode})
         # A1：本轮回答是否被长度上限截断。默认 False，只有真的读到上游给的
         # finish_reason ∈ {length, max_tokens, ...} 才会变 True——
@@ -1304,6 +1313,11 @@ async def _chat_stream_impl(
                 yield _sse("error", {"detail": f"混合执行失败：{describe_api_error(e)}"})
                 return
 
+            # 引擎里的工具跑在另一层，收不到本函数的局部变量：结果经 ctx.shared
+            # 回流（hybrid/agent_engine.py 与 workflow.py 把同一个 list 注入
+            # configurable）。拷一份，避免后面继续 append 影响引擎侧的记录。
+            web_sources = list(ctx.shared.get("web_sources") or [])
+
         # ---- 2. Agent 模式（统一智能体：工具由开关决定、调用由模型自主）----
         elif mode == "agent":
             yield _sse("status", {"text": "Agent 模式，正在规划任务..."})
@@ -1396,6 +1410,10 @@ async def _chat_stream_impl(
                         # 键存在即严格模式——模型现编的地址一律拒绝。
                         "download_allowlist": [],
                         "user_urls": extract_urls(req.question),
+                        # 联网结果收集袋（见 agent/tools.py::web_search）。
+                        # 必须传**这个 list 对象本身**：工具里是 append，换成新列表
+                        # 收尾就读不到东西了。
+                        "web_sources": web_sources,
                     },
                 }
                 full_text = ""
@@ -1577,6 +1595,11 @@ async def _chat_stream_impl(
             truncated = acc.truncated
 
         # ---- 收尾：存 assistant 消息 + 取回并行生成的标题 ----
+        # 联网来源放在落库前一次性下发：搜索发生在正文生成**中途**，抢不到正文
+        # 前面；用独立事件名渲染，不占知识库 sources 的槽位（见上面的说明）。
+        if web_sources:
+            yield _sse("web_sources", {"items": web_sources})
+
         msg_id = await asyncio.to_thread(
             store.add_message,
             uid,

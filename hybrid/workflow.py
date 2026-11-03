@@ -562,6 +562,9 @@ class WorkflowEngine:
                 # 即使 TOOL_APPROVAL_ENABLED=0，模型/配置也编不出新的外带地址。
                 "download_allowlist": [],
                 "user_urls": extract_urls(ctx.goal),
+                # 与 AgentEngine 同一只收集袋：工作流里的 web_search 节点
+                # （直接配在 workflow 上、不经 Agent）也要能回流到收尾。
+                "web_sources": ctx.shared.setdefault("web_sources", []),
             }
         }
         out = await tool.ainvoke(args, config=cfg)

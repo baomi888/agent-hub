@@ -173,6 +173,26 @@ export interface RefSource {
   text: string;
 }
 
+/**
+ * 联网来源条目（SSE `web_sources` 事件）。
+ *
+ * 为什么不复用 RefSource：那个类型描述的是「资料库里的一份文件」——有页码、
+ * 相似度、原文全文，点开是看原文；这里是「网上的一个页面」——有网址，点开是
+ * 新窗口。混成一个类型，界面里到处要写 `if (有没有 url)` 来分叉，最后必然
+ * 有一处漏判把本地文件渲染成可点外链。
+ *
+ * `id` 与正文里 `[n]` 的 n 是同一个数（后端在工具返回时就定好、全局递增），
+ * 所以正文角标能直接按 id 找到对应网址。
+ */
+export interface WebSource {
+  id: number;
+  title: string;
+  url: string;
+  /** 展示用域名（后端已去掉 www.），取不到时为空串 */
+  domain: string;
+  snippet: string;
+}
+
 // 依据强度（SSE grounding 事件）：weak=true 时回答上方挂「依据较弱」提示条
 export interface Grounding {
   strength: "high" | "medium" | "low" | "none";

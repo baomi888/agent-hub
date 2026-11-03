@@ -1,0 +1,260 @@
+/* ============================================================
+   联网来源：一枚「N 个来源」胶囊 + 点开的卡片浮层
+   形态参照 DeepSeek / 豆包的「参考来源」，但刻意与资料库引用区分：
+   这里每条都能点开原网页，没有页码/相似度/原文（那些是本地文件才有的）。
+   ============================================================ */
+
+.ws-block {
+  position: relative;
+  display: inline-flex;
+  margin-top: var(--space-10);
+}
+
+/* ---------- 胶囊 ---------- */
+
+.ws-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  height: 28px;
+  padding: 0 var(--space-10);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  background: var(--fill-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+}
+
+.ws-pill:hover {
+  color: var(--ink);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+.ws-pill > svg:first-child {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.ws-chev {
+  width: 12px;
+  height: 12px;
+  opacity: 0.7;
+  transition: transform 0.2s ease;
+}
+
+.ws-pill[aria-expanded="true"] .ws-chev {
+  transform: rotate(180deg);
+}
+
+/* ---------- 浮层（桌面：贴在胶囊上方） ---------- */
+
+.ws-pop {
+  position: absolute;
+  bottom: calc(100% + var(--space-8));
+  left: 0;
+  z-index: 30;
+  width: min(360px, calc(100vw - var(--space-32)));
+  max-height: 340px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-6);
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-2);
+}
+
+/* 遮罩只在手机端有（见下方媒体查询）；桌面点外面就能关，不需要蒙一层 */
+.ws-scrim {
+  display: none;
+}
+
+.ws-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px var(--space-8) var(--space-6);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-3);
+  letter-spacing: 0.04em;
+}
+
+.ws-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: var(--text-3);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+
+.ws-close:hover {
+  color: var(--ink);
+  background: var(--fill-2);
+}
+
+.ws-close svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ws-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ws-list a,
+.ws-row-static {
+  display: flex;
+  gap: var(--space-10);
+  padding: var(--space-8);
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  color: inherit;
+}
+
+.ws-list a {
+  transition: background 0.16s ease;
+}
+
+.ws-list a:hover {
+  background: var(--fill-2);
+}
+
+/* 字母徽标：不用真实 favicon（理由见 WebSources.tsx 的 badgeOf） */
+.ws-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-xs);
+}
+
+.ws-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ws-title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--ink);
+  line-height: var(--lh-tight, 1.35);
+  /* 长标题最多两行：来源列表是"认得出是哪篇"用的，不是读全文的地方 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ws-list a:hover .ws-title {
+  color: var(--accent-ink);
+}
+
+.ws-host {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  word-break: break-all;
+}
+
+.ws-snippet {
+  margin-top: 2px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ---------- 正文里的引用角标 [n] ---------- */
+
+/* 命中联网来源时，正文的 [n] 变成可点徽标（豆包那种小方块）。
+   vertical-align 提 1px：它夹在中文行里，不抬一点会看着像掉到底下去了。 */
+.ws-cite {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  margin: 0 1px;
+  vertical-align: 1px;
+  font-size: var(--fs-badge);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-xs);
+  text-decoration: none;
+  transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+}
+
+/* hover 用 accent-ink 做底：白字在 --accent(#C8892A) 上只有 ~3:1，读不清 */
+.ws-cite:hover {
+  color: #fff;
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
+}
+
+/* 手机端放大一点：16px 的方块手指点不准 */
+@media (max-width: 900px) {
+  .ws-cite {
+    min-width: 20px;
+    height: 20px;
+    font-size: var(--fs-xs);
+  }
+}
+
+/* ---------- 手机：从底部升起（浮层贴在上方会顶出屏幕） ---------- */
+
+@media (max-width: 640px) {
+  .ws-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 29;
+    background: rgba(48, 36, 18, 0.28);
+  }
+
+  .ws-pop {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    width: auto;
+    max-height: 62vh;
+    padding: var(--space-8);
+    /* 底部留安全区：iPhone 的 home 条会压住最后一条来源 */
+    padding-bottom: calc(var(--space-8) + env(safe-area-inset-bottom, 0px));
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    border-bottom: 0;
+  }
+}

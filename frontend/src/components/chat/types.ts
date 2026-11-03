@@ -1,6 +1,6 @@
 // 对话区的共享类型：消息与附件
 // 从 ChatArea.tsx 拆出（2026-09 重构），page.tsx 经由 components/ChatArea 再导出引用
-import type { Grounding, RefSource, ToolEvent, TraceItem } from "@/lib/types";
+import type { Grounding, RefSource, ToolEvent, TraceItem, WebSource } from "@/lib/types";
 
 export interface UiMessage {
   id: string;
@@ -21,6 +21,15 @@ export interface UiMessage {
   attachments?: ChatAttachment[];
   /** 引用溯源条目：来自 SSE sources 事件，点角标可展开原文 */
   sources?: RefSource[];
+  /**
+   * 联网来源：来自 SSE `web_sources` 事件（web_search 真实返回的网页）。
+   *
+   * 与 `sources` 分开存，不合并：两者的生命周期和语义都不同 —— 资料库来源
+   * 在正文之前就下发（要赶在用户读到第一句前挂上"依据较弱"），联网来源要等
+   * 工具真的被调用；而且一个能看原文、一个能开网页，界面形态本来就不一样。
+   * 合并会让后到的一批把先到的顶掉（旧前端就是整条覆盖）。
+   */
+  webSources?: WebSource[];
   /** 依据强度：来自 SSE grounding 事件，weak=true 时回答上方挂提示条 */
   grounding?: Grounding;
   /** 后端 messages 表自增 id，用于删除整轮对话 */

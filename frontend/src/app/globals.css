@@ -22,6 +22,9 @@
 @import "./styles/feedback.css";
 @import "./styles/hybrid.css";
 @import "./styles/refs.css";
+/* 联网来源（胶囊 + 卡片浮层）：与 refs.css 同属"引用"域，但形态不同
+   （一个看原文、一个开网页），单独一份便于整块调；必须排在 refs.css 之后。 */
+@import "./styles/webSources.css";
 @import "./styles/interactions.css";
 /* 登录门：独立一屏，不参与工作台的三栏布局，单独一份样式便于整块改版 */
 @import "./styles/auth.css";

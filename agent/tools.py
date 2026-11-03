@@ -34,6 +34,17 @@ def _configurable(config) -> dict:
     return (config or {}).get("configurable") or {}
 
 
+def _host_of(url: str) -> str:
+    """展示用域名（去掉 www.）。取不到就回空串，前端会退化成用标题当抬头。"""
+    from urllib.parse import urlsplit
+
+    try:
+        host = urlsplit(url).hostname or ""
+    except ValueError:
+        return ""
+    return host[4:] if host.startswith("www.") else host
+
+
 def _runtime(config) -> tuple[str | None, str | None]:
     """取出服务端注入的 (owner_id, kb_id)。
 
@@ -175,13 +186,55 @@ def web_search(query: str, max_results: int = 5, config: RunnableConfig = None) 
                 return f"直接回答：{answer_box.get('answer')}\n来源：{answer_box.get('link', '')}"
             return f"联网搜索未找到与 '{query}' 相关的结果。"
 
+        # 只保留可用的 http(s) 结果：坏链不给模型看（它会把内容原样搬进回答），
+        # 也不入袋。
+        # ★ 过滤必须排在**编号之前**：一旦先编号再跳过坏链，模型看到的 [3] 与
+        #   下发列表里 id=2 的那条就对不上，前端按 id 找网址会指到别的来源上。
+        usable = [
+            r
+            for r in organic
+            if isinstance(r.get("link"), str)
+            and r["link"].lower().startswith(("http://", "https://"))
+        ]
+        usable = usable[:max_results]
+        if not usable:
+            return f"联网搜索未找到与 '{query}' 相关的可用结果。"
+
+        # 服务端收集本轮联网结果，供收尾时下发给前端渲染「来源卡片」。
+        # 与 download_allowlist 同一套机制：configurable 由 api/chat.py 注入，
+        # 模型改不了这个列表，所以展示出去的一定是搜索接口真实返回的地址。
+        #
+        # ★ 编号必须**全局递增**，不能用每次搜索都从 1 起的 i：一轮里搜索两次
+        #   （换个问法再搜）会出现两组 [1][2]，前端按 id 找网址就会指错来源。
+        #   续号的基准取列表当前长度，保证「模型看到的编号」与「下发列表的 id」
+        #   是同一个数。
+        bag = _configurable(config).get("web_sources")
+        bag = bag if isinstance(bag, list) else None
+        base = len(bag) if bag else 0
+
         lines = []
-        for i, r in enumerate(organic[:max_results]):
+        for i, r in enumerate(usable):
             title = r.get("title", "?")
             snippet = (r.get("snippet") or "")[:200]
-            link = r.get("link", "")
-            lines.append(f"**[{i + 1}]** {title}\n   {snippet}\n   {link}")
+            link = r["link"]
+            idx = base + i + 1
+            lines.append(f"**[{idx}]** {title}\n   {snippet}\n   {link}")
+            if bag is not None:
+                bag.append(
+                    {
+                        "id": idx,
+                        "title": title,
+                        "url": link,
+                        "domain": _host_of(link),
+                        "snippet": snippet,
+                    }
+                )
 
+        # ⚠️ 这里**不要**再往返回值里塞"请用 [n] 标注、不要贴网址"这类指令。
+        # 2026-11-03 真实验证：模型会把整段检索结果（编号 + 摘要 + 网址）原样
+        # 抄进回答开头，连这句指令本身也一起抄了进去 —— 用户看到的是
+        # 「【引用要求】回答里用 [n] 标注…」这种内部口令。行为约束改放
+        # kb/rag_core.py 的 CAPABILITY_NOTE（无条件追加、不进 prompt_store 的 A/B）。
         return "\n\n".join(lines)
     except Exception as exc:  # noqa: BLE001
         # 不能只回一句"暂时不可用"：模型会把它当成任务完成，用户拿到的是
