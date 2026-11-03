@@ -45,6 +45,7 @@ import contextlib
 import json
 import mimetypes
 import os
+import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -400,6 +401,36 @@ def _resolve_switches(req: ChatRequest, has_kb: bool) -> tuple[bool, bool, str]:
         return has_kb, True, "mode:hybrid"
     # auto 及未知值：绑库就检索，并保留联网能力
     return has_kb, True, "mode:auto"
+
+
+# 服务端预检索的跳过判据。
+#
+# 背景：用户开了「智能联网」时，服务端会先替他搜一轮（见 agent/tools.py 的
+# prefetch_web_sources）。原因是"搜不搜由模型自主决定"不可靠 —— 2026-11-03 实测
+# 「广东石油化工学院周边有什么好吃的店」，开关开着、来源卡空白，正文却写着
+# "我搜到的""高德 4.55 分""519 个摊位"，全是编的。
+#
+# 判据故意**保守**（宁可多搜）：用户是主动打开这个开关的，多搜一次只多一秒；
+# 漏搜的代价是"来源卡空白 + 编出来的细节"，那个更贵。
+# 只跳过搜了也没用的三类：纯寒暄、纯生成/改写（不需要外部事实）、极短追问
+# （"继续""详细点"这类，说的是上一轮的内容）。
+_SKIP_PREFETCH_PATTERNS = (
+    r"^(你好|您好|hi|hello|嗨|在吗|在不在)",
+    r"(谢谢|再见|拜拜|晚安)\s*$",
+    r"(翻译|润色|改写|缩写|扩写|续写|起个名|取个名|写首诗|写个故事|讲个笑话)",
+    r"^(继续|接着说|详细点|再详细|展开说说|说下去|还有呢)\s*[。？?！!]*$",
+)
+
+
+def _skip_prefetch_web(question: str) -> bool:
+    """这一轮要不要跳过「服务端先搜一轮」。"""
+    q = (question or "").strip()
+    if len(q) < 4:
+        return True
+    # 带年份的问题一律不跳：多半在问赛事/政策/价格这类会变的时效信息
+    if re.search(r"(19|20)\d\d", q):
+        return False
+    return any(re.search(p, q, re.I) for p in _SKIP_PREFETCH_PATTERNS)
 
 
 async def _plan_route(
@@ -1132,6 +1163,37 @@ async def _chat_stream_impl(
             )
             return
 
+        # ---- 联网预检索（hybrid 与 agent 共用）----
+        #
+        # 用户开了「智能联网」＝明确表达"这一轮要用外部信息"，所以**结构上先搜一轮**，
+        # 不交给模型自觉。这和知识库那句「用户明确开了检索，不能靠模型自觉」是同一条
+        # 设计原则；2026-11-03 用户实测「油校周边好吃的店」，开关开着、来源卡空白，
+        # 正文却写「我搜到的」「高德 4.55 分」—— 全是编的，就是漏了这条。
+        #
+        # 放在分支之前是因为 hybrid（多步任务）同样需要：它内部的 agent 会自己反复
+        # 调 web_search，每次返回 6 条原始清单，很快就吃掉 token 预算然后半截中断。
+        # 先搜一轮、把结果交给模型，能显著减少重复检索。
+        #
+        # 失败不阻断：降级成"没有联网结果"，模型照常作答。
+        web_block = ""
+        if plan.use_web and not _skip_prefetch_web(req.question):
+            yield _sse("status", {"text": "正在联网检索..."})
+            try:
+                from agent.tools import prefetch_web_sources
+
+                web_text, web_hits = await asyncio.to_thread(
+                    prefetch_web_sources, req.question, web_sources, 6
+                )
+            except Exception as e:  # noqa: BLE001 —— 联网是增强项，失败不该让提问失败
+                web_text, web_hits = "", 0
+                yield _sse("status", {"text": f"联网检索不可用：{describe_api_error(e)}"})
+            if web_hits:
+                web_block = web_text
+                yield _sse("status", {"text": f"已找到 {web_hits} 条网页"})
+            elif web_text:
+                # 搜了但没结果：要让模型知道，否则它会按"搜过了"继续编
+                yield _sse("status", {"text": "没有搜到相关网页，按已有信息作答"})
+
         # ---- 1. 混合模式（工作流 × 自主 Agent 动态切换）----
         if mode == "hybrid":
             yield _sse("status", {"text": "混合模式，正在规划执行路径..."})
@@ -1169,12 +1231,25 @@ async def _chat_stream_impl(
                 else:
                     start_mode = "agent"
 
+                # 预检索结果拼进 goal：规划节点和 execute 节点的 prompt 都从 goal
+                # 取用户问题，拼在这里两处都能看到检索结果。
+                # ★ 只影响这一轮喂给模型的文本；落库仍用 req.question 的原话。
+                hybrid_goal = prompt_question
+                if web_block:
+                    hybrid_goal = (
+                        "【联网检索结果】（本轮已替你搜过，直接用这些结果作答；"
+                        "不要用同样的问题再搜一遍）\n" + web_block + "\n\n【用户问题】\n" + prompt_question
+                    )
                 ctx = TaskContext(
                     owner_id=uid,
-                    goal=prompt_question,
+                    goal=hybrid_goal,
                     current_mode=start_mode,
                     workflow_id=wf_id,
                 )
+                # 预检索已经入袋；把**同一个 list** 交给引擎，让工作流里的 web_search
+                # 继续往它里面追加 —— 收尾 `ctx.shared.get("web_sources")` 才能一次
+                # 拿到"预检索 + 本轮补搜"的全部来源（换新列表就只能读到一半）。
+                ctx.shared["web_sources"] = web_sources
                 # kb_id 走私有段注入（与 agent 分支同一安全边界：模型没机会改写它）
                 # 与 Agent 路径同一条边界：没开检索就不把库交给工具层
                 ctx.agent_state["kb_id"] = (
@@ -1385,8 +1460,19 @@ async def _chat_stream_impl(
                 # 部分 chat template 对"连续两条 human"敏感，合并是最稳的形态。
                 # 参考资料同理拼在**用户消息**里而不是 system：它是每轮都变的内容。
                 user_content = prompt_question
+                _blocks: list[str] = []
                 if refs_block:
-                    user_content = f"【参考资料】\n{refs_block}\n\n【用户问题】\n{prompt_question}"
+                    _blocks.append(f"【参考资料】\n{refs_block}")
+                if web_block:
+                    # 明说"已经搜过、别用同样的问题再搜一遍"：不写的话模型会看到
+                    # 编号就再调一次 web_search（用户要多等一次往返，来源卡还会
+                    # 出现两组编号）。
+                    _blocks.append(
+                        "【联网检索结果】（本轮已替你搜过，直接用这些结果作答；"
+                        "不要用同样的问题再搜一遍）\n" + web_block
+                    )
+                if _blocks:
+                    user_content = "\n\n".join(_blocks) + f"\n\n【用户问题】\n{prompt_question}"
                 if location_ctx:
                     _loc_note = location_note(location_ctx)
                     if _loc_note:

@@ -186,6 +186,79 @@ def kb_search(query: str, top_k: int = 3, config: RunnableConfig = None) -> str:
 # ==================== 2. 联网搜索 ====================
 
 
+def _search_organic(query: str, max_results: int):
+    """调 Serper 并过滤坏链，返回 (错误文案, 原始响应, usable 可用结果)。
+
+    错误文案非空表示这次搜索失败（缺 Key / 网络），调用方直接把它当结果交给模型。
+    抽出来给两条路径共用：
+      - `web_search` 工具（模型自己决定搜）
+      - `prefetch_web_sources`（用户开了「智能联网」时服务端先搜一轮）
+    ★ 两条路径必须走同一份过滤与编号，否则混用时"模型看到的 [Wn]"和"来源卡 id"
+      会错位。
+    """
+    from core import config as app_config
+    from core.serper import search_serper
+
+    if not app_config.SERPER_API_KEY:
+        return "联网搜索需要 SERPER_API_KEY，请在 .env 中配置后重启服务。", [], []
+    try:
+        # 统一入口：连接复用 + TTL 缓存 + App 查询补官网（与搜索预览同一套规则）
+        data = search_serper(query, max_results)
+    except Exception as exc:  # noqa: BLE001 —— 搜索失败不该让整轮提问崩掉
+        logger.warning("web_search 异常 query=%r: %s: %s", query, type(exc).__name__, exc)
+        return "联网搜索暂时不可用，请稍后再试或换个问法。", [], []
+    if data is None:
+        return "联网搜索暂时不可用，请稍后再试或换个问法。", [], []
+
+    organic = data.get("organic") or []
+    # 只保留可用的 http(s) 结果：坏链不给模型看（它会把内容原样搬进回答），
+    # 也不入袋。
+    # ★ 过滤必须排在**编号之前**：一旦先编号再跳过坏链，模型看到的 [3] 与
+    #   下发列表里 id=2 的那条就对不上，前端按 id 找网址会指到别的来源上。
+    usable = [
+        r
+        for r in organic
+        if isinstance(r.get("link"), str)
+        and r["link"].lower().startswith(("http://", "https://"))
+    ][:max_results]
+    return "", data, usable
+
+
+def _format_numbered(bag, usable) -> str:
+    """按下发的全局编号，把结果拼成给模型看的 markdown 列表。"""
+    lines = []
+    for idx, r in _number_web_sources(bag, usable):
+        title = r.get("title", "?")
+        snippet = (r.get("snippet") or "")[:200]
+        link = r["link"]
+        lines.append(f"**[W{idx}]** {title}\n   {snippet}\n   {link}")
+    return "\n\n".join(lines)
+
+
+def prefetch_web_sources(
+    query: str, bag: list[dict] | None, max_results: int = 6
+) -> tuple[str, int]:
+    """服务端主动检索一轮，返回 (给模型看的文本, 命中条数)。
+
+    为什么需要这条路径（2026-11-03 用户实测）：
+      「广东石油化工学院周边有什么好吃的店」这轮**联网开关是开着的**（截图里
+      淡金实心底），但模型没有调用 web_search，而是凭记忆写了一串具体店名和
+      「高德 4.55 分 / 519 个摊位」，来源卡一片空白。
+      根因是"搜不搜由模型自主决定"。这和知识库里那句「用户明确开了检索，不能靠
+      模型自觉，所以结构上先检索一轮」是同一个道理 —— 当时只给知识库做了结构化
+      预检索，联网漏了。
+
+    代价：多一次 Serper 往返（约 0.6~1.5s）。只对"确实需要外部信息"的问题付，
+    寒暄 / 纯生成类跳过（判据在 api/chat.py 的 _skip_prefetch_web）。
+    """
+    err, _data, usable = _search_organic(query, max_results)
+    if err:
+        return err, 0
+    if not usable:
+        return f"联网搜索未找到与 '{query}' 相关的结果。", 0
+    return _format_numbered(bag, usable), len(usable)
+
+
 @tool
 def web_search(query: str, max_results: int = 5, config: RunnableConfig = None) -> str:
     """联网搜索信息（Serper 引擎）。
@@ -210,17 +283,8 @@ def web_search(query: str, max_results: int = 5, config: RunnableConfig = None) 
         # module 'core.config' has no attribute 'get' → 被 except 吞成"联网搜索暂时不可用"。
         # 表现是：搜索其实**成功了**（白扣费），却永远回给用户"不可用"。
         # download_file 早已用 `as _cfg` 避开这个坑，web_search 这处漏了（2026-10-30 修）。
-        from core import config as app_config
-        from core.serper import search_serper
-
-        if not app_config.SERPER_API_KEY:
-            return "联网搜索需要 SERPER_API_KEY，请在 .env 中配置后重启服务。"
-
-        # 统一入口：连接复用 + TTL 缓存 + App 查询补官网（与搜索预览同一套规则）
-        data = search_serper(query, max_results)
-        if data is None:
-            return "联网搜索暂时不可用，请稍后再试或换个问法。"
-        organic = data.get("organic") or []
+        err, data, usable = _search_organic(query, max_results)
+        organic = (data or {}).get("organic") or []
 
         # 记录本轮检索到的链接，供 download_file 的允许清单使用。
         # 这是**服务端写入**（configurable 由 api/chat.py 注入），模型改不了；
@@ -232,6 +296,9 @@ def web_search(query: str, max_results: int = 5, config: RunnableConfig = None) 
                 if isinstance(link, str) and link:
                     allow.append(link)
 
+        if err:
+            return err
+
         if not organic:
             kg = data.get("knowledgeGraph") or {}
             answer_box = data.get("answerBox") or {}
@@ -241,17 +308,6 @@ def web_search(query: str, max_results: int = 5, config: RunnableConfig = None) 
                 return f"直接回答：{answer_box.get('answer')}\n来源：{answer_box.get('link', '')}"
             return f"联网搜索未找到与 '{query}' 相关的结果。"
 
-        # 只保留可用的 http(s) 结果：坏链不给模型看（它会把内容原样搬进回答），
-        # 也不入袋。
-        # ★ 过滤必须排在**编号之前**：一旦先编号再跳过坏链，模型看到的 [3] 与
-        #   下发列表里 id=2 的那条就对不上，前端按 id 找网址会指到别的来源上。
-        usable = [
-            r
-            for r in organic
-            if isinstance(r.get("link"), str)
-            and r["link"].lower().startswith(("http://", "https://"))
-        ]
-        usable = usable[:max_results]
         if not usable:
             return f"联网搜索未找到与 '{query}' 相关的可用结果。"
 
@@ -273,19 +329,12 @@ def web_search(query: str, max_results: int = 5, config: RunnableConfig = None) 
         bag = _configurable(config).get("web_sources")
         bag = bag if isinstance(bag, list) else None
 
-        lines = []
-        for idx, r in _number_web_sources(bag, usable):
-            title = r.get("title", "?")
-            snippet = (r.get("snippet") or "")[:200]
-            link = r["link"]
-            lines.append(f"**[W{idx}]** {title}\n   {snippet}\n   {link}")
-
         # ⚠️ 这里**不要**再往返回值里塞"请用 [n] 标注、不要贴网址"这类指令。
         # 2026-11-03 真实验证：模型会把整段检索结果（编号 + 摘要 + 网址）原样
         # 抄进回答开头，连这句指令本身也一起抄了进去 —— 用户看到的是
         # 「【引用要求】回答里用 [n] 标注…」这种内部口令。行为约束改放
         # kb/rag_core.py 的 CAPABILITY_NOTE（无条件追加、不进 prompt_store 的 A/B）。
-        return "\n\n".join(lines)
+        return _format_numbered(bag, usable)
     except Exception as exc:  # noqa: BLE001
         # 不能只回一句"暂时不可用"：模型会把它当成任务完成，用户拿到的是
         # 一段"我搜不了"的解释而不是搜索结果。日志留痕，排查才有入口。
