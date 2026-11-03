@@ -328,7 +328,7 @@ async def update_profile(body: ProfilePatch, uid: str = Depends(get_current_user
 
     try:
         # 按用户分桶限流：这是唯一能高频写 users 表的入口
-        await asyncio.to_thread(quota.hit, "profile:%s" % uid, 10)
+        await asyncio.to_thread(quota.hit, f"profile:{uid}", 10)
     except quota.RateLimited as e:
         _reject(str(e), 429)
 
@@ -346,7 +346,7 @@ async def update_profile(body: ProfilePatch, uid: str = Depends(get_current_user
             _reject("头像参数不合法")
         # img: 还要确认文件真的在（格式合法不代表存在）。不查的话手写一个
         # 不存在的 hash 就能把自己的头像变成破图 —— 而用户会以为网站坏了。
-        if avatar and not avatar_store.exists(avatar):
+        if avatar and not await asyncio.to_thread(avatar_store.exists, avatar):
             _reject("这张头像已经不在服务器上了，请重新上传")
 
     old_avatar = ""
@@ -388,7 +388,7 @@ async def upload_avatar(
         _reject(str(e))
     finally:
         if tmp:
-            avatar_store.remove_file(tmp)
+            await asyncio.to_thread(avatar_store.remove_file, tmp)
 
     old_avatar = await asyncio.to_thread(account.set_avatar, uid, new_avatar)
     if old_avatar and old_avatar != new_avatar:
@@ -404,7 +404,7 @@ def get_avatar(hash: str):
 
     **公开可读**：头像本来就不是秘密，而且 `<img src>` 是最简单的消费方式；
     强制鉴权会让每个头像都多一次 401 判定，还会让浏览器的图片缓存失效。
-    hash 是 128 位内容指纹，猜不出来，也就谈不上枚举。
+    hash 是 sha256 的前 64 位，正常流量下猜不出来，也就谈不上枚举。
 
     可以永久缓存：URL 里带 hash，换了头像 URL 就变（`Cache-Control: immutable`）。
     """
@@ -440,7 +440,7 @@ async def change_password(
         # 定 10/分 而不是更紧：每次 PBKDF2 约 80ms，10 次/分对服务器没有压力，
         # 而更紧的桶会误伤真实用户 —— 他可能先打错旧密码两次、新密码不合规一次，
         # 第四次才成功，然后发现自己"操作过于频繁"等了 60 秒。
-        await asyncio.to_thread(quota.hit, "password:%s" % uid, 10)
+        await asyncio.to_thread(quota.hit, f"password:{uid}", 10)
     except quota.RateLimited as e:
         _reject(str(e), 429)
 
@@ -480,7 +480,7 @@ async def change_username(
     """
     try:
         # 同 password：10/分 只拦脚本，不拦人
-        await asyncio.to_thread(quota.hit, "username:%s" % uid, 10)
+        await asyncio.to_thread(quota.hit, f"username:{uid}", 10)
     except quota.RateLimited as e:
         _reject(str(e), 429)
 

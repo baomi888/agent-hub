@@ -6,6 +6,8 @@
 // 三处各写一遍"是图标？是图片？还是首字母？"必然会漂移 —— 常见表现是
 // 换了头像侧栏变了、账号卡没变，或者其中一处忘了处理空值闪出一个方块。
 // 这里只判断一次，谁用谁传 `avatar` + `name`。
+import { useState } from "react";
+
 import CornIcon from "@/components/CornIcon";
 
 const ICON_PREFIX = "icon:";
@@ -55,6 +57,10 @@ interface Props {
 export default function UserAvatar({ avatar, name, className = "h-9 w-9" }: Props) {
   const img = avatarImageUrl(avatar);
   const icon = avatarIconName(avatar);
+  // 记录失败的 URL 而不是一个 boolean：avatar 换成新 hash 时自动重试，
+  // 不需要在 effect 里 setState，也就不会触发本仓库的级联渲染 lint。
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const showImage = Boolean(img && failedSrc !== img);
   // 底色用 accent-tint（浅玉米金）而不是 fill-1（中性灰）：
   // 灰圆压在暖米黄卡片上像贴了一张灰贴纸，和整站的纸感不是一套；
   // 浅金底 + 深棕图标/字才是"这个站自己的头像"
@@ -65,12 +71,17 @@ export default function UserAvatar({ avatar, name, className = "h-9 w-9" }: Prop
 
   return (
     <span className={shell} aria-hidden="true">
-      {img ? (
+      {showImage && img ? (
         // 头像不是内容主体，alt 留空让读屏跳过；身份由旁边的名字承担。
         // 不用 next/image：图片来自本站 /api（同源、尺寸固定 36px），
         // 走优化器只会多一层 loader 与一次磁盘读，没有收益
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={img} alt="" className="h-full w-full object-cover" />
+        <img
+          src={img}
+          alt=""
+          className="h-full w-full object-cover"
+          onError={() => setFailedSrc(img)}
+        />
       ) : icon ? (
         // 图标留 12% 内边距：CornIcon 的描边会溢出 viewBox，贴边会被裁掉笔锋
         <CornIcon name={icon} className="h-full w-full p-[12%]" />

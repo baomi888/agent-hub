@@ -103,6 +103,13 @@ export default function AvatarPicker({
   const [err, setErr] = useState<string | null>(null);
 
   const busy = saving !== null || phase !== "idle";
+  const close = () => {
+    // 错误属于“这一次选择”。不用 effect 在 open 变化时清理：关闭当下清掉，
+    // 下次重新打开就不会先看到上一张图留下的红字。
+    setErr(null);
+    setPhase("idle");
+    onClose();
+  };
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -143,7 +150,7 @@ export default function AvatarPicker({
       open={open}
       title="换个头像"
       desc="挑一个喜欢的图案，或者传一张自己的照片。随时能换。"
-      onClose={onClose}
+      onClose={close}
       busy={busy}
       footer={
         <>
@@ -156,7 +163,7 @@ export default function AvatarPicker({
           >
             用名字首字母
           </button>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose} disabled={busy}>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={close} disabled={busy}>
             取消
           </button>
         </>

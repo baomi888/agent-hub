@@ -39,6 +39,9 @@ log = logging.getLogger(__name__)
 
 # ---- 限额 ----
 MAX_BYTES = 5 * 1024 * 1024  # 对齐微博/知乎/QQ 的 5MB；GitHub 1MB、Gmail 4MB
+# multipart 边界/头 + 6MB 边界测试需要走到业务层给 400，因此应用入口留 2MB 余量。
+# 真正面向公网的 Nginx 仍单独卡 6m，本常量是本地直连/换代理时的兜底。
+REQUEST_BODY_LIMIT = MAX_BYTES + 2 * 1024 * 1024
 MAX_SIDE = 4000  # 单边像素上限，解压炸弹在读文件头这一步就被挡掉
 OUT_SIDE = 192  # 最终落盘尺寸（显示最大 64px，留了 3 倍视网膜余量）
 JPEG_QUALITY = 85  # 肉眼无损的甜点；0.7 以下人像脸会发灰
@@ -48,6 +51,8 @@ JPEG_QUALITY = 85  # 肉眼无损的甜点；0.7 以下人像脸会发灰
 # `Image.open()` 打得开；这里只是提前给一句人话错误。
 MIME_OK = frozenset({"image/jpeg", "image/png", "image/webp"})
 _MIME_ALIAS = {"image/jpg": "image/jpeg", "image/pjpeg": "image/jpeg"}
+# Content-Type 和扩展名都能伪造；这是 Image.open 解析出来的**真实格式**白名单。
+FORMAT_OK = frozenset({"JPEG", "PNG", "WEBP"})
 
 # 内容 hash 做文件名：换图 URL 自动变（不用处理浏览器缓存）、
 # 文件名不含任何用户输入（天然防路径穿越）、同图可共用一份。
@@ -167,6 +172,9 @@ def _render(src: str) -> bytes:
     """
     try:
         with Image.open(src) as im:
+            actual_format = str(im.format or "").upper()
+            if actual_format not in FORMAT_OK:
+                raise AvatarError("只支持 JPG / PNG / WebP 图片")
             w, h = im.size
             if w <= 0 or h <= 0:
                 raise AvatarError("这张图片的尺寸不合法")
@@ -198,7 +206,12 @@ def _render(src: str) -> bytes:
                 top = (im.height - side) // 2
                 im = im.crop((left, top, left + side, top + side))
 
+            # 大图先渐进缩，控制峰值内存；小图 thumbnail 不会放大，再统一 resize
+            # 到 192。最终文件尺寸必须恒定，否则前端 64px 容器里会出现不同清晰度，
+            # 浏览器验收也不能只拿一张大图就当“192 已成立”。
             im.thumbnail((OUT_SIDE, OUT_SIDE), Image.LANCZOS)
+            if im.size != (OUT_SIDE, OUT_SIDE):
+                im = im.resize((OUT_SIDE, OUT_SIDE), Image.LANCZOS)
 
             buf = io.BytesIO()
             im.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
@@ -231,8 +244,21 @@ def store(src: str) -> str:
     dest = os.path.join(avatar_dir(), hash_ + ".jpg")
     os.makedirs(avatar_dir(), exist_ok=True)
     if not os.path.exists(dest):
-        tmp = dest + ".tmp"
-        with open(tmp, "wb") as f:
-            f.write(data)
-        os.replace(tmp, dest)
+        # 每个请求用独立临时文件。固定写 `dest + ".tmp"` 时，同图并发上传会
+        # 多个线程争同一路径；在 Windows 上还会出现一个线程已经 replace、
+        # 另一个线程再也找不到临时文件的 500。内容相同，最后谁覆盖 dest 都可以。
+        fd, tmp = tempfile.mkstemp(prefix=hash_ + ".", suffix=".tmp", dir=avatar_dir())
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+            try:
+                os.replace(tmp, dest)
+            except (FileExistsError, PermissionError):
+                # Windows 上两个线程同时把同一内容 replace 到同一目标时，输家
+                # 会拿 WinError 5。只要赢家已经把完整目标文件放好，就等同成功；
+                # 目标不存在说明这是真的权限/磁盘错误，继续往上抛。
+                if not os.path.isfile(dest):
+                    raise
+        finally:
+            remove_file(tmp)
     return IMG_PREFIX + hash_

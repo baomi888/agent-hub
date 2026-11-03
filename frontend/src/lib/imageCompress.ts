@@ -44,17 +44,19 @@ export async function compressAvatar(file: File): Promise<Blob | null> {
     if (side <= 0) return null;
     const sx = (bmp.width - side) / 2;
     const sy = (bmp.height - side) / 2;
+    // 不放大：小头像压到 640 只会凭空增体积，服务器最终仍会规范到 192。
+    const outSide = Math.min(OUT_SIDE, side);
 
     const canvas = document.createElement("canvas");
-    canvas.width = OUT_SIDE;
-    canvas.height = OUT_SIDE;
+    canvas.width = outSide;
+    canvas.height = outSide;
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
 
     // 透明区域垫白：JPEG 没有 alpha，不垫的话透明会变黑（白底表情包变黑框头像）
     ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, OUT_SIDE, OUT_SIDE);
-    ctx.drawImage(bmp, sx, sy, side, side, 0, 0, OUT_SIDE, OUT_SIDE);
+    ctx.fillRect(0, 0, outSide, outSide);
+    ctx.drawImage(bmp, sx, sy, side, side, 0, 0, outSide, outSide);
 
     return await new Promise<Blob | null>((resolve) => {
       canvas.toBlob((b) => resolve(b), "image/jpeg", QUALITY);

@@ -17,6 +17,7 @@ import os
 import sys
 import tempfile
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -40,6 +41,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 import main  # noqa: E402
 from core import account, quota  # noqa: E402
+from service import avatar as avatar_service  # noqa: E402
 from service import daily  # noqa: E402
 
 # 导入期结束，把全局路径还给别的模块（每个用例自己用 _fresh 切临时库）。
@@ -203,8 +205,8 @@ def test_avatar_icons_cover_frontend_choices():
     names = {seg.strip().strip('"').strip(",") for seg in block.split('"')[1::2]}
     assert names, "没能从 AvatarPicker.tsx 里解析出图标名单"
     assert names == set(account.AVATAR_ICONS), (
-        "前后端头像名单不一致：仅前端 %s / 仅后端 %s"
-        % (sorted(names - set(account.AVATAR_ICONS)), sorted(set(account.AVATAR_ICONS) - names))
+        f"前后端头像名单不一致：仅前端 {sorted(names - set(account.AVATAR_ICONS))} / "
+        f"仅后端 {sorted(set(account.AVATAR_ICONS) - names)}"
     )
 
 
@@ -463,7 +465,7 @@ def test_username_change_limit(monkeypatch):
         quota._HITS.clear()  # 避开每分钟限流，只测终身上限
         r = cli.post(
             "/api/auth/username",
-            json={"password": "abc123", "new_username": "alice_%d" % i},
+            json={"password": "abc123", "new_username": f"alice_{i}"},
             headers=_h(tok),
         )
         assert r.status_code == 200, r.text
@@ -661,6 +663,20 @@ def test_avatar_upload_ok(monkeypatch):
     assert r2.json()["user"]["avatar"] == avatar
 
 
+def test_avatar_small_image_still_normalizes_to_192(monkeypatch):
+    """小图也必须输出 192×192，不能因为 thumbnail 不放大就漏掉尺寸契约。"""
+    from PIL import Image
+
+    cli = _fresh(monkeypatch, "av_small")
+    _, tok = _register(cli)
+    r = _upload(cli, tok, _jpeg(32, 16), "tiny.jpg")
+    assert r.status_code == 200, r.text
+
+    path = os.path.join(config.DATA_DIR, "avatars", _avatar_files()[0])
+    with Image.open(path) as im:
+        assert im.size == (192, 192), im.size
+
+
 def test_avatar_upload_too_big(monkeypatch):
     """6MB → 400，且不留半成品。
 
@@ -676,6 +692,18 @@ def test_avatar_upload_too_big(monkeypatch):
     assert "大" in r.json()["detail"]
     assert _tmp_uploads() == before_tmp, "超限后留下了半成品"
     assert _avatar_files() == []
+
+
+def test_avatar_declared_body_hard_limit_rejects_before_multipart(monkeypatch):
+    """超大 Content-Length 要在 multipart 解析前拒绝，不能先收满再判业务大小。"""
+    cli = _fresh(monkeypatch, "av_body_limit")
+    _, tok = _register(cli)
+    headers = _h(tok)
+    headers["Content-Length"] = str(avatar_service.REQUEST_BODY_LIMIT + 1)
+
+    r = cli.post("/api/auth/avatar", content=b"x", headers=headers)
+    assert r.status_code == 413, r.text
+    assert "5MB" in r.json()["detail"]
 
 
 def test_avatar_upload_not_image(monkeypatch):
@@ -705,6 +733,38 @@ def test_avatar_rejects_svg_and_gif(monkeypatch):
 
     r = _upload(cli, tok, b"GIF89a", "x.gif", "image/gif")
     assert r.status_code == 400, r.text
+
+
+def test_avatar_rejects_actual_format_even_when_mime_lies(monkeypatch):
+    """MIME 是 image/jpeg，真实内容却是 GIF/BMP/TIFF，也必须拒。
+
+    只看 Content-Type 等于把白名单交给攻击者填写；Image.open 打得开也不代表
+    格式在允许列表里。这里固定住“解析后的 im.format 还要再过一道”的硬约束。
+    """
+    from PIL import Image
+
+    cli = _fresh(monkeypatch, "av_disguised")
+    _, tok = _register(cli)
+    for fmt in ("GIF", "BMP", "TIFF"):
+        buf = io.BytesIO()
+        Image.new("RGB", (24, 24), (30, 120, 200)).save(buf, fmt)
+        r = _upload(cli, tok, buf.getvalue(), "pretend.jpg", "image/jpeg")
+        assert r.status_code == 400, f"{fmt}: {r.text}"
+        assert "JPG" in r.json()["detail"], (fmt, r.json())
+
+
+def test_avatar_accepts_real_webp(monkeypatch):
+    """WebP 在声明白名单里，后端真实格式白名单也必须接受。"""
+    from PIL import Image
+
+    cli = _fresh(monkeypatch, "av_webp")
+    _, tok = _register(cli)
+    buf = io.BytesIO()
+    Image.new("RGB", (96, 64), (40, 100, 220)).save(buf, "WEBP", quality=85)
+
+    r = _upload(cli, tok, buf.getvalue(), "me.webp", "image/webp")
+    assert r.status_code == 200, r.text
+    assert r.json()["user"]["avatar"].startswith("img:")
 
 
 def test_avatar_bomb_rejected_before_decode(monkeypatch):
@@ -861,6 +921,37 @@ def test_avatar_side_boundary(monkeypatch):
     r = _upload(cli, tok, _png_declaring(4001, 4001), "over.png", "image/png")
     assert r.status_code == 400, r.text
     assert "4000" in r.json()["detail"], r.json()
+
+
+def test_avatar_same_hash_concurrent_store_uses_independent_tmp(monkeypatch, tmp_path):
+    """同一张图并发落盘不能争用固定的 `hash.tmp`。
+
+    两边渲染结果相同、目标 hash 也相同，但临时文件必须各自独立；否则 Windows
+    上常见“一个线程刚 rename，另一个线程 rename 时源文件已不存在”的 500。
+    """
+    data_dir = tmp_path / "data"
+    avatar_dir = data_dir / "avatars"
+    avatar_dir.mkdir(parents=True)
+    monkeypatch.setattr(config, "DATA_DIR", str(data_dir))
+    src = tmp_path / "same.jpg"
+    src.write_bytes(_jpeg(320, 240))
+
+    real_replace = avatar_service.os.replace
+    barrier = threading.Barrier(2)
+
+    def synchronized_replace(src_path, dst_path):
+        # 强制两个线程都在各自写完临时文件后才进入 rename，稳定打中竞态窗口。
+        barrier.wait(timeout=5)
+        return real_replace(src_path, dst_path)
+
+    monkeypatch.setattr(avatar_service.os, "replace", synchronized_replace)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: avatar_service.store(str(src)), range(2)))
+
+    assert results[0] == results[1]
+    hash_ = results[0][len("img:") :]
+    assert (avatar_dir / f"{hash_}.jpg").is_file()
+    assert not list(avatar_dir.glob("*.tmp")), "并发落盘留下了临时文件"
 
 
 if __name__ == "__main__":

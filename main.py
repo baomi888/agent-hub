@@ -46,6 +46,7 @@ from api.user_feedback import router as user_feedback_router
 from core import account, apilog, config, llm_gate, quota
 from core import router as route_engine
 from kb import pipelines
+from service import avatar as avatar_store
 from service import daily
 
 
@@ -274,6 +275,16 @@ def _exact_matches(template: str, path: str) -> bool:
 @app.middleware("http")
 async def normalize_api_slash(request: Request, call_next: Callable[[Request], Any]) -> Response:
     path = request.scope.get("path", "")
+    # 头像上传的应用层入口闸。Nginx 也会在 6MB 截断；这里再挡一次，是为了
+    # 本地直连 / 未来换代理时仍不会把一个几十 MB 的 multipart 先收进临时磁盘。
+    # 留 2MB multipart/header 余量，6MB 的“应被业务拒绝”文件仍会走到路由给 400。
+    if request.method == "POST" and path in ("/api/auth/avatar", "/api/auth/avatar/"):
+        raw_len = (request.headers.get("content-length") or "").strip()
+        if raw_len.isdigit() and int(raw_len) > avatar_store.REQUEST_BODY_LIMIT:
+            return JSONResponse(
+                status_code=413,
+                content={"detail": "头像文件过大（>5MB），请换一张"},
+            )
     if path.startswith("/api/") and path != "/api/":
         has_slash = path.endswith("/")
         alt = path[:-1] if has_slash else path + "/"
