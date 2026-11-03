@@ -1024,7 +1024,12 @@ export default function ChatArea({
             className="max-h-40 flex-1 resize-none bg-transparent px-2 py-2.5 text-msg leading-relaxed text-text outline-none placeholder:text-faint"
           />
           {sending ? (
-            <button onClick={onStop} title="停止生成" aria-label="停止生成" className="send stop">
+            <button
+              onClick={onStop}
+              title="停止生成（截断当前输出，保留已生成内容）"
+              aria-label="停止生成，截断当前输出"
+              className="send stop"
+            >
               <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5" aria-hidden="true">
                 <rect x="6" y="6" width="12" height="12" rx="2" />
               </svg>
@@ -1048,7 +1053,11 @@ export default function ChatArea({
         {/* 键盘提示从 placeholder 里挪出来：placeholder 要短，才像"随便问点什么" */}
         <div className="input-hint">
           <span className="truncate">{capHint}</span>
-          <span className="ml-1 shrink-0 whitespace-nowrap">Enter 发送 · ↑ 上一条 · Esc 清空</span>
+          {/* 生成中把快捷键提示换成截断提示：停止键只有生成时才出现，
+              不写一句"点右侧按钮截断"，用户很容易把它当成另一个发送键。 */}
+          <span className="ml-1 shrink-0 whitespace-nowrap">
+            {sending ? "生成中 · 点右侧按钮截断输出" : "Enter 发送 · ↑ 上一条 · Esc 清空"}
+          </span>
         </div>
       </div>
 

@@ -436,6 +436,13 @@
   stroke-width: 2.2;
   color: #fff;
 }
+/* 停止/截断键里的方块是填充图形：上面 .send svg 的 fill:none 会覆盖
+   svg 上写的 fill="currentColor"，结果只剩一个没有图标的红圆。
+   这里单独把填充还给停止键，让方块真正显示出来。 */
+.send.stop svg {
+  fill: currentColor;
+  stroke: none;
+}
 .send:disabled {
   opacity: 0.3;
   cursor: default;
