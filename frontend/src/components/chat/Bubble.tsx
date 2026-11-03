@@ -7,6 +7,7 @@ import { memo, useMemo, useState } from "react";
 import type { UiMessage } from "./types";
 import { TOOL_META, toolLabel } from "./constants";
 import { parseRefs, renderContent, renderMarkdown } from "./content";
+import { stripPhantomCitations } from "@/lib/citations";
 import CornIcon from "../CornIcon";
 import PlanCard, { detectPlanTopic, isPlanRequest, parsePlan } from "./plan";
 import { HybridTraceView } from "@/components/HybridTrace";
@@ -177,6 +178,16 @@ const Bubble = memo(function Bubble({
   for (const r of refItems) refIdxs.add(Number(r.idx));
   for (const s of m.sources ?? []) refIdxs.add(s.id);
   const refAnchor = (n: number) => (refIdxs.has(n) ? refId(`${n}`) : null);
+  // 指不到的引用编号一律不显示（含末尾那句无中生有的「依据：[1][2]」）。
+  // 老会话里模型会跟着历史回答继续写 [1][2]，哪怕这轮根本没检索 —— 用户点了
+  // 没反应，比不显示更糟。流式期间不清理：联网来源是收尾才下发的，中途清理会把
+  // 真角标一起删掉、等来源到了又长回来，看着像在闪。
+  const shownContent = m.streaming
+    ? m.content
+    : stripPhantomCitations(m.content, {
+        refIds: refIdxs,
+        webIds: new Set(cites.keys()),
+      });
   // 正文已经内联了资料库角标时，末尾不再重复排一排同样的数字。
   // 老消息（改造前存的，正文里没有 [n]）仍然走末尾那排 —— 那是它唯一的入口。
   let inlineKbCited = false;
@@ -289,7 +300,7 @@ const Bubble = memo(function Bubble({
           ) : !m.streaming && isPlanRequest(userQuestion) ? (
             (() => {
               const plan = parsePlan(m.content);
-              if (!plan) return renderMarkdown(m.content, false, cites, knownUrls, refAnchor);
+              if (!plan) return renderMarkdown(shownContent, false, cites, knownUrls, refAnchor);
               // 优先用后端回传的主题（能从历史推断）；没有才退回本句关键词匹配。
               // PlanCard 只用到 topic.name（抬头文案），hint 在这里给空串即可。
               const topic = m.planTopic
@@ -316,7 +327,7 @@ const Bubble = memo(function Bubble({
           ) : (
             <>
               {/* AI 正文走 markdown 渲染：标题/列表/表格/代码块/链接都排出来 */}
-              {renderMarkdown(m.content, !!m.streaming, cites, knownUrls, refAnchor)}
+              {renderMarkdown(shownContent, !!m.streaming, cites, knownUrls, refAnchor)}
               {m.stopped && <span className="stopped-tag">已停止生成</span>}
               {/* 流式光标不在这里渲染：它不是一段文字，是"这一句还没写完"的记号。
                   span 跟在 markdown 块后面会另起一行、单独挂个 ▍，很怪；

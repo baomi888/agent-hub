@@ -61,6 +61,7 @@ from core import router as route_engine
 from core import scenarios as scenarios_mod
 from core import session as store
 from core.auth import get_current_user
+from core.citations import strip_phantom_citations
 from core.llm import get_llm, get_vision_llm
 from core.urltools import extract_urls
 from kb import pipelines
@@ -1596,6 +1597,15 @@ async def _chat_stream_impl(
             truncated = acc.truncated
 
         # ---- 收尾：存 assistant 消息 + 取回并行生成的标题 ----
+        # 落库前把「指不到来源」的引用编号删掉。模型会跟着历史回答继续写 [1][2]
+        # 和末尾的「依据：[1][2]」，哪怕这一轮根本没检索 —— 前端点了没反应，
+        # 用户只会觉得角标是坏的。来源有多少服务端最清楚，所以由这里兜底。
+        # （前端 lib/citations.ts 有一份等价实现，负责显示层与历史消息。）
+        acc_text = strip_phantom_citations(
+            acc_text,
+            has_kb=bool(refs_md),
+            web_ids={s["id"] for s in web_sources if isinstance(s, dict) and "id" in s},
+        )
         msg_id = await asyncio.to_thread(
             store.add_message,
             uid,
