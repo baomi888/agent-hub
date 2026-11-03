@@ -15,8 +15,12 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import PageShell from "@/components/console/PageShell";
-import { useConsoleUser } from "@/components/console/ConsoleLayout";
+import { useConsoleAccount } from "@/components/console/ConsoleLayout";
 import CornIcon from "@/components/CornIcon";
+import AvatarPicker from "@/components/settings/AvatarPicker";
+import PasswordDialog from "@/components/settings/PasswordDialog";
+import UsernameDialog from "@/components/settings/UsernameDialog";
+import UserAvatar from "@/components/settings/UserAvatar";
 import FeedbackCard from "@/components/FeedbackCard";
 import TagPicker from "@/components/profile/TagPicker";
 import { Callout, NotReady, Seg, SkeletonLines, Switch } from "@/components/console/ui";
@@ -187,7 +191,10 @@ export default function SettingsPage() {
               <CornIcon name="bulb" />
               再看一次上手说明
             </button>
-            <p className="hint">「修改密码」还没做好，先置灰。</p>
+            {/* 这里原来写的是「「修改密码」还没做好，先置灰」——
+                密码功能上线后这句话就成了错的：按钮明明是亮的，页面却在说它没做。
+                现在改成一句真实的、用户可能真会问的话。 */}
+            <p className="hint">密码、昵称、头像都能在这里改。改登录名要验证一次密码。</p>
           </section>
 
           {/* 兴趣方向：30 条定稿词表（core/tag_taxonomy.py）。
@@ -473,33 +480,200 @@ export default function SettingsPage() {
 
 /**
  * 账号信息仍然拆成子组件，但理由已经从「读不到」变成了「职责分离」：
- * `useConsoleUser()` 读的是 ConsoleLayout 提供的 Context —— 现在页面作为
- * layout 的 children 渲染在 Provider **内部**，在页面函数体里也能读到值了。
- * 保留这层拆分是因为账号卡自己还有退出登录、反馈入口等状态，
- * 混在 SettingsPage 里会让那个组件的 state 更难读。
+ * `useConsoleAccount()` 读的是 ConsoleLayout 提供的 Context —— 页面作为
+ * layout 的 children 渲染在 Provider **内部**，所以能读到值；这条约束对
+ * 子组件成立，对页面组件本身不成立（见 ConsoleLayout 里的说明）。
+ * 保留这层拆分是因为账号卡自己还有四个弹窗与编辑态，
+ * 混进 SettingsPage 会让那个组件的 state 更难读。
  */
 function AccountCard({ onLogout }: { onLogout: () => Promise<void> }) {
-  const me = useConsoleUser();
+  // 用 useConsoleAccount 而不是 useConsoleUser：改完资料要 refresh，
+  // 只更新本组件自己的 state 的话，侧栏还显示旧名字（两个消费者各持一份 me）
+  const { me, refresh } = useConsoleAccount();
+
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pwdOpen, setPwdOpen] = useState(false);
+  const [nameOpen, setNameOpen] = useState(false);
+  /** 正在保存的头像值（null = 没在保存）。传给选择器用于置灰对应项 */
+  const [savingAvatar, setSavingAvatar] = useState<string | null>(null);
+  /** 昵称行内编辑 */
+  const [editingNick, setEditingNick] = useState(false);
+  const [nickDraft, setNickDraft] = useState("");
+  const [savingNick, setSavingNick] = useState(false);
+  /** 一次性反馈。不用 toast 是因为它要贴着被改的那一行出现 */
+  const [note, setNote] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  // 昵称为空 = 没设过 → 回落登录名。这个判断只在**这一处**做，
+  // 后端返回的 nickname 空串就是"没设过"，两边语义必须一致
+  const displayName = me?.user.nickname || me?.user.username || "";
+
+  const pickAvatar = useCallback(
+    async (value: string) => {
+      setSavingAvatar(value);
+      try {
+        await api.updateProfile({ avatar: value });
+        // 刷新登录态 → 侧栏与这张卡同时变。这正是方案 §2.5 那个坑的修法
+        await refresh();
+        setPickerOpen(false);
+        setNote({ kind: "ok", text: value ? "头像换好了" : "已改回用名字首字母" });
+        return true;
+      } catch (e) {
+        setNote({ kind: "err", text: (e as Error).message || "头像没能换，稍后再试" });
+        return false;
+      } finally {
+        setSavingAvatar(null);
+      }
+    },
+    [refresh],
+  );
+
+  const startNickEdit = useCallback(() => {
+    setNickDraft(me?.user.nickname || "");
+    setNote(null);
+    setEditingNick(true);
+  }, [me?.user.nickname]);
+
+  const saveNick = useCallback(
+    async (e?: React.FormEvent) => {
+      e?.preventDefault();
+      const v = nickDraft.trim();
+      if (v.length > 20) {
+        setNote({ kind: "err", text: "昵称最多 20 个字符" });
+        return;
+      }
+      setSavingNick(true);
+      try {
+        await api.updateProfile({ nickname: v });
+        await refresh();
+        setEditingNick(false);
+        setNote({ kind: "ok", text: v ? "昵称改好了" : "已改回用登录名显示" });
+      } catch (e2) {
+        setNote({ kind: "err", text: (e2 as Error).message || "昵称没能改，稍后再试" });
+      } finally {
+        setSavingNick(false);
+      }
+    },
+    [nickDraft, refresh],
+  );
+
   return (
     <div className="card card-pad acct-card">
-      <CornIcon name="user" className="h-9 w-9" />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div className="card-title">{me?.user.username ?? "—"}</div>
-        <div className="meta">账号 ID {me?.user.id ?? "—"}</div>
+      {/* 头像本身就是"换头像"的按钮：单独再放一个「换头像」按钮会显得这张卡
+          有四个动作，而实际上点脸就是最直觉的那个 */}
+      <button
+        type="button"
+        className="acct-avatar-btn"
+        onClick={() => setPickerOpen(true)}
+        title="换头像"
+        aria-label="换头像"
+      >
+        <UserAvatar avatar={me?.user.avatar} name={displayName} className="h-10 w-10" />
+        <span className="acct-avatar-mark" aria-hidden="true">
+          换
+        </span>
+      </button>
+
+      <div className="acct-main">
+        {editingNick ? (
+          <form className="acct-nick-form" onSubmit={saveNick}>
+            <input
+              className="acct-nick-input"
+              value={nickDraft}
+              onChange={(e) => setNickDraft(e.target.value)}
+              maxLength={20}
+              placeholder={me?.user.username ?? ""}
+              aria-label="昵称"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  setEditingNick(false);
+                }
+              }}
+            />
+            <button type="submit" className="btn btn-primary btn-sm" disabled={savingNick}>
+              {savingNick ? "存…" : "保存"}
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => setEditingNick(false)}
+              disabled={savingNick}
+            >
+              取消
+            </button>
+          </form>
+        ) : (
+          <div className="acct-name-row">
+            <span className="card-title acct-name" title={displayName}>
+              {displayName}
+            </span>
+            <button
+              type="button"
+              className="acct-mini"
+              onClick={startNickEdit}
+              title="改昵称"
+              aria-label="改昵称"
+            >
+              <CornIcon name="pencil" className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
+        {/* 登录名**常驻显示**，不折叠：这是"改完忘了自己叫什么"的唯一兜底。
+            账号 ID 只露前 8 位（完整值在 title 里），32 位 hex 摆在这里没人看得下去 */}
+        <div className="meta acct-sub">
+          <span>
+            登录名 <b className="acct-username">{me?.user.username ?? "—"}</b>
+          </span>
+          <button
+            type="button"
+            className="acct-link"
+            onClick={() => setNameOpen(true)}
+            title="改登录名（要输密码，有次数上限）"
+          >
+            改
+          </button>
+          <span className="acct-sep" aria-hidden="true">
+            ·
+          </span>
+          <span title={me?.user.id ? `账号 ID ${me.user.id}` : undefined}>
+            账号 ID {(me?.user.id ?? "").slice(0, 8) || "—"}
+          </span>
+        </div>
+
+        {note && (
+          <p className={note.kind === "ok" ? "acct-note is-ok" : "acct-note is-err"} role="status">
+            {note.text}
+          </p>
+        )}
       </div>
+
       <div className="acct-actions">
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          disabled
-          title="后端尚无 /auth/password 端点"
-        >
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPwdOpen(true)}>
           修改密码
         </button>
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => void onLogout()}>
           退出登录
         </button>
       </div>
+
+      <AvatarPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        current={me?.user.avatar || ""}
+        name={displayName}
+        onPick={pickAvatar}
+        saving={savingAvatar}
+      />
+      <PasswordDialog open={pwdOpen} onClose={() => setPwdOpen(false)} />
+      <UsernameDialog
+        open={nameOpen}
+        onClose={() => setNameOpen(false)}
+        currentUsername={me?.user.username ?? ""}
+        remaining={me?.user.name_changes_left}
+        onSaved={refresh}
+      />
     </div>
   );
 }

@@ -72,10 +72,16 @@ def verify_password(password: str, stored: str) -> bool:
 
 # ---- Claims 字段名 ----
 # 对应 sky-take-out 的 `JwtClaimsConstant`（那边是 EMP_ID / USER_ID / USERNAME）。
-# 这里只保留本项目需要的三个：谁（uid）、叫什么（username）、这一枚令牌的身份（jti）。
+# 这里只保留本项目需要的四个：谁（uid）、叫什么（username）、这一枚令牌的身份（jti）、
+# 以及签发时该账号的密码水位（af，见 CLAIM_AFTER）。
 CLAIM_UID = "uid"
 CLAIM_USERNAME = "username"
 CLAIM_JTI = "jti"
+# 签发那一刻该账号的 token_valid_after 快照。
+# 为什么不直接拿 iat 跟库里的水位比：改密码和重签 Cookie 通常在同一秒内完成，
+# 两边的秒级时间戳会相等，"iat < 水位" 判不出来 —— 结果是改完密码旧令牌还能用。
+# 把水位**抄进令牌**，就完全变成整数比较，不依赖时钟精度，也不怕服务器时间被调。
+CLAIM_AFTER = "af"
 
 # 兼容历史令牌：早期只写了标准字段 sub，没有 uid / jti
 _LEGACY_SUB = "sub"
@@ -115,10 +121,15 @@ def _b64d(s: str) -> bytes:
     return base64.urlsafe_b64decode(s + pad)
 
 
-def create_token(user_id: str, ttl_days: int | None = None, username: str | None = None) -> str:
+def create_token(
+    user_id: str,
+    ttl_days: int | None = None,
+    username: str | None = None,
+    valid_after: int = 0,
+) -> str:
     """签发 HS256 令牌（手工 JWT）。
 
-    载荷：uid（身份）+ username（展示用）+ jti（吊销用）+ iat/exp。
+    载荷：uid（身份）+ username（展示用）+ jti（吊销用）+ af（密码水位快照）+ iat/exp。
     和 sky-take-out 的区别是它只放 empId；多带 username 是为了省掉"每次渲染
     导航栏都查一次库"，但**权限判定一律以 uid 为准**（username 可以被改名，
     uid 不行）。
@@ -136,6 +147,7 @@ def create_token(user_id: str, ttl_days: int | None = None, username: str | None
         "iat": now,
         "exp": now + days * 86400,
         CLAIM_JTI: secrets.token_urlsafe(16),
+        CLAIM_AFTER: int(valid_after or 0),
     }
     signing_input = "{}.{}".format(
         _b64e(json.dumps(header, separators=(",", ":")).encode()),
@@ -330,6 +342,19 @@ def current_user_id(request: Request) -> str:
         raise HTTPException(status_code=401, detail="未登录或登录已过期，请重新登录")
 
     uid = str(uid)
+
+    # 令牌水位：改密码时 account.change_password 写入当前时刻，签发时抄进令牌的
+    # af 早于它的一律作废。这是"把某人的全部旧会话一次作废"的唯一办法——
+    # 上面的 token_store 按 jti 精确吊销，只能踢掉某一枚，做不到"踢掉他的其它设备"。
+    #
+    # 每次都查一次库是刻意的：缓存 30 秒 = 改完密码后旧会话还能再用 30 秒，
+    # 而那 30 秒正是这个功能唯一要堵的窗口。
+    from core import account  # 延迟导入：account 反过来 import 本模块的口令函数
+
+    valid_after = account.get_token_valid_after(uid)
+    if valid_after and int(claims.get(CLAIM_AFTER) or 0) < valid_after:
+        raise HTTPException(status_code=401, detail="密码已修改，请重新登录")
+
     request.state.uid = uid
     request.state.username = str(claims.get(CLAIM_USERNAME) or "")
     request.state.token_claims = claims

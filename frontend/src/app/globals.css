@@ -41,3 +41,6 @@
 /* 更新公告：全屏强制页，不参与任何页面布局，放最后一块，避免被别处的
    同名类或全局 input/button 规则改掉 */
 @import "./styles/announce.css";
+/* 账号自助（头像选择 / 改密码 / 改登录名）：借 .btn 与 .auth-input，
+   所以排在 console.css / auth.css 之后，专有类名都是 .acct-* 前缀，不会外溢 */
+@import "./styles/account.css";

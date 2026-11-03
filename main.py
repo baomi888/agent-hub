@@ -261,7 +261,11 @@ def _exact_matches(template: str, path: str) -> bool:
     if len(ts) != len(ps):
         return False
     for a, b in zip(ts, ps, strict=False):
-        if a == b or (a.startswith("{") and a.endswith("}")):
+        # ★ `{param}` 不能吃空串：`/tasks/` 拆出来是 [..., 'tasks', '']，
+        #   若判成"命中了 /tasks/{task_id}"，就会跳过尾斜杠归一，
+        #   最后真的 404 —— 而没有尾斜杠的 /tasks 是 200。
+        #   Starlette 的 str 转换器同样不匹配空段，这里必须与它一致。
+        if a == b or (a.startswith("{") and a.endswith("}") and b != ""):
             continue
         return False
     return True

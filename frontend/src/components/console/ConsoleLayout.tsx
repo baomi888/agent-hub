@@ -17,7 +17,7 @@
 //     知识库页一起消失了）。
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { createContext, useContext, useEffect, useRef, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
 import AuthGate from "../AuthGate";
 import CornIcon from "../CornIcon";
 import GuideModal from "../guide/GuideModal";
@@ -62,10 +62,36 @@ const NAV: NavItem[] = [
  * 为什么需要：`useAuth` 是**每个实例各查一次** /api/auth/me。
  * 子页面如果自己再调一次 useAuth，它拿到的是一份独立状态 —— 用户在
  * 登录门里登录时，子页面那份不会跟着变（还是 null），账号名就会空着。
+ *
+ * 为什么值里要带 refresh：设置页改完昵称/头像后，只更新自己那一份 state 的话，
+ * 侧栏（另一个消费者）还显示旧名字，看起来像"没改成"。带上 refresh 让改动
+ * 从源头重新取值，所有消费者自然一起变。
  */
-const UserCtx = createContext<MeOut | null>(null);
+export interface ConsoleAccount {
+  me: MeOut | null;
+  /** 重新拉一次 /api/auth/me/ 并把结果写回登录态 */
+  refresh: () => Promise<void>;
+}
 
+// 默认值给空实现而不是 null：Context 是对象，消费者解构时不会因为 null 崩掉。
+// （这里的默认值只在没有 Provider 时生效，实际永远是 Provider 包着。）
+const UserCtx = createContext<ConsoleAccount>({ me: null, refresh: async () => {} });
+
+/**
+ * 只关心"当前是谁"时用这个。返回值形状与改造前一致，老的调用点一行都不用改。
+ */
 export function useConsoleUser(): MeOut | null {
+  return useContext(UserCtx).me;
+}
+
+/**
+ * 需要在改完资料后刷新登录态时用这个。
+ *
+ * ⚠️ 与 useConsoleUser 一样，**只能在 ConsoleLayout 的子组件里调用**。
+ * 页面组件是 layout 的父级，在它函数体里读到的是默认值（me=null）——
+ * 这是本项目踩过两次的坑（/cet、/path 永远停在"正在加载"）。
+ */
+export function useConsoleAccount(): ConsoleAccount {
   return useContext(UserCtx);
 }
 
@@ -73,6 +99,13 @@ export default function ConsoleLayout({ children }: { children: ReactNode }) {
   const auth = useAuth();
   const pathname = usePathname();
   const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // 必须 useMemo：Provider 的 value 每次渲染新建对象的话，所有消费者都会
+  // 跟着重渲染，而这个外壳的子组件是整棵页面树。
+  const account = useMemo<ConsoleAccount>(
+    () => ({ me: auth.me, refresh: auth.refresh }),
+    [auth.me, auth.refresh],
+  );
 
   // 切页回到顶部。滚动发生在这个 div 上（html/body 被 base.css 锁了），
   // 所以 Next 自带的 scroll-to-top 管不到 —— 不做这一步，从长页面跳到短页面
@@ -99,7 +132,7 @@ export default function ConsoleLayout({ children }: { children: ReactNode }) {
   const here = pathname.replace(/\/+$/, "") || "/";
 
   return (
-    <UserCtx.Provider value={auth.me}>
+    <UserCtx.Provider value={account}>
       {/* 滚动容器必须由外壳自己提供。
           base.css 给 html/body 设了 height:100% + overflow:hidden —— 那是首页工作台
           「固定视口、滚动发生在内部面板」的做法；控制台页面直接铺在 body 里，

@@ -6,6 +6,7 @@ import { useMemo, useRef, useState, type RefObject } from "react";
 import Link from "next/link";
 import MascotLogo from "./chat/MascotLogo";
 import CornIcon from "./CornIcon";
+import UserAvatar from "./settings/UserAvatar";
 import type { Conversation, QuotaInfo } from "@/lib/types";
 import type { FontScale } from "@/lib/hooks/usePrefs";
 
@@ -45,8 +46,12 @@ interface Props {
   loadError?: string | null;
   /** 失败后手动重试 */
   onRetryLoad?: () => void;
-  /** 当前登录用户名（登录门放进来之后才有值） */
+  /** 当前登录用户名（登录门放进来之后才有值）。用于 title 与首字母兜底 */
   username?: string;
+  /** 显示名：昵称优先，没设过就是 username。不传则直接用 username */
+  displayName?: string;
+  /** 头像值：""（首字母）/ "icon:<name>" / "img:<hash>" */
+  avatar?: string;
   /** 当前账号配额概览（含 unlimited 标记）；不传则不显示额度 */
   quota?: Record<string, QuotaInfo>;
   /** 打开「用量与反馈」看板（P2）。不传则账号块不可点 */
@@ -104,6 +109,8 @@ export default function Sidebar({
   loadError = null,
   onRetryLoad,
   username,
+  displayName,
+  avatar,
   quota,
   onOpenUsage,
   onLogout,
@@ -480,25 +487,22 @@ export default function Sidebar({
         {/* 当前账号 + 退出：多用户之后，知道自己"现在是誰"能省掉很多困惑 */}
         {username && (
           <div className="mt-2 flex items-center gap-2 rounded-sm bg-fill-3 px-2.5 py-2">
-            <span
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-fill-1 text-fs-xs text-accent-ink"
-              aria-hidden="true"
-            >
-              {username.slice(0, 1).toUpperCase()}
-            </span>
+            {/* 头像统一走 UserAvatar：这里只传值，不判断"图片还是图标还是首字母" ——
+                三处各写一遍必然会漂移（换了头像侧栏没变，就是那么来的） */}
+            <UserAvatar avatar={avatar} name={displayName || username} className="h-6 w-6" />
             <div className="min-w-0 flex-1">
               {/* 账号块可点开看板：额度不该只在超限时才被看见 */}
               {onOpenUsage ? (
                 <button
                   onClick={onOpenUsage}
                   className="block w-full truncate rounded-xs text-left text-fs-sm text-ink transition hover:text-accent-ink"
-                  title={`${username} · 查看用量与反馈`}
+                  title={`${displayName || username} · 查看用量与反馈`}
                 >
-                  {username}
+                  {displayName || username}
                 </button>
               ) : (
                 <div className="truncate text-fs-sm text-ink" title={username}>
-                  {username}
+                  {displayName || username}
                 </div>
               )}
               {quota && (

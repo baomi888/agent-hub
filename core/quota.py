@@ -45,9 +45,71 @@ import threading
 import time
 
 from core import config, metrics, timeutil
+from core import session as _session
 from core.session import _get_conn
 
 _lock = threading.Lock()
+
+
+# 上一次建表时的库路径：判断"这个库我已经建过了"（见 _ensure_tables）
+_TABLES_PATH: str | None = None
+
+
+def _raw_conn():
+    """不带建表守卫的连接。只给建表函数自己用（否则会递归）。"""
+    return _get_conn()
+
+
+def _conn():
+    """业务用的连接：先把当前库的表建齐再交出去。
+
+    ★ 建表必须跟着库路径走：测试与 e2e 会在运行时换库（`session._db_path`
+    / `AGENT_HUB_DB`），只在 import 时建一次的话，后换的库是空壳，现象是
+    `no such table: usage`（或 rate_buckets），且只在组合/全量跑时出现 ——
+    先 import 的模块把"表已建好"认领了，后换库的人就没机会再建。
+    详见 core/account.py 同名注释。
+    """
+    _ensure_tables()
+    return _get_conn()
+
+
+def _ensure_tables(force: bool = False) -> None:
+    """建 usage / rate_buckets（幂等；换了库路径会重跑）。"""
+    global _TABLES_PATH
+    # ★ 必须走 `_session._db_path()` 而不是 from-import 进来的副本：
+    #   测试/ e2e 是给 `core.session._db_path` 重新赋值来换库的，
+    #   按值 import 拿到的是旧函数，永远指向真实库 —— 于是"换了库却没建表"，
+    #   现象仍是 `no such table`，而且看起来像没生效。
+    path = _session._db_path()
+    if not force and path == _TABLES_PATH:
+        return
+    with _raw_conn() as conn:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS usage (
+                user_id  TEXT NOT NULL,
+                day      TEXT NOT NULL,
+                kind     TEXT NOT NULL,
+                count    INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (user_id, day, kind)
+            );
+            CREATE TABLE IF NOT EXISTS rate_buckets (
+                user_id TEXT NOT NULL,
+                sec     INTEGER NOT NULL,
+                n       INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (user_id, sec)
+            );
+            CREATE INDEX IF NOT EXISTS idx_rate_sec ON rate_buckets(sec);
+        """)
+    _TABLES_PATH = path
+
+
+def _ensure_rate_table() -> None:
+    """只建 rate_buckets 的旧入口（保留给既有测试/脚本调用）。
+
+    rate_buckets 与 usage 现在由同一个 `_ensure_tables` 负责（两张表一起建、
+    一起跟着库路径走），这里只是强制重跑一次，语义仍是"这个库的表建好"。
+    """
+    _ensure_tables(force=True)
 
 # uid -> 最近一分钟内的请求时间戳（秒）。只留窗口内的数据，不会无限涨
 _HITS: dict[str, list[float]] = {}
@@ -101,22 +163,6 @@ class QuotaExceeded(Exception):
 # ---------- 每分钟：进程内滑窗（+ 多 worker 兜底）----------
 
 
-def _ensure_rate_table() -> None:
-    with _get_conn() as conn:
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS rate_buckets (
-                user_id TEXT NOT NULL,
-                sec     INTEGER NOT NULL,
-                n       INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (user_id, sec)
-            );
-            CREATE INDEX IF NOT EXISTS idx_rate_sec ON rate_buckets(sec);
-        """)
-
-
-_ensure_rate_table()
-
-
 def _shared_count(uid: str, now_wall: int) -> int:
     """全局限额窗口内已放行数（跨进程）。返回 -1 表示读不到。
 
@@ -138,7 +184,7 @@ def _shared_count(uid: str, now_wall: int) -> int:
         db_part = cached[1]
     else:
         try:
-            with _get_conn() as conn:
+            with _conn() as conn:
                 row = conn.execute(
                     "SELECT COALESCE(SUM(n), 0) AS s FROM rate_buckets "
                     "WHERE user_id = ? AND sec > ?",
@@ -179,7 +225,7 @@ def _write_bucket(uid: str, sec: int, n: int) -> None:
     """把 (秒桶, 计数) 累加落库。失败静默——限流记账不该影响业务请求。"""
     global _flush_ops
     try:
-        with _get_conn() as conn:
+        with _conn() as conn:
             conn.execute(
                 "INSERT INTO rate_buckets (user_id, sec, n) VALUES (?, ?, ?) "
                 "ON CONFLICT(user_id, sec) DO UPDATE SET n = n + excluded.n",
@@ -194,7 +240,7 @@ def _write_bucket(uid: str, sec: int, n: int) -> None:
             if cached is not None:
                 _SHARED_CACHE[uid] = (cached[0], cached[1] + n)
         if _flush_ops % 60 == 0:
-            with _get_conn() as conn:
+            with _conn() as conn:
                 conn.execute("DELETE FROM rate_buckets WHERE sec < ?", (sec - _BUCKET_TTL,))
     except Exception:
         pass
@@ -264,19 +310,6 @@ def hit(uid: str, limit: int | None = None) -> int:
 # ---------- 每日：落库计数 ----------
 
 
-def _ensure_tables() -> None:
-    with _get_conn() as conn:
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS usage (
-                user_id  TEXT NOT NULL,
-                day      TEXT NOT NULL,
-                kind     TEXT NOT NULL,
-                count    INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (user_id, day, kind)
-            );
-        """)
-
-
 _ensure_tables()
 
 
@@ -295,7 +328,7 @@ def day_key(ts: int | None = None) -> str:
 
 
 def usage_today(uid: str, kind: str) -> int:
-    with _get_conn() as conn:
+    with _conn() as conn:
         row = conn.execute(
             "SELECT count FROM usage WHERE user_id = ? AND day = ? AND kind = ?",
             (uid, day_key(), kind),
@@ -305,7 +338,7 @@ def usage_today(uid: str, kind: str) -> int:
 
 def bump_usage(uid: str, kind: str, n: int = 1) -> int:
     """累加当日用量并返回累加后的值。原子 upsert，不做"读-改-写"。"""
-    with _get_conn() as conn:
+    with _conn() as conn:
         conn.execute(
             "INSERT INTO usage (user_id, day, kind, count) VALUES (?, ?, ?, ?) "
             "ON CONFLICT(user_id, day, kind) DO UPDATE SET count = count + excluded.count",
@@ -432,7 +465,7 @@ def history(uid: str, days: int = 7) -> list[dict]:
     # 后者在跨夏令时的时区会跳过/重复一天，且口径与 day_key 不一定一致。
     keys = timeutil.recent_days(days)
     since = keys[0]
-    with _get_conn() as conn:
+    with _conn() as conn:
         rows = conn.execute(
             "SELECT day, kind, count FROM usage WHERE user_id = ? AND day >= ?",
             (uid, since),

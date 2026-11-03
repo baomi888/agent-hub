@@ -211,6 +211,23 @@ export interface QuotaInfo {
 export interface UserOut {
   id: string;
   username: string;
+  /**
+   * 显示名。空串 = 没设过 → 全站显示 username。
+   * 与 username 分开是因为两者代价差太远：昵称随便改，登录名要验密码还限次。
+   */
+  nickname?: string;
+  /**
+   * 头像。三种形态，用前缀区分（后端 account.normalize_avatar 校验）：
+   *   ""              没设过 → 昵称首字母
+   *   "icon:<name>"   内置图标（CornIcon 的 name）
+   *   "img:<hash>"    上传的图片（第 2 批）
+   */
+  avatar?: string;
+  /**
+   * 登录名还能改几次（后端 MAX_NAME_CHANGES=3）。
+   * 老后端不返回时按"还能改"处理 —— 缺字段就把按钮变灰是最糟的降级方向。
+   */
+  name_changes_left?: number;
 }
 
 export interface MeOut {

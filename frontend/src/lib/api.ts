@@ -467,6 +467,31 @@ export const api = {
   logout: () => request<{ ok: boolean }>("/api/auth/logout/", { method: "POST" }),
   me: () => request<MeOut>("/api/auth/me/"),
 
+  // ---------- 账号自助 ----------
+  // 三个都返回新的 MeOut，调用方拿到直接 set 进登录态即可，不用再拉一次 /me。
+  // 注意**不带尾斜杠**：新端点统一规矩（见后端 main.py 的 normalize_api_slash）。
+  /** 改昵称 / 选内置头像。不传的字段保持不变 */
+  updateProfile: (body: { nickname?: string; avatar?: string }) =>
+    request<MeOut>("/api/auth/profile", {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  /**
+   * 改密码。后端会让**其它设备**的会话立即失效（令牌水位），当前这台会重签 Cookie。
+   * 所以调用成功后不需要重新登录，但要提示用户"别的设备要重新登录"。
+   */
+  changePassword: (oldPassword: string, newPassword: string) =>
+    request<MeOut>("/api/auth/password", {
+      method: "POST",
+      body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+    }),
+  /** 改登录名。要验密码，且后端限制总次数 */
+  changeUsername: (password: string, newUsername: string) =>
+    request<MeOut>("/api/auth/username", {
+      method: "POST",
+      body: JSON.stringify({ password, new_username: newUsername }),
+    }),
+
   // ---------- 用量与反馈看板 ----------
   usageSummary: () => request<UsageSummary>("/api/usage/summary"),
 

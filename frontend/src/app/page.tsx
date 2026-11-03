@@ -843,6 +843,8 @@ export default function Home() {
         overlay={viewport === "narrow"}
         open={sidebarOpen}
         username={auth.me?.user.username}
+        displayName={auth.me?.user.nickname || auth.me?.user.username}
+        avatar={auth.me?.user.avatar}
         quota={auth.me?.quota}
         onOpenUsage={() => setUsageOpen(true)}
         onLogout={() => void auth.logout()}

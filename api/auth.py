@@ -8,11 +8,14 @@ from __future__ import annotations
 本项目历史上已经因为"同一规则这处遵守、那处漏了"反复踩坑。
 
 路由清单：
-  GET  /api/auth/config/    公开：是否开放注册
-  POST /api/auth/register/  公开：注册并直接登录
-  POST /api/auth/login/     公开：登录
-  POST /api/auth/logout/    公开：退出（未登录时调用也返回 ok）
-  GET  /api/auth/me/        需登录：当前身份 + 今日用量
+  GET   /api/auth/config/    公开：是否开放注册
+  POST  /api/auth/register/  公开：注册并直接登录
+  POST  /api/auth/login/     公开：登录
+  POST  /api/auth/logout/    公开：退出（未登录时调用也返回 ok）
+  GET   /api/auth/me/        需登录：当前身份 + 今日用量
+  PATCH /api/auth/profile    需登录：改昵称 / 选内置头像（不验密码）
+  POST  /api/auth/password   需登录：改密码（验旧密码，踢掉其它设备）
+  POST  /api/auth/username   需登录：改登录名（验密码 + 查重 + 限 3 次）
 """
 
 import asyncio
@@ -42,6 +45,16 @@ class Credentials(BaseModel):
 class UserOut(BaseModel):
     id: str
     username: str
+    # 显示名。空串 = 没设过，前端回落到 username。
+    # 默认空串而不是必填：老前端拿到多出来的字段不会崩，新前端拿到老后端的
+    # 响应（没有这个字段）也有确定的回落值。
+    nickname: str = ""
+    # 头像。"" = 首字母 / "icon:<name>" = 内置图标 / "img:<hash>" = 上传（第 2 批）
+    avatar: str = ""
+    # 登录名还能改几次。默认给"上限"而不是 0：老后端不返回这个字段时，
+    # 前端应该按"还能改"显示 —— 默认成 0 会让所有人的改名按钮变灰，
+    # 那种"升级后功能消失"比"点了才被告知次数用完"糟得多。
+    name_changes_left: int = account.MAX_NAME_CHANGES
     # 只在 AUTH_RETURN_TOKEN=1 时回吐；浏览器侧靠 HttpOnly Cookie，不需要它
     token: str | None = None
 
@@ -53,6 +66,23 @@ class MeOut(BaseModel):
     # 默认 False：老前端拿到不带这个字段的响应也不会崩，未知一律当"不是管理员"
     # —— 权限判定的默认值必须是拒绝的那一侧。
     is_admin: bool = False
+
+
+class ProfilePatch(BaseModel):
+    """改昵称 / 头像。两个字段都可选，只改传了的那个。"""
+
+    nickname: str | None = None
+    avatar: str | None = None
+
+
+class PasswordChange(BaseModel):
+    old_password: str = Field(..., description="原密码")
+    new_password: str = Field(..., description="新密码")
+
+
+class UsernameChange(BaseModel):
+    password: str = Field(..., description="当前密码（改名是凭证变更，必须验证）")
+    new_username: str = Field(..., description="新登录名")
 
 
 def _reject(msg: str, status: int = 400) -> None:
@@ -88,15 +118,59 @@ def _client_ip(request: Request) -> str:
 def _is_reserved_admin_name(name: str) -> bool:
     """该用户名是否被配置为管理员（注册时保留，防抢注）。
 
-    背景：ADMIN_USERNAMES 里的名字是"可猜的权限"。若账号尚未创建，
-    自助注册的第一个抢注者就会直接变成管理员。这里把名单里的名字从
-    注册入口封掉——管理员账号只能由运维用 tools/create_user.py 创建，
-    或改用不可猜的 ADMIN_UIDS。
+    实现已移到 `core.account.is_reserved_admin_name`：改登录名那条路也必须过
+    同一道闸（否则把名字改成 "苞米呀" 就白拿管理员），规则只能有一份。
+    这里保留薄封装只为不改动既有调用点。
     """
-    n = account.normalize_name(name).casefold()
-    if not n:
-        return False
-    return any(n == str(x).casefold() for x in (config.ADMIN_USERNAMES or ()))
+    return account.is_reserved_admin_name(name)
+
+
+def _name_changes_left(row: dict) -> int:
+    """还能改几次登录名。
+
+    ★ 这里踩过坑：row 有两种形状 ——
+      · `account.get_user()` 给的是**原始行**，只有 `name_change_count`；
+      · `account._public()` 给的是对外 dict，只有折好的 `name_changes_left`。
+    早先写成 `row.get("name_changes_left", MAX)`，第一种形状永远命中默认值，
+    表现为"改完名剩余次数不减少"，前端一直显示还能改 3 次（上限形同虚设）。
+    所以两种形状都要认，优先级：折好的结果 > 原始计数 > 默认值。
+    """
+    left = row.get("name_changes_left")
+    if left is not None:
+        return max(0, int(left))
+    return max(
+        0, account.MAX_NAME_CHANGES - int(row.get("name_change_count") or 0)
+    )
+
+
+def _user_out(row: dict, token: str | None = None) -> UserOut:
+    """把用户行转成对外的 UserOut。
+
+    统一走这个函数，是为了让"哪些字段能出网"只有一处可读 —— 前面
+    `account._public()` 已经把 password_hash 摘掉了，这里再统一补上 token。
+    """
+    return UserOut(
+        id=row["id"],
+        username=row["username"],
+        nickname=row.get("nickname") or "",
+        avatar=row.get("avatar") or "",
+        name_changes_left=_name_changes_left(row),
+        token=token,
+    )
+
+
+async def _me_payload(row: dict) -> MeOut:
+    """用一行用户记录拼出 MeOut（配额快照走线程，别阻塞事件循环）。"""
+    snap = await asyncio.to_thread(quota.snapshot, row["id"])
+    return MeOut(user=_user_out(row), quota=snap, is_admin=quota._is_admin(row["id"]))
+
+
+async def _load_me(uid: str) -> MeOut:
+    row = await asyncio.to_thread(account.get_user, uid)
+    if not row:
+        # 账号被删了但 token 还有效（7 天内）——别当作系统错误，直接判未登录
+        raise HTTPException(status_code=401, detail="账号不存在，请重新登录")
+    return await _me_payload(row)
 
 
 def _issue_session(user: dict, request: Request, response: Response) -> UserOut:
@@ -110,13 +184,15 @@ def _issue_session(user: dict, request: Request, response: Response) -> UserOut:
     响应体里的 token 默认关闭（AUTH_RETURN_TOKEN=0）：给了 JS 就等于把
     XSS 的收益从"偷不到"变成"直接拿走 7 天会话"。
     """
-    token = create_token(user["id"], username=user["username"])
-    set_session_cookie(response, token, request)
-    return UserOut(
-        id=user["id"],
+    # af 必须带上当前水位：不带（=0）的话，改过密码的用户下次登录拿到的令牌
+    # 一落地就被"af < 水位"判成失效 —— 表现为登录成功却立刻被踢回登录页。
+    token = create_token(
+        user["id"],
         username=user["username"],
-        token=token if config.AUTH_RETURN_TOKEN else None,
+        valid_after=account.get_token_valid_after(user["id"]),
     )
+    set_session_cookie(response, token, request)
+    return _user_out(user, token=token if config.AUTH_RETURN_TOKEN else None)
 
 
 # ==================== 公开端点 ====================
@@ -212,13 +288,120 @@ def logout(request: Request, response: Response) -> dict:
 @router.get("/me/", response_model=MeOut)
 async def me(uid: str = Depends(get_current_user)):
     """当前身份。前端用它判断"要不要弹登录"，以及展示今日用量。"""
+    return await _load_me(uid)
+
+
+# ==================== 账号自助（需登录） ====================
+# 三个端点都不带尾斜杠：新端点统一规矩（见 main.py 的 normalize_api_slash）。
+
+
+@router.patch("/profile", response_model=MeOut)
+async def update_profile(body: ProfilePatch, uid: str = Depends(get_current_user)):
+    """改昵称 / 选内置头像。
+
+    **不需要密码**：这两样只影响"别人怎么看见我"，改错也不伤账号。
+    真正是凭证的东西（密码、登录名）在下面两个端点，必须验旧密码。
+    """
+    if body.nickname is None and body.avatar is None:
+        _reject("没有要改的内容")
+
+    try:
+        # 按用户分桶限流：这是唯一能高频写 users 表的入口
+        quota.hit("profile:%s" % uid, limit=10)
+    except quota.RateLimited as e:
+        _reject(str(e), 429)
+
+    if body.nickname is not None:
+        err = account.check_nickname(body.nickname)
+        if err:
+            _reject(err)
+
+    # 头像先校验再落库：normalize_avatar 返回 None = 非法，返回 "" = 清空。
+    # 用 is None 判断而不是 falsy —— 空串是合法的"清空"。
+    avatar = None
+    if body.avatar is not None:
+        avatar = account.normalize_avatar(body.avatar)
+        if avatar is None:
+            _reject("头像参数不合法")
+
+    if body.nickname is not None:
+        await asyncio.to_thread(account.set_nickname, uid, body.nickname)
+    if avatar is not None:
+        await asyncio.to_thread(account.set_avatar, uid, avatar)
+
+    return await _load_me(uid)
+
+
+@router.post("/password", response_model=MeOut)
+async def change_password(
+    body: PasswordChange,
+    request: Request,
+    response: Response,
+    uid: str = Depends(get_current_user),
+):
+    """改密码：验旧密码 → 校验新密码 → 落库（含令牌水位）→ 给当前这台重签 Cookie。
+
+    最后一步不能省。写完水位后，**所有**签发早于此刻的令牌都失效，包括正在
+    发起这次请求的这一枚；不重签的话用户改完密码自己就被踢回登录页，
+    会以为"改密码把号弄坏了"，然后拿旧密码反复试。
+    """
+    try:
+        # 改密码要跑一次 PBKDF2（本身就很慢），限流只是兜底。
+        # 定 10/分 而不是更紧：每次 PBKDF2 约 80ms，10 次/分对服务器没有压力，
+        # 而更紧的桶会误伤真实用户 —— 他可能先打错旧密码两次、新密码不合规一次，
+        # 第四次才成功，然后发现自己"操作过于频繁"等了 60 秒。
+        quota.hit("password:%s" % uid, limit=10)
+    except quota.RateLimited as e:
+        _reject(str(e), 429)
+
+    err = await asyncio.to_thread(
+        account.change_password, uid, body.old_password, body.new_password
+    )
+    if err:
+        # 已登录状态下不涉及"账号是否存在"的枚举，直接给具体原因更有用
+        _reject(err)
+
     row = await asyncio.to_thread(account.get_user, uid)
     if not row:
-        # 账号被删了但 token 还有效（7 天内）——别当作系统错误，直接判未登录
         raise HTTPException(status_code=401, detail="账号不存在，请重新登录")
-    snap = await asyncio.to_thread(quota.snapshot, uid)
-    return MeOut(
-        user=UserOut(id=uid, username=row["username"]),
-        quota=snap,
-        is_admin=quota._is_admin(uid),
+    # 重签时带上**刚写入的新水位**：af == 水位，因此不满足 "af < 水位"，自己不会被踢
+    set_session_cookie(
+        response,
+        create_token(uid, username=row["username"], valid_after=int(row.get("token_valid_after") or 0)),
+        request,
     )
+    return await _me_payload(row)
+
+
+@router.post("/username", response_model=MeOut)
+async def change_username(
+    body: UsernameChange,
+    request: Request,
+    response: Response,
+    uid: str = Depends(get_current_user),
+):
+    """改登录名：验密码 → 规则校验 → 查重 → 限次 → 落库 → 重签 Cookie。
+
+    为什么要密码、为什么限 3 次、改完忘了怎么办 —— 见
+    docs/账号自助_头像姓名密码_方案_2026-11-03.md §5.2。
+    """
+    try:
+        # 同 password：10/分 只拦脚本，不拦人
+        quota.hit("username:%s" % uid, limit=10)
+    except quota.RateLimited as e:
+        _reject(str(e), 429)
+
+    row, err, status = await asyncio.to_thread(
+        account.change_username, uid, body.password, body.new_username
+    )
+    if err or not row:
+        _reject(err or "改名失败", status)
+
+    # JWT 里的 username 只是展示冗余，重发即同步；uid 不变，所以不会掉线。
+    # 不重发的话，侧栏会一直显示旧的登录名直到下次登录——用户会以为没改成。
+    set_session_cookie(
+        response,
+        create_token(uid, username=row["username"], valid_after=int(row.get("token_valid_after") or 0)),
+        request,
+    )
+    return await _me_payload(row)
