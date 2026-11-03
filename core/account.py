@@ -75,9 +75,9 @@ def check_name(name: str) -> str | None:
     """校验用户名，合法返回 None，不合法返回给用户看的中文提示。"""
     n = normalize_name(name)
     if len(n) < MIN_NAME or len(n) > MAX_NAME:
-        return f"用户名需 {MIN_NAME}~{MAX_NAME} 个字符"
+        return f"登录名需 {MIN_NAME}~{MAX_NAME} 个字符"
     if not _NAME_RE.match(n):
-        return "用户名只能包含字母、数字、中文、下划线、点或连字符"
+        return "登录名只能包含字母、数字、中文、下划线、点或连字符"
     return None
 
 
@@ -201,9 +201,9 @@ def _ensure_columns() -> None:
                 "ALTER TABLE users ADD COLUMN name_change_count INTEGER NOT NULL DEFAULT 0"
             )
         if "token_valid_after" not in cols:
-            # 令牌水位：签发时间早于它的令牌一律作废。
-            # 改密码时写入当前时刻 = 把该账号其它设备的会话一次性踢掉。
-            # 0 = 从未触发，对存量令牌零影响（否则一上线就把所有人踢了）。
+            # 鉴权代数（列名因兼容保留）：每次改密码 +1，令牌带着签发时的代数。
+            # 用单调计数而不是时间戳，避免同秒连改两次时水位不变、旧令牌漏过，
+            # 也不受服务器时钟回拨影响。0 = 从未触发，对存量令牌零影响。
             conn.execute(
                 "ALTER TABLE users ADD COLUMN token_valid_after INTEGER NOT NULL DEFAULT 0"
             )
@@ -388,6 +388,10 @@ AVATAR_ICONS = frozenset(
 
 AVATAR_ICON_PREFIX = "icon:"
 
+# 上传头像的 hash：sha256 前 16 位，小写十六进制。
+# 只认这个形状是防穿越的第一道闸（另一道在 service/avatar.py::path_of）。
+_AVATAR_HASH_RE = re.compile(r"^[0-9a-f]{16}$")
+
 def check_nickname(nick: str) -> str | None:
     """校验昵称，合法返回 None。
 
@@ -412,14 +416,21 @@ def normalize_avatar(value: str) -> str | None:
     合法形态：
       ""             清空，前端回落首字母
       "icon:<name>"  name 必须在 AVATAR_ICONS 里
-      "img:<hash>"   第 2 批上传头像才有，现在一律拒绝（还没有上传能力，
-                     放行等于允许手写一个不存在的文件名，前端会显示成破图）
+      "img:<hash>"   上传的头像，hash 是 16 位小写十六进制（内容 sha256 前 16 位）
+
+    `img:` 之所以也走这里：用户传完图再选一个内置图标、然后又想换回刚才那张图，
+    前端手上还有那个 hash（`me.user.avatar`），没必要逼他重新传一遍。
+    但**文件是否存在由调用方另外校验**（`service.avatar.exists`）——
+    这里只管格式，不碰磁盘，否则 core 层就依赖了存储布局。
     """
     v = (value or "").strip()
     if not v:
         return ""
     if v.startswith(AVATAR_ICON_PREFIX):
         return v if v[len(AVATAR_ICON_PREFIX) :] in AVATAR_ICONS else None
+    if v.startswith("img:"):
+        h = v[len("img:") :]
+        return v if _AVATAR_HASH_RE.match(h) else None
     return None
 
 
@@ -430,15 +441,37 @@ def set_nickname(uid: str, nickname: str) -> None:
         )
 
 
-def set_avatar(uid: str, avatar: str) -> None:
+def set_avatar(uid: str, avatar: str) -> str:
+    """设置头像，**返回旧值**（调用方据此清理没人再引用的上传文件）。
+
+    返回旧值而不是让调用方先查一次：换头像时"读旧值 → 写新值"必须落在同一个
+    连接里，否则两个并发请求可能都读到同一个旧值，然后谁也删不掉那张图。
+    """
     with _conn() as conn:
+        row = conn.execute("SELECT avatar FROM users WHERE id = ?", (uid,)).fetchone()
+        old = (row["avatar"] if row else "") or ""
         conn.execute("UPDATE users SET avatar = ? WHERE id = ?", (avatar or "", uid))
+    return old
+
+
+def is_avatar_referenced(avatar: str) -> bool:
+    """还有没有别的用户在用这个头像值。
+
+    多个用户可以选同一张图（同图内容 hash 相同、只存一份），所以换头像后
+    不能无条件删文件 —— 先问一句"还有人用吗"。
+    """
+    v = (avatar or "").strip()
+    if not v:
+        return True
+    with _conn() as conn:
+        row = conn.execute("SELECT 1 FROM users WHERE avatar = ? LIMIT 1", (v,)).fetchone()
+        return row is not None
 
 
 def get_token_valid_after(uid: str) -> int:
-    """取令牌水位（改密码时写入的时刻）。0 = 从未触发。
+    """取账号当前鉴权代数（数据库列名 token_valid_after 为兼容保留）。0 = 从未改密。
 
-    这个查询会在**每一次**鉴权里跑。用单列主键查询换"绝不缓存"：
+    鉴权依赖会在**每一次**请求里读这个值。用主键查询换"绝不缓存"：
     缓存 30 秒意味着改完密码后旧会话还能多用 30 秒，而那正是这个功能
     唯一的用处。SQLite 本地主键查询是微秒级，不值得为它引入一份可能过期的副本。
     """
@@ -452,29 +485,41 @@ def get_token_valid_after(uid: str) -> int:
 def change_password(uid: str, old_password: str, new_password: str) -> str | None:
     """改密码。成功返回 None，失败返回给用户看的中文提示。
 
-    写入 `token_valid_after = now` 是**这个功能的重点**：不写水位等于只换了
+    把鉴权代数 +1 是**这个功能的重点**：不换代等于只换了
     门锁没换钥匙，已经登进来的会话（有效期 AUTH_TTL_DAYS=7 天）照旧能用，
     而用户会以为"我把人赶走了"。
 
-    当前这台不会掉线：API 层紧接着会用新时刻重签一枚 Cookie，
-    它的 iat >= 这里的 now，因此不满足"iat < 水位"。
+    当前这台不会掉线：API 层紧接着会带新代数重签一枚 Cookie。
+    其它令牌仍带旧代数，下一次请求就会被鉴权依赖拒绝。
     """
     row = get_user(uid)
     if not row:
         return "账号不存在"
+    if int(row.get("lock_until") or 0) > int(time.time()):
+        return "账号已被锁定，请稍后再试"
     if not verify_password(old_password, row["password_hash"]):
+        _record_login_failure(uid)
         return "原密码不对"
+    # 旧密码已证明本人身份；后续即使新密码不合规，也只该报新密码的问题，
+    # 不应让此前登录失败累计的计数继续挂着。
+    _clear_login_failure(uid)
     err = check_password(new_password)
     if err:
         return err
     if old_password == new_password:
         return "新密码和原密码相同"
-    now = int(time.time())
+    old_hash = row["password_hash"]
+    new_hash = hash_password(new_password)
     with _conn() as conn:
-        conn.execute(
-            "UPDATE users SET password_hash = ?, token_valid_after = ? WHERE id = ?",
-            (hash_password(new_password), now, uid),
+        cur = conn.execute(
+            "UPDATE users SET password_hash = ?, token_valid_after = token_valid_after + 1 "
+            "WHERE id = ? AND password_hash = ?",
+            (new_hash, uid, old_hash),
         )
+    if cur.rowcount != 1:
+        # 两个并发改密请求都验过了同一份旧密码：只允许第一个落库。
+        # 第二个若也返回成功，用户会误以为自己的新密码生效，实际却被另一边覆盖。
+        return "密码刚刚已被修改，请重新登录后再试"
     audit("password_change", uid, {})
     return None
 
@@ -488,8 +533,12 @@ def change_username(uid: str, password: str, new_name: str) -> tuple[dict | None
     row = get_user(uid)
     if not row:
         return None, "账号不存在", 401
+    if int(row.get("lock_until") or 0) > int(time.time()):
+        return None, "账号已被锁定，请稍后再试", 403
     if not verify_password(password, row["password_hash"]):
+        _record_login_failure(uid)
         return None, "密码不对", 400
+    _clear_login_failure(uid)
 
     name = normalize_name(new_name)
     err = check_name(name)
@@ -511,15 +560,25 @@ def change_username(uid: str, password: str, new_name: str) -> tuple[dict | None
 
     try:
         with _conn() as conn:
-            conn.execute(
+            cur = conn.execute(
                 "UPDATE users SET username = ?, name_change_count = name_change_count + 1 "
-                "WHERE id = ?",
-                (name, uid),
+                "WHERE id = ? AND username = ? AND name_change_count = ?",
+                (name, uid, row["username"], int(row.get("name_change_count") or 0)),
             )
     except sqlite3.IntegrityError:
         # 两个请求同时通过上面的查重、只有先落库的能成功。
         # 不捕这个异常的话，用户看到的是 500，而实际原因只是"手慢了"。
         return None, "这个登录名已被占用", 409
+
+    if cur.rowcount != 1:
+        latest = get_user(uid)
+        if not latest:
+            return None, "账号不存在，请重新登录", 401
+        if int(latest.get("name_change_count") or 0) >= MAX_NAME_CHANGES:
+            return None, f"登录名最多改 {MAX_NAME_CHANGES} 次，已经用完了", 403
+        # 同账号的另一个请求刚改过名。用旧快照继续写会让两个请求都报成功，
+        # 但最终只留下后一个名字，用户无法判断自己现在到底叫什么。
+        return None, "登录名刚刚被修改，请刷新后再试", 409
 
     audit("username_change", uid, {"from": row["username"], "to": name})
     return get_user(uid), "", 200

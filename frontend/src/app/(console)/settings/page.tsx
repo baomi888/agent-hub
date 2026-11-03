@@ -527,6 +527,30 @@ function AccountCard({ onLogout }: { onLogout: () => Promise<void> }) {
     [refresh],
   );
 
+  /**
+   * 上传头像。返回 null = 成功；返回字符串 = 弹窗里要显示的错误。
+   *
+   * 失败时**保持弹窗打开**并原地显示原因 —— 用户刚选完图，把他弹回设置页
+   * 再让他重新点一次头像、重新找那张图，是最没必要的摩擦。
+   */
+  const uploadAvatar = useCallback(
+    async (blob: Blob) => {
+      setSavingAvatar("img:upload");
+      try {
+        await api.uploadAvatar(blob);
+        await refresh();
+        setPickerOpen(false);
+        setNote({ kind: "ok", text: "头像换好了" });
+        return null;
+      } catch (e) {
+        return (e as Error).message || "上传没成功，稍后再试";
+      } finally {
+        setSavingAvatar(null);
+      }
+    },
+    [refresh],
+  );
+
   const startNickEdit = useCallback(() => {
     setNickDraft(me?.user.nickname || "");
     setNote(null);
@@ -664,6 +688,7 @@ function AccountCard({ onLogout }: { onLogout: () => Promise<void> }) {
         current={me?.user.avatar || ""}
         name={displayName}
         onPick={pickAvatar}
+        onUpload={uploadAvatar}
         saving={savingAvatar}
       />
       <PasswordDialog open={pwdOpen} onClose={() => setPwdOpen(false)} />

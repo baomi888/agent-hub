@@ -32,20 +32,20 @@ export default function AuthGate({ allowSignup, checking, onLogin, onRegister }:
     if (busy) return;
     const u = username.trim();
     if (!u || !password) {
-      setError("请填写用户名和密码");
+      setError("请填写登录名和密码");
       return;
     }
     // 注册前先在本地拦一道，和后端 core/account.py 的规则对齐：
     // 否则用户填错一次就打一次 400，日志里全是重试（内测第一天实测如此）。
     if (currentMode === "register") {
       if (u.length < 3 || u.length > 32) {
-        setError("用户名需 3~32 个字符");
+        setError("登录名需 3~32 个字符");
         return;
       }
       // 后端正则 ^[\w.\-]+$ 按 Unicode 匹配（含中文），JS 的 \w 不含中文，
       // 用 Unicode 属性转义对齐：字母/数字 + 下划线 + 点 + 连字符
       if (!/^[\p{L}\p{N}._\-]+$/u.test(u)) {
-        setError("用户名只能包含字母、数字、中文、下划线、点或连字符");
+        setError("登录名只能包含字母、数字、中文、下划线、点或连字符");
         return;
       }
       if (password.length < 6 || password.length > 128) {
@@ -109,7 +109,7 @@ export default function AuthGate({ allowSignup, checking, onLogin, onRegister }:
           }}
         >
           <label className="auth-label">
-            <span>用户名</span>
+            <span>登录名</span>
             <input
               value={username}
               onChange={(e) => setUsername(e.target.value)}

@@ -265,6 +265,40 @@
   white-space: nowrap;
 }
 
+/* ---------------- 上传自己的照片 ---------------- */
+
+.acct-upload {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-6);
+  margin-bottom: var(--space-14);
+}
+.acct-upload-btn {
+  /* 虚线边框与上面那块预览呼应：都是"这里可以放东西进来"的区域 */
+  border: 1px dashed var(--line);
+  gap: var(--space-6);
+}
+.acct-upload-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.acct-upload-hint {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+  line-height: 1.5;
+}
+/* 错误贴着按钮下方出现，别用 toast：用户正看着这个区域，跳走的提示容易被忽略。
+   颜色跟 .acct-note.is-err 用同一个语义色（暖纸面上纯红像报错横幅，
+   这里只是"这一张不行，换一张"） */
+.acct-upload-err {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--color-red-ink, #a23b2a);
+  line-height: 1.5;
+}
+
 .acct-pick-grid {
   display: grid;
   /* 5 列在 390px 屏上是每格约 58px：图标 28 + 两字标签，刚好不折行。

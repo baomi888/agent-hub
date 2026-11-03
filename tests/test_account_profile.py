@@ -12,6 +12,7 @@
 data/sessions.db 里建表（甚至建账号）。
 """
 
+import io
 import os
 import sys
 import tempfile
@@ -35,16 +36,6 @@ _ORIG_DB_PATH = session._db_path
 session._db_path = lambda: os.path.join(_TMP, "boot.db")
 session._init_db()
 
-config.ALLOW_SIGNUP = True
-# 显式配一个管理员名：默认是空列表，"改名抢注管理员"这条闸不会被触发，
-# 断言就成了假通过（真实部署里这个名单来自 .env）
-config.ADMIN_USERNAMES = ["admin"]
-config.AUTH_SECRET = "test-secret-account-profile"
-config._AUTH_SECRET_FILE = os.path.join(_TMP, ".auth_secret")
-# 关掉失败锁定：本文件测的是改密码/改名，不想被"连续失败 N 次锁号"干扰
-config.AUTH_MAX_FAILS = 0
-config.AUTH_LOCK_MINUTES = 0
-
 from fastapi.testclient import TestClient  # noqa: E402
 
 import main  # noqa: E402
@@ -56,8 +47,29 @@ from service import daily  # noqa: E402
 session._db_path = _ORIG_DB_PATH
 
 
+@pytest.fixture(autouse=True)
+def _isolate_config(monkeypatch):
+    """每个用例恢复一份账号测试配置，别污染同一进程里的其它测试。
+
+    这些值必须在 import 后、请求前设置（端点运行时才读 config），不能用模块级
+    裸赋值：pytest 收集所有文件时，模块级赋值会一直留到整个会话结束，导致后面的
+    “登录锁定”等测试被静默关闭。
+    """
+    monkeypatch.setattr(config, "ALLOW_SIGNUP", True)
+    # 显式配一个管理员名：默认是空列表，"改名抢注管理员"这条闸不会被触发，
+    # 断言就成了假通过（真实部署里这个名单来自 .env）
+    monkeypatch.setattr(config, "ADMIN_USERNAMES", ["admin"])
+    monkeypatch.setattr(config, "ADMIN_UIDS", [])
+    monkeypatch.setattr(config, "AUTH_SECRET", "test-secret-account-profile")
+    monkeypatch.setattr(config, "_AUTH_SECRET_FILE", os.path.join(_TMP, ".auth_secret"))
+    monkeypatch.setattr(config, "AUTH_RETURN_TOKEN", False)
+    # 本文件默认关掉失败锁定，单条安全测试会按需恢复阈值。
+    monkeypatch.setattr(config, "AUTH_MAX_FAILS", 0)
+    monkeypatch.setattr(config, "AUTH_LOCK_MINUTES", 0)
+
+
 def _fresh(monkeypatch, tag: str) -> TestClient:
-    """切到一个空库并返回独立 Cookie 罐子的客户端。"""
+    """切到一个空库 + 空数据目录，返回独立 Cookie 罐子的客户端。"""
     path = os.path.join(_TMP, tag + ".db")
     monkeypatch.setattr(session, "_db_path", lambda p=path: p)
     # 连接是按线程缓存的（路径变了才重建），换库必须连缓存一起丢掉
@@ -68,6 +80,12 @@ def _fresh(monkeypatch, tag: str) -> TestClient:
     daily._daily_tables_ready = False
     daily._ensure_daily_tables()
     quota._ensure_tables()
+    # ★ 数据目录也隔离：头像文件落在 ${DATA_DIR}/avatars，审计日志落在
+    #   ${DATA_DIR}/audit.log。指向真实的 data/ 会两件事都发生：测试往生产
+    #   目录写垃圾，以及"上一次跑留下的文件"让负向断言白过。
+    data_dir = os.path.join(_TMP, "data_" + tag)
+    os.makedirs(data_dir, exist_ok=True)
+    monkeypatch.setattr(config, "DATA_DIR", data_dir)
     # 限流按用户名/uid 分桶，同一个 client 连续调会累积
     quota._HITS.clear()
     return TestClient(main.app)
@@ -258,6 +276,98 @@ def test_password_change_rejects(monkeypatch):
     assert cli.get("/api/auth/me/", headers=_h(tok)).status_code == 200
 
 
+def test_second_password_change_same_second_invalidates_first_reissue(monkeypatch):
+    """同一秒连续改两次密码，第一次重签的令牌也必须失效。
+
+    ★ 这是时间戳水位最容易漏掉的边界：若把当前秒直接写进库，两次改密会得到
+    完全相同的值，第一枚 af 令牌看起来仍然“不早于水位”。鉴权代数必须单调 +1。
+    """
+    cli = _fresh(monkeypatch, "pwd_same_second")
+    _, old_tok = _register(cli)
+    fixed_now = int(account.time.time())
+    monkeypatch.setattr(account.time, "time", lambda: fixed_now)
+
+    r1 = cli.post(
+        "/api/auth/password",
+        json={"old_password": "abc123", "new_password": "def456"},
+        headers=_h(old_tok),
+    )
+    assert r1.status_code == 200, r1.text
+    first_reissue = cli.cookies.get("baomi_session")
+    assert first_reissue and first_reissue != old_tok
+
+    r2 = cli.post(
+        "/api/auth/password",
+        json={"old_password": "def456", "new_password": "ghi789"},
+        headers=_h(first_reissue),
+    )
+    assert r2.status_code == 200, r2.text
+    second_reissue = cli.cookies.get("baomi_session")
+    assert second_reissue and second_reissue != first_reissue
+
+    # 第一枚重签令牌是“第二次改密之前签发”的，必须被作废。
+    assert cli.get("/api/auth/me/", headers=_h(first_reissue)).status_code == 401
+    assert cli.get("/api/auth/me/", headers=_h(second_reissue)).status_code == 200
+
+
+def test_password_change_returns_replacement_for_bearer_clients(monkeypatch):
+    """AUTH_RETURN_TOKEN 客户端没有 Cookie，改密响应必须带回可用的新令牌。"""
+    cli = _fresh(monkeypatch, "pwd_bearer")
+    _, old_tok = _register(cli)
+    monkeypatch.setattr(config, "AUTH_RETURN_TOKEN", True)
+
+    r = cli.post(
+        "/api/auth/password",
+        json={"old_password": "abc123", "new_password": "def456"},
+        headers=_h(old_tok),
+    )
+    assert r.status_code == 200, r.text
+    new_tok = r.json().get("user", {}).get("token")
+    assert new_tok and new_tok != old_tok
+
+    assert cli.get("/api/auth/me/", headers=_h(old_tok)).status_code == 401
+    assert cli.get("/api/auth/me/", headers=_h(new_tok)).status_code == 200
+
+
+def test_credential_change_bad_password_counts_and_success_clears(monkeypatch):
+    """已登录不是绕过口令爆破计数的理由。
+
+    改密码 / 改登录名都要求旧密码；错误尝试要和登录入口一样累计 failed_count。
+    一旦密码验证成功，则应立即清掉历史计数，避免“输对新密码也被前几次错误拖累”。
+    """
+    cli = _fresh(monkeypatch, "pwd_fail_count")
+    uid, tok = _register(cli)
+    monkeypatch.setattr(config, "AUTH_MAX_FAILS", 5)
+    monkeypatch.setattr(config, "AUTH_LOCK_MINUTES", 15)
+
+    r = cli.post(
+        "/api/auth/password",
+        json={"old_password": "wrong", "new_password": "def456"},
+        headers=_h(tok),
+    )
+    assert r.status_code == 400
+    assert int(account.get_user(uid)["failed_count"]) == 1
+
+    r = cli.post(
+        "/api/auth/username",
+        json={"password": "wrong", "new_username": "alice_next"},
+        headers=_h(tok),
+    )
+    assert r.status_code == 400
+    assert int(account.get_user(uid)["failed_count"]) == 2
+
+    # 旧密码正确：哪怕新密码随后被规则拒绝，也应清掉此前的失败计数。
+    r = cli.post(
+        "/api/auth/password",
+        json={"old_password": "abc123", "new_password": "123"},
+        headers=_h(tok),
+    )
+    assert r.status_code == 400
+    row = account.get_user(uid)
+    assert int(row["failed_count"]) == 0
+    assert int(row["lock_until"]) == 0
+
+
 def test_password_untouched_user_keeps_token(monkeypatch):
     """没改过密码的用户，令牌不能被水位逻辑误伤（水位默认 0）。
 
@@ -424,6 +534,333 @@ def test_audit_log_written(monkeypatch, tmp_path):
     # ★ 负向：日志里绝不能出现口令明文，否则日志泄露 = 全站口令泄露
     assert "def456" not in body
     assert "abc123" not in body
+
+
+def test_old_users_table_migrates_without_losing_account(monkeypatch, tmp_path):
+    """上线前必须能直接升级老库，而不是只在新库里通过。"""
+    path = str(tmp_path / "legacy.db")
+    monkeypatch.setattr(session, "_db_path", lambda: path)
+    monkeypatch.setattr(session, "_LOCAL", threading.local())
+    with session._get_conn() as conn:
+        conn.executescript(
+            """
+            CREATE TABLE users (
+                id            TEXT PRIMARY KEY,
+                username      TEXT NOT NULL COLLATE NOCASE,
+                password_hash TEXT NOT NULL,
+                created_at    INTEGER NOT NULL,
+                last_login_at INTEGER,
+                status        INTEGER NOT NULL DEFAULT 1,
+                failed_count  INTEGER NOT NULL DEFAULT 0,
+                lock_until    INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE UNIQUE INDEX idx_users_name ON users(username COLLATE NOCASE);
+            INSERT INTO users
+                (id, username, password_hash, created_at, last_login_at)
+            VALUES
+                ('legacy-uid', 'olduser', 'pbkdf2_sha256$1$AA==$AA==', 1, 1);
+            """
+        )
+
+    account._ensure_tables(force=True)
+    row = account.get_user("legacy-uid")
+    assert row is not None and row["username"] == "olduser"
+    assert row["nickname"] == ""
+    assert row["avatar"] == ""
+    assert int(row["name_change_count"]) == 0
+    assert int(row["token_valid_after"]) == 0
+
+
+# ==================== 上传头像 ====================
+#
+# 这一组几乎全是负向：正向只证明"能传"，负向才证明"限制是真的"。
+# 尤其注意两条 —— 6MB 文件不能留下半成品、20000×20000 的声明尺寸不能被解码。
+
+
+def _jpeg(w: int = 800, h: int = 600, color=(200, 120, 40)) -> bytes:
+    from PIL import Image
+
+    im = Image.new("RGB", (w, h), color)
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=80)
+    return buf.getvalue()
+
+
+def _png_rgba(w: int = 120, h: int = 120, alpha: int = 0) -> bytes:
+    from PIL import Image
+
+    im = Image.new("RGBA", (w, h), (255, 0, 0, alpha))
+    buf = io.BytesIO()
+    im.save(buf, "PNG")
+    return buf.getvalue()
+
+
+def _png_declaring(w: int, h: int) -> bytes:
+    """造一个"文件极小但声称自己是 W×H"的 PNG（解压炸弹的最小形态）。
+
+    只有 IHDR + IEND，没有 IDAT：PIL 能读出尺寸但读不出像素 ——
+    正的实现必须在 `load()` 之前就把尺寸判掉，否则这里会去解一张 3.2GB 的位图。
+    """
+    import struct
+    import zlib
+
+    ihdr = struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)
+    chunk = b"IHDR" + ihdr
+    crc = struct.pack(">I", zlib.crc32(chunk) & 0xFFFFFFFF)
+    iend = struct.pack(">I", 0) + b"IEND" + struct.pack(">I", zlib.crc32(b"IEND") & 0xFFFFFFFF)
+    return b"\x89PNG\r\n\x1a\n" + struct.pack(">I", len(ihdr)) + chunk + crc + iend
+
+
+def _avatar_files() -> list[str]:
+    d = os.path.join(config.DATA_DIR, "avatars")
+    return sorted(os.listdir(d)) if os.path.isdir(d) else []
+
+
+def _tmp_uploads() -> set[str]:
+    return {
+        f
+        for f in os.listdir(tempfile.gettempdir())
+        if f.startswith("avatar_") and f.endswith(".upload")
+    }
+
+
+def _upload(cli, tok, data: bytes, name="me.jpg", mime="image/jpeg"):
+    return cli.post(
+        "/api/auth/avatar",
+        files={"file": (name, data, mime)},
+        headers=_h(tok),
+    )
+
+
+def test_avatar_upload_ok(monkeypatch):
+    """正常上传：落盘是 192×192、体积很小、原图不残留。"""
+    from PIL import Image
+
+    cli = _fresh(monkeypatch, "av_ok")
+    _, tok = _register(cli)
+    before_tmp = _tmp_uploads()
+
+    r = _upload(cli, tok, _jpeg(1600, 1200))
+    assert r.status_code == 200, r.text
+    avatar = r.json()["user"]["avatar"]
+    assert avatar.startswith("img:"), avatar
+
+    files = _avatar_files()
+    assert len(files) == 1, files
+    path = os.path.join(config.DATA_DIR, "avatars", files[0])
+    with Image.open(path) as im:
+        assert im.size == (192, 192), im.size  # 统一正方形
+        assert im.format == "JPEG"
+    # 体积断言：>30KB 说明压缩参数没生效（正常 12~18KB）
+    assert os.path.getsize(path) < 30 * 1024, os.path.getsize(path)
+    # ★ 原图必须已经删掉：这是"只存成品"的硬规矩，残留等于磁盘迟早被吃满
+    assert _tmp_uploads() == before_tmp, "临时原图没清理"
+
+    # 换过之后 me 里也应该是新值（前端靠它渲染）
+    r2 = cli.get("/api/auth/me/", headers=_h(tok))
+    assert r2.json()["user"]["avatar"] == avatar
+
+
+def test_avatar_upload_too_big(monkeypatch):
+    """6MB → 400，且不留半成品。
+
+    ★ 这里断的是"不留垃圾"，不只是"返回 400"：`save_stream` 边写边累加，
+    超限时半成品已经在磁盘上了，不删的话每次被刷都给服务器留 5MB。
+    """
+    cli = _fresh(monkeypatch, "av_big")
+    _, tok = _register(cli)
+    before_tmp = _tmp_uploads()
+
+    r = _upload(cli, tok, b"\xff\xd8" + b"0" * (6 * 1024 * 1024))
+    assert r.status_code == 400, r.text
+    assert "大" in r.json()["detail"]
+    assert _tmp_uploads() == before_tmp, "超限后留下了半成品"
+    assert _avatar_files() == []
+
+
+def test_avatar_upload_not_image(monkeypatch):
+    """扩展名与 Content-Type 都能伪造 —— 判定只能靠"打得开"。
+
+    注意这里的 Content-Type 是合法的 image/jpeg：正好证明前端/客户端声明的
+    类型不构成任何保证。
+    """
+    cli = _fresh(monkeypatch, "av_fake")
+    _, tok = _register(cli)
+
+    r = _upload(cli, tok, b"this is definitely not an image", "me.jpg", "image/jpeg")
+    assert r.status_code == 400, r.text
+    assert "打不开" in r.json()["detail"], r.json()
+    assert _avatar_files() == []
+
+
+def test_avatar_rejects_svg_and_gif(monkeypatch):
+    """SVG 是存储型 XSS 的入口，明确不收；GIF 也不收（会存成不会动的静图，白骗用户）。"""
+    cli = _fresh(monkeypatch, "av_svg")
+    _, tok = _register(cli)
+
+    svg = b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
+    r = _upload(cli, tok, svg, "x.svg", "image/svg+xml")
+    assert r.status_code == 400, r.text
+    assert "JPG" in r.json()["detail"]
+
+    r = _upload(cli, tok, b"GIF89a", "x.gif", "image/gif")
+    assert r.status_code == 400, r.text
+
+
+def test_avatar_bomb_rejected_before_decode(monkeypatch):
+    """解压炸弹：文件几百字节、声称 20000×20000 → 必须在解码前拒掉。
+
+    ★ 这条如果只断言"返回 400"是瞎的：真的解了码也会因为 OOM 之外的错误返回 400
+    或者进程直接挂掉。所以额外断言**处理耗时**很短 —— 解码 20000×20000 不可能
+    在 1 秒内完成。
+    """
+    import time
+
+    cli = _fresh(monkeypatch, "av_bomb")
+    _, tok = _register(cli)
+
+    data = _png_declaring(20000, 20000)
+    assert len(data) < 1000, len(data)
+    t0 = time.monotonic()
+    r = _upload(cli, tok, data, "bomb.png", "image/png")
+    elapsed = time.monotonic() - t0
+    assert r.status_code == 400, r.text
+    assert "像素" in r.json()["detail"] or "尺寸" in r.json()["detail"], r.json()
+    assert elapsed < 1.5, f"耗时 {elapsed:.2f}s，不像是在解码前拦下的"
+    assert _avatar_files() == []
+
+
+def test_avatar_transparent_gets_white_not_black(monkeypatch):
+    """透明 PNG 垫白底。
+
+    直接 convert("RGB") 会把全透明像素变成**黑色**，一个白底表情包传上去
+    就变成黑框头像 —— 用户以为是我们把图弄坏了。
+    """
+    from PIL import Image
+
+    cli = _fresh(monkeypatch, "av_alpha")
+    _, tok = _register(cli)
+    r = _upload(cli, tok, _png_rgba(120, 120, 0), "t.png", "image/png")
+    assert r.status_code == 200, r.text
+
+    path = os.path.join(config.DATA_DIR, "avatars", _avatar_files()[0])
+    with Image.open(path) as im:
+        px = im.convert("RGB").getpixel((96, 96))
+    assert min(px) > 240, px  # 接近纯白
+
+
+def test_avatar_get_and_cache_headers(monkeypatch):
+    """取图：内容正确 + 可永久缓存 + 非法 hash 一律 404（不泄露目录结构）。"""
+    cli = _fresh(monkeypatch, "av_get")
+    _, tok = _register(cli)
+    avatar = _upload(cli, tok, _jpeg()).json()["user"]["avatar"]
+    h = avatar[len("img:") :]
+
+    r = cli.get(f"/api/auth/avatar/{h}")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/jpeg"
+    assert "immutable" in r.headers.get("cache-control", "")
+    assert r.headers.get("x-content-type-options") == "nosniff"
+    assert r.content[:2] == b"\xff\xd8"  # JPEG 魔数
+
+    # 不存在的 hash / 形状不对的 hash / 路径穿越，全部 404
+    for bad in ["0" * 16, "..", "..%2F..%2Fsessions", "ABCDEF0123456789", h + ".jpg"]:
+        r = cli.get(f"/api/auth/avatar/{bad}")
+        assert r.status_code == 404, f"{bad} -> {r.status_code}"
+
+
+def test_avatar_replace_deletes_old_file(monkeypatch):
+    """换图后旧文件要删：否则一年下来攒一堆没人用的碎图。"""
+    cli = _fresh(monkeypatch, "av_replace")
+    _, tok = _register(cli)
+
+    a1 = _upload(cli, tok, _jpeg(color=(10, 200, 10))).json()["user"]["avatar"]
+    a2 = _upload(cli, tok, _jpeg(color=(200, 10, 10))).json()["user"]["avatar"]
+    assert a1 != a2
+    h1, h2 = a1[len("img:") :], a2[len("img:") :]
+    assert h1 + ".jpg" not in _avatar_files()
+    assert h2 + ".jpg" in _avatar_files()
+
+    # 从照片换回内置图标，文件也该清掉
+    r = cli.patch("/api/auth/profile", json={"avatar": "icon:star"}, headers=_h(tok))
+    assert r.status_code == 200, r.text
+    assert _avatar_files() == []
+
+
+def test_avatar_shared_hash_not_deleted(monkeypatch):
+    """两个人用同一张图（同一个内容 hash），其中一个人换掉不能把另一个人的图删了。"""
+    cli = _fresh(monkeypatch, "av_share")
+    _, tok_a = _register(cli, "alice")
+    cli.post("/api/auth/register/", json={"username": "bob", "password": "bob123"})
+    tok_b = cli.cookies.get("baomi_session")
+
+    data = _jpeg(color=(0, 90, 200))
+    a1 = _upload(cli, tok_a, data).json()["user"]["avatar"]
+    a2 = _upload(cli, tok_b, data).json()["user"]["avatar"]
+    assert a1 == a2, "同图应共用一份文件"
+
+    r = cli.patch("/api/auth/profile", json={"avatar": "icon:book"}, headers=_h(tok_a))
+    assert r.status_code == 200
+    # alice 换走了，但 bob 还在用这张图 → 文件必须留着
+    assert _avatar_files() == [a1[len("img:") :] + ".jpg"], _avatar_files()
+    assert cli.get(f"/api/auth/avatar/{a2[len('img:') :]}").status_code == 200
+
+
+def test_profile_rejects_missing_img_hash(monkeypatch):
+    """PATCH 传 img:<不存在> 要拒。
+
+    格式合法不代表文件在。放行的话用户能把自己的头像改成一张不存在的图，
+    前端显示破图 —— 而他不知道自己做了什么。
+    """
+    cli = _fresh(monkeypatch, "av_missing")
+    _, tok = _register(cli)
+
+    r = cli.patch("/api/auth/profile", json={"avatar": "img:" + "0" * 16}, headers=_h(tok))
+    assert r.status_code == 400, r.text
+    # 格式不合法的 hash 同样拒
+    for bad in ["img:xyz", "img:" + "A" * 16, "img:../../etc/passwd", "img:"]:
+        r = cli.patch("/api/auth/profile", json={"avatar": bad}, headers=_h(tok))
+        assert r.status_code == 400, f"{bad} -> {r.status_code}"
+
+
+def test_avatar_upload_requires_login(monkeypatch):
+    cli = _fresh(monkeypatch, "av_anon")
+    r = cli.post("/api/auth/avatar", files={"file": ("a.jpg", _jpeg(), "image/jpeg")})
+    assert r.status_code == 401
+
+
+def test_avatar_audit_written(monkeypatch):
+    """上传也进审计：头像出过"审核"问题，得能查是谁什么时候换的。"""
+    cli = _fresh(monkeypatch, "av_audit")
+    _, tok = _register(cli)
+    _upload(cli, tok, _jpeg())
+
+    log = os.path.join(config.DATA_DIR, "audit.log")
+    with open(log, encoding="utf-8") as f:
+        body = f.read()
+    assert "avatar_upload" in body
+
+
+def test_avatar_side_boundary(monkeypatch):
+    """单边边界：4000 收，4001 拒。
+
+    ★ 只测"炸弹被拒"是不够的 —— 把阈值写成 1 也能让它通过。
+      边界两侧各打一发，才说明那条线真的在最该在的位置。
+      4000×4000 用纯色（压完几十 KB），不会撞上 5MB 的传输上限。
+    """
+    from PIL import Image
+
+    cli = _fresh(monkeypatch, "av_side")
+    _, tok = _register(cli)
+
+    buf = io.BytesIO()
+    Image.new("RGB", (4000, 4000), (210, 170, 110)).save(buf, "JPEG", quality=70)
+    r = _upload(cli, tok, buf.getvalue(), "max.jpg")
+    assert r.status_code == 200, r.text
+
+    r = _upload(cli, tok, _png_declaring(4001, 4001), "over.png", "image/png")
+    assert r.status_code == 400, r.text
+    assert "4000" in r.json()["detail"], r.json()
 
 
 if __name__ == "__main__":

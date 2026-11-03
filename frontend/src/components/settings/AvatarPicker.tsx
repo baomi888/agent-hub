@@ -1,13 +1,16 @@
 "use client";
 
-// 头像选择器（第 1 批：内置图标；第 2 批会在同一网格里加"上传自己的图"页签）。
+// 头像选择器：内置图标 + 上传自己的照片。
 //
 // 图标只列**能当形象用**的那些。CornIcon 里还有 warn（警告三角）、trash、close、
 // check、back、arrow、plus —— 它们表达的是"一个操作"，做成头像会让人以为那是个按钮。
 // 这份名单必须与后端 `core/account.py::AVATAR_ICONS` 一致：**后端才是权威**
 // （它会拒绝白名单外的值），这里只是照着渲染，漏一个的表现是"选项不显示"，
 // 多一个的表现是"点了报参数不合法"。
+import { useRef, useState } from "react";
+
 import CornIcon from "@/components/CornIcon";
+import { MAX_UPLOAD_BYTES, compressAvatar } from "@/lib/imageCompress";
 import DialogShell from "./DialogShell";
 import UserAvatar from "./UserAvatar";
 
@@ -70,6 +73,17 @@ interface Props {
    * 失败时保持打开，让用户能直接换一个再试 —— 关掉再打开要重新找位置。
    */
   onPick: (avatar: string) => Promise<boolean>;
+  /**
+   * 上传一张已压好的图。**返回 null = 成功，返回字符串 = 要显示给用户的错误**。
+   *
+   * 为什么不是 boolean：后端给的错误是中文人话（太大 / 打不开 / 太频繁），
+   * 直接显示在弹窗里比"上传没成功"有用得多；而把错误统一成一个 bool 再让
+   * 这里编一句通用文案，等于把唯一有用的信息扔掉。
+   *
+   * 压缩在这里做、上传交给调用方：压图是"选择器"的事（它持有 file input），
+   * 上传要触发 `refresh()` 与那行一次性提示，那些是账号卡的事。
+   */
+  onUpload: (blob: Blob) => Promise<string | null>;
   /** 是否正在保存某个值（用于把对应项置灰） */
   saving?: string | null;
 }
@@ -80,15 +94,55 @@ export default function AvatarPicker({
   current = "",
   name,
   onPick,
+  onUpload,
   saving = null,
 }: Props) {
-  const busy = saving !== null;
+  const fileRef = useRef<HTMLInputElement>(null);
+  /** compress → upload 两段分开显示，用户才知道卡在哪一步 */
+  const [phase, setPhase] = useState<"idle" | "compress" | "upload">("idle");
+  const [err, setErr] = useState<string | null>(null);
+
+  const busy = saving !== null || phase !== "idle";
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    // 立刻清空 value：不清的话"再选同一张图"不会触发 change，
+    // 用户会以为点了没反应（这是 file input 的经典坑）
+    e.target.value = "";
+    if (!file) return;
+
+    setErr(null);
+    // 明显不是图片时先拦一道，省得白等一轮上传再看到后端的报错。
+    // 注意这里**不是**安全边界：类型能伪造，真正的判定在后端 Image.open。
+    if (file.type && !/^image\/(jpeg|jpg|png|webp)$/i.test(file.type)) {
+      setErr("只支持 JPG / PNG / WebP 图片");
+      return;
+    }
+
+    setPhase("compress");
+    try {
+      // 压不了（HEIC / 老浏览器）就传原图，让后端兜
+      const blob = (await compressAvatar(file)) ?? file;
+      if (blob.size > MAX_UPLOAD_BYTES) {
+        const mb = (blob.size / 1024 / 1024).toFixed(1);
+        setErr(`这张图压完还有 ${mb}MB，请换一张 5MB 以内的`);
+        return;
+      }
+      setPhase("upload");
+      const failed = await onUpload(blob);
+      if (failed) setErr(failed);
+    } catch {
+      setErr("图片处理失败，换一张试试");
+    } finally {
+      setPhase("idle");
+    }
+  }
 
   return (
     <DialogShell
       open={open}
       title="换个头像"
-      desc="挑一个喜欢的图案。头像只是给自己看的门面，随时能换。"
+      desc="挑一个喜欢的图案，或者传一张自己的照片。随时能换。"
       onClose={onClose}
       busy={busy}
       footer={
@@ -116,6 +170,40 @@ export default function AvatarPicker({
             头像会显示在侧栏和设置页
           </p>
         </div>
+      </div>
+
+      <div className="acct-upload">
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          className="sr-only"
+          onChange={(e) => void handleFile(e)}
+          aria-label="选择要上传的头像图片"
+        />
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm acct-upload-btn"
+          onClick={() => fileRef.current?.click()}
+          disabled={busy}
+        >
+          <CornIcon name="upload" className="h-4 w-4" />
+          <span>
+            {phase === "compress"
+              ? "正在压缩…"
+              : phase === "upload"
+                ? "正在上传…"
+                : "上传自己的照片"}
+          </span>
+        </button>
+        <p className="hint acct-upload-hint">
+          JPG / PNG / WebP，5MB 以内。先在手机上压小再传，省流量。
+        </p>
+        {err && (
+          <p className="acct-upload-err" role="alert">
+            {err}
+          </p>
+        )}
       </div>
 
       <div className="acct-pick-grid" role="group" aria-label="可选头像">

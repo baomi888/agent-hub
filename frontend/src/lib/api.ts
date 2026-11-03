@@ -28,7 +28,6 @@ import type {
   AdminFeedbackResp,
   MyFeedbackResp,
   FeedbackDict,
-  UserFeedbackItem,
 } from "./types";
 
 /**
@@ -485,6 +484,25 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
     }),
+  /**
+   * 上传头像。传上来的应该是**已经压过**的图（`lib/imageCompress.ts`），
+   * 后端仍然会按 5MB / 4000px / 192×192 三层重新校验一遍 —— 前端压缩是省流量，
+   * 不是安全边界。
+   *
+   * ★ 这里必须把 request 默认的 `Content-Type: application/json` 覆盖成空：
+   *   multipart 的 boundary 只能由浏览器自己生成，手写一个会导致后端解析失败
+   *   （表现为 FastAPI 报 422 "field required"，看起来像少传了文件）。
+   */
+  uploadAvatar: (blob: Blob, filename = "avatar.jpg") => {
+    const fd = new FormData();
+    fd.append("file", blob, filename);
+    return request<MeOut>("/api/auth/avatar", {
+      method: "POST",
+      body: fd,
+      headers: {},
+    });
+  },
+
   /** 改登录名。要验密码，且后端限制总次数 */
   changeUsername: (password: string, newUsername: string) =>
     request<MeOut>("/api/auth/username", {

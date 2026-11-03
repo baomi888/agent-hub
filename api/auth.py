@@ -16,11 +16,14 @@ from __future__ import annotations
   PATCH /api/auth/profile    需登录：改昵称 / 选内置头像（不验密码）
   POST  /api/auth/password   需登录：改密码（验旧密码，踢掉其它设备）
   POST  /api/auth/username   需登录：改登录名（验密码 + 查重 + 限 3 次）
+  POST  /api/auth/avatar     需登录：上传自定义头像（≤5MB，落盘 192×192）
+  GET   /api/auth/avatar/<hash>  公开：取头像图（hash 是内容指纹，永久可缓存）
 """
 
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from core import account, config, quota, token_store
@@ -33,12 +36,13 @@ from core.auth import (
     get_current_user,
     set_session_cookie,
 )
+from service import avatar as avatar_store
 
 router = APIRouter()
 
 
 class Credentials(BaseModel):
-    username: str = Field(..., description="用户名")
+    username: str = Field(..., description="登录名")
     password: str = Field(..., description="密码")
 
 
@@ -125,6 +129,20 @@ def _is_reserved_admin_name(name: str) -> bool:
     return account.is_reserved_admin_name(name)
 
 
+def _release_avatar(old: str) -> None:
+    """旧头像没人再引用时删掉文件（同步，调用方丢线程）。
+
+    为什么要判断"还有人用吗"：文件名是**内容 hash**，两个人可能选了同一张图，
+    只存了一份文件。换头像时无条件删就会把别人的图也删掉，表现为
+    "我换完头像，同事的头像变破图了"。
+    """
+    if not (old or "").startswith(avatar_store.IMG_PREFIX):
+        return
+    if account.is_avatar_referenced(old):
+        return
+    avatar_store.remove_hash(old[len(avatar_store.IMG_PREFIX) :])
+
+
 def _name_changes_left(row: dict) -> int:
     """还能改几次登录名。
 
@@ -159,10 +177,13 @@ def _user_out(row: dict, token: str | None = None) -> UserOut:
     )
 
 
-async def _me_payload(row: dict) -> MeOut:
+async def _me_payload(row: dict, token: str | None = None) -> MeOut:
     """用一行用户记录拼出 MeOut（配额快照走线程，别阻塞事件循环）。"""
-    snap = await asyncio.to_thread(quota.snapshot, row["id"])
-    return MeOut(user=_user_out(row), quota=snap, is_admin=quota._is_admin(row["id"]))
+    snap, is_admin = await asyncio.gather(
+        asyncio.to_thread(quota.snapshot, row["id"]),
+        asyncio.to_thread(quota._is_admin, row["id"]),
+    )
+    return MeOut(user=_user_out(row, token=token), quota=snap, is_admin=is_admin)
 
 
 async def _load_me(uid: str) -> MeOut:
@@ -189,7 +210,7 @@ def _issue_session(user: dict, request: Request, response: Response) -> UserOut:
     token = create_token(
         user["id"],
         username=user["username"],
-        valid_after=account.get_token_valid_after(user["id"]),
+        auth_version=account.get_token_valid_after(user["id"]),
     )
     set_session_cookie(response, token, request)
     return _user_out(user, token=token if config.AUTH_RETURN_TOKEN else None)
@@ -216,7 +237,7 @@ def register(body: Credentials, request: Request, response: Response):
     # 管理员用户名保留：自助注册不能抢注（2026-10-29 安全加固）。
     # 文案与"重名"保持一致，不确认该名字是否真的是管理员。
     if _is_reserved_admin_name(body.username):
-        _reject("该用户名不可用，请更换一个", 403)
+        _reject("该登录名不可用，请更换一个", 403)
 
     # 注册/登录单独限流：撞库脚本最爱的就是这两个端点
     try:
@@ -235,7 +256,7 @@ def register(body: Credentials, request: Request, response: Response):
     except Exception:
         # 唯一索引冲突 = 重名。这里吞掉 sqlite 的具体类型，
         # 免得数据库的错误信息一路漏到前端
-        _reject("该用户名已被占用", 409)
+        _reject("该登录名已被占用", 409)
 
     return _issue_session(user, request, response)
 
@@ -260,7 +281,7 @@ def login(body: Credentials, request: Request, response: Response):
     if not user:
         # no_user 与 bad_password 返回同一句话：自助注册的站点里，
         # 区分这两者等于免费提供一个"哪些用户名存在"的枚举接口
-        _reject("用户名或密码不正确", 401)
+        _reject("登录名或密码不正确", 401)
 
     return _issue_session(user, request, response)
 
@@ -307,7 +328,7 @@ async def update_profile(body: ProfilePatch, uid: str = Depends(get_current_user
 
     try:
         # 按用户分桶限流：这是唯一能高频写 users 表的入口
-        quota.hit("profile:%s" % uid, limit=10)
+        await asyncio.to_thread(quota.hit, "profile:%s" % uid, 10)
     except quota.RateLimited as e:
         _reject(str(e), 429)
 
@@ -323,13 +344,82 @@ async def update_profile(body: ProfilePatch, uid: str = Depends(get_current_user
         avatar = account.normalize_avatar(body.avatar)
         if avatar is None:
             _reject("头像参数不合法")
+        # img: 还要确认文件真的在（格式合法不代表存在）。不查的话手写一个
+        # 不存在的 hash 就能把自己的头像变成破图 —— 而用户会以为网站坏了。
+        if avatar and not avatar_store.exists(avatar):
+            _reject("这张头像已经不在服务器上了，请重新上传")
 
+    old_avatar = ""
     if body.nickname is not None:
         await asyncio.to_thread(account.set_nickname, uid, body.nickname)
     if avatar is not None:
-        await asyncio.to_thread(account.set_avatar, uid, avatar)
+        old_avatar = await asyncio.to_thread(account.set_avatar, uid, avatar)
+        # 从"上传的照片"换成图标 / 首字母时，旧文件就没人引用了，顺手清掉
+        if old_avatar and old_avatar != avatar:
+            await asyncio.to_thread(_release_avatar, old_avatar)
 
     return await _load_me(uid)
+
+
+@router.post("/avatar", response_model=MeOut)
+async def upload_avatar(
+    # 不写 `= File(...)`：与 api/kb.py 的写法保持一致，也避开 ruff 的 B008
+    # （函数默认值里做调用）。FastAPI 对 UploadFile 注解本来就按 multipart 文件处理。
+    file: UploadFile,
+    uid: str = Depends(get_current_user),
+):
+    """上传自定义头像：收文件 → 处理成 192×192 → 落盘 → 换库里的 avatar。
+
+    处理完**立刻删原图**（finally 里的 remove_file）：原图是唯一能让磁盘爆掉的
+    东西（5MB × 1000 人 = 5GB），而成品只有 12~18KB。这条是硬规矩。
+    """
+    try:
+        # 和 profile 同档：这是唯一能写磁盘的入口，比对数据库那条更应该限
+        await asyncio.to_thread(quota.hit, f"avatar:{uid}", 10)
+    except quota.RateLimited as e:
+        _reject(str(e), 429)
+
+    tmp = ""
+    try:
+        tmp = await avatar_store.save_upload(file)
+        new_avatar = await asyncio.to_thread(avatar_store.store, tmp)
+    except avatar_store.AvatarError as e:
+        # 中文、可操作、不含堆栈：这类错误的读者是用户，不是开发者
+        _reject(str(e))
+    finally:
+        if tmp:
+            avatar_store.remove_file(tmp)
+
+    old_avatar = await asyncio.to_thread(account.set_avatar, uid, new_avatar)
+    if old_avatar and old_avatar != new_avatar:
+        await asyncio.to_thread(_release_avatar, old_avatar)
+    await asyncio.to_thread(account.audit, "avatar_upload", uid, {"avatar": new_avatar})
+
+    return await _load_me(uid)
+
+
+@router.get("/avatar/{hash}")
+def get_avatar(hash: str):
+    """返回头像文件。
+
+    **公开可读**：头像本来就不是秘密，而且 `<img src>` 是最简单的消费方式；
+    强制鉴权会让每个头像都多一次 401 判定，还会让浏览器的图片缓存失效。
+    hash 是 128 位内容指纹，猜不出来，也就谈不上枚举。
+
+    可以永久缓存：URL 里带 hash，换了头像 URL 就变（`Cache-Control: immutable`）。
+    """
+    path = avatar_store.path_of(hash)
+    if not path:
+        raise HTTPException(status_code=404, detail="头像不存在")
+    return FileResponse(
+        path,
+        media_type="image/jpeg",
+        headers={
+            # nosniff：即使哪天有人往目录里塞了别的文件，浏览器也不许改判类型
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "public, max-age=31536000, immutable",
+        },
+    )
 
 
 @router.post("/password", response_model=MeOut)
@@ -350,7 +440,7 @@ async def change_password(
         # 定 10/分 而不是更紧：每次 PBKDF2 约 80ms，10 次/分对服务器没有压力，
         # 而更紧的桶会误伤真实用户 —— 他可能先打错旧密码两次、新密码不合规一次，
         # 第四次才成功，然后发现自己"操作过于频繁"等了 60 秒。
-        quota.hit("password:%s" % uid, limit=10)
+        await asyncio.to_thread(quota.hit, "password:%s" % uid, 10)
     except quota.RateLimited as e:
         _reject(str(e), 429)
 
@@ -364,13 +454,16 @@ async def change_password(
     row = await asyncio.to_thread(account.get_user, uid)
     if not row:
         raise HTTPException(status_code=401, detail="账号不存在，请重新登录")
-    # 重签时带上**刚写入的新水位**：af == 水位，因此不满足 "af < 水位"，自己不会被踢
-    set_session_cookie(
-        response,
-        create_token(uid, username=row["username"], valid_after=int(row.get("token_valid_after") or 0)),
-        request,
+    # 重签时带上**刚写入的新代数**：af == 代数，因此当前这台不会被自己踢掉。
+    token = create_token(
+        uid,
+        username=row["username"],
+        auth_version=int(row.get("token_valid_after") or 0),
     )
-    return await _me_payload(row)
+    set_session_cookie(response, token, request)
+    # 浏览器靠刚种下的 Cookie；Bearer/App 客户端拿不到 Cookie，必须能从响应里
+    # 换到新令牌，否则改完密码旧令牌作废、又没新令牌，等于被迫退出账号。
+    return await _me_payload(row, token=token if config.AUTH_RETURN_TOKEN else None)
 
 
 @router.post("/username", response_model=MeOut)
@@ -387,7 +480,7 @@ async def change_username(
     """
     try:
         # 同 password：10/分 只拦脚本，不拦人
-        quota.hit("username:%s" % uid, limit=10)
+        await asyncio.to_thread(quota.hit, "username:%s" % uid, 10)
     except quota.RateLimited as e:
         _reject(str(e), 429)
 
@@ -399,9 +492,10 @@ async def change_username(
 
     # JWT 里的 username 只是展示冗余，重发即同步；uid 不变，所以不会掉线。
     # 不重发的话，侧栏会一直显示旧的登录名直到下次登录——用户会以为没改成。
-    set_session_cookie(
-        response,
-        create_token(uid, username=row["username"], valid_after=int(row.get("token_valid_after") or 0)),
-        request,
+    token = create_token(
+        uid,
+        username=row["username"],
+        auth_version=int(row.get("token_valid_after") or 0),
     )
-    return await _me_payload(row)
+    set_session_cookie(response, token, request)
+    return await _me_payload(row, token=token if config.AUTH_RETURN_TOKEN else None)
