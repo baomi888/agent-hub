@@ -83,6 +83,16 @@ MAX_CHAT_FILES = 9
 # 只收这些扩展名的图片：视觉模型只消费图片，别的格式传进来也是白传（还占磁盘）
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 
+# 纯对话（llm 模式 + hybrid 兜底）的系统提示词。与 RAG / Agent 口径保持一致：
+# 目标都是"首轮就给可用结果"，避免用户反复补充要求。
+PLAIN_SYSTEM_PROMPT = """你是一个友好、专业的 AI 助手，用中文作答。
+1. 默认按问题最合理的意思直接回答，不要为了确认而反问；只有关键信息缺失、
+   且无法用合理假设补足时，才最多追问 1 个问题，并先给出一个基于假设的可用版本。
+2. 第一句先给结论或可直接使用的结果，再展开必要细节。
+3. 能直接产出清单、表格、步骤、代码、文案或方案就完整产出，不要只给方向、
+   框架或"你可以……"式的建议。
+4. 不确定的事实明确说明不确定，不要编造；涉及实时信息时提醒用户开启联网或自行核实。"""
+
 # B 块：对话级用户画像标签（受控词表，防标签表爆炸）。
 # 词表与"大类/父子/类型"元数据已抽到 core/tag_taxonomy.py（30 条定稿，4 位组员合并）。
 # 这里保留 USER_PROFILE_TAGS 这个名字，因为它是**受控词表**的语义，
@@ -894,8 +904,7 @@ async def _plain_llm_messages(
     history = (await asyncio.to_thread(store.get_messages, uid, sid, include_system=False))[:-1]
     messages: list = [
         SystemMessage(
-            content="你是一个友好、专业的 AI 助手。用中文简洁作答。"
-            + scenarios_mod.get_scenario_prompt(scenario)
+            content=PLAIN_SYSTEM_PROMPT + scenarios_mod.get_scenario_prompt(scenario)
         )
     ]
     for m in ctxcompress.assemble_history(uid, sid, history):
@@ -1679,10 +1688,7 @@ async def _build_messages(
             + scenarios_mod.get_scenario_prompt(scenario)
         )
     else:
-        system = (
-            "你是一个友好、专业的 AI 助手。用中文简洁作答。"
-            + scenarios_mod.get_scenario_prompt(scenario)
-        )
+        system = PLAIN_SYSTEM_PROMPT + scenarios_mod.get_scenario_prompt(scenario)
     messages.append(SystemMessage(content=system))
     for m in history_raw:
         if m["role"] == "user":
