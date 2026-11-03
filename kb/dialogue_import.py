@@ -258,8 +258,8 @@ def _block_has_structure(block: str) -> bool:
     lines = block.split("\n")
     return (
         bool(_RE_HEADING.match(lines[0] if lines else ""))
-        or any(_RE_BULLET.match(l) for l in lines)
-        or any(_RE_TABLE_ROW.match(l) for l in lines)
+        or any(_RE_BULLET.match(line) for line in lines)
+        or any(_RE_TABLE_ROW.match(line) for line in lines)
         or "```" in block
     )
 
@@ -304,10 +304,10 @@ def _block_is_knowledge(block: str) -> bool:
     if len(t) < _A_MIN_CHARS:
         return False
     lines = t.split("\n")
-    bullets = sum(1 for l in lines if _RE_BULLET.match(l))
+    bullets = sum(1 for line in lines if _RE_BULLET.match(line))
     if bullets >= 2:  # 整理过的清单
         return True
-    if any(_RE_TABLE_ROW.match(l) for l in lines):
+    if any(_RE_TABLE_ROW.match(line) for line in lines):
         return True
     if "```" in t:
         return True

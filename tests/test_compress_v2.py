@@ -287,13 +287,13 @@ class TestDialogueImport:
     def client(self, monkeypatch):
         from api import kb as kb_api
         from core import account
+        from core import config as _config
 
         # 进程内建表只跑一次：全量跑时 account/quota 的 users、usage、rate_buckets
         # 可能已经建到了其它测试的临时库（test_daily 等在模块级永久替换 _db_path）。
         # 这里对当前隔离库显式补建（都幂等），否则 auth 一查就
         # "no such table: users"、入库计额度就 "no such table: usage"。
         from core import quota as _quota
-        from core import config as _config
         from main import app
 
         account._ensure_tables()

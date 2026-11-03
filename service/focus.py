@@ -21,7 +21,8 @@ profile 与 checkin 的做法一致：复用同一个 SQLite（sessions.db），
 from __future__ import annotations
 
 import time
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from core import session as store
 
