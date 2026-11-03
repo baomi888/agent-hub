@@ -105,13 +105,14 @@ export function renderContent(text: string): ReactNode {
 // - 小输入（引用预览/用户消息）仍走旧 renderContent，不强行 markdown 化
 
 const MD_INLINE_RE =
-  /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[[^\]\n]+\]\([^)\s]+\))|(~~[^~\n]+~~)|(\[\d{1,2}\])|(https?:\/\/[^\s<>"{}|\\^`\[\]。，、；：！？（）【】《》「」『』]+)/gi;
+  /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[[^\]\n]+\]\([^)\s]+\))|(~~[^~\n]+~~)|(\[W\d{1,3}\])|(\[\d{1,2}\])|(https?:\/\/[^\s<>"{}|\\^`\[\]。，、；：！？（）【】《》「」『』]+)/gi;
 
 /** 行内元素：行内代码 / 粗体 / 链接 / 删除线 / 引用角标 / 裸 URL */
 export function renderInline(
   text: string,
   keyPrefix = "i",
-  cites?: Map<number, WebSource>
+  cites?: Map<number, WebSource>,
+  refAnchor?: (n: number) => string | null
 ): ReactNode[] {
   const out: ReactNode[] = [];
   let last = 0;
@@ -123,32 +124,52 @@ export function renderInline(
     if (tok.startsWith("`")) {
       out.push(<code key={key} className="md-code">{tok.slice(1, -1)}</code>);
     } else if (tok.startsWith("**")) {
-      out.push(<strong key={key}>{renderInline(tok.slice(2, -2), key, cites)}</strong>);
+      out.push(<strong key={key}>{renderInline(tok.slice(2, -2), key, cites, refAnchor)}</strong>);
     } else if (tok.startsWith("~~")) {
-      out.push(<del key={key}>{renderInline(tok.slice(2, -2), key, cites)}</del>);
+      out.push(<del key={key}>{renderInline(tok.slice(2, -2), key, cites, refAnchor)}</del>);
     } else if (tok.startsWith("[")) {
-      // 引用角标 [n]：**只有本条回答真有联网来源、且 n 命中时**才变成可点徽标。
-      // 命中不了就保持原样 —— 正文里「第[1]步」「[1] 先做…」这类编号很多，
-      // 一律加框会变成满屏彩色小块，比不加更糟。
-      const pure = /^\[(\d{1,2})\]$/.exec(tok);
-      const cited = pure ? cites?.get(Number(pure[1])) : undefined;
-      if (pure && cited) {
-        const chref = safeHref(cited.url);
-        out.push(
-          chref ? (
+      // ★ 两套编号，在**字符层面**就分开，不指望模型自己记得引的是哪一套：
+      //   [Wn] 联网网页   → 金色圆点，点开去外面
+      //   [n]  资料库片段 → 深色方角，点一下跳到本回答下方第 n 条
+      // 2026-11-03 混合场景取证：两套都从 1 起时，正文「根据资料库文档[1]」
+      // 被渲染成指向 gov.cn 的补贴新闻，5 个角标里 4 个指错。
+      // 前缀是唯一的硬隔离 —— 提示词只是降低概率，渲染层必须自己认得出。
+      const wsHit = /^\[W(\d{1,3})\]$/i.exec(tok);
+      const wsCited = wsHit ? cites?.get(Number(wsHit[1])) : undefined;
+      if (wsHit && wsCited) {
+        const chref = safeHref(wsCited.url);
+        if (chref) {
+          out.push(
             <a
               key={key}
               href={chref}
               target="_blank"
               rel="noopener noreferrer"
               className="ws-cite"
-              title={`${pure[1]} · ${cited.title || cited.domain}（打开原网页）`}
+              title={`W${wsHit[1]} · ${wsCited.title || wsCited.domain}（打开原网页）`}
             >
-              {pure[1]}
+              {wsHit[1]}
             </a>
-          ) : (
-            <span key={key}>{tok}</span>
-          )
+          );
+          last = m.index! + tok.length;
+          continue;
+        }
+      }
+      // 普通 [n]：只有本条回答真有资料库来源、且 n 命中时才变锚点。
+      // 命中不了保持原样 —— 正文里「第[1]步」「[1] 先做…」这类编号很多，
+      // 一律加框会变成满屏彩色小块，比不加更糟。
+      const kbHit = wsHit ? null : /^\[(\d{1,2})\]$/.exec(tok);
+      const anchor = kbHit && refAnchor ? refAnchor(Number(kbHit[1])) : null;
+      if (kbHit && anchor) {
+        out.push(
+          <a
+            key={key}
+            href={`#${anchor}`}
+            className="ref-inline"
+            title={`跳到参考资料 ${kbHit[1]}（本回答下方）`}
+          >
+            {kbHit[1]}
+          </a>
         );
         last = m.index! + tok.length;
         continue;
@@ -159,11 +180,11 @@ export function renderInline(
       if (mm && href) {
         out.push(
           <a key={key} href={href} target="_blank" rel="noopener noreferrer" className="inline-link" title={decodeUrl(href)}>
-            {renderInline(mm[1], key, cites)}
+            {renderInline(mm[1], key, cites, refAnchor)}
           </a>
         );
       } else if (mm) {
-        out.push(<span key={key}>{renderInline(mm[1], key, cites)}</span>);
+        out.push(<span key={key}>{renderInline(mm[1], key, cites, refAnchor)}</span>);
       } else {
         out.push(<span key={key}>{tok}</span>);
       }
@@ -297,8 +318,9 @@ export function splitTrailingLinks(text: string): { body: string; links: LinkIte
 // 所以这里换一种切法：按**编号行**切块，一块 = 编号标题 + 到下一个编号行之间的
 // 一切（摘要、网址），只认「含网址」的块，并且这些块必须一路连续到文末。
 
-/** 编号行：`**1** 标题` / `[1] 标题` / `1. 标题` / `1、标题`（数字最多两位，避免吞「2026 年」） */
-const NUM_HEAD_RE = /^[\s>*]*(?:\*\*)?\s*\[?(\d{1,2})\]?\s*(?:\*\*)?\s*[.、:：)）]?\s+(.+)$/;
+/** 编号行：`**1** 标题` / `[1] 标题` / `1. 标题` / `1、标题` / `**[W1]** 标题`
+ *  （W 是联网来源的前缀，资料库仍是纯数字；数字最多三位，避免吞「2026 年」） */
+const NUM_HEAD_RE = /^[\s>*]*(?:\*\*)?\s*\[?([Ww]?\d{1,3})\]?\s*(?:\*\*)?\s*[.、:：)）]?\s+(.+)$/;
 
 /** 「参考资料：」这类抬头，收口时一起收掉，否则正文里留个突兀的冒号 */
 const REF_HEAD_RE =
@@ -309,6 +331,31 @@ interface SrcBlock {
   url: string;
   start: number;
   end: number;
+}
+
+/**
+ * 模型偶尔会把下一个编号粘在上一行的网址后面。真实样本（2026-11-03，茂名马拉松）
+ * 里出现过 `https://reg.zuicool.com/13190**[W9]** 人民保险・2026茂名马拉松赛`：
+ * 前一块按「编号行往下 4 行内必有网址」把这一行当成自己的结尾，而 W9 剩下的
+ * 摘要和网址没有编号开头，收不到 —— 正文开头就留下一段没头没尾的摘要 + 一条裸链接。
+ * 这里先按 `**[Wn]**` 把行切开，让每个编号都从行首开始，后面就不必考虑粘连。
+ * 只切带粗体的 `**[Wn]**`：正文里裸出现的 [1][2] 是正常文字，不能动。
+ */
+function splitGluedHeads(lines: string[]): string[] {
+  const HEAD = /\*\*\[[Ww]?\d{1,3}\]\*\*/g;
+  const out: string[] = [];
+  for (const line of lines) {
+    const marks = [...line.matchAll(HEAD)].map((m) => m.index ?? 0);
+    if (marks.length === 0 || (marks.length === 1 && marks[0] === 0)) {
+      out.push(line);
+      continue;
+    }
+    if (marks[0] > 0) out.push(line.slice(0, marks[0]));
+    for (let i = 0; i < marks.length; i++) {
+      out.push(line.slice(marks[i], marks[i + 1] ?? line.length));
+    }
+  }
+  return out;
 }
 
 /** 扫全文找「编号块」：编号行往下 4 行内出现的第一条网址就算这个块的出处 */
@@ -346,7 +393,7 @@ function findNumberedBlocks(lines: string[]): SrcBlock[] {
 function splitNumberedBlocks(text: string): { body: string; links: LinkItem[] } {
   const empty = { body: text, links: [] as LinkItem[] };
   if (!text) return empty;
-  const lines = text.split("\n");
+  const lines = splitGluedHeads(text.split("\n"));
   const all = findNumberedBlocks(lines);
   if (all.length < 2) return empty;
 
@@ -390,10 +437,13 @@ export function renderMarkdown(
   streaming = false,
   cites?: Map<number, WebSource>,
   /** 已在「来源卡片」里展示过的网址：正文收口时不再重复列一遍 */
-  knownUrls?: Set<string>
+  knownUrls?: Set<string>,
+  /** 资料库片段编号 → 锚点 id；命中才把正文里的 [n] 渲染成跳转角标 */
+  refAnchor?: (n: number) => string | null
 ): ReactNode {
-  // 把一段文本拆成行内节点；带上 cites 之后，正文里的 [n] 才能变成可点徽标
-  const inlineOf = (s: string, kp: string) => renderInline(s, kp, cites);
+  // 把一段文本拆成行内节点；带上 cites 之后，正文里的 [Wn] 才能变成可点徽标，
+  // 带上 refAnchor 之后 [n] 才能跳到下方参考资料
+  const inlineOf = (s: string, kp: string) => renderInline(s, kp, cites, refAnchor);
   // 流式期间不摘：最后一条链接还在一个字一个字地长，摘了会来回跳（胶囊数字乱变）
   const split = streaming ? { body: text, links: [] as LinkItem[] } : splitTrailingLinks(text);
   // 后端已经给出「来源卡片」的那几条，不要再在下面列一遍：同一条链接出现两个

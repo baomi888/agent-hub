@@ -191,6 +191,12 @@ export interface WebSource {
   /** 展示用域名（后端已去掉 www.），取不到时为空串 */
   domain: string;
   snippet: string;
+  /**
+   * 搜索结果自带的发布日期，原样透传（"2 days ago" / "2026-07-22" / "Jul 15, 2025"）。
+   * Serper 只对部分站点给这个字段，取不到时是空串 —— 前端据此决定显不显示，
+   * 不要在这里做格式归一，各家站点的写法本来就不统一。
+   */
+  date?: string;
 }
 
 // 依据强度（SSE grounding 事件）：weak=true 时回答上方挂「依据较弱」提示条

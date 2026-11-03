@@ -208,6 +208,13 @@ def web_search(query: str, max_results: int = 5, config: RunnableConfig = None) 
         #   （换个问法再搜）会出现两组 [1][2]，前端按 id 找网址就会指错来源。
         #   续号的基准取列表当前长度，保证「模型看到的编号」与「下发列表的 id」
         #   是同一个数。
+        #
+        # ★★ 编号带 W 前缀（[W1] 而不是 [1]），是 2026-11-03 混合场景取证后定的。
+        #   资料库检索的提示词让模型写「（依据：[1][3]）」，而这里原本也是 [1][2][3]
+        #   —— 两套编号同形，前端只有一个 [n] 解析口，联网那张表先命中就把正文里
+        #   所有 [n] 全变成了指向网页的金色徽标：正文说「根据资料库文档[1]」，
+        #   点开却是 gov.cn 的补贴新闻。加前缀让两套编号在**字符层面**就分得开，
+        #   不依赖模型"记得自己引用的是哪一套"。
         bag = _configurable(config).get("web_sources")
         bag = bag if isinstance(bag, list) else None
         base = len(bag) if bag else 0
@@ -218,15 +225,21 @@ def web_search(query: str, max_results: int = 5, config: RunnableConfig = None) 
             snippet = (r.get("snippet") or "")[:200]
             link = r["link"]
             idx = base + i + 1
-            lines.append(f"**[{idx}]** {title}\n   {snippet}\n   {link}")
+            lines.append(f"**[W{idx}]** {title}\n   {snippet}\n   {link}")
             if bag is not None:
+                # Serper 的 organic 项常带 date（"2 days ago" / "Jul 15, 2025" /
+                # 中文站点的"2026-07-22"），有就透传：来源卡上带日期，用户才能
+                # 判断这条信息还新不新。取不到就留空串，前端不渲染这一栏。
+                raw_date = r.get("date")
                 bag.append(
                     {
                         "id": idx,
+                        "key": f"W{idx}",
                         "title": title,
                         "url": link,
                         "domain": _host_of(link),
                         "snippet": snippet,
+                        "date": raw_date.strip() if isinstance(raw_date, str) else "",
                     }
                 )
 

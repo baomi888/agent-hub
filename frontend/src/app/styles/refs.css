@@ -27,6 +27,37 @@
   color: var(--ink);
 }
 
+/* 正文里内联的资料库片段角标（新消息）：点一下滚到下方第 n 条参考。
+   和联网的 .ws-cite 刻意不同形不同色：那个是金色圆点、点开去外面的网页，
+   这个是深色方角、点一下往下看你自己上传的文件。同色同形的话，用户没法
+   从角标上判断点开之后会去哪 —— 2026-11-03 混合场景翻车的就是这一点。 */
+.ref-inline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  margin: 0 2px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  /* 行高即高度：角标靠它垂直居中，不能套 --lh-tight，否则基准线会飘 */
+  line-height: 1;
+  text-decoration: none;
+  vertical-align: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.ref-inline:hover {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  border-color: var(--accent-line);
+}
+
 /* 参考资料卡片：像便签一样贴在页面边缘 */
 .ref-block {
   margin-top: 12px;
