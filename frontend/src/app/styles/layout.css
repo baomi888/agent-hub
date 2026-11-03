@@ -7,6 +7,21 @@
   max-width: var(--measure);
 }
 
+/* 消息末尾的留白：让"把回答顶边滚到视口顶部"这条真的做得到。
+   没有它，内容总高不够时 maxScrollTop 太小，锚定会被浏览器 clamp 掉 ——
+   短回答永远贴在视口最下方。
+
+   ★ 高度由 ChatArea 按需写入（inline style），这里必须给 0：
+     原来写死 50vh 常驻，代价是**任何两三条消息的短对话也能往下滚一屏空白**，
+     用户以为"页面坏了 / 聊天记录没了"（2026-11-01 用户截图反馈）。
+     现在的规则：只有「正在流式输出且回答还没填满一屏」时才补足到一屏 ——
+     这正好是锚定需要的余量，也正好是"下方空白会被文字逐渐填满"的那段时间；
+     回答长到一屏、或者生成结束，留白立刻归零，滚动范围回到内容本身。 */
+.chat-tail {
+  height: 0;
+  flex: none;
+}
+
 /* 左栏：偏黄的左页（选择器改用语义类，不再依赖 DOM 顺序） */
 .side-left {
   width: 240px;
@@ -166,6 +181,29 @@
   color: var(--red-ink);
   background: var(--fill-2);
   border-color: var(--red);
+}
+
+/* 消息存库：与「删除」同一档视觉重量，但 hover 用玉米金 ——
+   「收起来」是正向动作，别用警示色。
+   常态比「删除」深一档（text-2 而不是 text-3）：这个按钮的职责一半是
+   让人知道功能存在，压到和删除一样淡就白挂了。 */
+.msg-action-save {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  padding: 2px 8px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.18s ease, background-color 0.18s ease, border-color 0.18s ease;
+}
+.msg-action-save:hover {
+  color: var(--accent-ink);
+  background: var(--fill-2);
+  border-color: var(--accent-line);
 }
 
 /* 消息操作条：平时收起，悬停/键盘聚焦到消息内才浮现，

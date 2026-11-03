@@ -400,8 +400,8 @@ def list_all(owner: str) -> list[dict]:
             # 确保 Chroma 实例已打开
             if pipe._vs is None:
                 pipe.get_or_open()
-            # 文件清单以落盘记录为准，库里真有片段但没记录时用 Chroma 元数据兜底
-            files = get_files(owner, kb_id) or pipe.list_sources()
+            # 文件清单：登记表 + 向量库里没登记过的 source（见 list_files_view 的说明）
+            files = list_files_view(owner, kb_id, pipe)
             result.append(
                 {
                     "kb_id": kb_id,
@@ -558,6 +558,38 @@ def get_file_names(owner: str, kb_id: str) -> list[str]:
         return [x.get("name", "") for x in _KB_FILES.get(kb_id, [])]
 
 
+def list_files_view(owner: str, kb_id: str, pipe: "RagPipeline") -> list[dict]:
+    """资料列表的完整视图 = 登记表在前 + 向量库里没登记过的 source 在后。
+
+    ★ 为什么不能再用 `get_files(...) or pipe.list_sources()`（2026-11-01）：
+      那个 `or` 是个短路陷阱 —— 只要 kb_files.json 里有记录（哪怕只有一条），
+      Chroma 兜底就永远不会执行。而「对话沉淀」只往向量库写、不登记文件，
+      于是用户存完 AI 的分析、收到"已存入"，回到资料库却一条新资料都没有，
+      顶端的"共 N 段"还涨了 —— 看着像自己没存对。
+      这里改成合并而不是二选一，历史数据因此自动显形，不用重存一遍。
+
+    origin 对没有登记记录的 source 只能按名字猜（`对话·` 前缀来自
+    dialogue_import.build_documents 的 source 约定）；猜错只影响标签，
+    不影响查看和删除 —— 两步都按 name 直接查向量库。
+    """
+    records = get_files(owner, kb_id)
+    known = {r.get("name") for r in records}
+    extra = []
+    for src in pipe.list_sources():
+        nm = src.get("name") or ""
+        if not nm or nm in known:
+            continue
+        extra.append(
+            {
+                "name": nm,
+                "chunks": src.get("chunks") or 0,
+                "added_at": src.get("added_at"),
+                "origin": "dialogue" if nm.startswith("对话·") else "upload",
+            }
+        )
+    return records + extra
+
+
 # ==================== 状态查询 ====================
 
 
@@ -576,7 +608,8 @@ def get_status(owner: str, kb_id: str) -> dict | None:
         "chunks": chunks,
         "chunk_size": params[0] if params else None,
         "chunk_overlap": params[1] if params else None,
-        "files": get_files(owner, kb_id) or pipe.list_sources(),
+        # 同样走合并视图：单库状态页也要能看见对话沉淀进来的资料
+        "files": list_files_view(owner, kb_id, pipe),
     }
 
 

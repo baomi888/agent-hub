@@ -25,6 +25,7 @@ _MODULE_NAMES = {
     "admin": "看板",
     "agent": "智能体",
     "auth": "账号",
+    "campus": "校园工具集",
     "cet": "四六级",
     "chat": "对话",
     "checkin": "打卡",
@@ -176,6 +177,12 @@ _LABELS: dict[tuple[str, str], str] = {
     ("GET", "/api/geo/locate"): "定位 · 自动识别城市",
     ("GET", "/api/metrics"): "监控 · 指标页",
     ("GET", "/api/metrics/json"): "监控 · 指标数据",
+    # ---------- 校园工具集（番茄钟专注记录同步） ----------
+    ("POST", "/api/campus/focus/sessions"): "校园工具集 · 上报专注记录",
+    ("GET", "/api/campus/focus/sessions"): "校园工具集 · 拉取专注记录",
+    ("GET", "/api/campus/focus/tasks"): "校园工具集 · 拉取任务库",
+    ("POST", "/api/campus/focus/tasks"): "校园工具集 · 上报任务库",
+    ("PATCH", "/api/campus/focus/tasks/{}"): "校园工具集 · 修改任务",
 }
 
 _PARAM_RE = re.compile(r"\{[^}]*\}")

@@ -10,6 +10,12 @@ export interface UiMessage {
   refs?: string;
   error?: string;
   streaming?: boolean;
+  /**
+   * 流式期间的进度说明（来自 SSE status 帧，已翻译成人话）：
+   * "正在翻你的资料库…" "找到 3 段相关资料" "正在组织答案…"
+   * 带资料库提问时首帧要等十几秒，这行字是那段时间里唯一的"它还活着"的证据。
+   */
+  status?: string;
   /** 用户主动中断了这次生成 */
   stopped?: boolean;
   attachments?: ChatAttachment[];

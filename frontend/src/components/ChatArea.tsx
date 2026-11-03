@@ -5,7 +5,7 @@
 //
 // 2026-09 重构：消息类型/常量/正文渲染/计划卡片/Bubble/Field 拆到 ./chat/*，
 // 本文件只保留主组件（顶栏 + 欢迎页 + 消息区 + 输入区）。
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import MascotLogo from "./chat/MascotLogo";
 import CornIcon from "./CornIcon";
@@ -16,8 +16,10 @@ import { isPlanRequest, stripPlanHint } from "./chat/plan";
 import CapToggles, { type CapValue } from "./chat/CapToggles";
 import Bubble from "./chat/Bubble";
 import BubbleErrorBoundary from "./chat/BubbleErrorBoundary";
+import TurnOutline from "./chat/TurnOutline";
 import QueryEnhance from "./chat/QueryEnhance";
 import GuideModal from "./guide/GuideModal";
+import AnnounceModal from "./announce/AnnounceModal";
 import FeedbackModal from "./feedback/FeedbackModal";
 import type { ChatAttachment, UiMessage } from "./chat/types";
 import FilePreviewModal from "./FilePreviewModal";
@@ -27,6 +29,40 @@ export type { UiMessage, ChatAttachment } from "./chat/types";
 export { stripPlanHint } from "./chat/plan";
 
 const aid = () => Math.random().toString(36).slice(2, 10);
+
+/**
+ * 回答顶边与视口顶部之间留的空隙。
+ * 不留会顶到边框上，读第一行时眼睛没有落点；留太多又会显得内容被"推下去"。
+ */
+const ANCHOR_GAP = 14;
+
+/**
+ * 跟随阶段回答底边与视口底部之间留的空隙。
+ * 贴死会显得最后一行被裁掉半截，留 18px 读起来有收尾感。
+ */
+const TAIL_PAD = 18;
+
+/**
+ * 锚定后「先让开头留在视口里」的时长（毫秒）。
+ *
+ * 2026-11-02：原来写死 320ms，实测在手机上几乎等于没有 —— 回答长得比眼睛快，
+ * 刚锚好就被下一帧顶走，用户根本来不及确认"这是开头"。1400ms 大约够读完 3 行，
+ * 之后才转入跟随。不是越长越好：太长会让"正在写"的反馈断掉。
+ */
+const ANCHOR_HOLD_MS = 1400;
+
+/**
+ * 跟随滚动「追平一段落差」所用的时长（毫秒）。
+ *
+ * 2026-11-02 第三轮：手机上一行中文约 25~33px，每 0.3~0.4 秒来一行。
+ * 原来的「每帧走剩余量 1/3、最多 6 帧」会在 100ms 内把一整行走完然后停 300ms ——
+ * 节奏是"弹一下、静一下"，用户原话"一抽一抽"。
+ *
+ * 现在不管落差多大都用固定时长匀速走完：25px 摊到 280ms，每帧只动 1~2px，
+ * 和"下一行什么时候来"基本同拍，观感是内容匀速上移。
+ * 取 280ms 而不是更长：再长就跟不上新行，视野会被越拖越远。
+ */
+const SCROLL_DURATION_MS = 280;
 
 /**
  * 检索条数也换成白话档位。
@@ -83,6 +119,14 @@ interface Props {
   prefill?: { text: string; ts: number };
   /** 删除某条消息及其所在的一轮对话（user + 后续 assistant） */
   onDeleteTurn?: (msgDbId: number) => void;
+  /**
+   * 把某条用户消息收进资料库。
+   *
+   * 入口长在消息自己的动作排里（不是右栏、不是资料库页）——这个功能最难的地方
+   * 不是能不能存，而是用户想不起来它存在。它必须出现在「刚刚说清楚一件事」
+   * 的那一刻，而那一刻用户的视线就在自己那条消息下面。
+   */
+  onSediment?: (msgDbId: number, text: string, role: "user" | "assistant") => void;
   /** 地理定位开关状态（开启后发送消息自动带坐标） */
   geoEnabled?: boolean;
   /** 当前定位城市（角标展示用，可能为 null） */
@@ -127,6 +171,7 @@ export default function ChatArea({
   onOpenSidebar,
   prefill,
   onDeleteTurn,
+  onSediment,
   geoEnabled = false,
   geoCity = null,
   geoPending = false,
@@ -164,6 +209,22 @@ export default function ChatArea({
   const draftRef = useRef("");
   const stickRef = useRef(true);
   const [atBottom, setAtBottom] = useState(true);
+  /** 已经锚定过顶部的助理消息 id：锚定只做一次，之后回到正常跟随 */
+  const anchoredRef = useRef<string | null>(null);
+  /** 程序自己设的 scrollTop 目标：onScroll 靠它区分"用户在滚"和"我们在滚" */
+  const progTopRef = useRef<number | null>(null);
+  /** 平滑滚动的截止时刻：期间不把滚动事件算成用户意图 */
+  const smoothUntilRef = useRef(0);
+  /** 锚定后的开头保护截止时刻：这段时间内不跟随，让"开头"在视口里停一会儿 */
+  const anchorUntilRef = useRef(0);
+  /** 锚定落地的 scrollTop：跟随阶段不能比它更靠上，否则回答还没长满一屏开头就被顶走 */
+  const anchoredPosRef = useRef<number | null>(null);
+  const scrollRafRef = useRef<number | null>(null);
+  /** 我们最后一次把 scrollTop 设成的值。onScroll 用它认领"这是我们自己滚的" ——
+   *  比时间窗可靠：手机上 rAF 慢、scroll 事件有延迟，时间窗经常开错。 */
+  const appliedTopRef = useRef<number | null>(null);
+  /** 消息末尾的留白元素：让"回答不足一屏"时也滚得到顶部（详见下方 effect） */
+  const tailRef = useRef<HTMLDivElement | null>(null);
   // 从引用角标打开的全文预览（文件名来自 RefSource，kb 用当前会话绑定的）
   const [previewFile, setPreviewFile] = useState<string | null>(null);
   // 顶栏「反馈」弹窗。**必须是 useCallback**：FeedbackModal 的 Esc / 焦点 effect
@@ -222,19 +283,228 @@ export default function ChatArea({
       ? "会联网查最新信息"
       : "都不勾＝纯对话";
 
-  // 新消息进来时贴住底部。
-  // ★ 空态（欢迎页）必须跳过：欢迎页比可视区高，滚到底会把吉祥物、眉题、
-  //   标题整块推到视口外 —— 打开就是"半截页面"，用户以为首页就长那样（10-28 实测：
-  //   1080×629 下欢迎页 616px、可视区 340px，一进来 scrollTop 就是 316）。
+  // 程序滚动：同一帧里多次触发只落一次，且把目标值记下来供 onScroll 认领
+  //
+  // ★ 2026-11-02 第二次重做（手机端「还是在底部一抽一抽」）：
+  //   上一版是「每帧走剩余量的 1/3，最多 6 帧后直接 snap 到位」。线上采样暴露了问题：
+  //   一行中文约 33px，先在 ~100ms 内一口气走完 6 帧，然后停 300ms 等下一行 ——
+  //   节奏是「弹一下、静一下、弹一下」。桌面一行字多（~40 字），0.9 秒才弹一次，
+  //   察觉不到；手机一行只有 21 字，0.4 秒弹一次，就成了"一抽一抽"。
+  //   实测位移分布：一共 732 个 50ms 采样点，只有 108 个点在动（15%），
+  //   动的那些中位 16.5px、90 分位 25px —— 典型的"脉冲式"位移。
+  //
+  //   现在的做法：**匀速追平**。不管落差是 25px 还是 800px，都在固定的
+  //   SCROLL_DURATION_MS 内以恒定速度走完 —— 每帧的步长完全一样，
+  //   视觉上是一条匀速上移的带子，而不是"起步一冲、尾巴拖沓"。
+  //
+  //   ★ 为什么不用指数缓动（试过，不行）：指数缓动第一帧就走掉剩余量的 20%，
+  //     25px 的一行会变成「100ms 内冲 20px，然后 3px、1px」—— 还是起步一顿。
+  //     实测缓动版：25px 分成 20/3/1 三段；匀速版每一帧都是 1~2px。
+  //   ★ 为什么必须按时间算、不能按帧数算：手机 60fps、ProMotion 120fps、
+  //     无头浏览器甚至 240fps，同一个"每帧走固定比例"在不同设备上速度差 4 倍。
+  //     （这条是踩出来的：探针里量到帧间隔中位 4.2ms ≈ 240fps。）
+  const programScroll = useCallback((el: HTMLDivElement, top: number) => {
+    const max = Math.max(0, el.scrollHeight - el.clientHeight);
+    const target = Math.max(0, Math.min(top, max));
+    progTopRef.current = target;
+    // 已经在追赶：让循环自己读最新的 progTopRef，不要重排（重排会把
+    // 走了一半的位移丢掉，反而更抖）
+    if (scrollRafRef.current != null) return;
+
+    let lastT = 0;
+    const tick = (now: number) => {
+      scrollRafRef.current = null;
+      const goal = progTopRef.current;
+      if (goal == null) return;
+      // 追赶途中用户可能已经接管了（手指比 rAF 快），这时立刻让开
+      if (!stickRef.current) return;
+      // 首帧没有上一帧时间，按 16ms 估；切后台再回来 dt 可能上千毫秒，
+      // 夹到 64ms 免得一下子跳过头
+      const dt = lastT ? Math.min(now - lastT, 64) : 16;
+      lastT = now;
+      const cur = el.scrollTop;
+      const diff = goal - cur;
+      if (Math.abs(diff) <= 0.6) {
+        el.scrollTop = goal;
+        appliedTopRef.current = el.scrollTop;
+        return;
+      }
+      // 速度 = 剩余量 / 固定时长；落差越大走得越快，但**全程匀速**。
+      // 下限 0.02px/ms 只为避免极小落差拖太久。
+      const speed = Math.max(0.02, Math.abs(diff) / SCROLL_DURATION_MS);
+      const step = Math.sign(diff) * Math.min(Math.abs(diff), dt * speed);
+      el.scrollTop = cur + step;
+      // 记下"我们刚把它设成了多少"，onScroll 靠这个认领自己的位移。
+      // 比时间窗可靠：手机上 rAF 慢、scroll 事件有延迟，时间窗经常开错。
+      appliedTopRef.current = el.scrollTop;
+      scrollRafRef.current = requestAnimationFrame(tick);
+    };
+    scrollRafRef.current = requestAnimationFrame(tick);
+  }, []);
+
+  // 尾部留白：让「回答不足一屏」时也滚得到顶部（2026-11-02 重做版）
+  //
+  // 为什么必须有它：内容总高不足一屏时 maxScrollTop 太小，把回答顶边锚到视口顶
+  // 会被浏览器 clamp 掉 —— 结果回答只能贴在视口最下方一字一字长出来，
+  // 用户看到的就是"回答一直在屏幕最下面"。实测（390×844）：回答 121px 时
+  // 顶边停在 y=505（视口 580），而不是应有的 y=75。
+  //
+  // ★ 为什么上一版会"一抽一抽"、这一版不会：
+  //   上一版在渲染 effect 里每帧 `getBoundingClientRect()` 量一次气泡高度。
+  //   DOM 还没更新时量到旧值或 0，tail 就瞬间跳几百像素（实测单次 517px）；
+  //   tail 一改 scrollHeight，浏览器立刻把 scrollTop 夹回去 —— 这就是抽搐。
+  //   这版改用 ResizeObserver：只在气泡**尺寸真的变了**之后才回调，量的是新值。
+  //   于是「气泡高度 + 留白 = 一屏」恒成立，scrollHeight 恒定，scrollTop 不动。
+  //
+  //   效果：回答在下方"填满"这段留白，顶边稳稳停在视口顶部，一直到写满一屏
+  //   才开始跟随 —— 正是豆包那种从上往下淌的观感。
+  const lastMsg = messages[messages.length - 1];
+  const lastId = lastMsg?.id ?? "";
+  const lastStreaming = !!lastMsg?.streaming;
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el || !stickRef.current) return;
-    if (messages.length === 0) {
-      el.scrollTop = 0;
+    const tail = tailRef.current;
+    if (!el || !tail) return;
+    const node =
+      lastStreaming && lastId
+        ? el.querySelector<HTMLElement>(`[data-mid="${lastId}"]`)
+        : null;
+    if (!node) {
+      tail.style.height = "0px";
       return;
     }
-    el.scrollTop = el.scrollHeight;
-  }, [messages]);
+    const apply = () => {
+      const bh = node.getBoundingClientRect().height;
+      const h = Math.max(0, Math.round(el.clientHeight - bh));
+      if (Math.abs((parseFloat(tail.style.height) || 0) - h) > 1) {
+        tail.style.height = `${h}px`;
+      }
+    };
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(node);
+    return () => ro.disconnect();
+    // 只在「哪一条在流式」变化时重建，内容增长交给 ResizeObserver ——
+    // 依赖 messages 会让每个 token 都重建一次 observer。
+  }, [lastId, lastStreaming]);
+
+  // 新消息 / 新一段文字进来时的视野策略（2026-11-01 重写）
+  //
+  // 改动前是每来一个字 `scrollTop = scrollHeight` —— 实测 131 个采样点里 130 个
+  // 「距底 ≤2px」。1080×629 的窗口下可视区只有 350px，一条 953px 的回答从第一个字
+  // 开始，顶边就在视口上方 185px：用户从头到尾只看得见最后一行。这不是流式坏了，
+  // 是视野落点错了。
+  //
+  // 现在的策略（对齐豆包）：
+  //   ① 一条回答的**第一个字**出现时，把这条气泡的顶边放到视口顶部（留 14px），
+  //      而不是贴底 —— 贴底意味着第 1 行永远落在视口最下方，越写越往上跑。
+  //      回答不足一屏时靠尾部留白（见上方 effect）补出滚动余量，同样能锚到顶。
+  //   ② 锚完先停 ANCHOR_HOLD_MS，让开头在视口里待够，再转入跟随；
+  //   ③ 跟随阶段让回答底边贴视口底，文字由 typewriter 按阅读速度往外放；
+  //   ④ 用户一旦上滚（stickRef=false）就彻底冻结，视野归他。
+  //
+  // 空态（欢迎页）仍然跳过：欢迎页比可视区高，滚到底会把标题推出视口。
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (messages.length === 0) {
+      anchoredRef.current = null;
+      anchoredPosRef.current = null;
+      programScroll(el, 0);
+      return;
+    }
+    if (!stickRef.current) return;
+
+    const last = messages[messages.length - 1];
+    // ★ 只有「正在流式」的那条才锚定（2026-11-02 第四次修正）。
+    //   之前只看"有文字"，打开会话时会对**最后一条历史回答**也锚一次，
+    //   scrollTop 从 0 直接甩到 25231 —— 用户看到的就是"一打开就跳到底部"。
+    //   历史消息的落点由下面的"切会话回到底部"逻辑负责，不该走锚定。
+    const hasText =
+      last?.role === "assistant" && last.streaming && (last.content ?? "").length > 0;
+    if (hasText && anchoredRef.current !== last.id) {
+      const node = el.querySelector<HTMLElement>(`[data-mid="${last.id}"]`);
+      if (node) {
+        // ★ 标记必须放在"确认拿到节点"之后（2026-11-02）：
+        //   原来先设 anchoredRef 再找节点，第一个 token 那一帧如果 DOM 还没挂上
+        //   （querySelector 返回 null），这次锚定机会就**永久丢掉**了 ——
+        //   后续每一帧都因为 id 相同而跳过锚定，回答只能贴在最底下长出来。
+        anchoredRef.current = last.id;
+        // ★ 先把留白**同步**补上，再算滚动范围（2026-11-02 关键修复）。
+        //   留白平时由 ResizeObserver 异步设置，第一个 token 落地那一帧它还是 0，
+        //   于是这一刻的 scrollHeight 少了一段，max 不够，锚定被 clamp ——
+        //   实测回答顶停在 y=503（视口 580）而不是 y=76，看起来就是"贴着最底下写"。
+        //   写 style 后立刻读 scrollHeight 会强制一次同步 layout，取到的就是新值。
+        const tailEl = tailRef.current;
+        if (tailEl) {
+          const th = Math.max(
+            0,
+            Math.round(el.clientHeight - node.getBoundingClientRect().height)
+          );
+          tailEl.style.height = `${th}px`;
+        }
+        const rect = node.getBoundingClientRect();
+        const elRect = el.getBoundingClientRect();
+        const max = Math.max(0, el.scrollHeight - el.clientHeight);
+        // ★ 用「相对当前位置的增量」而不是「绝对 scrollTop」（2026-11-02 第三次修正）。
+        //   绝对值的算法依赖 rel 与 max 的精确对齐，tail 是异步写入的，
+        //   差一截就被 clamp，实测偏移 428px（回答顶停在 504 而不是 76）。
+        //   增量只关心"回答顶边现在在视口哪儿、要上移多少"，不受 scrollHeight 影响。
+        const delta = rect.top - elRect.top - ANCHOR_GAP;
+        const target = Math.max(0, Math.min(el.scrollTop + delta, max));
+        if (typeof window !== "undefined") {
+          (window as unknown as Record<string, unknown>).__anchorDbg = {
+            rectTop: Math.round(rect.top),
+            elTop: Math.round(elRect.top),
+            delta: Math.round(delta),
+            from: Math.round(el.scrollTop),
+            to: Math.round(target),
+            max,
+            sh: el.scrollHeight,
+            ch: el.clientHeight,
+            tail: tailEl ? tailEl.style.height : "no-tail",
+          };
+        }
+        // ★ 必须同步落地，不能排进 rAF：下一个 token 通常 16ms 内就到，
+        //   进来又会调 programScroll 把排队的这一帧 cancel 掉 ——
+        //   实测就是这样：锚定永远被取消，用户看到的仍是 -113px 的末尾。
+        progTopRef.current = target;
+        if (scrollRafRef.current != null) {
+          cancelAnimationFrame(scrollRafRef.current);
+          scrollRafRef.current = null;
+        }
+        el.scrollTop = target;
+        // 同上：这一下也是我们自己设的，onScroll 必须认得，否则锚定刚落地的
+        // scroll 事件会把 stick 关掉，后面每个字都不再跟随。
+        appliedTopRef.current = el.scrollTop;
+        anchoredPosRef.current = target;
+        // 开头护住一会儿：内容长得比视线快，刚锚好就被下一帧顶走的话，
+        // 用户连"这行是开头"都没看清。
+        anchorUntilRef.current = performance.now() + ANCHOR_HOLD_MS;
+        return;
+      }
+    }
+    // 还没到跟随时间：让开头留在视口里
+    if (performance.now() < anchorUntilRef.current) return;
+
+    // 跟随：目标是让这条回答的**底边**贴住视口底部，而不是无脑滚到 scrollHeight。
+    //
+    // ★ 为什么不能用 scrollHeight：内容末尾还有父容器 padding，滚到 scrollHeight 等于
+    //   比锚定位还往下多走十几像素 —— 实测锚定刚落地的 y=14，两个采样点后就变成
+    //   -40，看着还是"从半截开始读"。改用"气泡底边对齐视口底"后，回答不足一屏时
+    //   这个值小于锚定位，被 Math.max 挡住，开头就钉在视口顶部不动。
+    const node = last ? el.querySelector<HTMLElement>(`[data-mid="${last.id}"]`) : null;
+    if (node) {
+      const box = node.getBoundingClientRect();
+      const elBox = el.getBoundingClientRect();
+      const bottom = box.bottom - elBox.top + el.scrollTop;
+      const want = bottom - el.clientHeight + TAIL_PAD;
+      const floor = anchoredPosRef.current ?? 0;
+      programScroll(el, Math.max(floor, want));
+      return;
+    }
+    programScroll(el, el.scrollHeight);
+  }, [messages, programScroll]);
 
   // 切换会话（首条消息换了）时强制回到底部，否则会停在上一会话的滚动位置
   const firstId = messages[0]?.id ?? "";
@@ -243,14 +513,44 @@ export default function ChatArea({
     if (firstId === prevFirstRef.current) return;
     prevFirstRef.current = firstId;
     stickRef.current = true;
+    anchoredRef.current = null;
+    anchoredPosRef.current = null;
     setAtBottom(true);
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [firstId]);
+    if (el) programScroll(el, el.scrollHeight);
+  }, [firstId, programScroll]);
 
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
+    // ① 这就是我们上一帧刚设进去的值 —— 认领，直接返回。
+    //   ★ 原来判的是「落点离目标 <= 4px」，但平滑追赶途中 scrollTop 离目标
+    //     还有几十像素，判定必然失败 → 被当成"用户接管" → cancelAnimationFrame
+    //     把正在跑的动画掐掉。手机上 rAF 慢，动画本来就跑不完，于是每次都是
+    //     「挪一点 → 被掐 → 攒够再挪一点」，这就是底部那种一抽一抽。
+    //     改成比对"我们设过的值"，和动画进行到哪一步无关。
+    const applied = appliedTopRef.current;
+    if (applied != null && Math.abs(el.scrollTop - applied) <= 2) return;
+
+    // 平滑滚动途中（点「回到最新」）：朝目标靠近的过程不该算成"用户接管"，
+    // 否则按钮会在中途闪一下又冒出来
+    if (smoothUntilRef.current && performance.now() < smoothUntilRef.current) {
+      const goal = progTopRef.current ?? 0;
+      if (Math.abs(el.scrollTop - goal) <= 2) {
+        smoothUntilRef.current = 0;
+        progTopRef.current = null;
+      }
+      return;
+    }
+
+    // ② 落点和我们设的对不上 = 用户真的动了。把还排着的程序滚动撤掉，
+    //    否则它会在 16ms 后把人按回原处（上滚 300px 被拽回去就是这么来的）。
+    appliedTopRef.current = null;
+    progTopRef.current = null;
+    if (scrollRafRef.current != null) {
+      cancelAnimationFrame(scrollRafRef.current);
+      scrollRafRef.current = null;
+    }
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     stickRef.current = near;
     setAtBottom((prev) => (prev === near ? prev : near));
@@ -261,11 +561,51 @@ export default function ChatArea({
     if (!el) return;
     stickRef.current = true;
     setAtBottom(true);
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    const target = Math.max(0, el.scrollHeight - el.clientHeight);
+    progTopRef.current = target;
+    smoothUntilRef.current = performance.now() + 700;
+    el.scrollTo({ top: target, behavior: "smooth" });
   }, []);
 
-  const addFiles = (files: FileList | File[]) => {
-    const arr = Array.from(files);
+  // ---- 对话目录（跳回前面某一问）----
+  // 只把「用户提问」当锚点：回答归到它上面那一问，和 DeepSeek 的目录一致。
+  const turns = useMemo(
+    () =>
+      messages
+        .filter((m) => m.role === "user")
+        .map((m, i) => ({
+          mid: m.id,
+          n: i + 1,
+          text: (m.content || "").replace(/\s+/g, " ").trim() || "（附件提问）",
+        })),
+    [messages]
+  );
+  // 刻度位置随内容变化，流式期间每来一批 token 都得重量（组件内防抖 120ms）
+  const outlineKey = `${messages.length}:${messages[messages.length - 1]?.content?.length ?? 0}`;
+
+  const jumpToTurn = useCallback((mid: string) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const node = el.querySelector<HTMLElement>(`[data-mid="${mid}"]`);
+    if (!node) return;
+    const top = node.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
+    const target = Math.max(0, Math.min(top - ANCHOR_GAP, el.scrollHeight - el.clientHeight));
+    // ★ 先把「跟随」关掉再滚：回答还在流式时，跟随逻辑每来一个字就会把视野拽回底部,
+    //   不关的话用户刚跳上去立刻被拉下来 —— 这正是最容易回归的地方。
+    stickRef.current = false;
+    anchoredRef.current = null;
+    anchorUntilRef.current = 0;
+    if (scrollRafRef.current != null) {
+      cancelAnimationFrame(scrollRafRef.current);
+      scrollRafRef.current = null;
+    }
+    progTopRef.current = null;
+    // 清掉「上一帧是我们设的」那条豁免，让 onScroll 按新位置重算 stick
+    appliedTopRef.current = null;
+    el.scrollTo({ top: target, behavior: "smooth" });
+  }, []);
+
+  const addFiles = (files: FileList | File[]) => {    const arr = Array.from(files);
     if (arr.length === 0) return;
     setPending((prev) => {
       const next = [...prev];
@@ -538,8 +878,16 @@ export default function ChatArea({
       <div className="relative min-h-0 flex-1">
         {/* overflow-x-hidden 是兜底：一长串不可断的字符（文件名、URL、表格）
             只要把子元素顶宽，移动端整页就能横向拖动、观感像“画幅歪了”。
-            宁可在这里裁掉，也不许把文档撑宽。 */}
-        <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto overflow-x-hidden">
+            宁可在这里裁掉，也不许把文档撑宽。
+
+            [overflow-anchor:none] 关掉浏览器的「滚动锚定」：流式时内容每帧都在长，
+            浏览器会自作主张微调 scrollTop 来保持可见位置，和我们自己的平滑滚动互相拉扯，
+            也是手机端抖动的来源之一。 */}
+        <div
+          ref={scrollRef}
+          onScroll={onScroll}
+          className="h-full overflow-y-auto overflow-x-hidden [overflow-anchor:none]"
+        >
           <div className="chat-measure mx-auto flex min-h-full flex-col px-6 pb-4 pt-6">
           {messages.length === 0 ? (
             // 欢迎页：主路径是「直接问」，首屏摆两块——
@@ -646,36 +994,49 @@ export default function ChatArea({
                 }
                 return (
                   // 错误边界：一条坏消息渲染抛错时只降级这一条，不白屏整个会话
-                  <BubbleErrorBoundary key={m.id}>
-                    <Bubble
-                      m={m}
-                      userQuestion={userQ}
-                      onForward={handleForward}
-                      onCopyFail={handleCopyFail}
-                      onFeedback={handleFeedback}
-                      onRetry={onRetry}
-                      onPreviewFile={boundKb ? openPreviewFile : undefined}
-                      onDeleteTurn={onDeleteTurn}
-                    />
-                  </BubbleErrorBoundary>
+                  // data-mid：滚动锚定要按 id 找到这条气泡的顶边，没有它只能贴底
+                  <div key={m.id} data-mid={m.id} className="min-w-0">
+                    <BubbleErrorBoundary>
+                      <Bubble
+                        m={m}
+                        userQuestion={userQ}
+                        onForward={handleForward}
+                        onCopyFail={handleCopyFail}
+                        onFeedback={handleFeedback}
+                        onRetry={onRetry}
+                        onPreviewFile={boundKb ? openPreviewFile : undefined}
+                        onDeleteTurn={onDeleteTurn}
+                        onSediment={onSediment}
+                      />
+                    </BubbleErrorBoundary>
+                  </div>
                 );
               })}
+              {/* 尾部留白：高度 = 一屏 − 本条回答高度，只在流式且不足一屏时给。
+                  没有它，回答不足一屏就没有滚动余量，只能贴在视口最下方 ——
+                  用户看到的就是"回答一直在屏幕最下面长出来"。 */}
+              <div className="chat-tail" ref={tailRef} aria-hidden="true" />
             </div>
           )}
           </div>
         </div>
+        {/* 对话目录：桌面走右侧页边刻度，手机走右下胶囊 + 半屏目录。
+            放在滚动容器外面 —— 它要贴住视口，不能跟着内容滚走 */}
+        <TurnOutline turns={turns} scrollRef={scrollRef} onJump={jumpToTurn} layoutKey={outlineKey} />
         {!atBottom && (
           <button
             type="button"
             onClick={scrollToBottom}
-            className="scroll-down"
+            className={messages.some((m) => m.streaming) ? "scroll-down is-live" : "scroll-down"}
             aria-label="回到最新消息"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M12 5v14" />
               <path d="M19 12l-7 7-7-7" />
             </svg>
-            <span>回到最新</span>
+            {/* 还在生成时先说"正在生成"：用户上滚之后就冻结了，不告诉他有新内容
+                长在下面，他会以为卡住了 */}
+            <span>{messages.some((m) => m.streaming) ? "正在生成" : "回到最新"}</span>
           </button>
         )}
       </div>
@@ -1072,6 +1433,10 @@ export default function ChatArea({
       {/* 首次进平台的上手说明：portal 到 body，和有没有对话无关；
           未登录（userId 为空）时它自己不渲染 */}
       <GuideModal userId={userId} />
+
+      {/* 更新公告：同一处挂载。它自己判断「引导还没读完就先不弹」，
+          所以两者不会叠在一起；并且它比 GuideModal 高一层（z 96 / 95） */}
+      <AnnounceModal userId={userId} />
 
       {/* 顶栏「反馈」打开的弹窗：内容与设置页是同一个 FeedbackCard，
           区别只是这里没有外层卡片（chrome=false） */}

@@ -1,0 +1,25 @@
+[
+  {
+    "file": "page.png",
+    "state": null,
+    "size": "1440x900",
+    "zoom": 1,
+    "animationWaitMs": 0,
+    "issues": [
+      "加载错误：Failed to load resource: the server responded with a status of 500 (Internal Server Error) http://localhost:3000/api/auth/me",
+      "加载错误：Failed to load resource: the server responded with a status of 500 (Internal Server Error) http://localhost:3000/api/auth/me"
+    ],
+    "lint": [
+      {
+        "rule": "contrastLow",
+        "label": "文字对比度不达标（正文低于 4.5:1，大字低于 3:1）",
+        "count": 5,
+        "examples": [
+          "span.campus-stats-num-label「累计」（4.22:1）",
+          "span.campus-stats-num-label「日均」（4.22:1）",
+          "span.campus-stats-num-label「连续」（4.22:1）"
+        ]
+      }
+    ]
+  }
+]

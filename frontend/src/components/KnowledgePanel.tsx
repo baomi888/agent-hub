@@ -15,7 +15,6 @@ import {
   type ChunkProfileId,
 } from "@/lib/chunkProfiles";
 import FilePreviewModal, { shortName } from "./FilePreviewModal";
-import SedimentModal from "./chat/SedimentModal";
 import CornIcon from "./CornIcon";
 
 const MAX_UPLOAD_MB = 100;
@@ -174,6 +173,14 @@ interface Props {
    * 为空时弹层第一步会退化成让用户自己挑一段对话。
    */
   sid?: string | null;
+  /**
+   * 打开沉淀弹层。
+   *
+   * 弹层本身搬到了页面层：用户消息下的「存进资料库」也要开它，而且进来时
+   * 得带上那条消息的 id 才能自动勾选。面板若能自己开一个，就会出现两个实例、
+   * 两套勾选状态 —— 同一件事在两处各记一份，迟早对不上。
+   */
+  onOpenSediment?: () => void;
 }
 
 export default function KnowledgePanel({
@@ -195,11 +202,9 @@ export default function KnowledgePanel({
   containerRef,
   loading = false,
   sid = null,
+  onOpenSediment,
 }: Props) {
   const [feed, setFeed] = useState<"upload" | "web" | null>(null);
-  // 沉淀弹层：单独一个开关，不塞进 feed —— feed 是「展开输入区」，
-  // 这个是直接开弹层，交互不同，混在一个 state 里会让 toggle 逻辑绕
-  const [sedimentOpen, setSedimentOpen] = useState(false);
   const [uploadKb, setUploadKb] = useState("");
   const [keyword, setKeyword] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -415,7 +420,7 @@ export default function KnowledgePanel({
             图标沿用「+」而不是 notes：这里三个都是"加内容"的动作，
             换一个形近的图标反而像另一种东西。 */}
         <button
-          onClick={() => setSedimentOpen(true)}
+          onClick={() => onOpenSediment?.()}
           className="feed-btn"
           aria-haspopup="dialog"
         >
@@ -896,16 +901,6 @@ export default function KnowledgePanel({
           </div>
         )}
       </div>
-
-      {sedimentOpen && (
-        <SedimentModal
-          sid={sid}
-          defaultKbId={boundKb}
-          boundKb={boundKb}
-          onBind={onBind}
-          onClose={() => setSedimentOpen(false)}
-        />
-      )}
 
       {preview && (
         <FilePreviewModal

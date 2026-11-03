@@ -15,8 +15,13 @@ export const EXAMPLES: { hint: string; q: string }[] = [
   { hint: "出题目", q: "根据课程笔记，给我出 3 道自测题" },
 ];
 
-// 校园工具集静态页地址（frontend/public/tools.html，无需登录即可用）
-export const TOOLS_URL = "/tools.html";
+// 校园工具集入口（新版 React 实现，路由 /tools，免登录）。
+//
+// 2026-11-02 修正：原先写死 "/tools.html"，那是 frontend/public/ 下的旧静态原型页
+// （页脚自述「非线上功能」），导致 Chat 入口点进去看到的永远是旧版，
+// 新版的番茄钟云同步、任务库等功能全看不到。旧页文件保留作实现对照，
+// 见 campus/logic/gpa.ts 的算法对照注释；next.config.ts 里 /tools.html 已 301 到 /tools。
+export const TOOLS_URL = "/tools";
 
 // 首屏入口（10-14 重排为「主次两层」）。
 //

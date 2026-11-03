@@ -1,0 +1,361 @@
+/* ============================================================
+   对话目录：桌面页边刻度 / 手机右下胶囊 + 半屏目录
+   回答末尾链接收口（LinkCluster）
+
+   为什么要单独一份：这两件事都「浮在正文之上」，和 chat.css 里那些
+   参与排版的规则不是一类；而且目录要在 900px 上做一次形态切换，
+   混进 chat.css 会被后面的媒体查询盖掉（那一跤在首屏高度上摔过）。
+   ============================================================ */
+
+/* ---------- 桌面：右侧页边刻度 ---------- */
+.turn-rail {
+  position: absolute;
+  top: 10px;
+  right: 2px;
+  bottom: 10px;
+  width: 22px;
+  z-index: 6;
+  display: none; /* 手机没有 hover，悬停卡片那套用不了，换成下面的胶囊 */
+}
+
+/* 内容不足一屏 / 问数不够：不显示入口。
+   ★ 用 opacity + pointer-events，不用 display:none —— 组件要靠测量 rail 的
+     高度才知道"能不能显示"，display:none 量到的是 0，会卡成谁也不出现。 */
+.turn-rail.is-off,
+.turn-fab.is-off {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.turn-tick {
+  position: absolute;
+  right: 0;
+  width: 22px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  border-radius: var(--radius-xs);
+}
+/* 视觉刻度只有 3px 宽，热区靠上面那个 22×16 的按钮撑开 */
+.turn-tick::after {
+  content: "";
+  position: absolute;
+  right: 7px;
+  top: 50%;
+  width: 3px;
+  height: 6px;
+  transform: translateY(-50%);
+  border-radius: 2px;
+  /* 0.22 在纸底太淡，1x 屏上几乎看不见 —— 它得自己"被注意到"，
+     这是用户能察觉有这个入口的第一道线索 */
+  background: rgba(61, 47, 26, 0.30);
+  transition: background-color 0.14s ease, height 0.14s ease, width 0.14s ease;
+}
+.turn-tick:hover::after,
+.turn-tick:focus-visible::after {
+  background: var(--accent);
+  width: 4px;
+  height: 10px;
+}
+/* 当前读到的那一问：拉长成一条金线，比加粗颜色更像「书签」 */
+.turn-tick.is-active::after {
+  background: var(--accent);
+  width: 4px;
+  height: 15px;
+}
+/* 深色下暖墨刻度会完全消失，换成暖白。
+   ★ 必须在 hover / is-active 之后把金色再写回来一次：三条选择器特异性相同，
+     后写的胜，否则深色下"当前问"也会被压成暖白，金线标记就没了 */
+.dark .turn-tick::after {
+  background: rgba(237, 224, 196, 0.28);
+}
+.dark .turn-tick:hover::after,
+.dark .turn-tick:focus-visible::after,
+.dark .turn-tick.is-active::after {
+  background: var(--accent);
+}
+.turn-tick:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.turn-tip {
+  position: absolute;
+  right: 26px;
+  width: 208px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--card-bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-2);
+  transform: translateY(-50%);
+  pointer-events: none;
+  z-index: 7;
+}
+.turn-tip-n {
+  font-size: var(--fs-xs);
+  color: var(--accent-ink);
+  font-variant-numeric: tabular-nums;
+}
+.turn-tip-t {
+  font-size: var(--fs-md);
+  line-height: 1.4;
+  color: var(--text-1);
+  /* 两行封顶：摘要只是"认得出是哪一问"，全文在正文里 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+/* ---------- 手机：右缘「书签页签」 ----------
+   原来是右下角圆形胶囊，实测和「回到最新」挤在同一行（两者恰恰总是同时出现，
+   因为都表示"你不在底部"），两个浮球并排很难看。
+   改成贴在右缘、垂直居中的一枚页签：沿的是同一套"页边"隐喻，
+   和桌面那条刻度轨指同一个位置，也彻底不跟底部按钮抢地方。 */
+.turn-fab {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 6;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  /* 宽度必须 ≤ 消息区左右内边距（px-6 = 24px），否则会压住正文最后一两个字。
+     实测 26px 时正好盖住「…拟合直线」的行尾，所以收到 22px、只留图标 + 问数。 */
+  width: 22px;
+  padding: 8px 3px;
+  border-radius: 9px 0 0 9px;
+  border: 1px solid var(--line-strong);
+  border-right: 0;
+  background: var(--panel);
+  color: var(--text-3);
+  font-size: var(--fs-badge);
+  line-height: 1.2;
+  cursor: pointer;
+  box-shadow: -1px 1px 4px rgba(80, 60, 30, 0.07);
+}
+.turn-fab svg {
+  width: 14px;
+  height: 14px;
+  margin-bottom: 1px;
+}
+.turn-fab-n {
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-ink);
+  font-size: var(--fs-xs);
+}
+.turn-fab:active {
+  background: var(--fill-3);
+}
+
+/* 900px 以上换成页边刻度。与页面主断点（<900 = 窄屏抽屉）对齐 */
+@media (min-width: 900px) {
+  .turn-rail {
+    display: block;
+  }
+  .turn-fab {
+    display: none;
+  }
+}
+
+/* ---------- 手机：半屏目录 ---------- */
+.turn-sheet-wrap {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+}
+.turn-sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(61, 47, 26, 0.26);
+  animation: turnFade 0.16s ease-out;
+}
+.turn-sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 68%;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-top: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: var(--shadow-2);
+  animation: turnSheetIn 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.turn-sheet-grab {
+  width: 34px;
+  height: 3px;
+  margin: 8px auto 2px;
+  border-radius: 2px;
+  background: var(--line-strong);
+  flex: none;
+}
+.turn-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 14px 8px;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+.turn-sheet-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.turn-sheet-x svg {
+  width: 15px;
+  height: 15px;
+}
+.turn-sheet-x:hover {
+  background: var(--fill-3);
+  color: var(--text-1);
+}
+.turn-sheet-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 8px 12px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.turn-sheet-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-1);
+}
+.turn-sheet-item:hover {
+  background: var(--fill-3);
+}
+.turn-sheet-item.is-active {
+  background: var(--accent-tint);
+}
+.tsi-n {
+  flex: none;
+  min-width: 18px;
+  padding-top: 1px;
+  font-size: var(--fs-xs);
+  color: var(--accent-ink);
+  font-variant-numeric: tabular-nums;
+}
+.tsi-t {
+  font-size: var(--fs-md);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+@keyframes turnSheetIn {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@keyframes turnFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ---------- 回答末尾的链接收口 ---------- */
+.link-cluster {
+  margin-top: 10px;
+}
+.lc-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-subtle);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.lc-pill svg {
+  width: 13px;
+  height: 13px;
+}
+.lc-pill:hover {
+  border-color: var(--accent-line);
+  color: var(--accent-ink);
+}
+.lc-chev {
+  transition: transform 0.16s ease;
+}
+.lc-pill[aria-expanded="true"] .lc-chev {
+  transform: rotate(180deg);
+}
+.lc-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.lc-list a {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--card-bg);
+  text-decoration: none;
+  color: var(--text-1);
+  transition: var(--t-color);
+}
+.lc-list a:hover {
+  border-color: var(--accent-line);
+  background: var(--fill-3);
+}
+.lc-label {
+  min-width: 0;
+  font-size: var(--fs-md);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lc-host {
+  flex: none;
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}

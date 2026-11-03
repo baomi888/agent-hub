@@ -28,7 +28,6 @@ import type {
   AdminFeedbackResp,
   MyFeedbackResp,
   FeedbackDict,
-  UserFeedbackItem,
 } from "./types";
 
 /**
@@ -86,7 +85,11 @@ function httpErr(res: Response, message: string): ApiStatusError {
  * 数组/对象转成 "[object Object]"，这正是委托页那个看不懂的报错气泡的成因。
  */
 async function httpError(res: Response): Promise<ApiStatusError> {
-  let detail = `HTTP ${res.status}`;
+  // 5xx 是服务端自己的事。用户看到「HTTP 500」只会以为自己填错了用户名密码，
+  // 或者以为站点坏了——两种都不对。给一句能理解的话，真实状态码留给控制台。
+  // 后端若在 5xx 里带了可读的 detail（如"上游模型超时"），下面那次解析会覆盖掉这句兜底。
+  let detail = res.status >= 500 ? "服务暂时连不上，稍后再试" : `HTTP ${res.status}`;
+  if (res.status >= 500) console.warn(`[api] ${res.status} ${res.url}`);
   if (res.status === 401) {
     notifyUnauthorized();
     return httpErr(res, "未登录或登录已过期，请重新登录");
@@ -370,6 +373,18 @@ export const api = {
       { method: "POST", body: JSON.stringify({ sid, indexes }) },
       { timeoutMs: 120000 }
     ),
+  /**
+   * 存「指定的这几条消息」——用户指着某句话按了保存。
+   *
+   * 和上面那条的区别：不走候选判据。判据是给批量预览排序用的正则，
+   * 用户明确指定了哪一句时，它没有资格再否掉。
+   */
+  importDialogueMessages: (kbId: string, sid: string, messageIds: number[]) =>
+    request<ImportDialogueResult>(
+      `/api/kb/${encodeURIComponent(kbId)}/import-dialogue`,
+      { method: "POST", body: JSON.stringify({ sid, message_ids: messageIds }) },
+      { timeoutMs: 120000 }
+    ),
 
   // ---------- 建库建议（板块 D，后端开发中）----------
   // 这三个端点在板块 D 落地前会 404。卡片组件已写好但**尚未挂载**（等 SSE
@@ -450,6 +465,50 @@ export const api = {
   },
   logout: () => request<{ ok: boolean }>("/api/auth/logout/", { method: "POST" }),
   me: () => request<MeOut>("/api/auth/me/"),
+
+  // ---------- 账号自助 ----------
+  // 三个都返回新的 MeOut，调用方拿到直接 set 进登录态即可，不用再拉一次 /me。
+  // 注意**不带尾斜杠**：新端点统一规矩（见后端 main.py 的 normalize_api_slash）。
+  /** 改昵称 / 选内置头像。不传的字段保持不变 */
+  updateProfile: (body: { nickname?: string; avatar?: string }) =>
+    request<MeOut>("/api/auth/profile", {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  /**
+   * 改密码。后端会让**其它设备**的会话立即失效（令牌水位），当前这台会重签 Cookie。
+   * 所以调用成功后不需要重新登录，但要提示用户"别的设备要重新登录"。
+   */
+  changePassword: (oldPassword: string, newPassword: string) =>
+    request<MeOut>("/api/auth/password", {
+      method: "POST",
+      body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+    }),
+  /**
+   * 上传头像。传上来的应该是**已经压过**的图（`lib/imageCompress.ts`），
+   * 后端仍然会按 5MB / 4000px / 192×192 三层重新校验一遍 —— 前端压缩是省流量，
+   * 不是安全边界。
+   *
+   * ★ 这里必须把 request 默认的 `Content-Type: application/json` 覆盖成空：
+   *   multipart 的 boundary 只能由浏览器自己生成，手写一个会导致后端解析失败
+   *   （表现为 FastAPI 报 422 "field required"，看起来像少传了文件）。
+   */
+  uploadAvatar: (blob: Blob, filename = "avatar.jpg") => {
+    const fd = new FormData();
+    fd.append("file", blob, filename);
+    return request<MeOut>("/api/auth/avatar", {
+      method: "POST",
+      body: fd,
+      headers: {},
+    });
+  },
+
+  /** 改登录名。要验密码，且后端限制总次数 */
+  changeUsername: (password: string, newUsername: string) =>
+    request<MeOut>("/api/auth/username", {
+      method: "POST",
+      body: JSON.stringify({ password, new_username: newUsername }),
+    }),
 
   // ---------- 用量与反馈看板 ----------
   usageSummary: () => request<UsageSummary>("/api/usage/summary"),

@@ -48,6 +48,22 @@ interface Props {
    *   的话后端已经绑上了、界面还写着没绑，用户会以为没生效又去点一遍。
    */
   onBind?: (kbId: string) => void | Promise<void>;
+  /**
+   * 从某条用户消息下的「存进资料库」进来时，传那条消息的 dbId 与原文。
+   *
+   * 有这个就走「单句模式」：界面上只显示这一句，确认后原样入库，
+   * **不经过候选判据**。判据是给批量预览排序用的正则，认不出「周会固定在
+   * 每周四三点」这种没有编号的事实；用户已经指着它说"就这句"，再拿正则
+   * 去否掉他，等于当面告诉他这功能不好使。
+   */
+  focusRef?: number | null;
+  focusText?: string | null;
+  /**
+   * 这条消息是谁说的。用户的短句走「单句原样存」，助手的回答走「分节列表」——
+   * 一段 700 字的回答整条塞进向量库，以后召回一条就占满检索 top-k，
+   * 所以按小节存，每节自带标题。
+   */
+  focusRole?: "user" | "assistant";
   onClose: () => void;
   /** 入库成功。调用方据此刷新库列表 / 提示 */
   onImported?: (kbId: string) => void;
@@ -58,6 +74,27 @@ const subscribe = () => () => {};
 const mountedSnapshot = () => true;
 const serverSnapshot = () => false;
 
+/**
+ * 候选正文去掉排版标记（`## 一、基础` → `一、基础`，`- 精听真题…` → `精听真题…`）。
+ *
+ * 只作用于显示：入库的仍是原文。助手的小节标题需要保留层级感，
+ * 但把 `##` `**` 原样摊在弹层里，满屏符号会把内容本身吃掉。
+ */
+function tidy(text: string): string {
+  return text
+    .split("\n")
+    .map((l) =>
+      l
+        .replace(/^\s{0,3}#{1,6}\s+/, "")
+        .replace(/^\s*[-*+•]\s+/, "")
+        .replace(/^\s*\d{1,2}[.、)]\s+/, "")
+        .replace(/\*\*/g, "")
+        .trim()
+    )
+    .filter(Boolean)
+    .join("\n");
+}
+
 /** 秒 → 「12 月 3 日」。后端全站用 Unix 秒，直接喂 Date 会变成 1970 年。 */
 function dayLabel(ts?: number): string {
   if (!ts) return "";
@@ -65,7 +102,7 @@ function dayLabel(ts?: number): string {
   return `${d.getMonth() + 1} 月 ${d.getDate()} 日`;
 }
 
-/** 空勾选集合的稳定引用：每次 render 新建会让导航栏的 checked 每帧重算 */
+/** 这条消息没命中候选时的空集：稳定引用，避免每帧新建 Set 让勾选状态重算 */
 const EMPTY_SET: ReadonlySet<number> = new Set<number>();
 
 export default function SedimentModal({
@@ -73,6 +110,9 @@ export default function SedimentModal({
   defaultKbId,
   boundKb,
   onBind,
+  focusRef,
+  focusText,
+  focusRole = "user",
   onClose,
   onImported,
 }: Props) {
@@ -97,12 +137,19 @@ export default function SedimentModal({
   const [kbId, setKbId] = useState<string | null>(defaultKbId ?? null);
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
+  /** 一个库都没有时就地建：让「存进资料库」不因为没建库而断路 */
+  const [newKb, setNewKb] = useState("");
+  const [makingKb, setMakingKb] = useState(false);
+  /** 「这条消息没挑出东西」那一屏，用户点了「看看这段对话里其它的」 */
+  const [focusOff, setFocusOff] = useState(false);
   const [done, setDone] = useState<{
     imported: number;
     skipped: number;
     kbName: string;
     /** 这次之后，这段对话是否真的会用这个库来检索 */
     bound: boolean;
+    /** 单句模式存的，文案说「这句」而不是「N 条」 */
+    one: boolean;
   } | null>(null);
 
   const activeKbId = kbId ?? kbs?.[0]?.kb_id ?? null;
@@ -110,7 +157,48 @@ export default function SedimentModal({
 
   const cands = data && data.sid === curSid ? data.cands : null;
   const activeErr = err && err.sid === curSid ? err.msg : null;
-  const pickedIdx = picked.sid === curSid ? picked.idx : EMPTY_SET;
+
+  // 「从这条消息进来」只作用于最初那段对话：用户点了「换一段对话」之后，
+  // 再拿上一条消息去存就是张冠李戴了。
+  const focusOn = focusRef != null && !!sid && curSid === sid;
+  /** 单句模式（只对用户的话）：他指的是这一整句，原样存，不列候选 */
+  const one = focusOn && focusRole === "user" && !!focusText && !focusOff;
+
+  /** 从某条助手回答进来：这条回答切出来的全部小节（带全局下标，勾选要用） */
+  const focusBlocks = useMemo<number[]>(() => {
+    if (!focusOn || focusRole !== "assistant" || !cands) return [];
+    const target = Number(focusRef);
+    const out: number[] = [];
+    cands.forEach((c, i) => {
+      if ((c.refs ?? []).some((r) => Number(r) === target)) out.push(i);
+    });
+    return out;
+  }, [cands, focusOn, focusRole, focusRef]);
+
+  /** 助手回答默认全勾 —— 他点的是「存这条回答」，不是「帮我挑几节」 */
+  const defaultIdx = useMemo<ReadonlySet<number>>(
+    () => (focusRole === "assistant" && focusBlocks.length > 0 ? new Set(focusBlocks) : EMPTY_SET),
+    [focusRole, focusBlocks]
+  );
+
+  // 还没动过勾选时用默认值；一旦用户点过任何一格，就用他自己的选择
+  const pickedIdx = picked.sid === curSid ? picked.idx : defaultIdx;
+
+  /** 这次要展示的候选（带全局下标）。从某条回答点进来时只给这条的节 */
+  const visible = useMemo<Array<{ c: DialogueCandidate; i: number }>>(() => {
+    if (!cands) return [];
+    const arr = cands.map((c, i) => ({ c, i }));
+    if (focusOn && focusRole === "assistant" && !focusOff) {
+      // 空集也要落到空态：让他知道"这条回答没切出小节"，
+      // 而不是把整段对话的候选糊上来、看起来像点错了地方
+      const keep = new Set(focusBlocks);
+      return arr.filter(({ i }) => keep.has(i));
+    }
+    return arr;
+  }, [cands, focusOn, focusRole, focusOff, focusBlocks]);
+
+  const mine = visible.filter(({ c }) => c.role !== "assistant");
+  const theirs = visible.filter(({ c }) => c.role === "assistant");
 
   // 目标库列表
   useEffect(() => {
@@ -200,7 +288,9 @@ export default function SedimentModal({
   const toggle = (i: number) => {
     if (!curSid) return;
     setPicked((prev) => {
-      const base = prev.sid === curSid ? prev.idx : EMPTY_SET;
+      // 从「默认全勾」开始切，而不是从空集 —— 否则用户取消一节，
+      // 另外几节会一起被清空（他看到的勾是 defaultIdx，点掉的却是空集里的一格）
+      const base = prev.sid === curSid ? prev.idx : defaultIdx;
       const next = new Set(base);
       if (next.has(i)) next.delete(i);
       else next.add(i);
@@ -208,7 +298,49 @@ export default function SedimentModal({
     });
   };
 
-  const canSave = pickedIdx.size > 0 && !!activeKbId && !saving;
+  const renderItem = ({ c, i }: { c: DialogueCandidate; i: number }) => {
+    const on = pickedIdx.has(i);
+    return (
+      <label key={`${c.ts ?? 0}-${i}`} className={`sd-item${on ? " on" : ""}`}>
+        <input type="checkbox" className="sd-box" checked={on} onChange={() => toggle(i)} />
+        <span className="sd-body">
+          <span className="sd-kind">{c.kind || "其它"}</span>
+          <span className="sd-text">{tidy(c.text)}</span>
+        </span>
+      </label>
+    );
+  };
+
+  const canSave = one
+    ? !!activeKbId && !saving
+    : pickedIdx.size > 0 && !!activeKbId && !saving;
+
+  /**
+   * 就地建一个库。
+   *
+   * 没有库时原来只有一句「先到资料库页建一个，再回来存」—— 用户已经勾完、
+   * 决定要存了，却要跳走再跳回来，这一步会把一半人挡在门外。
+   * 名字留空就拿这段对话的标题兜底，和板块 D「按主题建库」取同一个主意。
+   */
+  const makeKb = async () => {
+    if (makingKb) return;
+    const name = newKb.trim() || (data?.title ? `对话·${data.title}` : "我的资料库");
+    setMakingKb(true);
+    setSaveErr(null);
+    try {
+      const r = await api.createKb(name);
+      setKbs((prev) => [
+        ...(prev ?? []),
+        { kb_id: r.kb_id, name: r.name || name, chunks: 0, files: [] },
+      ]);
+      setKbId(r.kb_id);
+      setNewKb("");
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : "建库失败，稍后再试");
+    } finally {
+      setMakingKb(false);
+    }
+  };
 
   const submit = async () => {
     if (!curSid || !activeKbId) return;
@@ -216,8 +348,10 @@ export default function SedimentModal({
     setSaveErr(null);
     try {
       const indexes = [...pickedIdx].sort((a, b) => a - b);
-      const r = await api.importDialogue(activeKbId, curSid, indexes);
-      const skipped = r.skipped ?? Math.max(0, indexes.length - r.imported);
+      const r = one
+        ? await api.importDialogueMessages(activeKbId, curSid, [Number(focusRef)])
+        : await api.importDialogue(activeKbId, curSid, indexes);
+      const skipped = r.skipped ?? Math.max(0, (one ? 1 : indexes.length) - r.imported);
 
       // 存进去 ≠ 查得到：检索只走会话绑定的那个库。这段对话本来没绑库就顺手绑上，
       // 否则用户下次提问根本不会用到刚存的这几条（文案也就不能承诺"能查到"）。
@@ -234,7 +368,7 @@ export default function SedimentModal({
         }
       }
 
-      setDone({ imported: r.imported, skipped, kbName: activeKbName, bound });
+      setDone({ imported: r.imported, skipped, kbName: activeKbName, bound, one });
       onImported?.(activeKbId);
     } catch (e) {
       setSaveErr(e instanceof Error ? e.message : "没能存进去，稍后再试一次");
@@ -243,20 +377,30 @@ export default function SedimentModal({
     }
   };
 
+  /** 正看着「某条回答切出来的小节」这一屏 */
+  const focusBlockView = focusOn && focusRole === "assistant" && !focusOff;
+
   const title = useMemo(() => {
     if (done) return "已经存好了";
+    // 单句模式不说"收几条"——他只指了一条，说"几条"会让人怀疑点错了
+    if (one) return "存进资料库";
+    if (focusBlockView) return "存这条回答";
     return "从对话里收几条";
-  }, [done]);
+  }, [done, one, focusBlockView]);
 
   if (!mounted) return null;
 
   const sub = done
     ? `存进了「${done.kbName}」`
-    : data && data.sid === curSid
-      ? `${data.title}${cands && cands.length > 0 ? ` · 找到 ${cands.length} 条` : ""}`
-      : !curSid
-        ? "先挑一段对话 —— 会从里面找出你说清楚过的事"
-        : "正在翻这段对话…";
+    : one
+      ? "原样存，不改写"
+      : focusBlockView
+        ? `这条回答 · ${focusBlocks.length} 节`
+        : data && data.sid === curSid
+          ? `${data.title}${cands && cands.length > 0 ? ` · 找到 ${cands.length} 条` : ""}`
+          : !curSid
+            ? "先挑一段对话 —— 会从里面找出值得留的内容"
+            : "正在翻这段对话…";
 
   return createPortal(
     <div
@@ -293,7 +437,13 @@ export default function SedimentModal({
           {done ? (
             <div className="sd-done">
               <p className="sd-done-n">
-                {done.imported > 0 ? `${done.imported} 条已经进库了` : "这几条之前都存过了"}
+                {done.imported > 0
+                  ? done.one
+                    ? "这句已经进库了"
+                    : `${done.imported} 条已经进库了`
+                  : done.one
+                    ? "这句之前存过了"
+                    : "这几条之前都存过了"}
               </p>
               {done.imported > 0 && done.skipped > 0 && (
                 <p className="sd-done-p">
@@ -310,6 +460,9 @@ export default function SedimentModal({
                 <p className="sd-done-p">
                   同一句话不会重复入库，所以这次没写新的东西进去。
                 </p>
+              )}
+              {done.one && done.imported > 0 && (
+                <p className="sd-done-p">想再存几句，回到对话里，指着那句话再点一次就行。</p>
               )}
             </div>
           ) : !curSid ? (
@@ -332,6 +485,21 @@ export default function SedimentModal({
                 ))
               )}
             </div>
+          ) : one ? (
+            /* 单句模式：只显示他指的这一句。原样，不摘要、不改写 ——
+               资料库的价值在可溯源，改一个字就对不上他当时说的话。
+               ★ 放在「候选加载中」之前：这条路根本不需要候选，等它就是白等。 */
+            <div className="sd-one">
+              <p className="sd-one-label">这一句</p>
+              <p className="sd-one-text">{focusText}</p>
+              <p className="sd-hint">
+                原样存进去。以后问相关的事，我会先翻这里 ——
+                所以值得存的是"以后还用得上"的那句，不是这一轮的诉求。
+              </p>
+              <button type="button" className="sd-switch" onClick={() => setFocusOff(true)}>
+                或者从这段对话里多挑几条
+              </button>
+            </div>
           ) : activeErr ? (
             <div className="sd-err">
               <p>{activeErr}</p>
@@ -343,10 +511,10 @@ export default function SedimentModal({
             <p className="sd-hint">正在翻这段对话…</p>
           ) : cands.length === 0 ? (
             <div className="sd-empty">
-              <p>这段对话里没找到能存的句子。</p>
+              <p>这段对话里没找到能存的内容。</p>
               <p className="sd-empty-p">
-                只有你自己说过的、讲清楚了事实或规定的话才会出现在这里 ——
-                助手的回答不算，它生成的内容不是你的资料。
+                值得留的是讲清楚的事实、规定、偏好，以及助手整理过的分析。
+                「帮我做个计划」这类交给助手去办的事不算。
               </p>
               {!sid && (
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => setCurSid(null)}>
@@ -354,34 +522,61 @@ export default function SedimentModal({
                 </button>
               )}
             </div>
+          ) : visible.length === 0 ? (
+            /* 从某条回答点进来，但这条回答没切出小节 —— 说清楚为什么，
+               别把整段对话的候选糊上来，让人以为点错了地方 */
+            <div className="sd-empty">
+              <p>这条回答里没有能单独存下来的段落。</p>
+              <p className="sd-empty-p">
+                整条存进去会占掉检索的名额，所以按小节切；这条回答太短，没切出小节。
+              </p>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFocusOff(true)}>
+                看看这段对话里其它的
+              </button>
+            </div>
+          ) : focusOn && focusRole === "assistant" && !focusOff ? (
+            /* 从某条回答点进来：只列这条回答切出来的小节，默认全勾 */
+            <>
+              <p className="sd-focus">
+                这条回答拆成 {visible.length} 节，每节单独存 ——
+                以后问到相关的事能直接翻到那一节，不会把整条灌进来。
+              </p>
+              <div className="sd-list">{visible.map(renderItem)}</div>
+              {!sid && (
+                <button type="button" className="sd-switch" onClick={() => setCurSid(null)}>
+                  换一段对话
+                </button>
+              )}
+              <button type="button" className="sd-switch" onClick={() => setFocusOff(true)}>
+                这段对话里还有别的
+              </button>
+            </>
           ) : (
             <>
-              <div className="sd-list">
-                {cands.map((c, i) => {
-                  const on = pickedIdx.has(i);
-                  return (
-                    <label key={`${c.ts ?? 0}-${i}`} className={`sd-item${on ? " on" : ""}`}>
-                      <input
-                        type="checkbox"
-                        className="sd-box"
-                        checked={on}
-                        onChange={() => toggle(i)}
-                      />
-                      <span className="sd-body">
-                        <span className="sd-kind">{c.kind || "其它"}</span>
-                        <span className="sd-text">{c.text}</span>
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
+              {mine.length > 0 && (
+                <div className="sd-group">
+                  <p className="sd-group-t">你说的话</p>
+                  <div className="sd-list">{mine.map(renderItem)}</div>
+                </div>
+              )}
+              {theirs.length > 0 && (
+                <div className="sd-group">
+                  <p className="sd-group-t">助手的分析</p>
+                  <div className="sd-list">{theirs.map(renderItem)}</div>
+                </div>
+              )}
               <p className="sd-hint sd-tip">
-                勾你真正想留的。「帮我做个计划」这类是你说给助手的任务，
-                存进去也不会被当成资料问到。
+                助手整理过的要点最值得存 —— 下次问到相关的事，它能直接拿这些回答你。
+                你的原话是另一类：一手的事实和规定，改一个字就对不上。
               </p>
               {!sid && (
                 <button type="button" className="sd-switch" onClick={() => setCurSid(null)}>
                   换一段对话
+                </button>
+              )}
+              {focusOn && focusOff && (
+                <button type="button" className="sd-switch" onClick={() => setFocusOff(false)}>
+                  只看我指的那一条
                 </button>
               )}
             </>
@@ -390,7 +585,7 @@ export default function SedimentModal({
           {saveErr && <p className="sd-save-err">{saveErr}</p>}
         </div>
 
-        {(done || (cands && cands.length > 0)) && (
+        {(done || one || (cands && cands.length > 0)) && (
           <footer className="sd-foot">
             {done ? (
               <button type="button" className="btn btn-primary btn-sm sd-save" onClick={onClose}>
@@ -399,9 +594,30 @@ export default function SedimentModal({
             ) : kbs === null ? (
               <span className="sd-hint">正在读你的资料库…</span>
             ) : kbs.length === 0 ? (
-              <span className="sd-hint">
-                你还没有资料库 —— 先到「资料库」页建一个，再回来存。
-              </span>
+              /* 一个库都没有：原地建，别让人跳走再回来 */
+              <div className="sd-newkb">
+                <span className="sd-hint">
+                  你还没有资料库 —— 现在建一个，{one ? "把这一句" : "把这几条"}放进去。
+                </span>
+                <div className="sd-newkb-row">
+                  <input
+                    className="sd-input"
+                    value={newKb}
+                    onChange={(e) => setNewKb(e.target.value)}
+                    placeholder={data?.title ? `对话·${data.title}` : "资料库名字"}
+                    aria-label="新资料库的名字（留空用对话标题）"
+                    maxLength={40}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm sd-save"
+                    disabled={makingKb}
+                    onClick={() => void makeKb()}
+                  >
+                    {makingKb ? "正在建…" : "建一个"}
+                  </button>
+                </div>
+              </div>
             ) : (
               <>
                 <label className="sd-target">
@@ -424,7 +640,11 @@ export default function SedimentModal({
                   disabled={!canSave}
                   onClick={() => void submit()}
                 >
-                  {saving ? "正在存…" : `存进这个库${pickedIdx.size > 0 ? `（${pickedIdx.size} 条）` : ""}`}
+                  {saving
+                    ? "正在存…"
+                    : one
+                      ? "存进这个库"
+                      : `存进这个库${pickedIdx.size > 0 ? `（${pickedIdx.size} 条）` : ""}`}
                 </button>
               </>
             )}

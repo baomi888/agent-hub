@@ -64,6 +64,7 @@ from core.llm import get_llm, get_vision_llm
 from core.urltools import extract_urls
 from kb import pipelines
 from kb.rag_core import (
+    CAPABILITY_NOTE,
     SYSTEM_PROMPT,
     assess_grounding,
     describe_api_error,
@@ -907,7 +908,12 @@ async def _plain_llm_messages(
     history = (await asyncio.to_thread(store.get_messages, uid, sid, include_system=False))[:-1]
     messages: list = [
         SystemMessage(
-            content=PLAIN_SYSTEM_PROMPT + scenarios_mod.get_scenario_prompt(scenario)
+            # ★ 能力说明必须在这里也拼上：纯对话（llm 模式）与 hybrid 兜底
+            #   走的就是这个函数，漏了它模型只知道"我没有记忆"，
+            #   会把「记到哪」答成"建议你自己记到备忘录"（2026-11-01 线上实测）
+            content=PLAIN_SYSTEM_PROMPT
+            + CAPABILITY_NOTE
+            + scenarios_mod.get_scenario_prompt(scenario)
         )
     ]
     for m in ctxcompress.assemble_history(uid, sid, history):
@@ -988,7 +994,12 @@ async def _chat_stream_impl(
         elif city:
             location_ctx = {"city": city}
 
-    await asyncio.to_thread(store.add_message, uid, req.sid, "user", req.question)
+    # ★ 用户这条消息的 id 必须回给前端。消息下方的「存进资料库」靠它定位，
+    #   缺了它，刚发的消息要等刷新、从历史接口补 dbId 之后才点得到 ——
+    #   也就是"发完当下看不见，刷新才有"，最容易让新功能看起来没上线。
+    user_msg_id = await asyncio.to_thread(
+        store.add_message, uid, req.sid, "user", req.question
+    )
     should_gen_title = (await asyncio.to_thread(store.count_messages, uid, req.sid)) <= 2
 
     # 本轮打开的上游异步生成器登记处：收尾统一关闭（见 _Upstreams 的说明）
@@ -1104,6 +1115,8 @@ async def _chat_stream_impl(
                     "title": gen_title,
                     "mode": "vision",
                     "message_id": msg_id,
+                    # 用户那条消息自己的 id（见 979 行处的说明）
+                    "user_message_id": user_msg_id,
                 },
             )
             return
@@ -1600,6 +1613,9 @@ async def _chat_stream_impl(
                 "title": gen_title,
                 "mode": mode,
                 "message_id": msg_id,
+                # 用户那条消息自己的 id：前端据此回填 dbId，
+                # 让「存进资料库」在**刚发完、还没刷新**的时候就点得到
+                "user_message_id": user_msg_id,
                 "run_id": hybrid_run_id,
                 # A1：本条回答是否被长度上限截断。前端据此在正文末尾挂"内容可能不完整"，
                 # 也用于事后统计（messages.truncated 同样记了一位）。
@@ -1688,10 +1704,17 @@ async def _build_messages(
         system = (
             SYSTEM_PROMPT
             + grounding_note(grounding or {})
+            + CAPABILITY_NOTE
             + scenarios_mod.get_scenario_prompt(scenario)
         )
     else:
-        system = PLAIN_SYSTEM_PROMPT + scenarios_mod.get_scenario_prompt(scenario)
+        # 无参考资料时说清产品能力：这里原先是内联的一句话，
+        # 模型不知道有资料库，于是把「记到哪」答成「建议你自己记到备忘录」。
+        system = (
+            PLAIN_SYSTEM_PROMPT
+            + CAPABILITY_NOTE
+            + scenarios_mod.get_scenario_prompt(scenario)
+        )
     messages.append(SystemMessage(content=system))
     for m in history_raw:
         if m["role"] == "user":

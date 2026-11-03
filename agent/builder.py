@@ -21,6 +21,7 @@ from agent.tools import AGENT_TOOLS
 from core import config, prompt_store, tool_registry
 from core import scenarios as scenarios_mod
 from core.llm import get_llm
+from kb.rag_core import CAPABILITY_NOTE
 
 SYSTEM_PROMPT = """你是一个智能问答助手。本轮实际可用的能力由用户开启的开关决定：
   - 知识库检索（kb_search）：用户开了「检索」且当前会话有库时可用
@@ -296,7 +297,9 @@ def build_agent(
         # 三重预算护栏，但护栏在"外面"计数；主循环自己不封顶的话，单次回答仍可无界增长。
         # 默认 0 = 用平台默认，保持改造前行为（见 core/config.py 的说明）。
         llm = get_llm(temperature=0.1, max_tokens=config.AGENT_LLM_MAX_TOKENS or None)
-        system_prompt = base_prompt
+        # ★ 能力说明**无条件追加**，不进 prompt_store 的版本管理：
+        #   "产品有资料库"是事实，不该被提示词 A/B 实验掉（见 CAPABILITY_NOTE 的说明）
+        system_prompt = base_prompt + CAPABILITY_NOTE
         if kb_bound:
             system_prompt += (
                 "\n\n【当前会话已绑定知识库】\n"

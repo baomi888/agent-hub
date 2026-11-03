@@ -82,6 +82,20 @@ server {
         proxy_send_timeout 3600s;
     }
 
+    # 头像：应用层硬限 5MB，入口只给 6m。
+    # 否则 nginx 会先把几十 MB body 收完，FastAPI 才有机会在路由里拒绝。
+    location = /api/auth/avatar {
+        client_max_body_size 6m;
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host  $host;
+        proxy_set_header Connection        '';
+    }
+
     # ---------------- 前端：Next.js (127.0.0.1:3000) ----------------
     location / {
         proxy_pass http://127.0.0.1:3000;
