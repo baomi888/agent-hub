@@ -299,6 +299,119 @@
   line-height: 1.5;
 }
 
+/* ---------- 裁剪器 ----------
+   取景框做成圆形而不是方形：最终展示就是圆的，让用户在裁剪阶段看到的就是成品。
+   圆比方更"贵"一点的是——方形四角的内容也会被存下来，但那些角本来就不显示，
+   所以不影响结果，只影响"我拖到边上会不会露白"的心理预期（不会，见 clampTransform）。 */
+.acct-crop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* 14 而不是 10：取景框和滑块是两组东西，挤在一起会让人以为滑块是取景框的一部分 */
+  gap: var(--space-14);
+}
+
+.acct-crop-stage {
+  position: relative;
+  width: min(264px, 100%);
+  aspect-ratio: 1;
+  /* ★ 手机上不加这个，拖照片会变成滚弹窗内容 —— 手指一按一挪，图不动、页面动 */
+  touch-action: none;
+  border-radius: 50%;
+  overflow: hidden;
+  background: #fff;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  /* 一圈贴边阴影当取景框：比 border 细，不会在圆上出现锯齿 */
+  box-shadow:
+    0 0 0 1px var(--line),
+    0 2px 12px rgba(46, 36, 22, 0.1);
+}
+.acct-crop-stage:active {
+  cursor: grabbing;
+}
+
+.acct-crop-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+/* 内圈暗角：模拟镜头边缘，顺便提示"框外会被裁掉" */
+.acct-crop-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.5),
+    inset 0 0 24px rgba(46, 36, 22, 0.16);
+}
+
+.acct-crop-zoom {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  width: min(264px, 100%);
+}
+/* 两端的小圆点 / 大圆点：表示"缩小 ↔ 放大"。
+   比图标直白 —— 图标得先认出它是什么，圆点只表达大小 */
+.acct-crop-dot {
+  flex: none;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+.acct-crop-dot.is-sm {
+  width: 6px;
+  height: 6px;
+}
+.acct-crop-dot.is-lg {
+  width: 13px;
+  height: 13px;
+}
+.acct-crop-range {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 20px;
+  /* 只改强调色，其余交给系统原生滑块：iOS / Android / 桌面各自的手感都比自绘好 */
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.acct-crop-range:disabled {
+  cursor: default;
+}
+
+.acct-crop-hint {
+  max-width: 300px;
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  text-align: center;
+}
+
+/* 复位：文字按钮，别做成第四颗按钮 —— 底部已经有三颗了。
+   放在滑块行末尾，跟它操作的是同一个东西（变换），比另起一行居中更说得通 */
+.acct-crop-reset {
+  flex: none;
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-ink);
+  font-size: var(--fs-sm);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.acct-crop-reset:disabled {
+  color: var(--text-3);
+  text-decoration: none;
+  cursor: default;
+}
+
 .acct-pick-grid {
   display: grid;
   /* 5 列在 390px 屏上是每格约 58px：图标 28 + 两字标签，刚好不折行。
