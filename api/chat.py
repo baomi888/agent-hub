@@ -277,7 +277,10 @@ def _augment_plan(question: str, plan: bool, topic: dict | None = None) -> str:
 UPLOAD_TTL_HOURS = 24
 
 SSE_HEADERS = {
-    "Cache-Control": "no-cache",
+    # no-transform：禁止中间层（Next 的 compression 中间件 / nginx / CDN）对这个响应做
+    # gzip 之类的内容编码。一旦被压，压缩流要攒够 16KB 或等连接结束才 flush，浏览器就
+    # 收不到逐帧 token —— 用户看到「卡很久 → 突然全文」，点「停止生成」也没法生效。
+    "Cache-Control": "no-cache, no-transform",
     "X-Accel-Buffering": "no",
     "Connection": "keep-alive",
 }

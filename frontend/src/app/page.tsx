@@ -317,6 +317,11 @@ export default function Home() {
       );
       let finalRefs = "";
       for await (const ev of gen) {
+        // 用户点了「停止生成」就立刻踩刹车。
+        // 正常情况 abort 会让 reader.read() 抛 AbortError；但如果中间层（代理 / CDN）
+        // 把响应缓冲过，整段帧其实已经到浏览器了，abort 不会报错，也不会让 yield 停下，
+        // 于是文字继续往外蹦、看起来「停不掉」。这里主动丢掉剩余帧。
+        if (controller.signal.aborted) break;
         switch (ev.event) {
           // ---------- 混合架构三事件（仅 mode=hybrid 才有）----------
           case "hybrid_start": {
@@ -465,9 +470,14 @@ export default function Home() {
           }
         }
       }
-      // 兜底：结束流式状态
+      // 兜底：结束流式状态（如果是用户中途停止，气泡要显示"已停止生成"）
+      const aborted = controller.signal.aborted;
       setMessages((prev) =>
-        prev.map((m) => (m.id === asstId ? { ...m, streaming: false } : m))
+        prev.map((m) =>
+          m.id === asstId
+            ? { ...m, streaming: false, ...(aborted ? { stopped: true } : {}) }
+            : m
+        )
       );
     } catch (e) {
       // 用户主动停止（AbortError）不视为错误
