@@ -89,6 +89,14 @@ interface Props {
   messages: UiMessage[];
   sending: boolean;
   /**
+   * 回答是否还在**逐字播放**（网络已结束，打字机还在按 18~50 字/秒往外放）。
+   *
+   * ★ 为什么要单独传：`sending` 只跟网络请求的生死。1300 字的回答模型 2 秒推完，
+   *   播放器还要放 30 秒 —— 这 30 秒里 `sending` 已经是 false，停止键就变回了发送键，
+   *   而字还在一个个往外冒。用户点"截断"根本找不到按钮，这就是「截断不可用」的真身。
+   */
+  playing?: boolean;
+  /**
    * 两枚能力开关的当前值（受控）。2026-10-31 批 B：四档模式条下架后，
    * 它成了输入区上方**唯一**的能力入口，所以是必填 —— 它要进请求体
    * （use_kb / use_web），住在本组件内部的 state 里就发不出去了。
@@ -153,6 +161,7 @@ interface Props {
 export default function ChatArea({
   messages,
   sending,
+  playing = false,
   capValue,
   onCapChange,
   onSend,
@@ -1384,11 +1393,15 @@ export default function ChatArea({
             aria-label="输入问题"
             className="max-h-40 flex-1 resize-none bg-transparent px-2 py-2.5 text-msg leading-relaxed text-text outline-none placeholder:text-faint"
           />
-          {sending ? (
+          {sending || playing ? (
             <button
               onClick={onStop}
-              title="停止生成（截断当前输出，保留已生成内容）"
-              aria-label="停止生成，截断当前输出"
+              title={
+                sending
+                  ? "停止生成（截断当前输出，保留已生成内容）"
+                  : "立即全部显示（不再逐字播放）"
+              }
+              aria-label={sending ? "停止生成，截断当前输出" : "立即全部显示"}
               className="send stop"
             >
               <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5" aria-hidden="true">
@@ -1414,10 +1427,14 @@ export default function ChatArea({
         {/* 键盘提示从 placeholder 里挪出来：placeholder 要短，才像"随便问点什么" */}
         <div className="input-hint">
           <span className="truncate">{capHint}</span>
-          {/* 生成中把快捷键提示换成截断提示：停止键只有生成时才出现，
+          {/* 生成中把快捷键提示换成截断提示：停止键只有生成/播放时才出现，
               不写一句"点右侧按钮截断"，用户很容易把它当成另一个发送键。 */}
           <span className="ml-1 shrink-0 whitespace-nowrap">
-            {sending ? "生成中 · 点右侧按钮截断输出" : "Enter 发送 · ↑ 上一条 · Esc 清空"}
+            {sending
+              ? "生成中 · 点右侧按钮截断输出"
+              : playing
+                ? "仍在逐字显示 · 点右侧按钮立刻全显"
+                : "Enter 发送 · ↑ 上一条 · Esc 清空"}
           </span>
         </div>
       </div>

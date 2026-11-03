@@ -593,9 +593,20 @@ export default function Home() {
     [sendMessage, sending, setMessages]
   );
 
-  // 停止当前流式生成（中断 SSE 请求）
+  // 停止 / 立即全显。
+  //
+  // ★ 这里分两种情况，是用户报「截断不可用」的根因：
+  //   ① 请求还在跑 —— abort 掉 SSE，剩下的帧不再收（catch 里会把已收到的字一次性放完）；
+  //   ② 请求早就结束了，只是**打字机还在吐字** —— 这时 abortRef 已经是 null，
+  //      老代码直接 `?.abort()` 等于什么都没做，而字还在一个个往外冒。
+  //      1300 字的回答模型 2 秒推完，播放器按 18~50 字/秒要放 30 秒，
+  //      这 30 秒里按钮因为 sending=false 已经变回发送键了 —— 想停都找不到入口。
   const stopSending = () => {
-    abortRef.current?.abort();
+    if (abortRef.current) {
+      abortRef.current.abort();
+      return;
+    }
+    playerRef.current?.flush();
   };
 
   // 定位开关：开 → 先试浏览器定位，公网 http 下自动退到服务端 IP 定位；关 → 仅关闭开关（保留缓存）
@@ -871,6 +882,8 @@ export default function Home() {
         <ChatArea
           messages={messages}
           sending={sending}
+          // 播放器还在放字（网络可能早就结束了）：让停止键在这段时间也留着
+          playing={messages.some((m) => m.streaming)}
           capValue={capValue}
           onCapChange={onCapChange}
           onSend={sendMessage}
