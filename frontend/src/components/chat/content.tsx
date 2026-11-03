@@ -209,11 +209,6 @@ export function renderInline(
 
 // 表格单元格等复用的行内渲染在 renderMarkdown 内部定义（要带上 cites 才认得出角标）
 
-interface MdTable {
-  head: string[];
-  rows: string[][];
-}
-
 /** 解析一行表格单元格：| a | b | → [a, b]（容忍首尾无竖线） */
 function splitTableRow(line: string): string[] {
   return line

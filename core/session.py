@@ -24,6 +24,7 @@ from __future__ import annotations
 由 tools/migrate_owner.py 明确指派后才归某个真人所有。
 """
 
+import json
 import os
 import sqlite3
 import threading
@@ -133,6 +134,7 @@ def _init_db() -> None:
                 role            TEXT NOT NULL CHECK(role IN ('system','user','assistant')),
                 content         TEXT NOT NULL,
                 refs            TEXT,
+                web_sources     TEXT NOT NULL DEFAULT '[]',
                 created_at      INTEGER NOT NULL,
                 FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
             );
@@ -261,6 +263,15 @@ def _init_db() -> None:
         # 另建表又不值得——一个 BOOLEAN 语义的整数列，成本一行。
         try:
             conn.execute("ALTER TABLE messages ADD COLUMN truncated INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass
+
+        # 迁移：联网来源随 assistant 消息落库。只存在 SSE/前端内存时，刷新会话后
+        # 正文 [Wn] 会失去目标，来源卡也整块消失。
+        try:
+            conn.execute(
+                "ALTER TABLE messages ADD COLUMN web_sources TEXT NOT NULL DEFAULT '[]'"
+            )
         except Exception:
             pass
 
@@ -411,6 +422,7 @@ def add_message(
     content: str,
     refs: str = "",
     truncated: bool = False,
+    web_sources: list[dict] | None = None,
 ) -> int:
     """追加一条消息，返回 message id。同时更新会话的 updated_at。
 
@@ -420,11 +432,15 @@ def add_message(
     if not _owned(owner, sid):
         raise NotOwned(sid)
     now = int(time.time())
+    web_sources_json = json.dumps(
+        web_sources or [], ensure_ascii=False, separators=(",", ":")
+    )
     with _get_conn() as conn:
         conn.execute(
-            "INSERT INTO messages (conversation_id, role, content, refs, truncated, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (sid, role, content, refs, 1 if truncated else 0, now),
+            "INSERT INTO messages "
+            "(conversation_id, role, content, refs, truncated, web_sources, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (sid, role, content, refs, 1 if truncated else 0, web_sources_json, now),
         )
         conn.execute(
             "UPDATE conversations SET updated_at = ? WHERE id = ?",
@@ -629,7 +645,7 @@ def get_messages(
     Returns:
         [{role, content, created_at}, ...]
     """
-    cols = "m.id, m.role, m.content, m.refs, m.created_at"
+    cols = "m.id, m.role, m.content, m.refs, m.web_sources, m.created_at"
     join = (
         "FROM messages m JOIN conversations c ON m.conversation_id = c.id "
         "WHERE m.conversation_id = ? AND c.owner_id = ?"
@@ -651,6 +667,13 @@ def get_messages(
             ).fetchall()
 
     msgs = [dict(r) for r in rows]
+    for m in msgs:
+        raw = m.get("web_sources")
+        try:
+            parsed = json.loads(raw or "[]")
+        except (TypeError, ValueError):
+            parsed = []
+        m["web_sources"] = parsed if isinstance(parsed, list) else []
     if not msgs:
         return []
 
@@ -690,11 +713,19 @@ def get_message(owner: str, sid: str, msg_id: int) -> dict | None:
         return None
     with _get_conn() as conn:
         row = conn.execute(
-            "SELECT id, role, content, refs, created_at FROM messages "
+            "SELECT id, role, content, refs, web_sources, created_at FROM messages "
             "WHERE conversation_id = ? AND id = ?",
             (sid, msg_id),
         ).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        out = dict(row)
+        try:
+            parsed = json.loads(out.get("web_sources") or "[]")
+        except (TypeError, ValueError):
+            parsed = []
+        out["web_sources"] = parsed if isinstance(parsed, list) else []
+        return out
 
 
 def find_turn_ids(owner: str, sid: str, msg_id: int) -> list[int]:

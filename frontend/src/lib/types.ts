@@ -74,6 +74,8 @@ export interface Message {
   role: "user" | "assistant" | "system";
   content: string;
   refs?: string;
+  /** 联网来源，随 assistant 消息持久化；老消息没有这个字段时按空列表处理。 */
+  web_sources?: WebSource[];
   created_at?: number;
 }
 

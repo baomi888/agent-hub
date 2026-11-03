@@ -22,7 +22,7 @@ import { detailToMessage } from "@/lib/errors";
 import AuthGate from "@/components/AuthGate";
 import AnnounceModal from "@/components/announce/AnnounceModal";
 import type { UiMessage } from "@/components/chat/types";
-import type { ChatMode, Grounding, RefSource, ToolEvent, WebSource } from "@/lib/types";
+import type { Grounding, RefSource, ToolEvent, WebSource } from "@/lib/types";
 import { isPlanRequest } from "@/components/chat/plan";
 import { useHybridTrace } from "@/lib/useHybridTrace";
 import { createTypewriter, type Typewriter } from "@/lib/typewriter";
@@ -118,8 +118,7 @@ export default function Home() {
   const hybrid = useHybridTrace();
   // 轨迹是 hook 内部 state，但它要落到消息上（才能随消息持久化 / 刷新后重建），
   // 所以订阅它变化，把 items 同步进当前那条助手消息。
-  const [hybridItems, setHybridItems] = useState<import("@/lib/types").TraceItem[]>([]);
-  useEffect(() => setHybridItems(hybrid.trace.items), [hybrid.trace.items]);
+  const hybridItems = hybrid.trace.items;
   // 本轮助手消息 id：轨迹同步要靠它定位「往哪条消息上写」
   const asstIdRef = useRef<string | null>(null);
   // 本轮用户消息 id（前端临时 id）：done 帧带回 user_message_id 时按它回填 dbId。

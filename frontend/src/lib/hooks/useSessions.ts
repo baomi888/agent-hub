@@ -5,11 +5,17 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { uid } from "@/lib/id";
 import { stripPlanHint } from "@/components/ChatArea";
-import type { Conversation } from "@/lib/types";
+import type { Conversation, WebSource } from "@/lib/types";
 import type { UiMessage } from "@/components/chat/types";
 import type { ShowToast } from "./useToast";
 
-function toUi(role: string, content: string, refs?: string, dbId?: number): UiMessage | null {
+function toUi(
+  role: string,
+  content: string,
+  refs?: string,
+  dbId?: number,
+  webSources?: WebSource[]
+): UiMessage | null {
   if (role === "system") return null;
   return {
     id: uid(),
@@ -17,12 +23,21 @@ function toUi(role: string, content: string, refs?: string, dbId?: number): UiMe
     content: stripPlanHint(content),
     refs,
     dbId,
+    webSources: webSources?.length ? webSources : undefined,
   };
 }
 
-function toUiList(messages: { role: string; content: string; refs?: string; id?: number }[]) {
+function toUiList(
+  messages: {
+    role: string;
+    content: string;
+    refs?: string;
+    id?: number;
+    web_sources?: WebSource[];
+  }[]
+) {
   return messages
-    .map((m) => toUi(m.role, m.content, m.refs, m.id))
+    .map((m) => toUi(m.role, m.content, m.refs, m.id, m.web_sources))
     .filter(Boolean) as UiMessage[];
 }
 

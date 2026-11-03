@@ -59,6 +59,7 @@ def test_web_search_returns_results_and_fills_allowlist(monkeypatch):
     assert len(calls) == 1 and calls[0][1] == 5
     # 下载允许清单由服务端写入，download_file 严格模式依赖它
     assert allow == ["https://example.com/a.pdf", "https://example.com/b.pdf"]
+    assert "**[W1]**" in out and "**[W2]**" in out
 
 
 def test_web_search_without_config_still_works(monkeypatch):

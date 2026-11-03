@@ -20,6 +20,7 @@ kb_search / download_file **不再接受 kb_id 参数**，改成从 RunnableConf
 """
 
 import logging
+import threading
 
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
@@ -27,6 +28,10 @@ from langchain_core.tools import tool
 from core.urltools import url_allowed
 
 logger = logging.getLogger(__name__)
+
+# 同一轮可能有并行工具调用；编号的“读当前最大值 → 追加”必须是一个原子段，
+# 否则两个 web_search 都会拿到同一个起始 id，正文里的 [Wn] 就会指向错网址。
+_WEB_SOURCE_LOCK = threading.Lock()
 
 
 def _configurable(config) -> dict:
@@ -43,6 +48,56 @@ def _host_of(url: str) -> str:
     except ValueError:
         return ""
     return host[4:] if host.startswith("www.") else host
+
+
+def _number_web_sources(
+    bag: list[dict] | None, rows: list[dict]
+) -> list[tuple[int, dict]]:
+    """给本轮网页结果分配 Wn，并按 URL 去重。
+
+    同一轮重复搜到同一网址时复用原编号：既避免来源卡出现两条一模一样的网页，
+    也保证模型第二次看到的是同一个 Wn，而不是同一地址拥有两个编号。
+    """
+    if bag is None:
+        return [(i + 1, r) for i, r in enumerate(rows)]
+
+    with _WEB_SOURCE_LOCK:
+        by_url: dict[str, int] = {}
+        max_id = 0
+        for item in bag:
+            if not isinstance(item, dict):
+                continue
+            try:
+                idx = int(item.get("id") or 0)
+            except (TypeError, ValueError):
+                continue
+            max_id = max(max_id, idx)
+            url = item.get("url")
+            if isinstance(url, str) and url:
+                by_url[url] = idx
+
+        numbered: list[tuple[int, dict]] = []
+        for r in rows:
+            url = r["link"]
+            idx = by_url.get(url)
+            if idx is None:
+                max_id += 1
+                idx = max_id
+                by_url[url] = idx
+                raw_date = r.get("date")
+                bag.append(
+                    {
+                        "id": idx,
+                        "key": f"W{idx}",
+                        "title": r.get("title", "?"),
+                        "url": url,
+                        "domain": _host_of(url),
+                        "snippet": (r.get("snippet") or "")[:200],
+                        "date": raw_date.strip() if isinstance(raw_date, str) else "",
+                    }
+                )
+            numbered.append((idx, r))
+        return numbered
 
 
 def _runtime(config) -> tuple[str | None, str | None]:
@@ -206,8 +261,8 @@ def web_search(query: str, max_results: int = 5, config: RunnableConfig = None) 
         #
         # ★ 编号必须**全局递增**，不能用每次搜索都从 1 起的 i：一轮里搜索两次
         #   （换个问法再搜）会出现两组 [1][2]，前端按 id 找网址就会指错来源。
-        #   续号的基准取列表当前长度，保证「模型看到的编号」与「下发列表的 id」
-        #   是同一个数。
+        #   编号与追加在同一把锁内完成；重复搜索同一网址时复用原 Wn，
+        #   保证「模型看到的编号」与「下发列表的 id」始终是同一个数。
         #
         # ★★ 编号带 W 前缀（[W1] 而不是 [1]），是 2026-11-03 混合场景取证后定的。
         #   资料库检索的提示词让模型写「（依据：[1][3]）」，而这里原本也是 [1][2][3]
@@ -217,31 +272,13 @@ def web_search(query: str, max_results: int = 5, config: RunnableConfig = None) 
         #   不依赖模型"记得自己引用的是哪一套"。
         bag = _configurable(config).get("web_sources")
         bag = bag if isinstance(bag, list) else None
-        base = len(bag) if bag else 0
 
         lines = []
-        for i, r in enumerate(usable):
+        for idx, r in _number_web_sources(bag, usable):
             title = r.get("title", "?")
             snippet = (r.get("snippet") or "")[:200]
             link = r["link"]
-            idx = base + i + 1
             lines.append(f"**[W{idx}]** {title}\n   {snippet}\n   {link}")
-            if bag is not None:
-                # Serper 的 organic 项常带 date（"2 days ago" / "Jul 15, 2025" /
-                # 中文站点的"2026-07-22"），有就透传：来源卡上带日期，用户才能
-                # 判断这条信息还新不新。取不到就留空串，前端不渲染这一栏。
-                raw_date = r.get("date")
-                bag.append(
-                    {
-                        "id": idx,
-                        "key": f"W{idx}",
-                        "title": title,
-                        "url": link,
-                        "domain": _host_of(link),
-                        "snippet": snippet,
-                        "date": raw_date.strip() if isinstance(raw_date, str) else "",
-                    }
-                )
 
         # ⚠️ 这里**不要**再往返回值里塞"请用 [n] 标注、不要贴网址"这类指令。
         # 2026-11-03 真实验证：模型会把整段检索结果（编号 + 摘要 + 网址）原样

@@ -17,6 +17,7 @@ SSE 事件协议：
   event: status     { text: "..." }           状态提示
   event: tool       { name: "...", input: "...", output: "..." }  Agent 工具调用
   event: sources    { items: [...] }           引用溯源条目（含每条 strength）
+  event: web_sources { items: [...] }          联网搜索来源（Wn + 原网页地址）
   event: grounding  { strength: "...", best: 0.31, weak: true }
                    检索依据强度。weak=true 时前端在回答上方挂「依据较弱」提示条，
                    数据来源是 kb/rag_core.py::assess_grounding()
@@ -1595,11 +1596,6 @@ async def _chat_stream_impl(
             truncated = acc.truncated
 
         # ---- 收尾：存 assistant 消息 + 取回并行生成的标题 ----
-        # 联网来源放在落库前一次性下发：搜索发生在正文生成**中途**，抢不到正文
-        # 前面；用独立事件名渲染，不占知识库 sources 的槽位（见上面的说明）。
-        if web_sources:
-            yield _sse("web_sources", {"items": web_sources})
-
         msg_id = await asyncio.to_thread(
             store.add_message,
             uid,
@@ -1608,7 +1604,13 @@ async def _chat_stream_impl(
             acc_text,
             refs=refs_md,
             truncated=truncated,
+            web_sources=web_sources,
         )
+        # 先落库再下发：客户端收到来源卡后若立刻关页/断连，刷新会话仍能从消息行
+        # 恢复同一批 [Wn]，不会出现“正文有角标、来源永远丢失”。搜索发生在正文
+        # 生成中途，抢不到正文前面；独立事件仍不占知识库 sources 的槽位。
+        if web_sources:
+            yield _sse("web_sources", {"items": web_sources})
 
         # B 块：对话级用户画像标签（fire-and-forget，不阻塞 SSE；失败静默）
         if config.USER_TAG_HOOK_ENABLED and acc_text:
