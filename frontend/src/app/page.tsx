@@ -305,10 +305,14 @@ export default function Home() {
     const player = createTypewriter({
       onText: (full) =>
         setMessages((prev) => prev.map((m) => (m.id === asstId ? { ...m, content: full } : m))),
-      onDone: () =>
+      onDone: () => {
+        // 播放器放完（正常收尾 / 出错 flush）：到这一刻这一轮才算真正结束
+        playerRef.current = null;
         setMessages((prev) =>
           prev.map((m) => (m.id === asstId ? { ...m, streaming: false, status: undefined } : m))
-        ),
+        );
+        setSending(false);
+      },
     });
     playerRef.current = player;
     // 新一轮开始：先把上一轮的轨迹归零，否则新旧两轮的节点会串在一条时间轴上
@@ -535,13 +539,20 @@ export default function Home() {
       // 兜底：结束流式状态（如果是用户中途停止，气泡要显示"已停止生成"）
       const aborted = controller.signal.aborted;
       if (aborted) {
-        // 用户停止：手里剩下的字立刻全显，别再按阅读节奏慢慢放
-        player.flush();
+        // 用户点了「停止生成」：只保留**画面上已经显示出来**的部分。
+        // 这里不能 flush —— 打字机里还压着一大段没放出来的字（模型 180 字/秒，
+        // 播放器 18~50 字/秒），一次全倒出来，看起来就是"根本没截断"。
+        player.cancel();
+        playerRef.current = null;
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === asstId ? { ...m, streaming: false, stopped: true } : m
+            m.id === asstId
+              ? { ...m, streaming: false, stopped: true, status: undefined }
+              : m
           )
         );
+        // cancel() 不会触发 onDone，这一轮的 sending 在这里收
+        setSending(false);
       } else {
         // 流断了但没收到 done 帧：让播放器把缓冲放完并收尾，不要留一条永远"正在写"
         player.finish();
@@ -557,16 +568,24 @@ export default function Home() {
           )
         );
       } else {
-        // 用户主动停止：已经收到的字全部立刻显出来，再标"已停止生成"
-        player.flush();
+        // 用户主动停止（AbortError）：同样只保留已经显示出来的部分，停在当前画面，
+        // 不能把播放器缓冲着的字一次性倒出来（那样等于没有截断）
+        player.cancel();
+        playerRef.current = null;
         setMessages((prev) =>
-          prev.map((m) => (m.id === asstId ? { ...m, streaming: false, stopped: true } : m))
+          prev.map((m) =>
+            m.id === asstId
+              ? { ...m, streaming: false, stopped: true, status: undefined }
+              : m
+          )
         );
+        setSending(false);
       }
     } finally {
       abortRef.current = null;
-      setSending(false);
       refreshSessions();
+      // 注意：这里不再无条件 setSending(false)。上游结束后打字机还要慢慢放十几秒，
+      // 这期间按钮必须仍是「停止」，用户才能随时截断回放；收尾交给 onDone / 上面的 abort 分支。
     }
   }, [activeSid, mode, useKb, useWeb, topK, setSessions, setActiveSid, setMessages, showToast, refreshSessions]);
 
@@ -593,9 +612,23 @@ export default function Home() {
     [sendMessage, sending, setMessages]
   );
 
-  // 停止当前流式生成（中断 SSE 请求）
+  // 停止当前流式生成（中断 SSE 请求）；上游已经结束、只剩打字机在慢放时，直接截断回放
   const stopSending = () => {
-    abortRef.current?.abort();
+    if (abortRef.current) {
+      abortRef.current.abort();
+      return;
+    }
+    // 没有在收流，但文字还在慢慢放：把没放出来的缓冲丢掉，停在当前画面
+    const player = playerRef.current;
+    if (!player) return;
+    player.cancel();
+    playerRef.current = null;
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.streaming ? { ...m, streaming: false, stopped: true, status: undefined } : m
+      )
+    );
+    setSending(false);
   };
 
   // 定位开关：开 → 先试浏览器定位，公网 http 下自动退到服务端 IP 定位；关 → 仅关闭开关（保留缓存）
