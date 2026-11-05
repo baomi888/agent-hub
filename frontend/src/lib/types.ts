@@ -54,6 +54,13 @@ export interface KbProposal {
   expires_at: number;
   /** 后端生成的一句话说明（≤40 字），前端不拼接、不加工 */
   reason: string;
+  /**
+   * 这条建议指的是哪条回答（messages 表自增 id）。
+   *
+   * 只在「刷新后恢复」时用得上：实时那一帧是直接挂到刚生成的那条回答上的，
+   * 不需要对号；而刷新后消息是整段重新拉的，没有这个 id 就只能猜最后一条。
+   */
+  answer_message_id?: number;
 }
 
 /** confirm 的返回值：字段都是可选的 —— 建库成功但嵌入失败时 imported 可能是 0。 */

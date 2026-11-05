@@ -1724,6 +1724,30 @@ async def _chat_stream_impl(
             await asyncio.to_thread(store.rename_conversation, uid, req.sid, gen_title)
             yield _sse("title", {"title": gen_title})
 
+        # 板块 D7 / D11：这一轮结束后问一句「要不要把这些存成一个库」。
+        # 只发**建议**（落库 + 一帧 SSE），绝不自动建库：建库是可见副作用，
+        # 自动做的话用户某天会发现资料库被塞满不知道哪来的库。
+        # 放在 done 之前（前端要能在回答结束时把卡片挂在下面）；
+        # 失败静默 —— 建议发不出去不该影响这一轮回答。
+        try:
+            from core import kb_proposals
+
+            _conv = await asyncio.to_thread(store.get_conversation, uid, req.sid) or {}
+            proposal = await asyncio.to_thread(
+                kb_proposals.maybe_propose,
+                uid,
+                req.sid,
+                use_kb=bool(plan.use_kb),
+                use_web=bool(plan.use_web),
+                kb_bound=bool(_conv.get("kb_id")),
+                web_sources=web_sources,
+                answer_message_id=msg_id,
+            )
+            if proposal:
+                yield _sse("kb_proposal", proposal)
+        except Exception:  # noqa: BLE001
+            pass
+
         # message_id 回给前端：赞踩要按消息 id 落库，前端自己生成的 uid 后端不认
         # run_id 仅 hybrid 模式有值：人工切换 / 执行日志查询按它寻址
         yield _sse(

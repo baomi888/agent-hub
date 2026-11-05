@@ -470,6 +470,27 @@ export default function Home() {
             }
             break;
           }
+          case "kb_proposal": {
+            // 板块 D7 / D11：后端在回答结束后问「要不要把这轮的东西存成一个库」。
+            // 只挂到这一条回答上（不是全局弹窗）：建议针对的正是"这一轮"，
+            // 而且用户决定之前它会一直留在原地，刷新页面不会重放（一次性交互）。
+            const proposal = {
+              proposal_id: String(ev.data.proposal_id ?? ""),
+              topic: String(ev.data.topic ?? ""),
+              source: String(ev.data.source ?? "no_kb_retrieval") as
+                | "no_kb_retrieval"
+                | "web_search",
+              candidates: Number(ev.data.candidates ?? 0) || 0,
+              kb_hint: String(ev.data.kb_hint ?? ""),
+              expires_at: Number(ev.data.expires_at ?? 0) || 0,
+              reason: String(ev.data.reason ?? ""),
+            };
+            if (!proposal.proposal_id) break;
+            setMessages((prev) =>
+              prev.map((m) => (m.id === asstId ? { ...m, proposal } : m))
+            );
+            break;
+          }
           case "done": {
             const refs = String(ev.data.refs ?? "");
             // 后端回传的 messages 表 id：赞踩要按它落库，

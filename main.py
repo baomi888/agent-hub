@@ -32,8 +32,10 @@ from api.focus import router as focus_router
 from api.geo import router as geo_router
 from api.hybrid import router as hybrid_router
 from api.kb import router as kb_router
+from api.kb_proposals import router as kb_proposals_router
 from api.metrics import router as metrics_router
 from api.path import router as path_router
+from api.prefs import router as prefs_router
 from api.profile import router as profile_router
 from api.prompt_evo import router as prompt_evo_router
 from api.query import router as query_router
@@ -168,6 +170,9 @@ if config.CORS_ALLOW_LOCALHOST:
 app.include_router(auth_router, prefix="/api/auth", tags=["认证"])
 # Agent 编排的元数据端点（工具清单 / 延迟发现）：只读代码里的 TOOL_META，不执行工具
 app.include_router(agent_router, prefix="/api/agent", tags=["Agent 编排"])
+# 建库建议的确认/忽略必须在 kb_router **之前**挂：kb_router 里有 /{kb_id}/xxx
+# 这类带路径参数的路由，先挂它的话 /api/kb/proposals/<id>/confirm 存在被误匹配的风险
+app.include_router(kb_proposals_router, prefix="/api/kb/proposals", tags=["知识库沉淀"])
 app.include_router(kb_router, prefix="/api/kb", tags=["知识库"])
 app.include_router(sessions_router, prefix="/api/sessions", tags=["会话"])
 app.include_router(chat_router, prefix="/api/chat", tags=["问答"])
@@ -208,6 +213,8 @@ app.include_router(path_router, prefix="/api/path", tags=["学习路径"])
 app.include_router(profile_router, prefix="/api/profile", tags=["用户画像"])
 # 检索词增强（roadmap B3）：预览"把口语词换成标准词"的结果，只读、不写库、不调模型
 app.include_router(query_router, prefix="/api/query", tags=["检索词增强"])
+# 用户偏好（板块 D）：自动沉淀 / 检索无库时提示建库。两个开关，一读一写
+app.include_router(prefs_router, prefix="/api/prefs", tags=["用户偏好"])
 # 校园工具集 · 番茄钟专注记录同步（B6）：会话幂等追加 + 任务后写胜。
 # 只存「学什么、多久」，不存任何对话内容
 app.include_router(focus_router, prefix="/api/campus/focus", tags=["校园工具集"])

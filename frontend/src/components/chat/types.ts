@@ -1,6 +1,13 @@
 // 对话区的共享类型：消息与附件
 // 从 ChatArea.tsx 拆出（2026-09 重构），page.tsx 经由 components/ChatArea 再导出引用
-import type { Grounding, RefSource, ToolEvent, TraceItem, WebSource } from "@/lib/types";
+import type {
+  Grounding,
+  KbProposal,
+  RefSource,
+  ToolEvent,
+  TraceItem,
+  WebSource,
+} from "@/lib/types";
 
 export interface UiMessage {
   id: string;
@@ -16,6 +23,14 @@ export interface UiMessage {
    * 带资料库提问时首帧要等十几秒，这行字是那段时间里唯一的"它还活着"的证据。
    */
   status?: string;
+  /**
+   * 建库建议（板块 D，来自 SSE `kb_proposal` 帧，发生在 done 之前）。
+   *
+   * 挂在这一条回答上而不是放到页面级状态里：建议说的就是"这一轮的东西要不要存"，
+   * 脱离了具体那条回答，"这些"指什么是模糊的。会话重新打开时不会再出现
+   * （它是那一轮的交互，不是历史内容）。
+   */
+  proposal?: KbProposal;
   /** 用户主动中断了这次生成 */
   stopped?: boolean;
   attachments?: ChatAttachment[];

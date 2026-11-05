@@ -12,6 +12,7 @@ import CornIcon from "../CornIcon";
 import PlanCard, { detectPlanTopic, isPlanRequest, parsePlan } from "./plan";
 import { HybridTraceView } from "@/components/HybridTrace";
 import WebSources from "./WebSources";
+import KbProposalCard from "./KbProposalCard";
 import type { WebSource } from "@/lib/types";
 import { useCopy } from "@/lib/useCopy";
 import HubMark from "./HubMark";
@@ -353,6 +354,12 @@ const Bubble = memo(function Bubble({
             </>
           )}
         </div>
+
+        {/* 建库建议卡（板块 D）：回答结束后后端发来一帧 kb_proposal。
+            不进 .bubble-ai 里面 —— 它不是回答内容的一部分，是"这一轮聊完，
+            要不要把它存下来"的一个独立决定，视觉上也要从正文里分出来。
+            卡片自己管四种状态（待确认/已建/已忽略/已过期），这里只给数据。 */}
+        {!m.streaming && m.proposal && <KbProposalCard proposal={m.proposal} />}
 
         {/* 联网来源：与下面的资料库引用块并列，但不合并 ——
             那边每条带页码和相似度（本地文件），这边每条是网址（网页），

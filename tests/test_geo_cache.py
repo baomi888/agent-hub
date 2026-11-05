@@ -45,10 +45,34 @@ class _Client:
         return _Resp(type(self).payload)
 
 
+_ORIG_CLIENT = None
+
+
 def _patch_client():
+    """把 httpx.AsyncClient 换成假的，**并记住原件用于还原**。
+
+    ★ 不还原的代价是整进程级的：它后面任何一个用 httpx 的代码（LangChain 的
+      OpenAI 客户端、检索、聊天流）都会拿到这个假客户端，出错时的现象是
+      "那个模块自己坏了"。11-05 实测：test_sediment 的流式接线用例单独跑通过、
+      全量跑只吐 status+error，二分了十几轮才定位到这里。
+    """
+    global _ORIG_CLIENT
     import httpx
 
+    if _ORIG_CLIENT is None:
+        _ORIG_CLIENT = httpx.AsyncClient
     httpx.AsyncClient = _Client
+
+
+def _unpatch_client():
+    """还原 httpx.AsyncClient（幂等：没 patch 过就什么也不做）。"""
+    global _ORIG_CLIENT
+    if _ORIG_CLIENT is None:
+        return
+    import httpx
+
+    httpx.AsyncClient = _ORIG_CLIENT
+    _ORIG_CLIENT = None
 
 
 def _make_request(ip="8.8.8.8"):
@@ -149,8 +173,16 @@ async def main():
 
 def test_geo_cache_behaviour():
     """geo /locate 的缓存行为（pytest 入口，见 main() 里的逐条断言）。"""
-    assert asyncio.run(main()) == 0
+    # finally 而不是"最后一行还原"：main() 里任何一处抛异常都不能把
+    # 假 httpx 客户端留给后面的测试
+    try:
+        assert asyncio.run(main()) == 0
+    finally:
+        _unpatch_client()
 
 
 if __name__ == "__main__":
-    raise SystemExit(asyncio.run(main()))
+    try:
+        raise SystemExit(asyncio.run(main()))
+    finally:
+        _unpatch_client()
