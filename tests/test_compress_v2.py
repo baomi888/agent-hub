@@ -428,6 +428,45 @@ class TestDialogueImport:
         block2, _u2, _p2 = cc.load_summary_state(UID, sid)
         assert any(m.staged for m in block2.metas), "入库后至少应有一个段被标 staged"
 
+    def test_import_indexes_follow_preview_order(self, client, monkeypatch):
+        """★ 勾「第 1 条」存进去的必须就是预览里的第 1 条。
+
+        预览端点回的是 `rank_for_preview(extract_blocks(...))`：所有 user 候选
+        排在前、assistant 结构块整体后置。入库若按 `extract_blocks` 的原序取下标，
+        同一个数字指向两句话 —— 用户勾「一、基础」，库里躺的是「三、题型技巧」。
+        两端单测各自都是绿的，只有"预览序 vs 入库序"对着看才抓得到。
+        """
+        c, added = client
+        from api import kb as kb_api
+
+        monkeypatch.setattr(kb_api.pipelines, "owner_of", lambda kb: UID)
+
+        sid = store.create_conversation(UID, "下标错位回归")["id"]
+        store.add_message(UID, sid, "user", "我今天背了三十个单词，感觉还行")
+        store.add_message(UID, sid, "assistant", _ASST_LISTENING)
+        store.add_message(UID, sid, "user", "我的六级考试是 12 月 14 日，请务必记住这个日期")
+
+        preview = c.get(f"/api/kb/dialogue-candidates/{sid}").json()["candidates"]
+        assert len(preview) >= 3, [x["text"][:16] for x in preview]
+
+        # 前置断言：必须真的存在"两种序不同"，否则这条用例什么也没测
+        raw = dialogue_import.extract_blocks(
+            store.get_messages(UID, sid, limit_turns=None, include_system=False)
+        )
+        assert [x["role"] for x in raw] != [x["role"] for x in preview], (
+            "前置条件变了：两种序现在一样，换一组数据再测"
+        )
+
+        target = preview[1]
+        resp = c.post(
+            "/api/kb/kb-test/import-dialogue", json={"sid": sid, "indexes": [1]}
+        )
+        assert resp.status_code == 200, resp.text
+        assert len(added) == 1, f"只勾了一条却写进去 {len(added)} 条"
+        assert added[0].page_content == target["text"], (
+            f"勾的是《{target['text'][:20]}》，存进去的是《{added[0].page_content[:20]}》"
+        )
+
     def test_import_dialogue_twice_skips_second(self, client, monkeypatch):
         """同一段对话勾同样的候选再存一次：一条都不再写进去。
 

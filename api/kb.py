@@ -644,9 +644,15 @@ async def import_dialogue(
         # 计数口径跟着切块走：一条回答切 4 段，就是 4 个单元
         requested = len(picked)
     else:
-        cands = await asyncio.to_thread(dialogue_import.extract_blocks, msgs)
-        if not cands:
+        raw = await asyncio.to_thread(dialogue_import.extract_blocks, msgs)
+        if not raw:
             raise HTTPException(status_code=400, detail="这个会话没有可沉淀的知识候选")
+        # ★★ 下标基准必须和预览**同一个序**。`dialogue-candidates` 回的是
+        #   `rank_for_preview(raw)`，用户在界面上勾的是"第几条"；这里若按 raw 取，
+        #   勾「一、基础」会存成「三、题型技巧」，而且两端各自都"没错" ——
+        #   只有把预览顺序和入库顺序对着看才发现（2026-11-05 审出的 ★★★）。
+        #   助手块在 rank_for_preview 里保持原序且整体后置，所以对齐后依然稳定。
+        cands = dialogue_import.rank_for_preview(raw)
         idx = list(dict.fromkeys(req.indexes)) if req.indexes else list(range(len(cands)))
         bad = [i for i in idx if i < 0 or i >= len(cands)]
         if bad:

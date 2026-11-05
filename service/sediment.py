@@ -181,6 +181,9 @@ def ingest_candidates(
     if not cands:
         return {"imported": 0, "skipped": 0, "chunks": 0, "staged_segments": 0, "batch_id": ""}
     if indexes:
+        # 下标口径与 `GET /api/kb/dialogue-candidates` 一致：先 rank 再取。
+        # 否则"预览里第 1 条"和"存进去的第 1 条"是两句话（2026-11-05 的 ★★★）。
+        cands = dialogue_import.rank_for_preview(cands)
         bad = [i for i in indexes if i < 0 or i >= len(cands)]
         if bad:
             raise ValueError(f"候选下标越界：{bad[:5]}")
