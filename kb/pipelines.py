@@ -47,6 +47,14 @@ _KB_NAMES: dict[str, str] = {}
 _KB_LOCKS: dict[str, threading.RLock] = {}
 # { kb_id: owner_id }  —— 归属表。没有记录 = 无主（改造前的老库），谁都访问不到
 _KB_OWNERS: dict[str, str] = {}
+# 上次读盘时两个注册表文件的 mtime（None = 还没读过）。
+# ★ 为什么需要：板块 D 起后台 worker 也会建库（自动沉淀），它写的是同两个 json，
+#   而 API 进程与 worker 是**两个服务**。原来"只在内存表为空时读一次"意味着
+#   worker 建的库在 API 进程里永远不存在 —— 用户点进资料库看到的还是老列表，
+#   重启后端才冒出来（11-01"存进去了但看不见"的同一个家族）。
+#   用 mtime 判重：命中时只 stat 一次，不解析 json。
+_KB_NAMES_MTIME: float | None = None
+_KB_OWNERS_MTIME: float | None = None
 
 # 保护上面五个全局容器。用 RLock：内部函数会互相调用（add_file_records → get_or_create），
 # 普通 Lock 会在第二次 acquire 时把自己锁死
@@ -159,9 +167,18 @@ def _save_files() -> None:
         logging.getLogger(__name__).warning("文件清单落盘失败（重启后记录会丢）：%s", e)
 
 
+def _mt(path: str) -> float:
+    """文件 mtime；不存在返回 0。调用方需持有 _REGISTRY_LOCK。"""
+    try:
+        return os.stat(path).st_mtime
+    except OSError:
+        return 0.0
+
+
 def _load_names() -> None:
     """从磁盘加载中文名映射。调用方需持有 _REGISTRY_LOCK。"""
-    global _KB_NAMES
+    global _KB_NAMES, _KB_NAMES_MTIME
+    _KB_NAMES_MTIME = _mt(_names_path())
     try:
         with open(_names_path(), encoding="utf-8") as f:
             _KB_NAMES = json.load(f)
@@ -171,15 +188,25 @@ def _load_names() -> None:
 
 def _save_names() -> None:
     """持久化中文名映射（原子写）。调用方需持有 _REGISTRY_LOCK。"""
+    global _KB_NAMES_MTIME
     try:
         _atomic_write_json(_names_path(), _KB_NAMES)
+        # 写完就认下这个 mtime，免得下一次读立刻又白读一遍
+        _KB_NAMES_MTIME = _mt(_names_path())
     except Exception as e:
         logging.getLogger(__name__).warning("知识库名映射落盘失败：%s", e)
 
 
+def _reload_names_if_changed() -> None:
+    """别的进程改过注册表就重读。调用方需持有 _REGISTRY_LOCK。"""
+    if _KB_NAMES_MTIME is None or _mt(_names_path()) != _KB_NAMES_MTIME:
+        _load_names()
+
+
 def _load_owners() -> None:
     """从磁盘加载归属表。调用方需持有 _REGISTRY_LOCK。"""
-    global _KB_OWNERS
+    global _KB_OWNERS, _KB_OWNERS_MTIME
+    _KB_OWNERS_MTIME = _mt(_owners_path())
     try:
         with open(_owners_path(), encoding="utf-8") as f:
             data = json.load(f)
@@ -194,25 +221,31 @@ def _load_owners() -> None:
 
 def _save_owners() -> None:
     """持久化归属表（原子写）。调用方需持有 _REGISTRY_LOCK。"""
+    global _KB_OWNERS_MTIME
     try:
         _atomic_write_json(_owners_path(), _KB_OWNERS)
+        _KB_OWNERS_MTIME = _mt(_owners_path())
     except Exception as e:
         logging.getLogger(__name__).warning("知识库归属表落盘失败：%s", e)
+
+
+def _reload_owners_if_changed() -> None:
+    """别的进程改过归属表就重读。调用方需持有 _REGISTRY_LOCK。"""
+    if _KB_OWNERS_MTIME is None or _mt(_owners_path()) != _KB_OWNERS_MTIME:
+        _load_owners()
 
 
 def owner_of(kb_id: str) -> str | None:
     """该知识库属于谁；无主返回 None。"""
     with _REGISTRY_LOCK:
-        if not _KB_OWNERS:
-            _load_owners()
+        _reload_owners_if_changed()
         return _KB_OWNERS.get(kb_id)
 
 
 def owned_kb_ids(owner: str) -> set[str]:
     """该用户拥有的全部 kb_id。"""
     with _REGISTRY_LOCK:
-        if not _KB_OWNERS:
-            _load_owners()
+        _reload_owners_if_changed()
         return {k for k, v in _KB_OWNERS.items() if v == owner}
 
 
@@ -226,8 +259,7 @@ def name_of(kb_id: str | None) -> str | None:
     if not kb_id:
         return None
     with _REGISTRY_LOCK:
-        if not _KB_NAMES:
-            _load_names()
+        _reload_names_if_changed()
         return _KB_NAMES.get(kb_id)
 
 
@@ -389,6 +421,9 @@ def list_all(owner: str) -> list[dict]:
     # 整段加锁：循环里会 _get_or_create_raw 往注册表塞东西，
     # 不加锁的话并发遍历时 dict 被改动会直接抛 RuntimeError
     with _REGISTRY_LOCK:
+        # 名字表也要先对齐磁盘：worker 建的库名字存在同一个 json 里，
+        # 不刷新的话列表里会出现"名字 = kb_id"这种半生不熟的一行
+        _reload_names_if_changed()
         for col_name in all_collections:
             if not col_name.startswith("kb_"):
                 continue
