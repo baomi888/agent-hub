@@ -963,6 +963,7 @@ export default function Home() {
           prefill={prefill ?? undefined}
           onDeleteTurn={deleteTurn}
           onSediment={(dbId, text, role) => setSediment({ focus: dbId, text, role })}
+          onKbSaved={refreshKbs}
           geoEnabled={geoEnabled}
           geoCity={geoCity}
           geoPending={geoPending}

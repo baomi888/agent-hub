@@ -188,6 +188,7 @@ async def confirm(proposal_id: str, body: ConfirmIn, uid: str = Depends(get_curr
             "staged_segments": 0,
             "bound": False,
             "batch_id": "",
+            "duplicate": False,
             "note": "库已建好，但这段对话里没有可入库的整理内容",
         }
 
@@ -210,6 +211,9 @@ async def confirm(proposal_id: str, body: ConfirmIn, uid: str = Depends(get_curr
         "staged_segments": int(res.get("staged_segments") or 0),
         "bound": bool(bound),
         "batch_id": res.get("batch_id") or "",
+        # 幂等命中：内容之前存过，这次一条没写。前端要能把「已经存过」和
+        # 「没抓到内容」分开说 —— 两者在卡上长得一样，但意思完全不同。
+        "duplicate": bool(res.get("duplicate")),
     }
 
 

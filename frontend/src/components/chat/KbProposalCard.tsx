@@ -174,7 +174,11 @@ export default function KbProposalCard({
           已存进「{kbName}」
         </p>
         <p className="kbp-meta">
-          {imported > 0 ? `入库 ${imported} 条` : "建库完成，但这轮没抓到可入库的内容"}
+          {imported > 0
+            ? `入库 ${imported} 条`
+            : r.duplicate
+              ? "这轮内容之前已经存过，没有重复写入"
+              : "建库完成，但这轮没抓到可入库的内容"}
           {r.chunks ? ` · ${r.chunks} 个片段` : ""}
           {r.bound ? " · 已绑到当前会话，下次提问会自动用它" : " · 还没绑到当前会话"}
         </p>

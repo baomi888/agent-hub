@@ -135,6 +135,14 @@ interface Props {
    * 的那一刻，而那一刻用户的视线就在自己那条消息下面。
    */
   onSediment?: (msgDbId: number, text: string, role: "user" | "assistant") => void;
+  /**
+   * 建库建议卡点了「建库并存入」之后要做什么。
+   *
+   * 必须由上层刷新资料库列表：卡片只知道「我建成了」，右侧面板和顶部「资料库 N」
+   * 各自持有一份早先拉到的列表，不刷新就会出现「卡片说已存进，面板说还没有资料库」
+   * —— 用户会以为没成功，又点一遍。
+   */
+  onKbSaved?: () => void;
   /** 地理定位开关状态（开启后发送消息自动带坐标） */
   geoEnabled?: boolean;
   /** 当前定位城市（角标展示用，可能为 null） */
@@ -181,6 +189,7 @@ export default function ChatArea({
   prefill,
   onDeleteTurn,
   onSediment,
+  onKbSaved,
   geoEnabled = false,
   geoCity = null,
   geoPending = false,
@@ -1016,6 +1025,7 @@ export default function ChatArea({
                         onPreviewFile={boundKb ? openPreviewFile : undefined}
                         onDeleteTurn={onDeleteTurn}
                         onSediment={onSediment}
+                        onKbSaved={onKbSaved}
                       />
                     </BubbleErrorBoundary>
                   </div>

@@ -74,6 +74,8 @@ export interface KbProposalConfirmResult {
   staged_segments?: number;
   bound?: boolean;
   batch_id?: string;
+  /** 这批内容之前已经沉过（幂等命中），这次一条没写 —— 不是失败 */
+  duplicate?: boolean;
 }
 
 export interface Message {

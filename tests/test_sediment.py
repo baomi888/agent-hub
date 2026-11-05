@@ -282,6 +282,29 @@ class TestProposalEndpoints:
         # 建议状态落库
         assert sediment_store.get_proposal(UID, pid)["status"] == "confirmed"
 
+    def test_confirm_again_on_same_content_reports_duplicate(self, client, world):
+        """同一会话同一批内容再确认一次：一条不写，但必须说清是「存过了」。
+
+        幂等命中和「这轮没抓到内容」在卡上一模一样，意思完全不同：
+        前者是白点了第二下，后者是这段对话本来就没东西可存。前端要能分开说，
+        就必须由后端把这个事实报出来，不能让它去猜。
+        """
+        sid = _seed_conversation()
+        pid = self._make(sid)
+        first = client.post(f"/api/kb/proposals/{pid}/confirm", json={}).json()
+        assert first["imported"] > 0
+        assert first["duplicate"] is False
+
+        # 再挂一条新建议（直接落库，绕开 10 分钟冷却），内容与上一批完全一样
+        again = sediment_store.create_proposal(
+            UID, sid, "同一批内容", "no_kb_retrieval", {}, ttl_hours=1
+        )
+        body = client.post(
+            f"/api/kb/proposals/{again['proposal_id']}/confirm", json={}
+        ).json()
+        assert body["imported"] == 0
+        assert body["duplicate"] is True, "幂等命中要显式报出来"
+
     def test_confirm_twice_409(self, client, world):
         sid = _seed_conversation()
         pid = self._make(sid)

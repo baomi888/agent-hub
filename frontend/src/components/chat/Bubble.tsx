@@ -28,6 +28,7 @@ const Bubble = memo(function Bubble({
   onPreviewFile,
   onDeleteTurn,
   onSediment,
+  onKbSaved,
 }: {
   m: UiMessage;
   userQuestion?: string;
@@ -59,6 +60,8 @@ const Bubble = memo(function Bubble({
    * 弹层靠它决定显示单句还是分节列表。
    */
   onSediment?: (msgDbId: number, text: string, role: "user" | "assistant") => void;
+  /** 建库建议卡确认成功后刷新资料库列表（否则侧栏还停在"还没有资料库"） */
+  onKbSaved?: () => void;
 }) {
   const [feedback, setFeedback] = useState<"like" | "dislike" | null>(null);
   // 「踩」后展开的改进原因输入框：点踩即记一票，这里只收集可选的文字补充
@@ -359,7 +362,9 @@ const Bubble = memo(function Bubble({
             不进 .bubble-ai 里面 —— 它不是回答内容的一部分，是"这一轮聊完，
             要不要把它存下来"的一个独立决定，视觉上也要从正文里分出来。
             卡片自己管四种状态（待确认/已建/已忽略/已过期），这里只给数据。 */}
-        {!m.streaming && m.proposal && <KbProposalCard proposal={m.proposal} />}
+        {!m.streaming && m.proposal && (
+          <KbProposalCard proposal={m.proposal} onConfirmed={onKbSaved} />
+        )}
 
         {/* 联网来源：与下面的资料库引用块并列，但不合并 ——
             那边每条带页码和相似度（本地文件），这边每条是网址（网页），
