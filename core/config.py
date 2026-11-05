@@ -369,6 +369,22 @@ COMPRESS_KEEP_TURNS_EXPANDED = int(os.getenv("COMPRESS_KEEP_TURNS_EXPANDED", "12
 COMPRESS_MAX_SUMMARY_CHARS = int(os.getenv("COMPRESS_MAX_SUMMARY_CHARS", "4000"))
 COMPRESS_MAX_SEGMENTS = int(os.getenv("COMPRESS_MAX_SEGMENTS", "12"))
 
+# ---------- 知识库沉淀与按主题建库（板块 D）----------
+# 总开关：置 0 后 maybe_compress 不再排沉淀任务、「检索无库」也不再提议建库。
+#   与用户偏好（/api/prefs 的 auto_sediment）是**两把锁并联**：任一为关就是关。
+#   线上出问题时的回滚开关，不改代码。
+SEDIMENT_ENABLED = os.getenv("SEDIMENT_ENABLED", "1") not in ("0", "false", "False")
+# 候选的最低 salience：低于它的不进库。默认 0 = 不筛
+#   （extract_candidates 的七类判据已经筛过一轮，再筛容易把"短但是关键"的句子丢掉）。
+SEDIMENT_MIN_SALIENCE = float(os.getenv("SEDIMENT_MIN_SALIENCE", "0"))
+# 每用户「对话沉淀·<主题>」库的数量上限：超了复用最近用过的那个库，
+#   避免长年累月攒出几百个空壳库把 /knowledge 撑爆。
+SEDIMENT_MAX_TOPIC_KBS = int(os.getenv("SEDIMENT_MAX_TOPIC_KBS", "50"))
+# 建库建议的有效期（小时）：过期后 confirm 返回 410。
+PROPOSAL_TTL_HOURS = int(os.getenv("PROPOSAL_TTL_HOURS", "72"))
+# 同会话同来源的建库建议最短间隔（分钟）：否则每问一句都弹一次卡。
+PROPOSAL_COOLDOWN_MIN = int(os.getenv("PROPOSAL_COOLDOWN_MIN", "10"))
+
 # ---------- Prompt 自进化（GEPA 式 · issue #12）----------
 # 总开关：置 0 后 prompt_store.resolve 一律返回内置基线，进化产物不生效
 #   （线上出问题的一键回滚开关：不改代码、不回滚版本）。

@@ -1,7 +1,7 @@
 // 计划卡片：识别「计划类」请求 → 构造格式化提示词 → 解析回答为结构化计划渲染
 // 从 ChatArea.tsx 拆出（2026-09 重构）。isPlanRequest/PLAN_TOPICS 是前端关键词硬编码，
 // 长期方案是后端给结构化 plan 字段（见 docs/前端重构说明.md P2）
-import { Fragment, useState } from "react";
+import { Fragment } from "react";
 import { useCopy } from "@/lib/useCopy";
 
 export const PLAN_KEYWORDS = [

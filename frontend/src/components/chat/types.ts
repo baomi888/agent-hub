@@ -1,6 +1,13 @@
 // 对话区的共享类型：消息与附件
 // 从 ChatArea.tsx 拆出（2026-09 重构），page.tsx 经由 components/ChatArea 再导出引用
-import type { Grounding, RefSource, ToolEvent, TraceItem } from "@/lib/types";
+import type {
+  Grounding,
+  KbProposal,
+  RefSource,
+  ToolEvent,
+  TraceItem,
+  WebSource,
+} from "@/lib/types";
 
 export interface UiMessage {
   id: string;
@@ -16,11 +23,28 @@ export interface UiMessage {
    * 带资料库提问时首帧要等十几秒，这行字是那段时间里唯一的"它还活着"的证据。
    */
   status?: string;
+  /**
+   * 建库建议（板块 D，来自 SSE `kb_proposal` 帧，发生在 done 之前）。
+   *
+   * 挂在这一条回答上而不是放到页面级状态里：建议说的就是"这一轮的东西要不要存"，
+   * 脱离了具体那条回答，"这些"指什么是模糊的。会话重新打开时不会再出现
+   * （它是那一轮的交互，不是历史内容）。
+   */
+  proposal?: KbProposal;
   /** 用户主动中断了这次生成 */
   stopped?: boolean;
   attachments?: ChatAttachment[];
   /** 引用溯源条目：来自 SSE sources 事件，点角标可展开原文 */
   sources?: RefSource[];
+  /**
+   * 联网来源：来自 SSE `web_sources` 事件（web_search 真实返回的网页）。
+   *
+   * 与 `sources` 分开存，不合并：两者的生命周期和语义都不同 —— 资料库来源
+   * 在正文之前就下发（要赶在用户读到第一句前挂上"依据较弱"），联网来源要等
+   * 工具真的被调用；而且一个能看原文、一个能开网页，界面形态本来就不一样。
+   * 合并会让后到的一批把先到的顶掉（旧前端就是整条覆盖）。
+   */
+  webSources?: WebSource[];
   /** 依据强度：来自 SSE grounding 事件，weak=true 时回答上方挂提示条 */
   grounding?: Grounding;
   /** 后端 messages 表自增 id，用于删除整轮对话 */

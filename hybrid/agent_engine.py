@@ -163,6 +163,10 @@ class AgentEngine:
                     # 只允许下载本段搜索返回的链接或用户目标里原样出现的链接。
                     "download_allowlist": [],
                     "user_urls": extract_urls(goal) + extract_urls(ctx.goal),
+                    # 联网结果收集袋（见 agent/tools.py::web_search）：
+                    # 引擎这一层拿不到 api/chat.py 的局部变量，走 ctx.shared 回流，
+                    # 两处都必须是**同一个 list 对象**（工具里是 append）。
+                    "web_sources": ctx.shared.setdefault("web_sources", []),
                 },
             }
             # 跨轮记忆：把历史消息前置到本轮 goal 之前（历史为空则退化为单轮）。

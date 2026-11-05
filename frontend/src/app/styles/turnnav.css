@@ -332,7 +332,7 @@
 }
 .lc-list a {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   padding: 7px 10px;
   border: 1px solid var(--line);

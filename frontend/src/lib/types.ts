@@ -54,6 +54,13 @@ export interface KbProposal {
   expires_at: number;
   /** 后端生成的一句话说明（≤40 字），前端不拼接、不加工 */
   reason: string;
+  /**
+   * 这条建议指的是哪条回答（messages 表自增 id）。
+   *
+   * 只在「刷新后恢复」时用得上：实时那一帧是直接挂到刚生成的那条回答上的，
+   * 不需要对号；而刷新后消息是整段重新拉的，没有这个 id 就只能猜最后一条。
+   */
+  answer_message_id?: number;
 }
 
 /** confirm 的返回值：字段都是可选的 —— 建库成功但嵌入失败时 imported 可能是 0。 */
@@ -74,6 +81,8 @@ export interface Message {
   role: "user" | "assistant" | "system";
   content: string;
   refs?: string;
+  /** 联网来源，随 assistant 消息持久化；老消息没有这个字段时按空列表处理。 */
+  web_sources?: WebSource[];
   created_at?: number;
 }
 
@@ -171,6 +180,32 @@ export interface RefSource {
   strength?: "high" | "medium" | "low" | null;
   preview: string;
   text: string;
+}
+
+/**
+ * 联网来源条目（SSE `web_sources` 事件）。
+ *
+ * 为什么不复用 RefSource：那个类型描述的是「资料库里的一份文件」——有页码、
+ * 相似度、原文全文，点开是看原文；这里是「网上的一个页面」——有网址，点开是
+ * 新窗口。混成一个类型，界面里到处要写 `if (有没有 url)` 来分叉，最后必然
+ * 有一处漏判把本地文件渲染成可点外链。
+ *
+ * `id` 与正文里 `[n]` 的 n 是同一个数（后端在工具返回时就定好、全局递增），
+ * 所以正文角标能直接按 id 找到对应网址。
+ */
+export interface WebSource {
+  id: number;
+  title: string;
+  url: string;
+  /** 展示用域名（后端已去掉 www.），取不到时为空串 */
+  domain: string;
+  snippet: string;
+  /**
+   * 搜索结果自带的发布日期，原样透传（"2 days ago" / "2026-07-22" / "Jul 15, 2025"）。
+   * Serper 只对部分站点给这个字段，取不到时是空串 —— 前端据此决定显不显示，
+   * 不要在这里做格式归一，各家站点的写法本来就不统一。
+   */
+  date?: string;
 }
 
 // 依据强度（SSE grounding 事件）：weak=true 时回答上方挂「依据较弱」提示条

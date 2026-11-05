@@ -22,7 +22,7 @@ import { detailToMessage } from "@/lib/errors";
 import AuthGate from "@/components/AuthGate";
 import AnnounceModal from "@/components/announce/AnnounceModal";
 import type { UiMessage } from "@/components/chat/types";
-import type { ChatMode, Grounding, RefSource, ToolEvent } from "@/lib/types";
+import type { Grounding, RefSource, ToolEvent, WebSource } from "@/lib/types";
 import { isPlanRequest } from "@/components/chat/plan";
 import { useHybridTrace } from "@/lib/useHybridTrace";
 import { createTypewriter, type Typewriter } from "@/lib/typewriter";
@@ -118,8 +118,7 @@ export default function Home() {
   const hybrid = useHybridTrace();
   // 轨迹是 hook 内部 state，但它要落到消息上（才能随消息持久化 / 刷新后重建），
   // 所以订阅它变化，把 items 同步进当前那条助手消息。
-  const [hybridItems, setHybridItems] = useState<import("@/lib/types").TraceItem[]>([]);
-  useEffect(() => setHybridItems(hybrid.trace.items), [hybrid.trace.items]);
+  const hybridItems = hybrid.trace.items;
   // 本轮助手消息 id：轨迹同步要靠它定位「往哪条消息上写」
   const asstIdRef = useRef<string | null>(null);
   // 本轮用户消息 id（前端临时 id）：done 帧带回 user_message_id 时按它回填 dbId。
@@ -433,6 +432,18 @@ export default function Home() {
             }
             break;
           }
+          case "web_sources": {
+            // 联网来源：web_search 真实返回的网页，收尾时一次性下发。
+            // 单独一条事件而不是塞进 sources —— 那条帧是给资料库检索的，
+            // 前端按"整条覆盖"处理，挤进去会把知识库来源顶掉。
+            const items = (ev.data.items ?? []) as WebSource[];
+            if (items.length > 0) {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === asstId ? { ...m, webSources: items } : m))
+              );
+            }
+            break;
+          }
           case "grounding": {
             // 依据强度：后端判定本轮检索够不够格当依据。
             // 单独发一帧而不是塞进 done，是因为用户边流边读，
@@ -461,6 +472,27 @@ export default function Home() {
                 prev.map((c) => (c.id === sid ? { ...c, title } : c))
               );
             }
+            break;
+          }
+          case "kb_proposal": {
+            // 板块 D7 / D11：后端在回答结束后问「要不要把这轮的东西存成一个库」。
+            // 只挂到这一条回答上（不是全局弹窗）：建议针对的正是"这一轮"，
+            // 而且用户决定之前它会一直留在原地，刷新页面不会重放（一次性交互）。
+            const proposal = {
+              proposal_id: String(ev.data.proposal_id ?? ""),
+              topic: String(ev.data.topic ?? ""),
+              source: String(ev.data.source ?? "no_kb_retrieval") as
+                | "no_kb_retrieval"
+                | "web_search",
+              candidates: Number(ev.data.candidates ?? 0) || 0,
+              kb_hint: String(ev.data.kb_hint ?? ""),
+              expires_at: Number(ev.data.expires_at ?? 0) || 0,
+              reason: String(ev.data.reason ?? ""),
+            };
+            if (!proposal.proposal_id) break;
+            setMessages((prev) =>
+              prev.map((m) => (m.id === asstId ? { ...m, proposal } : m))
+            );
             break;
           }
           case "done": {
@@ -612,7 +644,13 @@ export default function Home() {
     [sendMessage, sending, setMessages]
   );
 
-  // 停止当前流式生成（中断 SSE 请求）；上游已经结束、只剩打字机在慢放时，直接截断回放
+  // 停止当前流式生成（中断 SSE 请求）；上游已经结束、只剩打字机在慢放时，直接截断回放。
+  //
+  // 分两种情况：
+  //   ① 请求还在跑 —— abort 掉 SSE，剩下的帧不再收；
+  //   ② 请求早就结束了，只是**打字机还在吐字** —— abortRef 已是 null，
+  //      老代码直接 ?.abort() 等于什么都没做；1300 字的回答模型 2 秒推完，
+  //      播放器按 18~50 字/秒还要放 30 秒，这期间用户随时可能想停。
   const stopSending = () => {
     if (abortRef.current) {
       abortRef.current.abort();
@@ -904,6 +942,8 @@ export default function Home() {
         <ChatArea
           messages={messages}
           sending={sending}
+          // 播放器还在放字（网络可能早就结束了）：让停止键在这段时间也留着
+          playing={messages.some((m) => m.streaming)}
           capValue={capValue}
           onCapChange={onCapChange}
           onSend={sendMessage}

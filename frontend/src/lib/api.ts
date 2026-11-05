@@ -1,6 +1,6 @@
 // 后端 API 封装：统一错误处理 + 类型化（相对路径走 rewrites 代理）
 import type { Conversation, KbInfo, KbFile, FilePreview, SearchResult, Defaults, Message } from "./types";
-import type { KbProposalConfirmResult } from "./types";
+import type { KbProposal, KbProposalConfirmResult } from "./types";
 import type { DialogueCandidatesResp, ImportDialogueResult } from "./types";
 import { detailToMessage } from "./errors";
 import type { MeOut, UserOut, Template, ApplyTemplateResult, UsageSummary } from "./types";
@@ -405,11 +405,26 @@ export const api = {
       `/api/kb/proposals/${encodeURIComponent(proposalId)}/dismiss`,
       { method: "POST", body: JSON.stringify({}) }
     ),
-  // 刷新后恢复卡片用（后端标为可选端点）：404 说明没做，卡片就该当它不存在
-  getKbProposal: (proposalId: string) =>
-    request<{ proposal_id: string; status: string }>(
-      `/api/kb/proposals/${encodeURIComponent(proposalId)}`
+  // 刷新后恢复卡片用：先按会话问"还有没有等我决定的建议"，拿到再用上面的按 id 查。
+  // 为什么不能只按 id：刷新之后前端手上没有 id（它只活在内存里），
+  // 所以恢复的入口必须是会话。返回 `{proposal: null}` 表示这个会话没有待办的，
+  // 是 200 不是 404 —— 见后端注释（每条会话加载都会发一次，404 会把控制台刷成红的）。
+  getPendingKbProposal: (sid: string) =>
+    request<{ proposal: (KbProposal & { status: string; kb_id: string }) | null }>(
+      `/api/kb/proposals?sid=${encodeURIComponent(sid)}`
     ),
+
+  // ---------- 用户偏好（板块 D 的服务端开关）----------
+  // ★ 与 usePrefs 的 localStorage 那套**不是一回事**：
+  //   那边是"这台设备上界面怎么显示"，这里是"允不允许后台替你做事"。
+  //   自动沉淀发生在 worker 里（没有浏览器），所以开关必须落服务端，
+  //   存 localStorage 的话关掉只在当前这台机器上有效，后台照样在建库。
+  getPrefs: () => request<{ auto_sediment: boolean; auto_create_kb: boolean }>("/api/prefs"),
+  setPrefs: (body: { auto_sediment?: boolean; auto_create_kb?: boolean }) =>
+    request<{ auto_sediment: boolean; auto_create_kb: boolean }>("/api/prefs", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
 
   // ---------- 消息反馈（赞 / 踩）----------
   // 同一条消息重复提交是"改"不是"追加"：点赞再点踩后端只留最后一次。

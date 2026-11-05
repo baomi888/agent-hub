@@ -101,6 +101,39 @@ def _wait_health(base: str, timeout: float = 60.0) -> bool:
     return False
 
 
+def _user_exists(db: str, name: str) -> bool:
+    """临时库里有没有这个账号（只读，验证预置是否真的落库）。"""
+    con = sqlite3.connect(db)
+    try:
+        row = con.execute(
+            "SELECT 1 FROM users WHERE lower(username) = lower(?)", (name,)
+        ).fetchone()
+        return bool(row)
+    finally:
+        con.close()
+
+
+def _rmtree(path: str, tries: int = 6) -> None:
+    """删临时目录，带重试。
+
+    ★ 为什么不能直接 `rmtree(ignore_errors=True)`：Windows 上刚被 kill 的
+      uvicorn 子进程偶尔还压着 e2e.db 的文件句柄，rmtree 当场抛 PermissionError，
+      被 ignore_errors 一吞就**静默留下垃圾**——Temp 里堆一堆 e2e.db，而 Linux
+      上的 CI 永远察觉不到。所以这里重试，并且真的删不掉时要出声。
+    """
+    for i in range(tries):
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except OSError:
+            if i == tries - 1:
+                print(f"[warn] 临时目录删不掉，已留在：{path}")
+                return
+            time.sleep(0.3)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--keep", action="store_true", help="保留临时目录")
@@ -125,6 +158,28 @@ def main() -> int:
     env.pop("DEEPSEEK_API_KEY", None)  # 不调模型，去掉真实 key 免得误打外部接口
     env.pop("EMBEDDING_API_KEY", None)  # RAG 预热同理：本脚本不碰知识库
 
+    # ---------- 预置管理员 ----------
+    # 管理员名在自助注册入口是**保留**的（防抢注，见 core/account.py::
+    # is_reserved_admin_name），所以它注定不能靠"注册"造出来——那正是这个洞
+    # 被堵上的原因。生产上这条路由 tools/create_user.py 走，这里等价地建进临时库。
+    #
+    # ★ 必须开**子进程**建号，不在本进程 import core.account：
+    #   ① core.session._db_path() 现读 AGENT_HUB_DB，父进程改了环境变量就等于
+    #      把自己的库指针指向临时库，一旦哪里忘了就写脏 data/sessions.db；
+    #   ② 更要命的是 core.session 按线程复用连接（_LOCAL），父进程那条连接
+    #      会一直开着——Windows 上文件句柄不放，临时目录永远删不掉，
+    #      表现就是 Temp 里堆一堆 dashboard_e2e_*。
+    # ★ 这里踩过的坑：脚本原来直接注册 e2e_admin，加固后必然 403，而失败
+    #   被后面的 KeyError 盖住，CI 只看到一句看不懂的 'calls' 报错。
+    _seed = (
+        "import sys; sys.path.insert(0, sys.argv[3]);"
+        "from core import account; account.create_user(sys.argv[1], sys.argv[2])"
+    )
+    seeded = subprocess.run(
+        [sys.executable, "-c", _seed, ADMIN, PASSWORD, str(ROOT)],
+        cwd=str(ROOT), env=env, capture_output=True, text=True,
+    )
+
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", str(port),
          "--log-level", "warning"],
@@ -142,9 +197,17 @@ def main() -> int:
         normal = _opener()
 
         # ---------- 注册与登录 ----------
+        # 管理员是上面**预置**的，所以这里反过来验：确认自助注册抢不走这个保留名。
+        # 这条断言以前是缺的——旧脚本直接"注册管理员"，等于假设保留名机制不存在。
         code, body = _http(anon, "POST", f"{base}/api/auth/register/",
                            {"username": ADMIN, "password": PASSWORD})
-        rep.check("管理员账号注册", code == 200, f"{code} {body[:60]}")
+        rep.check("管理员保留名禁止自助抢注（403）", code == 403, f"{code} {body[:40]}")
+        _err = (seeded.stderr or "").strip().splitlines()
+        rep.check(
+            "预置管理员已落库",
+            seeded.returncode == 0 and _user_exists(db, ADMIN),
+            f"rc={seeded.returncode} {_err[-1][:70] if _err else ADMIN}",
+        )
         code, body = _http(anon, "POST", f"{base}/api/auth/register/",
                            {"username": NORMAL, "password": PASSWORD})
         rep.check("普通账号注册", code == 200, f"{code} {body[:60]}")
@@ -190,7 +253,13 @@ def main() -> int:
 
         con = sqlite3.connect(db)
         con.row_factory = sqlite3.Row
-        rows = con.execute("SELECT path, method, status FROM api_call_logs").fetchall()
+        try:
+            rows = con.execute("SELECT path, method, status FROM api_call_logs").fetchall()
+        finally:
+            # ★ Windows 上必须显式关闭：句柄没放就删不掉临时目录，而
+            #   rmtree 带 ignore_errors=True 会**静默**失败，表现为 Temp 里
+            #   堆一堆 dashboard_e2e_* 目录，Linux 的 CI 却察觉不到。
+            con.close()
         paths = [r["path"] for r in rows]
         rep.check("真进程写入日志（≥6 条）", len(rows) >= 6, f"{len(rows)} 条")
         rep.check("/health 未入库", not any(p == "/health" for p in paths), str(paths[:4]))
@@ -213,7 +282,7 @@ def main() -> int:
             _http(admin, "GET", f"{base}/api/admin/overview?days=1")
         time.sleep(4.5)
         code, body = _http(admin, "GET", f"{base}/api/admin/overview?days=1")
-        total2 = json.loads(body)["calls"]["total"]
+        total2 = (json.loads(body).get("calls") or {}).get("total")
         rep.check("刷新看板不产生统计（无观察者效应）", total2 == total, f"{total} -> {total2}")
 
         # ---------- 排行三档 ----------
@@ -224,7 +293,7 @@ def main() -> int:
                       f"{code} items={len(js.get('items') or [])}")
             if sort == "fail":
                 bad = [x for x in js.get("items") or [] if x["failed"] > 0]
-                rep.check("failed 档每条都真的失败过", all(x["failed"] > 0 for x in js["items"]),
+                rep.check("failed 档每条都真的失败过", all(x["failed"] > 0 for x in js.get("items") or []),
                           f"{len(bad)} 条")
         code, body = _http(admin, "GET", f"{base}/api/admin/apis?days=1&sort=bogus")
         rep.check("非法 sort 回落 calls", json.loads(body).get("sort") == "calls", "")
@@ -260,13 +329,18 @@ def main() -> int:
             if ("Traceback" in ln or "never retrieved" in ln or "ERROR" in ln)
         ]
         rep.check("服务端无未捕获异常", not noisy, " / ".join(noisy[:2]))
+    except Exception as e:  # noqa: BLE001
+        # 脚本式验收最怕"半途炸掉"：异常一抛，finally 就直接进清理，
+        # 前面已跑完的断言连打印的机会都没有——CI 上只留下一句 KeyError，
+        # 看不出是第几项开始坏的。这里把异常收成一条失败，保证报告总能出全。
+        rep.check("脚本执行未中断", False, f"{type(e).__name__}: {e}")
     finally:
         if proc.poll() is None:
             proc.kill()
         if args.keep:
             print(f"临时目录：{tmp}")
         else:
-            shutil.rmtree(tmp, ignore_errors=True)
+            _rmtree(tmp)
 
     return rep.dump()
 

@@ -7,9 +7,13 @@ import { memo, useMemo, useState } from "react";
 import type { UiMessage } from "./types";
 import { TOOL_META, toolLabel } from "./constants";
 import { parseRefs, renderContent, renderMarkdown } from "./content";
+import { stripPhantomCitations } from "@/lib/citations";
 import CornIcon from "../CornIcon";
 import PlanCard, { detectPlanTopic, isPlanRequest, parsePlan } from "./plan";
 import { HybridTraceView } from "@/components/HybridTrace";
+import WebSources from "./WebSources";
+import KbProposalCard from "./KbProposalCard";
+import type { WebSource } from "@/lib/types";
 import { useCopy } from "@/lib/useCopy";
 import HubMark from "./HubMark";
 
@@ -156,6 +160,47 @@ const Bubble = memo(function Bubble({
   }
 
   const refId = (idx: string) => `${m.id}-ref-${idx}`;
+  // 联网来源按 id 建索引：正文里的 [Wn] 要能直接找到对应网址。
+  // 不用 useMemo —— 这里在用户消息的 early return 之后，放 hook 会违反调用规则；
+  // 来源最多十来条，每次建 Map 的成本远小于一次依赖比较。
+  const cites = new Map<number, WebSource>();
+  const knownUrls = new Set<string>();
+  for (const s of m.webSources ?? []) {
+    cites.set(s.id, s);
+    knownUrls.add(s.url);
+  }
+  // 资料库片段编号 → 锚点。命中才把正文里的 [n] 变成跳转角标：
+  // 联网用 [Wn]、资料库用 [n]，两套编号在渲染层彻底分开（见 content.tsx 的注释）。
+  // ★ 两个来源都要收：refItems 来自落库的 refs 文本（历史消息 / 刷新后重进），
+  //   m.sources 来自本轮的 SSE sources 帧。只认前者的话，本轮刚问完、refs 还没
+  //   回填的那一刻，正文里 [n] 会退回成裸方括号 —— 探针里就是这么翻车的。
+  // 这个 Set 也顺带挡住了「正文写了 [7] 但本轮只有 3 条」这种越界编号。
+  const refIdxs = new Set<number>();
+  for (const r of refItems) refIdxs.add(Number(r.idx));
+  for (const s of m.sources ?? []) refIdxs.add(s.id);
+  const refAnchor = (n: number) => (refIdxs.has(n) ? refId(`${n}`) : null);
+  // 指不到的引用编号一律不显示（含末尾那句无中生有的「依据：[1][2]」）。
+  // 老会话里模型会跟着历史回答继续写 [1][2]，哪怕这轮根本没检索 —— 用户点了
+  // 没反应，比不显示更糟。流式期间不清理：联网来源是收尾才下发的，中途清理会把
+  // 真角标一起删掉、等来源到了又长回来，看着像在闪。
+  const shownContent = m.streaming
+    ? m.content
+    : stripPhantomCitations(m.content, {
+        refIds: refIdxs,
+        webIds: new Set(cites.keys()),
+      });
+  // 正文已经内联了资料库角标时，末尾不再重复排一排同样的数字。
+  // 老消息（改造前存的，正文里没有 [n]）仍然走末尾那排 —— 那是它唯一的入口。
+  let inlineKbCited = false;
+  if (refIdxs.size > 0) {
+    // [n] 后面紧跟 ( 的是 markdown 链接 [文案](url)，不算引用，排除掉
+    for (const hit of m.content.matchAll(/\[(\d{1,2})\](?!\()/g)) {
+      if (refIdxs.has(Number(hit[1]))) {
+        inlineKbCited = true;
+        break;
+      }
+    }
+  }
   const toolNames = m.toolCalls
     ? Array.from(new Set(m.toolCalls.map((t) => toolLabel(t.name))))
     : [];
@@ -256,7 +301,7 @@ const Bubble = memo(function Bubble({
           ) : !m.streaming && isPlanRequest(userQuestion) ? (
             (() => {
               const plan = parsePlan(m.content);
-              if (!plan) return renderMarkdown(m.content);
+              if (!plan) return renderMarkdown(shownContent, false, cites, knownUrls, refAnchor);
               // 优先用后端回传的主题（能从历史推断）；没有才退回本句关键词匹配。
               // PlanCard 只用到 topic.name（抬头文案），hint 在这里给空串即可。
               const topic = m.planTopic
@@ -283,14 +328,16 @@ const Bubble = memo(function Bubble({
           ) : (
             <>
               {/* AI 正文走 markdown 渲染：标题/列表/表格/代码块/链接都排出来 */}
-              {renderMarkdown(m.content, !!m.streaming)}
+              {renderMarkdown(shownContent, !!m.streaming, cites, knownUrls, refAnchor)}
               {m.stopped && <span className="stopped-tag">已停止生成</span>}
               {/* 流式光标不在这里渲染：它不是一段文字，是"这一句还没写完"的记号。
                   span 跟在 markdown 块后面会另起一行、单独挂个 ▍，很怪；
                   改由 .bubble-ai[data-streaming] 的 :last-child::after 挂在最后一个
                   句子的末尾（见 kb.css）。 */}
-              {/* 引用角标：点一下跳到下面第 N 条参考片段 */}
-              {!m.streaming && refItems.length > 0 && (
+              {/* 引用角标：点一下跳到下面第 N 条参考片段。
+                  正文里已经内联过带编号的（新消息多半如此）就不再排这一排 ——
+                  同一批编号在一屏里出现两遍，读者会以为有两套参考资料。 */}
+              {!m.streaming && refItems.length > 0 && !inlineKbCited && (
                 <span className="ml-1 inline-flex flex-wrap items-center gap-1">
                   {refItems.map((r) => (
                     <a
@@ -307,6 +354,23 @@ const Bubble = memo(function Bubble({
             </>
           )}
         </div>
+
+        {/* 建库建议卡（板块 D）：回答结束后后端发来一帧 kb_proposal。
+            不进 .bubble-ai 里面 —— 它不是回答内容的一部分，是"这一轮聊完，
+            要不要把它存下来"的一个独立决定，视觉上也要从正文里分出来。
+            卡片自己管四种状态（待确认/已建/已忽略/已过期），这里只给数据。 */}
+        {!m.streaming && m.proposal && <KbProposalCard proposal={m.proposal} />}
+
+        {/* 联网来源：与下面的资料库引用块并列，但不合并 ——
+            那边每条带页码和相似度（本地文件），这边每条是网址（网页），
+            混在一个列表里必然出现「文件名 + 外链」这种自相矛盾的条目 */}
+        {!m.streaming && (m.webSources?.length ?? 0) > 0 && (
+          <WebSources
+            items={m.webSources ?? []}
+            /* 同一屏里还有资料库来源时才加抬头：只有联网时多了这行是废话 */
+            label={refIdxs.size > 0 ? "网页来源" : undefined}
+          />
+        )}
 
         {(m.refs && refItems.length > 0) || (m.sources?.length ?? 0) > 0 ? (
           <div className="ref-block">

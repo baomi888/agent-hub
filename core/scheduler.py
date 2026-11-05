@@ -117,6 +117,14 @@ def job_defs() -> dict[str, dict]:
             "cron": os.getenv("PROMPT_EVOLVE_CRON", "20 */6 * * *"),
             "description": "Prompt 自进化一轮（采集→变异→评估→择优，产出 shadow 候选）",
         },
+        # 对话沉淀（板块 D）：事件驱动 —— 压缩成功后 enqueue 写一行 pending，
+        # 这里每分钟 tick 一次，`run_pending()` 顺手把它排空（同 tick 里跑，
+        # 不额外开线程）。所以 cron 的密度决定"沉淀最晚多久落地"，取 1 分钟。
+        # 这个 job 自己没有 due_subjects / run_job，_run_job 对它是空转（无副作用）。
+        "sediment.dialogue": {
+            "cron": "* * * * *",
+            "description": "对话沉淀（事件驱动，每分钟排空待办）",
+        },
     }
 
 

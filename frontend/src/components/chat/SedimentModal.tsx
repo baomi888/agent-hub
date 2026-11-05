@@ -494,7 +494,7 @@ export default function SedimentModal({
               <p className="sd-one-text">{focusText}</p>
               <p className="sd-hint">
                 原样存进去。以后问相关的事，我会先翻这里 ——
-                所以值得存的是"以后还用得上"的那句，不是这一轮的诉求。
+                所以值得存的是「以后还用得上」的那句，不是这一轮的诉求。
               </p>
               <button type="button" className="sd-switch" onClick={() => setFocusOff(true)}>
                 或者从这段对话里多挑几条

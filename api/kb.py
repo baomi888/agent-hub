@@ -33,11 +33,11 @@ from api.schemas import KBQueryResponse
 from core import config, quota, upload
 from core import session as store
 from core.auth import get_current_user
-from core.context_compress import mark_segments_staged
 from core.netsafe import assert_safe_url
 from kb import dialogue_import, pipelines
 from kb.importer import import_url, import_urls_batch, search_preview
 from kb.rag_core import describe_api_error, load_document
+from service import sediment
 
 # 默认要登录：知识库是用户资产，列举/下载/删除都必须先验身份
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -644,9 +644,15 @@ async def import_dialogue(
         # 计数口径跟着切块走：一条回答切 4 段，就是 4 个单元
         requested = len(picked)
     else:
-        cands = await asyncio.to_thread(dialogue_import.extract_blocks, msgs)
-        if not cands:
+        raw = await asyncio.to_thread(dialogue_import.extract_blocks, msgs)
+        if not raw:
             raise HTTPException(status_code=400, detail="这个会话没有可沉淀的知识候选")
+        # ★★ 下标基准必须和预览**同一个序**。`dialogue-candidates` 回的是
+        #   `rank_for_preview(raw)`，用户在界面上勾的是"第几条"；这里若按 raw 取，
+        #   勾「一、基础」会存成「三、题型技巧」，而且两端各自都"没错" ——
+        #   只有把预览顺序和入库顺序对着看才发现（2026-11-05 审出的 ★★★）。
+        #   助手块在 rank_for_preview 里保持原序且整体后置，所以对齐后依然稳定。
+        cands = dialogue_import.rank_for_preview(raw)
         idx = list(dict.fromkeys(req.indexes)) if req.indexes else list(range(len(cands)))
         bad = [i for i in idx if i < 0 or i >= len(cands)]
         if bad:
@@ -656,63 +662,27 @@ async def import_dialogue(
             raise HTTPException(status_code=400, detail="没有勾选任何有效候选")
         requested = len(idx)
 
-    pipe = pipelines.get_or_create(uid, kb_id)
-    # 去重：这段对话里已经沉过的原句不再写第二遍。
-    # 向量库每条都用 uuid4 当 id，同一句话存两次就是两条独立片段，会重复
-    # 占掉检索 top-k 的名额（详见 kb/rag_core.py::get_dialogue_texts 的说明）。
-    # 过滤按原文精确比对：候选本来就是原句不改写，所以这里能直接对上。
-    existing = await asyncio.to_thread(pipe.get_dialogue_texts, req.sid)
-    picked = dialogue_import.drop_existing(picked, existing)
-    skipped = requested - len(picked)
-    if not picked:
-        # 全部存过：不算错误（用户可能是手滑点了第二次），但也不该静默返回成功
-        return {
-            "imported": 0,
-            "skipped": skipped,
-            "staged_segments": 0,
-            "kb_id": kb_id,
-            "sid": req.sid,
-        }
-
-    docs = dialogue_import.build_documents(picked, req.sid, title)
+    # 入库统一走服务层（板块 D 的 §8.1）：手工 / 自动 / 确认建议三条路
+    # 共用一份实现。11-01 那次"存进去了但看不见"就是因为这段逻辑在 API 里
+    # 内联了一份、worker 里另写了一份，只改了一处。
     try:
-        n = await asyncio.to_thread(pipe.add_chunks, docs)
+        res = await asyncio.to_thread(
+            sediment.write_picked, uid, req.sid, kb_id, picked, source="manual", title=title
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=describe_api_error(e)) from e
-    if n:
-        await asyncio.to_thread(quota.bump_usage, uid, "embed", n)
-        # 登记成一条「资料」，否则资料库页面看不到它（2026-11-01 用户实测）：
-        # /files 的数据源是 kb_files.json 登记表，而这里以前只写向量库 ——
-        # 用户收到"存入成功"，回到 /knowledge 却一条新资料都没有。
-        # 同名会话复用同一条记录并累加段数（add_file_records 是同名覆盖），
-        # 所以同一段对话存两次，卡片上显示的是累计段数，不是最后一次的。
-        doc_name = f"对话·{title}"
-        prev = next(
-            (x for x in pipelines.get_files(uid, kb_id) if x.get("name") == doc_name),
-            None,
-        )
-        pipelines.add_file_records(
-            uid,
-            kb_id,
-            [
-                {
-                    "name": doc_name,
-                    "chunks": int((prev or {}).get("chunks") or 0) + n,
-                    "added_at": int(time.time()),
-                    "origin": "dialogue",
-                    "sid": req.sid,
-                }
-            ],
-        )
 
-    ingested_refs = {r for c in picked for r in (c.get("refs") or [])}
-    staged = await asyncio.to_thread(mark_segments_staged, uid, req.sid, ingested_refs)
+    # skipped 的口径要含"勾了但没内容"的那些（例如勾中的是空行/纯符号），
+    # 所以是"选中数 - 真正写进去的"（向量库去重的那部分在 write_picked 里另算）
     return {
-        "imported": n,
-        "skipped": skipped,
-        "staged_segments": staged,
+        "imported": int(res.get("imported") or 0),
+        "skipped": (requested - len(picked)) + int(res.get("skipped") or 0),
+        "staged_segments": int(res.get("staged_segments") or 0),
         "kb_id": kb_id,
         "sid": req.sid,
+        # 批次 id：撤销与审计的抓手，同时让前端能判断"这批是不是之前存过"
+        "batch_id": res.get("batch_id") or "",
+        "duplicate": bool(res.get("duplicate")),
     }
 
 

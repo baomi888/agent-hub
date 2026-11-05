@@ -120,10 +120,12 @@ export default function Sidebar({
   const [query, setQuery] = useState("");
   // 删除是破坏性操作，点一下先进确认态，避免误删整段对话
   const [confirmDelId, setConfirmDelId] = useState<string | null>(null);
-  // 手机左滑删除：swipedId = 当前左滑露出删除钮的会话；touch 存进行中的手势（不进 state，避免逐帧重渲染）
+  // 手机左滑出操作区：swipedId = 当前左滑的会话；touch 存进行中的手势（不进 state，避免逐帧重渲染）
   const [swipedId, setSwipedId] = useState<string | null>(null);
-  const swipeTouch = useRef<{ id: string; x0: number; y0: number; el: HTMLElement; horizontal: boolean | null } | null>(null);
-  const SWIPE_W = 76; // 与 .session-swipe-del 宽度一致
+  const swipeTouch = useRef<{ id: string; x0: number; y0: number; el: HTMLElement | null; horizontal: boolean | null } | null>(null);
+  /** 最近一次横滑结束的时间：用来吞掉浏览器跟着补发的那一下 click */
+  const lastSwipeAt = useRef(0);
+  const SWIPE_W = 128; // 与 .session-swipe-acts 宽度一致（改名 64 + 删除 64）
 
   const startEdit = (c: Conversation) => {
     setEditingId(c.id);
@@ -251,28 +253,54 @@ export default function Sidebar({
               const swiped = swipedId === c.id;
               return (
                 <div key={c.id} className="session-swipe-wrap">
-                  {/* 底层删除钮：左滑后露出；点击进确认态（复用 confirmDelId 流程） */}
-                  <button
-                    type="button"
-                    className={`session-swipe-del${swiped ? " open" : ""}`}
-                    aria-label={`删除会话：${c.title}`}
-                    tabIndex={swiped ? 0 : -1}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setConfirmDelId(c.id);
-                      setSwipedId(null);
-                    }}
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                    </svg>
-                    删除
-                  </button>
+                  {/* 底层操作区：左滑后露出「改名 / 删除」。
+                      ★ 手机上原来只有删除：改名入口挂在 group-hover 上，触摸设备没有
+                      hover，那个按钮永远是 opacity-0 —— 表现就是「手机改不了对话名」
+                      （2026-11-04 用户反馈）。左滑是本页唯一已被用户发现的手势，
+                      两个操作都挂在它下面，比再造一个手势更好记。 */}
+                  <div className={`session-swipe-acts${swiped ? " open" : ""}`}>
+                    <button
+                      type="button"
+                      className="session-swipe-btn is-rename"
+                      aria-label={`重命名会话：${c.title}`}
+                      tabIndex={swiped ? 0 : -1}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        // 先收滑出再进编辑，否则 input 会带着 -128px 位移出现
+                        setSwipedId(null);
+                        startEdit(c);
+                      }}
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
+                      </svg>
+                      改名
+                    </button>
+                    <button
+                      type="button"
+                      className="session-swipe-btn is-del"
+                      aria-label={`删除会话：${c.title}`}
+                      tabIndex={swiped ? 0 : -1}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setConfirmDelId(c.id);
+                        setSwipedId(null);
+                      }}
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                      </svg>
+                      删除
+                    </button>
+                  </div>
                 <div
                   role="button"
                   tabIndex={0}
                   aria-current={active ? "true" : undefined}
                   onClick={() => {
+                    // 手势刚落幕时浏览器可能补一个 click（真机上滑得快就容易出现），
+                    // 那一下不该被当成点按 —— 会把刚滑开的行立刻收回，甚至误切会话。
+                    if (Date.now() - lastSwipeAt.current < 320) return;
                     // 已左滑的行：第一下点按只收回滑出，不误触选择
                     if (swiped) {
                       setSwipedId(null);
@@ -287,21 +315,25 @@ export default function Sidebar({
                     }
                   }}
                   className={`session group ${active ? "active" : ""}`}
-                  style={swiped ? { transform: `translateX(-${SWIPE_W}px)` } : undefined}
                   onTouchStart={(e) => {
                     const t = e.touches[0];
                     swipeTouch.current = {
                       id: c.id,
                       x0: t.clientX,
                       y0: t.clientY,
-                      el: e.currentTarget,
+                      // ★ 手势操作的是**操作区**，不是文字行：行要保持不动，
+                      //   否则 226px 的行宽被推开 128px 后标题整条跑出视口，
+                      //   用户看不到自己在删哪一行（2026-11-04 真机截图发现）。
+                      // 操作区是 .session 的**兄弟节点**（wrap 的子元素），不是子节点，
+                      // 用 currentTarget.querySelector 永远取不到 → 手势整段静默失效。
+                      el: e.currentTarget.parentElement?.querySelector(".session-swipe-acts") ?? null,
                       horizontal: null,
                     };
                     if (swipedId && swipedId !== c.id) setSwipedId(null);
                   }}
                   onTouchMove={(e) => {
                     const st = swipeTouch.current;
-                    if (!st || st.id !== c.id) return;
+                    if (!st || st.id !== c.id || !st.el) return;
                     const t = e.touches[0];
                     const dx = t.clientX - st.x0;
                     const dy = t.clientY - st.y0;
@@ -314,29 +346,31 @@ export default function Sidebar({
                       }
                     }
                     if (!st.horizontal) return;
-                    // 从已滑开位置回拖也要连贯：起点补偿 -SWIPE_W
+                    // 位移量 off 仍是 0 → -SWIPE_W；操作区从「推到行外」走到「贴住右缘」
                     const base = swiped ? -SWIPE_W : 0;
                     const off = Math.max(-SWIPE_W, Math.min(0, base + dx));
                     st.el.style.transition = "none";
-                    st.el.style.transform = `translateX(${off}px)`;
+                    st.el.style.transform = `translateX(${SWIPE_W + off}px)`;
                   }}
                   onTouchEnd={() => {
                     const st = swipeTouch.current;
-                    if (!st || st.id !== c.id) return;
+                    if (!st || st.id !== c.id || !st.el) return;
                     const m = /translateX\((-?[\d.]+)px\)/.exec(st.el.style.transform);
-                    const off = m ? parseFloat(m[1]) : 0;
+                    const x = m ? parseFloat(m[1]) : SWIPE_W;
                     st.el.style.transition = "";
                     st.el.style.transform = "";
                     swipeTouch.current = null;
+                    // 横向滑动过就记个时间点：onClick 会在 320ms 内忽略补发的 click
+                    if (st.horizontal) lastSwipeAt.current = Date.now();
                     // 滑过 1/3 阈值就吸附展开；几乎没动则视作点按回收
-                    if (off < -SWIPE_W / 3) setSwipedId(c.id);
+                    if (x < SWIPE_W - SWIPE_W / 3) setSwipedId(c.id);
                     else if (swiped) setSwipedId(null);
                   }}
                   onTouchCancel={() => {
                     // 手势被系统中断（来电/通知/浏览器边缘返回手势）时不会触发 touchend，
                     // 内联 transform 会留在半滑状态把这一行卡住 —— 这里强制复位。
                     const st = swipeTouch.current;
-                    if (!st || st.id !== c.id) return;
+                    if (!st || st.id !== c.id || !st.el) return;
                     st.el.style.transition = "";
                     st.el.style.transform = "";
                     swipeTouch.current = null;
@@ -357,7 +391,10 @@ export default function Sidebar({
                     <>
                       <div className="flex items-center justify-between gap-2">
                         <span className="session-name">{c.title}</span>
-                        <span className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                        {/* hover 才出现的小图标：桌面用。手机没有 hover —— 这里必须
+                            pointer-events-none，否则按钮虽然看不见却仍然可点，
+                            手指盲点在标题右侧会莫名进入编辑态。手机的入口走左滑。 */}
+                        <span className="pointer-events-none flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
                           <button
                             title="重命名"
                             aria-label={`重命名会话：${c.title}`}

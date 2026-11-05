@@ -88,6 +88,11 @@ export default function LinkCluster({ items }: { items: LinkItem[] }) {
             return (
               <li key={`${it.url}-${i}`}>
                 <a href={it.url} target="_blank" rel="noopener noreferrer" title={it.url}>
+                  {/* 首字徽标：和联网来源卡（WebSources）用同一套视觉，
+                      用户在两处看到的是同一种"来源"符号，不用重新认识一遍 */}
+                  <span className="ws-badge" aria-hidden="true">
+                    {(label || host).trim().charAt(0).toUpperCase()}
+                  </span>
                   <span className="lc-label">{label}</span>
                   {label !== host && <span className="lc-host">{host}</span>}
                 </a>

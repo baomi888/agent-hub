@@ -17,6 +17,7 @@ SSE 事件协议：
   event: status     { text: "..." }           状态提示
   event: tool       { name: "...", input: "...", output: "..." }  Agent 工具调用
   event: sources    { items: [...] }           引用溯源条目（含每条 strength）
+  event: web_sources { items: [...] }          联网搜索来源（Wn + 原网页地址）
   event: grounding  { strength: "...", best: 0.31, weak: true }
                    检索依据强度。weak=true 时前端在回答上方挂「依据较弱」提示条，
                    数据来源是 kb/rag_core.py::assess_grounding()
@@ -44,6 +45,7 @@ import contextlib
 import json
 import mimetypes
 import os
+import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -60,6 +62,7 @@ from core import router as route_engine
 from core import scenarios as scenarios_mod
 from core import session as store
 from core.auth import get_current_user
+from core.citations import strip_phantom_citations
 from core.llm import get_llm, get_vision_llm
 from core.urltools import extract_urls
 from kb import pipelines
@@ -398,6 +401,36 @@ def _resolve_switches(req: ChatRequest, has_kb: bool) -> tuple[bool, bool, str]:
         return has_kb, True, "mode:hybrid"
     # auto 及未知值：绑库就检索，并保留联网能力
     return has_kb, True, "mode:auto"
+
+
+# 服务端预检索的跳过判据。
+#
+# 背景：用户开了「智能联网」时，服务端会先替他搜一轮（见 agent/tools.py 的
+# prefetch_web_sources）。原因是"搜不搜由模型自主决定"不可靠 —— 2026-11-03 实测
+# 「广东石油化工学院周边有什么好吃的店」，开关开着、来源卡空白，正文却写着
+# "我搜到的""高德 4.55 分""519 个摊位"，全是编的。
+#
+# 判据故意**保守**（宁可多搜）：用户是主动打开这个开关的，多搜一次只多一秒；
+# 漏搜的代价是"来源卡空白 + 编出来的细节"，那个更贵。
+# 只跳过搜了也没用的三类：纯寒暄、纯生成/改写（不需要外部事实）、极短追问
+# （"继续""详细点"这类，说的是上一轮的内容）。
+_SKIP_PREFETCH_PATTERNS = (
+    r"^(你好|您好|hi|hello|嗨|在吗|在不在)",
+    r"(谢谢|再见|拜拜|晚安)\s*$",
+    r"(翻译|润色|改写|缩写|扩写|续写|起个名|取个名|写首诗|写个故事|讲个笑话)",
+    r"^(继续|接着说|详细点|再详细|展开说说|说下去|还有呢)\s*[。？?！!]*$",
+)
+
+
+def _skip_prefetch_web(question: str) -> bool:
+    """这一轮要不要跳过「服务端先搜一轮」。"""
+    q = (question or "").strip()
+    if len(q) < 4:
+        return True
+    # 带年份的问题一律不跳：多半在问赛事/政策/价格这类会变的时效信息
+    if re.search(r"(19|20)\d\d", q):
+        return False
+    return any(re.search(p, q, re.I) for p in _SKIP_PREFETCH_PATTERNS)
 
 
 async def _plan_route(
@@ -1008,6 +1041,15 @@ async def _chat_stream_impl(
     async def event_generator() -> None:
         refs_md = ""
         hybrid_run_id: str | None = None  # 仅 hybrid 模式有值，随 done 回传给前端
+        # 本轮联网来源：web_search 执行时往里 append（服务端注入，模型改不了），
+        # 收尾统一发给前端渲染「来源卡片」。
+        # 为什么不用 sources 帧：那条帧是给知识库检索用的，必须在正文**之前**发出
+        # （用户边流边读，sources 早到才有意义），而联网结果要等工具真的被调用才有。
+        # 挤同一个事件名会让前端后到的覆盖先到的——知识库来源会凭空消失。
+        # ★ 必须定义在**这个内嵌生成器里**：下面 hybrid 分支会重新赋值，一旦写在
+        #   外层函数，Python 会把它当成生成器的局部变量，agent / 纯对话路径从未
+        #   赋值就读取 → UnboundLocalError（ruff F841 当时就是这么报出来的）。
+        web_sources: list[dict] = []
         metrics.inc("chat_total", {"path": mode})
         # A1：本轮回答是否被长度上限截断。默认 False，只有真的读到上游给的
         # finish_reason ∈ {length, max_tokens, ...} 才会变 True——
@@ -1121,6 +1163,37 @@ async def _chat_stream_impl(
             )
             return
 
+        # ---- 联网预检索（hybrid 与 agent 共用）----
+        #
+        # 用户开了「智能联网」＝明确表达"这一轮要用外部信息"，所以**结构上先搜一轮**，
+        # 不交给模型自觉。这和知识库那句「用户明确开了检索，不能靠模型自觉」是同一条
+        # 设计原则；2026-11-03 用户实测「油校周边好吃的店」，开关开着、来源卡空白，
+        # 正文却写「我搜到的」「高德 4.55 分」—— 全是编的，就是漏了这条。
+        #
+        # 放在分支之前是因为 hybrid（多步任务）同样需要：它内部的 agent 会自己反复
+        # 调 web_search，每次返回 6 条原始清单，很快就吃掉 token 预算然后半截中断。
+        # 先搜一轮、把结果交给模型，能显著减少重复检索。
+        #
+        # 失败不阻断：降级成"没有联网结果"，模型照常作答。
+        web_block = ""
+        if plan.use_web and not _skip_prefetch_web(req.question):
+            yield _sse("status", {"text": "正在联网检索..."})
+            try:
+                from agent.tools import prefetch_web_sources
+
+                web_text, web_hits = await asyncio.to_thread(
+                    prefetch_web_sources, req.question, web_sources, 6
+                )
+            except Exception as e:  # noqa: BLE001 —— 联网是增强项，失败不该让提问失败
+                web_text, web_hits = "", 0
+                yield _sse("status", {"text": f"联网检索不可用：{describe_api_error(e)}"})
+            if web_hits:
+                web_block = web_text
+                yield _sse("status", {"text": f"已找到 {web_hits} 条网页"})
+            elif web_text:
+                # 搜了但没结果：要让模型知道，否则它会按"搜过了"继续编
+                yield _sse("status", {"text": "没有搜到相关网页，按已有信息作答"})
+
         # ---- 1. 混合模式（工作流 × 自主 Agent 动态切换）----
         if mode == "hybrid":
             yield _sse("status", {"text": "混合模式，正在规划执行路径..."})
@@ -1158,12 +1231,25 @@ async def _chat_stream_impl(
                 else:
                     start_mode = "agent"
 
+                # 预检索结果拼进 goal：规划节点和 execute 节点的 prompt 都从 goal
+                # 取用户问题，拼在这里两处都能看到检索结果。
+                # ★ 只影响这一轮喂给模型的文本；落库仍用 req.question 的原话。
+                hybrid_goal = prompt_question
+                if web_block:
+                    hybrid_goal = (
+                        "【联网检索结果】（本轮已替你搜过，直接用这些结果作答；"
+                        "不要用同样的问题再搜一遍）\n" + web_block + "\n\n【用户问题】\n" + prompt_question
+                    )
                 ctx = TaskContext(
                     owner_id=uid,
-                    goal=prompt_question,
+                    goal=hybrid_goal,
                     current_mode=start_mode,
                     workflow_id=wf_id,
                 )
+                # 预检索已经入袋；把**同一个 list** 交给引擎，让工作流里的 web_search
+                # 继续往它里面追加 —— 收尾 `ctx.shared.get("web_sources")` 才能一次
+                # 拿到"预检索 + 本轮补搜"的全部来源（换新列表就只能读到一半）。
+                ctx.shared["web_sources"] = web_sources
                 # kb_id 走私有段注入（与 agent 分支同一安全边界：模型没机会改写它）
                 # 与 Agent 路径同一条边界：没开检索就不把库交给工具层
                 ctx.agent_state["kb_id"] = (
@@ -1304,6 +1390,11 @@ async def _chat_stream_impl(
                 yield _sse("error", {"detail": f"混合执行失败：{describe_api_error(e)}"})
                 return
 
+            # 引擎里的工具跑在另一层，收不到本函数的局部变量：结果经 ctx.shared
+            # 回流（hybrid/agent_engine.py 与 workflow.py 把同一个 list 注入
+            # configurable）。拷一份，避免后面继续 append 影响引擎侧的记录。
+            web_sources = list(ctx.shared.get("web_sources") or [])
+
         # ---- 2. Agent 模式（统一智能体：工具由开关决定、调用由模型自主）----
         elif mode == "agent":
             yield _sse("status", {"text": "Agent 模式，正在规划任务..."})
@@ -1369,8 +1460,19 @@ async def _chat_stream_impl(
                 # 部分 chat template 对"连续两条 human"敏感，合并是最稳的形态。
                 # 参考资料同理拼在**用户消息**里而不是 system：它是每轮都变的内容。
                 user_content = prompt_question
+                _blocks: list[str] = []
                 if refs_block:
-                    user_content = f"【参考资料】\n{refs_block}\n\n【用户问题】\n{prompt_question}"
+                    _blocks.append(f"【参考资料】\n{refs_block}")
+                if web_block:
+                    # 明说"已经搜过、别用同样的问题再搜一遍"：不写的话模型会看到
+                    # 编号就再调一次 web_search（用户要多等一次往返，来源卡还会
+                    # 出现两组编号）。
+                    _blocks.append(
+                        "【联网检索结果】（本轮已替你搜过，直接用这些结果作答；"
+                        "不要用同样的问题再搜一遍）\n" + web_block
+                    )
+                if _blocks:
+                    user_content = "\n\n".join(_blocks) + f"\n\n【用户问题】\n{prompt_question}"
                 if location_ctx:
                     _loc_note = location_note(location_ctx)
                     if _loc_note:
@@ -1396,6 +1498,10 @@ async def _chat_stream_impl(
                         # 键存在即严格模式——模型现编的地址一律拒绝。
                         "download_allowlist": [],
                         "user_urls": extract_urls(req.question),
+                        # 联网结果收集袋（见 agent/tools.py::web_search）。
+                        # 必须传**这个 list 对象本身**：工具里是 append，换成新列表
+                        # 收尾就读不到东西了。
+                        "web_sources": web_sources,
                     },
                 }
                 full_text = ""
@@ -1577,6 +1683,15 @@ async def _chat_stream_impl(
             truncated = acc.truncated
 
         # ---- 收尾：存 assistant 消息 + 取回并行生成的标题 ----
+        # 落库前把「指不到来源」的引用编号删掉。模型会跟着历史回答继续写 [1][2]
+        # 和末尾的「依据：[1][2]」，哪怕这一轮根本没检索 —— 前端点了没反应，
+        # 用户只会觉得角标是坏的。来源有多少服务端最清楚，所以由这里兜底。
+        # （前端 lib/citations.ts 有一份等价实现，负责显示层与历史消息。）
+        acc_text = strip_phantom_citations(
+            acc_text,
+            has_kb=bool(refs_md),
+            web_ids={s["id"] for s in web_sources if isinstance(s, dict) and "id" in s},
+        )
         msg_id = await asyncio.to_thread(
             store.add_message,
             uid,
@@ -1585,7 +1700,13 @@ async def _chat_stream_impl(
             acc_text,
             refs=refs_md,
             truncated=truncated,
+            web_sources=web_sources,
         )
+        # 先落库再下发：客户端收到来源卡后若立刻关页/断连，刷新会话仍能从消息行
+        # 恢复同一批 [Wn]，不会出现“正文有角标、来源永远丢失”。搜索发生在正文
+        # 生成中途，抢不到正文前面；独立事件仍不占知识库 sources 的槽位。
+        if web_sources:
+            yield _sse("web_sources", {"items": web_sources})
 
         # B 块：对话级用户画像标签（fire-and-forget，不阻塞 SSE；失败静默）
         if config.USER_TAG_HOOK_ENABLED and acc_text:
@@ -1602,6 +1723,30 @@ async def _chat_stream_impl(
         if gen_title:
             await asyncio.to_thread(store.rename_conversation, uid, req.sid, gen_title)
             yield _sse("title", {"title": gen_title})
+
+        # 板块 D7 / D11：这一轮结束后问一句「要不要把这些存成一个库」。
+        # 只发**建议**（落库 + 一帧 SSE），绝不自动建库：建库是可见副作用，
+        # 自动做的话用户某天会发现资料库被塞满不知道哪来的库。
+        # 放在 done 之前（前端要能在回答结束时把卡片挂在下面）；
+        # 失败静默 —— 建议发不出去不该影响这一轮回答。
+        try:
+            from core import kb_proposals
+
+            _conv = await asyncio.to_thread(store.get_conversation, uid, req.sid) or {}
+            proposal = await asyncio.to_thread(
+                kb_proposals.maybe_propose,
+                uid,
+                req.sid,
+                use_kb=bool(plan.use_kb),
+                use_web=bool(plan.use_web),
+                kb_bound=bool(_conv.get("kb_id")),
+                web_sources=web_sources,
+                answer_message_id=msg_id,
+            )
+            if proposal:
+                yield _sse("kb_proposal", proposal)
+        except Exception:  # noqa: BLE001
+            pass
 
         # message_id 回给前端：赞踩要按消息 id 落库，前端自己生成的 uid 后端不认
         # run_id 仅 hybrid 模式有值：人工切换 / 执行日志查询按它寻址

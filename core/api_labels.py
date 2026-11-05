@@ -72,6 +72,12 @@ _LABELS: dict[tuple[str, str], str] = {
     ("POST", "/api/auth/logout"): "账号 · 退出登录",
     ("GET", "/api/auth/me"): "账号 · 当前用户",
     ("POST", "/api/auth/register"): "账号 · 注册",
+    # 账号自助（11-03）：昵称/头像/改密码/改登录名
+    ("PATCH", "/api/auth/profile"): "账号 · 改昵称与资料",
+    ("POST", "/api/auth/avatar"): "账号 · 上传头像",
+    ("GET", "/api/auth/avatar/{}"): "账号 · 读取头像",
+    ("POST", "/api/auth/password"): "账号 · 修改密码",
+    ("POST", "/api/auth/username"): "账号 · 修改登录名",
     # ---------- 对话 ----------
     ("POST", "/api/chat/stream"): "对话 · 提问（逐字回复）",
     ("POST", "/api/chat/upload"): "对话 · 上传附件",
@@ -98,6 +104,13 @@ _LABELS: dict[tuple[str, str], str] = {
     ("GET", "/api/kb/{}/file-content"): "知识库 · 预览文件原文",
     ("POST", "/api/kb/{}/rebuild"): "知识库 · 重建索引",
     ("POST", "/api/kb/{}/query"): "知识库 · 检索提问",
+    # 板块 D：建库建议（确认制）与用户偏好
+    ("GET", "/api/kb/proposals/{}"): "知识库 · 建库建议详情",
+    ("GET", "/api/kb/proposals"): "知识库 · 本会话待办建议",
+    ("POST", "/api/kb/proposals/{}/confirm"): "知识库 · 确认建库",
+    ("POST", "/api/kb/proposals/{}/dismiss"): "知识库 · 忽略建库建议",
+    ("GET", "/api/prefs"): "设置 · 读取自动沉淀",
+    ("PUT", "/api/prefs"): "设置 · 修改自动沉淀",
     # ---------- 每日委托 / 定时 ----------
     ("GET", "/api/delegate"): "每日委托 · 列表",
     ("POST", "/api/delegate"): "每日委托 · 新建",

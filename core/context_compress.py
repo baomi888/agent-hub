@@ -888,6 +888,17 @@ def maybe_compress(
     ok = commit_summary(
         owner, sid, new_text, new_upto, expected_upto=upto, meta_json=new_block.meta_json()
     )
+    if ok:
+        # 板块 D10：压缩成功 = 一批原文即将从上下文里消失，正是"该沉淀"的时刻。
+        # 只登记任务（worker 下一 tick 执行），不在这里做入库 —— 入库要 embedding，
+        # 几百毫秒到几秒，放在回答返回路径上会把"这一轮结束"拖慢。
+        # ★ 失败绝不阻塞压缩：enqueue 内部吞掉所有异常（`service/sediment.py` 有说明）。
+        try:
+            from service import sediment
+
+            sediment.enqueue(owner, sid, new_upto)
+        except Exception:  # noqa: BLE001
+            pass
     return {
         "ok": ok,
         "reason": decision.reason if ok else "race_lost（并发压缩，本轮放弃）",

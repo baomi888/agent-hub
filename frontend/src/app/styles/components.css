@@ -727,9 +727,21 @@ button.kb-chip-unbound:hover {
 .md-table td + td,
 .md-table th + th { border-left: 1px solid var(--line); }
 
-/* ============ 侧栏会话：手机左滑删除 ============
-   结构：wrap(relative,overflow:hidden) > [删除按钮(底层) + .session(上层滑动)]
-   touch-action: pan-y 让浏览器只管竖向滚动，横向手势归我们 */
+/* ============ 侧栏会话：手机左滑操作（改名 / 删除） ============
+   结构：wrap(relative,overflow:hidden) > [操作区(绝对定位) + .session(文字层)]
+   touch-action: pan-y 让浏览器只管竖向滚动，横向手势归我们
+
+   ★ 2026-11-04：这里原来只放了删除。改名的入口是 hover 才显示的小铅笔，
+     触摸设备没有 hover → 那个按钮永远 opacity-0，用户实际遇到的是
+     「手机能删对话，但改不了名」。左滑是侧栏唯一已被发现的手势，
+     两个操作都挂它下面，不再发明新手势。
+   ★ 宽度 128 必须与 Sidebar.tsx 的 SWIPE_W 一致：不一致会停在
+     差几像素的位置，露出半截按钮或压住按钮。
+   ★★ 交互定稿：操作区从右侧「滑入覆盖」，**文字行不动**。
+     最初做的是把 .session 整体左移 128px 露出按钮 —— 真机截图发现行宽只有
+     226px，推开 128 后短标题会被整条推出可视区，那一行变成空白，
+     用户准备删除时根本看不清自己选的是哪一行（误删风险）。
+     现在按钮压在标题右半上，开头几个字始终可读。 */
 .session-swipe-wrap {
   position: relative;
   border-radius: var(--radius-sm);
@@ -737,32 +749,48 @@ button.kb-chip-unbound:hover {
   touch-action: pan-y;
 }
 .session-swipe-wrap .session {
-  background: var(--panel); /* 盖住底下的红色删除钮 */
-  transition: transform 0.22s ease, var(--t-color);
+  background: var(--panel);
+  transition: var(--t-color);
   margin: 0; /* 原来的上下 margin 移到 wrap 上，避免露底 */
 }
 .session-swipe-wrap + .session-swipe-wrap { margin-top: 2px; }
-.session-swipe-wrap .session-swipe-del {
+.session-swipe-wrap .session-swipe-acts {
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
-  width: 76px;
+  width: 128px;
+  display: flex;
+  /* 收起 = 整体推到行外面，由 wrap 的 overflow:hidden 裁掉；
+     不用 opacity 是因为拖动时要跟手，淡入会闪。 */
+  transform: translateX(100%);
+  transition: transform 0.22s ease;
+  pointer-events: none;
+  box-shadow: -6px 0 12px rgba(61, 47, 26, 0.12);
+  /* ★ 必须给层级：.session 是 position:relative（有自己的 .session::before 竖条），
+     和本元素同属「定位元素」，浏览器按 DOM 顺序画 —— 文字层在后就整个盖住按钮。
+     表现是按钮坐标、尺寸、点击全对，但屏幕上看不见（2026-11-04 截图发现）。
+     改成「操作区滑入覆盖」后才暴露：旧版把文字行推开、右侧留空，所以不需要它。 */
+  z-index: 1;
+}
+.session-swipe-wrap .session-swipe-acts.open {
+  transform: translateX(0);
+  pointer-events: auto;
+}
+.session-swipe-wrap .session-swipe-btn {
+  flex: 1 1 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 2px;
   border: none;
-  background: var(--red-solid);
-  color: #fff;
   font-size: var(--fs-xs);
+  line-height: 1.1;
   cursor: pointer;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.15s ease;
 }
-.session-swipe-wrap .session-swipe-del svg {
+.session-swipe-wrap .session-swipe-btn svg {
   width: 16px;
   height: 16px;
   stroke: currentColor;
@@ -771,7 +799,16 @@ button.kb-chip-unbound:hover {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.session-swipe-wrap .session-swipe-del.open {
-  opacity: 1;
-  pointer-events: auto;
+/* 改名用深棕墨底 + 纸色字：这对变量在暗色主题下正好反转（--ink 变浅、--bg 变深），
+   两边对比度都够。金色实底配白字只有 2.7:1，字读不清，所以不用金色。 */
+.session-swipe-wrap .session-swipe-btn.is-rename {
+  background: var(--ink);
+  color: var(--bg);
+}
+.session-swipe-wrap .session-swipe-btn.is-del {
+  background: var(--red-solid);
+  color: #fff;
+}
+.session-swipe-wrap .session-swipe-btn:active {
+  filter: brightness(0.92);
 }

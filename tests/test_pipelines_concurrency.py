@@ -13,16 +13,19 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import pytest  # noqa: E402
+
 from core import config  # noqa: E402
 from kb import pipelines  # noqa: E402
 
 _TMP = tempfile.mkdtemp(prefix="kb_conc_")
 _OLD_ROOT = config.PROJECT_ROOT
-
-# 把落盘位置挪到临时目录，别污染真实的 data/kb_files.json
-config.PROJECT_ROOT = _TMP
 os.makedirs(os.path.join(_TMP, "data"), exist_ok=True)
 
+# ★ 落盘位置**不能**在导入时就改掉：pytest 会把整个 tests/ 收进同一个进程，
+#   导入期的全局改动没有还原点，后面所有用例都在临时目录里跑，
+#   而那些用例自己并不知道。改成 fixture 里逐条改（见文件末尾 `_pytest_isolate`）；
+#   从本文件直接 python 运行时由 main() 负责。
 FAILED: list[str] = []
 
 
@@ -242,8 +245,26 @@ def test_6_reentrant() -> None:
     check(done.is_set(), "持 _REGISTRY_LOCK 时再调 add_file_records 未死锁")
 
 
+@pytest.fixture(autouse=True)
+def _pytest_isolate(monkeypatch):
+    """pytest 下补两件 main() 本来会做的事。
+
+    1. 把落盘位置指到临时目录（导入期不再改全局）；
+    2. **把 check() 记下的失败转成断言**。`check()` 只 print 不抛异常，
+       于是这 6 条用例在 pytest 里从来没红过 —— 全量跑"全绿"里有一部分是假的。
+       断言失败不阻断其它用例：每条各查自己的增量。
+    """
+    monkeypatch.setattr(config, "PROJECT_ROOT", _TMP)
+    before = len(FAILED)
+    yield
+    new = FAILED[before:]
+    if new:
+        raise AssertionError("；".join(new))
+
+
 def main() -> int:
     print(f"临时目录：{_TMP}")
+    config.PROJECT_ROOT = _TMP  # 直接 python 运行时由这里负责隔离
     try:
         test_1_concurrent_records()
         test_2_never_read_partial()

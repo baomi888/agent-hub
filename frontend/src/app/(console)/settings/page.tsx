@@ -87,6 +87,11 @@ export default function SettingsPage() {
   // 兴趣标签：画像快照 + 是否展开选择器
   const [profile, setProfile] = useState<ProfileSnapshot | null>(null);
   const [tagEdit, setTagEdit] = useState(false);
+  // 自动沉淀（板块 D）：服务端开关，不是 localStorage —— 这件事发生在 worker 里，
+  // 没有浏览器参与。null = 还没读到，此时开关置灰（别让用户以为现在就是开的）
+  const [autoSediment, setAutoSediment] = useState<boolean | null>(null);
+  const [sedimentBusy, setSedimentBusy] = useState(false);
+  const [sedimentNote, setSedimentNote] = useState<string | null>(null);
 
   useEffect(() => {
     // 本地偏好在挂载后读，避免 SSR/CSR 首帧不一致。
@@ -121,6 +126,12 @@ export default function SettingsPage() {
       .myProfile()
       .then(setProfile)
       .catch(() => setProfile(null));
+    // 自动沉淀开关：后端 404（旧版本）时保持 null = 开关置灰，
+    // 而不是默认显示"已开启"——那是替用户撒谎
+    api
+      .getPrefs()
+      .then((p) => setAutoSediment(p.auto_sediment))
+      .catch(() => setAutoSediment(null));
   }, [authedId]);
 
   // 工具表 + 调度进程只给管理员拉：普通用户看不到这一列，
@@ -147,6 +158,30 @@ export default function SettingsPage() {
   const onTopK = useCallback((v: string) => {
     patchPrefs({ topK: Number(v) });
     setTopK(v);
+  }, []);
+
+  /**
+   * 自动沉淀开关：先乐观更新，失败再翻回来并说清原因。
+   *
+   * 为什么要乐观：这是一个"开关"，用户点完期待立刻看到状态变化。
+   * 等一个来回（PUT + 重渲染）再动，会有半秒的"我点了吗"。
+   * 但失败必须翻回来 —— 否则用户以为关了，后台还在建库，这是最糟的一种谎。
+   */
+  const onToggleSediment = useCallback(async (next: boolean) => {
+    setAutoSediment(next);
+    setSedimentBusy(true);
+    setSedimentNote(null);
+    try {
+      const saved = await api.setPrefs({ auto_sediment: next });
+      setAutoSediment(saved.auto_sediment);
+    } catch (e) {
+      setAutoSediment(!next);
+      setSedimentNote(
+        (e as Error)?.message ? `没改成：${(e as Error).message}` : "没改成，稍后再试"
+      );
+    } finally {
+      setSedimentBusy(false);
+    }
   }, []);
 
   const logout = useCallback(async () => {
@@ -337,6 +372,39 @@ export default function SettingsPage() {
                 <CornIcon name="book" />
                 去资料库设定
               </Link>
+            </div>
+          </section>
+
+          <section>
+            <p className="sec-label">知识库沉淀</p>
+            <div className="card card-pad">
+              <div
+                className="row"
+                style={{ justifyContent: "space-between", alignItems: "center" }}
+              >
+                <span style={{ fontSize: "var(--fs-lg)" }}>自动沉淀</span>
+                <Switch
+                  checked={autoSediment ?? false}
+                  disabled={autoSediment === null || sedimentBusy}
+                  onChange={onToggleSediment}
+                  label="自动沉淀"
+                />
+              </div>
+              <p className="hint">
+                长对话被压缩时，把里面的知识句自动存进「对话沉淀·主题」资料库，
+                下一轮检索就能用上。关掉只是不再自动存 —— 回答下面那个
+                「存进资料库」按钮仍然随时可用。
+              </p>
+              {autoSediment === null && (
+                <p className="hint">
+                  这一项现在读不到（后端版本较旧时会这样），先保持原状。
+                </p>
+              )}
+              {sedimentNote && (
+                <p className="hint" style={{ color: "var(--red-ink)" }}>
+                  {sedimentNote}
+                </p>
+              )}
             </div>
           </section>
 

@@ -5,11 +5,17 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { uid } from "@/lib/id";
 import { stripPlanHint } from "@/components/ChatArea";
-import type { Conversation } from "@/lib/types";
+import type { Conversation, WebSource } from "@/lib/types";
 import type { UiMessage } from "@/components/chat/types";
 import type { ShowToast } from "./useToast";
 
-function toUi(role: string, content: string, refs?: string, dbId?: number): UiMessage | null {
+function toUi(
+  role: string,
+  content: string,
+  refs?: string,
+  dbId?: number,
+  webSources?: WebSource[]
+): UiMessage | null {
   if (role === "system") return null;
   return {
     id: uid(),
@@ -17,13 +23,51 @@ function toUi(role: string, content: string, refs?: string, dbId?: number): UiMe
     content: stripPlanHint(content),
     refs,
     dbId,
+    webSources: webSources?.length ? webSources : undefined,
   };
 }
 
-function toUiList(messages: { role: string; content: string; refs?: string; id?: number }[]) {
+function toUiList(
+  messages: {
+    role: string;
+    content: string;
+    refs?: string;
+    id?: number;
+    web_sources?: WebSource[];
+  }[]
+) {
   return messages
-    .map((m) => toUi(m.role, m.content, m.refs, m.id))
+    .map((m) => toUi(m.role, m.content, m.refs, m.id, m.web_sources))
     .filter(Boolean) as UiMessage[];
+}
+
+/** 把「还在等我决定的建库建议」挂回它对应的那条回答上。
+ *
+ * 为什么必须做：建议卡不是历史内容，但**那条待确认的记录是真实存在的**
+ * （后端 kb_proposals 里一条 pending，带 72 小时有效期）。刷新之后如果只在内存里
+ * 丢掉卡片，用户会遇到两件说不通的事：① 刚才那张"要不要建库"的卡凭空消失了；
+ * ② 10 分钟内再问同一个会话，因为冷却判定还能看到那条 pending，**不会再出新的建议**
+ * —— 功能看起来就是坏的。
+ *
+ * 挂错人比不挂更糟，所以严格按 `answer_message_id` 对号；那条回答要是被删了
+ * （用户删掉了整轮对话）就对不上，宁可不显示。
+ */
+async function attachProposal(sid: string, list: UiMessage[]): Promise<UiMessage[]> {
+  try {
+    const res = await api.getPendingKbProposal(sid);
+    const p = res?.proposal;
+    if (!p || p.status !== "pending") return list;
+    const mid = Number(p.answer_message_id || 0);
+    if (!mid) return list;
+    const idx = list.findIndex((m) => m.dbId === mid);
+    if (idx < 0) return list;
+    const next = list.slice();
+    next[idx] = { ...next[idx], proposal: p };
+    return next;
+  } catch {
+    // 恢复失败绝不能连累看历史消息：这是锦上添花的一条请求
+    return list;
+  }
 }
 
 export function useSessions(showToast: ShowToast) {
@@ -63,7 +107,14 @@ export function useSessions(showToast: ShowToast) {
       setActiveSid(recent.id);
       try {
         const detail = await api.getSession(recent.id);
-        if (alive) setMessages(toUiList(detail.messages));
+        if (!alive) return;
+        const base = toUiList(detail.messages);
+        setMessages(base);
+        // 建议卡要等消息落地之后才知道挂哪条，所以先显示消息、再补挂
+        void attachProposal(recent.id, base).then((next) => {
+          if (!alive || next === base) return;
+          setMessages((prev) => (prev === base ? next : prev));
+        });
       } catch (e) {
         console.error(e);
         if (alive) showToast("error", "会话历史加载失败，请稍后重试");
@@ -92,7 +143,15 @@ export function useSessions(showToast: ShowToast) {
     setMessages([]);
     try {
       const detail = await api.getSession(sid);
-      setMessages(toUiList(detail.messages));
+      const base = toUiList(detail.messages);
+      setMessages(base);
+      // 切回一个还有待确认建议的会话时，卡片要跟着回来（见 attachProposal 的注释）。
+      // 用 `prev === base` 做守卫：这期间用户可能已经发了新消息，
+      // 那就不能再拿旧的 base 覆盖回去。
+      void attachProposal(sid, base).then((next) => {
+        if (next === base) return;
+        setMessages((prev) => (prev === base ? next : prev));
+      });
     } catch (e) {
       console.error(e);
       // 历史加载失败时主区是空的，不说一声用户只会以为这个会话本来就没聊过

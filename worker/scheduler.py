@@ -127,6 +127,14 @@ def _load_handlers(force: bool = False) -> tuple[bool, str]:
         register_handler(prompt_evo.JOB_KEY, prompt_evo)
     except Exception as e:  # noqa: BLE001
         _log_json("handler_missing", job_key="prompt.evolve", reason=f"{e}"[:200])
+    # 对话沉淀（板块 D）：没有 due_subjects / run_job，它靠 enqueue 写 pending 行 +
+    # 每次 tick 的 run_pending() 排空。单独挂、单独兜异常，理由同上。
+    try:
+        from service import sediment  # type: ignore
+
+        register_handler(sediment.JOB_KEY, sediment)
+    except Exception as e:  # noqa: BLE001
+        _log_json("handler_missing", job_key="sediment.dialogue", reason=f"{e}"[:200])
     return True, ""
 
 

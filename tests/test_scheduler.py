@@ -47,6 +47,8 @@ EXPECTED_CRONS = {
     "profile.aggregate": "30 2 * * *",
     # Prompt 自进化（GEPA · issue #12）：默认每日 4 次，只产出 shadow 候选
     "prompt.evolve": "20 */6 * * *",
+    # 对话沉淀（板块 D）：事件驱动，每分钟 tick 排空 enqueue 写下的待办
+    "sediment.dialogue": "* * * * *",
 }
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
