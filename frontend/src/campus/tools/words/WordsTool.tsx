@@ -394,7 +394,14 @@ export default function WordsTool() {
                 <span className="campus-flip-hint">
                   {session.round > 1 && session.idx === 0
                     ? `这一轮只练刚才没记住的 ${total} 个词 · 点击卡片翻转`
-                    : "点击卡片（或按空格）翻转看释义"}
+                    : (
+                      <>
+                        点击卡片
+                        {/* 键盘提示只给电脑：手机上「按空格」是句废话 */}
+                        <span className="campus-desktop-only">（或按空格）</span>
+                        翻转看释义
+                      </>
+                    )}
                 </span>
               )}
             </>
@@ -445,7 +452,8 @@ export default function WordsTool() {
           等整组过完，再单独练它们。
         </p>
 
-        <p className="campus-card-note campus-words-keys">
+        {/* 纯键盘说明，只在电脑上出现；手机上没有这些键，整行不渲染（由媒体查询隐藏） */}
+        <p className="campus-card-note campus-words-keys campus-desktop-only">
           <kbd>空格</kbd> 翻转 · <kbd>→</kbd> 认识 · <kbd>←</kbd> 不认识
         </p>
 

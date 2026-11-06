@@ -460,6 +460,13 @@
     var iframe = document.createElement("iframe");
     iframe.setAttribute("title", "校园工具集");
     iframe.setAttribute("loading", "eager");
+    /*
+      必须显式允许全屏，否则 iframe 里的 requestFullscreen 会被权限策略直接拒掉：
+      表现是「点了全屏没反应」，而且 document.fullscreenEnabled 在里面是 false，
+      连按钮都可能不出现。allow 里两个都要写 —— allowfullscreen 是旧 WebKit 认的写法。
+    */
+    iframe.setAttribute("allow", "fullscreen");
+    iframe.setAttribute("allowfullscreen", "true");
     iframe.style.width = w + "px";
     iframe.style.height = h + "px";
     iframe.src = FRAME_URL;

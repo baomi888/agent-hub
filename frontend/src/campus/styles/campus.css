@@ -53,6 +53,37 @@
   --campus-btn-solid-hover: color-mix(in srgb, var(--accent) 88%, black);
 }
 
+/* ---------- 设备能力：同一句提示，按设备给两版 ---------- */
+
+/*
+ * Esc、空格、回车、悬停这些都是「有物理键盘和指针」才存在的东西。
+ * 手机上把「按 Esc 退出」印在界面上，等于告诉用户一个他永远按不到的操作 ——
+ * 内测里就有人盯着那行字找 ESC 键。这类提示必须只在电脑上出现。
+ *
+ * 用法：一句话写两版，各包一层 span；默认（手机 / 平板 / 触屏）显示 `.campus-touch-only`，
+ * 只有「主指针是精确指针 + 能悬停」（电脑 + 键盘）才换成 `.campus-desktop-only`。
+ *
+ * 为什么用 CSS 而不是 JS 判断设备：首屏是服务端渲染的，那一刻拿不到设备信息，
+ * JS 判断会让手机先闪一版桌面文案再换掉。媒体查询首帧就成立，没有这个窗口，
+ * 也不会有 hydration 前后两套 DOM 的问题。
+ *
+ * `revert` 而不是 `inline` 或 `block`：包在 span 上要回到 inline，包在 p 上要回到 block，
+ * 让元素自己去问 UA 要默认值，才不用为每种标签单写一条。
+ */
+.campus-desktop-only {
+  display: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .campus-desktop-only {
+    display: revert;
+  }
+
+  .campus-touch-only {
+    display: none;
+  }
+}
+
 /* ---------- 页头 ---------- */
 
 .campus-head {
@@ -1981,11 +2012,30 @@ body.campus-modal-open .campus-scroll {
   animation: campus-stage-in 0.18s ease-out;
 }
 
-/* 真进全屏：这块区域就是整个屏幕。四边贴屏幕边，刘海与 Home 条会吃掉一截，这里补回安全区 */
-.campus-stage:fullscreen {
+/*
+ * 全屏宿主：一个始终存在的空盒子，专注视图渲染在它里面。
+ *
+ * 它平时高度为 0、不占位（里面的 .campus-stage 收起时不渲染）。
+ * 一旦浏览器把它切成全屏元素，它就是「整块屏幕」——所以这里给的高度、底色
+ * 是给真全屏用的，而不再是之前的 `.campus-stage:fullscreen`（那会儿请求的就是视图本身）。
+ */
+.campus-stage-host:fullscreen {
+  display: block;
   width: 100%;
   height: 100dvh;
+  overflow: auto;
+  background: var(--bg-canvas);
+}
+
+/*
+ * 「整屏」的两种形态共用一套外观 —— 真全屏与页内全屏在视觉上必须一模一样，
+ * 否则同一个按钮在不同手机上给出两种结果，调起来没完。
+ * 四边贴屏幕边，刘海与 Home 条会吃掉一截，这里补回安全区。
+ */
+.campus-stage-host:fullscreen > .campus-stage,
+.campus-stage.is-immersive {
   min-height: 0;
+  margin: 0;
   padding: 16px;
   padding-top: calc(16px + env(safe-area-inset-top));
   padding-right: calc(16px + env(safe-area-inset-right));
@@ -1995,6 +2045,51 @@ body.campus-modal-open .campus-scroll {
   border: 0;
   border-radius: 0;
   box-shadow: none;
+}
+
+/* 真全屏：宿主是整块屏幕，视图把它撑满 */
+.campus-stage-host:fullscreen > .campus-stage {
+  height: 100%;
+}
+
+/*
+ * 页内全屏（iPhone Safari 等没有元素全屏 API 的环境）。
+ *
+ * 和真全屏**同一个视觉结果**，区别只是少了浏览器那层系统 UI：
+ * 铺满视口（100dvh 而不是 100vh —— 手机地址栏收起/展开时不会露出半截背景），
+ * 背后页面由 scrollLock 停住，滚轮不会穿透过去。
+ *
+ * z-index 取 60，和「背单词」的全屏层同一档；完成提醒是 70，所以整屏专注时倒计时到点，
+ * 「本轮完成」照样盖在最上层 —— 这条顺序不能反。
+ */
+.campus-stage.is-immersive {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  height: 100dvh;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+/* 页内全屏没有地址栏可退，顶栏那颗按钮就是「退出」本身，点击区拉到 44px */
+.campus-stage.is-immersive .campus-stage-meta .campus-btn {
+  min-height: 44px;
+}
+
+/*
+ * 整屏后控件跟着放大一档。
+ * 屏幕从一张卡变成一整块，钟到了 180px 而按钮还是 32px 高 —— 视线从钟挪到按钮上，
+ * 那几颗字像是缩小了。整屏专注时不看键盘也能暂停，按钮得摸得到。
+ */
+.campus-stage.is-full .campus-stage-actions .campus-btn {
+  min-height: 52px;
+  font-size: var(--fs-lg);
+}
+
+/* 进度条同步加粗加宽：整屏时它是唯一还在动的「进度」信号，6px×520 太细了 */
+.campus-stage.is-full .campus-stage-bar {
+  width: min(640px, 84%);
+  height: 8px;
 }
 
 @keyframes campus-stage-in {
@@ -2076,9 +2171,11 @@ body.campus-modal-open .campus-scroll {
   outline: none;
 }
 
-/* 全屏了才敢放开：整块屏幕都是它的 */
-.campus-stage:fullscreen .campus-stage-clock {
-  font-size: clamp(56px, 18vmin, 190px);
+/* 整屏了才敢放开：整块屏幕都是它的。
+ * 用 min(vw, vh) 两个方向一起夹 —— 只用 vmin 时竖屏受宽度限制（390px 宽只有 70px 字），
+ * 横屏受高度限制，两种朝向都偏小；分开算能让横屏的手机拿到更大的字。 */
+.campus-stage.is-full .campus-stage-clock {
+  font-size: clamp(64px, min(28vw, 34vh), 180px);
 }
 
 .campus-stage-sub {
@@ -2130,11 +2227,33 @@ body.campus-modal-open .campus-scroll {
   color: var(--text-3);
 }
 
-/* 竖屏时提示横过来。只有真全屏才有意义 —— 页面内本来就是竖着看的，提示"横过来"没道理 */
+/* 竖屏时提示横过来。只有整屏才有意义 —— 页面内本来就是竖着看的，提示"横过来"没道理 */
 @media (orientation: portrait) {
-  .campus-stage:fullscreen .campus-stage-rotate,
-  .campus-stage.is-fs .campus-stage-rotate {
+  /*
+   * 竖屏整屏时把提示单独放一行。
+   * 它原来靠 `margin-left: auto` 挤在按钮右边，把「暂停 / 结束」整组顶离了屏幕中线，
+   * 一只手握着手机、拇指落在底部正中时反而点不到主操作。
+   */
+  .campus-stage.is-full .campus-stage-rotate {
     display: block;
+    flex: 1 0 100%;
+    margin: 0;
+    text-align: center;
+  }
+
+  .campus-stage.is-full .campus-stage-actions {
+    flex-wrap: wrap;
+  }
+}
+
+/*
+ * 「横过来更沉浸」只有手机看得懂 —— 能转的是手持设备，电脑（包括竖着拉窄的窗口）
+ * 转不了。这条放在上面那个竖屏规则之后：选择器特异性比 `.campus-touch-only` 高，
+ * 靠类名藏不住，只能在这里显式收掉。
+ */
+@media (hover: hover) and (pointer: fine) {
+  .campus-stage.is-full .campus-stage-rotate {
+    display: none;
   }
 }
 
@@ -2692,6 +2811,30 @@ body.campus-modal-open .campus-scroll {
   .campus-pomo-fold-close {
     min-height: 44px;
     padding: 4px 14px;
+  }
+
+  /*
+   * 窄屏（整屏与页内都算）的顶栏排成两行：任务名一行，时刻与两个按钮一行。
+   *
+   * 一行塞满的后果是任务名被压成「高等数学·…」—— 最该看清的就是「我现在在做什么」，
+   * 它反倒成了唯一被省略的信息。两行之后任务名拿到整行宽度，按钮也不再和它抢位置。
+   */
+  .campus-stage .campus-stage-head {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .campus-stage .campus-stage-meta {
+    width: 100%;
+  }
+
+  /* 时刻靠左、按钮靠右：三者等距会把「全屏」推到屏幕正中，看着像主操作 */
+  .campus-stage .campus-stage-now {
+    margin-right: auto;
+  }
+
+  .campus-stage .campus-stage-meta .campus-btn {
+    min-height: 44px;
   }
 
   .campus-tab {
