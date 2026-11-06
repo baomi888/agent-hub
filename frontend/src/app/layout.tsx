@@ -9,11 +9,21 @@ const DESC = "为大学生的 AI 素养平台：备考与求职智能体，知�
 export const metadata: Metadata = {
   title: TITLE,
   description: DESC,
-  // 标签页图标：漫画风知穗吉祥物（矢量 SVG，缩放不糊）
+  /* 标签页图标：直接用品牌吉祥物，三套并行备份
+     - SVG：Chrome / Edge / Firefox 首选，任意尺寸都锐利
+     - ICO：app/favicon.ico（多尺寸 16→256），Safari 与必应等搜索爬虫只认位图
+     - PNG：Android / PWA 主屏，见 manifest.webmanifest
+     apple 必须是 PNG：Safari 不认 SVG 的 apple-touch-icon，且透明底会被填黑，
+     所以这张由本地渲染时铺了纸色 #EDE4C8。 */
   icons: {
-    icon: [{ url: "/mascot.svg", type: "image/svg+xml" }],
-    apple: "/mascot.svg",
+    icon: [
+      { url: "/mascot.svg", type: "image/svg+xml" },
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
   },
+  manifest: "/manifest.webmanifest",
   openGraph: {
     title: TITLE,
     description: DESC,
