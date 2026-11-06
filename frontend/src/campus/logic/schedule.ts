@@ -470,13 +470,32 @@ export interface ImportResult {
   error: string | null;
 }
 
+/**
+ * 去掉聊天窗口爱加的 ``` 围栏（B7）。
+ *
+ * 用户的真实动作是「复制整段回复」，不是「精确选中 JSON」，于是粘进来的十次里有八次长这样：
+ *
+ *   ```json
+ *   { "courses": [ … ] }
+ *   ```
+ *
+ * 直接 `JSON.parse` 必然失败，而原来的提示只说「不是合法 JSON」—— 用户盯着满屏正常的
+ * JSON 看不出问题在哪。这里只在**首尾**剥一层围栏，中间内容一个字不动：正文里出现的
+ * ``` 不会被误吃。
+ */
+function stripCodeFence(text: string): string {
+  const trimmed = text.trim();
+  const match = /^```[a-zA-Z]*\s*\n?([\s\S]*?)\n?```$/.exec(trimmed);
+  return match ? match[1].trim() : trimmed;
+}
+
 /** 解析「小律同款」课表 JSON：`{ courses: [{ name, dayOfWeek, sections, weeks, ... }] }` */
 export function parseScheduleImport(text: string): ImportResult {
   const empty: ImportResult = { courses: [], skipped: 0, error: null };
 
   let data: unknown;
   try {
-    data = JSON.parse(text);
+    data = JSON.parse(stripCodeFence(text));
   } catch {
     return { ...empty, error: "这段内容不是合法 JSON，检查一下引号和逗号。" };
   }

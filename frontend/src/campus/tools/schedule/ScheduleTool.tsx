@@ -51,6 +51,7 @@ import { CourseDialog, CourseForm, EMPTY_DRAFT } from "./CourseEditor";
 import type { CourseDraft } from "./CourseEditor";
 import { ImportDialog, PeriodDialog, TermDialog } from "./ScheduleDialogs";
 import type { ImportFeedback } from "./ScheduleDialogs";
+import MoreMenu from "./MoreMenu";
 import WeekGrid, { headHeightOf } from "./WeekGrid";
 
 /**
@@ -541,6 +542,32 @@ export default function ScheduleTool() {
     setHint("课表已清空。");
   }
 
+  /**
+   * 「更多 → 导出我的课表」（A08）。
+   *
+   * 只有换设备时才用一次，所以不在主按钮组里。失败时不弹窗打扰 ——
+   * 把用户指回导入弹窗里那个「导出我的课表」按钮，它会把 JSON 填进文本框，
+   * 手动复制一样能带走，不至于卡在这里。
+   */
+  function downloadSchedule() {
+    const json = handleExport();
+    try {
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "我的课表.json";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      // 立刻 revoke 会让部分浏览器下载失败，等下一轮事件循环
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      setHint("已导出「我的课表.json」。换设备时用「导入课表」选这个文件。");
+    } catch {
+      setHint("浏览器不允许自动下载，去「导入课表」点「导出我的课表」可以手动复制内容。");
+    }
+  }
+
   function handleImport(text: string): ImportFeedback {
     const parsed = parseScheduleImport(text);
     if (parsed.error) return { ok: false, message: parsed.error };
@@ -823,14 +850,18 @@ export default function ScheduleTool() {
                   >
                     学期
                   </button>
-                  <button
-                    type="button"
-                    className={`campus-pill${mode === "all" ? " is-on" : ""}`}
-                    aria-pressed={mode === "all"}
-                    onClick={() => setMode(mode === "all" ? "week" : "all")}
-                  >
-                    {mode === "all" ? "按周" : "一览"}
-                  </button>
+                  {/*
+                   * 「一览」和「清空」收进「更多」（B7 / 2.1 第 3、6 条）。
+                   * 手机上原本是六颗胶囊平铺：添加 / 导入 / N 节 / 学期 / 一览 / 全屏，
+                   * 一排已经顶到 360px 的边；把低频的三项收起来，剩下五颗才敢放大字号。
+                   */}
+                  <MoreMenu
+                    variant="pill"
+                    allMode={mode === "all"}
+                    onToggleAll={() => setMode(mode === "all" ? "week" : "all")}
+                    onExport={downloadSchedule}
+                    onClear={clearAll}
+                  />
                   <button
                     type="button"
                     className="campus-pill"
@@ -896,20 +927,20 @@ export default function ScheduleTool() {
                   </button>
                   <button
                     type="button"
-                    className={`campus-seg-btn${mode === "all" ? " is-on" : ""}`}
-                    aria-pressed={mode === "all"}
-                    onClick={() => setMode("all")}
-                  >
-                    一览
-                  </button>
-                  <button
-                    type="button"
                     className="campus-seg-btn"
                     onClick={() => setFullscreen(true)}
                   >
                     全屏
                   </button>
                 </div>
+
+                {/* 学期总览 / 导出 / 清空：低频三项收进「更多」（B7 / 2.1 第 3、6 条） */}
+                <MoreMenu
+                  allMode={mode === "all"}
+                  onToggleAll={() => setMode(mode === "all" ? "week" : "all")}
+                  onExport={downloadSchedule}
+                  onClear={clearAll}
+                />
 
                 {/* 两颗 chip 常驻右端：学期、作息。原来学期说明独占一行，作息干脆没入口 */}
                 <div className="campus-wk-chips">
@@ -1070,10 +1101,8 @@ export default function ScheduleTool() {
 
         {hasCourses && (
           <div className="campus-card-foot">
+            {/* 「清空课表」已收进「更多」（B7 / 2.1 第 6 条），页脚只留只读信息 */}
             <span>共 {snapshot.courses.length} 门课，存在这台设备上</span>
-            <button type="button" className="campus-link-btn" onClick={clearAll}>
-              清空课表
-            </button>
           </div>
         )}
       </div>
@@ -1142,6 +1171,8 @@ export default function ScheduleTool() {
           onClose={() => setImportOpen(false)}
           onImport={handleImport}
           onExport={handleExport}
+          // 手机上折叠块默认展开（1.1 口径）：手机里一行灰字标题很容易被当成广告条划过
+          tutorialOpen={phone}
         />
       )}
 

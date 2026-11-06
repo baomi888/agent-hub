@@ -47,25 +47,33 @@ const SAMPLE_JSON = `{
   ]
 }`;
 
-/** 从 AI 那边整理课表用的提示词，旧版有，用户已经习惯这条路 */
-const AI_PROMPT = `你是一个课程表整理助手。请把我给的课表整理成如下 JSON，只输出 JSON、不要解释：
+/**
+ * 从 AI 那边整理课表用的提示词（B7 / 需求 1.2）。
+ *
+ * 相比旧版的四处改动，每一处都是「不写就出事」：
+ *  - 明写「只输出 JSON，不要加代码块标记」：聊天窗口默认会把 JSON 包进 ``` 里，
+ *    用户整段复制回来直接 JSON.parse 失败；
+ *  - `dayOfWeek` 明说 1=周一、不要写 0：0 会被 `normalizeLegacyDay` 归一成周日，
+ *    整张表错一天，而且界面上看不出来（周日列本来就在右边）；
+ *  - 周次给单双周的具体数组写法：只写「单双周」三个字，AI 会自由发挥成
+ *    「1-16周（单周）」这类解析不了的句子；
+ *  - 示例压成**一行**：多行缩进的 JSON 里一旦混进注释或尾逗号就废了，
+ *    单行示例照抄的成功率明显更高。
+ */
+const AI_PROMPT = `你是一个课程表整理助手。请把我给的课表整理成 JSON，只输出 JSON，不要解释、不要加代码块标记。
 
-{
-  "courses": [
-    {
-      "name": "课程名",
-      "dayOfWeek": 1,
-      "sections": [1, 2],
-      "teacher": "老师(可选)",
-      "classroom": "教室(可选)",
-      "weeks": [1, 2, 3],
-      "notes": "备注(可选)"
-    }
-  ]
-}
+字段说明：
+- name：课程名，必填
+- dayOfWeek：1=周一、2=周二……7=周日（不要写 0）
+- sections：第几节，数字数组，如 [1,2]；连堂请逐节展开
+- weeks：可选，上课周次数组，如 [1,2,3]；不写表示每周都上；单周写 [1,3,5,7,9,11,13,15]，双周写 [2,4,6,8,10,12,14,16]
+- teacher / classroom / notes：可选，老师 / 教室 / 备注
+
+输出格式（照这个形状，一门课一个对象）：
+{"courses":[{"name":"高等数学","dayOfWeek":1,"sections":[1,2],"weeks":[1,2,3],"teacher":"张教授","classroom":"教三-201"}]}
 
 我的课表如下：
-（把教务导出 / 截图转文字 / 手写的课表粘贴到这里）`;
+（把教务系统导出的课表 / 截图转成的文字 / 手写课表粘贴到这里）`;
 
 export interface ImportFeedback {
   ok: boolean;
@@ -78,11 +86,26 @@ interface ImportDialogProps {
   onImport: (text: string) => ImportFeedback;
   /** 生成当前课表的 JSON 文本（下载由父级做） */
   onExport: () => string;
+  /** 教程默认展开（1.1 口径：手机端默认展开，桌面默认收起） */
+  tutorialOpen?: boolean;
 }
 
-export function ImportDialog({ onClose, onImport, onExport }: ImportDialogProps) {
+export function ImportDialog({
+  onClose,
+  onImport,
+  onExport,
+  tutorialOpen: initialTutorialOpen = false,
+}: ImportDialogProps) {
   const [text, setText] = useState("");
   const [feedback, setFeedback] = useState<ImportFeedback | null>(null);
+  /**
+   * 教程的展开状态。
+   *
+   * 必须是受控的 `<details open>`，不能用 `<details open={true}>` 一把梭：
+   * 后者在 React 里每次重渲染都会把 open 写回 true，用户手动收起后随便点一下
+   * 别处又自己弹开，表现为「关不掉」。加 onToggle 把真实状态同步回来才是稳的。
+   */
+  const [tutorialOpen, setTutorialOpen] = useState(initialTutorialOpen);
 
   function handleImport() {
     const result = onImport(text);
@@ -201,9 +224,34 @@ export function ImportDialog({ onClose, onImport, onExport }: ImportDialogProps)
           </p>
         )}
 
-        <details className="campus-details">
-          <summary>手上还没有课表草稿？点开复制这段提示词去问知穗 AI</summary>
-          <div className="campus-add-row" style={{ marginTop: 8 }}>
+        {/*
+         * 导入教程（B7 / 需求 1.1–1.4 + A08）。
+         *
+         * 旧版只有一句「点开复制这段提示词去问知穗 AI」+ 一大坨 prompt ——
+         * 缺的正是新人卡住的地方：**提示词要丢给谁、回来之后干什么**。
+         * 这里按「三步 + 字段表 + 常见错法」重排，顺序就是用户真实动作的顺序。
+         */}
+        <details
+          className="campus-details"
+          open={tutorialOpen}
+          onToggle={(event) => setTutorialOpen(event.currentTarget.open)}
+        >
+          <summary>第一次导入？三步就好（附提示词与字段说明）</summary>
+
+          <ol className="campus-steps">
+            <li>
+              <b>复制提示词</b>：点下面的「复制提示词」，里面已经写明「只输出 JSON」。
+            </li>
+            <li>
+              <b>丢给知穗</b>：回首页对知穗说「帮我把这份课表整理成 JSON」，把教务系统导出的课表
+              一起发过去 —— 截图、复制出来的文字都行。用别的 AI 也可以，提示词是通用的。
+            </li>
+            <li>
+              <b>粘回这里</b>：把知穗回的 JSON 粘进上面的框，点「导入」。
+            </li>
+          </ol>
+
+          <div className="campus-add-row" style={{ marginTop: 10 }}>
             <button
               type="button"
               className="campus-btn"
@@ -218,7 +266,84 @@ export function ImportDialog({ onClose, onImport, onExport }: ImportDialogProps)
               复制提示词
             </button>
           </div>
+
           <pre className="campus-prompt">{AI_PROMPT}</pre>
+
+          <h3 className="campus-details-title">字段说明</h3>
+          <table className="campus-field-table">
+            <thead>
+              <tr>
+                <th scope="col">字段</th>
+                <th scope="col">必填</th>
+                <th scope="col">怎么写</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <code>name</code>
+                </td>
+                <td>是</td>
+                <td>课程名</td>
+              </tr>
+              <tr>
+                <td>
+                  <code>dayOfWeek</code>
+                </td>
+                <td>是</td>
+                <td>1=周一 …… 7=周日。写 0 会被当成周日</td>
+              </tr>
+              <tr>
+                <td>
+                  <code>sections</code>
+                </td>
+                <td>是</td>
+                <td>
+                  第几节，如 <code>[1,2]</code> 或 <code>&quot;1,2&quot;</code>（区间也可写成字符串）。
+                  没有节次的课会被丢弃
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <code>weeks</code>
+                </td>
+                <td>否</td>
+                <td>
+                  上课周次，如 <code>[1,2,3]</code> 或 <code>&quot;1-16&quot;</code>。不写 = 每周都上
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <code>teacher</code> <code>classroom</code> <code>notes</code>
+                </td>
+                <td>否</td>
+                <td>老师 / 教室 / 备注</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h3 className="campus-details-title">四种最常见的错法</h3>
+          <ul className="campus-faq">
+            <li>
+              外面套了一层代码块围栏（三个反引号 + json）—— 现在已经会自动剥掉，但直接粘纯 JSON 最稳。
+            </li>
+            <li>
+              <code>dayOfWeek</code> 写 0 想表示周一 —— 0 是周日，周一要写 1。
+            </li>
+            <li>
+              <code>sections</code> 写成「周一第 1-2 节」这种整句 —— 认不出节次，这门课会被整条丢掉，
+              导入结果里会写「丢弃无效 N 条」。
+            </li>
+            <li>
+              只给了一个数组、没有 <code>courses</code> 外层 —— 会提示「JSON 里没找到 courses 数组」。
+            </li>
+          </ul>
+
+          {/* A08：换设备的迁移路径。导出功能本来就在这个弹窗里，缺的只是一句话把人指过去 */}
+          <p className="campus-details-note">
+            换手机或换浏览器：先点上面的「导出我的课表」存下 JSON，到新设备点「导入课表」选这个文件，
+            课表和作息一起搬过去。
+          </p>
         </details>
       </div>
     </div>

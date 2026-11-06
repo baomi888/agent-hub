@@ -737,6 +737,178 @@
   border-radius: var(--radius-sm);
 }
 
+/* ------------------------------------------------------------------ *
+ * 导入教程（B7 / 需求 1.1–1.4 + A08）
+ * ------------------------------------------------------------------ */
+
+.campus-steps {
+  margin: 10px 0 0;
+  padding-left: 20px;
+  font-size: var(--fs-sm);
+  line-height: 1.75;
+  color: var(--text-2);
+}
+
+.campus-steps li + li {
+  margin-top: 4px;
+}
+
+.campus-steps b {
+  color: var(--ink);
+}
+
+.campus-details-title {
+  margin: 16px 0 6px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.campus-field-table {
+  width: 100%;
+  /*
+   * 固定布局 + 显式列宽：自动布局会按「最长不可断行内容」分配列宽，
+   * 而最后一行的 `teacher classroom notes` 三个字段名都是 nowrap，把第一列撑到 200px，
+   * 剩下给「怎么写」的就只剩 90px —— 390 宽的机器上「必填」两个字会被拆成两行。
+   */
+  table-layout: fixed;
+  font-size: var(--fs-xs);
+  border-collapse: collapse;
+}
+
+.campus-field-table th:nth-child(1) {
+  width: 33%;
+}
+
+.campus-field-table th:nth-child(2) {
+  width: 42px;
+}
+
+.campus-field-table th,
+.campus-field-table td {
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line);
+}
+
+.campus-field-table th {
+  font-weight: 600;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.campus-field-table td {
+  color: var(--text-2);
+  line-height: 1.6;
+}
+
+/* 行内代码：字段名与示例值要能和正文分开，否则「1-16」看起来像正文的一部分 */
+.campus-field-table code,
+.campus-faq code {
+  padding: 1px 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  color: var(--accent-ink);
+  background: var(--fill-3);
+  border-radius: var(--radius-xs);
+}
+
+.campus-faq code {
+  white-space: nowrap;
+}
+
+/*
+ * 表格里的字段名不设 nowrap：`teacher classroom notes` 三格挤在一列，
+ * nowrap 会把「字段」列顶到 200px 宽，剩下给「怎么写」的只有 90px。
+ * 也不用 overflow-wrap: anywhere —— 那会把 `"1-3"` 从中间劈成 `"1-` / `3"`。
+ * 交给默认的「按空格断行」，长字段名整体换行即可。
+ */
+.campus-field-table code {
+  white-space: normal;
+}
+
+.campus-faq {
+  margin: 0;
+  padding-left: 20px;
+  font-size: var(--fs-xs);
+  line-height: 1.75;
+  color: var(--text-2);
+}
+
+.campus-faq li + li {
+  margin-top: 4px;
+}
+
+/* A08：换设备的迁移提示，做成一条脚注而不是正文段落 —— 它只在搬家时才看 */
+.campus-details-note {
+  padding: 8px 10px;
+  margin: 14px 0 0;
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+  color: var(--text-2);
+  background: var(--fill-2);
+  border-left: 2px solid var(--accent-line);
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+}
+
+/* ------------------------------------------------------------------ *
+ * 「更多」菜单（B7 / 2.1 待勾选清单第 3、6 条）
+ * ------------------------------------------------------------------ */
+
+.campus-more {
+  position: relative;
+  display: inline-flex;
+}
+
+.campus-more-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  min-width: 156px;
+  padding: 4px;
+  background: var(--card-bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-2);
+}
+
+.campus-more-item {
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+}
+
+.campus-more-item:hover,
+.campus-more-item:focus-visible {
+  color: var(--ink);
+  background: var(--fill-3);
+}
+
+/* 清空不可逆：红色 + 一道分隔缝，避免顺着上面两项的位置点空一格就点到它 */
+.campus-more-item.is-danger {
+  margin-top: 4px;
+  color: var(--red-ink);
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 var(--radius-xs) var(--radius-xs);
+}
+
+.campus-more-item.is-danger:hover,
+.campus-more-item.is-danger:focus-visible {
+  color: var(--red-ink);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+}
+
 .campus-modal {
   position: fixed;
   inset: 0;
@@ -2428,12 +2600,13 @@ body.campus-modal-open .campus-scroll {
   align-items: center;
   margin: 8px 0 2px;
   padding-bottom: 2px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.campus-phone-tools::-webkit-scrollbar {
-  display: none;
+  /*
+   * 这里原来是 `overflow-x: auto`（怕六个胶囊在 360px 上排不下就横向滚）。
+   * B7 起必须去掉：`overflow-x: auto` 会把元素变成滚动容器，连带把 y 方向也裁掉，
+   * 「更多」菜单一弹出来就被切没了 —— 桌面上好好的，手机上点开像没反应。
+   * 六个胶囊在 360px 上本来就排得下（B6.1 压过 padding），真排不下就让它换行，
+   * 换行比「菜单被裁掉」可接受得多。
+   */
 }
 
 
