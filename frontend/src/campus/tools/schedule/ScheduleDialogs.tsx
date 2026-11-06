@@ -1,9 +1,9 @@
 "use client";
 
 /**
- * 课表的两个弹窗：导入、学期设置。
+ * 课表的三个弹窗：导入、学期设置、上课时间。
  *
- * 拆出来的原因很实际：这两块表单各自有独立的临时状态（粘贴的 JSON、开学日期…），
+ * 拆出来的原因很实际：这几块表单各自有独立的临时状态（粘贴的 JSON、开学日期、逐节时间…），
  * 塞进主组件会让「课表本体」和「一次性表单」的状态混在一起，改一个容易碰到另一个。
  *
  * 调用方式是「挂载即打开」—— 父级用 `{open && <ImportDialog />}` 控制，
@@ -11,6 +11,17 @@
  */
 
 import { useState } from "react";
+import {
+  DEFAULT_BREAK_MINUTES,
+  DEFAULT_FIRST_START,
+  DEFAULT_LESSON_MINUTES,
+  MAX_PERIOD_COUNT,
+  MIN_PERIOD_COUNT,
+  generateStarts,
+  resizeStarts,
+  toMinutes,
+} from "../../logic/schedule";
+import type { PeriodPlan } from "../../types";
 
 /* ------------------------------------------------------------------ *
  * 导入课表
@@ -74,7 +85,11 @@ export function ImportDialog({ onClose, onImport, onExport }: ImportDialogProps)
   const [feedback, setFeedback] = useState<ImportFeedback | null>(null);
 
   function handleImport() {
-    setFeedback(onImport(text));
+    const result = onImport(text);
+    setFeedback(result);
+    // 导入成功就收工：结果已经写到页面上的提示行里，弹窗继续留着会挡住下一步
+    //（D2：首次导入会紧接着弹出学期设置）
+    if (result.ok) onClose();
   }
 
   function handleFile(file: File | undefined) {
@@ -85,7 +100,9 @@ export function ImportDialog({ onClose, onImport, onExport }: ImportDialogProps)
       const content = String(reader.result ?? "");
       setText(content);
       // 选完文件直接导，少一步点击 —— 旧版就是这个行为
-      setFeedback(onImport(content));
+      const result = onImport(content);
+      setFeedback(result);
+      if (result.ok) onClose();
     };
     reader.onerror = () => setFeedback({ ok: false, message: "读不了这个文件，试试把内容直接粘进来。" });
     reader.readAsText(file, "utf-8");
@@ -259,7 +276,7 @@ export function TermDialog({
     <div className="campus-modal" role="dialog" aria-modal="true" aria-labelledby="campus-term-title">
       <button type="button" className="campus-modal-mask" aria-label="关闭学期设置" onClick={onClose} />
 
-      <div className="campus-modal-card" style={{ maxWidth: 440 }}>
+      <div className="campus-modal-card" style={{ maxWidth: 420 }}>
         <div className="campus-modal-head">
           <h2 id="campus-term-title" className="campus-card-title">
             本学期设置
@@ -270,29 +287,41 @@ export function TermDialog({
         </div>
 
         <p className="campus-card-note" style={{ marginTop: 0 }}>
-          课表要配上日历，才知道「这周是第几周」，也才能在周几下面标上日期。两种填法选一种就行。
+          课表要配上日历，才知道「这周是第几周」，也才能在周几下面标上日期。
           {currentWeekNo > 0 && ` 按现在的设置，日历上是第 ${currentWeekNo} 周。`}
         </p>
 
-        <label className="campus-field" style={{ marginBottom: 12 }}>
-          <span>开学日期（第 1 周周一）</span>
-          <input
-            className="campus-input"
-            type="date"
-            value={start}
-            onChange={(event) => {
-              setStart(event.target.value);
-              setMessage("");
-            }}
-          />
-        </label>
+        <div className="campus-term-grid">
+          <label className="campus-field">
+            <span>开学日期（第 1 周周一）</span>
+            <input
+              className="campus-input"
+              type="date"
+              value={start}
+              onChange={(event) => {
+                setStart(event.target.value);
+                setMessage("");
+              }}
+            />
+          </label>
 
-        <p className="campus-card-note" style={{ margin: "0 0 8px" }}>
-          或者，直接告诉我现在是第几周
-        </p>
+          <label className="campus-field">
+            <span>学期总周数</span>
+            <input
+              className="campus-input"
+              type="number"
+              min={6}
+              max={30}
+              value={weeks}
+              onChange={(event) => setWeeks(event.target.value)}
+            />
+          </label>
+        </div>
 
-        <div className="campus-add-row">
-          <label className="campus-field" style={{ maxWidth: 150 }}>
+        <p className="campus-term-or">不知道开学日期？告诉我现在是第几周也一样</p>
+
+        <div className="campus-add-row" style={{ alignItems: "flex-end" }}>
+          <label className="campus-field" style={{ maxWidth: 170 }}>
             <span>今天是第几周</span>
             <input
               className="campus-input"
@@ -308,18 +337,9 @@ export function TermDialog({
               }}
             />
           </label>
-
-          <label className="campus-field" style={{ maxWidth: 150 }}>
-            <span>学期总周数</span>
-            <input
-              className="campus-input"
-              type="number"
-              min={6}
-              max={30}
-              value={weeks}
-              onChange={(event) => setWeeks(event.target.value)}
-            />
-          </label>
+          <p className="campus-card-note" style={{ flex: "1 1 150px", margin: 0 }}>
+            填了开学日期就自动算，这一栏可以空着。
+          </p>
         </div>
 
         {message !== "" && (
@@ -334,6 +354,196 @@ export function TermDialog({
           </button>
           <button type="button" className="campus-btn" onClick={onClose}>
             稍后再说
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 上课时间（B2 · 需求 4.1 + A03）
+ * ------------------------------------------------------------------ */
+
+interface PeriodDialogProps {
+  /** 当前作息；弹窗内的改动不改父级，点保存才写回 */
+  plan: PeriodPlan;
+  onClose: () => void;
+  onSave: (plan: PeriodPlan) => void;
+}
+
+/**
+ * 「每节几点开始」的设置面板。
+ *
+ * 两条路都给：
+ *  ① 一键重排 —— 填「第一节几点、每节多长、课间多长」，整段覆盖，适合第一次设置；
+ *  ② 逐节微调 —— 学校作息往往有零碎的例外（周四早操推迟十分钟），只能一节一节改。
+ * 只给 ① 会让例外无从下手，只给 ② 要手填 12 个时间，都算没做完。
+ */
+export function PeriodDialog({ plan, onClose, onSave }: PeriodDialogProps) {
+  const [count, setCount] = useState(plan.count);
+  const [starts, setStarts] = useState<string[]>(plan.starts);
+  const [first, setFirst] = useState(plan.starts[0] ?? DEFAULT_FIRST_START);
+  const [duration, setDuration] = useState(String(plan.duration));
+  const [gap, setGap] = useState(String(DEFAULT_BREAK_MINUTES));
+  const [message, setMessage] = useState("");
+
+  const minutes = Math.min(120, Math.max(20, Number.parseInt(duration, 10) || DEFAULT_LESSON_MINUTES));
+
+  function changeCount(next: number) {
+    setCount(next);
+    // 保留已经调过的前几节，只补/砍尾部 —— 改节数不该把上午的时间清空
+    setStarts(resizeStarts({ count: next, starts, duration: minutes }, next));
+  }
+
+  function regenerate() {
+    const next = generateStarts({
+      count,
+      start: first,
+      duration: minutes,
+      gap: Number.parseInt(gap, 10),
+    });
+    setStarts(next);
+    setFirst(next[0]);
+    setMessage(`已按「${first} 开始、每节 ${minutes} 分钟」重排 ${count} 节。`);
+  }
+
+  function handleSave() {
+    const blank = starts.findIndex((time) => toMinutes(time) === null);
+    if (blank >= 0) {
+      setMessage(`第 ${blank + 1} 节的时间没填或写得不对，补一下再保存。`);
+      return;
+    }
+    onSave({ count, starts, duration: minutes });
+  }
+
+  return (
+    <div className="campus-modal" role="dialog" aria-modal="true" aria-labelledby="campus-period-title">
+      <button type="button" className="campus-modal-mask" aria-label="关闭上课时间" onClick={onClose} />
+
+      <div className="campus-modal-card" style={{ maxWidth: 520 }}>
+        <div className="campus-modal-head">
+          <h2 id="campus-period-title" className="campus-card-title">
+            上课时间
+          </h2>
+          <button type="button" className="campus-btn" onClick={onClose}>
+            关闭
+          </button>
+        </div>
+
+        <p className="campus-card-note" style={{ marginTop: 0 }}>
+          每所学校打铃的时间都不一样，这里按你自己的作息填。
+          改完之后，课表左侧的节次下面、课程详情里的钟点都会跟着变。
+        </p>
+
+        <div className="campus-period-gen">
+          <label className="campus-field">
+            <span>每天几节</span>
+            <select
+              className="campus-select"
+              value={String(count)}
+              onChange={(event) => changeCount(Number.parseInt(event.target.value, 10))}
+            >
+              {Array.from({ length: MAX_PERIOD_COUNT - MIN_PERIOD_COUNT + 1 }, (_, i) => {
+                const n = MIN_PERIOD_COUNT + i;
+                return (
+                  <option key={n} value={n}>
+                    {n} 节
+                  </option>
+                );
+              })}
+            </select>
+          </label>
+
+          <label className="campus-field">
+            <span>第一节</span>
+            <input
+              className="campus-input"
+              type="time"
+              value={first}
+              onChange={(event) => {
+                setFirst(event.target.value);
+                setMessage("");
+              }}
+            />
+          </label>
+
+          <label className="campus-field">
+            <span>每节（分）</span>
+            <input
+              className="campus-input"
+              type="number"
+              min={20}
+              max={120}
+              step={5}
+              value={duration}
+              onChange={(event) => {
+                setDuration(event.target.value);
+                setMessage("");
+              }}
+            />
+          </label>
+
+          <label className="campus-field">
+            <span>课间（分）</span>
+            <input
+              className="campus-input"
+              type="number"
+              min={0}
+              max={60}
+              step={5}
+              value={gap}
+              onChange={(event) => {
+                setGap(event.target.value);
+                setMessage("");
+              }}
+            />
+          </label>
+        </div>
+
+        <div className="campus-add-row" style={{ marginTop: 10 }}>
+          <button type="button" className="campus-btn is-primary" onClick={regenerate}>
+            按上面的值重排
+          </button>
+          <span className="campus-card-note" style={{ margin: 0 }}>
+            12:00–14:00 的空档会自动跳过。
+          </span>
+        </div>
+
+        <p className="campus-term-or">下面是逐节微调，学校有零碎的例外就改这里</p>
+
+        <div className="campus-period-grid">
+          {starts.map((time, index) => (
+            <label key={index} className="campus-field">
+              <span>第 {index + 1} 节</span>
+              <input
+                className="campus-input"
+                type="time"
+                value={time}
+                onChange={(event) => {
+                  const next = starts.slice();
+                  next[index] = event.target.value;
+                  setStarts(next);
+                  setMessage("");
+                }}
+              />
+            </label>
+          ))}
+        </div>
+
+        {message !== "" && (
+          <p className="campus-card-note" role="status" style={{ color: "var(--accent-ink)" }}>
+            {message}
+          </p>
+        )}
+
+        {/* 手机上一屏放不下 14 节，保存按钮贴在底边跟着滚，不用摸黑往下找 */}
+        <div className="campus-period-actions">
+          <button type="button" className="campus-btn is-primary" onClick={handleSave}>
+            保存
+          </button>
+          <button type="button" className="campus-btn" onClick={onClose}>
+            取消
           </button>
         </div>
       </div>

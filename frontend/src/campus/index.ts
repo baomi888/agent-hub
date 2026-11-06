@@ -15,7 +15,9 @@ export { computeGpa, scoreToGpa, parseLegacyGpa, SAMPLE_ROWS } from "./logic/gpa
 export { shuffle, drawWinners, drawOutcome, parseNames } from "./logic/draw";
 export {
   DAY_LABELS,
-  PERIODS,
+  MIN_PERIOD_COUNT,
+  MAX_PERIOD_COUNT,
+  DEFAULT_PERIOD_COUNT,
   COURSE_COLORS,
   normalizeLegacyDay,
   currentWeek,
@@ -31,6 +33,13 @@ export {
   parseScheduleImport,
   mergeCourses,
   migrateLegacySchedule,
+  toMinutes,
+  fromMinutes,
+  addMinutes,
+  generateStarts,
+  resizeStarts,
+  normalizePeriodPlan,
+  sectionTimeRange,
 } from "./logic/schedule";
 export {
   GROUP_SIZE,

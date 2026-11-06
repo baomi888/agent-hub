@@ -61,6 +61,22 @@ export interface TermSetting {
   weeks: number;
 }
 
+/**
+ * 一天的作息（B2 · 2026-11-06，需求 4.1 + A03）。
+ *
+ * 只存「每节几点开始」，不存结束时间 —— 结束时间由下一节推、最后一节按 `duration` 算。
+ * 存两套时间一定会出现「第 1 节 08:00–09:40，第 2 节 09:30 开始」这种自相矛盾的存档，
+ * 而用户真正要改的只有开始时间。
+ */
+export interface PeriodPlan {
+  /** 每天几节（8–14）。这是「手机一屏看全」能否成立的关键变量 */
+  count: number;
+  /** 每节开始时间 `HH:MM`，长度恒等于 count */
+  starts: string[];
+  /** 每节课上多少分钟；算结束时间与「一键重排」用 */
+  duration: number;
+}
+
 /** 课表存储快照 */
 export interface ScheduleSnapshot {
   courses: Course[];
@@ -71,6 +87,11 @@ export interface ScheduleSnapshot {
   term: TermSetting | null;
   /** 上次看的周次 */
   week: number;
+  /**
+   * 作息。0.6.1 之前没有这个字段，读取时由 `normalizePeriodPlan()` 补默认值
+   * （需求 A07：缺字段不能报错，也不能让整张表的行高突然变成 0）。
+   */
+  periods: PeriodPlan;
 }
 
 /** 词库级别（来自 data/words/index.json） */

@@ -5,7 +5,7 @@
  * 旧版把这三件事混在 DOM 操作里，出错时只能靠肉眼比对，所以先抽出来。
  */
 
-import type { Course, ScheduleSnapshot } from "../types";
+import type { Course, PeriodPlan, ScheduleSnapshot } from "../types";
 
 /** 周一为 0，周日为 6 —— 新结构统一口径 */
 export const DAY_LABELS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"] as const;
@@ -86,14 +86,144 @@ export function formatSections(sections: readonly number[]): string {
  * 以下是 2026-10-31 迁移时补充的部分：周视图布局、JSON 导入、旧数据迁移
  * ------------------------------------------------------------------ */
 
-/** 一天最多 12 节，与旧版 PERIODS 一致 */
-export const PERIODS = 12;
+/* ------------------------------------------------------------------ *
+ * 作息：每天几节、每节几点开始（B2 · 需求 4.1 + A03）
+ * ------------------------------------------------------------------ */
 
-/** 12 节的开始时间，全屏视图里标在节次下方。改作息直接改这里 */
-export const PERIOD_TIMES = [
-  "08:00", "08:55", "10:00", "10:55", "14:30", "15:25",
-  "16:20", "17:15", "19:40", "20:35", "21:30", "22:25",
-] as const;
+/** 每天最少 / 最多几节。8 节够放一个满课的工作日，14 节是「早八到晚十」的极限 */
+export const MIN_PERIOD_COUNT = 8;
+export const MAX_PERIOD_COUNT = 14;
+export const DEFAULT_PERIOD_COUNT = 12;
+
+/** 默认一节 45 分钟、课间 10 分钟、第一节 08:00 —— 国内高校最常见的作息 */
+export const DEFAULT_LESSON_MINUTES = 45;
+export const DEFAULT_BREAK_MINUTES = 10;
+export const DEFAULT_FIRST_START = "08:00";
+
+/**
+ * 午休窗口。生成的下一节落进 12:00–14:00 时直接跳到 14:00，
+ * 否则会出现「第 5 节 12:35 上课」这种一看就假的默认值。
+ */
+const LUNCH_FROM = 12 * 60;
+const LUNCH_TO = 14 * 60;
+
+/** `08:00` → 480（分钟）；非法输入返回 null，不让一个脏值把 12 节全带偏 */
+export function toMinutes(hhmm: string): number | null {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) return null;
+  return hour * 60 + minute;
+}
+
+/** 480 → `08:00`；跨零点回绕，`22:30 + 60` 得到 `23:30` 而不是 `24:30` */
+export function fromMinutes(total: number): string {
+  const wrapped = ((total % 1440) + 1440) % 1440;
+  const h = String(Math.floor(wrapped / 60)).padStart(2, "0");
+  const m = String(wrapped % 60).padStart(2, "0");
+  return `${h}:${m}`;
+}
+
+/** `08:00` + 45 → `08:45` */
+export function addMinutes(hhmm: string, minutes: number): string {
+  const base = toMinutes(hhmm);
+  return base === null ? hhmm : fromMinutes(base + minutes);
+}
+
+/**
+ * 按「第一节几点 + 每节多长 + 课间多长」生成整天的开始时间。
+ * 午休窗口默认跳过，关掉 `skipLunch` 就是连续排满。
+ */
+export function generateStarts(options: {
+  count?: number;
+  start?: string;
+  duration?: number;
+  gap?: number;
+  skipLunch?: boolean;
+} = {}): string[] {
+  const count = clampCount(options.count ?? DEFAULT_PERIOD_COUNT);
+  const duration = clampDuration(options.duration ?? DEFAULT_LESSON_MINUTES);
+  const gap = Math.min(60, Math.max(0, Math.trunc(options.gap ?? DEFAULT_BREAK_MINUTES)));
+  const skipLunch = options.skipLunch ?? true;
+
+  const first = toMinutes(options.start ?? DEFAULT_FIRST_START) ?? toMinutes(DEFAULT_FIRST_START)!;
+  const starts: string[] = [];
+  let cursor = first;
+
+  for (let i = 0; i < count; i += 1) {
+    starts.push(fromMinutes(cursor));
+    let next = cursor + duration + gap;
+    if (skipLunch && next >= LUNCH_FROM && next < LUNCH_TO) next = LUNCH_TO;
+    cursor = next;
+  }
+
+  return starts;
+}
+
+function clampCount(value: number): number {
+  const n = Math.trunc(value);
+  if (!Number.isFinite(n)) return DEFAULT_PERIOD_COUNT;
+  return Math.min(MAX_PERIOD_COUNT, Math.max(MIN_PERIOD_COUNT, n));
+}
+
+function clampDuration(value: number): number {
+  const n = Math.trunc(value);
+  if (!Number.isFinite(n)) return DEFAULT_LESSON_MINUTES;
+  return Math.min(120, Math.max(20, n));
+}
+
+/**
+ * 改节数时保留用户已经调过的时间。
+ * 只按新长度重排尾部，已经改好的前几节原样保留 —— 改完节数发现上午的时间被清空，
+ * 是最容易让人放弃设置的一种体验。
+ */
+export function resizeStarts(plan: PeriodPlan, nextCount: number): string[] {
+  const count = clampCount(nextCount);
+  const kept = plan.starts.slice(0, count).filter((time) => toMinutes(time) !== null);
+  if (kept.length >= count) return kept;
+
+  const last = kept[kept.length - 1] ?? DEFAULT_FIRST_START;
+  const tail = generateStarts({
+    count: count - kept.length,
+    start: addMinutes(last, plan.duration + DEFAULT_BREAK_MINUTES),
+    duration: plan.duration,
+  });
+  return [...kept, ...tail];
+}
+
+/** 旧存档 → 完整作息。缺字段、长度不对、脏时间都在这里兜住（需求 A07） */
+export function normalizePeriodPlan(raw: unknown): PeriodPlan {
+  const record = (raw ?? {}) as { count?: unknown; starts?: unknown; duration?: unknown };
+  const count = clampCount(Number(record.count) || DEFAULT_PERIOD_COUNT);
+  const duration = clampDuration(Number(record.duration) || DEFAULT_LESSON_MINUTES);
+
+  const rawStarts = Array.isArray(record.starts) ? record.starts : [];
+  const starts: string[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const candidate = typeof rawStarts[i] === "string" ? rawStarts[i].trim() : "";
+    const minutes = toMinutes(candidate);
+    starts.push(minutes === null ? "" : fromMinutes(minutes));
+  }
+
+  // 有一个空位就整段按默认重排：留半截空白时间，周视图会是「有的行有时间，有的是空的」
+  const complete = starts.every((time) => time !== "");
+  return { count, duration, starts: complete ? starts : generateStarts({ count, duration }) };
+}
+
+/**
+ * 一组节次 → `08:00–09:40`。
+ * 结束时间取最后一节的开始 + 单节时长，不依赖「下一节几点」—— 最后一节没有下一节。
+ */
+export function sectionTimeRange(sections: readonly number[], plan: PeriodPlan): string {
+  if (sections.length === 0) return "";
+  const first = Math.min(...sections);
+  const last = Math.max(...sections);
+  const from = plan.starts[first - 1];
+  const lastStart = plan.starts[last - 1];
+  if (!from || !lastStart) return "";
+  return `${from}–${addMinutes(lastStart, plan.duration)}`;
+}
 
 /** 课块配色，按课程 id 轮转。取的是与主站色板同族、深浅适中、浅底上能看清的值 */
 export const COURSE_COLORS = [
@@ -135,8 +265,11 @@ export function parseSections(input: unknown): number[] {
       .flatMap(collect);
   }
 
-  // 去重 + 只留 1..12，脏输入不该把整张课表带崩
-  const valid = raw.filter((n) => Number.isFinite(n) && n >= 1 && n <= PERIODS).map(Math.trunc);
+  // 去重 + 只留 1..14，脏输入不该把整张课表带崩。
+  // 上限放宽到 14 是因为 A03 允许每天排 14 节，写死 12 会把导入的第 13 节直接吞掉。
+  const valid = raw
+    .filter((n) => Number.isFinite(n) && n >= 1 && n <= MAX_PERIOD_COUNT)
+    .map(Math.trunc);
   return [...new Set(valid)].sort((a, b) => a - b);
 }
 
@@ -444,5 +577,7 @@ export function migrateLegacySchedule(raw: unknown): ScheduleSnapshot | null {
         ? { start: termStart, weeks: Math.min(30, Math.max(1, termWeeksCount || 20)) }
         : null,
     week: Math.max(1, Math.trunc(Number(data.week ?? 1)) || 1),
+    // 旧版是「12 节写死」，没有存作息。补一套默认值，用户第一次进「上课时间」才需要改
+    periods: normalizePeriodPlan(undefined),
   };
 }
