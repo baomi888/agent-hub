@@ -443,11 +443,15 @@ export default function ScheduleTool() {
   const todayIndex = todayWeek === week ? (new Date().getDay() + 6) % 7 : -1;
 
   /*
-   * 手机版式的大标题（B6）：固定显示「今天」，跟参考图一致 ——
+   * 手机版式的大标题（B6）：本周显示「今天」，跟参考图一致 ——
    * 它是「你在哪一天」的路标，不是「这一周是哪一周」的标题（那个交给右边的周次胶囊）。
-   * 翻到别周时标题仍是今天，这样翻周不会让整页最醒目的字跟着跳。
-   * 没设学期就没有可靠的今天，退回「第 N 周」，不给假日期。
+   *
+   * B7 修正：翻到别周时不能再写「今天」。原来标题固定是今天，于是第 7 周
+   * 的七格日期条写着「10月5日–11日」，正上方却顶着「11月6日 周五」——
+   * 用户看到的就是「日期和下面的课对不上」。翻到别周改成「第 N 周」，
+   * 完整区间交给表格上方那行小字（和桌面同一条），要回到今天，右边就有「回到今天」。
    */
+  const onTodayWeek = todayIndex >= 0;
   const now = new Date();
   const todayTitle = `${now.getMonth() + 1}月${now.getDate()}日`;
   const todayDow = `周${"一二三四五六日"[(now.getDay() + 6) % 7]}`;
@@ -708,8 +712,8 @@ export default function ScheduleTool() {
               <>
                 <div className="campus-daybar">
                   <span className="campus-daybar-title">
-                    {term ? todayTitle : `第 ${week} 周`}
-                    {term && <span className="campus-daybar-dow">{todayDow}</span>}
+                    {term && onTodayWeek ? todayTitle : `第 ${week} 周`}
+                    {term && onTodayWeek && <span className="campus-daybar-dow">{todayDow}</span>}
                   </span>
                   <div className="campus-daybar-side">
                     <button type="button" className="campus-pill" onClick={goToday}>
@@ -946,12 +950,17 @@ export default function ScheduleTool() {
                  * 左边这串日期是必需的：列头为了塞下 7 列只写日号（5、6、7），
                  * 看不出是几月；跨月那周更是「29 30 1 2」，靠列头根本读不出来。
                  *
-                 * 手机端（B6）不渲染左边这串：日期条已经逐天写了日号，
+                 * 手机端（B6）本周不渲染左边这串：日期条已经逐天写了日号，
                  * 再补一行区间就是同一件事说两遍。假期提示留着，那是这行唯一的新信息。
+                 *
+                 * B7：翻到别周时手机端要补回区间 —— 大标题这时只剩「第 N 周」，
+                 * 日期条又只有裸日号，跨月那周得靠这行才知道看的是哪一段。
                  */}
-                {term && weekDates && (holidayNote !== "" || !phone) && (
+                {term && weekDates && (holidayNote !== "" || !phone || !onTodayWeek) && (
                   <div className="campus-week-sub">
-                    {!phone && <span className="campus-week-range">{weekRangeText(weekDates)}</span>}
+                    {(!phone || !onTodayWeek) && (
+                      <span className="campus-week-range">{weekRangeText(weekDates)}</span>
+                    )}
                     {holidayNote !== "" && (
                       <span className="campus-week-holiday" title={DATA_NOTE}>
                         {holidayNote}

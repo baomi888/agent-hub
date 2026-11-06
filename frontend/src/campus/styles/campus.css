@@ -2343,11 +2343,22 @@ body.campus-modal-open .campus-scroll {
   flex: 0 0 34px;
 }
 
+/*
+ * 轨道之间不留 gap。
+ *
+ * 原来写的是 `gap: 3px`，六个间隙共 18px 全从轨道宽度里扣 ——
+ * 每格从 47px 缩到 39px，而下面的课程列在不带 gap 的 7 等分网格里仍是 47px。
+ * 于是日期条从左往右一路错位：第一格右移 18px，最后一格左移 10px，
+ * 中间第 4 列碰巧重合 —— 看起来就是「日期和课没对上」。
+ *
+ * 间隙改由格子自己的左右 margin 出（纯视觉，不参与轨道计算），
+ * 这样轨道边界与课程列边界逐列重合，格块只是各内缩 2px。
+ */
 .campus-daystrip-cells {
   display: grid;
   flex: 1;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 3px;
+  gap: 0;
   min-width: 0;
 }
 
@@ -2358,6 +2369,7 @@ body.campus-modal-open .campus-scroll {
   gap: 1px;
   align-items: center;
   justify-content: center;
+  margin: 0 2px;
   padding: 5px 2px 6px;
   background: var(--fill-3);
   border-radius: var(--radius-md);
@@ -2447,6 +2459,18 @@ body.campus-modal-open .campus-scroll {
     border-right: 0;
     border-left: 0;
     border-radius: 0;
+  }
+
+  /*
+   * 日期条必须跟着一起抵到卡片外沿。
+   *
+   * 表格用负 18px 伸到了卡片边上，日期条却还在卡片内容盒里 ——
+   * 两条基线差 18px，七格日期条整体压在课程列右侧，越往右偏得越多。
+   * 这里补同一个负 margin，日期条的 34px 占位 + 七等分就和表格的
+   * 「34px 节次栏 + 七等分」完全同源。
+   */
+  .campus-daystrip {
+    margin: 0 -18px;
   }
 
   /* 页面内不再追求「一屏 7 列」，min-width 会逼出横向滚动条，和参考图不符 */
