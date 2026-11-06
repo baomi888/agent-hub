@@ -1,5 +1,5 @@
 {
-  "name": "知穗Agent · 大学生 AI 素养平台",
+  "name": "知穗Agent",
   "short_name": "知穗Agent",
   "description": "备考与求职智能体，知识库问答，附 GPA 分析、番茄钟、课程表等校园工具集",
   "lang": "zh-CN",
@@ -9,7 +9,9 @@
   "background_color": "#EDE4C8",
   "theme_color": "#EDE4C8",
   "icons": [
-    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }

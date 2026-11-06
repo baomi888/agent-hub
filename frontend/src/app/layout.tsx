@@ -13,17 +13,27 @@ export const metadata: Metadata = {
      - SVG：Chrome / Edge / Firefox 首选，任意尺寸都锐利
      - ICO：app/favicon.ico（多尺寸 16→256），Safari 与必应等搜索爬虫只认位图
      - PNG：Android / PWA 主屏，见 manifest.webmanifest
-     apple 必须是 PNG：Safari 不认 SVG 的 apple-touch-icon，且透明底会被填黑，
-     所以这张由本地渲染时铺了纸色 #EDE4C8。 */
+     圆角在此处烘进位图（22%，抖音/豆包那种 App 观感）：Windows 桌面快捷方式、
+     必应搜索结果都不会替我们切圆角，直角会像一张方块贴纸。
+     唯一例外是 apple 那张——iOS 会自己套圆角遮罩，给圆角图会变成圆角套圆角，
+     所以它保持满铺，透明底也会被填黑，故本地渲染时铺了纸色 #EDE4C8。 */
   icons: {
     icon: [
-      { url: "/mascot.svg", type: "image/svg+xml" },
+      { url: "/icon.svg", type: "image/svg+xml" },
       { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
       { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
     ],
     apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
   },
   manifest: "/manifest.webmanifest",
+  /* 桌面/主屏图标下面的名字。不设的话各系统会去用 title 那串长标题，
+     桌面快捷方式会被截成「知穗Agent · 大学…」。三处一起给才管用：
+     manifest 的 name/short_name、这里的 appleWebApp.title。 */
+  appleWebApp: {
+    title: "知穗Agent",
+    capable: true,
+    statusBarStyle: "default",
+  },
   openGraph: {
     title: TITLE,
     description: DESC,
