@@ -1070,7 +1070,7 @@ export default function ScheduleTool() {
           <div className="campus-empty-state">
             <p className="campus-empty-title">还没有课表</p>
             <p className="campus-card-note">
-              把整理好的 JSON 粘进来最快；也可以一门一门手动加，加完随时能导出备份。
+              导入一份整理好的课表最快；也可以一门一门手动加，加完随时能导出备份。
             </p>
             <div className="campus-add-row" style={{ marginTop: 12 }}>
               <button
@@ -1088,7 +1088,8 @@ export default function ScheduleTool() {
               )}
             </div>
             <p className="campus-card-note" style={{ marginTop: 10 }}>
-              不知道 JSON 从哪来？点「导入课表」，里面有现成的提示词，复制给知穗就行。
+              不想手动敲？把教务系统的课表截个图发给知穗，让它整理成 JSON 再粘进来；
+              提示词点「导入课表」就有。
             </p>
           </div>
         )}
