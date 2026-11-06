@@ -14,7 +14,7 @@
  * 避免「正在聊天的页面」在切换路由时请求到已被清理的旧 chunk 而白屏。
  */
 
-const VERSION = "v1";
+const VERSION = "v3";
 const PRECACHE = `baomi-pre-${VERSION}`;
 const ASSETS = `baomi-assets-${VERSION}`;
 
@@ -85,23 +85,30 @@ self.addEventListener("fetch", (event) => {
   // 接口、鉴权、流式对话：一律不碰
   if (url.pathname.startsWith("/api/")) return;
 
+  const offlineResponse = async () => {
+    const cache = await caches.open(PRECACHE);
+    return (
+      (await cache.match(OFFLINE_URL)) ||
+      new Response("网络不可用，请检查连接后重试。", {
+        status: 503,
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      })
+    );
+  };
+
   // 页面导航：网络优先，断网落离线页
   if (request.mode === "navigate") {
     event.respondWith(
       (async () => {
+        /* 先看系统级在线状态：断网时直接给离线页，不去等 fetch 超时，
+           用户打开就能看到"没网"，而不是盯着一片空白等十几秒。
+           （实测 Chrome 的 offline 模拟下，SW 内的 fetch 仍可能命中 HTTP 缓存返回旧 HTML，
+             所以不能只靠 try/catch 判断。） */
+        if (navigator.onLine === false) return offlineResponse();
         try {
-          const fresh = await fetch(request);
-          return fresh;
+          return await fetch(request, { cache: "no-store" });
         } catch {
-          const cache = await caches.open(PRECACHE);
-          const offline = await cache.match(OFFLINE_URL);
-          return (
-            offline ||
-            new Response("网络不可用，请检查连接后重试。", {
-              status: 503,
-              headers: { "Content-Type": "text/plain; charset=utf-8" },
-            })
-          );
+          return offlineResponse();
         }
       })()
     );

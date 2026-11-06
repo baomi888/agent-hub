@@ -61,6 +61,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             __html: `(function(){try{var s=localStorage.getItem('theme');var f=new URLSearchParams(location.search).get('theme');var d=f?f==='dark':s?s==='dark':window.matchMedia('(prefers-color-scheme: dark)').matches;if(d)document.documentElement.classList.add('dark');var p={};try{p=JSON.parse(localStorage.getItem('baomi.prefs')||'{}')}catch(e){}if(p.fontScale)document.documentElement.setAttribute('data-fs',p.fontScale);}catch(e){}})();`,
           }}
         />
+        {/* Safari 15 及更早只认这个传统标签：缺了它，从主屏打开会退化成带地址栏的 Safari 窗口。
+            Next 16 的 appleWebApp.capable 现在只输出新标准 mobile-web-app-capable，
+            老 iOS 读不到（线上实测 head 里确实没有这一条），所以手工补一份。 */}
+        <meta name="apple-mobile-web-app-capable" content="yes" />
         {/* 中文 Web 字体改为本地子集（frontend/public/fonts/），彻底去掉外链依赖：
             jsdelivr / 飞书字体在国内网络下时通时断，线上实测字体曾被重置两次，
             汇报演示时一旦外链挂掉设计感会直接塌成系统默认字体。
