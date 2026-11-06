@@ -5,10 +5,35 @@
  * 旧版把这三件事混在 DOM 操作里，出错时只能靠肉眼比对，所以先抽出来。
  */
 
-import type { Course, ScheduleSnapshot } from "../types";
+import type { Course, PeriodPlan, ScheduleSnapshot } from "../types";
 
 /** 周一为 0，周日为 6 —— 新结构统一口径 */
 export const DAY_LABELS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"] as const;
+
+/** 一周七天。列数、日期条、月历表头都用它，不写裸 7 */
+export const DAYS_IN_WEEK = 7;
+
+/**
+ * 只有一个字宽时用的周几写法（手机上那排七格日期条）。
+ * 和 `DAY_LABELS` 的差别只是省掉「周」字 —— 一格 43px，两个字排不开。
+ */
+export const DOW_CHARS = "一二三四五六日";
+
+/**
+ * 日期 → 周几列号（周一 = 0）。
+ * `(getDay() + 6) % 7` 这个式子原来在归周一、算今天、写星期文案三处各写一遍，
+ * 抄错一处就是整列错位，统一走这里。
+ */
+export function columnOfDate(date: Date): number {
+  return (date.getDay() + 6) % 7;
+}
+
+/** 学期周数上限 / 默认值。导入解析、学期弹窗、旧数据兜底三处共用 */
+export const MAX_TERM_WEEKS = 30;
+export const DEFAULT_TERM_WEEKS = 20;
+
+/** 学期周数下限：再短就不是一个学期了，学期弹窗的输入框也按这个卡 */
+export const MIN_TERM_WEEKS = 1;
 
 /**
  * 旧版 v1 的 day 是 `dayOfWeek % 7`（周一 = 1，周日 = 0），
@@ -56,13 +81,13 @@ export function parseWeeks(text: string): number[] {
       const to = Number.parseInt(range[2], 10);
       if (!Number.isFinite(from) || !Number.isFinite(to)) continue;
       for (let w = Math.min(from, to); w <= Math.max(from, to); w += 1) {
-        if (w > 0 && w <= 30) weeks.add(w);
+        if (w > 0 && w <= MAX_TERM_WEEKS) weeks.add(w);
       }
       continue;
     }
 
     const single = Number.parseInt(token, 10);
-    if (Number.isFinite(single) && single > 0 && single <= 30) weeks.add(single);
+    if (Number.isFinite(single) && single > 0 && single <= MAX_TERM_WEEKS) weeks.add(single);
   }
 
   return [...weeks].sort((a, b) => a - b);
@@ -73,33 +98,243 @@ export function isActiveInWeek(weeks: readonly number[], week: number): boolean 
   return weeks.includes(week);
 }
 
-/** 节次范围 → 显示文案，如 [1,2] → "1-2 节" */
+/**
+ * 节次范围 → 显示文案，如 [1,2] → `第 1-2 节`、[3] → `第 3 节`。
+ *
+ * 区间也带「第」：课程详情里原来另写了一份 `sectionLabel`，两种写法并排出现
+ * （`第 3 节` / `1-2 节`），同一张卡片里粗细不齐。现在只有这一个出口。
+ */
 export function formatSections(sections: readonly number[]): string {
   if (sections.length === 0) return "未定节次";
   const sorted = sections.slice().sort((a, b) => a - b);
   const first = sorted[0];
   const last = sorted[sorted.length - 1];
-  return first === last ? `第 ${first} 节` : `${first}-${last} 节`;
+  return first === last ? `第 ${first} 节` : `第 ${first}-${last} 节`;
 }
 
 /* ------------------------------------------------------------------ *
  * 以下是 2026-10-31 迁移时补充的部分：周视图布局、JSON 导入、旧数据迁移
  * ------------------------------------------------------------------ */
 
-/** 一天最多 12 节，与旧版 PERIODS 一致 */
-export const PERIODS = 12;
+/* ------------------------------------------------------------------ *
+ * 作息：每天几节、每节几点开始（B2 · 需求 4.1 + A03）
+ * ------------------------------------------------------------------ */
 
-/** 12 节的开始时间，全屏视图里标在节次下方。改作息直接改这里 */
-export const PERIOD_TIMES = [
-  "08:00", "08:55", "10:00", "10:55", "14:30", "15:25",
-  "16:20", "17:15", "19:40", "20:35", "21:30", "22:25",
-] as const;
+/** 每天最少 / 最多几节。8 节够放一个满课的工作日，14 节是「早八到晚十」的极限 */
+export const MIN_PERIOD_COUNT = 8;
+export const MAX_PERIOD_COUNT = 14;
+export const DEFAULT_PERIOD_COUNT = 12;
 
-/** 课块配色，按课程 id 轮转。取的是与主站色板同族、深浅适中、浅底上能看清的值 */
+/** 默认一节 45 分钟、课间 10 分钟、第一节 08:00 —— 国内高校最常见的作息 */
+export const DEFAULT_LESSON_MINUTES = 45;
+export const DEFAULT_BREAK_MINUTES = 10;
+
+/** 单节时长 / 课间时长的可设范围，`PeriodDialog` 的输入框和这里的 clamp 用同一套 */
+export const MIN_LESSON_MINUTES = 20;
+export const MAX_LESSON_MINUTES = 120;
+export const MIN_BREAK_MINUTES = 0;
+export const MAX_BREAK_MINUTES = 60;
+export const DEFAULT_FIRST_START = "08:00";
+
+/**
+ * 午休窗口。生成的下一节落进 12:00–14:00 时直接跳到 14:00，
+ * 否则会出现「第 5 节 12:35 上课」这种一看就假的默认值。
+ */
+const LUNCH_FROM = 12 * 60;
+const LUNCH_TO = 14 * 60;
+
+/** `08:00` → 480（分钟）；非法输入返回 null，不让一个脏值把 12 节全带偏 */
+export function toMinutes(hhmm: string): number | null {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) return null;
+  return hour * 60 + minute;
+}
+
+/** 480 → `08:00`；跨零点回绕，`22:30 + 60` 得到 `23:30` 而不是 `24:30` */
+export function fromMinutes(total: number): string {
+  const wrapped = ((total % 1440) + 1440) % 1440;
+  const h = String(Math.floor(wrapped / 60)).padStart(2, "0");
+  const m = String(wrapped % 60).padStart(2, "0");
+  return `${h}:${m}`;
+}
+
+/** `08:00` + 45 → `08:45` */
+export function addMinutes(hhmm: string, minutes: number): string {
+  const base = toMinutes(hhmm);
+  return base === null ? hhmm : fromMinutes(base + minutes);
+}
+
+/**
+ * 按「第一节几点 + 每节多长 + 课间多长」生成整天的开始时间。
+ * 午休窗口默认跳过，关掉 `skipLunch` 就是连续排满。
+ */
+export function generateStarts(options: {
+  count?: number;
+  start?: string;
+  duration?: number;
+  gap?: number;
+  skipLunch?: boolean;
+} = {}): string[] {
+  const count = clampCount(options.count ?? DEFAULT_PERIOD_COUNT);
+  const duration = clampDuration(options.duration ?? DEFAULT_LESSON_MINUTES);
+  const gap = clampGap(options.gap ?? DEFAULT_BREAK_MINUTES);
+  const skipLunch = options.skipLunch ?? true;
+
+  // DEFAULT_FIRST_START 一定是合法 `HH:MM`，这里留一个数值兜底而不是 `!`：
+  // 将来有人把默认值改成 "8:00" 之外的脏值，也只会退到 08:00，不会抛错
+  const first =
+    toMinutes(options.start ?? DEFAULT_FIRST_START) ?? toMinutes(DEFAULT_FIRST_START) ?? 8 * 60;
+  const starts: string[] = [];
+  let cursor = first;
+
+  for (let i = 0; i < count; i += 1) {
+    starts.push(fromMinutes(cursor));
+    let next = cursor + duration + gap;
+    if (skipLunch && next >= LUNCH_FROM && next < LUNCH_TO) next = LUNCH_TO;
+    cursor = next;
+  }
+
+  return starts;
+}
+
+function clampCount(value: number): number {
+  const n = Math.trunc(value);
+  if (!Number.isFinite(n)) return DEFAULT_PERIOD_COUNT;
+  return Math.min(MAX_PERIOD_COUNT, Math.max(MIN_PERIOD_COUNT, n));
+}
+
+function clampDuration(value: number): number {
+  const n = Math.trunc(value);
+  if (!Number.isFinite(n)) return DEFAULT_LESSON_MINUTES;
+  return Math.min(MAX_LESSON_MINUTES, Math.max(MIN_LESSON_MINUTES, n));
+}
+
+/** 课间可设 0（连堂），上限 60 —— 再长就不像「课间」了 */
+export function clampGap(value: number): number {
+  const n = Math.trunc(value);
+  if (!Number.isFinite(n)) return DEFAULT_BREAK_MINUTES;
+  return Math.min(MAX_BREAK_MINUTES, Math.max(MIN_BREAK_MINUTES, n));
+}
+
+/** 学期总周数兜底：旧存档、手填、URL 里来的脏值都走这一个口 */
+export function clampTermWeeks(value: unknown): number {
+  const n = Math.trunc(Number(value));
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_TERM_WEEKS;
+  return Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, n));
+}
+
+/**
+ * 改节数时保留用户已经调过的时间。
+ * 只按新长度重排尾部，已经改好的前几节原样保留 —— 改完节数发现上午的时间被清空，
+ * 是最容易让人放弃设置的一种体验。
+ */
+export function resizeStarts(plan: PeriodPlan, nextCount: number): string[] {
+  const count = clampCount(nextCount);
+  const kept = plan.starts.slice(0, count).filter((time) => toMinutes(time) !== null);
+  if (kept.length >= count) return kept;
+
+  const last = kept[kept.length - 1] ?? DEFAULT_FIRST_START;
+  const tail = generateStarts({
+    count: count - kept.length,
+    start: addMinutes(last, plan.duration + DEFAULT_BREAK_MINUTES),
+    duration: plan.duration,
+  });
+  return [...kept, ...tail];
+}
+
+/** 旧存档 → 完整作息。缺字段、长度不对、脏时间都在这里兜住（需求 A07） */
+export function normalizePeriodPlan(raw: unknown): PeriodPlan {
+  const record = (raw ?? {}) as { count?: unknown; starts?: unknown; duration?: unknown };
+  const count = clampCount(Number(record.count) || DEFAULT_PERIOD_COUNT);
+  const duration = clampDuration(Number(record.duration) || DEFAULT_LESSON_MINUTES);
+
+  const rawStarts = Array.isArray(record.starts) ? record.starts : [];
+  const starts: string[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const candidate = typeof rawStarts[i] === "string" ? rawStarts[i].trim() : "";
+    const minutes = toMinutes(candidate);
+    starts.push(minutes === null ? "" : fromMinutes(minutes));
+  }
+
+  // 有一个空位就整段按默认重排：留半截空白时间，周视图会是「有的行有时间，有的是空的」
+  const complete = starts.every((time) => time !== "");
+  return { count, duration, starts: complete ? starts : generateStarts({ count, duration }) };
+}
+
+/**
+ * 一组节次 → `08:00–09:40`。
+ * 结束时间取最后一节的开始 + 单节时长，不依赖「下一节几点」—— 最后一节没有下一节。
+ */
+export function sectionTimeRange(sections: readonly number[], plan: PeriodPlan): string {
+  if (sections.length === 0) return "";
+  const first = Math.min(...sections);
+  const last = Math.max(...sections);
+  const from = plan.starts[first - 1];
+  const lastStart = plan.starts[last - 1];
+  if (!from || !lastStart) return "";
+  return `${from}–${addMinutes(lastStart, plan.duration)}`;
+}
+
+/**
+ * 课块配色，按课程 id 轮转（B5 起换成莫兰迪色系）。
+ *
+ * 旧色板（#C8892A 金 / #EF8A56 橙 / #1E7A46 绿…）是给「深色描边 + 12% 淡底」那套画法用的：
+ * 颜色只负责勾一条边，块里还是纸色。现在块改成实心底，颜色本身就是块，
+ * 8 个高明度色块并排时饱和度必须压下来 —— 否则一屏看过去像色卡，不是课表。
+ *
+ * 明度统一落在 L* 70–78、饱和度 15–25%（莫兰迪的共同点：灰调、发闷、彼此不抢）。
+ * 取值的硬门槛是 A03：深墨 #241F18 压在每一格上最低 7.05:1，教室那行 #3B332A 最低 5.35:1，
+ * 都高于 4.5:1 的正文线（逐色实测见 campus/reviews/2026-11-06_课表B5莫兰迪配色.md）。
+ *
+ * 顺序按色相拉开：赭 → 橄榄 → 鼠尾草 → 青 → 蓝 → 紫 → 粉 → 米灰。
+ * 相邻 id 的课因此不会撞色，连上四节的那种块也不会和隔壁混淆。
+ */
 export const COURSE_COLORS = [
-  "#C8892A", "#7C9A54", "#EF8A56", "#2A5A8A",
-  "#875B10", "#1E7A46", "#8A5A0A", "#A03E28",
+  "#C9A990", "#ACB07E", "#A3BCA4", "#93B7B0",
+  "#9DB1C6", "#AFA6C2", "#CBA5A6", "#C2B49A",
 ] as const;
+
+/**
+ * 旧色板 → 新色板的迁移表（B5）。
+ *
+ * 颜色是跟着课程一起存在 localStorage 里的十六进制值，只改 `COURSE_COLORS` 的话
+ * 新课是新色、老用户的课表还是旧色，同一张表里两种风格并存。
+ * 这张表在 `normalizeSnapshot` 读档时把旧值换成新值 —— 一次读档完成迁移，用户不用做任何操作，
+ * 也不动旧键（回滚到旧版仍然是合法的旧色值）。
+ *
+ * 按**旧板下标一一对应**，不做"挑个近色"：旧板的橙#EF8A56 / 红#A03E28 在莫兰迪里没有真正的对应物，
+ * 硬配对反而会把两门原本区分明显的课配成同一个色。按下标走能保住「相邻 id 不同色」这个性质。
+ */
+const LEGACY_COURSE_COLORS: Readonly<Record<string, string>> = {
+  "#c8892a": "#C9A990",
+  "#7c9a54": "#ACB07E",
+  "#ef8a56": "#A3BCA4",
+  "#2a5a8a": "#93B7B0",
+  "#875b10": "#9DB1C6",
+  "#1e7a46": "#AFA6C2",
+  "#8a5a0a": "#CBA5A6",
+  "#a03e28": "#C2B49A",
+};
+
+/**
+ * 任意来源的色值 → 一个合法的课块色。
+ *
+ * 三档：旧板的值换成莫兰迪；本身就是合法 hex 的原样返回（用户手改导入 JSON 时可能填自己的色）；
+ * 其它（空、拼错、"red"）退到第一个色，不让 UI 拿到一个画不出来的值。
+ *
+ * 必须在**所有**读档入口调用：旧的 `migrateLegacySchedule` 只覆盖 v1 迁移，
+ * v2 存档是直接 `readJson` 出来的（补 periods 那条路），漏了那里老用户就看不到新配色。
+ */
+export function normalizeCourseColor(value: unknown): string {
+  const raw = String(value ?? "").toLowerCase();
+  const mapped = LEGACY_COURSE_COLORS[raw] ?? raw;
+  // 注意 `i` 标志：新色板是大写十六进制（#C9A990），少了这个标志会把它们全判成非法值，
+  // 结果整张表都退回第一个色 —— 这一条曾经真的踩过（8 门课全变成同一个赭色）。
+  return /^#[0-9a-f]{6}$/i.test(mapped) ? mapped : COURSE_COLORS[0];
+}
 
 /**
  * 解析节次输入。
@@ -135,8 +370,11 @@ export function parseSections(input: unknown): number[] {
       .flatMap(collect);
   }
 
-  // 去重 + 只留 1..12，脏输入不该把整张课表带崩
-  const valid = raw.filter((n) => Number.isFinite(n) && n >= 1 && n <= PERIODS).map(Math.trunc);
+  // 去重 + 只留 1..14，脏输入不该把整张课表带崩。
+  // 上限放宽到 14 是因为 A03 允许每天排 14 节，写死 12 会把导入的第 13 节直接吞掉。
+  const valid = raw
+    .filter((n) => Number.isFinite(n) && n >= 1 && n <= MAX_PERIOD_COUNT)
+    .map(Math.trunc);
   return [...new Set(valid)].sort((a, b) => a - b);
 }
 
@@ -156,7 +394,7 @@ export function parseCourseWeeks(input: unknown): number[] | null {
   } else if (Array.isArray(input)) {
     weeks = input
       .map(Number)
-      .filter((n) => Number.isFinite(n) && n >= 1 && n <= 30)
+      .filter((n) => Number.isFinite(n) && n >= MIN_TERM_WEEKS && n <= MAX_TERM_WEEKS)
       .map(Math.trunc);
     weeks = [...new Set(weeks)].sort((a, b) => a - b);
   }
@@ -285,13 +523,32 @@ export interface ImportResult {
   error: string | null;
 }
 
+/**
+ * 去掉聊天窗口爱加的 ``` 围栏（B7）。
+ *
+ * 用户的真实动作是「复制整段回复」，不是「精确选中 JSON」，于是粘进来的十次里有八次长这样：
+ *
+ *   ```json
+ *   { "courses": [ … ] }
+ *   ```
+ *
+ * 直接 `JSON.parse` 必然失败，而原来的提示只说「不是合法 JSON」—— 用户盯着满屏正常的
+ * JSON 看不出问题在哪。这里只在**首尾**剥一层围栏，中间内容一个字不动：正文里出现的
+ * ``` 不会被误吃。
+ */
+function stripCodeFence(text: string): string {
+  const trimmed = text.trim();
+  const match = /^```[a-zA-Z]*\s*\n?([\s\S]*?)\n?```$/.exec(trimmed);
+  return match ? match[1].trim() : trimmed;
+}
+
 /** 解析「小律同款」课表 JSON：`{ courses: [{ name, dayOfWeek, sections, weeks, ... }] }` */
 export function parseScheduleImport(text: string): ImportResult {
   const empty: ImportResult = { courses: [], skipped: 0, error: null };
 
   let data: unknown;
   try {
-    data = JSON.parse(text);
+    data = JSON.parse(stripCodeFence(text));
   } catch {
     return { ...empty, error: "这段内容不是合法 JSON，检查一下引号和逗号。" };
   }
@@ -410,12 +667,10 @@ export function migrateLegacySchedule(raw: unknown): ScheduleSnapshot | null {
     const rawDay = Math.trunc(Number(record.day ?? 0)) || 0;
     const day = legacy ? normalizeLegacyDay(rawDay) : ((rawDay % 7) + 7) % 7;
 
-    const color = String(record.color ?? "");
-
     courses.push({
       id: Math.trunc(Number(record.id ?? 0)) || 0,
       name,
-      color: /^#[0-9a-f]{6}$/i.test(color) ? color : COURSE_COLORS[0],
+      color: normalizeCourseColor(record.color),
       day,
       sections,
       teacher: String(record.teacher ?? ""),
@@ -441,8 +696,13 @@ export function migrateLegacySchedule(raw: unknown): ScheduleSnapshot | null {
     sample: Boolean(data.sample),
     term:
       /^\d{4}-\d{2}-\d{2}$/.test(termStart)
-        ? { start: termStart, weeks: Math.min(30, Math.max(1, termWeeksCount || 20)) }
+        ? {
+            start: termStart,
+            weeks: clampTermWeeks(termWeeksCount),
+          }
         : null,
     week: Math.max(1, Math.trunc(Number(data.week ?? 1)) || 1),
+    // 旧版是「12 节写死」，没有存作息。补一套默认值，用户第一次进「上课时间」才需要改
+    periods: normalizePeriodPlan(undefined),
   };
 }

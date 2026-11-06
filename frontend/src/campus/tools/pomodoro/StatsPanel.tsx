@@ -30,6 +30,7 @@ import {
   streakDays,
   summarize,
 } from "../../logic/focus";
+import { downloadTextFile } from "../../logic/download";
 import { buildExport, exportFileName, mergeImport, parseExport } from "../../logic/focusExport";
 import type { FocusSession, FocusTask, StatsRange } from "../../types";
 
@@ -87,17 +88,14 @@ export default function StatsPanel({ sessions, tasks, now, ready, onImport, onFe
 
   function handleExport() {
     const data = buildExport(tasks, sessions, Date.now());
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = exportFileName(Date.now());
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    // 立刻 revoke 会让部分浏览器来不及取文件，等下载启动后再回收
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    onFeedback(`已导出 ${sessions.length} 条记录、${tasks.length} 个任务。`, true);
+    const text = JSON.stringify(data, null, 2);
+    const ok = downloadTextFile(exportFileName(Date.now()), text);
+    onFeedback(
+      ok
+        ? `已导出 ${sessions.length} 条记录、${tasks.length} 个任务。`
+        : "浏览器不允许自动下载，换个浏览器再试。",
+      ok,
+    );
   }
 
   async function handleFile(event: ChangeEvent<HTMLInputElement>) {

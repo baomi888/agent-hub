@@ -40,6 +40,15 @@
   --campus-btn-solid-text: var(--solid-text);
   --campus-btn-solid-hover: color-mix(in srgb, var(--accent-ink) 86%, var(--ink));
 
+  /* 放假那天的课块底色（B5）。浅色是暖灰、深色是暖褐——
+     两套主题下都要求「一眼看出这块被取消了」，所以不用 --fill-2 的透明叠加：
+     灰底下面透出卡片色，放假和正常块的明度差会被稀释到看不出。 */
+  --course-off: #D6D0C6;
+  /* 课块上的字：莫兰迪底是固定的浅色（不随主题变），所以字色也固定，
+     不能用 --ink —— 深色主题的 --ink 是暖白，压在这种浅底上只有 1.5:1。 */
+  --course-ink: #241F18;
+  --course-sub: #3B332A;
+
   width: 100%;
   max-width: var(--campus-max);
   margin: 0 auto;
@@ -51,6 +60,8 @@
   --campus-btn-solid: var(--accent);
   --campus-btn-solid-text: var(--solid);
   --campus-btn-solid-hover: color-mix(in srgb, var(--accent) 88%, black);
+  /* 深色主题下放假块用暖褐：亮灰块在深棕纸面上亮得像一格探照灯 */
+  --course-off: #3E372C;
 }
 
 /* ---------- 设备能力：同一句提示，按设备给两版 ---------- */
@@ -615,38 +626,6 @@
   border-radius: var(--radius-md);
 }
 
-/* ---------- 未迁移工具的占位提示 ---------- */
-
-.campus-pending {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 24px 18px;
-  background: var(--fill-3);
-  border: 1px dashed var(--line-strong);
-  border-radius: var(--campus-radius);
-}
-
-.campus-pending-title {
-  margin: 0;
-  font-size: var(--fs-lg);
-  font-weight: 600;
-  color: var(--ink);
-}
-
-.campus-pending-text {
-  margin: 0;
-  font-size: var(--fs-md);
-  line-height: 1.75;
-  color: var(--text-2);
-}
-
-.campus-pending a {
-  color: var(--accent-ink);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
 /* ---------- 通用：行内表单 / 分段控件 / 弹窗 ---------- */
 
 .campus-add-row {
@@ -724,6 +703,178 @@
   white-space: pre-wrap;
   background: var(--fill-3);
   border-radius: var(--radius-sm);
+}
+
+/* ------------------------------------------------------------------ *
+ * 导入教程（B7 / 需求 1.1–1.4 + A08）
+ * ------------------------------------------------------------------ */
+
+.campus-steps {
+  margin: 10px 0 0;
+  padding-left: 20px;
+  font-size: var(--fs-sm);
+  line-height: 1.75;
+  color: var(--text-2);
+}
+
+.campus-steps li + li {
+  margin-top: 4px;
+}
+
+.campus-steps b {
+  color: var(--ink);
+}
+
+.campus-details-title {
+  margin: 16px 0 6px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.campus-field-table {
+  width: 100%;
+  /*
+   * 固定布局 + 显式列宽：自动布局会按「最长不可断行内容」分配列宽，
+   * 而最后一行的 `teacher classroom notes` 三个字段名都是 nowrap，把第一列撑到 200px，
+   * 剩下给「怎么写」的就只剩 90px —— 390 宽的机器上「必填」两个字会被拆成两行。
+   */
+  table-layout: fixed;
+  font-size: var(--fs-xs);
+  border-collapse: collapse;
+}
+
+.campus-field-table th:nth-child(1) {
+  width: 33%;
+}
+
+.campus-field-table th:nth-child(2) {
+  width: 42px;
+}
+
+.campus-field-table th,
+.campus-field-table td {
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line);
+}
+
+.campus-field-table th {
+  font-weight: 600;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.campus-field-table td {
+  color: var(--text-2);
+  line-height: 1.6;
+}
+
+/* 行内代码：字段名与示例值要能和正文分开，否则「1-16」看起来像正文的一部分 */
+.campus-field-table code,
+.campus-faq code {
+  padding: 1px 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  color: var(--accent-ink);
+  background: var(--fill-3);
+  border-radius: var(--radius-xs);
+}
+
+.campus-faq code {
+  white-space: nowrap;
+}
+
+/*
+ * 表格里的字段名不设 nowrap：`teacher classroom notes` 三格挤在一列，
+ * nowrap 会把「字段」列顶到 200px 宽，剩下给「怎么写」的只有 90px。
+ * 也不用 overflow-wrap: anywhere —— 那会把 `"1-3"` 从中间劈成 `"1-` / `3"`。
+ * 交给默认的「按空格断行」，长字段名整体换行即可。
+ */
+.campus-field-table code {
+  white-space: normal;
+}
+
+.campus-faq {
+  margin: 0;
+  padding-left: 20px;
+  font-size: var(--fs-xs);
+  line-height: 1.75;
+  color: var(--text-2);
+}
+
+.campus-faq li + li {
+  margin-top: 4px;
+}
+
+/* A08：换设备的迁移提示，做成一条脚注而不是正文段落 —— 它只在搬家时才看 */
+.campus-details-note {
+  padding: 8px 10px;
+  margin: 14px 0 0;
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+  color: var(--text-2);
+  background: var(--fill-2);
+  border-left: 2px solid var(--accent-line);
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+}
+
+/* ------------------------------------------------------------------ *
+ * 「更多」菜单（B7 / 2.1 待勾选清单第 3、6 条）
+ * ------------------------------------------------------------------ */
+
+.campus-more {
+  position: relative;
+  display: inline-flex;
+}
+
+.campus-more-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  min-width: 156px;
+  padding: 4px;
+  background: var(--card-bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-2);
+}
+
+.campus-more-item {
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+}
+
+.campus-more-item:hover,
+.campus-more-item:focus-visible {
+  color: var(--ink);
+  background: var(--fill-3);
+}
+
+/* 清空不可逆：红色 + 一道分隔缝，避免顺着上面两项的位置点空一格就点到它 */
+.campus-more-item.is-danger {
+  margin-top: 4px;
+  color: var(--red-ink);
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 var(--radius-xs) var(--radius-xs);
+}
+
+.campus-more-item.is-danger:hover,
+.campus-more-item.is-danger:focus-visible {
+  color: var(--red-ink);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
 }
 
 .campus-modal {
@@ -1557,6 +1708,314 @@ body.campus-modal-open .campus-scroll {
   cursor: not-allowed;
 }
 
+/* ---------- 课程表 · B1 结构（0.6.0） ---------- */
+
+.campus-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 展开态按钮：和「收起」成对出现，让人知道再点一下会收回去 */
+.campus-btn.is-on {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+/* 添加课程：页内展开（不弹窗、不推挤课表），与番茄钟 0.5.5 的展开区同一手感 */
+.campus-add-panel {
+  margin-bottom: 14px;
+  padding: 12px;
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  animation: campus-fold-in 0.2s ease-out;
+}
+
+/*
+ * 课程表单：手机 2 列、桌面 6 列，字段跨列由 is-name / is-day / … 控制。
+ * 不再用 flex 的 `flex: 1.4 1 140px` 硬凑 —— 那套写法在不同宽度下会把
+ * 输入框拉成参差不齐的宽度，就是需求里说的「不整齐」。
+ */
+.campus-course-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 8px;
+}
+
+.campus-course-form .is-name,
+.campus-course-form .is-weeks {
+  grid-column: span 2;
+}
+
+.campus-course-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  grid-column: span 2;
+  gap: 8px;
+  align-items: center;
+}
+
+.campus-form-msg {
+  font-size: var(--fs-sm);
+  color: var(--red-ink);
+}
+
+@media (min-width: 640px) {
+  .campus-course-form {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .campus-course-form .is-name {
+    grid-column: span 3;
+  }
+
+  .campus-course-form .is-sections,
+  .campus-course-form .is-room,
+  .campus-course-form .is-teacher,
+  .campus-course-form .is-weeks {
+    grid-column: span 2;
+  }
+
+  .campus-course-form-actions {
+    grid-column: span 6;
+  }
+}
+
+/* 学期 chip：替代原来独占一行的说明小字，点开还是学期弹窗 */
+.campus-wk-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-left: auto;
+}
+
+.campus-term-chip {
+  padding: 4px 9px;
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+  background: transparent;
+  border: 1px dashed var(--line-strong);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+/* 作息 chip：实线，和学期区分 —— 学期是「配上了才有日期」，作息是「一直生效」 */
+.campus-term-chip.is-plain {
+  font-variant-numeric: tabular-nums;
+  border-style: solid;
+  border-color: var(--line);
+}
+
+.campus-term-chip:hover {
+  color: var(--ink);
+  background: var(--fill-2);
+  border-color: var(--accent-line);
+}
+
+/* 上课时间弹窗：4 个生成参数用 auto-fit，手机上两列、桌面 4 列（需求 5.1 的「太空」通病） */
+.campus-period-gen {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+/* 逐节微调：窗口窄时两列，宽了三列，12 节刚好压到 4 行，不用滚 */
+.campus-period-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 10px;
+}
+
+@media (min-width: 480px) {
+  .campus-period-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.campus-period-grid .campus-input {
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * 保存 / 取消贴在卡片底边。
+ * 手机上「每天 14 节」那一屏放不下底部的按钮，滚到底才能保存 —— 吸底之后
+ * 按钮一直在，滚不滚都看得到（sticky 在 overflow:auto 的卡片内是有效的）。
+ */
+.campus-period-actions {
+  position: sticky;
+  bottom: -18px;
+  display: flex;
+  gap: 8px;
+  padding: 10px 0 18px;
+  margin-bottom: -18px;
+  background: var(--card-bg);
+  border-top: 1px solid var(--line);
+}
+
+/* 空状态：删掉示例课之后，新人第一眼看到的就是这里 */
+.campus-empty-state {
+  padding: 18px 4px 8px;
+  text-align: center;
+}
+
+.campus-empty-state .campus-add-row {
+  justify-content: center;
+}
+
+.campus-empty-title {
+  margin: 0 0 8px;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.campus-hint {
+  margin-top: 10px;
+}
+
+/* 页脚：门数 + 降级后的「清空课表」，替代原来整张第二卡片 */
+.campus-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 10px;
+  margin-top: 14px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  border-top: 1px solid var(--line);
+}
+
+.campus-link-btn {
+  padding: 2px 5px;
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+
+.campus-link-btn:hover {
+  color: var(--red-ink);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+}
+
+/* 课程详情的事实表：dt 定宽，四行左边缘对齐 */
+.campus-course-facts {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+}
+
+.campus-course-facts > div {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.campus-course-facts dt {
+  flex: 0 0 38px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.campus-course-facts dd {
+  margin: 0;
+  font-size: var(--fs-md);
+  color: var(--ink);
+}
+
+.campus-fact-sub {
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 学期弹窗：两列并排，别再让 440px 的框里只躺三个窄输入 */
+.campus-term-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.campus-term-or {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 2px 0 10px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.campus-term-or::before,
+.campus-term-or::after {
+  height: 1px;
+  content: "";
+  background: var(--line);
+  flex: 1;
+}
+
+/*
+ * 表格上方那一行（B3.1）：左边「这一周是哪几天」，右边「这周因为什么放假」。
+ *
+ * 分开的理由：列头为塞下 7 列只写日号（5、6、7），单看列头分不出八月九月，
+ * 跨月那周更是「29 30 1 2」。月份必须有一个不占列宽的地方说清楚。
+ * 平常周右边不渲染，左边照样显示 —— 日期是定位信息，不是假期附属品。
+ */
+.campus-week-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 10px 2px 0;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+
+/* 日期串用等宽数字：翻周时「10月5日」和「9月28日」位宽一致，不会左右跳 */
+.campus-week-range {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+/* 表格外右上角那行提示（需求 4.7）：这一周因为什么放假。
+ * 只在有假期的周出现，平常周不渲染 —— 每周挂一句「本周没有节假日」是纯噪音。
+ * 全屏时改放顶栏标题旁（见 .campus-fullscreen-holiday），右上角留给「退出全屏」。
+ */
+.campus-week-holiday {
+  margin: 10px 2px 4px;
+  font-size: var(--fs-xs);
+  color: var(--accent-ink);
+  text-align: right;
+}
+
+/* 放进 .campus-week-sub 时不再自带外边距，也不右对齐 —— 位置由容器的两端对齐决定 */
+.campus-week-sub .campus-week-holiday {
+  margin: 0;
+  text-align: left;
+}
+
+/* 没设学期时的说明：同一位置，但要弱一档，别和「放假」抢注意力 */
+.campus-week-holiday.is-muted {
+  color: var(--text-3);
+}
+
+.campus-week-holiday .campus-link-btn {
+  margin-left: 4px;
+  font-size: inherit;
+}
+
 .campus-week-wrap {
   margin-top: 10px;
   overflow-x: auto;
@@ -1572,7 +2031,7 @@ body.campus-modal-open .campus-scroll {
 }
 
 .campus-week-rail {
-  flex: 0 0 40px;
+  flex: 0 0 44px;
   border-right: 1px solid var(--line);
 }
 
@@ -1583,7 +2042,7 @@ body.campus-modal-open .campus-scroll {
 .campus-week-slot {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
   align-items: center;
   justify-content: center;
   border-bottom: 1px solid var(--line);
@@ -1591,21 +2050,35 @@ body.campus-modal-open .campus-scroll {
 
 .campus-week-slot-no {
   font-size: var(--fs-xs);
-  color: var(--text-3);
+  font-weight: 600;
+  color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
 
+/* 节次下面的上课时间：B2 起页面内也显示（需求 4.1「在第几节下面标注时间」） */
 .campus-week-slot-time {
-  font-size: 10px;
+  font-size: 11px;
+  line-height: 1.1;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
-  opacity: 0.8;
 }
 
 .campus-week-days {
+  position: relative;
   display: grid;
   flex: 1;
   grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+/* 横向分节线：叠在日期列之上、课块之下。用渐变画，行高变了只改 background-size */
+.campus-week-lines {
+  position: absolute;
+  right: 0;
+  left: 0;
+  z-index: 1;
+  pointer-events: none;
+  background-image: linear-gradient(to bottom, var(--line) 0 1px, transparent 1px);
+  background-repeat: repeat-y;
 }
 
 .campus-week-day {
@@ -1621,38 +2094,237 @@ body.campus-modal-open .campus-scroll {
   background: var(--accent-soft);
 }
 
+/*
+ * 表头「周几 + 日期」。
+ * B5 起今天那一格改成实心胶囊（对应参考图的橙色胶囊）：原来只靠金色的字重和整列淡底，
+ * 在一屏七列里要找「今天」得多看两眼；实心块不用读字就知道是哪一列。
+ *
+ * 只给今天上底色、不给七列都上：整排七块底色会把表头变成第二条分割带，
+ * 而这一行真正要传达的信息只有「今天在哪」。
+ * 左右留 3px 让胶囊和内框脱开；上下不留边距 —— 表头高度是按行算的，
+ * 加竖向 margin 会把整列的课块往下推 1–2px，和左边节次栏错位。
+ */
 .campus-week-day-head {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   align-items: center;
   justify-content: center;
+  margin: 0 3px;
   font-size: var(--fs-xs);
   color: var(--text-2);
   border-bottom: 1px solid var(--line);
+  border-radius: var(--radius-sm);
 }
 
+/*
+ * 今天的胶囊用 --accent-ink 实心 + 卡片色字（5.70:1），不用 --accent：
+ * #C8892A 压白字只有 2.97:1，连大字线都不到。深色主题下 --accent-ink 是亮金，
+ * 配深色字是 6.93:1，两边都过 AA。
+ */
 .campus-week-day.is-today .campus-week-day-head {
   font-weight: 600;
-  color: var(--accent-ink);
+  color: var(--card-bg);
+  background: var(--accent-ink);
 }
 
+/* 今天恰好又放假：胶囊上的「休」不用金色淡底，换成半透明卡片色，否则两套底色打架 */
+.campus-week-day.is-today .campus-week-mark {
+  color: var(--card-bg);
+  background: color-mix(in srgb, var(--card-bg) 24%, transparent);
+}
+
+/*
+ * 日期。原来带 `opacity: .75`，叠加父级的 --text-2 后实测只有 4.17:1，
+ * 比 4.5 少一点 —— 而「今天几号」是用户认日期的主要依据，不该是全表最淡的字。
+ * 去掉 opacity，与「周一」同色同级，靠位置区分而不是靠淡化。
+ *
+ * 内容改成「10/5」之后占位比裸日号宽，字号降到 11px：跨月那列还要塞得下「休 / 班」，
+ * 12px 时 73px 的列会顶到两边（实测溢出 0px，等于贴着边）。
+ */
 .campus-week-date {
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
-  opacity: 0.75;
 }
 
+/*
+ * 列头的「休 / 班」徽标（需求 4.6）。
+ * 10px 单字，混在「周一 8」后面还挤得下；B4 把每列压到 45px 时也不会溢出 ——
+ * 只放一个字是有意的，写成「放假」「调休」在窄列里会换行。
+ *
+ * 颜色之外还有字（A06）：色弱用户分不出灰和橙，但「休」和「班」两个字认得出来。
+ */
+.campus-week-mark {
+  flex: none;
+  padding: 0 3px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  border-radius: 4px;
+}
+
+.campus-week-mark.is-off {
+  color: var(--text-3);
+  background: var(--fill-2);
+}
+
+.campus-week-mark.is-work {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+}
+
+/* ---------------------------------------------------------------- *
+ * 窄列模式（B4，全屏手机）：每列只有 45px 左右
+ * ---------------------------------------------------------------- */
+
+/*
+ * 表头改两行：第一行「周几 + 休/班」，第二行「10/5」。
+ *
+ * 一行放不下：「周一 10/5 休」按 12px 算是 24 + 25 + 16 + 间距 ≈ 70px，45px 的列装不下，
+ * 会横向溢出压到隔壁列。拆两行之后最宽的一行是「周一 + 休」= 40px，仍然留 5px 余量。
+ *
+ * 用 grid 不用 flex-wrap：换行会让 7 列高度不一致（有假期的那列变成三行），整行表头歪掉。
+ */
+.campus-week.is-compact .campus-week-day-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: 1fr 1fr;
+  gap: 0 1px;
+  align-content: center;
+  align-items: center;
+  justify-items: center;
+  line-height: 1.1;
+}
+
+.campus-week.is-compact .campus-week-dow {
+  grid-area: 1 / 1;
+}
+
+.campus-week.is-compact .campus-week-mark {
+  grid-area: 1 / 2;
+  padding: 0 2px;
+  font-size: 9px;
+  line-height: 12px;
+}
+
+.campus-week.is-compact .campus-week-date {
+  grid-area: 2 / 1 / 3 / 3;
+  font-size: 10px;
+}
+
+/* 窄列里的课名退到 11px：45px 宽一行只放得下 3 个汉字，13px 会折成三行被裁 */
+.campus-week.is-compact .campus-week-block {
+  padding: 3px 4px;
+}
+
+.campus-week.is-compact .campus-week-block-name {
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.campus-week.is-compact .campus-week-block-room,
+.campus-week.is-compact .campus-week-block-teacher {
+  font-size: 10px;
+}
+
+/*
+ * 矮行模式（B4，横屏手机）：一行只有 25px 上下。
+ *
+ * 这一档的取舍写在需求 6.2 里：横屏只求「看得见整周轮廓」，看清靠点开。
+ * 所以课名退到 11px、内边距压到 2px，教室和老师整行不渲染（组件里按 dense 跳过）——
+ * 留着它们只会把课名挤掉一行，反而更看不清。
+ */
+.campus-week.is-dense .campus-week-block {
+  gap: 0;
+  padding: 2px 4px;
+}
+
+.campus-week.is-dense .campus-week-block-name {
+  font-size: 11px;
+  line-height: 1.15;
+}
+
+/*
+ * 矮行时左侧节次栏只留节次号。
+ * 25px 的格子里塞「节次 + 时间」是 12 + 11 + 2 = 25，加下边框就溢，
+ * 实测两行数字糊在一起（横屏 844×390）。时间是页面内视图的职责，这里让位给行高。
+ */
+.campus-week.is-dense .campus-week-slot {
+  gap: 0;
+}
+
+.campus-week.is-dense .campus-week-slot-time {
+  display: none;
+}
+
+/*
+ * 放假那天的课块变暗（需求 4.5）。
+ *
+ * **不靠 opacity 实现**：先按「整块 opacity .45」做过，实测课名只剩 2.51:1（浅色），
+ * 比 4.5 差了一半多 —— 用户想确认「那天本来是哪门课」就读不出来了。
+ * 换成语义更准的「彩色变灰」：底色由课程色换成灰（JSX 里给 inline style），
+ * 字色跟着换成暖灰、加删除线。效果上同样是「一眼看出不用上」，但文字仍读得清（4.95:1）。
+ * 删除线是第二信号，色弱用户不靠颜色也能认（A06）。
+ * 调休上班日（班）不加这个类：那天真要上课。
+ *
+ * 字色这里改的是块级变量而不是直接写 color：`.campus-week-block-name` 和教室行
+ * 用的是 `var(--course-ink)` / `var(--course-sub)`，放假块只要把这两个变量换掉，
+ * 名字和教室两行自动跟着变，不用挑选择器。
+ */
+.campus-week-block.is-off {
+  --course-ink: #5A5348;
+  --course-sub: #5A5348;
+}
+
+/* 深色主题的放假块底色是暖褐，字要反过来用浅色（6.5:1） */
+.dark .campus-week-block.is-off {
+  --course-ink: #C9C0B0;
+  --course-sub: #C9C0B0;
+}
+
+.campus-week-block.is-off .campus-week-block-name {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+/*
+ * 今天要上的课块加深描边（需求 4.4）。
+ * 整列淡底表示「你在这天」，描边表示「今天就有这节」——
+ * 翻到别周时 todayIndex 是 -1，两者一起消失，不会出现「昨天的课被标成今天」。
+ * 用 outline 不用 border：border 会让块重排 1px，outline 不占布局。
+ */
+.campus-week-block.is-today-block {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: -2px;
+}
+
+/* 今天恰好又放假：描边跟着变暗，不然一圈亮琥珀框在灰块上很跳（C2 的取舍：两者不互斥） */
+.campus-week-block.is-off.is-today-block {
+  outline-color: var(--line-strong);
+}
+
+/*
+ * 课块。B2 起竖向居中 + 内边距 5/6：
+ * 原来是「顶对齐 + 4/5 内边距」，4 节高的块里两行字全挤在顶上，下半截空着 —— 4.3「框框太空旷」。
+ * 居中之后，1 节的格子和 4 节的块都是视觉居中的，高块不再显得空。
+ *
+ * B5 起改成「实心色块 + 居中排版」：底色由行内 style 给（课程色，放假给灰），
+ * 描边留 1px 透明保住块宽。圆角上到 8px —— 4px 在实心块上像贴纸，8px 才像一张卡片。
+ * 文字从两端对齐改居中：块宽只有 70–100px 时，居中的两行课名比左对齐更容易一眼读完。
+ */
 .campus-week-block {
   position: absolute;
+  z-index: 2;
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  align-items: flex-start;
-  padding: 4px 5px;
+  gap: 2px;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 6px;
   overflow: hidden;
   font-family: inherit;
-  text-align: left;
-  border: 1px solid;
-  border-radius: var(--radius-xs);
+  text-align: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 
@@ -1662,28 +2334,453 @@ body.campus-modal-open .campus-scroll {
   outline-offset: -1px;
 }
 
-.campus-week-block-name {
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  line-height: 1.3;
-  color: var(--ink);
+/*
+ * 深色主题下把色块压暗一档。
+ * 莫兰迪色是按浅色纸面调的（L* 70–78），原样放到 L* 10 的深棕纸面上像一排夜灯；
+ * brightness(.88) 之后明度落到 L* 62 左右，仍然是同一套色相，但不抢背景。
+ * 字色跟着一起变暗，#241F18 在最暗的紫灰块上仍有 5.9:1（AA 要 4.5）。
+ * hover 单独给一档，否则鼠标划过会从 .88 直接跳到 1.06，闪一下。
+ * 放假块不压：它本来就是暖褐 #3E372C，再乘 .88 就贴到卡片底色上了，看不出「这里有一块」。
+ */
+.dark .campus-week-block:not(.is-off) {
+  filter: brightness(0.88);
 }
 
+.dark .campus-week-block:not(.is-off):hover {
+  filter: brightness(0.96);
+}
+
+/*
+ * 课名 13px：4.2 的验收线是「页面内 ≥12px」，只到 12 依然被反馈「小」，所以上到 --fs-md。
+ *
+ * 最多两行 + 省略号：手机上每列只有 73px 宽，「马克思主义基本原理」按 13px 会折成四行，
+ * 两节的块高 90px 塞不下，最后一行被 overflow 裁掉半个字。两行是「看得清 + 不裁字」的交点。
+ */
+.campus-week-block-name {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--course-ink);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* 教室 / 老师各占一行，放不下就省略 —— 完整内容点开详情看 */
 .campus-week-block-room,
 .campus-week-block-teacher {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--course-sub);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 两门课并排时列宽只剩一半，字号必须退一档，否则 4 个字就折成两行 */
+.campus-week-block.is-split .campus-week-block-name {
+  font-size: var(--fs-xs);
+}
+
+/* ==========================================================================
+ * B6 · 手机版式：照参考图重排
+ *
+ * 拥挤的根源不是元素多，是「表格上方堆了 490px 的控制条」：
+ * 页头 96 + 工具标签 104 + 卡片头 56 + 周次条 44 + 视图切换 40 + 两颗 chip 36 + 区间行 22。
+ * 390×844 的屏幕上，表格只剩 354px 装 12 节，单节被压到 46px ——
+ * 于是每格 45×46 接近正方形，课名一挤就出省略号。
+ *
+ * 参考的做法正相反：顶部只留「日期 + 七格日期条」，表格占满剩下的全部高度，
+ * 单节做 72px 的竖长条，承认要滚动。这一节就是照这个重排。
+ * ========================================================================== */
+
+/* ---------- 第一行：大日期 + 两颗胶囊 ---------- */
+
+.campus-daybar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 2px 2px 10px;
+}
+
+.campus-daybar-title {
+  display: flex;
+  gap: 5px;
+  align-items: baseline;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-serif);
+  font-size: 23px;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 周几跟在大字后面，弱一档：它是日期的注脚，不是第二个标题 */
+.campus-daybar-dow {
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text-3);
+}
+
+.campus-daybar-side {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  align-items: center;
+}
+
+/*
+ * 胶囊按钮。
+ * 触摸目标 32px 高（低于 44 会点不准，但这一行要塞两颗，44 会把标题挤没），
+ * 左右 12px 内边距保证「回到今天」四个字不会被圆角切掉。
+ */
+.campus-pill {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 12px;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  line-height: 1;
+  color: var(--ink);
+  white-space: nowrap;
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.campus-pill.is-select {
+  padding-right: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.campus-pill.is-on {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+/* ---------- 第二行：七格日期条（同时是表头） ---------- */
+
+.campus-daystrip {
+  display: flex;
+  align-items: stretch;
+}
+
+/* 与节次栏同宽的空位：日期条要和下面的七列严格对齐，否则一眼就能看出错位 */
+.campus-daystrip-rail {
+  flex: 0 0 34px;
+}
+
+/*
+ * 轨道之间不留 gap。
+ *
+ * 原来写的是 `gap: 3px`，六个间隙共 18px 全从轨道宽度里扣 ——
+ * 每格从 47px 缩到 39px，而下面的课程列在不带 gap 的 7 等分网格里仍是 47px。
+ * 于是日期条从左往右一路错位：第一格右移 18px，最后一格左移 10px，
+ * 中间第 4 列碰巧重合 —— 看起来就是「日期和课没对上」。
+ *
+ * 间隙改由格子自己的左右 margin 出（纯视觉，不参与轨道计算），
+ * 这样轨道边界与课程列边界逐列重合，格块只是各内缩 2px。
+ */
+.campus-daystrip-cells {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0;
+  min-width: 0;
+}
+
+.campus-daycell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-items: center;
+  justify-content: center;
+  margin: 0 2px;
+  padding: 5px 2px 6px;
+  background: var(--fill-3);
+  border-radius: var(--radius-md);
+}
+
+.campus-daycell-dow {
   font-size: 10px;
-  line-height: 1.25;
+  line-height: 1.2;
+  /* --text-3 压在日期条的浅底上深色主题只有 4.23:1，10px 小字不够 AA，退一档用 --text-2 */
   color: var(--text-2);
 }
 
-/* 单节课的格子放不下教室和老师，只留课名，避免文字被裁一半 */
-.campus-week-block.is-one .campus-week-block-room,
-.campus-week-block.is-one .campus-week-block-teacher {
+.campus-daycell-num {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * 「休 / 班」放右上角，不占第三行。
+ * 加一行会让日期条在放假周比平常周高 12px，翻周时整张表上下跳。
+ */
+.campus-daycell-mark {
+  position: absolute;
+  top: 2px;
+  right: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-3);
+}
+
+.campus-daycell.is-work .campus-daycell-mark {
+  color: var(--accent-ink);
+}
+
+/* 今天：实心胶囊。和 B5 的列头用同一组色（5.70:1 / 深色 6.93:1） */
+.campus-daycell.is-today {
+  background: var(--accent-ink);
+}
+
+.campus-daycell.is-today .campus-daycell-dow,
+.campus-daycell.is-today .campus-daycell-num,
+.campus-daycell.is-today .campus-daycell-mark {
+  color: var(--card-bg);
+}
+
+/* ---------- 第三行：紧凑工具条 ---------- */
+
+.campus-phone-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 8px 0 2px;
+  padding-bottom: 2px;
+  /*
+   * 这里原来是 `overflow-x: auto`（怕六个胶囊在 360px 上排不下就横向滚）。
+   * B7 起必须去掉：`overflow-x: auto` 会把元素变成滚动容器，连带把 y 方向也裁掉，
+   * 「更多」菜单一弹出来就被切没了 —— 桌面上好好的，手机上点开像没反应。
+   * 六个胶囊在 360px 上本来就排得下（B6.1 压过 padding），真排不下就让它换行，
+   * 换行比「菜单被裁掉」可接受得多。
+   */
+}
+
+
+/* ---------- 手机端表格本体 ---------- */
+
+/* 无表头模式（B6）：日期条已经交代了日期，列头整行让出来 */
+.campus-week.is-bare .campus-week-rail-head {
   display: none;
 }
 
-.campus-week-block.is-split .campus-week-block-name {
-  font-size: 10px;
+/* `[hidden]` 是 UA 样式，压不过上面的 display:flex，必须显式再写一次 */
+.campus-week-day-head[hidden] {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  /*
+   * 贴到卡片左右边缘：卡片内边距是 18px，负 18 正好抵平。
+   * 7 列每列因此多出 5px（45 → 50），一列能多放半个汉字。
+   */
+  .campus-week-wrap {
+    margin: 6px -18px 0;
+    border-right: 0;
+    border-left: 0;
+    border-radius: 0;
+  }
+
+  /*
+   * 日期条必须跟着一起抵到卡片外沿。
+   *
+   * 表格用负 18px 伸到了卡片边上，日期条却还在卡片内容盒里 ——
+   * 两条基线差 18px，七格日期条整体压在课程列右侧，越往右偏得越多。
+   * 这里补同一个负 margin，日期条的 34px 占位 + 七等分就和表格的
+   * 「34px 节次栏 + 七等分」完全同源。
+   */
+  .campus-daystrip {
+    margin: 0 -18px;
+  }
+
+  /* 页面内不再追求「一屏 7 列」，min-width 会逼出横向滚动条，和参考图不符 */
+  .campus-week {
+    min-width: 0;
+  }
+
+  .campus-week-rail {
+    flex-basis: 34px;
+    border-right: 0;
+  }
+
+  .campus-week-slot {
+    gap: 1px;
+  }
+
+  .campus-week-slot-no {
+    font-size: var(--fs-sm);
+  }
+
+  .campus-week-slot-time {
+    font-size: 9px;
+    letter-spacing: -0.02em;
+  }
+
+  /* 参考图里一条竖线都没有：七条竖线把 366px 切成一格格的表格纸 */
+  .campus-week-day {
+    border-right: 0;
+  }
+
+  /* 分节线压淡一档，只留「这里换节了」的暗示 */
+  .campus-week-lines {
+    background-image: linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--line) 55%, transparent) 0 1px,
+      transparent 1px
+    );
+  }
+
+  .campus-week-slot {
+    border-bottom-color: color-mix(in srgb, var(--line) 55%, transparent);
+  }
+
+  /* 圆角跟参考图：8 → 12px，块内边距收窄换出每行多半个字 */
+  .campus-week-block {
+    padding: 4px 3px;
+    border-radius: 12px;
+  }
+
+  /*
+   * 课名 12px，单节最多 3 行 / 连堂课最多 4 行。
+   * 一列 47px、块内可用 41px，12px 一行放得下 3 个汉字：
+   * 3 行 = 9 字，正好够「马克思主义基本原理」；360px 的机器列宽只剩 43px，
+   * 一列掉到 2 个字，得靠连堂块的 4 行才装得下。
+   */
+  .campus-week-block-name {
+    font-size: 12px;
+    line-height: 1.2;
+    -webkit-line-clamp: 3;
+  }
+
+  .campus-week-block.is-tall .campus-week-block-name {
+    -webkit-line-clamp: 4;
+  }
+
+  /*
+   * 教室允许折两行。
+   * 桌面上「外语楼-305」一行放得下，这里只有 41px —— nowrap 一裁就是「外语…」，
+   * 而教室恰恰是「这节在哪上」的唯一信息，比省那一行重要。
+   */
+  .campus-week-block-room {
+    display: -webkit-box;
+    overflow: hidden;
+    font-size: 10px;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .campus-week-block-teacher {
+    font-size: 10px;
+  }
+
+  /* 节次栏的时间在 72px 的行里有富余，回调到 10px */
+  .campus-week-slot-time {
+    font-size: 10px;
+  }
+
+  /* 六个胶囊要排在 330px 里，左右内边距收到 10px；再宽「全屏」就被顶出屏幕外了 */
+  .campus-phone-tools .campus-pill {
+    padding: 0 10px;
+  }
+
+  /*
+   * 连上三节以上的长块：课名贴顶、教室贴底。
+   * 这是参考图的做法。原来整块竖向居中，四节的「数据结构」块 286px 高，
+   * 中间 60px 全是空的 —— 正是 4.3 说的「框框太空旷」，
+   * 一行长条上下各空一大截还夹在正中间，看着像没画完。
+   */
+  .campus-week-block.is-long {
+    padding-top: 8px;
+    justify-content: flex-start;
+  }
+
+  .campus-week-block.is-long .campus-week-block-room {
+    margin-top: auto;
+  }
+
+  /* 页头瘦身：说明段整段收掉，标题降一档 —— 手机上没人来这一页读介绍 */
+  .campus-head {
+    gap: 0;
+    margin-bottom: 12px;
+  }
+
+  .campus-shell {
+    padding-top: 12px;
+  }
+
+  .campus-sub {
+    display: none;
+  }
+
+  /*
+   * 工具标签仍保持 2×3 一格不藏（见上面 720px 那条注释的理由），只把密度压下来：
+   * 两行从 104px 收到 72px。不改成单行横滑，是因为横滑会把最后两个工具藏掉。
+   */
+  .campus-tabs {
+    gap: 3px;
+    padding: 3px;
+    margin-bottom: 10px;
+  }
+
+  .campus-tab {
+    gap: 4px;
+    padding: 6px 4px;
+    font-size: var(--fs-sm);
+  }
+
+  .campus-tab-ico {
+    width: 15px;
+    height: 15px;
+  }
+}
+
+/*
+ * 360px 小屏再收一档。
+ * 这条必须放在上一个 640px 媒体查询**之后**：同权重下靠顺序取胜，
+ * 放前面会被上面那条 `padding: 0 10px` 盖回去（第一版就踩了这个坑，
+ * 六个胶囊排不下，「全屏」被挤到第二行，表格顶上多出 38px 空白）。
+ */
+@media (max-width: 380px) {
+  .campus-phone-tools .campus-pill {
+    padding: 0 8px;
+  }
+
+  /* 加号不承载信息，藏掉它省 12px —— 刚好补上 360 宽上的缺口 */
+  .campus-pill-plus {
+    display: none;
+  }
+
+  /* 标题和两颗胶囊在这一宽度上也是刚好贴边，字号退一档才留得住「11月6日 周五」 */
+  .campus-daybar-title {
+    gap: 4px;
+    font-size: 20px;
+  }
+
+  .campus-daybar-side .campus-pill {
+    padding: 0 9px;
+  }
 }
 
 .campus-ov-wrap {
@@ -1769,14 +2866,58 @@ body.campus-modal-open .campus-scroll {
   color: var(--ink);
 }
 
+/* 全屏里的节日名：跟在标题后面，不复用页面内那行（那行是右对齐的，顶栏里会飘到按钮上） */
+.campus-fullscreen-holiday {
+  margin-left: 10px;
+  padding: 2px 8px;
+  font-family: var(--font-sans);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--accent-ink);
+  vertical-align: middle;
+  background: var(--accent-soft);
+  border-radius: 999px;
+}
+
 .campus-fullscreen-body {
   flex: 1;
-  padding: 12px 16px 24px;
+  min-height: 0;
+  padding: 10px 12px 14px;
   overflow: auto;
 }
 
+/*
+ * 全屏的表格**不能有最小宽度**（B4 / 需求 6.1）。
+ * 原来写 min-width: 720px，390px 的手机上必然横向滚动 ——「一屏看全整周」从第一条就不成立。
+ * 7 列是 `minmax(0, 1fr)` 的网格，宽度交出去就行；挤不挤由行高与表头形态承担。
+ */
 .campus-fullscreen .campus-week {
-  min-width: 720px;
+  min-width: 0;
+  width: 100%;
+}
+
+/*
+ * 横屏手机（844×390 这类）只靠高度过日子：顶栏每多占 10px，12 节就少 1px。
+ * 这一档把顶栏整体收窄，标题降一档字号，节日名不换行。
+ */
+@media (max-height: 480px) {
+  .campus-fullscreen-bar {
+    gap: 8px;
+    padding: 6px 10px;
+  }
+
+  .campus-fullscreen-title {
+    font-size: var(--fs-sm);
+  }
+
+  .campus-fullscreen-holiday {
+    margin-left: 6px;
+    padding: 1px 6px;
+  }
+
+  .campus-fullscreen-body {
+    padding: 6px 8px 8px;
+  }
 }
 
 /* ---------- 单词卡 ---------- */

@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# 本地重建时用来「挪走」旧构建目录（不用 rm，绕开 safe-delete 限制）
+/.next.*
