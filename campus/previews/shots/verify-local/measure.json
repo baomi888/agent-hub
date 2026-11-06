@@ -1,0 +1,110 @@
+{
+  "localLogin": {
+    "status": 200,
+    "body": "{\"id\":\"df0515ba09c14b12a98d6f38c823375f\",\"username\":\"zsverify1106\",\"nickname\":\"\",\"avatar\":\"\",\"name_changes_left\":3,\"token\":null}",
+    "meOk": true,
+    "meName": "zsverify1106"
+  },
+  "localMe": 200,
+  "local390Opened": true,
+  "local390": {
+    "url": "http://localhost:3000/tools",
+    "vw": 390,
+    "hScroll": 0,
+    "dayCells": 7,
+    "weekCols": 7,
+    "centerOffsets": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "stripL": 13,
+    "wrapL": 13,
+    "courseBlocks": 8,
+    "title": null,
+    "hasSchedulePanel": true,
+    "hydrated": true
+  },
+  "local390Tutorial": {
+    "summary": null,
+    "promptLen": 0,
+    "mentionsScreenshot": false,
+    "mentionsZhisui": false
+  },
+  "local360": {
+    "url": "http://localhost:3000/tools",
+    "vw": 360,
+    "hScroll": 0,
+    "dayCells": 7,
+    "weekCols": 7,
+    "centerOffsets": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "stripL": 13,
+    "wrapL": 13,
+    "courseBlocks": 8,
+    "title": null,
+    "hasSchedulePanel": true,
+    "hydrated": true
+  },
+  "local1440": {
+    "url": "http://localhost:3000/tools",
+    "vw": 1440,
+    "hScroll": 0,
+    "dayCells": 0,
+    "weekCols": 7,
+    "centerOffsets": [],
+    "stripL": null,
+    "wrapL": 315,
+    "courseBlocks": 8,
+    "title": null,
+    "hasSchedulePanel": true,
+    "hydrated": true
+  },
+  "local390Dark": {
+    "url": "http://localhost:3000/tools?theme=dark",
+    "vw": 390,
+    "hScroll": 0,
+    "dayCells": 7,
+    "weekCols": 7,
+    "centerOffsets": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "stripL": 13,
+    "wrapL": 13,
+    "courseBlocks": 8,
+    "title": null,
+    "hasSchedulePanel": true,
+    "hydrated": true
+  },
+  "remote390": {
+    "url": "https://myzhisui.cn/tools",
+    "vw": 390,
+    "hScroll": 0,
+    "dayCells": 0,
+    "weekCols": 7,
+    "centerOffsets": [],
+    "stripL": null,
+    "wrapL": 31,
+    "courseBlocks": 8,
+    "title": null,
+    "hasSchedulePanel": true,
+    "hydrated": true
+  }
+}
