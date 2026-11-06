@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
+import PwaRegister from "@/components/PwaRegister";
 import "./globals.css";
 
 const TITLE = "知穗Agent · 知识库 · 场景智能体 · 校园工具集";
@@ -68,6 +69,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       </head>
       <body className="min-h-full">
         {children}
+        <PwaRegister />
         <div className="grain" aria-hidden="true" />
       </body>
     </html>
