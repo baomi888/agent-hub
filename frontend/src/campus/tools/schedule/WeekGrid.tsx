@@ -31,13 +31,13 @@
  */
 
 import type { DayInfo } from "../../logic/holidays";
-import { layoutDay } from "../../logic/schedule";
+import { DAYS_IN_WEEK, DAY_LABELS, layoutDay } from "../../logic/schedule";
 import type { Course, PeriodPlan } from "../../types";
 
 /** 表头（周几 + 日期）的高度，课块的 top 要加上它 */
-export const HEAD_HEIGHT = 28;
+const HEAD_HEIGHT = 28;
 /** 窄列模式（全屏手机）的表头：周几和日期分两行，高度多 8px */
-export const HEAD_HEIGHT_COMPACT = 36;
+const HEAD_HEIGHT_COMPACT = 36;
 
 /** 表头实际高度；全屏算行高时要用同一个值，所以对外暴露 */
 export function headHeightOf(compact: boolean): number {
@@ -122,7 +122,7 @@ export default function WeekGrid({
           style={{ top: headHeight, height: bodyHeight, backgroundSize: `100% ${rowHeight}px` }}
         />
 
-        {Array.from({ length: 7 }, (_, day) => {
+        {Array.from({ length: DAYS_IN_WEEK }, (_, day) => {
           const blocks = layoutDay(courses.filter((course) => course.day === day));
           const date = weekDates?.[day] ?? null;
           const info = dayInfos?.[day] ?? null;
@@ -140,7 +140,7 @@ export default function WeekGrid({
                 style={{ height: bareHead ? 0 : headHeight }}
                 hidden={bareHead}
               >
-                <span className="campus-week-dow">周{"一二三四五六日"[day]}</span>
+                <span className="campus-week-dow">{DAY_LABELS[day]}</span>
                 {date && (
                   <span
                     className="campus-week-date"

@@ -15,10 +15,8 @@
  */
 
 import { useState } from "react";
-import { formatWeeks } from "../../logic/schedule";
+import { DAY_LABELS, formatSections, formatWeeks } from "../../logic/schedule";
 import type { Course } from "../../types";
-
-const DAY_NAMES = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 
 export interface CourseDraft {
   name: string;
@@ -53,14 +51,6 @@ export function draftFromCourse(course: Course): CourseDraft {
         ? formatWeeks(course.weeks).replace(/[第周]/g, "")
         : "",
   };
-}
-
-/** 节次 → 「第 1-2 节」/「第 3 节」 */
-export function sectionLabel(sections: readonly number[]): string {
-  if (sections.length === 0) return "";
-  const start = Math.min(...sections);
-  const end = Math.max(...sections);
-  return start === end ? `第 ${start} 节` : `第 ${start}-${end} 节`;
 }
 
 interface CourseFormProps {
@@ -114,7 +104,7 @@ export function CourseForm({
           value={draft.day}
           onChange={(event) => patch({ day: event.target.value })}
         >
-          {DAY_NAMES.map((name, index) => (
+          {DAY_LABELS.map((name, index) => (
             <option key={name} value={String(index + 1)}>
               {name}
             </option>
@@ -254,7 +244,7 @@ export function CourseDialog({
               <div>
                 <dt>时间</dt>
                 <dd>
-                  {DAY_NAMES[course.day]} · {sectionLabel(course.sections)}
+                  {DAY_LABELS[course.day]} · {formatSections(course.sections)}
                   {timeText && <span className="campus-fact-sub"> {timeText}</span>}
                 </dd>
               </div>

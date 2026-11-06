@@ -30,8 +30,15 @@ import {
   holidayLabelsOf,
   isYearCovered,
 } from "../../logic/holidays";
+import { downloadTextFile } from "../../logic/download";
 import {
   COURSE_COLORS,
+  DAYS_IN_WEEK,
+  DAY_LABELS,
+  DEFAULT_TERM_WEEKS,
+  DOW_CHARS,
+  clampTermWeeks,
+  columnOfDate,
   courseInWeek,
   currentWeek,
   formatWeeks,
@@ -96,7 +103,14 @@ const RAIL_WIDTH = 44;
 /** 列宽窄于这个值就切紧凑表头（两行：周几 / 日期） */
 const COMPACT_COL_WIDTH = 62;
 
-const DAY_NAMES = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+/**
+ * `1..count` 的周次列表。
+ * 手机周次胶囊、桌面下拉、学期总览表头三处都要，原来各写一遍
+ * `Array.from({ length: totalWeeks }, (_, i) => i + 1)`。
+ */
+function weekNumbers(count: number): number[] {
+  return Array.from({ length: count }, (_, index) => index + 1);
+}
 
 /* ------------------------------------------------------------------ *
  * 日期与初始化
@@ -105,7 +119,7 @@ const DAY_NAMES = ["周一", "周二", "周三", "周四", "周五", "周六", "
 /** 把任意日期归一到那一周的周一 */
 function mondayOf(date: Date): Date {
   const copy = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  copy.setDate(copy.getDate() - ((copy.getDay() + 6) % 7));
+  copy.setDate(copy.getDate() - columnOfDate(copy));
   return copy;
 }
 
@@ -331,7 +345,7 @@ export default function ScheduleTool() {
       if (!migrated.term && legacyTerm?.start && /^\d{4}-\d{2}-\d{2}$/.test(legacyTerm.start)) {
         migrated.term = {
           start: legacyTerm.start,
-          weeks: Math.min(30, Math.max(1, Number(legacyTerm.weeks) || 20)),
+          weeks: clampTermWeeks(legacyTerm.weeks),
         };
       }
 
@@ -411,8 +425,14 @@ export default function ScheduleTool() {
       document.body.style.overflow = previous;
     };
   }, [fullscreen]);
+  /*
+   * 「现在」在每次渲染里只取一次。
+   * 原来在算教学周、算今天第几列、写手机标题时各 `new Date()` 一次，
+   * 跨零点那一瞬间三处可能拿到不同日期，表头写「11月6日」而高亮还在 5 号那一列。
+   */
+  const now = new Date();
   const monday = term ? termMonday(term.start) : null;
-  const todayWeek = monday ? currentWeek(monday, new Date()) : 0;
+  const todayWeek = monday ? currentWeek(monday, now) : 0;
 
   /** 能翻到第几周：有学期按学期总周数，否则看课程最晚周次 */
   const totalWeeks = term ? term.weeks : Math.max(maxWeekOf(snapshot.courses), 1);
@@ -424,7 +444,7 @@ export default function ScheduleTool() {
   );
 
   const weekDates = monday
-    ? Array.from({ length: 7 }, (_, day) => dateOfCell(monday, week, day))
+    ? Array.from({ length: DAYS_IN_WEEK }, (_, day) => dateOfCell(monday, week, day))
     : undefined;
 
   /*
@@ -441,7 +461,7 @@ export default function ScheduleTool() {
       : null;
 
   /** 今天那一列只在「正在看本周」时高亮，翻到别周还标红会让人误会 */
-  const todayIndex = todayWeek === week ? (new Date().getDay() + 6) % 7 : -1;
+  const todayIndex = todayWeek === week ? columnOfDate(now) : -1;
 
   /*
    * 手机版式的大标题（B6）：本周显示「今天」，跟参考图一致 ——
@@ -453,9 +473,8 @@ export default function ScheduleTool() {
    * 完整区间交给表格上方那行小字（和桌面同一条），要回到今天，右边就有「回到今天」。
    */
   const onTodayWeek = todayIndex >= 0;
-  const now = new Date();
-  const todayTitle = `${now.getMonth() + 1}月${now.getDate()}日`;
-  const todayDow = `周${"一二三四五六日"[(now.getDay() + 6) % 7]}`;
+  const todayTitle = mdText(now);
+  const todayDow = `周${DOW_CHARS[columnOfDate(now)]}`;
 
   /** 从快照里取，编辑后自动是最新值，不会出现「弹窗里还是旧课名」 */
   const active = activeId === null ? null : (snapshot.courses.find((c) => c.id === activeId) ?? null);
@@ -550,22 +569,12 @@ export default function ScheduleTool() {
    * 手动复制一样能带走，不至于卡在这里。
    */
   function downloadSchedule() {
-    const json = handleExport();
-    try {
-      const blob = new Blob([json], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "我的课表.json";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      // 立刻 revoke 会让部分浏览器下载失败，等下一轮事件循环
-      window.setTimeout(() => URL.revokeObjectURL(url), 0);
-      setHint("已导出「我的课表.json」。换设备时用「导入课表」选这个文件。");
-    } catch {
-      setHint("浏览器不允许自动下载，去「导入课表」点「导出我的课表」可以手动复制内容。");
-    }
+    const ok = downloadTextFile("我的课表.json", handleExport());
+    setHint(
+      ok
+        ? "已导出「我的课表.json」。换设备时用「导入课表」选这个文件。"
+        : "浏览器不允许自动下载，去「导入课表」点「导出我的课表」可以手动复制内容。",
+    );
   }
 
   function handleImport(text: string): ImportFeedback {
@@ -752,7 +761,7 @@ export default function ScheduleTool() {
                       value={String(week)}
                       onChange={(event) => setWeek(Number.parseInt(event.target.value, 10))}
                     >
-                      {Array.from({ length: totalWeeks }, (_, i) => i + 1).map((w) => (
+                      {weekNumbers(totalWeeks).map((w) => (
                         <option key={w} value={w}>
                           第 {w} 周
                         </option>
@@ -786,7 +795,7 @@ export default function ScheduleTool() {
                               .filter(Boolean)
                               .join(" · ")}
                           >
-                            <span className="campus-daycell-dow">{"一二三四五六日"[day]}</span>
+                            <span className="campus-daycell-dow">{DOW_CHARS[day]}</span>
                             <span className="campus-daycell-num">{date.getDate()}</span>
                             {info && (
                               <span className="campus-daycell-mark">
@@ -891,7 +900,7 @@ export default function ScheduleTool() {
                   style={{ maxWidth: 160 }}
                   onChange={(event) => setWeek(Number.parseInt(event.target.value, 10))}
                 >
-                  {Array.from({ length: totalWeeks }, (_, i) => i + 1).map((w) => {
+                  {weekNumbers(totalWeeks).map((w) => {
                     const count = snapshot.courses.filter((course) => courseInWeek(course, w)).length;
                     return (
                       <option key={w} value={w}>
@@ -1020,7 +1029,7 @@ export default function ScheduleTool() {
                   <thead>
                     <tr>
                       <th scope="col">周</th>
-                      {DAY_NAMES.map((name) => (
+                      {DAY_LABELS.map((name) => (
                         <th key={name} scope="col">
                           {name}
                         </th>
@@ -1028,7 +1037,7 @@ export default function ScheduleTool() {
                     </tr>
                   </thead>
                   <tbody>
-                    {Array.from({ length: totalWeeks }, (_, i) => i + 1).map((w) => (
+                    {weekNumbers(totalWeeks).map((w) => (
                       <tr key={w} className={w === todayWeek ? "is-now" : undefined}>
                         <th scope="row">
                           <button
@@ -1042,7 +1051,7 @@ export default function ScheduleTool() {
                             {w}
                           </button>
                         </th>
-                        {Array.from({ length: 7 }, (_, day) => {
+                        {Array.from({ length: DAYS_IN_WEEK }, (_, day) => {
                           const names = snapshot.courses
                             .filter((course) => course.day === day && courseInWeek(course, w))
                             .map((course) => course.name);
@@ -1180,7 +1189,7 @@ export default function ScheduleTool() {
       {termOpen && (
         <TermDialog
           defaultStart={term?.start ?? ""}
-          defaultWeeks={term?.weeks ?? 20}
+          defaultWeeks={term?.weeks ?? DEFAULT_TERM_WEEKS}
           currentWeekNo={todayWeek}
           onClose={() => setTermOpen(false)}
           onSave={saveTerm}

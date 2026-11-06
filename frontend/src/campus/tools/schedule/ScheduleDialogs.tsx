@@ -11,12 +11,20 @@
  */
 
 import { useState } from "react";
+import { downloadTextFile } from "../../logic/download";
 import {
   DEFAULT_BREAK_MINUTES,
   DEFAULT_FIRST_START,
   DEFAULT_LESSON_MINUTES,
+  MAX_BREAK_MINUTES,
+  MAX_LESSON_MINUTES,
   MAX_PERIOD_COUNT,
+  MAX_TERM_WEEKS,
+  MIN_BREAK_MINUTES,
+  MIN_LESSON_MINUTES,
   MIN_PERIOD_COUNT,
+  MIN_TERM_WEEKS,
+  clampTermWeeks,
   generateStarts,
   resizeStarts,
   toMinutes,
@@ -208,21 +216,11 @@ export function ImportDialog({
             onClick={() => {
               const json = onExport();
               setText(json);
-              try {
-                const blob = new Blob([json], { type: "application/json" });
-                const url = URL.createObjectURL(blob);
-                const link = document.createElement("a");
-                link.href = url;
-                link.download = "我的课表.json";
-                document.body.appendChild(link);
-                link.click();
-                link.remove();
-                // 立刻 revoke 会让部分浏览器下载失败，等下一轮事件循环
-                window.setTimeout(() => URL.revokeObjectURL(url), 0);
-                setFeedback({ ok: true, message: "已导出为「我的课表.json」，内容也填在上面的框里了。" });
-              } catch {
-                setFeedback({ ok: true, message: "内容已填在框里，浏览器不允许自动下载，请手动复制。" });
-              }
+              setFeedback(
+                downloadTextFile("我的课表.json", json)
+                  ? { ok: true, message: "已导出为「我的课表.json」，内容也填在上面的框里了。" }
+                  : { ok: true, message: "内容已填在框里，浏览器不允许自动下载，请手动复制。" },
+              );
             }}
           >
             导出我的课表
@@ -408,7 +406,7 @@ export function TermDialog({
   const [message, setMessage] = useState("");
 
   function handleSave() {
-    const totalWeeks = Math.min(30, Math.max(1, Number.parseInt(weeks, 10) || 20));
+    const totalWeeks = clampTermWeeks(Number.parseInt(weeks, 10));
     const parsedNow = Number.parseInt(nowWeek, 10);
 
     if (start === "" && !(parsedNow >= 1)) {
@@ -418,7 +416,7 @@ export function TermDialog({
 
     onSave({
       start,
-      nowWeek: start === "" && parsedNow >= 1 ? Math.min(30, parsedNow) : null,
+      nowWeek: start === "" && parsedNow >= 1 ? clampTermWeeks(parsedNow) : null,
       weeks: totalWeeks,
     });
   }
@@ -461,8 +459,8 @@ export function TermDialog({
             <input
               className="campus-input"
               type="number"
-              min={6}
-              max={30}
+              min={MIN_TERM_WEEKS}
+              max={MAX_TERM_WEEKS}
               value={weeks}
               onChange={(event) => setWeeks(event.target.value)}
             />
@@ -477,8 +475,8 @@ export function TermDialog({
             <input
               className="campus-input"
               type="number"
-              min={1}
-              max={30}
+              min={MIN_TERM_WEEKS}
+              max={MAX_TERM_WEEKS}
               value={nowWeek}
               placeholder="如 9"
               disabled={start !== ""}
@@ -539,7 +537,10 @@ export function PeriodDialog({ plan, onClose, onSave }: PeriodDialogProps) {
   const [gap, setGap] = useState(String(DEFAULT_BREAK_MINUTES));
   const [message, setMessage] = useState("");
 
-  const minutes = Math.min(120, Math.max(20, Number.parseInt(duration, 10) || DEFAULT_LESSON_MINUTES));
+  const minutes = Math.min(
+    MAX_LESSON_MINUTES,
+    Math.max(MIN_LESSON_MINUTES, Number.parseInt(duration, 10) || DEFAULT_LESSON_MINUTES),
+  );
 
   function changeCount(next: number) {
     setCount(next);
@@ -624,8 +625,8 @@ export function PeriodDialog({ plan, onClose, onSave }: PeriodDialogProps) {
             <input
               className="campus-input"
               type="number"
-              min={20}
-              max={120}
+              min={MIN_LESSON_MINUTES}
+              max={MAX_LESSON_MINUTES}
               step={5}
               value={duration}
               onChange={(event) => {
@@ -640,8 +641,8 @@ export function PeriodDialog({ plan, onClose, onSave }: PeriodDialogProps) {
             <input
               className="campus-input"
               type="number"
-              min={0}
-              max={60}
+              min={MIN_BREAK_MINUTES}
+              max={MAX_BREAK_MINUTES}
               step={5}
               value={gap}
               onChange={(event) => {

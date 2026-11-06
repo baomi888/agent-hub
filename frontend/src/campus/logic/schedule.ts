@@ -10,6 +10,31 @@ import type { Course, PeriodPlan, ScheduleSnapshot } from "../types";
 /** 周一为 0，周日为 6 —— 新结构统一口径 */
 export const DAY_LABELS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"] as const;
 
+/** 一周七天。列数、日期条、月历表头都用它，不写裸 7 */
+export const DAYS_IN_WEEK = 7;
+
+/**
+ * 只有一个字宽时用的周几写法（手机上那排七格日期条）。
+ * 和 `DAY_LABELS` 的差别只是省掉「周」字 —— 一格 43px，两个字排不开。
+ */
+export const DOW_CHARS = "一二三四五六日";
+
+/**
+ * 日期 → 周几列号（周一 = 0）。
+ * `(getDay() + 6) % 7` 这个式子原来在归周一、算今天、写星期文案三处各写一遍，
+ * 抄错一处就是整列错位，统一走这里。
+ */
+export function columnOfDate(date: Date): number {
+  return (date.getDay() + 6) % 7;
+}
+
+/** 学期周数上限 / 默认值。导入解析、学期弹窗、旧数据兜底三处共用 */
+export const MAX_TERM_WEEKS = 30;
+export const DEFAULT_TERM_WEEKS = 20;
+
+/** 学期周数下限：再短就不是一个学期了，学期弹窗的输入框也按这个卡 */
+export const MIN_TERM_WEEKS = 1;
+
 /**
  * 旧版 v1 的 day 是 `dayOfWeek % 7`（周一 = 1，周日 = 0），
  * 新结构是 `(dayOfWeek - 1) % 7`（周一 = 0，周日 = 6）。
@@ -56,13 +81,13 @@ export function parseWeeks(text: string): number[] {
       const to = Number.parseInt(range[2], 10);
       if (!Number.isFinite(from) || !Number.isFinite(to)) continue;
       for (let w = Math.min(from, to); w <= Math.max(from, to); w += 1) {
-        if (w > 0 && w <= 30) weeks.add(w);
+        if (w > 0 && w <= MAX_TERM_WEEKS) weeks.add(w);
       }
       continue;
     }
 
     const single = Number.parseInt(token, 10);
-    if (Number.isFinite(single) && single > 0 && single <= 30) weeks.add(single);
+    if (Number.isFinite(single) && single > 0 && single <= MAX_TERM_WEEKS) weeks.add(single);
   }
 
   return [...weeks].sort((a, b) => a - b);
@@ -73,13 +98,18 @@ export function isActiveInWeek(weeks: readonly number[], week: number): boolean 
   return weeks.includes(week);
 }
 
-/** 节次范围 → 显示文案，如 [1,2] → "1-2 节" */
+/**
+ * 节次范围 → 显示文案，如 [1,2] → `第 1-2 节`、[3] → `第 3 节`。
+ *
+ * 区间也带「第」：课程详情里原来另写了一份 `sectionLabel`，两种写法并排出现
+ * （`第 3 节` / `1-2 节`），同一张卡片里粗细不齐。现在只有这一个出口。
+ */
 export function formatSections(sections: readonly number[]): string {
   if (sections.length === 0) return "未定节次";
   const sorted = sections.slice().sort((a, b) => a - b);
   const first = sorted[0];
   const last = sorted[sorted.length - 1];
-  return first === last ? `第 ${first} 节` : `${first}-${last} 节`;
+  return first === last ? `第 ${first} 节` : `第 ${first}-${last} 节`;
 }
 
 /* ------------------------------------------------------------------ *
@@ -98,6 +128,12 @@ export const DEFAULT_PERIOD_COUNT = 12;
 /** 默认一节 45 分钟、课间 10 分钟、第一节 08:00 —— 国内高校最常见的作息 */
 export const DEFAULT_LESSON_MINUTES = 45;
 export const DEFAULT_BREAK_MINUTES = 10;
+
+/** 单节时长 / 课间时长的可设范围，`PeriodDialog` 的输入框和这里的 clamp 用同一套 */
+export const MIN_LESSON_MINUTES = 20;
+export const MAX_LESSON_MINUTES = 120;
+export const MIN_BREAK_MINUTES = 0;
+export const MAX_BREAK_MINUTES = 60;
 export const DEFAULT_FIRST_START = "08:00";
 
 /**
@@ -144,10 +180,13 @@ export function generateStarts(options: {
 } = {}): string[] {
   const count = clampCount(options.count ?? DEFAULT_PERIOD_COUNT);
   const duration = clampDuration(options.duration ?? DEFAULT_LESSON_MINUTES);
-  const gap = Math.min(60, Math.max(0, Math.trunc(options.gap ?? DEFAULT_BREAK_MINUTES)));
+  const gap = clampGap(options.gap ?? DEFAULT_BREAK_MINUTES);
   const skipLunch = options.skipLunch ?? true;
 
-  const first = toMinutes(options.start ?? DEFAULT_FIRST_START) ?? toMinutes(DEFAULT_FIRST_START)!;
+  // DEFAULT_FIRST_START 一定是合法 `HH:MM`，这里留一个数值兜底而不是 `!`：
+  // 将来有人把默认值改成 "8:00" 之外的脏值，也只会退到 08:00，不会抛错
+  const first =
+    toMinutes(options.start ?? DEFAULT_FIRST_START) ?? toMinutes(DEFAULT_FIRST_START) ?? 8 * 60;
   const starts: string[] = [];
   let cursor = first;
 
@@ -170,7 +209,21 @@ function clampCount(value: number): number {
 function clampDuration(value: number): number {
   const n = Math.trunc(value);
   if (!Number.isFinite(n)) return DEFAULT_LESSON_MINUTES;
-  return Math.min(120, Math.max(20, n));
+  return Math.min(MAX_LESSON_MINUTES, Math.max(MIN_LESSON_MINUTES, n));
+}
+
+/** 课间可设 0（连堂），上限 60 —— 再长就不像「课间」了 */
+export function clampGap(value: number): number {
+  const n = Math.trunc(value);
+  if (!Number.isFinite(n)) return DEFAULT_BREAK_MINUTES;
+  return Math.min(MAX_BREAK_MINUTES, Math.max(MIN_BREAK_MINUTES, n));
+}
+
+/** 学期总周数兜底：旧存档、手填、URL 里来的脏值都走这一个口 */
+export function clampTermWeeks(value: unknown): number {
+  const n = Math.trunc(Number(value));
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_TERM_WEEKS;
+  return Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, n));
 }
 
 /**
@@ -255,7 +308,7 @@ export const COURSE_COLORS = [
  * 按**旧板下标一一对应**，不做"挑个近色"：旧板的橙#EF8A56 / 红#A03E28 在莫兰迪里没有真正的对应物，
  * 硬配对反而会把两门原本区分明显的课配成同一个色。按下标走能保住「相邻 id 不同色」这个性质。
  */
-export const LEGACY_COURSE_COLORS: Readonly<Record<string, string>> = {
+const LEGACY_COURSE_COLORS: Readonly<Record<string, string>> = {
   "#c8892a": "#C9A990",
   "#7c9a54": "#ACB07E",
   "#ef8a56": "#A3BCA4",
@@ -341,7 +394,7 @@ export function parseCourseWeeks(input: unknown): number[] | null {
   } else if (Array.isArray(input)) {
     weeks = input
       .map(Number)
-      .filter((n) => Number.isFinite(n) && n >= 1 && n <= 30)
+      .filter((n) => Number.isFinite(n) && n >= MIN_TERM_WEEKS && n <= MAX_TERM_WEEKS)
       .map(Math.trunc);
     weeks = [...new Set(weeks)].sort((a, b) => a - b);
   }
@@ -643,7 +696,10 @@ export function migrateLegacySchedule(raw: unknown): ScheduleSnapshot | null {
     sample: Boolean(data.sample),
     term:
       /^\d{4}-\d{2}-\d{2}$/.test(termStart)
-        ? { start: termStart, weeks: Math.min(30, Math.max(1, termWeeksCount || 20)) }
+        ? {
+            start: termStart,
+            weeks: clampTermWeeks(termWeeksCount),
+          }
         : null,
     week: Math.max(1, Math.trunc(Number(data.week ?? 1)) || 1),
     // 旧版是「12 节写死」，没有存作息。补一套默认值，用户第一次进「上课时间」才需要改
