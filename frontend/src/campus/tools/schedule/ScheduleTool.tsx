@@ -21,7 +21,7 @@
  *  - 「清空课表」从主按钮降级为页脚文字按钮，避免误触。
  */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   COVERED_YEARS,
   DATA_NOTE,
@@ -54,10 +54,36 @@ import type { ImportFeedback } from "./ScheduleDialogs";
 import WeekGrid, { headHeightOf } from "./WeekGrid";
 
 /**
- * 页面内周视图的行高。
- * B2 从 44 提到 46：课名字号回到 13px 之后，44px 的格子会让文字贴着上下边线（需求 4.2/4.3）。
+ * 页面内周视图的行高（桌面）。B2 从 44 提到 46：
+ * 课名字号回到 13px 之后，44px 的格子会让文字贴着上下边线（需求 4.2/4.3）。
  */
 const ROW_HEIGHT = 46;
+
+/**
+ * 手机页面内的行高（B6）。
+ *
+ * 46px 是「一屏塞下 12 节」算出来的：844 − 页头 490 ≈ 354px，除 10 节只剩 35px，
+ * 46 已经是能放两行字的下限。代价是每格 45×46 接近正方形，课块像一排小方块，
+ * 课名一挤就出省略号 —— 这就是「手机端看起来很拥挤」的真实来源。
+ *
+ * 参考的做法相反：承认要滚动，把一格做成 47×72 的竖长条。
+ * 一屏能看到 8 节，往下滑看后 4 节；换来的是课名能换 3 行、
+ * 「马克思主义基本原理」这种 9 字课名也读全。
+ */
+const PHONE_ROW_HEIGHT = 72;
+
+/** 手机断点。与 campus.css 里的 640px 保持一致，两边必须同改 */
+const PHONE_QUERY = "(max-width: 640px)";
+
+function subscribePhone(onChange: () => void) {
+  const mq = window.matchMedia(PHONE_QUERY);
+  mq.addEventListener("change", onChange);
+  return () => mq.removeEventListener("change", onChange);
+}
+
+function phoneSnapshot() {
+  return window.matchMedia(PHONE_QUERY).matches;
+}
 
 /* ---- 全屏（B4）：行高不再写死，按容器均分 ---- */
 /** 行高下限：再矮就连一个 11px 的课名都放不下 */
@@ -260,6 +286,13 @@ export default function ScheduleTool() {
   const [termOpen, setTermOpen] = useState(false);
   const [periodOpen, setPeriodOpen] = useState(false);
   const [hint, setHint] = useState("");
+  /**
+   * 是否手机版式（B6）。
+   * 用 useSyncExternalStore 而不是 useEffect + setState：断点是「外部环境」，
+   * 首帧就该是对的值，否则手机会先按桌面版式渲染一帧再跳，表格会闪一下。
+   * 服务端渲染取 false，水合后再校正 —— 不会出现属性不匹配的告警。
+   */
+  const phone = useSyncExternalStore(subscribePhone, phoneSnapshot, () => false);
 
   // 添加 / 编辑
   const [addOpen, setAddOpen] = useState(false);
@@ -408,6 +441,16 @@ export default function ScheduleTool() {
 
   /** 今天那一列只在「正在看本周」时高亮，翻到别周还标红会让人误会 */
   const todayIndex = todayWeek === week ? (new Date().getDay() + 6) % 7 : -1;
+
+  /*
+   * 手机版式的大标题（B6）：固定显示「今天」，跟参考图一致 ——
+   * 它是「你在哪一天」的路标，不是「这一周是哪一周」的标题（那个交给右边的周次胶囊）。
+   * 翻到别周时标题仍是今天，这样翻周不会让整页最醒目的字跟着跳。
+   * 没设学期就没有可靠的今天，退回「第 N 周」，不给假日期。
+   */
+  const now = new Date();
+  const todayTitle = `${now.getMonth() + 1}月${now.getDate()}日`;
+  const todayDow = `周${"一二三四五六日"[(now.getDay() + 6) % 7]}`;
 
   /** 从快照里取，编辑后自动是最新值，不会出现「弹窗里还是旧课名」 */
   const active = activeId === null ? null : (snapshot.courses.find((c) => c.id === activeId) ?? null);
@@ -610,29 +653,35 @@ export default function ScheduleTool() {
   return (
     <div id="campus-panel-schedule" role="tabpanel" aria-label="课程表">
       <div className="campus-card">
-        <div className="campus-card-head">
-          <h2 className="campus-card-title">我的课表</h2>
-          <div className="campus-head-actions">
-            <button
-              type="button"
-              className={`campus-btn${addOpen ? " is-on" : ""}`}
-              aria-expanded={addOpen}
-              onClick={() => {
-                setAddOpen((open) => !open);
-                setAddMessage("");
-              }}
-            >
-              {addOpen ? "收起" : "添加课程"}
-            </button>
-            <button
-              type="button"
-              className="campus-btn is-primary"
-              onClick={() => setImportOpen(true)}
-            >
-              导入课表
-            </button>
+        {/*
+         * 手机不渲染这一行（B6）：标题「我的课表」在只有一个工具的面板里是废话，
+         * 两颗按钮又会和下面的紧凑工具条重复。省下的 56px 全给课表。
+         */}
+        {!phone && (
+          <div className="campus-card-head">
+            <h2 className="campus-card-title">我的课表</h2>
+            <div className="campus-head-actions">
+              <button
+                type="button"
+                className={`campus-btn${addOpen ? " is-on" : ""}`}
+                aria-expanded={addOpen}
+                onClick={() => {
+                  setAddOpen((open) => !open);
+                  setAddMessage("");
+                }}
+              >
+                {addOpen ? "收起" : "添加课程"}
+              </button>
+              <button
+                type="button"
+                className="campus-btn is-primary"
+                onClick={() => setImportOpen(true)}
+              >
+                导入课表
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* 添加课程：页内展开，不弹出、不推挤下面的课表 */}
         {addOpen && (
@@ -654,97 +703,232 @@ export default function ScheduleTool() {
 
         {hasCourses ? (
           <>
-            {/* 周次条：翻周、选周、回本周，右侧一个学期 chip 替代原来的整行说明 */}
-            <div className="campus-wkbar">
-              <button
-                type="button"
-                className="campus-wk-btn"
-                aria-label="上一周"
-                disabled={week <= 1}
-                onClick={() => setWeek(week - 1)}
-              >
-                ‹
-              </button>
+            {phone ? (
+              /* ---------- 手机版式（B6）：照参考图重排，先日期、再操作、最后表格 ---------- */
+              <>
+                <div className="campus-daybar">
+                  <span className="campus-daybar-title">
+                    {term ? todayTitle : `第 ${week} 周`}
+                    {term && <span className="campus-daybar-dow">{todayDow}</span>}
+                  </span>
+                  <div className="campus-daybar-side">
+                    <button type="button" className="campus-pill" onClick={goToday}>
+                      回到今天
+                    </button>
+                    <select
+                      className="campus-pill is-select"
+                      aria-label="选择周次"
+                      value={String(week)}
+                      onChange={(event) => setWeek(Number.parseInt(event.target.value, 10))}
+                    >
+                      {Array.from({ length: totalWeeks }, (_, i) => i + 1).map((w) => (
+                        <option key={w} value={w}>
+                          第 {w} 周
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
 
-              <select
-                className="campus-select"
-                aria-label="选择周次"
-                value={String(week)}
-                style={{ maxWidth: 160 }}
-                onChange={(event) => setWeek(Number.parseInt(event.target.value, 10))}
-              >
-                {Array.from({ length: totalWeeks }, (_, i) => i + 1).map((w) => {
-                  const count = snapshot.courses.filter((course) => courseInWeek(course, w)).length;
-                  return (
-                    <option key={w} value={w}>
-                      第 {w} 周{w === todayWeek ? " · 本周" : count === 0 ? " · 没课" : ` · ${count} 门`}
-                    </option>
-                  );
-                })}
-              </select>
+                {/*
+                 * 七格日期条：参考图最显眼的一处，也是表头。
+                 * 表格因此不再渲染自己的列头（bareHead）—— 同一行日期写两遍
+                 * 既占高度又让人对不上，B6 之前就是这么乱的。
+                 */}
+                {weekDates && (
+                  <div className="campus-daystrip">
+                    <span className="campus-daystrip-rail" aria-hidden="true" />
+                    <div className="campus-daystrip-cells">
+                      {weekDates.map((date, day) => {
+                        const info = dayInfos?.[day] ?? null;
+                        const isToday = day === todayIndex;
+                        return (
+                          <div
+                            key={day}
+                            className={`campus-daycell${isToday ? " is-today" : ""}${
+                              info ? ` is-${info.kind}` : ""
+                            }`}
+                            title={[
+                              `${date.getMonth() + 1} 月 ${date.getDate()} 日`,
+                              info ? `${info.label}${info.kind === "off" ? " · 放假" : " · 调休上班"}` : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          >
+                            <span className="campus-daycell-dow">{"一二三四五六日"[day]}</span>
+                            <span className="campus-daycell-num">{date.getDate()}</span>
+                            {info && (
+                              <span className="campus-daycell-mark">
+                                {info.kind === "off" ? "休" : "班"}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
-              <button
-                type="button"
-                className="campus-wk-btn"
-                aria-label="下一周"
-                disabled={week >= totalWeeks}
-                onClick={() => setWeek(week + 1)}
-              >
-                ›
-              </button>
-
-              <button type="button" className="campus-btn" onClick={goToday}>
-                本周
-              </button>
-
-              <div className="campus-seg" role="group" aria-label="课表视图">
+                <div className="campus-phone-tools">
+                  <button
+                    type="button"
+                    className={`campus-pill${addOpen ? " is-on" : ""}`}
+                    aria-expanded={addOpen}
+                    onClick={() => {
+                      setAddOpen((open) => !open);
+                      setAddMessage("");
+                    }}
+                  >
+                    {addOpen ? (
+                      "收起"
+                    ) : (
+                      <>
+                        {/* ＋ 只是「这是新增」的提示，360px 宽的机器上要靠它省出 12px */}
+                        <span className="campus-pill-plus" aria-hidden="true">
+                          ＋{" "}
+                        </span>
+                        添加
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className="campus-pill"
+                    onClick={() => setImportOpen(true)}
+                  >
+                    导入
+                  </button>
+                  {/*
+                   * 只写「10 节」，不写「10 节 · 08:00 起」。
+                   * 一行要放六个胶囊，多 8 个字会把最后一个「全屏」顶出屏幕 ——
+                   * 而每节几点开始，左边节次栏里逐行标着，这里不必再重复一遍。
+                   */}
+                  <button
+                    type="button"
+                    className="campus-pill"
+                    onClick={() => setPeriodOpen(true)}
+                    title={`每天 ${plan.count} 节，第一节 ${plan.starts[0]} 开始`}
+                  >
+                    {plan.count} 节
+                  </button>
+                  <button
+                    type="button"
+                    className="campus-pill"
+                    onClick={() => setTermOpen(true)}
+                    title={term ? `第 1 周从 ${monthDay(term.start)} 开始，共 ${term.weeks} 周` : "还没设学期"}
+                  >
+                    学期
+                  </button>
+                  <button
+                    type="button"
+                    className={`campus-pill${mode === "all" ? " is-on" : ""}`}
+                    aria-pressed={mode === "all"}
+                    onClick={() => setMode(mode === "all" ? "week" : "all")}
+                  >
+                    {mode === "all" ? "按周" : "一览"}
+                  </button>
+                  <button
+                    type="button"
+                    className="campus-pill"
+                    onClick={() => setFullscreen(true)}
+                  >
+                    全屏
+                  </button>
+                </div>
+              </>
+            ) : (
+              /* ---------- 桌面版式：保持原样，用户没有反馈这里拥挤 ---------- */
+              <div className="campus-wkbar">
                 <button
                   type="button"
-                  className={`campus-seg-btn${mode === "week" ? " is-on" : ""}`}
-                  aria-pressed={mode === "week"}
-                  onClick={() => setMode("week")}
+                  className="campus-wk-btn"
+                  aria-label="上一周"
+                  disabled={week <= 1}
+                  onClick={() => setWeek(week - 1)}
                 >
-                  按周
+                  ‹
                 </button>
+
+                <select
+                  className="campus-select"
+                  aria-label="选择周次"
+                  value={String(week)}
+                  style={{ maxWidth: 160 }}
+                  onChange={(event) => setWeek(Number.parseInt(event.target.value, 10))}
+                >
+                  {Array.from({ length: totalWeeks }, (_, i) => i + 1).map((w) => {
+                    const count = snapshot.courses.filter((course) => courseInWeek(course, w)).length;
+                    return (
+                      <option key={w} value={w}>
+                        第 {w} 周
+                        {w === todayWeek ? " · 本周" : count === 0 ? " · 没课" : ` · ${count} 门`}
+                      </option>
+                    );
+                  })}
+                </select>
+
                 <button
                   type="button"
-                  className={`campus-seg-btn${mode === "all" ? " is-on" : ""}`}
-                  aria-pressed={mode === "all"}
-                  onClick={() => setMode("all")}
+                  className="campus-wk-btn"
+                  aria-label="下一周"
+                  disabled={week >= totalWeeks}
+                  onClick={() => setWeek(week + 1)}
                 >
-                  一览
+                  ›
                 </button>
-                <button
-                  type="button"
-                  className="campus-seg-btn"
-                  onClick={() => setFullscreen(true)}
-                >
-                  全屏
+
+                <button type="button" className="campus-btn" onClick={goToday}>
+                  本周
                 </button>
+
+                <div className="campus-seg" role="group" aria-label="课表视图">
+                  <button
+                    type="button"
+                    className={`campus-seg-btn${mode === "week" ? " is-on" : ""}`}
+                    aria-pressed={mode === "week"}
+                    onClick={() => setMode("week")}
+                  >
+                    按周
+                  </button>
+                  <button
+                    type="button"
+                    className={`campus-seg-btn${mode === "all" ? " is-on" : ""}`}
+                    aria-pressed={mode === "all"}
+                    onClick={() => setMode("all")}
+                  >
+                    一览
+                  </button>
+                  <button
+                    type="button"
+                    className="campus-seg-btn"
+                    onClick={() => setFullscreen(true)}
+                  >
+                    全屏
+                  </button>
+                </div>
+
+                {/* 两颗 chip 常驻右端：学期、作息。原来学期说明独占一行，作息干脆没入口 */}
+                <div className="campus-wk-chips">
+                  <button
+                    type="button"
+                    className="campus-term-chip"
+                    onClick={() => setTermOpen(true)}
+                    title="设置开学日期与总周数"
+                  >
+                    {term ? `第 1 周 ${monthDay(term.start)}起 · 共 ${term.weeks} 周` : "还没设学期"}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="campus-term-chip is-plain"
+                    onClick={() => setPeriodOpen(true)}
+                    title="设置每天几节、每节几点开始"
+                  >
+                    每天 {plan.count} 节 · {plan.starts[0]} 起
+                  </button>
+                </div>
               </div>
-
-              {/* 两颗 chip 常驻右端：学期、作息。原来学期说明独占一行，作息干脆没入口 */}
-              <div className="campus-wk-chips">
-                <button
-                  type="button"
-                  className="campus-term-chip"
-                  onClick={() => setTermOpen(true)}
-                  title="设置开学日期与总周数"
-                >
-                  {term ? `第 1 周 ${monthDay(term.start)}起 · 共 ${term.weeks} 周` : "还没设学期"}
-                </button>
-
-                <button
-                  type="button"
-                  className="campus-term-chip is-plain"
-                  onClick={() => setPeriodOpen(true)}
-                  title="设置每天几节、每节几点开始"
-                >
-                  每天 {plan.count} 节 · {plan.starts[0]} 起
-                </button>
-              </div>
-            </div>
-
+            )}
             {mode === "week" ? (
               <>
                 {/* 没设学期就什么都不标（D2 降级），但要说明原因，否则用户以为是没做 */}
@@ -761,10 +945,13 @@ export default function ScheduleTool() {
                  * 周区间 + 假期提示同一行（B3.1）。
                  * 左边这串日期是必需的：列头为了塞下 7 列只写日号（5、6、7），
                  * 看不出是几月；跨月那周更是「29 30 1 2」，靠列头根本读不出来。
+                 *
+                 * 手机端（B6）不渲染左边这串：日期条已经逐天写了日号，
+                 * 再补一行区间就是同一件事说两遍。假期提示留着，那是这行唯一的新信息。
                  */}
-                {term && weekDates && (
+                {term && weekDates && (holidayNote !== "" || !phone) && (
                   <div className="campus-week-sub">
-                    <span className="campus-week-range">{weekRangeText(weekDates)}</span>
+                    {!phone && <span className="campus-week-range">{weekRangeText(weekDates)}</span>}
                     {holidayNote !== "" && (
                       <span className="campus-week-holiday" title={DATA_NOTE}>
                         {holidayNote}
@@ -776,11 +963,13 @@ export default function ScheduleTool() {
                 <div className="campus-week-wrap">
                   <WeekGrid
                     courses={visibleCourses}
-                    rowHeight={ROW_HEIGHT}
+                    rowHeight={phone ? PHONE_ROW_HEIGHT : ROW_HEIGHT}
                     plan={plan}
                     weekDates={weekDates}
                     dayInfos={dayInfos}
                     todayIndex={todayIndex}
+                    // 有日期条的时候（= 手机且设了学期）表头是多余的，整行让出来
+                    bareHead={phone && weekDates !== undefined}
                     onOpen={(course) => setActiveId(course.id)}
                   />
                 </div>

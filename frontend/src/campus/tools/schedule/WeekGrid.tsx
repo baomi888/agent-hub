@@ -68,6 +68,12 @@ interface WeekGridProps {
    * 只会把课名挤掉一行，点开详情看更实在（需求 6.2 的「只见轮廓」）。
    */
   dense?: boolean;
+  /**
+   * 无表头模式（B6，手机页面内）：日期已经由表格上方的日期条交代，
+   * 表头再写一遍就是同一件事说两遍，还白占 28px。
+   * 置 true 时列头整行不渲染，`top` 基准回到 0。
+   */
+  bareHead?: boolean;
   /** 点课块：打开课程详情（B1 起，点击不再是「直接删除」） */
   onOpen: (course: Course) => void;
 }
@@ -81,12 +87,15 @@ export default function WeekGrid({
   todayIndex = -1,
   compact = false,
   dense = false,
+  bareHead = false,
   onOpen,
 }: WeekGridProps) {
   const count = plan.count;
   const bodyHeight = count * rowHeight;
-  const headHeight = headHeightOf(compact);
-  const rootClass = `campus-week${compact ? " is-compact" : ""}${dense ? " is-dense" : ""}`;
+  const headHeight = bareHead ? 0 : headHeightOf(compact);
+  const rootClass = `campus-week${compact ? " is-compact" : ""}${dense ? " is-dense" : ""}${
+    bareHead ? " is-bare" : ""
+  }`;
 
   return (
     <div className={rootClass}>
@@ -128,7 +137,8 @@ export default function WeekGrid({
             >
               <div
                 className={`campus-week-day-head${compact ? " is-compact" : ""}`}
-                style={{ height: headHeight }}
+                style={{ height: bareHead ? 0 : headHeight }}
+                hidden={bareHead}
               >
                 <span className="campus-week-dow">周{"一二三四五六日"[day]}</span>
                 {date && (
@@ -186,7 +196,9 @@ export default function WeekGrid({
                     type="button"
                     className={`campus-week-block${block.cols > 1 ? " is-split" : ""}${
                       off ? " is-off" : ""
-                    }${isToday ? " is-today-block" : ""}`}
+                    }${isToday ? " is-today-block" : ""}${span >= 2 ? " is-tall" : ""}${
+                      span >= 3 ? " is-long" : ""
+                    }`}
                     title={`点击查看：${label}`}
                     aria-label={`${label}，点击查看详情`}
                     onClick={() => onOpen(course)}
