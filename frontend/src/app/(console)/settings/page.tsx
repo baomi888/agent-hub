@@ -18,6 +18,7 @@ import PageShell from "@/components/console/PageShell";
 import { useConsoleAccount } from "@/components/console/ConsoleLayout";
 import CornIcon from "@/components/CornIcon";
 import AvatarPicker from "@/components/settings/AvatarPicker";
+import InstallAppRow from "@/components/settings/InstallAppRow";
 import PasswordDialog from "@/components/settings/PasswordDialog";
 import UsernameDialog from "@/components/settings/UsernameDialog";
 import UserAvatar from "@/components/settings/UserAvatar";
@@ -345,6 +346,11 @@ export default function SettingsPage() {
                 校园工具页（单词卡、课表、GPA）是独立的单页，<b>不跟随</b>这个档位。
               </p>
             </div>
+          </section>
+
+          <section>
+            <p className="sec-label">装成 App</p>
+            <InstallAppRow />
           </section>
 
           <section>
