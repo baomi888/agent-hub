@@ -54,7 +54,28 @@
 
 ## 6. 截图 / 录屏
 
-（视觉改动必附。浅色 + 深色各一张，放在 `campus/reviews/assets/` 或直接贴图）
+**视觉改动必附，且要把图直接嵌进报告**——审核员读报告时应该立刻看到效果，
+不要只留一串路径让他自己去翻目录。至少 2 张：浅色 + 深色，或手机 + 桌面。
+
+截图统一放 `campus/previews/shots/<批次名>/`，报告里用相对路径引用（不复制进 `reviews/`，避免重复占体积）。
+推荐写法（路径相对本文件所在的 `campus/reviews/`）：
+
+```html
+<table>
+  <tr>
+    <td align="center"><b>手机 390 · 浅色</b><br>
+      <img src="../previews/shots/<批次>/phone-390.png" width="300" alt="说明"><br>
+      <a href="../previews/shots/<批次>/phone-390.png">点开原图</a></td>
+    <td align="center"><b>桌面 1440 · 深色</b><br>
+      <img src="../previews/shots/<批次>/desk-1440-dark.png" width="420" alt="说明"><br>
+      <a href="../previews/shots/<批次>/desk-1440-dark.png">点开原图</a></td>
+  </tr>
+</table>
+```
+
+要求：① `width` 限宽（手机 300 / 桌面 420），别让 1440 的图撑破版面；
+② 每张给「点开原图」链接，方便审核员放大看字；③ 速览块下面保留完整截图清单表格；
+④ 截图时间必须晚于最后一次代码改动（`docs/05` 闸门 4 的「截图时效」）。
 
 ---
 
