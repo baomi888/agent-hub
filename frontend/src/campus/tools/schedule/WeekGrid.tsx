@@ -35,7 +35,14 @@ import { layoutDay } from "../../logic/schedule";
 import type { Course, PeriodPlan } from "../../types";
 
 /** 表头（周几 + 日期）的高度，课块的 top 要加上它 */
-const HEAD_HEIGHT = 28;
+export const HEAD_HEIGHT = 28;
+/** 窄列模式（全屏手机）的表头：周几和日期分两行，高度多 8px */
+export const HEAD_HEIGHT_COMPACT = 36;
+
+/** 表头实际高度；全屏算行高时要用同一个值，所以对外暴露 */
+export function headHeightOf(compact: boolean): number {
+  return compact ? HEAD_HEIGHT_COMPACT : HEAD_HEIGHT;
+}
 
 interface WeekGridProps {
   /** 已经按周次过滤好的课程 */
@@ -50,6 +57,17 @@ interface WeekGridProps {
   dayInfos?: readonly (DayInfo | null)[];
   /** 今天在第几列；-1 表示不高亮 */
   todayIndex?: number;
+  /**
+   * 窄列模式（B4，全屏手机）：列宽只有 45px 左右。
+   * 表头改「周几 / 日期」两行，字号退一档，「休 / 班」徽标留在周几旁边。
+   */
+  compact?: boolean;
+  /**
+   * 矮行模式（B4，横屏手机）：一行只有 25px 上下。
+   * 课名字号再退到 11px、行距压紧，并**只留课名**——教室和老师在这点高度里
+   * 只会把课名挤掉一行，点开详情看更实在（需求 6.2 的「只见轮廓」）。
+   */
+  dense?: boolean;
   /** 点课块：打开课程详情（B1 起，点击不再是「直接删除」） */
   onOpen: (course: Course) => void;
 }
@@ -61,15 +79,19 @@ export default function WeekGrid({
   weekDates,
   dayInfos,
   todayIndex = -1,
+  compact = false,
+  dense = false,
   onOpen,
 }: WeekGridProps) {
   const count = plan.count;
   const bodyHeight = count * rowHeight;
+  const headHeight = headHeightOf(compact);
+  const rootClass = `campus-week${compact ? " is-compact" : ""}${dense ? " is-dense" : ""}`;
 
   return (
-    <div className="campus-week">
+    <div className={rootClass}>
       <div className="campus-week-rail" aria-hidden="true">
-        <div className="campus-week-rail-head" style={{ height: HEAD_HEIGHT }} />
+        <div className="campus-week-rail-head" style={{ height: headHeight }} />
         {Array.from({ length: count }, (_, i) => (
           <div key={i} className="campus-week-slot" style={{ height: rowHeight }}>
             <span className="campus-week-slot-no">{i + 1}</span>
@@ -88,7 +110,7 @@ export default function WeekGrid({
         <div
           className="campus-week-lines"
           aria-hidden="true"
-          style={{ top: HEAD_HEIGHT, height: bodyHeight, backgroundSize: `100% ${rowHeight}px` }}
+          style={{ top: headHeight, height: bodyHeight, backgroundSize: `100% ${rowHeight}px` }}
         />
 
         {Array.from({ length: 7 }, (_, day) => {
@@ -102,10 +124,13 @@ export default function WeekGrid({
             <div
               key={day}
               className={`campus-week-day${isToday ? " is-today" : ""}`}
-              style={{ height: HEAD_HEIGHT + bodyHeight }}
+              style={{ height: headHeight + bodyHeight }}
             >
-              <div className="campus-week-day-head" style={{ height: HEAD_HEIGHT }}>
-                <span>周{"一二三四五六日"[day]}</span>
+              <div
+                className={`campus-week-day-head${compact ? " is-compact" : ""}`}
+                style={{ height: headHeight }}
+              >
+                <span className="campus-week-dow">周{"一二三四五六日"[day]}</span>
                 {date && (
                   <span
                     className="campus-week-date"
@@ -137,6 +162,15 @@ export default function WeekGrid({
                 const width = 100 / block.cols;
                 const { course } = block;
 
+                /*
+                 * 教室 / 老师的出现门槛随宽度走（B4）。
+                 * 宽列维持「2 节给教室、3 节给老师」；
+                 * 窄列（45px）往里塞教室是对折的：「机房-A」只剩「机房…」，
+                 * 花了 2 行的高度换 2 个字，不如把空间留给课名 —— 完整信息点开看。
+                 */
+                const roomAt = compact ? 3 : 2;
+                const teacherAt = compact ? 4 : 3;
+
                 const label = [
                   `${course.name}（第${block.start}${span > 1 ? `-${block.end}` : ""}节）`,
                   course.classroom ? `@${course.classroom}` : "",
@@ -157,24 +191,23 @@ export default function WeekGrid({
                     aria-label={`${label}，点击查看详情`}
                     onClick={() => onOpen(course)}
                     style={{
-                      top: HEAD_HEIGHT + (block.start - 1) * rowHeight + 1,
+                      top: headHeight + (block.start - 1) * rowHeight + 1,
                       height: span * rowHeight - 2,
                       left: `calc(${(block.col * width).toFixed(4)}% + 1px)`,
                       width: `calc(${width.toFixed(4)}% - 2px)`,
-                      // 课程色 12% 打底，再垫一层不透明的卡片底色 —— 只留一个 12% 的色块时，
-                      // 背后那条横向分节线会透过来，4 节的块里像被划了一道。
-                      // 放假那天（4.5）换成灰底灰框：这门课在这天被取消了，不该还留着课程色。
-                      background: off
-                        ? "var(--fill-2)"
-                        : `linear-gradient(${course.color}1f, ${course.color}1f), var(--card-bg)`,
-                      borderColor: off ? "var(--line-strong)" : course.color,
+                      // 课程色直接做底色（B5 起块是实心的，不再是 12% 淡底 + 同色描边）。
+                      // 底色不透明，背后那条横向分节线不会再透过来，所以不用再垫一层卡片色。
+                      // 放假那天（4.5）换成灰底：这门课在这天被取消了，不该还留着课程色。
+                      background: off ? "var(--course-off)" : course.color,
+                      // 描边留 1px 透明：块宽是按 calc(% - 2px) 算的，删掉 border 会多出 2px 顶到隔壁列
+                      borderColor: "transparent",
                     }}
                   >
                     <span className="campus-week-block-name">{course.name}</span>
-                    {span >= 2 && course.classroom && (
+                    {!dense && span >= roomAt && course.classroom && (
                       <span className="campus-week-block-room">{course.classroom}</span>
                     )}
-                    {span >= 3 && course.teacher && (
+                    {!dense && span >= teacherAt && course.teacher && (
                       <span className="campus-week-block-teacher">{course.teacher}</span>
                     )}
                   </button>

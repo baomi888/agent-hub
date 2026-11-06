@@ -21,7 +21,7 @@
  *  - 「清空课表」从主按钮降级为页脚文字按钮，避免误触。
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   COVERED_YEARS,
   DATA_NOTE,
@@ -37,6 +37,7 @@ import {
   formatWeeks,
   mergeCourses,
   migrateLegacySchedule,
+  normalizeCourseColor,
   normalizePeriodPlan,
   parseCourseWeeks,
   parseScheduleImport,
@@ -50,14 +51,23 @@ import { CourseDialog, CourseForm, EMPTY_DRAFT } from "./CourseEditor";
 import type { CourseDraft } from "./CourseEditor";
 import { ImportDialog, PeriodDialog, TermDialog } from "./ScheduleDialogs";
 import type { ImportFeedback } from "./ScheduleDialogs";
-import WeekGrid from "./WeekGrid";
+import WeekGrid, { headHeightOf } from "./WeekGrid";
 
 /**
  * 页面内周视图的行高。
  * B2 从 44 提到 46：课名字号回到 13px 之后，44px 的格子会让文字贴着上下边线（需求 4.2/4.3）。
  */
 const ROW_HEIGHT = 46;
-const FULL_ROW_HEIGHT = 52;
+
+/* ---- 全屏（B4）：行高不再写死，按容器均分 ---- */
+/** 行高下限：再矮就连一个 11px 的课名都放不下 */
+const FULL_ROW_MIN = 18;
+/** 行高上限：桌面全屏 12 节时别把格子拉成一根竖条 */
+const FULL_ROW_MAX = 96;
+/** 节次栏宽度，算列宽时要扣掉（与 CSS `.campus-week-rail` 的 flex-basis 一致） */
+const RAIL_WIDTH = 44;
+/** 列宽窄于这个值就切紧凑表头（两行：周几 / 日期） */
+const COMPACT_COL_WIDTH = 62;
 
 const DAY_NAMES = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 
@@ -236,6 +246,16 @@ export default function ScheduleTool() {
   const [ready, setReady] = useState(false);
   const [mode, setMode] = useState<"week" | "all">("week");
   const [fullscreen, setFullscreen] = useState(false);
+  /**
+   * 全屏的行高与紧凑模式由**容器实际尺寸**算出来（B4）。
+   *
+   * 原来写死 52px：390×844 竖向一屏放 12 × 52 + 表头 = 652，勉强够；
+   * 但横屏 390 高度只有 334 可用，52px 一行必然纵向滚，滚了就看不见整周。
+   * 现在按可用高度均分，上下限兜底。
+   */
+  const [fullRowHeight, setFullRowHeight] = useState(52);
+  const [fullCompact, setFullCompact] = useState(false);
+  const fullBodyRef = useRef<HTMLDivElement>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [termOpen, setTermOpen] = useState(false);
   const [periodOpen, setPeriodOpen] = useState(false);
@@ -253,8 +273,14 @@ export default function ScheduleTool() {
     const fresh = readJson<ScheduleSnapshot>(CAMPUS_KEYS.schedule);
     if (fresh && Array.isArray(fresh.courses)) {
       // 0.6.1 之前的存档没有 periods，缺了就补默认作息（需求 A07），不能让旧用户开页就崩
+      // 0.6.4 起颜色也在这里过一遍：v2 存档是直接 readJson 出来的，不走 migrateLegacySchedule，
+      // 不在这里转一道的话老用户永远看不到莫兰迪色（详见 normalizeCourseColor 的注释）
       setSnapshot({
         ...fresh,
+        courses: fresh.courses.map((course) => ({
+          ...course,
+          color: normalizeCourseColor(course.color),
+        })),
         periods: normalizePeriodPlan(fresh.periods),
         week: initialWeek(fresh.term, fresh.week),
       });
@@ -299,6 +325,58 @@ export default function ScheduleTool() {
 
   const term = snapshot.term;
   const plan = snapshot.periods;
+
+  /*
+   * 全屏尺寸自适应（B4 / 需求 6.1 / 6.2）。
+   *
+   * 两件事一起量，因为它们互相牵制：列宽窄到一定程度，表头就得改成两行（compact），
+   * 而表头高了 8px，行高就少 8px —— 先定紧凑与否，再算行高，不能反过来。
+   */
+  useLayoutEffect(() => {
+    if (!fullscreen) return;
+    const el = fullBodyRef.current;
+    if (!el) return;
+
+    const measure = () => {
+      const styles = getComputedStyle(el);
+      const padY = Number.parseFloat(styles.paddingTop) + Number.parseFloat(styles.paddingBottom);
+      const padX = Number.parseFloat(styles.paddingLeft) + Number.parseFloat(styles.paddingRight);
+
+      const compact = (el.clientWidth - padX - RAIL_WIDTH) / 7 < COMPACT_COL_WIDTH;
+      setFullCompact(compact);
+
+      // 竖向：把「表头 + N 节」塞进剩余高度，向下取整避免最后一节被切掉半个
+      const available = el.clientHeight - padY - headHeightOf(compact);
+      const next = Math.floor(available / plan.count);
+      setFullRowHeight(Math.min(FULL_ROW_MAX, Math.max(FULL_ROW_MIN, next)));
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [fullscreen, plan.count]);
+
+  /*
+   * 全屏的退出与滚动（A09）。
+   * 页内全屏只是一层 CSS，浏览器不认识，Esc 不接管就一直穿透到页面；
+   * 打开时锁住 body 滚动，否则手机上滑到底部会把整页带着滚。
+   */
+  useEffect(() => {
+    if (!fullscreen) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setFullscreen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previous;
+    };
+  }, [fullscreen]);
   const monday = term ? termMonday(term.start) : null;
   const todayWeek = monday ? currentWeek(monday, new Date()) : 0;
 
@@ -845,14 +923,16 @@ export default function ScheduleTool() {
             </div>
           </div>
 
-          <div className="campus-fullscreen-body">
+          <div className="campus-fullscreen-body" ref={fullBodyRef}>
             <WeekGrid
               courses={visibleCourses}
-              rowHeight={FULL_ROW_HEIGHT}
+              rowHeight={fullRowHeight}
               plan={plan}
               weekDates={weekDates}
               dayInfos={dayInfos}
               todayIndex={todayIndex}
+              compact={fullCompact}
+              dense={fullRowHeight < 40}
               onOpen={(course) => setActiveId(course.id)}
             />
           </div>

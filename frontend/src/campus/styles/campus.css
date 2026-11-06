@@ -40,6 +40,15 @@
   --campus-btn-solid-text: var(--solid-text);
   --campus-btn-solid-hover: color-mix(in srgb, var(--accent-ink) 86%, var(--ink));
 
+  /* 放假那天的课块底色（B5）。浅色是暖灰、深色是暖褐——
+     两套主题下都要求「一眼看出这块被取消了」，所以不用 --fill-2 的透明叠加：
+     灰底下面透出卡片色，放假和正常块的明度差会被稀释到看不出。 */
+  --course-off: #D6D0C6;
+  /* 课块上的字：莫兰迪底是固定的浅色（不随主题变），所以字色也固定，
+     不能用 --ink —— 深色主题的 --ink 是暖白，压在这种浅底上只有 1.5:1。 */
+  --course-ink: #241F18;
+  --course-sub: #3B332A;
+
   width: 100%;
   max-width: var(--campus-max);
   margin: 0 auto;
@@ -51,6 +60,8 @@
   --campus-btn-solid: var(--accent);
   --campus-btn-solid-text: var(--solid);
   --campus-btn-solid-hover: color-mix(in srgb, var(--accent) 88%, black);
+  /* 深色主题下放假块用暖褐：亮灰块在深棕纸面上亮得像一格探照灯 */
+  --course-off: #3E372C;
 }
 
 /* ---------- 设备能力：同一句提示，按设备给两版 ---------- */
@@ -1943,19 +1954,43 @@ body.campus-modal-open .campus-scroll {
   background: var(--accent-soft);
 }
 
+/*
+ * 表头「周几 + 日期」。
+ * B5 起今天那一格改成实心胶囊（对应参考图的橙色胶囊）：原来只靠金色的字重和整列淡底，
+ * 在一屏七列里要找「今天」得多看两眼；实心块不用读字就知道是哪一列。
+ *
+ * 只给今天上底色、不给七列都上：整排七块底色会把表头变成第二条分割带，
+ * 而这一行真正要传达的信息只有「今天在哪」。
+ * 左右留 3px 让胶囊和内框脱开；上下不留边距 —— 表头高度是按行算的，
+ * 加竖向 margin 会把整列的课块往下推 1–2px，和左边节次栏错位。
+ */
 .campus-week-day-head {
   display: flex;
   gap: 2px;
   align-items: center;
   justify-content: center;
+  margin: 0 3px;
   font-size: var(--fs-xs);
   color: var(--text-2);
   border-bottom: 1px solid var(--line);
+  border-radius: var(--radius-sm);
 }
 
+/*
+ * 今天的胶囊用 --accent-ink 实心 + 卡片色字（5.70:1），不用 --accent：
+ * #C8892A 压白字只有 2.97:1，连大字线都不到。深色主题下 --accent-ink 是亮金，
+ * 配深色字是 6.93:1，两边都过 AA。
+ */
 .campus-week-day.is-today .campus-week-day-head {
   font-weight: 600;
-  color: var(--accent-ink);
+  color: var(--card-bg);
+  background: var(--accent-ink);
+}
+
+/* 今天恰好又放假：胶囊上的「休」不用金色淡底，换成半透明卡片色，否则两套底色打架 */
+.campus-week-day.is-today .campus-week-mark {
+  color: var(--card-bg);
+  background: color-mix(in srgb, var(--card-bg) 24%, transparent);
 }
 
 /*
@@ -1997,25 +2032,118 @@ body.campus-modal-open .campus-scroll {
   background: var(--accent-soft);
 }
 
+/* ---------------------------------------------------------------- *
+ * 窄列模式（B4，全屏手机）：每列只有 45px 左右
+ * ---------------------------------------------------------------- */
+
+/*
+ * 表头改两行：第一行「周几 + 休/班」，第二行「10/5」。
+ *
+ * 一行放不下：「周一 10/5 休」按 12px 算是 24 + 25 + 16 + 间距 ≈ 70px，45px 的列装不下，
+ * 会横向溢出压到隔壁列。拆两行之后最宽的一行是「周一 + 休」= 40px，仍然留 5px 余量。
+ *
+ * 用 grid 不用 flex-wrap：换行会让 7 列高度不一致（有假期的那列变成三行），整行表头歪掉。
+ */
+.campus-week.is-compact .campus-week-day-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: 1fr 1fr;
+  gap: 0 1px;
+  align-content: center;
+  align-items: center;
+  justify-items: center;
+  line-height: 1.1;
+}
+
+.campus-week.is-compact .campus-week-dow {
+  grid-area: 1 / 1;
+}
+
+.campus-week.is-compact .campus-week-mark {
+  grid-area: 1 / 2;
+  padding: 0 2px;
+  font-size: 9px;
+  line-height: 12px;
+}
+
+.campus-week.is-compact .campus-week-date {
+  grid-area: 2 / 1 / 3 / 3;
+  font-size: 10px;
+}
+
+/* 窄列里的课名退到 11px：45px 宽一行只放得下 3 个汉字，13px 会折成三行被裁 */
+.campus-week.is-compact .campus-week-block {
+  padding: 3px 4px;
+}
+
+.campus-week.is-compact .campus-week-block-name {
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.campus-week.is-compact .campus-week-block-room,
+.campus-week.is-compact .campus-week-block-teacher {
+  font-size: 10px;
+}
+
+/*
+ * 矮行模式（B4，横屏手机）：一行只有 25px 上下。
+ *
+ * 这一档的取舍写在需求 6.2 里：横屏只求「看得见整周轮廓」，看清靠点开。
+ * 所以课名退到 11px、内边距压到 2px，教室和老师整行不渲染（组件里按 dense 跳过）——
+ * 留着它们只会把课名挤掉一行，反而更看不清。
+ */
+.campus-week.is-dense .campus-week-block {
+  gap: 0;
+  padding: 2px 4px;
+}
+
+.campus-week.is-dense .campus-week-block-name {
+  font-size: 11px;
+  line-height: 1.15;
+}
+
+/*
+ * 矮行时左侧节次栏只留节次号。
+ * 25px 的格子里塞「节次 + 时间」是 12 + 11 + 2 = 25，加下边框就溢，
+ * 实测两行数字糊在一起（横屏 844×390）。时间是页面内视图的职责，这里让位给行高。
+ */
+.campus-week.is-dense .campus-week-slot {
+  gap: 0;
+}
+
+.campus-week.is-dense .campus-week-slot-time {
+  display: none;
+}
+
 /*
  * 放假那天的课块变暗（需求 4.5）。
  *
  * **不靠 opacity 实现**：先按「整块 opacity .45」做过，实测课名只剩 2.51:1（浅色），
  * 比 4.5 差了一半多 —— 用户想确认「那天本来是哪门课」就读不出来了。
- * 换成语义更准的「彩色变灰」：底色和边框由课程色换成灰（在 JSX 里给 inline style），
- * 课名降到 --text-2 并加删除线。效果上同样是「一眼看出不用上」，但文字仍读得清。
+ * 换成语义更准的「彩色变灰」：底色由课程色换成灰（JSX 里给 inline style），
+ * 字色跟着换成暖灰、加删除线。效果上同样是「一眼看出不用上」，但文字仍读得清（4.95:1）。
  * 删除线是第二信号，色弱用户不靠颜色也能认（A06）。
  * 调休上班日（班）不加这个类：那天真要上课。
+ *
+ * 字色这里改的是块级变量而不是直接写 color：`.campus-week-block-name` 和教室行
+ * 用的是 `var(--course-ink)` / `var(--course-sub)`，放假块只要把这两个变量换掉，
+ * 名字和教室两行自动跟着变，不用挑选择器。
  */
-.campus-week-block.is-off .campus-week-block-name {
-  color: var(--text-2);
-  text-decoration: line-through;
-  text-decoration-thickness: 1px;
+.campus-week-block.is-off {
+  --course-ink: #5A5348;
+  --course-sub: #5A5348;
 }
 
-.campus-week-block.is-off .campus-week-block-room,
-.campus-week-block.is-off .campus-week-block-teacher {
-  color: var(--text-3);
+/* 深色主题的放假块底色是暖褐，字要反过来用浅色（6.5:1） */
+.dark .campus-week-block.is-off {
+  --course-ink: #C9C0B0;
+  --course-sub: #C9C0B0;
+}
+
+.campus-week-block.is-off .campus-week-block-name {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
 }
 
 /*
@@ -2038,6 +2166,10 @@ body.campus-modal-open .campus-scroll {
  * 课块。B2 起竖向居中 + 内边距 5/6：
  * 原来是「顶对齐 + 4/5 内边距」，4 节高的块里两行字全挤在顶上，下半截空着 —— 4.3「框框太空旷」。
  * 居中之后，1 节的格子和 4 节的块都是视觉居中的，高块不再显得空。
+ *
+ * B5 起改成「实心色块 + 居中排版」：底色由行内 style 给（课程色，放假给灰），
+ * 描边留 1px 透明保住块宽。圆角上到 8px —— 4px 在实心块上像贴纸，8px 才像一张卡片。
+ * 文字从两端对齐改居中：块宽只有 70–100px 时，居中的两行课名比左对齐更容易一眼读完。
  */
 .campus-week-block {
   position: absolute;
@@ -2045,14 +2177,14 @@ body.campus-modal-open .campus-scroll {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
   padding: 5px 6px;
   overflow: hidden;
   font-family: inherit;
-  text-align: left;
-  border: 1px solid;
-  border-radius: var(--radius-xs);
+  text-align: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 
@@ -2060,6 +2192,22 @@ body.campus-modal-open .campus-scroll {
   filter: brightness(1.06);
   outline: 2px solid var(--accent-line);
   outline-offset: -1px;
+}
+
+/*
+ * 深色主题下把色块压暗一档。
+ * 莫兰迪色是按浅色纸面调的（L* 70–78），原样放到 L* 10 的深棕纸面上像一排夜灯；
+ * brightness(.88) 之后明度落到 L* 62 左右，仍然是同一套色相，但不抢背景。
+ * 字色跟着一起变暗，#241F18 在最暗的紫灰块上仍有 5.9:1（AA 要 4.5）。
+ * hover 单独给一档，否则鼠标划过会从 .88 直接跳到 1.06，闪一下。
+ * 放假块不压：它本来就是暖褐 #3E372C，再乘 .88 就贴到卡片底色上了，看不出「这里有一块」。
+ */
+.dark .campus-week-block:not(.is-off) {
+  filter: brightness(0.88);
+}
+
+.dark .campus-week-block:not(.is-off):hover {
+  filter: brightness(0.96);
 }
 
 /*
@@ -2074,7 +2222,7 @@ body.campus-modal-open .campus-scroll {
   font-size: var(--fs-md);
   font-weight: 600;
   line-height: 1.25;
-  color: var(--ink);
+  color: var(--course-ink);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
@@ -2086,7 +2234,7 @@ body.campus-modal-open .campus-scroll {
   overflow: hidden;
   font-size: 11px;
   line-height: 1.2;
-  color: var(--text-2);
+  color: var(--course-sub);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2194,12 +2342,43 @@ body.campus-modal-open .campus-scroll {
 
 .campus-fullscreen-body {
   flex: 1;
-  padding: 12px 16px 24px;
+  min-height: 0;
+  padding: 10px 12px 14px;
   overflow: auto;
 }
 
+/*
+ * 全屏的表格**不能有最小宽度**（B4 / 需求 6.1）。
+ * 原来写 min-width: 720px，390px 的手机上必然横向滚动 ——「一屏看全整周」从第一条就不成立。
+ * 7 列是 `minmax(0, 1fr)` 的网格，宽度交出去就行；挤不挤由行高与表头形态承担。
+ */
 .campus-fullscreen .campus-week {
-  min-width: 720px;
+  min-width: 0;
+  width: 100%;
+}
+
+/*
+ * 横屏手机（844×390 这类）只靠高度过日子：顶栏每多占 10px，12 节就少 1px。
+ * 这一档把顶栏整体收窄，标题降一档字号，节日名不换行。
+ */
+@media (max-height: 480px) {
+  .campus-fullscreen-bar {
+    gap: 8px;
+    padding: 6px 10px;
+  }
+
+  .campus-fullscreen-title {
+    font-size: var(--fs-sm);
+  }
+
+  .campus-fullscreen-holiday {
+    margin-left: 6px;
+    padding: 1px 6px;
+  }
+
+  .campus-fullscreen-body {
+    padding: 6px 8px 8px;
+  }
 }
 
 /* ---------- 单词卡 ---------- */

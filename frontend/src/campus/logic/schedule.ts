@@ -225,11 +225,63 @@ export function sectionTimeRange(sections: readonly number[], plan: PeriodPlan):
   return `${from}–${addMinutes(lastStart, plan.duration)}`;
 }
 
-/** 课块配色，按课程 id 轮转。取的是与主站色板同族、深浅适中、浅底上能看清的值 */
+/**
+ * 课块配色，按课程 id 轮转（B5 起换成莫兰迪色系）。
+ *
+ * 旧色板（#C8892A 金 / #EF8A56 橙 / #1E7A46 绿…）是给「深色描边 + 12% 淡底」那套画法用的：
+ * 颜色只负责勾一条边，块里还是纸色。现在块改成实心底，颜色本身就是块，
+ * 8 个高明度色块并排时饱和度必须压下来 —— 否则一屏看过去像色卡，不是课表。
+ *
+ * 明度统一落在 L* 70–78、饱和度 15–25%（莫兰迪的共同点：灰调、发闷、彼此不抢）。
+ * 取值的硬门槛是 A03：深墨 #241F18 压在每一格上最低 7.05:1，教室那行 #3B332A 最低 5.35:1，
+ * 都高于 4.5:1 的正文线（逐色实测见 campus/reviews/2026-11-06_课表B5莫兰迪配色.md）。
+ *
+ * 顺序按色相拉开：赭 → 橄榄 → 鼠尾草 → 青 → 蓝 → 紫 → 粉 → 米灰。
+ * 相邻 id 的课因此不会撞色，连上四节的那种块也不会和隔壁混淆。
+ */
 export const COURSE_COLORS = [
-  "#C8892A", "#7C9A54", "#EF8A56", "#2A5A8A",
-  "#875B10", "#1E7A46", "#8A5A0A", "#A03E28",
+  "#C9A990", "#ACB07E", "#A3BCA4", "#93B7B0",
+  "#9DB1C6", "#AFA6C2", "#CBA5A6", "#C2B49A",
 ] as const;
+
+/**
+ * 旧色板 → 新色板的迁移表（B5）。
+ *
+ * 颜色是跟着课程一起存在 localStorage 里的十六进制值，只改 `COURSE_COLORS` 的话
+ * 新课是新色、老用户的课表还是旧色，同一张表里两种风格并存。
+ * 这张表在 `normalizeSnapshot` 读档时把旧值换成新值 —— 一次读档完成迁移，用户不用做任何操作，
+ * 也不动旧键（回滚到旧版仍然是合法的旧色值）。
+ *
+ * 按**旧板下标一一对应**，不做"挑个近色"：旧板的橙#EF8A56 / 红#A03E28 在莫兰迪里没有真正的对应物，
+ * 硬配对反而会把两门原本区分明显的课配成同一个色。按下标走能保住「相邻 id 不同色」这个性质。
+ */
+export const LEGACY_COURSE_COLORS: Readonly<Record<string, string>> = {
+  "#c8892a": "#C9A990",
+  "#7c9a54": "#ACB07E",
+  "#ef8a56": "#A3BCA4",
+  "#2a5a8a": "#93B7B0",
+  "#875b10": "#9DB1C6",
+  "#1e7a46": "#AFA6C2",
+  "#8a5a0a": "#CBA5A6",
+  "#a03e28": "#C2B49A",
+};
+
+/**
+ * 任意来源的色值 → 一个合法的课块色。
+ *
+ * 三档：旧板的值换成莫兰迪；本身就是合法 hex 的原样返回（用户手改导入 JSON 时可能填自己的色）；
+ * 其它（空、拼错、"red"）退到第一个色，不让 UI 拿到一个画不出来的值。
+ *
+ * 必须在**所有**读档入口调用：旧的 `migrateLegacySchedule` 只覆盖 v1 迁移，
+ * v2 存档是直接 `readJson` 出来的（补 periods 那条路），漏了那里老用户就看不到新配色。
+ */
+export function normalizeCourseColor(value: unknown): string {
+  const raw = String(value ?? "").toLowerCase();
+  const mapped = LEGACY_COURSE_COLORS[raw] ?? raw;
+  // 注意 `i` 标志：新色板是大写十六进制（#C9A990），少了这个标志会把它们全判成非法值，
+  // 结果整张表都退回第一个色 —— 这一条曾经真的踩过（8 门课全变成同一个赭色）。
+  return /^#[0-9a-f]{6}$/i.test(mapped) ? mapped : COURSE_COLORS[0];
+}
 
 /**
  * 解析节次输入。
@@ -543,12 +595,10 @@ export function migrateLegacySchedule(raw: unknown): ScheduleSnapshot | null {
     const rawDay = Math.trunc(Number(record.day ?? 0)) || 0;
     const day = legacy ? normalizeLegacyDay(rawDay) : ((rawDay % 7) + 7) % 7;
 
-    const color = String(record.color ?? "");
-
     courses.push({
       id: Math.trunc(Number(record.id ?? 0)) || 0,
       name,
-      color: /^#[0-9a-f]{6}$/i.test(color) ? color : COURSE_COLORS[0],
+      color: normalizeCourseColor(record.color),
       day,
       sections,
       teacher: String(record.teacher ?? ""),
