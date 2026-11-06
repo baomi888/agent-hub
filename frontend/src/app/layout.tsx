@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import PwaRegister from "@/components/PwaRegister";
-import InstallBanner from "@/components/InstallBanner";
 import "./globals.css";
 
 const TITLE = "知穗Agent · 知识库 · 场景智能体 · 校园工具集";
@@ -75,7 +74,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body className="min-h-full">
         {children}
         <PwaRegister />
-        <InstallBanner />
+        {/* InstallBanner 不在这里：它必须挂在"已登录的首页"里面（app/page.tsx）。
+            挂在根布局会先出现在登录门上 —— 详见组件头部注释。 */}
         <div className="grain" aria-hidden="true" />
       </body>
     </html>

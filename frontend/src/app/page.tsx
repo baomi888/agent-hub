@@ -20,6 +20,7 @@ import { useKnowledge } from "@/lib/hooks/useKnowledge";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { detailToMessage } from "@/lib/errors";
 import AuthGate from "@/components/AuthGate";
+import InstallBanner from "@/components/InstallBanner";
 import AnnounceModal from "@/components/announce/AnnounceModal";
 import type { UiMessage } from "@/components/chat/types";
 import type { Grounding, RefSource, ToolEvent, WebSource } from "@/lib/types";
@@ -906,6 +907,12 @@ export default function Home() {
 
   return (
     <main className="workbench-main flex overflow-hidden">
+      {/* 「装到桌面」的首次提示。★ 刻意挂在这里而不是根布局：
+          根布局会在登录门出现之前就渲染，组件判定「可以弹」→ 立刻写下 60 天冷却，
+          等用户真登录进来就再也不弹了（线上实测，探针里 localStorage 里躺着一个
+          比登录更早的时间戳）。挂进已登录分支后，物理上不可能先于登录出现。
+          position:fixed 的浮层不受 main 的 flex 与 overflow:hidden 影响，不占位。 */}
+      <InstallBanner />
       <Sidebar
         sessions={sessions}
         activeSid={activeSid}
