@@ -158,6 +158,7 @@ export {
   requestWakeLock,
   releaseWakeLock,
   tryLockLandscape,
+  unlockOrientation,
   currentFullscreenElement,
   subscribeFullscreen,
   isFullscreenSnapshot,

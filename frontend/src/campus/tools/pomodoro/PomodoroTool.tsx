@@ -30,7 +30,6 @@ import { playFinishSound, primeAudio } from "../../logic/audio";
 import { DEFAULT_SOUND_PREFS, loadSoundPrefs, saveSoundPrefs } from "../../logic/soundPrefs";
 import { joinDuration } from "../../logic/pomodoro";
 import {
-  currentFullscreenElement,
   enterFullscreen,
   exitFullscreen,
   isFullscreenSnapshot,
@@ -38,6 +37,7 @@ import {
   requestWakeLock,
   subscribeFullscreen,
   tryLockLandscape,
+  unlockOrientation,
   type WakeLockLike,
 } from "../../logic/fullscreen";
 import {
@@ -58,7 +58,23 @@ import { dayKey, makeSessionId, mergeSessions, rangeOf, sortSessions, summarize,
 import { activeTasks, addTask, archiveTask, findTask, makeTask, makeTaskId, mergeTasks, renameTask, restoreTask, touchTask } from "../../logic/focusTask";
 import { syncAll, type SyncStatus } from "../../logic/focusSync";
 import { loadSessions, loadTasks, saveSessions, saveTasks } from "../../logic/focusStore";
+import { lockPageScroll } from "../../logic/scrollLock";
 import type { FocusDirection, FocusEndReason, FocusSession, FocusTask, SoundPrefs } from "../../types";
+
+/**
+ * 是不是「手机竖着」。
+ *
+ * 只在同时满足两点时才去锁横屏：粗指针（手指，不是鼠标）+ 当前是竖屏。
+ * 桌面宽屏不需要锁（锁了也没用，反而可能在某些实现里抛错）；
+ * 已经横着的手机也不需要（lock 是幂等的，但没必要多一次调用）。
+ */
+function isTouchPortrait(): boolean {
+  if (typeof window === "undefined") return false;
+  return (
+    window.matchMedia("(pointer: coarse)").matches &&
+    window.matchMedia("(orientation: portrait)").matches
+  );
+}
 
 /**
  * 两个入口的图形标记。
@@ -148,7 +164,21 @@ export default function PomodoroTool() {
    * 直接订阅浏览器的全屏状态，不自己拿一份 state 去追 —— 少一次同步就少一类 bug。
    */
   const stageFs = useSyncExternalStore(subscribeFullscreen, isFullscreenSnapshot, () => false);
+  /**
+   * 页内全屏：iPhone Safari 之类没有元素全屏 API 的环境，用 CSS 把这块铺满视口。
+   * 它和 `stageFs` 是**互斥的两条路**（先试真全屏，失败才落到这里），合起来就是「整屏」。
+   */
+  const [immersive, setImmersive] = useState(false);
   const stageRef = useRef<HTMLElement | null>(null);
+  /**
+   * 全屏宿主：一个**始终存在**的普通 div，专注视图渲染在它里面。
+   *
+   * 为什么不在视图本身请求全屏：`requestFullscreen` 必须在点击的同一个任务里发出去，
+   * 而视图是 `setStageOpen(true)` 之后才挂载的 —— 等它出现再请求，手势已经过期，
+   * 浏览器直接拒绝。这就是「要点两次全屏才进得去」的根因：第一次只是把视图铺开，
+   * 第二次才真正全屏。留一个常驻节点，第一次点击就能一步到位。
+   */
+  const stageHostRef = useRef<HTMLDivElement | null>(null);
   /** 云同步状态。`checking` 是首屏还没问过服务器时的样子 */
   const [sync, setSync] = useState<{ status: SyncStatus; message: string; at: number | null }>({
     status: "checking",
@@ -266,8 +296,16 @@ export default function PomodoroTool() {
       });
 
       setTimer(null);
-      // 一轮结束就退出全屏：完成弹窗要能被看见，用户也该从屏幕里出来
+      /*
+       * 一轮结束就退出整屏：完成弹窗要能被看见，用户也该从屏幕里出来。
+       *
+       * 这里必须**连同浏览器全屏一起退**：视图收起后宿主是个空盒子，
+       * 如果还挂在全屏里，屏幕上就是一片空白 —— 到点本来该提醒，结果比什么都不做更糟。
+       */
       setStageOpen(false);
+      setImmersive(false);
+      unlockOrientation();
+      void exitFullscreen();
 
       if (!shouldRecord(session)) {
         // 误触（点开又点掉）不写记录，否则「专注条数」和连续天数会被污染
@@ -358,48 +396,86 @@ export default function PomodoroTool() {
   }, [done]);
 
   /**
-   * 专注视图展开时**不碰全屏**。
-   *
-   * 之前这里一打开就 `requestFullscreen` + 锁横屏，理由是「沉浸」；实际用下来很霸道：
-   * 页面被整屏接管、预览窗被顶掉、想切个标签看统计都回不去。全屏应该是用户的一次选择，
-   * 不是打开视图的副作用。所以现在只做一件事 —— 把浏览器的全屏状态同步成 `stageFs`，
-   * 让按钮文案和「屏幕常亮」跟着它走。
-   *
-   * 收起视图时仍要兜底退出全屏：否则浏览器会停在一个没有地址栏的全屏态里。
+   * 页面被卸载时兜底退出全屏 / 解除横屏锁。
+   * 切去别的工具（组件卸载）时不移交这些状态，浏览器会停在「没有地址栏、还横着」的怪状态里。
    */
   useEffect(() => {
-    if (!stageOpen) return;
     return () => {
       void exitFullscreen();
+      unlockOrientation();
     };
-  }, [stageOpen]);
+  }, []);
 
   /**
-   * 全屏是个显式开关：点一下进、再点一下出。
+   * 页内全屏时锁住背后的页面。
    *
-   * 必须在点击事件里发 `requestFullscreen`（浏览器要求用户手势），所以不做自动重试；
-   * 进不去就静静留在页面内的专注视图，不弹错、不打断计时。
+   * 那层是 `position: fixed` 的覆盖层，底下的 `.campus-scroll` 还在，滚轮会穿透过去，
+   * 视觉上像是「专注页自己在动」。滚动锁沿用弹窗那一套（给 body 打类，由 CSS 收口）。
    */
-  async function toggleStageFullscreen() {
-    if (currentFullscreenElement() !== null) {
-      await exitFullscreen();
+  useEffect(() => {
+    if (!immersive) return;
+    return lockPageScroll();
+  }, [immersive]);
+
+  /**
+   * 计时卡上的「全屏」入口 —— 打开专注视图 + 立刻整屏。
+   *
+   * 只在计时中给：专注视图是用来「专心」的，不是用来看设置的。
+   *
+   * 以前这里只 `setStageOpen(true)`，真正的全屏在视图里的另一颗按钮上，
+   * 两颗按钮都叫「全屏」，第一次却没全屏 —— 用户要点两次才进得去。
+   *
+   * 顺序不能反：先拿常驻宿主节点，再在同一段同步代码里发 `requestFullscreen`。
+   * 真全屏请求失败（iPhone Safari、被权限策略拦住的 iframe）就退到页内全屏，
+   * 所以「点一下有整屏」在两种环境里都成立。想回到页面内的大视图，
+   * 从视图里点「退出全屏」即可，视图本身不会收起。
+   */
+  function handleFocusFullscreen() {
+    if (!timer) return;
+    setStageOpen(true);
+
+    const host = stageHostRef.current;
+    if (!host) {
+      setImmersive(true);
       return;
     }
 
-    const ok = await enterFullscreen(stageRef.current);
-    // 只有 Android Chrome 支持锁横屏，失败静默：用户自己转过来一样能用
-    if (ok) void tryLockLandscape();
+    void enterFullscreen(host).then((ok) => {
+      if (!ok) {
+        setImmersive(true);
+        return;
+      }
+      // 只有真全屏才谈得上锁横屏（Android Chrome 要求文档已全屏），且只在手机竖着时锁
+      if (isTouchPortrait()) void tryLockLandscape();
+    });
+  }
+
+  /** 退出整屏：两条路一起收，回到页面内的专注视图（不收起视图） */
+  async function exitFocusFullscreen() {
+    setImmersive(false);
+    unlockOrientation();
+    await exitFullscreen();
+  }
+
+  /** 视图里的「全屏 / 退出全屏」是个开关 */
+  function toggleFocusFullscreen() {
+    if (stageFs || immersive) {
+      void exitFocusFullscreen();
+      return;
+    }
+    handleFocusFullscreen();
   }
 
   /**
    * 真进全屏时才保持屏幕常亮。
    *
    * 只在页面内看计时没必要拦着锁屏 —— 那反而像「我的屏幕被占住了」。
+   * 页内全屏同样算「整屏专注」，一起纳入。
    * 浏览器在标签页不可见时会自动释放锁，切回来必须重新申请，所以这里是
    * 「申请 / 重申请」而不是一个开关。暂停时释放 —— 既然没在计时，就没必要常亮。
    */
   useEffect(() => {
-    if (!stageOpen || !stageFs) return;
+    if (!stageOpen || !(stageFs || immersive)) return;
 
     let lock: WakeLockLike | null = null;
     let stopped = false;
@@ -425,7 +501,7 @@ export default function PomodoroTool() {
       document.removeEventListener("visibilitychange", onVisible);
       void releaseWakeLock(lock);
     };
-  }, [stageOpen, stageFs, running]);
+  }, [stageOpen, stageFs, immersive, running]);
 
   function persistTasks(next: FocusTask[]) {
     setTasks(next);
@@ -551,20 +627,12 @@ export default function PomodoroTool() {
   function handleReset() {
     setTimer(null);
     setZeroed(false);
+    // 和 finish 同理：视图一收，全屏里就只剩一个空盒子
     setStageOpen(false);
+    setImmersive(false);
+    unlockOrientation();
+    void exitFullscreen();
     setNotice({ text: "已重置，本轮没有记录。", done: false });
-  }
-
-  /**
-   * 打开专注视图。
-   *
-   * 只在计时中给入口：专注视图是用来「专心」的，不是用来看设置的。
-   * 它只是页面里的一块大区域 —— 标签栏、统计、任务列表都还在，随时能切走；
-   * 想要真的整屏，再点视图里的「全屏」，那是另一个动作。
-   */
-  function handleStageOpen() {
-    if (!timer) return;
-    setStageOpen(true);
   }
 
   /** 导入备份：任务与会话都只补不改，落库后统计立即反映新数据 */
@@ -580,7 +648,13 @@ export default function PomodoroTool() {
     void runSync();
   }
 
-  const closeStage = useCallback(() => setStageOpen(false), []);
+  const closeStage = useCallback(() => {
+    setStageOpen(false);
+    setImmersive(false);
+    unlockOrientation();
+    // 页内全屏没有浏览器态可退，但要兜住「浏览器全屏里按收起」这条路
+    void exitFullscreen();
+  }, []);
 
   /** 时长改动：两个输入框与快捷芯片都走这里，统一夹取区间 */
   function handleDuration(hours: number, mins: number) {
@@ -627,26 +701,54 @@ export default function PomodoroTool() {
         onSync={() => void runSync()}
       />
 
-      {stageOpen && timer && (
-        <FocusStage
-          containerRef={stageRef}
-          taskName={activeTask?.name ?? null}
-          category={activeTask?.category ?? "未分类"}
-          direction={direction}
-          display={display}
-          elapsed={elapsed}
-          percent={percent}
-          running={running}
-          paused={paused}
-          now={nowTick}
-          fullscreen={stageFs}
-          onPause={handlePause}
-          onResume={handleResume}
-          onStop={handleStop}
-          onToggleFullscreen={() => void toggleStageFullscreen()}
-          onExit={closeStage}
-        />
-      )}
+      {/*
+        全屏宿主。**它始终在页面上**（收起时是个空盒子，高度为 0），专注视图渲染在它里面。
+
+        存在的唯一理由是「一次点击就全屏」：`requestFullscreen` 必须在点击的同一段任务里
+        同步发出，而视图本身要等 `setStageOpen(true)` 之后才挂载 —— 拿它当请求目标，
+        必然要等第二次点击。改成对着这个常驻节点请求，第一次点击就能进。
+      */}
+      <div className="campus-stage-host" ref={stageHostRef}>
+        {stageOpen && timer && (
+          <FocusStage
+            containerRef={stageRef}
+            taskName={activeTask?.name ?? null}
+            category={activeTask?.category ?? "未分类"}
+            direction={direction}
+            display={display}
+            elapsed={elapsed}
+            percent={percent}
+            running={running}
+            paused={paused}
+            now={nowTick}
+            fullscreen={stageFs || immersive}
+            immersive={immersive}
+            onPause={handlePause}
+            onResume={handleResume}
+            onStop={handleStop}
+            onToggleFullscreen={toggleFocusFullscreen}
+            onExit={closeStage}
+          />
+        )}
+
+        {/*
+          完成提醒必须挂在宿主**里面**。
+          浏览器全屏时只渲染全屏元素及其后代，挂在外面的弹窗等于没渲染 ——
+          整屏专注跑完一轮，到点却什么都不出现，是最不能接受的那种静默失败。
+          页内全屏下它也一样在这层里，z-index 70 高于整屏层的 60，盖得住。
+        */}
+        {done && (
+          <FinishDialog
+            taskName={done.taskName}
+            category={done.category}
+            seconds={done.seconds}
+            todayCount={todaySummary?.sessionCount ?? 0}
+            todaySeconds={todaySummary?.totalSeconds ?? 0}
+            onAgain={handleAgain}
+            onClose={closeDone}
+          />
+        )}
+      </div>
 
       {/* 专注视图已经放大了大钟和操作，这块就收起，免得同屏摆两个计时 */}
       {!(stageOpen && timer) && (
@@ -676,7 +778,7 @@ export default function PomodoroTool() {
             onResume={handleResume}
             onStop={handleStop}
             onReset={handleReset}
-            onFullscreen={handleStageOpen}
+            onFullscreen={handleFocusFullscreen}
           />
 
           <p className="campus-card-note campus-pomo-notice" aria-live="polite">
@@ -802,18 +904,6 @@ export default function PomodoroTool() {
           </EntryFold>
         )}
       </div>
-
-      {done && (
-        <FinishDialog
-          taskName={done.taskName}
-          category={done.category}
-          seconds={done.seconds}
-          todayCount={todaySummary?.sessionCount ?? 0}
-          todaySeconds={todaySummary?.totalSeconds ?? 0}
-          onAgain={handleAgain}
-          onClose={closeDone}
-        />
-      )}
     </div>
   );
 }

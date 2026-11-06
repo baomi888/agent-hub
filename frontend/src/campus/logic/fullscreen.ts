@@ -6,12 +6,15 @@
  * 横屏锁不上就提示用户手动转 —— 功能可以打折，但不能因为一个 API 不支持就整块用不了。
  *
  * 支持度现状（2026 年）：
- *  - 全屏：桌面浏览器、Android Chrome 均支持；iOS Safari 只支持元素全屏，iPhone 上不支持 `orientation.lock`
+ *  - 全屏：桌面浏览器、Android Chrome 均支持；**iPhone Safari 至今不支持元素全屏**
+ *    （只允许 `<video>` 全屏，`fullscreenEnabled` 与 webkit 前缀都为假）
  *  - 屏幕常亮：Chrome / Edge / Safari 16.4+ 支持；iOS Safari 不支持
  *  - 横屏锁定：**只有 Android Chrome 支持**，iOS 完全没有这个 API
  *
- * 因此「横屏」在本项目里只能做到「优先按横屏排版 + 提示用户自己转」，
- * 不能强制旋转 —— 与 `campus/docs/06` 第 2.3 节的结论一致。
+ * 因此本模块只负责「能用就用」：全屏失败时由 FocusStage 退到**页内全屏**
+ * （`position: fixed` 铺满视口 + 安全区适配），横屏锁不上就优先按横屏排版、提示用户自己转。
+ * 也就是说 iPhone 上「全屏」照样是能按的，只是少了浏览器那一层系统 UI —— 与
+ * `campus/docs/06` 第 2.3 节的结论一致。
  */
 
 /** Wake Lock 句柄。只用到 release，其余字段按需扩展 */
@@ -38,6 +41,7 @@ type WakeLockNavigator = Navigator & {
 
 type OrientationLockable = ScreenOrientation & {
   lock?: (orientation: "landscape" | "portrait") => Promise<void>;
+  unlock?: () => void;
 };
 
 /** 当前是否已在全屏（含各厂商前缀） */
@@ -48,10 +52,14 @@ export function currentFullscreenElement(): Element | null {
 }
 
 /**
- * 进入全屏。返回是否成功 —— 调用方据此决定要不要显示「已进入全屏」的提示。
+ * 进入全屏。返回是否成功 —— 调用方据此决定要不要退到「页内全屏」（见 FocusStage）。
  *
  * 必须由用户手势触发（点击），否则浏览器会拒绝；这里不做排队重试，
- * 失败了就让用户再点一次，比"偷偷重试"更好理解。
+ * 失败就降级，比"偷偷重试"更好理解。
+ *
+ * `request()` 的 Promise 在**过渡动画结束后**才 resolve，而 `fullscreenElement`
+ * 由 fullscreenchange 事件写入，两者之间可能差一个任务队列 —— 立刻读会读到 null，
+ * 把一次成功的全屏误判成失败（然后又被叠上一层 CSS 全屏，出现双份）。所以先等一帧再确认。
  */
 export async function enterFullscreen(el: HTMLElement | null): Promise<boolean> {
   if (!el) return false;
@@ -66,10 +74,13 @@ export async function enterFullscreen(el: HTMLElement | null): Promise<boolean> 
 
   try {
     await request();
-    return currentFullscreenElement() !== null;
   } catch {
     return false;
   }
+
+  if (currentFullscreenElement() !== null) return true;
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  return currentFullscreenElement() !== null;
 }
 
 /** 退出全屏。本来就不在全屏时什么都不做（不报错） */
@@ -149,6 +160,10 @@ export async function releaseWakeLock(lock: WakeLockLike | null): Promise<void> 
 /**
  * 尝试锁定横屏。只有 Android Chrome 支持，iOS 一定失败。
  * 返回值只用于内部判断，界面上不区分「锁上了」和「用户自己转了」。
+ *
+ * 注意：`screen.orientation.lock()` 在 iOS 上连方法都不存在，
+ * 而 Android Chrome 要求**文档已进入全屏**才给锁 —— 所以调用顺序必须是
+ * 「先进全屏 → 再锁横屏」，反过来一定失败。
  */
 export async function tryLockLandscape(): Promise<boolean> {
   if (typeof screen === "undefined") return false;
@@ -160,6 +175,23 @@ export async function tryLockLandscape(): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * 解除横屏锁，回到「用户自己转」的状态。
+ *
+ * 锁横屏是作用在**整个页面**上的：退出全屏时不解除，用户回到页面内视图、
+ * 或者切去别的标签，屏幕还横着，看起来就像这个站把人锁住了。
+ * 有些实现里没有 unlock，直接忽略。
+ */
+export function unlockOrientation(): void {
+  if (typeof screen === "undefined") return;
+  const orientation = screen.orientation as OrientationLockable | undefined;
+  try {
+    orientation?.unlock?.();
+  } catch {
+    // 本来就没锁过、或浏览器不支持，都走这里，忽略
   }
 }
 
