@@ -69,7 +69,7 @@ const IOS: InstallGuide = {
       desc: "弹出的白色面板第一项就是「共享」——它就是分享面板的入口，苹果把它翻译成了共享。",
       fig: {
         shot: "/install/ios-2-share.webp",
-        w: 517,
+        w: 492,
         h: 640,
         alt: "Safari 的「⋯」菜单，第一项「共享」被金色方框圈出",
       },
@@ -188,8 +188,8 @@ const DESKTOP: InstallGuide = {
       desc: "装好后浏览器弹「已安装应用」。想让它出现在桌面就勾「创建桌面快捷方式」，想固定到任务栏就勾第一项，然后点「允许」。",
       fig: {
         shot: "/install/win-3-allow.webp",
-        w: 360,
-        h: 550,
+        w: 346,
+        h: 546,
         alt: "Edge 的「已安装应用」对话框，底部「允许」按钮被金色方框圈出",
       },
       caption: "勾好选项，点这个「允许」",
