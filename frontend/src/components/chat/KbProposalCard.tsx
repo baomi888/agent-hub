@@ -25,6 +25,7 @@
 // ⚠️ 当前状态：**组件已写好但尚未挂载**（page.tsx 还没处理 `kb_proposal` 事件）。
 //    等后端 SSE 事件上线，在 done 之前的 case 里渲染它即可，组件本身不用改。
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import type { ApiStatusError } from "@/lib/api";
 import type { KbProposal, KbProposalConfirmResult } from "@/lib/types";
@@ -188,9 +189,10 @@ export default function KbProposalCard({
           </p>
         )}
         <p className="kbp-links">
-          <a href="/knowledge" className="kbp-link">
+          {/* 用 Link 不用 <a>：知识库是站内页，<a> 会触发整页刷新 */}
+          <Link href="/knowledge" className="kbp-link">
             去资料库看看
-          </a>
+          </Link>
         </p>
       </div>
     );

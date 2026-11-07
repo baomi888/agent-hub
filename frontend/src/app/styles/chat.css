@@ -169,6 +169,10 @@
   flex: none;
   transition: var(--t-color);
 }
+.tools-link .tools-ico {
+  display: inline-flex;
+  flex: none;
+}
 .tools-link svg {
   flex: none;
   color: var(--text-3);
@@ -187,22 +191,61 @@
   flex: none;
 }
 
-/* 手机：这一行要塞 2 颗能力开关 + 反馈 + 工具集 + 齿轮。
-   实测 390px 内容区只有 324px，四颗药丸 + 齿轮要 341px 上下 ——
-   再怎么收内边距也放不进去（360px 更差 10px 左右），硬挤会横向溢出，
-   靠自然折行又会把齿轮单独甩到第二行。所以这里**显式分成两行**：
-     第一行：检索 / 智能联网  ........ 齿轮
-     第二行：反馈 / 工具集
-   靠 order 排：齿轮提到组前面（order 2），组独占一整行（flex-basis 100%）。
-   ★ 不用"宽度刚好够就一行"的写法：差 2–10px 的时候会忽一行忽两行，
-     换个字体就变样，那种脆的临界值不如固定两行。 */
+/* 手机：**一行放完**（2026-11-07 晚二改，推翻 10-30 的两行方案）。
+   两行方案的来由：390px 内容区只有 ~324px，四颗药丸 + 齿轮要 340px 上下，
+   硬挤会横向溢出，自然折行又会把某颗单独甩下去，所以当时显式排成
+   「检索 智能联网 ⚙ / 反馈 工具集」两行。
+   为什么改回去：两行把输入区顶得很高，手机上要占掉两排按钮的高度才够到
+   输入框，用户反馈"不要占两层"。
+   一行能成立靠三件事（数字都是在 360/390 实测过的）：
+     · 齿轮下架（.composer-bar .gear 隐藏）：它是「检索参数 / 精确段数」这种
+       调试向的微调，桌面端留着；手机上少这颗正好省出 24px + 间距。
+       ★ 不是删功能，是从手机界面里撤掉入口；桌面端行为完全不变。
+     · 组不再独占一行（flex: 0 1 auto），间距统一收到 6px。
+     · 四颗药丸的内边距各退一步（见本文件 ≤420 与 ≤380 两档）。
+   ★ 仍然守住一条：宁可再收内边距，也不让文字换行或截断 ——
+     药丸里的字被切成「智能联…」比多占一行更难看。 */
 @media (max-width: 560px) {
-  .composer-bar .gear {
-    order: 2;
+  .composer-bar {
+    flex-wrap: nowrap;
+    gap: 6px;
   }
   .composer-acts {
-    order: 3;
-    flex: 1 0 100%;
+    flex: 0 1 auto;
+    gap: 6px;
+  }
+  .composer-bar .gear {
+    display: none;
+  }
+  .tools-link {
+    padding: 0 9px;
+    gap: 5px;
+  }
+  .fb-mode-cta {
+    padding: 0 8px;
+  }
+}
+/* 360px 一档（多数安卓机）：实测这一行要 302px，而内容区只有 294px ——
+   差 8px 就会横向溢出（数字来自 .workbuddy/pp/measure_composer.js，不是估的）。
+   摘掉「工具集」的图标换这 20px：它还是能点开工具集，只是从"图标 + 字"
+   变成纯字药丸，和旁边的「反馈」同一形态，不显突兀。
+   为什么不摘「反馈」的呼吸点：那个点是"这里能说话"的唯一暗示。
+   ★ 隐藏的是包图标的那层 span，不是 svg —— CornIcon 的 svg 带内联 display:block。 */
+@media (max-width: 380px) {
+  .tools-link {
+    padding: 0 9px;
+  }
+  .tools-link .tools-ico {
+    display: none;
+  }
+}
+/* 320px（iPhone SE 一代那类老机器）：四颗药丸怎么收都放不下（要 302px，
+   可用只有 254px）。这里**整颗工具集撤掉** —— 320px 上优先保住输入框宽度和
+   两颗能力开关；工具集在左栏抽屉里仍有入口，不是功能没了。
+   不改成"只留图标"：15px 的图标单独站着会被读成一个装饰点。 */
+@media (max-width: 340px) {
+  .tools-link {
+    display: none;
   }
 }
 

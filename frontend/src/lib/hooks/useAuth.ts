@@ -2,13 +2,25 @@
 
 // 登录态：首屏确认"我是谁"，以及登录失效后把界面收回登录门。
 //
-// 两件事都在这里闭环：
-//   1) 刷新页面靠 /api/auth/me/ 找回身份（HttpOnly Cookie，JS 读不到 token）
-//   2) 任何接口返回 401 → api.ts 广播 UNAUTHORIZED_EVENT → 这里把 user 置空。
-//      不这么做的话，登录过期后用户点什么都是"没反应"：请求其实失败了，
-//      只是失败被埋在某个 hook 的 catch 里。
-import { useCallback, useEffect, useRef, useState } from "react";
-import { AUTHORIZED_EVENT, UNAUTHORIZED_EVENT, api } from "@/lib/api";
+// 2026-11-07 起这里只是 lib/authStore 的一层薄壳 —— 状态和请求都搬进单例了，
+// 原因见那个文件的头注释（跨 layout 跳转时新挂载的实例会重新 loading，
+// 整屏闪一下「正在确认登录状态」，观感就是"每次点导航都在刷新"）。
+//
+// 对调用方完全兼容：形状还是 { me, loading, allowSignup, refresh, login, register, logout }，
+// 老的二十来个调用点一行都不用改。唯一的行为差别是好的那一面：
+//   · refresh() 现在会让**所有**页面一起变（改完昵称，侧栏、设置页、工作台同帧更新）；
+//   · 退出登录后其它页面立刻读到 null，不会再各自探活一遍。
+import { useEffect, useSyncExternalStore } from "react";
+import {
+  ensureAuth,
+  getAuthSnapshot,
+  getServerAuthSnapshot,
+  login as storeLogin,
+  logout as storeLogout,
+  refreshAuth,
+  register as storeRegister,
+  subscribeAuth,
+} from "@/lib/authStore";
 import type { MeOut } from "@/lib/types";
 
 export interface AuthState {
@@ -24,81 +36,22 @@ export interface AuthState {
 }
 
 export function useAuth(): AuthState {
-  const [me, setMe] = useState<MeOut | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [allowSignup, setAllowSignup] = useState(true);
-  // 防止"先发的请求后回"覆盖后发的结论（StrictMode 下首屏 effect 会跑两次）
-  const aliveRef = useRef(true);
+  const snap = useSyncExternalStore(subscribeAuth, getAuthSnapshot, getServerAuthSnapshot);
 
+  // 只有"整页刚打开、还没有结论"时才真发请求；页面内跳转时这里是空转。
+  // 放在宏任务里发，避免 effect 体里同步触发的 setState 被判成级联渲染。
   useEffect(() => {
-    aliveRef.current = true;
-    return () => {
-      aliveRef.current = false;
-    };
-  }, []);
-
-  const refresh = useCallback(async () => {
-    try {
-      const data = await api.me();
-      if (aliveRef.current) setMe(data);
-    } catch {
-      if (aliveRef.current) setMe(null);
-    } finally {
-      if (aliveRef.current) setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    // allow_signup 单独拉：它是公开端点，未登录也能读，
-    // 登录页要先知道这件事才能决定渲染不渲染"注册"入口
-    api
-      .authConfig()
-      .then((c) => {
-        if (aliveRef.current) setAllowSignup(c.allow_signup);
-      })
-      .catch(() => {
-        /* 读不到就按"允许"兜底，注册失败时后端还会再挡一层 */
-      });
-    // 探活放到下一个宏任务：直接在 effect 里 setState 会被 React 编译器
-    // 判成"级联渲染"（eslint react-hooks/immutability）
-    const t = window.setTimeout(() => void refresh(), 0);
+    const t = window.setTimeout(() => ensureAuth(), 0);
     return () => window.clearTimeout(t);
-  }, [refresh]);
-
-  useEffect(() => {
-    const onExpired = () => setMe(null);
-    window.addEventListener(UNAUTHORIZED_EVENT, onExpired);
-    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onExpired);
   }, []);
 
-  useEffect(() => {
-    // 与 401 的「收回」对称：登录/注册成功（凭证建立）时刷新。
-    // 每个 useAuth 实例各持一份状态，登录动作只发生在发起登录的那个实例上
-    // （例如 ConsoleShell 的）—— 没有这个监听，同屏其它实例（以及由它们
-    // 驱动的页面级数据加载）会一直停在「未登录」的旧结论上，直到手动刷新。
-    const onAuthorized = () => void refresh();
-    window.addEventListener(AUTHORIZED_EVENT, onAuthorized);
-    return () => window.removeEventListener(AUTHORIZED_EVENT, onAuthorized);
-  }, [refresh]);
-
-  const login = useCallback(async (username: string, password: string) => {
-    await api.login(username, password);
-    await refresh();
-  }, [refresh]);
-
-  const register = useCallback(async (username: string, password: string) => {
-    await api.register(username, password);
-    await refresh();
-  }, [refresh]);
-
-  const logout = useCallback(async () => {
-    try {
-      await api.logout();
-    } catch {
-      /* 退出失败也要清本地：Cookie 可能已经过期了 */
-    }
-    setMe(null);
-  }, []);
-
-  return { me, loading, allowSignup, refresh, login, register, logout };
+  return {
+    me: snap.me,
+    loading: snap.loading,
+    allowSignup: snap.allowSignup,
+    refresh: refreshAuth,
+    login: storeLogin,
+    register: storeRegister,
+    logout: storeLogout,
+  };
 }

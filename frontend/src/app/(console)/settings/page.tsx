@@ -26,6 +26,7 @@ import FeedbackCard from "@/components/FeedbackCard";
 import TagPicker from "@/components/profile/TagPicker";
 import { Callout, NotReady, Seg, SkeletonLines, Switch } from "@/components/console/ui";
 import { api } from "@/lib/api";
+import { logout as storeLogout } from "@/lib/authStore";
 import { openGuide } from "@/lib/guide";
 import { useAuth } from "@/lib/hooks/useAuth";
 import {
@@ -186,13 +187,12 @@ export default function SettingsPage() {
   }, []);
 
   const logout = useCallback(async () => {
-    try {
-      await api.logout();
-    } catch {
-      /* 退出失败也要回工作台：Cookie 可能已经过期 */
-    }
+    // 走 authStore 的 logout，不直接 api.logout：
+    // 单例里那份 me 必须一起清掉，否则跳到 "/" 的那一瞬工作台会先按"已登录"
+    // 渲染出来（缓存里的旧身份），等下一个接口 401 才收回 —— 正好是这次要消灭的闪。
+    await storeLogout();
     // 用路由跳转而不是 window.location：整页刷新会丢掉 Back 历史。
-    // 登出后回到工作台，那里的 useAuth 会重新探活 → 拿不到身份 → 自然收回登录门。
+    // 回工作台后 useAuth 读到的是 null → 直接给落地页。
     router.push("/");
     router.refresh();
   }, [router]);

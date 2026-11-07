@@ -4,6 +4,7 @@
 // 2026-09 重构：toast/偏好/会话/知识库各域逻辑拆到 lib/hooks/*，
 // 本文件只保留：断点与主题、抽屉管理、聊天流（SSE）、联网建库编排、布局
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useRouter } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
 import ChatArea, { type ChatAttachment } from "@/components/ChatArea";
 import KnowledgePanel from "@/components/KnowledgePanel";
@@ -76,6 +77,7 @@ function subscribeTheme(cb: () => void) {
 
 export default function Home() {
   // ---- 各域 hooks ----
+  const router = useRouter();
   const { toasts, showToast } = useToast();
   const auth = useAuth();
   const prefs = usePrefs();
@@ -905,7 +907,7 @@ export default function Home() {
   }
 
   return (
-    <main className="workbench-main flex overflow-hidden">
+    <main className="workbench-main page-fade flex overflow-hidden">
       {/* 「装到桌面」的首次提示。★ 刻意挂在登录态确定之后（这里或上面的登录门分支），
           不挂根布局：根布局会在登录门出现之前就渲染，组件判定「可以弹」→
           立刻写下 60 天冷却，等用户真登录进来就再也不弹了（线上实测，探针里
@@ -921,7 +923,10 @@ export default function Home() {
         }}
         onCreate={createSession}
         onOpenTemplates={() => {
-          window.location.href = "/templates";
+          // 曾经是 window.location.href —— 那是**整页刷新**：浏览器白一帧、
+          // 重新下载整包 JS、再重新探活。模板广场本来就在同一个 Next 应用里，
+          // 走路由跳转才有"页面被换掉"而不是"应用被重启"的观感。
+          router.push("/templates");
         }}
         onRename={renameSession}
         onDelete={deleteSession}

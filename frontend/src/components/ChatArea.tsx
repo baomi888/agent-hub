@@ -7,6 +7,7 @@
 // 本文件只保留主组件（顶栏 + 欢迎页 + 消息区 + 输入区）。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import MascotLogo from "./chat/MascotLogo";
 import CornIcon from "./CornIcon";
 import { api } from "@/lib/api";
@@ -202,6 +203,7 @@ export default function ChatArea({
   onOpenUsage,
   userId = null,
 }: Props) {
+  const router = useRouter();
   const [input, setInput] = useState("");
   const [showParams, setShowParams] = useState(false);
   // 「自己填」展开：想直接敲数字的少数人才会点
@@ -733,7 +735,9 @@ export default function ChatArea({
   const handleIntroEntry = (key: string) => {
     switch (key) {
       case "template":
-        window.location.href = "/templates";
+        // 走路由跳转，不用 window.location.href：后者是整页刷新，
+        // 浏览器会白一帧再重新加载整个应用（同一个 Next 应用内没必要）。
+        router.push("/templates");
         break;
       case "tools":
         window.open(TOOLS_URL, "_blank", "noopener,noreferrer");
@@ -1160,7 +1164,11 @@ export default function ChatArea({
             </button>
             {/* 工具集：GPA / 番茄钟 / 课程表 / 单词卡 / 倒计时 / 抽签，独立单页且免登录。
                 title 里保留全名 —— 胶囊上只写「工具集」（和左边导航同一个名字），
-                完整的「校园工具集」留给落地页和那一页自己的标题。 */}
+                完整的「校园工具集」留给落地页和那一页自己的标题。
+                ★ 图标和文字各包一层 span：360px 上四颗药丸并排放不下，要单独摘掉图标
+                  （见 chat.css 的 ≤380 一档）。直接对 svg 写 display:none 不管用 ——
+                  CornIcon 的 svg 自带内联 style="display:block"，内联样式优先于样式表，
+                  这个坑 10-31 在「只留圆点」那版上踩过一次。 */}
             <a
               href={TOOLS_URL}
               target="_blank"
@@ -1169,8 +1177,10 @@ export default function ChatArea({
               aria-label="工具集：GPA 计算、番茄钟、课程表（免登录，独立页，新开标签）"
               title="工具集：GPA 计算 · 番茄钟 · 课表……（免登录，独立页）"
             >
-              <CornIcon name="tools" className="h-[15px] w-[15px]" />
-              工具集
+              <span className="tools-ico">
+                <CornIcon name="tools" className="h-[15px] w-[15px]" />
+              </span>
+              <span className="tools-txt">工具集</span>
             </a>
           </div>
           <button

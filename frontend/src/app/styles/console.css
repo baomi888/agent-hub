@@ -182,6 +182,30 @@
   }
 }
 
+/* ---------- 首页工作台的进场（page.tsx 里 <main class="workbench-main page-fade">）----------
+   为什么不直接用 .page-enter：那一条带了 2px 位移，而工作台里挂着一整排
+   position:fixed 的浮层（装到桌面提示、更新公告、上手说明、反馈弹窗）。
+   transform 在动画期间会把这些浮层的定位基准改成这个 main —— 只差 2px，
+   但它们自己也在播入场动画，两个位移叠起来看得出抖。
+   所以这里只动透明度：opacity 只创建层叠上下文，不创建 containing block。
+   时长比 .page-enter 更短（140ms）：工作台体量大，拖长了会显得"卡"。 */
+.page-fade {
+  animation: page-fade-in 0.14s ease-out backwards;
+}
+@keyframes page-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .page-fade {
+    animation: none;
+  }
+}
+
 /* ---------- 按钮（原型 .btn 系列；裸 .btn 在既有 11 个表里未被占用）---------- */
 .btn {
   display: inline-flex;
