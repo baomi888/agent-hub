@@ -399,6 +399,44 @@
   border: 0;
 }
 
+/* ---------- 嵌进控制台的那一份（设置 → 装到桌面 → /settings/install）----------
+   同一个 TourSteps，整页版靠 .tour-sheet 给边距，嵌进 .card 后边距由卡片自己给，
+   所以这里只做两件事：去掉 FAQ 的自带内边距、给入口链接一条分隔线。 */
+.tour-faq.is-embedded {
+  margin-top: 0;
+  padding: 0;
+}
+.tour-faq.is-embedded > h2 {
+  display: none; /* 页面里已经有 .sec-label「常见问题」，不要两个标题 */
+}
+
+/* 设置页卡片底部那条「看分步教程」——整行可点，右侧一个金箭头 */
+.install-more {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  margin-top: 12px;
+  padding-top: 11px;
+  border-top: 1px dashed var(--line);
+  font-size: var(--fs-md);
+  color: var(--accent-ink);
+  text-decoration: none;
+  transition: var(--t-color);
+}
+.install-more:hover,
+.install-more:focus-visible {
+  text-decoration: underline;
+  text-decoration-color: var(--accent-line);
+  text-underline-offset: 3px;
+}
+.install-more .arrow {
+  /* 紧跟在文字后面，不做右对齐：这不是列表行而是"一行可点的提示"，
+     箭头被推到卡片最右边会让人以为要点那里 */
+  margin-left: 1px;
+  color: var(--accent);
+}
+
 @media (max-width: 560px) {
   .tour {
     padding: 8px;

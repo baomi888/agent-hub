@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   detectPlatform,
   isInstalled,
@@ -146,8 +146,15 @@ const getCanPrompt = (): boolean => !!window.__baomiInstallPrompt;
 function Banner({ onClose }: { onClose: () => void }) {
   const platform = useSyncExternalStore(subscribePwa, getPlatform, () => "other" as Platform);
   const canPrompt = useSyncExternalStore(subscribePwa, getCanPrompt, () => false);
-  // 分步教程是独立页面（/install），不在提示条里展开：一张图缩到 200px 就看不清
+  // 教程页有两个，按"在不在登录页"分流：
+  //   · 首页 = 已登录 → /settings/install，应用内那一页，左导航还在
+  //     （公开页 /install 是独立页，左导航会消失，从应用里点过去就像退出了）
+  //   · 登录页 → /install。注意 eligible 里有 `pathname !== "/"` 的守卫，
+  //     所以登录页那份（app/login/page.tsx 挂的）当前根本不会显示，这一支是保险：
+  //     将来若放开到登录页，未登录的人去 /settings/install 只会被登录门弹回来。
   const router = useRouter();
+  const pathname = usePathname();
+  const tutorial = pathname?.startsWith("/login") ? "/install" : "/settings/install";
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -164,7 +171,7 @@ function Banner({ onClose }: { onClose: () => void }) {
   const openGuide = () => {
     // 先记账再跳走：跳页会卸载本组件，来不及等 CONFIRM_DELAY
     markShown();
-    router.push("/install");
+    router.push(tutorial);
   };
 
   const onAction = async () => {

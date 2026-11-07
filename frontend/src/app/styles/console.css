@@ -1164,10 +1164,11 @@ textarea.input {
   .console-nav {
     border-right: none;
     border-bottom: 1px solid var(--line);
-    /* 手机上这块导航是"每次都要占的固定成本"：8 个入口按 3 列排是 3 行，
-       加上品牌区吃掉首屏三分之一（390×844 实测约 270px），真正的内容要往下滚才看得到。
-       改 4 列 2 行，并把品牌区和条目高度压掉一档 —— 省下的是首屏可见内容。
-       4 列在 390px 下每列约 83px，"每日委托""学习路径"这种 4 字标签放得下。 */
+    /* 手机上这块导航是"每次都要占的固定成本"，所以一直想用列数换行数。
+       现在是 9 个入口，4 列排出来是 2 行 + 最后一项孤零零一行，本来就要变 3 行；
+       而 4 列在 390px 下每列约 83px，5 字的「校园工具集」放不下会折成
+       「校园工具 / 集」两行，把整块导航撑高。改 3 列：每列约 111px，
+       5 字标签一行放得下，9 项正好 3 行排满，不留孤行。 */
     padding: var(--space-10);
   }
   .nav-brand {
@@ -1183,7 +1184,7 @@ textarea.input {
   }
   .console-nav nav {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: var(--space-4);
     padding-bottom: 0;
   }
@@ -1194,6 +1195,8 @@ textarea.input {
     gap: var(--space-5);
     padding: var(--space-7) var(--space-4);
     font-size: var(--fs-sm);
+    /* 标签一律不许折行：折行会让某一行比别的行高，整块网格看着是歪的 */
+    white-space: nowrap;
   }
   .console-nav nav .nav-item svg {
     width: 16px;

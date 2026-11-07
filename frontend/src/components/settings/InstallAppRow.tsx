@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useSyncExternalStore } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   detectPlatform,
@@ -22,25 +23,29 @@ const getPlatform = (): Platform => detectPlatform();
 const getInstalled = (): boolean => isInstalled();
 const getCanPrompt = (): boolean => !!window.__baomiInstallPrompt;
 
+/** 应用内教程页。**不要**指向公开页 /install —— 那是独立页，左导航会消失，
+ *  从设置点进去就像退出了应用（详见 (console)/settings/install/page.tsx 顶部注释） */
+const TUTORIAL = "/settings/install";
+
 export default function InstallAppRow() {
   const platform = useSyncExternalStore(subscribePwa, getPlatform, () => "other" as Platform);
   const installed = useSyncExternalStore(subscribePwa, getInstalled, () => false);
   const canPrompt = useSyncExternalStore(subscribePwa, getCanPrompt, () => false);
 
-  // 分步教程在独立页 /install（不要求登录，可以单独发给别人）
+  // 分步教程在应用内子页（左导航还在），浏览器不支持一键安装时直接带过去
   const router = useRouter();
   const [busy, setBusy] = useState(false);
 
   const onAction = async () => {
     if (!canPrompt) {
-      router.push("/install");
+      router.push(TUTORIAL);
       return;
     }
     setBusy(true);
     await promptInstall();
     setBusy(false);
     // 不管用户点没点「安装」，都别继续下一步 —— 没装成功就把他送到分步教程
-    if (!isInstalled()) router.push("/install");
+    if (!isInstalled()) router.push(TUTORIAL);
   };
 
   return (
@@ -68,6 +73,15 @@ export default function InstallAppRow() {
           </>
         )}
       </p>
+
+      {/* 教程入口常显：已安装的人也会要（重装、教室友、换了新手机），
+          之前这里只剩「已安装」两个字，等于把这批人挡在外面 */}
+      <Link href={TUTORIAL} className="install-more">
+        <span>看分步教程：电脑 / 安卓 / 苹果</span>
+        <span className="arrow" aria-hidden="true">
+          ›
+        </span>
+      </Link>
     </div>
   );
 }
