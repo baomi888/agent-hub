@@ -95,6 +95,43 @@
   }
 }
 
+/* ---------- 返回栏（独立页专用，2026-11-07） ---------- */
+
+/*
+ * 这一页不套控制台外壳，而桌面快捷方式打开的是 PWA 独立窗口，里面没有
+ * 浏览器后退键。所以回程入口必须自己给，且要一直在页头（不随滚动消失）。
+ * 尺寸跟 /install 那张公开页的 .tour-back 对齐：同一个动作在两页长得一样。
+ */
+.campus-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.campus-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  font-size: var(--fs-md);
+  color: var(--text-2);
+  text-decoration: none;
+  transition: var(--t-color);
+}
+
+.campus-back:hover,
+.campus-back:focus-visible {
+  color: var(--accent-ink);
+}
+
+.campus-brand {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  letter-spacing: var(--ls-wide);
+  color: var(--text-3);
+}
+
 /* ---------- 页头 ---------- */
 
 .campus-head {
@@ -2732,6 +2769,18 @@ body.campus-modal-open .campus-scroll {
 
   .campus-sub {
     display: none;
+  }
+
+  /*
+   * 手机上没有鼠标，指针换成了手指：返回这一行从 32px 抬到 44px（触控最小高度）。
+   * 它同时是独立窗口里唯一的出路口，按不准就等于没有。
+   */
+  .campus-back {
+    min-height: 44px;
+  }
+
+  .campus-bar {
+    margin-bottom: 2px;
   }
 
   /*
