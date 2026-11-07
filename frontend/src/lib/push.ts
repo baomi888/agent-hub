@@ -23,6 +23,7 @@
  */
 
 import { api } from "./api";
+import type { PushDevice } from "./types";
 import { detectPlatform, type Platform } from "./pwa";
 
 export type PushSupport = "insecure" | "unsupported" | "ios-needs-install" | "ready";
@@ -98,6 +99,68 @@ export async function currentEndpoint(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/** endpoint 的短指纹。**必须和服务端 `push_store.endpoint_key` 算出同一个值**：
+ *  服务端是 `sha256(endpoint).hexdigest()[:12]`，这里是同算法的浏览器版。
+ *  两边不一致 → 永远认不出本机，界面又会退回"账号级"的糊涂状态。 */
+export async function endpointKey(endpoint: string): Promise<string> {
+  try {
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(endpoint));
+    return Array.from(new Uint8Array(buf))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+      .slice(0, 12);
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * 从账号的设备列表里认出**本机**。
+ *
+ * ★★ 这是「账号有几台」和「这台开没开」的分界点。少了这一步，设置页会拿
+ *   账号级的 `subscribed` 冒充本机状态：手机开了 → 电脑上也显示"已开启"，
+ *   于是"发一条测试"把通知发到手机、"关掉"又什么都没删，用户完全看不懂。
+ */
+export async function findMyDevice(list: PushDevice[]): Promise<PushDevice | null> {
+  if (!list?.length) return null;
+  const ep = await currentEndpoint();
+  if (!ep) return null;
+  const key = await endpointKey(ep);
+  if (!key) return null;
+  return list.find((d) => d.ep_key === key && !d.disabled) || null;
+}
+
+/** 设备在界面上叫什么。用户认的是"iPhone""Windows 上的 Edge"，不是 UA 原文。 */
+export function deviceLabel(platform: string, ua: string): string {
+  const u = ua || "";
+  if (platform === "ios" || /iPhone|iPad|iPod/.test(u)) {
+    return /iPad/.test(u) ? "iPad" : "iPhone";
+  }
+  if (platform === "android" || /Android/.test(u)) return "安卓手机";
+  const os = /Windows/i.test(u)
+    ? "Windows"
+    : /Macintosh|Mac OS X/i.test(u)
+      ? "Mac"
+      : /CrOS/i.test(u)
+        ? "ChromeOS"
+        : /Linux/i.test(u)
+          ? "Linux"
+          : "";
+  const browser = /Edg\//.test(u)
+    ? "Edge"
+    : /Firefox\//.test(u)
+      ? "Firefox"
+      : /OPR\//.test(u)
+        ? "Opera"
+        : /Chrome\//.test(u)
+          ? "Chrome"
+          : /Safari\//.test(u)
+            ? "Safari"
+            : "";
+  if (os && browser) return `${os} 上的 ${browser}`;
+  return os || browser || "一台设备";
 }
 
 export type EnableResult =

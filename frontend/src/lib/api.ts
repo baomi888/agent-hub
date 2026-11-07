@@ -676,6 +676,12 @@ export const api = {
         method: "POST",
         body: "{}",
       }, { timeoutMs: 30000 }),
+    // 移除账号里的**另一台**设备（本机用自己的 unsubscribe，浏览器那边也要撤销）
+    remove: (id: string) =>
+      request<{ ok: boolean; removed: boolean; devices: number }>("/api/push/remove", {
+        method: "POST",
+        body: JSON.stringify({ id }),
+      }),
   },
 
   // ---------- 提醒时刻 /api/remind（2 端点）----------

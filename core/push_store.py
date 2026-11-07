@@ -27,6 +27,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import secrets
 import time
 from typing import Any
@@ -189,6 +190,61 @@ def count_active(owner_id: str) -> int:
                 (owner_id,),
             ).fetchone()[0]
         )
+
+
+def endpoint_key(endpoint: str) -> str:
+    """endpoint 的短指纹（12 位 hex），给前端判断「这条是不是我这台设备」。
+
+    为什么不直接把 endpoint 下发：endpoint 是推送服务方的投递地址，配合我们的
+    VAPID 公钥就能往这台设备推任意内容（伪造通知）。设置页只需要「认得出自己」，
+    sha256 前 12 位足够区分、且不可逆。碰撞概率对「一个人的几台设备」量级可忽略。
+    """
+    return hashlib.sha256(endpoint.encode("utf-8")).hexdigest()[:12]
+
+
+def list_for_owner(owner_id: str) -> list[dict[str, Any]]:
+    """某人的全部订阅（含已停用），供设置页展示「哪几台设备」。
+
+    ★ 刻意不返回 endpoint / p256dh / auth —— 设置页只要认设备、看状态、能移除。
+    停用的行也要给：用户问「我手机怎么突然不响了」时，界面上得看得见「已失效」，
+    而不是从列表里凭空消失。
+    """
+    ensure()
+    with _conn() as conn:
+        rows = conn.execute(
+            """SELECT sub_id, endpoint, ua, platform, created_at, seen_at,
+                      last_ok_at, last_err, fail_count, disabled
+                 FROM push_subscriptions
+                WHERE owner_id=?
+                ORDER BY created_at""",
+            (owner_id,),
+        ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "ep_key": endpoint_key(r[1]),
+            "ua": r[2],
+            "platform": r[3],
+            "created_at": r[4],
+            "seen_at": r[5],
+            "last_ok_at": r[6],
+            "last_err": r[7],
+            "fail_count": r[8],
+            "disabled": bool(r[9]),
+        }
+        for r in rows
+    ]
+
+
+def remove_by_id(owner_id: str, sub_id: str) -> bool:
+    """按 sub_id 移除某台设备。**必须是自己名下的**，猜中别人的 id 也删不掉。"""
+    ensure()
+    with _conn() as conn:
+        cur = conn.execute(
+            "DELETE FROM push_subscriptions WHERE owner_id=? AND sub_id=?",
+            (owner_id, sub_id),
+        )
+        return cur.rowcount > 0
 
 
 def mark_ok(sub_id: str) -> None:

@@ -999,9 +999,20 @@ export type TodaySnapshot = {
    ========================================================================== */
 export type PushStatus = {
   supported: boolean;
+  /**
+   * ★★ **账号级**：名下任意一台设备订阅了就是 true。
+   * 千万不要拿它渲染「这台设备已开启」——电脑上从没开过、只因手机开了，
+   * 界面就会显示"已开启"。要判断本机，用 `findMyDevice()` 比对 `device_list`
+   * 里的 `ep_key`（见 lib/push.ts）。
+   */
   subscribed: boolean;
-  /** 这个账号下有几台设备订阅了（多端各算一台） */
+  /** 这个账号下有几台**还活着**的设备订阅了（停用的不算） */
   devices: number;
+  /**
+   * 名下所有设备，含已停用的（用户问"我手机怎么不响了"时得看得见"已失效"）。
+   * 不含 endpoint / 密钥——服务端只给 sha256 短指纹，够认自己，不可逆。
+   */
+  device_list: PushDevice[];
   /** VAPID 公钥（base64url），浏览器 subscribe 时作为 applicationServerKey */
   key: string;
   /**
@@ -1015,6 +1026,23 @@ export type PushStatus = {
   time: string;
   hour: number;
   minute: number;
+};
+
+/** 一台登记过的设备（GET /api/push/status 的 device_list 元素） */
+export type PushDevice = {
+  /** 服务端 sub_id，移除时回传 */
+  id: string;
+  /** endpoint 的 sha256 前 12 位。前端拿本机 endpoint 算同一个值来认自己 */
+  ep_key: string;
+  /** 'ios' | 'android' | 'desktop' | 'other'（老数据可能是空串） */
+  platform: string;
+  ua: string;
+  created_at: number;
+  /** 最近一次真发成功的时间戳；0/null 表示还没成功发过 */
+  last_ok_at: number | null;
+  fail_count: number;
+  /** true = 推送服务方说这条订阅没了（卸载/清数据），不会再发 */
+  disabled: boolean;
 };
 
 /* ==========================================================================

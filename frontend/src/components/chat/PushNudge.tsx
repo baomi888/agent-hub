@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
-import { pushSupport, notificationPermission, enablePush, disablePush } from "@/lib/push";
+import { pushSupport, notificationPermission, enablePush, disablePush, findMyDevice } from "@/lib/push";
 
 // 关掉后多久不再提。比安装提示的 60 天短：提醒开关是可逆的
 // （用户随时能在设置里打开），不该因为划走一次就一年不提。
@@ -57,14 +57,19 @@ export default function PushNudge({ enabled }: { enabled: boolean }) {
     }
     api.push
       .status()
-      .then((s) => {
+      .then(async (s) => {
         if (!alive) return;
         if (!s || !s.supported) {
           setView("hidden"); // 服务端没配密钥：静默隐藏，别让人点一个必然失败的按钮
           return;
         }
         setTime(s.time || "");
-        if (s.subscribed) {
+        // ★★ 必须认本机。`s.subscribed` 是账号级的：手机上开了推送，电脑上
+        //   这条就会误以为"这台也开了"而收起提示，用户永远等不到那句
+        //   "要不要每天提醒一次"——而这正是这台电脑唯一该看到的话。
+        const my = await findMyDevice(s.device_list || []);
+        if (!alive) return;
+        if (my) {
           setView("on");
           return;
         }

@@ -1,8 +1,9 @@
 """Web Push 的 HTTP 端点。
 
-  GET  /api/push/status      支持性 / 是否已订阅 / 服务端公钥（前端 subscribe 要用）
+  GET  /api/push/status      支持性 / 账号下有哪些设备 / 服务端公钥（前端 subscribe 要用）
   POST /api/push/subscribe   登记一台设备的订阅（同 endpoint 换账号会改 owner，不新增行）
-  POST /api/push/unsubscribe 退订本设备
+  POST /api/push/unsubscribe 退订**本机**（浏览器已撤销订阅，这里清服务端那行）
+  POST /api/push/remove      从账号里移除**某一台**设备（设置页的设备列表用）
   POST /api/push/test        给**自己**发一条测试通知（前端"验证一下能不能收到"用）
 
 为什么公钥要从接口下发而不是写进前端常量：换密钥时不想重新发版；
@@ -73,17 +74,41 @@ def _validate_keys(body: dict) -> tuple[str, str]:
 
 @router.get("/status")
 async def push_status(uid: str = Depends(get_current_user)) -> dict:
-    """前端据此决定：能不能订阅、要不要显示"已开启"、拿哪个公钥去 subscribe。"""
+    """前端据此决定：能不能订阅、要不要显示"已开启"、拿哪个公钥去 subscribe。
+
+    ★★ `subscribed` / `devices` 是**账号级**的（任意一台设备订阅了就算 true）。
+    设置页绝不能拿它渲染成"这台设备已开启"——电脑上从没开过、只因手机开了，
+    界面就会显示"已开启"并给出"发一条测试/关掉"，两个按钮都不做本地的事：
+    测试会把通知发到手机（让人以为发错了设备），关掉则因为本机没有订阅而
+    什么都不删。所以另给 `device_list`，让前端用 `ep_key` 认出**本机**那一行，
+    把"账号有几台"和"这台开没开"分成两个状态。
+    """
     ready = config.push_ready()
     count = 0
+    device_list: list[dict] = []
     if ready:
-        count = await asyncio.to_thread(push_store.count_active, uid)
+        rows = await asyncio.to_thread(push_store.list_for_owner, uid)
+        device_list = [
+            {
+                "id": r["id"],
+                "ep_key": r["ep_key"],
+                "platform": r["platform"],
+                "ua": r["ua"][:200],
+                "created_at": r["created_at"],
+                "last_ok_at": r["last_ok_at"],
+                "fail_count": r["fail_count"],
+                "disabled": r["disabled"],
+            }
+            for r in rows
+        ]
+        count = sum(1 for r in rows if not r["disabled"])
     hour, minute = await asyncio.to_thread(reminder_store.get, uid)
     return {
         # supported = 服务端具备发送能力（开关 + 密钥）。浏览器侧能力由前端自己探。
         "supported": ready,
         "subscribed": count > 0,
         "devices": count,
+        "device_list": device_list,
         # 没配密钥时返回空串，前端据此不弹授权框
         "key": config.VAPID_PUBLIC_KEY if ready else "",
         # 提醒时刻带上：首页那条提示和设置页都要显示"每天几点"，
@@ -119,6 +144,28 @@ async def push_unsubscribe(body: dict, uid: str = Depends(get_current_user)) -> 
         raise HTTPException(status_code=400, detail="endpoint 缺失")
     removed = await asyncio.to_thread(push_store.remove, uid, endpoint)
     return {"ok": True, "removed": removed, "devices": await asyncio.to_thread(push_store.count_active, uid)}
+
+
+@router.post("/remove")
+async def push_remove(body: dict, uid: str = Depends(get_current_user)) -> dict:
+    """移除某台设备的订阅（按 sub_id）。
+
+    和 `/unsubscribe` 的分工：`/unsubscribe` 是按 endpoint 退**本机**（浏览器自己
+    撤销订阅后顺手清账）；这里是设置页的设备列表里移除**别的设备**——那台设备
+    的浏览器订阅撤不掉（我们碰不到它），所以服务端删行就够：endpoint 不再被投放，
+    设备端的悬空订阅下次清理时会被推送服务方判 410。
+
+    归属校验在 SQL 里（`owner_id=? AND sub_id=?`），猜中别人的 sub_id 也删不掉。
+    """
+    sub_id = str(body.get("id") or "").strip()
+    if not sub_id or len(sub_id) > 64:
+        raise HTTPException(status_code=400, detail="id 缺失或过长")
+    removed = await asyncio.to_thread(push_store.remove_by_id, uid, sub_id)
+    return {
+        "ok": removed,
+        "removed": removed,
+        "devices": await asyncio.to_thread(push_store.count_active, uid),
+    }
 
 
 @router.post("/test")
