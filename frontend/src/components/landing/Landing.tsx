@@ -29,6 +29,7 @@ import Link from "next/link";
 import { useEffect, useRef } from "react";
 import MascotLogo from "@/components/chat/MascotLogo";
 import TourSteps from "@/components/install/TourSteps";
+import ReminderSteps from "@/components/reminder/ReminderSteps";
 import { DAY, FACTS, LP_FAQ, NOTES, TOC } from "@/lib/landingContent";
 
 export default function Landing() {
@@ -183,6 +184,7 @@ export default function Landing() {
             <a href="#cite">它怎么回答</a>
             <a href="#day">一天的样子</a>
             <a href="#install">装到桌面</a>
+            <a href="#reminder">到点提醒</a>
             <a href="#faq">常见问题</a>
           </nav>
 
@@ -368,6 +370,24 @@ export default function Landing() {
           </p>
         </section>
 
+        {/* 到点提醒：和「装到桌面」同一个做法——教程内嵌，不让人再点走。
+            为什么放在装到桌面之后：iPhone 上想收系统通知，前提就是先装到主屏，
+            读的顺序正好是"先装、再开提醒"。 */}
+        <section className="lp-sec lp-remind" id="reminder">
+          <p className="lp-eyebrow lp-reveal">每天提醒</p>
+          <h2 className="lp-h2 lp-reveal">到点它叫你一声</h2>
+          <p className="lp-body-txt lp-reveal">
+            手机上加一条日历订阅，到点由系统日历提醒你——关掉网页、锁屏都照响；电脑上打开浏览器通知就行。
+            两条路都只在你还有事没做完时才提醒，一天最多一次。
+          </p>
+          <div className="lp-install-body">
+            <ReminderSteps />
+          </div>
+          <p className="lp-install-more">
+            想发给别人或者收藏起来？<Link href="/reminder">这一页有单独的教程链接 ›</Link>
+          </p>
+        </section>
+
         {/* 常见问题 */}
         <section className="lp-sec" id="faq">
           <p className="lp-eyebrow lp-reveal">常见问题</p>
@@ -395,6 +415,7 @@ export default function Landing() {
           <span>知穗 Agent · 苞米地里的学习工作台</span>
           <nav aria-label="页脚">
             <Link href="/install">装到桌面</Link>
+            <Link href="/reminder">设置提醒</Link>
             <Link href="/login">登录</Link>
           </nav>
           {/* 联系方式贴在最底下、独占一行：这是外部访客唯一能直接找到人的

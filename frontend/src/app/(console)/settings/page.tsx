@@ -387,6 +387,15 @@ export default function SettingsPage() {
             <div style={{ marginTop: 10 }}>
               <CalendarRow />
             </div>
+            {/* 教程入口只放一条，不往每张卡里各塞一遍：
+                三张卡下面各挂一条"看教程"会让这一组变成四条链接。
+                放在整组末尾，找的人一眼看得到，不找的人也不觉得吵。 */}
+            <Link href="/settings/reminder" className="install-more">
+              <span>不知道怎么开？看分步教程：苹果 / 安卓 / 电脑</span>
+              <span className="arrow" aria-hidden="true">
+                ›
+              </span>
+            </Link>
           </section>
 
           <section>

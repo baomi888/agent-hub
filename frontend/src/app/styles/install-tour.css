@@ -482,3 +482,41 @@
     min-height: 42px;
   }
 }
+
+/* ---------- 「另一条路」折叠块 ----------
+ * 目前只有 iPhone 那个页签有：日历之外，装到主屏还能收系统通知。
+ * 放成折叠块而不是正文段落，是因为它只对一部分人有用，
+ * 展开后也不占别人的版面。 */
+.tour-alt {
+  margin: 16px 0 0;
+  font-size: var(--fs-md);
+  line-height: 1.68;
+}
+.tour-alt > summary {
+  position: relative;
+  padding-left: 18px;
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--accent-ink);
+  list-style: none;
+}
+.tour-alt > summary::-webkit-details-marker {
+  display: none;
+}
+.tour-alt > summary::before {
+  content: "▸";
+  position: absolute;
+  left: 2px;
+  top: 0;
+  font-size: 0.8em;
+  transition: transform 0.15s ease;
+}
+.tour-alt[open] > summary::before {
+  transform: rotate(90deg);
+}
+.tour-alt > p {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
