@@ -16,7 +16,7 @@ name = "baomi-agent"
 version = "0.1.0"
 description = "知穗 Agent —— 基于 RAG 知识库与 LangChain Agent 的个人知识助手"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Jinghao Feng", email = "fenjinghao@example.com" }]
 keywords = ["rag", "agent", "langchain", "knowledge-base", "chatbot", "llm"]
@@ -37,7 +37,10 @@ dev = ["pytest>=8.0", "ruff>=0.6"]
 # 逐行重排会产生一个 50+ 文件的纯格式提交，把真实改动埋掉。
 # 调到 120 是"不再新增超长行"的可执行门槛，同时不为难已有代码。
 line-length = 120
-target-version = "py311"
+# ★ 必须对齐**线上**的 Python（3.10），不是本机 venv（3.12）。
+# 写成 py311 时 ruff 会主动建议 datetime.UTC 这类 3.11+ 写法，
+# 本地全绿、一部署后端 ImportError 起不来（2026-11-07 踩过）。
+target-version = "py310"
 
 [tool.ruff.lint]
 # E/F: pycodestyle + pyflakes（基础）；I: isort；UP: pyupgrade；B: flake8-bugbear
@@ -56,4 +59,5 @@ ignore = ["E402"]  # 测试文件在 import 后做 sys.path 注入，允许后�
 
 [tool.black]
 line-length = 120
-target-version = ["py311"]
+# 同 ruff：对齐线上 3.10，别让格式化器产出 3.11+ 的写法
+target-version = ["py310"]
