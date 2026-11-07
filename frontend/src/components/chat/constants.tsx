@@ -55,7 +55,9 @@ export const SECONDARY_ENTRIES: {
   { key: "template", label: "模板广场", icon: "store" },
   { key: "upload", label: "上传资料建库", icon: "notes" },
   { key: "research", label: "让它去研究", icon: "bulb" },
-  { key: "tools", label: "校园工具集", icon: "tools" },
+  // 入口标签统一写「工具集」（11-07）：左边导航、对话栏、这里用的是同一个名字，
+  // 完整的「校园工具集」只留在那一页自己的标题和落地页里。
+  { key: "tools", label: "工具集", icon: "tools" },
 ];
 
 // 场景快选（SCENARIO_STARTERS）已随「场景选择撤出主界面」删除（10-14 晚）：

@@ -150,21 +150,23 @@
   }
 }
 
-/* 校园工具集入口（原先在侧栏，10-14 搬到对话栏；10-14 晚场景 chips 撤出后，
-   这一行只剩它一个）。描边 + 全圆角 + 靠右的胶囊观感；字号降一档、只在 hover
-   点亮金描边 —— 它是跳出去的外链，不是当前会话的属性，别跟主操作抢视线。 */
+/* 工具集入口（10-14 从侧栏搬到对话栏；11-07 再挪到「反馈」右边、同一行）。
+   它是跳出去的外链，不是当前会话的属性 —— 所以描边 + 灰字，金只留给 hover，
+   不跟「反馈」（金底金边，是行动）抢强度。高度锁 28px 和「反馈」齐平：
+   两颗并排时不齐高最刺眼，比宽度不对还明显。 */
 .tools-link {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: var(--space-6);
-  padding: 4px 12px;
+  height: 28px;
+  padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--fill-3);
   font-size: var(--fs-sm);
   color: var(--text-2);
   white-space: nowrap;
+  flex: none;
   transition: var(--t-color);
 }
 .tools-link svg {
@@ -177,6 +179,31 @@
 }
 .tools-link:hover svg {
   color: var(--accent-ink);
+}
+
+/* 反馈 + 工具集这一组：整体不参与收缩（宁可折行也不把字挤扁），
+   窄屏时整组一起折到第二行，见下面 .composer-bar 的规则。 */
+.composer-acts {
+  flex: none;
+}
+
+/* 手机：这一行要塞 2 颗能力开关 + 反馈 + 工具集 + 齿轮。
+   实测 390px 内容区只有 324px，四颗药丸 + 齿轮要 341px 上下 ——
+   再怎么收内边距也放不进去（360px 更差 10px 左右），硬挤会横向溢出，
+   靠自然折行又会把齿轮单独甩到第二行。所以这里**显式分成两行**：
+     第一行：检索 / 智能联网  ........ 齿轮
+     第二行：反馈 / 工具集
+   靠 order 排：齿轮提到组前面（order 2），组独占一整行（flex-basis 100%）。
+   ★ 不用"宽度刚好够就一行"的写法：差 2–10px 的时候会忽一行忽两行，
+     换个字体就变样，那种脆的临界值不如固定两行。 */
+@media (max-width: 560px) {
+  .composer-bar .gear {
+    order: 2;
+  }
+  .composer-acts {
+    order: 3;
+    flex: 1 0 100%;
+  }
 }
 
 /* 参数齿轮 */

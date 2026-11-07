@@ -1127,46 +1127,52 @@ export default function ChatArea({
         </div>
       )}
 
-      {/* 底部：外链入口 + 模式切换 + 输入框 */}
+      {/* 底部：能力开关 + 反馈 / 工具集 + 输入框 */}
       <div className="chat-measure mx-auto px-6 pb-5">
-        {/* 校园工具集：从侧栏搬来（10-14）。它是「发消息之前顺手用一下」的入口，
-            挂在对话栏这一行才够得着；放侧栏等于让它跟会话列表抢同一条视线。
-            场景 chips 撤出后（10-14 晚）这一行只剩它一个，保持靠右的胶囊观感。 */}
-        <div className="mb-2 flex items-center gap-2 flex-wrap">
-          <a
-            href={TOOLS_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="tools-link"
-            title="校园工具集：GPA 计算 · 番茄钟 · 课表……（免登录，独立页）"
-          >
-            <CornIcon name="tools" className="h-[15px] w-[15px]" />
-            校园工具集
-          </a>
-        </div>
-        <div className="mb-2 flex items-center gap-2 sm:gap-3">
+        <div className="composer-bar mb-2 flex flex-wrap items-center gap-2 sm:gap-3">
           {/* 2026-10-31 批 B：四档模式条下架，两枚能力开关常驻。
               原因：模式条把「检索 / 联网 / 走流程」混在一个字段里，用户选「检索」
               其实还想不想联网、允不允许调工具都说不清；后端新契约只有两个开关，
               与其做四档→两开关的翻译，不如直接让用户回答这两个问题。 */}
           <CapToggles value={capValue} onChange={onCapChange ?? (() => {})} />
-          {/* 反馈：紧贴能力开关右侧，不塞回顶栏那排灰图标里。
-              理由：想说话的那一刻人正在输入框这儿（刚被答错、刚发现按钮不好用），
-              顶栏右上的小图标太不显眼，内测第一批人的意见最容易在这里丢掉。
-              内容和设置页共用 FeedbackCard，只是装在弹窗里。 */}
-          <button
-            type="button"
-            onClick={() => setFbOpen(true)}
-            title="每条意见开发者都会看"
-            aria-label="提交反馈"
-            aria-haspopup="dialog"
-            className="fb-mode-cta"
-          >
-            <span className="fb-mode-dot" aria-hidden="true" />
-            {/* 只写「反馈」：原来 30px 宽的「内测反馈」在窄屏要缩成另一份文案，
-                现在两个宽度都放得下，就不必再留一份 .fb-mode-text-sm 的影子副本。 */}
-            <span className="fb-mode-text">反馈</span>
-          </button>
+          {/* 「反馈」和「工具集」编成一组（.composer-acts）：两颗都是"发消息前后
+              顺手要做的一件事"，所以并排。工具集 11-07 从独占的那一行挪过来 ——
+              之前它右对齐浮在一行空白上，跟下面这排按钮没有关系，看着像个孤儿标签。
+              ★ 成组还有第二个原因：窄屏放不下时两颗**一起**折行，
+              不会出现"反馈留在第一行、工具集掉到第二行"的散架样子。 */}
+          <div className="composer-acts flex items-center gap-2">
+            {/* 反馈：紧贴能力开关右侧，不塞回顶栏那排灰图标里。
+                理由：想说话的那一刻人正在输入框这儿（刚被答错、刚发现按钮不好用），
+                顶栏右上的小图标太不显眼，内测第一批人的意见最容易在这里丢掉。
+                内容和设置页共用 FeedbackCard，只是装在弹窗里。 */}
+            <button
+              type="button"
+              onClick={() => setFbOpen(true)}
+              title="每条意见开发者都会看"
+              aria-label="提交反馈"
+              aria-haspopup="dialog"
+              className="fb-mode-cta"
+            >
+              <span className="fb-mode-dot" aria-hidden="true" />
+              {/* 只写「反馈」：原来 30px 宽的「内测反馈」在窄屏要缩成另一份文案，
+                  现在两个宽度都放得下，就不必再留一份 .fb-mode-text-sm 的影子副本。 */}
+              <span className="fb-mode-text">反馈</span>
+            </button>
+            {/* 工具集：GPA / 番茄钟 / 课程表 / 单词卡 / 倒计时 / 抽签，独立单页且免登录。
+                title 里保留全名 —— 胶囊上只写「工具集」（和左边导航同一个名字），
+                完整的「校园工具集」留给落地页和那一页自己的标题。 */}
+            <a
+              href={TOOLS_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="tools-link"
+              aria-label="工具集：GPA 计算、番茄钟、课程表（免登录，独立页，新开标签）"
+              title="工具集：GPA 计算 · 番茄钟 · 课表……（免登录，独立页）"
+            >
+              <CornIcon name="tools" className="h-[15px] w-[15px]" />
+              工具集
+            </a>
+          </div>
           <button
             onClick={() => setShowParams((s) => !s)}
             title="检索参数设置"
