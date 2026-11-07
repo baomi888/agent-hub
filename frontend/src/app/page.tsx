@@ -19,8 +19,8 @@ import { useSessions } from "@/lib/hooks/useSessions";
 import { useKnowledge } from "@/lib/hooks/useKnowledge";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { detailToMessage } from "@/lib/errors";
-import AuthGate from "@/components/AuthGate";
 import InstallBanner from "@/components/InstallBanner";
+import Landing from "@/components/landing/Landing";
 import AnnounceModal from "@/components/announce/AnnounceModal";
 import type { UiMessage } from "@/components/chat/types";
 import type { Grounding, RefSource, ToolEvent, WebSource } from "@/lib/types";
@@ -891,19 +891,12 @@ export default function Home() {
     );
   }
   if (!auth.me) {
+    // 未登录看到的是落地页，不再是一张孤零零的登录卡片。
+    // 第一次从搜索结果 / 别人发的链接进来的人，需要一个说清楚"这是什么"的地方，
+    // 而不是先被要一个账号。登录卡片挪到 /login，落地页里每个「开始使用」都指向它。
     return (
       <>
-        <AuthGate
-          allowSignup={auth.allowSignup}
-          onLogin={auth.login}
-          onRegister={auth.register}
-        />
-        {/* 注册前也要提「装到桌面」：多数人第一次是从分享链接或搜索结果进来，
-            此刻还没有账号。挂在这里是安全的 —— 登录态已经确定（!auth.me），
-            不存在"提示先于登录出现、把 60 天冷却提前写掉"那个坑。
-            登录门自己的卡片里还有一个常驻入口（.auth-install），两处不重复：
-            这一条只在手机首次进站时露一次，那条一直都在。 */}
-        <InstallBanner />
+        <Landing />
         {/* 登录门之外也挂一个：?ann=<期号> 是拿来给人看版式的预览入口，
             没账号也该看得见。不带这个参数时它自己什么都不渲染（见组件里的 open 判定） */}
         <AnnounceModal userId={null} />

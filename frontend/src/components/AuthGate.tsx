@@ -13,11 +13,17 @@ interface Props {
   allowSignup: boolean;
   /** 首屏探活中：这段先不渲染表单，免得用户填一半被告知"其实你已登录" */
   checking?: boolean;
+  /**
+   * 从哪一页进来的（一般是落地页 /）。
+   * 传了才在卡片底部渲染"回到介绍页"—— 落地页是第二次改版后的入口，
+   * 访客点进登录卡片后要有路回去，不能只靠浏览器后退。
+   */
+  backHref?: string;
   onLogin: (username: string, password: string) => Promise<void>;
   onRegister: (username: string, password: string) => Promise<void>;
 }
 
-export default function AuthGate({ allowSignup, checking, onLogin, onRegister }: Props) {
+export default function AuthGate({ allowSignup, checking, backHref, onLogin, onRegister }: Props) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -167,6 +173,12 @@ export default function AuthGate({ allowSignup, checking, onLogin, onRegister }:
           </span>
           <span className="auth-install-go">看怎么装 ›</span>
         </Link>
+
+        {backHref && (
+          <p className="auth-back">
+            <Link href={backHref}>‹ 回到介绍页</Link>
+          </p>
+        )}
       </div>
     </div>
   );

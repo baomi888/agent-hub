@@ -20,6 +20,9 @@
 @import "./styles/guide.css";
 /* 「装到桌面」独立说明页（/install）：借 .btn 系列，必须排在 console.css 之后 */
 @import "./styles/install-tour.css";
+/* 落地页（未登录访问 /）：同样借 .btn 系列，排在 console.css / install-tour.css 之后。
+   它内部还嵌了一段 /install 的教程组件，所以必须排在 install-tour.css 后面才盖得住 */
+@import "./styles/landing.css";
 /* 反馈弹窗：内嵌 FeedbackCard，同样借 .btn / .seg 系列，排在 console.css 之后 */
 @import "./styles/feedback.css";
 @import "./styles/hybrid.css";

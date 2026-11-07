@@ -1,0 +1,1090 @@
+/* ============ 落地页（未登录访问 / 时的首页）============
+   组件：components/landing/Landing.tsx  文案：lib/landingContent.ts
+
+   视觉设定：**摊开的一页手账**。
+   - 底是桌面（--desk-0），上面摊两张纸：封面宽 1240，内页窄 940。
+     封面宽、内页窄，是"一本翻开的册子"的横截面，不是两张同宽的卡片。
+   - 区块之间用装订虚线分隔，页码用等宽数字压在页脚 —— 全页只有纸、墨、金三样东西。
+   - 真实界面像照片一样贴在封面右下角（略斜 2.2°），带一条纸胶带。
+
+   为什么整页靠 .lp 自己滚：base.css 把 html/body 设成了 overflow:hidden
+   （应用外壳固定视口），所以落地页的滚动同样只能发生在内部容器里。
+   ★ 连带后果：ScrollTrigger 的 scroller 必须是 .lp，默认盯 window 会全程不动。
+*/
+
+.lp {
+  height: 100dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+  padding-bottom: 44px;
+  background: var(--desk-0);
+}
+
+/* 首屏以下的区块默认藏起来，等 GSAP 滚到位再放。
+   ★ 只在"首屏以下"用：加载那一刻它们本来就不在视口里，所以看得到零闪烁。
+     GSAP 迟到或干脆没到（弱网 / 被拦）由 .lp-static 兜底放出来，
+     否则页面会永远停在半空的状態。 */
+.lp-reveal {
+  opacity: 0;
+}
+.lp-static .lp-reveal {
+  opacity: 1;
+}
+
+/* 用 <a href="#xxx"> 段内跳转时的落点偏移（页眉 68 高） */
+.lp-sec {
+  scroll-margin-top: 84px;
+}
+
+/* ---------- 页眉 ---------- */
+.lp-nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  padding: 0 16px;
+  background: var(--desk-0);
+  /* 滚下去之后卡片会从下面经过，一条发丝线把它和内容分开；
+     不用模糊玻璃 —— 这套品牌语言里没有那东西。
+     ★ 只靠 1px 的 --line 不够：导航底和纸面几乎同色，正文被齐刷刷切断时
+     看起来像渲染坏了（独立评审第 5 条）。这里补两道：线升到 --line-strong，
+     再压一层很浅的向下投影，让"内容从下面过去了"这件事有物理感。 */
+  border-bottom: 1px solid var(--line-strong);
+  box-shadow: 0 1px 0 -0.5px rgba(60, 42, 16, 0.06), 0 8px 14px -14px rgba(60, 42, 16, 0.5);
+}
+.lp-nav-inner {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  width: min(1240px, 100%);
+  height: 68px;
+  margin: 0 auto;
+}
+.lp-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-serif);
+  font-size: 1.0625rem;
+  font-weight: 700;
+  letter-spacing: var(--ls-tight);
+  color: var(--text-1);
+  text-decoration: none;
+}
+.lp-brand-mark {
+  width: 26px;
+  height: 26px;
+}
+.lp-links {
+  display: flex;
+  gap: 20px;
+}
+.lp-links a {
+  font-size: var(--fs-md);
+  color: var(--text-2);
+  text-decoration: none;
+  transition: var(--t-color);
+}
+.lp-links a:hover,
+.lp-links a:focus-visible {
+  color: var(--accent-ink);
+}
+.lp-nav-act {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-left: auto;
+}
+.lp-signin {
+  font-size: var(--fs-md);
+  color: var(--text-2);
+  text-decoration: none;
+  transition: var(--t-color);
+}
+.lp-signin:hover,
+.lp-signin:focus-visible {
+  color: var(--accent-ink);
+}
+.lp-start {
+  min-height: 36px;
+}
+
+/* ---------- 纸张 ---------- */
+.lp-sheet {
+  position: relative;
+  width: min(1240px, calc(100% - 32px));
+  margin-inline: auto;
+  background: var(--bg-canvas);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+}
+/* 封面比内页宽，两页之间留一道缝，就是册子翻开的那条缝 */
+.lp-cover {
+  margin-top: 12px;
+  padding: 60px 56px 76px;
+  min-height: min(780px, calc(100dvh - 112px));
+  overflow: hidden;
+}
+
+/* ---------- 封面文字 ---------- */
+.lp-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: var(--ls-wide);
+  color: var(--accent-ink);
+}
+.lp-eyebrow::before {
+  content: "";
+  flex: none;
+  width: 18px;
+  height: 1px;
+  background: var(--accent);
+}
+
+.lp-hero-copy {
+  max-width: 560px;
+}
+
+/* 大标题走文楷（--font-serif）。这套品牌里衬线的本义就是"手写的字"，
+   放大到 56px 才看得出笔锋；换成无衬线会立刻变回一个普通 SaaS 首页 */
+.lp-h1 {
+  margin: 15px 0 0;
+  font-family: var(--font-serif);
+  font-size: clamp(2.1rem, 4.4vw, 3.5rem);
+  font-weight: 700;
+  line-height: 1.24;
+  letter-spacing: 0.01em;
+  color: var(--text-1);
+}
+
+.lp-lede {
+  margin: 20px 0 0;
+  max-width: 30em;
+  font-size: clamp(1rem, 1.1vw, 1.0625rem);
+  line-height: 1.88;
+  color: var(--text-2);
+}
+
+.lp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 30px;
+}
+.lp-actions .btn,
+.lp-cta .btn {
+  min-height: 44px;
+  padding-inline: 22px;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+
+.lp-hero-note {
+  margin: 15px 0 0;
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+
+/* ---------- 贴在封面上的照片 ---------- */
+.lp-paste {
+  position: absolute;
+  right: 52px;
+  bottom: 92px;
+  z-index: 2;
+  width: 352px;
+  margin: 0;
+  padding: 9px 9px 0;
+  background: var(--step-2);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-2);
+  /* ★ 斜率固定写在这里，GSAP 只做"推近 + 摆正"：
+     回滚时它得能回到这张斜着的纸，所以起点不能由 JS 算 */
+  transform: rotate(-2.2deg);
+}
+/* 一条纸胶带：不是装饰，它解释了"这张图为什么贴在这儿" */
+.lp-paste::before {
+  content: "";
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  width: 76px;
+  height: 21px;
+  transform: translateX(-50%) rotate(-2.6deg);
+  background: var(--fill-2);
+  border-inline: 1px solid var(--line);
+}
+.lp-paste img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius-xs);
+}
+.lp-paste figcaption {
+  padding: 9px 2px 11px;
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+  color: var(--text-3);
+}
+
+/* 页脚页码：装订线一横，左边页码右边提示 */
+.lp-page-mark {
+  position: absolute;
+  left: 56px;
+  right: 56px;
+  bottom: 26px;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line-strong);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--ls-mid);
+  color: var(--text-3);
+}
+.lp-page-hint {
+  margin-left: auto;
+}
+
+/* ---------- 内页 ---------- */
+.lp-body {
+  width: min(940px, calc(100% - 32px));
+  margin-top: 12px;
+  padding: 46px 64px 52px;
+}
+
+/* 三条事实：不做图标网格，三条之间只用一道竖线分开 */
+.lp-facts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.lp-facts li {
+  padding: 0 24px;
+  border-left: 1px solid var(--line);
+}
+.lp-facts li:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+.lp-facts b {
+  display: block;
+  margin-bottom: 7px;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  letter-spacing: var(--ls-tight);
+  color: var(--text-1);
+}
+.lp-facts span {
+  display: block;
+  font-size: var(--fs-md);
+  line-height: 1.76;
+  color: var(--text-3);
+}
+
+.lp-sec {
+  margin-top: 52px;
+  padding-top: 50px;
+  border-top: 1px dashed var(--line-strong);
+}
+
+.lp-h2 {
+  margin: 11px 0 0;
+  font-family: var(--font-serif);
+  font-size: clamp(1.45rem, 2.5vw, 2rem);
+  font-weight: 700;
+  line-height: 1.36;
+  letter-spacing: 0.01em;
+  color: var(--text-1);
+}
+
+.lp-body-txt {
+  margin: 15px 0 0;
+  max-width: 34em;
+  font-size: 1rem;
+  line-height: 1.92;
+  color: var(--text-2);
+}
+
+/* ---------- 截图（贴着深一档衬底，像照片夹在册子里） ---------- */
+.lp-shot {
+  margin: 26px 0 0;
+}
+.lp-shot-frame {
+  padding: 10px;
+  background: var(--desk-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  /* 这张卡片在原截图里本来就被输入条挡住，硬切会让最后一行断在半截。
+     用渐隐收口，读起来是"下面还有"，而不是"裁坏了" */
+  -webkit-mask-image: linear-gradient(to bottom, #000 72%, rgba(0, 0, 0, 0.12) 100%);
+  mask-image: linear-gradient(to bottom, #000 72%, rgba(0, 0, 0, 0.12) 100%);
+}
+.lp-shot-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+}
+/* 图注 = 这一步的结论。与 /install 页的做法一致（左金竖条），
+   同一套语汇在两个页面之间才连得起来 */
+.lp-shot figcaption {
+  position: relative;
+  margin: 11px 0 0;
+  padding-left: 12px;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  line-height: 1.62;
+  color: var(--text-1);
+}
+.lp-shot figcaption::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.3em;
+  bottom: 0.3em;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.lp-points {
+  display: grid;
+  gap: 11px;
+  margin: 22px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.lp-points li {
+  position: relative;
+  padding-left: 20px;
+  font-size: var(--fs-lg);
+  line-height: 1.78;
+  color: var(--text-2);
+}
+.lp-points li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.78em;
+  width: 9px;
+  height: 2px;
+  background: var(--accent);
+  opacity: 0.6;
+}
+
+/* ---------- 四张便签 ---------- */
+.lp-notes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 26px;
+}
+.lp-note {
+  position: relative;
+  padding: 24px 22px 22px;
+  background: var(--step-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-1);
+}
+/* 顶部一小截金线当"标签页"，比给整张卡描金边轻 */
+.lp-note::before {
+  content: "";
+  position: absolute;
+  left: 22px;
+  top: 0;
+  width: 26px;
+  height: 2px;
+  background: var(--accent);
+}
+.lp-note-tag {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: var(--ls-mid);
+  color: var(--accent-ink);
+}
+.lp-note h3 {
+  margin: 9px 0 0;
+  font-family: var(--font-serif);
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.42;
+  color: var(--text-1);
+}
+.lp-note p {
+  margin: 9px 0 0;
+  font-size: var(--fs-md);
+  line-height: 1.82;
+  color: var(--text-2);
+}
+
+/* ---------- 一天的样子 ---------- */
+.lp-day {
+  position: relative;
+  margin-top: 30px;
+}
+/* 装订线：由 GSAP 从 0 拉到 1（transformOrigin: top） */
+.lp-rail {
+  position: absolute;
+  left: 77px;
+  top: 10px;
+  bottom: 10px;
+  width: 1px;
+  border-left: 1px dashed var(--line-strong);
+}
+.lp-day-list {
+  display: grid;
+  gap: 24px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.lp-stop {
+  position: relative;
+  display: grid;
+  grid-template-columns: 78px 1fr;
+}
+.lp-stop-time {
+  padding-top: 1px;
+  /* ★ 右对齐 + 留 13px：不留的话 07:20 的末位数字会顶到圆点上（评审第 8 条） */
+  padding-right: 13px;
+  text-align: right;
+  font-size: var(--fs-md);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--ls-mid);
+  color: var(--text-3);
+}
+.lp-stop-dot {
+  position: absolute;
+  left: 78px;
+  top: 7px;
+  width: 9px;
+  height: 9px;
+  margin-left: -5px;
+  /* 实心金点：空心圈在纸面上太弱，且和安装教程里的"金框"两套语汇打架 */
+  background: var(--accent);
+  border: 0;
+  /* 外圈一圈纸色，把虚线从点背后遮掉，点是"钉"在线上的 */
+  box-shadow: 0 0 0 3px var(--bg-canvas);
+  border-radius: 50%;
+}
+.lp-stop-body {
+  padding-left: 30px;
+}
+.lp-stop-body b {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  letter-spacing: var(--ls-tight);
+  color: var(--text-1);
+}
+.lp-stop-body p {
+  margin: 6px 0 0;
+  font-size: var(--fs-md);
+  line-height: 1.82;
+  color: var(--text-2);
+}
+
+/* ---------- 装到桌面 ---------- */
+.lp-install-body {
+  margin-top: 24px;
+  padding: 20px 20px 6px;
+  background: var(--step-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+/* TourSteps 是给 /install 整页写的，塞进内页时把上边距收一档 */
+.lp-install-body .tour-tabs {
+  margin-top: 8px;
+}
+.lp-install-body .tour-panel {
+  margin-top: 22px;
+}
+/* 教程图在这个区块里不再单独写上限。
+   ★ 这里原来写的是 `max-width: min(100%, 560px) !important` —— 它会把组件算好的
+   长宽比上限（竖图 320、宽图 min(图宽, 680)）整个顶掉，346px 的竖图被拉到 560px
+   放大 1.6 倍显示，边缘发虚。组件的上限才是对的，删掉这条即可。 */
+.lp-install-more {
+  margin: 15px 0 0;
+  font-size: var(--fs-md);
+  color: var(--text-3);
+}
+.lp-install-more a {
+  color: var(--accent-ink);
+  text-decoration: none;
+}
+.lp-install-more a:hover {
+  text-decoration: underline;
+}
+
+/* ---------- 常见问题 ---------- */
+.lp-faq {
+  margin-top: 22px;
+  border-top: 1px solid var(--line);
+}
+.lp-faq details {
+  border-bottom: 1px solid var(--line);
+}
+.lp-faq summary {
+  display: flex;
+  gap: 10px;
+  padding: 15px 0;
+  font-size: var(--fs-lg);
+  line-height: 1.55;
+  color: var(--text-1);
+  cursor: pointer;
+  list-style: none;
+}
+.lp-faq summary::-webkit-details-marker {
+  display: none;
+}
+.lp-faq summary::before {
+  content: "＋";
+  flex: none;
+  width: 1em;
+  font-size: var(--fs-md);
+  line-height: 1.7;
+  color: var(--accent);
+}
+.lp-faq details[open] summary::before {
+  content: "－";
+}
+.lp-faq summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.lp-faq p {
+  margin: 0;
+  padding: 0 0 16px 1.62em;
+  font-size: 1rem;
+  line-height: 1.86;
+  color: var(--text-2);
+}
+
+/* ---------- 收尾 ---------- */
+.lp-cta {
+  margin-top: 54px;
+  padding-top: 46px;
+  border-top: 1px dashed var(--line-strong);
+  text-align: center;
+}
+.lp-cta h2 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: clamp(1.4rem, 2.2vw, 1.85rem);
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--text-1);
+}
+.lp-cta p {
+  margin: 12px auto 0;
+  max-width: 28em;
+  font-size: 1rem;
+  line-height: 1.84;
+  color: var(--text-2);
+}
+.lp-cta .btn {
+  margin-top: 24px;
+}
+
+.lp-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  margin-top: 46px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.lp-foot nav {
+  display: flex;
+  gap: 16px;
+  margin-left: auto;
+}
+.lp-foot a {
+  color: inherit;
+  text-decoration: none;
+  transition: var(--t-color);
+}
+.lp-foot a:hover,
+.lp-foot a:focus-visible {
+  color: var(--accent-ink);
+}
+
+/* 联系方式：独占页脚最后一行。不做成按钮 —— 它是落款不是行动号召，
+   整条都能点，但视觉上只是"这一行里有邮箱" */
+.lp-mail {
+  flex: 1 0 100%;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 9px;
+  margin-top: 2px;
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+.lp-mail strong {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--accent-ink);
+  /* 320 宽的老机型上宁可整串换行，也不要撑破纸面 */
+  overflow-wrap: anywhere;
+}
+.lp-mail:hover strong,
+.lp-mail:focus-visible strong {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ---------- 窄屏 ---------- */
+/* 1160 以下文字块和照片挤不进一行了：照片从"贴上去"退回"排在下面"。
+   此时它不再斜着放 —— 斜置在窄屏会顶出右边，而且没有留白托着就像放歪了 */
+@media (max-width: 1160px) {
+  .lp-paste {
+    position: static;
+    width: min(360px, 86%);
+    margin-top: 40px;
+    transform: rotate(-1.4deg);
+  }
+  .lp-page-mark {
+    position: static;
+    margin-top: 36px;
+  }
+  .lp-cover {
+    min-height: 0;
+    padding-bottom: 40px;
+  }
+}
+
+@media (max-width: 760px) {
+  .lp-nav-inner {
+    height: 60px;
+    gap: 14px;
+  }
+  .lp-links {
+    display: none;
+  }
+  .lp-brand {
+    font-size: 1rem;
+  }
+  .lp-cover {
+    padding: 36px 22px 30px;
+  }
+  .lp-body {
+    padding: 34px 22px 38px;
+  }
+  .lp-hero-copy {
+    max-width: none;
+  }
+  .lp-h1 {
+    font-size: clamp(1.95rem, 8.6vw, 2.6rem);
+  }
+  .lp-lede {
+    font-size: 1rem;
+    line-height: 1.85;
+  }
+  .lp-paste {
+    width: 100%;
+    margin-top: 32px;
+    transform: rotate(-1deg);
+  }
+  .lp-facts {
+    grid-template-columns: 1fr;
+  }
+  .lp-facts li {
+    padding: 14px 0;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+  .lp-facts li:first-child {
+    padding-top: 0;
+    border-top: 0;
+  }
+  .lp-sec {
+    margin-top: 40px;
+    padding-top: 38px;
+  }
+  .lp-notes {
+    grid-template-columns: 1fr;
+  }
+  .lp-install-body {
+    padding: 16px 14px 4px;
+  }
+  /* 时间轴整列左移：58 的时间列刚好放得下 07:20 */
+  .lp-stop {
+    grid-template-columns: 58px 1fr;
+  }
+  .lp-stop-dot {
+    left: 58px;
+  }
+  .lp-rail {
+    left: 57px;
+  }
+  .lp-stop-body {
+    padding-left: 22px;
+  }
+  .lp-cta {
+    margin-top: 44px;
+    padding-top: 38px;
+  }
+  .lp-actions .btn,
+  .lp-cta .btn {
+    flex: 1 1 auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp {
+    scroll-behavior: auto;
+  }
+}
+
+/* ============ 收口修补（独立评审第 1/4/8/10/11/14 条） ============ */
+
+/* ---------- 深色：主按钮不能"消失" ----------
+   深色下 .btn-primary 的底是 #2e2618、纸面是 #251f15，实测对比 1.17:1 ——
+   按钮的形状整个没了，视觉权重反而落到带描边的次按钮上。落地页是全站的
+   第一眼，这里把主按钮做成"纸色反转"：米白底 + 深墨字（形状对比 ≥ 3:1）。
+   ★ 只作用于 .lp，不改全局：工作台里的深色面板底色不同，一起改会伤到那边。 */
+.dark .lp .btn-primary {
+  background: #f0e7d2;
+  color: #2a2116;
+}
+.dark .lp .btn-primary:hover {
+  background: var(--accent);
+  color: #22190a;
+}
+
+/* ---------- 深色：贴上去的产品截图是一块 16:1 的白板 ----------
+   截图本身是浅色界面（真实证据，不该反色），但压在深色纸面上第一眼比正文还抢。
+   压亮度 + 偏暖，让它像"深色房里的一张暖色照片"。
+   注意：这也是 a11y 上的取舍 —— 牺牲一点亮度换取"图不再刺眼"，但不再往下压，
+   否则图里的字会糊。 */
+.dark .lp-paste img,
+.dark .lp-shot-frame img,
+.dark .lp-install-body .tour-fig-frame img,
+.dark .lp-install-body .tour-fig-frame svg {
+  filter: brightness(0.84) contrast(1.03) sepia(0.08);
+}
+
+/* ---------- 三端切换：满宽 800px 像导航条，收到 420 ---------- */
+.lp-install-body .tour-tabs {
+  max-width: 420px;
+}
+
+/* ---------- 时间轴：末段虚线不要吊在最后一个点下面 ---------- */
+.lp-rail {
+  bottom: 34px;
+}
+
+/* ---------- 首屏那张照片：往上挪，填掉右上角那片空 ----------
+   只在宽屏生效：≥1180 时左文（最宽 560 + 左内边距 56）才和它错得开，
+   窄一点就还是压在右下角，否则会和标题撞上。 */
+@media (min-width: 1180px) {
+  .lp-paste {
+    top: 132px;
+    bottom: auto;
+    right: 56px;
+    width: 392px;
+  }
+}
+
+/* ---------- 手机顶栏不要抢首屏的视觉顶点 ----------
+   H1 之前先出现一个深色实心按钮，首屏最重的色块就跑到导航上了（评审第 14 条）。
+   手机上顶栏只留「登录」，注册/进入的主动作交给正文那颗按钮。 */
+@media (max-width: 720px) {
+  .lp-start {
+    display: none;
+  }
+}
+
+/* ============ 留白上的设计（2026-11-07）============
+   用户反馈两处：① 封面左下角一大片白；② 纸两边（桌面）什么都没有。
+   处理原则：**装饰必须能解释自己**——点阵是"桌面"，竖排字是"页边注"，
+   目录是"这页里面有什么"。纯花纹（斜纹、圆点乱撒、光斑）一律不做：
+   它们会让这副"手账"变成一张壁纸。
+   ★ 三条都只在 ≥1360 生效：纸宽 min(1240, 100% - 32)，1160 时页边只有 16px，
+     点阵会变成一条脏边、竖排字会直接压到纸上。1360 时页边 = 60px，刚好够。
+     （笔记本电脑 1366 是最窄的一档，再窄就不给这两样装饰。） */
+
+/* ---------- ① 桌面点阵：纸是摊在一块带点的垫子上的 ---------- */
+@media (min-width: 1360px) {
+  .lp {
+    background-image: radial-gradient(
+      circle at 50% 50%,
+      rgba(61, 47, 26, 0.14) 0.9px,
+      transparent 1.5px
+    );
+    background-size: 22px 22px;
+    /* ★ fixed 而不是 local：纸在滚，桌面不动。用 local 点阵会跟着纸走，
+       看着像纸自己长了花纹，而且两张纸之间的缝里会露出一条会动的点 */
+    background-attachment: fixed;
+  }
+  .dark .lp {
+    background-image: radial-gradient(
+      circle at 50% 50%,
+      rgba(237, 224, 196, 0.085) 0.9px,
+      transparent 1.5px
+    );
+  }
+}
+
+/* ---------- ② 两侧页边的竖排字：像书脊上印的那行 ---------- */
+.lp-margin {
+  display: none;
+}
+@media (min-width: 1360px) {
+  .lp-margin {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+  }
+  .lp-margin span {
+    position: absolute;
+    top: 50%;
+    font-size: 0.6875rem; /* 11px：比正文小一档，装饰不该和内容抢视线 */
+    letter-spacing: 0.34em;
+    white-space: nowrap;
+    color: var(--text-3);
+    opacity: 0.62;
+  }
+  /* ★ 两条竖排字一律锚在纸上（纸边 ±44px），不锚窗口边：
+     1920 的屏页边有 340px，字黏在屏幕最左边会离纸远远的，像掉了。
+     纸左边缘 = 50% - 620（纸宽上限 1240），纸右边缘 = 50% + 620。 */
+  .lp-margin-l {
+    right: calc(50% + 664px);
+    writing-mode: vertical-rl;
+    transform: translateY(-50%);
+  }
+  .lp-margin-r {
+    left: calc(50% + 664px);
+    writing-mode: vertical-rl;
+    transform: translateY(-50%);
+  }
+  /* ★ 竖排字的中文必须保持正立，从上往下读。
+     别用 rotate(180deg) 去仿欧式书脊 —— 那会把每个字转成倒的，认不出来
+     （第一版就是这么错的，截图里整行字是倒着的）。 */
+  /* 两条虚线：书页的"版心线"。放在纸外 20px、竖排字内侧，
+     它把"纸"和"页边"分开，页边才不像一块被剩下的底 */
+  .lp-margin::before,
+  .lp-margin::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background-image: repeating-linear-gradient(
+      to bottom,
+      var(--line-strong) 0 5px,
+      transparent 5px 13px
+    );
+    opacity: 0.55;
+  }
+  .lp-margin::before {
+    left: calc(50% - 640px);
+  }
+  .lp-margin::after {
+    right: calc(50% - 640px);
+  }
+}
+
+/* ---------- ③ 封面目录：填掉左下角那片白 ---------- */
+/* 压在封面底部、与右侧照片同一条底线（bottom: 92px），
+   左起纸的内边距，右到照片左侧留 48px —— 照片是绝对定位的，
+   目录不能钻到它下面去。≥1180 时照片挪到右上，底部整条都空出来，
+   目录就吃满整幅宽度，成了一条"页脚式的目录带"。 */
+.lp-toc {
+  position: absolute;
+  left: 56px;
+  right: 452px;
+  bottom: 92px;
+  z-index: 1;
+}
+.lp-toc-head {
+  margin: 0 0 10px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: var(--ls-wide);
+  color: var(--text-3);
+}
+.lp-toc-list {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.lp-toc-list a {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 4px 0;
+  text-decoration: none;
+}
+.lp-toc-no {
+  flex: none;
+  font-family: var(--font-serif);
+  font-size: var(--fs-sm);
+  color: var(--accent-ink);
+}
+.lp-toc-t {
+  font-size: var(--fs-md);
+  color: var(--text-2);
+  transition: var(--t-color);
+}
+.lp-toc-list a:hover .lp-toc-t,
+.lp-toc-list a:focus-visible .lp-toc-t {
+  color: var(--accent-ink);
+}
+.lp-toc-list a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: var(--radius-xs);
+}
+
+@media (min-width: 1180px) {
+  .lp-toc {
+    right: 56px;
+  }
+}
+
+/* 1160 以下照片退回正文流，目录也跟着回到流里，不再绝对定位 */
+@media (max-width: 1160px) {
+  .lp-toc {
+    position: static;
+    margin-top: 44px;
+  }
+}
+
+@media (max-width: 760px) {
+  .lp-toc-list {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 2px 16px;
+  }
+}
+
+/* ---------- ④ 封面上的吉祥物 ----------
+   位置：文字块和目录之间那块空白（用户圈出来的地方）。
+   底下垫一张椭圆影子 —— 没有影子它就会"浮"在白纸上，
+   看着像一张忘记裁掉的贴图，而不是站在桌上的东西。
+   影子跟着呼吸一起缩放，高度变化才可信。 */
+.lp-mascot {
+  position: relative;
+  z-index: 1;
+  width: 132px;
+  height: 132px;
+  margin-top: 28px;
+}
+.lp-mascot-fig {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.lp-mascot-shadow {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  width: 86px;
+  height: 12px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(50% 50% at 50% 50%, rgba(61, 47, 26, 0.26), rgba(61, 47, 26, 0) 76%);
+  /* 5s 与 .mascot 的 mascot-float 同频：它浮起来，影子就淡一点、小一点 */
+  animation: lp-shadow-breathe 5s ease-in-out infinite;
+}
+@keyframes lp-shadow-breathe {
+  0%, 100% { transform: translateX(-50%) scale(1); opacity: 1; }
+  50% { transform: translateX(-50%) scale(0.92); opacity: 0.72; }
+}
+
+/* 两颗金点：只在吉祥物右上方和左下角一闪一闪。
+   只有两颗、周期错开 2.3s —— 再多就变成圣诞树了 */
+.lp-spark {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  background: var(--accent);
+  clip-path: polygon(50% 0%, 61% 39%, 100% 50%, 61% 61%, 50% 100%, 39% 61%, 0% 50%, 39% 39%);
+  opacity: 0;
+  animation: lp-twinkle 4.6s ease-in-out infinite;
+}
+.lp-spark-1 {
+  top: 4%;
+  right: -6%;
+}
+.lp-spark-2 {
+  left: -8%;
+  top: 46%;
+  width: 7px;
+  height: 7px;
+  animation-delay: 2.3s;
+}
+@keyframes lp-twinkle {
+  0%, 62%, 100% { opacity: 0; transform: scale(0.5) rotate(0deg); }
+  74% { opacity: 0.95; transform: scale(1) rotate(12deg); }
+  88% { opacity: 0.35; transform: scale(0.82) rotate(24deg); }
+}
+
+/* 宽屏才把它放进"文字与目录之间"那块位置；窄屏它退回正文流，
+   排在按钮下面、照片上面 —— 手机上那块空白本来也不存在 */
+/* ★ 位置不能贴着左边放：文案块（含那行"一个登录名…"）的盒子宽 560、
+   底边到 535，贴着左内边距立一只 190 的吉祥物会直接压到那行字上。
+   所以往右挪到 left: 512（含纸的内边距，实际落在 613）：
+     · 那行字的**字**只到 421，右边是空的；
+     · 右边不撞照片（照片从 883 起，留 80）；
+     · 下边不撞目录（脚到 684，目录顶 698）。
+   ★★ 这个位置是"量出来的"，不是拍脑袋：改首屏文案（尤其那行说明变长）
+      必须回来重量一次。verify_landing.js 里用 Range 量文字实际范围守着这条，
+      文案一长长就会红。 */
+@media (min-width: 1180px) {
+  .lp-mascot {
+    position: absolute;
+    left: 512px;
+    bottom: 176px;
+    width: 190px;
+    height: 190px;
+    margin: 0;
+  }
+  .lp-mascot-shadow {
+    bottom: 16px;
+    width: 122px;
+    height: 16px;
+  }
+  /* ★ 放大到 190px 之后，头顶那道 4px 的白色高光会变成一块灰胶布
+     （它在 26px 的导航里是看不见的细节）。只在落地页这只大号的身上隐掉，
+     组件本身不动 —— 别的地方还要它。 */
+  .lp-mascot-fig svg path[stroke="#FFFFFF"] {
+    display: none;
+  }
+  /* ★ 深色下 components.css 给 .corn-logo 挂了 8px 的金色光晕，
+     那是为 26px 的导航图标调的；放大到 190px 就变成一圈发光的灯管。
+     大号这只不需要靠光晕浮出来（它本身就亮），关掉。 */
+  .dark .lp-mascot-fig.corn-logo {
+    filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-mascot-shadow,
+  .lp-spark {
+    animation: none;
+  }
+  .lp-spark {
+    opacity: 0.55;
+  }
+}

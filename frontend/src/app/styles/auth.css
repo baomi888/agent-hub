@@ -251,6 +251,24 @@
   border-radius: var(--radius-sm);
 }
 
+/* 「回到介绍页」：卡片最底下的一行退路。
+   不做成按钮——它不是这一步该做的事，只是一条回路，
+   所以用弱文字色、不描边、不占一行高度 */
+.auth-back {
+  margin: 13px 0 0;
+  text-align: center;
+  font-size: var(--fs-sm);
+}
+.auth-back a {
+  color: var(--text-3);
+  text-decoration: none;
+  transition: var(--t-color);
+}
+.auth-back a:hover,
+.auth-back a:focus-visible {
+  color: var(--accent-ink);
+}
+
 /* ---------- 小屏 ---------- */
 @media (max-width: 420px) {
   .auth-card {
