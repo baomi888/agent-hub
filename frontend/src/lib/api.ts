@@ -6,7 +6,7 @@ import { detailToMessage } from "./errors";
 import type { MeOut, UserOut, Template, ApplyTemplateResult, UsageSummary } from "./types";
 import type { ProfileSnapshot, TagTaxonomy, TemplateRecommend } from "./types";
 import type { TodaySnapshot } from "./types";
-import type { PushStatus, PushSubscribeBody } from "./types";
+import type { PushStatus, PushSubscribeBody, PushTestResult } from "./types";
 import type { RemindPref } from "./types";
 import type { CalendarLink } from "./types";
 import type { EnhanceResult } from "./types";
@@ -672,7 +672,7 @@ export const api = {
         body: JSON.stringify({ endpoint }),
       }),
     test: () =>
-      request<{ ok: boolean; sent: number; failed: number }>("/api/push/test", {
+      request<PushTestResult>("/api/push/test", {
         method: "POST",
         body: "{}",
       }, { timeoutMs: 30000 }),

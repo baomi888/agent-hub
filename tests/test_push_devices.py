@@ -223,3 +223,110 @@ class TestRemoveApi:
     def test_remove_requires_id(self, client):
         assert client.post("/api/push/remove", json={}).status_code == 400
         assert client.post("/api/push/remove", json={"id": "   "}).status_code == 400
+
+
+# ==================== 发送明细 ====================
+
+
+class TestSendDetailed:
+    """`sent=2` 只说明推送服务方收下了两条请求，不代表两台系统都弹了通知。
+
+    ★ 真实事故（2026-11-08）：手机看到了、电脑没看到，光看计数无法判断是
+      服务端没发还是 Windows 把通知吞了。明细带 sub_id，设置页才能点名。
+    """
+
+    def _ready(self, monkeypatch):
+        monkeypatch.setattr(config, "PUSH_ENABLED", True)
+        monkeypatch.setattr(config, "VAPID_PUBLIC_KEY", "k")
+        monkeypatch.setattr(config, "VAPID_PRIVATE_KEY", "k")
+
+    def test_items_per_device(self, db, monkeypatch):
+        from service import push as push_svc
+
+        self._ready(monkeypatch)
+        _add("u1", "https://x.example/1", platform="ios")
+        _add("u1", "https://x.example/2", platform="desktop")
+
+        def fake_send(sub, payload):
+            ok = sub["platform"] == "ios"
+            return ok, (None if ok else "500 boom"), False
+
+        monkeypatch.setattr(push_svc, "_send_one", fake_send)
+        res = push_svc.send_detailed("u1", {})
+
+        assert res["sent"] == 1 and res["failed"] == 1
+        assert len(res["items"]) == 2
+        assert [i["ok"] for i in res["items"]] == [True, False]
+        assert res["items"][0]["err"] is None
+        assert res["items"][1]["err"] == "500 boom"
+        # sub_id 要能对回 device_list，前端才点得出设备名
+        ids = {d["id"] for d in push_store.list_for_owner("u1")}
+        assert {i["sub_id"] for i in res["items"]} == ids
+
+    def test_send_to_user_shapes_stay_compatible(self, db, monkeypatch):
+        """`send_to_user` 的返回仍是那四个整数字段 —— worker 的统计口径别被改坏。"""
+        from service import push as push_svc
+
+        self._ready(monkeypatch)
+        _add("u1", "https://x.example/1")
+        monkeypatch.setattr(push_svc, "_send_one", lambda sub, payload: (True, None, False))
+        res = push_svc.send_to_user("u1", {})
+        assert set(res) == {"sent", "failed", "gone", "skipped"}
+        assert res["sent"] == 1
+
+
+# ==================== 自测限流 ====================
+
+
+class TestTestQuota:
+    def test_exhausted_message_is_human(self, client, monkeypatch):
+        """点满后必须是「今天的测试次数用完了」，而不是全局处理器拼的
+        「pushtest已达上限（10），明天再试或联系管理员调整配额」——
+        英文 kind 泄漏给用户，而且"联系管理员"对一个自测按钮纯属废话。
+        """
+        from api import push as push_api
+        from service import push as push_svc
+
+        monkeypatch.setattr(
+            push_svc,
+            "send_detailed",
+            lambda uid, payload: {"sent": 0, "failed": 0, "gone": 0, "skipped": 0, "items": []},
+        )
+
+        for _ in range(push_api._TEST_PER_DAY):
+            assert client.post("/api/push/test", json={}).status_code == 200
+
+        r = client.post("/api/push/test", json={})
+        assert r.status_code == 429
+        detail = r.json()["detail"]
+        assert "测试次数用完" in detail
+        assert "pushtest" not in detail, "英文 kind 不该出现在用户看到的文案里"
+        assert "真提醒照常发" in detail, "要说清真提醒不受影响，否则用户以为功能坏了"
+
+    def test_allowance_is_not_too_tight(self):
+        """5 次太低：调试三端时几下就用完，然后看到"发送失败"以为是坏了。"""
+        from api import push as push_api
+
+        assert push_api._TEST_PER_DAY >= 10
+
+    def test_test_returns_items(self, client, monkeypatch):
+        from service import push as push_svc
+
+        monkeypatch.setattr(
+            push_svc,
+            "send_detailed",
+            lambda uid, payload: {
+                "sent": 1,
+                "failed": 1,
+                "gone": 0,
+                "skipped": 0,
+                "items": [
+                    {"sub_id": "aaa", "ok": True, "gone": False, "err": None},
+                    {"sub_id": "bbb", "ok": False, "gone": False, "err": "500"},
+                ],
+            },
+        )
+        body = client.post("/api/push/test", json={}).json()
+        assert body["ok"] is True
+        assert body["sent"] == 1
+        assert [i["ok"] for i in body["items"]] == [True, False]

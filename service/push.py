@@ -144,12 +144,29 @@ def _send_one(sub: dict[str, Any], payload: dict[str, Any]) -> tuple[bool, str |
 
 def send_to_user(uid: str, payload: dict[str, Any]) -> dict[str, int]:
     """发给他名下所有还活着的订阅。多端会各收一次（这是对的：人可能在任一设备上）。"""
+    res = send_detailed(uid, payload)
+    return {k: res[k] for k in ("sent", "failed", "gone", "skipped")}
+
+
+def send_detailed(uid: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """同 `send_to_user`，但额外给出**每一台**的结果。
+
+    为什么需要：`sent=2` 只说明推送服务方收下了两条投递请求，**不代表两台设备的
+    系统都弹了通知**。用户报「手机看到了、电脑没看到」时，光有计数无法判断是
+    服务端没发、还是 WNS 收了但 Windows 把通知吞了（系统通知关、勿扰模式）。
+    带 sub_id 的明细让设置页能直接说「已投递到 2 台：iPhone ✓ / Windows 上的 Edge ✓，
+    没弹的话检查系统通知」，把排查方向从"你们的 bug"改到系统设置。
+
+    `sub_id` 是随机主键，不含 endpoint，可以下发给前端用来对 `device_list`。
+    """
     if not config.push_ready():
-        return {"sent": 0, "failed": 0, "gone": 0, "skipped": 1}
+        return {"sent": 0, "failed": 0, "gone": 0, "skipped": 1, "items": []}
     subs = push_store.list_active(uid)
     sent = failed = gone = 0
+    items: list[dict[str, Any]] = []
     for sub in subs:
         ok, err, is_gone = _send_one(sub, payload)
+        items.append({"sub_id": sub["sub_id"], "ok": ok, "gone": is_gone, "err": err})
         if ok:
             sent += 1
             push_store.mark_ok(sub["sub_id"])
@@ -159,7 +176,7 @@ def send_to_user(uid: str, payload: dict[str, Any]) -> dict[str, int]:
                 gone += 1
             push_store.mark_fail(sub["sub_id"], err or "unknown", gone=is_gone)
             logger.warning("push send failed uid=%s sub=%s gone=%s err=%s", uid, sub["sub_id"], is_gone, err)
-    return {"sent": sent, "failed": failed, "gone": gone, "skipped": 0}
+    return {"sent": sent, "failed": failed, "gone": gone, "skipped": 0, "items": items}
 
 
 # ==================== worker hook ====================

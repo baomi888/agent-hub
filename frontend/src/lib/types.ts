@@ -1074,6 +1074,31 @@ export type PushSubscribeBody = {
   platform?: string;
 };
 
+/**
+ * 「发一条测试」的结果（POST /api/push/test）。
+ *
+ * `sent` 只是**推送服务方收下了几条投递请求**，不等于那几台的系统真弹了通知
+ * ——Windows 的通知开关、勿扰模式、iOS 的专注模式都会在最后一步吞掉。
+ * 所以多给一份 `items` 明细：设置页据此能说清"已投递到 2 台：iPhone ✓、
+ * Windows 上的 Edge ✓"，把"我电脑为什么没弹"的排查方向挪到系统设置上。
+ */
+export type PushTestItem = {
+  /** 对应 PushDevice.id */
+  sub_id: string;
+  ok: boolean;
+  /** true = 推送服务方说这条订阅没了（410/404） */
+  gone: boolean;
+  err: string | null;
+};
+
+export type PushTestResult = {
+  ok: boolean;
+  sent: number;
+  failed: number;
+  gone: number;
+  items: PushTestItem[];
+};
+
 /* ==========================================================================
    日历订阅（GET /api/calendar/link）
    ==========================================================================

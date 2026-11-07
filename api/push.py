@@ -168,16 +168,32 @@ async def push_remove(body: dict, uid: str = Depends(get_current_user)) -> dict:
     }
 
 
+# 每天能自测几次。5 次太低——调试三端时几下就用完，然后看到"发送失败"
+# 还以为是功能坏了（实际是 429，用户完全看不出来）。10 次够把三端各验两轮，
+# 又不至于被当成免费闹钟（每次都会真弹一条通知）。
+_TEST_PER_DAY = 10
+
+
 @router.post("/test")
 async def push_test(uid: str = Depends(get_current_user)) -> dict:
-    """给自己发一条。**只发给自己**，所以没有"滥发"风险；仍限每天 5 次，
+    """给自己发一条。**只发给自己**，所以没有"滥发"风险；仍限每天若干次，
     免得把推送服务方的配额和用户的耐心一起耗光（每次都会真弹一个通知）。"""
     if not config.push_ready():
         raise HTTPException(status_code=503, detail="服务端未开启推送")
     from core import reminder_store  # 只在这个端点用到，放在函数里少一层 import 噪音
     from service import push as push_svc  # 延迟导入：service 层依赖 core，这里避免循环
 
-    await asyncio.to_thread(quota.consume_key, f"pushtest:{uid}", "pushtest", 5)
+    try:
+        await asyncio.to_thread(quota.consume_key, f"pushtest:{uid}", "pushtest", _TEST_PER_DAY)
+    except quota.QuotaExceeded as e:
+        # 不让它走全局处理器：那边会拼出「pushtest已达上限（10），明天再试或
+        # 联系管理员调整配额」——英文 kind 泄漏给用户，而且"联系管理员"对一个
+        # 自测按钮纯属废话。这里直说，并强调**真提醒不受影响**——否则用户会
+        # 以为整个提醒功能坏了。
+        raise HTTPException(
+            status_code=429,
+            detail=f"今天的测试次数用完了（每天 {_TEST_PER_DAY} 次）。真提醒照常发，明天就能再测。",
+        ) from e
     hour, minute = await asyncio.to_thread(reminder_store.get, uid)
     payload = {
         "title": "知穗的提醒长这样",
@@ -186,5 +202,8 @@ async def push_test(uid: str = Depends(get_current_user)) -> dict:
         "url": "/",
         "tag": "test",
     }
-    res = await asyncio.to_thread(push_svc.send_to_user, uid, payload)
+    # ★ 用 send_detailed 而不是 send_to_user：多台设备时，光有 sent 计数答不了
+    #   「我电脑为什么没弹」。明细让前端能说清"已投递到 2 台"，把排查方向从
+    #   服务端挪到系统通知设置上。
+    res = await asyncio.to_thread(push_svc.send_detailed, uid, payload)
     return {"ok": res.get("sent", 0) > 0, **res}

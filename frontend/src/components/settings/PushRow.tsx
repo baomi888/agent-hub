@@ -116,7 +116,12 @@ export default function PushRow() {
     if (res.reason === "denied") setView("denied");
     // ★ 不能说"换 Edge"：安卓上所有浏览器（含 Edge 安卓版）的推送底层都是
     //   Google FCM，国内连不通，换浏览器不会好。指到下面那张日历卡片上去。
-    else setNote("这台设备连不上推送服务，用下面的「日历提醒」一样能每天提醒");
+    else {
+      // 浏览器的原始错误（"Registration failed - push service error" 之类）
+      // 对用户是天书，但排查时是唯一线索——打到控制台，别静默吞掉。
+      if (res.detail) console.warn("[push] 订阅失败：", res.detail);
+      setNote("这台设备连不上推送服务，用下面的「日历提醒」一样能每天提醒");
+    }
   }, [refresh]);
 
   const off = useCallback(async () => {
@@ -145,18 +150,33 @@ export default function PushRow() {
   const test = useCallback(async () => {
     setBusy(true);
     setNote("");
+    const nameOf = (subId: string) => {
+      const d = list.find((x) => x.id === subId);
+      return d ? deviceLabel(d.platform, d.ua) : "一台设备";
+    };
     try {
       const r = await api.push.test();
-      // sent 是**真发出去的台数**。本机的订阅可能刚好失效（410）而别的设备
-      // 收到了，这时说"已发出"会让人以为这台也行，所以按台数分三档说。
-      if (r.sent <= 0) setNote("没发出去：这台设备的订阅可能已失效，点「关掉」再重新打开");
-      else if (r.sent === 1) setNote("已发出，看系统通知栏");
-      else setNote(`已发到 ${r.sent} 台设备，这台也会响一次`);
-    } catch {
-      setNote("发送失败，稍后再试");
+      const okItems = (r.items || []).filter((i) => i.ok);
+      if (r.sent <= 0) {
+        setNote("没发出去：这台设备的订阅可能已失效，点「关掉这台」再重新打开");
+      } else {
+        // ★ 点名发到了哪几台。只说"已发出"在"电脑没弹"的时候等于没说：
+        //   sent 只代表推送服务方收下了请求，系统那一步可能被通知开关吞掉。
+        //   写出设备名，用户才能对照着去查那台的通知设置。
+        const names = okItems.map((i) => nameOf(i.sub_id)).join("、");
+        setNote(
+          `已投递到 ${okItems.length} 台：${names}。` +
+            (okItems.length > 1 ? "如果哪一台没弹，检查那台的通知设置。" : "没弹的话检查系统通知设置。"),
+        );
+      }
+    } catch (e) {
+      // ★ 429 的说明（"今天的测试次数用完了"）比"发送失败"有用得多。
+      //   早先吞掉后端那句话，用户只能反复点、每次都 429，还以为功能坏了。
+      const msg = (e as Error)?.message || "";
+      setNote(msg && !/^HTTP \d+/.test(msg) ? msg : "发送失败，稍后再试");
     }
     setBusy(false);
-  }, []);
+  }, [list]);
 
   const aliveCount = list.filter((d) => !d.disabled).length;
   const others = list.filter((d) => !d.disabled && d.id !== mine?.id);
