@@ -188,6 +188,69 @@
   background: #D39428;
 }
 
+/* ---------- 注册前的安装入口 ----------
+   登录门后面是空的，装到桌面这件事只能在这一屏说清楚。做成整行链接：
+   一行小字没人点，整行才像下载页的入口。层级压在登录按钮之下 ——
+   虚线分隔 + 12px 说明 + 32px 图标，不跟 48px 的主按钮抢注意力。 */
+.auth-install {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  margin-top: var(--space-20);
+  padding-top: var(--space-16);
+  border-top: 1px dashed var(--line-strong);
+  color: var(--ink);
+  text-decoration: none;
+  transition: var(--t-color);
+}
+.auth-install-ic {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  transition: var(--t-color);
+}
+.auth-install-txt {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.auth-install-txt strong {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  line-height: 1.35;
+}
+.auth-install-txt em {
+  font-style: normal;
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+  color: var(--text-3);
+}
+.auth-install-go {
+  flex: none;
+  font-size: var(--fs-sm);
+  color: var(--accent-ink);
+  white-space: nowrap;
+}
+.auth-install:hover .auth-install-ic,
+.auth-install:focus-visible .auth-install-ic {
+  background: var(--accent-tint);
+}
+.auth-install:hover .auth-install-go {
+  text-decoration: underline;
+}
+.auth-install:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: var(--radius-sm);
+}
+
 /* ---------- 小屏 ---------- */
 @media (max-width: 420px) {
   .auth-card {

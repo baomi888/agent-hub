@@ -6,6 +6,7 @@
 // 按用户隔离的，弹一个"请登录"的小框、背后还留着别人的会话列表，等于把
 // 隔离做了一半。整页挡住最干净，也顺带避免了首屏先渲染空列表再跳走的闪烁。
 import { useState } from "react";
+import Link from "next/link";
 import MascotLogo from "./chat/MascotLogo";
 
 interface Props {
@@ -143,6 +144,29 @@ export default function AuthGate({ allowSignup, checking, onLogin, onRegister }:
             {busy ? "请稍候..." : currentMode === "login" ? "登录" : "注册并登录"}
           </button>
         </form>
+
+        {/* 注册前的安装入口。
+            为什么放在这一屏：大多数人第一次是从别人发的链接或搜索结果进来，
+            这时还没有账号，登录门后面什么都看不到。"装到桌面"必须在这之前讲清楚，
+            否则他下次还得再搜一次网址 —— 这也是把它做成独立页 /install 的原因，
+            那一页不需要登录，可以直接转发。
+            做成整行链接（而不是一行小字）：拇指好点，也才像"下载页"。 */}
+        <Link href="/install" className="auth-install">
+          <span className="auth-install-ic" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7">
+              <rect x="6.4" y="2.4" width="11.2" height="19.2" rx="3.2" />
+              <path d="M12 7.6v5.2" strokeLinecap="round" />
+              <path d="M9.5 10.6 12 13.1l2.5-2.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </span>
+          <span className="auth-install-txt">
+            <strong>装到桌面</strong>
+            {/* 这句必须短：390 宽下卡片内只剩 ~240px，写长了会折出".
+                址"这种孤字（第一版就折了，实拍看到） */}
+            <em>下次不用再输网址</em>
+          </span>
+          <span className="auth-install-go">看怎么装 ›</span>
+        </Link>
       </div>
     </div>
   );

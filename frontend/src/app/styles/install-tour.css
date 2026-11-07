@@ -1,0 +1,446 @@
+/* ============ 装到桌面 · 分步教程页（/install）============
+   组件：app/install/page.tsx + components/install/TourSteps.tsx
+
+   页面设定：一张纸摊在桌面上，像一本装订的说明书。
+   - body 的桌面渐变照旧露在四周（.tour 只做留白），纸面是 .tour-sheet
+   - 步骤是一条竖直的虚线装订线，序号是钉在线上的一枚小圆章
+   - 金色只出现在三处：眉题、序号、图注引线。其余全是墨色深浅
+   - 真机截图贴在深一档的纸色衬底里（--desk-1），像照片贴在笔记本里
+
+   为什么整页靠 .tour 自己滚：base.css 里 html/body 是 overflow:hidden
+   （应用外壳固定视口），页面级滚动一律发生在内部容器里，这里也一样。 */
+
+.tour {
+  height: 100dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tour-sheet {
+  position: relative;
+  /* 760：桌面端正文一行 ~44 字，再宽就没有阅读栏了；再窄则真机截图被压到看不清
+     （720 时 1280 宽的屏上左右各空 280，像把手机版拉宽） */
+  width: min(760px, 100%);
+  margin: 0 auto;
+  padding-bottom: 36px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+}
+
+/* 顶部一条发丝金线：从封面起笔，和全站浮层的做法一致 */
+.tour-sheet::before {
+  content: "";
+  display: block;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-line));
+}
+
+.tour-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px 0;
+}
+.tour-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  font-size: var(--fs-md);
+  color: var(--text-2);
+  text-decoration: none;
+  transition: var(--t-color);
+}
+.tour-back:hover,
+.tour-back:focus-visible {
+  color: var(--accent-ink);
+}
+.tour-brand {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  letter-spacing: var(--ls-wide);
+  color: var(--text-3);
+}
+
+.tour-body {
+  padding: 18px 20px 0;
+}
+
+.tour-eyebrow {
+  margin: 0;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: var(--ls-wide);
+  color: var(--accent-ink);
+}
+
+.tour-h1 {
+  margin: 7px 0 0;
+  font-family: var(--font-serif);
+  /* 上限跟着 --hero-fs 走（用户调大字号时整页跟着放大）；下限保 26px */
+  font-size: clamp(1.625rem, 6vw, var(--hero-fs));
+  font-weight: 700;
+  line-height: 1.28;
+  letter-spacing: var(--ls-tight);
+  color: var(--text-1);
+}
+
+.tour-lede {
+  margin: 10px 0 0;
+  max-width: 32em;
+  font-size: var(--msg-fs);
+  line-height: var(--lh-body);
+  color: var(--text-2);
+}
+
+/* ---------- 平台切换 ---------- */
+.tour-tabs {
+  display: flex;
+  gap: 2px;
+  margin-top: 22px;
+  padding: 3px;
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+.tour-tab {
+  flex: 1;
+  min-height: 36px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-md);
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.tour-tab:hover {
+  color: var(--text-1);
+}
+/* 选中：抬起的纸片 + 金字。全站「描边=未选、实底=已选」那套的轻量版 */
+.tour-tab[aria-selected="true"] {
+  background: var(--card-bg);
+  box-shadow: var(--shadow-1);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+.tour-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- 面板抬头 ---------- */
+.tour-panel {
+  margin-top: 24px;
+}
+.tour-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding-bottom: 11px;
+  border-bottom: 1px solid var(--line);
+}
+.tour-summary h2 {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  letter-spacing: var(--ls-tight);
+  color: var(--text-1);
+}
+.tour-count {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* 前提说明：左侧一道金线，读起来是"页边批注"而不是正文 */
+.tour-prereq {
+  margin: 13px 0 0;
+  padding: 10px 12px 10px 13px;
+  background: var(--fill-4);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-size: var(--fs-md);
+  line-height: 1.66;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- 步骤 ---------- */
+.tour-steps {
+  margin: 22px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.tour-steps-wait {
+  min-height: 320px;
+}
+
+.tour-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 26px 1fr;
+  gap: 0 14px;
+  padding-bottom: 30px;
+}
+.tour-step:last-child {
+  padding-bottom: 0;
+}
+/* 装订线：只在序号下方起笔，最后一步不画 */
+.tour-step:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 12px;
+  top: 33px;
+  bottom: 2px;
+  border-left: 1px dashed var(--line-strong);
+}
+
+.tour-no {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin-top: 3px;
+  border: 1px solid var(--accent-line);
+  border-radius: 50%;
+  /* 底色必须盖住装订线，用纸面色而不是透明 */
+  background: var(--bg-canvas);
+  color: var(--accent-ink);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.tour-step-body {
+  min-width: 0;
+}
+
+.tour-step-title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: var(--fs-title);
+  font-weight: 700;
+  line-height: 1.36;
+  letter-spacing: var(--ls-tight);
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+
+.tour-step-desc {
+  margin: 7px 0 0;
+  font-size: var(--msg-fs);
+  line-height: var(--lh-body);
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- 图 ---------- */
+.tour-fig {
+  margin: 14px 0 0;
+}
+/* 衬底比纸面深一档，截图（浅色）才和卡片分得开 */
+.tour-fig-frame {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  /* 上限由组件按图的长宽比写进 style（max-width），这里不写死 */
+  padding: 7px;
+  background: var(--desk-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.tour-fig-frame img,
+.tour-fig-frame svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+}
+
+/* 图注 = 这一步的结论（"点这个蓝色「添加」"）。
+   第一版它是全页最小最淡的一行，视线顺序变成"读解释 → 看图 → 最后才看到答案"，
+   正好反了（独立评审第一条）。现在提到与正文同档、加粗、用墨色，金色只留给竖条。 */
+.tour-cap {
+  position: relative;
+  margin: 9px 0 0;
+  padding-left: 12px;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+.tour-cap::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.26em;
+  bottom: 0.26em;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.tour-note {
+  margin: 24px 0 0;
+  padding-top: 14px;
+  border-top: 1px dashed var(--line-strong);
+  font-size: var(--fs-md);
+  line-height: 1.68;
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- 常见问题 ---------- */
+.tour-faq {
+  margin-top: 32px;
+  padding: 0 20px;
+}
+.tour-faq > h2 {
+  margin: 0;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: var(--ls-wide);
+  color: var(--accent-ink);
+}
+.tour-faq details {
+  border-bottom: 1px solid var(--line);
+}
+.tour-faq summary {
+  display: flex;
+  gap: 9px;
+  padding: 13px 0;
+  font-size: var(--fs-lg);
+  line-height: 1.5;
+  color: var(--text-1);
+  cursor: pointer;
+  list-style: none;
+}
+.tour-faq summary::-webkit-details-marker {
+  display: none;
+}
+.tour-faq summary::before {
+  content: "＋";
+  flex: none;
+  width: 1em;
+  color: var(--accent);
+  font-size: var(--fs-md);
+  line-height: 1.6;
+}
+.tour-faq details[open] summary::before {
+  content: "－";
+}
+.tour-faq summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.tour-faq p {
+  margin: 0;
+  padding: 0 0 14px 1.55em;
+  font-size: var(--msg-fs);
+  line-height: var(--lh-body);
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- 收尾 ---------- */
+.tour-cta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 28px 20px 0;
+  padding: 15px 16px;
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+.tour-cta p {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--fs-lg);
+  color: var(--text-1);
+}
+.tour-cta .btn {
+  flex: none;
+}
+.tour-foot {
+  margin: 16px 20px 0;
+  font-size: var(--fs-xs);
+  line-height: 1.62;
+  color: var(--text-3);
+}
+
+/* 只给读屏的说明（步骤编号已经画在圆章里，标题要用文字补一遍） */
+.tour-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 560px) {
+  .tour {
+    padding: 8px;
+  }
+  .tour-bar {
+    padding: 10px 15px 0;
+  }
+  .tour-body {
+    padding: 15px 15px 0;
+  }
+  .tour-faq {
+    padding: 0 15px;
+  }
+  .tour-cta {
+    margin-inline: 15px;
+  }
+  .tour-foot {
+    margin-inline: 15px;
+  }
+  /* 手机上三个 tab 要挤在一行：字号降一档，不然「iPhone / iPad」会被压扁 */
+  .tour-tab {
+    font-size: var(--fs-sm);
+    min-height: 34px;
+  }
+  .tour-step {
+    grid-template-columns: 24px 1fr;
+    gap: 0 11px;
+  }
+  .tour-no {
+    width: 24px;
+    height: 24px;
+  }
+  .tour-step:not(:last-child)::before {
+    left: 11px;
+  }
+  /* 两个按钮要够大，拇指才点得准 */
+  .tour-cta {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: center;
+  }
+  .tour-cta .btn {
+    min-height: 42px;
+  }
+}

@@ -898,6 +898,12 @@ export default function Home() {
           onLogin={auth.login}
           onRegister={auth.register}
         />
+        {/* 注册前也要提「装到桌面」：多数人第一次是从分享链接或搜索结果进来，
+            此刻还没有账号。挂在这里是安全的 —— 登录态已经确定（!auth.me），
+            不存在"提示先于登录出现、把 60 天冷却提前写掉"那个坑。
+            登录门自己的卡片里还有一个常驻入口（.auth-install），两处不重复：
+            这一条只在手机首次进站时露一次，那条一直都在。 */}
+        <InstallBanner />
         {/* 登录门之外也挂一个：?ann=<期号> 是拿来给人看版式的预览入口，
             没账号也该看得见。不带这个参数时它自己什么都不渲染（见组件里的 open 判定） */}
         <AnnounceModal userId={null} />
@@ -907,10 +913,10 @@ export default function Home() {
 
   return (
     <main className="workbench-main flex overflow-hidden">
-      {/* 「装到桌面」的首次提示。★ 刻意挂在这里而不是根布局：
-          根布局会在登录门出现之前就渲染，组件判定「可以弹」→ 立刻写下 60 天冷却，
-          等用户真登录进来就再也不弹了（线上实测，探针里 localStorage 里躺着一个
-          比登录更早的时间戳）。挂进已登录分支后，物理上不可能先于登录出现。
+      {/* 「装到桌面」的首次提示。★ 刻意挂在登录态确定之后（这里或上面的登录门分支），
+          不挂根布局：根布局会在登录门出现之前就渲染，组件判定「可以弹」→
+          立刻写下 60 天冷却，等用户真登录进来就再也不弹了（线上实测，探针里
+          localStorage 里躺着一个比登录更早的时间戳）。
           position:fixed 的浮层不受 main 的 flex 与 overflow:hidden 影响，不占位。 */}
       <InstallBanner />
       <Sidebar

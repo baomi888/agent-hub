@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useRouter } from "next/navigation";
 import {
   detectPlatform,
-  installSteps,
   isInstalled,
   promptInstall,
   subscribePwa,
@@ -146,7 +146,8 @@ const getCanPrompt = (): boolean => !!window.__baomiInstallPrompt;
 function Banner({ onClose }: { onClose: () => void }) {
   const platform = useSyncExternalStore(subscribePwa, getPlatform, () => "other" as Platform);
   const canPrompt = useSyncExternalStore(subscribePwa, getCanPrompt, () => false);
-  const [expanded, setExpanded] = useState(false);
+  // 分步教程是独立页面（/install），不在提示条里展开：一张图缩到 200px 就看不清
+  const router = useRouter();
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -160,18 +161,23 @@ function Banner({ onClose }: { onClose: () => void }) {
     return () => window.clearTimeout(t);
   }, []);
 
-  const info = installSteps(platform);
+  const openGuide = () => {
+    // 先记账再跳走：跳页会卸载本组件，来不及等 CONFIRM_DELAY
+    markShown();
+    router.push("/install");
+  };
 
   const onAction = async () => {
     if (!canPrompt) {
-      setExpanded((v) => !v);
+      openGuide();
       return;
     }
     setBusy(true);
     const ok = await promptInstall();
     setBusy(false);
+    // 没装成（用户取消 / 浏览器不给装）就把他送到分步教程
     if (ok) onClose();
-    else setExpanded(true);
+    else openGuide();
   };
 
   return (
@@ -223,7 +229,7 @@ function Banner({ onClose }: { onClose: () => void }) {
             disabled={busy}
             style={{ flex: "none" }}
           >
-            {busy ? "安装中…" : canPrompt ? "安装" : expanded ? "收起" : "怎么装"}
+            {busy ? "安装中…" : canPrompt ? "安装" : "怎么装"}
           </button>
           <button
             type="button"
@@ -244,38 +250,6 @@ function Banner({ onClose }: { onClose: () => void }) {
             ×
           </button>
         </div>
-
-        {expanded && (
-          <div
-            style={{
-              marginTop: 10,
-              paddingTop: 10,
-              borderTop: "1px solid var(--line)",
-            }}
-          >
-            <div style={{ fontSize: "var(--fs-md)", fontWeight: 600, marginBottom: 6 }}>
-              {info.title}
-            </div>
-            <ol
-              style={{
-                margin: 0,
-                paddingLeft: 18,
-                fontSize: "var(--fs-sm)",
-                lineHeight: 1.7,
-                color: "var(--ink)",
-              }}
-            >
-              {info.steps.map((s) => (
-                <li key={s}>{s}</li>
-              ))}
-            </ol>
-            {info.note && (
-              <p className="hint" style={{ margin: "8px 0 0", fontSize: "var(--fs-sm)" }}>
-                {info.note}
-              </p>
-            )}
-          </div>
-        )}
       </div>
     </div>
   );
