@@ -343,7 +343,7 @@ export default function SettingsPage() {
                 「跟随系统」用的是浏览器自己设的默认字号。
               </p>
               <p className="hint">
-                校园工具页（单词卡、课表、GPA）是独立的单页，<b>不跟随</b>这个档位。
+                校园工具页（单词卡、课程表、GPA）是独立的单页，<b>不跟随</b>这个档位。
               </p>
             </div>
           </section>

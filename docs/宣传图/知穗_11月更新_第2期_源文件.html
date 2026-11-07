@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>知穗 · 11 月更新 宣传图</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --step-0: #EDE4C8;
+    --step-1: #F5F0E1;
+    --step-2: #FDFAF2;
+    --desk-0: #F3EAD8;
+    --ink: #3D2F1A;
+    --ink-2: #5A4C33;
+    --ink-3: #6F6044;
+    --accent: #C8892A;
+    --accent-ink: #875B10;
+    --line: rgba(61, 47, 26, 0.12);
+    --line-strong: rgba(61, 47, 26, 0.26);
+    --serif: "Noto Serif SC", "Songti SC", serif;
+    --sans: "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  }
+
+  html, body { width: 1080px; height: 1440px; }
+  body {
+    font-family: var(--sans);
+    color: var(--ink);
+    background: var(--desk-0);
+    -webkit-font-smoothing: antialiased;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* 桌面：一层极淡的点阵，纸浮在上面 */
+  body::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(rgba(61, 47, 26, 0.10) 1px, transparent 1px);
+    background-size: 16px 16px;
+    opacity: .55;
+  }
+
+  .sheet {
+    position: absolute;
+    left: 38px; right: 38px; top: 30px; bottom: 28px;
+    background: var(--step-2);
+    border: 1px solid var(--line-strong);
+    box-shadow: 0 16px 40px rgba(61, 47, 26, .13);
+    padding: 50px 64px 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* 装订虚线：贴着纸左侧 */
+  .sheet::before {
+    content: "";
+    position: absolute;
+    left: 28px; top: 36px; bottom: 36px;
+    width: 1px;
+    background-image: repeating-linear-gradient(to bottom, var(--line-strong) 0 7px, transparent 7px 15px);
+    opacity: .65;
+  }
+
+  /* ---------- 页头 ---------- */
+  .head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding-bottom: 13px;
+    border-bottom: 1px solid var(--line);
+  }
+  .brand { font-family: var(--serif); font-size: 23px; letter-spacing: .16em; }
+  .brand .dot { color: var(--accent); margin: 0 6px; }
+  .issue { font-size: 18px; letter-spacing: .1em; color: var(--ink-3); }
+  .issue em { font-style: normal; color: var(--accent-ink); }
+
+  /* ---------- 标题区 ---------- */
+  .kicker {
+    margin-top: 24px;
+    font-size: 20px;
+    letter-spacing: .18em;
+    color: var(--accent-ink);
+  }
+  h1 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 108px;
+    line-height: 1.06;
+    letter-spacing: .05em;
+    margin-top: 6px;
+  }
+  .sub {
+    margin-top: 16px;
+    font-size: 28px;
+    line-height: 1.72;
+    color: var(--ink-2);
+    max-width: 640px;
+  }
+  .sub b { font-weight: 500; color: var(--ink); }
+
+  /* 标题右侧的吉祥物：占住那块留白，不压字 */
+  .mascot {
+    position: absolute;
+    right: 70px; top: 150px;
+    width: 152px; height: 152px;
+  }
+  .mascot svg { width: 100%; height: 100%; display: block; }
+
+  /* ---------- 主视觉 ---------- */
+  .stage {
+    margin-top: 26px;
+    display: flex;
+    align-items: flex-end;
+    gap: 40px;
+    height: 250px;
+  }
+
+  .phone {
+    width: 172px; height: 250px;
+    border: 2px solid var(--ink);
+    border-radius: 24px;
+    background: var(--step-1);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    position: relative;
+    flex: none;
+  }
+  .phone::before {
+    content: "";
+    position: absolute;
+    top: 9px; left: 50%; transform: translateX(-50%);
+    width: 36px; height: 4px; border-radius: 2px;
+    background: var(--line-strong);
+  }
+  .appicon {
+    width: 92px; height: 92px;
+    border-radius: 22%;
+    background: var(--step-2);
+    border: 1px solid var(--line-strong);
+    display: grid;
+    place-items: center;
+    box-shadow: 0 5px 12px rgba(61,47,26,.10);
+  }
+  .appicon svg { width: 76px; height: 76px; display: block; }
+  .appname { font-size: 14px; letter-spacing: .04em; color: var(--ink-2); }
+
+  .deskwin {
+    flex: 1;
+    height: 250px;
+    border: 2px solid var(--ink);
+    border-radius: 9px;
+    background: var(--step-1);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .winbar {
+    height: 28px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 11px;
+    border-bottom: 1px solid var(--line);
+    background: var(--step-0);
+    flex: none;
+  }
+  .winbar i { width: 8px; height: 8px; border-radius: 50%; background: rgba(61,47,26,.22); }
+  .winbar span { margin-left: 8px; font-size: 11px; color: var(--ink-3); letter-spacing: .08em; }
+  .winbody { flex: 1; display: flex; min-height: 0; }
+  .winside {
+    width: 88px;
+    border-right: 1px solid var(--line);
+    background: var(--step-0);
+    padding: 13px 9px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .winside i { height: 6px; border-radius: 3px; background: rgba(61,47,26,.15); }
+  .winside i:first-child { background: rgba(200,137,42,.5); }
+  .winmain { flex: 1; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+  .wq {
+    font-size: 12px; color: var(--ink-3); letter-spacing: .02em;
+    padding-bottom: 6px; border-bottom: 1px dashed var(--line);
+  }
+  .wl { height: 7px; border-radius: 4px; background: rgba(61,47,26,.13); }
+  .wl.s { width: 82%; }
+  .wl.xs { width: 64%; }
+  .wquote {
+    margin-top: 2px;
+    border-left: 3px solid rgba(200,137,42,.55);
+    padding-left: 9px;
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--ink-3);
+  }
+
+  .tagline {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 18px;
+    font-size: 18px;
+    color: var(--ink-3);
+  }
+  .tagline::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background-image: repeating-linear-gradient(to right, var(--line-strong) 0 6px, transparent 6px 12px);
+  }
+
+  /* ---------- 三条更新 ---------- */
+  .list {
+    margin-top: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .item { display: flex; gap: 20px; align-items: flex-start; }
+  .no {
+    font-family: var(--serif);
+    font-size: 21px;
+    color: var(--accent-ink);
+    letter-spacing: .08em;
+    padding-top: 4px;
+    flex: none;
+    width: 32px;
+  }
+  .it-body { flex: 1; }
+  .it-title {
+    font-family: var(--serif);
+    font-size: 31px;
+    letter-spacing: .02em;
+    line-height: 1.32;
+  }
+  .it-desc {
+    margin-top: 6px;
+    font-size: 22px;
+    line-height: 1.52;
+    color: var(--ink-2);
+  }
+  .it-desc b { font-weight: 500; color: var(--accent-ink); }
+
+  /* ---------- 底部：二维码 ---------- */
+  .foot {
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    padding: 18px 0 26px;
+    border-top: 1px solid var(--line);
+  }
+  .qrbox {
+    width: 252px; height: 252px;
+    background: #fff;
+    padding: 10px;
+    border: 1px solid var(--line-strong);
+    box-shadow: 0 7px 18px rgba(61,47,26,.10);
+    flex: none;
+  }
+  .qrbox img { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+  .foot-txt { padding-bottom: 6px; }
+  .foot-title { font-family: var(--serif); font-size: 42px; line-height: 1.2; }
+  .foot-url { margin-top: 8px; font-size: 25px; letter-spacing: .06em; color: var(--accent-ink); }
+  .foot-note { margin-top: 10px; font-size: 20px; line-height: 1.62; color: var(--ink-3); }
+  .foot-note span { display: block; }
+</style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="head">
+      <div class="brand">知穗<span class="dot">·</span>苞米地</div>
+      <div class="issue">十一月更新 <em>第 2 期</em> ｜ 2026.11.07</div>
+    </div>
+
+    <p class="kicker">这一期最想说的一件事</p>
+    <h1>装到桌面</h1>
+
+    <div class="mascot">
+      <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+        <g stroke-linecap="round" stroke-linejoin="round" stroke="#3D2F1A">
+          <path d="M52 22 C51 15 55 11 60 10 M60 22 C60 14 63 11 67 9 M67 22 C69 16 72 14 76 13" fill="none" stroke-width="4"/>
+          <path d="M42 78 C28 80 19 92 17 106 C31 104 42 95 46 84 Z" fill="#7C9A54" stroke-width="5"/>
+          <path d="M78 78 C92 80 101 92 103 106 C89 104 78 95 74 84 Z" fill="#8FAF62" stroke-width="5"/>
+          <rect x="37" y="24" width="46" height="68" rx="23" fill="#F5B840" stroke-width="5"/>
+          <g clip-path="url(#cob3)" fill="none" stroke-width="3" opacity=".28">
+            <path d="M48.5 28 C46 45 46 70 48.5 90"/><path d="M71.5 28 C74 45 74 70 71.5 90"/>
+            <path d="M38 34 C50 38 70 38 82 34"/><path d="M38 42 C50 46 70 46 82 42"/>
+            <path d="M38 76 C50 80 70 80 82 76"/><path d="M38 84 C50 88 70 88 82 84"/>
+          </g>
+          <clipPath id="cob3"><rect x="37" y="24" width="46" height="68" rx="23"/></clipPath>
+          <circle cx="52" cy="57" r="4.6" fill="#3D2F1A" stroke="none"/>
+          <circle cx="68" cy="57" r="4.6" fill="#3D2F1A" stroke="none"/>
+          <circle cx="53.6" cy="55.4" r="1.7" fill="#FFFDF6" stroke="none"/>
+          <circle cx="69.6" cy="55.4" r="1.7" fill="#FFFDF6" stroke="none"/>
+          <path d="M53.5 67 Q60 73 66.5 67" fill="none" stroke-width="4"/>
+          <ellipse cx="44.5" cy="64" rx="4.2" ry="2.6" fill="#EF8A56" opacity=".55" stroke="none"/>
+          <ellipse cx="75.5" cy="64" rx="4.2" ry="2.6" fill="#EF8A56" opacity=".55" stroke="none"/>
+        </g>
+      </svg>
+    </div>
+
+    <p class="sub">
+      手机主屏多一个图标，电脑上是独立窗口。<br>
+      <b>点开就全屏</b>，不用每次去搜网址。
+    </p>
+
+    <div class="stage">
+      <div class="phone">
+        <div class="appicon">
+          <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+            <g stroke-linecap="round" stroke-linejoin="round" stroke="#3D2F1A">
+              <path d="M52 22 C51 15 55 11 60 10 M60 22 C60 14 63 11 67 9 M67 22 C69 16 72 14 76 13" fill="none" stroke-width="4"/>
+              <path d="M42 78 C28 80 19 92 17 106 C31 104 42 95 46 84 Z" fill="#7C9A54" stroke-width="5"/>
+              <path d="M78 78 C92 80 101 92 103 106 C89 104 78 95 74 84 Z" fill="#8FAF62" stroke-width="5"/>
+              <rect x="37" y="24" width="46" height="68" rx="23" fill="#F5B840" stroke-width="5"/>
+              <g clip-path="url(#cob1)" fill="none" stroke-width="3" opacity=".28">
+                <path d="M48.5 28 C46 45 46 70 48.5 90"/><path d="M71.5 28 C74 45 74 70 71.5 90"/>
+                <path d="M38 34 C50 38 70 38 82 34"/><path d="M38 42 C50 46 70 46 82 42"/>
+                <path d="M38 76 C50 80 70 80 82 76"/><path d="M38 84 C50 88 70 88 82 84"/>
+              </g>
+              <clipPath id="cob1"><rect x="37" y="24" width="46" height="68" rx="23"/></clipPath>
+              <circle cx="52" cy="57" r="4.6" fill="#3D2F1A" stroke="none"/>
+              <circle cx="68" cy="57" r="4.6" fill="#3D2F1A" stroke="none"/>
+              <circle cx="53.6" cy="55.4" r="1.7" fill="#FFFDF6" stroke="none"/>
+              <circle cx="69.6" cy="55.4" r="1.7" fill="#FFFDF6" stroke="none"/>
+              <path d="M53.5 67 Q60 73 66.5 67" fill="none" stroke-width="4"/>
+              <ellipse cx="44.5" cy="64" rx="4.2" ry="2.6" fill="#EF8A56" opacity=".55" stroke="none"/>
+              <ellipse cx="75.5" cy="64" rx="4.2" ry="2.6" fill="#EF8A56" opacity=".55" stroke="none"/>
+            </g>
+          </svg>
+        </div>
+        <div class="appname">知穗Agent</div>
+      </div>
+
+      <div class="deskwin">
+        <div class="winbar"><i></i><i></i><i></i><span>知穗Agent</span></div>
+        <div class="winbody">
+          <div class="winside"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="winmain">
+            <p class="wq">洛必达法则什么时候能用？</p>
+            <div class="wl"></div>
+            <div class="wl s"></div>
+            <div class="wquote">先看是不是 0/0 或 ∞/∞，<br>而且上下都得能求导。</div>
+            <div class="wl"></div>
+            <div class="wl xs"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p class="tagline">没有地址栏，也没有标签页 —— 和装了个 App 一样</p>
+
+    <div class="list">
+      <div class="item">
+        <span class="no">01</span>
+        <div class="it-body">
+          <div class="it-title">聊出来的知识点，它自己会收进资料库</div>
+          <div class="it-desc">长对话需要压缩时，<b>成句的知识点自动存进「对话沉淀」</b>，<br>下一轮提问直接能检索到。不想让它存，设置里关掉就行。</div>
+        </div>
+      </div>
+      <div class="item">
+        <span class="no">02</span>
+        <div class="it-body">
+          <div class="it-title">课表重做了：整周七天一屏看完</div>
+          <div class="it-desc">不用再左右拖。配色换成低饱和的莫兰迪，手机端表格提到上半屏，<br>日期条和课程逐列对齐。</div>
+        </div>
+      </div>
+      <div class="item">
+        <span class="no">03</span>
+        <div class="it-body">
+          <div class="it-title">番茄钟在手机上点一次就全屏</div>
+          <div class="it-desc">只剩那个表盘，键盘不再弹出来挡着。</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="foot">
+      <div class="qrbox"><img src="qr.png" alt="扫码打开知穗"></div>
+      <div class="foot-txt">
+        <p class="foot-title">扫码直接用</p>
+        <p class="foot-url">myzhisui.cn</p>
+        <p class="foot-note">
+          <span>不登录也能先逛，校园工具不用账号。</span>
+          <span>还有：品牌介绍页、头像裁剪、来源单独成卡…</span>
+        </p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
