@@ -20,7 +20,7 @@
  *   · 同一个 tag 的通知会互相替换，不会一天堆三条。
  */
 
-const VERSION = "v4";
+const VERSION = "v5";
 const PRECACHE = `baomi-pre-${VERSION}`;
 const ASSETS = `baomi-assets-${VERSION}`;
 
@@ -162,9 +162,15 @@ self.addEventListener("fetch", (event) => {
 /* ============================ 推送 ============================ */
 
 /* 服务端发来的 payload 形如
-     { title, body, url, tag }
-   （见 service/push.py#build_message）。字段一律容错——通知内容坏了
-   顶多是一条难看的横幅，绝不能让 SW 抛错（未捕获异常会让推送被静默丢弃）。 */
+     { title, body, url, tag, force? }
+   （见 service/push.py#build_message 与 api/push.py 的测试端点）。
+   字段一律容错——通知内容坏了顶多是一条难看的横幅，绝不能让 SW 抛错
+   （未捕获异常会让推送被静默丢弃）。
+
+   `force: true` = **无条件弹**，不管用户是不是正开着页面。只给「发送一条测试」
+   用：那个按钮的全部意义就是"证明能收到通知"，跳过弹窗等于什么都没发生。
+   v5 之前没有这个开关，用户在设置页上当着自己的面点测试 —— 页面可见 → 被下面
+   那段静默逻辑吞掉 → 手机上响、电脑上什么都不出现，还以为电脑没订阅。 */
 self.addEventListener("push", (event) => {
   let payload = {};
   try {
@@ -172,6 +178,7 @@ self.addEventListener("push", (event) => {
   } catch {
     payload = { title: "知穗", body: event.data ? event.data.text() : "" };
   }
+  const force = payload.force === true;
 
   event.waitUntil(
     (async () => {
@@ -180,22 +187,29 @@ self.addEventListener("push", (event) => {
          （今天还有什么没做完），人就在场，数据不会因为这条通知而变化。
          真要做点什么（比如让「今天」条重取一次），在页面里监听 'message' 即可，
          这里不预设推送内容之外的行为。
-         includeUncontrolled：这个 SW 刚激活、旧标签页还没被接管时也能问到。 */
+         includeUncontrolled：这个 SW 刚激活、旧标签页还没被接管时也能问到。
+
+         ★ 判据是 `focused`，不是单看 `visibilityState`。标签页在活动位置、但
+           用户已经切到别的应用时，Chromium 仍报 visible；只按 visible 判会把
+           每日提醒静默吞掉——那正是"我明明开了提醒却从来没响过"的来源。
+           只有窗口真的在前台（用户此刻就盯着它）才值得压掉这一条。 */
       try {
         const clientList = await self.clients.matchAll({
           type: "window",
           includeUncontrolled: true,
         });
-        const visible = clientList.filter((c) => c.visibilityState === "visible");
-        if (visible.length) {
-          visible.forEach((c) => {
+        const looking = clientList.filter(
+          (c) => c.visibilityState === "visible" && c.focused === true
+        );
+        if (looking.length) {
+          looking.forEach((c) => {
             try {
               c.postMessage({ type: "baomi:push", payload });
             } catch {
               /* 跨源/已关闭的窗口，忽略 */
             }
           });
-          return;
+          if (!force) return;
         }
       } catch {
         /* 查询客户端失败就当没人看着，继续弹通知 */

@@ -330,3 +330,24 @@ class TestTestQuota:
         assert body["ok"] is True
         assert body["sent"] == 1
         assert [i["ok"] for i in body["items"]] == [True, False]
+
+    def test_test_payload_forces_notification(self, client, monkeypatch):
+        """测试推送必须带 force，否则 SW 会在"用户正盯着页面"时把它压掉。
+
+        用户报的就是这个：在电脑上当着设置页点「发一条测试」，手机上响了、
+        电脑上什么都不出现，通知中心也没有——因为 SW 判断"人就在站里"，
+        只 postMessage 给页面，而页面根本没监听这个事件。见 sw.js。
+        """
+        from service import push as push_svc
+
+        seen = {}
+
+        def fake(uid, payload):
+            seen.update(payload)
+            return {"sent": 1, "failed": 0, "gone": 0, "skipped": 0, "items": []}
+
+        monkeypatch.setattr(push_svc, "send_detailed", fake)
+        client.post("/api/push/test", json={})
+        assert seen.get("force") is True, "测试推送必须带 force=True"
+        assert seen.get("tag") == "test"
+

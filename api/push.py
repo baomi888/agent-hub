@@ -201,6 +201,10 @@ async def push_test(uid: str = Depends(get_current_user)) -> dict:
         "body": f"以后每天 {hour:02d}:{minute:02d} 只有在你还有事情没做完时才发一条",
         "url": "/",
         "tag": "test",
+        # ★ force：SW 平时会在"用户正盯着页面"时把通知压掉（只递给页面）。
+        #   但测试按钮的全部意义就是证明"这台设备收得到"——压掉就等于什么都没
+        #   发生，用户会以为电脑没订阅。见 frontend/public/sw.js 的 push 处理。
+        "force": True,
     }
     # ★ 用 send_detailed 而不是 send_to_user：多台设备时，光有 sent 计数答不了
     #   「我电脑为什么没弹」。明细让前端能说清"已投递到 2 台"，把排查方向从
