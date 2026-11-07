@@ -62,3 +62,9 @@ pydantic>=2.0,<3
 # ---------- 图片处理 ----------
 # 聊天附件压缩可缺省降级；头像上传会在启动时 import Pillow，因此这里是硬依赖。
 pillow>=10.0,<13
+
+# ---------- Web Push（每日提醒）----------
+# 只用来在 worker 里发通知（service/push.py）。没装时不报错、只是 push.daily
+# 那轮记一条 handler_missing —— 提醒是增强功能，不该拖垮调度进程。
+# 依赖链会自动带上 cryptography / http-ece / py-vapid。
+pywebpush>=2.0,<3

@@ -102,6 +102,18 @@ def job_defs() -> dict[str, dict]:
             "cron": "0 4 * * *",
             "description": "补生成过去 7 天内 failed / empty 的总结",
         },
+        # 每日提醒（**每人自己设时刻**，默认 20:00，见 core/reminder_store.py）。
+        #
+        # 从「每天 20:00 跑一次」改成「每 15 分钟一跳」：现在时间是个人的，
+        # 没有哪一次 tick 能代表所有人。每次 tick 只发给「自己的点已经到了、
+        # 今天还没发过」的人（过滤逻辑在 service/push.py#due_subjects）。
+        # 空跑的代价是查两次 SQLite，比「为每个人排一个 cron」便宜得多。
+        # ★ 步长 15 分钟必须与 reminder_store.MINUTE_STEPS 一致，
+        #   否则用户设了 :07 之类就永远等不到匹配。
+        "push.daily": {
+            "cron": "*/15 * * * *",
+            "description": "每日提醒：到自己的点了、且今天还有事没做完才推（没内容不发）",
+        },
         "housekeeping": {
             "cron": "15 4 * * *",
             "description": "清理过期运行记录（>90 天）与历史上传件",
@@ -245,6 +257,17 @@ def ensure_tables(seed: bool = True) -> None:
                     "INSERT INTO schedule_jobs (job_key, cron, tz, enabled, description) "
                     "VALUES (?, ?, ?, 1, ?) ON CONFLICT(job_key) DO NOTHING",
                     [(k, v["cron"], TZ_NAME, v["description"]) for k, v in JOB_DEFS.items()],
+                )
+                # ★ push.daily 的 cron 改过一次：从「每天固定 20:00 一次」
+                #   变成「每 15 分钟一跳、按人匹配」。上面那句是 DO NOTHING，
+                #   老库里的旧 cron 会原样留着 —— 那样提醒永远只在北京时间 20:00 扫一次，
+                #   用户把时间改成 7:30 就再也不会响，而且看不出任何异常。
+                #   这里只改「明显还是固定时刻」的行（不以 */ 开头），运维手工改成
+                #   别的周期则不动，保留"周期改表不改代码"的约定。
+                conn.execute(
+                    "UPDATE schedule_jobs SET cron=? "
+                    "WHERE job_key='push.daily' AND cron NOT LIKE '*/%'",
+                    ("*/15 * * * *",),
                 )
         _READY.add(path)
 

@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse
 from api.admin import router as admin_router
 from api.agent import router as agent_router
 from api.auth import router as auth_router
+from api.calendar import router as calendar_router
 from api.cet import router as cet_router
 from api.chat import router as chat_router
 from api.checkin import router as checkin_router
@@ -38,11 +39,14 @@ from api.path import router as path_router
 from api.prefs import router as prefs_router
 from api.profile import router as profile_router
 from api.prompt_evo import router as prompt_evo_router
+from api.push import router as push_router
 from api.query import router as query_router
+from api.remind import router as remind_router
 from api.report import router as report_router
 from api.schedule import router as schedule_router
 from api.sessions import router as sessions_router
 from api.templates import router as templates_router
+from api.today import router as today_router
 from api.usage import router as usage_router
 from api.user_feedback import router as user_feedback_router
 from core import account, apilog, config, llm_gate, quota
@@ -190,6 +194,13 @@ app.include_router(schedule_router, prefix="/api/schedule", tags=["调度"])
 app.include_router(report_router, prefix="/api/report", tags=["每日总结"])
 app.include_router(checkin_router, prefix="/api/checkin", tags=["打卡"])
 app.include_router(delegate_router, prefix="/api/delegate", tags=["每日委托"])
+# 今日一屏：首屏「今天」那条的取数口。只读、只裁剪，口径全部复用 service，
+# 不新增第二套算法（打卡天数/今日任务/下次委托都来自上面几个模块的同一批函数）
+app.include_router(today_router, prefix="/api/today", tags=["今日一屏"])
+app.include_router(push_router, prefix="/api/push", tags=["推送提醒"])
+app.include_router(calendar_router, prefix="/api/calendar", tags=["日历提醒"])
+# 提醒时刻：一个值同时管 Web Push 与日历事件的起点，所以不挂在上面两组里
+app.include_router(remind_router, prefix="/api", tags=["提醒时刻"])
 # 混合架构（工作流 × 自主 Agent）：工作流定义 / 切换规则 / 执行记录与人工切换
 app.include_router(hybrid_router, prefix="/api/hybrid", tags=["混合执行"])
 # Prompt 自进化（GEPA）：候选列表 / 指标对比 / promote / rollback / 手动触发。

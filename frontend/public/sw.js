@@ -12,9 +12,15 @@
  *
  * 更新机制：故意不调 skipWaiting()。新版本等用户关掉所有标签后自然激活，
  * 避免「正在聊天的页面」在切换路由时请求到已被清理的旧 chunk 而白屏。
+ *
+ * 推送（v4 起）：push / notificationclick 两个事件。
+ *   · 用户在别的标签页正看着本站 → **不弹通知**，只 postMessage 让页面自己刷新「今天」条。
+ *     通知的价值在于把人叫回来，人已经在场时弹一个横幅只是噪音。
+ *     这个判断只能放在 SW 里做：服务端只知道「有人调过接口」，不知道他是不是正盯着屏幕。
+ *   · 同一个 tag 的通知会互相替换，不会一天堆三条。
  */
 
-const VERSION = "v3";
+const VERSION = "v4";
 const PRECACHE = `baomi-pre-${VERSION}`;
 const ASSETS = `baomi-assets-${VERSION}`;
 
@@ -151,4 +157,98 @@ self.addEventListener("fetch", (event) => {
   }
 
   // 其余（HTML 片段、RSC 请求、上传文件等）交给浏览器默认行为
+});
+
+/* ============================ 推送 ============================ */
+
+/* 服务端发来的 payload 形如
+     { title, body, url, tag }
+   （见 service/push.py#build_message）。字段一律容错——通知内容坏了
+   顶多是一条难看的横幅，绝不能让 SW 抛错（未捕获异常会让推送被静默丢弃）。 */
+self.addEventListener("push", (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch {
+    payload = { title: "知穗", body: event.data ? event.data.text() : "" };
+  }
+
+  event.waitUntil(
+    (async () => {
+      /* 台账上"用户就在站里"这件事：有可见窗口就只把消息递给页面，不弹通知。
+         页面收到后**什么都不用做**——推送内容是从页面正在看的同一份数据算出来的
+         （今天还有什么没做完），人就在场，数据不会因为这条通知而变化。
+         真要做点什么（比如让「今天」条重取一次），在页面里监听 'message' 即可，
+         这里不预设推送内容之外的行为。
+         includeUncontrolled：这个 SW 刚激活、旧标签页还没被接管时也能问到。 */
+      try {
+        const clientList = await self.clients.matchAll({
+          type: "window",
+          includeUncontrolled: true,
+        });
+        const visible = clientList.filter((c) => c.visibilityState === "visible");
+        if (visible.length) {
+          visible.forEach((c) => {
+            try {
+              c.postMessage({ type: "baomi:push", payload });
+            } catch {
+              /* 跨源/已关闭的窗口，忽略 */
+            }
+          });
+          return;
+        }
+      } catch {
+        /* 查询客户端失败就当没人看着，继续弹通知 */
+      }
+
+      const title = payload.title || "知穗";
+      const options = {
+        body: payload.body || "",
+        icon: "/icon-192.png",
+        /* 不设 badge：安卓状态栏那个位图要求单色透明，用彩色图标会显示成一团白块。
+           不设时系统回落成应用图标，比"白方块"体面。 */
+        tag: payload.tag || "baomi", // 同 tag 替换，不堆叠
+        data: { url: payload.url || "/" },
+        lang: "zh-CN",
+      };
+      await self.registration.showNotification(title, options);
+    })()
+  );
+});
+
+/* 点通知：优先把已有的标签页提到前面并导航过去，没有才新开。
+   直接 openWindow 会让常用的人攒出一堆标签页——他本来就有这个站在后台开着。 */
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || "/";
+
+  event.waitUntil(
+    (async () => {
+      const clientList = await self.clients.matchAll({
+        type: "window",
+        includeUncontrolled: true,
+      });
+      for (const c of clientList) {
+        if (new URL(c.url).origin !== self.location.origin) continue;
+        try {
+          await c.focus();
+          /* navigate 只有部分浏览器实现（Chrome/Edge 有，Safari 没有）。
+             没有的话至少把窗口提到前面，用户自己在站内点一下也能到。 */
+          if (typeof c.navigate === "function") {
+            try {
+              await c.navigate(target);
+            } catch {
+              /* 页面正在跳转时会抛，忽略 */
+            }
+          } else {
+            c.postMessage({ type: "baomi:push-click", url: target });
+          }
+        } catch {
+          /* 聚焦失败就继续找下一个 */
+        }
+        return;
+      }
+      await self.clients.openWindow(target);
+    })()
+  );
 });

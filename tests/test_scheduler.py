@@ -49,6 +49,10 @@ EXPECTED_CRONS = {
     "prompt.evolve": "20 */6 * * *",
     # 对话沉淀（板块 D）：事件驱动，每分钟 tick 排空 enqueue 写下的待办
     "sediment.dialogue": "* * * * *",
+    # 每日提醒：时刻是**每个人自己设**的，所以不能是"每天 20:00 一次"，
+    # 必须每 15 分钟一跳、由 service/push.py#due_subjects 判断"这一跳轮到谁"。
+    # 改动这条 cron 前先看 core/reminder_store.py 的 MINUTE_STEPS（两处必须一致）。
+    "push.daily": "*/15 * * * *",
 }
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")

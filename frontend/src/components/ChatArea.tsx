@@ -13,6 +13,8 @@ import CornIcon from "./CornIcon";
 import { api } from "@/lib/api";
 import type { RefSource, QuotaInfo } from "@/lib/types";
 import { EXAMPLES, PRIMARY_ENTRIES, SECONDARY_ENTRIES, TOOLS_URL } from "./chat/constants";
+import TodayStrip from "./chat/TodayStrip";
+import PushNudge from "./chat/PushNudge";
 import { isPlanRequest, stripPlanHint } from "./chat/plan";
 import CapToggles, { type CapValue } from "./chat/CapToggles";
 import Bubble from "./chat/Bubble";
@@ -247,6 +249,9 @@ export default function ChatArea({
   const tailRef = useRef<HTMLDivElement | null>(null);
   // 从引用角标打开的全文预览（文件名来自 RefSource，kb 用当前会话绑定的）
   const [previewFile, setPreviewFile] = useState<string | null>(null);
+  // 今天条到底有没有出现（由 TodayStrip 回填）。推送入口靠它决定要不要渲染 ——
+  // 详见 chat/PushNudge.tsx 顶部：两个东西的人群是同一批，位置也就该在一起。
+  const [todayHasAny, setTodayHasAny] = useState(false);
   // 顶栏「反馈」弹窗。**必须是 useCallback**：FeedbackModal 的 Esc / 焦点 effect
   // 依赖 onClose，每次渲染都换引用会让 effect 反复重跑、把焦点从文本框里抢回来。
   const [fbOpen, setFbOpen] = useState(false);
@@ -936,6 +941,16 @@ export default function ChatArea({
                   新用户先看弹窗、关掉又看到一张三步卡，属于重复告知；
                   而老用户早就不需要它。删掉后 390×844 上首页不再需要滚动，
                   三张主线卡和输入框能同屏。 */}
+
+              {/* 「今天」条：打卡 / 六级 / 委托收成一条，放在日更大卡上面。
+                  没数据时组件自己返回 null（不占位）—— 所以从没建过计划的人
+                  看到的首屏和改动前完全一致，不会多一条空卡。 */}
+              <TodayStrip enabled={!!userId} onData={setTodayHasAny} />
+
+              {/* 「每天提醒」的入口紧跟在今天条下面：今天条只在有事要做时出现，
+                  而那正好就是推送有意义的人群（没任务可做的人，提醒内容是空的）。
+                  今天条不出现时它也不出现，所以新用户首屏仍然干净。 */}
+              {todayHasAny && <PushNudge enabled={!!userId} />}
 
               {/* ② 主线：三个持续陪伴功能。原来这里是四宫格，四件平级，
                   结果「模板广场」这种一次性动作和「每日委托」这种天天用的能力

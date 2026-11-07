@@ -19,6 +19,9 @@ import { useConsoleAccount } from "@/components/console/ConsoleLayout";
 import CornIcon from "@/components/CornIcon";
 import AvatarPicker from "@/components/settings/AvatarPicker";
 import InstallAppRow from "@/components/settings/InstallAppRow";
+import PushRow from "@/components/settings/PushRow";
+import ReminderTimeCard from "@/components/settings/ReminderTimeCard";
+import CalendarRow from "@/components/settings/CalendarRow";
 import PasswordDialog from "@/components/settings/PasswordDialog";
 import UsernameDialog from "@/components/settings/UsernameDialog";
 import UserAvatar from "@/components/settings/UserAvatar";
@@ -146,6 +149,22 @@ export default function SettingsPage() {
     api.schedule.health().then((d) => setHealth(toProbe(d))).catch((e) => setHealth(errProbe(e)));
     api.schedule.jobs().then((d) => setJobs(toProbe(d))).catch((e) => setJobs(errProbe(e)));
   }, [authedId, isAdmin]);
+
+  // 从首页「用日历」跳过来时带 #reminder，要把它滚到眼前。
+  //
+  // ★ 不能指望浏览器自己滚：本站 html/body 是 overflow:hidden，真正滚动的是
+  //   .console-scroll 这个内部容器，而浏览器的锚点默认只滚 document 滚动容器。
+  //   表现就是"跳过来了但停在页面顶部，看不到要开的东西"。
+  // ★ 也不能立刻滚：CalendarRow 要等 /api/calendar/link 返回才渲染，
+  //   晚一帧滚会停在"日历卡片还没出现"时的高度，位置偏上一截。
+  useEffect(() => {
+    const id = window.location.hash.replace("#", "");
+    if (!id) return;
+    const timer = setTimeout(() => {
+      document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "smooth" });
+    }, 320);
+    return () => clearTimeout(timer);
+  }, []);
 
   const onToggleDark = useCallback((next: boolean) => {
     writeTheme(next);
@@ -351,6 +370,23 @@ export default function SettingsPage() {
           <section>
             <p className="sec-label">装成 App</p>
             <InstallAppRow />
+          </section>
+
+          {/* 提醒排在「装成 App」之后：iOS 的推送要先装到主屏才有，
+              顺序反了会让人先点开一个开不了的开关 */}
+          <section id="reminder">
+            <p className="sec-label">提醒</p>
+            {/* 时间排在最前：它同时管推送和日历，两个通道的卡片都读它。
+                放在某个通道里就会让"只用另一个通道"的人找不到入口。 */}
+            <ReminderTimeCard />
+            <div style={{ marginTop: 10 }}>
+              <PushRow />
+            </div>
+            {/* 日历排在浏览器通知后面：能收到通知的人不需要它，收不到的人（安卓 FCM
+                在国内不通）往里看第二张卡片就是出路。 */}
+            <div style={{ marginTop: 10 }}>
+              <CalendarRow />
+            </div>
           </section>
 
           <section>

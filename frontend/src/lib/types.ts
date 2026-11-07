@@ -938,3 +938,132 @@ export interface EnhanceResult {
   vocab: { file: string; terms: number };
   warnings: string[];
 }
+
+/* ==========================================================================
+   今日一屏（GET /api/today）
+   ==========================================================================
+   首屏「今天」那条的唯一数据源。四个域压成一个请求，理由见 api/today.py
+   模块注释（弱网下并发三个端点会有"时有时无"的观感）。
+
+   ★ 这里**没有**任何由前端二次计算出来的字段：streak 是后端按
+   "今天没打就从昨天起算"给的，today_done 是把 today_tasks 里 done 求和，
+   days_left 由后端按 exam_date - today 算（前端自己减会跨时区差一天）。
+   ========================================================================== */
+export type TodaySnapshot = {
+  /** 服务端认定的今天（YYYY-MM-DD），打卡与任务都按它对齐 */
+  date: string;
+  /**
+   * 四件事一件都没建时为 false —— 首页整条不渲染。
+   * 不渲染而不是渲染成空卡：一个从没用过的人看到「0 天 · 0 个任务」，
+   * 只会以为这是又一张要填的表单。
+   */
+  has_any: boolean;
+  checkin: {
+    /** 连续打卡天数（今天还没打则从昨天起算，不是 0） */
+    streak: number;
+    longest: number;
+    /** 今天是否已经生成过总结 */
+    done_today: boolean;
+  };
+  cet: {
+    has_plan: boolean;
+    /** 距考试天数；没设考试日期时为 null */
+    days_left: number | null;
+    /** 整个计划的进度 */
+    total: number;
+    done: number;
+    today_total: number;
+    today_done: number;
+    /** 今天第一个还没做完的任务标题；全做完或今天没任务时为 null */
+    next_task: string | null;
+  };
+  delegate: {
+    /** 启用中的委托数量 */
+    enabled: number;
+    /**
+     * 最近一次执行的时间戳（秒）；没有启用的委托、或算出的时间已经过期时为 null。
+     * ★ 后端**只给未来**的时间点：worker 停过一阵后 next_run_at 会停在过去，
+     *   照原样返回会让首页写「21:00 每日学习复盘」，用户读成"今晚"，是假信息。
+     */
+    next_at: number | null;
+    next_name: string | null;
+  };
+};
+
+/* ==========================================================================
+   推送（GET /api/push/status）
+   ==========================================================================
+   `supported` 只表示**服务端**具备发送能力（开关打开 + VAPID 密钥齐全）。
+   浏览器侧能不能订阅由 lib/push.ts 自己探（PushManager / Notification 是否可用），
+   两者都要满足才显示授权入口——只信一个会在没配密钥的部署里弹一个必然失败的框。
+   ========================================================================== */
+export type PushStatus = {
+  supported: boolean;
+  subscribed: boolean;
+  /** 这个账号下有几台设备订阅了（多端各算一台） */
+  devices: number;
+  /** VAPID 公钥（base64url），浏览器 subscribe 时作为 applicationServerKey */
+  key: string;
+  /**
+   * 这个人的提醒时刻 "HH:MM"。
+   *
+   * ★ 跟着 /api/remind 里用户自己设的值走，不是全站默认值。
+   *   首页那条提示和设置页都要显示"每天几点"，让它们各自再请求一次 /api/remind
+   *   不值得，所以由 status 顺手带回来。写死 20:00 的话，改成 7:30 的人
+   *   会在界面上看到两个不同的时间，第一反应是"改了没生效"。
+   */
+  time: string;
+  hour: number;
+  minute: number;
+};
+
+/* ==========================================================================
+   提醒时刻（GET / POST /api/remind）
+   ==========================================================================
+   一个值管两个通道：worker 到点发的 Web Push，和日历里那条每日事件的起点。
+   所以设置页只放一处入口，别做成"推送时间"和"日历时间"两个开关。
+
+   `steps` 由服务端给：分钟只能落 0 / 15 / 30 / 45，因为调度是每 15 分钟一跳。
+   前端不要自己写死这四档——两边一旦不同步，用户设了时间也不会响。
+   ========================================================================== */
+export type RemindPref = {
+  hour: number;
+  minute: number;
+  /** "HH:MM"，服务端格式化好了 */
+  time: string;
+  /** 没设置过时用的全站默认值，用于文案区分"你设的"和"默认的" */
+  default_hour: number;
+  default_minute: number;
+  steps: number[];
+  /** 服务端没配 VAPID 时为 false —— 此时改时间只影响日历 */
+  push_enabled: boolean;
+};
+
+export type PushSubscribeBody = {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  ua?: string;
+  platform?: string;
+};
+
+/* ==========================================================================
+   日历订阅（GET /api/calendar/link）
+   ==========================================================================
+   给安卓用户的唯一出路：Web Push 在安卓走 Google FCM，国内连不通（见 lib/push.ts
+   顶部注释），而系统日历用本机定时器，不吃网络。
+
+   ★ 两个 URL 都要留着，别只留一个：
+     · subscribe_url / webcal_url —— 订阅，内容会跟着服务端更新（日历客户端定期来拉）
+     · download_url —— 一次性下载 .ics 导入，任何日历都吃，但内容从此固定
+     安卓上多数国产日历把"从网址订阅"藏在很深的菜单里，直接下载文件反而更快。
+   ========================================================================== */
+export type CalendarLink = {
+  token: string;
+  /** 提醒时刻，已是 "HH:MM" 格式（服务端按配置格式化，前端不再拼） */
+  time: string;
+  subscribe_url: string;
+  webcal_url: string;
+  download_url: string;
+  hour: number;
+  minute: number;
+};

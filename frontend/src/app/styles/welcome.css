@@ -481,3 +481,237 @@
   .entry-mini { padding: 2px 10px; }
   .welcome-mini { margin-top: 4px; }
 }
+
+/* ---------- 「今天」条（首屏唯一按天变的内容） ----------
+   放在三张日更大卡**上面**：它是「今天该干什么」，那三张是「能干什么」，
+   眼前的事要排在前头。
+   高度按两行文字定（约 56px）：390 宽下 main + sub 各一行不折行，
+   加上它就等于把首屏往下推 56px —— 这是可接受的，因为被替换掉的是
+   三句示例（EXAMPLES 只对"还没想好问什么"的新用户有价值，而今天条
+   恰恰只对"已经在用"的人出现，两者基本不重叠）。 */
+.today-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin-top: 14px;
+  padding: 9px 12px;
+  text-align: left;
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 1px 2px rgba(80, 60, 30, 0.05);
+  transition: var(--t-color);
+}
+.today-strip:hover,
+.today-strip:focus-within {
+  border-color: var(--accent-line);
+}
+
+.today-strip .ts-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.today-strip .ts-mark svg {
+  width: 17px;
+  height: 17px;
+}
+
+.today-strip .ts-body {
+  flex: 1;
+  min-width: 0; /* 长标题必须在条内截断，不许把首屏顶宽（移动端会横向溢出） */
+}
+
+.today-strip .ts-main {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.today-strip .ts-sub {
+  margin: 2px 0 0;
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 右侧那颗「去做」：金底浅、字用 accent-ink，是整条里唯一的可点焦点。
+   不做成整条可点 —— 副句里有委托名，用户可能只想读不想走。 */
+.today-strip .ts-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+  transition: var(--t-color);
+}
+.today-strip .ts-go:hover {
+  background: var(--accent-tint);
+}
+.today-strip .ts-go svg {
+  width: 13px;
+  height: 13px;
+}
+.today-strip .ts-go:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- 每日提醒入口（今天条下一行） ----------
+   为什么只有 34px 高：首屏刚被今天条占了 54px，再加一条 46px 的卡片
+   会让 390×844 上的首屏开始滚动，而这块内容的价值远低于"一进来就看见
+   该干什么"。压成一行、且关掉后永久不再出现，是它的合理预算。
+   层次也要低于今天条：今天条是"现在去做"，这条只是"要不要被提醒"，
+   所以不给背景、不给边框，只有一枚图标和一粒小按钮。 */
+.push-nudge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 4px;
+  /* 左边 19px 让 16px 的铃铛中心落在 27px 处 —— 正好与今天条那颗 30px 圆标
+     （padding 12 + 半径 15）的中心对齐。两行字的起点也随之对齐。
+     不写 text-align: left 的话会继承欢迎页的居中对齐，两行字各自居中，看着像排版坏了。 */
+  /* 右边 12px 与今天条的 padding 一致：两条的右侧控件（「用日历」/「去做」）
+     右边缘必须落在同一条竖线上，否则差几像素会看着像没对齐。 */
+  padding: 3px 12px 3px 19px;
+  text-align: left;
+  font-size: var(--fs-sm);
+  line-height: 1.35;
+  color: var(--text-3);
+  border-radius: var(--radius-sm);
+}
+
+.push-nudge .pn-ic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+}
+.push-nudge .pn-ic svg {
+  width: 15px;
+  height: 15px;
+}
+/* 不可用/失败态：把图标降成灰，避免"金色铃铛 = 一切正常"的误读 */
+.push-nudge .pn-ic--mute {
+  color: var(--text-3);
+  opacity: 0.7;
+}
+
+.push-nudge .pn-txt {
+  flex: 1;
+  min-width: 0; /* 长文案必须在这里截断，否则会把小按钮挤出屏幕（移动端横向溢出） */
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.push-nudge .pn-main {
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.push-nudge .pn-sub {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 已开启：主文案换成墨色 + 前面不留按钮，只用一行链接关掉 */
+.push-nudge--on .pn-main {
+  color: var(--ink);
+}
+
+.push-nudge .pn-btn {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.push-nudge .pn-btn:hover {
+  background: var(--accent-tint);
+}
+/* pn-btn 也用在 <a> 上（失败态的「用日历」跳到设置页）。
+   a 默认带下划线、且是 inline，直接套按钮样式会看起来像个带框的链接。
+   失败态那颗必须是按钮 —— 同一屏上方「去做」是金底按钮，这里若是灰字，
+   用户会把它读成说明文字，而不是"点这里能解决"。 */
+.push-nudge a.pn-btn {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+.push-nudge .pn-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* 文字链接（关掉 / 知道了）：不抢按钮位，但仍要够大能点 */
+.push-nudge .pn-link {
+  flex: 0 0 auto;
+  padding: 3px 4px;
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+  background: transparent;
+  border: 0;
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.push-nudge .pn-link:hover {
+  color: var(--ink);
+}
+
+.push-nudge .pn-x {
+  flex: 0 0 auto;
+  padding: 2px 4px 2px 2px;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--ink);
+  opacity: 0.35;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.push-nudge .pn-x:hover {
+  opacity: 0.7;
+}
+
+.push-nudge .pn-btn:focus-visible,
+.push-nudge .pn-link:focus-visible,
+.push-nudge .pn-x:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

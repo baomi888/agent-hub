@@ -475,6 +475,43 @@ METRICS_ENABLED = os.getenv("METRICS_ENABLED", "1") not in ("0", "false", "False
 JWT_HEADER_CHECK = os.getenv("JWT_HEADER_CHECK", "1") not in ("0", "false", "False")
 
 
+# ---------------- Web Push（VAPID） ----------------
+# 公钥下发给前端做 pushManager.subscribe 的 applicationServerKey；私钥只在服务端签名。
+# ★ 换掉这对密钥 = 所有已订阅设备立刻失效（浏览器把订阅绑在 applicationServerKey 上），
+#   而且旧订阅 service worker 里还留着，只能等用户重新授权，别轻易换。
+VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY", "")
+VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY", "")
+# VAPID 规范要求一个联系方式（mailto: 或 https:），推送服务方出问题时用来找你。
+VAPID_SUBJECT = os.getenv("VAPID_SUBJECT", "mailto:noreply@myzhisui.cn")
+
+# 总开关。置 0 后 service/push.py 的发送全部空转、/api/push/status 报 unsupported，
+# 但订阅表照常保留——重开时用户不用再授权一次。
+PUSH_ENABLED = os.getenv("PUSH_ENABLED", "1").strip().lower() not in ("0", "false", "no")
+
+# 每日提醒的时刻（北京时间）。选 20:00 的理由：六级任务与打卡都还来得及做完，
+# 再晚（23:30 生成总结时）就只剩「今天没做」的挫败感了。
+PUSH_HOUR = int(os.getenv("PUSH_HOUR", "20"))
+PUSH_MINUTE = int(os.getenv("PUSH_MINUTE", "0"))
+
+# 每人每天最多收几条。现在是 1（一个 job_key 一天一轮），留着是为了
+# 将来加「委托到点提醒」时有个硬闸门，别让人一天被叫三次。
+PUSH_MAX_PER_DAY = int(os.getenv("PUSH_MAX_PER_DAY", "1"))
+
+# 通知的存活时间（秒）。
+# ★★ 必须 > 0，否则 Edge/Windows 上的推送服务（WNS）会直接回 400：
+#    X-WNS-ERROR-DESCRIPTION: Ttl value conflicts with X-WNS-Cache-Policy.
+#    ——它把 TTL=0 解释成"要求 no-cache"，而 VAPID 请求走的是 cache 策略。
+#    这个错误体是空的，只有一个自定义响应头写着原因，非常难查（第一次接必踩）。
+# 取 8 小时：20:00 发的提醒当夜还有效，第二天上午自动作废——
+# 让用户早上看到"六级还剩 2 个任务（昨天）"比不发更糟。
+PUSH_TTL = int(os.getenv("PUSH_TTL", str(8 * 3600)))
+
+
+def push_ready() -> bool:
+    """Web Push 是否具备发送条件（开关 + 密钥齐全）。"""
+    return bool(PUSH_ENABLED and VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY)
+
+
 def validate() -> list[str]:
     """启动前校验关键配置，返回缺失项的中文提示列表。"""
     missing = []

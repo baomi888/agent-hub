@@ -5,6 +5,10 @@ import type { DialogueCandidatesResp, ImportDialogueResult } from "./types";
 import { detailToMessage } from "./errors";
 import type { MeOut, UserOut, Template, ApplyTemplateResult, UsageSummary } from "./types";
 import type { ProfileSnapshot, TagTaxonomy, TemplateRecommend } from "./types";
+import type { TodaySnapshot } from "./types";
+import type { PushStatus, PushSubscribeBody } from "./types";
+import type { RemindPref } from "./types";
+import type { CalendarLink } from "./types";
 import type { EnhanceResult } from "./types";
 import type {
   AgentTool,
@@ -641,6 +645,66 @@ export const api = {
         method: "POST",
         body: JSON.stringify(date ? { date } : {}),
       }, { timeoutMs: 120000 }),
+  },
+
+  // ---------- 今日一屏 /api/today ----------
+  //
+  // 首屏「今天」那条的唯一数据源：打卡 / 四级计划 / 委托三件事压成一个请求。
+  // 走 tryRequest 而不是 request：端点没部署时返回 null，首页就当"没有今天"
+  // 整条不渲染 —— 比抛错让首页红一片好。（首屏是最不该出现报错的地方。）
+  // 路径不带尾斜杠，与项目其余 ~62 个端点统一。
+  today: () => tryRequest<TodaySnapshot>("/api/today"),
+
+  // ---------- 推送 /api/push（4 端点）----------
+  //
+  // status 走 tryRequest：端点没部署时返回 null，前端就当"不支持推送"静默隐藏入口，
+  // 而不是在首页弹一个红色的报错。subscribe / unsubscribe / test 是写操作，走 request。
+  push: {
+    status: () => tryRequest<PushStatus>("/api/push/status"),
+    subscribe: (body: PushSubscribeBody) =>
+      request<{ ok: boolean; devices: number }>("/api/push/subscribe", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    unsubscribe: (endpoint: string) =>
+      tryRequest<{ ok: boolean; removed: boolean; devices: number }>("/api/push/unsubscribe", {
+        method: "POST",
+        body: JSON.stringify({ endpoint }),
+      }),
+    test: () =>
+      request<{ ok: boolean; sent: number; failed: number }>("/api/push/test", {
+        method: "POST",
+        body: "{}",
+      }, { timeoutMs: 30000 }),
+  },
+
+  // ---------- 提醒时刻 /api/remind（2 端点）----------
+  //
+  // 一个值同时决定 Web Push 的发送时刻和日历事件的起点，所以单独一组，
+  // 不塞进 push 或 calendar —— 没用日历的人也有权改推送时间。
+  // get 走 tryRequest：端点未部署时返回 null，设置页那一行整段不渲染。
+  remind: {
+    get: () => tryRequest<RemindPref>("/api/remind"),
+    set: (hour: number, minute: number) =>
+      request<RemindPref>("/api/remind", {
+        method: "POST",
+        body: JSON.stringify({ hour, minute }),
+      }),
+  },
+
+  // ---------- 日历订阅 /api/calendar（3 端点）----------
+  //
+  // 给安卓用户的出路：安卓的 Web Push 走 Google FCM，国内连不通（换浏览器也没用，
+  // Edge 安卓版同样是 FCM）。系统日历用本机定时器，不吃网络，所以这条路能在安卓上
+  // 真的做到「到点响」。
+  //
+  // link / reset 都走 tryRequest：拿不到链接时前端静默隐藏这一行，
+  // 而不是在设置页里留一个点了没反应的按钮。
+  calendar: {
+    link: () => tryRequest<CalendarLink>("/api/calendar/link"),
+    /** 换一个新链接，旧 URL 立刻 404（用于"链接不小心发出去了"） */
+    reset: () =>
+      tryRequest<CalendarLink>("/api/calendar/link/reset", { method: "POST" }),
   },
 
   // ---------- P6 打卡 /api/checkin（4 端点）----------

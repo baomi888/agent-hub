@@ -118,6 +118,10 @@ def _load_handlers(force: bool = False) -> tuple[bool, str]:
     except Exception as e:  # 对方模块里有语法错误/依赖缺失时也別把 worker 拖下水
         return False, f"service.daily 导入失败：{e}"
     for job_key in sched.JOB_DEFS:
+        # push.daily 的业务在 service/push.py，不归 daily 管（下面单独挂）。
+        # 不排除的话它会被挂上 daily，而 daily 没有 due_subjects，这一轮静默空转。
+        if job_key == "push.daily":
+            continue
         register_handler(job_key, daily)
     # prompt.evolve 的业务在 service/prompt_evo.py，不属于 daily：
     # 单独挂、单独兜异常——它挂了不该让 daily 的几个 job 跟着没实现。
@@ -135,6 +139,13 @@ def _load_handlers(force: bool = False) -> tuple[bool, str]:
         register_handler(sediment.JOB_KEY, sediment)
     except Exception as e:  # noqa: BLE001
         _log_json("handler_missing", job_key="sediment.dialogue", reason=f"{e}"[:200])
+    # 每日推送（Web Push）。单独兜异常：pywebpush 没装好也不该让日报那几个 job 停下。
+    try:
+        from service import push as push_svc  # type: ignore
+
+        register_handler(push_svc.JOB_KEY, push_svc)
+    except Exception as e:  # noqa: BLE001
+        _log_json("handler_missing", job_key="push.daily", reason=f"{e}"[:200])
     return True, ""
 
 
