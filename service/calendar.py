@@ -33,7 +33,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from core import config
 
@@ -84,8 +84,13 @@ def _uid(token: str) -> str:
 
 
 def _dtstamp() -> str:
-    """DTSTAMP 必须是 UTC 且带 Z。"""
-    return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    """DTSTAMP 必须是 UTC 且带 Z。
+
+    ★ 用 timezone.utc 而不是 datetime.UTC：后者是 Python 3.11 才有的，
+    线上是 3.10（本地 venv 是 3.12），本地跑得好好的、一部署就
+    `ImportError: cannot import name 'UTC'`，后端整个起不来。
+    """
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
 def _first_start_utc8(hour: int, minute: int) -> str:
