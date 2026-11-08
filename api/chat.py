@@ -849,6 +849,33 @@ async def _finish_turn(upstreams: _Upstreams, ticket) -> None:
         ticket.release()
 
 
+async def _note_first_ask(uid: str) -> None:
+    """激活线埋点：该账号的**第一条**提问，一轮只判一次，只在收尾调用。
+
+    口径（别改成按会话）
+    -------------------
+    "首问"是**账号级**事件：一个人开三个会话问同一件事，激活只发生过一次。
+    按会话判会把一次激活记成三次，激活率的分母直接失真。
+
+    判据为什么是 count == 1
+    ----------------------
+    走到这里时本轮的用户消息**已经落库**，所以"该 owner 名下的 user 消息恰好 1 条"
+    就等价于"这是他的第一条提问"。一次 COUNT（走 idx_msg_conv 的 JOIN）放在所有
+    token 都发完之后，不进逐帧循环 —— 每帧都查会把热路径拖成 DB 驱动器。
+
+    已知边界：把会话全删光再提问会再计一次。选择接受，不为它加一张"已激活"表 ——
+    删库是自毁动作、占比可忽略，而多一张要写脏的表会引入新的不一致。
+
+    失败即静默：埋点出问题绝不能让已经生成好的回答变成错误。
+    """
+    try:
+        n = await asyncio.to_thread(store.count_user_messages, uid)
+    except Exception:
+        return
+    if n == 1:
+        metrics.inc("first_ask_total")
+
+
 async def _stream_llm(
     llm, messages, request: Request, acc: _Acc, upstreams=None, path: str = "llm"
 ) -> None:
@@ -1136,6 +1163,11 @@ async def _chat_stream_impl(
                 refs=refs_md,
                 truncated=acc.truncated,
             )
+
+            # 激活线埋点：回答已经落库，此刻判"是不是他的第一问"最准。
+            # 放在 yield done 之前：done 一发出前端就开始收尾，之后再记会漏掉
+            # "用户拿到答案就关页"的那部分人。
+            await _note_first_ask(uid)
 
             # B 块：对话级用户画像标签（fire-and-forget，不阻塞 SSE；失败静默）
             if config.USER_TAG_HOOK_ENABLED and acc_text:
@@ -1702,6 +1734,9 @@ async def _chat_stream_impl(
             truncated=truncated,
             web_sources=web_sources,
         )
+        # 激活线埋点（与 vision 分支同一件事）：四条路径最后都汇到这里，
+        # 所以只需要两处调用，不必在 agent / hybrid / rag / llm 各写一遍。
+        await _note_first_ask(uid)
         # 先落库再下发：客户端收到来源卡后若立刻关页/断连，刷新会话仍能从消息行
         # 恢复同一批 [Wn]，不会出现“正文有角标、来源永远丢失”。搜索发生在正文
         # 生成中途，抢不到正文前面；独立事件仍不占知识库 sources 的槽位。

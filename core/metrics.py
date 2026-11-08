@@ -222,6 +222,12 @@ def _enabled() -> bool:
 # ---------- 预声明：让 /api/metrics 一开始就有稳定的 # HELP ----------
 
 counter("chat_total", "问答请求数（按执行路径）")
+# 激活线（2026-11-08）：账号级的**首问**次数。口径是 owner_id，不是会话 ——
+# 一个人开三个会话只该记一次，按会话记会把激活率的分母算歪。
+# 名字带 _total 与 chat_total 一致：render_prometheus() 不再补后缀，
+# 于是 /api/metrics 的 Prometheus 文本与 /api/metrics/json 的键名是同一个字符串，
+# 排查时不用在两套命名之间换算。
+counter("first_ask_total", "首次提问的账号数（每个账号只记一次，按 owner_id 判）")
 counter("chat_truncated", "输出被长度上限截断的问答数（按执行路径）")
 counter("chat_client_disconnect", "SSE 客户端中途断连次数")
 counter("retrieval_gate_blocked", "被 RETRIEVE_MIN_SIM 离群过滤丢掉的片段数")

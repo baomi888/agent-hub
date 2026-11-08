@@ -707,6 +707,25 @@ def count_messages(owner: str, sid: str) -> int:
         return row["c"]
 
 
+def count_user_messages(owner: str) -> int:
+    """该账号名下**所有会话**里的 user 消息条数（激活埋点用）。
+
+    为什么不能复用 count_messages：那个按 sid 算，只能回答"这个会话里有几条"。
+    "这是不是他的第一次提问"是账号级问题，必须跨会话数。
+
+    老库 owner_id 为 NULL 的行不算任何人的 —— 与 list_conversations 同一口径，
+    否则改造前的历史会话会把所有人的首问判定都污染成 False。
+    """
+    with _get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS c FROM messages m "
+            "JOIN conversations c ON m.conversation_id = c.id "
+            "WHERE c.owner_id = ? AND m.role = 'user'",
+            (owner,),
+        ).fetchone()
+        return int(row["c"] or 0)
+
+
 def get_message(owner: str, sid: str, msg_id: int) -> dict | None:
     """按 id 取单条消息。不是自己的会话返回 None。"""
     if not _owned(owner, sid):
