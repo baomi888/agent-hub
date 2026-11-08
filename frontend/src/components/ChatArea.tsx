@@ -12,7 +12,8 @@ import MascotLogo from "./chat/MascotLogo";
 import CornIcon from "./CornIcon";
 import { api } from "@/lib/api";
 import type { RefSource, QuotaInfo } from "@/lib/types";
-import { EXAMPLES, PRIMARY_ENTRIES, SECONDARY_ENTRIES, TOOLS_URL } from "./chat/constants";
+import { PRIMARY_ENTRIES, SECONDARY_ENTRIES, TOOLS_URL } from "./chat/constants";
+import StarterPrompts from "./StarterPrompts";
 import TodayStrip from "./chat/TodayStrip";
 import PushNudge from "./chat/PushNudge";
 import { isPlanRequest, stripPlanHint } from "./chat/plan";
@@ -714,9 +715,15 @@ export default function ChatArea({
     onSend(q, atts, undefined, isPlanRequest(q));
   };
 
-  const fillExample = (q: string) => {
-    setInput(q);
-    inputRef.current?.focus();
+  // 首屏便签：**点一下直接发**（2026-11-08 激活线）。
+  // 以前这里是 fillExample：只把问题塞进输入框等用户再点发送 —— 对刚注册的人
+  // 来说，"填好了"和"发出去了"之间还隔着一次点击，激活就在这一步丢的。
+  // 复用 submit 的同一套参数口径（plan 判定也一样），不另开一条发送路径。
+  const askStarter = (q: string) => {
+    if (sending) return;
+    stickRef.current = true;
+    setAtBottom(true);
+    onSend(q, undefined, undefined, isPlanRequest(q));
   };
 
   // 进料路径②：让它带着题目去联网研究——光标留在末尾，等用户补上题目
@@ -999,21 +1006,12 @@ export default function ChatArea({
                 ))}
               </div>
 
-              {/* ③ 次级示例：三句能立刻点的话，三列等宽便签；min-w-0 让长句在卡内截断不溢出
-                  矮屏（≤700px 高）整行让位：一屏放得下「品牌 + 三张日更大卡」比多摆三句示例更值 */}
-              <div className="welcome-egs mt-3 grid w-full grid-cols-1 gap-2 sm:grid-cols-3">
-                {EXAMPLES.map((e) => (
-                  <button
-                    key={e.q}
-                    onClick={() => fillExample(e.q)}
-                    className="welcome-eg"
-                    title={e.q}
-                  >
-                    <span className="welcome-eg-hint">{e.hint}</span>
-                    <span className="q">{e.q}</span>
-                  </button>
-                ))}
-              </div>
+              {/* ③ 次级示例：三句能**立刻点、点了就答**的话，三列等宽便签。
+                  内容与渲染搬进 StarterPrompts（数据在 lib/starterPrompts.ts）：
+                  这里只关心"点了发什么"，句子本身归那份数据文件管。
+                  矮屏（≤700px 高）整行让位：一屏放得下「品牌 + 三张日更大卡」
+                  比多摆三句示例更值。 */}
+              <StarterPrompts onPick={askStarter} disabled={sending} />
 
               <p className="welcome-foot">问完的每一句，都能翻回原文。</p>
             </div>
