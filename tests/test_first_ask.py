@@ -252,3 +252,33 @@ def test_starter_prompts_need_no_follow_up():
         assert len(q) >= 12, f"太短，问不出东西：{q}"
         for bad in _PLACEHOLDER:
             assert bad not in q, f"文案里有占位符/指代「{bad}」，用户还得补字：{q}"
+
+
+# ==================== 7. 接线：点了必须"发"，不能退回"预填" ====================
+#
+# 这一条是给未来改这块的人写的。激活线的全部价值就在"一次点击 = 一轮提问"，
+# 而最可能的回退方式不是删功能，是有人觉得"点了就发太突然"，把它改回
+# setInput + focus —— 那时候页面一切正常、tsc 全绿、埋点也照常工作，
+# 只是第一批用户的激活率悄悄掉回去，没有任何断言会红。
+
+
+def test_click_sends_instead_of_prefilling():
+    comp = (ROOT / "frontend" / "src" / "components" / "StarterPrompts.tsx").read_text(
+        encoding="utf-8"
+    )
+    area = (ROOT / "frontend" / "src" / "components" / "ChatArea.tsx").read_text(encoding="utf-8")
+
+    # 组件层：点击直接回调 onPick，不许碰输入框
+    assert "onClick={() => onPick(p.question)}" in comp
+    assert "setInput" not in comp
+
+    # 页面层：拿到句子就 onSend，且沿用 submit 的 plan 判定口径
+    assert "onSend(q, undefined, undefined, isPlanRequest(q))" in area
+    # 旧的"只预填"入口必须消失，否则两条路径并存，谁生效说不清。
+    # 判据带括号：注释里提到这个名字（解释为什么删掉）是允许的，函数/调用不行。
+    assert "fillExample(" not in area
+    # 示例数据只剩一个真值来源
+    constants = (ROOT / "frontend" / "src" / "components" / "chat" / "constants.tsx").read_text(
+        encoding="utf-8"
+    )
+    assert "export const EXAMPLES" not in constants
