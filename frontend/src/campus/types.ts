@@ -118,6 +118,55 @@ export interface WordsProgress {
   done: Record<string, number[]>;
 }
 
+/**
+ * 复习本条目上的两档标记。
+ *
+ * 负责人 2026-11-08 定的口径：「翻看 ≥5 次」标**可能不熟悉**，「点过不认识」标**确定不熟悉** ——
+ * 这是两个独立条件，任一成立就进复习本，但轻重必须看得出来：
+ * 前者只是"看太多次了，八成没记住"，后者是用户自己承认记不住。
+ * 两条都中时按「确定不熟悉」算（一个词只需要一个结论）。
+ */
+export type ReviewMark = "unsure" | "sure";
+
+/**
+ * 复习本条目。
+ *
+ * 为什么不直接存 WordItem：复习本要能把「这个词来自哪个级别、什么时候进的、
+ * 当时翻了几次才收进来」一起显示出来，元组塞不下这些；而且词库换版本后
+ * 复习本不能跟着失效，所以释义与例句在入本时**复制一份**留底。
+ */
+export interface ReviewEntry {
+  /** 单词，作为唯一键 */
+  w: string;
+  def: string;
+  egEn?: string;
+  egZh?: string;
+  /** 来自哪个级别（CET4 / CET6 / FALLBACK） */
+  lvl: string;
+  /** 入本时间戳（ms） */
+  at: number;
+  /** 入本时累计翻看次数，列表里显示「翻了 7 次」 */
+  flips: number;
+  /** 可能不熟悉 / 确定不熟悉 */
+  mark: ReviewMark;
+  /** 已掌握时间戳（ms）；只在 mastered 分区里有 */
+  okAt?: number;
+}
+
+/**
+ * 单词熟记档案（复习本的唯一数据源）。
+ *
+ * `watch` 是**入本前的计数表**：每次翻面 f+1、每次点「不认识」u+1。
+ * 两条线各自独立判定（f ≥ 5 → 可能不熟悉；u ≥ 1 → 确定不熟悉），
+ * 任一达标就转进 `items` 并从 watch 删掉 —— 所以 watch 里只有"还没资格进本"的词。
+ */
+export interface WordsMemory {
+  v: 1;
+  watch: Record<string, { f: number; u: number; t: number }>;
+  items: ReviewEntry[];
+  mastered: ReviewEntry[];
+}
+
 /** 倒计时事项 */
 export interface DeadlineItem {
   name: string;
