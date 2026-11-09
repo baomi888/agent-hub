@@ -174,6 +174,10 @@ export default function ToolNav({ active, onChange }: ToolNavProps) {
           aria-selected={tool.id === active}
           aria-controls={`campus-panel-${tool.id}`}
           data-migrated={tool.migrated}
+          /* 给每个标签带上工具 id：番茄钟已换成自己的身份色（赤陶），
+             样式靠 .campus-tab[data-tool="pomodoro"] 精确命中，
+             就不必为「只是某一次选中」去改其余五格的类名 */
+          data-tool={tool.id}
           className={`campus-tab${tool.id === active ? " is-active" : ""}`}
           onClick={() => onChange(tool.id)}
         >
