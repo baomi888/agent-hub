@@ -173,6 +173,217 @@ def build_ics(
     return "\r\n".join(_fold(x) for x in lines) + "\r\n"
 
 
+# ---------- 课表日历（与「每日提醒」并列的另一份 ICS） ----------
+
+# 周一 = 0，与 frontend/src/campus/logic/schedule.ts 的 columnOfDate 同口径
+_BYDAY = ("MO", "TU", "WE", "TH", "FR", "SA", "SU")
+
+
+def _esc(text: object) -> str:
+    """RFC 5545 §3.3.11 的文本转义。
+
+    课程名里出现逗号/分号非常常见（「高数, 下」「实验；周二」），
+    不转义会让客户端把 SUMMARY 截断在逗号处，现象是「课程名只显示了前半截」。
+    反斜杠必须最先换，否则会把后面新生成的转义再转一次。
+    """
+    return (
+        str(text or "")
+        .replace("\\", "\\\\")
+        .replace(";", "\\;")
+        .replace(",", "\\,")
+        .replace("\r\n", "\\n")
+        .replace("\n", "\\n")
+        .replace("\r", "\\n")
+    )
+
+
+def _course_uid(token: str, course_id: object) -> str:
+    """每门课一个稳定 UID：同一天刷新不能变成"多了一门课"。"""
+    digest = hashlib.sha256(f"{token}:{course_id}".encode()).hexdigest()[:16]
+    return f"zhisui-course-{digest}@{_UID_DOMAIN}"
+
+
+def _week_dates(term_start: str, day: int, weeks: list[int]) -> list[str]:
+    """第 1 周周一的日期 + 周次 → 这门课每个上课日的 `YYYYMMDD`。
+
+    服务端只做日期加法，**不重算教学周**（那是前端 currentWeek 的活）。
+    `weeks` 里越界或非整数的值直接跳过，不让一颗脏数据毁掉整份日历。
+    """
+    try:
+        first = datetime.strptime(term_start, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        return []
+    out: list[str] = []
+    for w in weeks:
+        try:
+            n = int(w)
+        except (TypeError, ValueError):
+            continue
+        if n < 1 or n > 60:
+            continue
+        out.append((first + timedelta(days=(n - 1) * 7 + day)).strftime("%Y%m%d"))
+    return out
+
+
+def build_courses_ics(
+    token: str,
+    courses: object = None,
+    term: object = None,
+    periods: object = None,
+) -> str:
+    """把课表快照变成一份**独立**的 .ics（每门课一条，按周重复）。
+
+    ★ 为什么不塞进 `build_ics` 那份：一个是「每天提醒你看一眼」，
+      一个是「每周几上什么课」。订阅是用户自己按日历加的，两件事合在一起
+      意味着「我只想要课表」的人被迫接收每日提醒，反之亦然。
+
+    ★ 为什么 DTSTART 从第 1 周算：日历客户端只拿得到一个 URL，
+      它不会带 cookie、也不会替我们算教学周。所以这里必须把「第 1 周周一」
+      和「周几」加出真实日期；`periods.starts` 是前端算好的每节开始时间，
+      服务端只取下标，不重复实现一遍作息换算。
+
+    `courses` 既可能是 `ScheduleSnapshot`（含 term/periods），也可能只是课程数组 ——
+    两种都收，因为前端有两个键（courses.v2 与 term.v1）各自独立上报。
+    """
+    course_list: list[dict] = []
+    per: dict = {}
+    term_setting: dict = {}
+
+    if isinstance(courses, dict):
+        raw = courses.get("courses")
+        course_list = [c for c in raw if isinstance(c, dict)] if isinstance(raw, list) else []
+        if isinstance(courses.get("periods"), dict):
+            per = courses["periods"]
+        if isinstance(courses.get("term"), dict):
+            term_setting = courses["term"]
+    elif isinstance(courses, list):
+        course_list = [c for c in courses if isinstance(c, dict)]
+    if isinstance(term, dict) and term:
+        term_setting = term
+    if isinstance(periods, dict) and periods:
+        per = periods
+
+    starts = per.get("starts") if isinstance(per.get("starts"), list) else []
+    try:
+        lesson_minutes = int(per.get("duration") or 45)
+    except (TypeError, ValueError):
+        lesson_minutes = 45
+    if lesson_minutes <= 0:
+        lesson_minutes = 45
+
+    term_start = str(term_setting.get("start") or "")
+    try:
+        term_weeks = int(term_setting.get("weeks") or 0)
+    except (TypeError, ValueError):
+        term_weeks = 0
+    if term_weeks <= 0:
+        term_weeks = 20  # 和前端 DEFAULT_TERM_WEEKS 一致
+
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//ZhiSui//Course Timetable//CN",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        "X-WR-CALNAME:知穗 · 课表",
+        "X-WR-CALDESC:在校园工具集的课程表里改课，这里每天自动重拉。",
+        "X-WR-TIMEZONE:Asia/Shanghai",
+        f"REFRESH-INTERVAL;VALUE=DURATION:{_REFRESH}",
+        f"X-PUBLISHED-TTL:{_REFRESH}",
+        "BEGIN:VTIMEZONE",
+        "TZID:Asia/Shanghai",
+        "BEGIN:STANDARD",
+        "DTSTART:19700101T000000",
+        "TZOFFSETFROM:+0800",
+        "TZOFFSETTO:+0800",
+        "TZNAME:CST",
+        "END:STANDARD",
+        "END:VTIMEZONE",
+    ]
+
+    emitted = 0
+    if term_start:
+        for course in course_list:
+            sections = course.get("sections")
+            if not isinstance(sections, list) or not sections:
+                continue
+            try:
+                first_section = min(int(s) for s in sections)
+            except (TypeError, ValueError):
+                continue
+            hhmm = "08:00"
+            index = first_section - 1
+            if 0 <= index < len(starts) and isinstance(starts[index], str):
+                hhmm = starts[index]
+            try:
+                hh, mm = (int(x) for x in hhmm.split(":"))
+            except (TypeError, ValueError):
+                continue
+            if not (0 <= hh <= 23 and 0 <= mm <= 59):
+                continue
+
+            try:
+                day = int(course.get("day") or 0)
+            except (TypeError, ValueError):
+                day = 0
+            if not 0 <= day <= 6:
+                continue
+
+            weeks = course.get("weeks")
+            week_list = [w for w in weeks if isinstance(w, (int, float))] if isinstance(weeks, list) else []
+            # weeks = null 表示每周都上：用 RRULE；给了具体周次就逐周列 RDATE，
+            # 因为「第 2、4、6 周上」不是任何 RRULE 能表达的（隔周还可以，跳着不行）。
+            if week_list:
+                dates = _week_dates(term_start, day, week_list)
+                if not dates:
+                    continue
+                first_date = dates[0]
+                rdate = ",".join(f"{d}T{hh:02d}{mm:02d}00" for d in dates)
+                rule = [f"RDATE;TZID=Asia/Shanghai:{rdate}"]
+            else:
+                dates = _week_dates(term_start, day, [1])
+                if not dates:
+                    continue
+                first_date = dates[0]
+                rule = [f"RRULE:FREQ=WEEKLY;BYDAY={_BYDAY[day]};COUNT={term_weeks}"]
+
+            name = str(course.get("name") or "课程").strip() or "课程"
+            room = str(course.get("classroom") or "").strip()
+            summary = f"{name} · {room}" if room else name
+            minutes = max(1, len(sections)) * lesson_minutes
+            detail = "；".join(
+                part
+                for part in (
+                    f"老师：{course.get('teacher')}".strip() if course.get("teacher") else "",
+                    str(course.get("notes") or "").strip(),
+                )
+                if part
+            )
+
+            lines.extend(
+                [
+                    "BEGIN:VEVENT",
+                    f"UID:{_course_uid(token, course.get('id'))}",
+                    f"DTSTAMP:{_dtstamp()}",
+                    f"DTSTART;TZID=Asia/Shanghai:{first_date}T{hh:02d}{mm:02d}00",
+                    f"DURATION:PT{minutes}M",
+                    *rule,
+                    f"SUMMARY:{_esc(summary)}",
+                ]
+            )
+            if room:
+                lines.append(f"LOCATION:{_esc(room)}")
+            if detail:
+                lines.append(f"DESCRIPTION:{_esc(detail)}")
+            # 上课是占时间的，和「每日提醒」那条（TRANSPARENT）语义相反
+            lines.append("TRANSP:OPAQUE")
+            lines.append("END:VEVENT")
+            emitted += 1
+
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(_fold(x) for x in lines) + "\r\n"
+
+
 def describe(
     token: str, hour: int | None = None, minute: int | None = None
 ) -> dict[str, str]:

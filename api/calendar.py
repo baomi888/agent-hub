@@ -21,7 +21,7 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
-from core import calendar_store, quota, reminder_store
+from core import calendar_store, campus_store, quota, reminder_store
 from core.auth import get_current_user
 from service import calendar as cal
 
@@ -86,6 +86,40 @@ async def reset_link(request: Request, uid: str = Depends(get_current_user)) -> 
     """换一个新链接。用于「链接不小心发出去了」——旧 URL 从这一刻起 404。"""
     token = await asyncio.to_thread(calendar_store.reset, uid)
     return _payload(request, token, uid)
+
+
+@router.get("/{token}/courses.ics")
+async def get_courses_ics(token: str, request: Request, dl: int = 0) -> Response:
+    """课表日历（与「每日提醒」并列的第二份 ICS）。
+
+    数据来自云端快照（`/api/campus/state` 那一份），不读 cookie、不读 localStorage：
+    日历客户端只有一个 URL。所以「课表上云」是这条端点的前提 ——
+    没开通云同步的用户会拿到一份**空日历**（不是 404），
+    这样手机日历里显示的是"还没课"，而不是"订阅失败"。
+    """
+    uid = calendar_store.owner_of(token)
+    if not uid:
+        raise HTTPException(status_code=404, detail="日历不存在或链接已失效")
+
+    try:
+        await asyncio.to_thread(quota.consume_key, token, "cal_fetch", _MAX_FETCH_PER_DAY)
+    except quota.QuotaExceeded as e:
+        raise HTTPException(status_code=429, detail="拉取过于频繁") from e
+
+    snap = await asyncio.to_thread(campus_store.load_snapshot, uid)
+    body = cal.build_courses_ics(token, snap.get("courses"), snap.get("term"))
+    await asyncio.to_thread(calendar_store.touch_fetch, token)
+
+    disposition = "attachment" if dl else "inline"
+    return Response(
+        content=body.encode("utf-8"),
+        media_type=_ICS_TYPE,
+        headers={
+            "Cache-Control": "no-store",
+            "X-Robots-Tag": "noindex",
+            "Content-Disposition": f'{disposition}; filename="zhisui-courses.ics"',
+        },
+    )
 
 
 @router.get("/{token}.ics")
