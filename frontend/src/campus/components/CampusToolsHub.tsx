@@ -10,7 +10,7 @@
  * 以后新增工具：在 ToolNav 的 TOOL_LIST 里加一条、在下面的 PANELS 里加一行即可。
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ComponentType } from "react";
 import Link from "next/link";
 import GpaTool from "../tools/gpa/GpaTool";
@@ -20,6 +20,7 @@ import WordsTool from "../tools/words/WordsTool";
 import DeadlineTool from "../tools/deadline/DeadlineTool";
 import DrawTool from "../tools/draw/DrawTool";
 import ToolNav from "./ToolNav";
+import { pullCampusState } from "../sync";
 import type { ToolId } from "../types";
 
 const PANELS: Record<ToolId, ComponentType> = {
@@ -33,6 +34,13 @@ const PANELS: Record<ToolId, ComponentType> = {
 
 export default function CampusToolsHub() {
   const [active, setActive] = useState<ToolId>("gpa");
+
+  // 挂载时拉一次云端快照（规格 2.3）。未登录 / 接口没上线 / 断网都会被
+  // `pullCampusState` 静默跳过 —— 这一页的核心承诺是"不登录也能用"，
+  // 所以同步失败不能冒泡成任何可见错误。
+  useEffect(() => {
+    void pullCampusState();
+  }, []);
   const Panel = PANELS[active] ?? GpaTool;
 
   return (

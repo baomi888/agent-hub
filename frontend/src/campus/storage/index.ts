@@ -29,16 +29,40 @@ export function readJson<T = unknown>(key: string): T | null {
   }
 }
 
-/** 写 JSON；返回是否成功，调用方一般不需要处理失败 */
-export function writeJson(key: string, value: unknown): boolean {
+/**
+ * 写 JSON；返回是否成功，调用方一般不需要处理失败。
+ *
+ * `silent: true` = 这次写入**不上报云端**。只有两种情况用它：
+ *  1. 同步层自己把云端数据落回本地（否则会形成「写入 → 上报 → 冲突 → 写入」的环）；
+ *  2. 同步层记水位（`campus.sync.at.*`），那本来就不是业务数据。
+ * 普通业务一律不带 silent —— 「本地改了却没同步上去」是这一层最要命的静默失败。
+ */
+export function writeJson(
+  key: string,
+  value: unknown,
+  opts?: { silent?: boolean }
+): boolean {
   if (!storageAvailable()) return false;
   try {
     window.localStorage.setItem(key, JSON.stringify(value));
+    if (!opts?.silent) notifySync(key, value);
     return true;
   } catch {
     // 配额满 / 隐私模式：记不住这一笔可以，但页面不能挂
     return false;
   }
+}
+
+/**
+ * 通知同步层（动态 import：`sync.ts` 反过来要用 readJson/writeJson，
+ * 静态导入会形成循环依赖，打包器能过但运行时顺序不稳）。
+ */
+function notifySync(key: string, value: unknown): void {
+  void import("../sync")
+    .then((mod) => mod.onLocalWrite(key, value))
+    .catch(() => {
+      // 同步层挂了不能影响本地保存 —— 它此刻已经写成功了
+    });
 }
 
 /** 删除一个键（仅用于「清空数据」这类用户主动操作，不要用它做迁移清理） */
