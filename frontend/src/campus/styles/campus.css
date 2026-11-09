@@ -49,6 +49,30 @@
   --course-ink: #241F18;
   --course-sub: #3B332A;
 
+  /*
+   * 工具身份色（方案 C）：六个工具各一支。
+   *
+   * 色值放在 .campus-shell 这一层而不是各面板里 —— 导航那格也在这一层下，
+   * 同一个工具在标签、卡片顶边、按钮上必须是同一支颜色，定义两处迟早会漂。
+   *
+   * 分工与金色 accent 一致：accent 管装饰（进度条、顶边、图形、点阵），
+   * accent-ink 管文字与实底（浅色下是压深的一档，压纸白才够 4.5:1）。
+   * 六支 ink 对纸白 #FDFAF2 依次是 5.06 / 5.45 / 5.70 / 5.77 / 6.74 / 6.68，全部过 AA；
+   * 对面板纸 #F5F0E1 也都在 4.6:1 以上。
+   */
+  --t-gpa: #6F8A4E;
+  --t-gpa-ink: #5C7340;
+  --t-pomo: #C25A2E;
+  --t-pomo-ink: #A84B24;
+  --t-sched: #C8892A;
+  --t-sched-ink: #875B10;
+  --t-words: #4E7EA8;
+  --t-words-ink: #3F6785;
+  --t-deadline: #A8574E;
+  --t-deadline-ink: #8B443B;
+  --t-draw: #7A6BA8;
+  --t-draw-ink: #5E5189;
+
   width: 100%;
   max-width: var(--campus-max);
   margin: 0 auto;
@@ -62,6 +86,135 @@
   --campus-btn-solid-hover: color-mix(in srgb, var(--accent) 88%, black);
   /* 深色主题下放假块用暖褐：亮灰块在深棕纸面上亮得像一格探照灯 */
   --course-off: #3E372C;
+  /*
+   * 深色下六支一起提亮：原色压在深棕纸面（#292217）上普遍只剩 2.4–3.0:1，糊成一片褐。
+   * accent 提到 5.2–6.9:1（它还要当标签底色、压深字 --solid），
+   * ink 再亮一档，7.5–9.1:1，当小字与主按钮实底。
+   * 提亮只调明度、不动色相，六个工具在深色里仍然认得出谁是谁。
+   */
+  --t-gpa: #8FAE64;
+  --t-gpa-ink: #B3CE8E;
+  --t-pomo: #E07B4E;
+  --t-pomo-ink: #F0A077;
+  --t-sched: #E0A03A;
+  --t-sched-ink: #E8B54E;
+  --t-words: #6E9FC6;
+  --t-words-ink: #9CC3DE;
+  --t-deadline: #D08070;
+  --t-deadline-ink: #E5A79A;
+  --t-draw: #A292CE;
+  --t-draw-ink: #C6B9E6;
+}
+
+/* ---------- 工具身份色：一个工具一支 ---------- */
+
+/*
+ * 一处映射、两处消费：导航那格（.campus-tab[data-tool]）与面板根节点（#campus-panel-*）
+ * 拿到的是同一组 --tool-accent / --tool-accent-ink。
+ * 所以「标签是蓝的、按钮还是金的」这种半套配色不可能出现 —— 两处读的是同一个变量。
+ */
+.campus-tab[data-tool="gpa"],
+#campus-panel-gpa {
+  --tool-accent: var(--t-gpa);
+  --tool-accent-ink: var(--t-gpa-ink);
+}
+
+.campus-tab[data-tool="pomodoro"],
+#campus-panel-pomodoro {
+  --tool-accent: var(--t-pomo);
+  --tool-accent-ink: var(--t-pomo-ink);
+}
+
+.campus-tab[data-tool="schedule"],
+#campus-panel-schedule {
+  --tool-accent: var(--t-sched);
+  --tool-accent-ink: var(--t-sched-ink);
+}
+
+.campus-tab[data-tool="words"],
+#campus-panel-words {
+  --tool-accent: var(--t-words);
+  --tool-accent-ink: var(--t-words-ink);
+}
+
+.campus-tab[data-tool="deadline"],
+#campus-panel-deadline {
+  --tool-accent: var(--t-deadline);
+  --tool-accent-ink: var(--t-deadline-ink);
+}
+
+.campus-tab[data-tool="draw"],
+#campus-panel-draw {
+  --tool-accent: var(--t-draw);
+  --tool-accent-ink: var(--t-draw-ink);
+}
+
+/*
+ * 导航那格的满色底。写成通用规则而不逐个点名工具 —— 标签身上有 data-tool，
+ * 新的第七个工具只要在 shell 里给两支色、上面加一条映射，标签就自动跟上。
+ * （面板不行：面板是 id，所以下面那两个面板列表要手工加一行。）
+ */
+.campus-tab[data-tool] {
+  --tool-tab-bg: var(--tool-accent-ink);
+  --tool-tab-ink: #FDFAF2;
+}
+
+.dark .campus-tab[data-tool] {
+  --tool-tab-bg: var(--tool-accent);
+  --tool-tab-ink: var(--solid);
+}
+
+/*
+ * 面板里凡是 var(--accent*) 的地方 —— 进度条、主按钮、分段选中、聚焦环、
+ * 词卡顶边、点阵、标签芯片 —— 都跟着面板换色，不逐条改选择器：
+ * 六个工具共用同一套组件，改了五处漏一处，最难查的那种半套色。
+ *
+ * 为什么还要单独声明 --campus-btn-solid：它写在 .campus-shell 上是 var(--accent-ink)，
+ * 而 CSS 变量在「声明它的元素」上就已经替换成字面量，子元素后来改 --accent-ink 不会回头重算。
+ * 漏了这行，主按钮永远停在金色。
+ *
+ * 三个 alpha 档沿用金色那套比例（10% / 20% / 12%），换成 color-mix 只为少维护 12 个色值。
+ */
+#campus-panel-gpa,
+#campus-panel-pomodoro,
+#campus-panel-schedule,
+#campus-panel-words,
+#campus-panel-deadline,
+#campus-panel-draw {
+  --accent: var(--tool-accent);
+  --accent-ink: var(--tool-accent-ink);
+  --accent-soft: color-mix(in srgb, var(--tool-accent) 10%, transparent);
+  --accent-line: color-mix(in srgb, var(--tool-accent) 20%, transparent);
+  --accent-line-soft: color-mix(in srgb, var(--tool-accent) 12%, transparent);
+
+  --campus-btn-solid: var(--tool-accent-ink);
+  --campus-btn-solid-hover: color-mix(in srgb, var(--tool-accent-ink) 86%, var(--ink));
+}
+
+/* 深色下实底按钮反过来：亮色压深字，跟浅色「深底压纸白」是同一思路的镜像 */
+.dark #campus-panel-gpa,
+.dark #campus-panel-pomodoro,
+.dark #campus-panel-schedule,
+.dark #campus-panel-words,
+.dark #campus-panel-deadline,
+.dark #campus-panel-draw {
+  --campus-btn-solid: var(--tool-accent);
+  --campus-btn-solid-text: var(--solid);
+  --campus-btn-solid-hover: color-mix(in srgb, var(--tool-accent) 88%, black);
+}
+
+/*
+ * 身份色落在纸面上：给「主场那张卡」一条 3px 顶边。
+ * 方案 C 里内容卡就是这么标身份的 —— 靠一条边而不是整块底色，安静，但一眼知道在哪个工具里。
+ *
+ * 单词卡、番茄钟、全屏牌原本就有（写在自己的段里），这里补其余三个。
+ * GPA 不加边：它的主场是顶上那排读数（主值已经是 .is-accent，会跟着变绿），
+ * 再给下面两张卡里任意一张加边，反而是在两张同等重要的卡之间瞎选一张。
+ */
+#campus-panel-schedule > .campus-card:first-child,
+#campus-panel-deadline > .campus-card:first-child,
+#campus-panel-draw > .campus-card:first-child {
+  border-top: 3px solid var(--tool-accent);
 }
 
 /* ---------- 设备能力：同一句提示，按设备给两版 ---------- */
@@ -72,7 +225,12 @@
  * 内测里就有人盯着那行字找 ESC 键。这类提示必须只在电脑上出现。
  *
  * 用法：一句话写两版，各包一层 span；默认（手机 / 平板 / 触屏）显示 `.campus-touch-only`，
- * 只有「主指针是精确指针 + 能悬停」（电脑 + 键盘）才换成 `.campus-desktop-only`。
+ * 只有「主指针是精确指针 + 能悬停 + 屏宽够」才换成 `.campus-desktop-only`。
+ *
+ * 为什么要宽度门槛：无头浏览器、分屏窄窗口的指针同样是「精细指针」，
+ * 只判断 hover/pointer 会让 390 宽的界面印着「空格 翻转 · Esc 退出」——
+ * 那种宽度下键位提示既按不到也没地方放，按触屏版处理才对。
+ * （2026-11-08 优化：原来只在单词卡里打 720px 补丁，这里收回成全局一条。）
  *
  * 为什么用 CSS 而不是 JS 判断设备：首屏是服务端渲染的，那一刻拿不到设备信息，
  * JS 判断会让手机先闪一版桌面文案再换掉。媒体查询首帧就成立，没有这个窗口，
@@ -85,7 +243,7 @@
   display: none;
 }
 
-@media (hover: hover) and (pointer: fine) {
+@media (hover: hover) and (pointer: fine) and (min-width: 720px) {
   .campus-desktop-only {
     display: revert;
   }
@@ -211,10 +369,19 @@
   background: var(--fill-2);
 }
 
+/*
+ * 当前工具那格：满色填充（方案 C 的「一个工具一支色」）。
+ *
+ * 满色用深一档的 ink 压纸白 —— 原色（如赤陶 #C25A2E）压白字只有 4.2:1，14px 的标签压不住。
+ * 六支 ink 压纸白是 5.06–6.74:1，都过 AA；深色主题镜像成亮色压深字（--solid，5.0–6.6:1）。
+ * 具体是哪支色由下面「工具身份色」那段的 [data-tool] 映射给，这里只说怎么用。
+ */
 .campus-tab.is-active {
-  color: var(--accent-ink);
-  background: var(--card-bg);
-  box-shadow: var(--shadow-1);
+  /* 带兜底：万一某个标签没拿到 data-tool（新工具忘了加），也退回纸底 + 板块金，
+     而不是掉成继承色 —— 一个漏项不该让那格看起来是坏的 */
+  color: var(--tool-tab-ink, var(--solid-text));
+  background: var(--tool-tab-bg, var(--accent-ink));
+  box-shadow: none;
 }
 
 /* 迁移中的工具：右侧点一个小标记，说明点进去仍是旧实现 */
@@ -994,9 +1161,23 @@ body.campus-modal-open .campus-scroll {
  * 卡片间距在这里比别处松一档（12 → 16）：这一页是三个功能块叠在一起，
  * 12px 时边界全靠一条 1px 线撑着，手机上几乎连成一片，读不出「到这儿换了一件事」。
  * 只在本面板内生效，其他板块的节奏不受影响 —— 要统一再统一，先在一页上验过。
+ *
+ * 身份色（赤陶）不在这里写：六页共用一套映射，统一放在文件前部
+ * 「工具身份色：一个工具一支」那一段，改色只改那一处。
  */
 #campus-panel-pomodoro {
   --pomo-gap: 16px;
+}
+
+/*
+ * 身份色落在纸面上：这一页三张卡，只有「专注计时」这张是本工具主场，
+ * 给它一条 3px 赤陶顶边。方案 C 里内容卡就是这么标身份的 ——
+ * 靠一条边而不是整块底色，安静，但一眼知道自己在哪个工具里。
+ * 用 :has() 认这张卡而不是认「第一张」：同步条和全屏宿主也在这层，
+ * 顺序一变就会选错卡。
+ */
+#campus-panel-pomodoro .campus-card:has(.campus-pomo-clock) {
+  border-top: 3px solid var(--tool-accent);
 }
 
 #campus-panel-pomodoro > .campus-card + .campus-card {
@@ -2971,15 +3152,7 @@ body.campus-modal-open .campus-scroll {
 
 /* ---------- 单词卡 ---------- */
 
-.campus-words-nav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
-
+/* 级别 chip 行（组导航已经并进标题行，这里只剩一行 chip） */
 .campus-chips {
   display: flex;
   flex-wrap: wrap;
@@ -3115,15 +3288,6 @@ body.campus-modal-open .campus-scroll {
   color: var(--text-3);
 }
 
-.campus-words-keys kbd {
-  padding: 1px 5px;
-  font-family: inherit;
-  font-size: var(--fs-xs);
-  background: var(--fill-3);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-xs);
-}
-
 .campus-words-source {
   font-size: var(--fs-xs);
   color: var(--text-3);
@@ -3131,6 +3295,1518 @@ body.campus-modal-open .campus-scroll {
 
 .campus-words-source a {
   color: var(--accent-ink);
+}
+
+/* ---------- 单词卡 · 面板内部的视觉层级 ---------- */
+
+/*
+ * 这一整段全部挂在 #campus-panel-words 下面，一个共用类都不裸写。
+ *
+ * 起因：六个工具切换过去，长得太像 —— 面板都是同一张纸卡，标题 14px、
+ * 正文 13px、按钮 12px，一整屏找不出第二个「重量」不同的东西。
+ * 但改版范围被明确限定在单词卡一个页面，所以这里用 ID 下钻而不是动
+ * .campus-flip / .campus-chip / .campus-btn 这些五个面板共用的类：
+ * 裸写它们等于给以后留一个跨页误伤的扣子。
+ *
+ * 三层高度分工（这也是「视觉冲击力」的全部来源，没有加任何新色）：
+ *   1. 面板 .campus-card —— 纸底，不加任何装饰；
+ *   2. 词卡 —— 纸面白 + 25% 墨描边 + 顶部 3px 金条 + shadow-2，整页唯一「抬起」的东西；
+ *   3. 三格读数 —— 上下两根 1px 细线夹住，是「已经发生的事」，不再加边框加底。
+ * 一个页面只允许一个物体比别人亮，视线才不用找。
+ */
+
+/*
+ * 版心：只有单词面板放宽到 1080。
+ *
+ * 880 是六个工具共用的版心（.campus-shell 的 --campus-max）。但单词卡是
+ * 「左边一张牌 + 右边一本复习本」的双栏结构，880 下左栏只剩 534 宽，
+ * 1440 的屏幕上左右各空掉 280 —— 一整页内容被捏在中间，看起来像没做完。
+ *
+ * 这里用 :has() 按「内容是谁」挑容器，而不是给 .campus-shell 加类：
+ * 路由薄壳（app/(campus)/tools/page.tsx）不用动，其他五个工具照旧 880。
+ * 不支持 :has() 的浏览器退化成 880，也就是现状，不会崩。
+ */
+.campus-shell:has(#campus-panel-words) {
+  --campus-max: 1080px;
+}
+
+/*
+ * 左栏不再套一层纸卡。
+ * 原来页面底 → 面板纸卡 → 词卡纸卡，三层底色只差几个百分点、三圈圆角三圈描边，
+ * 卡里套卡是「不干净」的主要来源。现在左栏透明，白牌直接浮在页面上，
+ * 整页只剩一个「抬起来」的东西 —— 就是那张要读的牌。
+ */
+#campus-panel-words .campus-words-main {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* 去掉纸卡以后，标题行直接坐在页面上，间距从卡内边距改成行间距 */
+#campus-panel-words .campus-words-main .campus-card-head {
+  margin-bottom: 12px;
+}
+
+#campus-panel-words .campus-words-state {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  background: var(--fill-3);
+  border-radius: 999px;
+}
+
+/* 级别 chip：选中态原来是「浅金底 + 金字」，跟旁边没选中的灰字只差一点明度。
+   改成金实底反白字，用 --campus-btn-solid 这一套（它已经按深浅主题配过对比度）。 */
+#campus-panel-words .campus-chip {
+  padding: 6px 12px;
+  font-size: var(--fs-sm);
+  transition: var(--t-color);
+}
+
+#campus-panel-words .campus-chip:hover {
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+
+#campus-panel-words .campus-chip.is-on {
+  color: var(--campus-btn-solid-text);
+  background: var(--campus-btn-solid);
+  border-color: var(--campus-btn-solid);
+}
+
+#campus-panel-words .campus-chip.is-on small {
+  color: inherit;
+  opacity: 0.75;
+}
+
+/* 标题行：左边标题、右边「‹ 组状态 ›」三步一排，居中而不是基线对齐 */
+#campus-panel-words .campus-words-main .campus-card-head {
+  align-items: center;
+}
+
+#campus-panel-words .campus-chips {
+  margin-bottom: 10px;
+}
+
+#campus-panel-words .campus-words-group {
+  gap: 4px;
+}
+
+#campus-panel-words .campus-wk-btn {
+  width: 30px;
+  height: 30px;
+}
+
+/* 进度：4px 细条看不出还剩多少，加粗到 6px，并把百分比写在右边 */
+#campus-panel-words .campus-words-meter {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+#campus-panel-words .campus-words-bar {
+  flex: 1 1 auto;
+  height: 6px;
+  margin-bottom: 0;
+  /* 0% 时轨道只剩 --fill-3 那一层 0.035 的淡影，整条读起来像一根分隔线，
+     不像「还没开始」的进度槽 —— 抬到 fill-2 才看得出来这是条槽 */
+  background: var(--fill-2);
+}
+
+#campus-panel-words .campus-words-pct {
+  flex: 0 0 auto;
+  min-width: 36px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/*
+ * 词卡本体。
+ * 外层是容器，不再是「一整块 button」—— 判定按钮与全屏入口现在长在牌面上，
+ * 而 button 里不能再套 button。卡片自己也不再是「一大片空纸里一个字」：
+ * 牌面、按钮、入口三层把高度用满，手机上不用靠 268px 的空高撑场面。
+ */
+#campus-panel-words .campus-flip {
+  position: relative;
+  gap: 14px;
+  min-height: 340px;
+  padding: 36px 16px 16px;
+  text-align: center;
+  background: var(--card-bg);
+  border: 1px solid var(--line-strong);
+  border-top: 3px solid var(--accent);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+}
+
+/* 牌面：整块可点，负责「翻面」这一个动作。撑满剩余高度，让单词居中而不是贴着按钮 */
+#campus-panel-words .campus-flip-face {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 6px 0;
+  font-family: inherit;
+  text-align: center;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+/* 右上角两枚图标：朗读、重练。低频动作不该占一整行 */
+#campus-panel-words .campus-flip-tools {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  display: flex;
+  gap: 2px;
+}
+
+#campus-panel-words .campus-flip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  color: var(--text-3);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+#campus-panel-words .campus-flip-icon:hover {
+  color: var(--ink);
+  background: var(--fill-3);
+}
+
+/* 牌底操作带：判定（占满剩余宽度）+ 全屏入口（方形，靠右） */
+#campus-panel-words .campus-flip-controls {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  width: 100%;
+}
+
+/*
+ * 本组点阵：翻过的点是淡金，当前那个拉成一枚小胶囊，未到的点是描边色。
+ * 它跟着词一起居中，落在牌面的下半截 —— 把那段留白变成一条「轨道」。
+ */
+#campus-panel-words .campus-flip-dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  /* 跟着词与提示一起居中：三者是一个整体，不各自飘在牌面里 */
+  margin-top: 2px;
+}
+
+#campus-panel-words .campus-flip-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--line-strong);
+  border-radius: 999px;
+  transition: width 0.2s ease;
+}
+
+#campus-panel-words .campus-flip-dot.is-past {
+  background: var(--accent);
+  opacity: 0.45;
+}
+
+#campus-panel-words .campus-flip-dot.is-now {
+  width: 16px;
+  background: var(--accent);
+}
+
+/* 判定按钮：长在牌面底部，两列，认识的列略宽 —— 主操作永远在右边 */
+#campus-panel-words .campus-flip-actions {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* 练到最后一组时只剩「重练这组」一个按钮，两列网格会把它压在 1fr 的窄列里，
+   不到一半宽 —— 单独一个就铺满整行 */
+#campus-panel-words .campus-flip-actions .campus-words-btn:only-child {
+  grid-column: 1 / -1;
+}
+
+#campus-panel-words .campus-flip-tag {
+  position: absolute;
+  top: 14px;
+  left: 18px;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  letter-spacing: var(--ls-mid);
+  color: var(--accent-ink);
+}
+
+/* 一枚 5px 的金点：「正面 / 释义」从一行小字变成一枚状态灯。
+   翻面时它跟着变，比只换两个字更容易被余光看见 */
+#campus-panel-words .campus-flip-tag::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  background: var(--accent);
+  border-radius: 999px;
+}
+
+#campus-panel-words .campus-flip-word {
+  font-size: clamp(40px, 12vw, 54px);
+  font-weight: 500;
+  line-height: 1.1;
+  letter-spacing: -0.015em;
+}
+
+/* 词下那道金短线：正面是「词 → 提示」的分隔，背面是「词 → 释义」的分隔 */
+#campus-panel-words .campus-flip-rule {
+  width: 30px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 999px;
+  opacity: 0.9;
+}
+
+/* 翻面后词让位：仍然是这一页的标题，但不该和释义抢同一档字号 */
+#campus-panel-words .campus-flip.is-flipped .campus-flip-word {
+  font-size: clamp(26px, 7.6vw, 34px);
+  color: var(--text-2);
+}
+
+/* 完成态那句「这组认完了」是一句结论，不是一张词卡的主角 */
+#campus-panel-words .campus-flip.is-done .campus-flip-word {
+  font-size: var(--fs-title);
+  color: var(--ink);
+}
+
+#campus-panel-words .campus-flip-hint {
+  font-size: var(--fs-md);
+}
+
+#campus-panel-words .campus-flip-def {
+  max-width: 34em;
+  font-size: var(--fs-xl);
+  font-weight: 500;
+  line-height: 1.55;
+}
+
+/* 例句：底色换成 --fill-3，因为父层现在已经是纸白，纸白压纸白等于没有块；
+   左侧那条竖线从 2px 提到 3px，和卡顶的金条同一重量 */
+#campus-panel-words .campus-flip-eg {
+  gap: 4px;
+  max-width: 100%;
+  padding: 10px 14px;
+  background: var(--fill-3);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+#campus-panel-words .campus-flip-eg-tag {
+  font-size: var(--fs-badge);
+  letter-spacing: var(--ls-mid);
+  color: var(--accent-ink);
+}
+
+#campus-panel-words .campus-flip-eg-en {
+  font-size: var(--fs-md);
+}
+
+#campus-panel-words .campus-flip-eg-zh {
+  font-size: var(--fs-sm);
+}
+
+/* 认完一组：卡片安静下来（去掉投影、换回淡底），把注意力让给下面「下一组」 */
+#campus-panel-words .campus-flip.is-done {
+  /* 完成态只有两行字 + 两个按钮，不该继续按 330 的空高撑 */
+  min-height: 240px;
+  background: var(--fill-3);
+  border-style: solid;
+  border-color: var(--line);
+  border-top: 3px solid var(--accent-ink);
+  box-shadow: none;
+}
+
+/*
+ * 深色主题下词卡抬不起来：--card-bg 就是面板色（step-2），
+ * 描边加投影在暗底上都换不来明度差，词卡会跟面板糊成一片。
+ * 这里把词卡往 --ink（暖白）方向混 8%，得到比面板亮一档的纸面 ——
+ * 仍然是令牌派生，没有引入新色值；浅色主题不需要这条，因为 card-bg 已经是最亮的一层。
+ */
+.dark #campus-panel-words .campus-flip {
+  background: color-mix(in srgb, var(--card-bg) 92%, var(--ink));
+}
+
+.dark #campus-panel-words .campus-flip.is-done {
+  background: var(--fill-3);
+}
+
+/* 评判按钮 */
+#campus-panel-words .campus-words-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  padding: 10px 16px;
+  font-family: inherit;
+  font-size: var(--fs-lg);
+  font-weight: 500;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+#campus-panel-words .campus-words-btn:hover {
+  background: var(--fill-2);
+}
+
+#campus-panel-words .campus-words-btn.is-known {
+  color: var(--campus-btn-solid-text);
+  background: var(--campus-btn-solid);
+  border-color: var(--campus-btn-solid);
+}
+
+#campus-panel-words .campus-words-btn.is-known:hover {
+  background: var(--campus-btn-solid-hover);
+  border-color: var(--campus-btn-solid-hover);
+}
+
+/* 次要小按钮：仍给复习本里的「移除 / 再练 / 清空」用 */
+#campus-panel-words .campus-words-mini {
+  padding: 5px 9px;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+#campus-panel-words .campus-words-mini:hover {
+  color: var(--ink);
+  background: var(--fill-3);
+  border-color: var(--line);
+}
+
+/* 三格读数 */
+#campus-panel-words .campus-words-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 16px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+#campus-panel-words .campus-words-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
+  border-left: 1px solid var(--line);
+}
+
+#campus-panel-words .campus-words-stat:first-child {
+  border-left: 0;
+}
+
+#campus-panel-words .campus-words-stat-num {
+  font-family: var(--font-serif);
+  font-size: var(--fs-title);
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+#campus-panel-words .campus-words-stat-label {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+/*
+ * 底部四行说明（规则 / 键盘 / 词库来源）原来 margin 全是 0，
+ * 四条同色同号的灰字连成一块，读起来像一段乱码。
+ * 只加相邻间距，不动字号 —— 它们确实是次要信息，不该被抬成正文。
+ */
+#campus-panel-words .campus-card-note + .campus-card-note {
+  margin-top: 8px;
+}
+
+/*
+ * 手机上的词卡。
+ * 226px 是「只有单词 + 一行提示」时代的尺寸；现在牌面上还长着判定按钮与全屏入口，
+ * 高度得让出来，否则中间那块只剩单词本身，还是一张空纸。
+ */
+@media (max-width: 560px) {
+  #campus-panel-words .campus-flip {
+    min-height: 300px;
+    padding: 34px 14px 14px;
+  }
+
+  #campus-panel-words .campus-flip-word {
+    font-size: clamp(42px, 13vw, 56px);
+  }
+
+  #campus-panel-words .campus-words-btn {
+    min-height: 48px;
+  }
+
+  #campus-panel-words .campus-words-deck-btn {
+    min-height: 48px;
+  }
+
+  #campus-panel-words .campus-words-stat-num {
+    font-size: var(--fs-xl);
+  }
+}
+
+/* ---------- 单词卡 · 版式（手机单栏 / 电脑双栏）---------- */
+
+/*
+ * 之前 1440 下整页只有一张 880 宽的卡：左边一大片空白、词卡里再一大片空白，
+ * 一块内容被拉成了三块空。电脑端改成「左刷词、右复习本」双栏：
+ *  - 左栏是操作区（选级别 → 看进度 → 翻牌 → 判定），视线一条直线往下；
+ *  - 右栏是资料区（复习本 + 怎么用），sticky 跟着走，翻词时不用回滚。
+ * 手机上两栏自然叠成一列，顺序不变。
+ */
+#campus-panel-words .campus-words-layout {
+  display: grid;
+  gap: var(--campus-gap);
+}
+
+#campus-panel-words .campus-words-side {
+  display: grid;
+  gap: var(--campus-gap);
+}
+
+/* 新手引导：一次性出现，讲完就收进「怎么用」 */
+#campus-panel-words .campus-words-guide {
+  margin-bottom: 10px;
+  padding: 11px 13px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-md);
+}
+
+#campus-panel-words .campus-words-guide-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+#campus-panel-words .campus-words-guide-kicker {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: var(--ls-mid);
+  color: var(--accent-ink);
+}
+
+#campus-panel-words .campus-words-guide-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+#campus-panel-words .campus-words-guide-close:hover {
+  color: var(--ink);
+  background: var(--fill-3);
+}
+
+#campus-panel-words .campus-words-guide-steps {
+  display: grid;
+  gap: 5px;
+  margin: 8px 0 0;
+  padding-left: 19px;
+  font-size: var(--fs-md);
+  line-height: 1.55;
+  color: var(--text-2);
+}
+
+#campus-panel-words .campus-words-guide-steps b {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+#campus-panel-words .campus-words-guide-ok {
+  width: 100%;
+  min-height: 36px;
+  margin-top: 10px;
+  font-family: inherit;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--campus-btn-solid-text);
+  background: var(--campus-btn-solid);
+  border: 1px solid var(--campus-btn-solid);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+#campus-panel-words .campus-words-guide-ok:hover {
+  background: var(--campus-btn-solid-hover);
+  border-color: var(--campus-btn-solid-hover);
+}
+
+/*
+ * 引导条出现时，词卡先让一截高度。
+ * 首次进来一屏是「页头 + 工具切换 + 引导 + 卡」四层，卡片再撑 330 就会把「认识」
+ * 这个主按钮顶出首屏 —— 那就成了「教程挡住了要教的东西」。
+ */
+#campus-panel-words.is-intro .campus-flip {
+  min-height: 250px;
+}
+
+/* 「怎么用」折叠块：规则 / 键盘 / 词库来源都住在这里，默认收起 */
+#campus-panel-words .campus-words-help {
+  padding: 11px 14px;
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+#campus-panel-words .campus-words-help summary {
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+#campus-panel-words .campus-words-help summary:hover {
+  color: var(--ink);
+}
+
+#campus-panel-words .campus-words-help-list {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding-left: 18px;
+  font-size: var(--fs-xs);
+  line-height: 1.65;
+  color: var(--text-3);
+}
+
+#campus-panel-words .campus-words-help-list b {
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+#campus-panel-words .campus-words-help-list kbd {
+  padding: 1px 5px;
+  font-family: inherit;
+  font-size: var(--fs-badge);
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+}
+
+#campus-panel-words .campus-words-help .campus-words-source {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+/*
+ * 平板竖屏（561–879）是单栏，但屏宽已经到 736 —— 一张 736×340 的词卡里只放一个词，
+ * 长宽比 2.2:1，像一条信封。这个区间把左栏收窄到 560 并居中，比例回到正常卡片，
+ * 和其他宽度下的观感一致。
+ */
+@media (min-width: 561px) and (max-width: 879px) {
+  /* 注意：网格项写 `margin: 0 auto` 会取消 stretch，宽度退成 fit-content（实测只剩 292），
+     得用 width:100% + justify-self 居中才收得准 */
+  #campus-panel-words .campus-words-main {
+    width: 100%;
+    max-width: 560px;
+    justify-self: center;
+  }
+}
+
+/* 电脑端：双栏 + 放大的词卡。880 是板块版心，左宽右窄 */
+@media (min-width: 880px) {
+  #campus-panel-words .campus-words-layout {
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 16px;
+    align-items: start;
+  }
+
+  #campus-panel-words .campus-words-side {
+    position: sticky;
+    top: 14px;
+  }
+
+  #campus-panel-words .campus-flip {
+    min-height: 360px;
+    padding: 40px 32px 18px;
+  }
+
+  #campus-panel-words .campus-flip-word {
+    font-size: clamp(64px, 7vw, 104px);
+  }
+
+  #campus-panel-words .campus-flip.is-flipped .campus-flip-word {
+    font-size: clamp(34px, 3.2vw, 44px);
+  }
+
+  #campus-panel-words .campus-flip-controls {
+    max-width: 520px;
+    margin: 0 auto;
+  }
+
+  /*
+   * 引导条在桌面上是「左边三条 + 右边一颗按钮」的横排。
+   * 竖排时那句话占满 848 宽，底下一颗同样宽的实心金按钮会显得很重 ——
+   * 手机上按钮通栏是对的（拇指目标），桌面上一颗 132 宽的按钮就够。
+   */
+  #campus-panel-words .campus-words-guide {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "head head"
+      "steps ok";
+    gap: 2px 20px;
+    align-items: center;
+  }
+
+  #campus-panel-words .campus-words-guide-head {
+    grid-area: head;
+  }
+
+  #campus-panel-words .campus-words-guide-steps {
+    grid-area: steps;
+    margin-top: 2px;
+  }
+
+  #campus-panel-words .campus-words-guide-ok {
+    grid-area: ok;
+    width: auto;
+    min-width: 132px;
+    min-height: 40px;
+    margin-top: 0;
+    padding: 0 18px;
+  }
+
+  #campus-panel-words .campus-words-stats {
+    margin-top: 14px;
+  }
+
+  /* 双栏后右栏自己是一个卡片，别再叠 .campus-card + .campus-card 的上边距 */
+  #campus-panel-words .campus-words-side .campus-card {
+    margin-top: 0;
+  }
+}
+
+/* ---------- 单词卡 · 全屏刷词 + 复习本 ---------- */
+
+/*
+ * 同样是 #campus-panel-words 下钻：这两块只属于单词卡，其他面板不该受影响。
+ *
+ * 全屏层用 fixed + z-index 60，与课表全屏、番茄钟沉浸态同一档 —— 顺序是：
+ *   页面 30 < 沉浸层 60 < 完成提醒 70。
+ * 不能再往上抬，否则番茄钟到点的提醒会被它盖住。
+ */
+
+/*
+ * 全屏入口：牌底最右的一枚方形按钮，与「不认识 / 认识」同一行、同一高度。
+ * 原来它是牌下单独一行 30px 的通栏小条，牌底于是长出三层；
+ * 收进操作带以后少一行，位置也固定 —— 每次都在右下角，不用找。
+ */
+#campus-panel-words .campus-words-deck-btn {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  min-width: 46px;
+  min-height: 46px;
+  padding: 0;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+/*
+ * 「全屏」两个字只在 ≥720 出现。
+ * 手机上 390 的牌宽要留给「不认识 / 认识」，四个字会把主按钮挤窄；
+ * 方格箭头本身就是通行写法，加上 aria-label 和 title，读屏与悬停都有交代。
+ */
+#campus-panel-words .campus-words-deck-label {
+  display: none;
+}
+
+@media (min-width: 720px) {
+  #campus-panel-words .campus-words-deck-label {
+    display: inline;
+  }
+
+  #campus-panel-words .campus-words-deck-btn {
+    padding: 0 14px;
+  }
+}
+
+#campus-panel-words .campus-words-deck-btn:hover:not(:disabled) {
+  background: var(--fill-2);
+  border-color: var(--accent);
+}
+
+#campus-panel-words .campus-words-deck-btn:disabled {
+  color: var(--text-3);
+  background: transparent;
+  border-color: var(--line);
+  cursor: not-allowed;
+}
+
+/* 收词提示：一句话，几秒后自己消失 */
+#campus-panel-words .campus-words-toast {
+  margin: 10px 0 0;
+  padding: 8px 12px;
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+/* ---------- 复习本 ---------- */
+
+#campus-panel-words .campus-rb-count {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+#campus-panel-words .campus-rb-count b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/*
+ * 两个读数：右栏 300 宽，如果顶上只有一行 12px 灰字，整块纸看上去是空的。
+ * 换成衬线大数字 + 上下细线，扫一眼就知道攒了多少，清单退到下一层。
+ */
+#campus-panel-words .campus-rb-meters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin-bottom: 12px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+#campus-panel-words .campus-rb-meter {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-items: center;
+  padding: 9px 0 8px;
+}
+
+#campus-panel-words .campus-rb-meter + .campus-rb-meter {
+  border-left: 1px solid var(--line);
+}
+
+#campus-panel-words .campus-rb-meter-num {
+  font-family: var(--font-serif);
+  font-size: var(--fs-num);
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+#campus-panel-words .campus-rb-meter-label {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+#campus-panel-words .campus-rb-legend {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+#campus-panel-words .campus-rb-legend-item {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+/* 图例里的徽章跟清单里同款，但不需要「贴在词后面」的那点左边距 */
+#campus-panel-words .campus-rb-legend-item .campus-rb-mark {
+  flex: 0 0 auto;
+  margin-left: 0;
+}
+
+#campus-panel-words .campus-rb-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+#campus-panel-words .campus-rb-actions .campus-words-btn {
+  flex: 1 1 auto;
+  min-height: 42px;
+}
+
+/* 空本子的一句话：没有可复习的词时，这里只交代规则，不摆按钮 */
+#campus-panel-words .campus-rb-hint {
+  margin: 12px 0 0;
+  font-size: var(--fs-md);
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+#campus-panel-words .campus-rb-toggle {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+#campus-panel-words .campus-rb-toggle:hover {
+  color: var(--ink);
+  background: var(--fill-2);
+  border-color: var(--line-strong);
+}
+
+#campus-panel-words .campus-rb-body {
+  display: grid;
+  gap: 18px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+#campus-panel-words .campus-rb-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+#campus-panel-words .campus-rb-title {
+  margin: 0 0 6px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: var(--ls-mid);
+  color: var(--text-2);
+}
+
+#campus-panel-words .campus-rb-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#campus-panel-words .campus-rb-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+#campus-panel-words .campus-rb-row.is-mastered {
+  opacity: 0.78;
+}
+
+#campus-panel-words .campus-rb-row-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* 释义可能很长，列表里只留一行；要看全的去刷词层或复习 */
+#campus-panel-words .campus-rb-def {
+  overflow: hidden;
+  font-size: var(--fs-md);
+  color: var(--text-2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+#campus-panel-words .campus-rb-word {
+  font-family: var(--font-serif);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+#campus-panel-words .campus-rb-meta {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+#campus-panel-words .campus-rb-split {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * 两档标记：轻的是中性描边（可能不熟悉），重的是金色实底（确定不熟悉）。
+ * 不用红色 —— "不熟悉"不是错误，红色会让人以为操作失败。
+ */
+#campus-panel-words .campus-rb-mark {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  font-family: var(--font-sans);
+  font-size: var(--fs-badge);
+  font-weight: 500;
+  line-height: 1.6;
+  vertical-align: middle;
+  border-radius: 999px;
+}
+
+#campus-panel-words .campus-rb-mark.is-unsure {
+  color: var(--text-3);
+  border: 1px solid var(--line-strong);
+}
+
+#campus-panel-words .campus-rb-mark.is-sure {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+}
+
+#campus-panel-words .campus-rb-row-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  align-items: center;
+}
+
+/* ---------- 全屏刷词层 ---------- */
+
+#campus-panel-words .campus-deck {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+#campus-panel-words .campus-deck-bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 16px;
+  padding-top: calc(10px + env(safe-area-inset-top));
+}
+
+#campus-panel-words .campus-deck-exit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  font-family: inherit;
+  font-size: var(--fs-lg);
+  line-height: 1;
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+#campus-panel-words .campus-deck-exit:hover {
+  color: var(--ink);
+  background: var(--fill-2);
+  border-color: var(--line-strong);
+}
+
+#campus-panel-words .campus-deck-eyebrow {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+#campus-panel-words .campus-deck-counter {
+  margin-left: auto;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+#campus-panel-words .campus-deck-progress {
+  height: 3px;
+  margin: 0 16px;
+  overflow: hidden;
+  background: var(--fill-2);
+  border-radius: 999px;
+}
+
+#campus-panel-words .campus-deck-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.2s ease;
+}
+
+#campus-panel-words .campus-deck-stage {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: 18px 16px;
+  /* 卡片长释义时不能把底部按钮和提示顶出视口：超出交给卡片自己滚 */
+  overflow: hidden;
+}
+
+/*
+ * 卡片是一整张「牌」：上面是可点翻面的牌面，下面贴着判定按钮。
+ * 高度跟着舞台走（封在 640），所以纸面不会在按钮之外再空出一大块；
+ * 内容超长时由牌面自己滚，按钮永远钉在纸的底沿。
+ */
+#campus-panel-words .campus-deck-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 560px;
+  height: 100%;
+  /* 上限 560：一张只有单词的纸铺满 844 的屏，中间一大片空白反而更空 */
+  max-height: 560px;
+  overflow: hidden;
+  background: var(--card-bg);
+  border: 1px solid var(--line-strong);
+  border-top: 3px solid var(--accent);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+}
+
+.dark #campus-panel-words .campus-deck-card {
+  background: color-mix(in srgb, var(--card-bg) 92%, var(--ink));
+}
+
+/* 牌面：整块可点，内容在剩余高度里居中 */
+#campus-panel-words .campus-deck-face {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 16px;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: 34px 22px 20px;
+  overflow: auto;
+  font-family: inherit;
+  text-align: center;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+/* 单词与释义作为一组居中：翻面后正文变长，整组仍贴着牌的视觉中心 */
+#campus-panel-words .campus-deck-main {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: center;
+  width: 100%;
+}
+
+#campus-panel-words .campus-deck-card.is-done {
+  /* 完成态只有两行字，不该继续占满 640 的高度 —— 收成一块小纸，像个结论 */
+  height: auto;
+  min-height: 220px;
+  background: var(--fill-3);
+  border-color: var(--line);
+  border-top: 3px solid var(--accent-ink);
+  box-shadow: none;
+}
+
+#campus-panel-words .campus-deck-card.is-done .campus-deck-face {
+  justify-content: center;
+  padding: 40px 24px 16px;
+}
+
+#campus-panel-words .campus-deck-tag {
+  position: absolute;
+  top: 14px;
+  left: 20px;
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  letter-spacing: var(--ls-mid);
+  color: var(--accent-ink);
+}
+
+/* 与面板里的词卡同一枚金点：两层界面的「状态灯」是同一个记号 */
+#campus-panel-words .campus-deck-tag::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  background: var(--accent);
+  border-radius: 999px;
+}
+
+/* 词头：词 + 一道金短线。翻面时整组让到左边，短线就是「词」与「义」的分界 */
+#campus-panel-words .campus-deck-lead {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: center;
+  max-width: 100%;
+}
+
+#campus-panel-words .campus-deck-rule {
+  width: 36px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 999px;
+  opacity: 0.9;
+}
+
+#campus-panel-words .campus-deck-word {
+  font-family: var(--font-serif);
+  /* 全屏只有这一个词，字号要压得住整张牌：390 下约 51px，长词靠 word-break 兜底 */
+  font-size: clamp(40px, 13vw, 62px);
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--ink);
+  word-break: break-word;
+}
+
+#campus-panel-words .campus-deck-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+}
+
+#campus-panel-words .campus-deck-def {
+  max-width: 30em;
+  font-size: var(--fs-title);
+  font-weight: 500;
+  line-height: 1.55;
+  color: var(--ink);
+}
+
+#campus-panel-words .campus-deck-eg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 100%;
+  padding: 10px 14px;
+  text-align: left;
+  background: var(--fill-3);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+#campus-panel-words .campus-deck-eg-en {
+  font-size: var(--fs-lg);
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
+#campus-panel-words .campus-deck-eg-zh {
+  font-size: var(--fs-md);
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+/* 深色下例句块本身比牌面还亮一档，译文再压到 text-3 就糊了 */
+.dark #campus-panel-words .campus-deck-eg-zh {
+  color: var(--text-2);
+}
+
+#campus-panel-words .campus-deck-hint {
+  font-size: var(--fs-md);
+  color: var(--text-3);
+}
+
+#campus-panel-words .campus-deck-done-title {
+  font-family: var(--font-serif);
+  font-size: var(--fs-title);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+#campus-panel-words .campus-deck-done-text {
+  max-width: 26em;
+  font-size: var(--fs-md);
+  line-height: 1.7;
+  color: var(--text-2);
+}
+
+/* 按钮行贴着牌的底沿：跟牌面共用一张纸，一条细线交代「下面是操作」 */
+#campus-panel-words .campus-deck-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  padding: 14px 18px 16px;
+  border-top: 1px solid var(--line);
+}
+
+#campus-panel-words .campus-deck-speak {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+#campus-panel-words .campus-deck-speak:hover {
+  color: var(--ink);
+  background: var(--fill-2);
+}
+
+#campus-panel-words .campus-deck-btn {
+  display: inline-flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  max-width: 220px;
+  min-height: 52px;
+  padding: 12px 18px;
+  font-family: inherit;
+  font-size: var(--fs-lg);
+  font-weight: 500;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+#campus-panel-words .campus-deck-btn:hover {
+  background: var(--fill-2);
+}
+
+#campus-panel-words .campus-deck-btn.is-known {
+  color: var(--campus-btn-solid-text);
+  background: var(--campus-btn-solid);
+  border-color: var(--campus-btn-solid);
+}
+
+#campus-panel-words .campus-deck-btn.is-known:hover {
+  background: var(--campus-btn-solid-hover);
+  border-color: var(--campus-btn-solid-hover);
+}
+
+#campus-panel-words .campus-deck-foot {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  justify-content: center;
+  margin: 0;
+  padding: 0 16px calc(18px + env(safe-area-inset-bottom));
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--text-3);
+  text-align: center;
+}
+
+#campus-panel-words .campus-deck-foot-text {
+  color: var(--text-2);
+}
+
+/*
+ * 横屏手机（844×390 这类）高度只有 390：牌面上下留白各收 10px，
+ * 否则「认识 / 不认识」会被顶出视口 —— 这页的全部操作必须在首屏内完成。
+ */
+@media (max-height: 480px) {
+  #campus-panel-words .campus-deck-stage {
+    padding: 8px 14px;
+  }
+
+  #campus-panel-words .campus-deck-face {
+    gap: 10px;
+    padding: 20px 18px 12px;
+  }
+
+  #campus-panel-words .campus-deck-actions {
+    padding: 0 14px 12px;
+  }
+
+  #campus-panel-words .campus-deck-word {
+    font-size: clamp(28px, 6vw, 40px);
+  }
+}
+
+@media (max-width: 560px) {
+  #campus-panel-words .campus-deck-actions {
+    flex-wrap: nowrap;
+  }
+
+  #campus-panel-words .campus-deck-btn {
+    max-width: none;
+  }
+}
+
+/*
+ * 全屏层在电脑上的尺寸。
+ * 1440 下原来是一张 560×380 的卡孤零零挂在正中间，四周全是空 —— 那不是沉浸，是空荡。
+ * 电脑视口横向富余：牌宽到 900、单词到 92px、释义放大一档，按钮跟着牌一起变宽，
+ * 眼睛不用在屏幕中间找那一小块字。
+ */
+@media (min-width: 880px) {
+  #campus-panel-words .campus-deck-bar {
+    max-width: 900px;
+    margin: 0 auto;
+  }
+
+  #campus-panel-words .campus-deck-progress {
+    width: calc(100% - 64px);
+    max-width: 836px;
+    margin: 0 auto;
+  }
+
+  #campus-panel-words .campus-deck-stage {
+    padding: 24px 32px;
+  }
+
+  /*
+   * 桌上这张牌：宽 900、高跟着舞台但封在 520。
+   * 按钮在牌内、牌面上方那道细线把「牌面」与「操作」分开，
+   * 所以下半截不再是悬着的空白，而是一段被交代过的下沿留白。
+   */
+  #campus-panel-words .campus-deck-card {
+    height: 100%;
+    max-width: 900px;
+    max-height: 520px;
+  }
+
+  #campus-panel-words .campus-deck-face {
+    padding: 48px 56px 24px;
+  }
+
+  #campus-panel-words .campus-deck-actions {
+    padding: 16px 56px 26px;
+  }
+
+  #campus-panel-words .campus-deck-word {
+    font-size: clamp(64px, 7vw, 104px);
+  }
+
+  /*
+   * 电脑上牌是 900 宽，背面如果还竖排居中，释义只占中间 340，
+   * 左右各三百多像素全是纸 —— 空就是这么来的。
+   * 翻面后改成「左词右义」两列，一道细竖线分隔，宽度被用起来，字也回到左侧的阅读起点。
+   */
+  #campus-panel-words .campus-deck-face.is-flipped .campus-deck-main {
+    flex-direction: row;
+    align-items: center;
+    gap: 40px;
+    text-align: left;
+  }
+
+  #campus-panel-words .campus-deck-face.is-flipped .campus-deck-lead {
+    /* 左列按单词自身宽度撑开，不再固定百分比：
+       40% 的列在 101px 字号下装不下 access，会把它断成 acces / s
+       上限 56% 是给长单词留的：超过就把右列挤到 40% 以下，不体面 */
+    flex: 0 0 auto;
+    align-items: flex-start;
+    max-width: 56%;
+  }
+
+  #campus-panel-words .campus-deck-face.is-flipped .campus-deck-word {
+    font-size: clamp(56px, 5.6vw, 84px);
+    text-align: left;
+  }
+
+  #campus-panel-words .campus-deck-face.is-flipped .campus-deck-body {
+    flex: 1 1 0;
+    min-width: 0;
+    align-items: flex-start;
+    padding-left: 40px;
+    text-align: left;
+    border-left: 1px solid var(--line);
+  }
+
+  #campus-panel-words .campus-deck-face.is-flipped .campus-deck-eg {
+    align-self: stretch;
+    max-width: none;
+  }
+
+  #campus-panel-words .campus-deck-def {
+    max-width: 24em;
+  }
+
+  #campus-panel-words .campus-deck-eg {
+    max-width: 32em;
+    padding: 14px 18px;
+  }
+
+  #campus-panel-words .campus-deck-btn {
+    max-width: 300px;
+    min-height: 58px;
+  }
+
+  #campus-panel-words .campus-deck-speak {
+    width: 54px;
+    height: 54px;
+  }
 }
 
 /* ---------- 群抽签 ---------- */

@@ -23,6 +23,18 @@ export const CAMPUS_KEYS = {
   week: "campus.schedule.week.v1",
   term: "campus.schedule.term.v1",
   words: "campus.words.progress.v1",
+  /**
+   * 单词熟记档案：翻看计数 + 复习本 + 已掌握。
+   * 与 `words` 分开存是刻意的 —— 复习本是跨级别、跨天累计的东西，
+   * 而 `words` 只记「上次练到第几组」，两者生命周期不同，混在一起改结构会互相牵制。
+   */
+  wordsReview: "campus.words.review.v1",
+  /**
+   * 单词卡新手引导是否已看过。
+   * 只记「看过」这个事实，不记步数 —— 引导是一次性的，看过的用户不该再被它挡住。
+   * 与进度、复习本分开存：清进度不代表要把教学再看一遍，反过来也一样。
+   */
+  wordsIntro: "campus.words.intro.v1",
   deadline: "campus.deadline.items.v1",
   /**
    * 番茄钟当日计数。0.3.0 起统计改由 focusSessions 聚合得出，
