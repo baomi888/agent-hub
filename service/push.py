@@ -31,6 +31,14 @@ logger = logging.getLogger(__name__)
 
 JOB_KEY = "push.daily"
 
+# ★ 2026-11-09 起这个 job 的定时路径**静默**：提醒中心（service/reminder_tick.py）
+#   接管了「到点该不该推、推什么」，内容口径与本模块的 build_message 完全一致。
+#   保留这个模块是因为：① 新的 tick 直接调 build_message，逻辑还在这里；
+#   ② `run_one` 仍可被 POST /api/schedule/run-now 手工触发（运维排障用）；
+#   ③ 规格要求「不删 job 定义」，老库里的 job_runs 记录还要能查。
+#   要回滚：把下面 due_subjects 的早退删掉，再把 reminder.tick 停用即可。
+_LEGACY_TIMED_DISABLED = True
+
 # 单条发送的超时。推送服务方（FCM/Mozilla）正常 200–800ms 就回，
 # 卡住的多半是网络问题；10 秒还不回就当失败，别让一轮里几十条串着超时。
 _SEND_TIMEOUT = 10
@@ -213,7 +221,13 @@ def due_subjects(job_key: str, planned_at: int) -> list[str]:
     `push.daily` 的 cron 是每 15 分钟一跳，而每个人的点不同，所以每一跳都要
     自己判断"该不该轮到我"。判断本身收在 `matches_time` 里（那个函数有单测，
     窗口边界这种容易写错的东西不该埋在循环里）。
+
+    ★ 2026-11-09：定时路径已交给 `service/reminder_tick.py`（每分钟一跳、
+      支持任意分钟的 at），这里直接返回空。**不要顺手删掉下面这段代码**，
+      它是回滚时唯一要恢复的东西，也是 `matches_time` 那组测试的被测对象。
     """
+    if _LEGACY_TIMED_DISABLED:
+        return []
     if not config.push_ready():
         return []
     day = quota.day_key()

@@ -114,6 +114,16 @@ def job_defs() -> dict[str, dict]:
             "cron": "*/15 * * * *",
             "description": "每日提醒：到自己的点了、且今天还有事没做完才推（没内容不发）",
         },
+        # 提醒中心（2026-11-09）。每分钟一跳：提醒现在可以是任意一分钟
+        # （`at` 支持 1–59 分钟），15 分钟的 tick 做不到「课前 10 分钟」。
+        #
+        # 与 push.daily 的关系：push.daily 的业务侧已经从 due 阶段直接返回空
+        # （service/push.py#due_subjects），留在这里不删是为了老库里的 job_runs
+        # 还能查、也为了能一条 SQL 把开关拨回去。两者的内容口径完全一致。
+        "reminder.tick": {
+            "cron": "* * * * *",
+            "description": "提醒中心：每分钟扫描到点的提醒（四道闸 + 同刻合并）",
+        },
         "housekeeping": {
             "cron": "15 4 * * *",
             "description": "清理过期运行记录（>90 天）与历史上传件",

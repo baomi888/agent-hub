@@ -120,7 +120,8 @@ def _load_handlers(force: bool = False) -> tuple[bool, str]:
     for job_key in sched.JOB_DEFS:
         # push.daily 的业务在 service/push.py，不归 daily 管（下面单独挂）。
         # 不排除的话它会被挂上 daily，而 daily 没有 due_subjects，这一轮静默空转。
-        if job_key == "push.daily":
+        # reminder.tick 同理，业务在 service/reminder_tick.py（2026-11-09）。
+        if job_key in ("push.daily", "reminder.tick"):
             continue
         register_handler(job_key, daily)
     # prompt.evolve 的业务在 service/prompt_evo.py，不属于 daily：
@@ -146,6 +147,14 @@ def _load_handlers(force: bool = False) -> tuple[bool, str]:
         register_handler(push_svc.JOB_KEY, push_svc)
     except Exception as e:  # noqa: BLE001
         _log_json("handler_missing", job_key="push.daily", reason=f"{e}"[:200])
+    # 提醒中心（2026-11-09）：每分钟一跳，四道闸 + 同刻合并。
+    # 单独兜异常的理由同上：它挂了不该让 delegate / report 一起停。
+    try:
+        from service import reminder_tick  # type: ignore
+
+        register_handler(reminder_tick.JOB_KEY, reminder_tick)
+    except Exception as e:  # noqa: BLE001
+        _log_json("handler_missing", job_key="reminder.tick", reason=f"{e}"[:200])
     return True, ""
 
 
