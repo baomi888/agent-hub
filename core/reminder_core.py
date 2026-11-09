@@ -65,6 +65,13 @@ MAX_PER_OWNER = 50
 # 再久就只推进不补发（理由见模块注释最后一段）。
 MAX_LAG_SECONDS = 15 * 60
 
+# 一次性迁移的完成标记，写进 SQLite 的 `PRAGMA user_version`（库头里的整数，
+# 不需要新表）。为什么需要它：迁移的判据是「有没有 source='system' 的行」，
+# 用户把那条删掉后，下一次进程重启会把它当成「还没迁移」再建回来 ——
+# 「删了又自己回来」比不迁移更像 bug。标记之后，重启不再重跑迁移；
+# 迁移后新开推送的人由 api/push.py 的 ensure_system 单独兜住。
+_MIGRATION_VERSION = 20261109
+
 # 来源枚举。`system` 是老「每日提醒」迁移过来的那一类，不对用户展示。
 SOURCES = (
     "manual",
@@ -166,6 +173,22 @@ CREATE TABLE IF NOT EXISTS campus_state (
 );
 """
 
+# 「一人只能有一条 system 提醒」的唯一索引。
+#
+# 为什么不能直接写进 `_SCHEMA`：web 与 worker 同时首次迁移是真实存在的交错
+# （两个进程各自 SELECT「有没有 system 行」，都得到没有，然后各插一条）。
+# 历史上已经落下的重复行要先清掉，否则建唯一索引会直接失败、而且每次启动都失败。
+# 保留 rowid 最小的那条：它就是最早迁移出来的那条，`/api/remind` 也一直读它。
+_UNIQUE_SYSTEM_SQL = """
+DELETE FROM reminders
+ WHERE source='system'
+   AND rowid NOT IN (
+       SELECT MIN(rowid) FROM reminders WHERE source='system' GROUP BY owner_id
+   );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reminders_one_system
+    ON reminders(owner_id) WHERE source='system';
+"""
+
 
 class ReminderInvalid(ValueError):
     """输入不合法。端点据此回 400（而不是 500）。"""
@@ -193,6 +216,8 @@ def ensure() -> None:
         return
     with _conn() as conn:
         conn.executescript(_SCHEMA)
+        # 去重必须早于建唯一索引；顺序反了会在有重复行的库上直接抛错
+        conn.executescript(_UNIQUE_SYSTEM_SQL)
         _migrate(conn)
     # ★ 放在迁移之后：迁移中途抛异常时不进缓存，下一次调用会重试，
     #   而不是留下「表建好了、数据没搬」的半截状态还当成已完成。
@@ -257,8 +282,10 @@ def _insert_system_row(
         "every_minutes": None,
         "next_fire_at": None,
     }
+    # OR IGNORE：唯一索引兜底。并发迁移时两个进程都走到这里，后到的这条
+    # 会被索引挡掉，而不是给用户落下两条「每日回顾」。
     conn.execute(
-        """INSERT INTO reminders
+        """INSERT OR IGNORE INTO reminders
               (id, owner_id, title, note, source, source_ref, override_json,
                freq, at, weekday, every_minutes, trigger_kind, anchor, offset_minutes,
                action, action_json, channels, enabled, next_fire_at, created_at, updated_at)
@@ -279,6 +306,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     「开着推送但从没进过设置页」的那批人会突然再也收不到提醒，
     而他们的订阅还在、服务端显示一切正常 —— 这种静默失效最难查。
     """
+    version = int(conn.execute("PRAGMA user_version").fetchone()[0] or 0)
+    if version >= _MIGRATION_VERSION:
+        return
+
     now = timeutil.now_ts()
     prefs = _legacy_prefs(conn)
     owners: set[str] = set(prefs)
@@ -311,6 +342,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
                 "VALUES (?,?,1,?) ON CONFLICT(owner_id, source) DO NOTHING",
                 (owner, source, now),
             )
+
+    # 最后一次写：中途抛异常时版本不前进，下一次启动会重试（写入本身都幂等）
+    conn.execute(f"PRAGMA user_version={int(_MIGRATION_VERSION)}")
 
 
 # ---------- 行 → 字典 ----------
@@ -377,6 +411,20 @@ def _validate(data: dict[str, Any]) -> dict[str, Any]:
     override = data.get("override")
     if override is not None and not isinstance(override, dict):
         raise ReminderInvalid("override 必须是对象")
+    if isinstance(override, dict) and override:
+        unknown = set(override) - {"title", "at", "enabled"}
+        if unknown:
+            raise ReminderInvalid(f"override 里不认识的字段：{','.join(sorted(unknown))}")
+        if "title" in override:
+            text = str(override.get("title") or "").strip()
+            if not text or len(text) > 60:
+                raise ReminderInvalid("override.title 要是 1–60 个字")
+            override = {**override, "title": text}
+        if "at" in override:
+            override = {**override, "at": _hhmm(override.get("at"))}
+    # 同时留一份解析后的对象：next_fire 要读 override.at（见 _scheduled），
+    # 只留 JSON 字符串会让「改时间」只改展示、不改调度。
+    out["override"] = override or None
     out["override_json"] = json.dumps(override, ensure_ascii=False) if override else None
 
     freq = str(data.get("freq") or "daily")
@@ -503,6 +551,30 @@ def next_fire(reminder: dict[str, Any], now: int | None = None) -> int | None:
     return None
 
 
+def _override_at(row: dict[str, Any]) -> str | None:
+    """override 里的时刻（没有就是 None）。"""
+    override = row.get("override")
+    if isinstance(override, dict):
+        at = override.get("at")
+        if at:
+            return str(at)
+    return None
+
+
+def _scheduled(row: dict[str, Any]) -> dict[str, Any]:
+    """调度用的视图：`override.at` 必须生效。
+
+    数据模型里的 override 包含 `at`。如果只让 `resolve()`（展示）用它、
+    `next_fire()` 仍读原行的 `at`，就会出现「列表写着 22:00，实际 23:00 响」——
+    用户会直接把它当成提醒不准，而且从界面上完全看不出来。
+    """
+    out = dict(row)
+    at = _override_at(row)
+    if at:
+        out["at"] = at
+    return out
+
+
 # ---------- CRUD ----------
 
 
@@ -522,7 +594,7 @@ def create(owner_id: str, data: dict[str, Any]) -> dict[str, Any]:
     row = _validate(data)
     now = timeutil.now_ts()
     rid = _new_id()
-    nxt = next_fire({**row, "next_fire_at": None}, now)
+    nxt = next_fire(_scheduled({**row, "next_fire_at": None}), now)
     with _conn() as conn:
         conn.execute(
             """INSERT INTO reminders
@@ -645,9 +717,14 @@ def update(owner_id: str, reminder_id: str, patch: dict[str, Any]) -> dict[str, 
         k in patch and str(patch.get(k)) != str(current.get(k))
         for k in schedule_keys
     )
+    # override.at 也是调度输入：只改 override 时上面那组键一个都没动，
+    # 不单独判就会保留旧的 next_fire_at（展示与实际再次分叉）。
+    override_changed = "override" in patch and _override_at(
+        {"override": patch.get("override")}
+    ) != _override_at(current)
     nxt = current["next_fire_at"]
-    if changed_schedule or nxt is None or int(nxt) <= now:
-        nxt = next_fire({**row, "next_fire_at": current["next_fire_at"]}, now)
+    if changed_schedule or override_changed or nxt is None or int(nxt) <= now:
+        nxt = next_fire(_scheduled({**row, "next_fire_at": current["next_fire_at"]}), now)
 
     with _conn() as conn:
         conn.execute(
@@ -815,7 +892,7 @@ def advance(reminder_id: str, now: int | None = None) -> int | None:
             )
         return None
     base = max(ts, int(row.get("next_fire_at") or 0))
-    nxt = next_fire(row, base)
+    nxt = next_fire(_scheduled(row), base)
     with _conn() as conn:
         conn.execute(
             "UPDATE reminders SET next_fire_at=?, updated_at=? WHERE id=?",
@@ -935,24 +1012,36 @@ def ensure_system(owner_id: str) -> dict[str, Any]:
     if existing:
         return existing
     hour, minute = default_time()
-    return create(
-        owner_id,
-        {
-            "title": "每日回顾",
-            "source": "system",
-            "freq": "daily",
-            "at": f"{hour:02d}:{minute:02d}",
-            "action": "agent_deliver",
-            "channels": "push",
-            "enabled": True,
-        },
-    )
+    try:
+        return create(
+            owner_id,
+            {
+                "title": "每日回顾",
+                "source": "system",
+                "freq": "daily",
+                "at": f"{hour:02d}:{minute:02d}",
+                "action": "agent_deliver",
+                "channels": "push",
+                "enabled": True,
+            },
+        )
+    except sqlite3.IntegrityError:
+        # 两个请求同时给同一个人开推送：唯一索引挡掉后到的 INSERT，
+        # 这时把先到的那条读回来就行（500 会让前端以为「开提醒失败」）。
+        existing = get_system(owner_id)
+        if existing:
+            return existing
+        raise
 
 
 def system_time(owner_id: str) -> tuple[int, int]:
-    """「每日回顾」当前设在几点；没有这条就返回全站默认值。"""
+    """「每日回顾」当前设在几点；没有这条就返回全站默认值。
+
+    ★ 必须读 `_scheduled()` 而不是裸 `at`：override.at 一旦存在就是实际生效的
+    时刻，读裸 `at` 会让 /api/remind 报一个「不是它真正会响」的时间。
+    """
     item = get_system(owner_id)
-    at = (item or {}).get("at") or ""
+    at = _scheduled(item or {}).get("at") or ""
     try:
         hour, minute = (int(part) for part in str(at).split(":"))
         return hour, minute
@@ -961,10 +1050,21 @@ def system_time(owner_id: str) -> tuple[int, int]:
 
 
 def set_system_time(owner_id: str, hour: int, minute: int) -> dict[str, Any]:
-    """改「每日回顾」的时刻（老接口 POST /api/remind 的落点）。"""
+    """改「每日回顾」的时刻（老接口 POST /api/remind 的落点）。
+
+    老接口的语义是「把这条改到这个点」，所以落点必须**压过** override.at：
+    只写 `at` 的话，override 里那份旧时刻仍在 `_scheduled()` 里赢下来，
+    表现为「界面上改了、实际还按老时间响」—— 用户会直接放弃这个功能。
+    这里保留 override 的其余字段（比如 title），只摘掉 `at`。
+    """
     hour, minute = _snap_time(hour, minute)
     item = ensure_system(owner_id)
-    updated = update(owner_id, item["id"], {"at": f"{hour:02d}:{minute:02d}", "enabled": True})
+    patch: dict[str, Any] = {"at": f"{hour:02d}:{minute:02d}", "enabled": True}
+    override = item.get("override")
+    if isinstance(override, dict) and override.get("at"):
+        rest = {k: v for k, v in override.items() if k != "at"}
+        patch["override"] = rest or None
+    updated = update(owner_id, item["id"], patch)
     return updated or item
 
 

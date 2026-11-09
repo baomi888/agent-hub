@@ -102,7 +102,11 @@ def set_time_prefs(owner_id: str, patch: dict[str, Any]) -> dict[str, Any]:
     quiet_end = _norm_hhmm(patch.get("quiet_end", current["quiet_end"]), "静默结束")
 
     cap = patch.get("daily_cap", current["daily_cap"])
-    cap = int(cap)
+    try:
+        cap = int(cap)
+    except (TypeError, ValueError):
+        # 端点把 ReminderInvalid 统一转 400；不接住的话 "abc" 会变成 500
+        raise reminder_core.ReminderInvalid("每日上限必须是整数") from None
     if not MIN_CAP <= cap <= MAX_CAP:
         raise reminder_core.ReminderInvalid(f"每日上限要在 {MIN_CAP}–{MAX_CAP} 条之间")
 
@@ -117,9 +121,15 @@ def set_time_prefs(owner_id: str, patch: dict[str, Any]) -> dict[str, Any]:
             days = item.get("weekday") or []
             if not isinstance(days, (list, tuple)):
                 raise reminder_core.ReminderInvalid("active_windows.weekday 要是数组")
+            try:
+                weekdays = sorted({int(d) for d in days if 0 <= int(d) <= 6})
+            except (TypeError, ValueError):
+                raise reminder_core.ReminderInvalid(
+                    "active_windows.weekday 只能是 0–6 的整数"
+                ) from None
             cleaned.append(
                 {
-                    "weekday": sorted({int(d) for d in days if 0 <= int(d) <= 6}),
+                    "weekday": weekdays,
                     "start": _norm_hhmm(item.get("start"), "活跃时段开始"),
                     "end": _norm_hhmm(item.get("end"), "活跃时段结束"),
                 }

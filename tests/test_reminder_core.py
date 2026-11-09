@@ -215,6 +215,41 @@ class TestUpdate:
         assert resumed["next_fire_at"] is not None
 
 
+class TestOverrideAt:
+    """override.at 必须同时改展示与调度。
+
+    规格把 `at` 放进 override，就是为了「改这条来源提醒的时间，但不动来源对象」。
+    如果它只影响 `resolve()` 的展示，用户会看到 22:00、实际 23:00 响，
+    这种不一致比功能缺失更难被信任。
+    """
+
+    def test_override_at_moves_next_fire(self, fresh_db):
+        item = reminder_core.create("u1", _mk(at="22:00"))
+        updated = reminder_core.update("u1", item["id"], {"override": {"at": "23:30"}})
+        assert datetime.fromtimestamp(updated["next_fire_at"], TZ).strftime("%H:%M") == "23:30"
+        assert reminder_core.resolve(updated)["at"] == "23:30"
+        assert updated["at"] == "22:00"  # 原值保留：override 不写回来源语义
+
+    def test_override_at_drives_advance(self, fresh_db):
+        item = reminder_core.create("u1", _mk(at="22:00"))
+        updated = reminder_core.update("u1", item["id"], {"override": {"at": "23:30"}})
+        planned = int(updated["next_fire_at"])
+        nxt = reminder_core.advance(item["id"], planned + 10)
+        assert nxt is not None
+        assert datetime.fromtimestamp(nxt, TZ).strftime("%H:%M") == "23:30"
+        assert nxt >= planned + 10
+
+    def test_override_at_validated(self, fresh_db):
+        item = reminder_core.create("u1", _mk())
+        with pytest.raises(reminder_core.ReminderInvalid):
+            reminder_core.update("u1", item["id"], {"override": {"at": "25:99"}})
+
+    def test_override_unknown_key_rejected(self, fresh_db):
+        item = reminder_core.create("u1", _mk())
+        with pytest.raises(reminder_core.ReminderInvalid):
+            reminder_core.update("u1", item["id"], {"override": {"titel": "typo"}})
+
+
 class TestDeleteAndSnooze:
     def test_delete_scoped_to_owner(self, fresh_db):
         item = reminder_core.create("u1", _mk())
@@ -420,6 +455,85 @@ class TestMigration:
         reminder_core.ensure()
         assert len(self._system_rows("u1")) == 1
 
+    def test_concurrent_migration_creates_one_system_row(self, fresh_db):
+        """web 与 worker 同时首次迁移，也只能落一条。
+
+        两边各自的 `has_system` 查询都在对方 INSERT 之前完成，这是升级重启时
+        真实存在的交错（两个进程同时 ensure）。没有唯一约束的话会各插一条，
+        之后用户改时间只改到其中一条，另一条仍在老时间响 —— 而且列表里看起来
+        只有一个「每日回顾」。
+        """
+        import threading
+
+        self._sub("u9")
+        # 只建表 + 建唯一索引、不跑 ensure()：ensure 会顺手把数据迁完，
+        # 就测不到「两边都查到没有、再各插一条」的交错了
+        with session._conn() as conn:
+            conn.executescript(reminder_core._SCHEMA)
+            conn.executescript(reminder_core._UNIQUE_SYSTEM_SQL)
+        barrier = threading.Barrier(2)
+        original = reminder_core._insert_system_row
+        errors: list[BaseException] = []
+
+        def gated(conn, owner, hour, minute, now):
+            # 两个线程都已完成「有没有 system 行」的查询，再一起往下插
+            barrier.wait(timeout=10)
+            return original(conn, owner, hour, minute, now)
+
+        def run() -> None:
+            try:
+                with session._conn() as conn:
+                    reminder_core._migrate(conn)
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        reminder_core._insert_system_row = gated  # type: ignore[assignment]
+        try:
+            threads = [threading.Thread(target=run) for _ in range(2)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=15)
+        finally:
+            reminder_core._insert_system_row = original  # type: ignore[assignment]
+
+        assert not errors, errors
+        assert len(self._system_rows("u9")) == 1
+
+    def test_existing_duplicates_are_collapsed_on_upgrade(self, fresh_db):
+        """修复前已经落下的两条 system 行，升级时要收敛回一条。
+
+        直接建唯一索引会失败（每次启动都失败），所以 ensure() 必须先删多余行。
+        """
+        now = int(time.time())
+        with session._conn() as conn:
+            conn.executescript(reminder_core._SCHEMA)
+            reminder_core._insert_system_row(conn, "u8", 20, 0, now)
+            reminder_core._insert_system_row(conn, "u8", 21, 0, now)
+        assert len(self._system_rows("u8")) == 2  # 修复前的历史状态
+
+        reminder_core.reset_cache()
+        reminder_core.ensure()
+
+        rows = self._system_rows("u8")
+        assert len(rows) == 1
+        assert rows[0]["at"] == "20:00"  # 保留最早那条（/api/remind 一直读它）
+
+    def test_deleted_system_row_is_not_resurrected_on_restart(self, fresh_db):
+        """用户删掉「每日回顾」后，进程重启不能又把它建回来。
+
+        迁移判据是「有没有 system 行」，没有完成标记的话每次启动都会重跑，
+        表现就是「删了又回来」—— 用户会认为删除按钮是假的。
+        """
+        self._sub("u7")
+        reminder_core.ensure()
+        row = self._system_rows("u7")[0]
+        assert reminder_core.delete("u7", row["id"]) is True
+
+        reminder_core.reset_cache()  # 模拟进程重启，_READY 丢失
+        reminder_core.ensure()
+        assert self._system_rows("u7") == []
+
     def test_active_subscriber_without_prefs_gets_default_row(self, fresh_db):
         """开着推送但没进过设置页的人也必须被覆盖。
 
@@ -468,6 +582,29 @@ class TestSystemRow:
         """老接口挂了 select 下拉，只能落在 0/15/30/45；吸附规则必须还在。"""
         reminder_core.set_system_time("u1", 7, 7)
         assert reminder_core.system_time("u1") == (7, 0)
+
+    def test_system_time_follows_override_at(self, fresh_db):
+        """override.at 存在时它就是生效时刻，GET 也必须报这个。
+
+        读裸 `at` 的话，界面写 20:00、实际 23:30 才响，用户会当成「提醒不准」，
+        而且从界面上完全看不出来。
+        """
+        item = reminder_core.ensure_system("u1")
+        reminder_core.update("u1", item["id"], {"override": {"at": "23:30"}})
+        assert reminder_core.system_time("u1") == (23, 30)
+
+    def test_set_system_time_overrides_stale_override_at(self, fresh_db):
+        """老接口写时间必须真的生效，不能被 override 里的旧时刻顶回去。"""
+        item = reminder_core.ensure_system("u1")
+        reminder_core.update("u1", item["id"], {"override": {"at": "23:30", "title": "晚间回顾"}})
+
+        updated = reminder_core.set_system_time("u1", 21, 0)
+
+        assert reminder_core.system_time("u1") == (21, 0)
+        # override 的其余字段要留着：老接口只管时间，不该顺手把用户改的标题丢掉
+        assert updated["override"] == {"title": "晚间回顾"}
+        planned = datetime.fromtimestamp(updated["next_fire_at"], TZ).strftime("%H:%M")
+        assert planned == "21:00", f"实际排到了 {planned}，等于改时间无效"
 
 
 # ==================== 概览 ====================

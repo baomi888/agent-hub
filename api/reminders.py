@@ -71,7 +71,9 @@ class ReminderIn(BaseModel):
     offset_minutes: int | None = None
     action: str = Field(default="notify")
     action_payload: dict | list | str | None = None
-    channels: str = Field(default="push")
+    # 列表也收：core 本来就支持数组，第二波前端更可能直接传 ["push","inapp"]。
+    # 只声明 str 会让这种请求在 422 就死掉，看起来像「后端不支持多通道」。
+    channels: str | list[str] = Field(default="push")
     enabled: bool = True
 
 
@@ -89,7 +91,7 @@ class ReminderPatch(BaseModel):
     every_minutes: int | None = Field(default=None, ge=60, le=1440)
     action: str | None = None
     action_payload: dict | list | str | None = None
-    channels: str | None = None
+    channels: str | list[str] | None = None
     enabled: bool | None = None
 
 
@@ -105,6 +107,16 @@ def _view(item: dict) -> dict:
     而用户刚在抽屉里改过 —— 这类不一致比功能缺失更让人不敢用。
     """
     return reminder_core.resolve(item)
+
+
+def _sources_view(prefs: dict[str, bool]) -> dict:
+    """GET / PUT 共用一个形状：PUT 返回 dict、GET 返回 list 的话，
+    前端「切完开关顺手刷新」就会拿到两种结构，第二波很容易写错。"""
+    sources = [
+        {"key": key, "label": label, "enabled": bool(prefs.get(key))}
+        for key, label in SOURCE_LABELS
+    ]
+    return {"sources": sources, "selectable": sources}
 
 
 @router.get("")
@@ -139,10 +151,7 @@ async def get_sources(uid: str = Depends(get_current_user)) -> dict:
     另外给 `selectable`，前端新建抽屉里就按这个顺序列，不再自己维护一份。
     """
     prefs = await asyncio.to_thread(user_prefs.source_prefs, uid)
-    sources = [
-        {"key": key, "label": label, "enabled": bool(prefs.get(key))} for key, label in SOURCE_LABELS
-    ]
-    return {"sources": sources, "selectable": sources}
+    return _sources_view(prefs)
 
 
 @router.put("/sources")
@@ -150,12 +159,16 @@ async def put_source(body: dict, uid: str = Depends(get_current_user)) -> dict:
     source = str(body.get("source") or "").strip()
     if not source:
         raise HTTPException(status_code=400, detail="source 缺失")
-    enabled = bool(body.get("enabled"))
+    raw = body.get("enabled")
+    if isinstance(raw, str):
+        enabled = raw.strip().lower() in {"1", "true", "yes", "on"}
+    else:
+        enabled = bool(raw)
     try:
         prefs = await asyncio.to_thread(user_prefs.set_source_pref, uid, source, enabled)
     except reminder_core.ReminderInvalid as exc:
         raise _bad(exc) from None
-    return {"source": source, "enabled": enabled, "sources": prefs}
+    return {**_sources_view(prefs), "source": source, "enabled": enabled}
 
 
 @router.get("/prefs")
@@ -169,9 +182,13 @@ async def get_prefs(uid: str = Depends(get_current_user)) -> dict:
 @router.put("/prefs")
 async def put_prefs(body: dict, uid: str = Depends(get_current_user)) -> dict:
     try:
-        return await asyncio.to_thread(user_prefs.set_time_prefs, uid, body)
+        prefs = await asyncio.to_thread(user_prefs.set_time_prefs, uid, body)
     except reminder_core.ReminderInvalid as exc:
         raise _bad(exc) from None
+    # 与 GET 同一个形状：前端切完 tab 不该丢掉滑杆的上下界
+    prefs["cap_min"] = user_prefs.MIN_CAP
+    prefs["cap_max"] = user_prefs.MAX_CAP
+    return prefs
 
 
 @router.get("/fires")

@@ -183,6 +183,8 @@ class TestSideEndpoints:
     def test_sources_toggle(self, client):
         res = client.put("/api/reminders/sources", json={"source": "timetable", "enabled": True})
         assert res.status_code == 200
+        # PUT 与 GET 必须同形状（都是 list），否则前端切完开关再渲染会拿到 dict
+        assert isinstance(res.json()["sources"], list)
         body = client.get("/api/reminders/sources").json()
         assert {s["key"]: s["enabled"] for s in body["sources"]}["timetable"] is True
 
@@ -197,6 +199,15 @@ class TestSideEndpoints:
 
     def test_prefs_reject_bad_cap(self, client):
         assert client.put("/api/reminders/prefs", json={"daily_cap": 99}).status_code == 400
+
+    def test_prefs_reject_non_integer_cap(self, client):
+        """字符串/浮点混进来要是 400，不是 500 —— 500 会被前端当成「后端挂了」。"""
+        assert client.put("/api/reminders/prefs", json={"daily_cap": "abc"}).status_code == 400
+
+    def test_channels_accepts_list(self, client):
+        """core 本来就支持数组；HTTP 层只收 str 会让第二波前端直接 422。"""
+        item = _create(client, channels=["push", "inapp"])
+        assert item["channels"] == "push,inapp"
 
     def test_fires_endpoint(self, client):
         item = _create(client)
