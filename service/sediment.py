@@ -304,4 +304,12 @@ def run_one(job_key: str, subject_id: str, planned_at: int) -> dict:
     return {"tokens_out": n}
 
 
-__all__ = ["JOB_KEY", "KB_PREFIX", "enqueue", "ingest_candidates", "reuse_or_create_topic_kb", "run_one", "write_picked"]
+__all__ = [
+    "JOB_KEY",
+    "KB_PREFIX",
+    "enqueue",
+    "ingest_candidates",
+    "reuse_or_create_topic_kb",
+    "run_one",
+    "write_picked",
+]
