@@ -25,7 +25,7 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from core import config, quota, reminder_store
+from core import config, quota, reminder_core, reminder_store
 from core.auth import get_current_user
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -35,8 +35,14 @@ _MAX_SET_PER_DAY = 30
 
 
 def _payload(uid: str) -> dict:
-    hour, minute = reminder_store.get(uid)
-    dhour, dminute = reminder_store.default_time()
+    """返回结构与改造前**逐字段一致**（老前端 + 日历服务端都在读）。
+
+    时间现在来自 `reminders` 表里 `source='system'` 那一行（提醒中心接管后的
+    唯一真值源）。没有那一行时退回全站默认值，**不写库** —— 打开设置页
+    不该给人凭空建一条提醒。
+    """
+    hour, minute = reminder_core.system_time(uid)
+    dhour, dminute = reminder_core.default_time()
     return {
         "hour": hour,
         "minute": minute,
@@ -44,7 +50,9 @@ def _payload(uid: str) -> dict:
         # 默认值单独给：前端要区分「你没设过，这是全站默认」和「你设成了这个点」
         "default_hour": dhour,
         "default_minute": dminute,
-        # 客户端不要自己写死档位：调度是 */15，改了这里就得同步改 cron
+        # 客户端不要自己写死档位。★ 第 1 条要求「新表支持 1–59 分钟」，但这个
+        # 老契约还没放开：老前端是 select 下拉，放开 steps 它会变成空下拉。
+        # 放开要等 /reminders 页面（第二波）上线一起改。
         "steps": list(reminder_store.MINUTE_STEPS),
         # 推送通道是否可用（没配 VAPID 时前端文案要退化成"只影响日历"）
         "push_enabled": config.push_ready(),
@@ -77,7 +85,13 @@ async def set_remind(body: dict, uid: str = Depends(get_current_user)) -> dict:
     await asyncio.to_thread(
         quota.consume_key, f"remind:{uid}", "remind_set", _MAX_SET_PER_DAY
     )
+    # 两处都写，故意冗余：
+    #  · reminders 表是提醒中心的真值源（新的 tick 只认它）；
+    #  · reminder_prefs 还给日历 ICS 读（service/calendar.py 直接取这个时刻），
+    #    而且它是这次改造的回滚点。两边用同一个吸附规则，不会出现「设置页显示
+    #    07:30、日历落在 07:15」这种对不上的情况。
     await asyncio.to_thread(reminder_store.set_time, uid, hour, minute)
+    await asyncio.to_thread(reminder_core.set_system_time, uid, hour, minute)
 
     # ★ 这里**不补发、也不清 push_log**：今天已经提醒过的话，改时间不该让人今晚
     #   被通知两次；今天还没提醒过的话，调度下一次 tick 自然会按新时间判断。

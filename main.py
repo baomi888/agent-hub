@@ -42,6 +42,7 @@ from api.prompt_evo import router as prompt_evo_router
 from api.push import router as push_router
 from api.query import router as query_router
 from api.remind import router as remind_router
+from api.reminders import router as reminders_router
 from api.report import router as report_router
 from api.schedule import router as schedule_router
 from api.sessions import router as sessions_router
@@ -49,7 +50,7 @@ from api.templates import router as templates_router
 from api.today import router as today_router
 from api.usage import router as usage_router
 from api.user_feedback import router as user_feedback_router
-from core import account, apilog, config, llm_gate, quota
+from core import account, apilog, config, llm_gate, quota, reminder_core
 from core import router as route_engine
 from kb import pipelines
 from service import avatar as avatar_store
@@ -93,6 +94,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await asyncio.to_thread(daily._ensure_daily_tables)
     except Exception as e:  # noqa: BLE001
         print(f"[启动警告] 数据表迁移失败（首次访问时会自动重试）：{e}")
+    # 提醒中心的四张表 + 老「每日提醒」迁移。**必须在启动时跑一次**：
+    # 迁移要把 `reminder_prefs` 和活订阅搬成 reminders 行，而 worker 的第一次
+    # tick 可能比第一个 HTTP 请求更早；晚跑一分钟的代价是那一分钟该响的提醒不响。
+    # 同样只告警不阻断：懒执行那条路会在首次访问时重试。
+    try:
+        await asyncio.to_thread(reminder_core.ensure)
+    except Exception as e:  # noqa: BLE001
+        print(f"[启动警告] 提醒中心建表/迁移失败（首次访问时会自动重试）：{e}")
     missing = config.validate()
     if missing:
         print(f"[启动警告] 配置缺失：{'；'.join(missing)}")
@@ -201,6 +210,10 @@ app.include_router(push_router, prefix="/api/push", tags=["推送提醒"])
 app.include_router(calendar_router, prefix="/api/calendar", tags=["日历提醒"])
 # 提醒时刻：一个值同时管 Web Push 与日历事件的起点，所以不挂在上面两组里
 app.include_router(remind_router, prefix="/api", tags=["提醒时刻"])
+# 提醒中心（独立模块）：提醒项 CRUD / 今日概览 / 来源开关 / 时间偏好 / 触发流水。
+# 与 /api/remind 的边界：那条只管「每日回顾这一个时刻」（老契约，日历还在读），
+# 新的通用提醒全在这里。两者共用 reminders 表里 source='system' 的那一行。
+app.include_router(reminders_router, prefix="/api/reminders", tags=["提醒中心"])
 # 混合架构（工作流 × 自主 Agent）：工作流定义 / 切换规则 / 执行记录与人工切换
 app.include_router(hybrid_router, prefix="/api/hybrid", tags=["混合执行"])
 # Prompt 自进化（GEPA）：候选列表 / 指标对比 / promote / rollback / 手动触发。

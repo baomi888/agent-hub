@@ -25,12 +25,15 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import logging
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from core import config, push_store, quota, reminder_store
+from core import config, push_store, quota, reminder_core, reminder_store
 from core.auth import get_current_user
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
@@ -134,6 +137,14 @@ async def push_subscribe(body: dict, uid: str = Depends(get_current_user)) -> di
         str(body.get("ua") or "")[:300],
         str(body.get("platform") or "")[:20],
     )
+    # 提醒中心（2026-11-09）：新开推送的人要有一条「每日回顾」，否则
+    # `/api/remind` 读不到东西、到点也没有任何提醒行可发 —— 而界面会显示
+    # 「推送已开启」，这种静默失效最难查（迁移只覆盖升级那一刻的老用户）。
+    # 失败不影响订阅本身：订阅成功是主流程，建提醒是附带的一步。
+    try:
+        await asyncio.to_thread(reminder_core.ensure_system, uid)
+    except Exception:  # noqa: BLE001
+        logger.exception("ensure_system reminder failed uid=%s", uid)
     return {"ok": True, **res, "devices": await asyncio.to_thread(push_store.count_active, uid)}
 
 
