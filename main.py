@@ -24,6 +24,7 @@ from api.admin import router as admin_router
 from api.agent import router as agent_router
 from api.auth import router as auth_router
 from api.calendar import router as calendar_router
+from api.campus import router as campus_router
 from api.cet import router as cet_router
 from api.chat import router as chat_router
 from api.checkin import router as checkin_router
@@ -214,6 +215,8 @@ app.include_router(remind_router, prefix="/api", tags=["提醒时刻"])
 # 与 /api/remind 的边界：那条只管「每日回顾这一个时刻」（老契约，日历还在读），
 # 新的通用提醒全在这里。两者共用 reminders 表里 source='system' 的那一行。
 app.include_router(reminders_router, prefix="/api/reminders", tags=["提醒中心"])
+# 校园工具集快照上云：整份覆盖，updated_at 新者胜（规格 2.3）
+app.include_router(campus_router, prefix="/api/campus", tags=["校园快照"])
 # 混合架构（工作流 × 自主 Agent）：工作流定义 / 切换规则 / 执行记录与人工切换
 app.include_router(hybrid_router, prefix="/api/hybrid", tags=["混合执行"])
 # Prompt 自进化（GEPA）：候选列表 / 指标对比 / promote / rollback / 手动触发。
