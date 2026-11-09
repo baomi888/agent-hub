@@ -332,6 +332,26 @@ class TestFailure:
         reminder_tick.run_one(reminder_tick.JOB_KEY, OWNER, _ts(12, 0))
         assert _fires(item["id"])[0]["detail"] == "push_not_configured"
 
+    def test_no_subscription_detail(self, db, sent):
+        """四个计数全零 = 这人没有订阅设备，不是「发失败」。
+
+        线上冒烟（2026-11-09）踩到的就是这条：假账号没有订阅，流水写成
+        `send_failed:sent=0failed=0`，看日志的人会去查推送服务方而不是去开推送。
+        """
+        sent["result"].update({"sent": 0, "failed": 0, "gone": 0, "skipped": 0})
+        item = reminder_core.create(OWNER, {"title": "没设备", "at": "12:00"})
+        _due_now(item["id"], _ts(12, 0))
+        reminder_tick.run_one(reminder_tick.JOB_KEY, OWNER, _ts(12, 0))
+        assert _fires(item["id"])[0]["detail"] == "no_subscription"
+
+    def test_real_send_failure_keeps_counts(self, db, sent):
+        """真有设备但发失败时，计数还是要露出来 —— 别把这条也吞成 no_subscription。"""
+        sent["result"].update({"sent": 0, "failed": 2, "gone": 0, "skipped": 0})
+        item = reminder_core.create(OWNER, {"title": "发失败", "at": "12:00"})
+        _due_now(item["id"], _ts(12, 0))
+        reminder_tick.run_one(reminder_tick.JOB_KEY, OWNER, _ts(12, 0))
+        assert _fires(item["id"])[0]["detail"] == "send_failed:sent=0failed=2"
+
 
 # ==================== worker 接线 ====================
 

@@ -147,7 +147,14 @@ def _fail_detail(res: dict[str, Any]) -> str:
         return "push_not_configured"
     if int(res.get("gone") or 0) > 0:
         return "subscription_gone"
-    return f"send_failed:sent={res.get('sent')}failed={res.get('failed')}"
+    sent = int(res.get("sent") or 0)
+    failed = int(res.get("failed") or 0)
+    # 四个计数全零 = 这人名下压根没有订阅设备。写成 `send_failed:sent=0failed=0`
+    # 会把它伪装成「发失败」，而排查的人会去查推送服务方——方向从一开始就错了。
+    # 线上冒烟就是踩到这个：假 owner 没有订阅，流水写成 send_failed。
+    if sent == 0 and failed == 0:
+        return "no_subscription"
+    return f"send_failed:sent={sent}failed={failed}"
 
 
 # ---------- worker hook ----------
