@@ -54,11 +54,23 @@ const ACTION_OPTIONS: { value: ReminderAction; label: string }[] = [
 
 const WEEK_LABELS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 
-/** `next_fire_at`（秒）→ 列表里那一行的时刻文案；没有下一次就说清楚为什么 */
-function whenText(item: ReminderItem): string {
+/**
+ * `next_fire_at`（秒）→ 列表里那一行的时刻文案；没有下一次就说清楚为什么。
+ *
+ * 「本周」分组必须带星期：只写 `22:00` 会让周四的提醒看起来像今晚就响。
+ * 来源被关掉时直接说「来源已关」——时间还在，但到点不会发，写时间等于骗人。
+ */
+function whenText(
+  item: ReminderItem,
+  opts?: { withDay?: boolean; sourceOff?: boolean }
+): string {
   if (!item.enabled) return "已暂停";
+  if (opts?.sourceOff) return "来源已关";
   if (!item.next_fire_at) return item.freq === "once" ? "已触发过" : "等你设个时间";
-  return fmtHM(toMs(item.next_fire_at));
+  const hm = fmtHM(toMs(item.next_fire_at));
+  if (!opts?.withDay) return hm;
+  const date = new Date(toMs(item.next_fire_at));
+  return `${WEEK_LABELS[(date.getDay() + 6) % 7]} ${hm}`;
 }
 
 // ==================== 卡片 ====================
@@ -70,6 +82,10 @@ function ReminderCard({
   onToggle,
   onDelete,
   onCloseSource,
+  onSnooze,
+  onOpenSources,
+  withDay,
+  sourceOff,
 }: {
   item: ReminderItem;
   sourceLabel: string;
@@ -77,12 +93,19 @@ function ReminderCard({
   onToggle: (item: ReminderItem) => void;
   onDelete: (item: ReminderItem) => void;
   onCloseSource: (item: ReminderItem) => void;
+  onSnooze: (item: ReminderItem) => void;
+  onOpenSources: () => void;
+  withDay: boolean;
+  sourceOff: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const canCloseSource = item.source !== "manual" && item.source !== "system";
 
   return (
-    <div className="card card-pad" style={{ opacity: item.enabled ? 1 : 0.62 }}>
+    <div
+      className="card card-pad"
+      style={{ opacity: item.enabled && !sourceOff ? 1 : 0.62 }}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -101,12 +124,17 @@ function ReminderCard({
           ) : null}
         </div>
         <div className="shrink-0 text-right">
-          <p className="text-[15px] font-medium tabular-nums text-[var(--ink)]">{whenText(item)}</p>
+          <p className="text-[15px] font-medium tabular-nums text-[var(--ink)]">
+            {whenText(item, { withDay, sourceOff })}
+          </p>
           <p className="text-[11px] text-[var(--ink-3)]">
             {item.freq === "once"
               ? "只一次"
               : item.freq === "weekly" && item.weekday !== null
-                ? WEEK_LABELS[item.weekday] || "每周"
+                ? // 「本周」分组的时间已经带了星期，再写一遍就成了「周三 08:00 / 周三」
+                  withDay
+                  ? "每周"
+                  : WEEK_LABELS[item.weekday] || "每周"
                 : item.freq === "weekdays"
                   ? "工作日"
                   : item.freq === "interval"
@@ -117,13 +145,25 @@ function ReminderCard({
       </div>
 
       <div className="mt-2 flex items-center gap-3 text-[12px]">
-        <button
-          type="button"
-          className="text-[var(--accent-ink)] hover:underline"
-          onClick={() => onToggle(item)}
-        >
-          {item.enabled ? "暂停这条" : "恢复这条"}
-        </button>
+        {sourceOff ? (
+          // 来源关着时，点「暂停这条」只会把单条也关掉，动作和用户想要的相反。
+          // 直接给一个去设置页的入口，比让他自己找更清楚。
+          <button
+            type="button"
+            className="text-[var(--accent-ink)] hover:underline"
+            onClick={onOpenSources}
+          >
+            去打开来源
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="text-[var(--accent-ink)] hover:underline"
+            onClick={() => onToggle(item)}
+          >
+            {item.enabled ? "暂停这条" : "恢复这条"}
+          </button>
+        )}
         <button
           type="button"
           className="text-[var(--accent-ink)] hover:underline"
@@ -143,6 +183,15 @@ function ReminderCard({
 
       {open ? (
         <div className="mt-2 flex flex-wrap items-center gap-3 border-t border-[var(--line)] pt-2 text-[12px]">
+          {item.enabled && !sourceOff ? (
+            <button
+              type="button"
+              className="text-[var(--ink-3)] hover:text-[var(--ink)]"
+              onClick={() => onSnooze(item)}
+            >
+              推迟 10 分钟
+            </button>
+          ) : null}
           {canCloseSource ? (
             <button
               type="button"
@@ -433,6 +482,12 @@ export default function RemindersPage() {
     return map;
   }, [sources]);
 
+  const sourceOn = useMemo(() => {
+    const map: Record<string, boolean> = { manual: true, system: true };
+    for (const s of sources) map[s.key] = s.enabled;
+    return map;
+  }, [sources]);
+
   const submit = useCallback(
     async (draft: ReminderDraft, overrideAt: string | null) => {
       setBusy(true);
@@ -492,6 +547,19 @@ export default function RemindersPage() {
     [reload, showToast]
   );
 
+  const snooze = useCallback(
+    async (item: ReminderItem) => {
+      try {
+        await api.reminders.snooze(item.id, 10);
+        showToast("success", "已推迟 10 分钟");
+        await reload();
+      } catch {
+        showToast("error", "推迟失败，稍后再试");
+      }
+    },
+    [reload, showToast]
+  );
+
   const closeSource = useCallback(
     async (item: ReminderItem) => {
       try {
@@ -531,7 +599,12 @@ export default function RemindersPage() {
     [showToast]
   );
 
-  const renderGroup = (title: string, list: ReminderItem[], hint?: string) => (
+  const renderGroup = (
+    title: string,
+    list: ReminderItem[],
+    hint?: string,
+    withDay = false
+  ) => (
     <section className="mt-4">
       <div className="mb-2 flex items-baseline gap-2">
         <h3 className="text-[14px] font-medium text-[var(--ink)]">{title}</h3>
@@ -556,6 +629,10 @@ export default function RemindersPage() {
               onToggle={toggle}
               onDelete={remove}
               onCloseSource={closeSource}
+              onSnooze={snooze}
+              onOpenSources={() => setTab("settings")}
+              withDay={withDay}
+              sourceOff={sourceOn[item.source] === false}
             />
           ))}
         </div>
@@ -627,7 +704,7 @@ export default function RemindersPage() {
                     className="flex items-center gap-2 rounded-full bg-[var(--canvas-sunk)] px-3 py-1 text-[12px]"
                   >
                     <span className="font-medium tabular-nums text-[var(--ink)]">
-                      {whenText(item)}
+                      {whenText(item, { sourceOff: sourceOn[item.source] === false })}
                     </span>
                     <span className="text-[var(--ink-3)]">{item.title}</span>
                   </li>
@@ -649,7 +726,7 @@ export default function RemindersPage() {
           ) : null}
 
           {renderGroup("今天", groups.today, "今天会响的")}
-          {renderGroup("本周", groups.week, "之后要响的")}
+          {renderGroup("本周", groups.week, "之后要响的", true)}
           {renderGroup("已暂停", groups.paused, "不会响，点恢复就继续")}
         </>
       ) : null}
@@ -659,7 +736,7 @@ export default function RemindersPage() {
           <section className="card card-pad">
             <h3 className="card-title">静默时段</h3>
             <p className="mt-1 text-[12px] text-[var(--ink-3)]">
-              这段时间里到点的提醒**不响也不补发**，直接顺到下一个时段。
+              这段时间里到点的提醒<b>不响也不补发</b>，直接顺到下一个时段。
             </p>
             <div className="mt-3 flex items-center gap-2">
               <input

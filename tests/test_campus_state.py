@@ -27,7 +27,7 @@ session._init_db()
 from fastapi.testclient import TestClient  # noqa: E402
 
 import main  # noqa: E402
-from core import campus_store  # noqa: E402
+from core import campus_store, timeutil  # noqa: E402
 from core.auth import get_current_user  # noqa: E402
 
 session._db_path = _ORIG_DB_PATH
@@ -62,6 +62,8 @@ class TestRoundTrip:
         assert body["items"] == []
         # 白名单也一起下发：前端不必自己维护第二份键名表
         assert COURSES in body["tools"]
+        # owner 用来判断「本机缓存属于哪个账号」，换账号时前端要靠它清缓存
+        assert body["owner"] == "u1"
 
     def test_put_then_get(self, client):
         snap = {"courses": [{"id": 1, "name": "高数"}], "term": {"start": "2026-09-07", "weeks": 18}}
@@ -123,6 +125,42 @@ class TestValidation:
     def test_missing_updated_at_rejected(self, client):
         res = client.put(f"/api/campus/state/{COURSES}", json={"payload": {"a": 1}})
         assert res.status_code == 400
+
+
+class TestClockSkew:
+    """客户端时钟不可信，但也不能让一台坏表把某一格永久锁死。"""
+
+    def test_future_timestamp_is_clamped(self, db, monkeypatch):
+        base = 1_800_000_000
+        monkeypatch.setattr(timeutil, "now_ts", lambda: base)
+        res = campus_store.put("u1", COURSES, {"a": 1}, (base + 3600) * 1000)
+        assert res["ok"] is True
+        assert res["updated_at"] == (base + 60) * 1000
+
+    def test_after_clock_catches_up_writes_work_again(self, db, monkeypatch):
+        base = 1_800_000_000
+        monkeypatch.setattr(timeutil, "now_ts", lambda: base)
+        campus_store.put("u1", COURSES, {"old": 1}, (base + 3600) * 1000)
+        # 两分钟后，正常设备的 now 已经追过被夹过的水位
+        monkeypatch.setattr(timeutil, "now_ts", lambda: base + 120)
+        res = campus_store.put("u1", COURSES, {"new": 2}, (base + 120) * 1000)
+        assert res["ok"] is True
+        assert campus_store.get("u1", COURSES)["payload"] == {"new": 2}
+
+    def test_legacy_poisoned_row_can_be_overwritten(self, db, monkeypatch):
+        """修复前写进去的 2099 时间戳，不能让这一格永远 409。"""
+        base = 1_800_000_000
+        monkeypatch.setattr(timeutil, "now_ts", lambda: base)
+        campus_store.ensure()
+        with session._conn() as conn:
+            conn.execute(
+                "INSERT INTO campus_state (owner_id, tool, payload_json, updated_at) "
+                "VALUES (?,?,?,?)",
+                ("u1", COURSES, '{"bad": true}', 4_102_444_800_000),
+            )
+        res = campus_store.put("u1", COURSES, {"good": True}, (base + 1) * 1000)
+        assert res["ok"] is True
+        assert campus_store.get("u1", COURSES)["payload"] == {"good": True}
 
 
 class TestIsolation:

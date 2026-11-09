@@ -101,3 +101,45 @@ class TestStorageHook:
         src = (CAMPUS / "sync.ts").read_text(encoding="utf-8")
         assert "res.status === 409" in src
         assert "cloud.payload" in src
+
+
+class TestAccountIsolation:
+    """同一台浏览器换账号时，不能让上一个人的课表写进下一个人的账号。"""
+
+    def test_pull_reads_owner_from_backend(self):
+        src = (CAMPUS / "sync.ts").read_text(encoding="utf-8")
+        assert 'body.owner' in src
+        assert "campus.sync.owner" in src
+
+    def test_owner_mismatch_clears_local_snapshots(self):
+        src = (CAMPUS / "sync.ts").read_text(encoding="utf-8")
+        assert "known !== owner" in src
+        assert "clearLocalSnapshots()" in src
+
+    def test_logout_clears_campus_local(self):
+        auth = (ROOT / "frontend" / "src" / "lib" / "authStore.ts").read_text(encoding="utf-8")
+        assert "resetCampusLocal" in auth
+        # 必须真的调用，不能只 import
+        assert "resetCampusLocal();" in auth
+
+
+class TestOfflineDurability:
+    """离线改动不能被云端旧快照覆盖，也不能卡在 2 秒防抖窗口里丢掉。"""
+
+    def test_local_write_marks_dirty_before_debounce(self):
+        src = (CAMPUS / "sync.ts").read_text(encoding="utf-8")
+        assert "campus.sync.dirty." in src
+        assert "markDirty(key, stamp)" in src
+        # dirty 必须在 pending.set 之前落盘
+        assert src.index("markDirty(key, stamp)") < src.index("pending.set(key, { value, stamp })")
+
+    def test_pull_uploads_dirty_local_instead_of_overwriting(self):
+        src = (CAMPUS / "sync.ts").read_text(encoding="utf-8")
+        assert "dirty >= cloudStamp" in src
+        assert "putOne(key, local, dirty)" in src
+
+    def test_flush_on_pagehide_and_background(self):
+        src = (CAMPUS / "sync.ts").read_text(encoding="utf-8")
+        assert 'addEventListener("pagehide"' in src
+        assert 'addEventListener("visibilitychange"' in src
+        assert "visibilityState" in src

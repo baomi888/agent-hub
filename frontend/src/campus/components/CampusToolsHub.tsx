@@ -79,7 +79,7 @@ export default function CampusToolsHub() {
           <h1 className="campus-title">校园工具集</h1>
           <p className="campus-sub">
             不用登录、不连教务，打开就能用。不登录时数据只存在这台设备的浏览器里；
-            登录后番茄钟的记录可同步到云端，换设备也在。
+            登录后课表、DDL、背单词和番茄钟的记录可同步到云端，换设备也在。
           </p>
         </header>
 

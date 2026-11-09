@@ -215,6 +215,10 @@ def _week_dates(term_start: str, day: int, weeks: list[int]) -> list[str]:
         return []
     out: list[str] = []
     for w in weeks:
+        # 2.5 这种值不是「第 2.5 周」，直接 int() 会悄悄变成第 2 周。
+        # 课表里的周次只会是整数，非整数一律视为脏数据跳过。
+        if isinstance(w, float) and not w.is_integer():
+            continue
         try:
             n = int(w)
         except (TypeError, ValueError):
@@ -338,8 +342,11 @@ def build_courses_ics(
                 if not dates:
                     continue
                 first_date = dates[0]
-                rdate = ",".join(f"{d}T{hh:02d}{mm:02d}00" for d in dates)
-                rule = [f"RDATE;TZID=Asia/Shanghai:{rdate}"]
+                # DTSTART 本身已经是一次出现，RDATE 再列一次会让部分客户端
+                # 在第一周渲染出两条重复课程。RFC 5545 的 recurrence set 是
+                # 「DTSTART ∪ RDATE ∪ RRULE」，不需要把首日重复一遍。
+                rdate = ",".join(f"{d}T{hh:02d}{mm:02d}00" for d in dates[1:])
+                rule = [f"RDATE;TZID=Asia/Shanghai:{rdate}"] if rdate else []
             else:
                 dates = _week_dates(term_start, day, [1])
                 if not dates:

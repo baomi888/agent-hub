@@ -20,6 +20,7 @@
 //   · 任何接口 401（api 层广播 UNAUTHORIZED_EVENT）→ 就地置空，不跳页
 //   · 主动退出 → 置空并作废在飞的探活（否则慢回来的那次会把身份写回去）
 import { AUTHORIZED_EVENT, UNAUTHORIZED_EVENT, api } from "@/lib/api";
+import { resetCampusLocal } from "@/campus/sync";
 import type { MeOut } from "@/lib/types";
 
 export interface AuthSnapshot {
@@ -143,5 +144,8 @@ export async function logout(): Promise<void> {
     /* 退出失败也要清本地：Cookie 可能已经过期了 */
   }
   gen++; // 在飞的探活带回来的会是"还登录着"，作废掉
+  // 同一台浏览器换账号时不能把上一个人的课表 / DDL / 单词进度留给下一个人，
+  // 更不能让「云端为空 + 本地有」把 A 的数据自动上传进 B 的账号。
+  resetCampusLocal();
   set({ me: null, loading: false });
 }

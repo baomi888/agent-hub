@@ -181,6 +181,31 @@ class TestGates:
         assert log["status"] == reminder_core.STATUS_EMPTY
         assert "channels=inapp" in log["detail"]
 
+    def test_disabled_source_stops_existing_reminder(self, db, sent):
+        """设置页承诺「关掉来源，已经建好的那几条一起停」——必须真的停。"""
+        item = reminder_core.create(
+            OWNER, {"title": "高数", "source": "timetable", "at": "12:00"}
+        )
+        _due_now(item["id"], _ts(12, 0))
+
+        res = reminder_tick.run_one(reminder_tick.JOB_KEY, OWNER, _ts(12, 0))
+
+        assert res["fired"] == 0
+        assert sent["calls"] == []
+        log = _fires(item["id"])[0]
+        assert log["status"] == reminder_core.STATUS_EMPTY
+        assert log["detail"] == "source_disabled:timetable"
+
+    def test_enabled_source_fires(self, db, sent):
+        user_prefs.set_source_pref(OWNER, "timetable", True)
+        item = reminder_core.create(
+            OWNER, {"title": "高数", "source": "timetable", "at": "12:00"}
+        )
+        _due_now(item["id"], _ts(12, 0))
+
+        assert reminder_tick.run_one(reminder_tick.JOB_KEY, OWNER, _ts(12, 0))["fired"] == 1
+        assert sent["calls"][0]["payload"]["title"] == "高数"
+
 
 # ==================== 内容来源 ====================
 
@@ -203,6 +228,7 @@ class TestContent:
 
     def test_cet_source_ignores_checkin_content(self, db, sent, monkeypatch):
         """source=cet 的提醒不能因为"今天没打卡"就响 —— 那不是它该管的事。"""
+        user_prefs.set_source_pref(OWNER, "cet", True)
         monkeypatch.setattr(
             push_svc,
             "build_message",
@@ -222,6 +248,7 @@ class TestContent:
         assert _fires(item["id"])[0]["status"] == reminder_core.STATUS_EMPTY
 
     def test_cet_source_sends_cet_content(self, db, sent, monkeypatch):
+        user_prefs.set_source_pref(OWNER, "cet", True)
         monkeypatch.setattr(
             push_svc,
             "build_message",
@@ -248,6 +275,7 @@ class TestContent:
         assert reminder_tick.run_one(reminder_tick.JOB_KEY, OWNER, _ts(12, 0))["fired"] == 0
 
     def test_delegate_source_uses_reminder_text(self, db, sent):
+        user_prefs.set_source_pref(OWNER, "delegate", True)
         with session._conn() as conn:
             conn.execute(
                 "CREATE TABLE delegations (delegation_id TEXT PRIMARY KEY, owner_id TEXT, "

@@ -27,7 +27,10 @@ router = APIRouter(dependencies=[Depends(get_current_user)])
 async def get_state(uid: str = Depends(get_current_user)) -> dict:
     """这个人云端的全部快照。没同步过的工具直接不出现（不是空 payload）。"""
     items = await asyncio.to_thread(campus_store.list_all, uid)
-    return {"items": items, "tools": list(campus_store.ALLOWED_TOOLS)}
+    # owner 是给前端判断「本机缓存属于哪个账号」的：换账号后如果还拿上一个人的
+    # localStorage 去补空云端，就会把 A 的课表写进 B 的账号。前端只拿它做比对，
+    # 不落业务数据。
+    return {"items": items, "tools": list(campus_store.ALLOWED_TOOLS), "owner": uid}
 
 
 @router.put("/state/{tool}")

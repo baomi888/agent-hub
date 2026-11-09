@@ -259,6 +259,9 @@ def cet_builder(uid: str, day: str) -> dict:
 
 push_svc.build_message = cet_builder  # type: ignore[assignment]
 cet_client = as_user("u_cet")
+# 第二波起来源开关默认全关：source=cet 的提醒要先在设置里打开这个来源，
+# 否则 tick 会按「来源已关」拦下。这里走真 HTTP，顺带验收开关本身。
+cet_client.put("/api/reminders/sources", json={"source": "cet", "enabled": True})
 cet = cet_client.post(
     "/api/reminders", json={"title": "六级", "source": "cet", "at": "19:00", "action": "agent_deliver"}
 ).json()

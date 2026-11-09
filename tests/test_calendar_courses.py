@@ -95,11 +95,35 @@ class TestSchedule:
         ics = cal.build_courses_ics("tok", SNAP)
         rdates = [row for row in _lines(ics) if row.startswith("RDATE")]
         assert len(rdates) == 1
-        # day=2 是周三：第 1/3/5 周 → 09-09 / 09-23 / 10-07
-        assert "20260909T100000" in rdates[0]
+        # day=2 是周三：第 1/3/5 周 → 09-09 / 09-23 / 10-07。
+        # 09-09 已经在 DTSTART 里，RDATE 不能再列一次（否则首周两条重复课）。
+        assert "DTSTART;TZID=Asia/Shanghai:20260909T100000" in ics
+        assert "20260909T100000" not in rdates[0]
         assert "20260923T100000" in rdates[0]
         assert "20261007T100000" in rdates[0]
         assert "RRULE" not in rdates[0]
+
+    def test_single_week_has_no_rdate(self):
+        """只上一周时 DTSTART 就是全部，RDATE 空行不该出现。"""
+        snap = {
+            "courses": [{"id": 3, "name": "单周课", "day": 0, "sections": [1], "weeks": [2]}],
+            "term": {"start": "2026-09-07", "weeks": 18},
+            "periods": {"starts": ["08:00"], "duration": 45},
+        }
+        ics = cal.build_courses_ics("tok", snap)
+        assert "DTSTART;TZID=Asia/Shanghai:20260914T080000" in ics
+        assert "RDATE" not in ics
+
+    def test_non_integer_week_is_ignored(self):
+        """2.5 周不是「第 2 周」，不能被 int() 悄悄截断成 2。"""
+        snap = {
+            "courses": [{"id": 4, "name": "脏数据", "day": 2, "sections": [3], "weeks": [2.5, 3]}],
+            "term": {"start": "2026-09-07", "weeks": 18},
+            "periods": {"starts": ["08:00", "08:55", "10:00"], "duration": 45},
+        }
+        ics = cal.build_courses_ics("tok", snap)
+        assert "20260916T100000" not in ics  # 第 2 周
+        assert "20260923T100000" in ics  # 第 3 周
 
     def test_section_time_comes_from_periods(self):
         """第 3 节 = periods.starts[2] = 10:00。服务端只取下标，不重算作息。"""

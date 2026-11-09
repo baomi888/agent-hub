@@ -191,17 +191,32 @@ def run_one(job_key: str, subject_id: str, planned_at: int) -> dict[str, Any]:
     cap = int(prefs.get("daily_cap") or 0)
     used = user_prefs.day_count(owner_id, timeutil.day_str(planned_at))
     remaining = max(0, cap - used)
+    # 来源开关一次取全：每个人每轮只查一次库，别在循环里按条查。
+    # `manual` / `system` 不参与开关：前者是用户亲手建的，后者是老「每日回顾」，
+    # 两个都没有「来源」可关（`set_source_pref` 也明确拒绝 system）。
+    enabled_sources = user_prefs.source_prefs(owner_id)
 
     batch: list[dict[str, Any]] = []
     for item in items:
         rid = str(item["id"])
         at = int(item["next_fire_at"])
+        source = str(item.get("source") or "manual")
         if quiet:
             reminder_core.record_fire(rid, at, reminder_core.STATUS_QUIET, "quiet_hours")
             reminder_core.advance(rid, planned_at)
             continue
         if remaining <= 0:
             reminder_core.record_fire(rid, at, reminder_core.STATUS_CAP, f"cap={cap}")
+            reminder_core.advance(rid, planned_at)
+            continue
+        configurable = source in reminder_core.SOURCES and source not in ("manual", "system")
+        if configurable and not enabled_sources.get(source):
+            # 设置页对用户的承诺是「关掉一个来源，已经建好的那几条会一起停」。
+            # 只挡新建、不挡已建，就是文案与事实不符。这里记 skipped_empty
+            # 而不是新增状态值：前端按五档展示，加值会漏样式。
+            reminder_core.record_fire(
+                rid, at, reminder_core.STATUS_EMPTY, f"source_disabled:{source}"
+            )
             reminder_core.advance(rid, planned_at)
             continue
         content = build_content(owner_id, item, planned_at)

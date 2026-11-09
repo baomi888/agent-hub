@@ -22,6 +22,7 @@ import json
 from typing import Any
 
 from core import session as store
+from core import timeutil
 
 # 白名单：与 frontend/src/campus/storage/keys.ts 的 CAMPUS_KEYS 逐字对应。
 # 加键必须两边一起改 —— 只改一边的表现是「同步静默失效」，最难查。
@@ -57,6 +58,21 @@ _READY: set[str] = set()
 
 class CampusInvalid(ValueError):
     """请求不合法 → 端点回 400。"""
+
+
+def _now_ms() -> int:
+    """当前毫秒时间戳。`timeutil.now_ts()` 是秒，这里只做单位换算。"""
+    return int(timeutil.now_ts()) * 1000
+
+
+def _stamp_limit() -> int:
+    """允许客户端时间最多领先 60 秒。
+
+    为什么不直接信任 `updated_at`：冲突判定是「大者胜」，一台时钟跳到 2099 的
+    设备会把这一格永久锁死 —— 之后所有正常写入都收到 409，界面上还看不出原因。
+    留 60 秒是给设备间正常的时钟漂移，不是给「手动改系统时间」。
+    """
+    return _now_ms() + 60_000
 
 
 def _db_path() -> str:
@@ -144,12 +160,20 @@ def put(owner_id: str, tool: str, payload: Any, updated_at: int) -> dict[str, An
     if stamp <= 0:
         raise CampusInvalid("updated_at 必须是正整数")
 
+    limit = _stamp_limit()
+    stamp = min(stamp, limit)
+
     ensure()
     with _conn() as conn:
         current = conn.execute(
             "SELECT payload_json, updated_at FROM campus_state WHERE owner_id=? AND tool=?",
             (owner_id, key),
         ).fetchone()
+
+        # 历史脏数据：本次修复前写进去的未来时间戳（可能已经是 2099）。
+        # 不把它当成「更新」，否则这一格永远写不进去，用户只能换账号或清库。
+        if current is not None and int(current[1]) > limit:
+            current = None
 
         # 云端更新（严格大于）：不覆盖。相等视为同一次写入的重放，让它过。
         if current is not None and int(current[1]) > stamp:
