@@ -38,6 +38,10 @@ const NAV: NavItem[] = [
   // 知识库是**独立页面**（2026-10-30）。原先它指向 /?kb=1，和「对话」落到同一个路由，
   // 只是首页右栏抽屉被拉开 —— 用户的原话是"点击对话和点击知识库都是一样的跳转"。
   { href: "/knowledge", icon: "book", label: "知识库" },
+  // 提醒中心（独立模块，2026-11-09）。固定在第 3 位：它回答的是「什么时候做什么」，
+  // 比「每日委托」（生成什么）更靠前。★ 标签只能两个字：写「提醒中心」会在手机
+  // 3 列网格里挤成两行、把整块导航撑高 —— 和当年「校园工具集」砍成「工具集」同一个坑。
+  { href: "/reminders", icon: "bell", label: "提醒" },
   { href: "/delegate", icon: "clock", label: "每日委托" },
   { href: "/report", icon: "calendar", label: "总结" },
   { href: "/checkin", icon: "star", label: "打卡" },

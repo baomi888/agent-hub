@@ -2,6 +2,15 @@
 import type { Conversation, KbInfo, KbFile, FilePreview, SearchResult, Defaults, Message } from "./types";
 import type { KbProposal, KbProposalConfirmResult } from "./types";
 import type { DialogueCandidatesResp, ImportDialogueResult } from "./types";
+import type {
+  ReminderItem,
+  ReminderSource,
+  ReminderSummary,
+  ReminderPrefs,
+  ReminderDraft,
+  ReminderPatchBody,
+  ReminderFire,
+} from "./types";
 import { detailToMessage } from "./errors";
 import type { MeOut, UserOut, Template, ApplyTemplateResult, UsageSummary } from "./types";
 import type { ProfileSnapshot, TagTaxonomy, TemplateRecommend } from "./types";
@@ -696,6 +705,61 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ hour, minute }),
       }),
+  },
+
+  // ---------- 提醒中心 /api/reminders（12 端点）----------
+  //
+  // 与上面 `remind` 的边界：那条只管「每日回顾这一个时刻」（老契约，日历仍在读它）；
+  // 一人 N 条、各有重复规则的通用提醒全在这里。两者共用 reminders 表里
+  // source='system' 的那一行，所以改这里的系统那条，老接口读到的时刻也跟着变。
+  //
+  // 读接口走 tryRequest：端点没部署时页面显示空态，而不是整页报错；
+  // 写接口走 request：真失败要让用户看见，不能静默吞掉。
+  reminders: {
+    list: (scope: "today" | "week" | "all" | "paused" = "all") =>
+      tryRequest<{ items: ReminderItem[]; scope: string; total: number }>(
+        `/api/reminders?scope=${scope}`
+      ),
+    summary: () => tryRequest<ReminderSummary>("/api/reminders/summary"),
+    sources: () =>
+      tryRequest<{ sources: ReminderSource[]; selectable: ReminderSource[] }>(
+        "/api/reminders/sources"
+      ),
+    /** 来源开关。返回里同时带 sources / selectable，切换后不必再拉一次 */
+    setSource: (source: string, enabled: boolean) =>
+      request<{ sources: ReminderSource[]; selectable: ReminderSource[] }>(
+        "/api/reminders/sources",
+        { method: "PUT", body: JSON.stringify({ source, enabled }) }
+      ),
+    prefs: () => tryRequest<ReminderPrefs>("/api/reminders/prefs"),
+    savePrefs: (
+      patch: Partial<Pick<ReminderPrefs, "quiet_start" | "quiet_end" | "daily_cap">>
+    ) =>
+      request<ReminderPrefs>("/api/reminders/prefs", {
+        method: "PUT",
+        body: JSON.stringify(patch),
+      }),
+    create: (body: ReminderDraft) =>
+      request<ReminderItem>("/api/reminders", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    patch: (id: string, body: ReminderPatchBody) =>
+      request<ReminderItem>(`/api/reminders/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    remove: (id: string) =>
+      request<{ ok: boolean; id: string }>(`/api/reminders/${id}`, { method: "DELETE" }),
+    /** 稍后再说：只推这条的 next_fire_at，不改重复规则 */
+    snooze: (id: string, minutes = 10) =>
+      request<ReminderItem>(`/api/reminders/${id}/snooze`, {
+        method: "POST",
+        body: JSON.stringify({ minutes }),
+      }),
+    /** 「今天为什么没响」的第一现场 */
+    fires: (id: string) =>
+      tryRequest<{ items: ReminderFire[] }>(`/api/reminders/fires?reminder_id=${id}`),
   },
 
   // ---------- 日历订阅 /api/calendar（3 端点）----------

@@ -1120,3 +1120,95 @@ export type CalendarLink = {
   hour: number;
   minute: number;
 };
+
+// ---------- 提醒中心（2026-11-09，规格见 docs/提醒中心_实施规格） ----------
+
+/** 重复规则。前四个必须与后端 core/reminder_core.py 的 FREQS 一致 */
+export type ReminderFreq = "once" | "daily" | "weekdays" | "weekly" | "interval";
+
+/** 到点之后做什么。`agent_deliver` 是「让 Agent 帮我写」，不是「弹个提醒」 */
+export type ReminderAction = "notify" | "agent_deliver" | "suggest_focus" | "open_tool";
+
+/** 一条提醒。`at` 是**来源值**，`override.at` 才是用户改过的值 —— 展示要用后者 */
+export interface ReminderItem {
+  id: string;
+  owner_id: string;
+  title: string;
+  note: string | null;
+  source: string;
+  source_ref: string | null;
+  /** 只覆盖 title / at；改标题不写回来源（委托那行一个字节都不动） */
+  override: { title?: string; at?: string } | null;
+  freq: ReminderFreq;
+  at: string | null;
+  /** 0 = 周一。`weekly` 必填 */
+  weekday: number | null;
+  every_minutes: number | null;
+  trigger_kind: string;
+  anchor: string | null;
+  offset_minutes: number | null;
+  action: ReminderAction;
+  action_payload: unknown;
+  /** 逗号分隔，如 `push` / `push,inapp` */
+  channels: string;
+  enabled: boolean;
+  /** 秒级时间戳；`once` 触发后变 null */
+  next_fire_at: number | null;
+  created_at: number;
+  updated_at: number;
+  /** 委托来源才有：那一行现在的标题/正文（只读，改了也不回写） */
+  source_title?: string;
+  source_note?: string;
+}
+
+export interface ReminderSource {
+  key: string;
+  label: string;
+  enabled: boolean;
+}
+
+export interface ReminderSummary {
+  day: string;
+  today: ReminderItem[];
+  today_count: number;
+  paused_count: number;
+  upcoming: ReminderItem[];
+}
+
+export interface ReminderPrefs {
+  quiet_start: string;
+  quiet_end: string;
+  daily_cap: number;
+  cap_min: number;
+  cap_max: number;
+  active_windows: unknown;
+}
+
+/** 新建/局部修改提醒时的入参（字段与后端 ReminderIn/ReminderPatch 对齐） */
+export interface ReminderDraft {
+  title: string;
+  note?: string | null;
+  source?: string;
+  freq?: ReminderFreq;
+  at?: string | null;
+  weekday?: number | null;
+  every_minutes?: number | null;
+  action?: ReminderAction;
+  channels?: string | string[];
+  enabled?: boolean;
+}
+
+/** 修改时的补丁：在草稿基础上多一个 override（只覆盖 title / at） */
+export type ReminderPatchBody = Partial<ReminderDraft> & {
+  override?: { title?: string; at?: string } | null;
+};
+
+/** 触发流水。status 五档见后端：sent / skipped_quiet / skipped_cap / skipped_empty / failed */
+export interface ReminderFire {
+  reminder_id: string;
+  planned_at: number;
+  fired_at: number;
+  status: string;
+  detail: string | null;
+  clicked_at: number | null;
+}

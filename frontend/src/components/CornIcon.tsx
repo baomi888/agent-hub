@@ -29,6 +29,7 @@ export type CornIconName =
   | "close" // 关闭 / 取消
   | "check" // 确认 / 完成
   | "clock" // 倒计时 / 时间
+  | "bell" // 提醒
   | "calendar" // 日期
   | "star" // 收藏 / 重点
   | "link" // 链接 / 外链
@@ -327,6 +328,30 @@ function Check() {
   );
 }
 
+/** 铃铛：提醒（形态与 Clock/Calendar 同一套圆头墨线，金色只用在铃锤） */
+function Bell() {
+  return (
+    <g {...INK_STROKE}>
+      {/* 钟体：上窄下宽，两侧是圆角弧，不用直线边（直线会显得像"杯子"） */}
+      <path
+        d="M15 34.5 C15.4 27.5 14.2 25 12.6 22.2 C10.8 19 12.4 14.6 16.4 12.6 C18.6 11.5 21.2 11 24 11 C26.8 11 29.4 11.5 31.6 12.6 C35.6 14.6 37.2 19 35.4 22.2 C33.8 25 32.6 27.5 33 34.5 Z"
+        fill="#FFFDF6"
+        strokeWidth={3}
+      />
+      {/* 底沿：单独一条线，让"开口"看得出来 */}
+      <path d="M12.4 34.5 H35.6" strokeWidth={2.8} />
+      {/* 铃锤：唯一的品牌金，和书的书签、时钟的指针同一处用法 */}
+      <path
+        d="M20.6 37.6 C20.6 40 22.1 41.6 24 41.6 C25.9 41.6 27.4 40 27.4 37.6"
+        fill="#F5B840"
+        strokeWidth={2.6}
+      />
+      {/* 顶部提手 */}
+      <path d="M21.2 11.2 C21.2 9 22.4 7.6 24 7.6 C25.6 7.6 26.8 9 26.8 11.2" strokeWidth={2.6} />
+    </g>
+  );
+}
+
 /** 时钟：倒计时 / 时间 */
 function Clock() {
   return (
@@ -494,6 +519,7 @@ const ICONS: Record<string, () => React.JSX.Element> = {
   close: Close,
   check: Check,
   clock: Clock,
+  bell: Bell,
   calendar: Calendar,
   star: Star,
   link: Link,
