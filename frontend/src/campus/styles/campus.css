@@ -3563,6 +3563,72 @@ body.campus-modal-open .campus-scroll {
   flex: 0 0 auto;
 }
 
+/* ---------- 工具页「别处更新了」（规格 6.2） ---------- */
+
+/*
+ * 只做 DOM 边界、不产生盒子。
+ * 宿主用它判断「焦点在不在面板里 / 有没有弹窗」，`display: contents` 保证
+ * 版式和「工具组件直接挂在 shell 下」一模一样，不会多出一层高度或间距。
+ */
+.campus-panel-slot {
+  display: contents;
+}
+
+/*
+ * 外部（另一台设备）更新了数据、但此刻不适合静默重挂时的提示条。
+ * 固定在视口底部而不是塞进内容流：塞进流里会把课表往下推一格，
+ * 用户正在看的那一行会跳走 —— 一条提示不该改变正在看的版面。
+ */
+.campus-remote {
+  position: fixed;
+  left: 50%;
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  z-index: 30;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: min(560px, calc(100vw - 24px));
+  padding: 10px 12px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  background: var(--card-bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--campus-radius);
+  box-shadow: var(--shadow-2);
+  transform: translateX(-50%);
+}
+
+.campus-remote-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.campus-remote-btn {
+  flex: 0 0 auto;
+}
+
+.campus-remote-dismiss {
+  flex: 0 0 auto;
+  padding: 4px 2px;
+  color: var(--text-3);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.campus-remote-dismiss:hover {
+  color: var(--ink);
+}
+
+/* 手机上按钮不换行：文字占满整行、按钮掉第二行时，这条提示会涨到三行高 */
+@media (max-width: 560px) {
+  .campus-remote {
+    flex-wrap: nowrap;
+    gap: 8px;
+    padding: 8px 10px;
+  }
+}
+
 /* ---------- 番茄钟 · 专注统计与下钻（B4） ---------- */
 
 /* 视觉隐藏但读屏可读：文件选择框用它，避免在按钮旁边露出一个原生「选择文件」 */

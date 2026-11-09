@@ -143,3 +143,99 @@ class TestOfflineDurability:
         assert 'addEventListener("pagehide"' in src
         assert 'addEventListener("visibilitychange"' in src
         assert "visibilityState" in src
+
+
+class TestToolRefresh:
+    """云端那份落地后，已经挂载的工具要能跟着变（规格 6.2）。
+
+    工具只在 mount effect 里读一次 localStorage，所以「重新读」只能靠宿主重挂：
+    事件总线在 storage（它是 localStorage 的唯一出口），订阅与重挂的决定在 CampusToolsHub。
+    这三层任何一层断开，表现都是「换了设备看不到刚加的那门课」，且不报任何错。
+    """
+
+    def _hub(self) -> str:
+        return (CAMPUS / "components" / "CampusToolsHub.tsx").read_text(encoding="utf-8")
+
+    def test_storage_owns_the_bus(self):
+        src = (CAMPUS / "storage" / "index.ts").read_text(encoding="utf-8")
+        assert "export function subscribeExternalWrite" in src
+        assert "export function notifyExternalWrite" in src
+
+    def test_write_json_does_not_broadcast(self):
+        """广播只能是同步层的动作。若 writeJson 也广播，任何一次本地编辑都会重挂自己。"""
+        src = (CAMPUS / "storage" / "index.ts").read_text(encoding="utf-8")
+        body = re.search(r"export function writeJson\(.*?\n\}", src, re.S)
+        assert body, "storage/index.ts 里找不到 writeJson"
+        assert "notifyExternalWrite" not in body.group(0)
+
+    def test_sync_routes_every_cloud_adopt_through_adopt_cloud(self):
+        src = (CAMPUS / "sync.ts").read_text(encoding="utf-8")
+        # 4 个「采用云端」的出口全部收敛到 adoptCloud（409 / dirty 落后 / 本机为空 / 云端更新）
+        assert src.count("adoptCloud(key") >= 4
+        # 只剩定义里那一处是直接 silent 写回，跑出去就漏通知
+        assert src.count("writeJson(key, cloud.payload, { silent: true })") == 0
+
+    def test_adopt_notifies_only_when_value_changed(self):
+        """值没变也叫醒界面 = 重挂 → 工具回写 → 又被当成外部更新，会来回弹。"""
+        src = (CAMPUS / "sync.ts").read_text(encoding="utf-8")
+        assert "if (!sameValue(before, payload)) notifyExternalWrite(key, payload)" in src
+
+    def test_clearing_local_snapshots_notifies_too(self):
+        """换账号清空后，已挂载的工具还在显示上一个人的数据，必须叫醒。"""
+        src = (CAMPUS / "sync.ts").read_text(encoding="utf-8")
+        assert "if (had) notifyExternalWrite(key, null)" in src
+
+    def test_hub_subscribes_and_remounts(self):
+        hub = self._hub()
+        assert "subscribeExternalWrite(" in hub
+        assert "<Panel key={reload} />" in hub
+
+    def test_hub_guards_unsaved_edits(self):
+        """三条守卫缺一条就会吞掉正在填的东西：弹窗、输入焦点、本次挂载后的输入事件。"""
+        hub = self._hub()
+        assert '[role="dialog"], .campus-modal' in hub
+        assert "isContentEditable" in hub
+        assert "typedRef" in hub
+        # 守卫判定为「不安全」时必须走提示条，不能直接重挂
+        assert "setStale(true)" in hub
+
+    def test_hub_only_watches_synced_tools(self):
+        hub = self._hub()
+        block = re.search(r"const TOOL_KEYS[^=]*=\s*\{(.*?)\n\};", hub, re.S)
+        assert block, "CampusToolsHub 里找不到 TOOL_KEYS"
+        body = block.group(1)
+        # 番茄钟有 focusSync，重挂会清掉正在跑的计时，绝不能进刷新名单
+        assert "pomodoro" not in body
+        for name in ("schedule", "week", "term", "words", "deadline"):
+            assert f"CAMPUS_KEYS.{name}" in body
+
+    def test_tool_components_are_untouched(self):
+        """规格 §6.2：刷新机制只许待在 storage + sync + 宿主里。
+
+        工具组件一旦自己订阅，就等于「同一个键两套刷新路径」——排查时无从下手。
+        """
+        for path in (CAMPUS / "tools").rglob("*.tsx"):
+            code = path.read_text(encoding="utf-8")
+            assert "subscribeExternalWrite" not in code, f"{path.name} 自己订阅了外部改写"
+            assert "notifyExternalWrite" not in code, f"{path.name} 自己广播了外部改写"
+
+
+class TestChannelHonesty:
+    """「怎么送达」只做推送时，界面不许摆一个能选却不生效的选择器。"""
+
+    def _page(self) -> str:
+        return (ROOT / "frontend" / "src" / "app" / "(console)" / "reminders" / "page.tsx").read_text(
+            encoding="utf-8"
+        )
+
+    def test_drawer_says_push_only(self):
+        assert "目前只支持这一种" in self._page()
+
+    def test_still_submits_push(self):
+        assert 'channels: "push"' in self._page()
+
+    def test_no_channel_picker(self):
+        """抽屉里的 select 只允许「重复 / 周几 / 到点之后 / 来源」四种，多一个就是假选项。"""
+        page = self._page()
+        drawer = page[page.index("function ReminderDrawer") : page.index("// ==================== 页面")]
+        assert drawer.count("<select") == 4

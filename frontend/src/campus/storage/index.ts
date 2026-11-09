@@ -53,6 +53,52 @@ export function writeJson(
   }
 }
 
+/* ------------------------------------------------------------------ *
+ * 外部改写通知（工具页同步刷新）
+ *
+ * 三条铁律里的第三条只说「写」；这里补的是「读」那一侧：云端数据落回 localStorage
+ * 时，**已经挂载**的工具是不知道的 —— 它们只在 mount effect 里读一次
+ * （ScheduleTool / DeadlineTool / WordsTool 都是这个写法）。
+ *
+ * 两个 API 的权限是单向的：
+ *  · `notifyExternalWrite` 只给同步层调（云端落地、换账号清空）；
+ *  · `subscribeExternalWrite` 只给宿主订阅，工具组件不订阅、也不许直接调前者
+ *    —— 工具要知道「数据变了」，唯一正确的方式是被重挂后重新读，见 CampusToolsHub。
+ * ------------------------------------------------------------------ */
+
+export type ExternalWriteListener = (key: string, value: unknown) => void;
+
+const externalListeners = new Set<ExternalWriteListener>();
+
+/**
+ * 订阅「有人绕过工具，直接改写了我负责的键」。
+ *
+ * @returns 取消订阅；组件卸载时必须调，否则会往已卸载的实例上 setState。
+ */
+export function subscribeExternalWrite(listener: ExternalWriteListener): () => void {
+  externalListeners.add(listener);
+  return () => {
+    externalListeners.delete(listener);
+  };
+}
+
+/**
+ * 广播一次外部改写。**只允许同步层调用**（业务代码里写 business key 应走 `writeJson`）。
+ *
+ * 单个订阅者抛错不能连累其它订阅者：这条通知是「刷新提示」，不是业务流程，
+ * 为一个渲染异常让整页崩掉不划算。
+ */
+export function notifyExternalWrite(key: string, value: unknown): void {
+  if (externalListeners.size === 0) return;
+  for (const listener of Array.from(externalListeners)) {
+    try {
+      listener(key, value === undefined ? null : value);
+    } catch {
+      // 忽略单个订阅者的异常
+    }
+  }
+}
+
 /**
  * 通知同步层（动态 import：`sync.ts` 反过来要用 readJson/writeJson，
  * 静态导入会形成循环依赖，打包器能过但运行时顺序不稳）。

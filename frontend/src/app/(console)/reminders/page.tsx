@@ -338,6 +338,22 @@ function ReminderDrawer({
             </select>
           </label>
 
+          {/*
+           * 「怎么送达」目前只有 Web Push 一条路：`service/reminder_tick.py` 只认
+           * channels 里的 push，写别的（inapp / telegram）会被拦下并记进流水。
+           * 所以这里**不放选择器** —— 一个能点、点了却不生效的选项，
+           * 比根本没有这个选项更让人以为"设置过了"。等第二种通道真上线再换成 select。
+           */}
+          <div className="rounded-lg border border-[var(--line)] bg-[var(--canvas)] px-3 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[12px] text-[var(--ink-3)]">怎么送达</span>
+              <span className="text-[13px] text-[var(--ink)]">推送通知</span>
+            </div>
+            <p className="mt-1 text-[12px] text-[var(--ink-3)]">
+              目前只支持这一种：到点出现在设备通知栏，前提是「设置」页里的推送是开着的。
+            </p>
+          </div>
+
           {editing ? null : (
             <label className="block">
               <span className="text-[12px] text-[var(--ink-3)]">算哪个来源</span>

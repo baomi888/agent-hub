@@ -10,6 +10,9 @@
  *     症状是「专注记录偶尔少几条」，而且极难复现。
  *  4. **写入即备份**：`writeJson` 之后 2 秒防抖上报。防抖是为了「拖一门课改 5 个字段」
  *     不产生 5 次整份上传（一条课表快照带 20 门课，整份 20KB 上下）。
+ *  5. **落回本地要广播**：云端那份写进 localStorage 时工具早已挂载完毕、读完了旧值，
+ *     所以每次「采用云端」都走 `adoptCloud` —— 值真的变了才 `notifyExternalWrite`，
+ *     由宿主（CampusToolsHub）决定重挂还是提示，见那里的注释。
  *
  * 为什么需要「上次同步时间戳」：本地快照里没有 `updated_at` 这个字段（它是同步的产物，
  * 不该污染工具的数据结构）。所以单独用 `campus.sync.at.<key>` 记一下本机最后一次
@@ -17,7 +20,7 @@
  */
 
 import { CAMPUS_KEYS } from "./storage/keys";
-import { readJson, removeJson, writeJson } from "./storage";
+import { notifyExternalWrite, readJson, removeJson, writeJson } from "./storage";
 
 /** 只同步这 5 个键；与后端 core/campus_store.py 的 ALLOWED_TOOLS 逐字对应 */
 const SYNC_KEYS: readonly string[] = [
@@ -77,6 +80,30 @@ function clearDirty(key: string, stamp: number): void {
   if (dirtyStamp(key) <= stamp) removeJson(dirtyKey(key));
 }
 
+/** 两份整份快照是不是同一份内容（都是 JSON，比字符串够用，也不引依赖） */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 采用云端那份：静默写本地 + 记水位 + **通知已挂载的工具**。
+ *
+ * 为什么要先比一次旧值：工具 mount 后会把读到的存档原样回写一次（`ready` 闸门之后
+ * 那个 write 效应），如果值没变也叫醒界面，就会变成「重挂 → 回写 → 又被当成外部更新」
+ * 的来回弹。只有内容真变了才通知。
+ */
+function adoptCloud(key: string, payload: unknown, stamp: number): void {
+  const before = readJson(key);
+  writeJson(key, payload, { silent: true });
+  rememberStamp(key, stamp);
+  if (!sameValue(before, payload)) notifyExternalWrite(key, payload);
+}
+
 async function putOne(key: string, payload: unknown, stamp: number): Promise<void> {
   let res: Response;
   try {
@@ -100,8 +127,7 @@ async function putOne(key: string, payload: unknown, stamp: number): Promise<voi
       | null;
     const cloud = body?.detail;
     if (cloud && cloud.payload !== undefined && cloud.payload !== null) {
-      writeJson(key, cloud.payload, { silent: true });
-      rememberStamp(key, Number(cloud.updated_at) || 0);
+      adoptCloud(key, cloud.payload, Number(cloud.updated_at) || 0);
       clearDirty(key, stamp);
     }
     return;
@@ -236,8 +262,7 @@ export async function pullCampusState(): Promise<void> {
       if (!cloud || dirty >= cloudStamp) {
         await putOne(key, local, dirty);
       } else {
-        writeJson(key, cloud.payload, { silent: true });
-        rememberStamp(key, cloudStamp);
+        adoptCloud(key, cloud.payload, cloudStamp);
         clearDirty(key, dirty);
       }
       continue;
@@ -256,14 +281,12 @@ export async function pullCampusState(): Promise<void> {
     const cloudStamp = Number(cloud.updated_at) || 0;
     if (local === null) {
       // 这台设备没数据：云端那份就是唯一读源，直接落地
-      writeJson(key, cloud.payload, { silent: true });
-      rememberStamp(key, cloudStamp);
+      adoptCloud(key, cloud.payload, cloudStamp);
       continue;
     }
 
     if (cloudStamp > lastStamp(key)) {
-      writeJson(key, cloud.payload, { silent: true });
-      rememberStamp(key, cloudStamp);
+      adoptCloud(key, cloud.payload, cloudStamp);
     }
   }
 }
@@ -276,9 +299,12 @@ function clearLocalSnapshots(): void {
   }
   pending.clear();
   for (const key of SYNC_KEYS) {
+    // 只有真的存过东西才通知：本来就没有的键去通知一次，会让界面白重挂一遍
+    const had = readJson(key) !== null;
     removeJson(key);
     removeJson(stampKey(key));
     removeJson(dirtyKey(key));
+    if (had) notifyExternalWrite(key, null);
   }
 }
 
