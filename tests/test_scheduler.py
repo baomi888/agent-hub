@@ -52,7 +52,11 @@ EXPECTED_CRONS = {
     # 每日提醒：时刻是**每个人自己设**的，所以不能是"每天 20:00 一次"，
     # 必须每 15 分钟一跳、由 service/push.py#due_subjects 判断"这一跳轮到谁"。
     # 改动这条 cron 前先看 core/reminder_store.py 的 MINUTE_STEPS（两处必须一致）。
+    # ★ 2026-11-09：它的定时路径已交给 reminder.tick（下面那条），due 阶段返回空。
+    #   这里仍留一行，是因为规格要求「不删 job 定义」且老库的 job_runs 还要能查。
     "push.daily": "*/15 * * * *",
+    # 提醒中心：每分钟一跳。15 分钟做不到「课前 10 分钟」，也做不到 22:03。
+    "reminder.tick": "* * * * *",
 }
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
