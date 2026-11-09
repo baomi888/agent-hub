@@ -1,0 +1,1003 @@
+"""提醒中心的内核：提醒项本体 + 触发流水 + 老数据迁移。
+
+## 为什么新开一套表，而不是扩 `core/reminder_store.py`
+
+`reminder_store` 管的是「每人每天一个时刻」——一张只有 hour/minute 的表，同时喂
+Web Push 和日历 ICS。这次要的是「一人 N 条、每条有自己的重复规则和内容」，
+形状完全不同。硬塞进那张表只能加列，而加列会让「日历只认一个时间」这条既有语义
+说不清（一张表里既有「那一个时刻」又有「一堆别的时刻」，读的人没法判断该取哪行）。
+
+所以新开一套表，`reminder_store` 原地不动（规格要求保留 6 个月回滚余地），
+老数据由 `_migrate()` 单向搬过来。搬的时候有两条不能破：
+
+1. **老用户行为不变**：同一时刻、同一内容、没内容照样不发；
+2. **`/api/remind` 返回结构不变**：老前端和日历服务端还在读它。
+
+## 时间口径
+
+落库一律 Unix 秒，解释一律 `core/timeutil.TZ`（禁止裸 `datetime.now()`）。
+`at` 存「本地 HH:MM」字符串而不是偏移量：全站一个业务时区，存字符串能让
+「每天 22:00」在任何时候读出来都还是 22:00。
+
+## `next_fire_at` 为什么是冗余列
+
+它完全可以从 freq/at 现算。但 tick 每分钟都要问一次「谁到点了」，现算就得把
+整张表拉回 Python 逐条判断；冗余一列 + `(enabled, next_fire_at)` 索引把这件事
+变成一次索引扫描。写少读多，这笔交易划算。
+
+★ 它也是**唯一**允许在 tick 里写的业务字段（规格禁止清单第 9 条）：
+tick 写得越少，SQLite 写竞争越小（`delegate.retry` 就在旁边跑）。
+
+## 为什么 due() 要卡一个滞后窗口
+
+worker 重启、机器休眠会让某一分钟的 tick 压根没跑。没有窗口的话，恢复后会把
+「三小时前课前十分钟该响的提醒」一次性补发出来——这比不响更糟。所以：
+
+* `due()` 只返回 `now - next_fire_at <= MAX_LAG_SECONDS` 的；
+* 更老的由 `catch_up()` 把 `next_fire_at` 推到下一次（并留一行 failed 流水），
+  让「今天为什么没响」在库里查得到。
+
+`reminder_fires.status` 的取值里没有 `missed`（规格把枚举定死了，中途加值要写迁移），
+所以迟到的那些记成 `failed` + `detail='missed:...'`。这是**借用**，不是分类错误，
+`detail` 一看就知道不是发送失败。
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import sqlite3
+import uuid
+from datetime import datetime, timedelta
+from typing import Any
+
+from core import config, timeutil
+from core import session as store
+
+# 已建表的库路径集合。键必须带路径：测试会在同一进程里反复切库，
+# 只用布尔量的话第二个用例起就不建表了，表现为 "no such table"。
+_READY: set[str] = set()
+
+# 一人最多 50 条。没有上限的提醒列表三个月后一定是一坨没人敢删的垃圾。
+MAX_PER_OWNER = 50
+
+# 迟到多久还算「该补发」。15 分钟 = 丢 15 个 tick 仍然补，
+# 再久就只推进不补发（理由见模块注释最后一段）。
+MAX_LAG_SECONDS = 15 * 60
+
+# 来源枚举。`system` 是老「每日提醒」迁移过来的那一类，不对用户展示。
+SOURCES = (
+    "manual",
+    "cet",
+    "checkin",
+    "delegate",
+    "focus",
+    "timetable",
+    "deadline",
+    "words",
+    "system",
+)
+
+# 前四个必须与 api/delegate.py 的 FREQS 完全一致（规格要求直接对齐，不发明新枚举），
+# 只多一个 once：委托没有「只此一次」的需求，手动提醒有。
+FREQS = ("once", "daily", "weekdays", "weekly", "interval")
+
+ACTIONS = ("notify", "agent_deliver", "suggest_focus", "open_tool")
+CHANNELS = ("push", "inapp", "calendar", "local")
+TRIGGER_KINDS = ("at", "relative")
+ANCHORS = ("class_start", "ddl_due", "focus_end")
+
+STATUS_SENT = "sent"
+STATUS_QUIET = "skipped_quiet"
+STATUS_CAP = "skipped_cap"
+STATUS_EMPTY = "skipped_empty"
+STATUS_FAILED = "failed"
+
+_HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+_SCHEMA = """
+-- 提醒项本体
+CREATE TABLE IF NOT EXISTS reminders (
+    id             TEXT PRIMARY KEY,
+    owner_id       TEXT NOT NULL,
+    title          TEXT NOT NULL,
+    note           TEXT,
+    source         TEXT NOT NULL DEFAULT 'manual',
+    source_ref     TEXT,
+    override_json  TEXT,
+    freq           TEXT NOT NULL DEFAULT 'daily',
+    at             TEXT,
+    weekday        INTEGER,
+    every_minutes  INTEGER,
+    trigger_kind   TEXT NOT NULL DEFAULT 'at',
+    anchor         TEXT,
+    offset_minutes INTEGER,
+    action         TEXT NOT NULL DEFAULT 'notify',
+    action_json    TEXT,
+    channels       TEXT NOT NULL DEFAULT 'push',
+    enabled        INTEGER NOT NULL DEFAULT 1,
+    next_fire_at   INTEGER,
+    created_at     INTEGER NOT NULL,
+    updated_at     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders(enabled, next_fire_at);
+CREATE INDEX IF NOT EXISTS idx_reminders_owner ON reminders(owner_id, enabled);
+
+-- 触发流水。主键就是幂等键：同一 (提醒, 计划时刻) 跑两遍也只会有一行。
+CREATE TABLE IF NOT EXISTS reminder_fires (
+    reminder_id TEXT NOT NULL,
+    planned_at  INTEGER NOT NULL,
+    fired_at    INTEGER,
+    status      TEXT NOT NULL,
+    detail      TEXT,
+    clicked_at  INTEGER,
+    PRIMARY KEY (reminder_id, planned_at)
+);
+CREATE INDEX IF NOT EXISTS idx_fires_time ON reminder_fires(planned_at);
+
+-- 用户时间偏好：「专属时间」落在这里（静默时段 / 活跃时段 / 每日上限）。
+-- 没有行 = 全用默认值，所以注册时不写库（同 reminder_store.get 的思路）。
+CREATE TABLE IF NOT EXISTS user_time_prefs (
+    owner_id       TEXT PRIMARY KEY,
+    quiet_start    TEXT NOT NULL DEFAULT '23:00',
+    quiet_end      TEXT NOT NULL DEFAULT '07:00',
+    active_windows TEXT,
+    daily_cap      INTEGER NOT NULL DEFAULT 6,
+    updated_at     INTEGER NOT NULL
+);
+
+-- 来源开关：**没有行 = 关**。默认全关，所以不必给新用户预插行；
+-- 「关掉」写成 enabled=0 而不是删行，是为了让「他什么时候关的」查得到。
+CREATE TABLE IF NOT EXISTS reminder_source_prefs (
+    owner_id   TEXT NOT NULL,
+    source     TEXT NOT NULL,
+    enabled    INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (owner_id, source)
+);
+
+-- 校园工具集上云（第一波只建表，写入在第二波）。
+CREATE TABLE IF NOT EXISTS campus_state (
+    owner_id     TEXT NOT NULL,
+    tool         TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    updated_at   INTEGER NOT NULL,
+    PRIMARY KEY (owner_id, tool)
+);
+"""
+
+
+class ReminderInvalid(ValueError):
+    """输入不合法。端点据此回 400（而不是 500）。"""
+
+
+class ReminderLimit(ValueError):
+    """条数超上限。单独立一个类，是为了让端点给出「先删掉不用的」这句提示。"""
+
+
+# ---------- 建表与迁移 ----------
+
+
+def _db_path() -> str:
+    return store._db_path()  # noqa: SLF001
+
+
+def _conn():
+    return store._get_conn()  # noqa: SLF001
+
+
+def ensure() -> None:
+    """幂等建表 + 一次性迁移（键用库路径，理由同 reminder_store.ensure）。"""
+    path = str(_db_path())
+    if path in _READY:
+        return
+    with _conn() as conn:
+        conn.executescript(_SCHEMA)
+        _migrate(conn)
+    # ★ 放在迁移之后：迁移中途抛异常时不进缓存，下一次调用会重试，
+    #   而不是留下「表建好了、数据没搬」的半截状态还当成已完成。
+    _READY.add(path)
+
+
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone()
+    return row is not None
+
+
+def _snap_time(hour: Any, minute: Any) -> tuple[int, int]:
+    """把任意输入夹到合法范围，分钟就近吸附到 0/15/30/45。
+
+    吸附是为了和 `reminder_store.MINUTE_STEPS` 保持一致：`/api/remind` 的返回里
+    还把 steps 当契约给老前端。新的提醒项自己支持 1–59 分钟，不走这里。
+    """
+    from core import reminder_store  # 局部 import：只要常量，不在 import 期建表
+
+    h = max(0, min(23, int(hour)))
+    m = int(minute)
+    if m not in reminder_store.MINUTE_STEPS:
+        m = min(reminder_store.MINUTE_STEPS, key=lambda step: abs(step - m))
+    return h, m
+
+
+def default_time() -> tuple[int, int]:
+    """没设置过的人用的时刻（来自环境变量，与 reminder_store.default_time 同口径）。"""
+    return _snap_time(
+        getattr(config, "PUSH_HOUR", 20),
+        getattr(config, "PUSH_MINUTE", 0),
+    )
+
+
+def _legacy_prefs(conn: sqlite3.Connection) -> dict[str, tuple[int, int]]:
+    """老表 `reminder_prefs` 的全量偏好，一次查完（迁移里按人循环用）。"""
+    if not _table_exists(conn, "reminder_prefs"):
+        return {}
+    rows = conn.execute("SELECT owner_id, hour, minute FROM reminder_prefs").fetchall()
+    return {str(r[0]): _snap_time(r[1], r[2]) for r in rows}
+
+
+def _insert_system_row(
+    conn: sqlite3.Connection, owner_id: str, hour: int, minute: int, now: int
+) -> None:
+    """给一个人建「每日回顾」那条系统提醒（迁移专用，直接走 SQL 不绕 create）。
+
+    action 用 `agent_deliver` 而不是 `notify`（规格字面写的是 notify）：
+    这条的语义是「接住原来 push.daily 那一条」，内容必须还是
+    「六级今天还剩几个任务 / 今天还没打卡」，没内容就不发。
+    写成 notify 会给「今天本来无话可说」的人凭空多一条「每日回顾」，
+    直接违背风险表里「没内容不发是最不能丢的一条」。
+    """
+    at = f"{hour:02d}:{minute:02d}"
+    rid = _new_id()
+    row = {
+        "freq": "daily",
+        "at": at,
+        "weekday": None,
+        "every_minutes": None,
+        "next_fire_at": None,
+    }
+    conn.execute(
+        """INSERT INTO reminders
+              (id, owner_id, title, note, source, source_ref, override_json,
+               freq, at, weekday, every_minutes, trigger_kind, anchor, offset_minutes,
+               action, action_json, channels, enabled, next_fire_at, created_at, updated_at)
+           VALUES (?,?,?,NULL,'system',NULL,NULL,'daily',?,NULL,NULL,'at',NULL,NULL,
+                   'agent_deliver',NULL,'push',1,?,?,?)""",
+        (rid, owner_id, "每日回顾", at, next_fire(row, now), now, now),
+    )
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """把老「每日提醒」搬成新表里的系统提醒（幂等，可反复执行）。
+
+    搬两类人：
+    1. `reminder_prefs` 里有行的（自己设过时间的）；
+    2. 有活推送订阅的（可能在用默认 20:00 那条）。
+
+    第 2 类不能漏：升级后 `push.daily` 就静默了，只搬第 1 类的话，
+    「开着推送但从没进过设置页」的那批人会突然再也收不到提醒，
+    而他们的订阅还在、服务端显示一切正常 —— 这种静默失效最难查。
+    """
+    now = timeutil.now_ts()
+    prefs = _legacy_prefs(conn)
+    owners: set[str] = set(prefs)
+    sub_owners: list[str] = []
+    if _table_exists(conn, "push_subscriptions"):
+        sub_owners = [
+            str(r[0])
+            for r in conn.execute(
+                "SELECT DISTINCT owner_id FROM push_subscriptions WHERE disabled=0"
+            ).fetchall()
+        ]
+        owners.update(sub_owners)
+
+    has_system = {
+        str(r[0])
+        for r in conn.execute("SELECT owner_id FROM reminders WHERE source='system'").fetchall()
+    }
+    for owner in owners:
+        if not owner or owner in has_system:
+            continue
+        hour, minute = prefs.get(owner) or default_time()
+        _insert_system_row(conn, owner, hour, minute, now)
+
+    # 来源开关：四六级 / 打卡默认开 —— 这是「默认全关」唯一一次破例，
+    # 理由是这两条他们本来就在收，不算新增打扰（规格迁移规则 2）。
+    for owner in sub_owners:
+        for source in ("cet", "checkin"):
+            conn.execute(
+                "INSERT INTO reminder_source_prefs (owner_id, source, enabled, updated_at) "
+                "VALUES (?,?,1,?) ON CONFLICT(owner_id, source) DO NOTHING",
+                (owner, source, now),
+            )
+
+
+# ---------- 行 → 字典 ----------
+
+
+def _loads(raw: Any) -> Any:
+    if raw in (None, ""):
+        return None
+    if isinstance(raw, (dict, list)):
+        return raw
+    try:
+        return json.loads(str(raw))
+    except (TypeError, ValueError):
+        # 坏 JSON 不该让整条提醒不可用：当作没写 override，原样展示来源内容
+        return None
+
+
+def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    d = dict(row)
+    d["override"] = _loads(d.pop("override_json", None))
+    d["action_payload"] = _loads(d.pop("action_json", None))
+    d["enabled"] = bool(d.get("enabled"))
+    return d
+
+
+def _new_id() -> str:
+    return "rm_" + uuid.uuid4().hex[:12]
+
+
+# ---------- 校验 ----------
+
+
+def _hhmm(value: Any) -> str:
+    text = str(value or "").strip()
+    if not _HHMM.match(text):
+        raise ReminderInvalid("时间要写成 HH:MM（00:00–23:59）")
+    return text
+
+
+def _validate(data: dict[str, Any]) -> dict[str, Any]:
+    """把输入整形成一行的列值。**全量**校验，不做局部合并（合并由 update 负责）。"""
+    out: dict[str, Any] = {}
+
+    title = str(data.get("title") or "").strip()
+    if not title:
+        raise ReminderInvalid("标题不能为空")
+    if len(title) > 60:
+        raise ReminderInvalid("标题最长 60 个字")
+    out["title"] = title
+
+    note = data.get("note")
+    note = None if note is None else str(note).strip()
+    if note and len(note) > 500:
+        raise ReminderInvalid("备注最长 500 个字")
+    out["note"] = note or None
+
+    source = str(data.get("source") or "manual")
+    if source not in SOURCES:
+        raise ReminderInvalid(f"未知来源：{source}")
+    out["source"] = source
+    ref = data.get("source_ref")
+    out["source_ref"] = None if ref in (None, "") else str(ref)[:64]
+
+    override = data.get("override")
+    if override is not None and not isinstance(override, dict):
+        raise ReminderInvalid("override 必须是对象")
+    out["override_json"] = json.dumps(override, ensure_ascii=False) if override else None
+
+    freq = str(data.get("freq") or "daily")
+    if freq not in FREQS:
+        raise ReminderInvalid(f"未知重复方式：{freq}")
+    out["freq"] = freq
+
+    if freq == "interval":
+        every = data.get("every_minutes")
+        if every in (None, ""):
+            raise ReminderInvalid("按间隔提醒要给出 every_minutes")
+        every = int(every)
+        if not 60 <= every <= 1440:
+            # 下限 60 与委托侧一致：比一小时更密的提醒在这个产品里没有场景，
+            # 却会把每日上限和推送配额一起打穿。
+            raise ReminderInvalid("间隔要在 60–1440 分钟之间")
+        out["every_minutes"] = every
+        out["at"] = _hhmm(data["at"]) if data.get("at") else None
+    else:
+        out["every_minutes"] = None
+        out["at"] = _hhmm(data.get("at"))
+
+    if freq == "weekly":
+        weekday = data.get("weekday")
+        if weekday is None:
+            raise ReminderInvalid("每周提醒要给出 weekday（0=周一）")
+        weekday = int(weekday)
+        if not 0 <= weekday <= 6:
+            raise ReminderInvalid("weekday 只能是 0–6（0=周一）")
+        out["weekday"] = weekday
+    else:
+        out["weekday"] = None
+
+    kind = str(data.get("trigger_kind") or "at")
+    if kind not in TRIGGER_KINDS:
+        raise ReminderInvalid(f"未知触发方式：{kind}")
+    if kind == "relative":
+        # ★ 第一波明确不支持：锚点（课前 / DDL 到期 / 专注结束）的数据还在
+        #   localStorage 里，服务端拿不到。先收下再静默不响，就是最典型的
+        #   「设了时间但从来不响」——宁可现在 400 拒绝，等课表上云再放开。
+        raise ReminderInvalid("「课前 / 到期前」这类相对时间要等课表上云后再开放")
+    out["trigger_kind"] = kind
+    out["anchor"] = None
+    out["offset_minutes"] = None
+
+    action = str(data.get("action") or "notify")
+    if action not in ACTIONS:
+        raise ReminderInvalid(f"未知动作：{action}")
+    out["action"] = action
+    payload = data.get("action_payload")
+    if payload is not None and not isinstance(payload, (dict, list, str)):
+        raise ReminderInvalid("action_payload 必须是对象或字符串")
+    out["action_json"] = (
+        json.dumps(payload, ensure_ascii=False)
+        if isinstance(payload, (dict, list))
+        else (str(payload) if payload else None)
+    )
+
+    raw_channels = data.get("channels", "push")
+    if isinstance(raw_channels, (list, tuple)):
+        parts = [str(x).strip() for x in raw_channels]
+    else:
+        parts = [p.strip() for p in str(raw_channels or "").split(",")]
+    parts = [p for p in parts if p]
+    bad = [p for p in parts if p not in CHANNELS]
+    if bad:
+        raise ReminderInvalid(f"未知通知方式：{','.join(bad)}")
+    if not parts:
+        raise ReminderInvalid("至少选一种通知方式")
+    out["channels"] = ",".join(dict.fromkeys(parts))
+
+    out["enabled"] = 0 if data.get("enabled") is False else 1
+    return out
+
+
+# ---------- 时间推算 ----------
+
+
+def next_fire(reminder: dict[str, Any], now: int | None = None) -> int | None:
+    """算下一次该响的时刻（Unix 秒）；算不出来返回 None。
+
+    三条容易写错的：
+
+    * `interval` 必须**从原来的 next_fire_at 递推**，不能从 now 起算 ——
+      从 now 起算的话，每分钟一跳就会把下一次一直往后推，永远响不了；
+    * `weekdays` 要跨过周六周日，`weekly` 要落到指定的星期几；
+    * 非 interval 一律只取 **严格大于 now** 的时刻，"等于 now" 留给这一次触发。
+    """
+    ts = timeutil.now_ts() if now is None else int(now)
+    freq = str(reminder.get("freq") or "daily")
+
+    if freq == "interval":
+        every = int(reminder.get("every_minutes") or 0)
+        if every <= 0:
+            return None
+        anchor = reminder.get("next_fire_at")
+        base = int(anchor) if anchor else ts
+        if base > ts:
+            return base
+        step = every * 60
+        return base + ((ts - base) // step + 1) * step
+
+    at = reminder.get("at")
+    if not at:
+        return None
+    try:
+        hour, minute = (int(part) for part in str(at).split(":"))
+    except (TypeError, ValueError):
+        return None
+
+    now_local = datetime.fromtimestamp(ts, timeutil.TZ)
+    weekday = reminder.get("weekday")
+    for offset in range(0, 8):
+        # 8 天足够覆盖 weekly（最多等 7 天）和「今天已过点 → 明天」
+        day = (now_local + timedelta(days=offset)).replace(
+            hour=hour, minute=minute, second=0, microsecond=0
+        )
+        if freq == "weekdays" and day.weekday() >= 5:
+            continue
+        if freq == "weekly" and day.weekday() != int(weekday if weekday is not None else 0):
+            continue
+        if int(day.timestamp()) > ts:
+            return int(day.timestamp())
+    return None
+
+
+# ---------- CRUD ----------
+
+
+def count(owner_id: str) -> int:
+    ensure()
+    with _conn() as conn:
+        row = conn.execute("SELECT COUNT(*) FROM reminders WHERE owner_id=?", (owner_id,)).fetchone()
+    return int(row[0])
+
+
+def create(owner_id: str, data: dict[str, Any]) -> dict[str, Any]:
+    """新建一条提醒。超上限抛 `ReminderLimit`（端点转 400）。"""
+    ensure()
+    if count(owner_id) >= MAX_PER_OWNER:
+        raise ReminderLimit(f"最多 {MAX_PER_OWNER} 条提醒，先删掉不用的")
+
+    row = _validate(data)
+    now = timeutil.now_ts()
+    rid = _new_id()
+    nxt = next_fire({**row, "next_fire_at": None}, now)
+    with _conn() as conn:
+        conn.execute(
+            """INSERT INTO reminders
+                  (id, owner_id, title, note, source, source_ref, override_json,
+                   freq, at, weekday, every_minutes, trigger_kind, anchor, offset_minutes,
+                   action, action_json, channels, enabled, next_fire_at, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                rid,
+                owner_id,
+                row["title"],
+                row["note"],
+                row["source"],
+                row["source_ref"],
+                row["override_json"],
+                row["freq"],
+                row["at"],
+                row["weekday"],
+                row["every_minutes"],
+                row["trigger_kind"],
+                row["anchor"],
+                row["offset_minutes"],
+                row["action"],
+                row["action_json"],
+                row["channels"],
+                row["enabled"],
+                nxt,
+                now,
+                now,
+            ),
+        )
+    return get(owner_id, rid) or {}
+
+
+def get(owner_id: str, reminder_id: str) -> dict[str, Any] | None:
+    """按 id 取。**归属校验写在 SQL 里**：猜中别人的 id 也只能拿到 None → 404。"""
+    ensure()
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM reminders WHERE id=? AND owner_id=?", (reminder_id, owner_id)
+        ).fetchone()
+    return _row_to_dict(row) if row else None
+
+
+def _get_any(reminder_id: str) -> dict[str, Any] | None:
+    ensure()
+    with _conn() as conn:
+        row = conn.execute("SELECT * FROM reminders WHERE id=?", (reminder_id,)).fetchone()
+    return _row_to_dict(row) if row else None
+
+
+def list_reminders(owner_id: str, scope: str = "all", now: int | None = None) -> list[dict[str, Any]]:
+    """按 scope 取列表：today / week / all / paused。
+
+    排序把「还没算下一次的」放最后：`next_fire_at IS NULL` 在 SQLite 的
+    ASC 排序里本来就是最前，显式写成 `IS NULL` 才符合「越近越前」的直觉。
+    """
+    ensure()
+    ts = timeutil.now_ts() if now is None else int(now)
+    start, end = timeutil.day_bounds(timeutil.day_str(ts))
+    where = ["owner_id = ?"]
+    params: list[Any] = [owner_id]
+    if scope == "paused":
+        where.append("enabled = 0")
+    elif scope == "today":
+        where += ["enabled = 1", "next_fire_at IS NOT NULL", "next_fire_at >= ?", "next_fire_at < ?"]
+        params += [start, end]
+    elif scope == "week":
+        where += ["enabled = 1", "next_fire_at IS NOT NULL", "next_fire_at >= ?", "next_fire_at < ?"]
+        params += [start, end + 6 * 86400]
+    sql = (
+        "SELECT * FROM reminders WHERE "
+        + " AND ".join(where)
+        + " ORDER BY (next_fire_at IS NULL), next_fire_at ASC, created_at ASC"
+    )
+    with _conn() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [resolve(_row_to_dict(r)) for r in rows]
+
+
+def update(owner_id: str, reminder_id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
+    """局部更新。**先合并再整体校验**：校验函数只认完整的一份，局部校验会漏组合错。
+
+    例如只把 freq 改成 weekly 而没给 weekday：合并后校验才会报错；
+    只校验传入字段的话，这一行会变成「weekly 但没有 weekday」，next_fire 永远算不出。
+    """
+    current = get(owner_id, reminder_id)
+    if current is None:
+        return None
+    merged = {
+        "title": current["title"],
+        "note": current["note"],
+        "source": current["source"],
+        "source_ref": current["source_ref"],
+        "override": current.get("override"),
+        "freq": current["freq"],
+        "at": current["at"],
+        "weekday": current["weekday"],
+        "every_minutes": current["every_minutes"],
+        "trigger_kind": current["trigger_kind"],
+        "action": current["action"],
+        "action_payload": current.get("action_payload"),
+        "channels": current["channels"],
+        "enabled": current["enabled"],
+    }
+    for key, value in patch.items():
+        if key == "action_json":
+            key = "action_payload"
+        if key in merged:
+            merged[key] = value
+    row = _validate(merged)
+
+    now = timeutil.now_ts()
+    # 时间规则变了就必须重算下一次；没变则保留原值 —— 否则每次改标题都会把
+    # 「今天 22:00」推到明天（next_fire 只取严格大于 now 的时刻）。
+    schedule_keys = ("freq", "at", "weekday", "every_minutes")
+    changed_schedule = any(
+        # 用 `k in patch` 而不是 `patch.get(k) is not None`：把 at 显式改成 None
+        # （例如 daily → interval）也是一次规则变更，漏判会让 next_fire_at 沿用旧值。
+        k in patch and str(patch.get(k)) != str(current.get(k))
+        for k in schedule_keys
+    )
+    nxt = current["next_fire_at"]
+    if changed_schedule or nxt is None or int(nxt) <= now:
+        nxt = next_fire({**row, "next_fire_at": current["next_fire_at"]}, now)
+
+    with _conn() as conn:
+        conn.execute(
+            """UPDATE reminders SET
+                   title=?, note=?, source=?, source_ref=?, override_json=?,
+                   freq=?, at=?, weekday=?, every_minutes=?,
+                   trigger_kind=?, anchor=?, offset_minutes=?,
+                   action=?, action_json=?, channels=?, enabled=?,
+                   next_fire_at=?, updated_at=?
+               WHERE id=? AND owner_id=?""",
+            (
+                row["title"],
+                row["note"],
+                row["source"],
+                row["source_ref"],
+                row["override_json"],
+                row["freq"],
+                row["at"],
+                row["weekday"],
+                row["every_minutes"],
+                row["trigger_kind"],
+                row["anchor"],
+                row["offset_minutes"],
+                row["action"],
+                row["action_json"],
+                row["channels"],
+                row["enabled"],
+                nxt,
+                now,
+                reminder_id,
+                owner_id,
+            ),
+        )
+    return get(owner_id, reminder_id)
+
+
+def set_enabled(owner_id: str, reminder_id: str, enabled: bool) -> dict[str, Any] | None:
+    """暂停 / 恢复。恢复时重算下一次：停了一个月再打开，原来的 next_fire_at 早就过去了。"""
+    return update(owner_id, reminder_id, {"enabled": bool(enabled)})
+
+
+def delete(owner_id: str, reminder_id: str) -> bool:
+    """删提醒。**流水不删**：它是「这条到底响过没有」的唯一证据，删了就没法追。"""
+    ensure()
+    with _conn() as conn:
+        cur = conn.execute("DELETE FROM reminders WHERE id=? AND owner_id=?", (reminder_id, owner_id))
+    return cur.rowcount > 0
+
+
+def snooze(owner_id: str, reminder_id: str, minutes: int) -> dict[str, Any] | None:
+    """推迟 N 分钟。只管这一次：响过之后按原规则继续。"""
+    minutes = int(minutes)
+    if not 1 <= minutes <= 1440:
+        raise ReminderInvalid("推迟时间要在 1–1440 分钟之间")
+    current = get(owner_id, reminder_id)
+    if current is None:
+        return None
+    now = timeutil.now_ts()
+    with _conn() as conn:
+        conn.execute(
+            "UPDATE reminders SET next_fire_at=?, enabled=1, updated_at=? WHERE id=? AND owner_id=?",
+            (now + minutes * 60, now, reminder_id, owner_id),
+        )
+    return get(owner_id, reminder_id)
+
+
+# ---------- 到期查询 ----------
+
+
+def _due_rows(
+    now: int | None = None,
+    max_lag: int = MAX_LAG_SECONDS,
+    owner_id: str | None = None,
+) -> list[dict[str, Any]]:
+    ensure()
+    ts = timeutil.now_ts() if now is None else int(now)
+    sql = (
+        "SELECT * FROM reminders WHERE enabled=1 AND next_fire_at IS NOT NULL "
+        "AND next_fire_at <= ? AND next_fire_at >= ?"
+    )
+    params: list[Any] = [ts, ts - int(max_lag)]
+    if owner_id is not None:
+        sql += " AND owner_id = ?"
+        params.append(owner_id)
+    sql += " ORDER BY next_fire_at ASC"
+    with _conn() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+def due(now: int | None = None, max_lag: int = MAX_LAG_SECONDS) -> list[tuple[str, int]]:
+    """本轮到期的 (reminder_id, planned_at)。只读，不写库。"""
+    return [(r["id"], int(r["next_fire_at"])) for r in _due_rows(now, max_lag)]
+
+
+def due_for_owner(
+    owner_id: str, now: int | None = None, max_lag: int = MAX_LAG_SECONDS
+) -> list[dict[str, Any]]:
+    """某个人的到期提醒（tick 的 run_one 用）。返回整行，run_one 要算内容。"""
+    return [resolve(r) for r in _due_rows(now, max_lag, owner_id)]
+
+
+def due_owners(now: int | None = None, max_lag: int = MAX_LAG_SECONDS) -> list[str]:
+    """本轮有到期提醒的用户（去重、保持顺序）。
+
+    同一分钟有两个提醒的只算一个人：worker 的幂等键是
+    (job_key, subject_id, planned_at)，subject 就是人。这样「同刻合并」
+    不需要额外逻辑 —— 一个人一轮只发一条，天然就是合并。
+    """
+    seen: dict[str, None] = {}
+    for row in _due_rows(now, max_lag):
+        seen.setdefault(row["owner_id"], None)
+    return list(seen)
+
+
+def catch_up(now: int | None = None, max_lag: int = MAX_LAG_SECONDS, limit: int = 200) -> int:
+    """把迟到的提醒推进到下一次，返回处理条数。
+
+    超过 `max_lag` 的不补发（补发等于半夜被三小时前的提醒砸醒），但也**不能不管**：
+    不推进的话它会一直躺在「已到期」里，每次 tick 都被扫出来，永远响不了。
+    留一行 failed + detail='missed:...' 是为了让「今天为什么没响」查得到。
+    """
+    ensure()
+    ts = timeutil.now_ts() if now is None else int(now)
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM reminders WHERE enabled=1 AND next_fire_at IS NOT NULL "
+            "AND next_fire_at < ? ORDER BY next_fire_at ASC LIMIT ?",
+            (ts - int(max_lag), max(1, int(limit))),
+        ).fetchall()
+    done = 0
+    for raw in rows:
+        row = _row_to_dict(raw)
+        planned = int(row["next_fire_at"])
+        record_fire(
+            row["id"],
+            planned,
+            STATUS_FAILED,
+            f"missed:{ts - planned}s",
+            fired_at=ts,
+        )
+        advance(row["id"], ts)
+        done += 1
+    return done
+
+
+def advance(reminder_id: str, now: int | None = None) -> int | None:
+    """把一条提醒推到下一次；`once` 触发后自动停用。返回新的 next_fire_at。
+
+    ★ 基准时间取 `max(now, 原来的 next_fire_at)`，不是单纯的 now。
+    因为 next_fire 只返回**严格大于基准**的时刻：如果有人用
+    `POST /api/schedule/run-now` 提前跑了一次（planned_at 还在未来），
+    基准用 now 就会算出「还是原来那个时刻」，下一次 tick 立刻再发一遍。
+    取两者较大值，保证「触发过一次，next_fire_at 就一定往前走」。
+    """
+    row = _get_any(reminder_id)
+    if row is None:
+        return None
+    ts = timeutil.now_ts() if now is None else int(now)
+    if row["freq"] == "once":
+        with _conn() as conn:
+            conn.execute(
+                "UPDATE reminders SET enabled=0, next_fire_at=NULL, updated_at=? WHERE id=?",
+                (ts, reminder_id),
+            )
+        return None
+    base = max(ts, int(row.get("next_fire_at") or 0))
+    nxt = next_fire(row, base)
+    with _conn() as conn:
+        conn.execute(
+            "UPDATE reminders SET next_fire_at=?, updated_at=? WHERE id=?",
+            (nxt, ts, reminder_id),
+        )
+    return nxt
+
+
+# ---------- 触发流水 ----------
+
+
+def record_fire(
+    reminder_id: str,
+    planned_at: int,
+    status: str,
+    detail: str | None = None,
+    fired_at: int | None = None,
+) -> None:
+    """写一行流水。主键 (reminder_id, planned_at) 就是幂等键。
+
+    冲突时只在「原来不是 sent」的情况下覆盖：先 failed 后重试成功要能改过来，
+    但已经 sent 的那一行不能被后来的重跑改成别的（那会让「响过没有」失真）。
+    """
+    ensure()
+    ts = timeutil.now_ts() if fired_at is None else int(fired_at)
+    with _conn() as conn:
+        conn.execute(
+            """INSERT INTO reminder_fires (reminder_id, planned_at, fired_at, status, detail)
+               VALUES (?,?,?,?,?)
+               ON CONFLICT(reminder_id, planned_at) DO UPDATE SET
+                   fired_at=excluded.fired_at,
+                   status=excluded.status,
+                   detail=excluded.detail
+               WHERE reminder_fires.status <> 'sent'""",
+            (reminder_id, int(planned_at), ts, status, None if detail is None else str(detail)[:300]),
+        )
+
+
+def fires(owner_id: str, reminder_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+    """触发流水（新→旧）。join reminders 是为了做归属校验，不额外加 owner 列。"""
+    ensure()
+    sql = (
+        "SELECT f.reminder_id, f.planned_at, f.fired_at, f.status, f.detail, f.clicked_at "
+        "FROM reminder_fires f JOIN reminders r ON r.id = f.reminder_id WHERE r.owner_id = ?"
+    )
+    params: list[Any] = [owner_id]
+    if reminder_id:
+        sql += " AND f.reminder_id = ?"
+        params.append(reminder_id)
+    sql += " ORDER BY f.planned_at DESC LIMIT ?"
+    params.append(max(1, min(int(limit or 20), 200)))
+    with _conn() as conn:
+        return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
+# ---------- 来源合并 ----------
+
+
+def _delegation_text(owner_id: str, ref: str) -> tuple[str, str] | None:
+    """取委托的原文案（只读，**绝不回写** —— 规格禁止清单第 3 条）。"""
+    with _conn() as conn:
+        if not _table_exists(conn, "delegations"):
+            return None
+        row = conn.execute(
+            "SELECT name, prompt FROM delegations WHERE delegation_id=? AND owner_id=?",
+            (ref, owner_id),
+        ).fetchone()
+    if not row:
+        return None
+    return str(row[0] or ""), str(row[1] or "")
+
+
+def resolve(reminder: dict[str, Any]) -> dict[str, Any]:
+    """合并「来源值 + override 值」，返回展示/发送用的视图。
+
+    override 只覆盖 title / at（`enabled` 写在我们自己的行上，不写 override）：
+    改一条委托来源的提醒时，新标题落 override，`delegations` 一行都不动。
+    """
+    out = dict(reminder)
+    override = out.get("override")
+    if isinstance(override, dict):
+        for key in ("title", "at"):
+            value = override.get(key)
+            if value not in (None, ""):
+                out[key] = value
+    if out.get("source") == "delegate" and out.get("source_ref"):
+        found = _delegation_text(str(out.get("owner_id") or ""), str(out["source_ref"]))
+        if found:
+            out["source_title"] = found[0]
+            out["source_note"] = found[1][:120]
+    return out
+
+
+# ---------- 老接口兼容（/api/remind） ----------
+
+
+def get_system(owner_id: str) -> dict[str, Any] | None:
+    """取这个人的「每日回顾」那条。没有就返回 None（GET 不写库）。"""
+    ensure()
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM reminders WHERE owner_id=? AND source='system' "
+            "ORDER BY created_at ASC LIMIT 1",
+            (owner_id,),
+        ).fetchone()
+    return _row_to_dict(row) if row else None
+
+
+def ensure_system(owner_id: str) -> dict[str, Any]:
+    """取或建「每日回顾」那条。
+
+    谁会走到「建」这条分支：迁移跑完之后才开推送订阅的人。老接口
+    `/api/remind` 仍然要能读到、改到一条真实存在的提醒，否则用户改了时间
+    却没有任何东西会响 —— 而且看不出来。
+    """
+    existing = get_system(owner_id)
+    if existing:
+        return existing
+    hour, minute = default_time()
+    return create(
+        owner_id,
+        {
+            "title": "每日回顾",
+            "source": "system",
+            "freq": "daily",
+            "at": f"{hour:02d}:{minute:02d}",
+            "action": "agent_deliver",
+            "channels": "push",
+            "enabled": True,
+        },
+    )
+
+
+def system_time(owner_id: str) -> tuple[int, int]:
+    """「每日回顾」当前设在几点；没有这条就返回全站默认值。"""
+    item = get_system(owner_id)
+    at = (item or {}).get("at") or ""
+    try:
+        hour, minute = (int(part) for part in str(at).split(":"))
+        return hour, minute
+    except (TypeError, ValueError):
+        return default_time()
+
+
+def set_system_time(owner_id: str, hour: int, minute: int) -> dict[str, Any]:
+    """改「每日回顾」的时刻（老接口 POST /api/remind 的落点）。"""
+    hour, minute = _snap_time(hour, minute)
+    item = ensure_system(owner_id)
+    updated = update(owner_id, item["id"], {"at": f"{hour:02d}:{minute:02d}", "enabled": True})
+    return updated or item
+
+
+# ---------- 概览 ----------
+
+
+def summary(owner_id: str, now: int | None = None) -> dict[str, Any]:
+    """今日概览（给首页 / today 用）。"""
+    ts = timeutil.now_ts() if now is None else int(now)
+    day = timeutil.day_str(ts)
+    start, end = timeutil.day_bounds(day)
+    items = list_reminders(owner_id, "all", now=ts)
+    today = [
+        item
+        for item in items
+        if item.get("enabled") and item.get("next_fire_at") and start <= int(item["next_fire_at"]) < end
+    ]
+    paused = [item for item in items if not item.get("enabled")]
+    upcoming = [
+        item
+        for item in items
+        if item.get("enabled") and item.get("next_fire_at") and int(item["next_fire_at"]) >= end
+    ][:5]
+    return {
+        "day": day,
+        "today": today,
+        "today_count": len(today),
+        "paused_count": len(paused),
+        "upcoming": upcoming,
+        "total": len(items),
+    }
+
+
+def reset_cache() -> None:
+    """测试用：切库后清掉「这个库建过表了」的缓存。"""
+    _READY.clear()
