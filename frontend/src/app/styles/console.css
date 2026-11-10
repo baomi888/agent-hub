@@ -1835,99 +1835,288 @@ textarea.input {
   border-top: 1px solid var(--line);
 }
 
-/* ---------- 24 小时时间轴 ----------
-   两条层：层 0 标签在轴上方，层 1 在轴下方。层由「与上一个同层节点的分钟差」
-   决定（<90 分钟就换层），不是用像素量宽度 —— 容器宽度在 CSS 里拿不到，
-   JS 里也算不准（还会随 resize 变）。 */
-.rem-axis {
+/* ---------- 一天的进度带 ----------
+   一条有厚度的带子，从上往下三层：事件（实心墨点）／带子本体（已过金染 + 静默斜纹 +
+   小时刻度）／刻度数字。上一版是一条 1px 细线加几个 7px 空心圆，970px 宽的卡里
+   那 66px 高的空间除了一根线什么都没说。
+   高度账：胶囊 0–18 / 游标 22–52 / 带子 30–52 / 刻度数字 55–69 / 容器 70。 */
+.rem-tape {
   position: relative;
-  height: 66px;
+  height: 70px;
   margin-top: var(--space-12);
 }
-.rem-axis-rail {
+/* 带子本体：比卡片暗一档的凹槽。上缘一道内阴影、下缘一道纸色高光，
+   看起来是压进纸里的，而不是贴在纸上的第二条线 */
+.rem-tape-body {
   position: absolute;
   top: 30px;
   right: 0;
   left: 0;
-  height: 1px;
-  background: var(--line-strong);
+  height: 22px;
+  overflow: hidden;
+  border-radius: 7px;
+  /* 比卡片暗一档：带子是「挖」进纸里的槽，不是贴在纸上的另一条线。
+     第一版用了 step-1→step-2（比卡片还亮），拍出来整条轴几乎看不见 */
+  background: var(--step-0);
+  box-shadow:
+    inset 0 1px 3px rgba(61, 47, 26, 0.16),
+    0 1px 0 rgba(255, 253, 246, 0.85);
 }
-.rem-axis-now {
+/* 这里**故意没有**「已过一段从左端起染」的填充。
+   试过两版：淡金渐染、加一条贴底的水位线 —— 两条都被读成媒体播放器的已播放进度条，
+   因为它的形状就是「从最左端开始填、推进端正好是游标」。而这条轴要回答的是
+   「今天几点有事」，不是「今天过去了多少」（后者由游标上的时间胶囊回答）。
+   去掉这层之后，眼睛第一眼落在事件点上，整条带子回到「一天的刻度尺」。 */
+/* 小时刻度做成尺子：整点的短划只贴在带子下缘（5px），6 小时那道才贯穿全高。
+   每道都贯穿的话，18px 高的带子里 24 根竖线会像条形码而不是刻度 */
+.rem-tick {
   position: absolute;
-  top: 24px;
-  bottom: 10px;
+  bottom: 0;
   width: 1px;
-  background: var(--accent);
+  height: 5px;
+  background: rgba(61, 47, 26, 0.2);
 }
-.rem-axis-now::before {
+.rem-tick[data-major="1"] {
+  top: 0;
+  height: 100%;
+  background: rgba(61, 47, 26, 0.24);
+}
+/* 静默时段：斜纹。「这一段到点也不响」是这个产品独有的一条信息，值得占一层 */
+/* 斜纹两侧各一道 1px 边线：只有斜纹时它读作「一片脏纹理」，有起止才读作「这个区间」。
+   斜纹本身也从 0.13 提到 0.16 —— 1x 下原来的密度基本看不见 */
+.rem-tape-quiet {
   position: absolute;
-  top: -3px;
-  left: -2.5px;
-  width: 6px;
-  height: 6px;
+  top: 0;
+  bottom: 0;
+  border-right: 1px solid rgba(61, 47, 26, 0.22);
+  border-left: 1px solid rgba(61, 47, 26, 0.22);
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(61, 47, 26, 0.16) 0 1.5px,
+    transparent 1.5px 6px
+  );
+}
+/* 刻度数字：只标 0/6/12/18/24。12px 是全站最小的一档，再小就不该出现在轴上 */
+.rem-tape-hours {
+  position: absolute;
+  top: 55px;
+  right: 0;
+  left: 0;
+  height: 14px;
+  font-family: var(--font-serif);
+  font-size: var(--fs-xs);
+  line-height: 14px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.rem-tape-hours span {
+  position: absolute;
+  transform: translateX(-50%);
+}
+.rem-tape-hours span:first-child {
+  transform: none;
+}
+.rem-tape-hours span:last-child {
+  transform: translateX(-100%);
+}
+
+/* 齿孔：每条提醒一枚，骑在带子上。齿孔只给「今天还没到点」的那几条 ——
+   早于此刻的提醒被服务端推到明天、归进「本周」，不会出现在这条轴上 */
+.rem-ev {
+  position: absolute;
+  top: 30px;
+  z-index: 2;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  transform: translateX(-50%);
+  cursor: pointer;
+}
+/* 实心墨点，不是空心圈 —— 这条轴上「今天有几件事」是主角，「过去多少」是背景。
+   空心圈只有 1px 的环，视觉重量比它身后的金染还低，那是上一版的问题所在。
+   --ink 在浅色下是墨、深色下是米白，一套值两套主题都成立 */
+.rem-ev i {
+  width: 11px;
+  height: 11px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--ink);
+  box-shadow: 0 0 0 2.5px var(--card-bg);
+  transition:
+    width 0.12s ease,
+    height 0.12s ease,
+    background-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+/* 悬停只放大、不换色：金是全轴「现在」的专用语汇，用在悬停上会把「金=此刻」稀释掉 */
+.rem-ev:hover i {
+  width: 13px;
+  height: 13px;
+}
+.rem-ev:focus-visible {
+  outline: none;
+}
+.rem-ev:focus-visible i {
+  width: 13px;
+  height: 13px;
+  box-shadow:
+    0 0 0 2.5px var(--card-bg),
+    0 0 0 4.5px var(--accent);
+}
+/* 悬停才浮出「12:30 · 午休」。常驻标签在 40px 一个刻度的密度下必然连成 `10:2712:30` */
+.rem-ev b {
+  position: absolute;
+  bottom: calc(100% + 7px);
+  left: 50%;
+  z-index: 4;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-5);
+  padding: var(--space-4) var(--space-8);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-xs);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-2);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--text-1);
+  white-space: nowrap;
+  opacity: 0;
+  transform: translate(-50%, 2px);
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+  pointer-events: none;
+}
+/* 气泡底下一个指向激活点的小三角 —— 没有它，密集段里不知道这块字属于哪一枚。
+   第一版用 border-top 画实心三角、颜色取卡片纸色，压在同一张纸上等于没画；
+   改成 45° 的小方块：只有朝外的两条边描线，和气泡自身的描边接成一体 */
+.rem-ev b::after {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  margin-top: -5px;
+  margin-left: -4px;
+  border-right: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
+  background: var(--card-bg);
+  transform: rotate(45deg);
   content: "";
 }
-.rem-axis-now b {
-  position: absolute;
-  top: -17px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: var(--fs-xs);
-  font-weight: 500;
-  color: var(--accent-ink);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+
+/* 悬停某一条时让出「现在」的胶囊：两者并排同高时会连成
+   「12:51 15:00 专注 25 分钟」一串，读起来像同一句话。
+   只在悬停期间让步，鼠标离开立刻回来 —— 用的是 :has，浏览器不支持就退化成两个都在（不至于坏） */
+.rem-tape:has(.rem-ev:hover) .rem-now {
+  opacity: 0;
 }
-.rem-axis-node {
-  position: absolute;
-  top: 26px;
-  display: grid;
-  justify-items: center;
-  transform: translateX(-50%);
+/* 提示块要压过游标线，否则金线会从字中间穿过去 */
+.rem-ev:hover,
+.rem-ev:focus-visible {
+  z-index: 5;
 }
-.rem-axis-node span {
-  width: 7px;
-  height: 7px;
-  border: 1.5px solid var(--ink);
-  border-radius: 50%;
-  background: var(--card-bg);
+.rem-ev:hover b,
+.rem-ev:focus-visible b {
+  opacity: 1;
+  transform: translate(-50%, 0);
 }
-.rem-axis-node em {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
+.rem-ev b em {
   font-style: normal;
+  font-weight: 600;
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+/* 深色下气泡的底色和带子同属一个明度阶梯，那道描边是它唯一的边界 */
+.dark .rem-ev b {
+  border-color: var(--line-strong);
+  background: var(--step-2);
+}
+.dark .rem-ev b::after {
+  border-top-color: var(--step-2);
+}
+.rem-ev-title {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rem-ev-more {
+  color: var(--text-3);
+}
+
+/* 现在：一条 1.5px 金线穿过带子，顶上一个时间胶囊。全轴只有它是实心浮起来的 */
+.rem-now {
+  position: absolute;
+  top: 22px;
+  bottom: 18px;
+  z-index: 3;
+  width: 1.5px;
+  background: var(--accent);
+  transform: translateX(-50%);
+}
+.rem-now::after {
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  border-top: 5px solid var(--accent);
+  border-right: 4px solid transparent;
+  border-left: 4px solid transparent;
+  content: "";
+  transform: translateX(-50%);
+}
+.rem-now b {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  padding: 0 var(--space-6);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-xs);
+  background: var(--ink);
+  box-shadow: var(--shadow-1);
   font-size: var(--fs-xs);
-  color: var(--text-2);
+  font-weight: 600;
+  line-height: 1.35;
+  transition: opacity 0.12s ease;
+  color: var(--card-bg);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  transform: translateX(-50%);
 }
-/* 层 0：标签在节点上方 */
-.rem-axis-node[data-layer="0"] em {
-  bottom: 12px;
+/* 深色：内阴影压在深纸上只剩「更黑」，底下那道纸色高光却会变成一条刺眼的白边；
+   斜纹的暖墨 alpha 在 #1A1610 上等于没画，得翻成米白 */
+/* 深色下带子不能比卡片更暗：卡片已经是 L*13.7，再往下压到 L*7.5 只差 6 个明度，
+   在近黑的底色上等于没画（实拍里右半截完全融进卡片）。深色这里翻个方向 ——
+   比卡片亮一档、靠顶部那道内阴影维持"挖进去"的感觉，边界才立得住 */
+.dark .rem-tape-body {
+  background: rgba(237, 224, 196, 0.07);
+  box-shadow:
+    inset 0 1px 4px rgba(0, 0, 0, 0.45),
+    inset 0 0 0 1px rgba(237, 224, 196, 0.1),
+    0 1px 0 rgba(255, 253, 246, 0.04);
 }
-/* 层 1：标签在轴下方 */
-.rem-axis-node[data-layer="1"] em {
-  top: 12px;
+/* 深色下刻度数字用次级正文色：--text-3(#A08B66) 在衬线笔画下掉到 4.8:1，
+   缩到 480px 就只剩几条金线，24 小时的骨架就没了 */
+.dark .rem-tape-hours {
+  color: var(--text-2);
 }
-.rem-axis-node:hover span,
-.rem-axis-node:focus-visible span {
-  border-color: var(--accent);
-  background: var(--accent);
+/* 刻度线是暖墨 alpha，在 #1A1610 上等于没画 —— 深色下必须翻成米白，
+   否则 6 小时那四道分隔线整条消失，带子只剩一片黑 */
+.dark .rem-tick {
+  background: rgba(237, 224, 196, 0.13);
 }
-.rem-axis-node:hover em,
-.rem-axis-node:focus-visible em {
-  color: var(--text-1);
+.dark .rem-tick[data-major="1"] {
+  background: rgba(237, 224, 196, 0.2);
 }
-/* 轴两端的刻度说明，只在桌面上给：手机上每个字都要换空间 */
-.rem-axis-ends {
-  display: flex;
-  justify-content: space-between;
-  margin-top: var(--space-2);
-  font-size: var(--fs-xs);
-  color: var(--text-3);
+.dark .rem-tape-quiet {
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(237, 224, 196, 0.09) 0 1.5px,
+    transparent 1.5px 7px
+  );
 }
 
 /* ---------- 抽屉 ---------- */
@@ -2048,31 +2237,45 @@ textarea.input {
     padding: var(--space-8) var(--space-10);
     gap: var(--space-8);
   }
-  /* 轴上不标时间：390 宽里 1 小时只值 14px，而 `12:30` 标签本身要 34px，
-     六个点必然连成 `10:2712:3015:00`。手机只留「点 + 现在线」，
-     回答"今天忙在哪个时段、现在到哪了"，具体几点由卡片左侧给。 */
-  .rem-axis-node em {
+  /* 手机上轴只回答「今天忙不忙、现在走到哪」：齿孔和带子留着，刻度砍到 6 小时一道、
+     数字砍到 0/12/24 —— 390 宽里 1 小时只值 16px，每小时一道线会糊成一片灰。
+     具体几点由卡片左侧给；悬停提示在触屏上本来也不成立。 */
+  .rem-tick[data-major="0"] {
     display: none;
   }
-  .rem-axis {
-    height: 40px;
-    margin-top: var(--space-8);
+  .rem-tape {
+    height: 64px;
+    margin-top: var(--space-10);
   }
-  .rem-axis-rail {
-    top: 21px;
+  .rem-tape-body {
+    top: 27px;
+    height: 18px;
   }
-  .rem-axis-node {
-    top: 17px;
+  /* 320 宽里 19:00–22:00 四点只隔 9px：齿孔和外圈都收一档，不然四个白圈会连成一串。
+     可点区跟着收到 14px —— 这个宽度在 320 下仍会和邻居重叠约 5px，
+     但那已经是「点偏了跳到相邻卡片」，代价是滚一下；轴本来就是辅助入口，主入口是下面的卡片 */
+  .rem-ev {
+    top: 27px;
+    width: 14px;
+    height: 18px;
   }
-  .rem-axis-now {
-    top: 15px;
-    bottom: 8px;
+  .rem-ev i {
+    width: 6px;
+    height: 6px;
+    box-shadow: 0 0 0 1px var(--card-bg);
   }
-  .rem-axis-now b {
-    top: -15px;
+  .rem-now {
+    top: 22px;
+    bottom: 17px;
   }
-  /* 手机上时间轴两端的小字去掉（0:00 / 24:00 谁都知道），把高度留给卡片 */
-  .rem-axis-ends {
+  .rem-tape-hours {
+    top: 45px;
+  }
+  .rem-tape-hours span:nth-child(2),
+  .rem-tape-hours span:nth-child(4) {
+    display: none;
+  }
+  .rem-ev b {
     display: none;
   }
   .rem-preview {

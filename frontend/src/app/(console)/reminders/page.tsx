@@ -62,12 +62,6 @@ const ACTION_OPTIONS: { value: ReminderAction; label: string }[] = [
 
 const WEEK_LABELS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 
-/** 时间轴上两个标签「不打架」的最小分钟间隔（同层）。90 分钟 ≈ 屏宽的 1/16。 */
-const AXIS_MIN_GAP = 90;
-
-/** 时间轴标签贴边的余量（百分比），否则 07:30 的前两位会被裁掉 */
-const AXIS_EDGE = 3;
-
 /**
  * 卡片左上角那个时刻；没有下一次就说清楚为什么。
  *
@@ -122,95 +116,181 @@ function useNowMinute(): number | null {
 
 // ==================== 今天的时间轴 ====================
 
-type AxisNode = { id: string; label: string; pct: number; layer: number };
+/** 一天有多少分钟。事件定位、静默段、游标都按它换算，别在三处各写 1440。 */
+const DAY_MIN = 1440;
+
+/** 带子上小时刻度的间隔（分钟）。60 = 整点一道，24 道正好铺满。 */
+const TICK_MIN = 60;
+
+/** 主刻度的小时间隔：6 小时一道重的，下面跟一个数字。 */
+const MAJOR_HOURS = [0, 6, 12, 18, 24];
+
+/** `HH:MM` → 当天分钟数。静默时段是自由文本，格式不对就当没配。 */
+function hhmmToMin(v: string | null | undefined): number | null {
+  if (!v) return null;
+  const m = /^(\d{1,2}):(\d{2})$/.exec(v.trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const mi = Number(m[2]);
+  if (!Number.isFinite(h) || !Number.isFinite(mi) || h > 24 || mi > 59) return null;
+  return h * 60 + mi;
+}
+
+type QuietBand = { from: number; to: number };
 
 /**
- * 24 小时轴。
+ * 静默时段在带子上是一段斜纹 —— 这是时间轴上的第二个真信息：
+ * 「这一段到点也不响」，比再画一个圆点有用得多。
+ * 它常常跨零点（23:00–07:00），所以拆成「0 点到结束」和「开始到 24 点」两截。
+ */
+function quietBands(start: string | null | undefined, end: string | null | undefined): QuietBand[] {
+  const a = hhmmToMin(start);
+  const b = hhmmToMin(end);
+  if (a === null || b === null || a === b) return [];
+  if (a > b) {
+    return [
+      { from: 0, to: b },
+      { from: a, to: DAY_MIN },
+    ];
+  }
+  return [{ from: a, to: b }];
+}
+
+type AxisEvent = {
+  /** 点这枚齿孔跳到哪张卡（同一分钟的多条合并成一枚，取第一条） */
+  id: string;
+  min: number;
+  label: string;
+  /** 这一枚上叠了几条，以及它们的标题，给悬停提示和读屏用 */
+  count: number;
+  title: string;
+};
+
+/**
+ * 一天的进度带。
  *
- * 两条通道：层 0 标签在轴上方、层 1 在轴下方。层由「与同层上一个节点的分钟差」
- * 决定，不是用像素量标签宽度 —— 容器宽度在 JS 里也算不准（会随 resize 变），
- * 而"90 分钟内算挤"在 970 宽的桌面上成立。
+ * 上一版是一条 1px 细线 + 几个 7px 空心圆，970px 宽的卡里 66px 高只画了 7 个点，
+ * 剩下全是空白；而且「今天已经过去多少」「夜里这一段到点不响」这两件事根本看不出来。
  *
- * 手机上不标时间（CSS 里把 `em` 藏掉）：390 宽里 1 小时只值 14px，
- * 而 `12:30` 这个标签本身要 34px，六个点必然连成 `10:2712:3015:00`。
- * 那时轴只承担一件事——「今天忙在哪个时段、现在到哪了」，具体几点由卡片左侧给。
+ * 这一版把轴做成一条有厚度的带子，从下往上叠四层，每层都是真信息：
+ *  1. 带子底：暖纸色凹槽 + 每小时一道刻度 —— 空白变成网格，而不是留白；
+ *  2. 已过染色：0 点到此刻的一段暖金，越靠近现在越浓，右端正好被游标压住；
+ *  3. 静默斜纹：prefs 里的静默时段画成斜纹段，「这一段不响」一眼可见；
+ *  4. 齿孔：每条提醒一枚，纸色实心 + 墨描边，骑在带子上。
+ *
+ * 时间标签不常驻：970px 里 40px 一个刻度，`12:30` 这类标签排开会连成 `10:2712:30`。
+ * 悬停/聚焦齿孔才浮出「12:30 · 午休」，具体几点平时看卡片左侧。
+ * 手机上只留齿孔和 0/12/24 三个数字 —— 390 宽里 1 小时只值 16px。
  */
 function TodayAxis({
   items,
   now,
+  quietStart,
+  quietEnd,
   onJump,
 }: {
   items: ReminderItem[];
   now: number | null;
+  quietStart: string | null | undefined;
+  quietEnd: string | null | undefined;
   onJump: (id: string) => void;
 }) {
-  const nodes = useMemo<AxisNode[]>(() => {
-    const list = items
-      .filter((i) => i.next_fire_at)
-      .map((i) => {
-        const d = new Date(toMs(i.next_fire_at as number));
-        return { id: i.id, min: d.getHours() * 60 + d.getMinutes(), label: fmtHM(d) };
-      })
-      .sort((a, b) => a.min - b.min);
-    const last: (number | null)[] = [null, null];
-    return list.map((n) => {
-      let layer = last.findIndex((m) => m === null || n.min - m >= AXIS_MIN_GAP);
-      // 两层都挤满（三条提醒挨在一个半小时里）：允许重叠，总比挤成 3 行高好
-      if (layer === -1) layer = 0;
-      last[layer] = n.min;
-      const raw = (n.min / 1440) * 100;
-      return {
-        id: n.id,
-        label: n.label,
-        pct: Math.min(100 - AXIS_EDGE, Math.max(AXIS_EDGE, raw)),
-        layer,
-      };
-    });
-  }, [items]);
-
   const nowMin = useMemo(() => {
     if (now === null) return null;
     const d = new Date(now);
     return d.getHours() * 60 + d.getMinutes();
   }, [now]);
 
-  const nowLabel = useMemo(() => (now === null ? "" : fmtHM(now)), [now]);
+  const events = useMemo<AxisEvent[]>(() => {
+    // 同一分钟的多条并成一枚：服务端本来就会把它们合并成一条通知，
+    // 轴上并排画两枚只会互相压住，点起来也分不清。
+    const buckets = new Map<number, { at: Date; ids: string[]; titles: string[] }>();
+    for (const item of items) {
+      if (!item.next_fire_at) continue;
+      const at = new Date(toMs(item.next_fire_at));
+      const min = at.getHours() * 60 + at.getMinutes();
+      const slot = buckets.get(min);
+      if (slot) {
+        slot.ids.push(item.id);
+        slot.titles.push(item.title);
+      } else {
+        buckets.set(min, { at, ids: [item.id], titles: [item.title] });
+      }
+    }
+    return [...buckets.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([min, slot]) => ({
+        id: slot.ids[0],
+        min,
+        label: fmtHM(slot.at),
+        count: slot.ids.length,
+        title: slot.titles.join("、"),
+      }));
+  }, [items]);
+
+  const quiet = useMemo(() => quietBands(quietStart, quietEnd), [quietStart, quietEnd]);
 
   return (
-    <>
-      <div className="rem-axis" role="group" aria-label="今天的提醒时间轴">
-        <div className="rem-axis-rail" />
-        {nowMin !== null ? (
-          <div
-            className="rem-axis-now"
-            style={{ left: `${(nowMin / 1440) * 100}%` }}
-            aria-hidden="true"
-            title={`现在 ${nowLabel}`}
-          >
-            <b>{nowLabel}</b>
-          </div>
-        ) : null}
-        {nodes.map((n) => (
-          <button
-            key={n.id}
-            type="button"
-            className="rem-axis-node"
-            data-layer={n.layer}
-            style={{ left: `${n.pct}%` }}
-            onClick={() => onJump(n.id)}
-            title={`${n.label} · 跳到这条`}
-            aria-label={`${n.label} 的提醒`}
-          >
-            <span aria-hidden="true" />
-            <em>{n.label}</em>
-          </button>
+    <div className="rem-tape" role="group" aria-label="今天的提醒时间轴">
+      <div className="rem-tape-body" aria-hidden="true">
+        {/* 斜纹垫在刻度下面：静默段盖住 6 点那道贯穿刻度时，刻度还得透出来 */}
+        {quiet.map((q) => (
+          <span
+            key={`q${q.from}`}
+            className="rem-tape-quiet"
+            style={{
+              left: `${(q.from / DAY_MIN) * 100}%`,
+              width: `${((q.to - q.from) / DAY_MIN) * 100}%`,
+            }}
+          />
+        ))}
+        {Array.from({ length: DAY_MIN / TICK_MIN }, (_, i) => i).map((h) => (
+          <i
+            key={`t${h}`}
+            className="rem-tick"
+            data-major={h % 6 === 0 ? "1" : "0"}
+            style={{ left: `${(h / (DAY_MIN / TICK_MIN)) * 100}%` }}
+          />
         ))}
       </div>
-      <div className="rem-axis-ends" aria-hidden="true">
-        <span>0:00</span>
-        <span>24:00</span>
+
+      {events.map((e) => (
+        <button
+          key={`e${e.min}`}
+          type="button"
+          className="rem-ev"
+          // 0 点和 24 点的齿孔要往回收一点，否则一半在带子外面
+          style={{ left: `${Math.min(99.6, Math.max(0.4, (e.min / DAY_MIN) * 100))}%` }}
+          onClick={() => onJump(e.id)}
+          aria-label={`${e.label} ${e.title}${e.count > 1 ? ` 等 ${e.count} 条` : ""}，跳到这条`}
+        >
+          <i aria-hidden="true" />
+          <b aria-hidden="true">
+            <em>{e.label}</em>
+            <span className="rem-ev-title">{e.title}</span>
+            {e.count > 1 ? <span className="rem-ev-more">+{e.count - 1}</span> : null}
+          </b>
+        </button>
+      ))}
+
+      {nowMin !== null && now !== null ? (
+        <div
+          className="rem-now"
+          style={{ left: `${(nowMin / DAY_MIN) * 100}%` }}
+          aria-hidden="true"
+        >
+          <b>{fmtHM(now)}</b>
+        </div>
+      ) : null}
+
+      <div className="rem-tape-hours" aria-hidden="true">
+        {MAJOR_HOURS.map((h) => (
+          <span key={`h${h}`} style={{ left: `${(h / 24) * 100}%` }}>
+            {h}
+          </span>
+        ))}
       </div>
-    </>
+    </div>
   );
 }
 
@@ -922,7 +1002,13 @@ export default function RemindersPage() {
                 {groups.today.length > 0 ? (
                   <>
                     <div className="card card-pad">
-                      <TodayAxis items={groups.today} now={now} onJump={jump} />
+                      <TodayAxis
+                        items={groups.today}
+                        now={now}
+                        quietStart={prefs?.quiet_start}
+                        quietEnd={prefs?.quiet_end}
+                        onJump={jump}
+                      />
                     </div>
                     <div className="mt-2 space-y-2">{groups.today.map(card)}</div>
                   </>
