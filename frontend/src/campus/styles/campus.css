@@ -1879,6 +1879,20 @@ body.campus-modal-open .campus-scroll {
   font-variant-numeric: tabular-nums;
 }
 
+/*
+ * 行内动作按钮补到 44px 热区。
+ *
+ * 不给全局 `.campus-btn` 加：那是六个工具共用的，44px 会把 GPA 表和课表的
+ * 每一行都撑高，是拿一页的可用性换另一页的。倒计时这一页不同 ——
+ * 它是手机上「我交了」的唯一入口，28px 高在真机上要瞄两次才点得中。
+ * 视觉上仍是原尺寸，多出来的 16px 靠 padding 摊到上下，看不出变化。
+ */
+.campus-dl-item .campus-btn {
+  min-height: 44px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
 .campus-dl-days {
   min-width: 76px;
   font-size: var(--fs-sm);
