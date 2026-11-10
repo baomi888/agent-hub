@@ -235,7 +235,13 @@ class TestChannelHonesty:
         assert 'channels: "push"' in self._page()
 
     def test_no_channel_picker(self):
-        """抽屉里的 select 只允许「重复 / 周几 / 到点之后 / 来源」四种，多一个就是假选项。"""
+        """抽屉里只允许三个 select：来源 / 周几 / 到点之后。多一个就是假选项。
+
+        2026-11-10 重排后频率改成 `.seg` 分段按钮，select 从 4 个变 3 个；
+        「怎么送达」是静态说明块（`.rem-deliver`），不是控件。
+        """
         page = self._page()
         drawer = page[page.index("function ReminderDrawer") : page.index("// ==================== 页面")]
-        assert drawer.count("<select") == 4
+        assert drawer.count("<select") == 3
+        deliver = drawer[drawer.index("怎么送达") : drawer.index("怎么送达") + 500]
+        assert "<select" not in deliver, "「怎么送达」又变回下拉框了"

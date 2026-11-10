@@ -1668,3 +1668,451 @@ textarea.input {
     display: none;
   }
 }
+
+/* ==================================================================
+   提醒中心 /reminders（2026-11-10）
+   ------------------------------------------------------------------
+   这一块只服务提醒页，命名统一 rem-*，不碰 .card / .field / .seg
+   这些全站类 —— 上一批的问题是页面里有两套控件语言，修法应当是
+   「并到已有的那套」，不是再造第三套。
+
+   1. 卡片 93px → 68px：左时间列 / 标题+元信息 / 一个「⋯」，四个动作全进菜单
+   2. 24 小时时间轴：按分钟定位，当前时刻一条竖线，节点可点跳到卡片
+   3. 抽屉沿规格「来源 → 触发 → 动作 → 送达」重排，底部一行预览
+   ================================================================== */
+
+/* ---------- 紧凑卡片 ---------- */
+.rem-card {
+  position: relative;
+  display: grid;
+  /* 第 3 列是「还有多久」，窄屏不显示（display:none 后 auto 列宽为 0，
+     ⋯ 仍然停在最右）—— 用 grid 而不是 flex，是为了让所有卡片的时间列
+     和标题起点严格对齐，扫读时才有一条直的左边界。 */
+  grid-template-columns: 50px minmax(0, 1fr) auto 26px;
+  align-items: center;
+  gap: var(--space-10);
+  padding: var(--space-10) var(--space-12);
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  transition: var(--t-color), border-color 0.16s;
+}
+/* 「还有 3 小时 12 分」只在够宽时出现：卡片窄于 620px 时两行内容已占满，
+   再塞一句倒计时会把标题挤成省略号，那是拿主要信息换次要信息。 */
+.rem-rest {
+  display: none;
+  grid-column: 3;
+  max-width: 132px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.rem-card:hover {
+  border-color: var(--line-strong);
+}
+/* 暂停 / 来源已关：整张卡降透明度，比在标题后面挂一个灰标签更省地方 */
+.rem-card[data-off="1"] {
+  opacity: 0.55;
+}
+/* 从时间轴跳过来时闪一下，否则滚动之后看不出是哪条 */
+.rem-card[data-flash="1"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft, rgba(200, 137, 42, 0.18));
+}
+
+.rem-when {
+  grid-column: 1;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+.rem-when small {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+.rem-main {
+  grid-column: 2;
+  min-width: 0;
+}
+/* 标题本身就是「改这条」的入口：它是全页最高频动作，藏在菜单里等于让人多点一次。
+   button 撑满整行是为了点击热区，不是视觉上要一块按钮。 */
+.rem-title {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-lg);
+  font-weight: 500;
+  color: var(--text-1);
+}
+.rem-title:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.rem-meta {
+  margin: 2px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.rem-meta b {
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.rem-morebtn {
+  grid-column: 4;
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: var(--radius-xs);
+  color: var(--text-3);
+  font-size: 15px;
+  line-height: 1;
+  letter-spacing: 1px;
+}
+.rem-morebtn:hover,
+.rem-morebtn[aria-expanded="true"] {
+  background: var(--step-2);
+  color: var(--text-1);
+}
+
+/* 点空白关菜单：用一层透明遮罩，省掉 document 级的 click 监听（少一个 effect） */
+.rem-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+}
+.rem-menu {
+  position: absolute;
+  top: calc(100% - 2px);
+  right: 0;
+  z-index: 21;
+  min-width: 176px;
+  padding: var(--space-4);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-2);
+}
+.rem-menu button {
+  display: block;
+  width: 100%;
+  padding: var(--space-8) var(--space-10);
+  border-radius: var(--radius-xs);
+  text-align: left;
+  font-size: var(--fs-md);
+  color: var(--text-1);
+}
+.rem-menu button:hover {
+  background: var(--step-2);
+}
+.rem-menu button[data-danger="1"] {
+  color: var(--red-ink);
+}
+.rem-menu p {
+  padding: var(--space-6) var(--space-10) var(--space-4);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.rem-menu hr {
+  margin: var(--space-4) 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+/* ---------- 24 小时时间轴 ----------
+   两条层：层 0 标签在轴上方，层 1 在轴下方。层由「与上一个同层节点的分钟差」
+   决定（<90 分钟就换层），不是用像素量宽度 —— 容器宽度在 CSS 里拿不到，
+   JS 里也算不准（还会随 resize 变）。 */
+.rem-axis {
+  position: relative;
+  height: 66px;
+  margin-top: var(--space-12);
+}
+.rem-axis-rail {
+  position: absolute;
+  top: 30px;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: var(--line-strong);
+}
+.rem-axis-now {
+  position: absolute;
+  top: 24px;
+  bottom: 10px;
+  width: 1px;
+  background: var(--accent);
+}
+.rem-axis-now::before {
+  position: absolute;
+  top: -3px;
+  left: -2.5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  content: "";
+}
+.rem-axis-now b {
+  position: absolute;
+  top: -17px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--accent-ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.rem-axis-node {
+  position: absolute;
+  top: 26px;
+  display: grid;
+  justify-items: center;
+  transform: translateX(-50%);
+}
+.rem-axis-node span {
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid var(--ink);
+  border-radius: 50%;
+  background: var(--card-bg);
+}
+.rem-axis-node em {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-style: normal;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* 层 0：标签在节点上方 */
+.rem-axis-node[data-layer="0"] em {
+  bottom: 12px;
+}
+/* 层 1：标签在轴下方 */
+.rem-axis-node[data-layer="1"] em {
+  top: 12px;
+}
+.rem-axis-node:hover span,
+.rem-axis-node:focus-visible span {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.rem-axis-node:hover em,
+.rem-axis-node:focus-visible em {
+  color: var(--text-1);
+}
+/* 轴两端的刻度说明，只在桌面上给：手机上每个字都要换空间 */
+.rem-axis-ends {
+  display: flex;
+  justify-content: space-between;
+  margin-top: var(--space-2);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+/* ---------- 抽屉 ---------- */
+/* 分组小标题：告诉用户「这一段在问什么」，比把 5 个字段平铺更像在填一张表 */
+.rem-step {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-6);
+  margin-bottom: var(--space-8);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-1);
+}
+.rem-step i {
+  font-style: normal;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--text-3);
+}
+/* 来源不可改时说清楚为什么，而不是把它变成一个灰掉的下拉框 */
+.rem-ro {
+  margin: 0;
+  padding: var(--space-8) var(--space-12);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-md);
+  color: var(--text-2);
+}
+/* 「怎么送达」是说明，不是控件：去掉输入框的外形，才不会看着像能选 */
+.rem-deliver {
+  padding: var(--space-10) var(--space-12);
+  border-radius: var(--radius-sm);
+  background: var(--step-2);
+}
+.rem-deliver b {
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--text-1);
+}
+.rem-deliver span {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+/* 底部预览 + 按钮：粘在滚动容器底部，滚到哪都能看见「这条到底是怎样的」 */
+.rem-preview {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  padding: var(--space-12) var(--space-16);
+  border-top: 1px solid var(--line);
+  background: var(--card-bg);
+}
+.rem-preview p {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.rem-preview p b {
+  font-weight: 500;
+  color: var(--text-1);
+}
+.rem-preview-acts {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-8);
+}
+/* 抽屉底部的按钮比页头的主按钮小一档：它跟在一行预览文字后面，
+   40px 高会把这条压成一块色块，抢掉预览本身。 */
+.rem-preview .btn-new,
+.rem-preview .btn-import {
+  padding: var(--space-8) var(--space-14);
+  font-size: var(--fs-md);
+}
+
+/* 来源开关：单列时「名字左 / 开关右」最好扫；两列时列尾会相邻，
+   两个开关贴在一起就分不清归属，所以改成「固定名字宽 + 开关紧随其后」。 */
+.rem-srclist {
+  display: grid;
+  gap: var(--space-4) var(--space-24);
+}
+.rem-src {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+@media (max-width: 900px) {
+  .rem-srclist {
+    gap: var(--space-2);
+  }
+}
+@media (min-width: 901px) {
+  .rem-srclist {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .rem-src {
+    justify-content: flex-start;
+  }
+  .rem-src > span {
+    flex: 0 0 92px;
+  }
+}
+
+/* ---------- 手机 ---------- */
+@media (max-width: 900px) {
+  /* 卡片再让 4px：390 下一屏能多露半张，比压字号划算 */
+  .rem-card {
+    grid-template-columns: 46px minmax(0, 1fr) auto 26px;
+    padding: var(--space-8) var(--space-10);
+    gap: var(--space-8);
+  }
+  /* 轴上不标时间：390 宽里 1 小时只值 14px，而 `12:30` 标签本身要 34px，
+     六个点必然连成 `10:2712:3015:00`。手机只留「点 + 现在线」，
+     回答"今天忙在哪个时段、现在到哪了"，具体几点由卡片左侧给。 */
+  .rem-axis-node em {
+    display: none;
+  }
+  .rem-axis {
+    height: 40px;
+    margin-top: var(--space-8);
+  }
+  .rem-axis-rail {
+    top: 21px;
+  }
+  .rem-axis-node {
+    top: 17px;
+  }
+  .rem-axis-now {
+    top: 15px;
+    bottom: 8px;
+  }
+  .rem-axis-now b {
+    top: -15px;
+  }
+  /* 手机上时间轴两端的小字去掉（0:00 / 24:00 谁都知道），把高度留给卡片 */
+  .rem-axis-ends {
+    display: none;
+  }
+  .rem-preview {
+    padding: var(--space-10) var(--space-12);
+  }
+  /* 抽屉在手机上贴底：底部的预览条与按钮组一起下沉，拇指够得着 */
+  .rem-drawer-card {
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+
+  /* 页头瘦身（PageShell compact）：只给量过的页面用，默认不生效。
+     390 下原来「眉题 + 标题 + 两行说明 + 操作」要 160px，现在是 96 上下：
+     眉题藏掉（-18）、说明限一行（-19）、标题压到 18px（-6）。 */
+  .pg-head--compact {
+    align-items: center;
+    gap: var(--space-8);
+    padding-bottom: var(--space-10);
+  }
+  .pg-head--compact > div:first-child {
+    min-width: 0;
+  }
+  .pg-head--compact .eyebrow {
+    display: none;
+  }
+  .pg-head--compact h2 {
+    font-size: 1.125rem;
+  }
+  .pg-head--compact .pg-sub {
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--fs-xs);
+  }
+}
+
+/* 「还有 3 小时」只在 ≥1200 的屏上出现：那个宽度下卡片两行内容之外
+   才真的空出 300px，不放点东西就是浪费；1024 下挤进去会把标题挤成省略号。 */
+@media (min-width: 1200px) {
+  .rem-rest {
+    display: block;
+  }
+}

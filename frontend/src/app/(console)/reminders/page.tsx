@@ -1,6 +1,6 @@
 "use client";
 
-// P7 · 提醒中心（2026-11-09，规格见 docs/提醒中心_实施规格）
+// P7 · 提醒中心（2026-11-09 建，2026-11-10 重排界面）
 //
 // 这个页面只回答一个问题：**什么时候，让我做什么**。
 // 三件事刻意不放在这里：
@@ -14,14 +14,22 @@
 // 直接显示 `at` 会出现「我明明改成 22:30，列表还写 20:00」——用户会当成没保存。
 // 服务端 `resolve()` 已经把 override 合并进 `at`，但"下一次到底几点响"只有
 // `next_fire_at` 知道（还要考虑静默时段、每日上限、once 已触发等），所以显示它。
+//
+// 2026-11-10 界面重排的三条判据（都是量出来的，不是审美）：
+//  1. 卡片 93px → 68px：一屏从 8 条到 12 条；每张卡上的可点从 4 个降到 2 个
+//     （标题＝改这条，⋯＝其余四个动作）。手机首屏原来只露 1.5 张。
+//  2. 时间轴做成真的：按分钟定位、当前时刻一条竖线、节点点了跳到卡片。
+//     原来只是把 6 条横排一行，没有轴也没有"现在"，而且和下面的列表重复念两遍。
+//  3. 抽屉按规格「来源 → 触发 → 动作 → 送达」重排，底部一行实时预览。
+//     原来顺序是「标题 → 重复 → 几点 → 动作 → 通道 → 来源」，和文档反着。
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PageShell from "@/components/console/PageShell";
 import CornIcon from "@/components/CornIcon";
-import { Callout, SkeletonLines, Switch, ToastHost } from "@/components/console/ui";
+import { Callout, Field, Seg, SkeletonLines, Switch, ToastHost } from "@/components/console/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { useToast } from "@/lib/hooks/useToast";
-import { fmtHM, toMs } from "@/lib/time";
+import { fmtHM, fmtRemaining, toMs } from "@/lib/time";
 import type {
   ReminderAction,
   ReminderDraft,
@@ -54,23 +62,156 @@ const ACTION_OPTIONS: { value: ReminderAction; label: string }[] = [
 
 const WEEK_LABELS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 
+/** 时间轴上两个标签「不打架」的最小分钟间隔（同层）。90 分钟 ≈ 屏宽的 1/16。 */
+const AXIS_MIN_GAP = 90;
+
+/** 时间轴标签贴边的余量（百分比），否则 07:30 的前两位会被裁掉 */
+const AXIS_EDGE = 3;
+
 /**
- * `next_fire_at`（秒）→ 列表里那一行的时刻文案；没有下一次就说清楚为什么。
+ * 卡片左上角那个时刻；没有下一次就说清楚为什么。
  *
- * 「本周」分组必须带星期：只写 `22:00` 会让周四的提醒看起来像今晚就响。
- * 来源被关掉时直接说「来源已关」——时间还在，但到点不会发，写时间等于骗人。
+ * 「本周」分组**不再**把星期塞进这一行（原来写 `周三 08:00`）：150px 的列里
+ * 那串字会被卡片挤成两行，而且每周三的提醒本来应该一直说「每周三」，
+ * 不是到了本周才提一次。星期改由下面的频率行承担（`每周三`）。
  */
-function whenText(
-  item: ReminderItem,
-  opts?: { withDay?: boolean; sourceOff?: boolean }
-): string {
+function whenMain(item: ReminderItem): string {
   if (!item.enabled) return "已暂停";
-  if (opts?.sourceOff) return "来源已关";
-  if (!item.next_fire_at) return item.freq === "once" ? "已触发过" : "等你设个时间";
-  const hm = fmtHM(toMs(item.next_fire_at));
-  if (!opts?.withDay) return hm;
-  const date = new Date(toMs(item.next_fire_at));
-  return `${WEEK_LABELS[(date.getDay() + 6) % 7]} ${hm}`;
+  if (!item.next_fire_at) return item.freq === "once" ? "已触发" : "没定时间";
+  return fmtHM(toMs(item.next_fire_at));
+}
+
+/** 时刻下面那行频率：它同时承担"这条会不会重复"和"是周几" */
+function freqText(item: ReminderItem): string {
+  if (item.freq === "weekly" && item.weekday !== null) {
+    return `每周${(WEEK_LABELS[item.weekday] ?? "每周").slice(1)}`;
+  }
+  if (item.freq === "weekdays") return "工作日";
+  if (item.freq === "interval") return `每 ${item.every_minutes || 0} 分钟`;
+  if (item.freq === "once") return "只一次";
+  return "每天";
+}
+
+/**
+ * 每分钟走一次的「现在」。
+ *
+ * 首帧刻意给 `null`：在 useState 的初值里直接取当前时间，会让服务端渲染与
+ * 首次客户端渲染拿到两个不同的时间，hydration 直接对不上；在渲染期取当前时间
+ * 还会被 `react-hooks/purity` 判红（同一个组件两次渲染结果不同）。
+ * 拿不到就先把那根竖线藏起来，一秒后它自己出现。
+ */
+function useNowMinute(): number | null {
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const tick = () => {
+      if (alive) setNow(Date.now());
+    };
+    // 用 setTimeout 而不是在 effect 里同步 setState：后者会触发
+    // react-hooks/set-state-in-effect（首帧级联渲染）。
+    const first = window.setTimeout(tick, 0);
+    const id = window.setInterval(tick, 60_000);
+    return () => {
+      alive = false;
+      window.clearTimeout(first);
+      window.clearInterval(id);
+    };
+  }, []);
+  return now;
+}
+
+// ==================== 今天的时间轴 ====================
+
+type AxisNode = { id: string; label: string; pct: number; layer: number };
+
+/**
+ * 24 小时轴。
+ *
+ * 两条通道：层 0 标签在轴上方、层 1 在轴下方。层由「与同层上一个节点的分钟差」
+ * 决定，不是用像素量标签宽度 —— 容器宽度在 JS 里也算不准（会随 resize 变），
+ * 而"90 分钟内算挤"在 970 宽的桌面上成立。
+ *
+ * 手机上不标时间（CSS 里把 `em` 藏掉）：390 宽里 1 小时只值 14px，
+ * 而 `12:30` 这个标签本身要 34px，六个点必然连成 `10:2712:3015:00`。
+ * 那时轴只承担一件事——「今天忙在哪个时段、现在到哪了」，具体几点由卡片左侧给。
+ */
+function TodayAxis({
+  items,
+  now,
+  onJump,
+}: {
+  items: ReminderItem[];
+  now: number | null;
+  onJump: (id: string) => void;
+}) {
+  const nodes = useMemo<AxisNode[]>(() => {
+    const list = items
+      .filter((i) => i.next_fire_at)
+      .map((i) => {
+        const d = new Date(toMs(i.next_fire_at as number));
+        return { id: i.id, min: d.getHours() * 60 + d.getMinutes(), label: fmtHM(d) };
+      })
+      .sort((a, b) => a.min - b.min);
+    const last: (number | null)[] = [null, null];
+    return list.map((n) => {
+      let layer = last.findIndex((m) => m === null || n.min - m >= AXIS_MIN_GAP);
+      // 两层都挤满（三条提醒挨在一个半小时里）：允许重叠，总比挤成 3 行高好
+      if (layer === -1) layer = 0;
+      last[layer] = n.min;
+      const raw = (n.min / 1440) * 100;
+      return {
+        id: n.id,
+        label: n.label,
+        pct: Math.min(100 - AXIS_EDGE, Math.max(AXIS_EDGE, raw)),
+        layer,
+      };
+    });
+  }, [items]);
+
+  const nowMin = useMemo(() => {
+    if (now === null) return null;
+    const d = new Date(now);
+    return d.getHours() * 60 + d.getMinutes();
+  }, [now]);
+
+  const nowLabel = useMemo(() => (now === null ? "" : fmtHM(now)), [now]);
+
+  return (
+    <>
+      <div className="rem-axis" role="group" aria-label="今天的提醒时间轴">
+        <div className="rem-axis-rail" />
+        {nowMin !== null ? (
+          <div
+            className="rem-axis-now"
+            style={{ left: `${(nowMin / 1440) * 100}%` }}
+            aria-hidden="true"
+            title={`现在 ${nowLabel}`}
+          >
+            <b>{nowLabel}</b>
+          </div>
+        ) : null}
+        {nodes.map((n) => (
+          <button
+            key={n.id}
+            type="button"
+            className="rem-axis-node"
+            data-layer={n.layer}
+            style={{ left: `${n.pct}%` }}
+            onClick={() => onJump(n.id)}
+            title={`${n.label} · 跳到这条`}
+            aria-label={`${n.label} 的提醒`}
+          >
+            <span aria-hidden="true" />
+            <em>{n.label}</em>
+          </button>
+        ))}
+      </div>
+      <div className="rem-axis-ends" aria-hidden="true">
+        <span>0:00</span>
+        <span>24:00</span>
+      </div>
+    </>
+  );
 }
 
 // ==================== 卡片 ====================
@@ -84,8 +225,9 @@ function ReminderCard({
   onCloseSource,
   onSnooze,
   onOpenSources,
-  withDay,
   sourceOff,
+  flash,
+  nowNumber,
 }: {
   item: ReminderItem;
   sourceLabel: string;
@@ -95,124 +237,112 @@ function ReminderCard({
   onCloseSource: (item: ReminderItem) => void;
   onSnooze: (item: ReminderItem) => void;
   onOpenSources: () => void;
-  withDay: boolean;
   sourceOff: boolean;
+  flash: boolean;
+  /** 「现在」的毫秒数；null = 还没拿到（首帧），这时不显示倒计时 */
+  nowNumber: number | null;
 }) {
   const [open, setOpen] = useState(false);
   const canCloseSource = item.source !== "manual" && item.source !== "system";
+  const dim = !item.enabled || sourceOff;
+
+  // 宽屏右侧那句「还有 3 小时」：970px 的卡如果只看左边 300px，
+  // 右边三分之二永远是空的 —— 与其留白，不如回答"我还能歇多久"。
+  const rest = useMemo(() => {
+    if (nowNumber === null || !item.enabled || !item.next_fire_at || sourceOff) return null;
+    return fmtRemaining(toMs(item.next_fire_at), new Date(nowNumber));
+  }, [nowNumber, item.enabled, item.next_fire_at, sourceOff]);
+
+  // 每个动作点完都先收起菜单：留着它，用户下一次点卡片会以为没响应
+  const run = (fn: () => void) => () => {
+    setOpen(false);
+    fn();
+  };
 
   return (
-    <div
-      className="card card-pad"
-      style={{ opacity: item.enabled && !sourceOff ? 1 : 0.62 }}
+    <article
+      className="rem-card"
+      id={`rem-card-${item.id}`}
+      data-off={dim ? "1" : undefined}
+      data-flash={flash ? "1" : undefined}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full bg-[var(--canvas-sunk)] px-2 py-0.5 text-[11px] text-[var(--ink-3)]">
-              {sourceLabel}
-            </span>
-            <span className="text-[11px] text-[var(--ink-3)]">
-              {ACTION_LABEL[item.action] || item.action}
-            </span>
-          </div>
-          <p className="mt-1 truncate text-[15px] font-medium text-[var(--ink)]">{item.title}</p>
-          {item.source_note ? (
-            <p className="mt-0.5 line-clamp-1 text-[12px] text-[var(--ink-3)]">
-              来源：{item.source_note}
-            </p>
-          ) : null}
-        </div>
-        <div className="shrink-0 text-right">
-          <p className="text-[15px] font-medium tabular-nums text-[var(--ink)]">
-            {whenText(item, { withDay, sourceOff })}
-          </p>
-          <p className="text-[11px] text-[var(--ink-3)]">
-            {item.freq === "once"
-              ? "只一次"
-              : item.freq === "weekly" && item.weekday !== null
-                ? // 「本周」分组的时间已经带了星期，再写一遍就成了「周三 08:00 / 周三」
-                  withDay
-                  ? "每周"
-                  : WEEK_LABELS[item.weekday] || "每周"
-                : item.freq === "weekdays"
-                  ? "工作日"
-                  : item.freq === "interval"
-                    ? `每 ${item.every_minutes || 0} 分钟`
-                    : "每天"}
-          </p>
-        </div>
+      <div className="rem-when">
+        {whenMain(item)}
+        <small>{freqText(item)}</small>
       </div>
 
-      <div className="mt-2 flex items-center gap-3 text-[12px]">
-        {sourceOff ? (
-          // 来源关着时，点「暂停这条」只会把单条也关掉，动作和用户想要的相反。
-          // 直接给一个去设置页的入口，比让他自己找更清楚。
-          <button
-            type="button"
-            className="text-[var(--accent-ink)] hover:underline"
-            onClick={onOpenSources}
-          >
-            去打开来源
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="text-[var(--accent-ink)] hover:underline"
-            onClick={() => onToggle(item)}
-          >
-            {item.enabled ? "暂停这条" : "恢复这条"}
-          </button>
-        )}
+      <div className="rem-main">
+        {/* 标题本身就是最高频的入口（改这条）。它比在卡片底下挂一排 11px
+            灰字可点得多，也把「每张卡 4 个可点」压到 2 个。 */}
         <button
           type="button"
-          className="text-[var(--accent-ink)] hover:underline"
+          className="rem-title"
           onClick={() => onEdit(item)}
+          title="改时间或标题"
         >
-          改时间/标题
+          {item.title}
         </button>
-        <button
-          type="button"
-          className="ml-auto text-[var(--ink-3)] hover:text-[var(--ink)]"
-          aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
-        >
-          更多
-        </button>
+        <p className="rem-meta">
+          <b>{sourceLabel}</b>
+          <span> · {ACTION_LABEL[item.action] || item.action}</span>
+          {item.source_note ? <span> · {item.source_note}</span> : null}
+          {sourceOff ? <span> · 来源已关</span> : null}
+        </p>
       </div>
+
+      <span className="rem-rest" aria-hidden={rest ? undefined : true}>
+        {rest}
+      </span>
+
+      <button
+        type="button"
+        className="rem-morebtn"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label={`「${item.title}」的更多动作`}
+        onClick={() => setOpen((v) => !v)}
+      >
+        ⋯
+      </button>
 
       {open ? (
-        <div className="mt-2 flex flex-wrap items-center gap-3 border-t border-[var(--line)] pt-2 text-[12px]">
-          {item.enabled && !sourceOff ? (
-            <button
-              type="button"
-              className="text-[var(--ink-3)] hover:text-[var(--ink)]"
-              onClick={() => onSnooze(item)}
-            >
-              推迟 10 分钟
+        <>
+          <div className="rem-scrim" onClick={() => setOpen(false)} aria-hidden="true" />
+          <div className="rem-menu" role="menu">
+            <button type="button" role="menuitem" onClick={run(() => onEdit(item))}>
+              改时间 / 标题
             </button>
-          ) : null}
-          {canCloseSource ? (
-            <button
-              type="button"
-              className="text-[var(--ink-3)] hover:text-[var(--ink)]"
-              onClick={() => onCloseSource(item)}
-            >
-              不再提醒「{sourceLabel}」
+            {item.enabled && !sourceOff ? (
+              <button type="button" role="menuitem" onClick={run(() => onSnooze(item))}>
+                推迟 10 分钟
+              </button>
+            ) : null}
+            {sourceOff ? (
+              // 来源关着时「暂停这条」会把单条也关掉，和用户想要的相反 ——
+              // 直接把他送到能做决定的地方。
+              <button type="button" role="menuitem" onClick={run(onOpenSources)}>
+                去打开「{sourceLabel}」来源
+              </button>
+            ) : (
+              <button type="button" role="menuitem" onClick={run(() => onToggle(item))}>
+                {item.enabled ? "暂停这条" : "恢复这条"}
+              </button>
+            )}
+            <hr />
+            {canCloseSource ? (
+              <button type="button" role="menuitem" onClick={run(() => onCloseSource(item))}>
+                不再提醒「{sourceLabel}」
+              </button>
+            ) : (
+              <p>这条是你自己建的，只能删掉</p>
+            )}
+            <button type="button" role="menuitem" data-danger="1" onClick={run(() => onDelete(item))}>
+              删除
             </button>
-          ) : (
-            <span className="text-[var(--ink-3)]">这条是你自己建的，只能删掉</span>
-          )}
-          <button
-            type="button"
-            className="ml-auto text-[var(--danger)] hover:underline"
-            onClick={() => onDelete(item)}
-          >
-            删除
-          </button>
-        </div>
+          </div>
+        </>
       ) : null}
-    </div>
+    </article>
   );
 }
 
@@ -221,6 +351,7 @@ function ReminderCard({
 function ReminderDrawer({
   open,
   editing,
+  sourceName,
   sources,
   busy,
   onClose,
@@ -228,21 +359,19 @@ function ReminderDrawer({
 }: {
   open: boolean;
   editing: ReminderItem | null;
+  /** 编辑时这条的来源叫法（来源只读，所以要单独传进来） */
+  sourceName: string;
   sources: ReminderSource[];
   busy: boolean;
   onClose: () => void;
-  onSubmit: (draft: ReminderDraft, overrideAt: string | null) => void;
+  onSubmit: (draft: ReminderDraft) => void;
 }) {
   // 初值直接从 `editing` 取，**不写 effect**：调用方用 `key` 控制重挂载，
   // 打开另一条时组件是新的实例，"同步 props 到 state"这件事根本不需要发生。
   // （写成 effect 会触发 react-hooks/set-state-in-effect：级联渲染。）
   const [title, setTitle] = useState(editing?.title ?? "");
-  const [at, setAt] = useState(
-    (editing?.override?.at || editing?.at || "20:00").slice(0, 5)
-  );
-  const [freq, setFreq] = useState<ReminderFreq>(
-    (editing?.freq as ReminderFreq) || "daily"
-  );
+  const [at, setAt] = useState((editing?.override?.at || editing?.at || "20:00").slice(0, 5));
+  const [freq, setFreq] = useState<ReminderFreq>((editing?.freq as ReminderFreq) || "daily");
   const [weekday, setWeekday] = useState(editing?.weekday ?? 0);
   const [action, setAction] = useState<ReminderAction>(
     (editing?.action as ReminderAction) || "notify"
@@ -252,113 +381,62 @@ function ReminderDrawer({
   if (!open) return null;
 
   const canSubmit = title.trim().length > 0 && !busy;
+  // 来源提醒的频率由来源决定（课表每周三就是每周三），界面上不给改。
+  // 自己定的 / 每日回顾可以改，且改了要真的提交 —— 否则就是一个能点不生效的控件。
+  const isOwn = !editing || editing.source === "manual" || editing.source === "system";
+
+  const pickSource = editing ? sourceName : (sources.find((s) => s.key === source)?.label ?? "自己定的");
+  const freqLine =
+    freq === "weekly"
+      ? `每周${(WEEK_LABELS[weekday] ?? "周一").slice(1)} ${at}`
+      : freq === "once"
+        ? `一次 · ${at}`
+        : `${FREQ_OPTIONS.find((o) => o.value === freq)?.label ?? "每天"} ${at}`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 p-0 sm:items-center sm:p-4">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 sm:items-center sm:p-4">
       <div
-        className="card w-full max-w-md overflow-y-auto"
+        className="card rem-drawer-card w-full max-w-md overflow-y-auto"
         style={{ maxHeight: "88dvh" }}
         role="dialog"
         aria-label={editing ? "修改提醒" : "新建提醒"}
       >
-        <div className="card-head">
+        <div className="card-head px-4 pb-2 pt-4">
           <h3 className="card-title">{editing ? "修改这条提醒" : "新建提醒"}</h3>
-          <button type="button" className="text-[var(--ink-3)]" onClick={onClose} aria-label="关闭">
+          <button
+            type="button"
+            className="text-[var(--text-3)]"
+            onClick={onClose}
+            aria-label="关闭"
+          >
             <CornIcon name="close" className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="space-y-4 p-4">
-          <label className="block">
-            <span className="text-[12px] text-[var(--ink-3)]">提醒什么</span>
+        <div className="space-y-4 px-4 pb-4">
+          {/* ① 说什么 */}
+          <Field label="提醒什么">
             <input
-              className="mt-1 w-full rounded-lg border border-[var(--line)] bg-[var(--canvas)] px-3 py-2"
+              className="input"
               value={title}
               maxLength={60}
               placeholder="例如：复盘今天"
               onChange={(e) => setTitle(e.target.value)}
             />
-          </label>
+          </Field>
 
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block">
-              <span className="text-[12px] text-[var(--ink-3)]">怎么重复</span>
-              <select
-                className="mt-1 w-full rounded-lg border border-[var(--line)] bg-[var(--canvas)] px-3 py-2"
-                value={freq}
-                onChange={(e) => setFreq(e.target.value as ReminderFreq)}
-              >
-                {FREQ_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block">
-              <span className="text-[12px] text-[var(--ink-3)]">几点</span>
-              <input
-                type="time"
-                className="mt-1 w-full rounded-lg border border-[var(--line)] bg-[var(--canvas)] px-3 py-2"
-                value={at}
-                onChange={(e) => setAt(e.target.value)}
-              />
-            </label>
-          </div>
-
-          {freq === "weekly" ? (
-            <label className="block">
-              <span className="text-[12px] text-[var(--ink-3)]">周几</span>
-              <select
-                className="mt-1 w-full rounded-lg border border-[var(--line)] bg-[var(--canvas)] px-3 py-2"
-                value={weekday}
-                onChange={(e) => setWeekday(Number(e.target.value))}
-              >
-                {WEEK_LABELS.map((label, index) => (
-                  <option key={label} value={index}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-
-          <label className="block">
-            <span className="text-[12px] text-[var(--ink-3)]">到点之后</span>
-            <select
-              className="mt-1 w-full rounded-lg border border-[var(--line)] bg-[var(--canvas)] px-3 py-2"
-              value={action}
-              onChange={(e) => setAction(e.target.value as ReminderAction)}
-            >
-              {ACTION_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          {/*
-           * 「怎么送达」目前只有 Web Push 一条路：`service/reminder_tick.py` 只认
-           * channels 里的 push，写别的（inapp / telegram）会被拦下并记进流水。
-           * 所以这里**不放选择器** —— 一个能点、点了却不生效的选项，
-           * 比根本没有这个选项更让人以为"设置过了"。等第二种通道真上线再换成 select。
-           */}
-          <div className="rounded-lg border border-[var(--line)] bg-[var(--canvas)] px-3 py-2">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[12px] text-[var(--ink-3)]">怎么送达</span>
-              <span className="text-[13px] text-[var(--ink)]">推送通知</span>
+          {/* ② 来源（规格顺序的第一位）：它决定「关掉这个来源时，这条跟不跟着停」 */}
+          {editing ? (
+            <div>
+              <span className="f">这是关于什么的</span>
+              <p className="rem-ro">
+                来自「{sourceName}」。来源建好之后不能换，要换就删掉重立一条。
+              </p>
             </div>
-            <p className="mt-1 text-[12px] text-[var(--ink-3)]">
-              目前只支持这一种：到点出现在设备通知栏，前提是「设置」页里的推送是开着的。
-            </p>
-          </div>
-
-          {editing ? null : (
-            <label className="block">
-              <span className="text-[12px] text-[var(--ink-3)]">算哪个来源</span>
+          ) : (
+            <Field label="这是关于什么的" hint="关掉某个来源时，这个来源下的提醒会一起停">
               <select
-                className="mt-1 w-full rounded-lg border border-[var(--line)] bg-[var(--canvas)] px-3 py-2"
+                className="input"
                 value={source}
                 onChange={(e) => setSource(e.target.value)}
               >
@@ -369,40 +447,131 @@ function ReminderDrawer({
                   </option>
                 ))}
               </select>
-            </label>
+            </Field>
           )}
 
-          <div className="flex items-center justify-end gap-2 pt-1">
-            <button
-              type="button"
-              className="rounded-lg px-3 py-2 text-[13px] text-[var(--ink-3)]"
-              onClick={onClose}
+          {/* ③ 什么时候 */}
+          <div>
+            <div className="rem-step">
+              什么时候提醒你 <i>到点才响；那天没内容就不响</i>
+            </div>
+            {isOwn ? (
+              <>
+                <Seg
+                  options={FREQ_OPTIONS}
+                  value={freq}
+                  onChange={setFreq}
+                  ariaLabel="重复方式"
+                  stretch
+                />
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <Field label="几点">
+                    <input
+                      type="time"
+                      className="input"
+                      value={at}
+                      onChange={(e) => setAt(e.target.value)}
+                    />
+                  </Field>
+                  {freq === "weekly" ? (
+                    <Field label="周几">
+                      <select
+                        className="input"
+                        value={weekday}
+                        onChange={(e) => setWeekday(Number(e.target.value))}
+                      >
+                        {WEEK_LABELS.map((label, index) => (
+                          <option key={label} value={index}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                  ) : null}
+                </div>
+              </>
+            ) : (
+              // 来源提醒：频率跟着来源走，能改的只有「几点」（落 override）
+              <>
+                <p className="rem-ro">
+                  跟着「{sourceName}」走：{editing ? freqText(editing) : ""}
+                </p>
+                <div className="mt-2">
+                  <Field label="改到几点" hint="只改这条，不动来源里的时间">
+                    <input
+                      type="time"
+                      className="input"
+                      value={at}
+                      onChange={(e) => setAt(e.target.value)}
+                    />
+                  </Field>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* ④ 做什么 */}
+          <Field label="到点之后">
+            <select
+              className="input"
+              value={action}
+              onChange={(e) => setAction(e.target.value as ReminderAction)}
             >
+              {ACTION_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          {/*
+           * 「怎么送达」：`service/reminder_tick.py` 只认 channels 里的 push，
+           * 写别的（inapp / telegram）会被拦下并记进流水。所以这里**不放选择器** ——
+           * 一个能点、点了却不生效的选项，比没有这个选项更让人以为"设置过了"。
+           * 也不用输入框的外形，否则看着还是像能选。
+           */}
+          <div className="rem-deliver">
+            <b>怎么送达 · 推送通知</b>
+            <span>
+              目前只支持这一种：到点出现在设备通知栏，前提是「设置」页里的推送是开着的。
+            </span>
+          </div>
+        </div>
+
+        {/* 底部预览：把上面四个字段的结论合成一句，省得用户回头再核一遍 */}
+        <footer className="rem-preview">
+          <p title={`${freqLine} · ${ACTION_LABEL[action]} · ${pickSource}`}>
+            <b>{freqLine}</b>
+            <span>
+              {" "}
+              · {ACTION_LABEL[action]} · {pickSource}
+            </span>
+          </p>
+          <div className="rem-preview-acts">
+            <button type="button" className="btn-import" onClick={onClose}>
               取消
             </button>
             <button
               type="button"
+              className="btn-new"
               disabled={!canSubmit}
-              className="rounded-lg bg-[var(--ink)] px-4 py-2 text-[13px] text-[var(--paper)] disabled:opacity-50"
               onClick={() =>
-                onSubmit(
-                  {
-                    title: title.trim(),
-                    source,
-                    freq,
-                    at,
-                    weekday: freq === "weekly" ? weekday : null,
-                    action,
-                    channels: "push",
-                  },
-                  freq === "weekly" ? null : at
-                )
+                onSubmit({
+                  title: title.trim(),
+                  source,
+                  freq,
+                  at,
+                  weekday: freq === "weekly" ? weekday : null,
+                  action,
+                  channels: "push",
+                })
               }
             >
               {busy ? "保存中…" : "保存"}
             </button>
           </div>
-        </div>
+        </footer>
       </div>
     </div>
   );
@@ -423,7 +592,11 @@ export default function RemindersPage() {
   const [drawer, setDrawer] = useState(false);
   const [editing, setEditing] = useState<ReminderItem | null>(null);
   const [busy, setBusy] = useState(false);
+  const [flash, setFlash] = useState<string | null>(null);
   const { toasts, showToast } = useToast();
+  // 「现在」只在这一层取一次，时间轴与卡片都读它 ——
+  // 两处各起一个定时器会各走各的，遇到跨零界点还会互相差一分钟。
+  const now = useNowMinute();
 
   // 取数拆成「拉」和「落地」两半：effect 里必须先把 await 走完再 setState，
   // 否则会被 react-hooks/set-state-in-effect 判成级联渲染（同页其他地方也一样）。
@@ -470,8 +643,7 @@ export default function RemindersPage() {
 
   // 「今天」由服务端 summary 判定，前端不自己算日期：
   //  - 服务端用的是他自己的时区和"今天"边界，前端再算一遍必然在跨零点时打架；
-  //  - 组件里调 `Date.now()` 是渲染期的不纯调用（react-hooks/purity），
-  //    会让同一份数据在不同时刻渲染出不同结果，测试也没法固定。
+  //  - 组件里调 `Date.now()` 是渲染期的不纯调用（react-hooks/purity）。
   const groups = useMemo(() => {
     const todayIds = new Set((summary?.today ?? []).map((i) => i.id));
     const active = items.filter((i) => i.enabled);
@@ -505,21 +677,29 @@ export default function RemindersPage() {
   }, [sources]);
 
   const submit = useCallback(
-    async (draft: ReminderDraft, overrideAt: string | null) => {
+    async (draft: ReminderDraft) => {
       setBusy(true);
       try {
         if (editing) {
-          // 改时间要落 override 还是 at：来源提醒（课表/委托）不该被写回来源，
-          // 但手工提醒没有来源，直接改自己的 at 更直白。
+          // 改时间落 override 还是 at：来源提醒（课表/委托/DDL）不该被写回来源，
+          // 手工提醒没有来源，直接改自己的 at 更直白。
+          //
+          // ⚠️ 这里以前对 weekly 传的是空值，后端 `_validate` 会直接 400
+          //    （「时间要写成 HH:MM」）—— 表现为「每周」提醒连改标题都保存不了。
+          //    现在一律传真实时刻；频率只在「自己定的 / 每日回顾」上提交，
+          //    来源提醒的频率跟着来源走，传上去反而会把来源的规则改掉。
           const isOwn = editing.source === "manual" || editing.source === "system";
+          // 时刻一定要是字符串：`time` 输入框永远有值（默认 20:00），
+          // 而 `override.at` 的类型不接受 null —— 以前 weekly 传 null 正是这里出的错。
+          const at = (draft.at ?? editing.override?.at ?? editing.at ?? "20:00").slice(0, 5);
           const body = isOwn
-            ? { title: draft.title, at: overrideAt }
-            : {
+            ? {
                 title: draft.title,
-                override: overrideAt
-                  ? { title: draft.title, at: overrideAt }
-                  : { title: draft.title },
-              };
+                at,
+                freq: draft.freq,
+                weekday: draft.weekday,
+              }
+            : { title: draft.title, override: { title: draft.title, at } };
           await api.reminders.patch(editing.id, body);
           showToast("success", "已更新");
         } else {
@@ -615,83 +795,88 @@ export default function RemindersPage() {
     [showToast]
   );
 
-  const renderGroup = (
-    title: string,
-    list: ReminderItem[],
-    hint?: string,
-    withDay = false
-  ) => (
-    <section className="mt-4">
-      <div className="mb-2 flex items-baseline gap-2">
-        <h3 className="text-[14px] font-medium text-[var(--ink)]">{title}</h3>
-        <span className="text-[12px] text-[var(--ink-3)]">{list.length} 条</span>
-        {hint ? <span className="text-[12px] text-[var(--ink-3)]">· {hint}</span> : null}
-      </div>
-      {list.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-[var(--line)] px-3 py-4 text-[13px] text-[var(--ink-3)]">
-          这里还空着
-        </p>
-      ) : (
-        <div className="space-y-2">
-          {list.map((item) => (
-            <ReminderCard
-              key={item.id}
-              item={item}
-              sourceLabel={sourceLabel[item.source] || item.source}
-              onEdit={(it) => {
-                setEditing(it);
-                setDrawer(true);
-              }}
-              onToggle={toggle}
-              onDelete={remove}
-              onCloseSource={closeSource}
-              onSnooze={snooze}
-              onOpenSources={() => setTab("settings")}
-              withDay={withDay}
-              sourceOff={sourceOn[item.source] === false}
-            />
-          ))}
-        </div>
-      )}
-    </section>
+  /** 时间轴节点 → 滚到那张卡片并闪一下，否则滚过去也不知道该看哪条 */
+  const jump = useCallback((id: string) => {
+    setFlash(id);
+    const el = document.getElementById(`rem-card-${id}`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => setFlash((cur) => (cur === id ? null : cur)), 1600);
+  }, []);
+
+  /** 今天还没到点的条数：回答「我还能歇多久」，比再写一遍「6 条」有用 */
+  const upcomingToday = useMemo(() => {
+    if (now === null) return null;
+    const d = new Date(now);
+    const minute = d.getHours() * 60 + d.getMinutes();
+    return groups.today.filter((i) => {
+      if (!i.next_fire_at) return false;
+      const t = new Date(toMs(i.next_fire_at));
+      return t.getHours() * 60 + t.getMinutes() > minute;
+    }).length;
+  }, [groups.today, now]);
+
+  const openDrawer = useCallback((item: ReminderItem | null) => {
+    setEditing(item);
+    setDrawer(true);
+  }, []);
+
+  const card = (item: ReminderItem) => (
+    <ReminderCard
+      key={item.id}
+      item={item}
+      sourceLabel={sourceLabel[item.source] || item.source}
+      onEdit={openDrawer}
+      onToggle={toggle}
+      onDelete={remove}
+      onCloseSource={closeSource}
+      onSnooze={snooze}
+      onOpenSources={() => setTab("settings")}
+      sourceOff={sourceOn[item.source] === false}
+      flash={flash === item.id}
+      nowNumber={now}
+    />
   );
+
+  // 空分组整段不渲染：原来三个分组都画标题，新账号首屏读到的是
+  // 「今天 0 条 / 本周 0 条 / 已暂停 0 条」—— 三个零不提供任何信息。
+  const renderGroup = (title: string, list: ReminderItem[]) => {
+    if (list.length === 0) return null;
+    return (
+      <section className="mt-4">
+        <h3 className="mb-2 text-[var(--fs-sm)] font-medium text-[var(--text-2)]">
+          {title} <span className="font-normal text-[var(--text-3)]">· {list.length} 条</span>
+        </h3>
+        <div className="space-y-2">{list.map(card)}</div>
+      </section>
+    );
+  };
 
   return (
     <PageShell
+      compact
       eyebrow="P7 · 提醒"
       title="提醒"
       sub="什么时候 · 说什么 · 做什么。到点没内容就不打扰你。"
       actions={
         <div className="flex items-center gap-2">
-          <div className="flex rounded-lg border border-[var(--line)] p-0.5">
+          <div className="seg" role="group" aria-label="视图">
             <button
               type="button"
-              className={`rounded-md px-3 py-1 text-[12px] ${
-                tab === "list" ? "bg-[var(--ink)] text-[var(--paper)]" : "text-[var(--ink-3)]"
-              }`}
+              aria-pressed={tab === "list"}
               onClick={() => setTab("list")}
             >
               提醒
             </button>
             <button
               type="button"
-              className={`rounded-md px-3 py-1 text-[12px] ${
-                tab === "settings" ? "bg-[var(--ink)] text-[var(--paper)]" : "text-[var(--ink-3)]"
-              }`}
+              aria-pressed={tab === "settings"}
               onClick={() => setTab("settings")}
             >
               设置
             </button>
           </div>
           {tab === "list" ? (
-            <button
-              type="button"
-              className="btn-new"
-              onClick={() => {
-                setEditing(null);
-                setDrawer(true);
-              }}
-            >
+            <button type="button" className="btn-new" onClick={() => openDrawer(null)}>
               + 新建
             </button>
           ) : null}
@@ -702,48 +887,52 @@ export default function RemindersPage() {
 
       {!loading && tab === "list" ? (
         <>
-          {/* 今天的时间轴：只显示今天会响的那几条，让人一眼看到"今天还有什么" */}
-          <section className="card card-pad">
-            <div className="flex items-baseline justify-between">
-              <h3 className="card-title">今天</h3>
-              <span className="text-[12px] text-[var(--ink-3)]">
-                {summary ? `${summary.today_count} 条` : "—"}
-              </span>
-            </div>
-            {groups.today.length === 0 ? (
-              <p className="mt-2 text-[13px] text-[var(--ink-3)]">今天没有要到点的提醒。</p>
-            ) : (
-              <ul className="mt-2 flex flex-wrap gap-2">
-                {groups.today.map((item) => (
-                  <li
-                    key={item.id}
-                    className="flex items-center gap-2 rounded-full bg-[var(--canvas-sunk)] px-3 py-1 text-[12px]"
-                  >
-                    <span className="font-medium tabular-nums text-[var(--ink)]">
-                      {whenText(item, { sourceOff: sourceOn[item.source] === false })}
-                    </span>
-                    <span className="text-[var(--ink-3)]">{item.title}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
           {items.length === 0 ? (
-            <div className="mt-4">
-              <Callout icon="bulb">
-                <b>还没有提醒</b>
-                <br />
-                点右上角「+ 新建」定一条，比如每天 22:00「复盘今天」。
-                <br />
-                到点时会按你设的方式提醒；没有内容可说的日子不会响。
-              </Callout>
-            </div>
-          ) : null}
+            <Callout icon="bulb">
+              <b>还没有提醒</b>
+              <br />
+              点右上角「+ 新建」定一条，比如每天 22:00「复盘今天」。
+              <br />
+              到点时会按你设的方式提醒；没有内容可说的日子不会响。
+            </Callout>
+          ) : (
+            <>
+              {/* 今天这一组：标题 → 24 小时轴 → 卡片。
+                  「今天」只出现一次（原来轴卡片和分组标题各写一遍）。
+                  轴只为回答「忙在哪个时段、现在走到哪、还剩几条」，
+                  卡片里已经有完整时间，所以轴上不重复标题。 */}
+              <section className="mt-4">
+                <div className="mb-2 flex items-baseline justify-between gap-2">
+                  <h3 className="text-[var(--fs-sm)] font-medium text-[var(--text-2)]">
+                    今天{" "}
+                    <span className="font-normal text-[var(--text-3)]">
+                      · {groups.today.length} 条
+                    </span>
+                  </h3>
+                  <span className="text-[var(--fs-xs)] text-[var(--text-3)]">
+                    {groups.today.length === 0
+                      ? "今天没有要到点的提醒"
+                      : upcomingToday === null
+                        ? "按时间排"
+                        : upcomingToday === 0
+                          ? "今天的都过完了"
+                          : `之后还有 ${upcomingToday} 条`}
+                  </span>
+                </div>
+                {groups.today.length > 0 ? (
+                  <>
+                    <div className="card card-pad">
+                      <TodayAxis items={groups.today} now={now} onJump={jump} />
+                    </div>
+                    <div className="mt-2 space-y-2">{groups.today.map(card)}</div>
+                  </>
+                ) : null}
+              </section>
 
-          {renderGroup("今天", groups.today, "今天会响的")}
-          {renderGroup("本周", groups.week, "之后要响的", true)}
-          {renderGroup("已暂停", groups.paused, "不会响，点恢复就继续")}
+              {renderGroup("本周", groups.week)}
+              {renderGroup("已暂停", groups.paused)}
+            </>
+          )}
         </>
       ) : null}
 
@@ -751,21 +940,21 @@ export default function RemindersPage() {
         <div className="space-y-4">
           <section className="card card-pad">
             <h3 className="card-title">静默时段</h3>
-            <p className="mt-1 text-[12px] text-[var(--ink-3)]">
+            <p className="mt-1 text-[var(--fs-xs)] text-[var(--text-3)]">
               这段时间里到点的提醒<b>不响也不补发</b>，直接顺到下一个时段。
             </p>
             <div className="mt-3 flex items-center gap-2">
               <input
                 type="time"
-                className="rounded-lg border border-[var(--line)] bg-[var(--canvas)] px-3 py-2"
+                className="input !w-auto"
                 value={prefs?.quiet_start || "23:00"}
                 onChange={(e) => setPrefs((p) => (p ? { ...p, quiet_start: e.target.value } : p))}
                 onBlur={(e) => void savePrefs({ quiet_start: e.target.value })}
               />
-              <span className="text-[var(--ink-3)]">到</span>
+              <span className="text-[var(--fs-xs)] text-[var(--text-3)]">到</span>
               <input
                 type="time"
-                className="rounded-lg border border-[var(--line)] bg-[var(--canvas)] px-3 py-2"
+                className="input !w-auto"
                 value={prefs?.quiet_end || "07:00"}
                 onChange={(e) => setPrefs((p) => (p ? { ...p, quiet_end: e.target.value } : p))}
                 onBlur={(e) => void savePrefs({ quiet_end: e.target.value })}
@@ -775,7 +964,7 @@ export default function RemindersPage() {
 
           <section className="card card-pad">
             <h3 className="card-title">每天最多几条</h3>
-            <p className="mt-1 text-[12px] text-[var(--ink-3)]">
+            <p className="mt-1 text-[var(--fs-xs)] text-[var(--text-3)]">
               同一分钟的多条会合并成一条通知，合并算一条。上限只挡「通知太多」，
               不挡你建多少条提醒。
             </p>
@@ -784,14 +973,14 @@ export default function RemindersPage() {
                 type="number"
                 min={prefs?.cap_min ?? 1}
                 max={prefs?.cap_max ?? 20}
-                className="w-24 rounded-lg border border-[var(--line)] bg-[var(--canvas)] px-3 py-2"
+                className="input !w-24"
                 value={prefs?.daily_cap ?? 6}
                 onChange={(e) =>
                   setPrefs((p) => (p ? { ...p, daily_cap: Number(e.target.value) } : p))
                 }
                 onBlur={(e) => void savePrefs({ daily_cap: Number(e.target.value) })}
               />
-              <span className="text-[12px] text-[var(--ink-3)]">
+              <span className="text-[var(--fs-xs)] text-[var(--text-3)]">
                 条（{prefs?.cap_min ?? 1}–{prefs?.cap_max ?? 20}）
               </span>
             </div>
@@ -799,13 +988,17 @@ export default function RemindersPage() {
 
           <section className="card card-pad">
             <h3 className="card-title">来源</h3>
-            <p className="mt-1 text-[12px] text-[var(--ink-3)]">
+            <p className="mt-1 text-[var(--fs-xs)] text-[var(--text-3)]">
               关掉一个来源，它就不再给你发提醒（已经建好的那几条会一起停）。
             </p>
-            <div className="mt-3 space-y-2">
+            {/* 两列：7 个来源原来竖排 7 行、每行只有「名字 + 开关」，
+                右半边全是空的；分两列后行数减半，也不用滚动就看全。
+                开关**跟在名字后面**而不是推到列尾 —— 两列时列尾相邻，
+                会读成「四六级 ▢ 打卡 ▢」，分不清哪个开关属于谁。 */}
+            <div className="rem-srclist mt-3">
               {sources.map((s) => (
-                <div key={s.key} className="flex items-center justify-between gap-3">
-                  <span className="text-[13px] text-[var(--ink)]">{s.label}</span>
+                <div key={s.key} className="rem-src">
+                  <span className="text-[var(--fs-md)] text-[var(--text-1)]">{s.label}</span>
                   <Switch
                     checked={s.enabled}
                     label={s.label}
@@ -814,14 +1007,14 @@ export default function RemindersPage() {
                 </div>
               ))}
             </div>
-            <p className="mt-3 text-[12px] text-[var(--ink-3)]">
+            <p className="mt-3 text-[var(--fs-xs)] text-[var(--text-3)]">
               推送设备在「设置」页管，不在这里 —— 那是整个账号的推送通道，
               以后对话回复也可能用它。
             </p>
           </section>
 
           {prefs ? (
-            <p className="text-[12px] text-[var(--ink-3)]">
+            <p className="text-[var(--fs-xs)] text-[var(--text-3)]">
               静默 {prefs.quiet_start}–{prefs.quiet_end} · 每天最多 {prefs.daily_cap} 条
             </p>
           ) : null}
@@ -832,6 +1025,7 @@ export default function RemindersPage() {
         key={editing ? `edit-${editing.id}` : "new"}
         open={drawer}
         editing={editing}
+        sourceName={editing ? sourceLabel[editing.source] || editing.source : ""}
         sources={sources.filter((s) => s.enabled)}
         busy={busy}
         onClose={() => {
