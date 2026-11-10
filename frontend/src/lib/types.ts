@@ -1212,3 +1212,81 @@ export interface ReminderFire {
   detail: string | null;
   clicked_at: number | null;
 }
+
+// ---------- 待办 /api/tasks（2026-11-10，规格见 docs/待办与提醒_Phase1实施单） ----------
+
+/** 清单键。**英文键落库**，中文只在这里映射 —— 改文案不该触发数据迁移 */
+export type TaskListKey = "inbox" | "course" | "homework" | "club" | "life" | "exam";
+
+/** 0 普通 / 1 重要 / 2 紧急 */
+export type TaskPriority = 0 | 1 | 2;
+
+export type TaskStatus = "open" | "done";
+
+/** 待办的联动提醒状态。`last_*` 来自最近一条 reminder_fires，用于显示「已响 / 已跳过」 */
+export interface TaskReminderState {
+  id: string;
+  enabled: boolean;
+  next_fire_at: number | null;
+  last_status: string | null;
+  last_fired_at: number | null;
+  last_detail: string | null;
+}
+
+/**
+ * 一条待办。
+ *
+ * ★ `due_at`（最晚什么时候交）与 `remind_at`（什么时候提醒我）是**两个字段**，
+ *   永远不要在前端合成一个：混起来之后用户会问「我明明设了提醒，
+ *   为什么显示今天是截止」。只设 `due_at` 不会响（后端不建联动提醒）。
+ * ★ 时间一律 **Unix 秒**，不是毫秒。
+ */
+export interface Task {
+  id: string;
+  owner_id: string;
+  title: string;
+  note: string | null;
+  list_key: TaskListKey;
+  priority: TaskPriority;
+  status: TaskStatus;
+  due_at: number | null;
+  remind_at: number | null;
+  completed_at: number | null;
+  recurrence: "none";
+  parent_id: string | null;
+  sort_order: number;
+  created_at: number;
+  updated_at: number;
+  /** null = 没设提醒时间（或联动提醒还不存在） */
+  reminder: TaskReminderState | null;
+}
+
+export interface TaskDraft {
+  title: string;
+  note?: string | null;
+  list_key?: TaskListKey;
+  priority?: TaskPriority;
+  due_at?: number | null;
+  remind_at?: number | null;
+}
+
+/** 局部更新。显式 `null` = 清空（端点用 exclude_unset，能把 null 传下去） */
+export interface TaskPatch {
+  title?: string;
+  note?: string | null;
+  list_key?: TaskListKey;
+  priority?: TaskPriority;
+  due_at?: number | null;
+  remind_at?: number | null;
+}
+
+export interface TaskSummary {
+  today: number;
+  overdue: number;
+  upcoming: number;
+  all_open: number;
+  completed: number;
+  by_list: Partial<Record<TaskListKey, number>>;
+  /** 今天 / 逾期里最早的一条；没有就是 null */
+  next: Task | null;
+}

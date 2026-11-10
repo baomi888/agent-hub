@@ -19,10 +19,13 @@ SHELL = ROOT / "frontend" / "src" / "components" / "console" / "PageShell.tsx"
 
 # page.tsx 用 `// ==================== 段落 ====================` 划分，按段落取源码，
 # 免得断言「卡片里没有暂停按钮」时连抽屉里的字段一起算进来。
+#
+# 2026-11-10 Phase 0/1 之后段落变细了：待办卡片与联动提醒卡片各占一段、
+# 两个抽屉也各占一段。这里取的是**断言真正关心的那段**，不是最靠前的那段。
 SECTIONS = {
-    "axis": ("// ==================== 今天的时间轴", "// ==================== 卡片"),
-    "card": ("// ==================== 卡片", "// ==================== 抽屉"),
-    "drawer": ("// ==================== 抽屉", "// ==================== 页面"),
+    "axis": ("// ==================== 今天的时间轴", "// ==================== 推送健康条"),
+    "card": ("// ==================== 联动提醒卡片", "// ==================== 送达记录"),
+    "drawer": ("// ==================== 提醒抽屉（新建 / 修改）", "// ==================== 删除确认"),
 }
 
 
@@ -210,10 +213,16 @@ class TestAxis:
 
         服务端本来就把同一分钟的提醒并成一条通知；轴上画两枚只会互相压住，
         而且叠在上面的那枚永远点不到。
+
+        2026-11-10 起合并搬到了页面的 `axisEvents` 里（TodayAxis 只负责画，
+        待办与联动提醒要在同一张轴上排，就得在拿到两类数据的地方合）。
+        写法也从「取 Map 槽位再原地 push」换成「先摊平排序、再和上一枚比 min」——
+        原地 push 会被 react-hooks/immutability 判成改写外部值
+        （`r.title` 一进闭包就报 "value cannot be modified"）。
         """
-        axis = _section("axis")
-        assert "new Map<number," in axis
-        assert "buckets.get(min)" in axis, "同一分钟又被拆成两枚齿孔了"
+        page = _page()
+        assert "seeds].sort(" in page, "待办与联动提醒没有先按时间排成一列"
+        assert "last.min === min" in page, "同一分钟又被拆成两枚齿孔了"
 
     def test_dark_groove_goes_lighter(self):
         """深色下带子要比卡片**亮**一档，不能沿用浅色那套「比卡片暗」。
@@ -428,9 +437,13 @@ class TestGroupTitles:
             assert hint not in page, f"分组标题又挂回解释句「{hint}」"
 
     def test_empty_group_is_not_rendered(self):
-        """三个零不提供信息：空分组整段不渲染。"""
+        """三个零不提供信息：空分组整段不渲染。
+
+        变量名从 list 改成 children（Phase 1 的分组要同时装待办与联动提醒，
+        叫 list 会和「清单 list_key」撞名），语义不变：长度 0 就整段不渲染。
+        """
         page = _page()
-        assert "if (list.length === 0) return null;" in page
+        assert "if (children.length === 0) return null;" in page
 
 
 class TestCompactHead:
@@ -448,3 +461,59 @@ class TestCompactHead:
         names = {p.parent.name for p in users}
         assert names <= {"reminders"}, f"compact 被这些页面用上了：{names}"
 
+
+
+class TestPhase0Contracts:
+    """Phase 0 的五件事，全部写成**不该出现**的断言。
+
+    正着断言「健康条出现了」会把「任何状态都显示健康条」判成绿的，
+    所以这里反过来钉：正常态必须 `return null`、失败态不许报警、
+    已触发的一次性提醒不许混进「接下来」、删除取消不许改动任何东西。
+    """
+
+    def test_health_bar_hides_itself_when_push_is_healthy(self):
+        """推送正常 → 整块不渲染。顶部常年挂一条「一切正常」等于没信息。"""
+        page = _page()
+        assert "if (status.supported && status.subscribed) return null;" in page
+
+    def test_health_bar_says_nothing_when_the_endpoint_fails(self):
+        """`/api/push/status` 挂了 → 返回 null → 整块消失。
+
+        提醒页顶上报一个「推送状态获取失败」，用户既看不懂也修不了。
+        """
+        page = _page()
+        assert "if (!status) return null;" in page
+
+    def test_fire_diary_has_a_zero_state(self):
+        """一条流水都没有时说「还没响过」，不要留一个空白的 <ul>。"""
+        page = _page()
+        assert "还没响过。" in page
+
+    def test_missed_is_not_rendered_as_failed(self):
+        """`failed` + `missed:` 是「错过窗口」，不是「发送失败」。
+
+        两者的处置完全不同（前者改设备/网络，后者看服务端），
+        合并成一句「发送失败」等于把排查方向指错。
+        """
+        page = _page()
+        assert 'startsWith("missed:")' in page
+        assert '"错过"' in page
+
+    def test_fired_once_never_shows_up_in_upcoming(self):
+        """freq=once 且 next_fire_at 为空 = 已经响过，不会再响。
+
+        它如果进了「接下来」，那一组每一条的承诺（还会再来一次）就是假的。
+        """
+        page = _page()
+        assert 'i.freq === "once" && !i.next_fire_at' in page
+
+    def test_delete_cancel_changes_nothing(self):
+        """取消只把 pending 置空：不发请求、不乐观删除、不留假撤销。"""
+        page = _page()
+        assert "onCancel={() => setPending(null)}" in page
+        assert "撤销" not in page, "又做了假撤销：后端没有 restore / soft-delete"
+
+    def test_delete_confirm_says_it_is_permanent(self):
+        """确认框必须写明不可恢复，否则「二次确认」只是多一次点击。"""
+        page = _page()
+        assert "删除后不能恢复" in page

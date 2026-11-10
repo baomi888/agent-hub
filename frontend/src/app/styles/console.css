@@ -1843,6 +1843,9 @@ textarea.input {
 /* 轴卡的内边距比通用 .card-pad（16px）紧一档：这张卡里只有「胶囊 / 带子 / 数字」
    三层，用通行的 16px 会让它比下面两张提醒卡加起来还高 —— 全页最大的白装最细的内容 */
 .rem-axiscard {
+  /* 与快速添加之间留一口气。写在 CSS 里而不是 JSX 的 mt-4：
+     轴卡的类名是测试契约的一部分（`card rem-axiscard` 两个类，不加尾巴）。 */
+  margin-top: var(--space-16);
   padding: 8px 18px 6px;
 }
 .rem-tape {
@@ -1961,6 +1964,14 @@ textarea.input {
     height 0.12s ease,
     background-color 0.12s ease,
     box-shadow 0.12s ease;
+}
+
+/* 轴上的两种形状：待办 = 圆点（可以勾掉），联动提醒 = 菱形（只能推迟）。
+   同一条轴上混着两类对象，形状是唯一能一眼分清的信号；
+   0.82 的缩放是为了让菱形的对角线（×1.41）和圆点直径看起来一样重。 */
+.rem-ev[data-kind="event"] i {
+  border-radius: 1px;
+  transform: rotate(45deg) scale(0.82);
 }
 
 /* 悬停只放大、不换色：金是全轴「现在」的专用语汇，用在悬停上会把「金=此刻」稀释掉 */
@@ -2149,6 +2160,510 @@ textarea.input {
   );
 }
 
+/* ---------- 推送健康条 ----------
+   只在「这台设备收不到」时出现（推送正常时整块不在 DOM）。
+   左侧一道 3px 警告色比整条刷黄克制：它是一条提示，不是一个警报。 */
+.rem-health {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-10);
+  margin-bottom: var(--space-12);
+  padding: var(--space-10) var(--space-12);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--warning-ink);
+  border-radius: var(--radius-sm);
+  background: var(--fill-3);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.rem-health > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--warning-ink);
+}
+.rem-health b {
+  display: block;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--text-1);
+}
+.rem-health span {
+  display: block;
+  margin-top: 2px;
+}
+.rem-health > a {
+  flex: 0 0 auto;
+  align-self: center;
+  white-space: nowrap;
+}
+
+/* ---------- 范围 tab（今天 / 接下来 / 全部 / 已完成）----------
+   计数跟在文字后面只是 12px 灰字，不用徽章底：四个 tab 各挂一个色块，
+   整行会变成四个互不相干的胶囊。 */
+.rem-tabs {
+  display: flex;
+  gap: var(--space-4);
+  margin-bottom: var(--space-12);
+  padding-bottom: 2px;
+  overflow-x: auto;
+}
+.rem-tabs button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-6);
+  min-height: 44px;
+  padding: 0 var(--space-12);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  font-size: var(--fs-md);
+  color: var(--text-2);
+  transition: var(--t-color);
+}
+.rem-tabs button:hover {
+  background: var(--fill-2);
+  color: var(--text-1);
+}
+/* 选中的 tab 用极淡金底 + 金描边：金色只标「你现在在看这里」 */
+.rem-tabs button[aria-pressed="true"] {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+.rem-tabcount {
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+}
+.rem-tabs button[aria-pressed="true"] .rem-tabcount {
+  color: var(--accent-ink);
+}
+
+/* ---------- 下一件 ----------
+   整页唯一的焦点块：左边一道 3px 金线 + 20px 衬线时刻，扫一眼就知道「现在最该看它」。
+   没有候选时整块不渲染（页面里由 nextUp 判空），不留空 hero。 */
+.rem-next {
+  margin-bottom: var(--space-12);
+  padding: var(--space-14) var(--space-16);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-1);
+}
+.rem-next-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+.rem-next-when {
+  font-family: var(--font-serif);
+  font-size: var(--fs-title);
+  line-height: 1;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.rem-next-rest {
+  font-size: var(--fs-xs);
+  color: var(--accent-ink);
+  font-variant-numeric: tabular-nums;
+}
+.rem-next-title {
+  margin: var(--space-6) 0 0;
+  font-size: var(--fs-xl);
+  font-weight: 500;
+  line-height: var(--lh-tight);
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+.rem-next-meta {
+  margin: 2px 0 0;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.rem-next-acts {
+  display: flex;
+  gap: var(--space-8);
+  margin-top: var(--space-10);
+}
+.rem-next-acts .btn-import {
+  min-height: 44px;
+  padding: 0 var(--space-16);
+}
+/* 卡内的主操作：与 .btn-new 同一种实心墨底，只是小一号 ——
+   页头的「+ 新建」是整页主操作，这里是「这张卡上最该点的那一下」。 */
+.rem-next-main {
+  min-height: 44px;
+  padding: 0 var(--space-20);
+  border-radius: var(--radius-sm);
+  background: var(--solid);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--solid-text);
+  box-shadow: var(--shadow-1);
+  transition: var(--t-color);
+}
+.rem-next-main:hover {
+  background: var(--accent);
+}
+
+/* ---------- 快速添加 ---------- */
+.rem-quick {
+  margin-bottom: var(--space-12);
+}
+.rem-quick form {
+  display: flex;
+  gap: var(--space-8);
+}
+.rem-quick .input {
+  flex: 1;
+  min-width: 0;
+}
+.rem-quick .btn-import {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 0 var(--space-14);
+}
+/* 「要提前提醒吗」三选一。这是**建议**不是表单：不选就等于不提醒，
+   所以它用一条淡底横条，而不是再弹一层。 */
+.rem-quickchip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-6);
+  margin-top: var(--space-8);
+  padding: var(--space-8) var(--space-10);
+  border-radius: var(--radius-sm);
+  background: var(--fill-3);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.rem-quickchip button {
+  min-height: 44px;
+  padding: 0 var(--space-12);
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  font-size: var(--fs-md);
+  color: var(--ink);
+  transition: var(--t-color);
+}
+.rem-quickchip button:hover {
+  background: var(--fill-2);
+}
+
+/* ---------- 待办行 ----------
+   与提醒卡共用 .rem-card 的骨架（同底色 / 同圆角 / 同 hover），
+   只在最左多一格 checkbox —— 「有没有完成态」是两类对象的唯一硬差别。
+
+   ★ 必须**逐个重新指定 grid-column**：.rem-when / .rem-main / .rem-morebtn
+     在基础布局里写死了 1 / 2 / 4（第 1 列本来放时间）。待办在最前面插了
+     checkbox，只改 grid-template-columns 不够——自动排布会让主内容掉进
+     44px 那一列，标题被截成「背 4…」，行高还被撑到 120px。 */
+.rem-task {
+  grid-template-columns: 44px 44px minmax(0, 1fr) 26px;
+}
+.rem-task .rem-check {
+  grid-column: 1;
+}
+.rem-task .rem-when {
+  grid-column: 2;
+}
+.rem-task .rem-main {
+  grid-column: 3;
+}
+.rem-task .rem-morebtn {
+  grid-column: 4;
+}
+/* 颜色只表达紧急（设计规范：不做来源配色） */
+.rem-task[data-priority="2"] {
+  border-left: 2px solid var(--red);
+}
+.rem-check {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--card-bg);
+}
+/* 视觉 18px、热区 44px：手机上点不中就是点不中，没有 hover 可以补救 */
+.rem-check > span {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--card-bg);
+  transition: var(--t-color);
+}
+.rem-check:hover > span {
+  border-color: var(--ink);
+}
+.rem-check[aria-checked="true"] > span {
+  border-color: var(--success);
+  background: var(--success);
+}
+.rem-check:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -4px;
+}
+
+/* 「⋯」视觉 26px，热区 44px（规范 §5.3 允许视觉小、热区大） */
+.rem-morebtn {
+  position: relative;
+}
+.rem-morebtn::before {
+  content: "";
+  position: absolute;
+  inset: -9px;
+}
+/* 标题是最高频入口，但它只有 20px 高：用伪元素把热区补到 44，
+   而不是把行高撑开 —— 12 条列表里每条多 12px 就是 144px。 */
+.rem-title {
+  position: relative;
+}
+.rem-title::after {
+  content: "";
+  position: absolute;
+  inset: -12px 0 -6px;
+}
+
+/* 今天响没响 / 为什么没响。正常「待响」不挂标签，只有异常才出现 ——
+   每行都顶一个状态，标签本身就变成了噪音。 */
+.rem-state {
+  color: var(--text-3);
+}
+.rem-state[data-tone="warn"] {
+  color: var(--warning-ink);
+}
+
+/* ---------- 分组小标题 ---------- */
+.rem-grouphead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  margin-bottom: var(--space-8);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text-2);
+}
+.rem-grouphead > span {
+  font-weight: 400;
+  color: var(--text-3);
+}
+.rem-groupmore {
+  margin-left: auto;
+  min-height: 44px;
+  padding: 0 var(--space-8);
+  font-size: var(--fs-xs);
+  color: var(--accent-ink);
+}
+.rem-groupmore:hover {
+  text-decoration: underline;
+}
+
+/* ---------- 倒计时（task.due_at 的视图，不是第二套数据）----------
+   一列「还剩几天 / 标题 / 日期」，靠 1px 分隔线连成一块，
+   不要每行一张卡片 —— 那会变成和待办列表抢注意力的第二份清单。 */
+.rem-count {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--card-bg);
+}
+.rem-count-row {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-10);
+  width: 100%;
+  min-height: 44px;
+  padding: var(--space-8) var(--space-12);
+  border-top: 1px solid var(--line);
+  text-align: left;
+  transition: var(--t-color);
+}
+.rem-count-row:first-child {
+  border-top: 0;
+}
+.rem-count-row:hover {
+  background: var(--fill-3);
+}
+.rem-count-row b {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--accent-ink);
+  font-variant-numeric: tabular-nums;
+}
+.rem-count-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-md);
+  color: var(--text-1);
+}
+.rem-count-date {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 抽屉里的「最近送达」 ----------
+   这一块是整个页面最能建立信任的地方：用户不需要理解 cron，
+   只需要知道「为什么没响」。所以异常那几行要带原因，不是只标红。 */
+.rem-fires {
+  margin-top: var(--space-4);
+  padding-top: var(--space-8);
+  border-top: 1px solid var(--line);
+}
+.rem-fires summary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.rem-fires ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rem-fires li {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: var(--space-8);
+  padding: var(--space-4) 0;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.rem-fires li:first-child {
+  border-top: 0;
+}
+.rem-fire-time {
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.rem-fires li[data-tone="ok"] .rem-fire-text {
+  color: var(--success-ink);
+}
+.rem-fires li[data-tone="warn"] .rem-fire-text {
+  color: var(--warning-ink);
+}
+.rem-fire-empty {
+  margin: var(--space-6) 0 0;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+/* ---------- 抽屉里的两个时间块（截止 / 提醒）----------
+   两块各自带边框，中间那句「只设截止时间不会响」写在**提醒块**里：
+   它解释的是「为什么这里没开」，不是一句通用提示。 */
+.rem-timeblock {
+  padding: var(--space-10) var(--space-12);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.rem-remindhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+.rem-remindhead .rem-step {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+.rem-noSound {
+  margin: var(--space-8) 0 0;
+  font-size: var(--fs-xs);
+  color: var(--warning-ink);
+}
+.rem-clear {
+  min-height: 44px;
+  margin-top: var(--space-4);
+  padding: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.rem-clear:hover {
+  color: var(--red-ink);
+  text-decoration: underline;
+}
+
+/* ---------- 删除确认 ---------- */
+.rem-confirm {
+  width: 100%;
+  max-width: 380px;
+  padding: var(--space-20);
+}
+.rem-confirm h3 {
+  font-family: var(--font-serif);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+.rem-confirm p {
+  margin-top: var(--space-8);
+  font-size: var(--fs-md);
+  line-height: var(--lh-body);
+  color: var(--text-2);
+}
+.rem-confirm-acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-8);
+  margin-top: var(--space-16);
+}
+.rem-confirm-acts .btn-import {
+  min-height: 44px;
+  padding: 0 var(--space-16);
+}
+/* 危险操作只用红描边 + 红字：红底白字在深色主题下会掉到 2.9:1 */
+.rem-danger {
+  min-height: 44px;
+  padding: 0 var(--space-20);
+  border: 1px solid var(--red);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-md);
+  color: var(--red-ink);
+  transition: var(--t-color);
+}
+.rem-danger:hover {
+  background: var(--fill-1);
+}
+.rem-danger:disabled {
+  opacity: 0.5;
+}
+
+/* 「没有完成语义的提醒」的次入口：它是文案级链接，不是第二个主按钮 */
+.rem-footlink {
+  margin: var(--space-16) 0 var(--space-8);
+  text-align: center;
+}
+.rem-footlink button {
+  min-height: 44px;
+  padding: 0 var(--space-8);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.rem-footlink button:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+.rem-emptyline {
+  padding: var(--space-16) 0;
+  text-align: center;
+  font-size: var(--fs-md);
+  color: var(--text-3);
+}
+
 /* ---------- 抽屉 ---------- */
 /* 分组小标题：告诉用户「这一段在问什么」，比把 5 个字段平铺更像在填一张表 */
 .rem-step {
@@ -2193,6 +2708,21 @@ textarea.input {
   color: var(--text-3);
 }
 /* 底部预览 + 按钮：粘在滚动容器底部，滚到哪都能看见「这条到底是怎样的」 */
+/* 抽屉：内容区自己滚，底部预览条永远停在自己那一段且**不遮内容**。
+   原来只靠 .rem-preview 的 `position: sticky` 兜底 —— 内容超过一屏时它会
+   压在上面最后一个字段上，390 下看起来就像备注框被裁掉一半。
+   改成「卡片 flex 纵向 + 内容区 flex:1 滚动」后，footer 是真正的最后一段。 */
+.rem-drawer-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.rem-dbody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .rem-preview {
   position: sticky;
   bottom: 0;
@@ -2266,6 +2796,32 @@ textarea.input {
     grid-template-columns: 46px minmax(0, 1fr) auto 26px;
     padding: var(--space-8) var(--space-10);
     gap: var(--space-8);
+  }
+  /* 待办行多一格 checkbox：时间列让到 40px，390 下标题仍有 230px 左右 */
+  .rem-task {
+    grid-template-columns: 44px 40px minmax(0, 1fr) 26px;
+  }
+  /* 「下一件」在手机上纵向排：时刻一行、标题一行、操作一行，高度不超过 132px */
+  .rem-next {
+    padding: var(--space-12);
+  }
+  .rem-next-title {
+    font-size: var(--fs-lg);
+  }
+  .rem-count-row {
+    grid-template-columns: 48px minmax(0, 1fr) auto;
+    gap: var(--space-8);
+    padding: var(--space-8) var(--space-10);
+  }
+  /* 四个 tab 在 390 下刚好排满，计数跟着缩小一档（padding 而不是字号） */
+  .rem-tabs button {
+    padding: 0 var(--space-10);
+  }
+  .rem-quick form {
+    gap: var(--space-6);
+  }
+  .rem-quickchip {
+    gap: var(--space-4);
   }
   /* 手机上轴只回答「今天忙不忙、现在走到哪」：齿孔和带子留着，刻度砍到 6 小时一道、
      数字砍到 0/12/24 —— 390 宽里 1 小时只值 16px，每小时一道线会糊成一片灰。

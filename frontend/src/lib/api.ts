@@ -11,6 +11,7 @@ import type {
   ReminderPatchBody,
   ReminderFire,
 } from "./types";
+import type { Task, TaskDraft, TaskPatch, TaskSummary } from "./types";
 import { detailToMessage } from "./errors";
 import type { MeOut, UserOut, Template, ApplyTemplateResult, UsageSummary } from "./types";
 import type { ProfileSnapshot, TagTaxonomy, TemplateRecommend } from "./types";
@@ -760,6 +761,43 @@ export const api = {
     /** 「今天为什么没响」的第一现场 */
     fires: (id: string) =>
       tryRequest<{ items: ReminderFire[] }>(`/api/reminders/fires?reminder_id=${id}`),
+    /**
+     * 全部送达流水（新→旧）。
+     *
+     * 用来回答「今天到底响了几条」：`summary.today` 只看 `next_fire_at`，
+     * 一条每天 08:00 的提醒响过之后 next_fire 就跳到明天了，今天这组立刻空掉。
+     * 想显示「已响 / 已跳过」，只能回流水里捞当天那几条。
+     */
+    firesAll: (limit = 50) =>
+      tryRequest<{ items: ReminderFire[] }>(`/api/reminders/fires?limit=${limit}`),
+  },
+
+  // ---------- 待办 /api/tasks（8 端点，2026-11-10）----------
+  //
+  // 与 reminders 的边界：**待办是「用户意图」，提醒是「投递规则」**。
+  // 待办设了提醒时间时，后端在同一事务里建一条 source='task' 的 linked reminder，
+  // 那条不进 /api/reminders 的列表（否则用户看到两条一样的「交高数作业」），
+  // 也只能通过 /api/tasks 改 —— 这里不提供任何直接写 linked reminder 的方法。
+  //
+  // 读接口走 tryRequest：端点没上线时页面显示空态，而不是红一片。
+  // 写接口走 request：真失败要让用户看见。
+  tasks: {
+    list: (scope: "today" | "upcoming" | "all" | "completed" = "today", limit = 100) =>
+      tryRequest<{ items: Task[]; scope: string; total: number }>(
+        `/api/tasks?scope=${scope}&limit=${limit}`
+      ),
+    summary: () => tryRequest<TaskSummary>("/api/tasks/summary"),
+    create: (body: TaskDraft) =>
+      request<Task>("/api/tasks", { method: "POST", body: JSON.stringify(body) }),
+    /** 显式 `null` 能清空 due_at / remind_at（后端用 exclude_unset 收） */
+    patch: (id: string, body: TaskPatch) =>
+      request<Task>(`/api/tasks/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    remove: (id: string) =>
+      request<{ ok: boolean; id: string }>(`/api/tasks/${id}`, { method: "DELETE" }),
+    complete: (id: string) =>
+      request<Task>(`/api/tasks/${id}/complete`, { method: "POST", body: "{}" }),
+    reopen: (id: string) =>
+      request<Task>(`/api/tasks/${id}/reopen`, { method: "POST", body: "{}" }),
   },
 
   // ---------- 日历订阅 /api/calendar（3 端点）----------
