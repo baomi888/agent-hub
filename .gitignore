@@ -83,6 +83,12 @@ frontend/_unused-public/
 # baomi-deploy.tar.gz 是 2.7MB 的中间产物，用完就该删。
 *.tar.gz
 
+# ================= 仓库只收代码与项目文档 =================
+# 预览截图（campus/previews/shots 下曾累积 270+ 张 PNG，单次 fetch 要拖几十 MB）
+# 与原型 HTML 属于一次性验收产物，不进仓库；需要留证据时放 issue / 评审文档里。
+campus/previews/
+campus/prototypes/
+
 # ================= Node =================
 node_modules/
 .next/
