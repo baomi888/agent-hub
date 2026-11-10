@@ -44,6 +44,9 @@ from api.push import router as push_router
 from api.query import router as query_router
 from api.remind import router as remind_router
 from api.reminders import router as reminders_router
+# 待办（2026-11-10）：tasks 表 + CRUD + linked reminder。
+# 与 reminders 分两张表：提醒是「投递规则」，待办是「用户意图」，生命周期不同。
+from api.tasks import router as tasks_router
 from api.report import router as report_router
 from api.schedule import router as schedule_router
 from api.sessions import router as sessions_router
@@ -215,6 +218,8 @@ app.include_router(remind_router, prefix="/api", tags=["提醒时刻"])
 # 与 /api/remind 的边界：那条只管「每日回顾这一个时刻」（老契约，日历还在读），
 # 新的通用提醒全在这里。两者共用 reminders 表里 source='system' 的那一行。
 app.include_router(reminders_router, prefix="/api/reminders", tags=["提醒中心"])
+# 待办：/api/tasks（today / upcoming / all / completed + summary + CRUD + 完成）
+app.include_router(tasks_router, prefix="/api/tasks", tags=["待办"])
 # 校园工具集快照上云：整份覆盖，updated_at 新者胜（规格 2.3）
 app.include_router(campus_router, prefix="/api/campus", tags=["校园快照"])
 # 混合架构（工作流 × 自主 Agent）：工作流定义 / 切换规则 / 执行记录与人工切换

@@ -215,6 +215,10 @@ def set_source_pref(owner_id: str, source: str, enabled: bool) -> dict[str, bool
         # system 是老「每日回顾」的内部来源，不该出现在来源开关里：
         # 用户看得见的开关只有七个（四六级 / 打卡 / 番茄钟 / 课表 / DDL / 单词 / 委托）。
         raise reminder_core.ReminderInvalid("system 不是可配置的来源")
+    if source == "task":
+        # task 是待办联动提醒的内部来源：它的生命周期跟着待办走，
+        # 用「关掉来源」批量停掉别人的待办提醒，语义上说不通也找不回来。
+        raise reminder_core.ReminderInvalid("task 不是可配置的来源")
     ensure()
     now = timeutil.now_ts()
     with reminder_core._conn() as conn:

@@ -73,6 +73,9 @@ MAX_LAG_SECONDS = 15 * 60
 _MIGRATION_VERSION = 20261109
 
 # 来源枚举。`system` 是老「每日提醒」迁移过来的那一类，不对用户展示。
+# `task` 是**待办联动提醒**的内部来源：一个待办最多一条，由 core/task_core.py
+# 在同一个事务里 upsert / disable。它不出现在七个来源开关里，也不出现在
+# `GET /api/reminders` 的列表里 —— 否则用户会看到两条一模一样的「交高数作业」。
 SOURCES = (
     "manual",
     "cet",
@@ -83,6 +86,7 @@ SOURCES = (
     "deadline",
     "words",
     "system",
+    "task",
 )
 
 # 前四个必须与 api/delegate.py 的 FREQS 完全一致（规格要求直接对齐，不发明新枚举），
@@ -124,6 +128,9 @@ CREATE TABLE IF NOT EXISTS reminders (
     channels       TEXT NOT NULL DEFAULT 'push',
     enabled        INTEGER NOT NULL DEFAULT 1,
     next_fire_at   INTEGER,
+    -- 绝对触发时刻（Unix 秒）。`once` + `fire_at` = 「2026-11-24 20:00 只响一次」，
+    -- 补上 `once` 只能表达 HH:MM 的缺口。空值 = 仍按 at/weekday 推算。
+    fire_at        INTEGER,
     created_at     INTEGER NOT NULL,
     updated_at     INTEGER NOT NULL
 );
@@ -189,6 +196,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_reminders_one_system
     ON reminders(owner_id) WHERE source='system';
 """
 
+# 「一个待办最多一条 linked reminder」的唯一索引。
+#
+# ★ 它必须**独立于 `_MIGRATION_VERSION`**：老库升上来时 `_migrate()` 早就跑过了，
+#   版本号不会再前进，把建索引塞进迁移里，老库永远等不到这一条 ——
+#   表现是同一个待办偶尔出现两条提醒（两个请求并发 upsert 时），极难复现。
+_UNIQUE_TASK_SQL = """
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reminders_one_task
+    ON reminders(owner_id, source_ref) WHERE source='task';
+"""
+
 
 class ReminderInvalid(ValueError):
     """输入不合法。端点据此回 400（而不是 500）。"""
@@ -216,12 +233,23 @@ def ensure() -> None:
         return
     with _conn() as conn:
         conn.executescript(_SCHEMA)
+        # 老库补列必须早于建索引：`CREATE TABLE IF NOT EXISTS` 不会给已存在的表加列，
+        # 而下面的 UPDATE 语句里已经写死了 fire_at。
+        _ensure_fire_at(conn)
         # 去重必须早于建唯一索引；顺序反了会在有重复行的库上直接抛错
         conn.executescript(_UNIQUE_SYSTEM_SQL)
+        conn.executescript(_UNIQUE_TASK_SQL)
         _migrate(conn)
     # ★ 放在迁移之后：迁移中途抛异常时不进缓存，下一次调用会重试，
     #   而不是留下「表建好了、数据没搬」的半截状态还当成已完成。
     _READY.add(path)
+
+
+def _ensure_fire_at(conn: sqlite3.Connection) -> None:
+    """老库补 `fire_at` 列（幂等）。**独立于迁移版本号**，理由见 `_UNIQUE_TASK_SQL`。"""
+    cols = {str(r[1]) for r in conn.execute("PRAGMA table_info(reminders)").fetchall()}
+    if "fire_at" not in cols:
+        conn.execute("ALTER TABLE reminders ADD COLUMN fire_at INTEGER")
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -432,6 +460,22 @@ def _validate(data: dict[str, Any]) -> dict[str, Any]:
         raise ReminderInvalid(f"未知重复方式：{freq}")
     out["freq"] = freq
 
+    # 绝对时刻（Unix 秒）。只有 `once` 能用：给一条「每天 22:00」写死一个日期，
+    # 第二天起就再也不响，而界面上还写着每天 —— 这种假承诺必须在写入时就拒掉。
+    fire_at = data.get("fire_at")
+    if fire_at in (None, ""):
+        out["fire_at"] = None
+    else:
+        try:
+            fire_at = int(fire_at)
+        except (TypeError, ValueError):
+            raise ReminderInvalid("fire_at 必须是 Unix 秒") from None
+        if fire_at <= 0:
+            raise ReminderInvalid("fire_at 必须是正数")
+        out["fire_at"] = fire_at
+    if out["fire_at"] and freq != "once":
+        raise ReminderInvalid("只有「只一次」的提醒可以指定具体日期和时间")
+
     if freq == "interval":
         every = data.get("every_minutes")
         if every in (None, ""):
@@ -445,7 +489,11 @@ def _validate(data: dict[str, Any]) -> dict[str, Any]:
         out["at"] = _hhmm(data["at"]) if data.get("at") else None
     else:
         out["every_minutes"] = None
-        out["at"] = _hhmm(data.get("at"))
+        # 带绝对时间的 once 允许没有 at（它只响一次，不需要「几点」这条规则）
+        if freq == "once" and out["fire_at"]:
+            out["at"] = _hhmm(data["at"]) if data.get("at") else None
+        else:
+            out["at"] = _hhmm(data.get("at"))
 
     if freq == "weekly":
         weekday = data.get("weekday")
@@ -516,6 +564,13 @@ def next_fire(reminder: dict[str, Any], now: int | None = None) -> int | None:
     ts = timeutil.now_ts() if now is None else int(now)
     freq = str(reminder.get("freq") or "daily")
 
+    # 绝对时刻优先：`once` + `fire_at` 就是「这一天这一刻只响一次」。
+    # 过去的时刻返回 None（不补发）—— 任务接口在写入前就会拒绝过去时间，
+    # 走到这里说明是历史数据或时钟回拨，宁可算不出下一次，也不要立刻炸一条。
+    if freq == "once" and reminder.get("fire_at"):
+        fire_at = int(reminder["fire_at"])
+        return fire_at if fire_at > ts else None
+
     if freq == "interval":
         every = int(reminder.get("every_minutes") or 0)
         if every <= 0:
@@ -578,17 +633,26 @@ def _scheduled(row: dict[str, Any]) -> dict[str, Any]:
 # ---------- CRUD ----------
 
 
-def count(owner_id: str) -> int:
+def count(owner_id: str, include_task: bool = True) -> int:
+    """这个人的提醒条数。
+
+    `include_task=False` 给限额检查用：**待办的联动提醒不占 50 条额度**。
+    否则一个有 50 个带提醒的待办的用户，从此再也建不了普通提醒，
+    而界面上只写着「最多 50 条提醒」—— 他数不出来这 50 条在哪。
+    """
     ensure()
+    sql = "SELECT COUNT(*) FROM reminders WHERE owner_id=?"
+    if not include_task:
+        sql += " AND source <> 'task'"
     with _conn() as conn:
-        row = conn.execute("SELECT COUNT(*) FROM reminders WHERE owner_id=?", (owner_id,)).fetchone()
+        row = conn.execute(sql, (owner_id,)).fetchone()
     return int(row[0])
 
 
 def create(owner_id: str, data: dict[str, Any]) -> dict[str, Any]:
     """新建一条提醒。超上限抛 `ReminderLimit`（端点转 400）。"""
     ensure()
-    if count(owner_id) >= MAX_PER_OWNER:
+    if count(owner_id, include_task=False) >= MAX_PER_OWNER:
         raise ReminderLimit(f"最多 {MAX_PER_OWNER} 条提醒，先删掉不用的")
 
     row = _validate(data)
@@ -600,8 +664,9 @@ def create(owner_id: str, data: dict[str, Any]) -> dict[str, Any]:
             """INSERT INTO reminders
                   (id, owner_id, title, note, source, source_ref, override_json,
                    freq, at, weekday, every_minutes, trigger_kind, anchor, offset_minutes,
-                   action, action_json, channels, enabled, next_fire_at, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   action, action_json, channels, enabled, next_fire_at, fire_at,
+                   created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 rid,
                 owner_id,
@@ -622,6 +687,7 @@ def create(owner_id: str, data: dict[str, Any]) -> dict[str, Any]:
                 row["channels"],
                 row["enabled"],
                 nxt,
+                row["fire_at"],
                 now,
                 now,
             ),
@@ -651,11 +717,15 @@ def list_reminders(owner_id: str, scope: str = "all", now: int | None = None) ->
 
     排序把「还没算下一次的」放最后：`next_fire_at IS NULL` 在 SQLite 的
     ASC 排序里本来就是最前，显式写成 `IS NULL` 才符合「越近越前」的直觉。
+
+    ★ `source='task'` 一律排除。待办的联动提醒由 `/api/tasks` 自己带出，
+    在这里再列一遍，用户会看到两条一模一样的「交高数作业」，
+    而且点开其中一条改时间，另一条不会变 —— 看起来像同步坏了。
     """
     ensure()
     ts = timeutil.now_ts() if now is None else int(now)
     start, end = timeutil.day_bounds(timeutil.day_str(ts))
-    where = ["owner_id = ?"]
+    where = ["owner_id = ?", "source <> 'task'"]
     params: list[Any] = [owner_id]
     if scope == "paused":
         where.append("enabled = 0")
@@ -699,6 +769,7 @@ def update(owner_id: str, reminder_id: str, patch: dict[str, Any]) -> dict[str, 
         "action_payload": current.get("action_payload"),
         "channels": current["channels"],
         "enabled": current["enabled"],
+        "fire_at": current.get("fire_at"),
     }
     for key, value in patch.items():
         if key == "action_json":
@@ -710,7 +781,7 @@ def update(owner_id: str, reminder_id: str, patch: dict[str, Any]) -> dict[str, 
     now = timeutil.now_ts()
     # 时间规则变了就必须重算下一次；没变则保留原值 —— 否则每次改标题都会把
     # 「今天 22:00」推到明天（next_fire 只取严格大于 now 的时刻）。
-    schedule_keys = ("freq", "at", "weekday", "every_minutes")
+    schedule_keys = ("freq", "at", "weekday", "every_minutes", "fire_at")
     changed_schedule = any(
         # 用 `k in patch` 而不是 `patch.get(k) is not None`：把 at 显式改成 None
         # （例如 daily → interval）也是一次规则变更，漏判会让 next_fire_at 沿用旧值。
@@ -733,7 +804,7 @@ def update(owner_id: str, reminder_id: str, patch: dict[str, Any]) -> dict[str, 
                    freq=?, at=?, weekday=?, every_minutes=?,
                    trigger_kind=?, anchor=?, offset_minutes=?,
                    action=?, action_json=?, channels=?, enabled=?,
-                   next_fire_at=?, updated_at=?
+                   next_fire_at=?, fire_at=?, updated_at=?
                WHERE id=? AND owner_id=?""",
             (
                 row["title"],
@@ -753,6 +824,7 @@ def update(owner_id: str, reminder_id: str, patch: dict[str, Any]) -> dict[str, 
                 row["channels"],
                 row["enabled"],
                 nxt,
+                row["fire_at"],
                 now,
                 reminder_id,
                 owner_id,
@@ -789,6 +861,110 @@ def snooze(owner_id: str, reminder_id: str, minutes: int) -> dict[str, Any] | No
             (now + minutes * 60, now, reminder_id, owner_id),
         )
     return get(owner_id, reminder_id)
+
+
+# ---------- 待办联动提醒（source='task'）----------
+#
+# 三个 helper 都**接收现成的连接、不 commit**：调用方（core/task_core.py）要把
+# 「改 tasks 行」和「改 linked reminder」放进同一个事务。要是这里自己 `with _conn()`
+# 提交，中途抛异常就会留下「待办改了、提醒还是旧的」——这种半截状态查起来极痛苦。
+#
+# 也刻意**不走 `create()`**：它有条数上限、而且单独提交。待办的提醒不该占
+# 「最多 50 条提醒」的额度，也不该把任务的事务劈成两半。
+
+
+def _task_reminder_id(conn: sqlite3.Connection, owner_id: str, task_id: str) -> str | None:
+    row = conn.execute(
+        "SELECT id FROM reminders WHERE owner_id=? AND source='task' AND source_ref=?",
+        (owner_id, task_id),
+    ).fetchone()
+    return str(row[0]) if row else None
+
+
+def get_task_reminder(owner_id: str, task_id: str) -> dict[str, Any] | None:
+    ensure()
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM reminders WHERE owner_id=? AND source='task' AND source_ref=?",
+            (owner_id, task_id),
+        ).fetchone()
+    return _row_to_dict(row) if row else None
+
+
+def upsert_task_reminder(
+    conn: sqlite3.Connection,
+    owner_id: str,
+    task_id: str,
+    title: str,
+    note: str | None,
+    fire_at: int | None,
+    now: int | None = None,
+    allow_enable: bool = True,
+) -> dict[str, Any] | None:
+    """把某个待办的联动提醒对齐到 `fire_at`（或停用）。
+
+    * `fire_at` 在未来 → `enabled=1, next_fire_at=fire_at`；
+    * `fire_at` 为空或已过去 → `enabled=0, next_fire_at=NULL`（**不删**：
+      送达历史还要能查，见 `reminder_fires` 的外键语义）；
+    * 原本没有这条、且 `fire_at` 为空 → 什么都不建（只设截止日期不会响）。
+
+    `title` / `note` 每次都同步：任务标题是唯一真值，不允许提醒行单独长出一个名字。
+
+    `allow_enable=False` 用于「已完成的待办被改了提醒时间」：时刻照样记下来
+    （`fire_at` 更新），但保持停用，等 reopen 再决定要不要真的启用。
+    """
+    ts = timeutil.now_ts() if now is None else int(now)
+    fire = int(fire_at) if fire_at else None
+    live = bool(fire and fire > ts) and allow_enable
+    enabled = 1 if live else 0
+    nxt = fire if live else None
+    rid = _task_reminder_id(conn, owner_id, task_id)
+    if rid is None:
+        if fire is None:
+            return None
+        rid = _new_id()
+        conn.execute(
+            """INSERT OR IGNORE INTO reminders
+                  (id, owner_id, title, note, source, source_ref, override_json,
+                   freq, at, weekday, every_minutes, trigger_kind, anchor, offset_minutes,
+                   action, action_json, channels, enabled, next_fire_at, fire_at,
+                   created_at, updated_at)
+               VALUES (?,?,?,?,'task',?,NULL,'once',NULL,NULL,NULL,'at',NULL,NULL,
+                       'notify',NULL,'push',?,?,?,?,?)""",
+            (rid, owner_id, title, note, task_id, enabled, nxt, fire, ts, ts),
+        )
+        rid = _task_reminder_id(conn, owner_id, task_id) or rid
+    else:
+        conn.execute(
+            """UPDATE reminders SET title=?, note=?, freq='once', at=NULL, weekday=NULL,
+                   every_minutes=NULL, trigger_kind='at', anchor=NULL, offset_minutes=NULL,
+                   action='notify', channels='push', enabled=?, next_fire_at=?, fire_at=?,
+                   updated_at=?
+               WHERE id=? AND owner_id=?""",
+            (title, note, enabled, nxt, fire, ts, rid, owner_id),
+        )
+    row = conn.execute("SELECT * FROM reminders WHERE id=?", (rid,)).fetchone()
+    return _row_to_dict(row) if row else None
+
+
+def disable_task_reminder(
+    conn: sqlite3.Connection, owner_id: str, task_id: str, now: int | None = None
+) -> None:
+    """停用（完成待办 / 清空提醒时间）。不删行，理由同上。"""
+    ts = timeutil.now_ts() if now is None else int(now)
+    conn.execute(
+        "UPDATE reminders SET enabled=0, next_fire_at=NULL, updated_at=? "
+        "WHERE owner_id=? AND source='task' AND source_ref=?",
+        (ts, owner_id, task_id),
+    )
+
+
+def delete_task_reminder(conn: sqlite3.Connection, owner_id: str, task_id: str) -> None:
+    """删除待办时一起删。**流水不删**：与 `delete()` 同一条口径。"""
+    conn.execute(
+        "DELETE FROM reminders WHERE owner_id=? AND source='task' AND source_ref=?",
+        (owner_id, task_id),
+    )
 
 
 # ---------- 到期查询 ----------

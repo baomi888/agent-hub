@@ -100,6 +100,17 @@ def _bad(exc: Exception) -> HTTPException:
     return HTTPException(status_code=400, detail=str(exc))
 
 
+def _guard_task(item: dict) -> None:
+    """linked reminder 只有一个修改入口：`/api/tasks/{id}`。
+
+    放行的话会出现「待办那边写着 20:00、提醒这边改成了 21:00」，
+    两边各说一套，而 worker 只认库里那一个 next_fire_at ——
+    用户永远查不出是哪边没生效。
+    """
+    if item.get("source") == "task":
+        raise HTTPException(status_code=400, detail="待办提醒请通过 /api/tasks/{id} 修改")
+
+
 def _view(item: dict) -> dict:
     """单条响应也走 `resolve()`：override 的标题要在**所有**出口生效。
 
@@ -218,6 +229,10 @@ async def patch_reminder(
     patch = body.model_dump(exclude_unset=True)
     if not patch:
         raise HTTPException(status_code=400, detail="没有要改的字段")
+    existing = await asyncio.to_thread(reminder_core.get, uid, reminder_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="提醒不存在")
+    _guard_task(existing)
     try:
         item = await asyncio.to_thread(reminder_core.update, uid, reminder_id, patch)
     except (reminder_core.ReminderInvalid, reminder_core.ReminderLimit) as exc:
@@ -229,6 +244,10 @@ async def patch_reminder(
 
 @router.delete("/{reminder_id}")
 async def delete_reminder(reminder_id: str, uid: str = Depends(get_current_user)) -> dict:
+    existing = await asyncio.to_thread(reminder_core.get, uid, reminder_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="提醒不存在")
+    _guard_task(existing)
     ok = await asyncio.to_thread(reminder_core.delete, uid, reminder_id)
     if not ok:
         raise HTTPException(status_code=404, detail="提醒不存在")
@@ -244,6 +263,10 @@ async def snooze_reminder(
         minutes = int(body.get("minutes"))
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="minutes 必须是整数") from None
+    existing = await asyncio.to_thread(reminder_core.get, uid, reminder_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="提醒不存在")
+    _guard_task(existing)
     try:
         item = await asyncio.to_thread(reminder_core.snooze, uid, reminder_id, minutes)
     except reminder_core.ReminderInvalid as exc:

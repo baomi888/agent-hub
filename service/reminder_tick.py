@@ -50,7 +50,8 @@ logger = logging.getLogger(__name__)
 JOB_KEY = "reminder.tick"
 
 # 哪些来源用「标题 + 备注」直接发，不做二次生成
-_PLAIN_SOURCES = ("manual", "focus", "timetable", "deadline", "words")
+# `task` 是待办的联动提醒：内容就是待办标题 + 备注，没有别的可生成。
+_PLAIN_SOURCES = ("manual", "focus", "timetable", "deadline", "words", "task")
 
 # 来源 → 点开之后去哪。给不出更精确的落地页时，统一去校园工具集。
 _TOOL_URL = "/tools"
@@ -209,7 +210,11 @@ def run_one(job_key: str, subject_id: str, planned_at: int) -> dict[str, Any]:
             reminder_core.record_fire(rid, at, reminder_core.STATUS_CAP, f"cap={cap}")
             reminder_core.advance(rid, planned_at)
             continue
-        configurable = source in reminder_core.SOURCES and source not in ("manual", "system")
+        # `task` 同理：待办提醒的开关是「待办详情里的提醒时间」，
+        # 放进来源开关里会让「关掉某个来源」把别人的待办一起弄哑。
+        configurable = (
+            source in reminder_core.SOURCES and source not in ("manual", "system", "task")
+        )
         if configurable and not enabled_sources.get(source):
             # 设置页对用户的承诺是「关掉一个来源，已经建好的那几条会一起停」。
             # 只挡新建、不挡已建，就是文案与事实不符。这里记 skipped_empty
