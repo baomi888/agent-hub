@@ -151,12 +151,16 @@ class TestDrawerOrder:
         assert order == sorted(order), "抽屉字段顺序又和规格不一致了"
 
     def test_delivery_block_is_not_a_control(self):
-        """「怎么送达」是说明块，不是下拉框 —— 否则看着又能选又不会生效。"""
+        """「怎么送达」是说明块，不是下拉框 —— 否则看着又能选又不会生效。
+
+        断言数整个抽屉的 select：只数「怎么送达」之后的那 500 字抓不到
+        「把控件插在标题前面」这种写法（反证时试出来的）。
+        """
         drawer = _section("drawer")
-        i = drawer.index("怎么送达")
-        block = drawer[i : i + 500]
-        assert "<select" not in block
         assert 'className="rem-deliver"' in drawer
+        assert drawer.count("<select") == 3, "抽屉里多了一个 select（只允许 来源/周几/到点之后）"
+        block = drawer[drawer.index('className="rem-deliver"') :]
+        assert "<select" not in block[:400]
 
     def test_bottom_preview_reflects_the_form(self):
         drawer = _section("drawer")
