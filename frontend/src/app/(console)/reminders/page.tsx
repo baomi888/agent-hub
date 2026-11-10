@@ -1001,7 +1001,7 @@ export default function RemindersPage() {
                 </div>
                 {groups.today.length > 0 ? (
                   <>
-                    <div className="card card-pad">
+                    <div className="card rem-axiscard">
                       <TodayAxis
                         items={groups.today}
                         now={now}

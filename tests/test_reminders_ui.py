@@ -148,14 +148,22 @@ class TestAxis:
         assert "Date.now()" in page
 
     def test_tape_is_a_groove_not_a_line(self):
-        """带子要比卡片暗一档 —— 它是挖进纸里的槽。
+        """带子要读成一块「挖进纸里的面」，不是一条淡色条。
 
-        第一版写的是 step-1 → step-2（比卡片还亮），970px 宽的卡里那条轴拍出来
-        几乎看不见，只剩 24 个数字浮在空白上。这条防的就是改回去。
+        第一版写的是 step-1 → step-2（比卡片还亮），拍出来几乎看不见，只剩 24 个
+        数字浮在空白上。第二版只有一道内阴影、底色仅比卡片暗 16/255，1x 下眯眼
+        就散成一条淡带 —— 评审原话「简陋感剩下的根因不是厚度不够，而是带子与
+        容器没有明度台阶」。
+
+        现在靠四件事同时成立：底色在 step-0 上再压 6% 暖墨、一圈 1px 暗边给轮廓、
+        上缘内阴影、下缘纸色高光当「唇」（挖出来的槽上暗下亮）。任何一条掉回
+        「只有一道阴影」，这块面就又散了。
         """
         body = _css_block(CONSOLE_CSS.read_text(encoding="utf-8"), ".rem-tape-body {")
-        assert "background: var(--step-0);" in body, "带子又和卡片同色了，整条轴会消失"
-        assert "inset 0 1px 3px" in body, "上缘内阴影没了，凹槽感就没了"
+        assert "background-color: var(--step-0);" in body, "带子又和卡片同色了"
+        assert "rgba(61, 47, 26, 0.06)" in body, "底色那层暖墨压深没了，明度台阶不够"
+        assert body.count("inset 0") >= 3, "凹槽的三层（暗边/上缘影/下唇）缺了层"
+        assert "inset 0 -1px 0" in body, "下缘那道「唇」没了，槽就只剩上暗、读成阴影"
 
     def test_ticks_are_a_ruler(self):
         """整点短划只贴带子下缘，6 小时那道才贯穿。
@@ -165,10 +173,15 @@ class TestAxis:
         """
         css = CONSOLE_CSS.read_text(encoding="utf-8")
         tick = _css_block(css, ".rem-tick {")
-        assert "height: 5px;" in tick, "整点刻线又贯穿全高了"
+        assert "height: 7px;" in tick, "整点刻线又贯穿全高了"
         assert "bottom: 0;" in tick
+        assert "rgba(61, 47, 26, 0.34)" in tick, "短划退回看不见的那一档"
         major = _css_block(css, '.rem-tick[data-major="1"] {')
         assert "height: 100%;" in major, "6 小时的主刻度不再是贯穿的那一道"
+        # 主刻度必须比短划「更重」，不能只靠高度差：1x 下高度差读不出来，
+        # 只剩带子下缘的一点灰噪（评审实测两档 1.38:1 / 1.45:1，几乎一样）
+        assert "width: 1.5px;" in major, "主刻度没加重量"
+        assert "rgba(61, 47, 26, 0.42)" in major
 
     def test_quiet_hours_are_drawn(self):
         """静默时段要画成斜纹 —— 「这一段到点也不响」是轴上第二条真信息。
@@ -213,7 +226,11 @@ class TestAxis:
         dark = _css_block(css, ".dark .rem-tape-body {")
         assert "background: rgba(237, 224, 196" in dark, "深色带子又回到「比卡片更暗」了"
         assert "var(--step-0)" not in dark
-        assert "inset 0 1px" in dark, "深色的凹陷感全丢了"
+        assert "inset 0 2px" in dark, "深色的凹陷感全丢了"
+        # 受光方向必须和浅色一致：上暗、下亮。整圈亮边框会把顶边翻得比基底还亮，
+        # 深色里那块就读成「发光的凸条」（实测顶边 57 / 基底 50，方向和浅色正相反）
+        assert "inset 0 0 0 1px" not in dark, "又给深色加了一圈亮边框，顶边会反过来发亮"
+        assert "inset 0 -1px 0" in dark, "深色少了底下那道「唇」"
 
     def test_no_left_anchored_fill(self):
         """轴上不许再有「从左端起染的已过填充」。
@@ -291,6 +308,54 @@ class TestAxis:
         pill = _css_block(CONSOLE_CSS.read_text(encoding="utf-8"), ".rem-now b {")
         assert "background: var(--ink);" in pill
         assert "color: var(--card-bg);" in pill
+
+    def test_axis_card_is_not_a_big_empty_box(self):
+        """轴卡的高度要和它装的东西相称。
+
+        2 倍实拍里量出来的是：卡 117px、带子 22px（19%）、带子上方 58px 空档 ——
+        那 58px 只为一枚 52px 宽的胶囊让路，横贯 698px 全是白。下面是 53px 一张的
+        提醒卡，轴卡是它的 2.2 倍高、信息量却是全页最少。评审原话「一个大盒子里
+        一条细带」「整页最大的白装的是最细的内容」。
+
+        现在容器收到 60px、轴卡用更紧的内边距（8/6，通用 .card-pad 是 16），
+        卡片总高约 74px。这条钉的是：容器别再涨回去、内边距别再退回通用值、
+        也别再有人把 card-pad 写回这张卡上。
+        """
+        page = _page()
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        tape = _css_block(css, ".rem-tape {")
+        assert "height: 60px;" in tape, "轴的容器又涨回去了，卡里会重新出现大片空档"
+        axis_card = _css_block(css, ".rem-axiscard {")
+        assert "padding: 8px 18px 6px;" in axis_card, "轴卡又用回 16px 的通用内边距"
+        assert 'className="card rem-axiscard"' in page, "轴卡换回 card-pad 了"
+
+    def test_now_line_hides_behind_events(self):
+        """游标要压在事件点**下面**。
+
+        14:47 和 15:00 只差 13 分钟（桌面 8.7px），一根 1.5px 金线从 15:00 的圆点旁边
+        擦过去时，两者会连成一个形 —— 评审实测净空只有 2px，读成「现在就是 15:00 那个点」。
+        压到事件层之下后，线读成「从圆点背后穿过去」，两者仍是两个物件。
+        """
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        # 前面还有 `.rem-tape:has(.rem-ev:hover) .rem-now {}`，不带换行会先命中它，
+        # 拿到的是 `opacity: 0` 那一小段 —— 断言落在空串上比报错更难查
+        now = _css_block(css, "\n.rem-now {")
+        ev = _css_block(css, "\n.rem-ev {")
+        assert "z-index: 1;" in now
+        assert "z-index: 2;" in ev, "事件点不在游标之上"
+        # 线只画在带子里：不再往上探出那截悬空的金色小棍
+        assert "top: 22px;" in now and "bottom: 16px;" in now
+
+    def test_dark_quiet_hatch_is_darker(self):
+        """深色下斜纹也必须是「更暗」的那种线，和浅色同一个语义。
+
+        暖墨 alpha 在近黑底上等于没画（0.13 叠上去只差 0.8/255），实拍里静默段
+        整块消失；而如果翻成米白亮线，深浅两个主题里「斜纹」的意思就反了。
+        """
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        dark = _css_block(css, ".dark .rem-tape-quiet {")
+        assert "rgba(0, 0, 0, 0.28)" in dark, "深色斜纹又变成亮线了"
+        assert "border-color: rgba(237, 224, 196" in dark, "区界边线在近黑底上看不见"
 
     def test_phone_thins_the_tape(self):
         """390 宽里 1 小时只值 16px：整点刻线全关、数字只留 0/12/24。
