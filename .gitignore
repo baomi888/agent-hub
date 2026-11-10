@@ -74,6 +74,9 @@ frontend/_unused-public/
 # ================= 本地工作区（不进仓库）=================
 .workbuddy/
 .trae/
+# 本地临时脚本/草稿（如 tmp/shenbaoshu 里的 docx 检查脚本）：
+# 不属于产品代码，也不该让 ruff / pytest 去扫，放这里就等于"已忽略"。
+tmp/
 
 # ================= 日志 =================
 *.log
@@ -82,6 +85,13 @@ frontend/_unused-public/
 # baomi-deploy-with-env.tar.gz 里带 .env 密钥，绝不能进仓库；
 # baomi-deploy.tar.gz 是 2.7MB 的中间产物，用完就该删。
 *.tar.gz
+
+# ================= 仓库只收代码与项目文档 =================
+# 预览截图（campus/previews/shots 下曾累积 270+ 张 PNG，单次 fetch 要拖几十 MB）
+# 与原型 HTML 属于一次性验收产物，不进仓库；需要留证据时放 issue / 评审文档里。
+campus/previews/
+campus/prototypes/
+
 
 # ================= Node =================
 node_modules/

@@ -186,6 +186,10 @@ SIGNUP_GLOBAL_PER_DAY = int(os.getenv("SIGNUP_GLOBAL_PER_DAY", "500"))
 AUTH_MAX_FAILS = int(os.getenv("AUTH_MAX_FAILS", "5"))
 AUTH_LOCK_MINUTES = int(os.getenv("AUTH_LOCK_MINUTES", "15"))
 
+# 同一 IP 每分钟允许的登录尝试次数。0 = 不限。
+# 与上面的账号锁定互补：账号锁定拦"盯着一个号试"，这道拦"从一台机器试一堆号"。
+LOGIN_IP_PER_MINUTE = int(os.getenv("LOGIN_IP_PER_MINUTE", "30"))
+
 # ---------- 上传配额（2026-10-29 安全加固 S-06 / S-07）----------
 # 单次请求的声明总大小上限（MB），聊天附件与知识库文档共用。0 = 不限。
 UPLOAD_TOTAL_MB = int(os.getenv("UPLOAD_TOTAL_MB", "200"))

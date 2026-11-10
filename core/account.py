@@ -32,8 +32,36 @@ _NAME_RE = re.compile(r"^[\w.\-]+$")
 
 MIN_NAME = 3
 MAX_NAME = 32
-MIN_PASSWORD = 6
+# 8 位起：6 位 + 纯数字在撞库字典里几乎是必中项（2026-11 安全加固）。
+MIN_PASSWORD = 8
 MAX_PASSWORD = 128
+
+# 撞库字典里排最前的口令。只收"一眼就该拒"的，不做复杂度规则——
+# 复杂度规则逼出来的是 Abcd1234! 这种人类记不住、字典里却靠前的口令。
+_WEAK_PASSWORDS = frozenset(
+    {
+        "12345678",
+        "123456789",
+        "1234567890",
+        "11111111",
+        "88888888",
+        "00000000",
+        "password",
+        "password1",
+        "passw0rd",
+        "qwerty123",
+        "qwertyui",
+        "admin123",
+        "abc12345",
+        "abcd1234",
+        "a1234567",
+        "aa123456",
+        "iloveyou",
+        "woaini1314",
+        "1qaz2wsx",
+        "asd123456",
+    }
+)
 
 # 登录名最多改几次。正常人改名一两次，反复改多半是出了问题，
 # 而"没有邮箱/手机号可找回"意味着改完忘了只能找管理员翻审计日志。
@@ -81,15 +109,26 @@ def check_name(name: str) -> str | None:
     return None
 
 
-def check_password(pwd: str) -> str | None:
+def check_password(pwd: str, username: str = "") -> str | None:
     """校验口令，合法返回 None，不合法返回给用户看的中文提示。
 
-    只卡长度，不卡复杂度：这是自用型部署，复杂度规则逼出来的往往是
-    "Abcd1234!" 这种人类记不住、撞库字典里却排前几的口令。
-    真要提速安全，加第二因子比加规则有用。
+    只卡长度 + 一小撮结构性弱口令（纯重复字符、字典头部、与登录名相同），
+    不做大小写/符号混排的复杂度规则：那是自用型部署里最容易被"Abcd1234!"
+    敷衍过去的规则，真正有用的是长度和"别用撞库字典里的前几名"。
+
+    ``username`` 可选：注册/改名时传进来，拒绝"登录名就是密码"。
     """
     if len(pwd) < MIN_PASSWORD or len(pwd) > MAX_PASSWORD:
         return f"密码需 {MIN_PASSWORD}~{MAX_PASSWORD} 位"
+    low = pwd.casefold()
+    if low in _WEAK_PASSWORDS:
+        return "这个密码太常见了，换一个不容易被猜到的"
+    if len(set(pwd)) == 1:
+        return "密码不能是同一个字符重复"
+    if pwd.isdigit():
+        return "密码不能全是数字，请混入字母"
+    if username and low == normalize_name(username).casefold():
+        return "密码不能和登录名相同"
     return None
 
 
