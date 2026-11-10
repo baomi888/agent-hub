@@ -93,6 +93,25 @@ def test_generic_api_example_is_not_a_leak():
     assert leak_guard.find_leak(example) is None
 
 
+def test_role_system_example_is_not_a_leak():
+    # "OpenAI 的 system message 是什么"这类教学问题，模型会回一个通用
+    # {"role": "system", "content": "..."} 示例：没有内部工具名/提示词就不算泄露。
+    example = (
+        'role=system 指的是 system message，例如 '
+        '{"role": "system", "content": "You are a helpful assistant."}'
+    )
+    assert leak_guard.find_leak(example) is None
+
+
+def test_role_dump_with_internal_tool_detected():
+    # 真正的"把对话原样吐出来"：role 结构里夹带内部工具名
+    dump = (
+        '{"role": "system", "content": "你可调用 kb_search"}, '
+        '{"role": "user", "content": "你好"}'
+    )
+    assert leak_guard.find_leak(dump) == "对话结构导出"
+
+
 def test_stream_guard_cuts_across_frames():
     guard = leak_guard.StreamGuard()
     frames = ["好的", "，以下是我的", "系统提示词：你是一个", "智能问答助手"]

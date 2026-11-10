@@ -105,6 +105,13 @@ _SCHEMA_SHAPE = re.compile(
 # "把对话原样吐出来"式导出：{"role": "system", "content": "..."}
 _ROLE_DUMP = re.compile(r'"role"\s*:\s*"(system|developer)"', re.I)
 
+# 光有 role=system 的结构不算泄露：用户问"OpenAI 的 system message 是什么"，
+# 模型回一段 {"role": "system", "content": "..."} 的通用示例是正常答案。
+# 必须同时出现本项目的内部标识（工具名 / 系统提示词）才判泄露。
+_ROLE_DUMP_STRONG = re.compile(
+    r"(系统提示词|系统指令|kb_search|web_search|get_weather|download_file)", re.I
+)
+
 # 自述式开头：模型自己说"以下是我的系统提示词"
 _PROMPT_HEADER = re.compile(
     r"(以下(是|为)我的?(系统提示词|系统指令|设定|提示词)|"
@@ -146,7 +153,7 @@ def find_leak(text: str) -> str | None:
 
     四类信号，覆盖"换个说法再吐一遍"的变体：
       1. 本项目提示词里的整句指纹（最准，几乎不会误伤）；
-      2. role/content 形式的对话导出，且夹带内部提示词指纹；
+      2. role/content 形式的对话导出，且夹带内部工具名或系统提示词；
       3. "以下是我的系统提示词"这种自述开头；
       4. 工具 schema 结构 + 内部工具名（用户让写通用 function calling
          示例不会命中，因为没有内部工具名）。
@@ -157,7 +164,7 @@ def find_leak(text: str) -> str | None:
             return "系统提示词指纹"
     if _PROMPT_HEADER.search(s):
         return "提示词自述开头"
-    if _ROLE_DUMP.search(s) and _INTERNAL_TARGET.search(s):
+    if _ROLE_DUMP.search(s) and _ROLE_DUMP_STRONG.search(s):
         return "对话结构导出"
     if _SCHEMA_SHAPE.search(s) and any(t in s for t in _INTERNAL_TOOLS):
         return "工具 schema 结构"
