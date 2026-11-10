@@ -93,7 +93,7 @@ def _fresh(monkeypatch, tag: str) -> TestClient:
     return TestClient(main.app)
 
 
-def _register(cli: TestClient, name="alice", pwd="abc123") -> tuple[str, str]:
+def _register(cli: TestClient, name="alice", pwd="Alice_pass_9") -> tuple[str, str]:
     """注册并返回 (uid, token)。显式拿 token 而不是依赖 cookie 罐子 ——
     后面注册第二个账号时，罐子会被换成别人的。"""
     r = cli.post("/api/auth/register/", json={"username": name, "password": pwd})
@@ -224,7 +224,7 @@ def test_password_change_kills_old_tokens(monkeypatch):
 
     r = cli.post(
         "/api/auth/password",
-        json={"old_password": "abc123", "new_password": "def456"},
+        json={"old_password": "Alice_pass_9", "new_password": "def45678"},
         headers=_h(old_tok),
     )
     assert r.status_code == 200, r.text
@@ -239,11 +239,11 @@ def test_password_change_kills_old_tokens(monkeypatch):
 
     # 新旧密码的登录结果
     assert (
-        cli.post("/api/auth/login/", json={"username": "alice", "password": "def456"}).status_code
+        cli.post("/api/auth/login/", json={"username": "alice", "password": "def45678"}).status_code
         == 200
     )
     assert (
-        cli.post("/api/auth/login/", json={"username": "alice", "password": "abc123"}).status_code
+        cli.post("/api/auth/login/", json={"username": "alice", "password": "Alice_pass_9"}).status_code
         == 401
     )
 
@@ -255,21 +255,21 @@ def test_password_change_rejects(monkeypatch):
     # 旧密码错
     r = cli.post(
         "/api/auth/password",
-        json={"old_password": "wrong", "new_password": "def456"},
+        json={"old_password": "wrong", "new_password": "def45678"},
         headers=_h(tok),
     )
     assert r.status_code == 400, r.text
     # 新密码太短
     r = cli.post(
         "/api/auth/password",
-        json={"old_password": "abc123", "new_password": "123"},
+        json={"old_password": "Alice_pass_9", "new_password": "123"},
         headers=_h(tok),
     )
     assert r.status_code == 400, r.text
     # 新旧相同
     r = cli.post(
         "/api/auth/password",
-        json={"old_password": "abc123", "new_password": "abc123"},
+        json={"old_password": "Alice_pass_9", "new_password": "Alice_pass_9"},
         headers=_h(tok),
     )
     assert r.status_code == 400, r.text
@@ -291,7 +291,7 @@ def test_second_password_change_same_second_invalidates_first_reissue(monkeypatc
 
     r1 = cli.post(
         "/api/auth/password",
-        json={"old_password": "abc123", "new_password": "def456"},
+        json={"old_password": "Alice_pass_9", "new_password": "def45678"},
         headers=_h(old_tok),
     )
     assert r1.status_code == 200, r1.text
@@ -300,7 +300,7 @@ def test_second_password_change_same_second_invalidates_first_reissue(monkeypatc
 
     r2 = cli.post(
         "/api/auth/password",
-        json={"old_password": "def456", "new_password": "ghi789"},
+        json={"old_password": "def45678", "new_password": "ghi789012"},
         headers=_h(first_reissue),
     )
     assert r2.status_code == 200, r2.text
@@ -320,7 +320,7 @@ def test_password_change_returns_replacement_for_bearer_clients(monkeypatch):
 
     r = cli.post(
         "/api/auth/password",
-        json={"old_password": "abc123", "new_password": "def456"},
+        json={"old_password": "Alice_pass_9", "new_password": "def45678"},
         headers=_h(old_tok),
     )
     assert r.status_code == 200, r.text
@@ -344,7 +344,7 @@ def test_credential_change_bad_password_counts_and_success_clears(monkeypatch):
 
     r = cli.post(
         "/api/auth/password",
-        json={"old_password": "wrong", "new_password": "def456"},
+        json={"old_password": "wrong", "new_password": "def45678"},
         headers=_h(tok),
     )
     assert r.status_code == 400
@@ -361,7 +361,7 @@ def test_credential_change_bad_password_counts_and_success_clears(monkeypatch):
     # 旧密码正确：哪怕新密码随后被规则拒绝，也应清掉此前的失败计数。
     r = cli.post(
         "/api/auth/password",
-        json={"old_password": "abc123", "new_password": "123"},
+        json={"old_password": "Alice_pass_9", "new_password": "123"},
         headers=_h(tok),
     )
     assert r.status_code == 400
@@ -390,7 +390,7 @@ def test_username_change(monkeypatch):
 
     r = cli.post(
         "/api/auth/username",
-        json={"password": "abc123", "new_username": "alice2"},
+        json={"password": "Alice_pass_9", "new_username": "alice2"},
         headers=_h(tok),
     )
     assert r.status_code == 200, r.text
@@ -399,11 +399,11 @@ def test_username_change(monkeypatch):
 
     # 旧名登不上、新名能登
     assert (
-        cli.post("/api/auth/login/", json={"username": "alice", "password": "abc123"}).status_code
+        cli.post("/api/auth/login/", json={"username": "alice", "password": "Alice_pass_9"}).status_code
         == 401
     )
     assert (
-        cli.post("/api/auth/login/", json={"username": "alice2", "password": "abc123"}).status_code
+        cli.post("/api/auth/login/", json={"username": "alice2", "password": "Alice_pass_9"}).status_code
         == 200
     )
     # uid 不变，所以原来那枚令牌仍然有效（改名不该踢自己下线）
@@ -423,7 +423,7 @@ def test_username_requires_password(monkeypatch):
     assert r.status_code == 400, r.text
     # 没改成功：原名还能登
     assert (
-        cli.post("/api/auth/login/", json={"username": "alice", "password": "abc123"}).status_code
+        cli.post("/api/auth/login/", json={"username": "alice", "password": "Alice_pass_9"}).status_code
         == 200
     )
 
@@ -432,22 +432,22 @@ def test_username_duplicate_and_reserved(monkeypatch):
     cli = _fresh(monkeypatch, "name_dup")
     _, tok = _register(cli, "alice")
     # 注册 bob 会把 Cookie 罐子换成 bob 的，所以后面一律显式带 token
-    cli.post("/api/auth/register/", json={"username": "bob", "password": "bob123"})
+    cli.post("/api/auth/register/", json={"username": "bob", "password": "bob12345"})
 
     r = cli.post(
-        "/api/auth/username", json={"password": "abc123", "new_username": "bob"}, headers=_h(tok)
+        "/api/auth/username", json={"password": "Alice_pass_9", "new_username": "bob"}, headers=_h(tok)
     )
     assert r.status_code == 409, r.text
     # NOCASE 唯一索引：大小写不同也算重名
     r = cli.post(
-        "/api/auth/username", json={"password": "abc123", "new_username": "BOB"}, headers=_h(tok)
+        "/api/auth/username", json={"password": "Alice_pass_9", "new_username": "BOB"}, headers=_h(tok)
     )
     assert r.status_code == 409, r.text
 
     # ★ 抢注管理员名必须被挡：否则改个名就白拿管理员权限
     for bad in ["admin", "ADMIN"]:
         r = cli.post(
-            "/api/auth/username", json={"password": "abc123", "new_username": bad}, headers=_h(tok)
+            "/api/auth/username", json={"password": "Alice_pass_9", "new_username": bad}, headers=_h(tok)
         )
         assert r.status_code == 403, f"{bad!r} 应被拒，实际 {r.status_code}"
 
@@ -465,14 +465,14 @@ def test_username_change_limit(monkeypatch):
         quota._HITS.clear()  # 避开每分钟限流，只测终身上限
         r = cli.post(
             "/api/auth/username",
-            json={"password": "abc123", "new_username": f"alice_{i}"},
+            json={"password": "Alice_pass_9", "new_username": f"alice_{i}"},
             headers=_h(tok),
         )
         assert r.status_code == 200, r.text
 
     quota._HITS.clear()
     r = cli.post(
-        "/api/auth/username", json={"password": "abc123", "new_username": "alice_x"}, headers=_h(tok)
+        "/api/auth/username", json={"password": "Alice_pass_9", "new_username": "alice_x"}, headers=_h(tok)
     )
     assert r.status_code == 403, r.text
     assert "最多改" in r.json()["detail"]
@@ -505,7 +505,7 @@ def test_audit_log_written(monkeypatch, tmp_path):
     quota._HITS.clear()
     r = cli.post(
         "/api/auth/password",
-        json={"old_password": "abc123", "new_password": "def456"},
+        json={"old_password": "Alice_pass_9", "new_password": "def45678"},
         headers=_h(tok),
     )
     assert r.status_code == 200, r.text
@@ -514,13 +514,13 @@ def test_audit_log_written(monkeypatch, tmp_path):
     #   顺手把"旧令牌真的失效了"变成断言，而不是默默 401 导致后面少写一条日志。
     assert cli.get("/api/auth/me/", headers=_h(tok)).status_code == 401
     quota._HITS.clear()
-    r = cli.post("/api/auth/login/", json={"username": "alice", "password": "def456"})
+    r = cli.post("/api/auth/login/", json={"username": "alice", "password": "def45678"})
     assert r.status_code == 200, r.text
     tok2 = cli.cookies.get("baomi_session")
 
     r = cli.post(
         "/api/auth/username",
-        json={"password": "def456", "new_username": "alice9"},
+        json={"password": "def45678", "new_username": "alice9"},
         headers=_h(tok2),
     )
     assert r.status_code == 200, r.text
@@ -534,8 +534,8 @@ def test_audit_log_written(monkeypatch, tmp_path):
     assert '"event": "username_change"' in lines[1]
     assert '"from": "alice"' in lines[1] and '"to": "alice9"' in lines[1]
     # ★ 负向：日志里绝不能出现口令明文，否则日志泄露 = 全站口令泄露
-    assert "def456" not in body
-    assert "abc123" not in body
+    assert "def45678" not in body
+    assert "Alice_pass_9" not in body
 
 
 def test_old_users_table_migrates_without_losing_account(monkeypatch, tmp_path):
@@ -851,7 +851,7 @@ def test_avatar_shared_hash_not_deleted(monkeypatch):
     """两个人用同一张图（同一个内容 hash），其中一个人换掉不能把另一个人的图删了。"""
     cli = _fresh(monkeypatch, "av_share")
     _, tok_a = _register(cli, "alice")
-    cli.post("/api/auth/register/", json={"username": "bob", "password": "bob123"})
+    cli.post("/api/auth/register/", json={"username": "bob", "password": "bob12345"})
     tok_b = cli.cookies.get("baomi_session")
 
     data = _jpeg(color=(0, 90, 200))

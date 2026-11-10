@@ -48,8 +48,8 @@ export default function AuthGate({ allowSignup, checking, onLogin, onRegister }:
         setError("登录名只能包含字母、数字、中文、下划线、点或连字符");
         return;
       }
-      if (password.length < 6 || password.length > 128) {
-        setError("密码需 6~128 位");
+      if (password.length < 8 || password.length > 128) {
+        setError("密码需 8~128 位");
         return;
       }
     }
@@ -128,7 +128,7 @@ export default function AuthGate({ allowSignup, checking, onLogin, onRegister }:
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete={currentMode === "register" ? "new-password" : "current-password"}
-              placeholder={currentMode === "register" ? "至少 6 位" : ""}
+              placeholder={currentMode === "register" ? "至少 8 位" : ""}
               className="auth-input"
             />
           </label>

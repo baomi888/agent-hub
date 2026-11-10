@@ -56,8 +56,8 @@ export default function PasswordDialog({ open, onClose }: Props) {
       setErr("请先输入原密码");
       return;
     }
-    if (newPwd.length < 6) {
-      setErr("新密码至少 6 位");
+    if (newPwd.length < 8) {
+      setErr("新密码至少 8 位");
       return;
     }
     if (newPwd !== confirm) {
@@ -144,7 +144,7 @@ export default function PasswordDialog({ open, onClose }: Props) {
             value={newPwd}
             onChange={(e) => setNewPwd(e.target.value)}
           />
-          <span className="hint">至少 6 位。别用生日和学号，那是最先被试的几个。</span>
+          <span className="hint">至少 8 位。别用生日和学号，那是最先被试的几个。</span>
         </label>
         <label className="acct-field">
           <span className="acct-label">再输一次新密码</span>
