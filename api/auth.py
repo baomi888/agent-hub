@@ -230,7 +230,9 @@ def register(body: Credentials, request: Request, response: Response):
     if not config.ALLOW_SIGNUP:
         _reject("本站已关闭自助注册，请联系管理员开通账号", 403)
 
-    err = account.check_name(body.username) or account.check_password(body.password)
+    err = account.check_name(body.username) or account.check_password(
+        body.password, body.username
+    )
     if err:
         _reject(err)
 
@@ -269,6 +271,13 @@ def login(body: Credentials, request: Request, response: Response):
     """
     try:
         quota.hit(_auth_rate_bucket(body.username), limit=10)
+        # 按 IP 再限一道：只按用户名分桶时，攻击者换用户名就能从同一台机器
+        # 无限撞库（每个用户名 10 次/分钟）。账号锁只惩罚"打同一个号"，
+        # IP 闸才拦得住"广撒网试一堆号"。
+        quota.hit(
+            "login:ip:%s" % _client_ip(request),
+            limit=config.LOGIN_IP_PER_MINUTE,
+        )
     except quota.RateLimited as e:
         _reject(str(e), 429)
 
