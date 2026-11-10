@@ -1,0 +1,601 @@
+/* ============================================================
+   账号自助：头像选择 / 修改密码 / 修改登录名
+   ------------------------------------------------------------
+   为什么单独一份：账号卡原本只有"图标 + 名字 + 两个按钮"，
+   现在多了行内改昵称、四个弹层，混在 console.css 里会和
+   用量卡、委托行的窄屏规则互相干扰。
+
+   视觉沿用苞米地笔记本：暖米黄纸面、深棕墨文字，玉米金只做
+   "选中/进行中"的点缀，不做大面积底色。
+   所有颜色走 tokens.css 变量，深色模式自动跟随；
+   只有半透明遮罩写死暖墨 rgba(46,36,22,·) —— 深色下也成立
+   （它本来就是"把灯调暗"，不是配色）。
+   ============================================================ */
+
+/* ---------------- 账号卡：头像按钮 ---------------- */
+
+.acct-avatar-btn {
+  position: relative;
+  flex: none;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  line-height: 0;
+  cursor: pointer;
+}
+.acct-avatar-btn:hover .acct-avatar-mark,
+.acct-avatar-btn:focus-visible .acct-avatar-mark {
+  opacity: 1;
+}
+.acct-avatar-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* 悬停时压一层暖墨写"换"：不额外占位，也不用一个常驻按钮
+   （常驻会让这张卡看起来有四个并列动作） */
+.acct-avatar-mark {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(46, 36, 22, 0.48);
+  color: #fffdf6;
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  opacity: 0;
+  transition: opacity 0.14s ease;
+}
+
+.acct-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.acct-name-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
+}
+.acct-name {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 行内小按钮（铅笔）。热区 26px，视觉只有 14px 图标 */
+.acct-mini {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: color 0.14s ease, background-color 0.14s ease, border-color 0.14s ease;
+}
+.acct-mini:hover {
+  color: var(--accent-ink);
+  background: var(--fill-1);
+  border-color: var(--line);
+}
+.acct-mini:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* 登录名 + 账号 ID 这一行 */
+.acct-sub {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  /* 6px：4px 时"登录名 xxx"和后面那个"改"会黏在一起，
+     看着像名字的一部分（截图确认过） */
+  gap: 6px;
+  margin-top: 2px;
+}
+.acct-username {
+  color: var(--text-2);
+  font-weight: 600;
+}
+.acct-link {
+  padding: 0 2px;
+  border: none;
+  background: none;
+  color: var(--accent-ink);
+  font-size: var(--fs-sm);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.acct-link:hover {
+  color: var(--accent);
+}
+.acct-sep {
+  color: var(--text-3);
+}
+
+/* 行内改昵称 */
+.acct-nick-form {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+}
+.acct-nick-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-canvas);
+  color: var(--ink);
+  font-size: var(--fs-lg); /* 移动端由 a11y.css 顶到 16px，iOS 不会放大整页 */
+  outline: none;
+  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+}
+.acct-nick-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(200, 137, 42, 0.14);
+}
+/* a11y.css 给所有 input 画了外描边；这里已有金边，两个叠加会成"双圈" */
+.acct-nick-input:focus-visible {
+  outline: none;
+}
+
+.acct-note {
+  margin: 6px 0 0;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+.acct-note.is-ok {
+  color: var(--accent-ink);
+}
+.acct-note.is-err {
+  color: var(--color-red-ink, #a23b2a);
+}
+
+/* ---------------- 弹层 ---------------- */
+
+/* z-index 97：在引导（95）与反馈（96）之上，公告强制页（110）之下。
+   账号弹窗只可能从设置页打开，此时公告已经读完，不会互相遮挡 */
+.acct-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 97;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(46, 36, 22, 0.46);
+  animation: acctFade 0.16s ease;
+}
+@keyframes acctFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.acct-dlg {
+  display: flex;
+  flex-direction: column;
+  width: min(460px, 100%);
+  /* 88dvh：手机地址栏收起/展开时 vh 会算错，dvh 才是当前可见高度 */
+  max-height: min(88dvh, 720px);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--card-bg);
+  box-shadow: 0 18px 48px rgba(46, 36, 22, 0.22);
+  animation: acctRise 0.18s ease;
+}
+@keyframes acctRise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.acct-dlg-head {
+  padding: var(--space-20) var(--space-20) var(--space-12);
+}
+.acct-dlg-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.acct-dlg-desc {
+  margin: 6px 0 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  line-height: 1.65;
+}
+/* 内容区自己滚：头部与按钮常驻，长内容不会把"确认"顶出屏幕 */
+.acct-dlg-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 var(--space-20) var(--space-16);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.acct-dlg-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-10);
+  padding: var(--space-14) var(--space-20);
+  border-top: 1px solid var(--line);
+  background: var(--bg-subtle, transparent);
+}
+
+/* ---------------- 头像选择器 ---------------- */
+
+.acct-avatar-preview {
+  display: flex;
+  align-items: center;
+  gap: var(--space-14);
+  margin-bottom: var(--space-16);
+  padding: var(--space-12);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-md);
+}
+.acct-avatar-preview-name {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------- 上传自己的照片 ---------------- */
+
+.acct-upload {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-6);
+  margin-bottom: var(--space-14);
+}
+.acct-upload-btn {
+  /* 虚线边框与上面那块预览呼应：都是"这里可以放东西进来"的区域 */
+  border: 1px dashed var(--line);
+  gap: var(--space-6);
+}
+.acct-upload-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.acct-upload-hint {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+  line-height: 1.5;
+}
+/* 错误贴着按钮下方出现，别用 toast：用户正看着这个区域，跳走的提示容易被忽略。
+   颜色跟 .acct-note.is-err 用同一个语义色（暖纸面上纯红像报错横幅，
+   这里只是"这一张不行，换一张"） */
+.acct-upload-err {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--color-red-ink, #a23b2a);
+  line-height: 1.5;
+}
+
+/* ---------- 裁剪器 ----------
+   取景框做成圆形而不是方形：最终展示就是圆的，让用户在裁剪阶段看到的就是成品。
+   圆比方更"贵"一点的是——方形四角的内容也会被存下来，但那些角本来就不显示，
+   所以不影响结果，只影响"我拖到边上会不会露白"的心理预期（不会，见 clampTransform）。 */
+.acct-crop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* 14 而不是 10：取景框和滑块是两组东西，挤在一起会让人以为滑块是取景框的一部分 */
+  gap: var(--space-14);
+}
+
+.acct-crop-stage {
+  position: relative;
+  width: min(264px, 100%);
+  aspect-ratio: 1;
+  /* ★ 手机上不加这个，拖照片会变成滚弹窗内容 —— 手指一按一挪，图不动、页面动 */
+  touch-action: none;
+  border-radius: 50%;
+  overflow: hidden;
+  background: #fff;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  /* 一圈贴边阴影当取景框：比 border 细，不会在圆上出现锯齿 */
+  box-shadow:
+    0 0 0 1px var(--line),
+    0 2px 12px rgba(46, 36, 22, 0.1);
+}
+.acct-crop-stage:active {
+  cursor: grabbing;
+}
+
+.acct-crop-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+/* 内圈暗角：模拟镜头边缘，顺便提示"框外会被裁掉" */
+.acct-crop-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.5),
+    inset 0 0 24px rgba(46, 36, 22, 0.16);
+}
+
+.acct-crop-zoom {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  width: min(264px, 100%);
+}
+/* 两端的小圆点 / 大圆点：表示"缩小 ↔ 放大"。
+   比图标直白 —— 图标得先认出它是什么，圆点只表达大小 */
+.acct-crop-dot {
+  flex: none;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+.acct-crop-dot.is-sm {
+  width: 6px;
+  height: 6px;
+}
+.acct-crop-dot.is-lg {
+  width: 13px;
+  height: 13px;
+}
+.acct-crop-range {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 20px;
+  /* 只改强调色，其余交给系统原生滑块：iOS / Android / 桌面各自的手感都比自绘好 */
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.acct-crop-range:disabled {
+  cursor: default;
+}
+
+.acct-crop-hint {
+  max-width: 300px;
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  text-align: center;
+}
+
+/* 复位：文字按钮，别做成第四颗按钮 —— 底部已经有三颗了。
+   放在滑块行末尾，跟它操作的是同一个东西（变换），比另起一行居中更说得通 */
+.acct-crop-reset {
+  flex: none;
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-ink);
+  font-size: var(--fs-sm);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.acct-crop-reset:disabled {
+  color: var(--text-3);
+  text-decoration: none;
+  cursor: default;
+}
+
+.acct-pick-grid {
+  display: grid;
+  /* 5 列在 390px 屏上是每格约 58px：图标 28 + 两字标签，刚好不折行。
+     6 列会把"交作业"这种三字标签折成两行 */
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space-10);
+}
+.acct-pick-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--fill-1);
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color 0.14s ease, background-color 0.14s ease;
+}
+.acct-pick-item:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-tint, var(--fill-2));
+}
+/* 选中态：金边 + 内阴影。加 box-shadow 而不是加粗边框，
+   否则选中时整格尺寸会变，网格抖一下 */
+.acct-pick-item.is-on {
+  border-color: var(--accent);
+  background: var(--accent-tint, var(--fill-2));
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.acct-pick-item:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.acct-pick-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.acct-pick-label {
+  color: var(--text-3);
+  font-size: 11px;
+  line-height: 1.15;
+  text-align: center;
+}
+.acct-pick-item.is-on .acct-pick-label {
+  color: var(--accent-ink);
+}
+/* 保存中的那一个盖住：只盖当前格，不锁整个网格，
+   用户能看出"是这一张在存"，而不是"整个弹窗卡住了" */
+.acct-pick-busy {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: inherit;
+  background: rgba(255, 253, 246, 0.84);
+  color: var(--accent-ink);
+  font-size: 11px;
+}
+.dark .acct-pick-busy {
+  background: rgba(32, 25, 16, 0.84);
+}
+
+/* ---------------- 表单（密码 / 登录名） ---------------- */
+
+.acct-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-14);
+}
+.acct-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.acct-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-8);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+/* "还能改几次"：跟在标签右端，不占一行 */
+.acct-quota {
+  color: var(--text-3);
+  font-weight: 400;
+}
+.acct-err {
+  margin: 0;
+  color: var(--color-red-ink, #a23b2a);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+/* 当前登录名：改名弹窗里常驻显示，防止改完忘了自己原来叫什么 */
+.acct-now {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--fill-1);
+}
+.acct-now-value {
+  color: var(--ink);
+  font-weight: 600;
+  word-break: break-all;
+}
+
+/* ---------------- 成功态 ---------------- */
+
+.acct-ok-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--fs-md);
+}
+.acct-ok-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+/* 新登录名用大字摆出来：这是整个流程里唯一一次"让用户记住"的机会 */
+.acct-new-name {
+  margin: 10px 0 12px;
+  padding: var(--space-14) var(--space-16);
+  border: 1px solid var(--accent-line, var(--line));
+  border-radius: var(--radius-md);
+  background: var(--accent-tint, var(--fill-1));
+  color: var(--accent-ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  text-align: center;
+  /* 中文名没有天然断点，不加这条会把弹窗顶宽 */
+  word-break: break-all;
+}
+
+/* ---------------- 手机 ---------------- */
+
+@media (max-width: 480px) {
+  .acct-mask {
+    padding: 12px;
+  }
+  .acct-dlg {
+    max-height: 86dvh;
+  }
+  .acct-dlg-head {
+    padding: var(--space-16) var(--space-16) var(--space-10);
+  }
+  .acct-dlg-body {
+    padding: 0 var(--space-16) var(--space-14);
+  }
+  .acct-dlg-foot {
+    padding: var(--space-12) var(--space-16);
+    /* 按钮各占一半：390 屏上"用名字首字母"这种长标签和"取消"并排会挤成一列 */
+    gap: var(--space-8);
+  }
+  .acct-dlg-foot .btn {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .acct-nick-form {
+    /* 窄屏上输入框 + 两个按钮排不下，让它独占一行、按钮下移 */
+    flex-wrap: wrap;
+  }
+  .acct-nick-input {
+    flex: 1 1 100%;
+  }
+}
+
+/* 系统开了「减少动态效果」就别淡入淡出 */
+@media (prefers-reduced-motion: reduce) {
+  .acct-mask,
+  .acct-dlg {
+    animation: none;
+  }
+}

@@ -277,14 +277,20 @@ async def delete_kb(kb_id: str, uid: str = Depends(get_current_user)) -> dict:
 
 @router.get("/{kb_id}/files")
 async def list_files(kb_id: str, uid: str = Depends(get_current_user)):
-    """列出库内文件（文件名 + 片段数）。记录缺失时用 Chroma 元数据兜底。"""
+    """列出库内资料（名称 + 片段数）。
+
+    ★ 与 `GET /api/kb/` 共用 `pipelines.list_files_view`：这两条路以前各写一份
+      兜底逻辑，都写成 `get_files(...) or pipe.list_sources()` —— 登记表非空时
+      Chroma 兜底永远不执行，对话沉淀进来的内容就永远看不见。抽成一处实现，
+      以后只改一个地方，不会再一条路修好、另一条路还漏。
+    """
     _must_own(uid, kb_id)
 
     def _list() -> dict:
         # list_sources → get_or_open → peek，要读 sqlite，别在事件循环里做
         pipe = pipelines.get_or_create(uid, kb_id)
-        records = pipelines.get_files(uid, kb_id) or pipe.list_sources()
-        return {"kb_id": kb_id, "chunks": pipe.count(), "files": records}
+        files = pipelines.list_files_view(uid, kb_id, pipe)
+        return {"kb_id": kb_id, "chunks": pipe.count(), "files": files}
 
     return await asyncio.to_thread(_list)
 
@@ -533,6 +539,51 @@ class ImportDialogueRequest(BaseModel):
     sid: str
     # 勾选的候选下标（按 candidates 接口返回顺序）；空 = 全部
     indexes: list[int] = Field(default_factory=list)
+    # 「就存这几条消息」——用户在界面上指着一句话按下保存时用。
+    #
+    # ★ 与 indexes 互斥，且**不走候选判据**：判据（`extract_blocks`）只是给批量
+    #   预览排个序。用户明确点了某一句，这份"我确定要存"本身就是确认，比正则
+    #   更可信 —— 再拿正则去否掉它，就会出现「我指着这句点保存，你说没挑出来」
+    #   这种当面打脸。
+    #   user 消息原样一条入库；assistant 消息按结构切块（长回答整条进库会占满
+    #   检索 top-k），所以一条回答可能产出多段。
+    message_ids: list[int] = Field(default_factory=list)
+
+
+def _messages_as_candidates(msgs: list[dict], ids: list[int]) -> list[dict]:
+    """把「指定的消息」直接当候选。
+
+    user 消息原样一条 = 一条知识，不切句：用户在界面上指的是这一整句消息，
+    把它拆成几段存进去，溯源时反而对不上他当时指的东西。
+
+    ★ assistant 消息走结构分块（2026-11-01）：一段 700 字的回答整条塞进向量库，
+      召回一条就占满检索 top-k，精度反而下降。切成小节后每块自带标题，
+      检索命中时知道它属于哪个主题。所以「指一条 AI 回答」可能产出多条候选，
+      这是刻意的，界面上会告诉用户拆成了几段。
+    """
+    by_id = {int(m.get("id") or 0): m for m in msgs}
+    out: list[dict] = []
+    for mid in dict.fromkeys(int(i) for i in ids):
+        m = by_id.get(mid)
+        if not m:
+            continue
+        text = (m.get("content") or "").strip()
+        if not text:
+            continue
+        if m.get("role") == "assistant":
+            out.extend(dialogue_import.extract_blocks([m], roles=("assistant",)))
+            continue
+        out.append(
+            {
+                "text": text,
+                # 走这条路的都是"用户自己讲的事实/规定"，没有分类器参与，统一按事实标
+                "kind": "事实",
+                "refs": [mid],
+                "role": "user",
+                "ts": int(m.get("created_at") or 0),
+            }
+        )
+    return out
 
 
 def _load_dialogue(uid: str, sid: str) -> tuple[list[dict], str]:
@@ -546,13 +597,18 @@ def _load_dialogue(uid: str, sid: str) -> tuple[list[dict], str]:
 
 @router.get("/dialogue-candidates/{sid}")
 async def dialogue_candidates(sid: str, uid: str = Depends(get_current_user)) -> dict:
-    """预览：这个会话里有哪些规则判定的知识候选（只列清单，不入库）。
+    """预览：这个会话里有哪些知识候选（只列清单，不入库）。
+
+    两种说话人两套判据（详见 `kb/dialogue_import.py::extract_blocks`）：
+    用户的话按句 + 七类信号；助手的回答按 markdown 结构切块，只问"是不是整理过的内容"。
+    前端按候选自带的 `role` 分红绿两组 —— 用户说的是一手事实，助手说的是模型产出，
+    以后检索命中时这个区别要能看见。
 
     报告 §4.1 的设计红线：**不做自动入库**——寒暄、试错、错误中间态
     一旦自动写入就不可逆污染检索，必须人工确认 + 可预览 + 可勾选。
     """
     msgs, title = _load_dialogue(uid, sid)
-    cands = await asyncio.to_thread(dialogue_import.extract_candidates, msgs)
+    cands = await asyncio.to_thread(dialogue_import.extract_blocks, msgs)
     return {
         "sid": sid,
         "conv_title": title,
@@ -575,16 +631,30 @@ async def import_dialogue(
     _must_own(uid, kb_id)
     await asyncio.to_thread(quota.guard, uid, "embed")
     msgs, title = _load_dialogue(uid, req.sid)
-    cands = await asyncio.to_thread(dialogue_import.extract_candidates, msgs)
-    if not cands:
-        raise HTTPException(status_code=400, detail="这个会话没有可沉淀的知识候选")
-    idx = list(dict.fromkeys(req.indexes)) if req.indexes else list(range(len(cands)))
-    bad = [i for i in idx if i < 0 or i >= len(cands)]
-    if bad:
-        raise HTTPException(status_code=400, detail=f"候选下标越界：{bad[:5]}")
-    picked = [c for i in idx if (c := cands[i]).get("text", "").strip()]
-    if not picked:
-        raise HTTPException(status_code=400, detail="没有勾选任何有效候选")
+
+    if req.message_ids:
+        # 指着某句话/某条回答存：不经过准入判据，但要真的属于这段会话。
+        # 助手的长回答在这里会切成多个小节，所以 picked 的条数可能多于 message_ids。
+        picked = _messages_as_candidates(msgs, req.message_ids)
+        if not picked:
+            raise HTTPException(
+                status_code=400,
+                detail="这条消息没有可入库的内容 —— 短句、寒暄和追问不算资料",
+            )
+        # 计数口径跟着切块走：一条回答切 4 段，就是 4 个单元
+        requested = len(picked)
+    else:
+        cands = await asyncio.to_thread(dialogue_import.extract_blocks, msgs)
+        if not cands:
+            raise HTTPException(status_code=400, detail="这个会话没有可沉淀的知识候选")
+        idx = list(dict.fromkeys(req.indexes)) if req.indexes else list(range(len(cands)))
+        bad = [i for i in idx if i < 0 or i >= len(cands)]
+        if bad:
+            raise HTTPException(status_code=400, detail=f"候选下标越界：{bad[:5]}")
+        picked = [c for i in idx if (c := cands[i]).get("text", "").strip()]
+        if not picked:
+            raise HTTPException(status_code=400, detail="没有勾选任何有效候选")
+        requested = len(idx)
 
     pipe = pipelines.get_or_create(uid, kb_id)
     # 去重：这段对话里已经沉过的原句不再写第二遍。
@@ -593,7 +663,7 @@ async def import_dialogue(
     # 过滤按原文精确比对：候选本来就是原句不改写，所以这里能直接对上。
     existing = await asyncio.to_thread(pipe.get_dialogue_texts, req.sid)
     picked = dialogue_import.drop_existing(picked, existing)
-    skipped = len(idx) - len(picked)
+    skipped = requested - len(picked)
     if not picked:
         # 全部存过：不算错误（用户可能是手滑点了第二次），但也不该静默返回成功
         return {
@@ -611,6 +681,29 @@ async def import_dialogue(
         raise HTTPException(status_code=500, detail=describe_api_error(e)) from e
     if n:
         await asyncio.to_thread(quota.bump_usage, uid, "embed", n)
+        # 登记成一条「资料」，否则资料库页面看不到它（2026-11-01 用户实测）：
+        # /files 的数据源是 kb_files.json 登记表，而这里以前只写向量库 ——
+        # 用户收到"存入成功"，回到 /knowledge 却一条新资料都没有。
+        # 同名会话复用同一条记录并累加段数（add_file_records 是同名覆盖），
+        # 所以同一段对话存两次，卡片上显示的是累计段数，不是最后一次的。
+        doc_name = f"对话·{title}"
+        prev = next(
+            (x for x in pipelines.get_files(uid, kb_id) if x.get("name") == doc_name),
+            None,
+        )
+        pipelines.add_file_records(
+            uid,
+            kb_id,
+            [
+                {
+                    "name": doc_name,
+                    "chunks": int((prev or {}).get("chunks") or 0) + n,
+                    "added_at": int(time.time()),
+                    "origin": "dialogue",
+                    "sid": req.sid,
+                }
+            ],
+        )
 
     ingested_refs = {r for c in picked for r in (c.get("refs") or [])}
     staged = await asyncio.to_thread(mark_segments_staged, uid, req.sid, ingested_refs)

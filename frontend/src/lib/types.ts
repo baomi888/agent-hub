@@ -13,8 +13,11 @@ export interface KbFile {
   name: string;
   chunks: number | null;
   added_at: number | null;
-  /** 这条资料怎么进库的：upload=用户上传，web=联网抓的 */
-  origin?: "upload" | "web";
+  /**
+   * 这条资料怎么进库的：upload=用户上传，web=联网抓的，dialogue=从对话里沉淀的。
+   * dialogue 的 name 形如 `对话·<会话标题>`，没有原始文件，正文只能从向量片段拼回。
+   */
+  origin?: "upload" | "web" | "dialogue";
 }
 
 export interface KbInfo {
@@ -87,7 +90,14 @@ export interface Message {
 export interface DialogueCandidate {
   text: string;
   kind: string;
-  refs?: string[];
+  /**
+   * 这句出自哪条消息 —— 后端 `kb/dialogue_import.py` 写的是 `refs: [message_id]`，
+   * 是**数字**，和界面上 `UiMessage.dbId` 同一套 id。
+   *
+   * 有了它，「在消息下面点存」才能只勾这一句对应的候选，而不是让用户在
+   * 整段对话的候选里自己找。之前这里写成 `string[]`，是因为没人用过它。
+   */
+  refs?: number[];
   role?: string;
   ts?: number;
   salience?: number;
@@ -201,6 +211,23 @@ export interface QuotaInfo {
 export interface UserOut {
   id: string;
   username: string;
+  /**
+   * 显示名。空串 = 没设过 → 全站显示 username。
+   * 与 username 分开是因为两者代价差太远：昵称随便改，登录名要验密码还限次。
+   */
+  nickname?: string;
+  /**
+   * 头像。三种形态，用前缀区分（后端 account.normalize_avatar 校验）：
+   *   ""              没设过 → 昵称首字母
+   *   "icon:<name>"   内置图标（CornIcon 的 name）
+   *   "img:<hash>"    上传的图片（第 2 批）
+   */
+  avatar?: string;
+  /**
+   * 登录名还能改几次（后端 MAX_NAME_CHANGES=3）。
+   * 老后端不返回时按"还能改"处理 —— 缺字段就把按钮变灰是最糟的降级方向。
+   */
+  name_changes_left?: number;
 }
 
 export interface MeOut {

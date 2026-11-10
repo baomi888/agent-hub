@@ -21,7 +21,7 @@ import { useToast } from "@/lib/hooks/useToast";
 import { fmtNum, fmtWhen } from "@/lib/time";
 import { CHUNK_PROFILES, nearestProfileId, profileParams, type ChunkProfileId } from "@/lib/chunkProfiles";
 import { loadKbChunks, saveKbChunks, type KbChunkMap } from "@/lib/kbChunkPrefs";
-import type { Defaults, KbFile, KbInfo } from "@/lib/types";
+import type { Defaults, FilePreview, KbFile, KbInfo } from "@/lib/types";
 
 /** 文件类型标：只区分"读得出来的三类 + 其它"，不追求完整 MIME */
 function kindOf(name: string): "pdf" | "doc" | "text" | "other" {
@@ -64,8 +64,13 @@ export default function KnowledgePage() {
   const [url, setUrl] = useState("");
   // 从对话里收几条：这一页进来时不知道是哪段对话，弹层第一步会让用户挑
   const [sedimentOpen, setSedimentOpen] = useState(false);
+  /** 正在预览的资料正文；previewBusy 是"正在读哪一条"，两者独立：
+      卡片上要能立刻显示"在读"，而弹层只在拿到正文后才出现（避免空壳闪一下） */
+  const [preview, setPreview] = useState<FilePreview | null>(null);
+  const [previewBusy, setPreviewBusy] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const detailRef = useRef<HTMLDivElement | null>(null);
+  const previewCloseRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     const t = window.setTimeout(() => setChunkMap(loadKbChunks()), 0);
@@ -236,6 +241,32 @@ export default function KnowledgePage() {
       setBusy(null);
     }
   };
+
+  /** 看正文：以前这一页只能看到文件名和段数，对话沉淀进来的东西更是连条目都没有。
+   *  后端 /file-content 对两种来源都兜得住 —— 有留档读原始文件，没有就从向量片段拼回来。 */
+  const openPreview = async (name: string) => {
+    if (!active || previewBusy) return;
+    setPreviewBusy(name);
+    try {
+      const data = await api.getFileContent(active.kb_id, name);
+      setPreview(data);
+    } catch (e) {
+      showToast("error", errMsg(e, "这份资料的正文读不出来，可能还没入库完整"));
+    } finally {
+      setPreviewBusy(null);
+    }
+  };
+
+  // 预览弹层：Esc 关闭 + 打开时把焦点交给关闭键（键盘用户不至于被关在里面）
+  useEffect(() => {
+    if (!preview) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPreview(null);
+    };
+    window.addEventListener("keydown", onKey);
+    previewCloseRef.current?.focus();
+    return () => window.removeEventListener("keydown", onKey);
+  }, [preview]);
 
   const files: KbFile[] = active?.files ?? [];
   const exts = defaults?.supported_extensions ?? [".pdf", ".md", ".txt"];
@@ -533,42 +564,72 @@ export default function KnowledgePage() {
                   </p>
                 ) : (
                   <div className="kbp-files">
-                    {files.map((f) => (
-                      <div className="kbp-file" key={f.name}>
-                        <span className="kbp-ext" data-kind={kindOf(f.name)}>
-                          {extOf(f.name)}
-                        </span>
-                        <div className="fn" title={f.name}>
-                          {f.name}
-                        </div>
-                        <div className="fm">
-                          {f.chunks != null ? `${fmtNum(f.chunks)} 段` : "已入库"}
-                          {f.added_at ? ` · ${fmtWhen(f.added_at)}` : ""}
-                          {f.origin === "web" ? " · 来自网页" : ""}
-                        </div>
-                        {confirmDelFile === f.name ? (
-                          <button
-                            type="button"
-                            className="btn btn-danger btn-sm"
-                            style={{ marginTop: 8 }}
-                            disabled={busy === "delete"}
-                            onClick={() => void removeFile(f.name)}
+                    {files.map((f) => {
+                      const fromDialogue = f.origin === "dialogue";
+                      return (
+                        <div
+                          className="kbp-file"
+                          key={f.name}
+                          role="button"
+                          tabIndex={0}
+                          aria-label={`查看 ${f.name}`}
+                          onClick={() => void openPreview(f.name)}
+                          onKeyDown={(e) => {
+                            if (e.key !== "Enter" && e.key !== " ") return;
+                            e.preventDefault();
+                            void openPreview(f.name);
+                          }}
+                        >
+                          <span
+                            className="kbp-ext"
+                            data-kind={fromDialogue ? "dialogue" : kindOf(f.name)}
                           >
-                            确认删掉
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="x"
-                            aria-label={`删除 ${f.name}`}
-                            title={`删除 ${f.name}`}
-                            onClick={() => setConfirmDelFile(f.name)}
-                          >
-                            <CornIcon name="close" />
-                          </button>
-                        )}
-                      </div>
-                    ))}
+                            {fromDialogue ? "对话" : extOf(f.name)}
+                          </span>
+                          <div className="fn" title={f.name}>
+                            {f.name}
+                          </div>
+                          <div className="fm">
+                            {previewBusy === f.name
+                              ? "正在读…"
+                              : f.chunks != null
+                                ? `${fmtNum(f.chunks)} 段`
+                                : "已入库"}
+                            {f.added_at ? ` · ${fmtWhen(f.added_at)}` : ""}
+                            {f.origin === "web" ? " · 来自网页" : ""}
+                            {fromDialogue ? " · 来自对话" : ""}
+                          </div>
+                          {confirmDelFile === f.name ? (
+                            <button
+                              type="button"
+                              className="btn btn-danger btn-sm"
+                              style={{ marginTop: 8 }}
+                              disabled={busy === "delete"}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void removeFile(f.name);
+                              }}
+                            >
+                              确认删掉
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="x"
+                              aria-label={`删除 ${f.name}`}
+                              title={`删除 ${f.name}`}
+                              onClick={(e) => {
+                                // 卡片本身是"看正文"，删除不能连带触发它
+                                e.stopPropagation();
+                                setConfirmDelFile(f.name);
+                              }}
+                            >
+                              <CornIcon name="close" />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </>
@@ -594,6 +655,38 @@ export default function KnowledgePage() {
             showToast("success", `已存进「${name}」`);
           }}
         />
+      )}
+
+      {preview && (
+        <div className="kbp-prev-mask" onClick={() => setPreview(null)}>
+          <div
+            className="kbp-prev"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${preview.name} 正文`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="kbp-prev-head">
+              <div>
+                <div className="kbp-prev-t">{preview.name}</div>
+                <div className="kbp-prev-m">
+                  {preview.origin === "chunks" ? "从库里的片段拼回来的正文" : "库内留档的原文"}
+                  {preview.truncated ? " · 只显示前 3 万字" : ""}
+                </div>
+              </div>
+              <button
+                type="button"
+                ref={previewCloseRef}
+                className="kbp-prev-x"
+                aria-label="关闭预览"
+                onClick={() => setPreview(null)}
+              >
+                <CornIcon name="close" />
+              </button>
+            </div>
+            <div className="kbp-prev-body">{preview.content}</div>
+          </div>
+        </div>
       )}
 
       <ToastHost toasts={toasts} />

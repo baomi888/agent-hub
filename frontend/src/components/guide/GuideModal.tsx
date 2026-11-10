@@ -167,7 +167,14 @@ export default function GuideModal({ userId = null }: Props) {
     const onFocusIn = (e: FocusEvent) => {
       const card = cardRef.current;
       if (!card) return;
-      if (!card.contains(e.target as Node)) card.focus();
+      const t = e.target as Element | null;
+      if (!t || card.contains(t)) return;
+      // ★ 焦点落在**另一个**模态里（比如盖在上面的更新公告）时不能抢。
+      //   两套守卫都以「不在我这里面就拉回来」为规则，同时在场就会互相抢，
+      //   focus() 同步派发 focusin，于是一路递归到 RangeError: Maximum call stack。
+      //   实测：公告和引导同屏时每次进首页必报。
+      if (t.closest?.('[role="dialog"][aria-modal="true"]')) return;
+      card.focus();
     };
     document.addEventListener("focusin", onFocusIn);
     return () => {

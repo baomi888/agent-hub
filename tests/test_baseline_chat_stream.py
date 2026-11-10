@@ -96,7 +96,12 @@ def client(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(chat.store, "count_messages", lambda uid, sid: 1)
     monkeypatch.setattr(chat.store, "get_messages", lambda *a, **k: [])
-    monkeypatch.setattr(chat.store, "add_message", lambda *a, **k: 123)
+    # 用户消息与助手消息要拿到**不同**的 id：恒返回同一个值的话，
+    # done 里把 user_message_id 塞成助手 id 也测不出来（2026-11-01 加成对断言）
+    def _fake_add(owner, sid, role, content, *a, **k):
+        return 1000 if role == "user" else 1001
+
+    monkeypatch.setattr(chat.store, "add_message", _fake_add)
     monkeypatch.setattr(chat.store, "rename_conversation", lambda *a, **k: None)
 
     monkeypatch.setattr(chat.pipelines, "exists", lambda owner, kid: True)
@@ -157,6 +162,9 @@ def test_rag_stream_event_sequence(client):
         "title",
         "mode",
         "message_id",
+        # 2026-11-01 新增：用户那条消息自己的 id。前端靠它回填 dbId，
+        # 消息下方的「存进资料库」才能在**没刷新**的时候出现。
+        "user_message_id",
         "run_id",
         "plan_topic",
         "truncated",
@@ -164,7 +172,11 @@ def test_rag_stream_event_sequence(client):
     assert done["truncated"] is False  # 这个假 LLM 不带 finish_reason=length
     assert done["answer"] == "你好呀"
     assert done["mode"] == "rag"
-    assert done["message_id"] == 123
+    assert done["message_id"] == 1001  # 助手那条（桩按 role 返回）
+    assert done["user_message_id"] == 1000  # 用户那条
+    # 负向：两个 id 必须不同。相等就说明 done 里塞的是同一个值，
+    # 前端拿它回填用户消息等于把助手 id 安到用户头上（删除/存库都会指错）
+    assert done["user_message_id"] != done["message_id"]
     assert done["run_id"] is None  # 仅 hybrid 模式有值
     assert done["title"] == "固定标题"
     assert done["plan_topic"] is None  # 非计划类问题（问的是种植密度）

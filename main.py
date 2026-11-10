@@ -28,6 +28,7 @@ from api.chat import router as chat_router
 from api.checkin import router as checkin_router
 from api.delegate import router as delegate_router
 from api.feedback import router as feedback_router
+from api.focus import router as focus_router
 from api.geo import router as geo_router
 from api.hybrid import router as hybrid_router
 from api.kb import router as kb_router
@@ -45,6 +46,7 @@ from api.user_feedback import router as user_feedback_router
 from core import account, apilog, config, llm_gate, quota
 from core import router as route_engine
 from kb import pipelines
+from service import avatar as avatar_store
 from service import daily
 
 
@@ -206,6 +208,9 @@ app.include_router(path_router, prefix="/api/path", tags=["学习路径"])
 app.include_router(profile_router, prefix="/api/profile", tags=["用户画像"])
 # 检索词增强（roadmap B3）：预览"把口语词换成标准词"的结果，只读、不写库、不调模型
 app.include_router(query_router, prefix="/api/query", tags=["检索词增强"])
+# 校园工具集 · 番茄钟专注记录同步（B6）：会话幂等追加 + 任务后写胜。
+# 只存「学什么、多久」，不存任何对话内容
+app.include_router(focus_router, prefix="/api/campus/focus", tags=["校园工具集"])
 
 
 # ---------- 修复：前后端尾部斜杠不一致导致的重定向黑洞 ----------
@@ -257,7 +262,11 @@ def _exact_matches(template: str, path: str) -> bool:
     if len(ts) != len(ps):
         return False
     for a, b in zip(ts, ps, strict=False):
-        if a == b or (a.startswith("{") and a.endswith("}")):
+        # ★ `{param}` 不能吃空串：`/tasks/` 拆出来是 [..., 'tasks', '']，
+        #   若判成"命中了 /tasks/{task_id}"，就会跳过尾斜杠归一，
+        #   最后真的 404 —— 而没有尾斜杠的 /tasks 是 200。
+        #   Starlette 的 str 转换器同样不匹配空段，这里必须与它一致。
+        if a == b or (a.startswith("{") and a.endswith("}") and b != ""):
             continue
         return False
     return True
@@ -266,6 +275,16 @@ def _exact_matches(template: str, path: str) -> bool:
 @app.middleware("http")
 async def normalize_api_slash(request: Request, call_next: Callable[[Request], Any]) -> Response:
     path = request.scope.get("path", "")
+    # 头像上传的应用层入口闸。Nginx 也会在 6MB 截断；这里再挡一次，是为了
+    # 本地直连 / 未来换代理时仍不会把一个几十 MB 的 multipart 先收进临时磁盘。
+    # 留 2MB multipart/header 余量，6MB 的“应被业务拒绝”文件仍会走到路由给 400。
+    if request.method == "POST" and path in ("/api/auth/avatar", "/api/auth/avatar/"):
+        raw_len = (request.headers.get("content-length") or "").strip()
+        if raw_len.isdigit() and int(raw_len) > avatar_store.REQUEST_BODY_LIMIT:
+            return JSONResponse(
+                status_code=413,
+                content={"detail": "头像文件过大（>5MB），请换一张"},
+            )
     if path.startswith("/api/") and path != "/api/":
         has_slash = path.endswith("/")
         alt = path[:-1] if has_slash else path + "/"

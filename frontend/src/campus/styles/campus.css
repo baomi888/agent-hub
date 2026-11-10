@@ -1,0 +1,2880 @@
+/* ============================================================
+   校园工具集 · 板块样式
+   ------------------------------------------------------------
+   规则（见 campus/docs/01_板块边界与架构.md 第 4 节）：
+   1. 只用全局令牌（--ink / --card-bg / --line / --accent …），不自造色板；
+   2. 不写死 #fff / #000，深浅主题都要成立；
+   3. 板块专属变量统一 --campus- 前缀，避免和全局撞名；
+   4. 不修改 src/app/styles/tokens.css。
+
+   字号基准取 --fs-lg（14px）而不是更小的档：内测里被反复投诉「字太小」，
+   工具类页面是高频短停留场景，宁可牺牲一点信息密度。
+   ============================================================ */
+
+/*
+ * 滚动容器。
+ * 全局 base.css（工作台外壳）把 html/body 设成 height:100% + overflow:hidden，
+ * 板块路由没有外壳包裹，于是内容一超出视口就被裁掉，页面「钉死」不能滚。
+ * 这里自己开一层：高度锁视口，纵向滚动，滚动条贴在视口右边而不是 880px 栏目边上。
+ * overscroll-behavior: contain 防止滚到底后把滚动接力给外层（预览里会连带整页弹一下）。
+ */
+.campus-scroll {
+  height: 100vh;
+  height: 100dvh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.campus-shell {
+  --campus-max: 880px;
+  --campus-gap: 12px;
+  --campus-radius: var(--radius-lg);
+
+  /* 主按钮的实心底。
+     原来用 --accent(#C8892A) 压 --solid-text(纸白)，实测 2.61:1，连 3:1 的大字线都不到；
+     深色主题反过来是浅金字压浅色字，更糊。这里按「实心底 + 反色字」重新分工：
+     浅色用深金压纸白（6.0:1），深色用亮金压深棕（5.4:1），两边都过 AA。 */
+  --campus-btn-solid: var(--accent-ink);
+  --campus-btn-solid-text: var(--solid-text);
+  --campus-btn-solid-hover: color-mix(in srgb, var(--accent-ink) 86%, var(--ink));
+
+  width: 100%;
+  max-width: var(--campus-max);
+  margin: 0 auto;
+  padding: 28px 16px 72px;
+  color: var(--ink);
+}
+
+.dark .campus-shell {
+  --campus-btn-solid: var(--accent);
+  --campus-btn-solid-text: var(--solid);
+  --campus-btn-solid-hover: color-mix(in srgb, var(--accent) 88%, black);
+}
+
+/* ---------- 页头 ---------- */
+
+.campus-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 20px;
+}
+
+.campus-title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: var(--fs-title);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
+
+.campus-sub {
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: 1.7;
+  color: var(--text-3);
+}
+
+/* ---------- 工具切换（横向滚动，窄屏不换行挤压） ---------- */
+
+.campus-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  margin-bottom: 18px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.campus-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.campus-tab {
+  flex: 0 0 auto;
+  /* 图标 + 文字一行：用 inline-flex 而不是改结构，切换时的过渡保持原样 */
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 7px 14px;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--text-2);
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.campus-tab-ico {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+}
+
+/* 旧图标里有两处「纸白」填充，浅色主题下是纸感，深色主题下会变成小亮块，
+   这里换成卡片底色，视觉上从「实心」变成「镂空」，和深色主题更搭 */
+.dark .campus-tab-ico [fill="#fdfaf2" i] {
+  fill: var(--card-bg);
+}
+
+.campus-tab:hover {
+  color: var(--ink);
+  background: var(--fill-2);
+}
+
+.campus-tab.is-active {
+  color: var(--accent-ink);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-1);
+}
+
+/* 迁移中的工具：右侧点一个小标记，说明点进去仍是旧实现 */
+.campus-tab[data-migrated="false"]::after {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+  background: var(--text-3);
+  border-radius: 50%;
+}
+
+/*
+ * 6 个标签带图标，横排的自然宽度约 640px。窗口比它窄时，横滑列表会把最后两个
+ * （组队刷题、群抽签）切掉一半，而且没有任何"右边还有"的提示 —— 用户会以为
+ * 这页只有四个工具。所以窄于 720px 就换成 2×3 网格：一个都不藏。
+ * 断点取 720 而不是常见的 560，是因为 561–720 之间同样会切。
+ */
+@media (max-width: 720px) {
+  .campus-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+  }
+
+  .campus-tab {
+    justify-content: center;
+  }
+}
+
+/* ---------- 记录 / 统计入口 ---------- */
+
+/*
+ * 两块「偶尔查一下」的内容收成两个入口：
+ * 主屏只留「计时 / 任务」，查看历史与统计要点一下才铺开。
+ * 每个入口一行：左边说是什么，右边给一个当下的数字（条数 / 今日累计），
+ * 不用打开也知道值不值得点。
+ */
+.campus-pomo-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* 和上面「我的任务」拉开距离。
+     它不是 .campus-card，吃不到 `.campus-card + .campus-card` 那条相邻规则，
+     所以之前只用 gap 撑着，比卡片之间的间距还小，看起来像粘在任务卡下面。 */
+  margin-top: var(--pomo-gap);
+}
+
+/*
+ * 两张**各自独立**的卡，不再挤在同一张卡里靠一条分隔线分开。
+ *
+ * 挤在一起时那两行看起来像同一张表的两个表头：既分不清是哪两个去处，
+ * 又因为中间只有 1px 线而显得贴得太死。各自有底色、边框和圆角之后，
+ * 「这是两个不同的入口」不用读字就能看出来。
+ *
+ * 视觉重量也故意比内容卡轻一档（填色底、无阴影）：
+ * 入口是「点开」的东西，展开出来的内容才是「纸白卡 + 阴影」的实体 ——
+ * 一层轻、一层实，页面就有了前后关系，而不是三块一样重的方块。
+ */
+.campus-pomo-entry {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 54px;
+  padding: 12px 16px;
+  font: inherit;
+  color: var(--ink);
+  text-align: left;
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-radius: var(--campus-radius);
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.campus-pomo-entry:hover {
+  background: var(--fill-2);
+  border-color: var(--line-strong);
+}
+
+/* 图形标记：形状不同（表盘 / 饼图）比两行一样的字更容易分辨 */
+.campus-pomo-entry-ico {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  color: var(--text-2);
+  transition: color 0.15s ease;
+}
+
+.campus-pomo-entry-label {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.campus-pomo-entry-value {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 一个很轻的箭头：说明「点了会打开东西」，不是一行静态文字 */
+.campus-pomo-entry-go {
+  font-size: var(--fs-lg);
+  line-height: 1;
+  color: var(--text-3);
+  transition: transform 0.18s ease;
+}
+
+/*
+ * 展开后：底回到纸白、边框转强调色、左侧一道 3px 竖条，并且抬出阴影。
+ * 三种变化一起来，是为了让这一行和下面刚长出来的内容连成一块「打开了的抽屉」。
+ */
+.campus-pomo-entry.is-open {
+  background: var(--card-bg);
+  border-color: var(--accent-line);
+  box-shadow: inset 3px 0 0 var(--accent), var(--shadow-1);
+}
+
+.campus-pomo-entry.is-open .campus-pomo-entry-ico,
+.campus-pomo-entry.is-open .campus-pomo-entry-value {
+  color: var(--accent-ink);
+}
+
+/* 箭头转 90°（朝下）：形状本身就在说"内容在下面" */
+.campus-pomo-entry.is-open .campus-pomo-entry-go {
+  transform: rotate(90deg);
+}
+
+/*
+ * 深色下 fill-3 只有 5% 的亮度差，两张入口卡会沉进卡片底里，看不出是另一类东西；
+ * 提一档到 fill-2（9%）才分辨得出来。
+ * 展开态不再换底（浅色下是"变亮变实"），因为深色里再回卡片底反而更暗，
+ * 变成"点开的那个凹下去"—— 这里靠金边、左条和阴影表示打开，两种主题都读得通。
+ */
+.dark .campus-pomo-entry {
+  background: var(--fill-2);
+}
+
+.dark .campus-pomo-entry:not(.is-open):hover {
+  background: var(--fill-1);
+}
+
+/* ---------- 入口下方的延展区 ---------- */
+
+/*
+ * 内容在按钮正下方长出来，不盖任何东西。
+ * 淡入 + 上移 6px：够让人看出"这是刚展开的"，又不会拖慢手感（0.2s）。
+ * 只动 opacity/transform，不碰 height —— 跑在合成层上，手机也不掉帧。
+ */
+.campus-pomo-fold {
+  padding: 14px 16px 16px;
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--campus-radius);
+  box-shadow: var(--shadow-1);
+  animation: campus-fold-in 0.2s ease-out;
+}
+
+@keyframes campus-fold-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.campus-pomo-fold-head {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin-bottom: 12px;
+}
+
+.campus-pomo-fold-title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: var(--fs-title);
+  font-weight: 600;
+}
+
+.campus-pomo-fold-note {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+/* 「收起」用文字比 × 清楚：这不是浮层，没有"关掉"的语义，只有"收回去" */
+.campus-pomo-fold-close {
+  min-height: 30px;
+  margin-left: auto;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.campus-pomo-fold-close:hover {
+  color: var(--ink);
+  background: var(--fill-3);
+}
+
+.campus-pomo-fold-foot {
+  margin: 12px 0 0;
+}
+
+/* ---------- 卡片 ---------- */
+
+.campus-card {
+  padding: 18px;
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--campus-radius);
+  box-shadow: var(--shadow-1);
+}
+
+.campus-card + .campus-card {
+  margin-top: var(--campus-gap);
+}
+
+.campus-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.campus-card-title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.campus-card-note {
+  margin: 0;
+  /* 13px 起步：这一行常是真说明（「建一次，以后每天直接点开始」），
+     12px 在手机上要凑近看，属于可读性问题而不是风格问题 */
+  font-size: var(--fs-md);
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+/* ---------- 表单 ---------- */
+
+.campus-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.campus-input,
+.campus-select {
+  width: 100%;
+  padding: 7px 10px;
+  font-size: var(--fs-lg);
+  color: var(--ink);
+  background: var(--bg-canvas);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  outline-offset: 2px;
+}
+
+.campus-input:focus-visible,
+.campus-select:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent-soft);
+}
+
+/* 数字框去掉上下箭头：课程表里连点 6 次学分会误触 */
+.campus-input[type="number"]::-webkit-outer-spin-button,
+.campus-input[type="number"]::-webkit-inner-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
+
+/* ---------- 按钮 ---------- */
+
+.campus-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--text-2);
+  white-space: nowrap;
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.campus-btn:hover {
+  color: var(--ink);
+  background: var(--fill-2);
+  border-color: var(--line-strong);
+}
+
+.campus-btn.is-primary {
+  color: var(--campus-btn-solid-text);
+  background: var(--campus-btn-solid);
+  border-color: var(--campus-btn-solid);
+}
+
+.campus-btn.is-primary:hover {
+  background: var(--campus-btn-solid-hover);
+  border-color: var(--campus-btn-solid-hover);
+}
+
+/* 禁用态的主按钮不要靠 opacity 变淡：金底淡到一半时字几乎看不见，
+   读起来像「按钮坏了」。换成中性底 + 可读的灰字，明确是「还不能点」 */
+.campus-btn.is-primary:disabled {
+  color: var(--text-3);
+  background: var(--fill-3);
+  border-color: var(--line);
+  opacity: 1;
+}
+
+.campus-btn.is-danger {
+  color: var(--red-ink);
+  background: transparent;
+  border-color: transparent;
+}
+
+.campus-btn.is-danger:hover {
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+}
+
+.campus-btn:disabled {
+  color: var(--text-3);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* ---------- 统计读数 ---------- */
+
+.campus-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--campus-gap);
+}
+
+.campus-stat {
+  padding: 12px 14px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.campus-stat-label {
+  display: block;
+  margin-bottom: 2px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.campus-stat-value {
+  font-family: var(--font-serif);
+  font-size: var(--fs-num);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+  color: var(--ink);
+}
+
+.campus-stat-value.is-accent {
+  color: var(--accent-ink);
+}
+
+/* 窄屏三列会挤成一团，直接堆叠 */
+@media (max-width: 560px) {
+  .campus-shell {
+    padding: 20px 12px 56px;
+  }
+
+  .campus-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .campus-stat-value {
+    font-size: var(--fs-xl);
+  }
+}
+
+/* ---------- 表格（GPA 明细） ---------- */
+
+.campus-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-md);
+}
+
+.campus-table th {
+  padding: 8px 6px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-3);
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+
+.campus-table td {
+  padding: 6px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.campus-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.campus-table .is-num {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  text-align: center;
+}
+
+/* ---------- 空态 ---------- */
+
+.campus-empty {
+  padding: 28px 16px;
+  font-size: var(--fs-md);
+  line-height: 1.7;
+  color: var(--text-3);
+  text-align: center;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-md);
+}
+
+/* ---------- 未迁移工具的占位提示 ---------- */
+
+.campus-pending {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 24px 18px;
+  background: var(--fill-3);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--campus-radius);
+}
+
+.campus-pending-title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.campus-pending-text {
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: 1.75;
+  color: var(--text-2);
+}
+
+.campus-pending a {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ---------- 通用：行内表单 / 分段控件 / 弹窗 ---------- */
+
+.campus-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+  margin-top: 4px;
+}
+
+.campus-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: var(--fs-md);
+  line-height: 1.7;
+  color: var(--ink);
+  background: var(--bg-canvas);
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius-sm);
+  resize: vertical;
+}
+
+.campus-textarea:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 1px;
+}
+
+.campus-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.campus-seg-btn {
+  padding: 5px 12px;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+
+.campus-seg-btn.is-on {
+  color: var(--accent-ink);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-1);
+}
+
+.campus-details {
+  margin-top: 12px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+.campus-details summary {
+  cursor: pointer;
+}
+
+.campus-prompt {
+  max-height: 240px;
+  margin: 8px 0 0;
+  padding: 12px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  background: var(--fill-3);
+  border-radius: var(--radius-sm);
+}
+
+.campus-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.campus-modal-mask {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  background: var(--veil-strong);
+  border: 0;
+  cursor: pointer;
+}
+
+.campus-modal-card {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  max-height: calc(100vh - 48px);
+  padding: 18px;
+  overflow: auto;
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--campus-radius);
+  box-shadow: var(--shadow-2);
+}
+
+.campus-modal-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+/*
+ * 弹窗开着时，背景那层滚动容器不再吃滚轮。
+ * 现在只剩「本轮完成」提醒用得到 —— 最近记录 / 专注统计已改成页面内展开，不再锁滚动。
+ */
+body.campus-modal-open .campus-scroll {
+  overflow: hidden;
+}
+
+/* 空状态：列表和统计共用一句"还没有数据"的说法 */
+.campus-pomo-empty {
+  padding: 22px 12px;
+  color: var(--text-2);
+  text-align: center;
+  background: var(--fill-3);
+  border-radius: var(--radius-sm);
+}
+
+.campus-pomo-empty p {
+  margin: 0 0 4px;
+}
+
+/*
+ * 深色下 --text-3 是按「纸白卡底」调的（#A08B66 对 #292217 是 4.78:1）；
+ * 一旦压在 fill-3 这种更亮的底上就掉到 4.22:1，低于 AA。
+ * 空状态里那句「怎么才会有数据」和统计数字旁边的标签都属于这种地方，
+ * 它们本来就靠"淡"来退后，提一档到 --text-2 仍然比正文轻，但读得清。
+ */
+.dark .campus-pomo-empty .campus-card-note,
+.dark .campus-stats-empty .campus-card-note,
+.dark .campus-stats-num-label {
+  color: var(--text-2);
+}
+
+/* ---------- 番茄钟 ---------- */
+
+/*
+ * 番茄钟的作用域变量。
+ *
+ * 卡片间距在这里比别处松一档（12 → 16）：这一页是三个功能块叠在一起，
+ * 12px 时边界全靠一条 1px 线撑着，手机上几乎连成一片，读不出「到这儿换了一件事」。
+ * 只在本面板内生效，其他板块的节奏不受影响 —— 要统一再统一，先在一页上验过。
+ */
+#campus-panel-pomodoro {
+  --pomo-gap: 16px;
+}
+
+#campus-panel-pomodoro > .campus-card + .campus-card {
+  margin-top: var(--pomo-gap);
+}
+
+/*
+ * 每张卡的头一行加一条底线。
+ *
+ * 标题和内容原来只靠字号分层，三个块摆在一起时，扫视下来像三段连续的文字。
+ * 这条线把「这块叫什么」和「这块里有什么」分开，也顺带把相邻两块隔开一档。
+ * 用 padding 换线的高度，不额外占位。
+ */
+#campus-panel-pomodoro .campus-card-head {
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.campus-pomo-clock {
+  margin: 8px 0 14px;
+  font-family: var(--font-serif);
+  font-size: clamp(48px, 14vw, 76px);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.05;
+  color: var(--ink);
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+
+.campus-pomo-bar {
+  height: 6px;
+  margin-bottom: 16px;
+  overflow: hidden;
+  background: var(--fill-3);
+  border-radius: 999px;
+}
+
+.campus-pomo-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.25s linear;
+}
+
+.campus-pomo-ctrl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.campus-pomo-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/*
+ * 桌面：把操作按钮撑起来。
+ *
+ * 之前「开始」只有 44×32，挂在 800px 宽的一行最右边，右边空出一大片 ——
+ * 它既是这页唯一的主操作，又是整行最小的东西，视线找不到落点。
+ * 撑到 88（主按钮 120）宽、40 高之后，空白变成呼吸，主次也分出来了。
+ * 手机上另有规则让它占满一行，所以这条只在 561px 以上生效。
+ */
+@media (min-width: 561px) {
+  #campus-panel-pomodoro .campus-pomo-btns .campus-btn {
+    justify-content: center;
+    min-width: 88px;
+    min-height: 40px;
+  }
+
+  #campus-panel-pomodoro .campus-pomo-btns .campus-btn.is-primary {
+    min-width: 120px;
+    font-size: var(--fs-lg);
+  }
+}
+
+/* ---------- 番茄钟 · 表盘与方向 ---------- */
+
+.campus-pomo-face {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 分段控件与时长框同一层：默认那档比下面的输入框矮一整圈，摆在一起像两级控件 */
+#campus-panel-pomodoro .campus-seg-btn {
+  min-height: 30px;
+  padding: 5px 14px;
+  font-size: var(--fs-md);
+}
+
+.campus-pomo-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* 任务名可能很长，宁可截断也不让分段控件被挤走 */
+.campus-pomo-task {
+  flex: 1 1 120px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 时长区：上行「时 + 分」，下行常用档位芯片。整体占一列，右侧留给开始/暂停 */
+.campus-pomo-dur-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.campus-pomo-dur {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.campus-pomo-unit {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+/*
+ * 时长输入框。
+ *
+ * 宽度给到 72px：两位数是常态，三位（180 分钟）也放得下；
+ * 高度跟上旁边的按钮（36px），桌面上一整行「时 / 分 / 快捷芯片 / 开始」才是同一层的控件，
+ * 而不是三个控件配两个小格子。
+ */
+.campus-pomo-unit .campus-input {
+  width: 72px;
+  min-height: 36px;
+  padding: 7px 9px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.campus-pomo-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.campus-pomo-chip {
+  min-height: 30px;
+  padding: 5px 11px;
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  white-space: nowrap;
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.campus-pomo-chip:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--accent-line);
+}
+
+.campus-pomo-chip.is-on {
+  font-weight: 600;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+.campus-pomo-chip:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+/* 提示文案恒占一行高度，出现/消失时不把下面内容顶得跳动 */
+.campus-pomo-notice {
+  min-height: 1.5em;
+  margin: 10px 0 0;
+}
+
+/* ---------- 番茄钟 · 提示音设置 ---------- */
+
+.campus-pomo-sound {
+  margin-top: 14px;
+  border-top: 1px dashed var(--line);
+}
+
+/* 触控热区不靠 padding 堆，直接给最小高度：手机上一行也能点准 */
+.campus-pomo-sound-sum {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  padding: 2px 0;
+  cursor: pointer;
+  list-style: none;
+}
+
+.campus-pomo-sound-sum::-webkit-details-marker {
+  display: none;
+}
+
+.campus-pomo-sound-sum::before {
+  content: "▸";
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--text-3);
+  transition: transform 0.15s ease;
+}
+
+.campus-pomo-sound[open] .campus-pomo-sound-sum::before {
+  transform: rotate(90deg);
+}
+
+.campus-pomo-sound-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-md);
+  color: var(--text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.campus-pomo-sound-value {
+  flex: 0 0 auto;
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.campus-pomo-sound-body {
+  padding: 6px 0 2px;
+}
+
+.campus-chime-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  gap: 8px;
+}
+
+.campus-chime-btn {
+  min-height: 40px;
+  padding: 6px 8px;
+  font-size: var(--fs-md);
+  color: var(--text-2);
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.campus-chime-btn:hover {
+  color: var(--ink);
+  border-color: var(--accent-line);
+}
+
+.campus-chime-btn.is-on {
+  font-weight: 600;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+.campus-pomo-sound-hint {
+  min-height: 1.4em;
+  margin: 8px 0 0;
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+
+.campus-pomo-sound-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
+.campus-pomo-vol {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  font-size: var(--fs-md);
+  color: var(--text-2);
+}
+
+.campus-pomo-vol input[type="range"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+.campus-pomo-vol b {
+  flex: 0 0 auto;
+  min-width: 36px;
+  font-weight: 500;
+  color: var(--text-3);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.campus-sound-tip {
+  margin: 8px 0 0;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+/* ---------- 番茄钟 · 完成提醒弹窗 ---------- */
+
+.campus-pomo-done {
+  max-width: 400px;
+  padding: 26px 22px 20px;
+  text-align: center;
+  animation: campus-pomo-done-in 0.22s ease-out;
+}
+
+@keyframes campus-pomo-done-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.campus-pomo-done-badge {
+  display: inline-block;
+  margin: 0;
+  padding: 3px 10px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+}
+
+.campus-pomo-done-title {
+  margin: 14px 0 0;
+  font-family: var(--font-serif);
+  font-size: var(--fs-xl);
+  font-weight: 500;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
+/* 时长是这一屏的主角，沿用表盘的衬线字体，视觉上接得住 */
+.campus-pomo-done-num {
+  margin: 10px 0 0;
+  font-family: var(--font-serif);
+  font-size: clamp(34px, 9vw, 44px);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  color: var(--ink);
+  letter-spacing: 0.01em;
+}
+
+.campus-pomo-done-task {
+  margin: 10px 0 0;
+  font-size: var(--fs-lg);
+  line-height: 1.5;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.campus-pomo-done-today {
+  margin: 6px 0 0;
+  font-size: var(--fs-md);
+  color: var(--text-3);
+}
+
+.campus-pomo-done-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 22px;
+}
+
+.campus-pomo-done-actions .campus-btn {
+  min-width: 112px;
+  justify-content: center;
+}
+
+/* ---------- 番茄钟 · 任务库 ---------- */
+
+.campus-task-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.campus-task-new {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.campus-task-new-name {
+  flex: 1 1 200px;
+}
+
+.campus-task-new-cat {
+  flex: 0 0 128px;
+}
+
+.campus-task-add {
+  flex: 0 0 auto;
+}
+
+.campus-task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.campus-task-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+}
+
+.campus-task-item:hover {
+  background: var(--fill-3);
+}
+
+.campus-task-item.is-active {
+  background: var(--fill-2);
+  border-color: var(--line-strong);
+}
+
+.campus-task-item.is-archived {
+  color: var(--text-3);
+  padding-left: 10px;
+}
+
+/* 选中态任务用整行按钮，点击区域大，手机上不容易点空 */
+.campus-task-pick {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 8px;
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+
+.campus-task-pick:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
+.campus-task-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.campus-task-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.campus-task-cat {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  background: var(--fill-3);
+  border-radius: 999px;
+}
+
+.campus-task-act {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+
+.campus-task-act:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+
+.campus-task-act:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+/* 行内改名：整行换成输入框 + 保存/取消，错误就贴在这一行下面 */
+.campus-task-item.is-editing {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 6px;
+  background: var(--fill-2);
+  border-color: var(--line-strong);
+}
+
+.campus-task-edit {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.campus-task-edit-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.campus-task-save {
+  flex: 0 0 auto;
+  padding: 5px 12px;
+  font-size: var(--fs-sm);
+}
+
+.campus-task-err {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--red-ink);
+}
+
+.campus-task-archived {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+
+.campus-task-toggle {
+  align-self: flex-start;
+  padding: 0;
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  text-decoration: underline;
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+/* ---------- 番茄钟 · 最近记录 ---------- */
+
+.campus-pomo-log {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.campus-pomo-log-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  font-size: var(--fs-sm);
+  background: var(--fill-3);
+  border-radius: var(--radius-sm);
+}
+
+.campus-pomo-log-time {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.campus-pomo-log-name {
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.campus-pomo-log-cat {
+  padding: 1px 6px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  background: var(--fill-2);
+  border-radius: 999px;
+}
+
+.campus-pomo-log-dur {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 次要按钮：重置这类「有后果但不常用」的动作，不做成实心，降低误触 */
+.campus-btn.is-ghost {
+  color: var(--text-2);
+  background: transparent;
+  border-color: transparent;
+}
+
+.campus-btn.is-ghost:hover {
+  color: var(--ink);
+  background: var(--fill-3);
+}
+
+/* ---------- 倒计时 ---------- */
+
+.campus-dl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.campus-dl-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+}
+
+.campus-dl-item.is-urgent {
+  border-left-color: var(--red);
+}
+
+.campus-dl-item.is-today {
+  border-left-color: var(--red);
+  background: var(--accent-soft);
+}
+
+.campus-dl-item.is-past {
+  border-left-color: var(--line-strong);
+  opacity: 0.72;
+}
+
+.campus-dl-name {
+  flex: 1 1 140px;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.campus-dl-date {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.campus-dl-days {
+  min-width: 76px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.campus-dl-item.is-urgent .campus-dl-days,
+.campus-dl-item.is-today .campus-dl-days {
+  font-weight: 600;
+  color: var(--red-ink);
+}
+
+/* ---------- 课程表 ---------- */
+
+.campus-wkbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.campus-wk-btn {
+  width: 32px;
+  height: 32px;
+  font-family: inherit;
+  font-size: var(--fs-lg);
+  line-height: 1;
+  color: var(--text-2);
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.campus-wk-btn:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--fill-2);
+}
+
+.campus-wk-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.campus-week-wrap {
+  margin-top: 10px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.campus-week {
+  display: flex;
+  align-items: flex-start;
+  min-width: 560px;
+  background: var(--card-bg);
+}
+
+.campus-week-rail {
+  flex: 0 0 40px;
+  border-right: 1px solid var(--line);
+}
+
+.campus-week-rail-head {
+  border-bottom: 1px solid var(--line);
+}
+
+.campus-week-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid var(--line);
+}
+
+.campus-week-slot-no {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.campus-week-slot-time {
+  font-size: 10px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+.campus-week-days {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.campus-week-day {
+  position: relative;
+  border-right: 1px solid var(--line);
+}
+
+.campus-week-day:last-child {
+  border-right: 0;
+}
+
+.campus-week-day.is-today {
+  background: var(--accent-soft);
+}
+
+.campus-week-day-head {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.campus-week-day.is-today .campus-week-day-head {
+  font-weight: 600;
+  color: var(--accent-ink);
+}
+
+.campus-week-date {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+.campus-week-block {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-items: flex-start;
+  padding: 4px 5px;
+  overflow: hidden;
+  font-family: inherit;
+  text-align: left;
+  border: 1px solid;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+
+.campus-week-block:hover {
+  filter: brightness(1.06);
+  outline: 2px solid var(--accent-line);
+  outline-offset: -1px;
+}
+
+.campus-week-block-name {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--ink);
+}
+
+.campus-week-block-room,
+.campus-week-block-teacher {
+  font-size: 10px;
+  line-height: 1.25;
+  color: var(--text-2);
+}
+
+/* 单节课的格子放不下教室和老师，只留课名，避免文字被裁一半 */
+.campus-week-block.is-one .campus-week-block-room,
+.campus-week-block.is-one .campus-week-block-teacher {
+  display: none;
+}
+
+.campus-week-block.is-split .campus-week-block-name {
+  font-size: 10px;
+}
+
+.campus-ov-wrap {
+  margin-top: 10px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.campus-ov {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: collapse;
+  font-size: var(--fs-xs);
+}
+
+.campus-ov th,
+.campus-ov td {
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+  border: 1px solid var(--line);
+}
+
+.campus-ov thead th {
+  font-weight: 600;
+  color: var(--text-2);
+  background: var(--fill-3);
+  white-space: nowrap;
+}
+
+.campus-ov td {
+  max-width: 120px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.campus-ov tr.is-now td,
+.campus-ov tr.is-now th {
+  background: var(--accent-soft);
+}
+
+.campus-ov-week {
+  padding: 2px 6px;
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  color: var(--accent-ink);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+
+.campus-ov-week:hover {
+  background: var(--fill-2);
+}
+
+.campus-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.campus-fullscreen-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.campus-fullscreen-title {
+  font-family: var(--font-serif);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.campus-fullscreen-body {
+  flex: 1;
+  padding: 12px 16px 24px;
+  overflow: auto;
+}
+
+.campus-fullscreen .campus-week {
+  min-width: 720px;
+}
+
+/* ---------- 单词卡 ---------- */
+
+.campus-words-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.campus-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.campus-chip {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 5px 12px;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.campus-chip small {
+  font-size: 10px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.campus-chip.is-on {
+  color: var(--accent-ink);
+  background: var(--card-bg);
+  border-color: var(--accent-line);
+}
+
+.campus-words-group {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.campus-words-bar {
+  height: 4px;
+  margin-bottom: 14px;
+  overflow: hidden;
+  background: var(--fill-3);
+  border-radius: 999px;
+}
+
+.campus-words-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.2s ease;
+}
+
+.campus-flip {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 220px;
+  padding: 24px 18px;
+  font-family: inherit;
+  text-align: center;
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+}
+
+.campus-flip.is-flipped {
+  background: var(--card-bg);
+}
+
+.campus-flip.is-done {
+  border-style: dashed;
+}
+
+.campus-flip-word {
+  font-family: var(--font-serif);
+  font-size: clamp(28px, 8vw, 40px);
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--ink);
+  word-break: break-word;
+}
+
+.campus-flip-hint {
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+
+.campus-flip-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+}
+
+.campus-flip-def {
+  font-size: var(--fs-lg);
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+.campus-flip-eg {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 480px;
+  padding: 10px 12px;
+  text-align: left;
+  background: var(--card-bg);
+  border-left: 2px solid var(--accent-line);
+  border-radius: var(--radius-xs);
+}
+
+.campus-flip-eg-tag {
+  font-size: 10px;
+  color: var(--text-3);
+  letter-spacing: 0.08em;
+}
+
+.campus-flip-eg-en {
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
+.campus-flip-eg-zh {
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+.campus-words-keys kbd {
+  padding: 1px 5px;
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+}
+
+.campus-words-source {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.campus-words-source a {
+  color: var(--accent-ink);
+}
+
+/* ---------- 群抽签 ---------- */
+
+.campus-draw-col {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.campus-draw-head {
+  flex: 0 0 100%;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.campus-draw-head.is-ok {
+  color: var(--accent-ink);
+}
+
+.campus-draw-name {
+  padding: 4px 10px;
+  font-size: var(--fs-md);
+  color: var(--text-2);
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.campus-draw-name.is-win {
+  font-weight: 600;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+/* ---------- 番茄钟 · 双时间行与全屏舞台（B3） ---------- */
+
+/* 主数字只显示一个方向，另一个方向用小字补在下面：
+   倒计时的人常在中间想知道「已经花了多久」，正计时的人想知道「还能不能停」 */
+.campus-pomo-sub {
+  margin: -6px 0 12px;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+  text-align: center;
+}
+
+/*
+ * 专注视图：页面里的一块大区域，不是覆盖层。
+ *
+ * 它跟着页面一起滚，标签栏、任务、统计都还能用 —— 「专心」不该等于「我的页面被锁住了」。
+ * 想要整屏的人自己点「全屏」，那时才套用下面的 `:fullscreen` 规则。
+ */
+.campus-stage {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  min-height: clamp(320px, 56dvh, 520px);
+  padding: 18px;
+  /* 和下面的卡片拉开距离：它不是 .campus-card，吃不到 `+` 相邻规则 */
+  margin-bottom: var(--campus-gap);
+  color: var(--text-1);
+  background: var(--bg-canvas);
+  border: 1px solid var(--line);
+  border-radius: var(--campus-radius);
+  box-shadow: var(--shadow-1);
+  animation: campus-stage-in 0.18s ease-out;
+}
+
+/* 真进全屏：这块区域就是整个屏幕。四边贴屏幕边，刘海与 Home 条会吃掉一截，这里补回安全区 */
+.campus-stage:fullscreen {
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
+  padding: 16px;
+  padding-top: calc(16px + env(safe-area-inset-top));
+  padding-right: calc(16px + env(safe-area-inset-right));
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  padding-left: calc(16px + env(safe-area-inset-left));
+  background: var(--bg-canvas);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+@keyframes campus-stage-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.campus-stage-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.campus-stage-task {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.campus-stage-task b {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.campus-stage-cat {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  font-size: var(--fs-xs);
+  color: var(--accent-ink);
+  white-space: nowrap;
+  background: var(--accent-soft);
+  border-radius: 999px;
+}
+
+.campus-stage-meta {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* 当前时刻：全屏看不到系统状态栏，得自己报时 */
+.campus-stage-now {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--fs-lg);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+
+.campus-stage-main {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+
+/* 字号跟视口短边走。页面内是「一块卡片」，所以比全屏时收一档，不至于把卡片撑爆 */
+.campus-stage-clock {
+  font-family: var(--font-serif);
+  font-size: clamp(52px, 12vmin, 128px);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  outline: none;
+}
+
+/* 全屏了才敢放开：整块屏幕都是它的 */
+.campus-stage:fullscreen .campus-stage-clock {
+  font-size: clamp(56px, 18vmin, 190px);
+}
+
+.campus-stage-sub {
+  font-size: var(--fs-lg);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+
+.campus-stage-bar {
+  width: min(520px, 80%);
+  height: 6px;
+  margin-top: 6px;
+  overflow: hidden;
+  background: var(--fill-3);
+  border-radius: 999px;
+}
+
+.campus-stage-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.25s linear;
+}
+
+.campus-stage-hint {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+  text-align: center;
+}
+
+.campus-stage-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 全屏里按钮要「摸得到」，不靠鼠标精确点 */
+.campus-stage-actions .campus-btn {
+  min-width: 96px;
+  min-height: 44px;
+}
+
+.campus-stage-rotate {
+  display: none;
+  margin: 0 0 0 auto;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+/* 竖屏时提示横过来。只有真全屏才有意义 —— 页面内本来就是竖着看的，提示"横过来"没道理 */
+@media (orientation: portrait) {
+  .campus-stage:fullscreen .campus-stage-rotate,
+  .campus-stage.is-fs .campus-stage-rotate {
+    display: block;
+  }
+}
+
+/* 横屏且够宽：大钟居中、操作区收到右侧一列 —— 这是全屏专注最舒服的版式 */
+@media (orientation: landscape) and (min-width: 760px) {
+  .campus-stage {
+    grid-template-areas:
+      "head head"
+      "main actions";
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1fr);
+    column-gap: 28px;
+  }
+
+  .campus-stage-head {
+    grid-area: head;
+  }
+
+  .campus-stage-main {
+    grid-area: main;
+  }
+
+  .campus-stage-actions {
+    grid-area: actions;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .campus-stage-actions .campus-btn {
+    min-width: 120px;
+  }
+
+  /* 横屏时垂直空间紧，操作提示让位给大钟 */
+  .campus-stage-hint,
+  .campus-stage-rotate {
+    display: none;
+  }
+}
+
+/* ---------- 番茄钟 · 云同步状态条（B6） ---------- */
+
+/*
+ * 放在番茄钟最上面：位置高于所有数据，「数据在哪」应该在看到数字之前就交代清楚。
+ * 四种状态用同一套结构，只换圆点颜色 —— 用户读的是那行字，不是颜色。
+ */
+.campus-sync {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 12px;
+  margin-bottom: 12px;
+  font-size: var(--fs-sm);
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-radius: var(--campus-radius);
+}
+
+.campus-sync-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  background: var(--text-3);
+  border-radius: 50%;
+}
+
+.campus-sync.is-synced .campus-sync-dot {
+  background: var(--accent);
+}
+
+.campus-sync.is-error .campus-sync-dot {
+  background: var(--red);
+}
+
+.campus-sync.is-guest .campus-sync-dot {
+  background: var(--line-strong);
+}
+
+.campus-sync.is-syncing .campus-sync-dot,
+.campus-sync.is-checking .campus-sync-dot {
+  background: var(--accent);
+  animation: campus-sync-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes campus-sync-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.campus-sync-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  align-items: baseline;
+  min-width: 0;
+  color: var(--text-2);
+}
+
+.campus-sync-text b {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.campus-sync-link {
+  margin-left: 6px;
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.campus-sync-btn {
+  flex: 0 0 auto;
+}
+
+/* ---------- 番茄钟 · 专注统计与下钻（B4） ---------- */
+
+/* 视觉隐藏但读屏可读：文件选择框用它，避免在按钮旁边露出一个原生「选择文件」 */
+.campus-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  white-space: nowrap;
+  border: 0;
+  clip-path: inset(50%);
+}
+
+/*
+ * 注意命名：这层容器**不能**叫 .campus-stats —— 那个类在 GPA 工具里是
+ * 「3 列网格」的统计卡，同名会把展开区内容排成三列（实测就是这么翻车的）。
+ * 这里只是给展开区内容一个普通块级容器。
+ */
+.campus-pomo-stats {
+  display: block;
+}
+
+/* 区间与日期同一行，右对齐分段控件 */
+.campus-stats-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.campus-stats-period {
+  margin: 0;
+}
+
+.campus-stats-nums {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.campus-stats-num {
+  padding: 9px 12px;
+  background: var(--fill-3);
+  border-radius: var(--radius-sm);
+}
+
+.campus-stats-num-label {
+  display: block;
+  margin-bottom: 2px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.campus-stats-num b {
+  font-size: var(--fs-lg);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.campus-stats-empty {
+  padding: 18px 12px;
+  color: var(--text-2);
+  text-align: center;
+  background: var(--fill-3);
+  border-radius: var(--radius-sm);
+}
+
+.campus-stats-empty p {
+  margin: 0 0 4px;
+}
+
+/* ---------- 饼图 ---------- */
+
+.campus-pie {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: center;
+  margin: 4px 0 12px;
+}
+
+.campus-pie-graphic {
+  position: relative;
+  flex: 0 0 auto;
+  width: 196px;
+  height: 196px;
+}
+
+.campus-pie-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/*
+ * 六色按索引轮换。色值放在变量里，深色主题只换变量，
+ * 不在 JS 里维护两份色表 —— 两份一定会漂。
+ */
+.campus-pie-c1 {
+  --pie: #c8892a;
+}
+
+.campus-pie-c2 {
+  --pie: #4e7c8a;
+}
+
+.campus-pie-c3 {
+  --pie: #8c6bb1;
+}
+
+.campus-pie-c4 {
+  --pie: #b4553f;
+}
+
+.campus-pie-c5 {
+  --pie: #5c8a4e;
+}
+
+.campus-pie-c6 {
+  --pie: #8a7350;
+}
+
+.dark .campus-pie-c1 {
+  --pie: #e0a03a;
+}
+
+.dark .campus-pie-c2 {
+  --pie: #6fa4b3;
+}
+
+.dark .campus-pie-c3 {
+  --pie: #ab8bd0;
+}
+
+.dark .campus-pie-c4 {
+  --pie: #d9705a;
+}
+
+.dark .campus-pie-c5 {
+  --pie: #7fae6c;
+}
+
+.dark .campus-pie-c6 {
+  --pie: #b39770;
+}
+
+.campus-pie-slice {
+  fill: var(--pie);
+  transition: opacity 0.15s ease;
+}
+
+/* 圆心挖空用卡片底色，跟随主题 */
+.campus-pie-hole {
+  fill: var(--card-bg);
+}
+
+.campus-pie-dot {
+  width: 10px;
+  height: 10px;
+  background: var(--pie);
+  border-radius: 3px;
+}
+
+.campus-pie-seg {
+  cursor: pointer;
+}
+
+/* 展开某一类时，其余扇区压暗但不隐藏：位置和大小仍是参照 */
+.campus-pie-seg.is-dim {
+  opacity: 0.42;
+}
+
+.campus-pie-seg:focus-visible {
+  outline: none;
+}
+
+.campus-pie-seg:focus-visible .campus-pie-slice {
+  stroke: var(--ink);
+  stroke-width: 2;
+}
+
+.campus-pie-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.campus-pie-center-name {
+  max-width: 86px;
+  overflow: hidden;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.campus-pie-center-num {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.campus-pie-legend {
+  display: flex;
+  flex: 1 1 240px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.campus-pie-legend-btn {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 6px 8px;
+  font-size: var(--fs-md);
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.campus-pie-legend-btn:hover {
+  background: var(--fill-3);
+}
+
+.campus-pie-legend-btn.is-on {
+  color: var(--ink);
+  background: var(--accent-soft);
+}
+
+.campus-pie-legend-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.campus-pie-legend-pct {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.campus-pie-legend-dur {
+  min-width: 68px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  text-align: right;
+}
+
+/* ---------- 下钻明细 ---------- */
+
+.campus-drill {
+  padding: 12px;
+  margin-top: 12px;
+  background: var(--fill-3);
+  border-radius: var(--radius-sm);
+}
+
+.campus-drill-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.campus-drill-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.campus-drill-title b {
+  font-size: var(--fs-lg);
+  color: var(--ink);
+}
+
+.campus-drill-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.campus-drill-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(56px, 1.4fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  font-size: var(--fs-md);
+}
+
+.campus-drill-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-1);
+}
+
+.campus-drill-bar {
+  height: 6px;
+  overflow: hidden;
+  background: var(--line);
+  border-radius: 999px;
+}
+
+.campus-drill-bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+}
+
+.campus-drill-value {
+  min-width: 64px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.campus-drill-count {
+  min-width: 38px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  text-align: right;
+}
+
+.campus-drill-note {
+  margin: 8px 0 0;
+}
+
+/* ---------- 导出 / 导入 ---------- */
+
+.campus-stats-io {
+  padding-top: 12px;
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.campus-stats-io-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.campus-stats-io-note {
+  margin: 8px 0 0;
+}
+
+/* ---------- 无障碍：尊重减少动效偏好 ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .campus-tab,
+  .campus-btn,
+  .campus-pomo-fill,
+  .campus-stage-fill,
+  .campus-words-fill {
+    transition: none;
+  }
+
+  /* 完成提醒是靠"突然出现"抓住注意力的，但对减少动效的用户来说淡入也够 */
+  .campus-pomo-done,
+  .campus-stage {
+    animation: none;
+  }
+
+  /* 展开区只做淡入，不做位移 —— 减少动效时连这一点也去掉，内容直接出现 */
+  .campus-pomo-fold {
+    animation: none;
+  }
+
+  .campus-pomo-entry-go {
+    transition: none;
+  }
+
+  .campus-sync.is-syncing .campus-sync-dot,
+  .campus-sync.is-checking .campus-sync-dot {
+    animation: none;
+  }
+}
+
+/* ---------- 窄屏 ---------- */
+
+@media (max-width: 560px) {
+  .campus-modal-card {
+    padding: 14px;
+  }
+
+  /* 入口本身是上下两张卡，手机上再把行高与触控区拉满 */
+  .campus-pomo-entry {
+    min-height: 56px;
+    padding: 13px 14px;
+  }
+
+  /* 手机上芯片也是要按的东西：28px 高时手指常按到隔壁那档 */
+  .campus-pomo-chip {
+    min-height: 40px;
+    padding: 6px 14px;
+  }
+
+  #campus-panel-pomodoro .campus-seg-btn {
+    min-height: 40px;
+    padding: 6px 16px;
+  }
+
+  .campus-pomo-fold {
+    padding: 12px 14px 14px;
+  }
+
+  /* 「收起」也拉到 44px：手指点得到，不再是浮层里那个小圆点 */
+  .campus-pomo-fold-close {
+    min-height: 44px;
+    padding: 4px 14px;
+  }
+
+  .campus-tab {
+    padding: 8px 6px;
+  }
+
+  /* 提示音：固定三列（6 个音色正好两行），比 auto-fill 更整齐；
+     手机上「试听」按钮会换到音量条下面，不挤在一行里 */
+  .campus-chime-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .campus-pomo-sound-row {
+    flex-wrap: wrap;
+  }
+
+  /* 完成弹窗：手机上收紧留白，给内容更多宽度 */
+  .campus-pomo-done {
+    padding: 20px 16px 16px;
+  }
+
+  .campus-pomo-done-num {
+    font-size: 34px;
+  }
+
+  /* 这几组是"要按"的按钮：手机上统一拉到 44px，手指点得准 */
+  .campus-pomo-btns .campus-btn,
+  .campus-pomo-done-actions .campus-btn,
+  .campus-pomo-sound-row .campus-btn {
+    min-height: 44px;
+  }
+
+  /* 主操作在手机上占满一行。开始 / 继续 是这一屏唯一该被一眼看到的东西，
+     缩在快捷芯片右下角当个小按钮，反而不如旁边那些"25 分"显眼 */
+  .campus-pomo-btns .campus-btn.is-primary {
+    flex: 1 1 100%;
+  }
+
+  .campus-dl-days {
+    min-width: 64px;
+    font-size: var(--fs-xs);
+  }
+
+  .campus-pomo-ctrl {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  /*
+   * 时长框：手机上回到「一个小框装一个数字」的比例。
+   * 之前用 flex: 1 1 0 把两个 label 各撑一半、框再吃满剩余宽度，
+   * 390px 下每个框被拉到 136px 宽 —— 一个两位数躺在一大片空白中央，
+   * 看着像框坏了，也把「时」和「分钟」推得离数字很远。
+   * 现在固定宽度、靠左排，数字和自己单位贴在一起读。
+   */
+  .campus-pomo-dur {
+    width: auto;
+    gap: 16px;
+  }
+
+  .campus-pomo-unit {
+    flex: 0 0 auto;
+    gap: 6px;
+    justify-content: flex-start;
+  }
+
+  .campus-pomo-unit .campus-input {
+    flex: 0 0 auto;
+    width: 64px;
+    max-width: none;
+    /* 44px：手指点得准，也和这一屏其他控件同高 */
+    min-height: 44px;
+  }
+
+  /* 窄屏下新建任务：名字一行、大类与按钮一行 */
+  .campus-task-new-cat {
+    flex: 1 1 auto;
+  }
+
+  /* 记录条目去掉大类，优先保住任务名和时长 */
+  .campus-pomo-log-item {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .campus-pomo-log-cat {
+    display: none;
+  }
+
+  /* 统计：四个数字两列，饼图缩到能放下，图例只留占比（时长点开下钻就有） */
+  .campus-stats-nums {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .campus-pie {
+    justify-content: center;
+    gap: 10px;
+  }
+
+  .campus-pie-graphic {
+    width: 168px;
+    height: 168px;
+  }
+
+  .campus-pie-legend {
+    flex: 1 1 100%;
+  }
+
+  .campus-pie-legend-dur {
+    display: none;
+  }
+
+  /* 下钻去掉条形图，把宽度让给任务名 —— 手机上名字被截断比看不到柱子更难受 */
+  .campus-drill-item {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .campus-drill-bar {
+    display: none;
+  }
+
+  .campus-stats-io-btns .campus-btn {
+    flex: 1 1 auto;
+    min-height: 44px;
+  }
+
+  /*
+   * 状态条在手机上不换行：文字占满整行、按钮掉到第二行时，这条提示会涨到 112px，
+   * 比它下面整张计时卡的头还高 —— 一条「数据在哪」的说明不该吃掉首屏八分之一的视野。
+   * 改成并排之后按钮靠右，文字按行内流连续折行（「仅本机」不再独占一行），
+   * 总高从 112 降到 54 上下。
+   */
+  .campus-sync {
+    flex-wrap: nowrap;
+    gap: 8px;
+    padding: 8px 10px;
+  }
+
+  .campus-sync-text {
+    /* flex 布局下标题和正文各是一个 flex item，放不下时整块换行，
+       「仅本机」就白白占掉一行；改成块级行内流，标题和正文接着排 */
+    display: block;
+    flex: 1 1 auto;
+  }
+
+  .campus-sync-text b {
+    margin-right: 8px;
+  }
+
+  /* 「去登录」不能被拆成两行：链接断行后读起来像别的东西 */
+  .campus-sync-link {
+    white-space: nowrap;
+  }
+
+  .campus-sync-btn {
+    margin-left: 0;
+    padding: 4px 10px;
+  }
+}
+
+/* ---------- iOS 专项 ---------- */
+
+/*
+ * 输入框字号低于 16px 时，iOS Safari 一聚焦就把整页放大，
+ * 键盘收起后页面还停在放大状态，得手动捏回来。
+ * 用 @supports 限定只在触屏 iOS 生效，Android 的字号视觉不受影响。
+ */
+@supports (-webkit-touch-callout: none) {
+  @media (max-width: 560px) {
+    .campus-input,
+    .campus-select,
+    .campus-textarea {
+      font-size: 16px;
+    }
+  }
+}
+
+/* 全面屏底部有 Home 指示条：弹窗按钮与页面尾部贴底会被盖住一截 */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .campus-modal {
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .campus-shell {
+    padding-bottom: calc(72px + env(safe-area-inset-bottom));
+  }
+}

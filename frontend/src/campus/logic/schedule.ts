@@ -1,0 +1,448 @@
+/**
+ * 校园工具集 · 课表周次计算（纯函数）
+ *
+ * 这里集中放课表最容易算错的三件事：星期归一、教学周、周次表达式解析。
+ * 旧版把这三件事混在 DOM 操作里，出错时只能靠肉眼比对，所以先抽出来。
+ */
+
+import type { Course, ScheduleSnapshot } from "../types";
+
+/** 周一为 0，周日为 6 —— 新结构统一口径 */
+export const DAY_LABELS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"] as const;
+
+/**
+ * 旧版 v1 的 day 是 `dayOfWeek % 7`（周一 = 1，周日 = 0），
+ * 新结构是 `(dayOfWeek - 1) % 7`（周一 = 0，周日 = 6）。
+ *
+ * ⚠️ 迁移旧数据时必须调一次，且**只能调一次**。重复调用会整体错位。
+ */
+export function normalizeLegacyDay(legacyDay: number): number {
+  const day = Math.trunc(legacyDay);
+  if (!Number.isFinite(day)) return 0;
+  return (((day - 1) % 7) + 7) % 7;
+}
+
+const MS_PER_DAY = 86_400_000;
+
+/** 去掉时分秒，只留自然日，避免跨零点计算漂移 */
+function startOfDay(date: Date): number {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
+/**
+ * 由学期起始日算当前教学周（第 1 周起）。
+ * 起始日之前返回 0，表示「学期还没开始」。
+ */
+export function currentWeek(termStart: Date, today: Date = new Date()): number {
+  const diffDays = Math.floor((startOfDay(today) - startOfDay(termStart)) / MS_PER_DAY);
+  if (diffDays < 0) return 0;
+  return Math.floor(diffDays / 7) + 1;
+}
+
+/**
+ * 解析周次表达式，如 `"1-8,10,12-14"` → `[1..8, 10, 12..14]`。
+ * 非法片段直接跳过，不让一条脏输入毁掉整张课表。
+ */
+export function parseWeeks(text: string): number[] {
+  const weeks = new Set<number>();
+
+  for (const piece of text.split(/[,，、\s]+/)) {
+    const token = piece.trim();
+    if (token === "") continue;
+
+    const range = token.match(/^(\d+)\s*[-~]\s*(\d+)$/);
+    if (range) {
+      const from = Number.parseInt(range[1], 10);
+      const to = Number.parseInt(range[2], 10);
+      if (!Number.isFinite(from) || !Number.isFinite(to)) continue;
+      for (let w = Math.min(from, to); w <= Math.max(from, to); w += 1) {
+        if (w > 0 && w <= 30) weeks.add(w);
+      }
+      continue;
+    }
+
+    const single = Number.parseInt(token, 10);
+    if (Number.isFinite(single) && single > 0 && single <= 30) weeks.add(single);
+  }
+
+  return [...weeks].sort((a, b) => a - b);
+}
+
+/** 某门课在指定周是否上课 */
+export function isActiveInWeek(weeks: readonly number[], week: number): boolean {
+  return weeks.includes(week);
+}
+
+/** 节次范围 → 显示文案，如 [1,2] → "1-2 节" */
+export function formatSections(sections: readonly number[]): string {
+  if (sections.length === 0) return "未定节次";
+  const sorted = sections.slice().sort((a, b) => a - b);
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  return first === last ? `第 ${first} 节` : `${first}-${last} 节`;
+}
+
+/* ------------------------------------------------------------------ *
+ * 以下是 2026-10-31 迁移时补充的部分：周视图布局、JSON 导入、旧数据迁移
+ * ------------------------------------------------------------------ */
+
+/** 一天最多 12 节，与旧版 PERIODS 一致 */
+export const PERIODS = 12;
+
+/** 12 节的开始时间，全屏视图里标在节次下方。改作息直接改这里 */
+export const PERIOD_TIMES = [
+  "08:00", "08:55", "10:00", "10:55", "14:30", "15:25",
+  "16:20", "17:15", "19:40", "20:35", "21:30", "22:25",
+] as const;
+
+/** 课块配色，按课程 id 轮转。取的是与主站色板同族、深浅适中、浅底上能看清的值 */
+export const COURSE_COLORS = [
+  "#C8892A", "#7C9A54", "#EF8A56", "#2A5A8A",
+  "#875B10", "#1E7A46", "#8A5A0A", "#A03E28",
+] as const;
+
+/**
+ * 解析节次输入。
+ *
+ * 收三种形状：数组 `[1,2]`、字符串 `"1,2"` / `"1-3"`、单个数字。
+ * 中文逗号一律当英文逗号处理 —— 手机输入法切到中文标点是常态。
+ */
+export function parseSections(input: unknown): number[] {
+  const collect = (token: string): number[] => {
+    const range = token.match(/^(\d+)\s*[-~]\s*(\d+)$/);
+    if (range) {
+      const from = Number.parseInt(range[1], 10);
+      const to = Number.parseInt(range[2], 10);
+      const list: number[] = [];
+      for (let i = Math.min(from, to); i <= Math.max(from, to); i += 1) list.push(i);
+      return list;
+    }
+    const single = Number.parseInt(token, 10);
+    return Number.isFinite(single) ? [single] : [];
+  };
+
+  let raw: number[] = [];
+  if (typeof input === "number") {
+    raw = [input];
+  } else if (Array.isArray(input)) {
+    raw = input.map(Number);
+  } else if (typeof input === "string") {
+    raw = input
+      .replace(/，/g, ",")
+      .split(",")
+      .map((piece) => piece.trim())
+      .filter(Boolean)
+      .flatMap(collect);
+  }
+
+  // 去重 + 只留 1..12，脏输入不该把整张课表带崩
+  const valid = raw.filter((n) => Number.isFinite(n) && n >= 1 && n <= PERIODS).map(Math.trunc);
+  return [...new Set(valid)].sort((a, b) => a - b);
+}
+
+/**
+ * 解析周次；返回 null 表示「每周都上」。
+ *
+ * 与节次不同的是，这里**必须**区分「没填」和「填了但无效」：
+ * 没填是每周都上，填了无效按每周都上处理也符合直觉，所以两者都落到 null。
+ */
+export function parseCourseWeeks(input: unknown): number[] | null {
+  if (input === null || input === undefined || input === "") return null;
+
+  let weeks: number[] = [];
+  if (typeof input === "string") {
+    // 容忍「第1-16周」这种从教务系统抄来的写法
+    weeks = parseWeeks(input.replace(/[第周\s]/g, ""));
+  } else if (Array.isArray(input)) {
+    weeks = input
+      .map(Number)
+      .filter((n) => Number.isFinite(n) && n >= 1 && n <= 30)
+      .map(Math.trunc);
+    weeks = [...new Set(weeks)].sort((a, b) => a - b);
+  }
+
+  return weeks.length > 0 ? weeks : null;
+}
+
+/** 某门课是否在指定周上课；没标周次 = 每周都上 */
+export function courseInWeek(course: Course, week: number): boolean {
+  const weeks = course.weeks;
+  return !weeks || weeks.length === 0 || weeks.includes(week);
+}
+
+/** 判重键：课名 + 星期 + 节次 + 周次全一样才算同一门 */
+export function courseKey(
+  course: Pick<Course, "name" | "day" | "sections" | "weeks">,
+): string {
+  return [
+    course.name.trim().toLowerCase(),
+    course.day,
+    course.sections.slice().sort((a, b) => a - b).join(","),
+    (course.weeks ?? []).slice().sort((a, b) => a - b).join(","),
+  ].join("|");
+}
+
+/** 周视图里一个课块的布局结果 */
+export interface DayBlock {
+  course: Course;
+  /** 起始节（1 基） */
+  start: number;
+  /** 结束节（1 基，含） */
+  end: number;
+  /** 该块在第几列（0 基） */
+  col: number;
+  /** 这一簇共分几列 */
+  cols: number;
+}
+
+/**
+ * 同一天内的课块布局：先按起始节分簇，簇内贪心分列，重叠的课并排显示。
+ *
+ * 为什么必须分栏：两块都绝对定位在同一个 top/height 上，后画的会把先画的整块盖住，
+ * 用户看到的就是文字重叠的「乱码」。这是旧版 10-29 修过的问题（第 1061 行注释）。
+ */
+export function layoutDay(courses: readonly Course[]): DayBlock[] {
+  const items = courses
+    .map((course) => {
+      const sections = course.sections.slice().sort((a, b) => a - b);
+      return {
+        course,
+        start: sections[0],
+        end: sections[sections.length - 1] ?? sections[0],
+      };
+    })
+    .sort((a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start));
+
+  const clusters: (typeof items)[] = [];
+  let cluster: typeof items = [];
+  let clusterEnd = 0;
+
+  for (const item of items) {
+    if (cluster.length > 0 && item.start > clusterEnd) {
+      clusters.push(cluster);
+      cluster = [];
+      clusterEnd = 0;
+    }
+    cluster.push(item);
+    clusterEnd = Math.max(clusterEnd, item.end);
+  }
+  if (cluster.length > 0) clusters.push(cluster);
+
+  const result: DayBlock[] = [];
+  for (const group of clusters) {
+    // colEnd[i] = 第 i 列已经占到第几节
+    const colEnd: number[] = [];
+    const placed = group.map((item) => {
+      let col = colEnd.findIndex((end) => end < item.start);
+      if (col < 0) {
+        col = colEnd.length;
+        colEnd.push(item.end);
+      } else {
+        colEnd[col] = item.end;
+      }
+      return { ...item, col };
+    });
+
+    for (const item of placed) {
+      result.push({ ...item, cols: colEnd.length });
+    }
+  }
+
+  return result;
+}
+
+/** 周次显示文案：`[1,2,3,5]` → 「第1-3,5周」，空则「每周」 */
+export function formatWeeks(weeks: readonly number[] | null): string {
+  if (!weeks || weeks.length === 0) return "每周";
+
+  const sorted = weeks.slice().sort((a, b) => a - b);
+  const parts: string[] = [];
+  let start = sorted[0];
+  let prev = sorted[0];
+
+  for (let i = 1; i <= sorted.length; i += 1) {
+    const current = sorted[i];
+    if (current === prev + 1) {
+      prev = current;
+      continue;
+    }
+    parts.push(start === prev ? `${start}` : `${start}-${prev}`);
+    start = current;
+    prev = current;
+  }
+
+  return `第${parts.join(",")}周`;
+}
+
+/**
+ * 导入 JSON 的解析结果。
+ * `courses` 是解析成功的课程；`skipped` 是被丢掉的行数，要如实告诉用户「进来多少、丢了多少」。
+ */
+export interface ImportResult {
+  courses: Omit<Course, "id" | "color">[];
+  skipped: number;
+  /** 整体性错误（不是合法 JSON / 没有 courses 数组） */
+  error: string | null;
+}
+
+/** 解析「小律同款」课表 JSON：`{ courses: [{ name, dayOfWeek, sections, weeks, ... }] }` */
+export function parseScheduleImport(text: string): ImportResult {
+  const empty: ImportResult = { courses: [], skipped: 0, error: null };
+
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return { ...empty, error: "这段内容不是合法 JSON，检查一下引号和逗号。" };
+  }
+
+  const list = (data as { courses?: unknown })?.courses;
+  if (!Array.isArray(list)) {
+    return { ...empty, error: "JSON 里没找到 courses 数组，格式见下方示例。" };
+  }
+
+  const parsed: Omit<Course, "id" | "color">[] = [];
+  let skipped = 0;
+
+  for (const entry of list) {
+    if (!entry || typeof entry !== "object") {
+      skipped += 1;
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+
+    const sections = parseSections(record.sections ?? record.section ?? []);
+    if (sections.length === 0) {
+      // 没有节次就没法排进周视图，只能丢掉
+      skipped += 1;
+      continue;
+    }
+
+    const rawDay = record.dayOfWeek ?? record.day;
+    const day = rawDay === undefined || rawDay === null ? 0 : normalizeLegacyDay(Number(rawDay));
+
+    const name = String(record.name ?? "").trim();
+    parsed.push({
+      name: name === "" ? "未命名课程" : name,
+      day,
+      sections,
+      teacher: String(record.teacher ?? ""),
+      classroom: String(record.classroom ?? ""),
+      weeks: parseCourseWeeks(record.weeks),
+      notes: String(record.notes ?? ""),
+    });
+  }
+
+  return { courses: parsed, skipped, error: null };
+}
+
+/** 合并导入结果：按 courseKey 判重，保留已有课程 */
+export function mergeCourses(
+  existing: readonly Course[],
+  incoming: readonly Omit<Course, "id" | "color">[],
+  startId: number,
+): { courses: Course[]; added: number; duplicated: number; nextId: number } {
+  const seen = new Set(existing.map(courseKey));
+  const merged = existing.slice();
+  let nextId = startId;
+  let added = 0;
+  let duplicated = 0;
+
+  for (const item of incoming) {
+    const key = courseKey(item);
+    if (seen.has(key)) {
+      duplicated += 1;
+      continue;
+    }
+    seen.add(key);
+    nextId += 1;
+    merged.push({
+      ...item,
+      id: nextId,
+      color: COURSE_COLORS[(nextId - 1) % COURSE_COLORS.length],
+    });
+    added += 1;
+  }
+
+  return { courses: merged, added, duplicated, nextId };
+}
+
+/* ------------------------------------------------------------------ *
+ * 旧数据迁移
+ * ------------------------------------------------------------------ */
+
+/**
+ * 旧版课表存档 → 新结构。
+ *
+ * 两个必须处理的差异：
+ *  1. `day` 的口径变过。v1 存的是 `dayOfWeek % 7`（周一 = 1、周日 = 0），
+ *     v2 起是 `(dayOfWeek - 1) % 7`（周一 = 0、周日 = 6）。v1 数据要整体回拨一天，
+ *     否则一升级整张表错位 —— 这正是旧版 10-29 修的那个 bug。
+ *  2. 字段可能缺失或类型不对，逐项兜底，坏一行不能毁掉整张课表。
+ */
+export function migrateLegacySchedule(raw: unknown): ScheduleSnapshot | null {
+  if (!raw || typeof raw !== "object") return null;
+  const data = raw as {
+    v?: unknown;
+    cseq?: unknown;
+    sample?: unknown;
+    courses?: unknown;
+    term?: unknown;
+    week?: unknown;
+  };
+
+  if (!Array.isArray(data.courses)) return null;
+
+  const legacy = Number(data.v ?? 1) < 2;
+  const courses: Course[] = [];
+
+  for (const entry of data.courses) {
+    if (!entry || typeof entry !== "object") continue;
+    const record = entry as Record<string, unknown>;
+
+    const sections = parseSections(record.sections);
+    if (sections.length === 0) continue;
+
+    const name = String(record.name ?? "").trim();
+    if (name === "") continue;
+
+    // v2 的 day 已经是 0 基，只做模 7 兜底；v1 才需要回拨
+    const rawDay = Math.trunc(Number(record.day ?? 0)) || 0;
+    const day = legacy ? normalizeLegacyDay(rawDay) : ((rawDay % 7) + 7) % 7;
+
+    const color = String(record.color ?? "");
+
+    courses.push({
+      id: Math.trunc(Number(record.id ?? 0)) || 0,
+      name,
+      color: /^#[0-9a-f]{6}$/i.test(color) ? color : COURSE_COLORS[0],
+      day,
+      sections,
+      teacher: String(record.teacher ?? ""),
+      classroom: String(record.classroom ?? ""),
+      weeks: parseCourseWeeks(record.weeks),
+      notes: String(record.notes ?? ""),
+    });
+  }
+
+  const seq = Math.max(
+    Math.trunc(Number(data.cseq ?? 0)) || 0,
+    0,
+    ...courses.map((course) => course.id),
+  );
+
+  const termRecord = data.term as { start?: unknown; weeks?: unknown } | null | undefined;
+  const termStart = typeof termRecord?.start === "string" ? termRecord.start : "";
+  const termWeeksCount = Math.trunc(Number(termRecord?.weeks ?? 0));
+
+  return {
+    courses,
+    seq,
+    sample: Boolean(data.sample),
+    term:
+      /^\d{4}-\d{2}-\d{2}$/.test(termStart)
+        ? { start: termStart, weeks: Math.min(30, Math.max(1, termWeeksCount || 20)) }
+        : null,
+    week: Math.max(1, Math.trunc(Number(data.week ?? 1)) || 1),
+  };
+}

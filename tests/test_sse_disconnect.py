@@ -252,3 +252,15 @@ def test_normal_answer_is_saved(monkeypatch):
     asyncio.run(main_())
 
     assert any(a[2] == "assistant" and "完整答案" in a[3] for a, _kw in saved if len(a) >= 4)
+
+
+def test_sse_headers_forbid_buffering() -> None:
+    """回归：SSE 响应头必须禁止中间层做内容编码。
+
+    Next 的 `compression` 中间件遇到不带 `no-transform` 的响应会给它加 gzip，
+    而 gzip 流要攒满 16KB 或等连接结束才 flush —— 浏览器拿不到逐帧 token，
+    用户看到的是「卡很久 → 突然全文」，此时点「停止生成」也停不下来
+    （网络流早已结束，只剩前端还在渲染积压的帧）。
+    """
+    assert "no-transform" in chat_mod.SSE_HEADERS["Cache-Control"]
+    assert chat_mod.SSE_HEADERS["X-Accel-Buffering"] == "no"

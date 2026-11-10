@@ -29,6 +29,33 @@ from kb import dialogue_import  # noqa: E402
 
 UID = "u-compress-v2"
 
+# 真实形态的助手回答（取自用户线上那张截图的同一段内容）。
+# 4 个 markdown 小节 + 一段不带标题的引言，用来锁住"整节进、碎片不进"。
+_ASST_LISTENING = """英语六级听力提分，核心是先解决听不懂的输入问题，再练做对题的应试技巧。分几块说：
+
+## 一、基础：把耳朵练开
+
+- **精听真题**：选一段 1-2 分钟的真题音频，逐句听写，听不出的地方反复听 3 遍再看原文，标出听不出的原因（生词？连读？弱读？）。
+- **跟读模仿**：对着原文跟读，重点模仿连读、失去爆破，比如 not at all 读成 nada-tall。
+
+## 二、题型技巧
+
+- **长对话 / 讲座**：先看选项，圈出关键词，预判话题和问题方向；听的时候抓转折词和因果词，答案常在这些词后面。
+- **新闻听力**：重点听首句，新闻导语通常概括全文；数字、时间、地点容易设题，边听边记。
+- **同义替换**：六级听力很少原词重现，选项往往是原文的改写，平时积累常见替换。
+
+## 三、应试细节
+
+- 利用读题时间快速扫选项，不要纠结上一题，错过就放。
+- 边听边在选项旁做标记，听到什么划什么。
+- 考前一个月整套限时模考，适应节奏和疲劳感。
+
+## 四、常见误区
+
+- 只泛听不精听，听再多也提不上去
+- 背单词只记拼写不记发音，听到也反应不过来
+- 追求听懂每个词，抓关键信息即可"""
+
 
 # ==================== §6-1 结构化 + 旧格式兼容 ====================
 
@@ -260,6 +287,7 @@ class TestDialogueImport:
     def client(self, monkeypatch):
         from api import kb as kb_api
         from core import account
+        from core import config as _config
 
         # 进程内建表只跑一次：全量跑时 account/quota 的 users、usage、rate_buckets
         # 可能已经建到了其它测试的临时库（test_daily 等在模块级永久替换 _db_path）。
@@ -271,6 +299,12 @@ class TestDialogueImport:
         account._ensure_tables()
         _quota._ensure_tables()
         _quota._ensure_rate_table()
+        # 限流按 uid 分桶、窗口 60 秒：这一组用例会对同一个 uid 连着打十几次
+        # import-dialogue，累计超过 RATE_PER_MINUTE 就变成 429 —— 拦的是"手速"，
+        # 跟业务对不对无关。两边都要关：_HITS 是进程内窗口，RATE_LIMIT_SHARED
+        # 那一层落在 SQLite 的 rate_buckets 里，清内存清不掉，跨用例照样会累加。
+        _quota._HITS.clear()
+        monkeypatch.setattr(_config, "RATE_LIMIT_SHARED", False, raising=False)
 
         # 只隔离"真正往 Chroma 写"的那一步：其余（提取/回写/配额）全部走真实现
         added: list[object] = []
@@ -286,14 +320,30 @@ class TestDialogueImport:
 
             def __init__(self):
                 self.stored: set[str] = set()
+                # list_sources 的替身：真实现从 Chroma 元数据里按 source 聚合，
+                # 这里按入库的 Document 累加，好让 /files 的合并逻辑跑真分支
+                self.sources: list[dict] = []
 
             def add_chunks(self, docs):
                 added.extend(docs)
                 self.stored.update(d.page_content for d in docs)
+                for d in docs:
+                    src = (d.metadata or {}).get("source") or "未知来源"
+                    hit = next((x for x in self.sources if x["name"] == src), None)
+                    if hit:
+                        hit["chunks"] += 1
+                    else:
+                        self.sources.append({"name": src, "chunks": 1, "added_at": None})
                 return len(docs)
 
             def get_dialogue_texts(self, sid):
                 return set(self.stored)
+
+            def list_sources(self) -> list[dict]:
+                return [dict(x) for x in self.sources]
+
+            def count(self) -> int:
+                return sum(int(x.get("chunks") or 0) for x in self.sources)
 
         # 同一个库要沿用同一个实例：每次 new 一个的话 stored 永远是空的，
         # 去重就测不出来了（真实场景里库是持久的，不是每次请求新建）
@@ -306,6 +356,27 @@ class TestDialogueImport:
         c = TestClient(app)
         c.headers.update({"X-Auth-Token": token})
         return c, added
+
+    @pytest.fixture()
+    def pipe(self, client):
+        """取回 client fixture 里那个 FakePipe。
+
+        `pipelines.get_or_create` 已被 patch 成恒定返回同一实例，
+        所以再调一次拿到的就是它 —— 不必为测试改 client 的返回值（会动到既有用例）。
+        """
+        from api import kb as kb_api
+
+        return kb_api.pipelines.get_or_create(UID, "kb-test")
+
+    @pytest.fixture()
+    def files_registry(self, monkeypatch, tmp_path):
+        """把 kb_files.json 挪到 tmp：登记会真的落盘，不隔离就写脏仓库里的 data/。"""
+        from api import kb as kb_api
+
+        path = tmp_path / "kb_files.json"
+        monkeypatch.setattr(kb_api.pipelines, "_files_path", lambda: str(path))
+        monkeypatch.setattr(kb_api.pipelines, "_KB_FILES", {})
+        return path
 
     def _seed_conversation(self, n_pairs: int = 12):
         sid = store.create_conversation(UID, "压缩测试会话")["id"]
@@ -384,6 +455,71 @@ class TestDialogueImport:
         assert body["skipped"] == n1, body
         assert len(added) == n1, "第二次不该再往库里写任何片段"
 
+    # ---------- 沉淀完必须"看得见"（2026-11-01 用户实测缺口）----------
+    #
+    # 用户把 AI 的整段分析存进六级资料库，收到"已存入"，回到 /knowledge 却
+    # 一条新资料都没有。根因不是没写进向量库，而是资料列表读的是 kb_files.json
+    # 登记表，而对话沉淀只写向量库、从不登记。
+
+    def test_import_dialogue_shows_up_in_file_list(
+        self, client, pipe, files_registry, monkeypatch
+    ):
+        c, added = client
+        from api import kb as kb_api
+
+        monkeypatch.setattr(kb_api.pipelines, "owner_of", lambda kb: UID)
+        sid = self._seed_conversation(n_pairs=2)
+
+        resp = c.post("/api/kb/kb-test/import-dialogue", json={"sid": sid, "indexes": []})
+        assert resp.status_code == 200, resp.text
+        n = resp.json()["imported"]
+        assert n > 0 and len(added) == n
+
+        body = c.get("/api/kb/kb-test/files").json()
+        names = [f["name"] for f in body["files"]]
+        rec = next((f for f in body["files"] if f["name"] == "对话·压缩测试会话"), None)
+        assert rec is not None, f"沉淀完资料列表里没有这条：{names}"
+        assert rec["origin"] == "dialogue"
+        assert rec["chunks"] == n
+        # 负向：登记过的 source 不能被下面的 Chroma 兜底再补一遍
+        assert names.count("对话·压缩测试会话") == 1
+
+        # 同名会话（现实里很容易建出两个「周会安排」）存进同一条资料：
+        # 段数要累加，不能被同名覆盖成"只有最后一次的几条"
+        sid2 = store.create_conversation(UID, "压缩测试会话")["id"]
+        mid2 = store.add_message(UID, sid2, "user", "另外补充：服务器到期日是十二月三号。")
+        r2 = c.post(
+            "/api/kb/kb-test/import-dialogue", json={"sid": sid2, "message_ids": [mid2]}
+        )
+        assert r2.status_code == 200, r2.text
+        assert r2.json()["imported"] == 1, r2.text
+        body2 = c.get("/api/kb/kb-test/files").json()
+        rec2 = next(f for f in body2["files"] if f["name"] == "对话·压缩测试会话")
+        assert rec2["chunks"] == n + 1, rec2
+
+    def test_file_list_recovers_unregistered_source(
+        self, client, pipe, files_registry, monkeypatch
+    ):
+        """向量库里有、登记表里没有的 source 也要列出来。
+
+        这是给**已经踩过坑的用户**兜底：他们以前存进去的对话片段没有登记记录，
+        不该逼他们重新存一遍才看得见。
+        """
+        c, _ = client
+        from api import kb as kb_api
+
+        monkeypatch.setattr(kb_api.pipelines, "owner_of", lambda kb: UID)
+        pipe.sources.append({"name": "对话·旧会话", "chunks": 3, "added_at": None})
+        pipe.sources.append({"name": "C:\\tmp\\kb_up_abcd.pdf", "chunks": 2, "added_at": None})
+
+        body = c.get("/api/kb/kb-test/files").json()
+        got = {f["name"]: f for f in body["files"]}
+        assert got["对话·旧会话"]["chunks"] == 3
+        assert got["对话·旧会话"]["origin"] == "dialogue"
+        # 不认识的 source（老库的临时绝对路径）默认按 upload，标签猜错不影响存取
+        assert got["C:\\tmp\\kb_up_abcd.pdf"]["origin"] == "upload"
+        assert body["chunks"] == 5
+
     def test_import_dialogue_bad_kb_404(self, client):
         c, _ = client
         sid = self._seed_conversation(n_pairs=2)
@@ -404,3 +540,222 @@ class TestDialogueImport:
             json={"sid": sid, "indexes": [9999]},
         )
         assert resp.status_code == 400
+
+    # ---------- 指着某一句存（message_ids）----------
+    #
+    # 这条路刻意**不走候选判据**：判据是零 LLM 正则，认不出「周会固定在
+    # 每周四下午三点」这种没有编号的事实。用户已经指着那句话点了保存，
+    # 再拿正则否掉他，界面上就变成「我点了保存，它说没挑出来」。
+
+    def test_import_by_message_id_stores_that_sentence(self, client, monkeypatch):
+        c, added = client
+        from api import kb as kb_api
+
+        monkeypatch.setattr(kb_api.pipelines, "owner_of", lambda kb: UID)
+        sid = store.create_conversation(UID, "单句入库")["id"]
+        # 这句不含编号、不是待办，正规判据根本不会把它当候选
+        mid = store.add_message(UID, sid, "user", "我们实验室的周会固定在每周四下午三点，会议室是 B2-07。")
+        store.add_message(UID, sid, "assistant", "好的。")
+
+        cands = c.get(f"/api/kb/dialogue-candidates/{sid}").json()["candidates"]
+        assert all("每周四" not in x["text"] for x in cands), "前提失效：这句被判据收进来了"
+
+        resp = c.post("/api/kb/kb-test/import-dialogue", json={"sid": sid, "message_ids": [mid]})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["imported"] == 1, resp.text
+        assert len(added) == 1
+        assert added[0].page_content == "我们实验室的周会固定在每周四下午三点，会议室是 B2-07。"
+        assert added[0].metadata["message_id"] == mid
+
+    def test_import_by_message_id_rejects_short_chatter(self, client, monkeypatch):
+        """短而空泛的助手回答仍然存不了。
+
+        ★ 语义已经变了：10-31 时这条测的是「助手的话一律不算资料」，
+          11-01 起助手整理过的内容**是**资料库的主要来源。所以它被拒的理由
+          从"角色不对"变成"没有成节的内容"—— 24 个字、没标题没列表，
+          切不出小节，整条存进去又只是噪音。见下一条正向测试。
+        """
+        c, added = client
+        from api import kb as kb_api
+
+        monkeypatch.setattr(kb_api.pipelines, "owner_of", lambda kb: UID)
+        sid = store.create_conversation(UID, "单句入库")["id"]
+        store.add_message(UID, sid, "user", "你好")
+        aid = store.add_message(UID, sid, "assistant", "好的，随时可以继续问我。")
+
+        resp = c.post("/api/kb/kb-test/import-dialogue", json={"sid": sid, "message_ids": [aid]})
+        assert resp.status_code == 400, resp.text
+        assert added == [], "被拒的请求不许往库里写东西"
+
+    def test_import_by_message_id_splits_assistant_answer(self, client, monkeypatch):
+        """指一条助手的回答存：按小节入库，不是整条塞进去。
+
+        ★ 为什么要拆：一段 700 字整条进向量库后，召回一条就把整段灌进上下文，
+          top-k 的名额被一条占满，精度反而下降。拆成小节后每块自带标题，
+          问到具体的事能精确翻到那一节。
+        ★ 为什么 count 必须对上：这条路径的 `skipped = requested - len(picked)`，
+          用消息条数当分母就会算出负数（一条消息切 2 段 → 2 - 2 恰好没事，
+          但如果只切 1 段、用户指了 2 条消息，就会变成 2 - 1 之类）。
+          所以 requested 的口径改成"单元数"，这里同时锁住 skipped 不为负。
+        """
+        c, added = client
+        from api import kb as kb_api
+
+        monkeypatch.setattr(kb_api.pipelines, "owner_of", lambda kb: UID)
+        sid = store.create_conversation(UID, "听力提分")["id"]
+        store.add_message(UID, sid, "user", "给我分析英语六级听力提分技巧")
+        aid = store.add_message(UID, sid, "assistant", _ASST_LISTENING)
+
+        resp = c.post("/api/kb/kb-test/import-dialogue", json={"sid": sid, "message_ids": [aid]})
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["imported"] == 4, body
+        assert body["skipped"] == 0, body
+        assert len(added) == 4
+        # 每节以它自己的标题开头，且都挂在这条消息的 id 上（溯源要能对回去）
+        assert all(d.page_content.startswith("## ") for d in added), [d.page_content[:20] for d in added]
+        assert all(d.metadata["message_id"] == aid for d in added)
+        assert all(d.metadata["role"] == "assistant" for d in added)
+        # 引言「分几块说：」这类碎片不该单独成条
+        assert all("分几块说" not in d.page_content for d in added)
+
+    def test_import_by_message_id_idempotent(self, client, monkeypatch):
+        c, added = client
+        from api import kb as kb_api
+
+        monkeypatch.setattr(kb_api.pipelines, "owner_of", lambda kb: UID)
+        sid = store.create_conversation(UID, "单句入库")["id"]
+        mid = store.add_message(UID, sid, "user", "负责人是老陈，工号 KX-3301。")
+
+        first = c.post("/api/kb/kb-test/import-dialogue", json={"sid": sid, "message_ids": [mid]})
+        assert first.status_code == 200, first.text
+        assert first.json()["imported"] == 1, first.text
+        second = c.post("/api/kb/kb-test/import-dialogue", json={"sid": sid, "message_ids": [mid]})
+        assert second.status_code == 200, second.text
+        body = second.json()
+        assert body["imported"] == 0, body
+        assert body["skipped"] == 1, body
+        assert len(added) == 1, "同一句第二次不该再写一份进库"
+
+
+# ==================== 助手回答的结构分块（2026-11-01）====================
+
+
+class TestAssistantBlocks:
+    """锁住「整节进、碎片不进」。
+
+    背景：10-31 把准入范围收成只收 user，理由是助手长回答占了 92% 的候选、
+    抽样全是排版垃圾。方向错了一半 —— 助手整理过的内容恰恰是沉淀功能最该收的。
+    实测那段 754 字的听力提分回答：只收 user 时提出 0 条；恢复双角色也只有 1 条
+    （靠「不要纠结上一题」命中否定规则）。所以改成按 markdown 结构切块。
+    """
+
+    def test_splits_by_section(self):
+        cs = dialogue_import.extract_blocks(
+            [{"id": 5, "role": "assistant", "content": _ASST_LISTENING, "created_at": 1}]
+        )
+        assert len(cs) == 4, [c["text"][:20] for c in cs]
+        assert [c["text"].splitlines()[0] for c in cs] == [
+            "## 一、基础：把耳朵练开",
+            "## 二、题型技巧",
+            "## 三、应试细节",
+            "## 四、常见误区",
+        ]
+        assert all(c["role"] == "assistant" for c in cs)
+        assert all(c["refs"] == [5] for c in cs)
+        # 引言碎片只有几十字、没有结构，不该单独成条
+        assert all("分几块说" not in c["text"] for c in cs)
+
+    def test_echo_and_followup_rejected(self):
+        """回声 / 追问 / 寒暄都不进库 —— 它们没有内容，只会占检索名额。"""
+        for txt in (
+            "好的，记下了：实验室周会——每周四下午 3 点。",
+            "需要我再展开讲讲吗？你说一句就行，我按你的方向细化。",
+            "没问题！随时可以继续问，我在。",
+        ):
+            got = dialogue_import.extract_blocks(
+                [{"id": 1, "role": "assistant", "content": txt, "created_at": 1}]
+            )
+            assert got == [], txt
+
+    def test_code_fence_kept_whole(self):
+        """代码围栏不能被切碎，也不能把代码里的 `#` 当标题。"""
+        txt = (
+            "可以这样写：\n\n```python\n# 加权平均\ndef gpa(scores):\n"
+            "    return sum(s * c for s, c in scores) / sum(c for _, c in scores)\n```\n\n"
+            "注意学分是权重，不能直接算术平均。"
+        )
+        cs = dialogue_import.extract_blocks(
+            [{"id": 1, "role": "assistant", "content": txt, "created_at": 1}]
+        )
+        assert len(cs) == 1, cs
+        assert "def gpa" in cs[0]["text"]
+        assert "不能直接算术平均" in cs[0]["text"], "代码后面的说明不该被切掉"
+
+    def test_long_block_is_capped(self):
+        """超长整块要再切，不然召回一条就占满 top-k。"""
+        body = "\n".join(f"- 第{i}条：这是一条很长的说明，用来把整块撑过上限。" for i in range(60))
+        cs = dialogue_import.extract_blocks(
+            [{"id": 1, "role": "assistant", "content": body, "created_at": 1}]
+        )
+        assert len(cs) > 1, "超过 1200 字没有切开"
+        assert all(len(c["text"]) <= 1300 for c in cs)
+
+    def test_user_side_unchanged(self):
+        """user 的部分必须与 extract_candidates 完全一致 —— 那套判据是调好的。"""
+        msgs = [
+            {"id": 1, "role": "user", "content": "负责人是老陈，工号 KX-3301。", "created_at": 1},
+            {"id": 2, "role": "user", "content": "嗯", "created_at": 2},
+        ]
+        got = dialogue_import.extract_blocks(msgs, roles=("user",))
+        want = dialogue_import.extract_candidates(msgs, roles=("user",))
+        assert got == want
+
+    def test_extract_candidates_default_still_user_only(self):
+        """压缩链路依赖的默认值不许变。
+
+        `core/context_compress.build_segment_meta` 显式传双角色；如果这个默认值
+        被顺手改宽，未来的调用方会静默拿到助手候选，kind 跟着变、折叠顺序也变 ——
+        这种错不会报错，只会让压缩质量悄悄下降。
+        """
+        msgs = [
+            {"id": 1, "role": "user", "content": "必须记住：周五交材料。", "created_at": 1},
+            {"id": 2, "role": "assistant", "content": _ASST_LISTENING, "created_at": 2},
+        ]
+        cands = dialogue_import.extract_candidates(msgs)
+        assert all(c["role"] == "user" for c in cands)
+
+    def test_preview_keeps_section_order(self):
+        """预览排序不许打乱章节顺序。
+
+        salience 是按块长度给的，「二、题型技巧」比「一、基础」长，按它排就会
+        把第二章排到第一章前面 —— 用户读到「二」才发现「一」在后面，逻辑是断的。
+
+        ★ 第二条断言是防假绿的关键：必须**先证明样本里存在长度倒挂**，
+          否则「顺序对了」可能只是因为长度恰好递增，改不改排序都能过。
+        """
+        cs = dialogue_import.extract_blocks(
+            [{"id": 5, "role": "assistant", "content": _ASST_LISTENING, "created_at": 1}]
+        )
+        by_len = sorted(cs, key=lambda c: len(c["text"]), reverse=True)
+        assert by_len[0] is not cs[0] or len(cs[1]["text"]) > len(cs[0]["text"]), (
+            "样本退化：本例必须出现「后者比前者长」，否则测不出排序问题"
+        )
+
+        ranked = dialogue_import.rank_for_preview(cs)
+        assert [c["text"].splitlines()[0] for c in ranked] == [
+            "## 一、基础：把耳朵练开",
+            "## 二、题型技巧",
+            "## 三、应试细节",
+            "## 四、常见误区",
+        ]
+
+    def test_preview_puts_user_before_assistant(self):
+        """用户候选排前面，助手块随后 —— 前端按 role 分组，顺序不能交错。"""
+        msgs = [
+            {"id": 1, "role": "user", "content": "负责人是老陈，工号 KX-3301。", "created_at": 1},
+            {"id": 2, "role": "assistant", "content": _ASST_LISTENING, "created_at": 2},
+        ]
+        ranked = dialogue_import.rank_for_preview(dialogue_import.extract_blocks(msgs))
+        roles = [c["role"] for c in ranked]
+        assert roles == ["user"] + ["assistant"] * 4, roles

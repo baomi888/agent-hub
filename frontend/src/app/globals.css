@@ -33,5 +33,14 @@
 @import "./styles/sediment.css";
 @import "./styles/layout.css";
 @import "./styles/fx.css";
+/* 对话目录（页边刻度 / 手机半屏目录）+ 回答末尾链接收口：
+   两者都浮在正文之上，且目录在 900px 上要切形态，独立成表便于整块调 */
+@import "./styles/turnnav.css";
 @import "./styles/a11y.css";
 @import "./styles/mascot.css";
+/* 更新公告：全屏强制页，不参与任何页面布局，放最后一块，避免被别处的
+   同名类或全局 input/button 规则改掉 */
+@import "./styles/announce.css";
+/* 账号自助（头像选择 / 改密码 / 改登录名）：借 .btn 与 .auth-input，
+   所以排在 console.css / auth.css 之后，专有类名都是 .acct-* 前缀，不会外溢 */
+@import "./styles/account.css";

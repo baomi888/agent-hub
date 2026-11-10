@@ -120,9 +120,12 @@ def extract_candidates(
       - **角色范围**：默认只收 user。助手的长回答按句切分后命中率极高——
         本地真实库 181 条消息跑出来 194 条候选，其中 179 条来自助手
         （每条助手消息平均 2.03 条），抽样是「## 🗓️ 国庆广州游计划」
-        「**今日待办**」这种整段生成的排版垃圾。设计意图本来就写在本文件开头：
-        「*用户*在对话里讲清楚的业务规则、约束、偏好」。压缩链路要保全两种角色，
+        「**今日待办**」这种整段生成的排版垃圾。压缩链路要保全两种角色，
         由调用方显式传 `roles=("user","assistant")`。
+
+        ★ 2026-11-01 补记：这个默认值**只对压缩链路成立**。沉淀场景不要用它 ——
+          它会把助手整理好的内容一并丢掉（实测 754 字的听力提分回答提出 0 条）。
+          沉淀入口请用 `extract_blocks()`：user 按句、assistant 按结构块。
       - 挡掉「我记住了」这类**应答回声**（复述指令，不是知识）；
       - 补上含**业务编号**的陈述句（`extract_entities` 不认 KX-3301 这种代号）。
 
@@ -174,6 +177,211 @@ def extract_candidates(
                 }
             )
     return _suppress_superseded(out)
+
+
+# ---------- 助手回答的结构分块（2026-11-01）----------
+#
+# 为什么要另起一条路，而不是把 `roles` 改回双角色
+# ----------------------------------------------
+# 2026-10-31 把准入范围收成只收 user，理由是「助手长回答占了 92% 的候选，
+# 抽样是『## 🗓️ 国庆广州游计划』『**今日待办**』这种整段生成的排版垃圾」。
+# 这个判断错了一半：
+#   · 对的：助手的**回声**（「好的，记下了：周会每周四 15:00」）和**追问**
+#     （「需要我再展开吗」）确实是垃圾，不该进库；
+#   · 错的：助手整理过的内容恰恰是整个沉淀功能最该收的。实测用户那张截图里
+#     754 字的「六级听力提分」回答 —— 只收 user 时提出 **0 条**；
+#     就算把角色改回双角色也只提出 **1 条**（「不要纠结上一题」，
+#     仅仅因为含"不要"命中否定规则），精听真题 / 跟读模仿 / 同义替换
+#     这些一条都出不来。
+#
+# 所以根因不是角色，是**粒度和判据**：
+#   ① `classify_text` 只认 纠正 / 约束 / 待办 / 偏好 / 目标 / 硬实体 七类信号。
+#      「精听真题：选一段 1-2 分钟的真题音频，逐句听写」不含任何一类 ——
+#      它是知识，只是不属于那七类「对话里的事实」。问它等于拿错尺子。
+#   ② 按句切会把一个小节拆成孤立碎片：检索命中"逐句听写"时，
+#      不知道它属于「听力基础训练」这个主题。
+#
+# 因此助手消息改用**结构分块**：按 markdown 标题成块，块自带标题与列表；
+# 准入判据换成「这块是不是整理过的内容」（有列表 / 有表格 / 有代码 / 够长），
+# 不再问 classify_text。
+#
+# 为什么不直接改 `extract_candidates`：它在 `core/context_compress.py` 里
+# 给压缩段打 kind/salience（决定折叠顺序），那套语义依赖「按句 + 七类权重」。
+# 两个场景本来就不是一回事，拆成两个函数，谁也不会误用。
+#
+# 为什么不改 `KIND_WEIGHTS`：压缩侧用 `KIND_WEIGHTS.get(kind, 0.0)` 取段内最大权重，
+# 往共享表里塞新 kind 会悄悄改变每一段的折叠顺序。这里的 "要点"/"说明"
+# 只在本模块内使用，不进那张表。
+
+_RE_HEADING = re.compile(r"^\s{0,3}#{1,6}\s+\S")
+_RE_FENCE = re.compile(r"^\s*(?:```|~~~)")
+_RE_BULLET = re.compile(r"^\s*(?:[-*+•]|\d{1,2}[.、)])\s+\S")
+_RE_TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
+_RE_HR = re.compile(r"^\s*(?:[-*_]\s*){3,}$")
+
+# 短于此的一律不收——「好的」「明白」「需要我再展开吗」都在这一档
+_A_MIN_CHARS = 25
+# 没有结构（无标题/列表/表格/代码）的纯段落要够长，才算"讲清楚了一件事"
+_A_PARA_MIN = 80
+# 超长块再切：754 字整条进向量库，召回一条就占满 top-k，精度反而下降
+_A_MAX_CHARS = 1200
+
+
+def _split_md_blocks(content: str) -> list[str]:
+    """按 markdown 标题分组；代码围栏里的 `#` 不当标题。"""
+    blocks: list[str] = []
+    cur: list[str] = []
+    in_fence = False
+    for ln in (content or "").split("\n"):
+        if _RE_FENCE.match(ln):
+            in_fence = not in_fence
+            cur.append(ln)
+            continue
+        if in_fence:
+            cur.append(ln)
+            continue
+        if _RE_HR.match(ln):  # 分隔线本身不是内容
+            continue
+        if _RE_HEADING.match(ln):
+            if cur:
+                blocks.append("\n".join(cur).strip())
+                cur = []
+            cur.append(ln)
+            continue
+        cur.append(ln)
+    if cur:
+        blocks.append("\n".join(cur).strip())
+    return [b for b in blocks if b]
+
+
+def _block_has_structure(block: str) -> bool:
+    lines = block.split("\n")
+    return (
+        bool(_RE_HEADING.match(lines[0] if lines else ""))
+        or any(_RE_BULLET.match(line) for line in lines)
+        or any(_RE_TABLE_ROW.match(line) for line in lines)
+        or "```" in block
+    )
+
+
+def _refine_block(block: str) -> list[str]:
+    """有结构的整块保留；纯叙述按空行再分段。
+
+    列表项之间常有空行（`- a` 空行 `- b`），按空行切会把一个列表拆散，
+    所以只对"完全没有结构"的块做二次分段。
+    """
+    if _block_has_structure(block):
+        return [block]
+    return [p.strip() for p in re.split(r"\n\s*\n", block) if p.strip()]
+
+
+def _cap_block(block: str) -> list[str]:
+    """超长块按行累积切开，尽量不切断一个列表项。"""
+    if len(block) <= _A_MAX_CHARS:
+        return [block]
+    out: list[str] = []
+    cur: list[str] = []
+    size = 0
+    for ln in block.split("\n"):
+        if size + len(ln) + 1 > _A_MAX_CHARS and cur:
+            out.append("\n".join(cur).strip())
+            cur = []
+            size = 0
+        cur.append(ln)
+        size += len(ln) + 1
+    if cur:
+        out.append("\n".join(cur).strip())
+    return [b for b in out if b]
+
+
+def _block_is_knowledge(block: str) -> bool:
+    """这块值不值得进库。
+
+    注意这里**不问 classify_text**：助手整理出来的内容（"精听真题：选一段…"）
+    在七类信号里是"其它"，按那套判据永远出不来。
+    """
+    t = block.strip()
+    if len(t) < _A_MIN_CHARS:
+        return False
+    lines = t.split("\n")
+    bullets = sum(1 for line in lines if _RE_BULLET.match(line))
+    if bullets >= 2:  # 整理过的清单
+        return True
+    if any(_RE_TABLE_ROW.match(line) for line in lines):
+        return True
+    if "```" in t:
+        return True
+    if _RE_HEADING.match(lines[0]):
+        return True
+    return len(t) >= _A_PARA_MIN  # 纯叙述要够长
+
+
+def _block_kind(block: str) -> str:
+    return "要点" if _block_has_structure(block) else "说明"
+
+
+def _block_salience(block: str) -> float:
+    """按信息量给分：小节越完整越靠前，但不超过手工强调的那几类。"""
+    return round(min(0.9, 0.45 + min(len(block), 600) / 1500.0), 3)
+
+
+def _assistant_candidates(m: dict) -> list[dict]:
+    mid = int(m.get("id") or 0)
+    ts = int(m.get("created_at") or 0)
+    out: list[dict] = []
+    for raw in _split_md_blocks(m.get("content") or ""):
+        for block in _refine_block(raw):
+            for piece in _cap_block(block):
+                if not _block_is_knowledge(piece):
+                    continue
+                out.append(
+                    {
+                        "text": piece,
+                        "kind": _block_kind(piece),
+                        "refs": [mid],
+                        "role": "assistant",
+                        "ts": ts,
+                        "salience": _block_salience(piece),
+                    }
+                )
+    return out
+
+
+def extract_blocks(
+    messages: list[dict], *, roles: tuple[str, ...] = ("user", "assistant")
+) -> list[dict]:
+    """沉淀入口：**按说话人用两套完全不同的策略**。
+
+    - user：一句话就是一条事实，按句切 + `classify_text` 分类（同 extract_candidates）
+    - assistant：一段回答是一个主题，按 markdown 结构切块，只看"是不是整理过的内容"
+
+    两种角色的信息形态本来就不同，用同一把尺子必然有一边是错的 ——
+    这正是 10-31 那次"收成只收 user"的由来（拿句子尺子量长文，全是碎片，
+    于是判定长文是垃圾）。
+
+    返回结构与 `extract_candidates` 一致（text/kind/refs/role/ts/salience），
+    前端靠 `role` 分红绿两组展示。
+    """
+    msgs = [
+        m
+        for m in (messages or [])
+        if m.get("role") in roles and (m.get("content") or "").strip()
+    ]
+    if not msgs:
+        return []
+
+    out: list[dict] = []
+    if "user" in roles:
+        out.extend(
+            extract_candidates([m for m in msgs if m.get("role") == "user"], roles=("user",))
+        )
+    if "assistant" in roles:
+        for m in msgs:
+            if m.get("role") == "assistant":
+                out.extend(_assistant_candidates(m))
+    # 时间序：前端分组展示，但组内仍按对话先后，用户能顺着回忆找
+    out.sort(key=lambda c: (int(c.get("ts") or 0), (c.get("refs") or [0])[0]))
+    return out
 
 
 def drop_existing(picked: list[dict], existing: set[str]) -> list[dict]:
@@ -229,9 +437,16 @@ def rank_for_preview(cands: list[dict]) -> list[dict]:
     """给预览列表排序：纠正 > 显式强调 > 类型权重 > salience。
 
     前端勾选页按这个顺序展示，默认勾选 salience 高于阈值的部分。
+
+    ★ 助手的结构块**不参与重排**（2026-11-01）：它们的顺序就是原文的章节顺序
+      （一、二、三、四），而上面这套键会按 salience 排 —— salience 是按块长度
+      给的，于是「二、题型技巧」（160 字）会跑到「一、基础」（143 字）前面。
+      用户读到第二章才发现第一章在后面，逻辑是断的。所以助手块原样保持
+      `extract_blocks` 给出的时间序，整体排在用户候选之后（前端另行分组）。
     """
-    return sorted(
-        cands,
+    mine = [c for c in cands if c.get("role") != "assistant"]
+    theirs = [c for c in cands if c.get("role") == "assistant"]
+    mine.sort(
         key=lambda c: (
             c.get("kind") == "纠正",
             KIND_WEIGHTS.get(c.get("kind") or "其它", 0.0),
@@ -239,6 +454,13 @@ def rank_for_preview(cands: list[dict]) -> list[dict]:
         ),
         reverse=True,
     )
+    return mine + theirs
 
 
-__all__ = ["build_documents", "extract_candidates", "rank_for_preview"]
+__all__ = [
+    "build_documents",
+    "drop_existing",
+    "extract_blocks",
+    "extract_candidates",
+    "rank_for_preview",
+]
