@@ -125,7 +125,13 @@ try:
     r = kb_search.invoke({"query": "苞米是什么"}, config=cfg())
     check("high 档 grounding_note 为空", grounding_note(assess_grounding(HIGH)) == "", "")
     check("强检索不吐【必须遵守】", "必须遵守" not in r, r[:60])
-    check("强检索直接返回片段（[1] 角标开头）", r.lstrip().startswith("**[1]**"), r[:60])
+    # L0：检索片段现在包在【资料开始·知识库】里，[1] 紧跟在开始标签之后。
+    # 断言仍然检查「直接给片段、前面不夹任何约束」，只是把标签算作边界。
+    check(
+        "强检索直接返回片段（[1] 角标在资料标签内）",
+        "【资料开始·知识库】\n**[1]**" in r,
+        r[:60],
+    )
 finally:
     _restore(saved)
 
@@ -136,7 +142,11 @@ saved = _install_stub(LOW)
 try:
     r = kb_search.invoke({"query": "量子纠缠是什么"}, config=cfg())
     check("关开关后 low 档不吐【必须遵守】", "必须遵守" not in r, r[:60])
-    check("关开关后 low 档直接返回片段", r.lstrip().startswith("**[1]**"), r[:60])
+    check(
+        "关开关后 low 档直接返回片段",
+        "【资料开始·知识库】\n**[1]**" in r,
+        r[:60],
+    )
 finally:
     _restore(saved)
     core.config.GROUNDING_NOTICE = saved_notice

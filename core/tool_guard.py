@@ -36,7 +36,7 @@ import os
 import time
 from typing import Any
 
-from core import config
+from core import approval_store, config
 
 # ==================== 每次执行的守卫状态 ====================
 # contextvars：同一进程内并发跑多个请求时互不污染（asyncio 下天然按任务隔离）。
@@ -53,6 +53,10 @@ class _GuardState:
         # 命中封禁/截断的次数，便于日志与测试观测
         self.blocked_calls = 0
         self.truncated = 0
+        # ④ 重复调用计数：key = (工具名, 参数稳定 hash) -> 本轮已尝试次数。
+        #   只记次数，不做"这次是否比上次有进展"的语义判断——那是模型的事，
+        #   守卫只负责识别"同一件事原地打转"。
+        self.call_counts: dict[tuple[str, str], int] = {}
 
 
 _state_var: contextvars.ContextVar[_GuardState | None] = contextvars.ContextVar(
@@ -94,11 +98,35 @@ def _state() -> _GuardState:
 
 
 def approval_token(tool_name: str, args: dict[str, Any]) -> str:
-    """(工具名, 参数) 的稳定 hash。参数变了 -> 串变了 -> 必须重新确认。"""
+    """旧版确认串：仅用于 `TOOL_APPROVAL_REAL_CONFIRM_ENABLED=0` 的对照模式。
+
+    新链路（默认）不用它——那个串模型自己就能回填，不构成人类确认，
+    见 `core/approval_store.py` 顶部说明。
+    """
     payload = json.dumps(
         {"tool": tool_name, "args": args}, ensure_ascii=False, sort_keys=True, default=str
     )
     return "confirm:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+
+
+def _args_fingerprint(args: dict[str, Any]) -> str:
+    """参数稳定指纹：键排序 + 非 JSON 值 str 化，同参数永远同 hash。
+
+    用 hash 而不是把整个参数串塞进 dict key：工具参数可能含大段文本，
+    直接当 key 会让 call_counts 随着轮次膨胀；hash 只有 12 字节。
+    """
+    payload = json.dumps(args, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+
+
+def _count(name: str, tool_name: str) -> None:
+    """打一个指标点（失败静默：指标不该影响工具执行）。"""
+    try:
+        from core import metrics
+
+        metrics.inc(name, {"tool": tool_name})
+    except Exception:  # noqa: BLE001
+        pass
 
 
 # ==================== 输出截断 ====================
@@ -126,6 +154,19 @@ def truncate_output(tool_name: str, text: str, limit: int) -> str:
         )
     except Exception:  # noqa: BLE001
         return text[:limit] + f"\n\n... [输出已截断：共 {n} 字符，上限 {limit}]"
+
+
+def _runtime_config(call_kwargs: dict | None) -> dict:
+    """取 LangChain 注入的 configurable 段（模型无法写入这里）。
+
+    `_make_guarded_fn` 把原始调用参数原样透传给 `guarded_run`，
+    其中 `config` 是框架注入的 RunnableConfig。审批所需的 owner / turn / token
+    全部从这里读——**不经过模型参数**，所以模型编不出来。
+    """
+    cfg = (call_kwargs or {}).get("config")
+    if not isinstance(cfg, dict):
+        return {}
+    return cfg.get("configurable") or {}
 
 
 # ==================== 守卫主逻辑 ====================
@@ -158,23 +199,69 @@ def guarded_run(
             "请改用其他途径，或直接告诉用户当前条件不具备。**不要重复调用本工具。**"
         )
 
-    # ---------- 2. 需要审批：首次只回确认串 ----------
+    # ---------- 1.5 重复调用看门狗：同一 (工具, 参数) 第 3 次直接拦下 ----------
+    # 放在审批之前：待确认的重复调用同样计入次数，避免模型用"反复点同一下"
+    # 把审批确认框刷出来。第 1、2 次照常走后续流程，只有第 3 次起才拦。
+    if getattr(config, "TOOL_REPEAT_GUARD_ENABLED", True):
+        key = (tool_name, _args_fingerprint(args))
+        n = st.call_counts.get(key, 0) + 1
+        st.call_counts[key] = n
+        if n >= 3:
+            st.blocked_calls += 1
+            _count("tool_guard_repeat", tool_name)
+            return (
+                f"⛔ 已连续 3 次相同调用（工具 {tool_name}、参数未变），本次不再执行。"
+                "请换策略（改参数、换工具），或直接向用户说明当前失败原因。"
+                "**不要用相同参数再次调用。**"
+            )
+
+    # ---------- 2. 需要审批：真实人工确认（L4）----------
+    # 默认走一次性 token：token 只能由前端点击后由服务端签发，绑定
+    # (user, tool_name, args_hash, turn)，带过期、用后即焚。模型拿不到 token，
+    # 所以「同参数再调一次」仍然被拒——这是这一层与旧「纸糊审批」的根本区别。
     if meta is not None and meta.needs_approval:
-        token = approval_token(tool_name, args)
         if not config.TOOL_APPROVAL_ENABLED:
             pass  # 全局关闭审批（调试/演示用），直接执行
-        elif st.pending.get(tool_name) != token:
-            # 首次（或参数变了）：登记 + 不执行
-            st.pending[tool_name] = token
-            st.blocked_calls += 1
-            return (
-                f"⏸ 工具 {tool_name} 需要用户确认后才能执行（它会改动外部状态：写入/入库等）。\n"
-                f"参数：{json.dumps(args, ensure_ascii=False, default=str)[:400]}\n"
-                f"如果用户已确认，请带着确认串再调用一次：{token}\n"
-                "如果用户尚未确认，请先向用户说明将要做什么并征求同意，不要自行重试。"
-            )
+        elif getattr(config, "TOOL_APPROVAL_REAL_CONFIRM_ENABLED", True):
+            cfg = _runtime_config(call_kwargs)
+            owner = str(cfg.get("owner_id") or "")
+            turn_id = str(cfg.get("turn_id") or "")
+            token = str(cfg.get("approval_token") or "")
+            ah = approval_store.args_hash(args)
+            if token and approval_store.consume(token, owner, tool_name, ah, turn_id):
+                pass  # 人类确认过：执行一次
+            else:
+                # 模型没带 token（或 token 与本次 user/tool/args/turn 不匹配）：
+                # 只登记待确认请求，绝不执行。登记失败（缺服务端上下文）也仍然拒绝。
+                if owner and turn_id:
+                    approval_store.create_pending(owner, tool_name, args, turn_id)
+                st.blocked_calls += 1
+                _count("tool_guard_approval_wait", tool_name)
+                why = (
+                    "确认令牌无效、已过期、已使用，或与本次参数/轮次不匹配"
+                    if token
+                    else "模型无权自行确认"
+                )
+                return (
+                    f"⏸ 工具 {tool_name} 需要真实用户在前端点击确认后才能执行"
+                    f"（它会改动外部状态：写入/入库/下载等）。\n"
+                    f"参数：{json.dumps(args, ensure_ascii=False, default=str)[:400]}\n"
+                    f"本次未执行（{why}）。已向用户界面发出确认请求。\n"
+                    "**不要用相同参数再调用一次**——重试不会通过，只会重复打扰用户。"
+                    "请先向用户说明将要做什么，等待用户在界面上确认。"
+                )
         else:
-            # 带着匹配的确认串回来：消费掉，继续执行
+            # 对照模式：旧「确认串」逻辑，仅用于关闭严格开关时复现原行为。
+            token = approval_token(tool_name, args)
+            if st.pending.get(tool_name) != token:
+                st.pending[tool_name] = token
+                st.blocked_calls += 1
+                return (
+                    f"⏸ 工具 {tool_name} 需要用户确认后才能执行（它会改动外部状态：写入/入库等）。\n"
+                    f"参数：{json.dumps(args, ensure_ascii=False, default=str)[:400]}\n"
+                    f"如果用户已确认，请带着确认串再调用一次：{token}\n"
+                    "如果用户尚未确认，请先向用户说明将要做什么并征求同意，不要自行重试。"
+                )
             st.pending.pop(tool_name, None)
 
     # ---------- 3. 执行 ----------

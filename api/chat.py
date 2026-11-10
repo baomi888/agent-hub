@@ -54,7 +54,18 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
-from core import config, llm_gate, metrics, quota, tag_taxonomy, tool_registry, upload
+from core import (
+    approval_store,
+    config,
+    data_boundary,
+    llm_gate,
+    metrics,
+    prompt_security,
+    quota,
+    tag_taxonomy,
+    tool_registry,
+    upload,
+)
 from core import context_compress as ctxcompress
 from core import router as route_engine
 from core import scenarios as scenarios_mod
@@ -71,6 +82,11 @@ from kb.rag_core import (
     rewrite_query,
 )
 from service import enhance as enhance_svc
+
+# RAG 系统提示词也登记进泄露指纹库：RAG 路径不经过 agent.builder，没人替它登记；
+# 这里 import 时登记一次即可（静态常量，不会变）。纯 LLM / 视觉的 system prompt
+# 是通用短句，不构成机密，不登记。
+prompt_security.register_protected_text(SYSTEM_PROMPT, label="rag_system_prompt")
 
 # 默认要登录：整组路由统一挂鉴权，新增端点时不会漏
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -319,6 +335,15 @@ class ChatRequest(BaseModel):
         "拼在服务端是为了：(1) 让格式指令和历史一起进模型（前端改写会让当前轮丢上下文）；"
         "(2) 入库存原始问题，不污染历史。",
     )
+    # ---- L4 真实人工确认（2026-11-08）----
+    # 这两个字段**只在前端点击确认后**由前端从 /api/chat/approval 拿到并回传。
+    # 模型看不到它们，也写不进工具参数；工具守卫只从服务端注入的 configurable 读取。
+    approval_token: str | None = Field(
+        default=None, description="一次性确认 token（服务端签发，绑定 user/tool/args/turn）"
+    )
+    turn_id: str | None = Field(
+        default=None, description="确认绑定的轮次 id；与 approval_token 同时回传"
+    )
 
 
 # ==================== SSE 帧 ====================
@@ -413,6 +438,25 @@ async def _plan_route(
         return PlannedRoute("llm", "agent", use_kb, use_web, source)
     if source == "mode:agent":
         return PlannedRoute("agent", "agent", use_kb, use_web, source)
+
+    # ② 路由 Fast Path：下面两种情况路由模型的结论是**必然**的，调它纯属浪费一次
+    #   网络往返（首 token 延迟 + 一次失败重试窗口）。注意这里只判"开关状态"和
+    #   "有没有显式工作流"，**不做任何中文关键词/子串判意图**——router.py 早期
+    #   就是靠词表猜意图，把"了解一下"误判成"了解"，这类教训不能重演。
+    if getattr(config, "ROUTER_FASTPATH_ENABLED", True):
+        # a) 用户/模板已经指定了工作流：工作流本身就是明确选择，直接起跑。
+        #    此前这种情况仍先调路由，若模型判成 agent，workflow_id 会被静默忽略。
+        if req.workflow_id:
+            if config.HYBRID_MODE_ENABLED:
+                return PlannedRoute(
+                    "hybrid", "workflow", use_kb, use_web, f"{source}:fastpath:workflow_id"
+                )
+            mode = "agent" if (use_kb or use_web) else "llm"
+            return PlannedRoute(mode, "workflow", use_kb, use_web, f"{source}:fastpath:workflow_id")
+        # b) 两个能力开关都关：没有工具可绑、也没有库可检索，路由判 workflow 也进不去
+        #    （进 hybrid 需要工具），判 agent 也会被降级成 llm。结论唯一，跳过模型。
+        if not use_kb and not use_web:
+            return PlannedRoute("llm", "agent", use_kb, use_web, f"{source}:fastpath:no_tools")
 
     # ②③ 判 workflow / agent
     decision = await route_engine.decide(question, has_kb=has_kb, use_web=use_web)
@@ -706,6 +750,10 @@ class _Acc:
         self.finish_reason: str | None = None
         # 被长度上限截断：文本合法、结构完整、但**内容不完整**
         self.truncated = False
+        # 输出侧提示词泄露过滤器命中：本次回答已被替换为固定拒答，
+        # 不能再判截断/把未过滤的原文写进 done.answer。
+        self.leak_blocked = False
+        self.leak_reason: str | None = None
 
 
 # 各供应商对"被长度上限截断"的叫法。OpenAI 兼容接口用 length，
@@ -802,6 +850,57 @@ async def _finish_turn(upstreams: _Upstreams, ticket) -> None:
         ticket.release()
 
 
+def _new_leak_guard(turn_id: str = "", path: str = "") -> prompt_security.LeakFilter | None:
+    """按开关创建输出过滤器；None = 本次回答不做输出侧过滤。
+
+    读 config 而不是写死 True：线上排障需要能只关输出过滤（或全关）来对比
+    行为，见 core/config.py 的 PROMPT_LEAK_OUTPUT_GUARD_ENABLED。
+    ``turn_id`` / ``path`` 只用于服务端 soft 日志（"谁在系统性试探"），不下发。
+    """
+    if not getattr(config, "PROMPT_LEAK_GUARD_ENABLED", True):
+        return None
+    if not getattr(config, "PROMPT_LEAK_OUTPUT_GUARD_ENABLED", True):
+        return None
+    return prompt_security.LeakFilter(turn_id=turn_id, path=path)
+
+
+def _guarded_refusal(prefix: str) -> str:
+    """把已安全下发的正文和固定拒答拼成最终答案（不保留任何被拦下的原文）。"""
+    head = prefix.rstrip()
+    return (head + "\n\n" + prompt_security.REFUSAL_TEXT) if head else prompt_security.REFUSAL_TEXT
+
+
+def _security_refusal_response(ticket, rule: str) -> StreamingResponse:
+    """输入拦截命中：**不调用任何模型**，直接回一条 SSE 拒答。
+
+    额度不扣、用户消息不落库（避免攻击串污染历史/标题），并发名额仍通过
+    StreamingResponse 的 background 归还——与正常收尾同一条路径，不会漏还。
+    """
+    async def _gen():
+        yield _sse("status", {"text": "请求被安全策略拦截"})
+        yield _sse("token", {"text": prompt_security.REFUSAL_TEXT})
+        yield _sse(
+            "done",
+            {
+                "answer": prompt_security.REFUSAL_TEXT,
+                "refs": "",
+                "title": "",
+                "mode": "blocked",
+                "message_id": 0,
+                "run_id": "",
+                "truncated": False,
+                "plan_topic": None,
+            },
+        )
+
+    return StreamingResponse(
+        _gen(),
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
+        background=BackgroundTask(ticket.release),
+    )
+
+
 async def _stream_llm(
     llm, messages, request: Request, acc: _Acc, upstreams=None, path: str = "llm"
 ) -> None:
@@ -813,8 +912,13 @@ async def _stream_llm(
     断连检测改成每 16 帧查一次（首帧仍然查）：is_disconnected() 要读 asgi 状态，
     逐帧调用等于千 token 回答白付上千次开销。**确定性由关闭动作保证，不靠检测频率**：
     无论走哪条出口（正常结束 / 断连 return / 上游异常），`aclosing` 都会 aclose 上游。
+
+    2026-11-08：token 出口统一过 ``LeakFilter``（提示词/工具定义泄露）。过滤命中
+    时立刻停止上游、把已下发的安全前缀 + 固定拒答作为最终答案，绝不能让后面的
+    token 继续流出去。
     """
     agen = upstreams.track(llm.astream(messages)) if upstreams is not None else llm.astream(messages)
+    guard = _new_leak_guard(path=path)
     try:
         seen = 0
         async with contextlib.aclosing(agen) as stream:
@@ -839,8 +943,26 @@ async def _stream_llm(
                     )
                 if not isinstance(delta, str) or not delta:
                     continue
-                acc.text += delta
-                yield _sse("token", {"text": delta})
+                for part in (guard.feed(delta) if guard is not None else [delta]):
+                    acc.text += part
+                    yield _sse("token", {"text": part})
+                if guard is not None and guard.blocked:
+                    acc.leak_blocked = True
+                    acc.leak_reason = guard.reason
+                    metrics.inc(
+                        "prompt_leak_blocked",
+                        {"stage": "output", "path": path, "rule": guard.reason or "?"},
+                    )
+                    refusal = _guarded_refusal(acc.text)
+                    tail = ("\n\n" + prompt_security.REFUSAL_TEXT) if acc.text.strip() else prompt_security.REFUSAL_TEXT
+                    acc.text = refusal
+                    yield _sse("token", {"text": tail})
+                    return
+        if guard is not None:
+            # 流正常结束：把未下发的安全尾巴吐出去（过滤器只压着 48 字）
+            for part in guard.flush():
+                acc.text += part
+                yield _sse("token", {"text": part})
         # 正常结束才判截断：走到这里说明上游把流跑完了（不是断连、不是异常）。
         # 截断帧放在 token 之后、done 之前——前端读到时正文已经渲染完，
         # 提示条出现在最后，符合"先给内容再给限制"的顺序。
@@ -853,6 +975,24 @@ async def _stream_llm(
 
 
 # ==================== 主路由 ====================
+
+
+class ApprovalRequest(BaseModel):
+    request_id: str = Field(..., min_length=8, description="SSE approval 事件里的 request_id")
+
+
+@router.post("/approval")
+async def issue_tool_approval(req: ApprovalRequest, uid: str = Depends(get_current_user)):
+    """L4：前端点击「允许执行」后，服务端才签发一次性 token。
+
+    为什么必须单独一个端点：token 只能由**真实点击**这个动作触发签发。
+    如果让模型在工具调用里自己产生/回填确认串，就等于模型自证，
+    回到旧「纸糊审批」的老路。pending 只登记在服务端，模型看不到 request_id。
+    """
+    issued = approval_store.issue_token(req.request_id, uid)
+    if issued is None:
+        raise HTTPException(status_code=404, detail="确认请求不存在、已过期或不属于当前用户")
+    return issued
 
 
 @router.post("/stream")
@@ -883,8 +1023,43 @@ async def chat_stream(
         raise
 
 
+async def _context_notes(uid: str) -> str:
+    """本轮要追加的「画像 + 任务」注释（两个开关各自独立，默认关闭）。
+
+    为什么走 `asyncio.to_thread`：两张表都是 SQLite 同步读，直接在事件循环里
+    读会阻塞几百微秒到毫秒级——单次看着不多，200 并发时就是实打实的排队。
+    读失败一律返回空串：画像/任务只是偏好辅助，不能让它成为 500 的来源。
+    """
+    if not (
+        getattr(config, "PROFILE_INJECT_ENABLED", False)
+        or getattr(config, "TASK_INJECT_ENABLED", False)
+    ):
+        return ""
+
+    def _load() -> str:
+        parts = [store.profile_note(uid), store.task_note(uid)]
+        return "\n\n".join(p for p in parts if p)
+
+    try:
+        return await asyncio.to_thread(_load)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _with_note(text: str, note: str) -> str:
+    """把注释追加到一条 user message 的末尾（带空行分隔，避免和正文粘连）。
+
+    L0：画像 / 任务摘要不是资料，先中和其中的资料边界标签，
+    防止它们伪造/提前闭合资料区，混进【参考资料】。
+    """
+    if not note:
+        return text
+    note = data_boundary.sanitize_markers(note)
+    return f"{text}\n\n{note}" if text else note
+
+
 async def _plain_llm_messages(
-    uid: str, sid: str, question: str, scenario: str | None
+    uid: str, sid: str, question: str, scenario: str | None, note: str = ""
 ) -> list:
     """纯对话口径的 messages：system + 压缩后的历史 + 本轮问题。
 
@@ -896,14 +1071,18 @@ async def _plain_llm_messages(
         SystemMessage(
             content="你是一个友好、专业的 AI 助手。用中文简洁作答。"
             + scenarios_mod.get_scenario_prompt(scenario)
+            + data_boundary.clause()
+            + prompt_security.security_clause()
         )
     ]
-    for m in ctxcompress.assemble_history(uid, sid, history):
+    for m in ctxcompress.assemble_history(uid, sid, history, question=question):
         if m["role"] == "user":
             messages.append(HumanMessage(content=m["content"]))
         elif m["role"] == "assistant":
             messages.append(AIMessage(content=m["content"]))
-    messages.append(HumanMessage(content=question))
+    # ① 画像/⑤ 任务只能追加在**最后一条 user message**：进 system 会让所有分支
+    # 共享的 system 前缀随用户变化（KV 缓存直接失效），也会把"偏好"抬成硬约束。
+    messages.append(HumanMessage(content=_with_note(question, note)))
     return messages
 
 
@@ -917,6 +1096,17 @@ async def _chat_stream_impl(
     conv = await asyncio.to_thread(store.get_conversation, uid, req.sid)
     if not conv:
         raise HTTPException(status_code=404, detail=f"会话不存在：{req.sid}")
+
+    # ① 输入拦截：在扣额度、路由、任何 LLM 调用之前判。命中就只回固定拒答，
+    # 不把攻击串写进历史/标题，也不消耗用户的每日问答额度（避免被拿来刷额度）。
+    # 2026-11-10：命中不再一律拒答——询问能力/规则/工作方式的良性提问
+    # （intent=benign）放行，只有"逐字/原文/编码/导出"类才拒。
+    leak_hit = prompt_security.detect_prompt_extraction(req.question)
+    if leak_hit is not None:
+        leak_rule, intent = leak_hit
+        if intent != prompt_security.INTENT_BENIGN:
+            metrics.inc("prompt_leak_blocked", {"stage": "input", "rule": leak_rule})
+            return _security_refusal_response(ticket, leak_rule)
 
     await asyncio.to_thread(quota.consume, uid, "ask")
 
@@ -986,6 +1176,10 @@ async def _chat_stream_impl(
         refs_md = ""
         hybrid_run_id: str | None = None  # 仅 hybrid 模式有值，随 done 回传给前端
         metrics.inc("chat_total", {"path": mode})
+        # ①/⑤ 本轮末尾注释（画像 + 任务），开关都关时这里直接空串、不发任何查询。
+        # 只在请求开头取一次：同一轮内各分支（含 hybrid 兜底）用的是同一份，
+        # 避免同一条回答里画像前后不一致。
+        ctx_note = await _context_notes(uid)
         # A1：本轮回答是否被长度上限截断。默认 False，只有真的读到上游给的
         # finish_reason ∈ {length, max_tokens, ...} 才会变 True——
         # 取不到上游信号时一律按"未截断"处理（见 _finish_reason_of 的注释）。
@@ -1025,10 +1219,8 @@ async def _chat_stream_impl(
                         # 图片理解也走同一套依据判定，提示条口径保持一致
                         g = assess_grounding(docs_scores)
                         yield _sse("grounding", g)
-                        references = "\n\n".join(
-                            f"[{i + 1}] （来源：{d.metadata.get('source', '?')}）\n{d.page_content}"
-                            for i, (d, _) in enumerate(docs_scores)
-                        )
+                        # L0：与 RAG / Agent 预检索共用同一份分来源标签
+                        references = _references_text(docs_scores, uid, kb_id)
                         vision_question = (
                             f"【参考资料】\n{references}\n\n【用户问题】\n{req.question}"
                         )
@@ -1036,8 +1228,12 @@ async def _chat_stream_impl(
                 except Exception:
                     yield _sse("status", {"text": "知识库检索失败，已仅按图片作答"})
 
+            # 保密条款最后追加：检索 grounded 提示/场景预设都可能变，只有它是固定尾段。
+            # L0 的资料边界规则放在它前面（保密条款必须保持在 system 最末）。
+            vision_system += data_boundary.clause()
+            vision_system += prompt_security.security_clause()
             messages = [SystemMessage(content=vision_system)]
-            for m in ctxcompress.assemble_history(uid, req.sid, history):
+            for m in ctxcompress.assemble_history(uid, req.sid, history, question=req.question):
                 if m["role"] == "user":
                     messages.append(HumanMessage(content=m["content"]))
                 elif m["role"] == "assistant":
@@ -1133,9 +1329,24 @@ async def _chat_stream_impl(
                 else:
                     start_mode = "agent"
 
+                # 对话历史注入：修复"混合模式每轮失忆"（2026-10-16 线上复现）。
+                # 其它三种模式都读历史，唯独 hybrid 过去只拿当前一句 → 模型看不到上下文。
+                # 历史放 shared（跨模式数据通道），Agent/Workflow 引擎拼 prompt 时前置。
+                # ①/⑤ 注释注入点：hybrid 引擎的拼装顺序是
+                #   history_messages(ctx) + HumanMessage(ctx.goal)
+                # 所以**最后一条 user message 就是 goal**。不能塞进 shared["history"]：
+                # ① 它不在末尾（后面还有 goal）；② history_messages 对每条内容做
+                # [:500] 截断，长用户消息会把追加在末尾的注释直接切掉。
+                hist_raw = (
+                    await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False)
+                )[:-1]
+                hist = ctxcompress.assemble_history(
+                    uid, req.sid, hist_raw, question=req.question
+                )
+
                 ctx = TaskContext(
                     owner_id=uid,
-                    goal=prompt_question,
+                    goal=_with_note(prompt_question, ctx_note),
                     current_mode=start_mode,
                     workflow_id=wf_id,
                 )
@@ -1144,13 +1355,7 @@ async def _chat_stream_impl(
                 ctx.agent_state["kb_id"] = (
                     kb_id if (plan.use_kb and kb_id and kb_exists) else None
                 )
-                # 对话历史注入：修复"混合模式每轮失忆"（2026-10-16 线上复现）。
-                # 其它三种模式都读历史，唯独 hybrid 过去只拿当前一句 → 模型看不到上下文。
-                # 历史放 shared（跨模式数据通道），Agent/Workflow 引擎拼 prompt 时前置。
-                hist_raw = (
-                    await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False)
-                )[:-1]
-                ctx.shared["history"] = ctxcompress.assemble_history(uid, req.sid, hist_raw)
+                ctx.shared["history"] = hist
 
                 rules = await asyncio.to_thread(hstore.list_rules, uid)
                 orch = HybridOrchestrator(
@@ -1173,6 +1378,8 @@ async def _chat_stream_impl(
                 yield _sse("hybrid_start", {"run_id": ctx.run_id, "mode": start_mode})
 
                 full_text = ""
+                # 输出侧泄露过滤：hybrid 的 token 不走 _stream_llm，必须在这里单独接。
+                guard = _new_leak_guard(path="hybrid")
                 # 最后一个**成功**节点把产出写在了哪个键。节点退出时由工作流引擎
                 # 在 node_exit 里带出（见 hybrid/workflow.py）——用它取答案，
                 # 比"shared 里最后一个值"精确，也不会把 plan 的规划稿当答案。
@@ -1186,8 +1393,22 @@ async def _chat_stream_impl(
                     if et == "token":
                         delta = ev.payload.get("text", "")
                         if delta:
-                            full_text += delta
-                            yield _sse("token", {"text": delta})
+                            for part in (guard.feed(delta) if guard is not None else [delta]):
+                                full_text += part
+                                yield _sse("token", {"text": part})
+                            if guard is not None and guard.blocked:
+                                tail = (
+                                    ("\n\n" + prompt_security.REFUSAL_TEXT)
+                                    if full_text.strip()
+                                    else prompt_security.REFUSAL_TEXT
+                                )
+                                full_text = _guarded_refusal(full_text)
+                                metrics.inc(
+                                    "prompt_leak_blocked",
+                                    {"stage": "output", "path": "hybrid", "rule": guard.reason or "?"},
+                                )
+                                yield _sse("token", {"text": tail})
+                                break
                     elif et == "tool_call":
                         p = ev.payload
                         frame = {"name": p.get("name", "?")}
@@ -1230,6 +1451,12 @@ async def _chat_stream_impl(
                         # 引擎级错误事件留痕但不打断：终态由 ctx.status 统一落锤
                         yield _sse("status", {"text": f"执行异常：{ev.payload.get('error', '')}"})
 
+                if guard is not None and not guard.blocked:
+                    # 流正常结束：吐出被过滤器压住的最后 48 字（同 _stream_llm 口径）
+                    for part in guard.flush():
+                        full_text += part
+                        yield _sse("token", {"text": part})
+
                 # 取答案：流式累积优先；没有流式输出（纯工作流 + 全非流式节点）时
                 # 按 _pick_hybrid_answer 的优先级回 shared 里找，**不取 plan**。
                 acc_text = (
@@ -1247,7 +1474,7 @@ async def _chat_stream_impl(
                     acc = _Acc()
                     try:
                         fb_messages = await _plain_llm_messages(
-                            uid, req.sid, prompt_question, req.scenario
+                            uid, req.sid, prompt_question, req.scenario, ctx_note
                         )
                         async for frame in _stream_llm(
                             get_llm(max_tokens=2048),
@@ -1269,7 +1496,9 @@ async def _chat_stream_impl(
                     truncated = acc.truncated
                     used_fallback = True
 
-                if ctx.status in ("failed", "timeout") and not used_fallback:
+                if ctx.status in ("failed", "timeout") and not used_fallback and not (
+                    guard is not None and guard.blocked
+                ):
                     yield _sse("error", {"detail": ctx.error or "混合执行失败"})
                     return
             except ValueError as e:
@@ -1329,10 +1558,10 @@ async def _chat_stream_impl(
                         # grounding 帧必须赶在正文前：前端要在回答上方挂"依据较弱"提示条
                         grounding = assess_grounding(docs_scores)
                         yield _sse("grounding", grounding)
-                        refs_block = _references_text(docs_scores)
+                        refs_block = _references_text(docs_scores, uid, kb_id)
 
                 messages = []
-                for m in ctxcompress.assemble_history(uid, req.sid, history):
+                for m in ctxcompress.assemble_history(uid, req.sid, history, question=req.question):
                     if m["role"] == "user":
                         messages.append(HumanMessage(content=m["content"]))
                     elif m["role"] == "assistant":
@@ -1350,6 +1579,8 @@ async def _chat_stream_impl(
                     _loc_note = location_note(location_ctx)
                     if _loc_note:
                         user_content = user_content + "\n\n" + _loc_note.strip()
+                # ①/⑤ 画像与任务同样只追加在这条 user message 末尾（不进 system）
+                user_content = _with_note(user_content, ctx_note)
                 messages.append(HumanMessage(content=user_content))
 
                 # LangGraph checkpoint thread_id = 会话 id，天然多轮记忆。
@@ -1357,6 +1588,9 @@ async def _chat_stream_impl(
                 # 模型在参数里怎么编 kb_id 都影响不到真实检索目标。
                 # recursion_limit 兜底：工具返回"不可用"时模型反复重试是纯烧钱，
                 # 硬限制整轮的工具步数（LLM 往返 + 工具执行都占步数）
+                # L4：本轮 id。前端带着确认 token 重发时必须回传同一个 turn_id，
+                # 服务端签发的 token 也绑在它上面——换了 turn_id，token 自然失效。
+                turn_id = req.turn_id or uuid.uuid4().hex
                 config_ = {
                     "recursion_limit": 10,
                     "configurable": {
@@ -1371,10 +1605,16 @@ async def _chat_stream_impl(
                         # 键存在即严格模式——模型现编的地址一律拒绝。
                         "download_allowlist": [],
                         "user_urls": extract_urls(req.question),
+                        # L4：一次性确认 token 与轮次。两者都只从服务端注入，
+                        # 模型既看不到也改不了（工具 schema 里没有这两个参数）。
+                        "turn_id": turn_id,
+                        "approval_token": req.approval_token or "",
                     },
                 }
                 full_text = ""
                 agent_reason: str | None = None
+                # 输出侧泄露过滤：Agent 路径不走 _stream_llm，token 出口在这里接。
+                guard = _new_leak_guard(turn_id=turn_id, path="agent")
 
                 # stream_mode=["updates","messages"] 事件为 (mode字符串, payload)
                 # 必须走 astream：同步 stream() 会把整个事件循环堵住，
@@ -1412,8 +1652,22 @@ async def _chat_stream_impl(
                                     if isinstance(p, dict) and p.get("type") == "text"
                                 )
                             if isinstance(delta, str) and delta:
-                                full_text += delta
-                                yield _sse("token", {"text": delta})
+                                for part in (guard.feed(delta) if guard is not None else [delta]):
+                                    full_text += part
+                                    yield _sse("token", {"text": part})
+                                if guard is not None and guard.blocked:
+                                    tail = (
+                                        ("\n\n" + prompt_security.REFUSAL_TEXT)
+                                        if full_text.strip()
+                                        else prompt_security.REFUSAL_TEXT
+                                    )
+                                    full_text = _guarded_refusal(full_text)
+                                    metrics.inc(
+                                        "prompt_leak_blocked",
+                                        {"stage": "output", "path": "agent", "rule": guard.reason or "?"},
+                                    )
+                                    yield _sse("token", {"text": tail})
+                                    break
 
                     # -- updates 模式：payload={node: {"messages": [...]}}，工具调用/返回 --
                     elif mode_name == "updates" and isinstance(payload, dict):
@@ -1441,10 +1695,25 @@ async def _chat_stream_impl(
                                         },
                                     )
 
+                if guard is not None and not guard.blocked:
+                    # 流正常结束：吐出被过滤器压住的最后 48 字（同 _stream_llm 口径）
+                    for part in guard.flush():
+                        full_text += part
+                        yield _sse("token", {"text": part})
+
+                # L4：本轮若触发了高风险工具的待确认请求，把卡片信息推给前端。
+                # 注意这里**不发 token**——token 只能由用户点击 /api/chat/approval 后
+                # 由服务端签发；模型看到的只是这条 SSE 的另一端，拿不到它。
+                for pend in approval_store.pending_for_turn(uid, turn_id):
+                    ev = pend.as_event()
+                    ev["question"] = req.question
+                    yield _sse("approval", ev)
+
                 acc_text = full_text
                 # A1：Agent 路径不走 _stream_llm，截断要在这里单独判一次。
                 # 判断用的是同一个 _TRUNCATED_REASONS 集合，换供应商时口径不会分叉。
-                if _is_truncation(agent_reason, "agent"):
+                # 输出过滤命中时答案已被替换成拒答，不能再挂"内容不完整"。
+                if not (guard is not None and guard.blocked) and _is_truncation(agent_reason, "agent"):
                     truncated = True
                     yield _truncation_frame(agent_reason)
 
@@ -1508,7 +1777,8 @@ async def _chat_stream_impl(
                 grounding,
                 req.scenario,
                 # 查询改写用原文（改写要看逐轮字面），喂模型用压缩后的上下文
-                ctxcompress.assemble_history(uid, req.sid, history),
+                ctxcompress.assemble_history(uid, req.sid, history, question=req.question),
+                ctx_note,
             )
 
             acc = _Acc()
@@ -1532,7 +1802,9 @@ async def _chat_stream_impl(
         else:
             yield _sse("status", {"text": "纯 LLM 模式..."})
             # 与 hybrid 兜底共用一份拼装口径（system + 压缩块 + 最近 K 轮原文）
-            messages = await _plain_llm_messages(uid, req.sid, prompt_question, req.scenario)
+            messages = await _plain_llm_messages(
+                uid, req.sid, prompt_question, req.scenario, ctx_note
+            )
 
             acc = _Acc()
             try:
@@ -1612,19 +1884,33 @@ async def _chat_stream_impl(
 # ==================== 辅助 ====================
 
 
-def _references_text(docs_scores) -> str:
+def _references_text(
+    docs_scores, owner: str | None = None, kb_id: str | None = None
+) -> str:
     """把检索到的片段拼成【参考资料】块的正文。
 
     RAG 分支与「统一智能体的预检索」共用这一份口径：两处各写一遍的话，
     同一份资料在两条路径里的编号顺序、来源标注迟早会对不上，用户看到的就是
     "同一条问题，引用卡片和正文里的 [1] 指的不是同一段"。
+
+    L0：每条片段按**入库来源**分别用不同标签包住（用户上传 / 联网导入 / 知识库），
+    避免三类资料混成一个无边界的大块。标签只在【参考资料】区域内出现；
+    调用方传 owner/kb_id 才能拿到来源，取不到时按「知识库」兜底。
     """
     if not docs_scores:
         return ""
-    return "\n\n".join(
-        f"[{i + 1}] （来源：{d.metadata.get('source', '?')}）\n{d.page_content}"
-        for i, (d, _) in enumerate(docs_scores)
-    )
+    origin_map = data_boundary.kb_origin_map(owner, kb_id)
+    blocks = []
+    for i, (d, _) in enumerate(docs_scores):
+        src = d.metadata.get("source", "?")
+        kind = data_boundary.source_for_file(src, origin_map)
+        blocks.append(
+            data_boundary.wrap(
+                kind,
+                f"[{i + 1}] （来源：{src}）\n{d.page_content}",
+            )
+        )
+    return "\n\n".join(blocks)
 
 
 async def _build_messages(
@@ -1636,6 +1922,7 @@ async def _build_messages(
     grounding: dict | None = None,
     scenario: str | None = None,
     history=None,
+    note: str = "",
 ) -> list:
     """组装 LLM 输入：历史 + 已检索到的参考资料。
 
@@ -1654,7 +1941,7 @@ async def _build_messages(
         raw = (
             await asyncio.to_thread(store.get_messages, owner, sid, include_system=False)
         )[:-1]
-        history_raw = ctxcompress.assemble_history(owner, sid, raw)
+        history_raw = ctxcompress.assemble_history(owner, sid, raw, question=question)
     # 输入侧字符预算：窗口放宽到 30 轮（最多 70 条）后，超长会话会把 prompt 推过
     # 模型上下文（实测最重会话 76k tok > 64K，会让 DeepSeek 直接 500）。
     # 从最新往旧累计，超预算就丢最旧的（保留"最近的上下文"），而不是截断最新一轮——
@@ -1671,17 +1958,22 @@ async def _build_messages(
             total += c
         history_raw = list(reversed(kept))
     messages = []
-    references = _references_text(docs_scores) if kb_id else ""
+    references = _references_text(docs_scores, owner, kb_id) if kb_id else ""
+    # L0：先放「资料边界」standing rule，再放保密条款（保密条款始终最后）。
     if references:
         system = (
             SYSTEM_PROMPT
             + grounding_note(grounding or {})
             + scenarios_mod.get_scenario_prompt(scenario)
+            + data_boundary.clause()
+            + prompt_security.security_clause()
         )
     else:
         system = (
             "你是一个友好、专业的 AI 助手。用中文简洁作答。"
             + scenarios_mod.get_scenario_prompt(scenario)
+            + data_boundary.clause()
+            + prompt_security.security_clause()
         )
     messages.append(SystemMessage(content=system))
     for m in history_raw:
@@ -1692,7 +1984,8 @@ async def _build_messages(
     user_prompt = (
         f"【参考资料】\n{references}\n\n【用户问题】\n{question}" if references else question
     )
-    messages.append(HumanMessage(content=user_prompt))
+    # ①/⑤ 只追加在最后一条 user message，不进 system（理由同 _plain_llm_messages）
+    messages.append(HumanMessage(content=_with_note(user_prompt, note)))
     return messages
 
 
@@ -1824,21 +2117,63 @@ async def _compress_after_turn(uid: str, sid: str) -> None:
     失败一律静默：压缩是优化项，任何异常都不能让用户看到错误、
     更不能影响下一轮对话（读取侧 `assemble_history` 自带降级）。
     """
-    # 闸满就跳过本轮压缩（下一轮还会再判一次，不会永久漏压）
-    _ticket = llm_gate.try_ticket()
-    if _ticket is None:
+    if getattr(config, "COMPRESS_ENABLED", True):
+        # 闸满就跳过本轮压缩（下一轮还会再判一次，不会永久漏压）
+        _ticket = llm_gate.try_ticket()
+        if _ticket is not None:
+            try:
+                await asyncio.to_thread(ctxcompress.maybe_compress, uid, sid)
+            except Exception:
+                pass
+            finally:
+                _ticket.release()
+    # ⑤ 压缩完再更新任务摘要：summary 取的是**刚写进去的**压缩块，
+    #   如果和压缩并行跑，任务层读到的会是上一版（甚至空），下一轮注入就滞后。
+    await _update_task_after_turn(uid, sid)
+
+
+def _persist_task_summary(uid: str, sid: str) -> None:
+    """把当前会话写成一个 active 任务（title=会话标题，summary=压缩摘要前 N 字）。
+
+    为什么 task_id 直接用 sid：最小版只做"会话即任务"，一个会话不会同时属于
+    两个任务；用 sid 还能保证 upsert 幂等（同一轮重复调用不会多出任务）。
+    """
+    conv = store.get_conversation(uid, sid)
+    if not conv:
         return
+    summary = ""
+    if getattr(config, "COMPRESS_ENABLED", True):
+        block, _upto = ctxcompress.load_summary(uid, sid)
+        cap = int(getattr(config, "TASK_SUMMARY_CHARS", 200))
+        summary = block.render()[:cap]
+    store.upsert_task(
+        uid,
+        task_id=sid,
+        title=(conv.get("title") or "").strip() or "未命名会话",
+        status="active",
+        last_sid=sid,
+        summary=summary,
+    )
+
+
+async def _update_task_after_turn(uid: str, sid: str) -> None:
+    """任务摘要更新（异步、失败静默）。
+
+    **写入不受 TASK_INJECT_ENABLED 控制**：开关只管"注不注入"。数据层先攒着，
+    临时打开 A/B 时立刻就能有最近任务可注入，而不是打开后的第一轮还是空的。
+    """
     try:
-        await asyncio.to_thread(ctxcompress.maybe_compress, uid, sid)
-    except Exception:
+        await asyncio.to_thread(_persist_task_summary, uid, sid)
+    except Exception:  # noqa: BLE001
         pass
-    finally:
-        _ticket.release()
 
 
 def _schedule_compress(uid: str, sid: str) -> None:
     """把压缩判定丢到后台（fire-and-forget，不阻塞 SSE）。"""
-    if not getattr(config, "COMPRESS_ENABLED", True):
+    # 压缩和任务摘要都关掉时没有后台工作可做，直接返回（避免每轮空建一个 task）
+    if not getattr(config, "COMPRESS_ENABLED", True) and not getattr(
+        config, "TASK_INJECT_ENABLED", False
+    ):
         return
     try:
         _t = asyncio.create_task(_compress_after_turn(uid, sid))

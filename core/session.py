@@ -246,6 +246,22 @@ def _init_db() -> None:
                 PRIMARY KEY (owner_id, tag)
             );
             CREATE INDEX IF NOT EXISTS idx_tagpick_owner ON user_tag_picks(owner_id);
+
+            -- ⑤ 任务对象层（最小版）：每个会话对应一个任务，用来在下一轮把"最近在做
+            -- 什么"带回上下文。刻意不建 Thread / Assignment，也不做跨会话关联：
+            -- 这一层只回答"这个用户最近几个任务是什么"，不是任务管理系统。
+            CREATE TABLE IF NOT EXISTS tasks (
+                owner_id   TEXT NOT NULL,
+                task_id    TEXT NOT NULL,
+                title      TEXT NOT NULL DEFAULT '',
+                status     TEXT NOT NULL DEFAULT 'active',
+                last_sid   TEXT,
+                summary    TEXT NOT NULL DEFAULT '',
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (owner_id, task_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_task_active
+                ON tasks(owner_id, status, updated_at DESC);
         """)
 
         # 迁移：老库补 refs 列（已存在则忽略）
@@ -547,6 +563,122 @@ def get_user_tags(owner: str, limit: int = 30) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+# 画像注入的边界文案：模块级常量而不是拼在调用点，是为了让所有注入点逐字一致。
+# "不是事实依据"这半句是核心：画像来自模型抽标签，可能滞后或抽错，不能让它盖过
+# 参考资料和本轮问题。
+PROFILE_NOTE_HEAD = (
+    "【长期兴趣画像（仅作偏好参考，不是事实依据；"
+    "与参考资料或本轮问题冲突时，一律以它们为准）】"
+)
+
+
+def profile_note(owner: str, limit: int | None = None, days: int | None = None) -> str:
+    """把用户最近 90 天的 Top N 兴趣标签拼成一行（无标签返回空串）。
+
+    读取侧只做两件事：取权重最高的 N 个 + 过滤掉太久没更新的。
+    **不写库、不改权重、不进 Chroma**——画像注入是只读的展示性上下文。
+
+    失败静默返回空串：画像只是辅助，不能因为读标签失败把整轮问答搞崩。
+    调用方必须用 `asyncio.to_thread` 包住本函数（SQLite 是同步 IO）。
+    """
+    if not owner or not getattr(config, "PROFILE_INJECT_ENABLED", False):
+        return ""
+    lim = int(limit if limit is not None else getattr(config, "PROFILE_INJECT_LIMIT", 8))
+    win = int(days if days is not None else getattr(config, "PROFILE_INJECT_DAYS", 90))
+    try:
+        tags = get_user_tags(owner, limit=lim)
+    except Exception:  # noqa: BLE001
+        return ""
+    cutoff = int(time.time()) - win * 86400
+    fresh = [t for t in tags if int(t.get("updated_at") or 0) >= cutoff]
+    if not fresh:
+        return ""
+    names = "、".join(str(t["tag"]) for t in fresh if t.get("tag"))
+    if not names:
+        return ""
+    return f"{PROFILE_NOTE_HEAD}用户长期关注：{names}"
+
+
+# ==================== 任务对象层（最小版 · ⑤）====================
+#
+# 只有一张 tasks 表，task_id 复用会话 id（一个会话 = 一个任务）。
+# 刻意不做 Thread / Assignment / 跨会话关联：这一层的唯一职责是"下一轮把
+# 最近在做什么带回上下文"，越简单越不会和 hybrid 的 TaskContext 混淆。
+
+
+def upsert_task(
+    owner: str,
+    task_id: str,
+    title: str,
+    status: str = "active",
+    last_sid: str | None = None,
+    summary: str = "",
+) -> None:
+    """写入 / 更新一个任务摘要。失败静默（任务是辅助信息）。"""
+    if not owner or not task_id:
+        return
+    now = int(time.time())
+    try:
+        with _get_conn() as conn:
+            conn.execute(
+                "INSERT INTO tasks (owner_id, task_id, title, status, last_sid, summary, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(owner_id, task_id) DO UPDATE SET "
+                "title=excluded.title, status=excluded.status, "
+                "last_sid=excluded.last_sid, summary=excluded.summary, "
+                "updated_at=excluded.updated_at",
+                (owner, task_id, title or "", status or "active", last_sid, summary or "", now),
+            )
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def list_active_tasks(owner: str, limit: int = 3) -> list[dict]:
+    """取该用户最近活跃的任务（按 updated_at 倒序，最多 limit 条）。"""
+    if not owner:
+        return []
+    try:
+        with _get_conn() as conn:
+            rows = conn.execute(
+                "SELECT task_id, title, status, last_sid, summary, updated_at "
+                "FROM tasks WHERE owner_id = ? AND status = 'active' "
+                "ORDER BY updated_at DESC LIMIT ?",
+                (owner, max(1, min(int(limit), 20))),
+            ).fetchall()
+    except Exception:  # noqa: BLE001
+        return []
+    return [dict(r) for r in rows]
+
+
+TASK_NOTE_HEAD = "【近期任务（仅作连续性参考，不是本轮指令；与用户本轮问题冲突时以本轮问题为准）】"
+
+
+def task_note(owner: str, limit: int | None = None) -> str:
+    """把最近活跃任务拼成一段可注入文本（无任务返回空串）。
+
+    每条只给 title + summary 前 N 字：任务层是**索引**，不是内容仓库；
+    把完整压缩摘要塞进来等于把压缩块又拷一遍，白白增加 token。
+    """
+    if not owner or not getattr(config, "TASK_INJECT_ENABLED", False):
+        return ""
+    lim = int(limit if limit is not None else getattr(config, "TASK_INJECT_LIMIT", 3))
+    rows = list_active_tasks(owner, lim)
+    if not rows:
+        return ""
+    cap = int(getattr(config, "TASK_SUMMARY_CHARS", 200))
+    lines: list[str] = []
+    for r in rows:
+        title = (r.get("title") or "").strip() or "（未命名任务）"
+        summary = (r.get("summary") or "").strip()
+        if summary:
+            if len(summary) > cap:
+                summary = summary[:cap] + "…（摘要已截断）"
+            lines.append(f"- {title}：{summary}")
+        else:
+            lines.append(f"- {title}")
+    return TASK_NOTE_HEAD + "\n" + "\n".join(lines)
+
+
 # ==================== 用户画像快照（方案 C · C2 块）====================
 
 
@@ -695,6 +827,38 @@ def get_message(owner: str, sid: str, msg_id: int) -> dict | None:
             (sid, msg_id),
         ).fetchone()
         return dict(row) if row else None
+
+
+def get_messages_by_ids(owner: str, sid: str, ids: list[int]) -> list[dict]:
+    """按 message id 批量取消息（**一条 WHERE id IN (...)**，供压缩段回读用）。
+
+    归属校验并进 JOIN：不是自己的会话返回空列表，不区分"不存在"与"无权限"。
+    ids 会被去重并限制条数——回读只是上下文增强，不该被一个异常大的 refs
+    列表放大成一次全表扫描。
+    """
+    if not ids:
+        return []
+    clean: list[int] = []
+    for i in ids:
+        try:
+            v = int(i)
+        except (TypeError, ValueError):
+            continue
+        if v > 0 and v not in clean:
+            clean.append(v)
+    if not clean:
+        return []
+    clean = clean[:100]
+    placeholders = ",".join("?" * len(clean))
+    with _get_conn() as conn:
+        rows = conn.execute(
+            "SELECT m.id, m.role, m.content, m.created_at "
+            "FROM messages m JOIN conversations c ON m.conversation_id = c.id "
+            f"WHERE m.conversation_id = ? AND c.owner_id = ? AND m.id IN ({placeholders}) "
+            "ORDER BY m.id ASC",
+            (sid, owner, *clean),
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def find_turn_ids(owner: str, sid: str, msg_id: int) -> list[int]:

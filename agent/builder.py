@@ -18,39 +18,16 @@ from collections import OrderedDict
 from langchain.agents import create_agent
 
 from agent.tools import AGENT_TOOLS
-from core import config, prompt_store, tool_registry
+from core import config, data_boundary, prompt_security, prompt_store, tool_registry
 from core import scenarios as scenarios_mod
+from core.agent_prompts import AGENT_SYSTEM_PROMPT
 from core.llm import get_llm
 
-SYSTEM_PROMPT = """你是一个智能问答助手。本轮实际可用的能力由用户开启的开关决定：
-  - 知识库检索（kb_search）：用户开了「检索」且当前会话有库时可用
-  - 联网搜索（web_search）：用户开了「智能联网」时可用
-  - 查询中国城市天气（get_weather）
-  - 下载文档类文件，可选并入知识库（download_file）
-
-行为准则：
-  1. 用不用工具、用哪个工具、用几次，由你根据问题自行判断，不需要征求许可。
-     工具清单里没有的能力就是本轮没开——如实说明，不要假装调用，也不要绕道实现。
-  2. 资料类问题优先查知识库：库内资料带出处，可信度高于网页摘要。库里确实没有，
-     且本轮允许联网时再上网补充。
-  3. 实时信息（新闻、价格、赛况、当日天气实况）必须联网获取，不许凭记忆作答。
-  4. 天气查询用 get_weather，支持中文或拼音输入（如 北京 / beijing）。
-  5. 当用户要求"搜索并下载论文/文档/报告"时，先用 web_search 找到文件直链，再用 download_file 下载；
-     若用户说明要入库，传入对应的 kb_id。
-  6. 若某工具明确返回失败（如提示"暂时不可用"），不要用相同参数重复调用该工具，
-     直接基于已有信息回答或如实告知用户。
-  7. 工具返回错误时如实向用户解释，绝不编造。
-  8. 参考知识库资料回答时，末尾注明来源编号（依据：[1][2]）。
-     只用真正支撑了结论的片段当依据；kb_search 在检索偏弱（相似度过低或仅沾边）
-     时会主动返回**必须遵守**的约束，请严格照它指示：如实告知用户知识库里没有
-     直接相关资料、并给出下一步，不要拿低分片段硬凑答案。
-  9. 闲聊、身份、常识等无需工具的问题直接回答。算术、换算、日期差自己算，
-     但要复核进位和运算优先级；结果是给用户看的数字时尤其别算错。
- 10. web_search 返回的是**原始检索结果清单**（标题 / 摘要 / 链接），不是给用户看的成品。
-     请消化后用自己的话作答：归纳成 3~5 条要点，每条说清"发生了什么、什么时间、谁说的"，
-     来源用 [1][2] 角标标注；**不要把带粗体和链接的原始列表原样贴给用户**。
-     一次搜索已经覆盖问题时就作答，不要为了全面而换词重搜；信息互相矛盾时
-     以官方媒体为准，并说明存在不同说法。"""
+# 系统提示词文本已挪到 core/agent_prompts.py：builder 会 import LangChain，而
+# core/prompt_security.py 的泄露指纹库与离线攻击评估只需要文本，不能被一起拖进
+# LangChain。这里保留同名别名，老代码 `from agent.builder import SYSTEM_PROMPT`
+# 与 prompt_store 的 path="agent" 基线都不受影响。
+SYSTEM_PROMPT = AGENT_SYSTEM_PROMPT
 
 
 def _coarse_coord(v):
@@ -156,6 +133,13 @@ _CHECKPOINTER = _make_checkpointer()
 _AGENT_CACHE: OrderedDict[tuple, object] = OrderedDict()
 _AGENT_CACHE_MAX = 32
 _AGENT_LOCK = threading.Lock()
+
+# 缓存 miss 的哨兵。**不要改回 `if cached is not None`**。
+# 值域现在只有 CompiledStateGraph（create_agent 不会返回 None），但那是**外部事实**，
+# 不是类型保证。一旦将来工厂改成"编译失败返回 None"，`is not None` 会把有效缓存
+# 当成 miss：表现为缓存静默失效（每轮重新编译）、不报错、不打日志，
+# 只能靠"怎么突然变慢了"察觉 —— 和 `_cache_key` 漏维度是同一类静默故障。
+_MISSING = object()
 
 
 def _cache_key(
@@ -273,8 +257,10 @@ def build_agent(
     )
 
     with _AGENT_LOCK:
-        cached = _AGENT_CACHE.get(key)
-        if cached is not None:
+        # 命中判定用哨兵、不用 `is not None`（原因见模块级 _MISSING）。
+        # get(key, default) 只做一次哈希查找，比 `key in d` 再取值省一次。
+        cached = _AGENT_CACHE.get(key, _MISSING)
+        if cached is not _MISSING:
             _AGENT_CACHE.move_to_end(key)
             return cached
 
@@ -316,6 +302,14 @@ def build_agent(
         # 模型仍在回答前看得到，只是位置从"头部"挪到"尾部"。
         # 场景预设保留在 system 里：它是按场景选定的稳定内容，不随请求变化。
         system_prompt += scene
+        # L0：资料边界 standing rule。必须放在保密条款之前——保密条款是要
+        # 始终保持在 system 最末的固定尾段（见下一条注释）。开关关闭时为空串。
+        system_prompt += data_boundary.clause()
+        # ② 保密条款**最后追加**：prompt_store 的 active 版本、场景预设、kb 状态段
+        # 都是可变的，只有这里是在它们全部拼完之后覆盖上去，进化候选删不掉它。
+        # 条款里的随机 canary 会写进 system prompt，输出过滤器据此抓"翻译/改写后
+        # 仍带着水印"的泄露（跨语言也成立）。
+        system_prompt += prompt_security.security_clause()
 
         # 绑定的工具 = 全部直接工具 + 本用户已激活的延迟工具。
         # 延迟工具不在激活集里就不进 bind_tools，省每轮 schema token；
@@ -334,6 +328,15 @@ def build_agent(
             and ((not tool_registry.TOOL_META[t.name].defer) or (t.name in activated))
         ]
         tools_to_bind = build_guarded_tools(enabled)
+        # 把**最终** system prompt（可能是 prompt_store 里的 active 版本）与每个
+        # 工具的 description 登记进泄露指纹库：静态常量覆盖不到进化后的文本，
+        # 而 24 字指纹不要求模型原样整段输出，插 markdown/换行也能命中。
+        prompt_security.register_protected_text(system_prompt, label="system_prompt")
+        for _t in tools_to_bind:
+            prompt_security.register_protected_text(
+                getattr(_t, "description", "") or "",
+                label=f"tool:{getattr(_t, 'name', '') or 'unknown'}",
+            )
         agent = create_agent(
             model=llm,
             tools=tools_to_bind,

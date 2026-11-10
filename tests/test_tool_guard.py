@@ -85,28 +85,66 @@ def main() -> int:
     short = tool_guard.truncate_output("kb_search", "短文本", 4000)
     check("未超限不动它", short == "短文本")
 
-    print("\n[B] needs_approval：未批准不执行")
+    print("\n[B] needs_approval：模型自证不执行（L4 真实人工确认）")
     # download_file 在 TOOL_META 里是 needs_approval=True
     check("前提：download_file 需要审批", TOOL_META["download_file"].needs_approval is True)
     from agent.tools import AGENT_TOOLS
+    from core import approval_store
 
+    approval_store.reset()
     G = tool_guard.build_guarded_tools(AGENT_TOOLS)
     dl = [t for t in G if t.name == "download_file"][0]
-    with tool_guard.guard_scope() as st:
-        r1 = dl.invoke({"url": "http://example.com/a.pdf"})
-        # 工具内部会真的去抓 URL 吗？不会——审批在**执行前**就返回了，
-        # 所以这里既不联网也不产生副作用。
+    cfg = {"configurable": {"owner_id": "u-test", "turn_id": "t-test"}}
+    args = {"url": "http://example.com/a.pdf"}
+    with tool_guard.guard_scope():
+        r1 = dl.invoke(args, config=cfg)
+        # 工具内部不会真去抓 URL——审批在**执行前**就返回了，无副作用、不联网。
         r1_text = r1 if isinstance(r1, str) else str(r1)
-        check("首次调用不执行（需确认）", "需要用户确认" in r1_text, r1_text[:50])
-        tok = st.pending.get("download_file")
-        check("登记了确认串", bool(tok) and tok.startswith("confirm:"), tok)
+        check("首次调用不执行（等待人工确认）", "需要真实用户" in r1_text, r1_text[:50])
+        pending = approval_store.pending_for_turn("u-test", "t-test")
+        check("登记了待确认请求", len(pending) == 1, len(pending))
+        req_id = pending[0].request_id if pending else ""
+        check("尚未签发 token", req_id and not approval_store.has_active_token(req_id), req_id)
 
-        print("\n[C] 换参数后必须重新确认（批准的是那一次，不是永久）")
-        r2 = dl.invoke({"url": "http://example.com/b.pdf"})
+        print("\n[C] 模型「同参数再调一次」仍然被拒（L4 核心断言）")
+        r2 = dl.invoke(args, config=cfg)
         r2_text = r2 if isinstance(r2, str) else str(r2)
-        check("换参数仍不执行", "需要用户确认" in r2_text, r2_text[:40])
-        tok2 = st.pending.get("download_file")
-        check("确认串随参数变化", tok2 != tok, f"{tok} -> {tok2}")
+        check("同参数重试仍不执行", "本次未执行" in r2_text, r2_text[:50])
+        check("没有凭空产生 token", req_id and not approval_store.has_active_token(req_id), req_id)
+
+    print("\n[C2] 人工点击后才签发 token，且只能执行一次")
+    # 生产里「用户确认后继续」是**新的一轮请求**：guard_scope 会重建，
+    # 重复调用计数也从头算。这里同样换一个作用域，避免第 3 次同参被看门狗拦下。
+    issued = approval_store.issue_token(req_id, "u-test")
+    check("服务端签发 token", bool(issued and issued.get("approval_token")), str(issued))
+    token = (issued or {}).get("approval_token", "")
+
+    calls: list[str] = []
+
+    def fake_download(*a, **kw):
+        calls.append("run")
+        return "下载成功"
+
+    cfg_ok = {
+        "configurable": {
+            "owner_id": "u-test",
+            "turn_id": "t-test",
+            "approval_token": token,
+        }
+    }
+    with tool_guard.guard_scope():
+        out = tool_guard.guarded_run(
+            "download_file", fake_download, args, None, (), {"config": cfg_ok}
+        )
+        check("带人工确认 token 执行", out == "下载成功", out[:40])
+        check("确实执行了一次", len(calls) == 1, len(calls))
+
+    with tool_guard.guard_scope():
+        out2 = tool_guard.guarded_run(
+            "download_file", fake_download, args, None, (), {"config": cfg_ok}
+        )
+        check("同一 token 重放被拒", out2 != "下载成功" and "本次未执行" in out2, out2[:50])
+        check("没有第二次执行", len(calls) == 1, len(calls))
 
     print("\n[D] retryable=False 失败后封禁，不再执行")
     # kb_search.retryable=False

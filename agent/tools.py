@@ -24,6 +24,7 @@ import logging
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
+from core import data_boundary
 from core.urltools import url_allowed
 
 logger = logging.getLogger(__name__)
@@ -87,6 +88,7 @@ def kb_search(query: str, top_k: int = 3, config: RunnableConfig = None) -> str:
             return f"知识库中未找到与 '{query}' 相关的内容。"
 
         assessment = assess_grounding(docs_scores)
+        origin_map = data_boundary.kb_origin_map(owner, kb_id)
         lines = []
         for i, (d, score) in enumerate(docs_scores):
             src = d.metadata.get("source", "?")
@@ -96,7 +98,11 @@ def kb_search(query: str, top_k: int = 3, config: RunnableConfig = None) -> str:
             sim = _to_similarity(score)
             # 换不了就整段省掉，绝不把原始距离当相似度透出去
             score_txt = f" | score={sim:.3f}" if sim is not None else ""
-            lines.append(f"**[{i + 1}]** {src}{loc}{score_txt} | {preview}...")
+            line = f"**[{i + 1}]** {src}{loc}{score_txt} | {preview}..."
+            # L0：检索片段按入库来源包进对应标签（用户上传 / 联网导入 / 知识库）。
+            # 下面那句 grounding 约束留在标签外——它是**指令**，不是资料。
+            kind = data_boundary.source_for_file(src, origin_map)
+            lines.append(data_boundary.wrap(kind, line))
 
         body = "\n\n".join(lines)
         # 与纯 RAG 链路共用同一套 grounding 注释：检索偏弱（low / medium）时，
@@ -170,9 +176,15 @@ def web_search(query: str, max_results: int = 5, config: RunnableConfig = None) 
             kg = data.get("knowledgeGraph") or {}
             answer_box = data.get("answerBox") or {}
             if kg.get("description"):
-                return f"简介：{kg.get('description')}\n来源：{kg.get('url', '')}"
+                return data_boundary.wrap(
+                    data_boundary.SOURCE_WEB,
+                    f"简介：{kg.get('description')}\n来源：{kg.get('url', '')}",
+                )
             if answer_box.get("answer"):
-                return f"直接回答：{answer_box.get('answer')}\n来源：{answer_box.get('link', '')}"
+                return data_boundary.wrap(
+                    data_boundary.SOURCE_WEB,
+                    f"直接回答：{answer_box.get('answer')}\n来源：{answer_box.get('link', '')}",
+                )
             return f"联网搜索未找到与 '{query}' 相关的结果。"
 
         lines = []
@@ -182,7 +194,7 @@ def web_search(query: str, max_results: int = 5, config: RunnableConfig = None) 
             link = r.get("link", "")
             lines.append(f"**[{i + 1}]** {title}\n   {snippet}\n   {link}")
 
-        return "\n\n".join(lines)
+        return data_boundary.wrap(data_boundary.SOURCE_WEB, "\n\n".join(lines))
     except Exception as exc:  # noqa: BLE001
         # 不能只回一句"暂时不可用"：模型会把它当成任务完成，用户拿到的是
         # 一段"我搜不了"的解释而不是搜索结果。日志留痕，排查才有入口。

@@ -53,6 +53,16 @@ MAX_SEGMENTS = int(getattr(config, "COMPRESS_MAX_SEGMENTS", 12))
 
 SEG_PREFIX = "[COMPRESSED-"
 
+# ③ 压缩段回读：只有用户**明确回头指代**时才触发，避免每轮都多捞一段原文。
+#   命中词写死在这里（是行为契约的一部分）：这些词共同点是"指向已发生过的事"，
+#   没有它们时模型只需要压缩摘要，回读纯属浪费 token。
+RECALL_HINTS = ("刚才", "上次", "之前", "那个", "具体")
+RECALL_MAX_CHARS = int(getattr(config, "COMPRESS_RECALL_MAX_CHARS", 1200))
+RECALL_HEAD = (
+    "【压缩段原文回读（用户提到了「刚才/上次/之前」等指代；"
+    "以下是最近一个压缩段的来源原文，仅作细节参考）】"
+)
+
 # v2 折叠开关：False 时完全回到 v1 行为（折最早段，不看 salience / staged）。
 FOLD_BY_SALIENCE = bool(getattr(config, "COMPRESS_V2_FOLD", True))
 
@@ -277,8 +287,34 @@ class SummaryBlock:
 
     # ---- 序列化 ----
     def render(self) -> str:
-        """渲染成落库文本：每段一行 `[COMPRESSED-n] ...`。"""
+        """渲染成落库文本：每段一行 `[COMPRESSED-n] ...`。
+
+        注意：**落库格式保持不变**（老数据兼容 + 前缀稳定），锚点只在拼上下文时
+        由 `render_anchored()` 现算，不写进库。否则每次新增段都要改写旧行，
+        破坏"只追加不改旧段"这一条压缩层硬约束。
+        """
         return "\n".join(f"{SEG_PREFIX}{i + 1}] {seg}" for i, seg in enumerate(self.segments))
+
+    def render_anchored(self) -> str:
+        """渲染成**喂给模型**的上下文文本：每段额外带稳定锚点 `[Cn refs=a-b]`。
+
+        锚点的作用：让模型（和排查的人）能直接说清"这是第几个压缩段、
+        覆盖哪几条原始消息"，后续若需要回读细节，用 refs 范围就能一条
+        `WHERE id IN (...)` 把原文捞回来，而不用重跑压缩或猜索引。
+
+        段号 n 与 refs 范围都来自已落库的 segments/metas，纯函数、可重复，
+        所以同一份压缩块每次组装出来的锚点逐字节一致（不破 KV 前缀）。
+        refs 为空（旧数据 / 规则压缩没带 refs）时只给 `[Cn]`，不编造范围。
+        """
+        lines: list[str] = []
+        for i, seg in enumerate(self.segments):
+            meta = self.metas[i] if i < len(self.metas) else SegmentMeta()
+            refs = sorted({int(r) for r in (meta.refs or []) if int(r) > 0})
+            if refs:
+                lines.append(f"{SEG_PREFIX}{i + 1}] [C{i + 1} refs={refs[0]}-{refs[-1]}] {seg}")
+            else:
+                lines.append(f"{SEG_PREFIX}{i + 1}] [C{i + 1}] {seg}")
+        return "\n".join(lines)
 
     def meta_json(self) -> str:
         """metas 序列化成 JSON（落 conversations.compressed_meta 列）。"""
@@ -667,6 +703,11 @@ class ContextPlan:
     # 放在这里而不是让调用方自己再过滤一次：过滤规则（以 compressed_upto 为准）
     # 只能有一处实现，否则迟早两边算得不一样。
     kept: list[dict] = field(default_factory=list)
+    # ③ 带锚点的渲染文本（`[C3 refs=1201-1240]`）。summary_text 保持旧的无锚点
+    # 格式，供落库/既有调用方使用；喂模型时优先用这一个。
+    anchored_text: str = ""
+    # ③ 最近一个压缩段（回读时从这里取 refs，不重新解析 prompt 文本）
+    block: SummaryBlock | None = None
 
 
 def plan_context(
@@ -693,6 +734,8 @@ def plan_context(
         keep_message_id_from=first_id,
         keep_turns=keep_turns,
         kept=kept,
+        anchored_text=summary.render_anchored(),
+        block=summary,
     )
 
 
@@ -755,6 +798,67 @@ PRELUDE_HEAD = (
 PRELUDE_ACK = "已了解早期对话的压缩摘要，后续回答会参考它。"
 
 
+def should_recall(question: str | None) -> bool:
+    """是否触发压缩段原文回读（保守规则，命中即回读）。
+
+    只做"有没有回头指代"的判断，**不做意图分类**：这里不存在"用户是不是
+    在问细节"的语义推断，只是词面命中。误触发的代价是多了最多 1200 字原文；
+    漏触发则模型只能靠摘要猜。两害相权取轻。
+    """
+    if not question or not getattr(config, "COMPRESS_RECALL_ENABLED", True):
+        return False
+    return any(h in question for h in RECALL_HINTS)
+
+
+def _last_segment_refs(block: SummaryBlock) -> list[int]:
+    """最近一个压缩段的来源 message id（去重、正序）。"""
+    if not block.segments:
+        return []
+    idx = len(block.segments) - 1
+    meta = block.metas[idx] if idx < len(block.metas) else None
+    return sorted({int(r) for r in ((meta.refs if meta else []) or []) if int(r) > 0})
+
+
+def build_recall_text(
+    owner: str,
+    sid: str,
+    block: SummaryBlock,
+    *,
+    max_chars: int | None = None,
+) -> str:
+    """把最近一个压缩段的 refs 原文拼成回读文本（一条 IN 查询，超限截断）。
+
+    为什么要回读：压缩摘要是"规则抽取后的简述"，用户说"刚才那个公式"
+    时摘要往往只剩一句结论，细节已经丢了。回读不是重新压缩，只是按已记下的
+    refs 精确取回原文——所以它比"重新检索"便宜得多，也不会引入新的事实。
+    """
+    from core import session as store
+
+    refs = _last_segment_refs(block)
+    if not refs:
+        return ""
+    cap = int(max_chars or RECALL_MAX_CHARS)
+    try:
+        msgs = store.get_messages_by_ids(owner, sid, refs)
+    except Exception:  # noqa: BLE001 —— 回读失败不许拖垮对话
+        return ""
+    if not msgs:
+        return ""
+    parts: list[str] = []
+    for m in msgs:
+        content = (m.get("content") or "").strip()
+        if not content:
+            continue
+        who = "用户" if m.get("role") == "user" else "助手"
+        parts.append(f"{who}：{content}")
+    if not parts:
+        return ""
+    text = "\n".join(parts)
+    if len(text) > cap:
+        text = text[:cap] + f"\n…（回读原文超过 {cap} 字符，已截断）"
+    return RECALL_HEAD + "\n" + text
+
+
 def _clean(msgs: list[dict]) -> list[dict]:
     """只留 user / assistant 且内容非空，转成 {role, content}。"""
     return [
@@ -770,11 +874,16 @@ def assemble_history(
     raw_messages: list[dict],
     *,
     keep_turns: int | None = None,
+    question: str | None = None,
 ) -> list[dict]:
     """把会话原文组装成"喂给模型的历史"：压缩块前置 + 最近 K 轮原文。
 
     所有模式（vision / hybrid / agent / rag / llm）都走这一个函数，
     避免五处各写一份、日后改规则漏掉其中一处。
+
+    `question` 是**本轮用户提问**（可选）：只有它命中 RECALL_HINTS 时才回读
+    最近一个压缩段的 refs 原文，并把回读内容并进压缩摘要那一条 user message。
+    这样角色序列仍是 user→assistant→原文，不会出现连续两条 human。
 
     返回 `[{role, content}, ...]`，调用方自己转成 HumanMessage/AIMessage 或 dict。
     压缩层任何异常都**降级为原样返回**：压缩是优化，不能成为对话失败的原因。
@@ -790,8 +899,13 @@ def assemble_history(
     if not plan.summary_text:
         # 还没压缩过：原样直通（绝不能在这里套 K 轮窗口，见上面第 3 条）
         return _clean(raw_messages)
+    summary_text = plan.anchored_text or plan.summary_text
+    if plan.block is not None and should_recall(question):
+        recall = build_recall_text(owner, sid, plan.block)
+        if recall:
+            summary_text = summary_text + "\n\n" + recall
     out = [
-        {"role": "user", "content": PRELUDE_HEAD + plan.summary_text},
+        {"role": "user", "content": PRELUDE_HEAD + summary_text},
         {"role": "assistant", "content": PRELUDE_ACK},
     ]
     out.extend(_clean(plan.kept))
