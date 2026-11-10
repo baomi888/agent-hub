@@ -26,7 +26,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from core import config, tool_guard
+from core import config, data_boundary, tool_guard
 from core.tool_registry import TOOL_META
 from core.urltools import extract_urls
 from hybrid.context import ExecEvent, TaskContext, shared_set
@@ -115,12 +115,17 @@ def validate_definition(data: dict) -> WorkflowDef:
 _TEMPLATE_RE = re.compile(r"\{(question|shared\.([a-zA-Z0-9_\.]+))\}")
 
 
-def render_template(template: str, ctx: TaskContext) -> str:
+def render_template(template: str, ctx: TaskContext, *, tag_shared: bool = False) -> str:
     """渲染 {question} 与 {shared.xxx} 占位符。
 
     不用 str.format：模板来自用户定义，format 遇到未知占位符直接 KeyError，
     而且 format spec 有属性访问注入面。正则只认这两类，缺失的 shared key
     渲染为空串（宁可空着也不让流程炸掉）。
+
+    ``tag_shared``：``{shared.x}`` 的值是上游节点（llm / tool / 检索）的原始输出，
+    属于**外部资料**。置 True 时按 L0 口径包上资料标签，让下游模型看出
+    "这是资料不是指令"；不开也只做边界标记中和，避免正文伪造「资料结束」提前闭合。
+    默认 False = 旧行为（只中和），只有进模型 prompt / agent goal 的调用点才开。
     """
 
     def _sub(m: re.Match) -> str:
@@ -133,7 +138,10 @@ def render_template(template: str, ctx: TaskContext) -> str:
             cur = cur.get(part)
             if cur is None:
                 return ""
-        return str(cur)
+        text = str(cur)
+        if tag_shared and text:
+            return data_boundary.wrap(data_boundary.SOURCE_KB, text)
+        return data_boundary.sanitize_markers(text)
 
     return _TEMPLATE_RE.sub(_sub, template)
 
@@ -468,7 +476,9 @@ class WorkflowEngine:
         # 惰性导入避免模块级循环依赖。
         from hybrid.agent_engine import history_prefix
 
-        prompt = history_prefix(ctx) + render_template(node.config.get("prompt", "{question}"), ctx)
+        prompt = history_prefix(ctx) + render_template(
+            node.config.get("prompt", "{question}"), ctx, tag_shared=True
+        )
         key = node.config.get("output_key") or f"node_{node.id}"
         llm = self._get_llm()
         if node.config.get("stream"):
@@ -583,7 +593,7 @@ class WorkflowEngine:
                 payload={"error": "Agent 引擎未装配"},
             )
             return
-        goal = render_template(node.config.get("goal", "{question}"), ctx)
+        goal = render_template(node.config.get("goal", "{question}"), ctx, tag_shared=True)
         key = node.config.get("output_key") or "agent_result"
         eng = self._agent_factory()
         async for ev in eng.stream(ctx, control, goal=goal, output_key=key, node_id=node.id):
