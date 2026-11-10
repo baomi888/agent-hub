@@ -56,9 +56,8 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
-from core import config, llm_gate, metrics, quota, tag_taxonomy, tool_registry, upload
+from core import config, leak_guard, llm_gate, metrics, quota, tag_taxonomy, tool_registry, upload
 from core import context_compress as ctxcompress
-from core import leak_guard
 from core import router as route_engine
 from core import scenarios as scenarios_mod
 from core import session as store

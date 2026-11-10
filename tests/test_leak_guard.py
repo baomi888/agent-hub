@@ -17,7 +17,6 @@ import pytest
 
 from core import account, leak_guard
 
-
 # ==================== 入站：明确索要内部配置 → block ====================
 
 

@@ -275,7 +275,7 @@ def login(body: Credentials, request: Request, response: Response):
         # 无限撞库（每个用户名 10 次/分钟）。账号锁只惩罚"打同一个号"，
         # IP 闸才拦得住"广撒网试一堆号"。
         quota.hit(
-            "login:ip:%s" % _client_ip(request),
+            f"login:ip:{_client_ip(request)}",
             limit=config.LOGIN_IP_PER_MINUTE,
         )
     except quota.RateLimited as e:
