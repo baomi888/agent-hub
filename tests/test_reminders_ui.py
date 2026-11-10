@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parent.parent
 PAGE = ROOT / "frontend" / "src" / "app" / "(console)" / "reminders" / "page.tsx"
 CONSOLE_CSS = ROOT / "frontend" / "src" / "app" / "styles" / "console.css"
 SHELL = ROOT / "frontend" / "src" / "components" / "console" / "PageShell.tsx"
+CORN = ROOT / "frontend" / "src" / "components" / "CornIcon.tsx"
 
 # page.tsx 用 `// ==================== 段落 ====================` 划分，按段落取源码，
 # 免得断言「卡片里没有暂停按钮」时连抽屉里的字段一起算进来。
@@ -462,7 +463,6 @@ class TestCompactHead:
         assert names <= {"reminders"}, f"compact 被这些页面用上了：{names}"
 
 
-
 class TestPhase0Contracts:
     """Phase 0 的五件事，全部写成**不该出现**的断言。
 
@@ -564,7 +564,7 @@ class TestAxisCarriesInformation:
     def test_ticks_inside_quiet_are_muted(self):
         """整点线穿过静默段会被读成"轴断了"，压淡它。"""
         page = _page()
-        assert "data-quiet={inQuiet(quiet, h * TICK_MIN) ? \"1\" : \"0\"}" in page
+        assert 'data-quiet={inQuiet(quiet, h * TICK_MIN) ? "1" : "0"}' in page
         css = CONSOLE_CSS.read_text(encoding="utf-8")
         block = _css_block(css, '.rem-tick[data-quiet="1"] {')
         assert "rgba(61, 47, 26, 0.11)" in block
@@ -598,7 +598,7 @@ class TestSortAndBulk:
         assert "const [pickMode" not in page
         assert "const [sortMode" not in page
         # 退出时必须三样一起清：留着 sortIds 会让下一次进排序从旧顺序开始
-        exit_block = page[page.index("const exitMode"): page.index("const beginPick")]
+        exit_block = page[page.index("const exitMode") : page.index("const beginPick")]
         for line in ('setMode("normal")', "setPicked([])", "setSortIds(null)", "setDragId(null)"):
             assert line in exit_block, f"exitMode 漏了 {line}"
 
@@ -641,13 +641,13 @@ class TestSortAndBulk:
         """
         page = _page()
         assert "api.tasks.reorder(ids)" in page
-        save = page[page.index("const saveSort"): page.index("const runBulk")]
+        save = page[page.index("const saveSort") : page.index("const runBulk")]
         assert "api.tasks.patch" not in save, "排序又在逐条改"
 
     def test_noop_save_does_not_write(self):
         """没动就不发请求：一次「什么都没改」的保存不该在服务端留 updated_at。"""
         page = _page()
-        save = page[page.index("const saveSort"): page.index("const runBulk")]
+        save = page[page.index("const saveSort") : page.index("const runBulk")]
         assert 'ids.join("|") === before.join("|")' in save
 
     def test_failed_save_keeps_the_dragged_order(self):
@@ -657,8 +657,8 @@ class TestSortAndBulk:
         再进来时顺序已经回到原样，会以为是「保存按钮坏了」。
         """
         page = _page()
-        save = page[page.index("const saveSort"): page.index("const runBulk")]
-        tail = save[save.index("} catch {"):]
+        save = page[page.index("const saveSort") : page.index("const runBulk")]
+        tail = save[save.index("} catch {") :]
         assert 'setMode("normal")' not in tail, "失败后还是退出了排序模式"
         assert "再点一次" in tail
 
@@ -687,3 +687,98 @@ class TestSortAndBulk:
         assert page.count('mode !== "sort" && scope ===') == 4, "四个 scope 有一个没被挡住"
         # 排序模式下不显示「下一件」和快速添加：正在挑行时多一个输入框会抢焦点
         assert 'scope !== "completed" && mode === "normal"' in page
+
+
+class TestTaskMarks:
+    """待办左端的类型图标（2026-11-10）。
+
+    这一组只钉两类错误，因为它们是"画面上看不出来"的：
+      1) 两个清单共用一个图标 —— 每个图标单看都对，并排看也"挺整齐"，
+         只有把六条排在一起才发现作业和考试长得一样；
+      2) 图标名写错 —— `CornIcon` 对未知名字**静默回退**成玉米，
+         于是页面照样有图、截图照样好看，只是全部变成了同一个。
+    """
+
+    def _list_mark(self) -> str:
+        page = _page()
+        i = page.index("const LIST_MARK")
+        return page[i : page.index("};", i)]
+
+    def test_every_list_has_its_own_mark(self):
+        """六个清单六个不同图标。撞了就有一类永远认不出来。"""
+        block = self._list_mark()
+        pairs = re.findall(r"(\w+):\s*\"([a-z]+)\"", block)
+        assert [k for k, _ in pairs] == ["inbox", "course", "homework", "club", "life", "exam"]
+        marks = [m for _, m in pairs]
+        assert len(set(marks)) == 6, f"有清单共用图标：{marks}"
+
+    def test_marks_exist_in_the_icon_set(self):
+        """用到的名字必须在 `ICONS` 里，否则会静默变成玉米（页面不报错）。"""
+        src = CORN.read_text(encoding="utf-8")
+        i = src.index("const ICONS")
+        known = set(re.findall(r"^\s*(\w+):", src[i : src.index("};", i)], re.M))
+        assert "corn" in known, "兜底图标本身不在集合里，测试的前提就不成立"
+
+        used = set(re.findall(r":\s*\"([a-z]+)\"", self._list_mark()))
+        page = _page()
+        hints = page[page.index("const MARK_HINTS") : page.index("function taskMark")]
+        used |= set(re.findall(r",\s*\"([a-z]+)\"\]", hints))
+        assert used <= known, f"这些名字不在 ICONS 里，会静默退回玉米：{sorted(used - known)}"
+
+    def test_inbox_falls_back_to_the_title(self):
+        """清单是权威，只有收件箱才按标题猜。反了会跟 meta 里的清单名打架。"""
+        page = _page()
+        i = page.index("function taskMark")
+        seg = page[i : i + 260]
+        assert 'if (task.list_key !== "inbox") return LIST_MARK[task.list_key]' in seg
+
+    def test_mark_is_decorative_but_list_name_stays(self):
+        """图标 aria-hidden，清单名仍在 meta 里 —— 读屏用户不能因此丢掉这句话。"""
+        page = _page()
+        i = page.index('className="rem-head"')
+        assert 'aria-hidden="true"' in page[i : i + 600]
+        assert "<b>{LIST_LABEL[task.list_key] ?? task.list_key}</b>" in page
+
+    def test_mark_sits_between_checkbox_and_title(self):
+        """位置固定在 checkbox 之后、标题之前：不占那格 44px 的完成热区。"""
+        page = _page()
+        check = page.index('className="rem-check"')
+        mark = page.index('className="rem-mark"', check)
+        title = page.index('className="rem-title"', mark)
+        assert check < mark < title
+
+    def test_mark_never_squeezes_the_title(self):
+        """图标占位必须从标题里"借"，但不能把标题压到没有省略号。"""
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        assert "width: 20px" in _css_block(css, ".rem-mark {")
+        assert "min-width: 0" in _css_block(css, ".rem-head {")
+        title = _css_block(css, ".rem-head .rem-title {")
+        assert "flex: 1" in title and "min-width: 0" in title
+        # 标题自己仍然要能省略，否则窄屏会顶出卡片
+        # （锚行首：`.rem-head .rem-title` 里也含 `.rem-title {`，不锚会取错块）
+        assert "text-overflow: ellipsis" in _css_block(css, "\n.rem-title {")
+
+    def test_linked_reminder_gets_no_list_mark(self):
+        """联动提醒的时刻由来源决定，它不属于任何清单 —— 硬套图标就是编造。"""
+        page = _page()
+        i = page.index('className="rem-next-mark"')
+        assert "isTask ? (" in page[max(0, i - 260) : i]
+        # 三个挂载点：待办卡、排序行、下一件（且下一件是条件渲染）
+        assert page.count("<CornIcon name={taskMark(") == 3
+
+    def test_drawer_picker_follows_the_selection(self):
+        """抽屉里的图标跟着下拉框走：写死一个名字等于选什么都显示同一类。"""
+        page = _page()
+        i = page.index('className="rem-listpick"')
+        seg = page[i : i + 700]
+        assert "data-mark={LIST_MARK[listKey]}" in seg
+        assert "<CornIcon name={LIST_MARK[listKey]}" in seg
+
+    def test_home_icon_is_registered(self):
+        """生活清单用的新图标：类型、函数、注册表三处都要有。"""
+        src = CORN.read_text(encoding="utf-8")
+        assert '| "home"' in src
+        assert "function Home()" in src
+        assert re.search(r"^\s*home: Home,", src, re.M)
+        # 描边必须跟主题走，否则深色下图标会变成一块黑色轮廓
+        assert 'stroke="currentColor"' in src

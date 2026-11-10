@@ -206,9 +206,7 @@ class TestReminderBoundary:
         import time
 
         _create(client, title="带提醒的待办", remind_at=int(time.time()) + 3600)
-        client.post(
-            "/api/reminders", json={"title": "手工提醒", "freq": "daily", "at": "22:00"}
-        )
+        client.post("/api/reminders", json={"title": "手工提醒", "freq": "daily", "at": "22:00"})
         items = client.get("/api/reminders?scope=all").json()["items"]
         assert [i["title"] for i in items] == ["手工提醒"]
 
@@ -272,21 +270,15 @@ class TestReorder:
 
     def test_patch_rejects_negative_sort_order(self, client):
         task = _create(client)
-        assert client.patch(
-            f"/api/tasks/{task['id']}", json={"sort_order": -5}
-        ).status_code == 422
-        assert client.patch(
-            f"/api/tasks/{task['id']}", json={"sort_order": 30}
-        ).json()["sort_order"] == 30
+        assert client.patch(f"/api/tasks/{task['id']}", json={"sort_order": -5}).status_code == 422
+        assert client.patch(f"/api/tasks/{task['id']}", json={"sort_order": 30}).json()["sort_order"] == 30
 
 
 class TestBulk:
     def test_bulk_complete(self, client):
         a = _create(client, title="A")
         b = _create(client, title="B")
-        res = client.post(
-            "/api/tasks/bulk", json={"ids": [a["id"], b["id"]], "action": "complete"}
-        )
+        res = client.post("/api/tasks/bulk", json={"ids": [a["id"], b["id"]], "action": "complete"})
         assert res.status_code == 200
         assert res.json()["changed"] == 2
         assert client.get("/api/tasks?scope=all").json()["items"] == []
@@ -295,25 +287,19 @@ class TestBulk:
     def test_bulk_reopen(self, client):
         a = _create(client, title="A")
         client.post(f"/api/tasks/{a['id']}/complete")
-        assert client.post(
-            "/api/tasks/bulk", json={"ids": [a["id"]], "action": "reopen"}
-        ).json()["changed"] == 1
+        assert client.post("/api/tasks/bulk", json={"ids": [a["id"]], "action": "reopen"}).json()["changed"] == 1
         assert client.get("/api/tasks?scope=all").json()["items"][0]["id"] == a["id"]
 
     def test_bulk_delete(self, client):
         a = _create(client, title="A")
         b = _create(client, title="B")
-        assert client.post(
-            "/api/tasks/bulk", json={"ids": [a["id"]], "action": "delete"}
-        ).json()["changed"] == 1
+        assert client.post("/api/tasks/bulk", json={"ids": [a["id"]], "action": "delete"}).json()["changed"] == 1
         assert client.get(f"/api/tasks/{a['id']}").status_code == 404
         assert client.get(f"/api/tasks/{b['id']}").status_code == 200
 
     def test_bulk_move(self, client):
         a = _create(client, title="A")
-        res = client.post(
-            "/api/tasks/bulk", json={"ids": [a["id"]], "action": "move", "list_key": "life"}
-        )
+        res = client.post("/api/tasks/bulk", json={"ids": [a["id"]], "action": "move", "list_key": "life"})
         assert res.json()["changed"] == 1
         assert client.get(f"/api/tasks/{a['id']}").json()["list_key"] == "life"
 
@@ -333,9 +319,7 @@ class TestBulk:
     def test_bulk_cross_user_changes_nothing(self, client):
         theirs = _create(client, title="别人的")
         _as("u2")
-        assert client.post(
-            "/api/tasks/bulk", json={"ids": [theirs["id"]], "action": "complete"}
-        ).json()["changed"] == 0
+        assert client.post("/api/tasks/bulk", json={"ids": [theirs["id"]], "action": "complete"}).json()["changed"] == 0
         _as("u1")
         assert client.get(f"/api/tasks/{theirs['id']}").json()["status"] == "open"
 
@@ -344,9 +328,7 @@ class TestBulk:
         ids = [f"tk_{i}" for i in range(task_core.MAX_BULK + 1)]
         res = client.post("/api/tasks/bulk", json={"ids": ids, "action": "complete"})
         assert res.status_code == 422
-        ok = client.post(
-            "/api/tasks/bulk", json={"ids": ids[: task_core.MAX_BULK], "action": "complete"}
-        )
+        ok = client.post("/api/tasks/bulk", json={"ids": ids[: task_core.MAX_BULK], "action": "complete"})
         assert ok.status_code == 200
 
     def test_reorder_ids_capped_at_200(self, client):

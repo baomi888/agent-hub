@@ -257,8 +257,7 @@ class TestLifecycle:
         with session._conn() as conn:
             conn.execute("UPDATE tasks SET remind_at=? WHERE id=?", (remind, task["id"]))
             conn.execute(
-                "UPDATE reminders SET fire_at=?, next_fire_at=? "
-                "WHERE source='task' AND source_ref=?",
+                "UPDATE reminders SET fire_at=?, next_fire_at=? WHERE source='task' AND source_ref=?",
                 (remind, remind, task["id"]),
             )
         task_core.complete(OWNER, task["id"])
@@ -586,8 +585,10 @@ class TestReminderBoundary:
         monkeypatch.setattr(
             push_svc,
             "send_to_user",
-            lambda owner_id, payload: calls.append({"owner": owner_id, "payload": payload})
-            or {"sent": 1, "failed": 0, "gone": 0, "skipped": 0, "items": []},
+            lambda owner_id, payload: (
+                calls.append({"owner": owner_id, "payload": payload})
+                or {"sent": 1, "failed": 0, "gone": 0, "skipped": 0, "items": []}
+            ),
         )
         stats = reminder_tick.run_one(reminder_tick.JOB_KEY, OWNER, remind)
         assert stats["fired"] == 1
@@ -599,9 +600,7 @@ class TestReminderBoundary:
         """只设截止日期：到点前 worker 一条都看不到（不响是**对的**）。"""
         remind = _ts(20, 9, 0)
         task = task_core.create(OWNER, _mk(due_at=remind))
-        monkeypatch.setattr(
-            push_svc, "send_to_user", lambda *a, **k: {"sent": 0, "failed": 0, "gone": 0}
-        )
+        monkeypatch.setattr(push_svc, "send_to_user", lambda *a, **k: {"sent": 0, "failed": 0, "gone": 0})
         assert reminder_core.due_for_owner(OWNER, now=remind, max_lag=60) == []
         assert _linked(task["id"]) is None
 

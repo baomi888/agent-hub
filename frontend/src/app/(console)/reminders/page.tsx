@@ -37,6 +37,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageShell from "@/components/console/PageShell";
 import CornIcon from "@/components/CornIcon";
+import type { CornIconName } from "@/components/CornIcon";
 import { Callout, Field, Seg, SkeletonLines, Switch, ToastHost } from "@/components/console/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
@@ -101,6 +102,52 @@ const LIST_LABEL: Record<TaskListKey, string> = {
   life: "生活",
   exam: "考试",
 };
+
+/**
+ * 清单 → 左端图标。
+ *
+ * ★ 六个清单必须**各不相同**：这一列是"扫一眼认类型"的唯一线索，
+ *   两个清单共用一个图标（比如都退到 corn）等于这一列白加。
+ * ★ `inbox` 用知穗（corn）是有意的：收件箱自己不是一类事，它装的是
+ *   "还没归类的东西"，用吉祥物正好表达"暂时算我的"。
+ */
+const LIST_MARK: Record<TaskListKey, CornIconName> = {
+  inbox: "corn",
+  course: "book",
+  homework: "notes",
+  club: "target",
+  life: "home",
+  exam: "bolt",
+};
+
+/**
+ * 收件箱里的条目按标题猜一个更贴的图标。
+ *
+ * 为什么要猜：新待办默认落在收件箱，而"交高数作业"这条在用户心里就是作业。
+ * 只按清单给图标的话，他把作业记下来看到的永远是玉米，"作业有作业图标"
+ * 这件事就只在手动归过类之后才成立。
+ *
+ * 为什么**只**猜收件箱：一旦归了类，清单就是权威答案。这时再按标题猜
+ * "这条像考试"，只会和 meta 里写着的那两个字打架。
+ * 猜错也不丢信息 —— meta 一直写着真实清单名，图标只是提示。
+ */
+const MARK_HINTS: [RegExp, CornIconName][] = [
+  [/作业|习题|论文|报告|实验|刷题|周报|交|写|presentation/i, "notes"],
+  [/考试|期中|期末|四六级|雅思|托福|考研|测验|补考|证书|报名/i, "bolt"],
+  [/上课|课程|讲座|预习|复习|网课|学分|开题/i, "book"],
+  [/社团|例会|开会|招新|策划|比赛|演出|活动|聚餐/i, "target"],
+  [/快递|取|买|缴费|宿舍|食堂|体检|报销|办证|理发|洗衣/i, "home"],
+];
+
+/** 一条待办该用哪个图标。纯函数，便于单独验：清单优先，收件箱才看标题。 */
+function taskMark(task: Pick<Task, "list_key" | "title">): CornIconName {
+  if (task.list_key !== "inbox") return LIST_MARK[task.list_key] ?? "corn";
+  const title = task.title ?? "";
+  for (const [re, name] of MARK_HINTS) {
+    if (re.test(title)) return name;
+  }
+  return "corn";
+}
 
 const PRIORITY_OPTIONS: { value: string; label: string }[] = [
   { value: "0", label: "普通" },
@@ -557,7 +604,16 @@ function NextCard({
         <span className="rem-next-when">{when}</span>
         <span className="rem-next-rest">{rest ?? ""}</span>
       </div>
-      <h3 className="rem-next-title">{title}</h3>
+      <h3 className="rem-next-title">
+        {/* 只给待办挂图标：联动提醒的时刻由来源（课表/番茄钟）决定，
+            它不属于任何清单，硬套一个清单图标就是编造 */}
+        {isTask ? (
+          <span className="rem-next-mark" aria-hidden="true" data-mark={taskMark(next.task)}>
+            <CornIcon name={taskMark(next.task)} className="h-full w-full" />
+          </span>
+        ) : null}
+        <span>{title}</span>
+      </h3>
       <p className="rem-next-meta">
         {meta}
         {isTask && next.task.due_at
@@ -703,14 +759,20 @@ function TaskCard({
       </div>
 
       <div className="rem-main">
-        <button
-          type="button"
-          className="rem-title"
-          onClick={() => (pick ? onPick(task) : onEdit(task))}
-          title={pick ? "点一下选中" : "改标题、时间或截止日期"}
-        >
-          {task.title}
-        </button>
+        <div className="rem-head">
+          {/* 装饰性：清单名在下面 meta 里已经写着，读屏不必再念一遍图标 */}
+          <span className="rem-mark" aria-hidden="true" data-mark={taskMark(task)}>
+            <CornIcon name={taskMark(task)} className="h-full w-full" />
+          </span>
+          <button
+            type="button"
+            className="rem-title"
+            onClick={() => (pick ? onPick(task) : onEdit(task))}
+            title={pick ? "点一下选中" : "改标题、时间或截止日期"}
+          >
+            {task.title}
+          </button>
+        </div>
         <p className="rem-meta">
           <b>{LIST_LABEL[task.list_key] ?? task.list_key}</b>
           {task.priority > 0 ? <span> · {PRIORITY_LABEL[task.priority]}</span> : null}
@@ -840,7 +902,12 @@ function SortRow({
         <small>{task.due_at ? "截止" : task.remind_at ? "提醒" : "无日期"}</small>
       </div>
       <div className="rem-main">
-        <span className="rem-title">{task.title}</span>
+        <div className="rem-head">
+          <span className="rem-mark" aria-hidden="true" data-mark={taskMark(task)}>
+            <CornIcon name={taskMark(task)} className="h-full w-full" />
+          </span>
+          <span className="rem-title">{task.title}</span>
+        </div>
         <p className="rem-meta">
           <b>{LIST_LABEL[task.list_key] ?? task.list_key}</b>
           {task.priority > 0 ? <span> · {PRIORITY_LABEL[task.priority]}</span> : null}
@@ -1205,17 +1272,24 @@ function TaskDrawer({
 
           <div className="grid grid-cols-2 gap-2">
             <Field label="清单">
-              <select
-                className="input"
-                value={listKey}
-                onChange={(e) => setListKey(e.target.value as TaskListKey)}
-              >
-                {LIST_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
+              {/* 原生 option 里放不了 svg，所以图标放框外：改清单时它当场换掉，
+                  比"选完再看列表"更早知道这条会被归到哪一类 */}
+              <div className="rem-listpick">
+                <span className="rem-mark" aria-hidden="true" data-mark={LIST_MARK[listKey]}>
+                  <CornIcon name={LIST_MARK[listKey]} className="h-full w-full" />
+                </span>
+                <select
+                  className="input"
+                  value={listKey}
+                  onChange={(e) => setListKey(e.target.value as TaskListKey)}
+                >
+                  {LIST_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </Field>
             <div>
               <span className="f">优先级</span>

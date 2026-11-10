@@ -14,6 +14,7 @@ export type CornIconName =
   | "book" // 考研复习
   | "pen" // 论文写作
   | "notes" // 课程笔记
+  | "home" // 生活日常（待办清单用）
   | "bolt" // 期末冲刺
   | "briefcase" // 求职简历
   | "globe" // 四六级/雅思
@@ -65,6 +66,28 @@ function Book() {
       </g>
       {/* 金色书签 */}
       <path d="M30.5 9.3 V19 L34 15.8 L37.5 19 V8.6 Z" fill="#F5B840" strokeWidth={2.4} />
+    </g>
+  );
+}
+
+/** 小屋：生活日常。金屋顶、白墙体、门只靠描边分 —— 18px 下再多的细节都会糊成灰块 */
+function Home() {
+  return (
+    <g {...INK_STROKE}>
+      {/* 墙体 */}
+      <path
+        d="M11.5 22 V37.5 C11.5 38.9 12.6 40 14 40 H34 C35.4 40 36.5 38.9 36.5 37.5 V22"
+        fill="#FFFDF6"
+        strokeWidth={3}
+      />
+      {/* 屋顶：金色实心三角，盖住墙顶，读起来才是「屋」而不是「盒子」 */}
+      <path d="M7 23.5 L24 8 L41 23.5 Z" fill="#F5B840" strokeWidth={3} />
+      {/* 门 */}
+      <path
+        d="M19.5 40 V31 C19.5 29.9 20.4 29 21.5 29 H26.5 C27.6 29 28.5 29.9 28.5 31 V40"
+        fill="#FFFDF6"
+        strokeWidth={2.6}
+      />
     </g>
   );
 }
@@ -504,6 +527,7 @@ const ICONS: Record<string, () => React.JSX.Element> = {
   book: Book,
   pen: Pen,
   notes: Notes,
+  home: Home,
   bolt: Bolt,
   briefcase: Briefcase,
   globe: Globe,

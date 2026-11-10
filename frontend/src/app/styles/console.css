@@ -1743,6 +1743,42 @@ textarea.input {
   grid-column: 2;
   min-width: 0;
 }
+/* 类型图标与标题同一行：图标在左、标题吃掉剩下的宽度。
+   图标不占勾选框那一格 —— 那一格是 44px 的"完成"热区，塞进去就是两个
+   完全不同的动作挤在一个点上。 */
+.rem-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  min-width: 0;
+}
+.rem-mark {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  /* 图标自带的白填在深色卡上比标题还亮，压一档让它退到文字后面：
+     这一列是"认得出来"，不是"看得见" */
+  opacity: 0.92;
+}
+.rem-head .rem-title {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+/* 抽屉里的清单选择：图标 18px（比列表小一档，右边还要塞下下拉框） */
+.rem-listpick {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+}
+.rem-listpick .rem-mark {
+  width: 18px;
+  height: 18px;
+}
+.rem-listpick select {
+  flex: 1;
+  min-width: 0;
+}
 /* 标题本身就是「改这条」的入口：它是全页最高频动作，藏在菜单里等于让人多点一次。
    button 撑满整行是为了点击热区，不是视觉上要一块按钮。 */
 .rem-title {
@@ -2359,12 +2395,24 @@ textarea.input {
   font-variant-numeric: tabular-nums;
 }
 .rem-next-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
   margin: var(--space-6) 0 0;
   font-size: var(--fs-xl);
   font-weight: 500;
   line-height: var(--lh-tight);
   color: var(--text-1);
   overflow-wrap: anywhere;
+}
+/* hero 卡只有一张，图标可以给到 26 —— 与 fs-xl 的标题同高，看着像"这条的封面" */
+.rem-next-mark {
+  flex: none;
+  width: 26px;
+  height: 26px;
+}
+.rem-next-title > span:last-child {
+  min-width: 0;
 }
 .rem-next-meta {
   margin: 2px 0 0;
