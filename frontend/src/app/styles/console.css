@@ -2994,3 +2994,243 @@ textarea.input {
     display: block;
   }
 }
+
+/* ==================== 多选 / 排序 / 批量（2026-11-10 第二波） ====================
+
+   这一段的共同前提：**三类操作互斥**。整页只维护一个 `mode`，
+   所以这里的样式也只描述「此刻是哪个模式」，不做「同时多选又排序」的组合态。
+
+   两种模式都用同一套 44px 热区（`.rem-toolbtn` / `.rem-grip` / `.rem-bulkbtn`）：
+   视觉可以小，热区不能省 —— 它是本页唯一「点错了会改数据」的一排按钮。 */
+
+.rem-toolrow,
+.rem-selbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin-top: var(--space-8);
+}
+/* 正常模式：入口靠右。它不抢 tab 的位置，也不在左边开一个空洞 */
+.rem-toolrow {
+  justify-content: flex-end;
+}
+/* 两种模式的操作条：左边一句「现在是什么状态」，右边是这一模式的出口 */
+.rem-selbar {
+  padding: var(--space-6) var(--space-8) var(--space-6) var(--space-12);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--step-1);
+}
+.rem-selbar b {
+  margin-right: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-1);
+}
+.rem-toolbtn {
+  flex: none;
+  min-height: 44px;
+  padding: 0 var(--space-12);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  transition: var(--t-color);
+}
+.rem-toolbtn:hover {
+  background: var(--step-2);
+  color: var(--text-1);
+}
+.rem-toolbtn[data-primary="1"] {
+  font-weight: 600;
+  color: var(--accent-ink);
+}
+.rem-toolbtn[data-primary="1"]:hover {
+  background: var(--accent-soft);
+}
+.rem-toolbtn:disabled {
+  opacity: 0.5;
+}
+
+/* ---------- 选择模式：同一个位置换形状 ----------
+   方形 = 选中、圆形 = 完成。两个 checkbox 并排一定会被读混，
+   所以这里只有一格，靠形状和底部分别说明它此刻代表什么。 */
+.rem-task[data-pick="1"] .rem-check > span {
+  border-radius: var(--radius-xs);
+}
+.rem-task[data-picked="1"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.rem-task[data-picked="1"] .rem-check > span {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+/* ---------- 排序模式 ----------
+   列顺序与正常待办行完全一致（把手↔勾选框、时间、标题），只是把「勾选」
+   换成「把手」。进排序模式时整行的骨架不能跳 —— 跳了会让人觉得
+   "列表被重新排过一次了"，而这正是此刻最不该发生的事。 */
+.rem-sortrow {
+  grid-template-columns: 44px 44px minmax(0, 1fr);
+  user-select: none;
+}
+.rem-sortrow .rem-when {
+  grid-column: 2;
+}
+.rem-sortrow .rem-main {
+  grid-column: 3;
+}
+/* 正在拖的那一行要「浮起来」：不做视觉反馈的话，手指按住一行往上推，
+   屏幕只是在别的行之间跳，用户会以为是列表卡了 */
+.rem-sortrow[data-dragging="1"] {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-2);
+  opacity: 0.9;
+}
+/* 把手。★ `touch-action: none` 是拖拽能在手机上工作的**前提**：
+   少了它，手指一按就先触发页面滚动，`pointermove` 根本不会来。 */
+.rem-grip {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  cursor: grab;
+  touch-action: none;
+  transition: var(--t-color);
+}
+.rem-grip:hover {
+  background: var(--step-2);
+  color: var(--text-1);
+}
+.rem-grip:active {
+  cursor: grabbing;
+}
+.rem-grip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+/* 2 列 × 3 个点，用径向渐变画：图标库里没有「把手」，emoji 又会带自己的颜色 */
+.rem-grip-dots {
+  width: 12px;
+  height: 18px;
+  background-image: radial-gradient(
+    circle at 1.5px 1.5px,
+    currentColor 1.5px,
+    transparent 1.7px
+  );
+  background-size: 6px 6px;
+}
+
+/* ---------- 批量操作条 ---------- */
+/* 只在「选中了东西」时才出现。空着也挂一条底栏会一直盖住列表最后一行，
+   而它此刻没有任何可做的事。 */
+.rem-bulkbar {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--space-12) + env(safe-area-inset-bottom, 0px));
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  width: min(560px, calc(100vw - 24px));
+  padding: var(--space-6);
+  transform: translateX(-50%);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-2);
+}
+.rem-bulkn {
+  min-width: 26px;
+  padding: 0 var(--space-4);
+  text-align: center;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-ink);
+}
+.rem-bulkbtn {
+  flex: none;
+  min-height: 44px;
+  padding: 0 var(--space-10);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-md);
+  color: var(--text-1);
+  transition: var(--t-color);
+}
+.rem-bulkbtn:hover {
+  background: var(--step-2);
+}
+/* 主操作 = 实心墨底（与 .rem-next-main / .btn-primary 同一条规则） */
+.rem-bulkbtn[data-primary="1"] {
+  background: var(--solid);
+  font-weight: 500;
+  color: var(--solid-text);
+}
+.rem-bulkbtn[data-primary="1"]:hover {
+  background: var(--accent);
+  color: var(--solid-text);
+}
+.rem-bulkbtn[data-danger="1"] {
+  color: var(--red-ink);
+}
+.rem-bulkbtn:disabled {
+  opacity: 0.5;
+}
+.rem-bulkmove {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.rem-bulkmove select {
+  min-height: 44px;
+  max-width: 84px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--card-bg);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+}
+
+@media (max-width: 900px) {
+  /* 390 下塞不下「移到」两个字：清单名本身（收件箱/作业/考试）已经说明了去向 */
+  .rem-bulkmove > span {
+    display: none;
+  }
+  .rem-bulkmove select {
+    max-width: 76px;
+  }
+  .rem-bulkbtn {
+    padding: 0 var(--space-8);
+    font-size: var(--fs-sm);
+  }
+  /* 与正常待办行同一套窄屏列宽（勾选 44 / 时间 40），换模式时列不跳 */
+  .rem-sortrow {
+    grid-template-columns: 44px 40px minmax(0, 1fr);
+  }
+}
+
+/* 批量操作条是 fixed 的，会压住列表最后一行 —— 它出现时给页面补出等高留白
+   （与手机上 .form-actions.is-fixed 同一个做法）。不补的话，最后一个待办
+   永远有一半在底栏下面，而它恰恰是「刚才没看全、想再确认一下」的那一条。 */
+.console-page:has(.rem-bulkbar) {
+  padding-bottom: 92px;
+}
+
+/* 深色下 `--solid`（#2E2618）与 `--card-bg` 几乎同色，实心主按钮会读成
+   一行普通文字 —— 底栏这种"一眼要找到主操作"的位置不能接受。
+   这里换金底深字（就是 .btn-primary:hover 的配色），只作用于这一处。 */
+.dark .rem-bulkbtn[data-primary="1"] {
+  background: var(--accent);
+  color: #22190a;
+}

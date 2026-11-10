@@ -53,6 +53,18 @@ SCOPES = ("today", "upcoming", "all", "completed")
 # 而「没有截止日期」应当排最后，所以先把 NULL 换成一个大到不会撞车的整数。
 _FAR = 4102444800  # 2100-01-01，够用到这个产品不再存在
 
+# 手排序号参与排序的前缀。`(sort_order = 0)` 在 SQLite 里是 0/1，
+# 升序后「排过的手动位（>0）」在前、「没排过（0）」在后 —— 两者各自保持内部顺序。
+# ★ 0 必须解释成「未参与排序」而不是「第 0 位」：老数据全是 0，
+#   一旦 0 算最前，所有历史待办会瞬间挤到用户亲手排过的那几条上面。
+_MANUAL_FIRST = "(sort_order = 0) ASC, sort_order ASC, "
+
+# 批量动作。放在 core 里而不是端点里：worker / 脚本也可能要批量补账。
+BULK_ACTIONS = ("complete", "reopen", "delete", "move")
+
+# 一次批量最多处理多少条。200 是 list 的上限，保持"选中范围 ⊆ 一屏能看到的范围"。
+MAX_BULK = 200
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
     id            TEXT PRIMARY KEY,
@@ -149,6 +161,23 @@ def _priority(value: Any) -> int:
     if p not in (0, 1, 2):
         raise TaskInvalid("优先级只能是 0 / 1 / 2")
     return p
+
+
+def _sort_order(value: Any) -> int:
+    """手排序号。0 = 没排过（回落到按优先级/截止时间），正数才是用户排的位置。
+
+    ★ 为什么 0 不当作「排在最前」：老数据全是 0，一旦 0 算最前，
+      所有历史待办会瞬间挤到手动排过的那几条上面。0 必须是"未参与排序"。
+    """
+    if value is None or value == "":
+        return 0
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        raise TaskInvalid("排序号必须是整数") from None
+    if n < 0:
+        raise TaskInvalid("排序号不能是负数")
+    return n
 
 
 def _ts(value: Any, field: str) -> int | None:
@@ -270,8 +299,10 @@ def list_tasks(
         where = f"owner_id=? AND status='open' AND {today_sql}"
         args: list[Any] = [owner_id, *today_args]
         order = (
-            # 逾期优先（due_at 在昨天以前），再按截止时间，再按提醒时间
-            f"ORDER BY CASE WHEN due_at IS NOT NULL AND due_at < {start} THEN 0 ELSE 1 END, "
+            # 手动排过的压过一切（那是用户亲手定的位置）；没排过的（0）落回自动规则：
+            # 逾期优先 → 截止时间 → 提醒时间 → 优先级。
+            f"ORDER BY {_MANUAL_FIRST} CASE WHEN due_at IS NOT NULL AND due_at < {start} "
+            "THEN 0 ELSE 1 END, "
             f"COALESCE(due_at, {_FAR}) ASC, COALESCE(remind_at, {_FAR}) ASC, "
             "priority DESC, created_at DESC"
         )
@@ -284,7 +315,8 @@ def list_tasks(
         )
         args = [owner_id, *today_args, end, end]
         order = (
-            f"ORDER BY MIN(COALESCE(due_at, {_FAR}), COALESCE(remind_at, {_FAR})) ASC, "
+            f"ORDER BY {_MANUAL_FIRST} "
+            f"MIN(COALESCE(due_at, {_FAR}), COALESCE(remind_at, {_FAR})) ASC, "
             "priority DESC, created_at DESC"
         )
     elif scope == "completed":
@@ -296,7 +328,8 @@ def list_tasks(
         args = [owner_id]
         order = (
             # 优先级高的在前；同优先级按截止时间，没有截止的垫底
-            "ORDER BY priority DESC, (due_at IS NULL), due_at ASC, created_at DESC"
+            f"ORDER BY {_MANUAL_FIRST} priority DESC, (due_at IS NULL), due_at ASC, "
+            "created_at DESC"
         )
 
     sql = f"SELECT * FROM tasks WHERE {where} {order} LIMIT ?"
@@ -434,8 +467,9 @@ def update(owner_id: str, task_id: str, patch: dict[str, Any]) -> dict[str, Any]
         "priority": current["priority"],
         "due_at": current["due_at"],
         "remind_at": current["remind_at"],
+        "sort_order": current["sort_order"],
     }
-    for key in ("title", "note", "list_key", "priority", "due_at", "remind_at"):
+    for key in ("title", "note", "list_key", "priority", "due_at", "remind_at", "sort_order"):
         if key in patch:
             merged[key] = patch[key]
 
@@ -445,15 +479,16 @@ def update(owner_id: str, task_id: str, patch: dict[str, Any]) -> dict[str, Any]
     priority = _priority(merged["priority"])
     due_at = _ts(merged["due_at"], "截止时间")
     remind_at = _ts(merged["remind_at"], "提醒时间")
+    sort_order = _sort_order(merged["sort_order"])
     _check_remind(remind_at, now)
 
     status = current["status"]
     with _conn() as conn:
         conn.execute(
             """UPDATE tasks SET title=?, note=?, list_key=?, priority=?,
-                   due_at=?, remind_at=?, updated_at=?
+                   due_at=?, remind_at=?, sort_order=?, updated_at=?
                WHERE id=? AND owner_id=?""",
-            (title, note, list_key, priority, due_at, remind_at, now, task_id, owner_id),
+            (title, note, list_key, priority, due_at, remind_at, sort_order, now, task_id, owner_id),
         )
         # 只有「标题 / 备注 / 提醒时间」变了才碰提醒。只改 due_at 时**一个字节都不动**
         # —— 不变量 #3：改截止时间不能把已经设好的提醒挪走。
@@ -523,6 +558,124 @@ def delete(owner_id: str, task_id: str) -> bool:
             return False
         reminder_core.delete_task_reminder(conn, owner_id, task_id)
     return True
+
+
+def reorder(owner_id: str, ordered_ids: list[str]) -> int:
+    """按给定顺序重排一批待办，返回真正改动的行数。
+
+    一次事务写完整组，而不是「上移一格就发一个请求」：拖一次发 N 个请求
+    既慢又会在中途失败时留下半新半旧的顺序。
+
+    编号从 10 开始、步长 10：留出空隙，将来要在两条之间插一条时
+    不必把后面全部重写一遍（取中间值即可）。
+
+    ★ 只在传进来的 id 上写值，不碰组外的行。用户看到的列表可能已经被
+      scope 过滤过（今天 / 接下来），把过滤掉的项一起编号会把它们的
+      sort_order 弄乱 —— 那些项在别的视图里还有自己的顺序。
+    """
+    ensure()
+    if not ordered_ids:
+        return 0
+    now = timeutil.now_ts()
+    changed = 0
+    with _conn() as conn:
+        for index, task_id in enumerate(ordered_ids):
+            cur = conn.execute(
+                "UPDATE tasks SET sort_order=?, updated_at=? WHERE id=? AND owner_id=?",
+                ((index + 1) * 10, now, task_id, owner_id),
+            )
+            changed += max(0, cur.rowcount)
+    return changed
+
+
+def bulk(
+    owner_id: str,
+    ids: list[str],
+    action: str,
+    list_key: str | None = None,
+) -> int:
+    """批量动作，返回真正生效的条数。
+
+    ★ 为什么锁在 owner_id + id IN (...) 上、而不是先 `get()` 再逐条改：
+      多选列表里混进别人的 id 时（前端缓存过期、手改请求），
+      `get()` 返回 None 就跳过 —— 这一步必须由 SQL 自己保证，
+      不能让调用方"记得先校验"。跨用户的行在这里天然写不进去。
+
+    ★ 批量完成要连带停用联动提醒（不变量 #6 的批量版），否则会出现
+      「列表里都打勾了，到点还在响」—— 单条 complete 是这么做的，
+      批量走另一条路的话很容易漏。
+    """
+    ensure()
+    if action not in BULK_ACTIONS:
+        raise TaskInvalid("批量动作只能是 " + " / ".join(BULK_ACTIONS))
+    uniq = list(dict.fromkeys(ids))[:MAX_BULK]
+    if not uniq:
+        return 0
+    now = timeutil.now_ts()
+    marks = ",".join("?" * len(uniq))
+
+    with _conn() as conn:
+        owned = [
+            row["id"]
+            for row in conn.execute(
+                f"SELECT id FROM tasks WHERE owner_id=? AND id IN ({marks})",
+                (owner_id, *uniq),
+            ).fetchall()
+        ]
+        if not owned:
+            return 0
+        done_marks = ",".join("?" * len(owned))
+
+        if action == "delete":
+            conn.execute(
+                f"DELETE FROM tasks WHERE owner_id=? AND id IN ({done_marks})",
+                (owner_id, *owned),
+            )
+            for tid in owned:
+                reminder_core.delete_task_reminder(conn, owner_id, tid)
+            return len(owned)
+
+        if action == "move":
+            # `_list_key(None)` 会回落到 inbox —— 批量「改清单」漏传参数时
+            # 把几十条静默搬进收件箱，比直接报错难查得多，所以这里要求显式给。
+            if not list_key:
+                raise TaskInvalid("批量改清单要说明改到哪个清单")
+            target = _list_key(list_key)
+            cur = conn.execute(
+                f"UPDATE tasks SET list_key=?, updated_at=? "
+                f"WHERE owner_id=? AND id IN ({done_marks})",
+                (target, now, owner_id, *owned),
+            )
+            return max(0, cur.rowcount)
+
+        # complete / reopen
+        status = "done" if action == "complete" else "open"
+        cur = conn.execute(
+            f"UPDATE tasks SET status=?, completed_at=?, updated_at=? "
+            f"WHERE owner_id=? AND id IN ({done_marks}) AND status<>?",
+            (status, now if status == "done" else None, now, owner_id, *owned, status),
+        )
+        changed = max(0, cur.rowcount)
+
+        for tid in owned:
+            if status == "done":
+                reminder_core.disable_task_reminder(conn, owner_id, tid, now=now)
+                continue
+            # reopen：提醒时间还在未来才恢复，过去的不要补发（与单条 reopen 同口径）
+            row = conn.execute(
+                "SELECT title, note, remind_at FROM tasks WHERE id=? AND owner_id=?",
+                (tid, owner_id),
+            ).fetchone()
+            if row is None:
+                continue
+            remind_at = row["remind_at"]
+            if remind_at and int(remind_at) > now:
+                reminder_core.upsert_task_reminder(
+                    conn, owner_id, tid, row["title"], row["note"], remind_at, now=now
+                )
+            else:
+                reminder_core.disable_task_reminder(conn, owner_id, tid, now=now)
+        return changed
 
 
 def reset_cache() -> None:

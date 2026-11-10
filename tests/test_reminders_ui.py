@@ -577,3 +577,113 @@ class TestAxisCarriesInformation:
         assert tape.count("</div>") >= 2, "图例被塞进 .rem-tape 里了"
         css = CONSOLE_CSS.read_text(encoding="utf-8")
         assert "height: 60px;" in _css_block(css, ".rem-tape {")
+
+
+class TestSortAndBulk:
+    """排序与批量（2026-11-10 第二波）的四条硬约束。
+
+    这一组断言大部分是**负向**的：拖拽和批量最容易出的错不是"画得不好看"，
+    而是「一次拖动发 N 个请求」「批量删不确认」「多选和完成混在同一格」——
+    这些错误在截图里全看不见。
+    """
+
+    def test_one_mode_at_a_time(self):
+        """整页只维护一个 `mode`，不是两个布尔量。
+
+        两个开关可以同时为 true（多选 + 排序）——那时「点一下」到底算选、算拖
+        还是算完成，界面自己都说不清。
+        """
+        page = _page()
+        assert 'useState<"normal" | "select" | "sort">("normal")' in page
+        assert "const [pickMode" not in page
+        assert "const [sortMode" not in page
+        # 退出时必须三样一起清：留着 sortIds 会让下一次进排序从旧顺序开始
+        exit_block = page[page.index("const exitMode"): page.index("const beginPick")]
+        for line in ('setMode("normal")', "setPicked([])", "setSortIds(null)", "setDragId(null)"):
+            assert line in exit_block, f"exitMode 漏了 {line}"
+
+    def test_changing_tab_exits_the_mode(self):
+        """换 tab 必须退出：选中的 id 属于上一个列表，带着它们去新列表
+        等于对看不见的行执行操作。"""
+        page = _page()
+        assert "setScope(o.value);" in page
+        seg = page[page.index("setScope(o.value);") :][:200]
+        assert "exitMode();" in seg, "换 tab 没退出多选/排序"
+        # 注释被 _page() 剥掉了，理由说明要回原文里找
+        assert "属于上一个列表" in PAGE.read_text(encoding="utf-8")
+
+    def test_pick_reuses_the_completion_checkbox(self):
+        """选择模式**不新增**第二个 checkbox：同一格换形状（方 = 选中，圆 = 完成）。
+
+        一行里两个 checkbox，用户永远分不清哪个是完成、哪个是选中。
+        """
+        page = _page()
+        assert page.count('className="rem-check"') == 1, "又多了一个 checkbox"
+        assert "const checked = pick ? picked : done;" in page
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        assert '.rem-task[data-pick="1"] .rem-check > span {' in css
+
+    def test_drag_is_pointer_not_html5(self):
+        """用 pointer 事件而不是 `draggable`：后者在手机浏览器上不触发，
+        而这个页面的主视口是 390。"""
+        page = _page()
+        assert "setPointerCapture" in page
+        assert "document.elementFromPoint" in page
+        assert "draggable" not in page, "又用回 HTML5 拖放了，手机上是死的"
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        block = _css_block(css, ".rem-grip {")
+        assert "touch-action: none" in block, "少了它手指一按就滚页面，pointermove 不来"
+
+    def test_sort_saves_in_one_request(self):
+        """拖完只发一次 reorder，不逐条 PATCH。
+
+        逐条发的话中途失败会留下半新半旧的顺序，而且 20 条就是 20 个往返。
+        """
+        page = _page()
+        assert "api.tasks.reorder(ids)" in page
+        save = page[page.index("const saveSort"): page.index("const runBulk")]
+        assert "api.tasks.patch" not in save, "排序又在逐条改"
+
+    def test_noop_save_does_not_write(self):
+        """没动就不发请求：一次「什么都没改」的保存不该在服务端留 updated_at。"""
+        page = _page()
+        save = page[page.index("const saveSort"): page.index("const runBulk")]
+        assert 'ids.join("|") === before.join("|")' in save
+
+    def test_failed_save_keeps_the_dragged_order(self):
+        """保存失败要留在排序模式。
+
+        直接退出等于把用户拖了半天的顺序丢掉，而他看到的是一句 toast ——
+        再进来时顺序已经回到原样，会以为是「保存按钮坏了」。
+        """
+        page = _page()
+        save = page[page.index("const saveSort"): page.index("const runBulk")]
+        tail = save[save.index("} catch {"):]
+        assert 'setMode("normal")' not in tail, "失败后还是退出了排序模式"
+        assert "再点一次" in tail
+
+    def test_bulk_delete_still_confirms(self):
+        """批量删除照样二次确认：批量更容易手滑，不因为「多选」就免掉。"""
+        page = _page()
+        assert 'if (action === "delete") {' in page
+        assert 'setPending({ kind: "bulk", ids: picked })' in page
+        assert "delete 选中的 ${pending.ids.length} 条" not in page  # 模板串写法不同
+        assert "删除选中的" in page and "pending.ids.length" in page
+
+    def test_bulk_move_always_names_the_list(self):
+        """`move` 不带 list_key 时后端会 400（不静默搬进收件箱）。
+        前端必须真的把选中的清单发上去。"""
+        page = _page()
+        assert 'action === "move" ? bulkList : undefined' in page
+
+    def test_bulkbar_only_appears_with_a_selection(self):
+        """空着也挂一条底栏会一直盖住列表最后一行，而它此刻无事可做。"""
+        page = _page()
+        assert 'mode === "select" && picked.length > 0' in page
+
+    def test_sort_mode_drops_the_unmovable_rows(self):
+        """排序模式只留可排序的待办：日程提醒的时刻由来源决定，拖了不会动。"""
+        page = _page()
+        assert page.count('mode !== "sort" && scope ===') == 4, "四个 scope 有一个没被挡住"
+        # 排序模式下不显示「下一件」和快速添加：正在挑行时多一个输入框会抢焦点
+        assert 'scope !== "completed" && mode === "normal"' in page

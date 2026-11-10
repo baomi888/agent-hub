@@ -53,6 +53,7 @@ import type {
   ReminderSource,
   ReminderSummary,
   Task,
+  TaskBulkAction,
   TaskDraft,
   TaskListKey,
   TaskPatch,
@@ -607,22 +608,32 @@ function TaskCard({
   now,
   dim,
   flash,
+  pick,
+  picked,
   onToggle,
   onEdit,
   onDelete,
   onSnooze,
+  onPick,
 }: {
   task: Task;
   now: number | null;
   dim: boolean;
   flash: boolean;
+  /** 多选模式：最左那格改成「选中」，标题上也一点就选 */
+  pick: boolean;
+  picked: boolean;
   onToggle: (task: Task) => void;
   onEdit: (task: Task) => void;
   onDelete: (task: Task) => void;
   onSnooze: (task: Task) => void;
+  onPick: (task: Task) => void;
 }) {
   const [open, setOpen] = useState(false);
   const done = task.status === "done";
+  // 选择模式下这一格表达的是「选中」，不是「完成」——所以视觉要换形状
+  // （方形 vs 圆形），否则用户会把「勾选」当成「做完了」。
+  const checked = pick ? picked : done;
   // 时间列：有提醒时间就显示它（那才是「会响」的时刻），否则显示截止日
   const when = task.remind_at
     ? { main: fmtHM(toMs(task.remind_at)), small: "提醒" }
@@ -662,17 +673,28 @@ function TaskCard({
       data-off={dim || done ? "1" : undefined}
       data-flash={flash ? "1" : undefined}
       data-priority={task.priority || undefined}
+      data-pick={pick ? "1" : undefined}
+      data-picked={pick && picked ? "1" : undefined}
     >
-      {/* 待办的 ○：真实 checkbox，热区 44（视觉 18）。联动提醒没有这一格 */}
+      {/* 待办的 ○：真实 checkbox，热区 44（视觉 18）。联动提醒没有这一格。
+          ★ 选择模式下**同一个位置**换成「选中」：一行里放两个 checkbox，
+            用户永远分不清哪个是完成、哪个是选中。原来那格（完成）在
+            底部操作条里有，点错了还能补救。 */}
       <button
         type="button"
         role="checkbox"
-        aria-checked={done}
-        aria-label={done ? `取消完成「${task.title}」` : `完成「${task.title}」`}
+        aria-checked={checked}
+        aria-label={
+          pick
+            ? `${picked ? "取消选中" : "选中"}「${task.title}」`
+            : `${done ? "取消完成" : "完成"}「${task.title}」`
+        }
         className="rem-check"
-        onClick={() => onToggle(task)}
+        onClick={() => (pick ? onPick(task) : onToggle(task))}
       >
-        <span aria-hidden="true">{done ? <CornIcon name="check" className="h-3 w-3" /> : null}</span>
+        <span aria-hidden="true">
+          {checked ? <CornIcon name="check" className="h-3 w-3" /> : null}
+        </span>
       </button>
 
       <div className="rem-when">
@@ -684,8 +706,8 @@ function TaskCard({
         <button
           type="button"
           className="rem-title"
-          onClick={() => onEdit(task)}
-          title="改标题、时间或截止日期"
+          onClick={() => (pick ? onPick(task) : onEdit(task))}
+          title={pick ? "点一下选中" : "改标题、时间或截止日期"}
         >
           {task.title}
         </button>
@@ -710,18 +732,22 @@ function TaskCard({
         </p>
       </div>
 
-      <button
-        type="button"
-        className="rem-morebtn"
-        aria-expanded={open}
-        aria-haspopup="menu"
-        aria-label={`「${task.title}」的更多动作`}
-        onClick={() => setOpen((v) => !v)}
-      >
-        ⋯
-      </button>
+      {/* 选择模式下收起「⋯」：这张卡此刻只有一种操作（选中），
+          多留一个菜单等于给误触多开一扇门 */}
+      {pick ? null : (
+        <button
+          type="button"
+          className="rem-morebtn"
+          aria-expanded={open}
+          aria-haspopup="menu"
+          aria-label={`「${task.title}」的更多动作`}
+          onClick={() => setOpen((v) => !v)}
+        >
+          ⋯
+        </button>
+      )}
 
-      {open ? (
+      {open && !pick ? (
         <>
           <div className="rem-scrim" onClick={() => setOpen(false)} aria-hidden="true" />
           <div className="rem-menu" role="menu">
@@ -750,6 +776,76 @@ function TaskCard({
           </div>
         </>
       ) : null}
+    </article>
+  );
+}
+
+// ==================== 排序行 ====================
+
+/**
+ * 排序模式下的一行：把手 + 标题 + 时间。
+ *
+ * ★ 不复用 `TaskCard` 是故意的。排序时 checkbox 和「⋯」都用不了
+ *   （点一下就把行挪走 / 把菜单盖在正在拖的行上），留着它们只会让人误触；
+ *   而「有把手」本身就是「这个模式能干什么」的说明。
+ *
+ * ★ 把手用 `touch-action: none`：不加的话手指一按就开始滚动页面，
+ *   `pointermove` 收不到，拖拽在手机上等于不存在。
+ */
+function SortRow({
+  task,
+  now,
+  dragging,
+  onDown,
+  onMove,
+  onUp,
+  onKey,
+}: {
+  task: Task;
+  now: number | null;
+  dragging: boolean;
+  onDown: (e: React.PointerEvent<HTMLButtonElement>) => void;
+  onMove: (e: React.PointerEvent<HTMLButtonElement>) => void;
+  onUp: (e: React.PointerEvent<HTMLButtonElement>) => void;
+  onKey: (e: React.KeyboardEvent<HTMLButtonElement>) => void;
+}) {
+  const when = task.due_at
+    ? shortDay(task.due_at, now ?? toMs(task.due_at))
+    : task.remind_at
+      ? fmtHM(toMs(task.remind_at))
+      : "—";
+  return (
+    <article
+      className="rem-card rem-sortrow"
+      data-task-id={task.id}
+      data-dragging={dragging ? "1" : undefined}
+      data-priority={task.priority || undefined}
+    >
+      <button
+        type="button"
+        className="rem-grip"
+        aria-label={`调整「${task.title}」的顺序，可拖动或用上下方向键`}
+        onPointerDown={onDown}
+        onPointerMove={onMove}
+        onPointerUp={onUp}
+        onPointerCancel={onUp}
+        onKeyDown={onKey}
+      >
+        <span aria-hidden="true" className="rem-grip-dots" />
+      </button>
+      {/* 时间列与标题列的位置和正常待办行一致（把手占了原来勾选框那格），
+          所以进排序模式时整行的骨架不跳 */}
+      <div className="rem-when">
+        {when}
+        <small>{task.due_at ? "截止" : task.remind_at ? "提醒" : "无日期"}</small>
+      </div>
+      <div className="rem-main">
+        <span className="rem-title">{task.title}</span>
+        <p className="rem-meta">
+          <b>{LIST_LABEL[task.list_key] ?? task.list_key}</b>
+          {task.priority > 0 ? <span> · {PRIORITY_LABEL[task.priority]}</span> : null}
+        </p>
+      </div>
     </article>
   );
 }
@@ -1582,9 +1678,21 @@ export default function RemindersPage() {
   const [reminderDrawer, setReminderDrawer] = useState(false);
   const [editingReminder, setEditingReminder] = useState<ReminderItem | null>(null);
   const [pending, setPending] = useState<
-    { kind: "task"; task: Task } | { kind: "reminder"; item: ReminderItem } | null
+    | { kind: "task"; task: Task }
+    | { kind: "reminder"; item: ReminderItem }
+    | { kind: "bulk"; ids: string[] }
+    | null
   >(null);
   const [busy, setBusy] = useState(false);
+  // 列表模式：正常 / 多选 / 排序。三者互斥 —— 同时开着会让人分不清
+  // 「点这一下」是在选、在拖，还是在完成。
+  const [mode, setMode] = useState<"normal" | "select" | "sort">("normal");
+  const [picked, setPicked] = useState<string[]>([]);
+  /** 批量「移到清单」的目标，默认收件箱 */
+  const [bulkList, setBulkList] = useState<TaskListKey>("inbox");
+  /** 排序模式下的本地顺序；null = 没进排序模式 */
+  const [sortIds, setSortIds] = useState<string[] | null>(null);
+  const [dragId, setDragId] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [quick, setQuick] = useState("");
   const [quickParse, setQuickParse] = useState<null | {
@@ -1992,7 +2100,11 @@ export default function RemindersPage() {
     if (!pending) return;
     setBusy(true);
     try {
-      if (pending.kind === "task") {
+      if (pending.kind === "bulk") {
+        await api.tasks.bulk(pending.ids, "delete");
+        setPicked([]);
+        setMode("normal");
+      } else if (pending.kind === "task") {
         await api.tasks.remove(pending.task.id);
       } else {
         await api.reminders.remove(pending.item.id);
@@ -2006,6 +2118,149 @@ export default function RemindersPage() {
       setBusy(false);
     }
   }, [pending, reload, showToast]);
+
+  // ===== 多选 / 批量 =====
+  //
+  // 为什么整页只维护一个 `mode`：多选和排序都以「点一下」为主交互，
+  // 两个模式同时开着，用户没法从界面判断这一下是选中、是拖动、还是完成。
+  const exitMode = useCallback(() => {
+    setMode("normal");
+    setPicked([]);
+    setSortIds(null);
+    setDragId(null);
+  }, []);
+
+  const beginPick = useCallback(() => {
+    setSortIds(null);
+    setPicked([]);
+    setMode("select");
+  }, []);
+
+  const togglePick = useCallback((task: Task) => {
+    setPicked((prev) =>
+      prev.includes(task.id) ? prev.filter((id) => id !== task.id) : [...prev, task.id]
+    );
+  }, []);
+
+  const beginSort = useCallback((list: Task[]) => {
+    setPicked([]);
+    // 本地顺序 = 当前列表顺序。进排序模式时不重排一次：用户看到的第一帧
+    // 必须就是他刚才看的那个顺序，否则「我明明什么也没动」。
+    setSortIds(list.map((t) => t.id));
+    setMode("sort");
+  }, []);
+
+  const moveSort = useCallback((id: string, delta: number) => {
+    setSortIds((prev) => {
+      if (!prev) return prev;
+      const from = prev.indexOf(id);
+      const to = from + delta;
+      if (from < 0 || to < 0 || to >= prev.length) return prev;
+      const next = prev.slice();
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  }, []);
+
+  // 拖拽用 pointer 事件，不用 HTML5 的 draggable：后者在手机浏览器上
+  // 根本不触发（而这个页面的主视口就是 390）。捕获指针之后 pointermove
+  // 全部发给把手，所以要用坐标反查「手指/鼠标下面是哪一行」。
+  const dragFrom = useRef<string | null>(null);
+
+  const onGripDown = useCallback((e: React.PointerEvent<HTMLButtonElement>, id: string) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragFrom.current = id;
+    setDragId(id);
+  }, []);
+
+  const onGripMove = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+    const from = dragFrom.current;
+    if (!from) return;
+    const hit = document.elementFromPoint(e.clientX, e.clientY);
+    const to =
+      hit instanceof Element
+        ? hit.closest<HTMLElement>("[data-task-id]")?.dataset.taskId
+        : undefined;
+    if (!to || to === from) return;
+    setSortIds((prev) => {
+      if (!prev) return prev;
+      const a = prev.indexOf(from);
+      const b = prev.indexOf(to);
+      if (a < 0 || b < 0) return prev;
+      const next = prev.slice();
+      const [moved] = next.splice(a, 1);
+      next.splice(b, 0, moved);
+      return next;
+    });
+  }, []);
+
+  const onGripUp = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    dragFrom.current = null;
+    setDragId(null);
+  }, []);
+
+  const saveSort = useCallback(async () => {
+    const ids = sortIds ?? [];
+    const before = (data?.tasks[scope] ?? []).map((t) => t.id);
+    // 没动就不发请求：一次「什么都没改」的保存不该在服务端留一条 updated_at
+    if (!ids.length || ids.join("|") === before.join("|")) {
+      exitMode();
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.tasks.reorder(ids);
+      showToast("success", "顺序已保存");
+      setMode("normal");
+      setSortIds(null);
+      await reload();
+    } catch {
+      // 失败就留在排序模式：拖了半天的顺序不能因为一次网络抖动直接丢掉
+      showToast("error", "顺序没保存上，再点一次「完成」试试");
+    } finally {
+      setBusy(false);
+    }
+  }, [data, exitMode, reload, scope, showToast, sortIds]);
+
+  const runBulk = useCallback(
+    async (action: TaskBulkAction) => {
+      if (!picked.length) return;
+      // 删除照旧走二次确认：批量删更容易手滑，不因为「多选」就免掉这一步
+      if (action === "delete") {
+        setPending({ kind: "bulk", ids: picked });
+        return;
+      }
+      setBusy(true);
+      try {
+        const res = await api.tasks.bulk(
+          picked,
+          action,
+          action === "move" ? bulkList : undefined
+        );
+        const n = res.changed;
+        showToast(
+          n > 0 ? "success" : "info",
+          action === "complete"
+            ? `完成了 ${n} 条`
+            : action === "reopen"
+              ? `恢复了 ${n} 条`
+              : `已移到「${LIST_LABEL[bulkList]}」${n ? ` · ${n} 条` : ""}`
+        );
+        setPicked([]);
+        setMode("normal");
+        await reload();
+      } catch (e) {
+        showToast("error", e instanceof Error ? e.message : "没成功，稍后再试");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [bulkList, picked, reload, showToast]
+  );
 
   const toggleReminder = useCallback(
     async (item: ReminderItem) => {
@@ -2164,10 +2419,13 @@ export default function RemindersPage() {
       now={now}
       dim={scope === "completed" || task.status === "done"}
       flash={flash === task.id}
+      pick={mode === "select"}
+      picked={picked.includes(task.id)}
       onToggle={toggleTask}
       onEdit={openTaskDrawer}
       onDelete={(t) => setPending({ kind: "task", task: t })}
       onSnooze={snoozeTask}
+      onPick={togglePick}
     />
   );
 
@@ -2187,6 +2445,102 @@ export default function RemindersPage() {
     );
   };
 
+  /** 当前 tab 的待办：多选与排序都只作用在它上面 */
+  const scopeTasks = tasks[scope];
+  const allPicked = scopeTasks.length > 0 && picked.length === scopeTasks.length;
+
+  /** 排序模式下的行。按本地顺序取；取不到的 id 跳过 —— 别的端刚删掉一条时，
+      整段不该因此渲染失败。 */
+  const sortRows = (() => {
+    if (!sortIds) return [];
+    const map = new Map(scopeTasks.map((t) => [t.id, t]));
+    return sortIds.map((id) => map.get(id)).filter((t): t is Task => Boolean(t));
+  })();
+
+  /**
+   * tab 下面那一行。
+   *
+   * 正常模式下只放两个入口（排序 / 多选），**不常驻**批量按钮：
+   * 一屏里同时出现「完成」和「批量完成」，人会以为它们是一回事。
+   */
+  const toolBar =
+    mode === "select" ? (
+      <div className="rem-selbar">
+        <b>已选 {picked.length} 条</b>
+        <button
+          type="button"
+          className="rem-toolbtn"
+          onClick={() => setPicked(allPicked ? [] : scopeTasks.map((t) => t.id))}
+        >
+          {allPicked ? "取消全选" : "全选"}
+        </button>
+        <button type="button" className="rem-toolbtn" onClick={exitMode}>
+          退出多选
+        </button>
+      </div>
+    ) : mode === "sort" ? (
+      <div className="rem-selbar">
+        <b>拖动把手调整顺序</b>
+        <button type="button" className="rem-toolbtn" disabled={busy} onClick={exitMode}>
+          取消
+        </button>
+        <button
+          type="button"
+          className="rem-toolbtn"
+          data-primary="1"
+          disabled={busy}
+          onClick={() => void saveSort()}
+        >
+          {busy ? "保存中…" : "完成"}
+        </button>
+      </div>
+    ) : scopeTasks.length > 0 ? (
+      <div className="rem-toolrow">
+        {scope !== "completed" && scopeTasks.length > 1 ? (
+          <button type="button" className="rem-toolbtn" onClick={() => beginSort(scopeTasks)}>
+            排序
+          </button>
+        ) : null}
+        <button type="button" className="rem-toolbtn" onClick={beginPick}>
+          多选
+        </button>
+      </div>
+    ) : null;
+
+  /** 排序模式只留下「可排序的那几行」：日程提醒的时刻是来源定的，挪不动，
+      混在一起只会让人拖了没反应。 */
+  const sortSection =
+    mode === "sort" ? (
+      <section className="mt-4">
+        <h3 className="rem-grouphead">
+          调整顺序
+          <span>· 拖动，或聚焦把手后按 ↑ ↓</span>
+        </h3>
+        <div className="space-y-2">
+          {sortRows.map((t) => (
+            <SortRow
+              key={t.id}
+              task={t}
+              now={now}
+              dragging={dragId === t.id}
+              onDown={(e) => onGripDown(e, t.id)}
+              onMove={onGripMove}
+              onUp={onGripUp}
+              onKey={(e) => {
+                if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  moveSort(t.id, -1);
+                } else if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  moveSort(t.id, 1);
+                }
+              }}
+            />
+          ))}
+        </div>
+      </section>
+    ) : null;
+
   const listView = (
     <>
       <PushHealth status={data?.push ?? null} />
@@ -2198,7 +2552,12 @@ export default function RemindersPage() {
             key={o.value}
             type="button"
             aria-pressed={scope === o.value}
-            onClick={() => setScope(o.value)}
+            onClick={() => {
+              setScope(o.value);
+              // 换 tab 就退出多选/排序：选中的 id 属于上一个列表，
+              // 留着它们会在新列表里执行到看不见的行上。
+              exitMode();
+            }}
           >
             {o.label}
             <span className="rem-tabcount">{scopeCount[o.value]}</span>
@@ -2206,7 +2565,11 @@ export default function RemindersPage() {
         ))}
       </div>
 
-      {nextUp && scope !== "completed" ? (
+      {toolBar}
+
+      {/* 多选 / 排序时不显示「下一件」：它会抢走视线，而它上面那颗勾
+          作用的对象又不在选中的那几条里 */}
+      {nextUp && scope !== "completed" && mode === "normal" ? (
         <NextCard
           next={nextUp}
           now={now}
@@ -2219,7 +2582,9 @@ export default function RemindersPage() {
         />
       ) : null}
 
-      {scope !== "completed" ? (
+      {/* 建档的入口在「+ 新建」里也有；多选/排序时不放这里 ——
+          正在挑行的时候多一个输入框，光标和选择都容易跑掉 */}
+      {scope !== "completed" && mode === "normal" ? (
         <div className="rem-quick">
           <form
             onSubmit={(e) => {
@@ -2255,7 +2620,9 @@ export default function RemindersPage() {
         </div>
       ) : null}
 
-      {scope === "today" ? (
+      {sortSection}
+
+      {mode !== "sort" && scope === "today" ? (
         <>
           {/* 轴只为回答「忙在哪个时段、现在走到哪、还剩几条」，
               卡片里已经有完整时间，所以轴上不重复标题。 */}
@@ -2304,7 +2671,7 @@ export default function RemindersPage() {
         </>
       ) : null}
 
-      {scope === "upcoming" ? (
+      {mode !== "sort" && scope === "upcoming" ? (
         <>
           {group("接下来 · 7 天", upcomingSplit.soon.map(taskCard))}
           {group("更远", upcomingSplit.later.map(taskCard))}
@@ -2313,7 +2680,7 @@ export default function RemindersPage() {
         </>
       ) : null}
 
-      {scope === "all" ? (
+      {mode !== "sort" && scope === "all" ? (
         <>
           {group("全部 · 待办", tasks.all.map(taskCard))}
           {group("日程提醒", groups.today.concat(groups.soon, groups.later).map(card))}
@@ -2322,7 +2689,7 @@ export default function RemindersPage() {
         </>
       ) : null}
 
-      {scope === "completed" ? (
+      {mode !== "sort" && scope === "completed" ? (
         <>
           {group("已完成 · 待办", tasks.completed.map(taskCard))}
           {tasks.completed.length === 0 ? (
@@ -2333,11 +2700,13 @@ export default function RemindersPage() {
 
       {/* 没有完成语义的重复提醒（每天 22:00 复盘）仍然是提醒，不是待办 ——
           给它留一个次入口，但不要做成「新建」的第二个主按钮 */}
-      <p className="rem-footlink">
-        <button type="button" onClick={() => openReminderDrawer(null)}>
-          要「每天 22:00」这种没有完成语义的提醒？新建提醒
-        </button>
-      </p>
+      {mode === "normal" ? (
+        <p className="rem-footlink">
+          <button type="button" onClick={() => openReminderDrawer(null)}>
+            要「每天 22:00」这种没有完成语义的提醒？新建提醒
+          </button>
+        </p>
+      ) : null}
     </>
   );
 
@@ -2487,6 +2856,69 @@ export default function RemindersPage() {
         </div>
       ) : null}
 
+      {/* 批量操作条：只在「选中了东西」时出现。
+          空着也挂一条底栏会一直盖住列表最后一行，而它此刻没有任何可做的事。 */}
+      {mode === "select" && picked.length > 0 ? (
+        <div className="rem-bulkbar" role="group" aria-label="批量操作">
+          <b className="rem-bulkn">{picked.length}</b>
+          {scope === "completed" ? (
+            <button
+              type="button"
+              className="rem-bulkbtn"
+              data-primary="1"
+              disabled={busy}
+              onClick={() => void runBulk("reopen")}
+            >
+              恢复
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="rem-bulkbtn"
+                data-primary="1"
+                disabled={busy}
+                onClick={() => void runBulk("complete")}
+              >
+                {busy ? "处理中…" : "完成"}
+              </button>
+              <span className="rem-bulkmove">
+                <span aria-hidden="true">移到</span>
+                <select
+                  value={bulkList}
+                  aria-label="移到哪个清单"
+                  disabled={busy}
+                  onChange={(e) => setBulkList(e.target.value as TaskListKey)}
+                >
+                  {(Object.keys(LIST_LABEL) as TaskListKey[]).map((k) => (
+                    <option key={k} value={k}>
+                      {LIST_LABEL[k]}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="rem-bulkbtn"
+                  disabled={busy}
+                  onClick={() => void runBulk("move")}
+                >
+                  移动
+                </button>
+              </span>
+            </>
+          )}
+          <button
+            type="button"
+            className="rem-bulkbtn"
+            data-danger="1"
+            disabled={busy}
+            onClick={() => void runBulk("delete")}
+          >
+            删除
+          </button>
+        </div>
+      ) : null}
+
       <TaskDrawer
         key={editingTask ? `edit-${editingTask.id}-${editingTask.updated_at}` : "new-task"}
         open={taskDrawer}
@@ -2520,12 +2952,16 @@ export default function RemindersPage() {
             ? `删除「${pending.task.title}」？`
             : pending?.kind === "reminder"
               ? `删除「${pending.item.title}」？`
-              : ""
+              : pending?.kind === "bulk"
+                ? `删除选中的 ${pending.ids.length} 条？`
+                : ""
         }
         note={
-          pending?.kind === "task"
-            ? "删除后不能恢复，关联的提醒也会一起取消。"
-            : "删除后不能恢复，这条的送达记录也不会再显示。"
+          pending?.kind === "bulk"
+            ? "删除后不能恢复，这些待办关联的提醒也会一起取消。"
+            : pending?.kind === "task"
+              ? "删除后不能恢复，关联的提醒也会一起取消。"
+              : "删除后不能恢复，这条的送达记录也不会再显示。"
         }
         busy={busy}
         onCancel={() => setPending(null)}

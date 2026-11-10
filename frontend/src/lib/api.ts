@@ -11,7 +11,14 @@ import type {
   ReminderPatchBody,
   ReminderFire,
 } from "./types";
-import type { Task, TaskDraft, TaskPatch, TaskSummary } from "./types";
+import type {
+  Task,
+  TaskBulkAction,
+  TaskDraft,
+  TaskListKey,
+  TaskPatch,
+  TaskSummary,
+} from "./types";
 import { detailToMessage } from "./errors";
 import type { MeOut, UserOut, Template, ApplyTemplateResult, UsageSummary } from "./types";
 import type { ProfileSnapshot, TagTaxonomy, TemplateRecommend } from "./types";
@@ -798,6 +805,23 @@ export const api = {
       request<Task>(`/api/tasks/${id}/complete`, { method: "POST", body: "{}" }),
     reopen: (id: string) =>
       request<Task>(`/api/tasks/${id}/reopen`, { method: "POST", body: "{}" }),
+    /**
+     * 一次写完整组新顺序（按数组顺序编号 10/20/30…），返回真正改动的条数。
+     *
+     * 只在传进来的 id 上写值 —— 组外那些行在别的 scope 里还有自己的顺序，
+     * 后端不会替它们重新编号。
+     */
+    reorder: (ids: string[]) =>
+      request<{ ok: boolean; changed: number }>("/api/tasks/reorder", {
+        method: "POST",
+        body: JSON.stringify({ ids }),
+      }),
+    /** 批量完成 / 重开 / 删除 / 改清单。`move` 必须带 `list_key`，否则 400 */
+    bulk: (ids: string[], action: TaskBulkAction, list_key?: TaskListKey) =>
+      request<{ ok: boolean; changed: number; action: string }>("/api/tasks/bulk", {
+        method: "POST",
+        body: JSON.stringify(list_key ? { ids, action, list_key } : { ids, action }),
+      }),
   },
 
   // ---------- 日历订阅 /api/calendar（3 端点）----------

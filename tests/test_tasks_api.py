@@ -243,3 +243,112 @@ class TestReminderBoundary:
     def test_source_switch_rejects_task(self, client):
         res = client.put("/api/reminders/sources", json={"source": "task", "enabled": False})
         assert res.status_code == 400
+
+
+# ==================== 排序与批量 ====================
+
+
+class TestReorder:
+    def test_reorder_changes_list_order(self, client):
+        a = _create(client, title="A")
+        b = _create(client, title="B")
+        assert [i["title"] for i in client.get("/api/tasks?scope=all").json()["items"]] == [
+            "A",
+            "B",
+        ]
+        res = client.post("/api/tasks/reorder", json={"ids": [b["id"], a["id"]]})
+        assert res.status_code == 200
+        assert res.json() == {"ok": True, "changed": 2}
+        assert [i["title"] for i in client.get("/api/tasks?scope=all").json()["items"]] == [
+            "B",
+            "A",
+        ]
+
+    def test_reorder_is_not_swallowed_by_task_id_route(self, client):
+        """`POST /reorder` 若被 `/{task_id}` 抢走，会返回 404「待办不存在」。"""
+        res = client.post("/api/tasks/reorder", json={"ids": []})
+        assert res.status_code == 200
+        assert res.json()["changed"] == 0
+
+    def test_patch_rejects_negative_sort_order(self, client):
+        task = _create(client)
+        assert client.patch(
+            f"/api/tasks/{task['id']}", json={"sort_order": -5}
+        ).status_code == 422
+        assert client.patch(
+            f"/api/tasks/{task['id']}", json={"sort_order": 30}
+        ).json()["sort_order"] == 30
+
+
+class TestBulk:
+    def test_bulk_complete(self, client):
+        a = _create(client, title="A")
+        b = _create(client, title="B")
+        res = client.post(
+            "/api/tasks/bulk", json={"ids": [a["id"], b["id"]], "action": "complete"}
+        )
+        assert res.status_code == 200
+        assert res.json()["changed"] == 2
+        assert client.get("/api/tasks?scope=all").json()["items"] == []
+        assert len(client.get("/api/tasks?scope=completed").json()["items"]) == 2
+
+    def test_bulk_reopen(self, client):
+        a = _create(client, title="A")
+        client.post(f"/api/tasks/{a['id']}/complete")
+        assert client.post(
+            "/api/tasks/bulk", json={"ids": [a["id"]], "action": "reopen"}
+        ).json()["changed"] == 1
+        assert client.get("/api/tasks?scope=all").json()["items"][0]["id"] == a["id"]
+
+    def test_bulk_delete(self, client):
+        a = _create(client, title="A")
+        b = _create(client, title="B")
+        assert client.post(
+            "/api/tasks/bulk", json={"ids": [a["id"]], "action": "delete"}
+        ).json()["changed"] == 1
+        assert client.get(f"/api/tasks/{a['id']}").status_code == 404
+        assert client.get(f"/api/tasks/{b['id']}").status_code == 200
+
+    def test_bulk_move(self, client):
+        a = _create(client, title="A")
+        res = client.post(
+            "/api/tasks/bulk", json={"ids": [a["id"]], "action": "move", "list_key": "life"}
+        )
+        assert res.json()["changed"] == 1
+        assert client.get(f"/api/tasks/{a['id']}").json()["list_key"] == "life"
+
+    def test_bulk_move_without_list_key_is_400(self, client):
+        a = _create(client)
+        res = client.post("/api/tasks/bulk", json={"ids": [a["id"]], "action": "move"})
+        assert res.status_code == 400
+        assert "清单" in res.json()["detail"]
+        # 没有静默搬进 inbox
+        assert client.get(f"/api/tasks/{a['id']}").json()["list_key"] == "homework"
+
+    def test_bulk_unknown_action_is_400(self, client):
+        a = _create(client)
+        res = client.post("/api/tasks/bulk", json={"ids": [a["id"]], "action": "archive"})
+        assert res.status_code == 400
+
+    def test_bulk_cross_user_changes_nothing(self, client):
+        theirs = _create(client, title="别人的")
+        _as("u2")
+        assert client.post(
+            "/api/tasks/bulk", json={"ids": [theirs["id"]], "action": "complete"}
+        ).json()["changed"] == 0
+        _as("u1")
+        assert client.get(f"/api/tasks/{theirs['id']}").json()["status"] == "open"
+
+    def test_bulk_ids_capped_at_200(self, client):
+        """上限写在 pydantic 上：201 个 id 直接 422，不靠核心层截断。"""
+        ids = [f"tk_{i}" for i in range(task_core.MAX_BULK + 1)]
+        res = client.post("/api/tasks/bulk", json={"ids": ids, "action": "complete"})
+        assert res.status_code == 422
+        ok = client.post(
+            "/api/tasks/bulk", json={"ids": ids[: task_core.MAX_BULK], "action": "complete"}
+        )
+        assert ok.status_code == 200
+
+    def test_reorder_ids_capped_at_200(self, client):
+        ids = [f"tk_{i}" for i in range(task_core.MAX_BULK + 1)]
+        assert client.post("/api/tasks/reorder", json={"ids": ids}).status_code == 422

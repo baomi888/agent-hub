@@ -1278,7 +1278,22 @@ export interface TaskPatch {
   priority?: TaskPriority;
   due_at?: number | null;
   remind_at?: number | null;
+  /**
+   * 手排序号。**0 = 没排过**（落回自动规则），正数才是用户排的位置。
+   *
+   * ★ 批量排序走 `POST /api/tasks/reorder`，不要逐条 PATCH —— 拖一次发 N 个
+   *   请求，中途失败会留下半新半旧的顺序。
+   */
+  sort_order?: number;
 }
+
+/**
+ * 批量动作。
+ *
+ * `move` 必须带 `list_key`：不传时后端会 400 而不是默认搬进 inbox ——
+ * 漏传一次就把几十条静默挪走，比报错难查得多。
+ */
+export type TaskBulkAction = "complete" | "reopen" | "delete" | "move";
 
 export interface TaskSummary {
   today: number;

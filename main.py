@@ -44,12 +44,13 @@ from api.push import router as push_router
 from api.query import router as query_router
 from api.remind import router as remind_router
 from api.reminders import router as reminders_router
-# 待办（2026-11-10）：tasks 表 + CRUD + linked reminder。
-# 与 reminders 分两张表：提醒是「投递规则」，待办是「用户意图」，生命周期不同。
-from api.tasks import router as tasks_router
 from api.report import router as report_router
 from api.schedule import router as schedule_router
 from api.sessions import router as sessions_router
+
+# 待办（2026-11-10）：tasks 表 + CRUD + linked reminder。
+# 与 reminders 分两张表：提醒是「投递规则」，待办是「用户意图」，生命周期不同。
+from api.tasks import router as tasks_router
 from api.templates import router as templates_router
 from api.today import router as today_router
 from api.usage import router as usage_router

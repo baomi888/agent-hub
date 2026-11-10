@@ -346,6 +346,173 @@ class TestScopes:
         assert [i["title"] for i in task_core.list_tasks(OWNER, "all")] == ["紧急", "重要", "普通"]
 
 
+# ==================== 手动排序 ====================
+
+
+class TestManualOrder:
+    """`sort_order` 的三条硬约束：0 是「没排过」、只写传入的 id、跨用户写不进。"""
+
+    def test_zero_is_not_the_first_position(self, db):
+        """老数据全是 0。若把 0 当第 0 位，一拖任何一条，全部历史待办会挤到它上面。"""
+        a = task_core.create(OWNER, _mk(title="没排过"))
+        b = task_core.create(OWNER, _mk(title="手动排到第一"))
+        task_core.reorder(OWNER, [b["id"]])
+        titles = [i["title"] for i in task_core.list_tasks(OWNER, "all")]
+        assert titles == ["手动排到第一", "没排过"]
+        assert task_core.get(OWNER, a["id"])["sort_order"] == 0
+        assert task_core.get(OWNER, b["id"])["sort_order"] == 10
+
+    def test_manual_order_beats_priority(self, db):
+        """手动排过的压过优先级：用户亲手挪的位置不能被自动规则翻回去。"""
+        low = task_core.create(OWNER, _mk(title="普通", priority=0))
+        task_core.create(OWNER, _mk(title="紧急", priority=2))
+        assert [i["title"] for i in task_core.list_tasks(OWNER, "all")] == ["紧急", "普通"]
+        task_core.reorder(OWNER, [low["id"]])
+        assert [i["title"] for i in task_core.list_tasks(OWNER, "all")] == ["普通", "紧急"]
+
+    def test_reorder_only_writes_given_ids(self, db):
+        """列表可能被 scope 过滤过 —— 组外那几条在别的视图里还有自己的顺序。"""
+        a = task_core.create(OWNER, _mk(title="A", due_at=_ts(17, 9, 0)))
+        b = task_core.create(OWNER, _mk(title="B", due_at=_ts(18, 9, 0)))
+        outside = task_core.create(OWNER, _mk(title="不在本组", due_at=_ts(19, 9, 0)))
+        task_core.update(OWNER, outside["id"], {"sort_order": 99})
+
+        assert task_core.reorder(OWNER, [b["id"], a["id"]]) == 2
+        assert task_core.get(OWNER, b["id"])["sort_order"] == 10
+        assert task_core.get(OWNER, a["id"])["sort_order"] == 20
+        # 组外那条一个字节都没动
+        assert task_core.get(OWNER, outside["id"])["sort_order"] == 99
+
+    def test_reorder_is_owner_scoped(self, db):
+        other = task_core.create("u2", _mk(title="别人的"))
+        assert task_core.reorder(OWNER, [other["id"]]) == 0
+        assert task_core.get("u2", other["id"])["sort_order"] == 0
+
+    def test_reorder_empty_list_is_noop(self, db):
+        task_core.create(OWNER, _mk())
+        assert task_core.reorder(OWNER, []) == 0
+
+    def test_order_holds_inside_today(self, db):
+        """`today` 的 ORDER BY 也带手动序，否则挪完切个 tab 又乱回去。"""
+        now = _ts(10, 12, 0)
+        early = task_core.create(OWNER, _mk(title="下午一点", due_at=_ts(10, 13, 0)))
+        late = task_core.create(OWNER, _mk(title="晚上十点", due_at=_ts(10, 22, 0)))
+        assert [i["title"] for i in task_core.list_tasks(OWNER, "today", now=now)] == [
+            "下午一点",
+            "晚上十点",
+        ]
+        task_core.reorder(OWNER, [late["id"], early["id"]])
+        assert [i["title"] for i in task_core.list_tasks(OWNER, "today", now=now)] == [
+            "晚上十点",
+            "下午一点",
+        ]
+
+    def test_update_accepts_zero_to_clear(self, db):
+        task = task_core.create(OWNER, _mk())
+        task_core.update(OWNER, task["id"], {"sort_order": 30})
+        assert task_core.get(OWNER, task["id"])["sort_order"] == 30
+        # 显式传 0 = 退出手动排序（落回自动规则），不是「排到最前」
+        task_core.update(OWNER, task["id"], {"sort_order": 0})
+        assert task_core.get(OWNER, task["id"])["sort_order"] == 0
+
+    def test_negative_sort_order_rejected(self, db):
+        task = task_core.create(OWNER, _mk())
+        with pytest.raises(task_core.TaskInvalid):
+            task_core.update(OWNER, task["id"], {"sort_order": -1})
+
+
+# ==================== 批量 ====================
+
+
+class TestBulk:
+    def test_complete_marks_all_and_stops_reminders(self, db):
+        """批量完成必须连带停用联动提醒 —— 单条 complete 是这么做的，批量很容易漏。"""
+        remind = _ts(20, 9, 0)
+        a = task_core.create(OWNER, _mk(title="A", remind_at=remind))
+        b = task_core.create(OWNER, _mk(title="B", remind_at=remind))
+        c = task_core.create(OWNER, _mk(title="C", remind_at=remind))
+        assert len(reminder_core.due_for_owner(OWNER, now=remind)) == 3
+
+        assert task_core.bulk(OWNER, [a["id"], b["id"]], "complete") == 2
+        assert task_core.get(OWNER, a["id"])["status"] == "done"
+        assert task_core.get(OWNER, a["id"])["completed_at"] is not None
+        # C 没被选中，照旧响
+        assert [i["title"] for i in reminder_core.due_for_owner(OWNER, now=remind)] == ["C"]
+        assert _linked(a["id"])["enabled"] is False
+        assert _linked(c["id"])["enabled"] is True
+
+    def test_complete_skips_already_done(self, db):
+        a = task_core.create(OWNER, _mk(title="A"))
+        b = task_core.create(OWNER, _mk(title="B"))
+        task_core.complete(OWNER, a["id"])
+        assert task_core.bulk(OWNER, [a["id"], b["id"]], "complete") == 1
+
+    def test_reopen_does_not_resurrect_past_reminder(self, db):
+        """提醒时间早就过了：重开只回到列表，不许补发一条。"""
+        past = _ts(10, 9, 0)
+        a = task_core.create(OWNER, _mk(title="A", remind_at=_ts(20, 9, 0)))
+        task_core.complete(OWNER, a["id"])
+        task_core.bulk(OWNER, [a["id"]], "reopen")
+        assert task_core.get(OWNER, a["id"])["status"] == "open"
+        assert task_core.get(OWNER, a["id"])["completed_at"] is None
+        assert _linked(a["id"])["enabled"] is True
+
+        # 把提醒挪到过去（直接改库，模拟时间流逝），再走一轮重开
+        with session._conn() as conn:
+            conn.execute("UPDATE tasks SET remind_at=? WHERE id=?", (past, a["id"]))
+        task_core.complete(OWNER, a["id"])
+        task_core.bulk(OWNER, [a["id"]], "reopen")
+        assert _linked(a["id"])["enabled"] is False
+
+    def test_move_needs_explicit_list_key(self, db):
+        a = task_core.create(OWNER, _mk(title="A"))
+        with pytest.raises(task_core.TaskInvalid):
+            task_core.bulk(OWNER, [a["id"]], "move")
+        assert task_core.get(OWNER, a["id"])["list_key"] == "homework"
+
+    def test_move_changes_list(self, db):
+        a = task_core.create(OWNER, _mk(title="A"))
+        b = task_core.create(OWNER, _mk(title="B"))
+        assert task_core.bulk(OWNER, [a["id"], b["id"]], "move", "inbox") == 2
+        assert task_core.get(OWNER, a["id"])["list_key"] == "inbox"
+        by_list = task_core.summary(OWNER)["by_list"]
+        assert by_list["inbox"] == 2
+        assert by_list["homework"] == 0
+
+    def test_delete_removes_linked_reminder(self, db):
+        a = task_core.create(OWNER, _mk(title="A", remind_at=_ts(20, 9, 0)))
+        b = task_core.create(OWNER, _mk(title="B", remind_at=_ts(20, 9, 0)))
+        assert task_core.bulk(OWNER, [a["id"]], "delete") == 1
+        assert task_core.get(OWNER, a["id"]) is None
+        assert _linked(a["id"]) is None
+        assert _linked(b["id"]) is not None
+
+    def test_cross_user_ids_are_ignored(self, db):
+        mine = task_core.create(OWNER, _mk(title="我的"))
+        theirs = task_core.create("u2", _mk(title="别人的"))
+        assert task_core.bulk(OWNER, [mine["id"], theirs["id"]], "complete") == 1
+        assert task_core.get("u2", theirs["id"])["status"] == "open"
+        assert task_core.get(OWNER, mine["id"])["status"] == "done"
+
+    def test_all_ids_foreign_returns_zero(self, db):
+        theirs = task_core.create("u2", _mk(title="别人的"))
+        assert task_core.bulk(OWNER, [theirs["id"]], "delete") == 0
+        assert task_core.get("u2", theirs["id"]) is not None
+
+    def test_duplicate_ids_counted_once(self, db):
+        a = task_core.create(OWNER, _mk(title="A"))
+        assert task_core.bulk(OWNER, [a["id"], a["id"], a["id"]], "complete") == 1
+
+    def test_unknown_action_rejected(self, db):
+        a = task_core.create(OWNER, _mk(title="A"))
+        with pytest.raises(task_core.TaskInvalid):
+            task_core.bulk(OWNER, [a["id"]], "archive")
+
+    def test_empty_ids_is_noop(self, db):
+        assert task_core.bulk(OWNER, [], "complete") == 0
+        assert task_core.bulk(OWNER, [], "move", "inbox") == 0
+
+
 # ==================== 概览 ====================
 
 

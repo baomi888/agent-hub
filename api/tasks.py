@@ -57,6 +57,21 @@ class TaskPatch(BaseModel):
     priority: int | None = Field(default=None, ge=0, le=2)
     due_at: int | None = None
     remind_at: int | None = None
+    sort_order: int | None = Field(default=None, ge=0)
+
+
+class ReorderIn(BaseModel):
+    """一批待办的新顺序，按数组顺序编号（10, 20, 30…）。"""
+
+    ids: list[str] = Field(default_factory=list, max_length=task_core.MAX_BULK)
+
+
+class BulkIn(BaseModel):
+    """批量动作。`move` 要带 `list_key`，其余不用。"""
+
+    ids: list[str] = Field(default_factory=list, max_length=task_core.MAX_BULK)
+    action: str
+    list_key: str | None = None
 
 
 def _bad(exc: Exception) -> HTTPException:
@@ -140,3 +155,28 @@ async def reopen_task(task_id: str, uid: str = Depends(get_current_user)) -> dic
     if item is None:
         raise HTTPException(status_code=404, detail="待办不存在")
     return item
+
+
+# ==================== 批量 ====================
+#
+# ★ 这两条必须写在 `/{task_id}` **后面**吗？不 —— 恰好相反。
+#   `/reorder` 会被 `GET /{task_id}` 之外的方法匹配到，但 `POST /bulk` 与
+#   `POST /{task_id}/complete` 不冲突（路径段数不同）。写成不带路径参数的形式
+#   就放在最后，靠 FastAPI 的精确匹配即可；但**不能**写成 `/{task_id}` 能吞掉的形状。
+
+
+@router.post("/reorder")
+async def reorder_tasks(body: ReorderIn, uid: str = Depends(get_current_user)) -> dict:
+    changed = await asyncio.to_thread(task_core.reorder, uid, body.ids)
+    return {"ok": True, "changed": changed}
+
+
+@router.post("/bulk")
+async def bulk_tasks(body: BulkIn, uid: str = Depends(get_current_user)) -> dict:
+    try:
+        changed = await asyncio.to_thread(
+            task_core.bulk, uid, body.ids, body.action, body.list_key
+        )
+    except task_core.TaskInvalid as exc:
+        raise _bad(exc) from None
+    return {"ok": True, "changed": changed, "action": body.action}
