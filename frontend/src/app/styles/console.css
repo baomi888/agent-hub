@@ -1896,6 +1896,13 @@ textarea.input {
   height: 100%;
   background: rgba(61, 47, 26, 0.42);
 }
+/* 落在静默段里的刻度要压到几乎看不见。
+   整点线是贯穿整条带子的，它压过斜纹时会被读成「轴在这里断了一截」——
+   上一轮评审说的就是这条。压淡之后静默段读起来是一整片连续的面，
+   刻度只是隐约可见的参考，不再是把带子切开的一道口子。 */
+.rem-tick[data-quiet="1"] {
+  background: rgba(61, 47, 26, 0.11);
+}
 /* 静默时段：斜纹。「这一段到点也不响」是这个产品独有的一条信息，值得占一层。
    两侧各一道 1px 边线：只有斜纹时它读作「一片脏纹理」，有起止才读作「这个区间」。
    斜纹本身退到三档里最轻的一档（0.13）—— 它占了 28% 的宽度和 100% 的高度，
@@ -1937,6 +1944,58 @@ textarea.input {
   transform: translateX(-100%);
 }
 
+/* 静默图例：斜纹样张 + 起止时间。
+   没有这一行，斜纹就只是一块来路不明的底纹 —— 上一轮评审的原话。
+   字号用全站最小的一档：它是注解，不是信息主体，不该和 0/6/12/18/24 抢注意力。
+   放在 `.rem-tape` 外面（`rem-tape` 的 60px 高度是量过的契约），
+   所以这里是正常流里的块，不是绝对定位。 */
+.rem-tape-wrap {
+  position: relative;
+}
+.rem-tape-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  margin: var(--space-4) 0 0;
+  font-size: var(--fs-xs);
+  line-height: 14px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+/* 样张：从带子上"抠下来的那一小块"—— 同底色、同角度、同比它粗一档的线。
+   16×10 那版实测两种主题下都读不出是斜纹（截图放大才看出来），
+   因为 1.5px 的线在 7px 间距里缩到 2/3 就糊成灰底了。 */
+.rem-legend-hatch {
+  flex-shrink: 0;
+  width: 20px;
+  height: 12px;
+  border: 1px solid rgba(61, 47, 26, 0.18);
+  border-radius: 3px;
+  background-color: var(--step-0);
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(61, 47, 26, 0.22) 0 2px,
+    transparent 2px 6px
+  );
+}
+/* 深色下斜纹要换黑：暖墨 alpha 在近黑上差不到 1/255，等于没画（时间轴踩过这个坑） */
+.dark .rem-legend-hatch {
+  border-color: rgba(255, 255, 255, 0.14);
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(0, 0, 0, 0.62) 0 2px,
+    transparent 2px 6px
+  );
+}
+.rem-tape-legend .rem-legend-more {
+  display: none;
+}
+@media (min-width: 640px) {
+  .rem-tape-legend .rem-legend-more {
+    display: inline;
+  }
+}
+
 /* 齿孔：每条提醒一枚，骑在带子上。齿孔只给「今天还没到点」的那几条 ——
    早于此刻的提醒被服务端推到明天、归进「本周」，不会出现在这条轴上 */
 .rem-ev {
@@ -1972,6 +2031,29 @@ textarea.input {
 .rem-ev[data-kind="event"] i {
   border-radius: 1px;
   transform: rotate(45deg) scale(0.82);
+}
+
+/* 已经过去的时刻：仍然实心，但退到 40%。不改成空心圈 ——
+   空心是"待办未完成"在别处的语汇（卡片左侧那个 ○），搬到轴上会混淆；
+   而且全空心的轴正是上一版被判"视觉重量太低"的原因。
+   现在"深 = 还没到、淡 = 已经过去"，同一套墨色，只有一个维度在变。 */
+.rem-ev[data-past="1"] i {
+  opacity: 0.4;
+}
+
+/* 同一分钟并了多条：外面再套一圈。
+   不然"这一枚代表 3 条"和"这一枚代表 1 条"长得一模一样，
+   只有悬停才看得出「+2」—— 而悬停是手机上没有的动作。 */
+.rem-ev[data-many="1"] i {
+  box-shadow:
+    0 0 0 2px var(--card-bg),
+    0 0 0 3.5px var(--ink);
+}
+.rem-ev[data-many="1"][data-past="1"] i {
+  box-shadow:
+    0 0 0 2px var(--card-bg),
+    0 0 0 3.5px var(--ink);
+  opacity: 0.4;
 }
 
 /* 悬停只放大、不换色：金是全轴「现在」的专用语汇，用在悬停上会把「金=此刻」稀释掉 */
@@ -2070,6 +2152,12 @@ textarea.input {
 }
 .rem-ev-more {
   color: var(--text-3);
+}
+/* 气泡里的「还有 1 小时 20 分 / 已过 40 分钟」。
+   齿孔只有 11px 放不下字，但这句是扫轴时最想知道的东西，所以挂在悬停气泡里。 */
+.rem-ev-delta {
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
 }
 
 /* 现在：一条 1.5px 金线穿过带子，顶上一个时间胶囊。全轴只有它是实心浮起来的 */

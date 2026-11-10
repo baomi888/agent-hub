@@ -308,6 +308,27 @@ function quietBands(start: string | null | undefined, end: string | null | undef
   return [{ from: a, to: b }];
 }
 
+/** 某个分钟点是否落在静默段里（用于把穿过去的整点线压淡） */
+function inQuiet(bands: QuietBand[], min: number): boolean {
+  return bands.some((b) => min >= b.from && min < b.to);
+}
+
+/**
+ * 「这条还有多久 / 过去多久」。
+ *
+ * 齿孔只有 11px，放不下字；但一枚齿孔**只**说明"这个点有事"，
+ * 说明不了"这件事跟我现在的距离"——而那才是用户扫一眼轴想知道的。
+ * 所以这句挂在悬停气泡里，不占静态面积。
+ */
+function fmtDelta(diffMin: number): string {
+  if (diffMin === 0) return "就是现在";
+  const abs = Math.abs(diffMin);
+  const h = Math.floor(abs / 60);
+  const m = abs % 60;
+  const span = h > 0 ? (m > 0 ? `${h} 小时 ${m} 分` : `${h} 小时`) : `${m} 分`;
+  return diffMin > 0 ? `还有 ${span}` : `已过 ${span}`;
+}
+
 type AxisEvent = {
   /** 点这枚齿孔跳到哪张卡（同一分钟的多条合并成一枚，取第一条） */
   id: string;
@@ -362,7 +383,8 @@ function TodayAxis({
   const quiet = useMemo(() => quietBands(quietStart, quietEnd), [quietStart, quietEnd]);
 
   return (
-    <div className="rem-tape" role="group" aria-label="今天的提醒时间轴">
+    <div className="rem-tape-wrap">
+      <div className="rem-tape" role="group" aria-label="今天的提醒时间轴">
       <div className="rem-tape-body" aria-hidden="true">
         {/* 斜纹垫在刻度下面：静默段盖住 6 点那道贯穿刻度时，刻度还得透出来 */}
         {quiet.map((q) => (
@@ -380,30 +402,45 @@ function TodayAxis({
             key={`t${h}`}
             className="rem-tick"
             data-major={h % 6 === 0 ? "1" : "0"}
+            /* 落进静默段的刻度要压淡：整点线是贯穿整条带子的，
+               它穿过斜纹时会被读成"轴在这里断了"，而不是"这一段不响"。 */
+            data-quiet={inQuiet(quiet, h * TICK_MIN) ? "1" : "0"}
             style={{ left: `${(h / (DAY_MIN / TICK_MIN)) * 100}%` }}
           />
         ))}
       </div>
 
-      {events.map((e) => (
-        <button
-          key={`e${e.min}`}
-          type="button"
-          className="rem-ev"
-          data-kind={e.kind}
-          // 0 点和 24 点的齿孔要往回收一点，否则一半在带子外面
-          style={{ left: `${Math.min(99.6, Math.max(0.4, (e.min / DAY_MIN) * 100))}%` }}
-          onClick={() => onJump(e.id)}
-          aria-label={`${e.label} ${e.title}${e.count > 1 ? ` 等 ${e.count} 条` : ""}，跳到这条`}
-        >
-          <i aria-hidden="true" />
-          <b aria-hidden="true">
-            <em>{e.label}</em>
-            <span className="rem-ev-title">{e.title}</span>
-            {e.count > 1 ? <span className="rem-ev-more">+{e.count - 1}</span> : null}
-          </b>
-        </button>
-      ))}
+      {events.map((e) => {
+        // 已过去的和还没到的必须看得出差别：全都画成一样的墨点，
+        // 用户扫一眼分不清"9 点那条已经响过了"和"晚上 9 点还没到"。
+        const delta = nowMin === null ? null : e.min - nowMin;
+        return (
+          <button
+            key={`e${e.min}`}
+            type="button"
+            className="rem-ev"
+            data-kind={e.kind}
+            data-past={delta !== null && delta < 0 ? "1" : "0"}
+            data-many={e.count > 1 ? "1" : "0"}
+            // 0 点和 24 点的齿孔要往回收一点，否则一半在带子外面
+            style={{ left: `${Math.min(99.6, Math.max(0.4, (e.min / DAY_MIN) * 100))}%` }}
+            onClick={() => onJump(e.id)}
+            aria-label={`${e.label} ${e.title}${e.count > 1 ? ` 等 ${e.count} 条` : ""}${
+              delta === null ? "" : `，${fmtDelta(delta)}`
+            }，跳到这条`}
+          >
+            <i aria-hidden="true" />
+            <b aria-hidden="true">
+              <em>{e.label}</em>
+              <span className="rem-ev-title">{e.title}</span>
+              {e.count > 1 ? <span className="rem-ev-more">+{e.count - 1}</span> : null}
+              {delta !== null ? (
+                <span className="rem-ev-delta">{fmtDelta(delta)}</span>
+              ) : null}
+            </b>
+          </button>
+        );
+      })}
 
       {nowMin !== null && now !== null ? (
         <div
@@ -415,13 +452,27 @@ function TodayAxis({
         </div>
       ) : null}
 
-      <div className="rem-tape-hours" aria-hidden="true">
-        {MAJOR_HOURS.map((h) => (
-          <span key={`h${h}`} style={{ left: `${(h / 24) * 100}%` }}>
-            {h}
-          </span>
-        ))}
+        <div className="rem-tape-hours" aria-hidden="true">
+          {MAJOR_HOURS.map((h) => (
+            <span key={`h${h}`} style={{ left: `${(h / 24) * 100}%` }}>
+              {h}
+            </span>
+          ))}
+        </div>
       </div>
+
+      {/* 斜纹没有图例就只是一块脏底纹。上一轮评审的原话是「斜纹含义无解释」——
+          补一行最小字号的说明。放在 .rem-tape **外面**：轴本身 60px 的高度是
+          量过的契约（高度再涨，卡里就会重新出现大片空档），图例是轴底下的一行注解。 */}
+      {quiet.length > 0 && quietStart && quietEnd ? (
+        <p className="rem-tape-legend">
+          <span className="rem-legend-hatch" aria-hidden="true" />
+          <span>
+            静默 {quietStart}–{quietEnd}
+          </span>
+          <span className="rem-legend-more">，这一段到点也不响</span>
+        </p>
+      ) : null}
     </div>
   );
 }

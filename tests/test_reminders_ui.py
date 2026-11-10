@@ -517,3 +517,63 @@ class TestPhase0Contracts:
         """确认框必须写明不可恢复，否则「二次确认」只是多一次点击。"""
         page = _page()
         assert "删除后不能恢复" in page
+
+
+class TestAxisCarriesInformation:
+    """时间轴要能被读出信息，而不只是"有 6 个点"（上一轮评审的三条）。"""
+
+    def test_past_and_future_are_distinguishable(self):
+        """已过 / 未到必须看得出差别。
+
+        全都画成一样的墨点，用户分不清"9 点那条已经响过了"和"晚上 9 点还没到"。
+        用同一个墨色的透明度差，不引入第二种颜色 —— 颜色在这条轴上归"紧急"。
+        """
+        page = _page()
+        assert 'data-past={delta !== null && delta < 0 ? "1" : "0"}' in page
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        block = _css_block(css, '.rem-ev[data-past="1"] i {')
+        assert "opacity: 0.4" in block, "已过去的齿孔又和未到的一样重了"
+
+    def test_merged_events_look_heavier(self):
+        """同一分钟并了多条要看得出来 —— 手机上没法悬停，`+2` 永远看不见。"""
+        page = _page()
+        assert 'data-many={e.count > 1 ? "1" : "0"}' in page
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        assert '.rem-ev[data-many="1"] i {' in css
+
+    def test_hover_bubble_says_how_far(self):
+        """齿孔 11px 放不下字，但"还有多久"是扫轴最想知道的，挂在气泡里。"""
+        page = _page()
+        assert "fmtDelta(delta)" in page
+        assert 'className="rem-ev-delta"' in page
+        # 三种说法都要有：还有 / 已经过 / 就是现在
+        assert "还有 ${span}" in page
+        assert "已过 ${span}" in page
+        assert '"就是现在"' in page
+
+    def test_quiet_band_has_a_legend(self):
+        """斜纹没有图例就只是一块来路不明的底纹。"""
+        page = _page()
+        assert 'className="rem-tape-legend"' in page
+        assert "静默 {quietStart}–{quietEnd}" in page
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        assert ".rem-legend-hatch {" in css
+        # 深色下必须换一套斜纹，否则暖墨 alpha 在近黑上等于没画
+        assert ".dark .rem-legend-hatch {" in css
+
+    def test_ticks_inside_quiet_are_muted(self):
+        """整点线穿过静默段会被读成"轴断了"，压淡它。"""
+        page = _page()
+        assert "data-quiet={inQuiet(quiet, h * TICK_MIN) ? \"1\" : \"0\"}" in page
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        block = _css_block(css, '.rem-tick[data-quiet="1"] {')
+        assert "rgba(61, 47, 26, 0.11)" in block
+
+    def test_legend_sits_outside_the_tape(self):
+        """图例不许撑高轴本身：`.rem-tape` 的 60px 是量过的，涨了卡里就出现空档。"""
+        page = _page()
+        tape = page[page.index('className="rem-tape"') : page.index('className="rem-tape-legend"')]
+        # 图例出现在 .rem-tape 的闭合之后 —— 中间必然夹着 wrap 的闭合
+        assert tape.count("</div>") >= 2, "图例被塞进 .rem-tape 里了"
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        assert "height: 60px;" in _css_block(css, ".rem-tape {")
