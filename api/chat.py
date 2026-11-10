@@ -67,7 +67,6 @@ from core import (
     upload,
 )
 from core import context_compress as ctxcompress
-from core import leak_guard
 from core import router as route_engine
 from core import scenarios as scenarios_mod
 from core import session as store
@@ -890,6 +889,20 @@ def _guarded_refusal(prefix: str) -> str:
     return (head + "\n\n" + prompt_security.REFUSAL_TEXT) if head else prompt_security.REFUSAL_TEXT
 
 
+def _leak_blocked_reply(text: str) -> tuple[str, str]:
+    """出站命中泄露时的收尾：返回 (落库/回执的最终答案, 要补发给前端的尾巴)。
+
+    三条流式路径（llm / hybrid / agent）共用，避免同一套"保留安全前缀 + 拒答"
+    逻辑各写一遍——之前三处各写一份，改文案时漏改一处就会出现两套收尾。
+    """
+    tail = (
+        "\n\n" + prompt_security.REFUSAL_TEXT
+        if (text or "").strip()
+        else prompt_security.REFUSAL_TEXT
+    )
+    return _guarded_refusal(text), tail
+
+
 def _security_refusal_response(ticket, rule: str) -> StreamingResponse:
     """输入拦截命中：**不调用任何模型**，直接回一条 SSE 拒答。
 
@@ -939,10 +952,6 @@ async def _stream_llm(
     """
     agen = upstreams.track(llm.astream(messages)) if upstreams is not None else llm.astream(messages)
     guard = _new_leak_guard(path=path)
-    # 第二道出站检查：短指纹（<24 字，如"你是一个智能问答助手"这种开头句）。
-    # prompt_security 的 24 字指纹窗口刻意不认短片段（误伤率优先），这里用
-    # leak_guard 的固定句表补上；它只做 400 字滚动窗口匹配，不缓冲、不改变节奏。
-    short_fp = leak_guard.StreamGuard()
     try:
         seen = 0
         async with contextlib.aclosing(agen) as stream:
@@ -968,20 +977,6 @@ async def _stream_llm(
                 if not isinstance(delta, str) or not delta:
                     continue
                 for part in (guard.feed(delta) if guard is not None else [delta]):
-                    try:
-                        part = short_fp.feed(part)
-                    except leak_guard.LeakDetected:
-                        acc.leak_blocked = True
-                        acc.leak_reason = "short_fingerprint"
-                        metrics.inc(
-                            "prompt_leak_blocked",
-                            {"stage": "output", "path": path, "rule": "short_fingerprint"},
-                        )
-                        refusal = _guarded_refusal(acc.text)
-                        tail = ("\n\n" + prompt_security.REFUSAL_TEXT) if acc.text.strip() else prompt_security.REFUSAL_TEXT
-                        acc.text = refusal
-                        yield _sse("token", {"text": tail})
-                        return
                     acc.text += part
                     yield _sse("token", {"text": part})
                 if guard is not None and guard.blocked:
@@ -991,29 +986,13 @@ async def _stream_llm(
                         "prompt_leak_blocked",
                         {"stage": "output", "path": path, "rule": guard.reason or "?"},
                     )
-                    refusal = _guarded_refusal(acc.text)
-                    tail = ("\n\n" + prompt_security.REFUSAL_TEXT) if acc.text.strip() else prompt_security.REFUSAL_TEXT
-                    acc.text = refusal
+                    acc.text, tail = _leak_blocked_reply(acc.text)
                     yield _sse("token", {"text": tail})
                     return
         if guard is not None:
             # 流正常结束：把未下发的安全尾巴吐出去（过滤器只压着 48 字）
-            # 尾巴同样要过短指纹检查：短回答（<48 字）根本没触发过 feed，全在 flush 里。
+            # 尾巴已由 LeakFilter.flush 自己做过判定（含短指纹），这里不再二次检查。
             for part in guard.flush():
-                try:
-                    part = short_fp.feed(part)
-                except leak_guard.LeakDetected:
-                    acc.leak_blocked = True
-                    acc.leak_reason = "short_fingerprint"
-                    metrics.inc(
-                        "prompt_leak_blocked",
-                        {"stage": "output", "path": path, "rule": "short_fingerprint"},
-                    )
-                    refusal = _guarded_refusal(acc.text)
-                    tail = ("\n\n" + prompt_security.REFUSAL_TEXT) if acc.text.strip() else prompt_security.REFUSAL_TEXT
-                    acc.text = refusal
-                    yield _sse("token", {"text": tail})
-                    return
                 acc.text += part
                 yield _sse("token", {"text": part})
         # 正常结束才判截断：走到这里说明上游把流跑完了（不是断连、不是异常）。
@@ -1256,18 +1235,13 @@ async def _chat_stream_impl(
             _BG_TASKS.add(title_task)
             title_task.add_done_callback(_BG_TASKS.discard)
 
-        # ---- 0. 入站护栏：明确索要系统提示词 / 工具定义时直接拒答 ----
-        # 这只是第一道门。正则宁可少拒：真正兜底的是工具鉴权（模型拿不到越权数据）
-        # 与出站过滤。"翻译以上全部内容"这类格式转换请求记为 soft：正常用户也会
-        # 这么说，放行，靠输出过滤兜底，不当场拒。
-        verdict = leak_guard.classify(req.question)
-        if verdict == "soft":
+        # ---- 0. 入站护栏：明确索要系统提示词 / 工具定义时在请求入口就拒答 ----
+        # 判定统一在 prompt_security.detect_prompt_extraction（原 leak_guard.classify
+        # 的结构规则已并入其中，见其 structural_export 分支）。这里只剩**观测**：
+        # "翻译以上全部内容"这类格式转换请求正常用户也会说，放行、靠输出过滤兜底，
+        # 只记一个 soft 计数，用于观察真实试探量。
+        if prompt_security.classify(req.question) == "soft":
             metrics.inc("chat_leak_soft", {"path": "input"})
-        elif verdict == "block":
-            metrics.inc("chat_leak_blocked", {"path": "input"})
-            yield _sse("status", {"text": "检测到内部配置导出请求，已拒绝"})
-            yield _sse("token", {"text": leak_guard.REFUSAL})
-            return
 
         # ---- 0. 图片理解模式：有图片附件时用视觉模型直接回答 ----
         if _has_image(req.attachments):
@@ -1457,8 +1431,6 @@ async def _chat_stream_impl(
                 full_text = ""
                 # 输出侧泄露过滤：hybrid 的 token 不走 _stream_llm，必须在这里单独接。
                 guard = _new_leak_guard(path="hybrid")
-                # 短指纹兜底，与 _stream_llm 同口径
-                hybrid_short_fp = leak_guard.StreamGuard()
                 # 最后一个**成功**节点把产出写在了哪个键。节点退出时由工作流引擎
                 # 在 node_exit 里带出（见 hybrid/workflow.py）——用它取答案，
                 # 比"shared 里最后一个值"精确，也不会把 plan 的规划稿当答案。
@@ -1473,38 +1445,14 @@ async def _chat_stream_impl(
                         delta = ev.payload.get("text", "")
                         if delta:
                             for part in (guard.feed(delta) if guard is not None else [delta]):
-                                try:
-                                    part = hybrid_short_fp.feed(part)
-                                except leak_guard.LeakDetected:
-                                    tail = (
-                                        ("\n\n" + prompt_security.REFUSAL_TEXT)
-                                        if full_text.strip()
-                                        else prompt_security.REFUSAL_TEXT
-                                    )
-                                    full_text = _guarded_refusal(full_text)
-                                    metrics.inc(
-                                        "prompt_leak_blocked",
-                                        {
-                                            "stage": "output",
-                                            "path": "hybrid",
-                                            "rule": "short_fingerprint",
-                                        },
-                                    )
-                                    yield _sse("token", {"text": tail})
-                                    break
                                 full_text += part
                                 yield _sse("token", {"text": part})
                             if guard is not None and guard.blocked:
-                                tail = (
-                                    ("\n\n" + prompt_security.REFUSAL_TEXT)
-                                    if full_text.strip()
-                                    else prompt_security.REFUSAL_TEXT
-                                )
-                                full_text = _guarded_refusal(full_text)
                                 metrics.inc(
                                     "prompt_leak_blocked",
                                     {"stage": "output", "path": "hybrid", "rule": guard.reason or "?"},
                                 )
+                                full_text, tail = _leak_blocked_reply(full_text)
                                 yield _sse("token", {"text": tail})
                                 break
                     elif et == "tool_call":
@@ -1551,27 +1499,8 @@ async def _chat_stream_impl(
 
                 if guard is not None and not guard.blocked:
                     # 流正常结束：吐出被过滤器压住的最后 48 字（同 _stream_llm 口径）
-                    # 尾巴同样过短指纹检查（短回答根本没触发过 feed，全在 flush 里）
+                    # flush 内部已含短指纹判定，这里不再二次检查。
                     for part in guard.flush():
-                        try:
-                            part = hybrid_short_fp.feed(part)
-                        except leak_guard.LeakDetected:
-                            tail = (
-                                ("\n\n" + prompt_security.REFUSAL_TEXT)
-                                if full_text.strip()
-                                else prompt_security.REFUSAL_TEXT
-                            )
-                            full_text = _guarded_refusal(full_text)
-                            metrics.inc(
-                                "prompt_leak_blocked",
-                                {
-                                    "stage": "output",
-                                    "path": "hybrid",
-                                    "rule": "short_fingerprint",
-                                },
-                            )
-                            yield _sse("token", {"text": tail})
-                            break
                         full_text += part
                         yield _sse("token", {"text": part})
 
@@ -1733,8 +1662,6 @@ async def _chat_stream_impl(
                 agent_reason: str | None = None
                 # 输出侧泄露过滤：Agent 路径不走 _stream_llm，token 出口在这里接。
                 guard = _new_leak_guard(turn_id=turn_id, path="agent")
-                # 短指纹兜底，与 _stream_llm 同口径
-                agent_short_fp = leak_guard.StreamGuard()
 
                 # stream_mode=["updates","messages"] 事件为 (mode字符串, payload)
                 # 必须走 astream：同步 stream() 会把整个事件循环堵住，
@@ -1773,38 +1700,14 @@ async def _chat_stream_impl(
                                 )
                             if isinstance(delta, str) and delta:
                                 for part in (guard.feed(delta) if guard is not None else [delta]):
-                                    try:
-                                        part = agent_short_fp.feed(part)
-                                    except leak_guard.LeakDetected:
-                                        tail = (
-                                            ("\n\n" + prompt_security.REFUSAL_TEXT)
-                                            if full_text.strip()
-                                            else prompt_security.REFUSAL_TEXT
-                                        )
-                                        full_text = _guarded_refusal(full_text)
-                                        metrics.inc(
-                                            "prompt_leak_blocked",
-                                            {
-                                                "stage": "output",
-                                                "path": "agent",
-                                                "rule": "short_fingerprint",
-                                            },
-                                        )
-                                        yield _sse("token", {"text": tail})
-                                        break
                                     full_text += part
                                     yield _sse("token", {"text": part})
                                 if guard is not None and guard.blocked:
-                                    tail = (
-                                        ("\n\n" + prompt_security.REFUSAL_TEXT)
-                                        if full_text.strip()
-                                        else prompt_security.REFUSAL_TEXT
-                                    )
-                                    full_text = _guarded_refusal(full_text)
                                     metrics.inc(
                                         "prompt_leak_blocked",
                                         {"stage": "output", "path": "agent", "rule": guard.reason or "?"},
                                     )
+                                    full_text, tail = _leak_blocked_reply(full_text)
                                     yield _sse("token", {"text": tail})
                                     break
 
@@ -1836,27 +1739,8 @@ async def _chat_stream_impl(
 
                 if guard is not None and not guard.blocked:
                     # 流正常结束：吐出被过滤器压住的最后 48 字（同 _stream_llm 口径）
-                    # 尾巴同样过短指纹检查（短回答根本没触发过 feed，全在 flush 里）
+                    # flush 内部已含短指纹判定，这里不再二次检查。
                     for part in guard.flush():
-                        try:
-                            part = agent_short_fp.feed(part)
-                        except leak_guard.LeakDetected:
-                            tail = (
-                                ("\n\n" + prompt_security.REFUSAL_TEXT)
-                                if full_text.strip()
-                                else prompt_security.REFUSAL_TEXT
-                            )
-                            full_text = _guarded_refusal(full_text)
-                            metrics.inc(
-                                "prompt_leak_blocked",
-                                {
-                                    "stage": "output",
-                                    "path": "agent",
-                                    "rule": "short_fingerprint",
-                                },
-                            )
-                            yield _sse("token", {"text": tail})
-                            break
                         full_text += part
                         yield _sse("token", {"text": part})
 

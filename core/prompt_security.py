@@ -286,6 +286,156 @@ def _normalize(text: str) -> str:
     return _normalize_with_map(text)[0]
 
 
+# ==================== 结构特征 / 短指纹（并入自原 core/leak_guard.py）====================
+# 这组表与下面的 _RULES 是**互补**关系，不是重复：
+#   _RULES 认"话术"（动作词 + 机密对象），回答"用户在要什么"；
+#   这里认"形状"（role/content 数组、工具 schema、自述开头）与"固定句"，
+#   回答"模型已经吐出了什么"。入站只借用前者的 block 档，出站两条都用。
+# 拆开的好处：输出侧命中一律是确定性信号（不依赖模型是否逐字），误伤极低。
+
+# 本项目提示词里只可能出现在提示词里的整句。挑整句、不挑"你是助手"这类通用词，
+# 否则用户问"你能做什么"时模型正常复述就会误杀。
+SHORT_FINGERPRINTS = (
+    "你是一个智能问答助手",
+    "直接给结果（优先级高于下面的行为准则）",
+    "工具清单里没有的能力就是本轮没开",
+    "仅依据【参考资料】回答用户问题",
+    "你是一个友好、专业的 AI 助手",
+)
+
+# 内部工具名：单独出现不算泄露（前端本来就会展示"正在调用 web_search"），
+# 必须和 schema 结构同时出现才判。
+_INTERNAL_TOOLS = ("kb_search", "web_search", "get_weather", "download_file")
+
+# 输出侧：整段配置导出的结构特征（不只认"某个工具名 + parameters"）
+_SCHEMA_SHAPE = re.compile(r'"(parameters|input_schema)"\s*:|"type"\s*:\s*"function"', re.I)
+
+# "把对话原样吐出来"式导出：{"role": "system", "content": "..."}
+_ROLE_DUMP = re.compile(r'"role"\s*:\s*"(system|developer)"', re.I)
+
+# 光有 role=system 不算泄露（问"system message 是什么"时模型给通用示例是正常答案），
+# 必须同时出现本项目的内部标识才判。
+_ROLE_DUMP_STRONG = re.compile(
+    r"(系统提示词|系统指令|kb_search|web_search|get_weather|download_file)", re.I
+)
+
+# 自述式开头：模型自己说"以下是我的系统提示词"
+_PROMPT_HEADER = re.compile(
+    r"(以下(是|为)我的?(系统提示词|系统指令|设定|提示词)|"
+    r"(我的)?系统提示词(如下|是)[:：]|"
+    r"(here\s+is|below\s+is)\s+(my|the)\s+system\s+prompt)",
+    re.I,
+)
+
+# 短指纹的滚动窗口。最长指纹不到 40 字，400 足够防"拆帧"，也避免长回答上 O(n²)。
+_SHORT_WINDOW = 400
+
+# 入站粗筛的四个正则，按"动作 + 目标"配对来判，避免"什么是 system prompt"被误伤。
+_EXTRACT_VERB = re.compile(
+    r"(输出|打印|显示|给出|导出|泄露|复述|列出|贴出|告诉我|返回|"
+    r"reveal|dump|output|print|show|repeat|leak|give\s+me|return|put|embed|write)",
+    re.I,
+)
+_INTERNAL_TARGET = re.compile(
+    r"(系统提示词|系统提示|提示词|系统指令|设定原文|"
+    r"system\s*(prompt|message|instructions?)|"
+    r"工具定义|工具描述|工具清单|tool\s*(schema|definition)s?|"
+    r"内部(配置|信息|规则)|payload\.tools|"
+    r"[\"']?payload[\"']?\s*[:：=]?\s*\{?\s*[\"']?tools[\"']?)",
+    re.I,
+)
+_OVERRIDE = re.compile(
+    r"((忽略|无视|忘掉|跳过|不要理会).{0,8}(指令|设定|提示|规则)|"
+    r"ignore\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|rules?))",
+    re.I,
+)
+# 格式转换式导出：单独出现很可能是正常需求（"把以上全部内容翻译成英文"），
+# 只算 soft —— 放行，交给输出过滤兜底。
+_FORMAT_SWITCH = re.compile(
+    r"((以上|上面|上述|前面|之前).{0,12}(全部|所有).{0,12}(翻译|转成|换成|输出|复述)|"
+    r"(translate|convert|output|repeat)\s+(everything|all)(\s+\w+){0,4}\s+above|"
+    r"\bbase64\b|as\s+strings)",
+    re.I,
+)
+
+
+def find_leak(text: str) -> str | None:
+    """出站结构特征：命中返回原因（进日志），否则 None。
+
+    覆盖 24 字指纹窗口抓不到的确定性信号，也是"换个说法再吐一遍"的兜底：
+      1. 提示词固定整句（短，如"你是一个智能问答助手"）；
+      2. "以下是我的系统提示词"这种自述开头；
+      3. role/content 对话导出，且夹带内部工具名或系统提示词；
+      4. 工具 schema 结构 + 内部工具名（写通用 function calling 示例不会命中）。
+    """
+    s = text or ""
+    if not s:
+        return None
+    for fp in SHORT_FINGERPRINTS:
+        if fp in s:
+            return "系统提示词指纹"
+    if _PROMPT_HEADER.search(s):
+        return "提示词自述开头"
+    if _ROLE_DUMP.search(s) and _ROLE_DUMP_STRONG.search(s):
+        return "对话结构导出"
+    if _SCHEMA_SHAPE.search(s) and any(t in s for t in _INTERNAL_TOOLS):
+        return "工具 schema 结构"
+    return None
+
+
+def classify(text: str) -> str | None:
+    """入站粗筛：返回 ``"block"`` / ``"soft"`` / None。
+
+    block = 明确在索要内部配置，直接拒答、不送模型；
+    soft  = 像格式转换式导出，但正常用户也会这么说，放行 + 交给输出过滤；
+    None  = 正常请求。
+
+    这是第一道门，不是安全边界：真正兜底的是工具鉴权与输出过滤，所以宁可少拒。
+    """
+    s = _normalize(text or "")
+    if not s:
+        return None
+    if _OVERRIDE.search(s):
+        return "block"
+    if _EXTRACT_VERB.search(s) and _INTERNAL_TARGET.search(s):
+        return "block"
+    if _FORMAT_SWITCH.search(s):
+        return "soft"
+    return None
+
+
+def looks_like_extraction(text: str) -> bool:
+    """是否明确在索要内部配置（只有 block 档算）。"""
+    return classify(text) == "block"
+
+
+class LeakDetected(Exception):
+    """流式输出里检测到泄露，调用方应停止透传并替换为 REFUSAL_TEXT。"""
+
+
+class StreamGuard:
+    """无缓冲的逐帧检查器（兼容旧调用方）：命中泄露就抛 ``LeakDetected``。
+
+    定位是"万一模型开始吐了，就在第一个确定性信号出现的位置掐断"：只保留最近
+    ``_SHORT_WINDOW`` 个字符做窗口匹配，不扣留输出。新代码请优先用
+    :class:`LeakFilter`——它多一层 holdback，能在指纹成形前就不发字符。
+    """
+
+    __slots__ = ("_buf",)
+
+    def __init__(self) -> None:
+        self._buf = ""
+
+    def feed(self, delta: str) -> str:
+        """吃一帧，原样返回；检测到泄露时抛 LeakDetected。"""
+        if not delta:
+            return ""
+        self._buf = (self._buf + delta)[-_SHORT_WINDOW:]
+        if find_leak(self._buf):
+            raise LeakDetected()
+        return delta
+
+
 # ==================== ① 输入拦截 ====================
 
 # 动作词：出现这些词说明用户在"要模型把某内容拿出来"，而不是在问功能。
@@ -474,6 +624,12 @@ def detect_prompt_extraction(text: str) -> tuple[str, str] | None:
     norm = _normalize(text)
     if not norm:
         return None
+    # 结构粗筛（原 leak_guard.classify）先跑：它的 block 档认的是"动作 + 目标"配对，
+    # 对 payload.tools / role-content 这类**没有中文机密词**的导出尤其重要。
+    # 只借它的 block 档；soft 档（格式转换）在这里不生效，仍交给下面的 _RULES
+    # 与意图分流判断，避免把"翻译成 JSON"这类真攻击放成良性。
+    if classify(text) == "block":
+        return "structural_export", INTENT_BLOCK
     for rule_id, pattern in _RULES:
         if pattern.search(norm):
             return rule_id, _classify_intent(norm)
@@ -840,6 +996,11 @@ class LeakFilter:
         soft 的 ``spans`` 保持**归一化坐标**，由调用方决定哪些段已经"定稿"
         （后面已经有非命中字符，不会再长成 dense）后再映射回原文。
         """
+        # 先跑确定性的结构/短指纹（<24 字，24 字窗口认不出）：
+        # 命中就是 hard，不必再走归一化与 shingle 统计。
+        structural = find_leak(self._raw_tail[-_SHORT_WINDOW:])
+        if structural:
+            return Severity.HARD, structural, (), [], "structural", 0
         norm, origin = _normalize_with_map(self._raw_tail)
         if len(norm) > _NORM_TAIL:
             norm = norm[-_NORM_TAIL:]
