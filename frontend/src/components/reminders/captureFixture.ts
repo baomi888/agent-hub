@@ -385,8 +385,12 @@ function readList(clause: string): TaskListKey {
 }
 
 function readPriority(clause: string): TaskPriority {
-  if (/重要|必须|急|马上|赶紧/.test(clause)) return 2;
-  if (/尽量|最好|有空/.test(clause)) return 1;
+  // 四档与后端一致：0 普通 / 1 日常 / 2 重要 / 3 紧急。
+  // 「急/马上/赶紧」和「必须/重要」要分开 —— 前者是"现在就得动"，
+  // 后者只是"别忘"，合成一档会让紧急那档永远选不到。
+  if (/马上|赶紧|急|立刻|今天就/.test(clause)) return 3;
+  if (/重要|必须|务必|一定/.test(clause)) return 2;
+  if (/尽量|最好|有空|顺手/.test(clause)) return 1;
   return 0;
 }
 

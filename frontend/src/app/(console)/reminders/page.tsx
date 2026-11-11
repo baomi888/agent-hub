@@ -178,13 +178,29 @@ function taskMark(task: Pick<Task, "list_key" | "title" | "icon">): CornIconName
   return "corn";
 }
 
+/**
+ * 四档优先级。参考苹果提醒事项的做法：**用颜色分档，不用文字分档** ——
+ * 名字只在编辑面板里出现，列表上用一小段颜色表示「这件事有多急」。
+ *
+ * 0 普通是「没有标记」，所以它不取任何语义色：一旦给普通也上色，
+ * 四档就变成四种标签，满屏都是彩条，反而看不出哪条真的急。
+ */
 const PRIORITY_OPTIONS: { value: string; label: string }[] = [
   { value: "0", label: "普通" },
-  { value: "1", label: "重要" },
-  { value: "2", label: "紧急" },
+  { value: "1", label: "日常" },
+  { value: "2", label: "重要" },
+  { value: "3", label: "紧急" },
 ];
 
-const PRIORITY_LABEL: Record<number, string> = { 0: "普通", 1: "重要", 2: "紧急" };
+const PRIORITY_LABEL: Record<number, string> = { 0: "普通", 1: "日常", 2: "重要", 3: "紧急" };
+
+/** 编辑面板里的四颗色块：名字 + 色号（色号是 CSS 变量名，不写死颜色值） */
+const PRIORITY_PICKS: { value: TaskPriority; label: string }[] = [
+  { value: 0, label: "普通" },
+  { value: 1, label: "日常" },
+  { value: 2, label: "重要" },
+  { value: 3, label: "紧急" },
+];
 
 type Scope = "today" | "upcoming" | "all" | "completed";
 
@@ -704,6 +720,7 @@ function TaskCard({
   onDelete,
   onSnooze,
   onPick,
+  onStyle,
 }: {
   task: Task;
   now: number | null;
@@ -717,8 +734,12 @@ function TaskCard({
   onDelete: (task: Task) => void;
   onSnooze: (task: Task) => void;
   onPick: (task: Task) => void;
+  /** 就地改外观：图标与等级。写回后由上层 reload */
+  onStyle: (task: Task, patch: { icon?: string | null; priority?: TaskPriority }) => void;
 }) {
   const [open, setOpen] = useState(false);
+  // 图标面板与「⋯」菜单互斥：两个都开着会叠在同一个角落
+  const [styleOpen, setStyleOpen] = useState(false);
   const done = task.status === "done";
   // 选择模式下这一格表达的是「选中」，不是「完成」——所以视觉要换形状
   // （方形 vs 圆形），否则用户会把「勾选」当成「做完了」。
@@ -762,6 +783,7 @@ function TaskCard({
       data-off={dim || done ? "1" : undefined}
       data-flash={flash ? "1" : undefined}
       data-priority={task.priority || undefined}
+      data-done={done ? "1" : undefined}
       data-pick={pick ? "1" : undefined}
       data-picked={pick && picked ? "1" : undefined}
     >
@@ -793,10 +815,24 @@ function TaskCard({
 
       <div className="rem-main">
         <div className="rem-head">
-          {/* 装饰性：清单名在下面 meta 里已经写着，读屏不必再念一遍图标 */}
-          <span className="rem-mark" aria-hidden="true" data-mark={taskMark(task)}>
+          {/* 图标从"装饰"升级成按钮：主界面上就能换图标和等级，不必进抽屉。
+              点它开一个小面板（图标 12 个 + 等级 4 档），选完立刻写回。
+              ★ 多选模式下不响应：那一刻这一行只有一个动作（选中）。 */}
+          <button
+            type="button"
+            className="rem-markbtn"
+            data-mark={taskMark(task)}
+            aria-label={`改「${task.title}」的图标和等级`}
+            aria-expanded={pick ? undefined : styleOpen}
+            aria-haspopup={pick ? undefined : "dialog"}
+            disabled={pick}
+            onClick={() => {
+              setOpen(false);
+              setStyleOpen((v) => !v);
+            }}
+          >
             <CornIcon name={taskMark(task)} className="h-full w-full" />
-          </span>
+          </button>
           <button
             type="button"
             className="rem-title"
@@ -827,16 +863,29 @@ function TaskCard({
         </p>
       </div>
 
-      {/* 选择模式下收起「⋯」：这张卡此刻只有一种操作（选中），
-          多留一个菜单等于给误触多开一扇门 */}
-      {pick ? null : (
+      {/* 已完成的卡片：「⋯」换成一颗明确的「删除」。
+          这是勾完之后唯一的下一步 —— 收在菜单里等于让用户为了扔一张
+          已经划掉的卡，再点两下。取消完成仍然可以勾回去，所以不丢退路。 */}
+      {pick ? null : done ? (
+        <button
+          type="button"
+          className="rem-donebtn"
+          aria-label={`删除「${task.title}」`}
+          onClick={() => onDelete(task)}
+        >
+          <CornIcon name="trash" className="h-4 w-4" />
+        </button>
+      ) : (
         <button
           type="button"
           className="rem-morebtn"
           aria-expanded={open}
           aria-haspopup="menu"
           aria-label={`「${task.title}」的更多动作`}
-          onClick={() => setOpen((v) => !v)}
+          onClick={() => {
+            setStyleOpen(false);
+            setOpen((v) => !v);
+          }}
         >
           ⋯
         </button>
@@ -868,6 +917,74 @@ function TaskCard({
             >
               删除
             </button>
+          </div>
+        </>
+      ) : null}
+
+      {/* 外观面板：图标 + 等级。
+          为什么不拆成两个入口：这一行只有 390px，多做一颗按钮就得再挪一次
+          时间列；而「换个图标」和「标成紧急」在用户脑子里本来就是同一件事——
+          "这条看起来要不一样"。 */}
+      {styleOpen && !pick ? (
+        <>
+          <div
+            className="rem-scrim"
+            onClick={() => setStyleOpen(false)}
+            aria-hidden="true"
+          />
+          <div className="rem-stylepop" role="dialog" aria-label="图标与等级">
+            <p className="rem-stylepop-hd">图标</p>
+            <div className="rem-stylepop-icons">
+              {MARK_PICKS.map((p) => (
+                <button
+                  key={p.name}
+                  type="button"
+                  className="rem-iconbtn"
+                  data-on={task.icon === p.name ? "1" : "0"}
+                  aria-label={p.label}
+                  aria-pressed={task.icon === p.name}
+                  onClick={() => {
+                    setStyleOpen(false);
+                    onStyle(task, { icon: p.name });
+                  }}
+                >
+                  <CornIcon name={p.name} className="h-full w-full" />
+                </button>
+              ))}
+              {/* 「自动」：清掉自选，回到按清单和标题猜 */}
+              <button
+                type="button"
+                className="rem-iconbtn rem-iconbtn-auto"
+                data-on={!task.icon ? "1" : "0"}
+                aria-pressed={!task.icon}
+                onClick={() => {
+                  setStyleOpen(false);
+                  onStyle(task, { icon: null });
+                }}
+              >
+                自动
+              </button>
+            </div>
+            <p className="rem-stylepop-hd">等级</p>
+            <div className="rem-stylepop-levels">
+              {PRIORITY_PICKS.map((p) => (
+                <button
+                  key={p.value}
+                  type="button"
+                  className="rem-levelbtn"
+                  data-level={p.value}
+                  data-on={task.priority === p.value ? "1" : "0"}
+                  aria-pressed={task.priority === p.value}
+                  onClick={() => {
+                    setStyleOpen(false);
+                    onStyle(task, { priority: p.value });
+                  }}
+                >
+                  <i aria-hidden="true" />
+                  {p.label}
+                </button>
+              ))}
+            </div>
           </div>
         </>
       ) : null}
@@ -1814,6 +1931,9 @@ type Data = {
 
 const EMPTY_TASKS: Record<Scope, Task[]> = { today: [], upcoming: [], all: [], completed: [] };
 
+/** 稳定空数组：放进 useMemo 返回值里，避免每次渲染都给下游一个新引用 */
+const NO_TASKS: Task[] = [];
+
 export default function RemindersPage() {
   const { me } = useAuth();
   const authedId = me?.user?.id ?? null;
@@ -2072,6 +2192,27 @@ export default function RemindersPage() {
     return out;
   }, [tasks.today, groups.today]);
 
+  // ===== 今天勾掉的条目 =====
+  //
+  // 后端 complete() 之后 `status` 就是 done，`scope=today/all` 里立刻查不到它 ——
+  // 上一版前端干脆把卡片从列表里删掉，于是"点一下勾，卡片没了"。用户要的是
+  // 市面 To-Do 那种：勾上 → 划一道线留在原地 → 想扔再点删除。
+  //
+  // 所以这里把**今天完成的**捞回来，接到当前列表末尾（done 统一沉底）。
+  // 判据用 `completed_at` 而不是本地"刚点过"的集合：刷新、换设备、第二天早上
+  // 打开都还是对的，而内存集合一刷新就没了。
+  const doneToday = useMemo<Task[]>(() => {
+    if (now === null) return NO_TASKS;
+    const d = new Date(now);
+    d.setHours(0, 0, 0, 0);
+    const start = Math.floor(d.getTime() / 1000);
+    const end = start + 86_400;
+    return tasks.completed.filter(
+      (t) => t.completed_at !== null && t.completed_at >= start && t.completed_at < end
+    );
+  }, [tasks.completed, now]);
+
+
   // ===== 下一件 =====
   //
   // 「下一件」必须是**还没发生**的那一条：把上午 9 点已经过掉的条目顶在最上面，
@@ -2260,19 +2401,37 @@ export default function RemindersPage() {
    *
    * 先乐观更新（勾上立刻有反馈），失败再拉回真值并 toast ——
    * 等一次网络往返才出现勾，手感像卡住。
-   * 取消完成时如果提醒时间已经过去，后端不会重新启用，这里要说清楚，
-   * 而不是让用户以为「勾回来就还会响」。
+   *
+   * ★ 乐观更新**不再把卡片从列表里删掉**（上一版就是这么写的，
+   *   于是用户点一下勾，那条直接从眼前消失，看不到"做完了"这件事）。
+   *   现在只翻转它自己的 status，卡片留在原位、变成划线态；reload 之后
+   *   后端不再返回它，由 `doneToday`（今天完成的）把它接回列表末尾。
+   *   一套逻辑把"打完勾立刻可见"和"刷新后仍然可见"同时解决。
    */
   const toggleTask = useCallback(
     async (task: Task) => {
       const willDone = task.status !== "done";
+      const flip = (t: Task): Task =>
+        t.id !== task.id
+          ? t
+          : {
+              ...t,
+              status: willDone ? "done" : "open",
+              completed_at: willDone ? Math.floor(Date.now() / 1000) : null,
+            };
       setData((prev) =>
         prev
           ? {
               ...prev,
               tasks: {
-                ...prev.tasks,
-                [scope]: prev.tasks[scope].filter((t) => t.id !== task.id),
+                today: prev.tasks.today.map(flip),
+                upcoming: prev.tasks.upcoming.map(flip),
+                all: prev.tasks.all.map(flip),
+                // 取消完成要能从「已完成」里立刻消失；完成则不必在这里补，
+                // reload 会带回来（这里补会和 today 重复显示两次）
+                completed: willDone
+                  ? prev.tasks.completed
+                  : prev.tasks.completed.filter((t) => t.id !== task.id),
               },
             }
           : prev
@@ -2292,11 +2451,28 @@ export default function RemindersPage() {
         await reload();
       }
     },
-    [reload, scope, showToast]
+    [reload, showToast]
   );
 
-  const snoozeTask = useCallback(
-    async (task: Task) => {
+  /**
+   * 就地改外观（图标 / 等级）。
+   *
+   * 不做乐观更新：这两个字段的价值就在于"看得见的差别"，写回失败却先
+   * 变了色，用户会以为成功了。PATCH 只有一个字段，等一次往返不慢。
+   */
+  const patchStyle = useCallback(
+    async (task: Task, patch: { icon?: string | null; priority?: TaskPriority }) => {
+      try {
+        await api.tasks.patch(task.id, patch);
+        await reload();
+      } catch {
+        showToast("error", "没改成，稍后再试");
+      }
+    },
+    [reload, showToast]
+  );
+
+  const snoozeTask = useCallback(async (task: Task) => {
       // 待办的「推迟」= 把它的提醒时间往后挪 10 分钟（改的是同一个 linked reminder）
       const base = task.remind_at ?? Math.floor(Date.now() / 1000);
       try {
@@ -2643,22 +2819,25 @@ export default function RemindersPage() {
       onDelete={(t) => setPending({ kind: "task", task: t })}
       onSnooze={snoozeTask}
       onPick={togglePick}
+      onStyle={patchStyle}
     />
   );
 
   /** 空分组整段不渲染：三个「0 条」不提供任何信息，只占首屏 */
-  const group = (title: string, children: React.ReactNode[], suffix = "条") => {
+  /**
+   * 区里的小分段（「今天」「接下来 7 天」「更远」「今天完成」）。
+   * 只在区里不止一段时出现 —— 只有一段还加一行标题，等于把「待办」写两遍。
+   */
+  const subBlock = (title: string, children: React.ReactNode[]) => {
     if (children.length === 0) return null;
     return (
-      <section className="mt-4">
-        <h3 className="rem-grouphead">
+      <div className="rem-sub" key={title}>
+        <h3 className="rem-subhd">
           {title}
-          <span>
-            · {children.length} {suffix}
-          </span>
+          <span>· {children.length} 条</span>
         </h3>
         <div className="space-y-2">{children}</div>
-      </section>
+      </div>
     );
   };
 
@@ -2792,6 +2971,75 @@ export default function RemindersPage() {
       </button>
     ) : null;
 
+  // ===== 当前 tab 的两个区（待办 / 提醒）=====
+  //
+  // 每一段是一个小标题 + 若干条。段的顺序就是阅读顺序：
+  // 近的在前、远的在后、刚做完的垫底。
+  const taskBlocks: { title: string; items: Task[] }[] = (() => {
+    switch (scope) {
+      case "today":
+        return [{ title: "今天", items: tasks.today }];
+      case "upcoming":
+        return [
+          { title: "接下来 7 天", items: upcomingSplit.soon },
+          { title: "更远", items: upcomingSplit.later },
+        ];
+      case "completed":
+        return [{ title: "已完成", items: tasks.completed }];
+      default:
+        return [{ title: "全部", items: tasks.all }];
+    }
+  })();
+
+  // 今天完成的接在后面，单独一段。**不并进原来的段**：并进去就得重排时间顺序，
+  // 一条刚勾掉的卡片会插到两小时前的位置，用户会以为点错了。
+  const openIds = new Set(taskBlocks.flatMap((b) => b.items.map((t) => t.id)));
+  const doneTail = scope === "completed" ? NO_TASKS : doneToday.filter((t) => !openIds.has(t.id));
+
+  const remBlocks: { title: string; items: ReminderItem[] }[] = (() => {
+    switch (scope) {
+      case "today":
+        return [{ title: "今天", items: groups.today }];
+      case "upcoming":
+        return [
+          { title: "接下来 7 天", items: groups.soon },
+          { title: "更远", items: groups.later },
+        ];
+      case "completed":
+        return [];
+      default:
+        return [
+          { title: "定时提醒", items: groups.today.concat(groups.soon, groups.later) },
+          { title: "已结束", items: groups.ended },
+          { title: "已暂停", items: groups.paused },
+        ];
+    }
+  })();
+
+  const taskTotal = taskBlocks.reduce((n, b) => n + b.items.length, 0) + doneTail.length;
+  const remTotal = remBlocks.reduce((n, b) => n + b.items.length, 0);
+  const showTaskSub = taskBlocks.length + (doneTail.length > 0 ? 1 : 0) > 1;
+  const showRemSub = remBlocks.length > 1;
+
+  const taskEmpty =
+    scope === "today"
+      ? "今天没有待办。"
+      : scope === "upcoming"
+        ? "接下来还没有安排。"
+        : scope === "completed"
+          ? "还没有完成的待办。"
+          : "还没有待办。";
+  const remEmpty =
+    scope === "today"
+      ? "今天没有定时提醒。"
+      : scope === "upcoming"
+        ? "接下来没有定时提醒。"
+        : "还没有定时提醒。";
+
+  /** 今天两区全空时兜底：把最近要做的几条挪上来，别让首屏一片空白 */
+  const fallbackTasks =
+    scope === "today" && taskTotal === 0 && remTotal === 0 ? tasks.upcoming.slice(0, 3) : NO_TASKS;
+
   const listView = (
     <>
       <PushHealth status={data?.push ?? null} onOpen={() => setTab("settings")} />
@@ -2873,80 +3121,105 @@ export default function RemindersPage() {
 
       {sortSection}
 
-      {mode !== "sort" && scope === "today" ? (
-        <>
-          {/* 轴只为回答「忙在哪个时段、现在走到哪、还剩几条」，
-              卡片里已经有完整时间，所以轴上不重复标题。 */}
-          {axisEvents.length > 0 ? (
-            <div className="card rem-axiscard">
-              <TodayAxis
-                events={axisEvents}
-                now={now}
-                quietStart={prefs?.quiet_start}
-                quietEnd={prefs?.quiet_end}
-                onJump={jump}
-              />
+      {/* ===== 时间轴：不随 tab 变 =====
+          上一版只在「今天」这个 tab 渲染，切到「全部」整块消失，用户以为
+          时间轴没了。它表示的永远是**今天**，跟当前 tab 筛的是哪一批无关，
+          所以放在 tab 语义之外：任何 tab 都能看到「今天忙在哪个时段」。 */}
+      {mode !== "sort" ? (
+        <div className="card rem-axiscard">
+          <div className="rem-axis-hd">
+            <b>今天</b>
+            <span>
+              {axisEvents.length > 0 ? `${axisEvents.length} 个时间点` : "今天没有安排"}
+            </span>
+          </div>
+          <TodayAxis
+            events={axisEvents}
+            now={now}
+            quietStart={prefs?.quiet_start}
+            quietEnd={prefs?.quiet_end}
+            onJump={jump}
+          />
+        </div>
+      ) : null}
+
+      {/* ===== 待办区 =====
+          区域常驻，哪怕 0 条 —— 「这里是空的」和「这里没有这个区」是两件事，
+          上一版空分组 return null，用户在一屏里什么都找不到。 */}
+      {mode !== "sort" ? (
+        <section className="rem-sect" data-kind="task" aria-label="待办">
+          <div className="rem-sect-hd">
+            <h2 className="rem-sect-title">待办</h2>
+            <span className="rem-sect-n">{taskTotal} 条</span>
+          </div>
+          {showTaskSub ? (
+            taskBlocks.map((b) => subBlock(b.title, b.items.map(taskCard)))
+          ) : (
+            <div className="space-y-2">{taskBlocks[0]?.items.map(taskCard)}</div>
+          )}
+          {doneTail.length > 0 ? subBlock("今天完成", doneTail.map(taskCard)) : null}
+          {taskTotal === 0 && doneTail.length === 0 ? (
+            <div className="rem-sect-empty">
+              <p>{taskEmpty}</p>
+              {/* 今天一条都没有时，把最近要做的挪上来 —— 首屏全空会让人以为
+                  数据丢了，而"今天真没事"和"清单是空的"看起来一模一样 */}
+              {fallbackTasks.length > 0 ? (
+                <>
+                  <p className="rem-sect-hint">今天没有安排，这是接下来的：</p>
+                  <div className="space-y-2">{fallbackTasks.map(taskCard)}</div>
+                </>
+              ) : null}
             </div>
           ) : null}
-
-          {group("今天 · 待办", tasks.today.map(taskCard))}
-          {group("今天 · 定时提醒", groups.today.map(card))}
-
-          {countdown.length > 0 ? (
-            <section className="mt-4">
-              <h3 className="rem-grouphead">
-                倒计时
-                <span>· {countdown.length} 项</span>
-                <button type="button" className="rem-groupmore" onClick={() => setScope("upcoming")}>
-                  查看全部
-                </button>
-              </h3>
-              <div className="rem-count">
-                {countdown.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    className="rem-count-row"
-                    onClick={() => openTaskDrawer(t)}
-                  >
-                    <b>{t.due_at ? daysLeft(t.due_at, now ?? toMs(t.due_at)) : 0} 天</b>
-                    <span className="rem-count-title">{t.title}</span>
-                    <span className="rem-count-date">
-                      {t.due_at ? shortDay(t.due_at, now ?? toMs(t.due_at)) : ""}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </section>
-          ) : null}
-        </>
+        </section>
       ) : null}
 
-      {mode !== "sort" && scope === "upcoming" ? (
-        <>
-          {group("接下来 · 7 天", upcomingSplit.soon.map(taskCard))}
-          {group("更远", upcomingSplit.later.map(taskCard))}
-          {group("接下来 · 定时提醒", groups.soon.map(card))}
-          {group("更远 · 定时提醒", groups.later.map(card))}
-        </>
+      {/* ===== 提醒区 =====
+          「已完成」没有提醒：联动提醒没有完成态（勾掉它，来源那边照样来）。 */}
+      {mode !== "sort" && scope !== "completed" ? (
+        <section className="rem-sect" data-kind="rem" aria-label="定时提醒">
+          <div className="rem-sect-hd">
+            <h2 className="rem-sect-title">提醒</h2>
+            <span className="rem-sect-n">{remTotal} 条</span>
+          </div>
+          {remTotal === 0 ? (
+            <div className="rem-sect-empty">
+              <p>{remEmpty}</p>
+            </div>
+          ) : showRemSub ? (
+            remBlocks.map((b) => subBlock(b.title, b.items.map(card)))
+          ) : (
+            <div className="space-y-2">{remBlocks[0]?.items.map(card)}</div>
+          )}
+        </section>
       ) : null}
 
-      {mode !== "sort" && scope === "all" ? (
-        <>
-          {group("全部 · 待办", tasks.all.map(taskCard))}
-          {group("定时提醒", groups.today.concat(groups.soon, groups.later).map(card))}
-          {group("已结束", groups.ended.map(card))}
-          {group("已暂停", groups.paused.map(card))}
-        </>
-      ) : null}
-
-      {mode !== "sort" && scope === "completed" ? (
-        <>
-          {group("已完成 · 待办", tasks.completed.map(taskCard))}
-          {tasks.completed.length === 0 ? (
-            <p className="rem-emptyline">还没有完成的待办。</p>
-          ) : null}
-        </>
+      {mode !== "sort" && scope === "today" && countdown.length > 0 ? (
+        <section className="mt-4">
+          <h3 className="rem-grouphead">
+            倒计时
+            <span>· {countdown.length} 项</span>
+            <button type="button" className="rem-groupmore" onClick={() => setScope("upcoming")}>
+              查看全部
+            </button>
+          </h3>
+          <div className="rem-count">
+            {countdown.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className="rem-count-row"
+                onClick={() => openTaskDrawer(t)}
+              >
+                <b>{t.due_at ? daysLeft(t.due_at, now ?? toMs(t.due_at)) : 0} 天</b>
+                <span className="rem-count-title">{t.title}</span>
+                <span className="rem-count-date">
+                  {t.due_at ? shortDay(t.due_at, now ?? toMs(t.due_at)) : ""}
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
       ) : null}
 
       {/* 只响一次、没有「完成」可言的重复提醒（每天 22:00 复盘）仍然是提醒，

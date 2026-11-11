@@ -73,7 +73,13 @@ BULK_ACTIONS = ("complete", "reopen", "delete", "move")
 # 一次批量最多处理多少条。200 是 list 的上限，保持"选中范围 ⊆ 一屏能看到的范围"。
 MAX_BULK = 200
 
-_SCHEMA = """
+# 优先级四档：0 普通 / 1 日常 / 2 重要 / 3 紧急。
+# ★ 这是**有序**值，不是标签集合：ORDER BY priority DESC 直接靠它排序，
+#   所以任何改动都要连着迁移数据一起做（见 `_widen_priority`）。
+PRIORITY_LABELS = {0: "普通", 1: "日常", 2: "重要", 3: "紧急"}
+PRIORITY_MAX = max(PRIORITY_LABELS)
+
+_TABLE = """
 CREATE TABLE IF NOT EXISTS tasks (
     id            TEXT PRIMARY KEY,
     owner_id      TEXT NOT NULL,
@@ -81,7 +87,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     note          TEXT,
     list_key      TEXT NOT NULL DEFAULT 'inbox',
     icon          TEXT,
-    priority      INTEGER NOT NULL DEFAULT 0 CHECK (priority IN (0, 1, 2)),
+    priority      INTEGER NOT NULL DEFAULT 0 CHECK (priority IN (0, 1, 2, 3)),
     status        TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'done')),
     due_at        INTEGER,
     remind_at     INTEGER,
@@ -92,10 +98,21 @@ CREATE TABLE IF NOT EXISTS tasks (
     created_at    INTEGER NOT NULL,
     updated_at    INTEGER NOT NULL
 );
+"""
+
+# 索引单独一段：重建表时要先把旧索引连同旧表一起清掉，再按这里补回来。
+# 混在 `_TABLE` 里会让 `CREATE INDEX IF NOT EXISTS` 因为**旧索引名字还占着**
+# 而静默跳过，最后 DROP 旧表把索引一起带走 —— 表没了索引，查询全表扫。
+_INDEXES = """
 CREATE INDEX IF NOT EXISTS idx_tasks_owner_status_due ON tasks(owner_id, status, due_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_owner_remind ON tasks(owner_id, remind_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_owner_created ON tasks(owner_id, created_at DESC);
 """
+
+_SCHEMA = _TABLE + _INDEXES
+
+# 老库的 CHECK 旧约束。命中就说明三档时代建的库，要整表重建。
+_LEGACY_PRIORITY_CHECK = "priority IN (0, 1, 2)"
 
 
 class TaskInvalid(ValueError):
@@ -133,7 +150,50 @@ def ensure() -> None:
         cols = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)")}
         if "icon" not in cols:
             conn.execute("ALTER TABLE tasks ADD COLUMN icon TEXT")
+        _widen_priority(conn)
     _READY.add(path)
+
+
+def _widen_priority(conn) -> None:
+    """把三档优先级的库升到四档。
+
+    SQLite **不能 ALTER 一条 CHECK 约束**（`ALTER TABLE ... DROP CONSTRAINT` 不存在），
+    唯一的办法是整表重建：改名 → 建新表 → 搬数据 → 删旧表 → 补索引。
+    不做这件事的后果不是报错而是「静默降级」：新值 3 写进去会撞 CHECK，
+    表现为用户选了「紧急」却存成别的，或者整条 PATCH 500。
+
+    ★ 旧值要**平移**而不是原样搬：老库里 1=重要 2=紧急，新序里 1=日常、2=重要。
+      原样搬会让每一条「紧急」悄悄降成「重要」、每一条「重要」降成「日常」。
+      0 和 3 之后的语义没变，所以只动 1、2 两档。
+
+    ★ 幂等：判据是 `sqlite_master.sql` 里还写着旧 CHECK。重建完这句话就没了，
+      下次启动直接跳过；`_READY` 缓存只是省事，不是正确性依赖。
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'"
+    ).fetchone()
+    if row is None or _LEGACY_PRIORITY_CHECK not in str(row["sql"]):
+        return
+    conn.executescript(
+        f"""
+        ALTER TABLE tasks RENAME TO tasks_priority_old;
+        DROP INDEX IF EXISTS idx_tasks_owner_status_due;
+        DROP INDEX IF EXISTS idx_tasks_owner_remind;
+        DROP INDEX IF EXISTS idx_tasks_owner_created;
+        {_TABLE}
+        INSERT INTO tasks
+            (id, owner_id, title, note, list_key, icon, priority, status,
+             due_at, remind_at, completed_at, recurrence, parent_id, sort_order,
+             created_at, updated_at)
+        SELECT id, owner_id, title, note, list_key, icon,
+               CASE priority WHEN 1 THEN 2 WHEN 2 THEN 3 ELSE priority END,
+               status, due_at, remind_at, completed_at, recurrence, parent_id,
+               sort_order, created_at, updated_at
+          FROM tasks_priority_old;
+        DROP TABLE tasks_priority_old;
+        {_INDEXES}
+        """
+    )
 
 
 def _new_id() -> str:
@@ -188,9 +248,9 @@ def _priority(value: Any) -> int:
     try:
         p = int(value or 0)
     except (TypeError, ValueError):
-        raise TaskInvalid("优先级只能是 0 / 1 / 2") from None
-    if p not in (0, 1, 2):
-        raise TaskInvalid("优先级只能是 0 / 1 / 2")
+        raise TaskInvalid("优先级只能是 0 / 1 / 2 / 3") from None
+    if p not in PRIORITY_LABELS:
+        raise TaskInvalid("优先级只能是 0 / 1 / 2 / 3")
     return p
 
 

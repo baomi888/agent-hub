@@ -616,3 +616,95 @@ class TestReminderBoundary:
         linked = _linked(task["id"])
         assert linked["enabled"] is False
         assert linked["next_fire_at"] is None
+
+
+class TestPriorityWidening:
+    """三档优先级的库升到四档（2026-11-11）。
+
+    SQLite 不能 ALTER 一条 CHECK 约束，只能整表重建。两件事都是**静默**失败：
+      - 不重建：写 3 撞 CHECK，用户选了「紧急」保存不上；
+      - 重建但原样搬：老的 1=重要 悄悄降成「日常」、2=紧急 降成「重要」。
+    还有一件更隐蔽的：先改名再建表时，旧索引的名字还占着，
+    `CREATE INDEX IF NOT EXISTS` 会静默跳过，最后 DROP 旧表把索引一起带走。
+    """
+
+    _LEGACY = """
+    CREATE TABLE tasks (
+        id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, title TEXT NOT NULL, note TEXT,
+        list_key TEXT NOT NULL DEFAULT 'inbox', icon TEXT,
+        priority INTEGER NOT NULL DEFAULT 0 CHECK (priority IN (0, 1, 2)),
+        status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'done')),
+        due_at INTEGER, remind_at INTEGER, completed_at INTEGER,
+        recurrence TEXT NOT NULL DEFAULT 'none', parent_id TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX idx_tasks_owner_status_due ON tasks(owner_id, status, due_at);
+    INSERT INTO tasks VALUES ('a', 'u1', '普通', NULL, 'inbox', NULL, 0, 'open',
+                              NULL, NULL, NULL, 'none', NULL, 0, 1, 1);
+    INSERT INTO tasks VALUES ('b', 'u1', '重要', NULL, 'inbox', NULL, 1, 'open',
+                              NULL, NULL, NULL, 'none', NULL, 0, 1, 1);
+    INSERT INTO tasks VALUES ('c', 'u1', '紧急', NULL, 'inbox', NULL, 2, 'done',
+                              NULL, NULL, 1, 'none', NULL, 0, 1, 1);
+    """
+
+    def test_levels_are_shifted_not_moved_as_is(self, tmp_path, monkeypatch):
+        import sqlite3
+
+        path = tmp_path / "legacy.db"
+        conn = sqlite3.connect(path)
+        conn.executescript(self._LEGACY)
+        conn.commit()
+        conn.close()
+
+        monkeypatch.setattr(session, "_db_path", lambda: path)
+        task_core.reset_cache()
+
+        got = {t["title"]: t["priority"] for t in task_core.list_tasks(OWNER, "all")}
+        assert got == {"普通": 0, "重要": 2}, "1 档没平移到 2（重要）"
+        assert task_core.get(OWNER, "c")["priority"] == 3, "2 档没平移到 3（紧急）"
+        # 4 档之后 3 必须写得进去
+        assert task_core.create(OWNER, _mk(priority=3))["priority"] == 3
+
+    def test_indexes_survive_the_rebuild(self, tmp_path, monkeypatch):
+        import sqlite3
+
+        path = tmp_path / "legacy.db"
+        conn = sqlite3.connect(path)
+        conn.executescript(self._LEGACY)
+        conn.commit()
+        conn.close()
+
+        monkeypatch.setattr(session, "_db_path", lambda: path)
+        task_core.reset_cache()
+        task_core.ensure()
+
+        conn = sqlite3.connect(path)
+        names = {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='tasks'"
+            )
+        }
+        conn.close()
+        assert {
+            "idx_tasks_owner_status_due",
+            "idx_tasks_owner_remind",
+            "idx_tasks_owner_created",
+        } <= names, "重建表把索引弄丢了，查询会退化成全表扫"
+
+    def test_migration_is_idempotent(self, tmp_path, monkeypatch):
+        """重启两次不能再搬一遍（那会把 2 一直往上推）。"""
+        import sqlite3
+
+        path = tmp_path / "legacy.db"
+        conn = sqlite3.connect(path)
+        conn.executescript(self._LEGACY)
+        conn.commit()
+        conn.close()
+
+        monkeypatch.setattr(session, "_db_path", lambda: path)
+        for _ in range(3):
+            task_core.reset_cache()
+            task_core.ensure()
+        assert task_core.get(OWNER, "b")["priority"] == 2

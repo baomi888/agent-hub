@@ -1198,8 +1198,8 @@ export interface ReminderFire {
 /** 清单键。**英文键落库**，中文只在这里映射 —— 改文案不该触发数据迁移 */
 export type TaskListKey = "inbox" | "course" | "homework" | "club" | "life" | "exam";
 
-/** 0 普通 / 1 重要 / 2 紧急 */
-export type TaskPriority = 0 | 1 | 2;
+/** 0 普通 / 1 日常 / 2 重要 / 3 紧急。**有序**：后端 ORDER BY priority DESC 靠它排 */
+export type TaskPriority = 0 | 1 | 2 | 3;
 
 export type TaskStatus = "open" | "done";
 

@@ -1914,6 +1914,103 @@ textarea.input {
   border-top: 1px solid var(--line);
 }
 
+/* ---------- 图标 / 等级面板（卡片上就地改）----------
+   与「⋯」菜单同一套定位：贴在卡片下沿、右对齐、带一层透明遮罩。
+   ★ 图标一律不给独立配色（会变调色盘）；颜色留给下面的等级 ——
+     同一张面板里只能有一个地方用颜色说话。 */
+.rem-stylepop {
+  position: absolute;
+  top: calc(100% - 2px);
+  right: 0;
+  z-index: 21;
+  width: min(304px, calc(100vw - 28px));
+  padding: var(--space-10);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-2);
+}
+.rem-stylepop-hd {
+  margin: 0 0 var(--space-6);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.rem-stylepop-hd + .rem-stylepop-hd,
+.rem-stylepop-levels {
+  margin-top: var(--space-10);
+}
+.rem-stylepop-icons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+}
+.rem-iconbtn {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  color: var(--text-2);
+  transition: var(--t-color);
+}
+.rem-iconbtn:hover {
+  border-color: var(--line-strong);
+  background: var(--fill-2);
+}
+.rem-iconbtn[data-on="1"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.rem-iconbtn > svg {
+  width: 20px;
+  height: 20px;
+}
+/* 「自动」是一颗字按钮：它不是第 13 个图标，而是"不用选" */
+.rem-iconbtn-auto {
+  width: auto;
+  padding: 0 var(--space-10);
+  font-size: var(--fs-xs);
+}
+.rem-stylepop-levels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+}
+.rem-levelbtn {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  gap: var(--space-6);
+  padding: 0 var(--space-10);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: var(--fs-md);
+  color: var(--text-2);
+  transition: var(--t-color);
+}
+.rem-levelbtn > i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+.rem-levelbtn[data-level="1"] > i {
+  background: var(--info);
+}
+.rem-levelbtn[data-level="2"] > i {
+  background: var(--accent);
+}
+.rem-levelbtn[data-level="3"] > i {
+  background: var(--red);
+}
+.rem-levelbtn[data-on="1"] {
+  border-color: var(--line-strong);
+  background: var(--step-2);
+  color: var(--text-1);
+}
+
 /* ---------- 一天的进度带 ----------
    一条有厚度的带子，从上往下三层：事件（实心墨点）／带子本体（已过金染 + 静默斜纹 +
    小时刻度）／刻度数字。上一版是一条 1px 细线加几个 7px 空心圆，970px 宽的卡里
@@ -2555,9 +2652,76 @@ textarea.input {
 .rem-task .rem-morebtn {
   grid-column: 4;
 }
-/* 颜色只表达紧急（设计规范：不做来源配色） */
+/* 颜色只表达紧急程度（设计规范：不做来源配色）。四档里 **0 普通不着色** ——
+   一旦普通也上色，四档就变成四种标签，满屏彩条反而看不出哪条真的急。
+   取色：日常=信息蓝 / 重要=主金 / 紧急=语义红，全是既有 token，
+   深色主题跟着 tokens 一起变，不在这里写死色值。 */
+.rem-task[data-priority="1"] {
+  border-left: 2px solid var(--info);
+}
 .rem-task[data-priority="2"] {
+  border-left: 2px solid var(--accent);
+}
+.rem-task[data-priority="3"] {
   border-left: 2px solid var(--red);
+}
+
+/* 勾完之后这张卡**留在原地**：划一道线、淡下去，等用户决定删不删。
+   上一版是直接从列表里删掉，于是「做完了」这件事在界面上没有发生过。 */
+.rem-task[data-done="1"] {
+  opacity: 0.68;
+}
+.rem-task[data-done="1"] .rem-title {
+  text-decoration: line-through;
+  text-decoration-thickness: 1.5px;
+  text-decoration-color: var(--text-3);
+  color: var(--text-3);
+}
+.rem-task[data-done="1"] .rem-when {
+  color: var(--text-3);
+}
+
+/* 卡片上的图标从装饰升级成按钮：点它换图标 / 改等级。
+   视觉仍是 20px，热区撑到 44 高；宽度只给 34 —— 再宽就会把标题挤走，
+   而标题才是这一行的主角。 */
+.rem-markbtn {
+  flex: none;
+  display: grid;
+  width: 34px;
+  height: 44px;
+  margin-left: -7px;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  transition: var(--t-color);
+}
+.rem-markbtn:hover {
+  background: var(--fill-2);
+  color: var(--text-1);
+}
+.rem-markbtn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.rem-markbtn > svg {
+  width: 20px;
+  height: 20px;
+  opacity: 0.92;
+}
+
+/* 已完成卡片上的「删除」：勾完之后唯一的下一步，不再收进 ⋯ 菜单 */
+.rem-donebtn {
+  display: grid;
+  width: 34px;
+  height: 44px;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  transition: var(--t-color);
+}
+.rem-donebtn:hover {
+  background: var(--fill-2);
+  color: var(--red-ink);
 }
 .rem-check {
   display: grid;
@@ -2642,6 +2806,94 @@ textarea.input {
 }
 .rem-groupmore:hover {
   text-decoration: underline;
+}
+
+/* ---------- 两个区：待办 / 提醒 ----------
+   以前是「今天 · 待办」「今天 · 定时提醒」混排，空的那一组直接不渲染；
+   用户在「今天」看到一片空白，只能切到「全部」才确认自己的待办还在。
+   现在两个区**永远都在**（0 条也有一行说明），标题上带一个颜色小方块，
+   让「这一屏有两大类东西」一眼可见 —— 颜色只做区分，不做第二套语义。 */
+.rem-sect {
+  margin-top: var(--space-16);
+}
+.rem-sect-hd {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  margin-bottom: var(--space-8);
+  padding-bottom: var(--space-6);
+  border-bottom: 1px solid var(--line);
+}
+.rem-sect-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text-1);
+}
+.rem-sect-title::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+.rem-sect[data-kind="rem"] .rem-sect-title::before {
+  background: var(--info);
+  border-radius: 50%;
+}
+.rem-sect-n {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.rem-sect-empty {
+  padding: var(--space-10) 0 var(--space-4);
+  font-size: var(--fs-md);
+  color: var(--text-3);
+}
+.rem-sect-empty p {
+  margin: 0;
+}
+.rem-sect-hint {
+  margin-top: var(--space-10) !important;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.rem-sect-hint + div {
+  margin-top: var(--space-6);
+}
+/* 区内分段：比区标题小一档，且不画分隔线 —— 两层线会显得页面碎 */
+.rem-sub + .rem-sub {
+  margin-top: var(--space-12);
+}
+.rem-subhd {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  margin: 0 0 var(--space-6);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-3);
+}
+.rem-subhd > span {
+  font-weight: 400;
+}
+
+/* 轴卡上那行字：只说「这是今天」+「有几个时间点」，
+   不再重复 tab 名 —— 轴不随 tab 变，跟着 tab 命名会误导。 */
+.rem-axis-hd {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.rem-axis-hd b {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text-2);
 }
 
 /* ---------- 倒计时（task.due_at 的视图，不是第二套数据）----------

@@ -43,7 +43,8 @@ class TaskIn(BaseModel):
     # 图标名（对应前端 CornIcon 的 key）。null = 不指定，前端按清单自动挑。
     # 只做字符集校验，不枚举：展示层加图标不该被后端的白名单卡住。
     icon: str | None = Field(default=None, max_length=24)
-    priority: int = Field(default=0, ge=0, le=2)
+    # 四档：0 普通 / 1 日常 / 2 重要 / 3 紧急（上限跟 core.PRIORITY_MAX 对齐）
+    priority: int = Field(default=0, ge=0, le=task_core.PRIORITY_MAX)
     due_at: int | None = None
     remind_at: int | None = None
     # Phase 1 只接受 none；给非空值是 400 而不是静默忽略
@@ -58,7 +59,7 @@ class TaskPatch(BaseModel):
     note: str | None = Field(default=None, max_length=1000)
     list_key: str | None = None
     icon: str | None = Field(default=None, max_length=24)
-    priority: int | None = Field(default=None, ge=0, le=2)
+    priority: int | None = Field(default=None, ge=0, le=task_core.PRIORITY_MAX)
     due_at: int | None = None
     remind_at: int | None = None
     sort_order: int | None = Field(default=None, ge=0)

@@ -196,6 +196,40 @@ class TestIcon:
         assert items[0]["icon"] == "book"
 
 
+class TestPriorityLevels:
+    """四档优先级（2026-11-11）：0 普通 / 1 日常 / 2 重要 / 3 紧急。
+
+    扩档这件事有两个坑，都是**静默**的：
+      - 只改 Python 常量不改 CHECK：写 3 直接撞约束，PATCH 500；
+      - 只改 CHECK 不搬数据：老的 1=重要、2=紧急 会原地降级成「日常」「重要」。
+    所以下面既验「3 能进能出」，也验老库迁移后的档位。
+    """
+
+    def test_create_with_each_level(self, client):
+        for level in (0, 1, 2, 3):
+            task = _create(client, priority=level)
+            assert task["priority"] == level
+
+    def test_patch_between_levels(self, client):
+        task = _create(client, priority=0)
+        for level in (3, 1, 0):
+            res = client.patch(f"/api/tasks/{task['id']}", json={"priority": level})
+            assert res.status_code == 200
+            assert res.json()["priority"] == level
+
+    def test_rejects_out_of_range(self, client):
+        assert client.post("/api/tasks", json={"title": "x", "priority": 4}).status_code == 422
+        task = _create(client)
+        assert client.patch(f"/api/tasks/{task['id']}", json={"priority": 9}).status_code == 422
+
+    def test_urgent_sorts_first(self, client):
+        _create(client, title="普通", priority=0)
+        _create(client, title="紧急", priority=3)
+        _create(client, title="日常", priority=1)
+        titles = [i["title"] for i in client.get("/api/tasks?scope=all").json()["items"]]
+        assert titles == ["紧急", "日常", "普通"]
+
+
 class TestLifecycle:
     def test_complete_then_reopen(self, client):
         import time

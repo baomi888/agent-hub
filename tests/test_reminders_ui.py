@@ -720,9 +720,15 @@ class TestSortAndBulk:
         assert 'mode === "select" && picked.length > 0' in page
 
     def test_sort_mode_drops_the_unmovable_rows(self):
-        """排序模式只留可排序的待办：日程提醒的时刻由来源决定，拖了不会动。"""
+        """排序模式只留可排序的待办：日程提醒的时刻由来源决定，拖了不会动。
+
+        2026-11-11 改版后页面上只剩一个 `scope ===` 分支（提醒区排除「已完成」），
+        四个 tab 的内容由 `taskBlocks` / `remBlocks` 两张表决定。所以这条断言
+        改成钉「三块东西都受 mode 管」—— 轴、待办区、提醒区，漏掉任何一块，
+        进排序模式都会残留一堆拖不动的行。
+        """
         page = _page()
-        assert page.count('mode !== "sort" && scope ===') == 4, "四个 scope 有一个没被挡住"
+        assert page.count('mode !== "sort"') >= 3, "轴/待办区/提醒区有一个没被挡住"
         # 排序模式下不显示「下一件」和快速添加：正在挑行时多一个输入框会抢焦点
         assert 'scope !== "completed" && mode === "normal"' in page
 
@@ -770,18 +776,22 @@ class TestTaskMarks:
         seg = page[i : i + 260]
         assert 'if (task.list_key !== "inbox") return LIST_MARK[task.list_key]' in seg
 
-    def test_mark_is_decorative_but_list_name_stays(self):
-        """图标 aria-hidden，清单名仍在 meta 里 —— 读屏用户不能因此丢掉这句话。"""
+    def test_mark_is_a_button_but_list_name_stays(self):
+        """图标从装饰升级成按钮（2026-11-11）：读屏要念得出「改图标和等级」，
+        同时清单名仍留在 meta 里 —— 图标变得可点，不代表可以拿掉那句文字。"""
         page = _page()
         i = page.index('className="rem-head"')
-        assert 'aria-hidden="true"' in page[i : i + 600]
+        head = page[i : i + 900]
+        assert 'className="rem-markbtn"' in head
+        assert "aria-label={`改「${task.title}」的图标和等级`}" in head
+        assert 'aria-hidden="true"' not in head, "可点的按钮不能再对读屏隐身"
         assert "<b>{LIST_LABEL[task.list_key] ?? task.list_key}</b>" in page
 
     def test_mark_sits_between_checkbox_and_title(self):
         """位置固定在 checkbox 之后、标题之前：不占那格 44px 的完成热区。"""
         page = _page()
         check = page.index('className="rem-check"')
-        mark = page.index('className="rem-mark"', check)
+        mark = page.index('className="rem-markbtn"', check)
         title = page.index('className="rem-title"', mark)
         assert check < mark < title
 
@@ -2388,3 +2398,128 @@ class TestReminderAccessInTodo:
         for src in (nudge, todo):
             for bad in ("用日历", "系统日历里订阅", "日历也能提醒"):
                 assert bad not in src, f"还有指向已删功能的文案：{bad}"
+
+
+class TestTwoAreasAndTimeline:
+    """首页的「时间轴 + 待办区 + 提醒区」（2026-11-11）。
+
+    用户原话：在首页（有今天时间轴那一屏）看不到自己的待办和提醒，
+    必须切到「全部」才有；而且时间轴只在其中一个 tab 出现。
+    根因不是数据，是渲染：四个 scope 各写一套 JSX，空分组整段 return null，
+    轴只在 `scope === "today"` 里渲染。
+
+    这一组钉三件事，每一条都配过反证：
+      1) 轴不再挂任何一个 tab；
+      2) 两个区永远都在（0 条也留一行说明）；
+      3) 勾完的卡片不回列表里消失，而是划线留在原地。
+    """
+
+    def _seg(self, start: str, end: str, back: int = 420) -> str:
+        """从 `start` **往前多取一段**再截到 `end`。
+
+        轴那段的条件写在卡片前面（`{mode !== "sort" ? (`），只从
+        `card rem-axiscard` 开始截，正好把要断言的条件切在外面 —— 那样
+        「轴绑回某个 tab」也照样通过，等于没断言（本轮踩过）。
+        """
+        page = _page()
+        i = page.index(start)
+        j = page.index(end, i)
+        return page[max(0, i - back) : j]
+
+    def test_axis_is_not_tied_to_a_tab(self):
+        """轴表示的永远是「今天」，跟当前 tab 筛哪一批无关。
+
+        反证：把轴那段的条件改回 `mode !== "sort" && scope === "today"` → 变红。
+        """
+        seg = self._seg("card rem-axiscard", 'data-kind="task"')
+        assert 'mode !== "sort" ?' in seg
+        assert "scope ===" not in seg, "轴又绑回某个 tab 了，切 tab 就会整块消失"
+
+    def test_both_areas_always_render(self):
+        """空的时候给一行字，而不是整段不渲染。
+
+        反证：把 `remTotal === 0` 那个分支删掉（让空数组直接 map）→ 变红。
+        """
+        page = _page()
+        assert 'className="rem-sect" data-kind="task"' in page
+        assert 'className="rem-sect" data-kind="rem"' in page
+        # 空的分支要真的挂在「0 条」上，不能只是字符串还在文件里
+        assert "{remTotal === 0 ? (" in page
+        # 0 条时的那句话必须存在，否则空区就是一整片什么都没
+        assert "{taskEmpty}" in page and "{remEmpty}" in page
+        # 只有一段时走的是「不画分段标题」的分支 —— 那个分支**必须也渲染条目**，
+        # 否则「今天有 2 条、没有刚完成的」这种最常见的状态会整块空白。
+        # （本轮就踩了：只写了 showTaskSub 的三元，else 写了 null。）
+        assert "{taskBlocks[0]?.items.map(taskCard)}" in page
+        assert "{remBlocks[0]?.items.map(card)}" in page
+
+    def test_checked_task_is_not_pulled_out_of_the_list(self):
+        """勾选不能把卡片从列表里删掉 —— 这是本次改动最核心的一条。
+
+        旧写法 `[scope]: prev.tasks[scope].filter(...)` 会让卡片当场消失。
+        所以既断言「那句删卡代码不在 toggleTask 里」，也断言「它在原地翻转状态」。
+        反证：把 `.filter((t) => t.id !== task.id)` 塞回 toggleTask → 变红。
+        """
+        page = _page()
+        i = page.index("const toggleTask = useCallback")
+        block = page[i : page.index("const patchStyle", i)]
+        assert "prev.tasks[scope]" not in block, "勾选又把卡片从当前 tab 里删掉了"
+        assert "status: willDone ? \"done\" : \"open\"" in block
+        # 四个 scope 都要翻，漏一个就会出现「今天划掉了、全部里还在」
+        for scope in ("today", "upcoming", "all"):
+            assert f"{scope}: prev.tasks.{scope}.map(flip)" in block
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        done = _css_block(css, '.rem-task[data-done="1"] .rem-title {')
+        assert "line-through" in done
+
+    def test_done_tail_comes_from_completed_at_not_memory(self):
+        """「今天完成的」按 completed_at 捞，不靠内存里的「刚点过」。
+
+        内存集合一刷新就没了，而用户刷一下页面那条划线卡就消失，等于没改。
+        """
+        page = _page()
+        i = page.index("const doneToday")
+        seg = page[i : i + 700]
+        assert "tasks.completed.filter" in seg
+        assert "t.completed_at >= start" in seg
+
+    def test_done_card_has_an_explicit_delete_button(self):
+        """已完成的卡片上直接给「删除」，不再收进 ⋯ 菜单。
+
+        反证：把 done 分支删掉（让所有卡片都走 ⋯）→ 变红。
+        """
+        page = _page()
+        assert 'className="rem-donebtn"' in page
+        assert 'aria-label={`删除「${task.title}」`}' in page
+
+
+class TestPriorityLevels:
+    """四档优先级（2026-11-11）：普通 / 日常 / 重要 / 紧急。
+
+    苹果提醒事项的做法：等级靠颜色表达，名字只出现在编辑面板里。
+    这一组钉「档数」和「颜色只给等级，不给图标」两件事。
+    """
+
+    def test_four_levels_everywhere(self):
+        page = _page()
+        opts = page[page.index("const PRIORITY_OPTIONS") : page.index("const PRIORITY_OPTIONS") + 400]
+        for label in ("普通", "日常", "重要", "紧急"):
+            assert label in opts, f"少了一档：{label}"
+
+    def test_level_colors_are_on_the_card_edge(self):
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        for level, token in (("1", "--info"), ("2", "--accent"), ("3", "--red")):
+            block = _css_block(css, f'.rem-task[data-priority="{level}"] {{')
+            assert token in block, f"等级 {level} 的颜色没挂上 {token}"
+        # 0 普通不着色：四档都上色就变成四种标签，看不出哪条真急
+        assert '.rem-task[data-priority="0"]' not in css
+
+    def test_backend_and_frontend_agree_on_the_range(self):
+        """后端放宽到 3、前端类型是 0|1|2|3，两头必须一起改。"""
+        core = (ROOT / "core" / "task_core.py").read_text(encoding="utf-8")
+        api = (ROOT / "api" / "tasks.py").read_text(encoding="utf-8")
+        types = (ROOT / "frontend" / "src" / "lib" / "types.ts").read_text(encoding="utf-8")
+        assert "CHECK (priority IN (0, 1, 2, 3))" in core
+        assert "PRIORITY_LABELS = {0: \"普通\", 1: \"日常\", 2: \"重要\", 3: \"紧急\"}" in core
+        assert "le=task_core.PRIORITY_MAX" in api
+        assert "export type TaskPriority = 0 | 1 | 2 | 3;" in types

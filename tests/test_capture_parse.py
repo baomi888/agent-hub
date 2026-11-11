@@ -186,8 +186,11 @@ class TestValidation:
         assert items[0]["list_key"] == "inbox"
 
     def test_priority_clamped(self):
+        # 四档之后上限是 3（2026-11-11）。模型写 9 要夹到最高档，不是丢整条
         items, _ = _tighten([_item(priority=9)], "明天交高数作业")
-        assert items[0]["priority"] == 2
+        assert items[0]["priority"] == 3
+        items, _ = _tighten([_item(priority=-2)], "明天交高数作业")
+        assert items[0]["priority"] == 0
         items, _ = _tighten([_item(priority="高")], "明天交高数作业")
         assert items[0]["priority"] == 0
 

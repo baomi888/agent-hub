@@ -146,8 +146,9 @@ class RawItem(BaseModel):
     @field_validator("priority", mode="before")
     @classmethod
     def _prio_ok(cls, v: Any) -> int:
+        # 模型偶尔会写 9 或「高」。夹到 0..3 而不是丢整条：优先级错了是可改的小错。
         try:
-            return max(0, min(2, int(v)))
+            return max(0, min(3, int(v)))
         except (TypeError, ValueError):
             return 0
 
@@ -242,6 +243,7 @@ SYSTEM_PROMPT = """你在把用户随口说的一段话整理成待办和提醒�
 {"items": [{"kind": "task|reminder", "title": "...", "note": null,
   "list_key": "inbox|course|homework|club|life|exam 或 null",
   "priority": 0, "due_at": "YYYY-MM-DD HH:MM 或 null",
+  （priority 四档：0 普通 / 1 日常 / 2 重要 / 3 紧急。原话里没有明显语气就写 0）
   "remind_at": "YYYY-MM-DD HH:MM 或 null",
   "recurrence": {"freq": "once|daily|weekdays|weekly|interval", "at": "HH:MM 或 null",
                  "weekday": 0-6 或 null, "every_minutes": 60-1440 或 null,
