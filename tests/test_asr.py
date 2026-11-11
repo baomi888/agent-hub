@@ -70,6 +70,58 @@ class TestPayload:
         assert len(body["Data"]) != 104
         assert body["SourceType"] == 1 and body["VoiceFormat"] == "wav"
 
+    def test_hotwords_are_sent_and_well_formed(self):
+        """热词表是纠"四六级→四六吉"这类同音错字的唯一手段。
+
+        这里不只断言"传了"，还断言**格式合法**：腾讯云对单条热词有硬限制
+        （≤10 汉字、权重 1-11、逗号与竖线是分隔符）。格式错了服务端回
+        InvalidParameter，而那时候用户看到的是一句"语音没转成"，
+        根本查不到是热词表写坏了。
+
+        反证：把 `hotword_list()` 里的 `f"{word}|{weight}"` 改成只返回 word，
+        本用例在"每项必须带权重"那条上变红。
+        """
+        body = __import__("json").loads(asr.build_payload(b"RIFF"))
+        raw = body.get("HotwordList")
+        assert raw, "没有传热词表，等于放弃了纠错的唯一手段"
+
+        items = raw.split(",")
+        assert 0 < len(items) <= 128
+        for item in items:
+            word, sep, weight = item.partition("|")
+            assert sep == "|", f"热词缺少权重：{item}"
+            assert 0 < len(word) <= 10, f"热词超过 10 个字符：{word}"
+            assert 1 <= int(weight) <= 11, f"权重越界：{item}"
+            assert "," not in word and "|" not in word
+
+    def test_hotwords_cover_the_words_that_get_misheard(self):
+        """抽样钉几个真实会被听错的词。删掉它们就等于让"高数"继续变"高树"。
+
+        反证：从 `_DEFAULT_HOTWORDS` 里删掉 ("四六级", 9)，这里变红。
+        """
+        words = {w for w, _ in asr._DEFAULT_HOTWORDS}
+        for word in ("高数", "四六级", "教务系统", "实验报告", "提醒我"):
+            assert word in words, f"热词表少了「{word}」"
+
+    def test_env_hotwords_override_builtin(self, monkeypatch):
+        """运营补词不改代码。同名以内置表为准会被覆盖成新权重。"""
+        monkeypatch.setattr(config, "ASR_HOTWORDS", "量子力学|7,高数|10,坏词|99")
+        raw = asr.hotword_list()
+        assert "量子力学|7" in raw
+        assert "高数|10" in raw  # 覆盖内置的 9
+        assert "坏词" not in raw  # 权重越界，整条丢掉，而不是让服务端报参数错
+
+    def test_filter_modal_is_set_but_punctuation_is_kept(self):
+        """语气词要滤（"嗯、那个"会被模型当成正文拆出噪音条目），
+        标点**不能滤**："明天三点。交作业"里的句号是断句依据，
+        滤掉会让模型把两件事合成一条。
+
+        反证：在 build_payload 里加 `body["FilterPunc"] = 2`，本用例变红。
+        """
+        body = __import__("json").loads(asr.build_payload(b"RIFF"))
+        assert body.get("FilterModal") == 1
+        assert "FilterPunc" not in body
+
 
 # ==================== 失败分叉 ====================
 
@@ -183,11 +235,30 @@ def client(tmp_path, monkeypatch):
 class TestEndpoint:
     def test_capabilities_says_whether_mic_should_render(self, client, monkeypatch):
         """前端靠这个决定渲不渲染麦克风。没有密钥时说 true，界面就会出现
-        一个点了只弹"还没接"的按钮 —— 那正是"半成品"的来源。"""
+        一个点了只弹"还没接"的按钮 —— 那正是"半成品"的来源。
+
+        `stream` 必须**单独**为 false 而不是把 `voice` 一起拉下去：
+        只少了 APPID 时，语音功能本身还在（退回一句话识别），
+        麦克风要照常显示。等值断言而不是 `in`，就是防这个的。
+        """
         monkeypatch.setattr(config, "ASR_ENABLED", False)
-        assert client.get("/api/capture/capabilities").json() == {"voice": False}
+        monkeypatch.setattr(config, "ASR_STREAM_ENABLED", False)
+        assert client.get("/api/capture/capabilities").json() == {
+            "voice": False,
+            "stream": False,
+        }
+        # 有密钥、没 APPID：能说话，但不能边说边出字
         monkeypatch.setattr(config, "ASR_ENABLED", True)
-        assert client.get("/api/capture/capabilities").json() == {"voice": True}
+        assert client.get("/api/capture/capabilities").json() == {
+            "voice": True,
+            "stream": False,
+        }
+        # 三项齐全：两条路都通
+        monkeypatch.setattr(config, "ASR_STREAM_ENABLED", True)
+        assert client.get("/api/capture/capabilities").json() == {
+            "voice": True,
+            "stream": True,
+        }
 
     def test_disabled_returns_503(self, client, monkeypatch):
         monkeypatch.setattr(config, "ASR_ENABLED", False)

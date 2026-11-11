@@ -36,6 +36,120 @@ _VERSION = "2019-06-14"
 _ACTION = "SentenceRecognition"
 _TIMEOUT = 20.0
 
+# ---------------------------------------------------------------------------
+# 临时热词表（HotwordList）
+#
+# 为什么需要：一句话识别是通用中文模型，`高数 / 四六级 / 教务系统 / 大创`
+# 这类校园高频词不在它的通用语料里，识别结果经常同音替换（"四六级"→"四六吉"、
+# "高数"→"高树"）。热词表是腾讯云给的唯一不改模型就能纠这些词的手段。
+#
+# 权重规则（官方文档）：
+#   · 1-11，11 是"超级热词"；**设多了会拉低整体字准率**，所以这里最高 9。
+#   · 100 是"同音强制替换"，只在必须纠正的音近词上用，本表不用。
+#   · 单个热词 ≤10 个汉字，整表 ≤128 个。
+#
+# 只放"说错了会明显看不懂"的词。像"复习""作业"这种通用词不放：
+# 它们本来就是模型的强项，设成热词只会把相邻的词挤掉。
+# ---------------------------------------------------------------------------
+_DEFAULT_HOTWORDS: tuple[tuple[str, int], ...] = (
+    # 产品自身
+    ("知穗", 9),
+    ("每日委托", 7),
+    ("学习路径", 6),
+    # 课程与学业
+    ("高数", 9),
+    ("线性代数", 8),
+    ("概率论", 8),
+    ("大物", 7),
+    ("形势与政策", 9),
+    ("英语听力", 6),
+    ("绩点", 7),
+    ("综测", 7),
+    ("学分", 6),
+    ("期末", 6),
+    ("补考", 7),
+    ("缓考", 7),
+    # 考试
+    ("四六级", 9),
+    ("四级", 8),
+    ("六级", 8),
+    ("考研", 7),
+    ("保研", 7),
+    ("背单词", 6),
+    ("真题", 6),
+    # 校园事务
+    ("选课", 7),
+    ("抢课", 7),
+    ("教务系统", 8),
+    ("体测", 7),
+    ("志愿时长", 7),
+    ("辅导员", 7),
+    ("社团", 5),
+    ("班群", 5),
+    # 交付物（这些是"说错一个字就看不懂"的词）
+    ("实验报告", 7),
+    ("课程设计", 7),
+    ("文献综述", 6),
+    ("开题报告", 7),
+    ("实习报告", 6),
+    ("答辩", 6),
+    ("组会", 6),
+    ("大创", 6),
+    ("挑战杯", 6),
+    # 生活
+    ("快递", 5),
+    ("食堂", 4),
+    ("宿舍", 5),
+    # 动作词：整句话的意图全靠它们，听错就等于没听懂
+    ("提醒我", 6),
+    ("待办", 6),
+    ("打卡", 5),
+    ("番茄钟", 6),
+    # 中英混说
+    ("DDL", 6),
+    ("PPT", 5),
+)
+
+_MAX_HOTWORDS = 128
+_MAX_HOTWORD_CHARS = 10
+
+
+def _hotword_ok(word: str, weight: int) -> bool:
+    """单条热词是否合法。非法条目直接跳过 —— 一个脏词不该让整次转写失败。"""
+    if not word or len(word) > _MAX_HOTWORD_CHARS:
+        return False
+    # 逗号和竖线是分隔符，出现在词里会把整张表拆坏
+    return "," not in word and "|" not in word and 1 <= weight <= 11
+
+
+def hotword_list() -> str:
+    """拼成腾讯云要的 `词|权重,词|权重`。
+
+    `config.ASR_HOTWORDS` 里的词排在内置表**之后**并覆盖同名项：
+    运营补词不用改代码，而内置表保证开箱就有校园词。
+    """
+    merged: dict[str, int] = {}
+    for word, weight in _DEFAULT_HOTWORDS:
+        if _hotword_ok(word, weight):
+            merged[word] = weight
+
+    for chunk in (config.ASR_HOTWORDS or "").split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        word, _, weight_text = chunk.partition("|")
+        try:
+            weight = int(weight_text) if weight_text else 5
+        except ValueError:
+            continue
+        word = word.strip()
+        if _hotword_ok(word, weight):
+            merged[word] = weight
+
+    items = list(merged.items())[:_MAX_HOTWORDS]
+    return ",".join(f"{word}|{weight}" for word, weight in items)
+
+
 # 腾讯云的错误码 → 用户能懂、且指向下一步的话。
 # 不把 code 直接抛给用户：`FailedOperation.ErrorRecognize` 对一个想记待办的人没有意义。
 _CODES = {
@@ -101,18 +215,32 @@ def authorization(secret_id: str, secret_key: str, payload: str, timestamp: int)
 
 def build_payload(audio: bytes, fmt: str = "wav") -> str:
     """请求体。`DataLen` 是**原始字节数**，不是 base64 之后的长度 ——
-    填错的话服务端按"数据不完整"回 ErrorRecognize，看起来像录音有问题。"""
-    return json.dumps(
-        {
-            "EngSerViceType": config.ASR_ENGINE,
-            "SourceType": 1,
-            "VoiceFormat": fmt,
-            "Data": base64.b64encode(audio).decode("ascii"),
-            "DataLen": len(audio),
-            "ProjectId": 0,
-        },
-        ensure_ascii=False,
-    )
+    填错的话服务端按"数据不完整"回 ErrorRecognize，看起来像录音有问题。
+
+    除了必填项，只传两个"非默认"参数：
+    - `HotwordList`：校园热词，纠同音错字（见 `_DEFAULT_HOTWORDS`）
+    - `FilterModal`：过滤"嗯/啊/那个"，避免语气词被当成正文
+
+    `FilterPunc` 保持默认 0（**保留标点**）：整理待办时"明天下午三点。交高数作业"
+    这个句号是模型断句的依据，滤掉反而会让它把两件事合成一条。
+    `ConvertNumMode` 默认就是 1（中文数字转阿拉伯），不重复传。
+    """
+    body: dict[str, object] = {
+        "EngSerViceType": config.ASR_ENGINE,
+        "SourceType": 1,
+        "VoiceFormat": fmt,
+        "Data": base64.b64encode(audio).decode("ascii"),
+        "DataLen": len(audio),
+        "ProjectId": 0,
+    }
+
+    words = hotword_list()
+    if words:
+        body["HotwordList"] = words
+    if 0 < config.ASR_FILTER_MODAL <= 2:
+        body["FilterModal"] = config.ASR_FILTER_MODAL
+
+    return json.dumps(body, ensure_ascii=False)
 
 
 def _explain(code: str) -> str:

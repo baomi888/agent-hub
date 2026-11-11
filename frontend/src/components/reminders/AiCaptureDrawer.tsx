@@ -82,6 +82,10 @@ function clock(sec: number): string {
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
 }
 
+/** 语音全屏态底部那条波形的柱子数。
+ *  40 根在 390px 屏上每根约 4px（含间距），既看得出起伏，又不会糊成一块。 */
+const WAVE_BARS = 40;
+
 /**
  * Phase A 的演示缝（**Phase B 接后端后整块删除**）。
  *
@@ -466,8 +470,40 @@ export default function AiCaptureDrawer({
   const [fixErr, setFixErr] = useState("");
   /** 语音输入接没接（后端 ASR 有没有配密钥）。没接就**不渲染**麦克风 */
   const [voiceOn, setVoiceOn] = useState(false);
+  /**
+   * 后端支不支持**边说边出字**。
+   *
+   * 它和 `voiceOn` 是两件事：没有 APPID 时 `voiceOn=true, streamOn=false`，
+   * 麦克风照样要显示（退回去用一句话识别），只是字要等说完才出来。
+   * 把它们合成一个开关，会让"少配一个 APPID"在用户看来是"语音坏了"。
+   */
+  const [streamOn, setStreamOn] = useState(false);
+  /** 流式：已经定型（`slice_type=2`）的句子，按说出顺序排 */
+  const [streamDone, setStreamDone] = useState<string[]>([]);
+  /** 流式：正在说的这句，还会变。**整句替换**，不是增量 */
+  const [streamLive, setStreamLive] = useState("");
+  /** 这一次语音走的是不是流式。决定收尾时要不要再播一遍打字机 */
+  const streamedRef = useRef(false);
   /** 语音失败的一句话。空串 = 没出错 */
   const [voiceErr, setVoiceErr] = useState("");
+
+  /**
+   * 语音全屏态。录音、转写、逐字上屏三个阶段都发生在这一层里。
+   *
+   * 为什么单独一层而不是在底栏里滚字：参考 TimeMind 的形态 —— 说话时整屏
+   * 只做一件事，字要大到自己能看清有没有说错。底栏那 40px 的输入框里逐字跳，
+   * 字号被挤在 16px，看三个字就看不下了。
+   */
+  const [liveOpen, setLiveOpen] = useState(false);
+  /** 转写回来的原话。空串 = 还没结果（还在录或在转） */
+  const [liveScript, setLiveScript] = useState("");
+  /** 打字机已经显示到第几个字。**不用 CSS animation**：文字长度不定，
+      长度得逐帧算，交给 JS 反而简单，而且 reduced-motion 时能直接跳到末尾 */
+  const [liveShown, setLiveShown] = useState(0);
+  /** 波形柱（左旧右新）。只在录音时有值，停下就归零 */
+  const [wave, setWave] = useState<number[]>(() => new Array(WAVE_BARS).fill(0));
+  /** 语音 + 先打的字合并后的全文。自动整理提交的是它，不是单看语音那半句 */
+  const liveFullRef = useRef("");
 
   const rootRef = useRef<HTMLDivElement | null>(null);
   /** 写库的同步锁。state 要等下一次渲染才生效，连续两次点击挡不住 —— 只有 ref 是立即的 */
@@ -484,7 +520,9 @@ export default function AiCaptureDrawer({
     api.capture
       .capabilities()
       .then((c) => {
-        if (alive) setVoiceOn(Boolean(c.voice));
+        if (!alive) return;
+        setVoiceOn(Boolean(c.voice));
+        setStreamOn(Boolean(c.stream));
       })
       .catch(() => {});
     return () => {
@@ -493,13 +531,55 @@ export default function AiCaptureDrawer({
   }, []);
 
   const voice = useVoiceInput({
-    onText: (text) => {
-      // 追加而不是覆盖：用户可能先打了一半，再改用说的
-      setText((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
+    streaming: streamOn,
+    onText: (said) => {
+      // 追加而不是覆盖：用户可能先打了一半，再改用说的。
+      // ★ 必须在这里算好合并结果并存进 ref：自动整理发生在 effect 里，
+      //   那时候读到的 `text` 还是录音开始前那一版的闭包值，
+      //   直接用就会把先打的那半句丢掉。
+      const merged = text.trim() ? `${text.trim()} ${said}` : said;
+      setText(merged);
+      liveFullRef.current = merged;
       setVoiceErr("");
-      inputRef.current?.focus();
+      // 不立刻关全屏层：转写结果要在这一层里**逐字上屏**，
+      // 用户才看得清 AI 听成了什么。关层放在打字机播完之后。
+      setLiveScript(said);
+      if (streamedRef.current) {
+        // 流式下这些字已经在屏幕上逐条出现过了。再播一遍打字机等于
+        // 让用户把同一段话看两次，而且会多等 620ms 才开整理。
+        setLiveShown(said.length);
+      } else {
+        // 关掉动效偏好的人不该等一段"打字动画"：直接给全文，620ms 后照样自动整理
+        setLiveShown(
+          typeof window !== "undefined" &&
+            window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+            ? said.length
+            : 0
+        );
+      }
+      // 不聚焦输入框：手机上聚焦会立刻把键盘顶起来，正好盖住刚上屏的字。
+      // 要手改的话，整理完之后点「修改原话」会自己聚焦。
     },
-    onError: setVoiceErr,
+    onError: (msg) => {
+      setVoiceErr(msg);
+      // 出错必须退出全屏：那层没有输入框，留在里面用户只能取消重来
+      setLiveOpen(false);
+    },
+    onFrame: (frame) => {
+      if (frame.type === "segment") {
+        setStreamDone((prev) => [...prev, frame.text]);
+        setStreamLive("");
+        return;
+      }
+      if (frame.type === "partial") {
+        // 整句替换：上游给的是"这句到目前为止的全文"，拼接会得到叠字
+        setStreamLive(frame.text);
+        return;
+      }
+      if (frame.type === "done") {
+        streamedRef.current = true;
+      }
+    },
   });
 
   /**
@@ -527,6 +607,14 @@ export default function AiCaptureDrawer({
     closeRef.current = onClose;
   }, [onClose]);
 
+  /**
+   * 全屏语音态开着时，Esc 只取消录音，不关整个抽屉。
+   *
+   * 用 ref 而不是 state：这个 keydown 的 effect 只挂一次，读 state 会拿到
+   * 挂载那一刻的旧值（永远是 false）。ref 每次渲染被重新赋值，读到的是最新的。
+   */
+  const liveEscRef = useRef<(() => void) | null>(null);
+
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     inputRef.current?.focus();
@@ -541,6 +629,11 @@ export default function AiCaptureDrawer({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
+        const leaveLive = liveEscRef.current;
+        if (leaveLive) {
+          leaveLive();
+          return;
+        }
         closeRef.current();
         return;
       }
@@ -641,6 +734,81 @@ export default function AiCaptureDrawer({
     setCommitting(false);
     window.setTimeout(() => inputRef.current?.focus(), 0);
   };
+
+  // ---------- 语音全屏态：波形 / 打字机 / 自动整理 ----------
+
+  /** 取消这次录音：麦克风停掉、层收起、不提交任何东西 */
+  /**
+   * 清空全屏语音层的临时状态。
+   *
+   * 开始录音和取消录音都调它。两边各写一遍的代价不是啰嗦，是**漏字段** ——
+   * 漏掉 `streamDone` 的症状是上一次说的话被带进这一次，而界面看起来
+   * 一切正常（那些字确实在屏幕上）。
+   */
+  const clearLive = () => {
+    setLiveScript("");
+    setLiveShown(0);
+    setWave(new Array(WAVE_BARS).fill(0));
+    setStreamDone([]);
+    setStreamLive("");
+    streamedRef.current = false;
+  };
+
+  const cancelLive = () => {
+    voice.cancel();
+    setLiveOpen(false);
+    clearLive();
+    // 取消 = 这句不算。不清的话，下次录音会把上一次的内容一起提交
+    liveFullRef.current = "";
+  };
+
+  // Esc 要分两层：全屏语音态开着时，Esc 只取消录音，不关整个抽屉
+  // （用户按 Esc 的意思是"这句不算"，不是"退出整理"）。
+  liveEscRef.current = liveOpen ? cancelLive : null;
+
+  // 波形电平走 ref：level 每 70ms 变一次，直接进依赖数组会让 interval
+  // 每 70ms 重建一次，柱子会跳帧。
+  const levelRef = useRef(0);
+  levelRef.current = voice.level;
+
+  useEffect(() => {
+    if (voice.phase !== "recording") {
+      // 停录后把柱子放平。不清的话它会停在最后一帧的高度上，像还在收音。
+      setWave((prev) => (prev.some((v) => v > 0.01) ? new Array(WAVE_BARS).fill(0) : prev));
+      return;
+    }
+    const id = window.setInterval(() => {
+      setWave((prev) => [...prev.slice(1), levelRef.current]);
+    }, 70);
+    return () => window.clearInterval(id);
+  }, [voice.phase]);
+
+  // 打字机：一次一个字。34ms/字 是"读得完、又不像卡住"的折中
+  // （中文正常阅读约 5-8 字/秒，这里是 29 字/秒，只求眼睛能跟上）。
+  useEffect(() => {
+    if (!liveOpen || !liveScript) return;
+    if (liveShown >= liveScript.length) return;
+    const id = window.setTimeout(() => setLiveShown((n) => n + 1), 34);
+    return () => window.clearTimeout(id);
+  }, [liveOpen, liveScript, liveShown]);
+
+  /**
+   * 字播完之后自动开始整理。
+   *
+   * 为什么要自动：参考的形态就是「说完就排好」，中间不再按一次按钮。
+   * 620ms 是留给用户看清最后几个字的时间 —— 少了像闪过去，多了像卡住。
+   * 如果用户等不及，底栏的 ✓ 可以直接跳过这段等待。
+   */
+  useEffect(() => {
+    if (!liveOpen || !liveScript) return;
+    if (liveShown < liveScript.length) return;
+    const id = window.setTimeout(() => {
+      setLiveOpen(false);
+      // 提交合并后的全文：用户先打了一半再用说的，那半句也得进整理
+      void runParse(liveFullRef.current || liveScript);
+    }, 620);
+    return () => window.clearTimeout(id);
+  }, [liveOpen, liveScript, liveShown, runParse]);
 
   const editText = () => {
     setStatus("idle");
@@ -884,6 +1052,24 @@ export default function AiCaptureDrawer({
   const issueCount = Object.keys(issues).length;
   const activeStep = committing || issueCount > 0 ? 3 : status === "ready" ? 2 : 1;
 
+  /**
+   * 全屏语音层的三个阶段。
+   *
+   * `thinking` 和 `typing` 的差别是"字有没有到"：转写请求还在路上时只能转圈，
+   * 字一到就切成逐字上屏 —— 这两种状态的下一步不一样（等 vs 看）。
+   */
+  const livePhase: "listening" | "thinking" | "typing" =
+    voice.phase === "recording"
+      ? "listening"
+      : voice.phase === "transcribing" || voice.phase === "finishing"
+        ? "thinking"
+        : liveScript
+          ? "typing"
+          : "listening";
+
+  /** 流式下已经有字了。没字时仍然显示那三个点 —— 一个空光标在闪像是在等问题。 */
+  const hasStreamText = streamDone.length > 0 || streamLive !== "";
+
   // ---------- 顶部那三行：我在哪 / 刚发生什么 / 下一步 ----------
   const title = (() => {
     if (status === "ready") return items.length === 0 ? "没整理出待办或提醒" : `确认这 ${items.length} 条`;
@@ -924,6 +1110,91 @@ export default function AiCaptureDrawer({
         data-status={status}
         data-step={activeStep}
       >
+        {/* ⓪ 语音全屏态：说话时整屏只做一件事。
+            不挂在 body 里 —— body 是可滚动的，字一多就会把输入框顶走；
+            这一层用 absolute 盖住整个抽屉，退出时才把控制权还给下面那套界面。 */}
+        {liveOpen ? (
+          <section className="rem-cap-live" data-phase={livePhase} aria-label="语音输入">
+            <div className="rem-cap-live-head">
+              <span className="rem-cap-live-kicker" aria-live="polite">
+                {livePhase === "listening"
+                  ? "正在听"
+                  : livePhase === "thinking"
+                    ? "正在转成文字"
+                    : "你说的是"}
+              </span>
+              {livePhase === "listening" ? (
+                <p className="rem-cap-live-tip">想到哪说到哪，说完点右下角</p>
+              ) : null}
+            </div>
+
+            <div className="rem-cap-live-body">
+              {voice.streaming && hasStreamText ? (
+                /* 流式：边听边出字。
+                   已定型的用正文色，正在说的那句用次级色 —— 这一屏唯一能告诉
+                   用户"这半句还会变"的方式就是颜色，而这件事直接决定他会不会
+                   在字还没稳的时候就点完成。 */
+                <p className="rem-cap-live-text" data-testid="live-script">
+                  {streamDone.join("")}
+                  <span className="rem-cap-live-heard">{streamLive}</span>
+                  <span className="rem-cap-live-caret" aria-hidden="true" />
+                </p>
+              ) : livePhase === "typing" ? (
+                <p className="rem-cap-live-text" data-testid="live-script">
+                  {liveScript.slice(0, liveShown)}
+                  <span className="rem-cap-live-caret" aria-hidden="true" />
+                </p>
+              ) : (
+                // 不用"会转成什么"之类的说明句：这一态用户只关心"它有没有在录"，
+                // 三个点在跳就是答案。
+                <p className="rem-cap-live-wait" aria-hidden="true">
+                  <i />
+                  <i />
+                  <i />
+                </p>
+              )}
+            </div>
+
+            <div className="rem-cap-live-dock">
+              <button
+                type="button"
+                className="rem-cap-live-x"
+                aria-label="取消这次录音"
+                onClick={cancelLive}
+              >
+                <CornIcon name="close" className="h-4 w-4" />
+              </button>
+
+              <div className="rem-cap-live-wave" aria-hidden="true">
+                {wave.map((v, i) => (
+                  // 高度直接写在 style 上：40 根柱子各自不同高度，用 class 表达要 40 条规则
+                  <i key={i} style={{ height: `${Math.round(5 + v * 34)}px` }} />
+                ))}
+              </div>
+
+              <span className="rem-cap-live-clock">{clock(voice.seconds)}</span>
+
+              <button
+                type="button"
+                className="rem-cap-live-ok"
+                disabled={livePhase === "thinking"}
+                aria-label={livePhase === "typing" ? "现在开始整理" : "说完了"}
+                onClick={() => {
+                  if (livePhase === "typing") {
+                    // 字已经在屏幕上，不必再等那 620ms
+                    setLiveOpen(false);
+                    void runParse(liveFullRef.current || liveScript);
+                  } else {
+                    void voice.stop();
+                  }
+                }}
+              >
+                <CornIcon name="check" className="h-4 w-4" />
+              </button>
+            </div>
+          </section>
+        ) : null}
+
         {/* ① 顶部：固定不滚 */}
         <header className="rem-cap-top">
           <div className="rem-cap-head">
@@ -1411,14 +1682,8 @@ export default function AiCaptureDrawer({
                 既读不全，又把输入栏顶高了一截。示例卡本身现在可点，
                 「一键试一句」的能力没有丢，丢的只是重复。 */}
 
-            {/* 录音/听写是**状态**不是引导：只在真的发生时出现，平时一个字都不占 */}
-            {voice.phase !== "idle" ? (
-              <p className="rem-cap-voice" aria-live="polite">
-                {voice.phase === "recording"
-                  ? `正在录音 ${clock(voice.seconds)}，说完点方块`
-                  : "正在听写…"}
-              </p>
-            ) : null}
+            {/* 录音/听写已经是**全屏层**（见 ⓪），底栏不再重复一句状态。
+                这里只留失败的原因 —— 它必须留在输入框上方，因为下一步就是重说。 */}
             {voiceErr ? (
               <p className="rem-cap-fix-err" role="alert">
                 {voiceErr}
@@ -1441,9 +1706,22 @@ export default function AiCaptureDrawer({
                         : "用说的"
                   }
                   disabled={voice.phase === "transcribing" || status === "parsing"}
-                  onClick={() =>
-                    voice.phase === "recording" ? void voice.stop() : void voice.start()
-                  }
+                  onClick={() => {
+                    if (voice.phase === "recording") {
+                      void voice.stop();
+                      return;
+                    }
+                    // 先把全屏层立起来再申请麦克风：权限弹窗出现时背后已经是大字界面，
+                    // 而不是先闪一下底栏再切成全屏。
+                    // 必须 blur 输入框 —— 抽屉打开时会自动聚焦它，手机上键盘已经弹出，
+                    // 不收起的话全屏层下半屏被键盘盖住，字全看不见。
+                    inputRef.current?.blur();
+                    setLiveOpen(true);
+                    clearLive();
+                    // 每次录音都从零开始记；转写回来时 onText 会把"先打的字 + 说的"合进去
+                    liveFullRef.current = "";
+                    void voice.start();
+                  }}
                 >
                   {voice.phase === "recording" ? (
                     <span className="rem-cap-mic-stop" aria-hidden="true" />

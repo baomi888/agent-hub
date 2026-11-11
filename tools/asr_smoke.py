@@ -84,7 +84,7 @@ async def main() -> int:
             return 2
 
         if code in ("EmptyResult", "FailedOperation.ErrorRecognize"):
-            print(f"\n结论：**签名通过**。服务端认了这把钥匙，只是静音没内容可识别。")
+            print("\n结论：**签名通过**。服务端认了这把钥匙，只是静音没内容可识别。")
             print("      到这步就可以用手机录一句真话测端到端了。")
             return 0
 
