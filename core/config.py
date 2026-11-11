@@ -69,10 +69,16 @@ ASR_STREAM_ENABLED = bool(ASR_SECRET_ID and ASR_SECRET_KEY and ASR_APPID)
 # 实时接口没有 `16k_zh_dialect` 这个值，方言要换成 `16k_zh_en`（31 种方言）
 # 或大模型版 `Hy-ASR-3.0-preview`。共用同一个配置项会静默降级成默认引擎。
 ASR_STREAM_ENGINE = os.getenv("TENCENT_ASR_STREAM_ENGINE", "16k_zh")
-# 静音多久算一句话说完。官方建议 500-2000，默认 1000。
-# 这里取 800 而不是默认值：用户说的是"一句话待办"，句子中间的停顿本来就短，
-# 1000ms 会把"明天下午三点…交高数作业"从中间切开，变成两类条目。
-ASR_VAD_SILENCE_MS = int(os.getenv("TENCENT_ASR_VAD_SILENCE_MS", "800"))
+# 静音多久算一句话说完（VAD 断句）。官方建议 500-2000，默认 1000。
+#
+# 这里取 1300 而不是更短，理由是**误切的代价不对称**：
+#   · 设短了（800）：「明天下午三点…交高数作业」中间那个自然停顿会被切开，
+#     变成「明天下午三点。」+「交高数作业。」两段稳态结果，句号一拼，
+#     整理时就成了两条待办 —— 用户得手动删掉一条。
+#   · 设长了（1300）：每句话晚 300ms 定型，而这一屏本来就是"说完才整理"，
+#     用户感知不到。
+# 上限是 2000，再长就会让"说了两句只等到一句"的感觉出现。
+ASR_VAD_SILENCE_MS = int(os.getenv("TENCENT_ASR_VAD_SILENCE_MS", "1300"))
 # 单次流式会话的硬上限（秒）。腾讯云侧最长 5 分钟，这里卡 60 秒是因为
 # 再长就不是"一句话"了，而且手机端连续录音 60 秒耗电已经能感觉到。
 ASR_STREAM_MAX_SECONDS = int(os.getenv("TENCENT_ASR_STREAM_MAX_SECONDS", "60"))
