@@ -223,13 +223,20 @@ SYSTEM_PROMPT = """你在把用户随口说的一段话整理成待办和提醒�
 3. 用户说"明天/周五/下周/下午三点"时，按我给的出现时间和星期几推算。
 4. 只有明确说了"提醒我 / 叫我 / 记得"才填 remind_at。不要把 due_at 抄成 remind_at。
 5. "每天/每周/工作日/每小时"这类周期放进 recurrence，不要塞进 due_at。
-6. 有完成动作的（交作业、写论文、报名、取快递）用 "task"；
-   到点要做的事（开会、上课、生日、体检）用 "reminder"。
-7. 一句话不要拆成几个同义条目，也不要把两件事合成一条。
-8. 时间不确定时：把对应字段写 null，needs_confirm 为 true，并在 questions 里问一个问题，
+6. **"task" 是默认值**：凡是"做完能打勾"的事一律用它 —— 交作业、写论文、报名、取快递、
+   起床、吃早饭、买菜、收拾房间、给谁回电话。
+7. 只有"到点被通知"本身就是全部意义的，才用 "reminder" —— 生日、吃药、开会开始、
+   班车发车、成绩公布、截止时刻到了提醒一声。
+   判据只有一句：**说完之后用户还需要"去做"一件具体的事吗？**
+   需要 → task；只是"知道一下、别错过" → reminder。
+   特别注意："早上八点起床""十点吃早饭"这类**看起来是时间点、其实是待办**的，
+   必须给 task。上一版的规则把它们全判成了 reminder，用户看到满屏"只提醒"，没法打勾。
+8. 带"每天/每周/工作日/每小时"这类周期的**必须**用 "reminder"（待办暂不支持重复）。
+9. 一句话不要拆成几个同义条目，也不要把两件事合成一条。
+10. 时间不确定时：把对应字段写 null，needs_confirm 为 true，并在 questions 里问一个问题，
    每个问题给两个选项（label 是给用户看的中文，value 是 once/weekly 这类机器值）。
-9. 最多 12 条。多出来的一律不要，放进 unresolved 用一句话说明。
-10. 什么都不像的句子（口头语、废话）不要变成条目，放进 unresolved。
+11. 最多 12 条。多出来的一律不要，放进 unresolved 用一句话说明。
+12. 什么都不像的句子（口头语、废话）不要变成条目，放进 unresolved。
 
 输出结构：
 {"items": [{"kind": "task|reminder", "title": "...", "note": null,
@@ -310,10 +317,13 @@ def _to_proposal(item: RawItem, text: str, now: int, cursor: int) -> tuple[dict,
     """把一条原始条目收紧成前端契约。返回 (proposal, 新的 cursor)。"""
     kind = item.kind
     if kind == "task" and item.recurrence is not None:
-        # 规格：task 的 recurrence 必须为 null（库里的 Task.recurrence 只允许 "none"）。
-        # 但直接丢掉会让「每天背单词」变成一条没有时间的待办 —— 用户原话里的"每天"
-        # 凭空消失，而且卡片上会写「缺少时间」，等于怪用户没说清。
-        # 这套类型里只有 reminder 能承载"每天"，所以改判成 reminder。
+        # 规格：task 的 recurrence 必须为 null（库里的 Task.recurrence 只允许 "none"，
+        # 见 `task_core._recurrence`）。但直接丢掉会让「每天背单词」变成一条没有
+        # 时间的待办 —— 用户原话里的"每天"凭空消失，卡片上还会写「缺少时间」，
+        # 等于怪用户没说清。这套类型里只有 reminder 能承载"每天"，所以改判成 reminder。
+        #
+        # 提示词第 8 条已经要求周期类直接给 reminder，这里是**兜底**：
+        # 模型偶尔仍会输出 task + recurrence，两种处理方式都不能丢信息。
         kind = "reminder"
     due_at = _to_ts(item.due_at, now)
     remind_at = _to_ts(item.remind_at, now)
@@ -372,6 +382,9 @@ def _to_proposal(item: RawItem, text: str, now: int, cursor: int) -> tuple[dict,
         "title": item.title,
         "note": (item.note or None) and item.note[:500].strip(),
         "list_key": (item.list_key or "inbox") if kind == "task" else None,
+        # 图标不由模型猜：它没有"这条该长什么样"的可靠依据，猜错比留空更糟
+        # （留空时列表会按清单/标题兜底，效果更稳）。这一格留给用户在确认屏上选。
+        "icon": None,
         "priority": item.priority,
         "due_at": due_at,
         "remind_at": remind_at,

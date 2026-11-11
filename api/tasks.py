@@ -40,6 +40,9 @@ class TaskIn(BaseModel):
     title: str = Field(..., min_length=1, max_length=120)
     note: str | None = Field(default=None, max_length=1000)
     list_key: str = Field(default="inbox")
+    # 图标名（对应前端 CornIcon 的 key）。null = 不指定，前端按清单自动挑。
+    # 只做字符集校验，不枚举：展示层加图标不该被后端的白名单卡住。
+    icon: str | None = Field(default=None, max_length=24)
     priority: int = Field(default=0, ge=0, le=2)
     due_at: int | None = None
     remind_at: int | None = None
@@ -54,6 +57,7 @@ class TaskPatch(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=120)
     note: str | None = Field(default=None, max_length=1000)
     list_key: str | None = None
+    icon: str | None = Field(default=None, max_length=24)
     priority: int | None = Field(default=None, ge=0, le=2)
     due_at: int | None = None
     remind_at: int | None = None

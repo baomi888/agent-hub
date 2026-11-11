@@ -29,6 +29,7 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 import uuid
 from typing import Any
@@ -48,6 +49,13 @@ MAX_TASKS_PER_OWNER = 300
 LIST_KEYS = ("inbox", "course", "homework", "club", "life", "exam")
 
 SCOPES = ("today", "upcoming", "all", "completed")
+
+# 图标名的字符集上限。**不做枚举白名单**：icon 是纯展示字段，
+# 前端认不出的名字会自己退回清单图标（见 `taskMark`），所以多存一个
+# 陌生名字的代价是"这颗图标不显示"，而不是坏数据。
+# 反过来说，如果这里写死一张表，前端想加个图标就得同步改后端 ——
+# 展示层的迭代不该被持久层的白名单卡住。
+_ICON_RE = re.compile(r"^[a-z][a-z0-9_]{0,23}$")
 
 # 排序用的「无穷大」：SQLite 的 ORDER BY 里 NULL 排最前，
 # 而「没有截止日期」应当排最后，所以先把 NULL 换成一个大到不会撞车的整数。
@@ -72,6 +80,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     title         TEXT NOT NULL,
     note          TEXT,
     list_key      TEXT NOT NULL DEFAULT 'inbox',
+    icon          TEXT,
     priority      INTEGER NOT NULL DEFAULT 0 CHECK (priority IN (0, 1, 2)),
     status        TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'done')),
     due_at        INTEGER,
@@ -118,6 +127,12 @@ def ensure() -> None:
     reminder_core.ensure()
     with _conn() as conn:
         conn.executescript(_SCHEMA)
+        # 老库补列（幂等）：`CREATE TABLE IF NOT EXISTS` 对已存在的表什么都不做，
+        # 所以新加字段必须单独 ALTER，否则升级部署后线上库永远少这一列，
+        # 症状是 SELECT * 拿不到 icon、前端每颗图标都退回清单默认值。
+        cols = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)")}
+        if "icon" not in cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN icon TEXT")
     _READY.add(path)
 
 
@@ -151,6 +166,22 @@ def _list_key(value: Any) -> str:
     if key not in LIST_KEYS:
         raise TaskInvalid("清单只能是 " + " / ".join(LIST_KEYS))
     return key
+
+
+def _icon(value: Any) -> str | None:
+    """图标名。空 / None = 不指定，由前端按清单挑一个默认的。
+
+    宽松校验而不是枚举：见 `_ICON_RE` 上面的注释。这里只挡两种真正有害的输入 ——
+    空串以外的乱码（会原样进 JSON 响应）和超长串（一屏 20 条每条都带 1KB 图标名）。
+    """
+    if value is None:
+        return None
+    name = str(value).strip().lower()
+    if not name:
+        return None
+    if not _ICON_RE.match(name):
+        raise TaskInvalid("图标名只能用英文字母、数字和下划线")
+    return name
 
 
 def _priority(value: Any) -> int:
@@ -419,6 +450,7 @@ def create(owner_id: str, data: dict[str, Any]) -> dict[str, Any]:
     title = _title(data.get("title"))
     note = _note(data.get("note"))
     list_key = _list_key(data.get("list_key"))
+    icon = _icon(data.get("icon"))
     priority = _priority(data.get("priority"))
     recurrence = _recurrence(data.get("recurrence"))
     due_at = _ts(data.get("due_at"), "截止时间")
@@ -434,11 +466,11 @@ def create(owner_id: str, data: dict[str, Any]) -> dict[str, Any]:
             raise TaskLimit(f"最多 {MAX_TASKS_PER_OWNER} 条待办，先完成或删除一些")
         conn.execute(
             """INSERT INTO tasks
-                  (id, owner_id, title, note, list_key, priority, status,
+                  (id, owner_id, title, note, list_key, icon, priority, status,
                    due_at, remind_at, completed_at, recurrence, parent_id, sort_order,
                    created_at, updated_at)
-               VALUES (?,?,?,?,?,?,'open',?,?,NULL,?,NULL,0,?,?)""",
-            (tid, owner_id, title, note, list_key, priority, due_at, remind_at,
+               VALUES (?,?,?,?,?,?,?,'open',?,?,NULL,?,NULL,0,?,?)""",
+            (tid, owner_id, title, note, list_key, icon, priority, due_at, remind_at,
              recurrence, now, now),
         )
         if remind_at is not None:
@@ -464,18 +496,29 @@ def update(owner_id: str, task_id: str, patch: dict[str, Any]) -> dict[str, Any]
         "title": current["title"],
         "note": current["note"],
         "list_key": current["list_key"],
+        "icon": current.get("icon"),
         "priority": current["priority"],
         "due_at": current["due_at"],
         "remind_at": current["remind_at"],
         "sort_order": current["sort_order"],
     }
-    for key in ("title", "note", "list_key", "priority", "due_at", "remind_at", "sort_order"):
+    for key in (
+        "title",
+        "note",
+        "list_key",
+        "icon",
+        "priority",
+        "due_at",
+        "remind_at",
+        "sort_order",
+    ):
         if key in patch:
             merged[key] = patch[key]
 
     title = _title(merged["title"])
     note = _note(merged["note"])
     list_key = _list_key(merged["list_key"])
+    icon = _icon(merged["icon"])
     priority = _priority(merged["priority"])
     due_at = _ts(merged["due_at"], "截止时间")
     remind_at = _ts(merged["remind_at"], "提醒时间")
@@ -485,10 +528,22 @@ def update(owner_id: str, task_id: str, patch: dict[str, Any]) -> dict[str, Any]
     status = current["status"]
     with _conn() as conn:
         conn.execute(
-            """UPDATE tasks SET title=?, note=?, list_key=?, priority=?,
+            """UPDATE tasks SET title=?, note=?, list_key=?, icon=?, priority=?,
                    due_at=?, remind_at=?, sort_order=?, updated_at=?
                WHERE id=? AND owner_id=?""",
-            (title, note, list_key, priority, due_at, remind_at, sort_order, now, task_id, owner_id),
+            (
+                title,
+                note,
+                list_key,
+                icon,
+                priority,
+                due_at,
+                remind_at,
+                sort_order,
+                now,
+                task_id,
+                owner_id,
+            ),
         )
         # 只有「标题 / 备注 / 提醒时间」变了才碰提醒。只改 due_at 时**一个字节都不动**
         # —— 不变量 #3：改截止时间不能把已经设好的提醒挪走。

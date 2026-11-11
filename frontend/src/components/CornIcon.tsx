@@ -558,6 +558,16 @@ const ICONS: Record<string, () => React.JSX.Element> = {
   corn: Corn,
 };
 
+/**
+ * 所有可用图标名。
+ *
+ * 给"运行时判断一个字符串是不是合法图标名"用 —— 待办的自选图标是存在库里的
+ * 纯字符串（`Task.icon`），渲染前必须确认它在册，否则会静默退化成玉米，
+ * 用户选了却看不到变化。从 `ICONS` 反推而不是另写一份清单，是为了避免
+ * 两份清单漂移（加图标时只改上面那一个对象）。
+ */
+export const ICON_NAMES: ReadonlySet<string> = new Set(Object.keys(ICONS));
+
 type Props = {
   name: string;
   className?: string;

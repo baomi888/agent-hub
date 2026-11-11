@@ -1227,6 +1227,11 @@ export interface Task {
   title: string;
   note: string | null;
   list_key: TaskListKey;
+  /**
+   * 用户自选的图标名（`CornIcon` 的 key）。`null` = 没选过，
+   * 界面按清单兜底（见 `taskMark`）—— 所以老数据升级后外观不变。
+   */
+  icon: string | null;
   priority: TaskPriority;
   status: TaskStatus;
   due_at: number | null;
@@ -1245,6 +1250,7 @@ export interface TaskDraft {
   title: string;
   note?: string | null;
   list_key?: TaskListKey;
+  icon?: string | null;
   priority?: TaskPriority;
   due_at?: number | null;
   remind_at?: number | null;
@@ -1255,6 +1261,7 @@ export interface TaskPatch {
   title?: string;
   note?: string | null;
   list_key?: TaskListKey;
+  icon?: string | null;
   priority?: TaskPriority;
   due_at?: number | null;
   remind_at?: number | null;
@@ -1321,6 +1328,11 @@ export interface CaptureProposal {
   note: string | null;
   /** 只有 task 有值；reminder 为 null（它不属于任何清单） */
   list_key: TaskListKey | null;
+  /**
+   * 用户在这一屏里为它挑的图标（`CornIcon` 名）。`null` = 没挑，落库为空，
+   * 列表按清单自动兜底。模型不参与猜图标 —— 猜错的成本比"用默认的"高。
+   */
+  icon: string | null;
   priority: TaskPriority;
   due_at: number | null;
   remind_at: number | null;

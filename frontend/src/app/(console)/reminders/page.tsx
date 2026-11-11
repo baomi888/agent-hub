@@ -38,7 +38,7 @@
 // 待办的时间一律是 Unix 秒（后端口径），展示前用 `toMs()` 转毫秒。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageShell from "@/components/console/PageShell";
-import CornIcon from "@/components/CornIcon";
+import CornIcon, { ICON_NAMES } from "@/components/CornIcon";
 import type { CornIconName } from "@/components/CornIcon";
 import AiCaptureDrawer, {
   Spark,
@@ -52,6 +52,7 @@ import { Callout, Field, Seg, SkeletonLines, Switch, ToastHost } from "@/compone
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { useToast } from "@/lib/hooks/useToast";
+import { MARK_PICKS } from "@/lib/taskIcons";
 import { fmtHM, fmtRemaining, toMs } from "@/lib/time";
 import type {
   CaptureProposal,
@@ -132,6 +133,12 @@ const LIST_MARK: Record<TaskListKey, CornIconName> = {
 };
 
 /**
+ * 自选图标那一排的清单与中文名都挪到 `lib/taskIcons.ts` 了 ——
+ * 语音整理结果里也要让用户改图标，两处必须用同一张表，否则
+ * "在待办页选得到的图标，在整理屏上选不到"。
+ */
+
+/**
  * 收件箱里的条目按标题猜一个更贴的图标。
  *
  * 为什么要猜：新待办默认落在收件箱，而"交高数作业"这条在用户心里就是作业。
@@ -150,8 +157,19 @@ const MARK_HINTS: [RegExp, CornIconName][] = [
   [/快递|取|买|缴费|宿舍|食堂|体检|报销|办证|理发|洗衣/i, "home"],
 ];
 
-/** 一条待办该用哪个图标。纯函数，便于单独验：清单优先，收件箱才看标题。 */
-function taskMark(task: Pick<Task, "list_key" | "title">): CornIconName {
+/**
+ * 一条待办该用哪个图标。纯函数，便于单独验：**自选 > 清单 > 标题**。
+ *
+ * 三级而不是两级，是因为三者各有各的失效场景：
+ *  - 用户自己选过（`task.icon`）→ 他说了算，哪怕和清单不搭
+ *  - 没选过、但归了清单 → 清单图标比猜标题准（"取快递"在作业清单里也是作业）
+ *  - 收件箱里的 → 只能猜标题，猜错也不丢信息（meta 一直写着真实清单名）
+ */
+function taskMark(task: Pick<Task, "list_key" | "title" | "icon">): CornIconName {
+  const own = task.icon;
+  // 用 `ICON_NAMES.has` 而不是直接转换：前端认不出的名字（后端宽松校验放行了新图标、
+  // 而旧版前端还没跟上）应当退回清单图标，而不是渲染成玉米让用户以为没生效
+  if (own && ICON_NAMES.has(own)) return own as CornIconName;
   if (task.list_key !== "inbox") return LIST_MARK[task.list_key] ?? "corn";
   const title = task.title ?? "";
   for (const [re, name] of MARK_HINTS) {
@@ -1216,6 +1234,8 @@ function TaskDrawer({
   // 打开另一条时组件是新的实例，"同步 props 到 state" 这件事根本不需要发生。
   const [title, setTitle] = useState(editing?.title ?? "");
   const [listKey, setListKey] = useState<TaskListKey>(editing?.list_key ?? "inbox");
+  /** 自选图标。`null` = 没选，渲染时按清单/标题自动挑（见 `taskMark`） */
+  const [icon, setIcon] = useState<string | null>(editing?.icon ?? null);
   const [priority, setPriority] = useState<TaskPriority>(editing?.priority ?? 0);
   const [note, setNote] = useState(editing?.note ?? "");
   const [dueDate, setDueDate] = useState(dateValue(editing?.due_at ?? null));
@@ -1285,11 +1305,50 @@ function TaskDrawer({
             />
           </Field>
 
+          <Field label="图标">
+            {/* 自动档必须留着，而且必须排第一：绝大多数人不会选图标，
+                他们要的是"我的作业看起来像作业"。自动档就是按清单+标题猜的那套，
+                放在这儿是为了让"我没选"这件事看起来是个选项，而不是一个漏填的空。
+                选中态用 aria-pressed 表达，样式靠 data-on —— 不给图标单独配色：
+                这一排本来就花，再上色就变成调色盘了。 */}
+            <div className="rem-iconpick" role="group" aria-label="选一个图标">
+              <button
+                type="button"
+                className="rem-iconpick-b"
+                data-auto="1"
+                data-on={icon === null ? "1" : "0"}
+                aria-pressed={icon === null}
+                aria-label="自动选（跟随清单）"
+                title="自动（跟随清单）"
+                onClick={() => setIcon(null)}
+              >
+                <CornIcon name={LIST_MARK[listKey]} className="h-full w-full" />
+              </button>
+              {MARK_PICKS.map((p) => (
+                <button
+                  key={p.name}
+                  type="button"
+                  className="rem-iconpick-b"
+                  data-on={icon === p.name ? "1" : "0"}
+                  aria-pressed={icon === p.name}
+                  aria-label={p.label}
+                  title={p.label}
+                  onClick={() => setIcon(p.name)}
+                >
+                  <CornIcon name={p.name} className="h-full w-full" />
+                </button>
+              ))}
+            </div>
+          </Field>
+
           <div className="grid grid-cols-2 gap-2">
             <Field label="清单">
               {/* 原生 option 里放不了 svg，所以图标放框外：改清单时它当场换掉，
                   比"选完再看列表"更早知道这条会被归到哪一类 */}
               <div className="rem-listpick">
+                {/* 这里**只**表示清单，不能被上面的自选图标顶掉：
+                    它俩回答的是不同问题（"归到哪一类" vs "这条长什么样"），
+                    混用会让"我选了星星，为什么清单显示的还是作业"变成一个问题 */}
                 <span className="rem-mark" aria-hidden="true" data-mark={LIST_MARK[listKey]}>
                   <CornIcon name={LIST_MARK[listKey]} className="h-full w-full" />
                 </span>
@@ -1439,6 +1498,7 @@ function TaskDrawer({
                 onSubmit({
                   title: title.trim(),
                   list_key: listKey,
+                  icon,
                   priority,
                   note: note.trim() || null,
                   due_at: dueStamp,

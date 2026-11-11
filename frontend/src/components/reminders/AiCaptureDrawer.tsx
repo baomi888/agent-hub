@@ -51,7 +51,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import CornIcon from "@/components/CornIcon";
+import CornIcon, { ICON_NAMES } from "@/components/CornIcon";
 import MascotLogo from "@/components/chat/MascotLogo";
 import type {
   CaptureParseResult,
@@ -63,6 +63,7 @@ import type {
 } from "@/lib/types";
 import { api } from "@/lib/api";
 import type { ApiStatusError } from "@/lib/api";
+import { MARK_LABEL, MARK_PICKS } from "@/lib/taskIcons";
 import { useVoiceInput } from "./useVoiceInput";
 import { nextOccurrenceAt, parseFixture } from "./captureFixture";
 
@@ -175,6 +176,8 @@ export function taskDraftOf(item: CaptureProposal): TaskDraft {
     priority: item.priority,
   };
   if (item.note) draft.note = item.note;
+  // 用户在这一屏挑过图标才带上；没挑就不传，让后端存 null、列表按清单兜底
+  if (item.icon) draft.icon = item.icon;
   if (item.due_at !== null) draft.due_at = item.due_at;
   if (item.remind_at !== null) draft.remind_at = item.remind_at;
   return draft;
@@ -832,6 +835,54 @@ export default function AiCaptureDrawer({
   /** 哪一行的「不提醒」被点开了。同时只开一行 —— 满屏展开等于没有提示。 */
   const [openNrmd, setOpenNrmd] = useState<string | null>(null);
 
+  /** 正在给哪一条挑图标。同时只开一条，理由同上。 */
+  const [iconFor, setIconFor] = useState<string | null>(null);
+
+  /** 正在改哪一条的标题。改的是 `items` 里的真值，取消勾选就不提交。 */
+  const [titleFor, setTitleFor] = useState<string | null>(null);
+
+  /** 改标题。**直接写回 items**，不搞临时态 + 保存按钮：
+   *  这一屏每个改动本来就只在点「加入」时才落库，多一个"保存"只是多一次点击，
+   *  而用户改完标题接着就会去改时间。 */
+  const retitle = useCallback((id: string, value: string) => {
+    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, title: value } : it)));
+  }, []);
+
+  /**
+   * 就地换类型：待办 ↔ 提醒。
+   *
+   * 为什么需要它：模型的 kind 判定只在"说话那一刻"可用，判错的代价不该由用户承担。
+   * 「早上八点起床」被判成提醒，用户想的是"我要打勾"—— 除了取消勾选重说一遍，
+   * 他没有任何出路。这一屏是他最后一次说"不，这是待办"的机会。
+   *
+   * 两个方向的代价不对称，所以分两种处理：
+   *  - → 提醒：清掉 list_key 和 icon（提醒不属于任何清单，也没有图标字段）。
+   *    清完如果没有任何时间，`isWritable` 会立刻变 false，那一行自动长出
+   *    「补上时间」的入口 —— 不需要在这里再补一套提示。
+   *  - → 待办：**只有在没有 recurrence 时才允许**（按钮那边已经 disabled）。
+   *    因为待办不支持重复，硬转会把"每天背单词"的"每天"吞掉，
+   *    转完变成一条没有时间的待办，用户还以为自己在管理同一个东西。
+   */
+  const flipKind = useCallback((id: string) => {
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.id !== id) return it;
+        if (it.kind === "task") {
+          return { ...it, kind: "reminder" as const, list_key: null, icon: null };
+        }
+        if (it.recurrence !== null) return it; // 双保险：按钮已 disabled，这里再挡一次
+        return { ...it, kind: "task" as const, list_key: it.list_key ?? "inbox" };
+      })
+    );
+    setIconFor(null);
+  }, []);
+
+  /** 给某一条挑图标。`null` = 回到"自动"，落库时就不传这个字段。 */
+  const pickIcon = useCallback((id: string, name: string | null) => {
+    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, icon: name } : it)));
+    setIconFor(null);
+  }, []);
+
   // ---------- 原话分段（编号回看） ----------
   const segments = useMemo(() => {
     if (!heard) return [];
@@ -1349,15 +1400,10 @@ export default function AiCaptureDrawer({
               </div>
             ) : (
               <>
-                {/* 汇总条：一眼知道"整理出了什么" */}
-                <div className="rem-cap-summarybar">
-                  <span>
-                    {items.length} 条 · {taskCount} 条待办 · {remCount} 条提醒
-                  </span>
-                  {confirmCount > 0 ? (
-                    <span className="rem-cap-summarybar-warn">{confirmCount} 条要确认</span>
-                  ) : null}
-                </div>
+                {/* 汇总条**已删**（11 日第三次改）：它写的"N 条 · X 条待办 · Y 条提醒"
+                    和顶部 sub 那句、以及下面「逐条确认」右边的小字是同一组数字，
+                    三处重复的结果是——原话和条目之间插了两块"统计"，用户从大屏
+                    滑下来先撞见的是计数，不是自己刚说的话。计数留在 sub 一处就够。 */}
 
                 {/* 注意力路由：有需确认就把人带过去，而不是只报个数（§4.4） */}
                 {confirmCount > 0 ? (
@@ -1421,10 +1467,9 @@ export default function AiCaptureDrawer({
                 {/* 逐条检查 */}
                 <div className="rem-cap-axishd">
                   <h3>逐条确认</h3>
-                  <span>
-                    {taskCount} 条待办 · {remCount} 条提醒
-                    {confirmCount > 0 ? ` · ${confirmCount} 条要确认` : ""}
-                  </span>
+                  {/* 右边原来还挂一遍「X 条待办 · Y 条提醒 · Z 条要确认」。
+                      和顶部 sub、已删的汇总条三处同源，删到只剩标题 ——
+                      这一行的职责是"给下面这组东西起个名"。 */}
                 </div>
 
                 <div className="rem-cap-axis" aria-label="按时间排好的安排">
@@ -1506,6 +1551,146 @@ export default function AiCaptureDrawer({
                           </p>
 
                           {meta ? <p className="rem-cap-axisnote">{meta}</p> : null}
+
+                          {/* 类型和图标都能就地改。
+                              ★ 类型为什么必须有出口：模型的 kind 判定只在"说话那一刻"可用。
+                                它把「早上八点起床」判成提醒，用户想的是"我要打勾"——
+                                以前除了取消勾选重说一遍没有别的办法，这一屏因此变成了
+                                "AI 说的算，你只能点头"。现在这里就是他说"不"的地方。
+                              ★ 图标只对 task 出现：提醒库里没有这个字段，摆个按不动的按钮
+                                比不摆更糟。 */}
+                          <div className="rem-cap-axisacts">
+                            <button
+                              type="button"
+                              className="rem-cap-kind"
+                              data-kind={item.kind}
+                              aria-pressed={isTask}
+                              aria-label={
+                                isTask
+                                  ? `把「${item.title}」改成提醒`
+                                  : `把「${item.title}」改成待办`
+                              }
+                              disabled={!isTask && item.recurrence !== null}
+                              title={
+                                !isTask && item.recurrence !== null
+                                  ? "这条会重复，只能作为提醒"
+                                  : isTask
+                                    ? "点一下改成提醒（不占清单，到点通知）"
+                                    : "点一下改成待办（可以打勾完成）"
+                              }
+                              onClick={() => flipKind(item.id)}
+                            >
+                              <CornIcon
+                                name={isTask ? "notes" : "bell"}
+                                className="h-3.5 w-3.5"
+                              />
+                              <span>{isTask ? "待办" : "提醒"}</span>
+                              <span className="rem-cap-kind-swap" aria-hidden="true">
+                                ⇄
+                              </span>
+                            </button>
+
+                            {isTask ? (
+                              <button
+                                type="button"
+                                className="rem-cap-iconbtn"
+                                data-on={item.icon ? "1" : "0"}
+                                aria-expanded={iconFor === item.id}
+                                aria-controls={`rem-cap-icons-${item.id}`}
+                                title={
+                                  item.icon
+                                    ? `图标：${MARK_LABEL[item.icon] ?? "自选"}`
+                                    : "换个图标"
+                                }
+                                onClick={() =>
+                                  setIconFor((prev) => (prev === item.id ? null : item.id))
+                                }
+                              >
+                                <CornIcon
+                                  name={
+                                    item.icon && ICON_NAMES.has(item.icon)
+                                      ? item.icon
+                                      : "corn"
+                                  }
+                                  className="h-3.5 w-3.5"
+                                />
+                                <span>图标</span>
+                              </button>
+                            ) : null}
+                            <button
+                              type="button"
+                              className="rem-cap-iconbtn"
+                              aria-expanded={titleFor === item.id}
+                              aria-controls={`rem-cap-title-${item.id}`}
+                              title="改这条的标题（模型抽错字时唯一能救回来的地方）"
+                              onClick={() =>
+                                setTitleFor((prev) => (prev === item.id ? null : item.id))
+                              }
+                            >
+                              <CornIcon name="pencil" className="h-3.5 w-3.5" />
+                              <span>改标题</span>
+                            </button>
+                          </div>
+
+                          {titleFor === item.id ? (
+                            <div className="rem-cap-titleedit-box">
+                              {/* 直接写回 items，不做临时态：这一屏所有改动都要到
+                                  「加入」才落库，多一个"保存"只是多一次点击。 */}
+                              <input
+                                className="rem-cap-titleedit"
+                                id={`rem-cap-title-${item.id}`}
+                                value={item.title}
+                                maxLength={60}
+                                aria-label="这条的标题"
+                                onChange={(e) => retitle(item.id, e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" || e.key === "Escape") {
+                                    setTitleFor(null);
+                                  }
+                                }}
+                              />
+                              <p className="rem-cap-titleedit-hint">
+                                {item.title.trim()
+                                  ? "改完回车收起；点「加入」才会保存。"
+                                  : "标题不能空着，否则这条加不进去。"}
+                              </p>
+                            </div>
+                          ) : null}
+                          {iconFor === item.id ? (
+                            <div
+                              className="rem-cap-iconpick"
+                              id={`rem-cap-icons-${item.id}`}
+                              role="group"
+                              aria-label={`给「${item.title}」选图标`}
+                            >
+                              <button
+                                type="button"
+                                className="rem-cap-iconpick-b"
+                                data-auto="1"
+                                data-on={item.icon === null ? "1" : "0"}
+                                aria-pressed={item.icon === null}
+                                aria-label="自动"
+                                title="自动（按清单和标题挑）"
+                                onClick={() => pickIcon(item.id, null)}
+                              >
+                                <CornIcon name="corn" className="h-full w-full" />
+                              </button>
+                              {MARK_PICKS.map((p) => (
+                                <button
+                                  key={p.name}
+                                  type="button"
+                                  className="rem-cap-iconpick-b"
+                                  data-on={item.icon === p.name ? "1" : "0"}
+                                  aria-pressed={item.icon === p.name}
+                                  aria-label={p.label}
+                                  title={p.label}
+                                  onClick={() => pickIcon(item.id, p.name)}
+                                >
+                                  <CornIcon name={p.name} className="h-full w-full" />
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
                           {/* 原因挂在那一行自己身上。只给个红标「没加上」，
                               用户不知道是该重试还是该改 —— 两条路差得很远 */}
                           {issue ? (

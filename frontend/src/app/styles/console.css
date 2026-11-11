@@ -1779,6 +1779,49 @@ textarea.input {
   flex: 1;
   min-width: 0;
 }
+/* 图标选择器：一排小方格，选中态只换描边和淡底，不换图形本身。
+   ★ 不给每个图标单独配色：13 个色块摆一起会变成调色盘，
+     而这一排要传达的是"形状不同"，不是"颜色不同"。 */
+.rem-iconpick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.rem-iconpick-b {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text-2);
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    color 120ms ease;
+}
+/* 自动档用虚线：它不是一个具体图标，是一条"按清单猜"的规则。
+   实线会让它看起来和旁边那些平级，而它其实是个兜底。 */
+.rem-iconpick-b[data-auto="1"] {
+  border-style: dashed;
+}
+.rem-iconpick-b[data-on="1"] {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--accent-tint);
+  color: var(--accent-ink);
+}
+.rem-iconpick-b:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rem-iconpick-b {
+    transition: none;
+  }
+}
 /* 标题本身就是「改这条」的入口：它是全页最高频动作，藏在菜单里等于让人多点一次。
    button 撑满整行是为了点击热区，不是视觉上要一块按钮。 */
 .rem-title {
@@ -3658,8 +3701,12 @@ textarea.input {
 }
 .rem-cap-srcquote p {
   margin: 0;
-  font-size: var(--fs-md);
-  line-height: 1.75;
+  /* 13px → 20px，和结果态的原话卡同一档（那边 22px）。
+     这一块出现在"整理中"，正是用户刚从 31px 的全屏语音层退出来的那一刻 ——
+     字号如果在这里塌到 13px，会读成"我的话说完了，现在轮到 AI"，
+     而他其实只是在等 1–3 秒。 */
+  font-size: 1.25rem;
+  line-height: 1.7;
   color: var(--text-1);
   word-break: break-word;
 }
@@ -3949,13 +3996,20 @@ textarea.input {
 }
 .rem-cap-quote {
   margin: var(--space-8) 0 0;
-  font-size: var(--fs-md);
-  line-height: 1.85;
+  /* ★ 13px → 22px（2026-11-11 第三次改）。
+     用户的原话是这一屏的**证据**，不是脚注。上一版把它压成 13px 的一小段，
+     于是流式大屏上刚看过 31px 的大字，一转头同一句话缩成了注释 ——
+     观感上像"AI 听完就把我的话收走了"，用户只能对着几条结论点头。
+     22px 是全屏层的 31px 之外最近的一档：它已经退出"只做一件事"的状态，
+     下面还有条目要看，再大就把条目挤出第一屏。 */
+  font-size: 1.375rem;
+  line-height: 1.75;
   color: var(--text-1);
   word-break: break-word;
 }
 .rem-cap-srcmark {
-  padding: 0 1px;
+  padding: 1px 2px;
+  border-radius: 4px;
   border-bottom: 1px dashed var(--accent-line);
   background: transparent;
   color: inherit;
@@ -3963,14 +4017,24 @@ textarea.input {
   transition: background var(--t-color), border-color var(--t-color);
 }
 .rem-cap-srcmark[data-on="1"] {
-  border-bottom-color: var(--accent);
+  border-bottom-color: transparent;
   background: var(--accent-tint);
+  color: var(--accent-ink);
 }
 .rem-cap-srcno {
-  margin-left: 1px;
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  margin-left: 2px;
+  border-radius: 999px;
+  background: var(--accent-soft);
   font-size: var(--fs-badge);
+  line-height: 1;
   color: var(--accent-ink);
-  vertical-align: super;
+  /* 上标在大字里会飘到底线外，改成"跟随文字的小圆牌" */
+  vertical-align: baseline;
+  transform: translateY(-2px);
 }
 .rem-cap-src-acts {
   display: flex;
@@ -4129,6 +4193,131 @@ textarea.input {
   font-size: var(--fs-md);
   line-height: 1.55;
   color: var(--text-3);
+}
+
+/* 卡片底部的两个"就地改"：换类型 / 换图标。
+   ★ 刻意做成次级按钮（无底色、只有描边）：这一屏的主按钮是底栏的「加入 N 条」，
+     这里再抢一次视觉，用户会以为要先在这儿确认什么。 */
+.rem-cap-axisacts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--space-4);
+}
+.rem-cap-kind,
+.rem-cap-iconbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: var(--fs-md);
+  color: var(--text-3);
+  transition:
+    border-color 120ms ease,
+    color 120ms ease,
+    background 120ms ease;
+}
+.rem-cap-kind[data-kind="task"] {
+  border-color: var(--accent-line);
+  color: var(--accent-ink);
+}
+/* 换向箭头用更淡的一档：它是"点一下会变成另一个"，不是内容的一部分 */
+.rem-cap-kind-swap {
+  color: var(--text-3);
+  opacity: 0.7;
+}
+.rem-cap-kind:hover:not(:disabled),
+.rem-cap-iconbtn:hover {
+  border-color: var(--line-strong);
+  color: var(--text-1);
+}
+.rem-cap-kind:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.rem-cap-iconbtn[data-on="1"] {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.rem-cap-kind:focus-visible,
+.rem-cap-iconbtn:focus-visible,
+.rem-cap-iconpick-b:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* 展开的标题编辑框。和图标面板同一档视觉：浅底 + 细边，不抢主按钮 */
+.rem-cap-titleedit-box {
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.rem-cap-titleedit {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--card-bg);
+  font: inherit;
+  /* 和卡片标题同一档字号：编辑时字不能突然变小，否则像是在改另一件事 */
+  font-size: 17px;
+  line-height: 1.5;
+  color: var(--text-1);
+}
+.rem-cap-titleedit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.rem-cap-titleedit-hint {
+  margin: 6px 0 0;
+  font-size: var(--fs-md);
+  color: var(--text-3);
+}
+
+/* 展开的图标面板：和上面的胶囊左对齐，铺满卡片宽度 */
+.rem-cap-iconpick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.rem-cap-iconpick-b {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--text-2);
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    color 120ms ease;
+}
+.rem-cap-iconpick-b[data-auto="1"] {
+  border-style: dashed;
+}
+.rem-cap-iconpick-b[data-on="1"] {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--accent-tint);
+  color: var(--accent-ink);
+}
+@media (prefers-reduced-motion: reduce) {
+  .rem-cap-kind,
+  .rem-cap-iconbtn,
+  .rem-cap-iconpick-b {
+    transition: none;
+  }
 }
 
 /* 每条的状态：可直接加入 / 需要确认 / 缺少时间 / 加入失败。

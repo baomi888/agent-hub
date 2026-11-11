@@ -158,6 +158,44 @@ class TestPatch:
         assert client.patch("/api/tasks/tk_nope", json={"title": "x"}).status_code == 404
 
 
+class TestIcon:
+    """自选图标：新建能带上、PATCH 能改、显式 null 能清回"自动"。
+
+    这三条覆盖的是三种**会静默出错**的形状：
+      - 建表加了列但 INSERT 没写 → 传了 icon 回来是 null（用户以为没保存）
+      - PATCH 用 exclude_none 生成 patch → 清空永远失败（点"自动"没反应）
+      - 不校验字符集 → 脏字符串进 JSON，前端渲染成玉米且看不出来
+
+    ★ 编码只挡字符集、不枚举图标名：`icon` 是展示字段，前端认不出会自己退回
+      清单图标。枚举会让"前端加个图标"变成"后端也得发版"。
+    """
+
+    def test_create_with_icon(self, client):
+        task = _create(client, icon="star")
+        assert task["icon"] == "star"
+        # 回读也要有，不然只有创建响应带着它、列表页照样是玉米
+        assert client.get(f"/api/tasks/{task['id']}").json()["icon"] == "star"
+
+    def test_create_without_icon_is_null(self, client):
+        assert _create(client)["icon"] is None
+
+    def test_patch_sets_and_clears_icon(self, client):
+        task = _create(client)
+        assert client.patch(f"/api/tasks/{task['id']}", json={"icon": "bell"}).json()["icon"] == "bell"
+        # 显式 null = 回到自动（落回清单/标题兜底）
+        assert client.patch(f"/api/tasks/{task['id']}", json={"icon": None}).json()["icon"] is None
+
+    def test_rejects_dirty_icon_name(self, client):
+        res = client.post("/api/tasks", json={"title": "x", "icon": "star; drop table"})
+        assert res.status_code == 400
+        assert "图标名" in res.json()["detail"]
+
+    def test_icon_shows_up_in_list(self, client):
+        _create(client, title="带图标的", icon="book")
+        items = client.get("/api/tasks?scope=all").json()["items"]
+        assert items[0]["icon"] == "book"
+
+
 class TestLifecycle:
     def test_complete_then_reopen(self, client):
         import time
@@ -248,19 +286,26 @@ class TestReminderBoundary:
 
 class TestReorder:
     def test_reorder_changes_list_order(self, client):
+        """排序生效的判据是"前后翻过来了"，不是"初始必须是 A、B"。
+
+        ★ 这里原来断言初始顺序 `== ["A", "B"]`，但它**不确定**：两条在同一个
+          Unix 秒里创建，`created_at` 相同，`ORDER BY ... created_at DESC` 之后
+          没有任何 tiebreaker，剩下的顺序由查询计划决定 —— 四个测试文件一起跑时
+          偶尔会以 B、A 返回，于是这条测试随机变红（2026-11-11 实测：单跑绿、
+          组合偶尔红，同一秒内两次创建）。测试断言"先记的在前"等于在断言
+          SQLite 的隐式行为，不是在断言 reorder。
+        """
         a = _create(client, title="A")
         b = _create(client, title="B")
-        assert [i["title"] for i in client.get("/api/tasks?scope=all").json()["items"]] == [
-            "A",
-            "B",
-        ]
+        before = [i["title"] for i in client.get("/api/tasks?scope=all").json()["items"]]
+        assert sorted(before) == ["A", "B"]
+
         res = client.post("/api/tasks/reorder", json={"ids": [b["id"], a["id"]]})
         assert res.status_code == 200
         assert res.json() == {"ok": True, "changed": 2}
-        assert [i["title"] for i in client.get("/api/tasks?scope=all").json()["items"]] == [
-            "B",
-            "A",
-        ]
+        after = [i["title"] for i in client.get("/api/tasks?scope=all").json()["items"]]
+        # 显式排过之后顺序就是确定的：B 在前、A 在后
+        assert after == ["B", "A"]
 
     def test_reorder_is_not_swallowed_by_task_id_route(self, client):
         """`POST /reorder` 若被 `/{task_id}` 抢走，会返回 404「待办不存在」。"""

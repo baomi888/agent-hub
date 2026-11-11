@@ -326,6 +326,8 @@ function parseClause(
     title,
     note: null,
     list_key: kind === "task" ? readList(clause) : null,
+    // 离线夹具也不猜图标：和生产路径保持一致（图标由用户在确认屏上选）
+    icon: null,
     priority: readPriority(clause),
     due_at: kind === "task" ? when.dueAt : null,
     remind_at: wantsRemind ? when.remindAt : null,

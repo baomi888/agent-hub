@@ -64,6 +64,26 @@ class TestHappyPath:
         )
         assert it["source_start"] == 0 and it["source_end"] == 7
         assert it["needs_confirm"] is False
+        # 图标不由模型猜，一律是 null（用户在确认屏上自己选）
+        assert it["icon"] is None
+
+    def test_prompt_defaults_to_task(self):
+        """类型判定的默认值必须是 task。
+
+        上一版写的是"到点要做的事（开会、上课、生日、体检）用 reminder"，
+        模型据此把「早上八点起床」「十点吃早饭」全判成提醒 —— 用户看到的
+        是满屏「只提醒」，一条都打不了勾（2026-11-11 实机反馈）。
+
+        这条测试钉的是**根因**（提示词里的默认值），不是某一条输出：
+        输出由模型决定，改提示词才改得动它。断言用两个短串而不是整段比对，
+        是为了让措辞可以继续打磨、但"默认 task"这个意思不许丢。
+        """
+        p = capture_parse.SYSTEM_PROMPT
+        assert '"task" 是默认值' in p
+        # 旧规则的原句必须已经不在了，否则模型会继续照着它判
+        assert "到点要做的事（开会、上课、生日、体检）用" not in p
+        # 周期类必须 still 指向 reminder（待办不支持重复，这一条不能一起删掉）
+        assert "必须**用 \"reminder\"" in p
 
     def test_reminder_with_weekly(self):
         text = "每周三晚上八点背单词"
