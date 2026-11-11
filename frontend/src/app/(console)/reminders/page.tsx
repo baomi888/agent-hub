@@ -842,10 +842,37 @@ function TaskCard({
           >
             {task.title}
           </button>
+          {/* 等级标记：既是「看得见」也是「点得开」。
+              ★ 上一版等级只体现为卡片左边 2px 的色条 —— 手机上基本看不出来，
+                而且唯一入口是左边那颗任务图标（看着就是装饰），所以用户会
+                得出「根本没有等级功能」的结论。这一版把等级做成标题右边的
+                文字标记，**未设等级时也显示灰字「普通」**：不留白，用户才
+                知道这个维度存在；点它就开同一个面板。 */}
+          <button
+            type="button"
+            className="rem-pritag"
+            data-p={task.priority}
+            data-open={styleOpen ? "1" : undefined}
+            title={pick ? undefined : "点一下改等级"}
+            aria-label={
+              pick
+                ? undefined
+                : `「${task.title}」的等级：${PRIORITY_LABEL[task.priority] ?? "普通"}，点一下可改`
+            }
+            aria-haspopup={pick ? undefined : "dialog"}
+            aria-expanded={pick ? undefined : styleOpen}
+            disabled={pick}
+            onClick={() => {
+              setOpen(false);
+              setStyleOpen((v) => !v);
+            }}
+          >
+            <i aria-hidden="true" />
+            {PRIORITY_LABEL[task.priority] ?? "普通"}
+          </button>
         </div>
         <p className="rem-meta">
           <b>{LIST_LABEL[task.list_key] ?? task.list_key}</b>
-          {task.priority > 0 ? <span> · {PRIORITY_LABEL[task.priority]}</span> : null}
           {/* 「不提醒」排在截止日期之前：窄屏会被省略号吃掉末尾，而这句是
               这一行里唯一"不做就会误事"的信息，所以还要给警示色 */}
           {remindText ? (
@@ -1058,10 +1085,15 @@ function SortRow({
             <CornIcon name={taskMark(task)} className="h-full w-full" />
           </span>
           <span className="rem-title">{task.title}</span>
+          {/* 排序模式只读：这一行唯一的动作是拖动，标记做成纯展示，
+              但**仍然显示**——否则一进排序模式，等级就整片消失，用户会以为被改了 */}
+          <span className="rem-pritag" data-p={task.priority} data-static="1">
+            <i aria-hidden="true" />
+            {PRIORITY_LABEL[task.priority] ?? "普通"}
+          </span>
         </div>
         <p className="rem-meta">
           <b>{LIST_LABEL[task.list_key] ?? task.list_key}</b>
-          {task.priority > 0 ? <span> · {PRIORITY_LABEL[task.priority]}</span> : null}
         </p>
       </div>
     </article>

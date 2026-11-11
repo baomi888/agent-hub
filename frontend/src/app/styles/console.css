@@ -2657,13 +2657,78 @@ textarea.input {
    取色：日常=信息蓝 / 重要=主金 / 紧急=语义红，全是既有 token，
    深色主题跟着 tokens 一起变，不在这里写死色值。 */
 .rem-task[data-priority="1"] {
-  border-left: 2px solid var(--info);
+  border-left: 3px solid var(--info);
 }
 .rem-task[data-priority="2"] {
-  border-left: 2px solid var(--accent);
+  border-left: 3px solid var(--accent);
 }
 .rem-task[data-priority="3"] {
-  border-left: 2px solid var(--red);
+  border-left: 3px solid var(--red);
+}
+
+/* 等级标记：标题右侧的「圆点 + 文字」，既是展示也是入口。
+   ★ 为什么不能只靠左边那条色条：2px 宽在 390px 的手机上几乎看不见，
+     全列表扫过去仍然是一片同色卡片，用户会直接得出「没有等级功能」。
+     所以等级必须有一处**读得出来**的落点，而且未设等级时也占位（灰字「普通」）——
+     不留白，用户才知道这个维度存在、并且点得开。
+   ★ 圆点用 currentColor：一个变量同时决定点色和字色，不再维护两套映射。 */
+.rem-pritag {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--text-3);
+  transition: var(--t-color);
+}
+/* 24px 高的胶囊在手机上按不准：伪元素把热区往外扩到约 44px 高，
+   不参与布局，所以标题的宽度一分都不会少。 */
+.rem-pritag::after {
+  content: "";
+  position: absolute;
+  inset: -10px -6px;
+}
+.rem-pritag > i {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.rem-pritag[data-p="1"] {
+  color: var(--info);
+  background: var(--fill-3);
+}
+.rem-pritag[data-p="2"] {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+}
+.rem-pritag[data-p="3"] {
+  color: var(--red-ink);
+  background: var(--fill-2);
+  font-weight: 600;
+}
+.rem-pritag:hover:not([data-static="1"]):not(:disabled) {
+  background: var(--fill-2);
+}
+.rem-pritag[data-open="1"] {
+  background: var(--fill-2);
+  color: var(--text-1);
+}
+.rem-pritag[data-static="1"],
+.rem-pritag:disabled {
+  cursor: default;
+}
+.rem-pritag:disabled::after {
+  content: none;
 }
 
 /* 勾完之后这张卡**留在原地**：划一道线、淡下去，等用户决定删不删。
