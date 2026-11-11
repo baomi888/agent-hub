@@ -31,6 +31,7 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 import smtplib
 import ssl
@@ -131,6 +132,40 @@ def _classify(exc: BaseException) -> tuple[str, bool]:
     return "unknown", True
 
 
+def _b64(text: str) -> str:
+    return base64.b64encode(text.encode("utf-8")).decode("ascii")
+
+
+def _authenticate(client: smtplib.SMTP) -> None:
+    """自己做 AUTH，**不用 `smtplib.login()`**。
+
+    ★ 这一条是实测出来的，不是洁癖：`login()` 在第一个机制失败后会
+    **自动换下一个机制重试**（PLAIN → LOGIN → …）。而 QQ 邮箱在第一次
+    535 之后就直接掐断连接，于是第二次尝试抛 `SMTPServerDisconnected`，
+    把真正的 535 盖掉了。结果就是**授权码填错被报成「网络问题，可重试」**：
+    运维去查网络（白查），用户则永远收不到信（静默）。
+
+    只走一个机制，535 就能原样上升为 `SMTPAuthenticationError`，
+    被正确归成「配置错、不可重试」。
+    """
+    user, password = config.SMTP_USER, config.SMTP_PASSWORD
+    mechanisms = (client.esmtp_features.get("auth") or "").upper().split()
+
+    if "PLAIN" in mechanisms:
+        code, resp = client.docmd("AUTH", "PLAIN " + _b64(f"\0{user}\0{password}"))
+    elif "LOGIN" in mechanisms:
+        code, resp = client.docmd("AUTH", "LOGIN")
+        if code == 334:
+            code, resp = client.docmd(_b64(user))
+        if code == 334:
+            code, resp = client.docmd(_b64(password))
+    else:
+        raise smtplib.SMTPNotSupportedError(f"服务器不支持登录认证（{mechanisms or '无'}）")
+
+    if code != 235:
+        raise smtplib.SMTPAuthenticationError(code, resp)
+
+
 def send(
     to: str,
     subject: str,
@@ -178,7 +213,7 @@ def send(
             if config.SMTP_SECURITY == "starttls":
                 client.starttls(context=ssl.create_default_context())
                 client.ehlo()
-            client.login(config.SMTP_USER, config.SMTP_PASSWORD)
+            _authenticate(client)
             client.send_message(msg)
     except Exception as exc:  # noqa: BLE001 — 这里是唯一的错误收口，必须全接住
         code, retryable = _classify(exc)

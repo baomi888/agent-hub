@@ -134,6 +134,41 @@ class TestFailureClassification:
         # 授权码错时重试一万次也一样，标成可重试会让调用方白等
         assert res["retryable"] is False
 
+    def test_auth_failure_survives_a_hangup(self, monkeypatch, smtp):
+        """服务器回 535 之后**立刻断开** —— QQ 邮箱的真实行为。
+
+        ★ 这一条是本项目最容易踩的一个坑：`smtplib.login()` 在 PLAIN 失败后
+        会自动换 LOGIN 机制重试，而 QQ 已经掐了连接，于是抛的是
+        `SMTPServerDisconnected` —— 授权码填错被报成「网络问题，可重试」，
+        运维去查网络（白查），用户永远收不到信（静默）。
+
+        反证：把 `_authenticate` 换回 `client.login(...)` → 本用例变红
+        （error 从 auth_failed 变成 network）。
+        """
+        monkeypatch.setattr(smtp, "behavior", "auth_close")
+        res = mailer.send("a@b.com", "t", "x")
+        assert res["error"] == "auth_failed", res
+        assert res["retryable"] is False
+
+    def test_login_only_server_is_supported(self, monkeypatch):
+        """只公布 AUTH LOGIN 的服务器（部分企业邮箱）也要能登进去。"""
+        server = FakeSMTP(mechanisms=("LOGIN",)).start()
+        try:
+            monkeypatch.setattr(config, "SMTP_HOST", server.host)
+            monkeypatch.setattr(config, "SMTP_PORT", server.port)
+            monkeypatch.setattr(config, "SMTP_USER", "bot@qq.com")
+            monkeypatch.setattr(config, "SMTP_PASSWORD", "authcode")
+            monkeypatch.setattr(config, "SMTP_FROM", "bot@qq.com")
+            monkeypatch.setattr(config, "SMTP_SECURITY", "none")
+            monkeypatch.setattr(config, "SMTP_TIMEOUT", 5)
+
+            res = mailer.send("a@b.com", "t", "x")
+            assert res["ok"] is True, res
+            assert server.wait_for(1)
+            assert server.credentials == [("bot@qq.com", "authcode")]
+        finally:
+            server.stop()
+
     def test_recipient_refused_is_permanent(self, smtp, monkeypatch):
         monkeypatch.setattr(smtp, "behavior", "rcpt")
         res = mailer.send("nobody@b.com", "t", "x")

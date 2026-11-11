@@ -32,13 +32,18 @@ class FakeSMTP:
     `behavior` 用来模拟故障：
       * `"ok"`        正常
       * `"auth"`      登录时回 535（授权码错）
+      * `"auth_close"` 回 535 之后**立刻断开** —— QQ 邮箱的真实行为。
+        这一条专门用来钉住「不能因为连接被掐就把 535 误判成网络问题」。
       * `"rcpt"`      收件人回 550（地址不存在）
       * `"greet"`     连上就断（网络类故障）
       * `"slow"`      接受连接但永不响应（验超时是否真的生效）
+
+    `mechanisms` 控制 EHLO 里公布哪些 AUTH 机制，用来验「只支持 LOGIN 的服务器」。
     """
 
-    def __init__(self, behavior: str = "ok") -> None:
+    def __init__(self, behavior: str = "ok", mechanisms: tuple[str, ...] = ("PLAIN", "LOGIN")) -> None:
         self.behavior = behavior
+        self.mechanisms = mechanisms
         self.messages: list[dict[str, Any]] = []
         self.credentials: list[tuple[str, str]] = []
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -102,9 +107,10 @@ class FakeSMTP:
                 upper = line.upper()
 
                 if upper.startswith(("EHLO", "HELO")):
+                    mechs = b" ".join(m.encode() for m in self.mechanisms)
                     client.sendall(
                         b"250-fake.local\r\n"
-                        b"250-AUTH PLAIN LOGIN\r\n"
+                        b"250-AUTH " + mechs + b"\r\n"
                         b"250 OK\r\n"
                     )
                 elif upper.startswith("AUTH PLAIN"):
@@ -120,8 +126,12 @@ class FakeSMTP:
                         client.sendall(b"535 bad credentials\r\n")
                         continue
                     self.credentials.append((user, pwd))
-                    if self.behavior == "auth":
+                    if self.behavior in ("auth", "auth_close"):
                         client.sendall(b"535 Authentication failed\r\n")
+                        if self.behavior == "auth_close":
+                            # QQ 的真实行为：535 之后直接掐断。老写法用 login() 会自动
+                            # 换 LOGIN 机制重试，于是拿到的是连接断开而不是这条 535。
+                            break
                     else:
                         client.sendall(b"235 2.7.0 Accepted\r\n")
                 elif upper.startswith("AUTH LOGIN"):
@@ -130,11 +140,12 @@ class FakeSMTP:
                     client.sendall(b"334 UGFzc3dvcmQ6\r\n")
                     pwd = base64.b64decode(reader.readline().strip()).decode("utf-8", "replace")
                     self.credentials.append((user, pwd))
+                    failed = self.behavior in ("auth", "auth_close")
                     client.sendall(
-                        b"535 Authentication failed\r\n"
-                        if self.behavior == "auth"
-                        else b"235 2.7.0 Accepted\r\n"
+                        b"535 Authentication failed\r\n" if failed else b"235 2.7.0 Accepted\r\n"
                     )
+                    if failed and self.behavior == "auth_close":
+                        break
                 elif upper.startswith("MAIL FROM"):
                     mail_from = line.split(":", 1)[1].strip().strip("<>")
                     client.sendall(b"250 OK\r\n")
