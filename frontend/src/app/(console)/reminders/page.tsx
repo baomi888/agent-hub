@@ -2683,36 +2683,42 @@ export default function RemindersPage() {
       </section>
     ) : null;
 
+  /* AI 整理入口（v12）。它是**次入口**：主位仍然是右上角的「+ 新建」，
+     这里只负责"说一句，我替你拆"。多选/排序时不挂 —— 那两种模式正在挑行，
+     一个"再说一句"的入口只会把焦点和视线都抢走。
+
+     2026-11-11 把它从 listView 里提出来：原先它在 listView 内部，而空列表时
+     外层走的是 Callout 分支、listView 整个不渲染 —— 于是**新用户第一次进待办页
+     恰恰看不到这个入口**。空态才是最需要"说一句就行"的时刻。
+     现在它跟 isEmpty 无关，只跟 tab 和 mode 有关。 */
+  const captureStrip =
+    mode === "normal" ? (
+      <button
+        type="button"
+        className="rem-cap-strip"
+        onClick={() => setCaptureOpen(true)}
+        aria-label="一句话添加：打一句或说一段，自动拆成待办和提醒"
+      >
+        <span className="rem-cap-strip-mark" aria-hidden="true">
+          <Spark className="rem-cap-spark" />
+        </span>
+        <span className="rem-cap-strip-copy">
+          <span className="rem-cap-strip-kicker">一句话添加</span>
+          <span className="rem-cap-strip-text rem-cap-strip-desktop">
+            打字或说一句：明天下午交高数作业，周五社团开会…
+          </span>
+          <span className="rem-cap-strip-text rem-cap-strip-mobile">
+            说一句，自动拆成待办和提醒
+          </span>
+        </span>
+        <span className="rem-cap-strip-go" aria-hidden="true">
+          开始 →
+        </span>
+      </button>
+    ) : null;
+
   const listView = (
     <>
-      {/* AI 整理入口（v12）。它是**次入口**：主位仍然是右上角的「+ 新建」，
-          这里只负责"说一句，我替你拆"。多选/排序时不挂 —— 那两种模式正在挑行，
-          一个"再说一句"的入口只会把焦点和视线都抢走。 */}
-      {mode === "normal" ? (
-        <button
-          type="button"
-          className="rem-cap-strip"
-          onClick={() => setCaptureOpen(true)}
-          aria-label="一句话添加：打一句或说一段，自动拆成待办和提醒"
-        >
-          <span className="rem-cap-strip-mark" aria-hidden="true">
-            <Spark className="rem-cap-spark" />
-          </span>
-          <span className="rem-cap-strip-copy">
-            <span className="rem-cap-strip-kicker">一句话添加</span>
-            <span className="rem-cap-strip-text rem-cap-strip-desktop">
-              打字或说一句：明天下午交高数作业，周五社团开会…
-            </span>
-            <span className="rem-cap-strip-text rem-cap-strip-mobile">
-              说一句，自动拆成待办和提醒
-            </span>
-          </span>
-          <span className="rem-cap-strip-go" aria-hidden="true">
-            开始 →
-          </span>
-        </button>
-      ) : null}
-
       <PushHealth status={data?.push ?? null} />
 
       {/* 范围 tab：四个视图的语义见实施单 §5.3。逾期不会消失，它留在「今天」 */}
@@ -2918,17 +2924,20 @@ export default function RemindersPage() {
       {loading ? <SkeletonLines widths={["70%", "90%", "55%", "80%"]} /> : null}
 
       {!loading && tab === "list" ? (
-        isEmpty ? (
-          <Callout icon="bulb">
-            <b>还没有待办</b>
-            <br />
-            在下面一行直接写「明天 9 点交高数作业」，或者点右上角「+ 新建」。
-            <br />
-            只设截止时间，不会收到提醒。想被提醒，记得打开「提醒我」。
-          </Callout>
-        ) : (
-          listView
-        )
+        <>
+          {captureStrip}
+          {isEmpty ? (
+            <Callout icon="bulb">
+              <b>还没有待办</b>
+              <br />
+              在下面一行直接写「明天 9 点交高数作业」，或者点右上角「+ 新建」。
+              <br />
+              只设截止时间，不会收到提醒。想被提醒，记得打开「提醒我」。
+            </Callout>
+          ) : (
+            listView
+          )}
+        </>
       ) : null}
 
       {!loading && tab === "settings" ? (

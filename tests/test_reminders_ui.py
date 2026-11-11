@@ -1692,16 +1692,22 @@ class TestCaptureEmptyStateDemo:
         for forbidden in ("runParse", "api.", "onCommit", "fetch("):
             assert forbidden not in body, f"fillDemo 只许填字，不许 {forbidden}"
 
-    def test_empty_state_has_no_mascot_or_brand_row(self):
-        """空态不再摆吉祥物和品牌行。
+    def test_empty_state_keeps_the_brand_mark(self):
+        """空态要保留举着待办清单的知穗。
 
-        这一屏要回答的是「我能在这里做什么」，不是「这是谁做的」。
-        吉祥物会把视线从演示卡上带走，也让抽屉重新长出人格化旁白。
+        2026-11-11 线上核对时发现它被删过一轮，当时的理由是「这一屏要回答
+        『我能做什么』，不是『这是谁做的』」。但它在这里不是署名：手里那张
+        清单正是下面演示卡在做的事，属于演示的一部分；而且这是用户明确要过的
+        图标（原话「加上我们的品牌图标，结合我们这个现在的功能特别点设计」）。
+        删掉它属于替用户改需求，不是优化。
         """
         src = _capture()
-        assert "MascotLogo" not in src
-        assert "rem-cap-brand" not in src
-        assert "知穗" not in src
+        assert '<MascotLogo holding="list" />' in src, "品牌图标又丢了"
+        assert 'className="rem-cap-brand-mark"' in src
+        # 仍然不给可访问名：旁边就有主张句，读屏读两遍是噪音
+        i = src.index('className="rem-cap-brand-mark"')
+        seg = src[i : i + 160]
+        assert "aria-hidden" in seg, "图标不该有自己的可访问名"
 
     def test_brand_mark_holds_a_todo_list(self):
         """不是把首页那个 logo 搬过来：它手里举着一张待办清单。
@@ -1973,3 +1979,35 @@ class TestUserCopyWords:
         """字符串里的 `//` 不是注释 —— 这是正则版会踩的坑，必须钉住。"""
         src = 'const u = "https://myzhisui.cn/x"; const t = "推送";'
         assert "推送" in _strip_js_comments(src)
+
+class TestCaptureEntryVisibility:
+    """入口条必须与"列表是否为空"解耦。
+
+    2026-11-11 线上抓到的真 bug：captureStrip 原先写在 listView 内部，
+    而空列表时外层走的是 Callout 分支、listView 整个不渲染 ——
+    **新用户第一次进待办页，恰恰看不到「一句话添加」**，而那正是最需要它的时刻。
+    离线 188 条 e2e 全绿也没抓到，因为测试数据都 seed 了任务（isEmpty=false）。
+    """
+
+    def test_strip_is_defined_outside_list_view(self):
+        """它得是个独立变量，不能长在 listView 里面。"""
+        src = PAGE.read_text(encoding="utf-8")
+        assert "const captureStrip" in src, "入口条不见了"
+        assert src.index("const captureStrip") < src.index("const listView = ("), (
+            "captureStrip 又回到 listView 内部了 —— 空列表时它会跟着一起消失"
+        )
+
+    def test_strip_renders_in_empty_branch_too(self):
+        """空态和列表是二选一的两条分支，入口条必须在分支之外。"""
+        src = PAGE.read_text(encoding="utf-8")
+        k = src.index("{captureStrip}")
+        seg = src[k : k + 700]
+        assert "isEmpty" in seg, "captureStrip 没被放进 isEmpty 的判断里"
+        assert "listView" in seg, "captureStrip 后面应该紧接着 isEmpty ? 空态 : listView"
+
+    def test_strip_hidden_in_select_and_sort(self):
+        """多选/排序时仍然不挂 —— 这是原设计，提出来之后不能顺手丢掉。"""
+        src = PAGE.read_text(encoding="utf-8")
+        i = src.index("const captureStrip")
+        seg = src[i : i + 300]
+        assert 'mode === "normal"' in seg, "多选/排序时入口条应该收起"

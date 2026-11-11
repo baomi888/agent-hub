@@ -52,6 +52,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CornIcon from "@/components/CornIcon";
+import MascotLogo from "@/components/chat/MascotLogo";
 import type {
   CaptureParseResult,
   CaptureProposal,
@@ -960,6 +961,12 @@ export default function AiCaptureDrawer({
           {status === "idle" && text.trim() === "" && voice.phase === "idle" ? (
             <div className="rem-cap-empty">
               <div className="rem-cap-hello">
+                {/* 图标不另给可访问名：下面还有主张句，读屏读两遍是噪音。
+                    举着一张待办清单的知穗 —— 这是这个产品才有的动作，
+                    和右侧「一句话被拆成几条」讲的是同一件事。 */}
+                <span className="rem-cap-brand-mark" aria-hidden="true">
+                  <MascotLogo holding="list" />
+                </span>
                 <p className="rem-cap-lead">说清「什么时候、要做什么」</p>
               </div>
 
