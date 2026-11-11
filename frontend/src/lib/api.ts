@@ -23,7 +23,7 @@ import { detailToMessage } from "./errors";
 import type { MeOut, UserOut, Template, ApplyTemplateResult, UsageSummary } from "./types";
 import type { ProfileSnapshot, TagTaxonomy, TemplateRecommend } from "./types";
 import type { TodaySnapshot } from "./types";
-import type { PushStatus, PushSubscribeBody, PushTestResult } from "./types";
+import type { MailState, PushStatus, PushSubscribeBody, PushTestResult } from "./types";
 import type { CaptureParseResult } from "./types";
 import type { RemindPref } from "./types";
 import type { EnhanceResult } from "./types";
@@ -699,6 +699,32 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ id }),
       }),
+  },
+
+  // ---------- 邮件提醒 /api/mail（安卓唯一能收到的那条路）----------
+  //
+  // 语义是**兜底**：服务端只在推送一条都没送出去时才发信，所以这里没有
+  // 「用邮件还是用通知」的选择，用户只管填地址。
+  // 全部走 request 而不是 tryRequest：这几个动作都要给明确的失败原因
+  // （地址格式、验证码错、今天发太多），静默返回 null 会让界面无法解释。
+  mail: {
+    get: () => tryRequest<MailState>("/api/mail"),
+    start: (address: string) =>
+      request<MailState & { expires_in: number }>("/api/mail", {
+        method: "POST",
+        body: JSON.stringify({ address }),
+      }, { timeoutMs: 30000 }),
+    verify: (code: string) =>
+      request<MailState>("/api/mail/verify", {
+        method: "POST",
+        body: JSON.stringify({ code }),
+      }),
+    setEnabled: (enabled: boolean) =>
+      request<MailState>("/api/mail", {
+        method: "PATCH",
+        body: JSON.stringify({ enabled }),
+      }),
+    remove: () => request<MailState>("/api/mail", { method: "DELETE" }),
   },
 
   // ---------- 提醒时刻 /api/remind（2 端点）----------

@@ -570,6 +570,44 @@ def push_ready() -> bool:
     return bool(PUSH_ENABLED and VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY)
 
 
+# ---------------- 邮件通道（SMTP） ----------------
+# 为什么需要它：安卓的 Web Push 底层一律走 Google 的 FCM，国内连不通，
+# 换浏览器不解决（见 `frontend/src/lib/push.ts` 顶部）。日历订阅又在
+# 2026-11-11 删掉了，所以安卓上「提醒」等于只能打开 App 才看得见。
+# 邮件是唯一在「没有 App、没有 GMS、不必点授权」的前提下还能把人叫回来的通道。
+#
+# 语义是**兜底**不是并行：`service/reminder_tick.py` 只在 push 一条都没送出去时
+# 才发信。已经能收到通知的人再收一封邮件只是打扰。
+#
+# 默认值按 QQ 邮箱（smtp.qq.com:465）给 —— 这个项目的使用者最可能有的是它。
+# ★ QQ/163 的「SMTP 密码」是**授权码**，不是登录密码，要去邮箱设置里单独生成。
+#   拿登录密码填进去会得到 535 Authentication failed，而且错误里不会说是这个原因。
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.qq.com").strip()
+SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+SMTP_USER = os.getenv("SMTP_USER", "").strip()
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "").strip()
+# 发件人显示名与地址。留空时用 SMTP_USER 自己 —— 多数邮件服务要求
+# From 与登录账号同域，随便写别人的地址会被判成伪造直接退信。
+SMTP_FROM = os.getenv("SMTP_FROM", "").strip() or SMTP_USER
+SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "苞米").strip()
+# ssl = 465 那种一上来就加密；starttls = 587 那种先明文问候再升；none 只给内网自建。
+SMTP_SECURITY = os.getenv("SMTP_SECURITY", "ssl").strip().lower()
+# ★ 必须有超时。smtplib 默认不设超时 = 阻塞到 TCP 自己放弃（最长可达十几分钟），
+#   而 worker 是单线程串行跑 job 的，一个卡住的 SMTP 会把后面所有提醒一起拖死。
+SMTP_TIMEOUT = int(os.getenv("SMTP_TIMEOUT", "12"))
+
+MAIL_ENABLED = os.getenv("MAIL_ENABLED", "1").strip().lower() not in ("0", "false", "no")
+
+# 邮件正文里要带一个能点开的链接，所以需要一个不带尾斜杠的站点地址。
+# 不从请求头推：worker 里没有请求上下文，而且 Host 头是客户端给的，不能信。
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "https://myzhisui.cn").strip().rstrip("/")
+
+
+def mail_ready() -> bool:
+    """邮件通道是否具备发送条件。缺一项就当没配，界面上直说而不是让人白填地址。"""
+    return bool(MAIL_ENABLED and SMTP_HOST and SMTP_USER and SMTP_PASSWORD and SMTP_FROM)
+
+
 def validate() -> list[str]:
     """启动前校验关键配置，返回缺失项的中文提示列表。"""
     missing = []

@@ -1028,6 +1028,32 @@ export type PushStatus = {
   minute: number;
 };
 
+/**
+ * 邮件提醒的状态（GET /api/mail）。
+ *
+ * 为什么需要它：安卓的网页通知底层走 Google FCM，国内连不通，日历订阅又已经
+ * 删掉，所以安卓上「提醒」只能打开 App 才看得见。邮件是那边唯一还能把人
+ * 叫回来的通道 —— 服务端只在通知零投递时才发信，不是并行发两份。
+ */
+export type MailState = {
+  /** 服务端配没配发信账号。false 时界面不能摆输入框，否则用户会白填一遍 */
+  ready: boolean;
+  /** 填过的地址（可能还没验证） */
+  address: string | null;
+  /** 验证过才算生效。填了但没验的地址在派发时会被跳过 */
+  verified: boolean;
+  /** 用户手动开关。verified 且 enabled 才真的发 */
+  enabled: boolean;
+  /** 有码等着填，且还没过期 */
+  pending: boolean;
+  /** 当前这个码还剩几秒有效 */
+  code_expires_in: number;
+  /** 还能试几次，用完要重新发 */
+  attempts_left: number;
+  /** 发件人地址，用户要能在自己邮箱里搜到「这封是谁发的」 */
+  from: string | null;
+};
+
 /** 一台登记过的设备（GET /api/push/status 的 device_list 元素） */
 export type PushDevice = {
   /** 服务端 sub_id，移除时回传 */

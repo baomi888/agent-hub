@@ -48,6 +48,7 @@ import AiCaptureDrawer, {
 } from "@/components/reminders/AiCaptureDrawer";
 import type { CommitOutcome } from "@/components/reminders/AiCaptureDrawer";
 import ReminderAccess from "@/components/reminders/ReminderAccess";
+import MailAccess from "@/components/reminders/MailAccess";
 import { Callout, Field, Seg, SkeletonLines, Switch, ToastHost } from "@/components/console/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
@@ -3293,6 +3294,10 @@ export default function RemindersPage() {
           {/* 提醒权限排最前：这一屏里只有它管「响不响」，底下三个都在管
               「响几次、响哪些」。权限没开的时候，后面三项调了也不会响。 */}
           <ReminderAccess />
+          {/* 紧跟在权限卡后面：上面那张管「这台设备响不响」，这张管
+              「这台设备根本响不了的时候怎么办」。两件事连着发生，放一起
+              用户才能在看到"这台收不到"之后立刻找到出路。 */}
+          <MailAccess />
 
           <section className="card card-pad">
             <h3 className="card-title">免打扰时间</h3>

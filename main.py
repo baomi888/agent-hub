@@ -37,6 +37,7 @@ from api.geo import router as geo_router
 from api.hybrid import router as hybrid_router
 from api.kb import router as kb_router
 from api.kb_proposals import router as kb_proposals_router
+from api.mail import router as mail_router
 from api.metrics import router as metrics_router
 from api.path import router as path_router
 from api.prefs import router as prefs_router
@@ -214,6 +215,9 @@ app.include_router(delegate_router, prefix="/api/delegate", tags=["每日委托"
 # 不新增第二套算法（打卡天数/今日任务/下次委托都来自上面几个模块的同一批函数）
 app.include_router(today_router, prefix="/api/today", tags=["今日一屏"])
 app.include_router(push_router, prefix="/api/push", tags=["推送提醒"])
+# 邮件兜底通道。安卓的 Web Push 走 Google FCM、国内连不通，邮件是那边唯一
+# 能收到的提醒方式。语义是补位：推送零投递时才发信。
+app.include_router(mail_router, prefix="/api/mail", tags=["邮件提醒"])
 app.include_router(calendar_router, prefix="/api/calendar", tags=["日历提醒"])
 # 提醒时刻：一个值同时管 Web Push 与日历事件的起点，所以不挂在上面两组里
 app.include_router(remind_router, prefix="/api", tags=["提醒时刻"])

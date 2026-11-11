@@ -20,6 +20,19 @@ worker 的幂等键是 `(job_key, subject_id, planned_at)`。把 subject 取成 
 * 不同分钟仍然各发一次，不受影响；
 * 「每人每天最多 6 条」这条产品承诺只需要在一个地方数（`user_prefs.day_count`）。
 
+## 投递：一条推送 + 一条邮件兜底
+
+`channels` 里只认 `push`，**邮件不是另一个 channel**，它是同一条提醒在
+「推送送不出去」时的第二个投递方式。这两件事必须分开：
+
+* `channels` 表达**用户意图**（「这条要不要提醒我」）；
+* 投递方式取决于**设备能力**（这台机器收不收得到通知）。
+
+把邮件做成 channel 会让用户在每条待办上都面对一个「用推送还是用邮件」的
+选择，而他既不知道自己的手机走不走 FCM，也不该知道。所以由服务端决定：
+推送零投递 → 用已验证的邮箱补一封。安卓（FCM 国内连不通）永远是零投递，
+邮件就是它唯一能收到的提醒。
+
 ## 内容从哪来
 
 `action=agent_deliver` 时按 `source` 分流，**没内容就不发**（`skipped_empty`）。
@@ -42,7 +55,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from core import reminder_core, timeutil, user_prefs
+from core import config, mail_store, mailer, reminder_core, timeutil, user_prefs
 from service import push as push_svc
 
 logger = logging.getLogger(__name__)
@@ -86,7 +99,9 @@ def build_content(owner_id: str, reminder: dict[str, Any], planned_at: int) -> d
     """这条提醒该推什么。返回 None = 没内容，不发（记 skipped_empty）。"""
     channels = str(reminder.get("channels") or "")
     if "push" not in [c.strip() for c in channels.split(",")]:
-        # 第一波只实现了 push。inapp / calendar / local 要么在第二波（站内红点），
+        # `push` 在这里代表「要提醒我」，不代表「必须走 Web Push」——
+        # 送不出去时由邮件兜底，见模块注释「投递」一节。
+        # inapp / calendar / local 要么在第二波（站内红点），
         # 要么是客户端自己的事（本地通知）。这里返回 None 而不是硬发一条，
         # 免得用户明明只勾了「站内」，手机却响了。
         return None
@@ -143,19 +158,91 @@ def _empty_reason(reminder: dict[str, Any]) -> str:
     return f"no_content来源={reminder.get('source')}"
 
 
-def _fail_detail(res: dict[str, Any]) -> str:
+# ---------- 邮件兜底 ----------
+
+
+def _mail_text(batch: list[dict[str, Any]], planned_at: int) -> tuple[str, str]:
+    """邮件比通知多出的地方是**能写全**，所以正文不再砍成前三条。
+
+    通知的 body 卡在 200 字符是为了锁屏上不滚动；邮件没有这个约束，
+    把 N 条都列出来才有意义，否则用户点开邮件看到的和锁屏一模一样。
+    """
+    titles = [str(item["content"].get("title") or "提醒") for item in batch]
+    if len(batch) == 1:
+        subject = titles[0]
+    else:
+        subject = f"{titles[0]} 等 {len(batch)} 件"
+    # 本地时刻有信息量：同一封信里可能是 15:00 的作业和 19:00 的班会
+    stamp = datetime.fromtimestamp(int(planned_at), timeutil.TZ).strftime("%m月%d日 %H:%M")
+    lines = [f"{stamp} 的提醒：", ""]
+    for item in batch:
+        title = str(item["content"].get("title") or "提醒")
+        body = str(item["content"].get("body") or "").strip()
+        lines.append(f"· {title}")
+        if body:
+            lines.append(f"  {body}")
+    lines += [
+        "",
+        f"打开看详情：{config.PUBLIC_BASE_URL}/reminders",
+        "",
+        "—— ",
+        "这封邮件是苞米发来的。没能给你弹出应用通知，所以改用邮件提醒。",
+        f"不想收的话，在「设置 → 提醒」里关掉邮件提醒即可：{config.PUBLIC_BASE_URL}/reminders?tab=settings",
+    ]
+    return subject, "\n".join(lines)
+
+
+def _fallback_mail(
+    owner_id: str, batch: list[dict[str, Any]], planned_at: int
+) -> dict[str, Any] | None:
+    """推送一条都没送出去时，用邮件兜底。
+
+    **只在 push 零投递时调用**，不是并行发两份。已经能在手机上看到通知的人，
+    再收一封同样内容的邮件只是打扰；而安卓（FCM 在国内连不通）永远是零投递，
+    这封邮件才是他唯一能收到的提醒。
+
+    任何异常都不往外抛：一封邮件发不出去，不该把整轮 job 记成失败 ——
+    那样 worker 会重试三次，而重试期间这个人的其他提醒照样收不到，
+    日志里却写着「调度失败」，排查方向全错。
+    """
+    try:
+        address = mail_store.verified_address(owner_id)
+        if not address:
+            return None
+        if not config.mail_ready():
+            # 服务端没配发信账号：返回一个明确的 not_configured，
+            # 让 detail 里能看出「本来该发邮件，但没配」，而不是干脆没提。
+            return {"ok": False, "error": "not_configured", "retryable": False, "detail": ""}
+        subject, text = _mail_text(batch, planned_at)
+        return mailer.send(address, subject, text)
+    except Exception:  # noqa: BLE001
+        logger.exception("reminder mail fallback failed owner=%s", owner_id)
+        return {"ok": False, "error": "exception", "retryable": True, "detail": ""}
+
+
+def _fail_detail(res: dict[str, Any], mail_res: dict[str, Any] | None = None) -> str:
     if int(res.get("skipped") or 0) > 0:
-        return "push_not_configured"
-    if int(res.get("gone") or 0) > 0:
-        return "subscription_gone"
-    sent = int(res.get("sent") or 0)
-    failed = int(res.get("failed") or 0)
-    # 四个计数全零 = 这人名下压根没有订阅设备。写成 `send_failed:sent=0failed=0`
-    # 会把它伪装成「发失败」，而排查的人会去查推送服务方——方向从一开始就错了。
-    # 线上冒烟就是踩到这个：假 owner 没有订阅，流水写成 send_failed。
-    if sent == 0 and failed == 0:
-        return "no_subscription"
-    return f"send_failed:sent={sent}failed={failed}"
+        base = "push_not_configured"
+    elif int(res.get("gone") or 0) > 0:
+        base = "subscription_gone"
+    else:
+        sent = int(res.get("sent") or 0)
+        failed = int(res.get("failed") or 0)
+        # 四个计数全零 = 这人名下压根没有订阅设备。写成 `send_failed:sent=0failed=0`
+        # 会把它伪装成「发失败」，而排查的人会去查推送服务方——方向从一开始就错了。
+        # 线上冒烟就是踩到这个：假 owner 没有订阅，流水写成 send_failed。
+        if sent == 0 and failed == 0:
+            base = "no_subscription"
+        else:
+            base = f"send_failed:sent={sent}failed={failed}"
+    # 邮件也失败时把原因接在后面。不接的话「两条通道都没成」看起来和
+    # 「只有推送失败」一模一样，而这两种情况的处理方式完全不同：
+    # 前者要去查 SMTP 配置，后者不用管。
+    if mail_res is not None and not mail_res.get("ok"):
+        err = str(mail_res.get("error") or "unknown")
+        if err != "not_configured":
+            base = f"{base}+mail:{err}"
+    return base
 
 
 # ---------- worker hook ----------
@@ -236,9 +323,18 @@ def run_one(job_key: str, subject_id: str, planned_at: int) -> dict[str, Any]:
 
     payload = _merge(batch, planned_at)
     res = push_svc.send_to_user(owner_id, payload)
-    ok = int(res.get("sent") or 0) > 0
+    push_ok = int(res.get("sent") or 0) > 0
+    # 推送零投递才发邮件。`no_subscription`（安卓）和 `send_failed`（推送服务方挂了）
+    # 两种都算零投递 —— 对用户来说都是「手机上没动静」，兜底不该挑原因。
+    mail_res = None if push_ok else _fallback_mail(owner_id, batch, planned_at)
+    mail_ok = bool(mail_res and mail_res.get("ok"))
+    ok = push_ok or mail_ok
     status = reminder_core.STATUS_SENT if ok else reminder_core.STATUS_FAILED
-    base_detail = None if ok else _fail_detail(res)
+    base_detail = None if ok else _fail_detail(res, mail_res)
+    if ok and mail_ok and not push_ok:
+        # 只有邮件送达。记下来，否则「他明明收到了信，流水却写着没发」
+        # 是另一个方向的查不出来。前缀 `via:` 不影响 day_count（它只排 merged_into）。
+        base_detail = "via:mail"
 
     now = timeutil.now_ts()
     for index, item in enumerate(batch):
@@ -255,6 +351,7 @@ def run_one(job_key: str, subject_id: str, planned_at: int) -> dict[str, Any]:
         "fired": len(batch),
         "merged": max(0, len(batch) - 1),
         "push": res,
+        "mail": mail_res,
         "tokens_out": 0,
     }
 
