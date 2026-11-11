@@ -34,7 +34,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from core import reminder_core, user_prefs
+from core import reminder_core, timeutil, user_prefs
 from core.auth import get_current_user
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -66,6 +66,11 @@ class ReminderIn(BaseModel):
     at: str | None = None
     weekday: int | None = Field(default=None, ge=0, le=6)
     every_minutes: int | None = Field(default=None, ge=60, le=1440)
+    # 绝对触发时刻（Unix 秒）。`once + fire_at` = 「11-24 20:00 只响一次」。
+    # 表里和 `core` 里早就有这一列，只是 HTTP 层没暴露 —— 于是
+    # 「下周五 18:00 开会」这种指定日期的一次性提醒根本建不出来，
+    # 而每天/每周那几种用 `at` 就够，不需要它（规格 §3.3）。
+    fire_at: int | None = None
     trigger_kind: str = Field(default="at")
     anchor: str | None = None
     offset_minutes: int | None = None
@@ -89,6 +94,7 @@ class ReminderPatch(BaseModel):
     at: str | None = None
     weekday: int | None = Field(default=None, ge=0, le=6)
     every_minutes: int | None = Field(default=None, ge=60, le=1440)
+    fire_at: int | None = None
     action: str | None = None
     action_payload: dict | list | str | None = None
     channels: str | list[str] | None = None
@@ -98,6 +104,25 @@ class ReminderPatch(BaseModel):
 def _bad(exc: Exception) -> HTTPException:
     """业务校验失败 → 400。用 detail 直接回中文，前端原样展示。"""
     return HTTPException(status_code=400, detail=str(exc))
+
+
+def _check_fire_at(fire_at: int | None, freq: str | None) -> None:
+    """一次性提醒的绝对时刻：过去的时间一律拒。
+
+    `once + fire_at` 是「这一天这一刻响一次」。写一个已经过去的时刻，
+    `next_fire()` 算出来还是过去值 —— 要么当场响一声（用户正在睡觉），
+    要么被 `catch_up()` 记一条 failed 流水（用户在界面上什么都看不到）。
+    两种都不是他想要的，所以在写之前就拒掉，别把问题留给 worker。
+
+    非 `once` 传 `fire_at` 也拒：给「每天 22:00」钉死一个日期，
+    第二天起就再也不响，而界面上还写着每天 —— 这是假承诺。
+    """
+    if fire_at is None:
+        return
+    if freq != "once":
+        raise HTTPException(status_code=400, detail="只有「仅一次」的提醒可以指定具体日期和时间")
+    if fire_at <= timeutil.now_ts():
+        raise HTTPException(status_code=400, detail="这个时间已经过去了，换一个")
 
 
 def _guard_task(item: dict) -> None:
@@ -140,6 +165,7 @@ async def list_reminders(scope: str = "all", uid: str = Depends(get_current_user
 
 @router.post("")
 async def create_reminder(body: ReminderIn, uid: str = Depends(get_current_user)) -> dict:
+    _check_fire_at(body.fire_at, body.freq)
     try:
         item = await asyncio.to_thread(
             reminder_core.create, uid, body.model_dump(exclude_none=False)
@@ -233,6 +259,11 @@ async def patch_reminder(
     if existing is None:
         raise HTTPException(status_code=404, detail="提醒不存在")
     _guard_task(existing)
+    # `freq` 没传时用库里现有的那条判断 —— 只改 fire_at 的补丁不该因为
+    # "这次没带 freq" 被误判成非 once。（这里**不要**写成
+    # `if "fire_at" in patch`：fire_at 为 None 时 `_check_fire_at` 本来就返回，
+    # 那道判断一个字都不会执行，只是看起来像在保护。）
+    _check_fire_at(patch.get("fire_at"), patch.get("freq") or existing.get("freq"))
     try:
         item = await asyncio.to_thread(reminder_core.update, uid, reminder_id, patch)
     except (reminder_core.ReminderInvalid, reminder_core.ReminderLimit) as exc:

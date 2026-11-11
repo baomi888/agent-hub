@@ -33,6 +33,19 @@ VISION_API_KEY = os.getenv("VISION_API_KEY", EMBEDDING_API_KEY)
 VISION_BASE_URL = os.getenv("VISION_BASE_URL", EMBEDDING_BASE_URL)
 VISION_MODEL = os.getenv("VISION_MODEL", "qwen-vl-plus")
 
+# ---------- 语音转写（腾讯云一句话识别）----------
+# 两个都填了才算接上。只填一个的症状是调用 401 —— 界面上看起来像"语音坏了"，
+# 实际是密钥少了一半，所以用 ASR_ENABLED 把这种情况挡在渲染之前。
+ASR_SECRET_ID = os.getenv("TENCENT_ASR_SECRET_ID", "")
+ASR_SECRET_KEY = os.getenv("TENCENT_ASR_SECRET_KEY", "")
+ASR_REGION = os.getenv("TENCENT_ASR_REGION", "ap-shanghai")
+# 16k_zh = 中文通用。别写成 8k：手机录音是 16k 采的，降采样只会掉准确率。
+ASR_ENGINE = os.getenv("TENCENT_ASR_ENGINE", "16k_zh")
+ASR_ENABLED = bool(ASR_SECRET_ID and ASR_SECRET_KEY)
+# 腾讯云一句话识别单次上限：60 秒 / 3MB。这里按字节卡，时长由前端录满 60s 就停。
+ASR_MAX_BYTES = 3 * 1024 * 1024
+ASR_MAX_SECONDS = 60
+
 # ---------- 路径 ----------
 DATA_DIR = os.getenv("DATA_DIR", os.path.join(PROJECT_ROOT, "data"))
 PERSIST_DIR = os.getenv("PERSIST_DIR", os.path.join(PROJECT_ROOT, "chroma_db"))
@@ -155,6 +168,10 @@ LEGACY_OWNER = "legacy"
 # ---------- 配额（防止别人用你的界面烧你的额度）----------
 # 每个用户每分钟最多多少次问答 / 建库类写操作；0 = 不限
 RATE_PER_MINUTE = int(os.getenv("RATE_PER_MINUTE", "10"))
+# 每个用户每分钟最多几次「一句话整理」（/api/capture/parse）。
+# 单次要跑一轮 LLM（约 1–3 秒、几毛钱），比聊天贵也比聊天慢：
+# 聊天卡住用户自己会停，整理卡住用户会连按发送。所以单独一档、默认比聊天更紧。
+CAPTURE_PARSE_PER_MINUTE = int(os.getenv("CAPTURE_PARSE_PER_MINUTE", "8"))
 # 每个用户每日 slices（embedding 条数）上限；0 = 不限
 DAILY_EMBED_LIMIT = int(os.getenv("DAILY_EMBED_LIMIT", "1000"))
 # 每个用户每日问答次数上限；0 = 不限

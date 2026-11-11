@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from core import reminder_core, session, task_core, user_prefs
+from core import reminder_core, session, task_core, timeutil, user_prefs
 from service import push as push_svc
 from service import reminder_tick
 
@@ -312,8 +312,12 @@ class TestScopes:
         titles = [i["title"] for i in task_core.list_tasks(OWNER, "today", now=now)]
         assert titles[0] == "前天"
 
-    def test_remind_today_counts_as_today(self, db):
+    def test_remind_today_counts_as_today(self, db, monkeypatch):
         now = _ts(10, 12, 0)
+        # create() 内部取的是真实时钟，`_check_remind` 会把"已经过去"的提醒时间挡掉。
+        # 这条测试固定造 11-10 的数据，但只在 11-10 那天真实时钟才落在它前面 ——
+        # 不把 now 钉住，跨过 11-10 之后它每天都红，看起来像产品坏了。
+        monkeypatch.setattr(timeutil, "now_ts", lambda: now)
         task_core.create(OWNER, _mk(title="今晚提醒", remind_at=_ts(10, 21, 0)))
         assert [i["title"] for i in task_core.list_tasks(OWNER, "today", now=now)] == ["今晚提醒"]
 

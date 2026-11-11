@@ -295,3 +295,61 @@ class TestSubscribeHook:
         )
         assert res.status_code == 200, res.text
         assert reminder_core.get_system("u1") is not None
+
+
+# ==================== 一次性提醒的绝对时刻（fire_at）====================
+#
+# AI 整理要能表达「下周五 18:00 开会」这种**指定日期只响一次**的提醒。
+# 表里（`reminders.fire_at`）和 `core` 里早就有，缺的只是 HTTP 这一层，
+# 所以这一组测的是：字段进得来、过去的时间被拦住、非 once 传了也拦住。
+#
+# 为什么"过去的时间"必须在 HTTP 层拦：`next_fire()` 会照原样算出那个过去的时刻，
+# 轻则当场响一声（用户正在睡觉），重则被 `catch_up()` 记一条 failed 流水 ——
+# 而用户在界面上什么都看不到。
+
+
+class TestFireAt:
+    def test_once_with_fire_at_lands_on_that_moment(self, client):
+        """`once + fire_at` 就是那一个时刻，不能被「几点」规则改写成别的日子。"""
+        target = int(time.time()) + 3 * 3600
+        item = _create(client, title="开会", freq="once", at=None, fire_at=target)
+        assert item["fire_at"] == target
+        assert item["next_fire_at"] == target
+        assert item["freq"] == "once"
+
+    def test_past_fire_at_is_rejected(self, client):
+        res = client.post(
+            "/api/reminders",
+            json={"title": "开会", "freq": "once", "fire_at": int(time.time()) - 60},
+        )
+        assert res.status_code == 400, res.text
+        assert "已经过去" in res.json()["detail"]
+
+    def test_fire_at_with_repeating_freq_is_rejected(self, client):
+        """给「每天 22:00」钉死一个日期，第二天起就再也不响，而界面上还写着每天。"""
+        res = client.post(
+            "/api/reminders",
+            json={
+                "title": "背单词",
+                "freq": "daily",
+                "at": "22:00",
+                "fire_at": int(time.time()) + 3600,
+            },
+        )
+        assert res.status_code == 400, res.text
+        assert "仅一次" in res.json()["detail"]
+
+    def test_patch_fire_at_moves_next_fire(self, client):
+        later = int(time.time()) + 5 * 3600
+        item = _create(client, title="开会", freq="once", at=None, fire_at=int(time.time()) + 3600)
+        res = client.patch(f"/api/reminders/{item['id']}", json={"fire_at": later})
+        assert res.status_code == 200, res.text
+        assert res.json()["next_fire_at"] == later
+
+    def test_patch_past_fire_at_is_rejected(self, client):
+        item = _create(client, title="开会", freq="once", at=None, fire_at=int(time.time()) + 3600)
+        res = client.patch(
+            f"/api/reminders/{item['id']}", json={"fire_at": int(time.time()) - 60}
+        )
+        assert res.status_code == 400, res.text
+        assert "已经过去" in res.json()["detail"]

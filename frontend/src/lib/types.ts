@@ -1193,6 +1193,8 @@ export interface ReminderDraft {
   at?: string | null;
   weekday?: number | null;
   every_minutes?: number | null;
+  /** 绝对触发时刻（Unix 秒）。只有 `freq: "once"` 能用：过去的时间后端 400 */
+  fire_at?: number | null;
   action?: ReminderAction;
   channels?: string | string[];
   enabled?: boolean;
@@ -1304,4 +1306,57 @@ export interface TaskSummary {
   by_list: Partial<Record<TaskListKey, number>>;
   /** 今天 / 逾期里最早的一条；没有就是 null */
   next: Task | null;
+}
+
+// ==================== AI 整理（capture）====================
+//
+// 这一组是 `/api/capture/parse` 的返回形状，**不是**数据库模型。
+// 三处硬边界：
+//   1. `kind` 只有两种，前端不能把两类混成一张卡：
+//      task 有 ○ 能勾完成，reminder 是 ◇ 只能推迟/暂停/关来源。
+//   2. `due_at` 与 `remind_at` 分开。只设 due_at 不会响 —— 界面上要写出来。
+//   3. `source_start/source_end` 由**服务端**算，前端不算 offset。
+//      null = 找不到原文，此时不高亮、不给编号，但条目仍然保留。
+
+export type CaptureKind = "task" | "reminder";
+
+export interface CaptureQuestion {
+  id: string;
+  text: string;
+  options: { label: string; value: string }[];
+}
+
+/** 提醒的重复规则。只有 reminder 有；task 的 `recurrence` 恒为 null。 */
+export interface CaptureRecurrence {
+  freq: ReminderFreq;
+  at?: string | null;
+  weekday?: number | null;
+  every_minutes?: number | null;
+  /** 只允许和 `freq="once"` 一起出现 */
+  fire_at?: number | null;
+}
+
+export interface CaptureProposal {
+  id: string;
+  kind: CaptureKind;
+  title: string;
+  note: string | null;
+  /** 只有 task 有值；reminder 为 null（它不属于任何清单） */
+  list_key: TaskListKey | null;
+  priority: TaskPriority;
+  due_at: number | null;
+  remind_at: number | null;
+  recurrence: CaptureRecurrence | null;
+  /** 必须是原话的连续子串 */
+  source_text: string;
+  source_start: number | null;
+  source_end: number | null;
+  needs_confirm: boolean;
+  questions: CaptureQuestion[];
+}
+
+export interface CaptureParseResult {
+  items: CaptureProposal[];
+  /** 没被采纳的句子 / 超出的条目，一句话说明 */
+  unresolved: string[];
 }

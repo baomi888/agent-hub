@@ -13,7 +13,11 @@ summary:focus-visible,
 }
 /* 容器自带聚焦光晕的，不重复画一圈 */
 .input-row textarea:focus-visible,
-.search input:focus-visible {
+.search input:focus-visible,
+/* AI 整理的输入纸：外层 .rem-cap-pad 在 focus-within 时换成金边 + 3px 光晕，
+   里面的 textarea 再画一条 2px 就成了「纸里又套一个方框」（与 auth.css 同一个坑）。
+   注：10 日第一版这里写的是 `.rem-cap-composer input`，改名为「纸」后同步。 */
+.rem-cap-pad textarea:focus-visible {
   outline: none;
 }
 

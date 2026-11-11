@@ -2778,7 +2778,7 @@ textarea.input {
   opacity: 0.5;
 }
 
-/* 「没有完成语义的提醒」的次入口：它是文案级链接，不是第二个主按钮 */
+/* 「只到点响一声、不用勾完成」的提醒次入口：它是文案级链接，不是第二个主按钮 */
 .rem-footlink {
   margin: var(--space-16) 0 var(--space-8);
   text-align: center;
@@ -3281,4 +3281,1406 @@ textarea.input {
 .dark .rem-bulkbtn[data-primary="1"] {
   background: var(--accent);
   color: #22190a;
+}
+
+/* ==================== 一句话整理抽屉（v13 工具型 · Phase A）====================
+
+   坐标系和别的抽屉不同：**不是居中 modal**，而是桌面右贴边 520px 的整高面板 /
+   手机整屏从底部铺上来。
+
+   三段是**硬约束**，不是排版偏好：
+     ① .rem-cap-top    固定，不参与滚动 —— 标题 / 一句说明 / 关闭 任何时候都要在
+     ② .rem-cap-body   flex:1 + overflow-y:auto —— 结果再多也只滚这一块
+     ③ .rem-cap-dock   固定底部 —— 输入栏永远在同一位置，这是"工具感"的来源
+
+   2026-11-10 第二版推翻了"中间一张纸"：纸上下各空 200px，示例句和信任说明被挤进
+   纸里，底部没有东西承重视线，整屏读起来像一张空表格。承重的必须是**贴底输入栏**，
+   中间那块只负责显示"现在有什么 / 马上会出现什么"。
+
+   两条容易踩的：
+   1. 面板要自己吃掉滚动（三段 flex + min-height:0），否则手机上 composer 会被
+      内容顶出屏幕；
+   2. 遮罩的透明度不能只写一个值：暖墨 22% 在近黑底上等于没遮，深色要换纯黑。 */
+
+.rem-cap-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  /* 22% → 32%（11 日第二轮）。22% 在浅米底上压不住任何东西：背景正文照样读得清，
+     弹窗看着像页面被切掉一块，而不是浮在页面上。模态的第一句语法就是"后面暗、前面亮"。
+     没再往上加：再深下去遮罩会变成一块灰板，跟暖米基调打架。 */
+  background: rgba(61, 47, 26, 0.32);
+  animation: rem-cap-fade 0.2s ease both;
+}
+.dark .rem-cap-scrim {
+  background: rgba(0, 0, 0, 0.52);
+}
+
+.rem-cap-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 61;
+  display: flex;
+  flex-direction: column;
+  width: min(520px, 100%);
+  min-height: 0;
+  background: var(--card-bg);
+  border-left: 1px solid var(--line);
+  box-shadow: -18px 0 44px rgba(61, 47, 26, 0.1);
+  animation: rem-cap-slide 0.24s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  /* 深色主题里 --accent-ink 本身就是金，金圆上再画金勾/金菱形等于空点 */
+  --cap-on-accent: #22190a;
+}
+.dark .rem-cap-drawer {
+  background: var(--surface);
+  box-shadow: -18px 0 44px rgba(0, 0, 0, 0.44);
+}
+
+/* ---------- ① 顶部（不滚） ---------- */
+
+.rem-cap-top {
+  position: relative;
+  flex: 0 0 auto;
+  padding: var(--space-16) var(--space-20) var(--space-14);
+  border-bottom: 1px solid var(--line);
+}
+
+.rem-cap-head {
+  min-width: 0;
+  padding-right: 44px;
+}
+
+.rem-cap-title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: var(--fs-title);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+  color: var(--text-1);
+}
+.rem-cap-sub {
+  margin: var(--space-6) 0 0;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+.rem-cap-close {
+  position: absolute;
+  top: var(--space-14);
+  right: var(--space-16);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background var(--t-color), color var(--t-color);
+}
+.rem-cap-close:hover {
+  background: var(--fill-2);
+  color: var(--text-1);
+}
+.rem-cap-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -4px;
+}
+
+/* ---------- ② 整理区（唯一滚动的部分） ---------- */
+
+.rem-cap-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-14);
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-16) var(--space-20);
+}
+
+/* ----- 空态演示：一句话 → 拆出来的样子 -----
+   2026-11-11 第三轮。前两轮都在同一个暖色里调明度，用户看图一句话点破：
+   「画框和背景色一模一样，就像糊在一起」。
+
+   原因是硬的：卡底和抽屉底当时**都是 --card-bg 同一个值**，唯一的边界是
+   1px / 10% 的暖墨线。同一个色相里，ΔL* 再调也就三四个点，人眼在浅底上分不出，
+   只能靠描边硬撑 —— 而那根线本身也只有 10% 浓度。
+
+   这一轮不再调明度，换**色相**：卡换成淡蓝便签（--memo-*），抽屉保持暖米纸。
+   冷暖是对立项，不靠明度也比得出来；卡里再放暖白行卡，卡内又多一层冷暖。
+   整体仍然是「纸」的语言，只是多了一张贴上去的便签。 */
+
+.rem-cap-empty {
+  /* 上下 auto：内容不足一屏时把余量对半分到两头。溢出时 auto 自动退化成 0，照常滚动。
+     为什么不改成"贴顶 + 底部贴 dock"：那样上下两组会断开，中间一个几百像素的大洞，
+     比现在更难读。居中的问题靠**内容加厚**解决（见下面 hello / demo），不靠挪位置。 */
+  margin: auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-24);
+}
+
+/* 顶部组：图标 + 名字 + 一句主张。
+   三行的字号是 56 → 17 → 22，最后一行最大 —— 倒过来排，
+   主张就成了图标的注释，那它就不配占那块地方。 */
+.rem-cap-hello {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-14);
+  text-align: center;
+}
+
+/* 品牌行：字形沿用首页（衬线 + 700 + --ls-tight），形态不沿用 ——
+   首页是 26px 的小 logo 缩在导航栏里，这里给足 56px，因为图标手里
+   举着一张待办清单，那是这个产品才有的东西，缩到 26px 就看不见了。
+
+   **纵排而不是横排**（11-11 第二轮）。横排时图标 56、字 17，比例 3.3:1；
+   首页那对是 26:17 = 1.5:1 —— 同一套字，换个比例就散了，字看着像挂在图标旁边。
+   横排要成立得把字放到 37px，那就比主张还大。纵排绕开了这个比较：
+   图标是图标、名字是名字，上下各自成立。 */
+.rem-cap-brand {
+  align-self: center;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-6);
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 1.0625rem;
+  font-weight: 700;
+  letter-spacing: var(--ls-tight);
+  color: var(--text-1);
+}
+
+.rem-cap-brand-mark {
+  flex: none;
+  width: 56px;
+  height: 56px;
+}
+
+/* 空态的主张。全屏第二大的字（标题 20px 之下、正文 12px 之上）——
+   上一版整屏只有 20px 和 12px 两档，中间是空的，所以无论塞多少内容都"没有层次"。
+   用衬线是因为它在说一句人话，不是一句功能。 */
+.rem-cap-lead {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 1.375rem;
+  font-weight: 500;
+  line-height: 1.35;
+  letter-spacing: var(--ls-tight);
+  color: var(--text-1);
+}
+
+/* 底部组：预演卡 + 一句说明。跟着输入栏走，跟"要打字"这件事同构。 */
+.rem-cap-demo-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+}
+
+.rem-cap-demo {
+  /* 整张卡可点（填入原话，不发请求）。所以它必须是按钮的行为：
+     光标、hover、键盘焦点、按下反馈，一样不能少 —— 否则用户看不出它能点。 */
+  display: block;
+  width: 100%;
+  padding: var(--space-16);
+  /* 淡蓝便签贴在暖米抽屉上（11-11 第三轮）。
+     上一版卡底写的是 --card-bg，和抽屉底**完全同一个值**，只剩一条 10% 暖墨线撑着边界
+     —— 那就是用户说的「画框和背景色一模一样，糊在一起」。同色相下再怎么调明度，
+     1px 的线都救不了。这里换的不只是深浅，是**色相**：暖纸 + 冷便签，
+     两个通道同时拉开（ΔL* 4.9 + 色相差约 200°），远看近看都分得开。
+     为什么是蓝而不是别的：蓝金是互补对，跟玉米金放一起最跳又不脏；
+     而且它在这张图里是有分工的 —— 冷色 = 还没整理的原话，暖色 = 已经理好的清单。 */
+  border: 1px solid var(--memo-line);
+  border-radius: 16px;
+  background: var(--memo-bg);
+  box-shadow: var(--memo-shadow);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--t-color),
+    box-shadow var(--t-move),
+    transform var(--t-move);
+}
+.rem-cap-demo:hover {
+  border-color: var(--memo-ink);
+  box-shadow: var(--memo-shadow-hover);
+  /* 往上浮 2px 而不是原地变色：这张卡是「便签」，便签被手指碰会翘一下。
+     只变色的话，在蓝底上肉眼几乎看不出 hover 生效了。 */
+  transform: translateY(-2px);
+}
+.rem-cap-demo:active {
+  transform: translateY(0);
+}
+/* 减弱动效：hover 的位移去掉，改成只换边框色和阴影。
+   卡片整块上浮对前庭敏感的人是实打实的不适，不是"动画好看不好看"的问题。 */
+@media (prefers-reduced-motion: reduce) {
+  .rem-cap-demo:hover {
+    transform: none;
+  }
+}
+.rem-cap-demo:focus-visible {
+  outline: 2px solid var(--memo-ink);
+  outline-offset: 2px;
+}
+
+.rem-cap-demo-said {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: 1.7;
+  color: var(--text-2);
+}
+
+/* 标签不参与换行：它一折行，"你说"就跑到第二行去了，读起来像两句话。
+   用便签的冷色 —— 这一行是「用户的原话」，不是产品的结论，颜色上先分家。 */
+.rem-cap-demo-tag {
+  flex: none;
+  padding-top: 1px;
+  font-size: var(--fs-badge);
+  font-weight: 600;
+  color: var(--memo-ink);
+  letter-spacing: 0.06em;
+}
+
+.rem-cap-demo-sep {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 8px;
+  font-size: var(--fs-badge);
+  color: var(--memo-ink);
+  letter-spacing: 0.04em;
+}
+
+/* 后面拉一条渐隐的线：把「原话」和「结果」在视觉上真切开。
+   不画满整行 —— 满行会变成表格的分隔线，渐隐才是「从这里开始不一样」。
+   跟卡底同色系、只比它深一档，所以它读起来是纸上的折痕，不是一条 UI 边框。 */
+.rem-cap-demo-sep::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--memo-line), transparent);
+}
+
+.rem-cap-demo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* 行卡是**暖白**，落在冷底上 —— 卡内又出现一次冷暖分层：
+   便签（冷）→ 贴在上面的三条小纸条（暖）。上一版是卡亮行暗、同一个暖色里差 3 个点，
+   凑近了才看得出；这一版是靠色相直接分开，扫一眼就有里外。 */
+.rem-cap-demo-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card-bg);
+  box-shadow: 0 1px 1px rgba(45, 72, 104, 0.04);
+}
+
+/* 勾选圈 / 菱形，跟结果态的时间轴同一个语义：待办能勾完，日程只能推迟。
+   演示里出现第三种形状，用户对照真实结果时就少一次"这俩是一回事吗"。 */
+.rem-cap-demo-node {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--line-strong);
+}
+.rem-cap-demo-node[data-kind="task"] {
+  border-radius: 50%;
+}
+.rem-cap-demo-node[data-kind="reminder"] {
+  border-radius: 2px;
+  transform: rotate(45deg);
+}
+
+/* 时间用等宽数字：两行的冒号对齐，眼睛能顺着扫下来 */
+.rem-cap-demo-when {
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--accent-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.rem-cap-demo-what {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--fs-md);
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 说明搬到卡外：在卡里它跟「整理成 三条」挤在一起，读起来像第四行结果 */
+.rem-cap-demo-foot {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  text-align: center;
+}
+
+
+/* ----- 整理中 ----- */
+
+/* "你说的"是证据卡，不是聊天气泡：左金线 + 原文 + 时间，没有头像、没有气泡尾巴 */
+.rem-cap-srcquote {
+  padding: var(--space-12) var(--space-14);
+  border-left: 2px solid var(--accent-line);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--fill-1);
+}
+.rem-cap-srcquote-k {
+  display: block;
+  margin-bottom: var(--space-5);
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+}
+.rem-cap-srcquote p {
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: 1.75;
+  color: var(--text-1);
+  word-break: break-word;
+}
+.rem-cap-srcquote-meta {
+  display: block;
+  margin-top: var(--space-6);
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+}
+
+.rem-cap-proc {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.rem-cap-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+.rem-cap-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-3);
+  animation: rem-cap-bounce 1.1s ease-in-out infinite;
+}
+.rem-cap-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.rem-cap-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+/* ----- 失败 / 0 条：都要有出口，不给空白页 ----- */
+
+.rem-cap-fail,
+.rem-cap-zero {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-8);
+  padding: var(--space-16);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--fill-1);
+}
+.rem-cap-fail-ttl,
+.rem-cap-zero-ttl {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 500;
+  color: var(--text-1);
+}
+.rem-cap-fail-note,
+.rem-cap-zero-note {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+  color: var(--text-2);
+}
+/* 「为什么失败」比「怎么办」更该先看见：429 要等、502 要换说法，
+   两种情况用户该做的事完全不同，不能只给一句"没整理出来" */
+.rem-cap-fail-why {
+  margin: 0 0 var(--space-6);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  font-weight: 600;
+  color: var(--text-1);
+}
+.rem-cap-fail-acts {
+  display: flex;
+  gap: var(--space-8);
+  margin-top: var(--space-4);
+}
+.rem-cap-fail-retry {
+  margin-top: var(--space-4);
+}
+/* 没加上时贴在那一行下面的原因。只在真的发生过一次提交之后出现，
+   所以用 --bad 系里最轻的一档：它是解释，不是警报横幅 */
+.rem-cap-issue {
+  margin: var(--space-4) 0 0;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  font-weight: 600;
+  color: var(--red-ink);
+}
+
+/* ----- 缺时间：就地补一个时刻 -----
+   「缺少时间」原先只是个标签。标了却不给出口，用户唯一的动作是取消勾选 ——
+   等于告诉他"你说错了"，还不给改的机会。入口挂在缺时间的那一行上：
+   点开就地填，填完这一行自己变成「可直接加入」。 */
+
+.rem-cap-fix {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.rem-cap-fix-btn {
+  position: relative;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  font-weight: 600;
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+  cursor: pointer;
+}
+/* 视觉上还是一行小字，但触控区上下各撑 14px：文字行高约 19px，撑完 >44，
+   手指按得中（和「不提醒」那个入口同一个做法） */
+.rem-cap-fix-btn::before {
+  content: "";
+  position: absolute;
+  inset: -14px -8px;
+}
+.rem-cap-fix-btn:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 4px;
+  border-radius: var(--radius-xs);
+}
+
+.rem-cap-fix-panel {
+  flex: 1 1 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-6);
+  margin-top: var(--space-4);
+  padding: var(--space-8) var(--space-10);
+  border-left: 2px solid var(--line-strong);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--fill-1);
+}
+
+.rem-cap-fix-input {
+  flex: 1 1 108px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 var(--space-8);
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius-sm);
+  background: var(--card-bg);
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+.rem-cap-fix-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.rem-cap-fix-ok {
+  min-height: 44px;
+  padding: 0 var(--space-14);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--card-bg);
+  color: var(--text-1);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.rem-cap-fix-ok:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.rem-cap-fix-hint,
+.rem-cap-fix-err {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+}
+.rem-cap-fix-hint {
+  color: var(--text-3);
+}
+.rem-cap-fix-err {
+  font-weight: 600;
+  color: var(--red-ink);
+}
+
+@media (max-width: 900px) {
+  /* iOS 聚焦 font-size < 16px 的输入框会把整页放大、且不还原（见 a11y.css）。
+     那边有通配兜底，这里显式再来一份：抽屉自己不该指望别处的规则。 */
+  .rem-cap-fix-input {
+    font-size: 16px;
+  }
+}
+.rem-cap-zero .rem-cap-primary,
+.rem-cap-zero-retry {
+  margin-top: var(--space-4);
+}
+
+/* ----- 结果：汇总条 ----- */
+
+.rem-cap-summarybar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-10);
+  padding: var(--space-10) var(--space-12);
+  border-radius: var(--radius-sm);
+  background: var(--fill-2);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.rem-cap-summarybar-warn {
+  color: var(--warning-ink);
+  white-space: nowrap;
+}
+
+/* 注意力路由：有需确认就把人带过去，而不是只报个数让他自己找（§4.4） */
+.rem-cap-route {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-6);
+  width: 100%;
+  min-height: 38px;
+  padding: 0 var(--space-12);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  background: var(--accent-tint);
+  color: var(--accent-ink);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition: background var(--t-color), border-color var(--t-color);
+}
+.rem-cap-route:hover {
+  border-color: var(--accent);
+}
+.rem-cap-route:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ----- 结果：你说的 ----- */
+
+.rem-cap-src {
+  padding: var(--space-12) var(--space-14);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--fill-1);
+}
+.rem-cap-src-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+.rem-cap-src-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-5);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.rem-cap-src-toggle:hover {
+  color: var(--text-1);
+}
+.rem-cap-caret {
+  width: 0;
+  height: 0;
+  border-left: 4px solid currentColor;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  transition: transform var(--t-move);
+}
+.rem-cap-caret[data-open="1"] {
+  transform: rotate(90deg);
+}
+.rem-cap-quote {
+  margin: var(--space-8) 0 0;
+  font-size: var(--fs-md);
+  line-height: 1.85;
+  color: var(--text-1);
+  word-break: break-word;
+}
+.rem-cap-srcmark {
+  padding: 0 1px;
+  border-bottom: 1px dashed var(--accent-line);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: background var(--t-color), border-color var(--t-color);
+}
+.rem-cap-srcmark[data-on="1"] {
+  border-bottom-color: var(--accent);
+  background: var(--accent-tint);
+}
+.rem-cap-srcno {
+  margin-left: 1px;
+  font-size: var(--fs-badge);
+  color: var(--accent-ink);
+  vertical-align: super;
+}
+.rem-cap-src-acts {
+  display: flex;
+  gap: var(--space-8);
+  margin-top: var(--space-10);
+}
+
+/* ----- 结果：逐条检查 ----- */
+
+.rem-cap-axishd {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+.rem-cap-axishd h3 {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--text-1);
+}
+.rem-cap-axishd span {
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+}
+
+/* 一条轴。左栏日期/钟点，中间节点，右边是事。
+   顺序本身就是"已经理清了"的证据，所以不按天分成一堆卡片。 */
+.rem-cap-axis {
+  --cap-gutter: 52px;
+  --cap-nodecol: 24px;
+  --cap-node-center: 19px;
+  display: flex;
+  flex-direction: column;
+}
+.rem-cap-axisrow {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--cap-gutter) var(--cap-nodecol) minmax(0, 1fr);
+  align-items: start;
+  padding: var(--space-10) 0;
+}
+.rem-cap-axisrow::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--cap-gutter) + var(--cap-nodecol) / 2);
+  width: 1px;
+  /* --line 在纸底上是 rgba(...,0.10)，等于没画；轴必须用 --line-strong */
+  background: var(--line-strong);
+}
+.rem-cap-axisrow:first-child::before {
+  top: var(--cap-node-center);
+}
+.rem-cap-axisrow:last-child::before {
+  bottom: calc(100% - var(--cap-node-center));
+}
+
+.rem-cap-axiswhen {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 1px;
+  padding-right: var(--space-10);
+  text-align: right;
+}
+.rem-cap-axisday {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.rem-cap-axistime {
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 待办 = 圆（能勾完）；日程 = 菱形（只能推迟/暂停/关来源）。
+   两种形状是这两类对象在界面上唯一的区别，不许混。 */
+.rem-cap-nodewrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--cap-nodecol);
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+/* 视觉 17px 不改，热区补到 44（与 .rem-morebtn 同做法） */
+.rem-cap-nodewrap::before {
+  content: "";
+  position: absolute;
+  inset: -10px;
+}
+.rem-cap-node {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--card-bg);
+  transition: background var(--t-color), border-color var(--t-color);
+}
+.rem-cap-node[data-on="1"] {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.rem-cap-node[data-kind="reminder"] {
+  border-radius: 4px;
+  transform: rotate(45deg);
+}
+.rem-cap-node[data-kind="reminder"][data-on="1"] {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.rem-cap-node svg {
+  color: var(--cap-on-accent);
+}
+.rem-cap-nodewrap:hover .rem-cap-node {
+  border-color: var(--accent);
+}
+.rem-cap-nodewrap:hover .rem-cap-node[data-kind="reminder"] {
+  border-color: var(--accent);
+}
+.rem-cap-nodewrap:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -8px;
+}
+
+.rem-cap-axisbody {
+  min-width: 0;
+  padding-top: 1px;
+}
+.rem-cap-axisttl {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-6);
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  color: var(--text-1);
+}
+.rem-cap-axisnote {
+  margin: var(--space-3) 0 0;
+  font-size: var(--fs-badge);
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+/* 每条的状态：可直接加入 / 需要确认 / 缺少时间 / 加入失败。
+   只是一个小 pill，不要做成大面积色块。 */
+.rem-cap-flag {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 3px;
+  font-size: var(--fs-badge);
+  font-weight: 400;
+  white-space: nowrap;
+}
+.rem-cap-flag[data-tone="ok"],
+.rem-cap-flag[data-tone="muted"] {
+  background: var(--fill-2);
+  color: var(--text-3);
+}
+.rem-cap-flag[data-tone="ask"] {
+  background: var(--accent-tint);
+  color: var(--accent-ink);
+}
+.rem-cap-flag[data-tone="bad"] {
+  background: var(--fill-2);
+  color: var(--color-red-ink);
+}
+
+/* 编号按原话出现顺序，排在行尾当脚注。点它回看那一句。 */
+.rem-cap-no {
+  position: relative;
+  margin-left: auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-badge);
+  line-height: 1;
+  color: var(--text-3);
+  cursor: pointer;
+}
+/* 视觉 18px 不改，热区补到 38（±10px 命中） */
+.rem-cap-no::before {
+  content: "";
+  position: absolute;
+  inset: -10px;
+}
+.rem-cap-no:hover {
+  background: var(--accent-tint);
+  color: var(--accent-ink);
+}
+
+/* 不变量 #1：只设截止不会响。
+   上一版是整屏一行黄色提示，用户读完仍不知道「不提醒」指什么 ——
+   把它改成那一行自己的状态词，点开才展开后果说明。 */
+.rem-cap-nrmd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-8);
+  margin-top: var(--space-4);
+}
+.rem-cap-nrmd-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-2);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+  cursor: pointer;
+}
+/* 视觉 20px，热区撑到 44（手机） */
+.rem-cap-nrmd-btn::before {
+  content: "";
+  position: absolute;
+  inset: -12px -8px;
+}
+.rem-cap-nrmd-btn:hover {
+  color: var(--text-1);
+}
+.rem-cap-nrmd-btn:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 4px;
+  border-radius: var(--radius-xs);
+}
+.rem-cap-nrmd-caret {
+  font-size: 9px;
+  line-height: 1;
+  transition: transform 0.15s ease;
+}
+.rem-cap-nrmd-btn[aria-expanded="true"] .rem-cap-nrmd-caret {
+  transform: rotate(180deg);
+}
+.rem-cap-nrmd-panel {
+  flex: 1 1 100%;
+  margin: 0;
+  padding: var(--space-6) var(--space-10);
+  border-left: 2px solid var(--line-strong);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--fill-1);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rem-cap-nrmd-caret {
+    transition: none;
+  }
+}
+
+.rem-cap-ask {
+  margin-top: var(--space-8);
+  padding: var(--space-10) var(--space-12);
+  border-left: 2px solid var(--accent-line);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--fill-1);
+}
+.rem-cap-ask-q {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-1);
+}
+.rem-cap-ask .rem-cap-chips {
+  margin-top: var(--space-8);
+}
+
+.rem-cap-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+}
+.rem-cap-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--fill-2);
+  font: inherit;
+  font-size: var(--fs-badge);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.rem-cap-chip-btn {
+  cursor: pointer;
+  transition: background var(--t-color), border-color var(--t-color), color var(--t-color);
+}
+.rem-cap-chip-btn:hover {
+  background: var(--fill-3);
+  color: var(--ink);
+}
+.rem-cap-chip-btn[data-on="1"] {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+  color: var(--accent-ink);
+}
+.rem-cap-chip-btn:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ---------- ③ 底部 ---------- */
+
+.rem-cap-dock {
+  flex: 0 0 auto;
+  padding: var(--space-12) var(--space-20) max(var(--space-14), env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+  background: var(--card-bg);
+}
+.dark .rem-cap-dock {
+  background: var(--surface);
+}
+
+/* 示例句不再在底栏（11 日第二轮）。空态那张演示卡本身可点，
+   「一键试一句」的能力并到了卡上，底栏只剩输入框。 */
+
+
+.rem-cap-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-6);
+  padding: 5px 5px 5px 6px;
+  border: 1px solid var(--input-border);
+  border-radius: 22px;
+  background: var(--fill-1);
+  transition: border-color var(--t-color), background var(--t-color);
+}
+.rem-cap-composer:focus-within {
+  border-color: var(--accent);
+  background: var(--card-bg);
+}
+.rem-cap-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-height: 96px;
+  padding: 9px 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-lg);
+  line-height: 1.5;
+  color: var(--text-1);
+  resize: none;
+}
+/* a11y.css 给全局 input:focus-visible 画了 2px 方框，输入框靠外层金边表示焦点
+   （与 auth.css 同一个先例），这里要把它关掉，否则会出现双层描边 */
+.rem-cap-input:focus,
+.rem-cap-input:focus-visible {
+  outline: none;
+}
+.rem-cap-input::placeholder {
+  color: var(--text-3);
+}
+/* 整理中锁住输入：字要还在、颜色退一档，但不能灰成"禁用控件"那种死灰 */
+.rem-cap-input:disabled {
+  color: var(--text-2);
+  -webkit-text-fill-color: var(--text-2);
+  opacity: 1;
+}
+.rem-cap-mic,
+.rem-cap-send {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background var(--t-color), opacity var(--t-color);
+}
+.rem-cap-mic {
+  background: transparent;
+  color: var(--text-2);
+}
+.rem-cap-mic:hover {
+  background: var(--fill-3);
+}
+/* 录音中：按钮里是方块（停止），不是麦克风。两个动作不能长同一个样子 ——
+   变红只是辅助，形状变了才不会误点。 */
+.rem-cap-mic[data-rec="1"] {
+  color: var(--red-ink);
+  animation: rem-cap-mic-pulse 1.6s ease-in-out infinite;
+}
+.rem-cap-mic:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.rem-cap-mic-stop {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  background: currentColor;
+}
+@keyframes rem-cap-mic-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rem-cap-mic[data-rec="1"] {
+    animation: none;
+  }
+}
+
+/* 录音/听写状态行：只在真的在录时出现，平时不占位 */
+.rem-cap-voice {
+  margin: 0 0 var(--space-8);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.rem-cap-send {
+  background: var(--accent);
+  color: var(--cap-on-accent);
+}
+.rem-cap-send:hover {
+  background: var(--accent);
+  filter: brightness(1.04);
+}
+.rem-cap-send:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+/* ---------- ③ 底部：结果态 ---------- */
+
+.rem-cap-dock--result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+.rem-cap-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-10);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.rem-cap-summary b {
+  font-weight: 500;
+  color: var(--text-1);
+}
+.rem-cap-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  cursor: pointer;
+}
+.rem-cap-link:hover {
+  color: var(--text-1);
+  text-decoration: underline;
+}
+.rem-cap-acts {
+  display: flex;
+  gap: var(--space-8);
+}
+.rem-cap-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 var(--space-12);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background var(--t-color), color var(--t-color), border-color var(--t-color);
+}
+.rem-cap-ghost:hover {
+  background: var(--fill-3);
+  color: var(--ink);
+}
+.rem-cap-acts-ghost {
+  flex: 0 0 auto;
+}
+.rem-cap-primary {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-6);
+  min-height: 40px;
+  padding: 0 var(--space-14);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--ink);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--card-bg);
+  cursor: pointer;
+  transition: background var(--t-color), opacity var(--t-color);
+}
+.rem-cap-primary:hover {
+  background: var(--accent);
+}
+.rem-cap-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+/* 深色下 --ink 是浅色，主按钮要反过来用金底墨字 */
+.dark .rem-cap-primary {
+  background: var(--accent);
+  color: var(--cap-on-accent);
+}
+.dark .rem-cap-primary:hover {
+  filter: brightness(1.06);
+}
+
+.rem-cap-failbar {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--color-red-ink);
+}
+
+/* ---------- 动画（reduced-motion 下整组关掉） ---------- */
+
+@keyframes rem-cap-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes rem-cap-slide {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes rem-cap-up {
+  from {
+    transform: translateY(24px);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@keyframes rem-cap-bounce {
+  0%,
+  60%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+/* ---------- 入口条 ---------- */
+/* 次入口：金色左缘 + 淡金渐变，和「+ 新建」的主位拉开层次。
+   不用图标库，也没有 emoji —— 一个自绘的火花就是它的记号。 */
+.rem-cap-strip {
+  display: flex;
+  width: 100%;
+  min-height: 64px;
+  margin-top: var(--space-16);
+  align-items: center;
+  gap: var(--space-12);
+  padding: 0 var(--space-16) 0 var(--space-14);
+  border: 1px solid var(--accent-line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: linear-gradient(90deg, var(--accent-soft), var(--step-2) 45%);
+  text-align: left;
+  box-shadow: var(--shadow-1);
+  transition: var(--t-color);
+}
+.rem-cap-strip:hover {
+  border-color: var(--accent);
+  background: linear-gradient(90deg, var(--accent-tint), var(--step-2) 52%);
+}
+.rem-cap-strip-mark {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--accent-line);
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.rem-cap-strip-mark .rem-cap-spark { width: 18px; height: 18px; }
+.rem-cap-strip-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+}
+.rem-cap-strip-kicker {
+  font-size: var(--fs-badge);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--accent-ink);
+}
+.rem-cap-strip-text {
+  overflow: hidden;
+  font-size: var(--fs-lg);
+  color: var(--text-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rem-cap-strip-mobile { display: none; }
+.rem-cap-strip-go {
+  margin-left: auto;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--accent-ink);
+  white-space: nowrap;
+}
+
+/* ---------- 窄屏：抽屉改成底部铺 ---------- */
+@media (max-width: 900px) {
+  .rem-cap-drawer {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 92dvh;
+    border-top: 1px solid var(--line-strong);
+    border-left: 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    box-shadow: 0 -14px 38px var(--fill-1);
+    animation: rem-cap-up 0.28s cubic-bezier(0.22, 0.8, 0.22, 1) both;
+  }
+  /* 抓手上那一道：告诉手指"这块能拖下去"（拖动本身还没做，Phase D 再说） */
+  .rem-cap-top { padding: var(--space-16) var(--space-16) var(--space-12); }
+  .rem-cap-top::before {
+    content: "";
+    position: absolute;
+    top: 7px;
+    left: 50%;
+    width: 38px;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--line-strong);
+    transform: translateX(-50%);
+  }
+  .rem-cap-title { font-size: 21px; }
+  .rem-cap-body { padding: var(--space-14) var(--space-16); }
+  .rem-cap-dock { padding: var(--space-10) var(--space-16) max(var(--space-12), env(safe-area-inset-bottom)); }
+  /* iOS Safari 聚焦 <16px 的输入框会放大整页且不还原 */
+  .rem-cap-input { font-size: 16px; }
+  .rem-cap-mic,
+  .rem-cap-send { width: 44px; height: 44px; }
+  .rem-cap-chip-btn { min-height: 44px; }
+  .rem-cap-ghost { min-height: 44px; }
+  .rem-cap-primary { min-height: 46px; }
+  .rem-cap-axis { --cap-gutter: 48px; }
+  .rem-cap-strip { min-height: 60px; gap: var(--space-10); padding: 0 var(--space-12); }
+  .rem-cap-strip-desktop { display: none; }
+  .rem-cap-strip-mobile { display: block; }
+  /* 390 下「开始 →」会把示例句挤掉一半，入口本身已经说了要做什么 */
+  .rem-cap-strip-go { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rem-cap-drawer,
+  .rem-cap-scrim,
+  .rem-cap-proc { animation: none; }
+  .rem-cap-dots i { animation: none; }
 }

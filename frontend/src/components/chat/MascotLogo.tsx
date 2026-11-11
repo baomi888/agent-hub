@@ -8,7 +8,46 @@ type Props = {
   mood?: "idle" | "thinking";
   /** 变化时歪一下头（如切换能力开关）；传会变的标识即可 */
   tiltKey?: string | number;
+  /**
+   * 手里的道具。默认空手（全站原有的用法都不变）。
+   *
+   * `"list"` = 举着一张待办清单。用在「一句话整理」的空态：那里要的不是
+   * 又一个 logo，而是「把话拆成条目」这件事的执行者。空手的吉祥物放在那儿
+   * 只是个装饰，举清单的它才和旁边演示的东西是同一件事。
+   */
+  holding?: "list";
 };
+
+/** 待办清单道具：一条已勾、两条待办。跟着 mascot-body 一起摇，才像"举着" */
+function HoldingList() {
+  return (
+    <g className="mascot-hold">
+      {/* 手臂：从身体右侧伸出来。不画这只手的话，纸片会像凭空飘在旁边 */}
+      <path d="M80 57 C85.5 55.5 89 56.5 92 59.5" fill="none" stroke="currentColor" strokeWidth={5} />
+      {/* 清单本体：斜一点，像随手举着而不是贴在画布上 */}
+      <g transform="rotate(-7 101 45)">
+        <rect
+          x="88"
+          y="25"
+          width="26"
+          height="40"
+          rx="5"
+          fill="#FFFDF6"
+          stroke="currentColor"
+          strokeWidth={4}
+        />
+        {/* 第一行是完成态：金勾 + 被划掉的线。品牌金只在"完成"这一处出现 */}
+        <path d="M92.5 34.5 l2.6 2.6 l4.6-5.4" fill="none" stroke="#F5B840" strokeWidth={3.2} />
+        <path d="M102.5 33.5 h6" stroke="currentColor" strokeWidth={2.8} opacity={0.28} />
+        {/* 还没做的两条：只留短横，细节太多在 40px 以下会糊成灰块 */}
+        <path d="M92.5 44.5 h5" stroke="currentColor" strokeWidth={2.8} opacity={0.32} />
+        <path d="M100.5 44.5 h7" stroke="currentColor" strokeWidth={2.8} opacity={0.32} />
+        <path d="M92.5 53.5 h5" stroke="currentColor" strokeWidth={2.8} opacity={0.32} />
+        <path d="M100.5 53.5 h7" stroke="currentColor" strokeWidth={2.8} opacity={0.32} />
+      </g>
+    </g>
+  );
+}
 
 /**
  * 知穗吉祥物（漫画 Q 版）：会眨眼、会呼吸漂浮、hover 时弹一下。
@@ -18,7 +57,13 @@ type Props = {
  *  - mood 从 thinking 回落 idle（生成完成）时自动眨一次眼
  *  - tiltKey 变化时歪一下头（如切换能力开关）
  */
-export default function MascotLogo({ className = "", title, mood = "idle", tiltKey }: Props) {
+export default function MascotLogo({
+  className = "",
+  title,
+  mood = "idle",
+  tiltKey,
+  holding,
+}: Props) {
   const raw = useId();
   const clip = `cob${raw.replace(/[:]/g, "")}`;
   const [happy, setHappy] = useState(false);
@@ -104,6 +149,8 @@ export default function MascotLogo({ className = "", title, mood = "idle", tiltK
             <ellipse className="mascot-mouth-o" cx="60" cy="69" rx="3.4" ry="4" fill="none" stroke="currentColor" strokeWidth={4} />
             {/* 脸高光 */}
             <path d="M45 31 C48 27 53 25 58 25" fill="none" stroke="#FFFFFF" strokeWidth={4} opacity={0.5} />
+            {/* 道具放在 body 里：跟着身体一起摇，才像"举在手里" */}
+            {holding === "list" ? <HoldingList /> : null}
           </g>
         </g>
       </svg>

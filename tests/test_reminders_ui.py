@@ -381,28 +381,28 @@ class TestAxis:
 
 
 class TestDrawerOrder:
-    """抽屉按规格「来源 → 触发 → 动作 → 送达」重排。"""
+    """抽屉按用户能理解的顺序：谁的提醒 → 什么时候 → 提醒时做什么。"""
 
     def test_fields_follow_spec_order(self):
         drawer = _section("drawer")
         order = [
-            drawer.index("提醒什么"),
-            drawer.index("这是关于什么的"),
+            drawer.index("提醒你什么"),
+            drawer.index("由哪个功能安排"),
             drawer.index("什么时候提醒你"),
-            drawer.index("到点之后"),
-            drawer.index("怎么送达"),
+            drawer.index("提醒时做什么"),
+            drawer.index("提醒方式"),
         ]
         assert order == sorted(order), "抽屉字段顺序又和规格不一致了"
 
     def test_delivery_block_is_not_a_control(self):
-        """「怎么送达」是说明块，不是下拉框 —— 否则看着又能选又不会生效。
+        """「提醒方式」是说明块，不是下拉框 —— 否则看着又能选又不会生效。
 
-        断言数整个抽屉的 select：只数「怎么送达」之后的那 500 字抓不到
+        断言数整个抽屉的 select：只数「提醒方式」之后的那 500 字抓不到
         「把控件插在标题前面」这种写法（反证时试出来的）。
         """
         drawer = _section("drawer")
         assert 'className="rem-deliver"' in drawer
-        assert drawer.count("<select") == 3, "抽屉里多了一个 select（只允许 来源/周几/到点之后）"
+        assert drawer.count("<select") == 3, "抽屉里多了一个 select（只允许 功能/周几/提醒动作）"
         block = drawer[drawer.index('className="rem-deliver"') :]
         assert "<select" not in block[:400]
 
@@ -447,6 +447,43 @@ class TestGroupTitles:
         assert "if (children.length === 0) return null;" in page
 
 
+class TestUserFacingCopy:
+    """界面只说「提醒 / 通知」，不把内部术语漏给用户。
+
+    这组断言看的是去掉注释后的源码：注释里可以写「触发窗口」，
+    JSX、showToast、aria-label、placeholder 里一个都不许有。
+    """
+
+    # 「影响」里也有一个「响」，不能按裸字判；只看单独表示"响铃/发声"的用法。
+    INTERNAL_PATTERNS = (
+        r"(?<!影)响",
+        r"推送",
+        r"静默",
+        r"送达",
+        r"来源",
+        r"日程",
+        r"触发",
+        r"后端",
+        r"服务端",
+    )
+
+    def test_no_internal_words_in_user_facing_source(self):
+        for name, src in (("页面", _page()), ("一句话添加抽屉", _capture())):
+            for pattern in self.INTERNAL_PATTERNS:
+                m = re.search(pattern, src)
+                assert m is None, f"{name}里还有内部术语「{m.group(0) if m else pattern}」"
+
+    def test_key_copy_stays_in_plain_chinese(self):
+        page = _page()
+        capture = _capture()
+        assert "设了提醒时间，到时会通知你" in page
+        assert "只设截止时间，不会收到提醒" in page
+        assert "免打扰时间" in page
+        assert "提醒记录" in page
+        assert "补上时间" in capture
+        assert "设好后才会提醒你" in capture
+
+
 class TestCompactHead:
     """页头瘦身只给量过的页面用。"""
 
@@ -485,9 +522,9 @@ class TestPhase0Contracts:
         assert "if (!status) return null;" in page
 
     def test_fire_diary_has_a_zero_state(self):
-        """一条流水都没有时说「还没响过」，不要留一个空白的 <ul>。"""
+        """一条流水都没有时说「还没有提醒过」，不要留一个空白的 <ul>。"""
         page = _page()
-        assert "还没响过。" in page
+        assert "还没有提醒过。" in page
 
     def test_missed_is_not_rendered_as_failed(self):
         """`failed` + `missed:` 是「错过窗口」，不是「发送失败」。
@@ -497,7 +534,8 @@ class TestPhase0Contracts:
         """
         page = _page()
         assert 'startsWith("missed:")' in page
-        assert '"错过"' in page
+        assert '"没提醒 · 当时设备不在线"' in page
+        assert '"发送失败"' not in _strip_comments(page), "错过窗口不该写成发送失败"
 
     def test_fired_once_never_shows_up_in_upcoming(self):
         """freq=once 且 next_fire_at 为空 = 已经响过，不会再响。
@@ -555,7 +593,7 @@ class TestAxisCarriesInformation:
         """斜纹没有图例就只是一块来路不明的底纹。"""
         page = _page()
         assert 'className="rem-tape-legend"' in page
-        assert "静默 {quietStart}–{quietEnd}" in page
+        assert "免打扰 {quietStart}–{quietEnd}" in page
         css = CONSOLE_CSS.read_text(encoding="utf-8")
         assert ".rem-legend-hatch {" in css
         # 深色下必须换一套斜纹，否则暖墨 alpha 在近黑上等于没画
@@ -782,3 +820,1156 @@ class TestTaskMarks:
         assert re.search(r"^\s*home: Home,", src, re.M)
         # 描边必须跟主题走，否则深色下图标会变成一块黑色轮廓
         assert 'stroke="currentColor"' in src
+
+
+CAPTURE = ROOT / "frontend" / "src" / "components" / "reminders" / "AiCaptureDrawer.tsx"
+FIXTURE = ROOT / "frontend" / "src" / "components" / "reminders" / "captureFixture.ts"
+A11Y_CSS = ROOT / "frontend" / "src" / "app" / "styles" / "a11y.css"
+
+
+def _capture() -> str:
+    return _strip_comments(CAPTURE.read_text(encoding="utf-8"))
+
+
+def _jsx_element(src: str, opening: str) -> str:
+    """截出以 opening 开头那个 JSX 元素（从开标签到配平的闭标签）。
+
+    为什么不能只比 index 先后：v13 的第一版断言写的是
+    `body_i < dock_i < comp_i`，反证时在 dock 前面插一个空
+    `<div className="rem-cap-dock" />`，`src.index` 命中的是那个空 div，
+    三个位置关系照样成立 —— 断言静默变绿，等于没写。
+    要比的是**包含关系**：composer 是不是真的在这个 footer 的子树里。
+
+    只配平同名标签，不解析属性（属性里的 `=>` 会骗过朴素的 `<[^>]*>`）。
+    """
+    tag = re.match(r"<([A-Za-z][\w.-]*)", opening).group(1)
+    i = src.index(opening)
+    depth = 0
+    for m in re.finditer(r"<(/?)" + re.escape(tag) + r"\b", src[i:]):
+        if m.group(1):
+            depth -= 1
+            if depth == 0:
+                return src[i : i + m.start()]
+        else:
+            depth += 1
+    raise AssertionError(f"{opening} 找不到配平的闭标签，层级无从判断")
+
+
+def _dock_condition(src: str) -> str:
+    """取 ③ 底栏那个条件表达式（`{status === "idle" || … ? (`）。
+
+    为什么要单独切一段：`status === "parsing" ||` 在发送按钮的 disabled 里也出现一次，
+    整文件搜字串的话，把整理中从底栏条件里删掉照样能搜到 → 断言静默变绿（踩过）。
+    """
+    i = src.index('{status === "idle" ||')
+    return src[i : src.index("? (", i)]
+
+
+class TestAiCaptureShell:
+    """AI 整理抽屉（v12 · Phase A）的壳层契约。
+
+    Phase A 还没有后端，能出错的地方全在「顺序」和「默认值」上：
+    结果态是不是一打开就挂在 DOM 里、示例句会不会偷偷提交、
+    勾选全取消之后主按钮还能不能点、语音没接 STT 会不会假装在听。
+    这些都不是像素问题，端到端脚本能验一次，源码断言能保证明天还不会错。
+    """
+
+    def test_drawer_is_a_real_dialog(self):
+        """抽屉要能被读屏当成模态：role=dialog + aria-modal + 标题挂 aria-labelledby。"""
+        src = _capture()
+        assert 'role="dialog"' in src
+        assert 'aria-modal="true"' in src
+        assert "aria-labelledby" in src
+
+    def test_now_is_a_required_prop(self):
+        """渲染期不许 Date.now()：否则纯函数组件每次渲染结果都可能不同。
+
+        `now` 是必填 prop（页面已有每分钟走一次的 useNowMinute），
+        一旦有人把它写成 `now?: number` 再 `?? Date.now()` 兜底，这条要红。
+        """
+        src = _capture()
+        assert "now: number;" in src
+        assert "Date.now()" not in src
+
+    def test_result_state_is_mounted_conditionally(self):
+        """输入态和结果态是二选一渲染，不是把结果态藏起来。
+
+        藏起来的话：一次都没整理过的用户，Tab 键能摸到「加入 0 条」。
+        """
+        src = _capture()
+        assert 'status === "ready"' in src
+        assert '{status === "ready" ? (' in src
+
+    def test_example_sentence_only_fills_the_box(self):
+        """示例只填入、只聚焦 —— 不许顺手提交。
+
+        这是设计稿最容易被实现错的一条：点了示例句立刻出结果，
+        用户会以为自己刚才说了什么。
+        """
+        src = _capture()
+        # 锚在示例卡上：追问选项用的是同一个 chip class，从 class 找会抓错块
+        i = src.index('className="rem-cap-demo"')
+        seg = src[i : src.index("rem-cap-demo-foot")]
+        assert "onClick={fillDemo}" in seg
+        assert "void runParse" not in seg, "示例卡不许直接触发整理"
+
+    def test_join_button_follows_the_selection(self):
+        """取消勾选要能一路取消到 0，且 0 条时既 disabled、commit 也直接返回。"""
+        src = _capture()
+        assert "disabled={pickedItems.length === 0 || committing}" in src
+        assert "if (committingRef.current || pickedItems.length === 0) return;" in src
+
+    def test_voice_entry_only_exists_when_asr_is_wired(self):
+        """没接转写就不渲染麦克风。
+
+        上一版是"按钮一直在，点了弹『语音输入还没接』"—— 用户看到的不是
+        "这里有个功能"，而是"这个产品没做完"。现在入口由后端 capabilities 决定：
+        没配密钥就根本不出现，配了才出现，出现就真能录。
+
+        同时钉住"不假装在听"：源码里不许有那种点了没反应却写「正在听…」的假状态。
+        """
+        src = _capture()
+        assert "正在听…" not in src, "不许出现伪造的『正在听』"
+        assert "{voiceOn ? (" in src, "麦克风必须挂在 voiceOn 后面，不能无条件渲染"
+        assert ".capabilities()" in src, "有没有接语音要问后端，不能前端写死"
+        assert "{status === \"parsing\" || voice.phase !== \"idle\"}" in src, (
+            "录音中必须锁住输入框：转写结果是追加进去的，边打边说会对不上"
+        )
+
+    def test_fixture_never_invents_a_reminder(self):
+        """只有原话里说了「提醒我」才给 remind_at：只设截止的待办不会响。
+
+        光断言「有这个变量名」是摆设（改名成 wantsRemindX 照样是子串）——
+        要钉的是**门**：remind_at 必须挂在 ASK_WORDS 这个条件后面。
+        """
+        fx = _strip_comments(FIXTURE.read_text(encoding="utf-8"))
+        assert re.search(
+            r'const wantsRemind = kind === "task" && ASK_WORDS\.test\(clause\);', fx
+        ), "remind_at 的开关不见了：又会在没让它提醒的时候自己响"
+        assert "remind_at: wantsRemind ? when.remindAt : null," in fx
+
+    def test_input_box_has_no_second_outline(self):
+        """输入框的聚焦描边由外层那张纸承担，a11y.css 里必须留了例外。
+
+        漏了这条就会重演「金边框 + 2px 描边 = 套两个框」（auth 输入框踩过同款）。
+        注：外层从 `.rem-cap-composer`（贴底胶囊）改名为 `.rem-cap-pad`（纸）后，
+        这里跟着改；旧名字不许再出现，否则等于有两条规则并存。
+        """
+        a11y = A11Y_CSS.read_text(encoding="utf-8")
+        assert ".rem-cap-pad textarea:focus-visible" in a11y
+        # 旧选择器不许再留一份（注释里提到类名不算，这里钉的是选择器本身）
+        assert ".rem-cap-composer input:focus-visible" not in a11y
+        sub = a11y[a11y.index(".rem-cap-pad textarea:focus-visible") :]
+        assert "outline: none" in sub[: sub.index("}")]
+
+    def test_small_print_is_not_typeset_at_badge_size(self):
+        """底栏汇总句是给人读的：不许借 --fs-badge（10px）。"""
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        assert "font-size: var(--fs-xs)" in _css_block(css, ".rem-cap-summary {")
+
+    def test_checked_diamond_stays_visible_in_dark(self):
+        """深色里 --accent-ink 本身就是金：金圆上的菱形必须换深墨。"""
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        assert "--cap-on-accent: #22190a;" in _css_block(css, ".rem-cap-drawer {")
+        # 菱形不再靠一个额外的 span，而是把方块转 45°；选中后必须还是实心菱形
+        assert "transform: rotate(45deg)" in _css_block(
+            css, '.rem-cap-node[data-kind="reminder"] {'
+        )
+        assert "background: var(--accent)" in _css_block(
+            css, '.rem-cap-node[data-kind="reminder"][data-on="1"] {'
+        )
+
+
+class TestCaptureIsAToolNotAChat:
+    """v13：抽屉是工具，不是聊天（2026-11-10 第三次改版，用户打回"中间太空"之后）。
+
+    第二版把输入做成"占满中部的纸"：纸上下各空 200px，示例句和信任说明被挤进纸里，
+    底部没有任何东西承重视线，整屏读起来像一张空表格。v13 把承重的换成**贴底输入栏**：
+
+        ① .rem-cap-top   固定不滚：步骤条 / 标题 / 一句说明 / 关闭
+        ② .rem-cap-body  flex:1 + overflow-y:auto：结果再多也只滚这一块
+        ③ .rem-cap-dock  贴底：输入栏永远在同一位置
+
+    这几条钉的是"三段关系"，不是像素 —— 像素会改，关系改了就退回一张纸。
+    """
+
+    def test_three_segments_are_the_skeleton(self):
+        src = _capture()
+        assert 'className="rem-cap-top"' in src
+        assert 'className="rem-cap-body"' in src
+        assert 'className="rem-cap-dock"' in src
+
+    def test_composer_lives_in_the_dock_not_in_the_scrolling_area(self):
+        """输入框必须在 dock 这个 footer 的子树里，不能落进滚动区。
+
+        放进滚动区的话，用户滚到结果一半就找不到输入框了 —— 而且"贴底"这件事
+        是靠 flex 撑出来的，不是靠 position。
+
+        判据是**包含关系**（composer 落在 dock 子树内），不是三段 index 的先后：
+        前后关系挡不住"多插一个同名空节点"这种改法（上一版就是这么漏的）。
+        """
+        src = _capture()
+        dock_open = src.index('<footer className="rem-cap-dock">')
+        dock = _jsx_element(src, '<footer className="rem-cap-dock">')
+        assert 'className="rem-cap-composer"' in dock, (
+            "composer 必须在 dock 子树里；挪到滚动区用户就找不到输入框了"
+        )
+        # 反过来钉住：dock 是 body 之后的那一段，不能整个被搬进滚动区
+        assert src.index('<div className="rem-cap-body"') < dock_open
+
+    def test_css_pins_the_dock_and_lets_only_the_body_scroll(self):
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        body = _css_block(css, ".rem-cap-body {")
+        assert "flex: 1 1 auto" in body
+        assert "overflow-y: auto" in body
+        dock = _css_block(css, ".rem-cap-dock {")
+        assert "flex: 0 0 auto" in dock
+        drawer = _css_block(css, ".rem-cap-drawer {")
+        assert "flex-direction: column" in drawer
+
+    def test_no_step_wizard_and_no_tutorial_block(self):
+        """11 日撤掉顶部步骤条和输入态的教程块。
+
+        第一版按验收文档挂了 `1 说一句 → 2 确认 → 3 加入`，输入态还堆了
+        「说清什么时候、要做什么」+ 例句 + 等待区虚线 + 「说错也没关系」。
+        每一条单看都有道理，摞起来像没做完的产品在教用户用。
+
+        反证：把任一段 DOM 粘回 `_capture()`，这条必须红。
+        """
+        src = _capture()
+        for dead in [
+            "rem-cap-steps",
+            "rem-cap-steparrow",
+            "rem-cap-guide",
+            "试试这样说",
+            "说错也没关系",
+        ]:
+            assert dead not in src, f"引导性元素又回来了：{dead}"
+
+    def test_no_first_person_narration(self):
+        """去 AI 味 P0：抽屉里不许出现"我听到 / 我先把 / 我在整理"。"""
+        src = _capture()
+        for bad in ["我听到", "我先把", "我在整理", "我拿不准"]:
+            assert bad not in src, f"抽屉里还有第一人称旁白：{bad}"
+
+    def test_no_avatar_or_greeting_bubble(self):
+        src = _capture()
+        assert "chat-avatar" not in src
+        assert "rem-cap-bubble" not in src
+
+    def test_dock_no_longer_carries_a_second_row_of_examples(self):
+        """示例句从底栏搬进了空态卡片，底栏不再挂第二排例子。
+
+        原来屏幕上有三处在举例：演示卡、底栏 chips、输入框 placeholder。
+        chips 是最吃亏的那个 —— 四个短语挤一行，每个被压到八来个字，
+        既读不全，又把输入栏顶高了一截。示例卡本身现在可点，
+        「一键试一句」的能力没有丢，丢的只是重复。
+        """
+        src = _capture()
+        assert "rem-cap-chips--dock" not in src, "底栏的第二排例子又回来了"
+        assert "CAPTURE_EXAMPLES" not in src, "这份数据已经没人用了，别留在这儿当诱饵"
+
+    def test_input_is_reachable_from_failure_and_zero(self):
+        """失败态和 0 条都要给同一个输入框。
+
+        不给的话，用户就被卡在一个"没有出口"的页面里 —— 而这两种状态的下一步
+        本来就是"再写一句"，回退到输入态反而多一次点击。
+        """
+        src = _capture()
+        dock = _dock_condition(src)
+        assert 'status === "failed"' in dock
+        assert 'items.length === 0' in dock
+
+    def test_composer_stays_put_while_parsing(self):
+        """整理中也要留着输入栏，只是锁住。
+
+        撤掉的话下半屏会空出一大块、输入框还跳了位置 —— 这正是"上下两边太空"的来源。
+        v13 的第一版就漏了这一段：整理中整条 dock 不渲染，截图里 60% 是空的。
+        """
+        src = _capture()
+        assert 'status === "parsing"' in _dock_condition(src), (
+            "整理中必须和 idle / 失败 / 0 条共用同一个 composer"
+        )
+        assert "voice.phase !== \"idle\"" in src, "录音/听写中光标还能动会骗人"
+
+    def test_reminderless_task_explains_itself_in_place(self):
+        """「不提醒」必须点得开，而且只解释自己那一行。
+
+        上一版是整屏一行黄字（`.rem-cap-warnline`）：用户读完还是不知道
+        「不提醒」指什么 —— 连写这行提示的人都把它记成了「只退出不完成」。
+        疑问在哪产生，答案就在哪展开。
+        """
+        src = _capture()
+        assert "rem-cap-warnline" not in src, "旧的整屏黄字提示该撤掉了"
+        assert "aria-expanded={openNrmd === item.id}" in src
+        assert "aria-controls={`rem-cap-nrmd-${item.id}`}" in src
+        assert 'className="rem-cap-nrmd-panel"' in src
+        # 说明句用大白话：直接说加入后不会提醒、去哪能补
+        assert "加入后不会提醒你" in src
+        assert "在列表里打开它" in src
+
+    def test_noremind_hit_area_reaches_44(self):
+        """视觉 20px 的文字按钮，热区必须补到 44（手机）。"""
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        hit = _css_block(css, ".rem-cap-nrmd-btn::before")
+        assert "inset: -12px -8px" in hit, "20 + 12×2 = 44，改数字就得重新算"
+
+
+class TestCaptureTalksToTheBackend:
+    """Phase B：解析走真实接口，fixture 只在**离线验收**时活着。
+
+    这一组守的不是"接没接上"，是"假结果会不会跑到真实用户面前" ——
+    一个能骗过用户的结果，比一次 502 严重得多。
+    """
+
+    def test_parse_goes_through_the_api(self):
+        src = _capture()
+        assert "api.capture.parse(" in src, "解析必须走 POST /api/capture/parse"
+        assert "if (OFFLINE_PARSE) {" in src, "离线分支要单独成块，别和真实分支搅在一起"
+
+    def test_offline_fixture_cannot_reach_production(self):
+        """假结果的开关必须被 NODE_ENV 兜死。
+
+        `next build` 里 `process.env.NODE_ENV !== "production"` 恒为 false，
+        整支 fixture 会被当成死代码消掉。把这一句删了，环境变量一旦漏配，
+        用户看到的就是一份"整理得很好、但其实没调用模型"的假结果。
+        """
+        src = _capture()
+        i = src.index("const OFFLINE_PARSE")
+        gate = src[i : i + 240]
+        assert 'process.env.NODE_ENV !== "production"' in gate, "缺 NODE_ENV 兜底"
+        assert 'process.env.NEXT_PUBLIC_CAPTURE_OFFLINE === "1"' in gate, "缺显式开关"
+
+    def test_no_internal_schedule_words_on_screen(self):
+        """界面上不许出现「Phase A / 写库在 C 阶段」这类词。
+
+        这是本轮最贵的一条教训：用户原话是"连我自己都不懂"。
+        排期是内部的事，用户只关心"我点了会发生什么"。
+        """
+        for name, src in (("抽屉", _capture()), ("列表页", _page())):
+            for bad in ("Phase A", "Phase B", "Phase C", "C 阶段"):
+                assert bad not in src, f"{name}上还写着内部排期词：{bad}"
+
+    def test_three_failures_have_three_next_steps(self):
+        """429 要等、502 要换说法、断网要重试 —— 三种失败不能共用一句话。
+
+        只断言 "err?.status === 502" 出现过是不够的：把两种失败改成同一句话
+        照样能过（反证抓到的假绿）。所以取到那一行，再看它给的下一步是什么。
+        """
+        src = _capture()
+        i429 = src.index("err?.status === 429")
+        i502 = src.index("err?.status === 502")
+        line429 = src[i429 : src.index("\n", i429)]
+        line502 = src[i502 : src.index("\n", i502)]
+        assert "有点多" in line429, "429 是「现在人多」，要让用户等一下"
+        assert "换个说法" in line502, "502 是模型没读懂，要让用户换说法"
+        assert "换个说法" not in line429, "两种失败别共用一句话"
+        assert "rem-cap-fail-why" in src, "失败原因要显示出来，不能只说「没整理出来」"
+
+    def test_offline_demo_fail_goes_through_the_same_translation(self):
+        """离线演示的失败态必须过真机那条翻译 —— 否则截图会替自己背书。
+
+        上一版 demo 分支直接 `setStatus("failed")`、没设原因：截图里的失败态只有
+        「这次没整理出来」，而真机上新加了「换个说法」。截图全绿，真机才看得见差别。
+        现在让假异常接着走 `parseFailMessage`，两边的字就不可能分叉。
+        """
+        src = _capture()
+        i = src.index("if (DEMO_FAIL_CMDS.includes(demoCmd))")
+        branch = src[i : i + 400]
+        assert "setFailMsg(parseFailMessage(demoError(demoCmd)))" in branch, (
+            "演示失败也要给原因，而且必须走真机同一个翻译函数"
+        )
+        assert "这次没读懂" not in branch, "原因文案只有一处来源，不许在演示分支里另写一句"
+
+    def test_demo_can_reproduce_all_three_failures(self):
+        """三种失败都要能在离线复现，不然只有 502 有截图、429 只能靠真机。
+
+        这里必须查 DEMO_FAIL_CMDS 这一行，不能只查「fail429 出现过」：
+        `demoError()` 里也有 `cmd === "fail429"`，从清单里删掉照样能过（反证抓到的假绿）。
+        """
+        src = _capture()
+        i = src.index("const DEMO_FAIL_CMDS = ")
+        line = src[i : src.index(";", i)]
+        for cmd in ('"fail"', '"fail429"', '"failnet"'):
+            assert cmd in line, f"离线演示复现不了 {cmd}"
+        assert '{ status: 429' in src, "429 要带 status，翻译函数按 status 分岔"
+
+
+class TestCaptureAxis:
+    """结果态是**一条按时间排好的轴**（2026-11-10 晚，按 TimeMind 的形态重做）。
+
+    用户的原话是"说话颠三倒四，它按时间给我排好了"。这句话里能验的只有一个字：
+    **序**。第一版按天分组的卡片墙做不到 —— 重复项被踢进"每天/每周X"分组，
+    等于把最该按时间插进去的东西挪出了时间线。
+    """
+
+    def test_result_is_one_axis_not_day_groups(self):
+        """一张轴，不是按天分组的卡片墙。分组标题一回来，序就散了。"""
+        src = _capture()
+        assert 'className="rem-cap-axis"' in src
+        assert "rem-cap-day" not in src
+        assert "rem-cap-item" not in src
+
+    def test_rows_carry_their_sort_key(self):
+        """排序键要落在 DOM 上（data-at），否则"有没有排"只能靠肉眼。"""
+        src = _capture()
+        assert "data-at={slot.at}" in src
+        assert ".sort((a, b) => a.slot.at - b.slot.at)" in src
+
+    def test_repeats_are_sorted_by_their_next_occurrence(self):
+        """每周三的瑜伽按"下一个周三"插进轴里，不是排到最后。
+
+        这条是整个重做的命门：只看 `due_at` 的话，重复项没有 due_at，
+        会被统一丢到最后，用户看到的就还是一堆分组。
+        """
+        fx = _strip_comments(FIXTURE.read_text(encoding="utf-8"))
+        assert "export function nextOccurrenceAt(" in fx
+        assert 'if (rec.freq === "weekly" && w === (rec.weekday ?? 1)) return d.getTime();' in fx
+
+    def test_reminder_time_also_comes_from_due_at(self):
+        """一次性日程的时间在 `due_at` 里，不只在 `recurrence.fire_at`。
+
+        2026-11-11 真实对话抓到的：后端对「下周二中午跟导师吃饭」返回的是
+        `recurrence: null` + `due_at: 1794888000`。而这里当时只读 `rec?.fire_at`，
+        fire 恒为 null → 那一行显示「待定」；可同一行右侧又挂着「可直接加入」，
+        因为 isWritable 走的是 reminderDraftOf，那边有 due_at 兜底。
+        同一个界面里两套判据打架，用户看到的是"时间待定但可以直接加"。
+
+        离线 fixture 造不出这个形状（它给 reminder 的 due_at 恒为 null，
+        时间挂在 recurrence.fire_at 上），所以 188 条离线断言**永远测不到**。
+        这条静态断言补的就是那个洞。
+        """
+        fx = _strip_comments(FIXTURE.read_text(encoding="utf-8"))
+        i = fx.index("export function nextOccurrenceAt(")
+        seg = fx[i : i + 3000]
+        m = re.search(r"const fire = (.+?);", seg)
+        assert m, "找不到 fire 的取值那行"
+        expr = m.group(1)
+        assert "item.due_at" in expr, "reminder 分支漏了 due_at —— 会显示成「待定」"
+        assert "item.remind_at" in expr, "单独设的提醒时间也要算"
+
+    def test_will_ring_distinguishes_deadline_from_reminder(self):
+        """「会提醒」不能只看有没有字段，要区分截止时间和提醒时刻。
+
+        待办的 `due_at` 是截止时间，到点不响；日程能写出 fire_at 就会响。
+        之前底栏手写的是 `remind_at !== null || recurrence !== null`，
+        3 条里 2 条日程只报「1 条会提醒」—— 少算的那条用户看不出来，
+        但他会因此以为「不用再设提醒了」。
+        """
+        src = _capture()
+        i = src.index("export function willRing")
+        seg = src[i : i + 400]
+        assert 'item.kind === "reminder"' in seg
+        assert "reminderDraftOf(item) !== null" in seg, "日程按能否写出 fire_at 判"
+        assert "item.remind_at !== null" in seg, "待办只有设了提醒才会响"
+        # 计数必须走这个函数，不许在底栏再手写一版
+        assert "isWritable(i) && willRing(i)" in src
+
+    def test_day_anchor_written_only_when_the_day_changes(self):
+        """同一天只在第一行写日期，否则每行都重复"明天"，又退化成分组标题。"""
+        src = _capture()
+        assert "showDay: i === 0 || rows[i - 1].slot.day !== row.slot.day" in src
+
+    def test_filler_clauses_never_become_items(self):
+        """整句都是"呃 / 然后那个 / 哦对了"的，丢掉且**不计入 unresolved**。
+
+        弹一条"没看懂「呃」"等于告诉用户他说了句废话。
+        """
+        fx = _strip_comments(FIXTURE.read_text(encoding="utf-8"))
+        assert "if (FILLER_ONLY.test(trimmed)) continue;" in fx
+        assert "function isTimeOnly(" in fx
+
+    def test_correction_patches_the_previous_item_only(self):
+        """"三点，不对，四点"：修正只改上一条的时间，**不许新建条目**。
+
+        钉的是 patchTime 的边界：它的函数体里一旦出现 push，一句话就会裂成两条。
+        """
+        fx = _strip_comments(FIXTURE.read_text(encoding="utf-8"))
+        assert "if (CORRECTION_START.test(trimmed)) {" in fx
+        body = fx[fx.index("function patchTime(") :]
+        body = body[: body.index("\n}\n")]
+        assert "push" not in body
+        assert "fire_at: dayStart + (hour ?? 18) * 3600 + minute * 60" in body
+
+    def test_pickup_code_attaches_instead_of_becoming_a_todo(self):
+        """取件码 / 单号挂在上一件事上，不单独成一条待办。"""
+        fx = _strip_comments(FIXTURE.read_text(encoding="utf-8"))
+        assert "if (ATTACH_TO_PREV.test(trimmed) && items.length > 0) {" in fx
+        assert "last.note =" in fx
+
+    def test_original_words_are_open_by_default(self):
+        """v13 把「你说的」放在结果区顶部，默认展开；点标题可收起。
+
+        上一版是默认折叠（第一屏直接给轴），但 v13 要求"原话可回看"必须在
+        第一屏看得到——否则用户不知道整理结果是从哪句话来的。
+        """
+        src = _capture()
+        assert "const [showSource, setShowSource] = useState(true);" in src
+        assert "{showSource ? (" in src
+
+    def test_weekday_question_says_zhou(self):
+        """"是这六，还是以后每六？"是错的 —— weekdayZh 只返回「六」，要自己补「周」。"""
+        fx = _strip_comments(FIXTURE.read_text(encoding="utf-8"))
+        assert "const zh = `周${weekdayZh(when.weekday)}`;" in fx
+
+
+class TestCopySpeaksUserLanguage:
+    """界面上不许端出内部术语（2026-11-10 晚）。
+
+    起因：作者本人把「联动提醒只推迟不完成」记成了「只退出不完成」。
+    一句话连写它的人都记不准，就是没进脑子 —— 用户更不可能懂「联动」：
+    那是代码里的 `source != 'manual'`，界面上找不到任何叫「联动」的东西。
+
+    钉的是用户真正看得见的三层，不是措辞品味：
+      1. 导航与页标题只说「待办」，提醒退回成它的一个属性；
+      2. 副标题里不出现「联动」「完成语义」这些分类词；
+      3. 抽屉问候句论「条」不论「件」，且不再承诺「下一件 N 点会响」。
+    """
+
+    def test_nav_and_title_both_say_todo(self):
+        """一个词不能在侧边栏、页标题、tab 三层各指一件事。"""
+        nav = (ROOT / "frontend" / "src" / "components" / "console" / "ConsoleLayout.tsx").read_text(
+            encoding="utf-8"
+        )
+        assert '{ href: "/reminders", icon: "bell", label: "待办" }' in nav
+        assert 'title="待办"' in _page()
+        assert 'title="提醒 / 待办"' not in _page()
+
+    def test_subtitle_has_no_internal_category_words(self):
+        """「联动」是代码词，「完成语义」是产品经理词，两样都不是用户的话。"""
+        page = _page()
+        assert "联动" not in page
+        assert "完成语义" not in page
+
+    def test_subtitle_answers_which_items_will_notify(self):
+        """副标题必须回答「哪些会通知」—— 这正是用户分不清的那件事。"""
+        assert "设了提醒时间，到时会通知你" in _page()
+
+    def test_context_line_counts_todos_not_pieces(self):
+        """待办论「条」，不论「件」。"""
+        cap = _capture()
+        assert "条待办" in cap
+        assert "件${" not in cap
+
+    def test_greeting_does_not_promise_it_will_ring(self):
+        """不许再写「下一件 23:59 交高数作业」：那是 due_at，卡片上写着「不提醒」。
+
+        正文里专门防了「只设截止不会响」，副标题却暗示会响 —— 等于自己推翻自己。
+        """
+        cap = _capture()
+        assert "下一件" not in cap
+        assert "nextLabel" not in cap
+
+
+class TestCaptureWritesForReal:
+    """Phase C：点「加入」真的写库。
+
+    这一组守的不是"能写进去"，而是**写错的那几种**（规格 §8.2）：
+    双击写两遍、把 `remind_at: null` 也发出去（等于替用户造一条联动提醒）、
+    把没定时间的提醒写成哑弹、部分失败却声称全成功、失败原因不落款。
+    """
+
+    def test_commit_calls_the_two_existing_apis(self):
+        """复用现有端点，不自建批量接口 —— 批量接口会把"部分失败"吞成整批回滚。"""
+        page = _page()
+        assert "api.tasks.create(taskDraftOf(item))" in page
+        assert "api.reminders.create(draft)" in page
+        fn = page[page.index("const commitCapture = useCallback(") :]
+        fn = fn[: fn.index("\n  );")]
+        assert "Promise.allSettled(" in fn, "一条失败不能拖累另外两条"
+        assert "Promise.all(" not in fn
+
+    def test_task_draft_omits_remind_at_instead_of_sending_null(self):
+        """只说「明天交作业」的任务，请求里不许出现 `remind_at`。
+
+        传 `remind_at: null` 与不传在后端是两件事：前者走"设置提醒时间"分支，
+        会顺手造一条联动提醒 —— 用户没要求，列表里却多出一个会响的东西。
+        """
+        src = _capture()
+        assert "if (item.remind_at !== null) draft.remind_at = item.remind_at;" in src
+        assert "remind_at: null" not in src, "不许把 null 当默认值发出去"
+        assert "if (item.due_at !== null) draft.due_at = item.due_at;" in src
+
+    def test_reminder_draft_never_claims_task_source(self):
+        """`source:"task"` 是联动提醒的专属标记，从这里写进去用户改不动它（会 400）。"""
+        src = _capture()
+        i = src.index("export function reminderDraftOf")
+        body = src[i : src.index("\n}", i)]
+        assert 'source: "manual"' in body
+        assert '"task"' not in body
+
+    def test_reminder_without_a_time_is_not_written(self):
+        """算不出「什么时候」的提醒一个请求都不发：提醒的全部价值就是那个时刻。"""
+        src = _capture()
+        assert "if (at === null || at === undefined) return null;" in src
+        assert "if (!rec?.at) return null;" in src
+        # 拦住之后必须给出路：光说"没写几点"，用户唯一能做的就是取消勾选
+        assert "点下方「补上时间」，设好后才会提醒你" in src
+
+    def test_double_click_guard_is_a_ref_not_state(self):
+        """防双击必须用 ref —— 这条是**真机 e2e 抓出来的**。
+
+        上一版写的是 `if (committing) return; setCommitting(true)`：连续两次点击
+        发生在同一个渲染里，两次读到的 `committing` 都还是 false，于是后端多出两条
+        一模一样的待办（e2e B1 实测 got=2 / want=1）。源码断言的顺序当时是"对"的，
+        这就是只查源码会给自己作的保。
+
+        现在断言的是：闸门读的是 `committingRef.current`，而且它在 await 之前置上。
+        """
+        src = _capture()
+        i = src.index("const commit = async () => {")
+        body = src[i : src.index("\n  };", i)]
+        guard = body.index("if (committingRef.current || pickedItems.length === 0) return;")
+        arm = body.index("committingRef.current = true;")
+        firstAwait = body.index("await onCommit(")
+        assert guard < arm < firstAwait, "防双击那三行的顺序错了"
+        assert "const committingRef = useRef(false);" in src
+
+    def test_drawer_closes_only_when_nothing_failed(self):
+        """全进去了才关抽屉；有失败的留在原地（关掉就等于把失败项一起丢了）。"""
+        src = _capture()
+        close = src.index("onClose();\n      return;")
+        cond = src.rindex("if (Object.keys(failed).length === 0)", 0, close)
+        assert cond < close
+
+    def test_successful_items_are_removed_from_the_axis(self):
+        """写成功的那几条要从轴上摘掉：它们已经在真实列表里，留着像写了两遍。"""
+        src = _capture()
+        assert "setItems((prev) => prev.filter((i) => !okIds.includes(i.id)));" in src
+
+    def test_failure_reason_is_shown_under_that_row(self):
+        """只标一个红点「没加上」，用户不知道该重试还是该改 —— 两件事差很远。"""
+        src = _capture()
+        assert 'className="rem-cap-issue"' in src
+        assert 'role="alert"' in src
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        assert ".rem-cap-issue {" in css
+        assert "var(--red-ink)" in _css_block(css, ".rem-cap-issue {")
+
+    def test_pages_that_write_also_reload(self):
+        """写完不刷新，用户去列表里看不到刚加的那条，会以为又失败了。"""
+        page = _page()
+        i = page.index("const commitCapture = useCallback(")
+        fn = page[i : page.index("\n  );", i)]
+        # 只报「没加上」却不刷新，用户去列表里看不到刚加的那条，会以为又失败了
+        assert "if (okIds.length > 0) await reload();" in fn
+
+    def test_toast_says_how_many_will_remind(self):
+        """规格 §8.1：toast 要说清几条会提醒，不能只说"已加入"。"""
+        page = _page()
+        assert "其中 ${remind} 条会提醒你" in page
+        assert "已加入 ${okIds.length} 条" in page
+
+    def test_partial_failure_does_not_toast(self):
+        """有失败时不要弹 toast：它在手机上是弹在主轴按钮上的（真机截图抓到过）。
+
+        而且它会和抽屉底栏说同一件事、说的还不一样（"已加入 1 条" vs
+        "已加入 1 条，1 条没加上"），用户会以为是两个结果。
+        """
+        page = _page()
+        i = page.index("const commitCapture = useCallback(")
+        fn = page[i : page.index("\n  );", i)]
+        assert "if (bad === 0 && okIds.length > 0) {" in fn
+        assert 'showToast("error", "这次一条都没加上' not in fn
+
+    def test_preview_wording_is_gone(self):
+        """Phase B 的「预览：都还没写进去」现在会变成反话 —— 它已经真的写进去了。"""
+        for name, src in (("抽屉", _capture()), ("列表页", _page())):
+            assert "预览" not in src, f"{name}上还写着预览"
+            assert "onCommitPreview" not in src
+
+    def test_demo_partial_cannot_be_triggered_in_production(self):
+        """演示缝（造一次部分失败）必须和离线开关绑在一起，生产构建里摇掉。"""
+        src = _capture()
+        i = src.index("const forced =")
+        gate = src[i : i + 200]
+        assert "OFFLINE_PARSE && demoMode" in gate
+
+
+class TestCaptureFillsMissingTime:
+    """「缺少时间」得有个就地补的入口。
+
+    上一版只是个灰色标签：标了却不给出口，用户唯一的动作是取消勾选 ——
+    等于告诉他「你说错了」，还不给改的机会。这一组守的是补时间这条路的
+    **判据、时区、拦下、回写**，任何一条错了用户都会得到一条错时刻的提醒。
+
+    顺带修掉一个既有 bug：标签原来按「有没有时间字段」判，于是
+    「每天…但没钟点」的提醒会显示「可直接加入」，点下去却发不出去 ——
+    字段齐不等于写得进去。
+    """
+
+    def test_flag_uses_writability_not_field_presence(self):
+        """标签必须按 `isWritable` 判，不能按"有没有时间字段"。
+
+        `recurrence` 非 null 但 `at` 缺失的提醒（"每天提醒我喝水"没说几点），
+        字段是全的，`reminderDraftOf` 却返回 null —— 用户看到「可直接加入」
+        却一条都写不进去，只能怪自己。
+        """
+        src = _capture()
+        assert ") : !isWritable(item) ? (" in src, "缺少时间这一档要按能不能写来判"
+        assert "hasAnyTime" not in src, "旧的 hasAnyTime 判据会放过「有周期但没钟点」的提醒"
+
+    def test_remind_count_only_counts_writable_rows(self):
+        """底栏的「N 条会提醒」只算**真能写进去的**。
+
+        截图抓到的原状：一条"有 recurrence 但没钟点"的提醒，字段齐、却发不出请求，
+        底栏一边写「1 条会提醒」，一边写「1 条都没加上」—— 两句话当着用户的面互相打脸。
+        """
+        src = _capture()
+        i = src.index("const remindCount = pickedItems.filter(")
+        body = src[i : src.index(").length", i)]
+        assert "isWritable(i) &&" in body
+
+    def test_primary_button_counts_only_writable(self):
+        """主按钮上的条数只能是**真能写进去的**。
+
+        说「加入 1 条」就得真加 1 条。一条都写不进去时改成「1 条还不能加」——
+        仍然可点（点一下给统一原因），但不能许诺一个不会发生的结果。
+        """
+        src = _capture()
+        assert "const writableCount = pickedItems.filter(isWritable).length;" in src
+        assert "`${pickedItems.length} 条还不能加`" in src
+        assert "`加入 ${writableCount} 条，并设 ${remindCount} 条提醒`" in src
+
+    def test_entry_only_on_unwritable_reminders(self):
+        """待办不做这个入口：待办没有"几点响"这个概念，给它补时间是另一个功能。"""
+        src = _capture()
+        i = src.index('className="rem-cap-fix"')
+        head = src[src.rindex("{", 0, i - 200) : i]
+        assert 'item.kind === "reminder" && !isWritable(item)' in head
+
+    def test_clock_only_for_repeating_rules(self):
+        """重复规则只补钟点。
+
+        给「每天 22:00」再问一个日期，用户填完发现日期没生效 —— 他只会觉得坏了。
+        """
+        src = _capture()
+        assert "export function needsClockOnly" in src
+        assert "!rec.at" in src or "freq !== \"once\"" in src
+        assert "{needsClockOnly(item) ? null : (" in src, "重复项不该出现日期输入框"
+        assert "这条会重复提醒，还差一个时间。" in src
+
+    def test_local_time_is_interpreted_as_local(self):
+        """拼 `YYYY-MM-DDTHH:MM` 交给 Date，**绝不用 Date.UTC**。
+
+        用 UTC 拼的话，成都用户填「早八点」会得到下午四点响 —— 而且是在他睡着的时候。
+        不带时区的 ISO 串在 JS 里按本地时区解释，正好是用户填的那一刻。
+        """
+        src = _capture()
+        assert "new Date(`${date}T${time}:00`)" in src
+        assert "Date.UTC" not in src
+
+    def test_past_time_is_blocked_before_the_request(self):
+        """过去的时间在前端就拦：用户改的是"什么时候响"，让他看着输入框就知道错。"""
+        src = _capture()
+        i = src.index("const applyFix = () => {")
+        body = src[i : src.index("\n  };", i)]
+        assert "if (ts <= Math.floor(now / 1000))" in body
+        assert "这个时间已经过去了" in body
+        # 拦下之后不能写：比的是**同一分支内**的先后（clockOnly 分支前面也有 setItems）
+        past = body.index("这个时间已经过去了")
+        assert past < body.index("setItems((prev) =>", past)
+
+    def test_filled_time_lands_on_the_item(self):
+        """补完要真的写回这一条：一次性写 `remind_at`，重复项写 `recurrence.at`。"""
+        src = _capture()
+        i = src.index("const applyFix = () => {")
+        body = src[i : src.index("\n  };", i)]
+        assert "recurrence: { ...i.recurrence, at: fixing.time }" in body
+        assert "remind_at: ts," in body
+
+    def test_confirm_flag_is_released_only_when_nothing_was_asked(self):
+        """补时间要能解掉「需要确认」的死结，但**只在没有具体问句时**。
+
+        `needsConfirm()` 的判据是「有没有答过问句」。有些条目 `needs_confirm`
+        为 true 却 `questions` 为空（"没说哪天"），`[].some(...)` 恒假 →
+        永远显示「需要确认」，界面上一个可点的地方都没有。
+        而"这周六还是每周六"这种问句，补时间并不能替用户回答，硬清掉就是替他做主。
+        """
+        src = _capture()
+        assert "export" not in src[src.index("function settledByTime") - 20 : src.index("function settledByTime")]
+        i = src.index("function settledByTime(item: CaptureProposal, next: CaptureProposal)")
+        body = src[i : src.index("\n}", i)]
+        assert "item.questions.length === 0 ? { ...next, needs_confirm: false } : next" in body
+
+    def test_filling_time_also_ticks_the_row(self):
+        """补了时间就把这条勾上 —— 他特意补，说明要加进去。"""
+        src = _capture()
+        i = src.index("const applyFix = () => {")
+        body = src[i : src.index("\n  };", i)]
+        assert "setPicked((prev) => ({ ...prev, [item.id]: true }))" in body
+
+    def test_filling_time_clears_the_previous_failure(self):
+        """补完时间要撤掉上一次「没加上」的红字。
+
+        不撤的话，用户改好了还看着「没加上」，会以为自己白改了一遍 ——
+        他甚至可能再改一次。
+        """
+        src = _capture()
+        i = src.index("const applyFix = () => {")
+        body = src[i : src.index("\n  };", i)]
+        # 钉住那个条件，不只钉"有没有这两行"：写成 `if (true) return prev;`
+        # 两行都还在，但什么都没撤 —— 上一版就是这么假绿的
+        assert "if (!(item.id in prev)) return prev;" in body
+        assert body.index("if (!(item.id in prev)) return prev;") < body.index(
+            "delete next[item.id];"
+        )
+
+    def test_fix_error_stays_in_the_row(self):
+        """拦下理由写在输入框下面，不弹 toast —— 用户的眼睛正看着输入框。"""
+        src = _capture()
+        assert 'className="rem-cap-fix-err" role="alert"' in src
+        assert "setFixErr(\"先选一个时间。\")" in src
+        assert "setFixErr(\"日期和时刻都要选。\")" in src
+        # `.rem-cap-fix-err` 先出现在 `-hint, -err` 的合并选择器里，
+        # `_css_block` 会抓到那个共享块 —— 所以这里直接钉它自己那段声明
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        assert ".rem-cap-fix-err {\n  font-weight: 600;\n  color: var(--red-ink);" in css
+
+    def test_fix_controls_are_touchable_and_do_not_zoom(self):
+        """触控 ≥44、手机输入框 16px —— 两条都是硬约束，不是审美。"""
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        assert "min-height: 44px" in _css_block(css, ".rem-cap-fix-input {")
+        assert "min-height: 44px" in _css_block(css, ".rem-cap-fix-ok {")
+        # iOS 聚焦 <16px 的输入框会把整页放大且不还原（a11y.css 里有全局兜底，
+        # 抽屉自己也要显式一份，不能指望别处的通配规则）。
+        # 用正则定位到「那条 media 里的那个选择器」，而不是在文件里搜 16px ——
+        # 别处写一个 16px 就能让这条静默变绿。
+        assert re.search(
+            r"@media \(max-width: 900px\) \{[^}]*\.rem-cap-fix-input \{\s*font-size: 16px;",
+            css,
+            re.S,
+        ), "移动端要给 .rem-cap-fix-input 显式 16px"
+
+    def test_no_wall_clock_read_during_render(self):
+        """渲染期不许读 Date.now()：`now` 是页面每分钟推下来的，自己读会和服务端差一截。"""
+        src = _capture()
+        assert "Date.now()" not in src
+
+
+class TestCaptureEmptyStateDemo:
+    """空态里那块示范：不写教程，直接演一遍。
+
+    把引导删干净之后抽屉中间是纯白一片（用户原话「太空了」）。但补回去的不能是
+    说明文字 —— 堆步骤就变回「被教着用」。取的是 TimeMind 那种做法：
+    给一轮真实的输入和它的结果，静态、不发请求、不写库。
+
+    这组守四件事：**它在、它只在没人说话时在、它演的是产品真做得到的事、
+    并且它自己说了这是示例**。最后一条最要紧 —— 不说的话，用户会以为
+    那两条已经加进列表了。
+    """
+
+    def test_demo_only_when_idle_and_silent(self):
+        """一提笔或一开口就收起：那时用户已经在行动，示例只会挡住结果。"""
+        src = _capture()
+        assert 'className="rem-cap-empty"' in src
+        i = src.index('className="rem-cap-empty"')
+        # 条件挂在整块空态（品牌行 + 演示卡）上，不是挂在卡片上：
+        # 只收起卡片的话，品牌行会孤零零留在上面，比空着更怪
+        head = src[max(0, i - 400) : i]
+        assert 'status === "idle"' in head, "只在输入态出现"
+        assert 'text.trim() === ""' in head, "一打字就该让位"
+        assert 'voice.phase === "idle"' in head, "录音时不能还摆着示例"
+
+    def test_demo_fills_the_input_without_sending(self):
+        """卡可以点，但点了只填字：不发请求、不写库、不触发整理。
+
+        这条是防退化的 —— 以后有人想「让示例也能点一下真的跑一遍」，
+        会先在这里撞上，然后被迫想清楚要不要给示例加网络请求。
+        和旧的示例 chips 是同一条规则（视觉基线 §7）：填充是帮忙，提交是替用户做主。
+        """
+        src = _capture()
+        start = src.index('className="rem-cap-demo"')
+        seg = src[start : src.index("rem-cap-demo-foot")]
+        assert "onClick={fillDemo}" in seg, "卡要能点，否则看不出它是快捷输入"
+        for forbidden in ("api.", "fetch(", "onCommit", "runParse", "useEffect"):
+            assert forbidden not in seg, f"示例块里不该出现 {forbidden}"
+
+        i = src.index("const fillDemo = ()")
+        body = src[i : src.index("};", i)]
+        assert "setText(DEMO_SAID)" in body
+        assert "inputRef.current?.focus()" in body
+        for forbidden in ("runParse", "api.", "onCommit", "fetch("):
+            assert forbidden not in body, f"fillDemo 只许填字，不许 {forbidden}"
+
+    def test_empty_state_has_no_mascot_or_brand_row(self):
+        """空态不再摆吉祥物和品牌行。
+
+        这一屏要回答的是「我能在这里做什么」，不是「这是谁做的」。
+        吉祥物会把视线从演示卡上带走，也让抽屉重新长出人格化旁白。
+        """
+        src = _capture()
+        assert "MascotLogo" not in src
+        assert "rem-cap-brand" not in src
+        assert "知穗" not in src
+
+    def test_brand_mark_holds_a_todo_list(self):
+        """不是把首页那个 logo 搬过来：它手里举着一张待办清单。
+
+        空态下面演的就是「一句话被拆成几条」，站在旁边的那位得是这件事的
+        执行者，否则只是贴了一个装饰。这条钉住三件事：道具只在被要求时出现、
+        道具里有一条已完成的勾（待办能勾完是我们和纯日程产品的区别）、
+        以及它挂在 mascot-body 里（跟着身体摇，才像"举着"）。
+        """
+        mascot = (ROOT / "frontend" / "src" / "components" / "chat" / "MascotLogo.tsx").read_text(
+            encoding="utf-8"
+        )
+        assert 'holding === "list" ? <HoldingList /> : null' in mascot, "不能默认出现在全站"
+        assert "mascot-hold" in mascot
+        # 金色对勾：清单上那一条是「已经做完的」
+        hold = mascot[mascot.index("function HoldingList()") : mascot.index("export default function")]
+        assert 'stroke="#F5B840"' in hold, "完成态用品牌金标出来"
+        # 道具必须在 mascot-body 里面，才会跟着摇摆
+        body_start = mascot.index('className="mascot-body"')
+        assert mascot.index("<HoldingList />", body_start) > body_start
+
+    def test_empty_state_leads_with_the_task_not_the_brand(self):
+        """空态第一句必须是任务本身：说清什么时候、要做什么。"""
+        src = _capture()
+        assert "说清「什么时候、要做什么」" in src
+
+    def test_task_lead_sits_above_the_demo(self):
+        """先说这一屏要做什么，再演一遍结果。"""
+        src = _capture()
+        assert src.index('className="rem-cap-lead"') < src.index('className="rem-cap-demo"')
+
+    def test_task_lead_is_a_paragraph(self):
+        """这句是纯文字，用 p；不要再往里塞图片或组件。"""
+        src = _capture()
+        assert '<p className="rem-cap-lead">说清「什么时候、要做什么」</p>' in src
+
+    def test_brand_mark_uses_the_same_type_as_the_landing(self):
+        """衬线 + 700 + --ls-tight，与 landing.css 的 .lp-brand 逐项对齐。
+
+        不手动写死 15px/16px：字号用 1.0625rem，和首页保持同一个数，
+        改一处两边一起动。
+        """
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        block = _css_block(css, ".rem-cap-brand {")
+        assert "font-family: var(--font-serif)" in block
+        assert "font-weight: 700" in block
+        assert "letter-spacing: var(--ls-tight)" in block
+        assert "font-size: 1.0625rem" in block
+
+    def test_demo_shows_only_what_the_product_can_do(self):
+        """原话写「下午三点」「晚上七点」，结果就必须是 15:00 / 19:00。
+
+        示例最怕演一个产品做不到的效果：用户照着说完发现对不上，
+        比什么都不演更伤人。这里钉住原话与结果的一致，
+        并且**待办那条只写日期**：待办在真实结果里只占日期锚点、不显示钟点，
+        演示里给它编一个 20:00 就是演一件产品不会做的事。
+        """
+        src = _capture()
+        assert "明天下午三点交高数作业，周五晚上七点社团开会，周日交实验报告" in src
+        assert "明天 15:00" in src
+        assert "周五 19:00" in src
+        assert ">周日<" in src, "待办只写日期锚点"
+
+    def test_demo_admits_it_is_an_example(self):
+        """必须自报「这是示例」—— 否则用户以为那几条已经进了列表。
+
+        同时要说明卡能点（这是它从静态图变成快捷输入后的唯一 affordance）。
+        两句合成一行：一句说怎么用，一句说用了不会留下东西。
+
+        不用“点一下可以试试 · 不会存进你的列表”那种写法 —— 间隔号 + “可以试试”
+        是产品文档的语气。人说话会直接讲**会发生什么**：填进输入框、不会保存。
+        """
+        src = _capture()
+        assert "点一下填入输入框" in src
+        assert "不会保存" in src
+        # 上一版的两个说法不许回来：它们是「AI 味」的具体形态，不是抽象感觉
+        assert "可以试试 ·" not in src
+        assert "不会存进你的列表" not in src
+
+    def test_demo_rows_use_the_same_node_shapes_as_the_real_axis(self):
+        """圈 = 待办，菱形 = 日程。
+
+        演示里出现第三种形状，用户对照真实结果时就得多想一次"这俩是一回事吗"。
+        形状在这里不仅好看，它是这个产品区分两类对象的唯一视觉手段。
+        """
+        src = _capture()
+        assert 'className="rem-cap-demo-node" data-kind="task"' in src
+        assert 'data-kind="reminder"' in src
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        assert "border-radius: 50%" in _css_block(css, '.rem-cap-demo-node[data-kind="task"] {')
+        assert "rotate(45deg)" in _css_block(css, '.rem-cap-demo-node[data-kind="reminder"] {')
+
+    def test_empty_state_has_a_second_type_scale(self):
+        """空态要有一句 22px 的主张，不能只有 20px 标题和 12px 正文两档。
+
+        上一版整屏最大 20px、其余全 12px，中间是断的 —— 所以无论往中间塞多少内容，
+        读起来都是"没有层次"，那才是"空"的真正来源，不是像素面积不够。
+        """
+        src = _capture()
+        assert 'className="rem-cap-lead"' in src
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        block = _css_block(css, ".rem-cap-lead {")
+        assert "font-family: var(--font-serif)" in block
+        assert "font-size: 1.375rem" in block, "22px：标题 20 之下、正文 12 之上的那一档"
+
+    def test_demo_card_does_not_share_the_drawer_background(self):
+        """卡底不能和抽屉底同一个令牌 —— 那正是「糊在一起」的字面原因。
+
+        抽屉底是 --card-bg（浮层最亮的一档）。上一版卡底也是它，
+        两个同色矩形之间只剩一条 10% 的暖墨线，用户看图的原话是
+        「画框和背景色一模一样」。这条断言盯的是**同值**这个事实，
+        不是"看起来像不像"：以后谁把卡底改回 --card-bg，这里立刻红。
+
+        只换明度不够：同一个色相里 ΔL* 三四个点在浅底上分不出，
+        所以卡用的是另一套色相令牌（--memo-*），这一层也一起钉住。
+        """
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        drawer_bg = re.search(r"background:\s*([^;]+);", _css_block(css, ".rem-cap-drawer {"))
+        card_bg = re.search(r"background:\s*([^;]+);", _css_block(css, ".rem-cap-demo {"))
+        assert drawer_bg and card_bg
+        assert card_bg.group(1).strip() != drawer_bg.group(1).strip(), (
+            f"卡底和抽屉底同色：{card_bg.group(1).strip()}"
+        )
+        assert card_bg.group(1).strip() == "var(--memo-bg)", "卡底要用便签那套冷色"
+
+    def test_demo_card_is_a_light_note_on_a_warm_sheet(self):
+        """卡内还要有一次冷暖分层：便签（冷）上贴三条暖白小纸条。
+
+        上一版是卡亮行暗、同一个暖色里差 3 个点，凑近了才看得出。
+        这一版靠色相直接分开，扫一眼就有里外 —— 行卡用回 --card-bg 的暖白，
+        正好和冷底对立。这也是为什么行卡不能跟着改成 --memo-* 系：
+        两层都冷，卡就又糊成一整块了。
+        """
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        row = _css_block(css, ".rem-cap-demo-row {")
+        assert "background: var(--card-bg)" in row
+
+    def test_memo_tokens_exist_in_both_themes(self):
+        """便签色必须在浅色和深色里各写一遍。
+
+        CSS 变量不会因为切到 .dark 自动换值：只在 :root 写一次，
+        深色主题下会拿到浅色的 #E8EEF7，在 #292217 的抽屉上变成一块发光的蓝斑。
+        这类 bug 在浅色主题下永远看不见，只能靠断言拦。
+        """
+        tokens = (ROOT / "frontend" / "src" / "app" / "styles" / "tokens.css").read_text(
+            encoding="utf-8"
+        )
+        i = tokens.index(".dark {")
+        for name in ("--memo-bg:", "--memo-line:", "--memo-ink:"):
+            assert name in tokens[:i], f"浅色主题缺 {name}"
+            assert name in tokens[i:], f"深色主题缺 {name}"
+
+    def test_demo_is_vertically_balanced(self):
+        """内容不足一屏时上下 auto。
+
+        贴顶会让下面空出一大片，那就是用户说的「太空」—— 加了内容却还是空的，
+        等于白加。溢出时 auto 自动退化成 0，照常滚动。
+
+        auto 挂在整块空态上、不挂在卡片上：两处都写的话，卡片还会在
+        品牌行和底栏之间再挤一次，把两者顶开。
+        """
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        assert "margin: auto 0" in _css_block(css, ".rem-cap-empty {")
+        assert "margin: auto 0" not in _css_block(css, ".rem-cap-demo {")
+
+
+# ==================== 用户文案规范（2026-11-11）====================
+#
+# docs/design/提醒中心_文案规范_2026-11-11.md §5.1 的九个别用词。
+# 这份清单只对**用户看得见的地方**生效，所以要先真的把注释剔掉。
+BANNED_COPY_WORDS = ("响", "推送", "送达", "静默", "来源", "日程", "触发", "后端", "服务端")
+
+# 「影响」「响应」「音响」里都含「响」，但都不是闹钟那个动作。
+# 不做这层剔除，规范页里「不影响你建多少提醒」会被自己的检查判红。
+SAFE_COMPOUNDS = ("影响", "响应", "音响")
+
+
+def _strip_js_comments(src: str) -> str:
+    """按字符状态剥掉 JS/TS 注释，字符串里的 `//` 不算注释。
+
+    为什么不复用上面的 `_strip_comments`：那个是正则，遇到
+    `const u = "https://myzhisui.cn/x"` 会把 `https:` 后面的整行当行注释吃掉。
+    用来断言「卡片里没有某个词」时这没问题（那行本来也没有），
+    但用来找禁用词就是**漏检** —— 被吃掉的半行里有什么都查不到。
+
+    注释里的换行保留，报错时行号才和源文件对得上。
+    已知局限：模板字符串 `${...}` 内部的注释不会被识别（极少见，且只会误报不会漏检）。
+    """
+    out: list[str] = []
+    i, n = 0, len(src)
+    state = "code"  # code | dq | sq | tpl
+    while i < n:
+        ch = src[i]
+        nxt = src[i + 1] if i + 1 < n else ""
+        if state == "code":
+            if ch == "/" and nxt == "/":
+                j = src.find("\n", i)
+                if j == -1:
+                    break
+                out.append("\n")
+                i = j + 1
+                continue
+            if ch == "/" and nxt == "*":
+                j = src.find("*/", i + 2)
+                end = n if j == -1 else j
+                out.append("\n" * src.count("\n", i, end))
+                i = n if j == -1 else j + 2
+                continue
+            if ch == '"':
+                state = "dq"
+            elif ch == "'":
+                state = "sq"
+            elif ch == "`":
+                state = "tpl"
+            out.append(ch)
+            i += 1
+            continue
+        # 字符串态：转义要整体跳过，否则 `\"` 会被当成字符串结束
+        if ch == "\\":
+            out.append(src[i : i + 2])
+            i += 2
+            continue
+        if (state == "dq" and ch == '"') or (state == "sq" and ch == "'") or (state == "tpl" and ch == "`"):
+            state = "code"
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _banned_hits(path: Path) -> list[str]:
+    """返回 `行号 词 :: 上下文`；空列表表示这一份合规。"""
+    code = _strip_js_comments(path.read_text(encoding="utf-8"))
+    hits = []
+    for no, line in enumerate(code.splitlines(), 1):
+        probe = line
+        for safe in SAFE_COMPOUNDS:
+            probe = probe.replace(safe, "")
+        found = [w for w in BANNED_COPY_WORDS if w in probe]
+        if found:
+            hits.append(f"{path.name}:{no} {'/'.join(found)} :: {line.strip()[:80]}")
+    return hits
+
+
+class TestUserCopyWords:
+    """§5.1 静态检查：用户可见文案里不许出现九个别用词。
+
+    规范页把这张表写成人工检查清单，但人工清单只能保证「今天查过」。
+    写成断言才能保证「明天改回来会红」—— 这正是同一份文档 §6
+    要求「不做假语音、假进度、假撤销」的同一个思路：不靠自觉，靠会红。
+    """
+
+    def test_no_banned_words_in_visible_copy(self):
+        for path in (PAGE, CAPTURE):
+            hits = _banned_hits(path)
+            assert not hits, "用户可见文案里出现了规范禁止的词：\n" + "\n".join(hits)
+
+    def test_checker_ignores_comments(self):
+        """注释里的词不算 —— 这条是防止别人嫌红就把检查删掉。
+
+        源码里大量注释在解释「为什么只设截止不会响」，那些必须被放过，
+        否则测试会逼着人把注释改歪，那就变成了规范在篡改理由。
+        """
+        src = '// 到点不会响\nconst a = 1; /* 最近送达 */\nconst b = 2; // 推送'
+        cleaned = _strip_js_comments(src)
+        for word in ("响", "送达", "推送"):
+            assert word not in cleaned
+
+    def test_checker_keeps_urls_inside_strings(self):
+        """字符串里的 `//` 不是注释 —— 这是正则版会踩的坑，必须钉住。"""
+        src = 'const u = "https://myzhisui.cn/x"; const t = "推送";'
+        assert "推送" in _strip_js_comments(src)

@@ -25,6 +25,7 @@ from api.agent import router as agent_router
 from api.auth import router as auth_router
 from api.calendar import router as calendar_router
 from api.campus import router as campus_router
+from api.capture import router as capture_router
 from api.cet import router as cet_router
 from api.chat import router as chat_router
 from api.checkin import router as checkin_router
@@ -251,6 +252,9 @@ app.include_router(prefs_router, prefix="/api/prefs", tags=["用户偏好"])
 # 校园工具集 · 番茄钟专注记录同步（B6）：会话幂等追加 + 任务后写胜。
 # 只存「学什么、多久」，不存任何对话内容
 app.include_router(focus_router, prefix="/api/campus/focus", tags=["校园工具集"])
+# 一句话整理（v13 · Phase B）：一句话 → 待办/提醒 proposal。
+# **只读 + 调模型，不写库**；写库在 Phase C 由前端逐条调 /api/tasks 与 /api/reminders
+app.include_router(capture_router, prefix="/api/capture", tags=["AI 整理"])
 
 
 # ---------- 修复：前后端尾部斜杠不一致导致的重定向黑洞 ----------

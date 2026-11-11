@@ -221,7 +221,7 @@ class TestToolRefresh:
 
 
 class TestChannelHonesty:
-    """「怎么送达」只做推送时，界面不许摆一个能选却不生效的选择器。"""
+    """「提醒方式」只有通知时，界面不许摆一个能选却不生效的选择器。"""
 
     def _page(self) -> str:
         return (ROOT / "frontend" / "src" / "app" / "(console)" / "reminders" / "page.tsx").read_text(
@@ -229,19 +229,19 @@ class TestChannelHonesty:
         )
 
     def test_drawer_says_push_only(self):
-        assert "目前只支持这一种" in self._page()
+        assert "提醒会出现在设备的通知栏" in self._page()
 
     def test_still_submits_push(self):
         assert 'channels: "push"' in self._page()
 
     def test_no_channel_picker(self):
-        """抽屉里只允许三个 select：来源 / 周几 / 到点之后。多一个就是假选项。
+        """抽屉里只允许三个 select：功能 / 周几 / 提醒动作。多一个就是假选项。
 
         2026-11-10 重排后频率改成 `.seg` 分段按钮，select 从 4 个变 3 个；
-        「怎么送达」是静态说明块（`.rem-deliver`），不是控件。
+        「提醒方式」是静态说明块（`.rem-deliver`），不是控件。
         """
         page = self._page()
         drawer = page[page.index("function ReminderDrawer") : page.index("// ==================== 页面")]
         assert drawer.count("<select") == 3
-        deliver = drawer[drawer.index("怎么送达") : drawer.index("怎么送达") + 500]
-        assert "<select" not in deliver, "「怎么送达」又变回下拉框了"
+        deliver = drawer[drawer.index("提醒方式") : drawer.index("提醒方式") + 500]
+        assert "<select" not in deliver, "「提醒方式」又变回下拉框了"

@@ -1,6 +1,6 @@
 "use client";
 
-// P7 · 提醒 / 待办（2026-11-09 建，2026-11-10 重排，2026-11-10 晚改为「待办为主对象」）
+// P7 · 待办（2026-11-09 建，2026-11-10 重排，2026-11-10 晚改为「待办为主对象」）
 //
 // 这个页面只回答一个问题：**什么时候，让我做什么**。
 // 三件事刻意不放在这里：
@@ -38,12 +38,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageShell from "@/components/console/PageShell";
 import CornIcon from "@/components/CornIcon";
 import type { CornIconName } from "@/components/CornIcon";
+import AiCaptureDrawer, {
+  Spark,
+  commitFailMessage,
+  reminderDraftOf,
+  taskDraftOf,
+} from "@/components/reminders/AiCaptureDrawer";
+import type { CommitOutcome } from "@/components/reminders/AiCaptureDrawer";
 import { Callout, Field, Seg, SkeletonLines, Switch, ToastHost } from "@/components/console/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { useToast } from "@/lib/hooks/useToast";
 import { fmtHM, fmtRemaining, toMs } from "@/lib/time";
 import type {
+  CaptureProposal,
   PushStatus,
   ReminderAction,
   ReminderDraft,
@@ -63,8 +71,8 @@ import type {
 } from "@/lib/types";
 
 const ACTION_LABEL: Record<string, string> = {
-  notify: "仅提醒",
-  agent_deliver: "让 Agent 帮我写",
+  notify: "只提醒",
+  agent_deliver: "让助手帮我写",
   suggest_focus: "开始专注",
   open_tool: "打开工具",
 };
@@ -73,12 +81,12 @@ const FREQ_OPTIONS: { value: ReminderFreq; label: string }[] = [
   { value: "daily", label: "每天" },
   { value: "weekdays", label: "工作日" },
   { value: "weekly", label: "每周" },
-  { value: "once", label: "只一次" },
+  { value: "once", label: "仅一次" },
 ];
 
 const ACTION_OPTIONS: { value: ReminderAction; label: string }[] = [
-  { value: "notify", label: "仅提醒" },
-  { value: "agent_deliver", label: "让 Agent 帮我写" },
+  { value: "notify", label: "只提醒" },
+  { value: "agent_deliver", label: "让助手帮我写" },
   { value: "suggest_focus", label: "开始专注" },
 ];
 
@@ -516,9 +524,9 @@ function TodayAxis({
         <p className="rem-tape-legend">
           <span className="rem-legend-hatch" aria-hidden="true" />
           <span>
-            静默 {quietStart}–{quietEnd}
+            免打扰 {quietStart}–{quietEnd}
           </span>
-          <span className="rem-legend-more">，这一段到点也不响</span>
+          <span className="rem-legend-more">，这段时间不会发提醒</span>
         </p>
       ) : null}
     </div>
@@ -540,16 +548,16 @@ function PushHealth({ status }: { status: PushStatus | null }) {
   if (!status) return null;
   if (status.supported && status.subscribed) return null;
 
-  const title = status.supported ? "这个账号还没有设备能接收提醒" : "当前浏览器不支持推送";
+  const title = status.supported ? "这个账号还没有能收提醒的设备" : "这个浏览器收不到提醒";
   return (
     <div className="rem-health" role="status">
       <CornIcon name="warn" className="h-4 w-4" />
       <div>
-        <b>{title}，到点不会响。</b>
+        <b>{title}，到时间不会提醒你。</b>
         <span>
           {status.supported
-            ? "去设置页打开推送；或者在系统日历里订阅，用日历自己的提醒兜底。"
-            : "可以改用系统日历订阅，它不依赖浏览器推送。"}
+            ? "去设置页开启通知；也可以在系统日历里订阅，让日历到时间提醒你。"
+            : "可以改用系统日历订阅，不依赖浏览器通知。"}
         </span>
       </div>
       <a className="inline-link" href="/settings">
@@ -649,12 +657,12 @@ function remindState(task: Task): { text: string; tone: "muted" | "warn" } | nul
   const r = task.reminder;
   if (!r?.last_status) return null;
   if (r.last_status === "sent") return { text: "已提醒", tone: "muted" };
-  if (r.last_status === "skipped_quiet") return { text: "已跳过 · 静默时段", tone: "warn" };
-  if (r.last_status === "skipped_cap") return { text: "已跳过 · 当天上限", tone: "warn" };
-  if (r.last_status === "skipped_empty") return { text: "已跳过 · 无内容", tone: "warn" };
+  if (r.last_status === "skipped_quiet") return { text: "没提醒 · 免打扰时间", tone: "warn" };
+  if (r.last_status === "skipped_cap") return { text: "没提醒 · 今天次数已满", tone: "warn" };
+  if (r.last_status === "skipped_empty") return { text: "没提醒 · 没有内容", tone: "warn" };
   if (r.last_status === "failed") {
     const missed = (r.last_detail || "").startsWith("missed:");
-    return { text: missed ? "错过 · 当时不在线" : "发送失败", tone: "warn" };
+    return { text: missed ? "没提醒 · 当时设备不在线" : "没发出去", tone: "warn" };
   }
   return { text: r.last_status, tone: "warn" };
 }
@@ -818,7 +826,7 @@ function TaskCard({
             </button>
             {!done && task.reminder?.enabled ? (
               <button type="button" role="menuitem" onClick={run(() => onSnooze(task))}>
-                提醒推迟 10 分钟
+                推迟提醒 10 分钟
               </button>
             ) : null}
             {done ? (
@@ -928,7 +936,7 @@ function SortRow({
  */
 function whenMain(item: ReminderItem): string {
   if (!item.enabled) return "已暂停";
-  if (!item.next_fire_at) return item.freq === "once" ? "已触发" : "没定时间";
+  if (!item.next_fire_at) return item.freq === "once" ? "已提醒过" : "还没设时间";
   return fmtHM(toMs(item.next_fire_at));
 }
 
@@ -939,18 +947,18 @@ function freqText(item: ReminderItem): string {
   }
   if (item.freq === "weekdays") return "工作日";
   if (item.freq === "interval") return `每 ${item.every_minutes || 0} 分钟`;
-  if (item.freq === "once") return "只一次";
+  if (item.freq === "once") return "仅一次";
   return "每天";
 }
 
 /** 流水状态 → 两个字的短标签（卡片上没地方写整句） */
 function fireShort(f: ReminderFire): string {
-  if (f.status === "sent") return "已响";
-  if (f.status === "skipped_quiet") return "已跳过 · 静默";
-  if (f.status === "skipped_cap") return "已跳过 · 上限";
-  if (f.status === "skipped_empty") return "已跳过 · 无内容";
+  if (f.status === "sent") return "已提醒";
+  if (f.status === "skipped_quiet") return "没提醒 · 免打扰";
+  if (f.status === "skipped_cap") return "没提醒 · 次数已满";
+  if (f.status === "skipped_empty") return "没提醒 · 没有内容";
   if (f.status === "failed") {
-    return (f.detail || "").startsWith("missed:") ? "错过" : "发送失败";
+    return (f.detail || "").startsWith("missed:") ? "没提醒" : "没发出去";
   }
   return f.status;
 }
@@ -1029,7 +1037,7 @@ function ReminderCard({
           <b>{sourceLabel}</b>
           <span> · {ACTION_LABEL[item.action] || item.action}</span>
           {item.source_note ? <span> · {item.source_note}</span> : null}
-          {sourceOff ? <span> · 来源已关</span> : null}
+          {sourceOff ? <span> · 这个功能已关闭</span> : null}
           {fire ? (
             <span className="rem-state" data-tone={fire.status === "sent" ? "muted" : "warn"}>
               {" "}
@@ -1070,7 +1078,7 @@ function ReminderCard({
               // 来源关着时「暂停这条」会把单条也关掉，和用户想要的相反 ——
               // 直接把他送到能做决定的地方。
               <button type="button" role="menuitem" onClick={run(onOpenSources)}>
-                去打开「{sourceLabel}」来源
+                去打开「{sourceLabel}」的提醒
               </button>
             ) : (
               <button type="button" role="menuitem" onClick={run(() => onToggle(item))}>
@@ -1080,10 +1088,10 @@ function ReminderCard({
             <hr />
             {canCloseSource ? (
               <button type="button" role="menuitem" onClick={run(() => onCloseSource(item))}>
-                不再提醒「{sourceLabel}」
+                不再接收「{sourceLabel}」的提醒
               </button>
             ) : (
-              <p>这条是你自己建的，只能删掉</p>
+              <p>这条是你自己建的，不跟着其他功能走</p>
             )}
             <button
               type="button"
@@ -1103,7 +1111,7 @@ function ReminderCard({
 // ==================== 送达记录 ====================
 
 /**
- * 「最近送达」。
+ * 「提醒记录」。
  *
  * 这是整个页面最能建立信任的一块：用户不需要理解 cron，只需要知道
  * 「为什么没响」。所以每行都要给**原因**，而不是只有红叉。
@@ -1130,11 +1138,11 @@ function FireDiary({ reminderId }: { reminderId: string | null }) {
 
   return (
     <details className="rem-fires">
-      <summary>最近送达{fires && fires.length ? `（${fires.length} 条）` : ""}</summary>
+      <summary>提醒记录{fires && fires.length ? `（${fires.length} 条）` : ""}</summary>
       {fires === null ? (
-        <p className="rem-fire-empty">正在读送达记录…</p>
+        <p className="rem-fire-empty">正在读提醒记录…</p>
       ) : fires.length === 0 ? (
-        <p className="rem-fire-empty">还没响过。</p>
+        <p className="rem-fire-empty">还没有提醒过。</p>
       ) : (
         <ul>
           {fires.slice(0, 5).map((f) => (
@@ -1157,20 +1165,20 @@ function fireTone(f: ReminderFire): string {
 function fireText(f: ReminderFire): string {
   const d = f.detail || "";
   if (f.status === "sent") {
-    return d.startsWith("merged_into:") ? "已送达（与同刻提醒合并）" : "已送达";
+    return d.startsWith("merged_into:") ? "已提醒（和同一时间的其他提醒合并了）" : "已提醒";
   }
-  if (f.status === "skipped_quiet") return "已跳过 · 静默时段";
-  if (f.status === "skipped_cap") return `已跳过 · 当天已达上限（${(d.match(/\d+/) ?? ["?"])[0]} 条）`;
+  if (f.status === "skipped_quiet") return "没提醒 · 免打扰时间";
+  if (f.status === "skipped_cap") return `没提醒 · 今天已经提醒了 ${(d.match(/\d+/) ?? ["?"])[0]} 条`;
   if (f.status === "skipped_empty") {
-    if (d.startsWith("source_disabled:")) return "已跳过 · 来源已关闭";
-    return "已跳过 · 没有内容可提醒";
+    if (d.startsWith("source_disabled:")) return "没提醒 · 这个功能已关闭";
+    return "没提醒 · 没有可提醒的内容";
   }
   if (f.status === "failed") {
-    if (d.startsWith("missed:")) return "错过 · 当时设备不在线或错过了触发窗口";
-    if (d === "no_subscription") return "失败 · 没有可接收的设备";
-    if (d === "push_not_configured") return "失败 · 服务端未配置推送";
-    if (d === "subscription_gone") return "失败 · 推送服务返回 410";
-    return `失败 · ${d || "未说明"}`;
+    if (d.startsWith("missed:")) return "没提醒 · 当时设备不在线";
+    if (d === "no_subscription") return "没发出去 · 没有能收提醒的设备";
+    if (d === "push_not_configured") return "没发出去 · 提醒服务还没配置好";
+    if (d === "subscription_gone") return "没发出去 · 这台设备的通知已失效";
+    return "没发出去 · 原因不明";
   }
   return f.status;
 }
@@ -1306,7 +1314,7 @@ function TaskDrawer({
           {/* 截止：只到这里不会响。这句话必须写在控件旁边，而不是折叠在帮助里 */}
           <div className="rem-timeblock">
             <div className="rem-step">
-              最晚什么时候交 <i>截止时间；只设它不会响</i>
+              最晚什么时候完成 <i>这是截止时间；只设它，不会收到提醒</i>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <Field label="日期">
@@ -1317,7 +1325,7 @@ function TaskDrawer({
                   onChange={(e) => setDueDate(e.target.value)}
                 />
               </Field>
-              <Field label="时刻（可不填）">
+              <Field label="几点（可不填）">
                 <input
                   type="time"
                   className="input"
@@ -1344,7 +1352,7 @@ function TaskDrawer({
           <div className="rem-timeblock">
             <div className="rem-remindhead">
               <div className="rem-step">
-                提醒我 <i>到点发推送；和截止时间是两件事</i>
+                提醒我 <i>到设定时间发通知；可以和截止时间不同</i>
               </div>
               <Switch
                 checked={remindOn}
@@ -1369,7 +1377,7 @@ function TaskDrawer({
                     onChange={(e) => setRemindDate(e.target.value)}
                   />
                 </Field>
-                <Field label="时刻">
+                <Field label="几点">
                   <input
                     type="time"
                     className="input"
@@ -1380,7 +1388,7 @@ function TaskDrawer({
               </div>
             ) : (
               <p className="rem-noSound">
-                只设截止时间不会响。要收到提醒，请打开「提醒我」。
+                只设截止时间，不会收到提醒。想被提醒，请打开「提醒我」。
               </p>
             )}
           </div>
@@ -1509,7 +1517,7 @@ function ReminderDrawer({
 
         <div className="rem-dbody space-y-4 px-4 pb-4">
           {/* ① 说什么 */}
-          <Field label="提醒什么">
+          <Field label="提醒你什么">
             <input
               className="input"
               value={title}
@@ -1522,13 +1530,13 @@ function ReminderDrawer({
           {/* ② 来源（规格顺序的第一位）：它决定「关掉这个来源时，这条跟不跟着停」 */}
           {editing ? (
             <div>
-              <span className="f">这是关于什么的</span>
+              <span className="f">由哪个功能安排</span>
               <p className="rem-ro">
-                来自「{sourceName}」。来源建好之后不能换，要换就删掉重立一条。
+                这条提醒属于「{sourceName}」。建好后不能改，要换只能删掉重新建。
               </p>
             </div>
           ) : (
-            <Field label="这是关于什么的" hint="关掉某个来源时，这个来源下的提醒会一起停">
+            <Field label="由哪个功能安排" hint="关闭这个功能后，它安排的提醒也会一起停">
               <select
                 className="input"
                 value={source}
@@ -1547,7 +1555,7 @@ function ReminderDrawer({
           {/* ③ 什么时候 */}
           <div>
             <div className="rem-step">
-              什么时候提醒你 <i>到点才响；那天没内容就不响</i>
+              什么时候提醒你 <i>到时间就提醒；课表、打卡这类当天没有内容时不发</i>
             </div>
             {isOwn ? (
               <>
@@ -1588,10 +1596,10 @@ function ReminderDrawer({
               // 来源提醒：频率跟着来源走，能改的只有「几点」（落 override）
               <>
                 <p className="rem-ro">
-                  跟着「{sourceName}」走：{editing ? freqText(editing) : ""}
+                  由「{sourceName}」安排：{editing ? freqText(editing) : ""}
                 </p>
                 <div className="mt-2">
-                  <Field label="改到几点" hint="只改这条，不动来源里的时间">
+                  <Field label="改到几点" hint="只改这一条，不影响这个功能里的其他提醒">
                     <input
                       type="time"
                       className="input"
@@ -1605,7 +1613,7 @@ function ReminderDrawer({
           </div>
 
           {/* ④ 做什么 */}
-          <Field label="到点之后">
+          <Field label="提醒时做什么">
             <select
               className="input"
               value={action}
@@ -1626,9 +1634,9 @@ function ReminderDrawer({
            * 也不用输入框的外形，否则看着还是像能选。
            */}
           <div className="rem-deliver">
-            <b>怎么送达 · 推送通知</b>
+            <b>提醒方式 · 通知</b>
             <span>
-              目前只支持这一种：到点出现在设备通知栏，前提是「设置」页里的推送是开着的。
+              到时间后，提醒会出现在设备的通知栏。前提是「设置」页里已经开启通知。
             </span>
           </div>
 
@@ -1749,6 +1757,8 @@ export default function RemindersPage() {
   const [data, setData] = useState<Data | null>(null);
   const [taskDrawer, setTaskDrawer] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  // AI 整理（v12 · Phase A）：只是一个壳，拆句在本地 fixture 里，一条都不入库
+  const [captureOpen, setCaptureOpen] = useState(false);
   const [reminderDrawer, setReminderDrawer] = useState(false);
   const [editingReminder, setEditingReminder] = useState<ReminderItem | null>(null);
   const [pending, setPending] = useState<
@@ -2101,7 +2111,7 @@ export default function RemindersPage() {
           showToast("success", "已更新");
         } else {
           await api.reminders.create(draft);
-          showToast("success", "已建好，到点会提醒你");
+          showToast("success", "已建好，到时间会提醒你");
         }
         setReminderDrawer(false);
         setEditingReminder(null);
@@ -2113,6 +2123,61 @@ export default function RemindersPage() {
       }
     },
     [editingReminder, reload, showToast]
+  );
+
+  /**
+   * 一句话整理 → 真正写库。**逐条写，不假装原子**。
+   *
+   * 为什么不是一个批量端点：三条待办里坏一条，用户最想要的是"两条进去、一条告诉我为什么"，
+   * 而不是整批回滚、白说一遍。`allSettled` 而不是 `all`，就是为了让好的那几条落地。
+   *
+   * 返回值只报"哪几条没进去 + 为什么"，界面上的"已加入 X 条"由抽屉自己算 ——
+   * 两边都算一遍，迟早在某个分支上对不上。
+   */
+  const commitCapture = useCallback(
+    async (picked: CaptureProposal[]): Promise<CommitOutcome> => {
+      const results = await Promise.allSettled(
+        picked.map((item) => {
+          if (item.kind === "task") return api.tasks.create(taskDraftOf(item));
+          const draft = reminderDraftOf(item);
+          // 抽屉已经拦过一轮，这里再挡一次：宁可少写一条，也不要把提醒写成哑弹
+          if (!draft) return Promise.reject(new Error("这条还没有提醒时间"));
+          return api.reminders.create(draft);
+        })
+      );
+
+      const okIds: string[] = [];
+      const issues: Record<string, string> = {};
+      let remind = 0;
+      results.forEach((r, i) => {
+        const item = picked[i];
+        if (r.status === "fulfilled") {
+          okIds.push(item.id);
+          if (item.remind_at !== null || item.recurrence !== null) remind += 1;
+        } else {
+          issues[item.id] = commitFailMessage(r.reason);
+        }
+      });
+
+      const bad = Object.keys(issues).length;
+      // **只有全成功才出 toast。**
+      // 有一条没加上时抽屉不关、底栏和行内已经把话说完了；这时候再弹一个
+      // "已加入 1 条" 的 toast，正好压在主轴按钮上（真机截图里出现过），
+      // 用户会以为是两个不同的结果。
+      if (bad === 0 && okIds.length > 0) {
+        showToast(
+          "success",
+          remind > 0
+            ? `已加入 ${okIds.length} 条，其中 ${remind} 条会提醒你`
+            : `已加入 ${okIds.length} 条`
+        );
+      }
+
+      // 写成功就必须刷新：不刷新的话，用户去列表里看不到刚加的那条，会以为又失败了
+      if (okIds.length > 0) await reload();
+      return { okIds, issues };
+    },
+    [reload, showToast]
   );
 
   /**
@@ -2366,9 +2431,12 @@ export default function RemindersPage() {
       try {
         const res = await api.reminders.setSource(item.source, false);
         await reload();
-        showToast("success", `已关掉「${res?.sources.find((s) => s.key === item.source)?.label ?? item.source}」`);
+        showToast(
+          "success",
+          `已关闭「${res?.sources.find((s) => s.key === item.source)?.label ?? item.source}」的提醒`
+        );
       } catch {
-        showToast("error", "关不掉，稍后再试");
+        showToast("error", "没关掉，稍后再试");
       }
     },
     [reload, showToast]
@@ -2588,7 +2656,7 @@ export default function RemindersPage() {
       <section className="mt-4">
         <h3 className="rem-grouphead">
           调整顺序
-          <span>· 拖动，或聚焦把手后按 ↑ ↓</span>
+          <span>· 拖动，或用方向键 ↑ ↓ 调整</span>
         </h3>
         <div className="space-y-2">
           {sortRows.map((t) => (
@@ -2617,6 +2685,34 @@ export default function RemindersPage() {
 
   const listView = (
     <>
+      {/* AI 整理入口（v12）。它是**次入口**：主位仍然是右上角的「+ 新建」，
+          这里只负责"说一句，我替你拆"。多选/排序时不挂 —— 那两种模式正在挑行，
+          一个"再说一句"的入口只会把焦点和视线都抢走。 */}
+      {mode === "normal" ? (
+        <button
+          type="button"
+          className="rem-cap-strip"
+          onClick={() => setCaptureOpen(true)}
+          aria-label="一句话添加：打一句或说一段，自动拆成待办和提醒"
+        >
+          <span className="rem-cap-strip-mark" aria-hidden="true">
+            <Spark className="rem-cap-spark" />
+          </span>
+          <span className="rem-cap-strip-copy">
+            <span className="rem-cap-strip-kicker">一句话添加</span>
+            <span className="rem-cap-strip-text rem-cap-strip-desktop">
+              打字或说一句：明天下午交高数作业，周五社团开会…
+            </span>
+            <span className="rem-cap-strip-text rem-cap-strip-mobile">
+              说一句，自动拆成待办和提醒
+            </span>
+          </span>
+          <span className="rem-cap-strip-go" aria-hidden="true">
+            开始 →
+          </span>
+        </button>
+      ) : null}
+
       <PushHealth status={data?.push ?? null} />
 
       {/* 范围 tab：四个视图的语义见实施单 §5.3。逾期不会消失，它留在「今天」 */}
@@ -2684,7 +2780,7 @@ export default function RemindersPage() {
                 提前 1 小时
               </button>
               <button type="button" onClick={() => void applyQuickRemind(0)}>
-                到点提醒
+                到时间提醒
               </button>
               <button type="button" onClick={() => void applyQuickRemind(null)}>
                 不提醒
@@ -2713,7 +2809,7 @@ export default function RemindersPage() {
           ) : null}
 
           {group("今天 · 待办", tasks.today.map(taskCard))}
-          {group("今天 · 日程提醒", groups.today.map(card))}
+          {group("今天 · 定时提醒", groups.today.map(card))}
 
           {countdown.length > 0 ? (
             <section className="mt-4">
@@ -2749,15 +2845,15 @@ export default function RemindersPage() {
         <>
           {group("接下来 · 7 天", upcomingSplit.soon.map(taskCard))}
           {group("更远", upcomingSplit.later.map(taskCard))}
-          {group("接下来 · 日程提醒", groups.soon.map(card))}
-          {group("更远 · 日程提醒", groups.later.map(card))}
+          {group("接下来 · 定时提醒", groups.soon.map(card))}
+          {group("更远 · 定时提醒", groups.later.map(card))}
         </>
       ) : null}
 
       {mode !== "sort" && scope === "all" ? (
         <>
           {group("全部 · 待办", tasks.all.map(taskCard))}
-          {group("日程提醒", groups.today.concat(groups.soon, groups.later).map(card))}
+          {group("定时提醒", groups.today.concat(groups.soon, groups.later).map(card))}
           {group("已结束", groups.ended.map(card))}
           {group("已暂停", groups.paused.map(card))}
         </>
@@ -2772,12 +2868,13 @@ export default function RemindersPage() {
         </>
       ) : null}
 
-      {/* 没有完成语义的重复提醒（每天 22:00 复盘）仍然是提醒，不是待办 ——
-          给它留一个次入口，但不要做成「新建」的第二个主按钮 */}
+      {/* 只响一次、没有「完成」可言的重复提醒（每天 22:00 复盘）仍然是提醒，
+          不是待办 —— 给它留一个次入口，但不要做成「新建」的第二个主按钮。
+          文案不许再写「没有完成语义」：那是开发者的分类型由，不是用户的话。 */}
       {mode === "normal" ? (
         <p className="rem-footlink">
           <button type="button" onClick={() => openReminderDrawer(null)}>
-            要「每天 22:00」这种没有完成语义的提醒？新建提醒
+            只要到时间提醒，不用勾完成？新建提醒
           </button>
         </p>
       ) : null}
@@ -2793,14 +2890,14 @@ export default function RemindersPage() {
   return (
     <PageShell
       compact
-      eyebrow="P7 · 提醒"
-      title="提醒 / 待办"
-      sub="待办有截止和提醒，联动提醒只推迟不完成。"
+      eyebrow="什么时候做什么"
+      title="待办"
+      sub="设了提醒时间，到时会通知你；课表、打卡的提醒会自动排好。"
       actions={
         <div className="flex items-center gap-2">
           <div className="seg" role="group" aria-label="视图">
             <button type="button" aria-pressed={tab === "list"} onClick={() => setTab("list")}>
-              提醒
+              列表
             </button>
             <button
               type="button"
@@ -2827,7 +2924,7 @@ export default function RemindersPage() {
             <br />
             在下面一行直接写「明天 9 点交高数作业」，或者点右上角「+ 新建」。
             <br />
-            只设截止时间不会响；要收到提醒，记得再打开「提醒我」。
+            只设截止时间，不会收到提醒。想被提醒，记得打开「提醒我」。
           </Callout>
         ) : (
           listView
@@ -2837,9 +2934,9 @@ export default function RemindersPage() {
       {!loading && tab === "settings" ? (
         <div className="space-y-4">
           <section className="card card-pad">
-            <h3 className="card-title">静默时段</h3>
+            <h3 className="card-title">免打扰时间</h3>
             <p className="mt-1 text-[var(--fs-xs)] text-[var(--text-3)]">
-              这段时间里到点的提醒<b>不响也不补发</b>，直接顺到下一个时段。
+              这段时间里的提醒<b>不会发出，也不会事后补发</b>。
             </p>
             <div className="mt-3 flex items-center gap-2">
               <input
@@ -2869,10 +2966,10 @@ export default function RemindersPage() {
           </section>
 
           <section className="card card-pad">
-            <h3 className="card-title">每天最多几条</h3>
+            <h3 className="card-title">每天最多提醒几次</h3>
             <p className="mt-1 text-[var(--fs-xs)] text-[var(--text-3)]">
-              同一分钟的多条会合并成一条通知，合并算一条。上限只挡「通知太多」，
-              不挡你建多少条提醒。
+              同一分钟的多条提醒会合并成一条通知，合并后算一次。这个上限只限制发出多少条，
+              不影响你建多少提醒。
             </p>
             <div className="mt-3 flex items-center gap-2">
               <input
@@ -2889,16 +2986,15 @@ export default function RemindersPage() {
                 onBlur={(e) => void savePrefs({ daily_cap: Number(e.target.value) })}
               />
               <span className="text-[var(--fs-xs)] text-[var(--text-3)]">
-                条（{prefs?.cap_min ?? 1}–{prefs?.cap_max ?? 20}）
+                次（{prefs?.cap_min ?? 1}–{prefs?.cap_max ?? 20}）
               </span>
             </div>
           </section>
 
           <section className="card card-pad">
-            <h3 className="card-title">来源</h3>
+            <h3 className="card-title">哪些功能会提醒你</h3>
             <p className="mt-1 text-[var(--fs-xs)] text-[var(--text-3)]">
-              关掉一个来源，它就不再给你发提醒（已经建好的那几条会一起停）。
-              待办自己的提醒不受这里影响 —— 它跟着待办走。
+              关掉一个功能，它安排的提醒都会停。你自己建的待办和提醒不受影响。
             </p>
             {/* 两列：7 个来源原来竖排 7 行、每行只有「名字 + 开关」，
                 右半边全是空的；分两列后行数减半，也不用滚动就看全。
@@ -2917,14 +3013,13 @@ export default function RemindersPage() {
               ))}
             </div>
             <p className="mt-3 text-[var(--fs-xs)] text-[var(--text-3)]">
-              推送设备在「设置」页管，不在这里 —— 那是整个账号的推送通道，
-              以后对话回复也可能用它。
+              接收提醒的设备在「设置 → 提醒」里管理。
             </p>
           </section>
 
           {prefs ? (
             <p className="text-[var(--fs-xs)] text-[var(--text-3)]">
-              静默 {prefs.quiet_start}–{prefs.quiet_end} · 每天最多 {prefs.daily_cap} 条
+              免打扰 {prefs.quiet_start}–{prefs.quiet_end} · 每天最多提醒 {prefs.daily_cap} 次
             </p>
           ) : null}
         </div>
@@ -2993,6 +3088,16 @@ export default function RemindersPage() {
         </div>
       ) : null}
 
+      {/* AI 整理（Phase A）：只在有「现在」的时候挂 —— 抽屉里要按本地日分组，
+          没有 now 就分不出「今天/明天」，而渲染期又不许自己取时间。 */}
+      {captureOpen && now !== null ? (
+        <AiCaptureDrawer
+          now={now}
+          onClose={() => setCaptureOpen(false)}
+          onCommit={commitCapture}
+        />
+      ) : null}
+
       <TaskDrawer
         key={editingTask ? `edit-${editingTask.id}-${editingTask.updated_at}` : "new-task"}
         open={taskDrawer}
@@ -3035,7 +3140,7 @@ export default function RemindersPage() {
             ? "删除后不能恢复，这些待办关联的提醒也会一起取消。"
             : pending?.kind === "task"
               ? "删除后不能恢复，关联的提醒也会一起取消。"
-              : "删除后不能恢复，这条的送达记录也不会再显示。"
+              : "删除后不能恢复，这条的提醒记录也不会再显示。"
         }
         busy={busy}
         onCancel={() => setPending(null)}

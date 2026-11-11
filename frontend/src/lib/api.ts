@@ -24,6 +24,7 @@ import type { MeOut, UserOut, Template, ApplyTemplateResult, UsageSummary } from
 import type { ProfileSnapshot, TagTaxonomy, TemplateRecommend } from "./types";
 import type { TodaySnapshot } from "./types";
 import type { PushStatus, PushSubscribeBody, PushTestResult } from "./types";
+import type { CaptureParseResult } from "./types";
 import type { RemindPref } from "./types";
 import type { CalendarLink } from "./types";
 import type { EnhanceResult } from "./types";
@@ -945,6 +946,41 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ action }),
       }),
+  },
+  /**
+   * 一句话整理（v13 Phase B）。
+   *
+   * 只返回 proposal，**不写库** —— 勾选确认之后由页面逐条调 tasks.create /
+   * reminders.create（Phase C）。所以这个调用失败时什么都不会脏，重试是安全的。
+   *
+   * 超时给到 45s：后端要排队 + 调一轮模型（本地实测 2–4s，高峰期更久）。
+   * 用默认的 60s 也行，但 45s 能让"这次太久"早一点变成可重试的失败态，
+   * 而不是让用户对着"正在整理…"发呆一分多钟。
+   */
+  capture: {
+    parse: (text: string, nowMs?: number) =>
+      request<CaptureParseResult>(
+        "/api/capture/parse",
+        {
+          method: "POST",
+          body: JSON.stringify(nowMs ? { text, now: Math.floor(nowMs / 1000) } : { text }),
+        },
+        { timeoutMs: 45000 }
+      ),
+    /** 语音输入接没接。没接就不渲染麦克风 —— 按钮摆在那儿、点下去弹"还没做"，
+     *  比根本没有这个按钮更像半成品。 */
+    capabilities: () => request<{ voice: boolean }>("/api/capture/capabilities"),
+    transcribe: (wav: Blob) => {
+      const form = new FormData();
+      form.append("file", wav, "voice.wav");
+      return request<{ text: string }>(
+        "/api/capture/transcribe",
+        // headers 传空对象覆盖默认的 application/json：FormData 的 Content-Type
+        // 必须留给浏览器加 boundary，手写会导致后端收不到文件
+        { method: "POST", body: form, headers: {} },
+        { timeoutMs: 30000 }
+      );
+    },
   },
 };
 
