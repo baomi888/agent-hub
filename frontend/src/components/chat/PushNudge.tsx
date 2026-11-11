@@ -1,13 +1,13 @@
 "use client";
 
-// 首页「今天」条下面那一行：要不要每天提醒一次。
+// 首页「今天」条下面那一行：要不要让它到点提醒你。
 //
 // 为什么排在今天条下面而不是做成浮层：
 //   · 浮层已经被「装到桌面」占着（InstallBanner，同一个位置、同一批时机），
 //     两个浮层抢同一块屏幕，一定会有一个被挤掉（之前 GuideModal 与
 //     InstallBanner 抢过，靠 ARM_DELAY/CONFIRM_DELAY 才压住）。
-//   · 更重要的是**人群对齐**：今天条只在「有事要做」时出现，而「每日提醒」
-//     也只对这批人有意义——没有任务、没有连续天数的人，提醒内容是空的。
+//   · 更重要的是**人群对齐**：今天条只在「有事要做」时出现，而提醒权限
+//     也只对这批人有意义——没有任务的人不需要被叫。
 //     两个东西天然同框，比把它放到首页顶部去打扰所有人合理。
 //
 // 为什么不是一个自动弹出的对话框：通知权限**必须由用户手势触发**。
@@ -39,7 +39,6 @@ export default function PushNudge({ enabled }: { enabled: boolean }) {
   const [detail, setDetail] = useState("");
   const [busy, setBusy] = useState(false);
   /** 提醒时刻，来自 /api/push/status —— 用户可以在设置页改，这里不能写死 */
-  const [time, setTime] = useState("");
 
   useEffect(() => {
     if (!enabled) return;
@@ -63,8 +62,7 @@ export default function PushNudge({ enabled }: { enabled: boolean }) {
           setView("hidden"); // 服务端没配密钥：静默隐藏，别让人点一个必然失败的按钮
           return;
         }
-        setTime(s.time || "");
-        // ★★ 必须认本机。`s.subscribed` 是账号级的：手机上开了推送，电脑上
+          // ★★ 必须认本机。`s.subscribed` 是账号级的：手机上开了推送，电脑上
         //   这条就会误以为"这台也开了"而收起提示，用户永远等不到那句
         //   "要不要每天提醒一次"——而这正是这台电脑唯一该看到的话。
         const my = await findMyDevice(s.device_list || []);
@@ -124,8 +122,8 @@ export default function PushNudge({ enabled }: { enabled: boolean }) {
           <BellIcon />
         </span>
         <span className="pn-txt">
-          <span className="pn-main">已开启每日提醒</span>
-          <span className="pn-sub">每天 {time || "到点"}，只在你还有事没做完时发</span>
+          <span className="pn-main">已开启到点提醒</span>
+          <span className="pn-sub">设了提醒时间的待办会通知你</span>
         </span>
         <button type="button" className="pn-link" onClick={off} disabled={busy}>
           关掉
@@ -161,13 +159,14 @@ export default function PushNudge({ enabled }: { enabled: boolean }) {
         </span>
         <span className="pn-txt">
           <span className="pn-main">这台手机收不到网页通知</span>
-          {/* ★ 这里原来写的是「换 Edge 浏览器，或把知穗装到桌面后再试」，对安卓是**错的**：
+          {/* ★ 这里原来写的是「换 Edge 浏览器」+「用日历」，两句都不对了：
               安卓上所有浏览器（含 Edge 安卓版）的推送底层都是 Google FCM，
-              国内连不通，换浏览器不会好。唯一能走通的是系统日历，所以直接把人往那边送。 */}
-          <span className="pn-sub">日历也能提醒，去设置里开</span>
+              国内连不通，换浏览器不会好；日历提醒在 2026-11-11 已删除。
+              所以只留一条真话 + 一个去看设备清单的入口。 */}
+          <span className="pn-sub">换台设备开，手机不影响</span>
         </span>
-        <Link href="/settings#reminder" className="pn-btn">
-          用日历
+        <Link href="/reminders?tab=settings" className="pn-btn">
+          看设备
         </Link>
       </div>
     );
@@ -180,9 +179,11 @@ export default function PushNudge({ enabled }: { enabled: boolean }) {
       </span>
       <span className="pn-txt">
         {/* 文案长度受实际可用宽度约束：390 宽下 pn-txt 只有约 150px（按钮与 × 各占一段），
-            超过 9 个字就会被截成「…」。这句是 8 字 + 9 字，实测刚好放得下。 */}
-        <span className="pn-main">每天 {time || "到点"} 提醒我</span>
-        <span className="pn-sub">只在你还有事没做完时</span>
+            超过 9 个字就会被截成「…」。这两句是 5 字 + 9 字，实测放得下。
+            ★ 不再显示"每天 HH:MM"：提醒时刻已经跟着每条待办走，
+              这里写一个固定时刻会让人以为只有那一个点才响。 */}
+        <span className="pn-main">到点提醒我</span>
+        <span className="pn-sub">只在你设了时间的事上</span>
       </span>
       <button type="button" className="pn-btn" onClick={on} disabled={busy}>
         {busy ? "开启中…" : "打开提醒"}

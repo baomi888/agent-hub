@@ -4,10 +4,10 @@ import PageShell from "@/components/console/PageShell";
 import ReminderSteps from "@/components/reminder/ReminderSteps";
 import { FAQ } from "@/lib/reminderGuide";
 
-/* 应用内的「设置提醒」教程页（设置 → 提醒 → 看分步教程）。
+/* 应用内的「打开提醒」教程页（待办 → 设置 → 看分步教程）。
  *
  * 为什么不直接跳公开页 /reminder：那一页是独立页（套 .tour 整页纸、自带"回到首页"），
- * 从设置点进去左导航会整个消失，感觉像退出了应用。所以做成 (console) 组里的子路由，
+ * 从应用里点进去左导航会整个消失，感觉像退出了应用。所以做成 (console) 组里的子路由，
  * 外壳不动，点左导航随时能切走。
  *
  * 两页内容同源（ReminderSteps + FAQ 都来自 lib/reminderGuide.ts），
@@ -15,18 +15,18 @@ import { FAQ } from "@/lib/reminderGuide";
  */
 
 export const metadata: Metadata = {
-  title: "设置提醒 · 知穗Agent",
+  title: "打开提醒 · 知穗Agent",
 };
 
 export default function SettingsReminderPage() {
   return (
     <PageShell
-      eyebrow="每天提醒"
-      title="设置提醒"
-      sub="一步一图，苹果、安卓、电脑分开写。手机上加一条日历订阅最稳，电脑上打开浏览器通知就行。"
+      eyebrow="到点提醒"
+      title="打开提醒"
+      sub="权限只有一处：待办 → 设置 → 提醒权限。苹果要先装到主屏，安卓多数机型在国内收不到，两页都写清了。"
       actions={
-        <Link href="/settings#reminder" className="btn btn-ghost btn-sm">
-          回到设置
+        <Link href="/reminders?tab=settings" className="btn btn-ghost btn-sm">
+          去打开提醒
         </Link>
       }
     >

@@ -1099,28 +1099,6 @@ export type PushTestResult = {
   items: PushTestItem[];
 };
 
-/* ==========================================================================
-   日历订阅（GET /api/calendar/link）
-   ==========================================================================
-   给安卓用户的唯一出路：Web Push 在安卓走 Google FCM，国内连不通（见 lib/push.ts
-   顶部注释），而系统日历用本机定时器，不吃网络。
-
-   ★ 两个 URL 都要留着，别只留一个：
-     · subscribe_url / webcal_url —— 订阅，内容会跟着服务端更新（日历客户端定期来拉）
-     · download_url —— 一次性下载 .ics 导入，任何日历都吃，但内容从此固定
-     安卓上多数国产日历把"从网址订阅"藏在很深的菜单里，直接下载文件反而更快。
-   ========================================================================== */
-export type CalendarLink = {
-  token: string;
-  /** 提醒时刻，已是 "HH:MM" 格式（服务端按配置格式化，前端不再拼） */
-  time: string;
-  subscribe_url: string;
-  webcal_url: string;
-  download_url: string;
-  hour: number;
-  minute: number;
-};
-
 // ---------- 提醒中心（2026-11-09，规格见 docs/提醒中心_实施规格） ----------
 
 /** 重复规则。前四个必须与后端 core/reminder_core.py 的 FREQS 一致 */

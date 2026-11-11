@@ -2252,3 +2252,139 @@ class TestStreamingVoice:
         # 流式分支里要直接给全长
         seg = src[src.find("if (streamedRef.current)") :][:200]
         assert "setLiveShown(said.length)" in seg
+
+
+# ==================== 提醒权限搬进待办（2026-11-11）====================
+
+ACCESS = ROOT / "frontend" / "src" / "components" / "reminders" / "ReminderAccess.tsx"
+SETTINGS_PAGE = ROOT / "frontend" / "src" / "app" / "(console)" / "settings" / "page.tsx"
+
+
+class TestReminderAccessInTodo:
+    """提醒权限从「设置」搬进「待办 → 设置」，日历订阅整条删除。
+
+    为什么这些值得钉住：
+      · 「设置里还能开关提醒」= 两个地方管同一件事，关了一个、另一个还显示开着，
+        是这一轮最想消掉的重复；
+      · 「设备清单里能不能关掉别的设备」只在多设备时才需要，最容易在重构里悄悄
+        退化成「只能看不能改」；
+      · 日历一删，所有指着它的文案都变成了假出路，而假出路比没有出路更费时间。
+    """
+
+    def test_card_has_exactly_one_switch(self):
+        """整张卡只有一个开关 —— 本机的提醒权限。
+
+        用户的原话是「只把权限开关做一个按钮就行」。多一个「每天几点」的开关，
+        就会和每条待办自己的提醒时间打架。
+
+        反证：再加一个 `<Switch`，本用例变红。
+        """
+        src = _strip_js_comments(ACCESS.read_text(encoding="utf-8"))
+        assert src.count("<Switch") == 1, "提醒权限卡里出现了不止一个开关"
+
+    def test_other_devices_can_be_turned_off(self):
+        """设备清单里，别的设备必须能单独关掉。
+
+        「手机开了、电脑忘了关」是这张卡最真实的使用场景。只能看不能关，
+        等于把用户逼回设置页。
+
+        反证：把 `api.push.remove(d.id)` 删掉，本用例变红。
+        """
+        src = _strip_js_comments(ACCESS.read_text(encoding="utf-8"))
+        assert "api.push.remove(d.id)" in src
+        assert "关掉" in src
+
+    def test_this_device_toggles_through_browser(self):
+        """本机必须走浏览器的订阅/退订，而不是删服务端那行。
+
+        只删服务端行的话，浏览器那边还留着一条悬空订阅，下次打开页面
+        会「自己又开了」——用户会认为这个开关坏了。
+
+        反证：把 `await disablePush();` 删掉，本用例变红。
+        """
+        src = _strip_js_comments(ACCESS.read_text(encoding="utf-8"))
+        assert "disablePush()" in src
+        assert "enablePush()" in src
+
+    def test_mounted_in_todo_settings_tab(self):
+        """卡必须挂在待办页的「设置」标签里，且排在免打扰之前。
+
+        排在后面的话，用户打开设置先看到「免打扰」「每天最多提醒几次」，
+        而这三项在权限没开时调了也不响。
+
+        反证：把 `<ReminderAccess />` 挪到 `免打扰时间` 那段之后，本用例变红。
+        """
+        src = PAGE.read_text(encoding="utf-8")
+        i = src.find("<ReminderAccess />")
+        # 认标题本身而不是「免打扰时间」这四个字：设置标签底部那行汇总
+        # （「免打扰 23:00–07:00 · 每天最多提醒 6 次」）里也有它，先匹配到就永远绿。
+        j = src.find('<h3 className="card-title">免打扰时间</h3>')
+        assert i > 0 and j > 0
+        assert i < j, "提醒权限卡被排到免打扰后面了"
+
+    def test_settings_page_only_links_out(self):
+        """设置页不再放第二份控件，只留一条指路。
+
+        反证：把 `<PushRow />` 加回去，本用例变红。
+        """
+        src = _strip_js_comments(SETTINGS_PAGE.read_text(encoding="utf-8"))
+        for gone in ("<PushRow", "<CalendarRow", "<ReminderTimeCard"):
+            assert gone not in src, f"设置页还在渲染 {gone}，两处都能开关同一件事"
+        assert "/reminders?tab=settings" in src
+
+    def test_removed_components_are_really_gone(self):
+        """三个组件文件删掉、前端不再有日历接口。
+
+        留着文件不引用，下一个人会把它当成还能用的东西接回去。
+
+        反证：随便新建一个 CalendarRow.tsx，本用例变红。
+        """
+        base = ROOT / "frontend" / "src" / "components" / "settings"
+        for name in ("CalendarRow.tsx", "PushRow.tsx", "ReminderTimeCard.tsx"):
+            assert not (base / name).exists(), f"{name} 还在"
+        api_src = (ROOT / "frontend" / "src" / "lib" / "api.ts").read_text(encoding="utf-8")
+        assert "api.calendar" not in api_src
+        assert "/api/calendar" not in api_src
+
+    def test_tab_can_be_opened_from_a_link(self):
+        """`?tab=settings` 要能直接落到设置标签。
+
+        首页那条提醒提示、教程页的按钮都靠它一步到位；不支持的话点过去
+        停在列表，用户还得自己再点一次「设置」。
+
+        反证：删掉读 `search` 的那段 effect，本用例变红。
+        """
+        src = _strip_js_comments(PAGE.read_text(encoding="utf-8"))
+        assert 'get("tab")' in src
+        assert 'setTab("settings")' in src
+
+    def test_failed_status_is_not_reported_as_unsupported(self):
+        """接口失败不能显示成「浏览器不支持通知」。
+
+        `/api/push/status` 拿不到时返回 null。早先把它和「服务端没开推送」
+        混成同一个分支，界面就对一个其实能收通知的浏览器说「你收不到」——
+        用户照着这句话去换设备，方向从一开始就错了。
+
+        反证：并回 `if (!s || !s.supported)`，本用例变红。
+        """
+        src = _strip_js_comments(ACCESS.read_text(encoding="utf-8"))
+        assert 'setView("error")' in src
+        assert "if (!s || !s.supported)" not in src
+
+    def test_no_copy_promises_the_calendar_anymore(self):
+        """界面上不能再出现「去日历里订阅」这种已经做不到的指引。
+
+        这一条是给「文案与事实对齐」兜底的：删功能时最容易漏的就是别处的
+        一句话，而那句话会把用户送去一个不存在的入口。
+
+        反证：把「也可以在系统日历里订阅」加回待办页，本用例变红。
+        """
+        nudge = _strip_js_comments(
+            (ROOT / "frontend" / "src" / "components" / "chat" / "PushNudge.tsx").read_text(
+                encoding="utf-8"
+            )
+        )
+        todo = _strip_js_comments(PAGE.read_text(encoding="utf-8"))
+        for src in (nudge, todo):
+            for bad in ("用日历", "系统日历里订阅", "日历也能提醒"):
+                assert bad not in src, f"还有指向已删功能的文案：{bad}"

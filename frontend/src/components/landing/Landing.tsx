@@ -374,11 +374,11 @@ export default function Landing() {
             为什么放在装到桌面之后：iPhone 上想收系统通知，前提就是先装到主屏，
             读的顺序正好是"先装、再开提醒"。 */}
         <section className="lp-sec lp-remind" id="reminder">
-          <p className="lp-eyebrow lp-reveal">每天提醒</p>
+          <p className="lp-eyebrow lp-reveal">到点提醒</p>
           <h2 className="lp-h2 lp-reveal">到点它叫你一声</h2>
           <p className="lp-body-txt lp-reveal">
-            手机上加一条日历订阅，到点由系统日历提醒你——关掉网页、锁屏都照响；电脑上打开浏览器通知就行。
-            两条路都只在你还有事没做完时才提醒，一天最多一次。
+            每条待办可以单独设提醒时间：「明天 14:30 交高数作业」。到点由浏览器通知你，
+            打开一次权限就行。iPhone 装到主屏、电脑用 Edge 就能收；安卓多数机型在国内收不到，教程里写了怎么确认。
           </p>
           <div className="lp-install-body">
             <ReminderSteps />

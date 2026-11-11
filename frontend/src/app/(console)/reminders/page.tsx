@@ -4,8 +4,10 @@
 //
 // 这个页面只回答一个问题：**什么时候，让我做什么**。
 // 三件事刻意不放在这里：
-//  1. 推送设备（Web Push 订阅）留在设置页 —— 那是账号级基础设施，
-//     以后对话回复也可能借它推，搬进提醒页等于让一个模块独占全站能力；
+//  1. 推送设备（Web Push 订阅）**在这里**（2026-11-11 从设置页搬进来）。
+//     当初留着它的理由是「账号级基础设施，别的模块也可能借它推」，实际用下来
+//     用户只会在一个场景找它：关掉某台旧设备的提醒。让这件事发生在待办页里，
+//     比维护一个「账号级基础设施」的位置更实在。
 //  2. 每日委托的正文留在 /delegate —— 提醒只管"什么时候提醒你去看"，不管"写什么"；
 //  3. 番茄钟、课表等工具的编辑留在工具集 —— 这里只提供「关闭该来源」这一个开关。
 //
@@ -45,6 +47,7 @@ import AiCaptureDrawer, {
   taskDraftOf,
 } from "@/components/reminders/AiCaptureDrawer";
 import type { CommitOutcome } from "@/components/reminders/AiCaptureDrawer";
+import ReminderAccess from "@/components/reminders/ReminderAccess";
 import { Callout, Field, Seg, SkeletonLines, Switch, ToastHost } from "@/components/console/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
@@ -543,7 +546,7 @@ function TodayAxis({
  * ★ 推送正常时**整块不渲染**（不是 display:none）：留在 DOM 里的话，
  *   `role="status"` 会把一句「不会响」读给读屏用户，而事实是会响。
  */
-function PushHealth({ status }: { status: PushStatus | null }) {
+function PushHealth({ status, onOpen }: { status: PushStatus | null; onOpen: () => void }) {
   // 端点没上线 / 请求失败 → null，静默隐藏（不该在提醒页顶上报错）
   if (!status) return null;
   if (status.supported && status.subscribed) return null;
@@ -556,13 +559,17 @@ function PushHealth({ status }: { status: PushStatus | null }) {
         <b>{title}，到时间不会提醒你。</b>
         <span>
           {status.supported
-            ? "去设置页开启通知；也可以在系统日历里订阅，让日历到时间提醒你。"
-            : "可以改用系统日历订阅，不依赖浏览器通知。"}
+            ? "在设置里打开「提醒权限」，到点会通知你。"
+            : // 安卓的网页通知底层走 Google 服务，国内不通；日历那条路已删，
+              // 所以这里没有第二条路可指，只能说实话。
+              "安卓手机在国内收不到网页通知，换台电脑或 iPhone 打开提醒即可。"}
         </span>
       </div>
-      <a className="inline-link" href="/settings">
+      {/* 用按钮而不是链接：已经在待办页上了，链接会整页重载一次，
+          回来滚到顶部、列表重新拉一遍 —— 只是切个标签，不该有这些代价。 */}
+      <button type="button" className="inline-link" onClick={onOpen}>
         去设置
-      </a>
+      </button>
     </div>
   );
 }
@@ -1752,6 +1759,14 @@ export default function RemindersPage() {
   const authedId = me?.user?.id ?? null;
 
   const [tab, setTab] = useState<"list" | "settings">("list");
+  // `?tab=settings` 直接落到设置：提醒权限从「设置」搬进来之后，首页那条
+  // 「打开提醒」的提示卡、教程页的「回到设置」都要能一步到位。用
+  // window.location 而不是 useSearchParams：后者在 App Router 里会把整页
+  // 拉进 Suspense，为了读一个参数不值得。
+  useEffect(() => {
+    const want = new URLSearchParams(window.location.search).get("tab");
+    if (want === "settings") setTab("settings");
+  }, []);
   const [scope, setScope] = useState<Scope>("today");
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<Data | null>(null);
@@ -2719,7 +2734,7 @@ export default function RemindersPage() {
 
   const listView = (
     <>
-      <PushHealth status={data?.push ?? null} />
+      <PushHealth status={data?.push ?? null} onOpen={() => setTab("settings")} />
 
       {/* 范围 tab：四个视图的语义见实施单 §5.3。逾期不会消失，它留在「今天」 */}
       <div className="rem-tabs" role="group" aria-label="待办范围">
@@ -2942,6 +2957,10 @@ export default function RemindersPage() {
 
       {!loading && tab === "settings" ? (
         <div className="space-y-4">
+          {/* 提醒权限排最前：这一屏里只有它管「响不响」，底下三个都在管
+              「响几次、响哪些」。权限没开的时候，后面三项调了也不会响。 */}
+          <ReminderAccess />
+
           <section className="card card-pad">
             <h3 className="card-title">免打扰时间</h3>
             <p className="mt-1 text-[var(--fs-xs)] text-[var(--text-3)]">
@@ -3021,9 +3040,8 @@ export default function RemindersPage() {
                 </div>
               ))}
             </div>
-            <p className="mt-3 text-[var(--fs-xs)] text-[var(--text-3)]">
-              接收提醒的设备在「设置 → 提醒」里管理。
-            </p>
+            {/* 设备清单已经搬到这一页最上面的「提醒权限」卡里（2026-11-11）。
+                这里不再留一句「去设置里管」——那句话本身就是要被删掉的东西。 */}
           </section>
 
           {prefs ? (

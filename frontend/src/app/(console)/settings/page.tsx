@@ -19,9 +19,6 @@ import { useConsoleAccount } from "@/components/console/ConsoleLayout";
 import CornIcon from "@/components/CornIcon";
 import AvatarPicker from "@/components/settings/AvatarPicker";
 import InstallAppRow from "@/components/settings/InstallAppRow";
-import PushRow from "@/components/settings/PushRow";
-import ReminderTimeCard from "@/components/settings/ReminderTimeCard";
-import CalendarRow from "@/components/settings/CalendarRow";
 import PasswordDialog from "@/components/settings/PasswordDialog";
 import UsernameDialog from "@/components/settings/UsernameDialog";
 import UserAvatar from "@/components/settings/UserAvatar";
@@ -150,13 +147,13 @@ export default function SettingsPage() {
     api.schedule.jobs().then((d) => setJobs(toProbe(d))).catch((e) => setJobs(errProbe(e)));
   }, [authedId, isAdmin]);
 
-  // 从首页「用日历」跳过来时带 #reminder，要把它滚到眼前。
+  // 带 #tags 这类锚点跳过来时要滚到眼前。
   //
   // ★ 不能指望浏览器自己滚：本站 html/body 是 overflow:hidden，真正滚动的是
   //   .console-scroll 这个内部容器，而浏览器的锚点默认只滚 document 滚动容器。
-  //   表现就是"跳过来了但停在页面顶部，看不到要开的东西"。
-  // ★ 也不能立刻滚：CalendarRow 要等 /api/calendar/link 返回才渲染，
-  //   晚一帧滚会停在"日历卡片还没出现"时的高度，位置偏上一截。
+  //   表现就是"跳过来了但停在页面顶部，看不到要看的东西"。
+  // ★ 晚一帧再滚：目标区块里常有要等接口才渲染的子组件，立刻滚会停在
+  //   "内容还没出现"时的高度，位置偏上一截。
   useEffect(() => {
     const id = window.location.hash.replace("#", "");
     if (!id) return;
@@ -372,26 +369,14 @@ export default function SettingsPage() {
             <InstallAppRow />
           </section>
 
-          {/* 提醒排在「装成 App」之后：iOS 的推送要先装到主屏才有，
-              顺序反了会让人先点开一个开不了的开关 */}
+          {/* 提醒（2026-11-11）：整组搬到「待办 → 设置」。
+              这里只留一条指路，不留第二份控件 —— 两个地方都能开关同一件事，
+              迟早出现"在这关了那边还显示开着"。
+              保留这条而不是整段删掉：老用户会先来设置页找，找不到会以为功能没了。 */}
           <section id="reminder">
             <p className="sec-label">提醒</p>
-            {/* 时间排在最前：它同时管推送和日历，两个通道的卡片都读它。
-                放在某个通道里就会让"只用另一个通道"的人找不到入口。 */}
-            <ReminderTimeCard />
-            <div style={{ marginTop: 10 }}>
-              <PushRow />
-            </div>
-            {/* 日历排在浏览器通知后面：能收到通知的人不需要它，收不到的人（安卓 FCM
-                在国内不通）往里看第二张卡片就是出路。 */}
-            <div style={{ marginTop: 10 }}>
-              <CalendarRow />
-            </div>
-            {/* 教程入口只放一条，不往每张卡里各塞一遍：
-                三张卡下面各挂一条"看教程"会让这一组变成四条链接。
-                放在整组末尾，找的人一眼看得到，不找的人也不觉得吵。 */}
-            <Link href="/settings/reminder" className="install-more">
-              <span>不知道怎么开？看分步教程：苹果 / 安卓 / 电脑</span>
+            <Link href="/reminders?tab=settings" className="install-more">
+              <span>提醒权限、已开启提醒的设备，都在「待办 → 设置」里</span>
               <span className="arrow" aria-hidden="true">
                 ›
               </span>

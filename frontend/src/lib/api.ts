@@ -26,7 +26,6 @@ import type { TodaySnapshot } from "./types";
 import type { PushStatus, PushSubscribeBody, PushTestResult } from "./types";
 import type { CaptureParseResult } from "./types";
 import type { RemindPref } from "./types";
-import type { CalendarLink } from "./types";
 import type { EnhanceResult } from "./types";
 import type {
   AgentTool,
@@ -823,21 +822,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify(list_key ? { ids, action, list_key } : { ids, action }),
       }),
-  },
-
-  // ---------- 日历订阅 /api/calendar（3 端点）----------
-  //
-  // 给安卓用户的出路：安卓的 Web Push 走 Google FCM，国内连不通（换浏览器也没用，
-  // Edge 安卓版同样是 FCM）。系统日历用本机定时器，不吃网络，所以这条路能在安卓上
-  // 真的做到「到点响」。
-  //
-  // link / reset 都走 tryRequest：拿不到链接时前端静默隐藏这一行，
-  // 而不是在设置页里留一个点了没反应的按钮。
-  calendar: {
-    link: () => tryRequest<CalendarLink>("/api/calendar/link"),
-    /** 换一个新链接，旧 URL 立刻 404（用于"链接不小心发出去了"） */
-    reset: () =>
-      tryRequest<CalendarLink>("/api/calendar/link/reset", { method: "POST" }),
   },
 
   // ---------- P6 打卡 /api/checkin（4 端点）----------

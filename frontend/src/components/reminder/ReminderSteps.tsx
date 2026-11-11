@@ -2,14 +2,14 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { detectPlatform, subscribePwa, type Platform } from "@/lib/pwa";
-import { GUIDE_ORDER, reminderGuide, type RemindFigure } from "@/lib/reminderGuide";
-import { REMIND_FIGS } from "./figs";
+import { GUIDE_ORDER, reminderGuide } from "@/lib/reminderGuide";
 
 /* 「设置提醒」的分步教程（/reminder 公开页与 /settings/reminder 应用内页共用）。
  *
- * 和 components/install/TourSteps.tsx 长得像，但**没有合并成一个通用组件**：
- *   · 这边每个步骤的图是可选的（电脑那两步只有文字），那边每步必有图；
- *   · 这边多一个 alt 折叠块（iPhone 才有的「另一条路」），那边没有；
+ * 和 components/install/TourSteps.tsx 长得像，但没有合并成一个通用组件：
+ *   · 这边每一步只有文字（2026-11-11 去掉了日历截图 —— 流程不进日历了，
+ *     旧图全对不上，留着只会让人按图找不到按钮）；
+ *   · 那边每步必有图，还多一套「装到主屏」的状态。
  *   · 合并就要给所有分支加 if，读起来比两份 40 行更难。
  *
  * 三个必须守住的点（同 TourSteps，踩过的坑）：
@@ -103,7 +103,6 @@ export default function ReminderSteps() {
                   {s.title}
                 </h3>
                 <p className="tour-step-desc">{s.desc}</p>
-                {s.fig && <Figure fig={s.fig} caption={s.caption} />}
               </div>
             </li>
           ))}
@@ -119,38 +118,5 @@ export default function ReminderSteps() {
         )}
       </section>
     </>
-  );
-}
-
-function Figure({ fig, caption }: { fig: RemindFigure; caption?: string }) {
-  // 宽扁的图（设置页卡片、日历时间轴）放开到满宽；竖长的图（整屏截图）限 320px，
-  // 否则一张手机整屏图在桌面上会被拉到 600px 宽，一屏全是它。
-  // 上限再夹一次原图宽度：放大只会变糊。
-  const wide = fig.w / fig.h > 1.15;
-  const maxW = wide ? Math.min(fig.w, 680) : 320;
-  const Draw = "draw" in fig ? REMIND_FIGS[fig.draw] : null;
-
-  return (
-    <figure className="tour-fig">
-      <div
-        className="tour-fig-frame"
-        style={{ aspectRatio: `${fig.w} / ${fig.h}`, maxWidth: maxW }}
-      >
-        {Draw ? (
-          <Draw />
-        ) : (
-          // eslint-disable-next-line @next/next/no-img-element -- 静态裁剪图，宽高已知，不需要 next/image 的按需转码
-          <img
-            src={"shot" in fig ? fig.shot : ""}
-            alt={fig.alt}
-            width={fig.w}
-            height={fig.h}
-            loading="lazy"
-            decoding="async"
-          />
-        )}
-      </div>
-      {caption ? <figcaption className="tour-cap">{caption}</figcaption> : null}
-    </figure>
   );
 }
