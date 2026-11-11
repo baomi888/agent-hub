@@ -968,8 +968,10 @@ export const api = {
         { timeoutMs: 45000 }
       ),
     /** 语音输入接没接。没接就不渲染麦克风 —— 按钮摆在那儿、点下去弹"还没做"，
-     *  比根本没有这个按钮更像半成品。 */
-    capabilities: () => request<{ voice: boolean }>("/api/capture/capabilities"),
+     *  比根本没有这个按钮更像半成品。
+     *  `stream` 只表示支不支持**边说边出字**：它为 false 时麦克风照样要显示，
+     *  内部退回一句话识别。把它当成语音总开关会让"少配一个 APPID"看起来像坏了。 */
+    capabilities: () => request<{ voice: boolean; stream: boolean }>("/api/capture/capabilities"),
     transcribe: (wav: Blob) => {
       const form = new FormData();
       form.append("file", wav, "voice.wav");

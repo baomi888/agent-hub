@@ -33,11 +33,17 @@ VISION_API_KEY = os.getenv("VISION_API_KEY", EMBEDDING_API_KEY)
 VISION_BASE_URL = os.getenv("VISION_BASE_URL", EMBEDDING_BASE_URL)
 VISION_MODEL = os.getenv("VISION_MODEL", "qwen-vl-plus")
 
-# ---------- 语音转写（腾讯云一句话识别）----------
+# ---------- 语音转写（腾讯云）----------
 # 两个都填了才算接上。只填一个的症状是调用 401 —— 界面上看起来像"语音坏了"，
 # 实际是密钥少了一半，所以用 ASR_ENABLED 把这种情况挡在渲染之前。
 ASR_SECRET_ID = os.getenv("TENCENT_ASR_SECRET_ID", "")
 ASR_SECRET_KEY = os.getenv("TENCENT_ASR_SECRET_KEY", "")
+# 实时语音识别（WebSocket）的路径里带 appid：`wss://asr.cloud.tencent.com/asr/v2/<appid>`。
+# 它和 SecretId/SecretKey 是**三种不同的东西**，在控制台不同页面拿：
+#   APPID   → 账号中心（cloud.tencent.com/developer）
+#   SecretId/SecretKey → API 密钥管理（console.cloud.tencent.com/cam/capi）
+# 只填了后两个时流式连不上（握手 4001），此时自动退回一句话识别，功能不降级只掉"边说边出字"。
+ASR_APPID = os.getenv("TENCENT_ASR_APPID", "")
 ASR_REGION = os.getenv("TENCENT_ASR_REGION", "ap-shanghai")
 # 16k_zh = 中文通用。别写成 8k：手机录音是 16k 采的，降采样只会掉准确率。
 ASR_ENGINE = os.getenv("TENCENT_ASR_ENGINE", "16k_zh")
@@ -45,6 +51,31 @@ ASR_ENABLED = bool(ASR_SECRET_ID and ASR_SECRET_KEY)
 # 腾讯云一句话识别单次上限：60 秒 / 3MB。这里按字节卡，时长由前端录满 60s 就停。
 ASR_MAX_BYTES = 3 * 1024 * 1024
 ASR_MAX_SECONDS = 60
+# 临时热词表（腾讯云 HotwordList），格式 `词|权重,词|权重`。
+# 留空 = 只用 core/asr.py 里的校园内置词表；填了就**追加**在内置表后面，
+# 同名的以这里为准（运营可以不改代码补词）。
+# 权重 1-11，11 是"超级热词"且设多了会拉低整体字准率，所以内置表最高只到 9。
+ASR_HOTWORDS = os.getenv("TENCENT_ASR_HOTWORDS", "")
+# 语气词过滤强度：0 不过滤 / 1 部分 / 2 严格。
+# 一句话整理最怕"嗯、那个、就是"混进正文（模型会照着这些词拆出噪音条目），
+# 但严格过滤会把"那个作业"里的"那个"也吃掉，所以默认只开部分过滤。
+ASR_FILTER_MODAL = int(os.getenv("TENCENT_ASR_FILTER_MODAL", "1"))
+
+# ---------- 实时语音识别（WebSocket 流式）----------
+# 能不能走流式，取决于 APPID 有没有填。**没填不是错误**：前端会自动退回
+# 一句话识别，用户只是看不到"边说边出字"，功能本身还在。
+ASR_STREAM_ENABLED = bool(ASR_SECRET_ID and ASR_SECRET_KEY and ASR_APPID)
+# 流式引擎。注意它和一句话识别的 `ASR_ENGINE` 是**两套可选值**：
+# 实时接口没有 `16k_zh_dialect` 这个值，方言要换成 `16k_zh_en`（31 种方言）
+# 或大模型版 `Hy-ASR-3.0-preview`。共用同一个配置项会静默降级成默认引擎。
+ASR_STREAM_ENGINE = os.getenv("TENCENT_ASR_STREAM_ENGINE", "16k_zh")
+# 静音多久算一句话说完。官方建议 500-2000，默认 1000。
+# 这里取 800 而不是默认值：用户说的是"一句话待办"，句子中间的停顿本来就短，
+# 1000ms 会把"明天下午三点…交高数作业"从中间切开，变成两类条目。
+ASR_VAD_SILENCE_MS = int(os.getenv("TENCENT_ASR_VAD_SILENCE_MS", "800"))
+# 单次流式会话的硬上限（秒）。腾讯云侧最长 5 分钟，这里卡 60 秒是因为
+# 再长就不是"一句话"了，而且手机端连续录音 60 秒耗电已经能感觉到。
+ASR_STREAM_MAX_SECONDS = int(os.getenv("TENCENT_ASR_STREAM_MAX_SECONDS", "60"))
 
 # ---------- 路径 ----------
 DATA_DIR = os.getenv("DATA_DIR", os.path.join(PROJECT_ROOT, "data"))

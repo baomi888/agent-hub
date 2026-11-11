@@ -4116,14 +4116,18 @@ textarea.input {
   align-items: center;
   gap: var(--space-6);
   margin: 0;
-  font-size: var(--fs-md);
+  /* 2026-11-11：13px → 17px。这一屏的全部内容就是几条待办，13px 在手机上
+     要凑近才看得清。17px 是「一屏还能看到 5-6 条」的上限，再大就变成
+     一次只能看三条。 */
+  font-size: 17px;
   line-height: 1.5;
   color: var(--text-1);
 }
 .rem-cap-axisnote {
   margin: var(--space-3) 0 0;
-  font-size: var(--fs-badge);
-  line-height: 1.6;
+  /* 10px → 13px：10px 的「22:00 截止」在户外光下基本看不见 */
+  font-size: var(--fs-md);
+  line-height: 1.55;
   color: var(--text-3);
 }
 
@@ -4153,20 +4157,22 @@ textarea.input {
   color: var(--color-red-ink);
 }
 
-/* 编号按原话出现顺序，排在行尾当脚注。点它回看那一句。 */
+/* 编号按原话出现顺序，排在行尾当脚注。点它回看那一句。
+   2026-11-11：从灰方框改成圆形徽章 —— 它对应的是「这句话在原话里的第几句」，
+   是这一屏的第二重要信息（第一是标题），不该长得像个十万块注脚。 */
 .rem-cap-no {
   position: relative;
   margin-left: auto;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 4px;
-  border: 1px solid var(--line);
-  border-radius: 3px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
   background: transparent;
   font: inherit;
-  font-size: var(--fs-badge);
+  font-size: var(--fs-xs);
   line-height: 1;
-  color: var(--text-3);
+  color: var(--accent-ink);
   cursor: pointer;
 }
 /* 视觉 18px 不改，热区补到 38（±10px 命中） */
@@ -4683,4 +4689,207 @@ textarea.input {
   .rem-cap-scrim,
   .rem-cap-proc { animation: none; }
   .rem-cap-dots i { animation: none; }
+}
+
+/* ==========================================================================
+   语音全屏态（2026-11-11）
+   --------------------------------------------------------------------------
+   参考的是 TimeMind 的做法：按下麦克风之后整屏只做一件事 —— 把你说的字放到
+   28px，让你自己看得见有没有说错。底栏那个 40px 高的输入框做不了这件事。
+
+   这一层用 absolute 盖住抽屉本身（.rem-cap-drawer 是 position: fixed，
+   它天然是包含块），不盖整屏：侧栏和页面还在，用户知道自己在哪。
+   ========================================================================== */
+
+.rem-cap-live {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--card-bg);
+}
+.dark .rem-cap-live {
+  background: var(--surface);
+}
+
+.rem-cap-live-head {
+  flex: 0 0 auto;
+  padding: 26px 24px 0;
+}
+.rem-cap-live-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-md);
+  letter-spacing: var(--ls-wide);
+  color: var(--text-3);
+}
+/* 录音中在 kicker 前面点一个会呼吸的金点 —— 这是"正在收声音"的唯一动态信号，
+   波形只证明"有声音进来"，不证明"在录"。 */
+.rem-cap-live[data-phase="listening"] .rem-cap-live-kicker::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: rem-live-pulse 1.4s ease-in-out infinite;
+}
+.rem-cap-live-tip {
+  margin: 10px 0 0;
+  font-size: var(--fs-md);
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+.rem-cap-live-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 22px 24px 8px;
+}
+/* 逐字上屏的那段话。行高 1.65 是给中文留的：1.5 在 28px 下两行会贴在一起，
+   读起来像一整块。 */
+.rem-cap-live-text {
+  margin: 0;
+  font-size: clamp(24px, 7vw, 30px);
+  line-height: 1.65;
+  letter-spacing: 0.01em;
+  color: var(--text-1);
+  word-break: break-word;
+}
+/* 正在说的那半句。用次级色而不是斜体或下划线：
+   它在下一秒就会被替换成新内容，斜体/下划线在这么大的字号下太吵，
+   而颜色深浅是"稳定 vs 还可能变"最自然的表达。 */
+.rem-cap-live-heard {
+  color: var(--text-2);
+}
+.rem-cap-live-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-left: 2px;
+  background: var(--accent);
+  vertical-align: -0.16em;
+  animation: rem-live-caret 1s steps(2, start) infinite;
+}
+
+/* 转写请求在路上时的三个点。不写"正在识别"这种字：那一态没有任何信息量，
+   用户只需要知道"还在动"。 */
+.rem-cap-live-wait {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 0;
+}
+.rem-cap-live-wait i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.28;
+  animation: rem-live-dot 1.1s ease-in-out infinite;
+}
+.rem-cap-live-wait i:nth-child(2) { animation-delay: 0.16s; }
+.rem-cap-live-wait i:nth-child(3) { animation-delay: 0.32s; }
+
+/* ---------- 底部胶囊：× | 波形 | 计时 | ✓ ---------- */
+
+.rem-cap-live-dock {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 16px max(16px, env(safe-area-inset-bottom));
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--fill-2);
+}
+.rem-cap-live-x,
+.rem-cap-live-ok {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--card-bg);
+  color: var(--text-2);
+  cursor: pointer;
+}
+/* 视觉 38，热区 44：手指按偏 3px 也点得到 */
+.rem-cap-live-x::before,
+.rem-cap-live-ok::before {
+  content: "";
+  position: absolute;
+  inset: -3px;
+}
+.rem-cap-live-ok {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--cap-on-accent, #22190a);
+}
+.rem-cap-live-ok:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.rem-cap-live-x:hover { background: var(--fill-1); }
+.rem-cap-live-clock {
+  flex: none;
+  min-width: 40px;
+  text-align: right;
+  font-size: var(--fs-md);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+
+/* 波形：40 根柱子，左旧右新。overflow hidden 让新柱子从右边"挤"进来。 */
+.rem-cap-live-wave {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 40px;
+  overflow: hidden;
+}
+.rem-cap-live-wave i {
+  flex: none;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  /* 只过渡高度，且要短：80ms 比采样间隔（70ms）略长，看起来是连续的；
+     长了会变成"缓慢起伏"，跟声音对不上。 */
+  transition: height 80ms linear;
+}
+
+@keyframes rem-live-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.82); }
+}
+@keyframes rem-live-caret {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+@keyframes rem-live-dot {
+  0%, 100% { opacity: 0.28; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-3px); }
+}
+
+@media (max-width: 900px) {
+  .rem-cap-live-head { padding: 20px 18px 0; }
+  .rem-cap-live-body { padding: 18px 18px 6px; }
+  .rem-cap-live-dock { margin: 0 12px max(12px, env(safe-area-inset-bottom)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rem-cap-live[data-phase="listening"] .rem-cap-live-kicker::before,
+  .rem-cap-live-caret,
+  .rem-cap-live-wait i { animation: none; }
+  .rem-cap-live-wave i { transition: none; }
 }

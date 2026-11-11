@@ -26,6 +26,7 @@ from api.auth import router as auth_router
 from api.calendar import router as calendar_router
 from api.campus import router as campus_router
 from api.capture import router as capture_router
+from api.capture import ws_router as capture_ws_router
 from api.cet import router as cet_router
 from api.chat import router as chat_router
 from api.checkin import router as checkin_router
@@ -255,6 +256,9 @@ app.include_router(focus_router, prefix="/api/campus/focus", tags=["校园工具
 # 一句话整理（v13 · Phase B）：一句话 → 待办/提醒 proposal。
 # **只读 + 调模型，不写库**；写库在 Phase C 由前端逐条调 /api/tasks 与 /api/reminders
 app.include_router(capture_router, prefix="/api/capture", tags=["AI 整理"])
+# 实时语音转写（WebSocket）。单独挂是因为它不能带 `get_current_user` 那个
+# HTTP 依赖（参数类型是 Request，在 WS 路由里注不进去），鉴权在函数体里做。
+app.include_router(capture_ws_router, prefix="/api/capture", tags=["AI 整理"])
 
 
 # ---------- 修复：前后端尾部斜杠不一致导致的重定向黑洞 ----------

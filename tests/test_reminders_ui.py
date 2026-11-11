@@ -2011,3 +2011,244 @@ class TestCaptureEntryVisibility:
         i = src.index("const captureStrip")
         seg = src[i : i + 300]
         assert 'mode === "normal"' in seg, "多选/排序时入口条应该收起"
+
+
+# ==================== 语音输入：全屏态与采集约束（2026-11-11）====================
+
+VOICE = ROOT / "frontend" / "src" / "components" / "reminders" / "useVoiceInput.ts"
+
+
+def _css_rule(selector: str, path: Path = CONSOLE_CSS) -> str:
+    """取某个选择器的第一段 `{...}`。
+
+    必须用 `selector + " {"` 精确匹配：`.rem-cap-live` 不能匹配到
+    `.rem-cap-live-head`，否则断言读到的是另一条规则，永远绿。
+    """
+    raw = path.read_text(encoding="utf-8")
+    i = raw.find(selector + " {")
+    assert i >= 0, f"CSS 里找不到 {selector}"
+    j = raw.index("}", i)
+    return raw[i:j]
+
+
+class TestVoiceCaptureSurface:
+    """语音输入从"底栏一行提示"改成"整屏只做一件事"。
+
+    参考的形态（TimeMind 的语音页）：按下麦克风后整屏只放这一件事，
+    字大到能自己看出有没有说错，底部一条 `× | 波形 | 计时 | ✓` 的胶囊。
+
+    为什么这些要用源码断言钉住：
+      · 「字要大」最容易被下一个人为了"一屏多显示几条"改回 15px，而
+        那恰恰是用户这次提的问题；
+      · 采集约束（关降噪、开 AGC）看不出效果，删掉了界面完全正常，
+        只有识别率会悄悄掉下去 —— 这是最典型的"改坏了没人发现"。
+    """
+
+    def test_live_layer_covers_the_drawer(self):
+        """全屏层必须盖住抽屉本身，而不是塞在 body 里跟着一起滚。
+
+        塞进 body 的话，字一多就把输入框顶走，而这一层的存在意义就是
+        "说话时没有别的控件在动"。
+
+        反证：把 `position: absolute` 删掉，本用例变红。
+        """
+        rule = _css_rule(".rem-cap-live")
+        assert "position: absolute" in rule
+        assert "inset: 0" in rule
+
+    def test_live_text_is_far_bigger_than_the_input(self):
+        """至少 24px。用户的原话是"文字大一点，现在好小"。
+
+        反证：把 clamp 改成 `clamp(14px, 3vw, 16px)`，本用例变红。
+        """
+        rule = _css_rule(".rem-cap-live-text")
+        assert "clamp(24px" in rule, f"字号又变回去了：{rule}"
+
+    def test_dock_has_cancel_wave_clock_and_done(self):
+        """底栏四个件缺一不可：取消、波形、计时、完成。
+
+        少计时 → 用户不知道说了多久（60 秒上限时会突然被截断）；
+        少波形 → 看不出麦克风有没有收到声音，只能靠念完再看结果。
+        """
+        src = CAPTURE.read_text(encoding="utf-8")
+        for cls in (
+            "rem-cap-live-x",
+            "rem-cap-live-wave",
+            "rem-cap-live-clock",
+            "rem-cap-live-ok",
+        ):
+            assert cls in src, f"语音底栏少了 {cls}"
+
+    def test_mic_blurs_the_input_before_starting(self):
+        """点麦克风必须先收起键盘。
+
+        抽屉打开时会自动聚焦输入框，手机上键盘已经弹起来；不 blur 的话
+        全屏层下半屏被键盘盖住，刚上屏的字一个字都看不见。
+
+        反证：删掉 `inputRef.current?.blur()`，本用例变红。
+        """
+        src = _strip_js_comments(CAPTURE.read_text(encoding="utf-8"))
+        blur = src.find("inputRef.current?.blur()")
+        start = src.find("void voice.start()")
+        assert blur > 0 and start > 0
+        assert blur < start, "blur 必须在 start 之前，否则键盘已经顶起来了"
+
+    def test_capture_turns_off_noise_suppression(self):
+        """降噪必须关、AGC 必须开。
+
+        `noiseSuppression` 是为通话设计的，手机端会削 2-4kHz 的弱能量段，
+        而中文声母 s/sh/x/j/q/zh/ch 正好在那里 —— 录出来人耳听着干净，
+        识别引擎却少了区分字头的信息，表现为成片同音错字。
+
+        反证：把 `noiseSuppression: false` 改回 true，本用例变红。
+        """
+        src = VOICE.read_text(encoding="utf-8")
+        assert "noiseSuppression: false" in src
+        assert "autoGainControl: true" in src
+        assert "noiseSuppression: true" not in src
+
+    def test_audio_is_normalized_before_resampling(self):
+        """峰值归一化必须在编码前跑，且先于重采样。
+
+        手机麦克风峰值常常只有 0.05-0.15，16bit 里有效位数只剩 12 位左右，
+        声母先被量化掉一截。把峰值顶到 0.85 等于免费多 3-4 bit。
+
+        反证：把调用改回 `resample(pcm, cur.rate)`，本用例变红。
+        """
+        src = VOICE.read_text(encoding="utf-8")
+        assert "normalizePeak(pcm)" in src
+        assert "normalizePeak(await" not in src
+
+    def test_wave_stops_when_recording_stops(self):
+        """波形只在录音时跑。不停的话 interval 会一直 setState，
+        抽屉关掉之后还在跑（内存泄漏 + 电）。"""
+        src = VOICE.read_text(encoding="utf-8")
+        assert "setLevel(0)" in src, "停止时没把电平清零，波形会停在最后一帧"
+
+    def test_result_titles_are_at_least_17px(self):
+        """整理结果的条目标题不许退回 13px。
+
+        这一屏的全部内容就是几条待办，13px 在手机上要凑近看。
+
+        反证：把 17px 改回 `var(--fs-md)`（13px），本用例变红。
+        """
+        rule = _css_rule(".rem-cap-axisttl")
+        assert "font-size: 17px" in rule, f"条目标题又变小了：{rule}"
+
+    def test_live_animation_respects_reduced_motion(self):
+        """关掉动效的人不该看到闪烁光标和呼吸点。"""
+        raw = CONSOLE_CSS.read_text(encoding="utf-8")
+        i = raw.rindex("@media (prefers-reduced-motion: reduce)")
+        tail = raw[i:]
+        assert ".rem-cap-live-caret" in tail
+        assert "animation: none" in tail
+
+
+# ==================== 流式语音：真实时链路（2026-11-11）====================
+
+
+class TestStreamingVoice:
+    """边说边出字。
+
+    这一层最容易出的不是"字错了"，而是**字没到**：`onopen` 就发包、结束前
+    不 flush 剩余半包、`partial` 当成追加拼接。三种都只在真机上表现为
+    "我明明说了但没记上"，在代码里看着完全正常。
+    """
+
+    def test_audio_waits_for_ready_not_onopen(self):
+        """必须等上游的 `ready` 帧才能发音频。
+
+        WebSocket 的 `onopen` 只表示"这条连接建立了"，**不表示握手成功**：
+        签名不对、APPID 不匹配时连接照样会 open，然后立刻被上游关掉。
+        在 onopen 里置 `wsOpen = true` 的话，那几百毫秒的音频会发进一个
+        即将关闭的连接，用户看到的是"说了开头，后面全没了"。
+
+        反证：把 `cur.wsOpen = true` 挪到 `ws.onopen` 里，本用例变红。
+        """
+        src = _strip_js_comments(VOICE.read_text(encoding="utf-8"))
+        # 锚点必须带赋值形态：文件前面的 teardown 里有 `cur.ws.onmessage = null`，
+        # 光搜 "ws.onmessage" 会先命中那一行，断言的区间就成了倒的。
+        onopen = src.find("ws.onopen = ()")
+        onmessage = src.find("ws.onmessage = (event)")
+        onclose = src.find("ws.onclose = ()")
+        assert 0 < onopen < onmessage < onclose
+        # onopen 里不许出现开闸
+        assert "wsOpen = true" not in src[onopen:onmessage]
+        # 开闸必须发生在 ready 帧的处理里
+        assert "cur.wsOpen = true" in src[onmessage:onclose]
+
+    def test_partial_replaces_instead_of_appending(self):
+        """`partial` 是"这句到目前为止的全文"，必须整句替换。
+
+        追加的话会得到"我我我要要去去图书馆"，而且它只在连续两次 partial
+        之间才看得出来 —— 单测里不看这一条就永远发现不了。
+
+        反证：改成 `setStreamLive((prev) => prev + frame.text)`，本用例变红。
+        """
+        src = _strip_js_comments(CAPTURE.read_text(encoding="utf-8"))
+        assert "setStreamLive(frame.text)" in src
+        assert "setStreamLive((prev)" not in src
+
+    def test_remaining_bytes_are_flushed_before_end(self):
+        """发 end 之前必须把没凑满的那半包发出去。
+
+        每包 200ms，用户点完成时手上往往还压着几十毫秒 —— 而最后那个字
+        常常正好在这几十毫秒里。不发的话它不会出现在任何结果里，
+        但界面上刚才明明显示过。
+
+        反证：删掉 `flush(cur, true)` 那一行，本用例变红。
+        """
+        src = _strip_js_comments(VOICE.read_text(encoding="utf-8"))
+        flush_at = src.find("flush(cur, true)")
+        end_at = src.find('JSON.stringify({ type: "end" })')
+        assert flush_at > 0 and end_at > 0
+        assert flush_at < end_at, "end 必须先 flush 再发，否则最后一个字会丢"
+
+    def test_stream_url_is_same_origin_in_production(self):
+        """生产环境必须连**同域**的 `/api/capture/ws`。
+
+        这是整条链路能不能通的前提：生产 `/api/*` 走 Next.js 的 rewrites，
+        而 rewrites **不支持 WebSocket 升级**，所以 nginx 必须把这条路径
+        单独 proxy_pass 到后端 8000。如果前端写成绝对地址（比如把服务器 IP
+        写死），换域名、上 HTTPS 都会静默失效。
+
+        反证：把返回值改成写死的 `ws://8.163.62.25:8000/...`，本用例变红。
+        """
+        src = _strip_js_comments(VOICE.read_text(encoding="utf-8"))
+        assert "window.location.host}/api/capture/ws" in src
+        # 本地开发要能自己找到后端，否则每个新拉代码的人都要先配环境变量
+        assert 'process.env.NODE_ENV === "development"' in src
+        assert ":8000/api/capture/ws" in src
+
+    def test_drawer_passes_streaming_flag(self):
+        """抽屉要把 `/capabilities` 的 `stream` 传给录音钩子。
+
+        不传的话钩子默认 `streaming=false`，界面上一切正常 —— 只是永远
+        走一句话识别，"边说边出字"这个功能等于没做。
+        """
+        src = _strip_js_comments(CAPTURE.read_text(encoding="utf-8"))
+        assert "streaming: streamOn" in src
+        assert "setStreamOn(Boolean(c.stream))" in src
+
+    def test_live_text_shows_what_is_still_changing(self):
+        """正在说的那句要用次级色，和已经定型的区分开。
+
+        这一屏唯一能告诉用户"这半句还会变"的方式就是颜色。分不出来的话，
+        用户会在字还没稳的时候点完成，然后发现结果少了一截。
+
+        反证：把 `.rem-cap-live-heard` 的颜色改成 `var(--text-1)`，本用例变红。
+        """
+        rule = _css_rule(".rem-cap-live-heard")
+        assert "color: var(--text-2)" in rule
+
+    def test_typing_animation_is_skipped_when_streamed(self):
+        """流式已经逐条显示过了，收尾时不能再播一遍打字机。
+
+        再播一遍的代价不只是多等 620ms：用户会看到同一段话在屏幕上
+        "重新打一遍"，像是又识别了一次。
+        """
+        src = _strip_js_comments(CAPTURE.read_text(encoding="utf-8"))
+        assert "streamedRef.current" in src
+        # 流式分支里要直接给全长
+        seg = src[src.find("if (streamedRef.current)") :][:200]
+        assert "setLiveShown(said.length)" in seg
