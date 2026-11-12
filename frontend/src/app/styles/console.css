@@ -2847,6 +2847,29 @@ textarea.input {
 .rem-state[data-tone="warn"] {
   color: var(--warning-ink);
 }
+/* 「不提醒」本身是个按钮：点它进抽屉设提醒。
+   视觉上做成"看起来能点"的文字（下划线 + 热区），但不能像链接那样蓝 ——
+   这一行里它首先是状态，其次才是入口。热区靠伪元素往上下扩，
+   meta 行只有 12px 高，真按在字上是按不准的。 */
+.rem-state-btn {
+  position: relative;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.rem-state-btn::after {
+  content: "";
+  position: absolute;
+  inset: -6px -4px;
+}
+.rem-state-btn:hover {
+  color: var(--accent-ink);
+}
 
 /* ---------- 分组小标题 ---------- */
 .rem-grouphead {

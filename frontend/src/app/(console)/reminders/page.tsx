@@ -874,12 +874,21 @@ function TaskCard({
         <p className="rem-meta">
           <b>{LIST_LABEL[task.list_key] ?? task.list_key}</b>
           {/* 「不提醒」排在截止日期之前：窄屏会被省略号吃掉末尾，而这句是
-              这一行里唯一"不做就会误事"的信息，所以还要给警示色 */}
+              这一行里唯一"不做就会误事"的信息，所以还要给警示色。
+              ★ 它同时是**入口**：点一下直接打开抽屉（提醒区已在第一屏），
+                否则用户看到「不提醒」三个字也没有任何下一步可做 ——
+                那三个字就只是抱怨，不是功能。 */}
           {remindText ? (
-            <span className="rem-state" data-tone="warn">
+            <button
+              type="button"
+              className="rem-state rem-state-btn"
+              data-tone="warn"
+              title="点一下给这条待办设提醒"
+              onClick={() => onEdit(task)}
+            >
               {" "}
               · {remindText}
-            </span>
+            </button>
           ) : null}
           {dueText ? <span> · {dueText}</span> : null}
           {state ? (
@@ -924,8 +933,15 @@ function TaskCard({
           <div className="rem-scrim" onClick={() => setOpen(false)} aria-hidden="true" />
           <div className="rem-menu" role="menu">
             <button type="button" role="menuitem" onClick={run(() => onEdit(task))}>
-              改这条待办
+              改内容或时间
             </button>
+            {/* 单列一项：用户找的是「提醒」这个词，藏在「改这条待办」后面
+                等于让他去猜。两个入口开的是同一个抽屉，但这一项说的是他的意图。 */}
+            {!done ? (
+              <button type="button" role="menuitem" onClick={run(() => onEdit(task))}>
+                {task.remind_at ? "改提醒时间" : "设一个提醒"}
+              </button>
+            ) : null}
             {!done && task.reminder?.enabled ? (
               <button type="button" role="menuitem" onClick={run(() => onSnooze(task))}>
                 推迟提醒 10 分钟
@@ -1363,8 +1379,14 @@ function fireText(f: ReminderFire): string {
 /**
  * 新建 / 修改待办。
  *
- * 字段顺序就按「先写什么、再什么时候」：标题 → 清单 → 截止 → 提醒 → 优先级 → 备注。
- * `due_at` 与 `remind_at` 是两个独立控件，中间那句「只设截止时间不会响」
+ * 字段顺序：标题 → 图标 → 清单 + 优先级 → **提醒** → 截止 → 备注。
+ *
+ * ★ 提醒排在截止**之前**，这是被用户反馈逼出来的：抽屉在手机上只有约 80vh，
+ *   前面「标题输入 + 12 个图标网格 + 两个下拉 + 两个日期框」就要吃掉 400 多像素，
+ *   提醒区排在后面正好掉到折叠线以下。用户不会去滚一个"看起来到底了"的抽屉，
+ *   直接得出「待办不能设提醒」的结论 —— 功能是完整的，只是他没见过。
+ *
+ * `due_at` 与 `remind_at` 是两个独立控件，那句「只设截止时间不会响」
  * 不是装饰 —— 少了它，用户设完截止日期就会等一个永远不会来的通知。
  */
 function TaskDrawer({
@@ -1527,44 +1549,11 @@ function TaskDrawer({
             </div>
           </div>
 
-          {/* 截止：只到这里不会响。这句话必须写在控件旁边，而不是折叠在帮助里 */}
-          <div className="rem-timeblock">
-            <div className="rem-step">
-              最晚什么时候完成 <i>这是截止时间；只设它，不会收到提醒</i>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <Field label="日期">
-                <input
-                  type="date"
-                  className="input"
-                  value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
-                />
-              </Field>
-              <Field label="几点（可不填）">
-                <input
-                  type="time"
-                  className="input"
-                  value={dueTime}
-                  onChange={(e) => setDueTime(e.target.value)}
-                />
-              </Field>
-            </div>
-            {dueDate ? (
-              <button
-                type="button"
-                className="rem-clear"
-                onClick={() => {
-                  setDueDate("");
-                  setDueTime("");
-                }}
-              >
-                清掉截止时间
-              </button>
-            ) : null}
-          </div>
-
-          {/* 提醒：与截止分开 */}
+          {/* 提醒：排在截止之前。
+              ★ 上一版它排在「标题 + 12 个图标 + 清单/优先级 + 两个日期框」之后，
+                抽屉在手机上只有约 80vh，提醒区正好掉到折叠线以下 ——
+                用户不滚到底就看不到，于是得出「待办不能设提醒」的结论。
+                把它提到截止前面，打开抽屉第一屏就能看见开关。 */}
           <div className="rem-timeblock">
             <div className="rem-remindhead">
               <div className="rem-step">
@@ -1604,9 +1593,46 @@ function TaskDrawer({
               </div>
             ) : (
               <p className="rem-noSound">
-                只设截止时间，不会收到提醒。想被提醒，请打开「提醒我」。
+                不打开就不会收到任何通知；截止日期只用来排期和排序，它不会响。
               </p>
             )}
+          </div>
+
+          {/* 截止：只到这里不会响。这句话必须写在控件旁边，而不是折叠在帮助里 */}
+          <div className="rem-timeblock">
+            <div className="rem-step">
+              最晚什么时候完成 <i>这是截止时间；只设它，不会收到提醒</i>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="日期">
+                <input
+                  type="date"
+                  className="input"
+                  value={dueDate}
+                  onChange={(e) => setDueDate(e.target.value)}
+                />
+              </Field>
+              <Field label="几点（可不填）">
+                <input
+                  type="time"
+                  className="input"
+                  value={dueTime}
+                  onChange={(e) => setDueTime(e.target.value)}
+                />
+              </Field>
+            </div>
+            {dueDate ? (
+              <button
+                type="button"
+                className="rem-clear"
+                onClick={() => {
+                  setDueDate("");
+                  setDueTime("");
+                }}
+              >
+                清掉截止时间
+              </button>
+            ) : null}
           </div>
 
           <Field label="备注（可选）">
