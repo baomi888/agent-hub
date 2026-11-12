@@ -63,12 +63,17 @@ def _payload(request: Request, token: str, uid: str) -> dict:
     # ★ 按 "://" 切而不是 replace("https://", ...)：本地开发是 http，
     #   字面替换会原样返回一个 http 链接，点下去是个下载而不是订阅。
     _, _, rest = sub.partition("://")
+    courses = base + info["courses"]
+    _, _, courses_rest = courses.partition("://")
     return {
         "token": token,
         "time": info["time"],
         "subscribe_url": sub,
         "webcal_url": f"webcal://{rest}" if rest else sub,
         "download_url": base + info["download"],
+        # 课表那份：订阅链接是给"上课提醒"用的，前端可再拼 `?before=N` 改提前量
+        "courses_url": courses,
+        "courses_webcal_url": f"webcal://{courses_rest}" if courses_rest else courses,
         "hour": hour,
         "minute": minute,
     }
@@ -89,13 +94,16 @@ async def reset_link(request: Request, uid: str = Depends(get_current_user)) -> 
 
 
 @router.get("/{token}/courses.ics")
-async def get_courses_ics(token: str, request: Request, dl: int = 0) -> Response:
+async def get_courses_ics(token: str, request: Request, dl: int = 0, before: int = 10) -> Response:
     """课表日历（与「每日提醒」并列的第二份 ICS）。
 
     数据来自云端快照（`/api/campus/state` 那一份），不读 cookie、不读 localStorage：
     日历客户端只有一个 URL。所以「课表上云」是这条端点的前提 ——
     没开通云同步的用户会拿到一份**空日历**（不是 404），
     这样手机日历里显示的是"还没课"，而不是"订阅失败"。
+
+    `before` 是课前提前几分钟响（0–60）。它落在 URL 里而不是服务端配置里，
+    因为同一份课表不同的人要不同的提前量，而订阅是"一个 URL 一份日历"。
     """
     uid = calendar_store.owner_of(token)
     if not uid:
@@ -107,7 +115,7 @@ async def get_courses_ics(token: str, request: Request, dl: int = 0) -> Response
         raise HTTPException(status_code=429, detail="拉取过于频繁") from e
 
     snap = await asyncio.to_thread(campus_store.load_snapshot, uid)
-    body = cal.build_courses_ics(token, snap.get("courses"), snap.get("term"))
+    body = cal.build_courses_ics(token, snap.get("courses"), snap.get("term"), before_minutes=before)
     await asyncio.to_thread(calendar_store.touch_fetch, token)
 
     disposition = "attachment" if dl else "inline"

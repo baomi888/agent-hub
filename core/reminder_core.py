@@ -510,10 +510,18 @@ def _validate(data: dict[str, Any]) -> dict[str, Any]:
     if kind not in TRIGGER_KINDS:
         raise ReminderInvalid(f"未知触发方式：{kind}")
     if kind == "relative":
-        # ★ 第一波明确不支持：锚点（课前 / DDL 到期 / 专注结束）的数据还在
-        #   localStorage 里，服务端拿不到。先收下再静默不响，就是最典型的
-        #   「设了时间但从来不响」——宁可现在 400 拒绝，等课表上云再放开。
-        raise ReminderInvalid("「课前 / 到期前」这类相对时间要等课表上云后再开放")
+        # ★ 第一波明确不支持：锚点（课前 / DDL 到期 / 专注结束）要按课表实时重算
+        #   `next_fire_at`，而课表一改就得全场重排 —— 那是调度器的事，不是建一条提醒的事。
+        #   先收下再静默不响，就是最典型的「设了时间但从来不响」，所以这里 400 拒绝。
+        #
+        #   ⚠️ 原来这句话写的是「等课表上云后再开放」，但课表**早就上云了**
+        #   （campus_store 快照 + `/api/calendar/{token}/courses.ics`）。
+        #   留着一句过期的理由，会让后来的人（包括我自己）以为"做完上云就能用了"。
+        #   现在真正的答案是另一条路：课前提醒走系统日历，不经过调度器，也不怕推送不通。
+        raise ReminderInvalid(
+            "「课前 / 到期前」这种相对时间还没做。要课前提醒，去「提醒 → 设置 → 上课提醒」"
+            "把课表加进手机日历，由系统日历在课前响"
+        )
     out["trigger_kind"] = kind
     out["anchor"] = None
     out["offset_minutes"] = None

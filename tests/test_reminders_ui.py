@@ -2343,18 +2343,27 @@ class TestReminderAccessInTodo:
         assert "/reminders?tab=settings" in src
 
     def test_removed_components_are_really_gone(self):
-        """三个组件文件删掉、前端不再有日历接口。
+        """三个组件文件删掉、摘要日历没有偷偷接回来。
 
         留着文件不引用，下一个人会把它当成还能用的东西接回去。
 
         反证：随便新建一个 CalendarRow.tsx，本用例变红。
+
+        ★ 2026-11-12 改过这里的接口断言：课表订阅加回来了，而它当初被
+          一起删掉只是"前端入口全删"的连带结果 —— 删的理由（摘要日历固定
+          20:00，和每条待办各自的时间对不上）跟课表无关。所以现在放行
+          `/api/calendar/link`（只用来取地址），但摘要那份（`.ics` 主份、
+          `link/reset`）仍然不许出现在前端：接回来就等于把那个"对不上"的问题接回来。
         """
         base = ROOT / "frontend" / "src" / "components" / "settings"
         for name in ("CalendarRow.tsx", "PushRow.tsx", "ReminderTimeCard.tsx"):
             assert not (base / name).exists(), f"{name} 还在"
         api_src = (ROOT / "frontend" / "src" / "lib" / "api.ts").read_text(encoding="utf-8")
-        assert "api.calendar" not in api_src
-        assert "/api/calendar" not in api_src
+        # 课表订阅只借这一条端点取地址（api.ts 里是对象属性，字面不会出现 api.calendar）
+        assert "/api/calendar/link" in api_src
+        # 摘要日历的痕迹：端点路径以 .ics 结尾，以及换链接的那个动作
+        assert ".ics" not in api_src, "每日摘要日历被接回前端了"
+        assert "link/reset" not in api_src
 
     def test_tab_can_be_opened_from_a_link(self):
         """`?tab=settings` 要能直接落到设置标签。
@@ -2523,3 +2532,39 @@ class TestPriorityLevels:
         assert "PRIORITY_LABELS = {0: \"普通\", 1: \"日常\", 2: \"重要\", 3: \"紧急\"}" in core
         assert "le=task_core.PRIORITY_MAX" in api
         assert "export type TaskPriority = 0 | 1 | 2 | 3;" in types
+
+
+class TestActionCopyIsHonest:
+    """「提醒时做什么」这三档全是行话，用户猜不出来。
+
+    2026-11-12 用户原话：「用户可能不知道『让助手帮我写』『开始专注』是什么意思」。
+    查下来不只是看不懂，其中一档还是**假的** —— `suggest_focus` 在后端走的
+    和「只提醒」完全同一个分支，选了等于没选。所以这里锁两件事：
+    每档都要有一句人话解释；「让助手帮我写」不许在没内容可写的来源上出现。
+    """
+
+    def test_every_action_has_a_plain_hint(self):
+        page = _page()
+        block = page[page.index("const ACTION_HINT") : page.index("const AGENT_SOURCES")]
+        for key, word in (
+            ("notify", "通知"),
+            ("agent_deliver", "简报"),
+            ("suggest_focus", "专注"),
+        ):
+            assert key in block, f"{key} 没有解释文案"
+            assert word in block, f"{key} 的解释没说到点会发生什么（缺「{word}」）"
+
+    def test_agent_deliver_only_where_there_is_content(self):
+        """自己建的提醒上没有东西可写，列出来只会让人以为助手会替他写作业。"""
+        page = _page()
+        assert "AGENT_SOURCES" in page
+        assert "actionOptionsFor" in page
+        # 抽屉必须按来源取选项；直接渲染全量 ACTION_OPTIONS 等于过滤被绕过
+        assert "ACTION_OPTIONS.map" not in page, "抽屉又直接渲染全量选项了"
+        assert "actionList.map" in page
+
+    def test_focus_action_really_changes_destination(self):
+        """「开始专注」必须真的换落点，不然它和「只提醒」没有区别。"""
+        tick = (ROOT / "service" / "reminder_tick.py").read_text(encoding="utf-8")
+        assert 'if action == "suggest_focus":' in tick
+        assert '"/tools?tool=pomodoro"' in tick

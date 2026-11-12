@@ -1054,8 +1054,29 @@ export type MailState = {
   from: string | null;
 };
 
-/** 一台登记过的设备（GET /api/push/status 的 device_list 元素） */
-export type PushDevice = {
+/**
+ * 日历订阅链接（GET /api/calendar/link）。
+ *
+ * 一条 token 同时管两份日历：`*.ics` 是每天一条的摘要，`courses.ics` 是课表。
+ * 现在前端只用课表那份 —— 摘要日历 2026-11-11 删过（它固定时刻，
+ * 和「每条待办各自设时间」对不上），课表不一样：每门课的真实上课时间就在里面。
+ */
+export type CalendarLink = {
+  token: string;
+  /** 每天摘要的时刻（HH:MM）。只在摘要那份日历里有意义 */
+  time: string;
+  subscribe_url: string;
+  webcal_url: string;
+  download_url: string;
+  /** 课表订阅地址。可拼 `?before=N` 改课前提前几分钟 */
+  courses_url: string;
+  /** 同上，webcal:// 形式，iOS/macOS 点一下直接订阅 */
+  courses_webcal_url: string;
+  hour: number;
+  minute: number;
+};
+
+/** 一台登记过的设备（GET /api/push/status 的 device_list 元素） */export type PushDevice = {
   /** 服务端 sub_id，移除时回传 */
   id: string;
   /** endpoint 的 sha256 前 12 位。前端拿本机 endpoint 算同一个值来认自己 */

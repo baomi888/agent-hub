@@ -35,6 +35,23 @@ const PANELS: Record<ToolId, ComponentType> = {
 };
 
 /**
+ * `?tool=pomodoro` 里指定的工具。
+ *
+ * 存在的理由只有一个：提醒的「开始专注」要能**一步到位**。通知点开落到工具集
+ * 首页，用户还得自己找到番茄钟再点一次 —— 那条通知就等于没起作用。
+ *
+ * 只在客户端读（`window` 不存在时返回 null）：SSR 期间没有 URL 查询串，
+ * 若在这里就返回 pomodoro，服务端渲染 gpa、客户端渲染番茄钟，会触发
+ * hydration mismatch。所以调用方放在 mount effect 里，不在渲染期调。
+ */
+function toolFromQuery(): ToolId | null {
+  if (typeof window === "undefined") return null;
+  const want = new URLSearchParams(window.location.search).get("tool");
+  if (!want) return null;
+  return Object.prototype.hasOwnProperty.call(PANELS, want) ? (want as ToolId) : null;
+}
+
+/**
  * 哪些 localStorage 键归哪个工具管。
  *
  * 与 `sync.ts` 的 SYNC_KEYS 逐项对应（那份名单是「能上云的」，这份是「刷新时该叫醒谁」）。
@@ -88,6 +105,16 @@ export default function CampusToolsHub() {
   // 所以同步失败不能冒泡成任何可见错误。
   useEffect(() => {
     void pullCampusState();
+  }, []);
+
+  // 从「开始专注」那条通知点进来时带着 `?tool=pomodoro`，落地就在番茄钟上。
+  // setState 推在 setTimeout(0) 里：本项目开了 react-hooks/set-state-in-effect，
+  // 在 effect 体里同步 set 会判红（MailAccess 的倒计时是同一套处理）。
+  useEffect(() => {
+    const want = toolFromQuery();
+    if (!want) return;
+    const timer = window.setTimeout(() => setActive(want), 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   const Panel = PANELS[active] ?? GpaTool;

@@ -107,6 +107,15 @@ def build_content(owner_id: str, reminder: dict[str, Any], planned_at: int) -> d
         return None
 
     action = str(reminder.get("action") or "notify")
+    if action == "suggest_focus":
+        # 「开始专注」必须**换个落点**，不能只换文案：点通知直接进专注计时。
+        # 在这之前它走的是和「只提醒」一模一样的分支 —— 界面上多一个选项、
+        # 行为上没有任何区别，用户迟早会发现自己在选一个摆设。
+        return {
+            "title": str(reminder.get("title") or "该专注了")[:60],
+            "body": str(reminder.get("note") or "")[:120] or "点一下开始一段专注。",
+            "url": "/tools?tool=pomodoro",
+        }
     if action != "agent_deliver":
         return _notify_content(reminder)
 

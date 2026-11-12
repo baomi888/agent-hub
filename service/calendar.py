@@ -234,8 +234,14 @@ def build_courses_ics(
     courses: object = None,
     term: object = None,
     periods: object = None,
+    before_minutes: int = 10,
 ) -> str:
     """把课表快照变成一份**独立**的 .ics（每门课一条，按周重复）。
+
+    `before_minutes` 是课前提前多久响（0–60，0 = 正点）。**每条 VEVENT 都带
+    VALARM** —— 没有它，日历里只是"画了一节课"，课前手机一声不响，
+    用户会认为"课表提醒没做"。而 VALARM 是唯一不依赖推送通道的响铃路径：
+    系统日历用本机 AlarmManager 定时，断网、关掉浏览器、后台冻结都不影响。
 
     ★ 为什么不塞进 `build_ics` 那份：一个是「每天提醒你看一眼」，
       一个是「每周几上什么课」。订阅是用户自己按日历加的，两件事合在一起
@@ -283,6 +289,14 @@ def build_courses_ics(
     if term_weeks <= 0:
         term_weeks = 20  # 和前端 DEFAULT_TERM_WEEKS 一致
 
+    # 提前量在这里定死一次，循环里不再重复计算。夹在 0–60 的原因：
+    # 负数等于"课后提醒"（没意义），超过一小时就是另一个上午的闹钟了。
+    try:
+        lead = int(before_minutes)
+    except (TypeError, ValueError):
+        lead = 10
+    lead = max(0, min(60, lead))
+
     lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
@@ -290,7 +304,7 @@ def build_courses_ics(
         "CALSCALE:GREGORIAN",
         "METHOD:PUBLISH",
         "X-WR-CALNAME:知穗 · 课表",
-        "X-WR-CALDESC:在校园工具集的课程表里改课，这里每天自动重拉。",
+        f"X-WR-CALDESC:在校园工具集的课程表里改课，这里每天自动重拉。课前 {lead} 分钟提醒。",
         "X-WR-TIMEZONE:Asia/Shanghai",
         f"REFRESH-INTERVAL;VALUE=DURATION:{_REFRESH}",
         f"X-PUBLISHED-TTL:{_REFRESH}",
@@ -384,6 +398,19 @@ def build_courses_ics(
                 lines.append(f"DESCRIPTION:{_esc(detail)}")
             # 上课是占时间的，和「每日提醒」那条（TRANSPARENT）语义相反
             lines.append("TRANSP:OPAQUE")
+            # 闹钟文字用课名，而不是"日程提醒"——锁屏上要一眼看出是哪节课。
+            # 提前 0 分钟也写成 -PT0M（负零合法），不写 PT0M：有的客户端把
+            # 不带负号的 TRIGGER 当成"结束后提醒"，正好反了。
+            alarm = f"{lead} 分钟后上课：{summary}" if lead else f"现在上课：{summary}"
+            lines.extend(
+                [
+                    "BEGIN:VALARM",
+                    "ACTION:DISPLAY",
+                    f"DESCRIPTION:{_esc(alarm)}",
+                    f"TRIGGER:-PT{lead}M",
+                    "END:VALARM",
+                ]
+            )
             lines.append("END:VEVENT")
             emitted += 1
 
@@ -405,6 +432,8 @@ def describe(
     return {
         "subscribe": f"/api/calendar/{token}.ics",
         "download": f"/api/calendar/{token}.ics?dl=1",
+        # 课表是**独立的第二份**日历：只要课表的人不该被迫收每日提醒
+        "courses": f"/api/calendar/{token}/courses.ics",
         "time": f"{hour:02d}:{minute:02d}",
         "uid": _uid(token),
     }

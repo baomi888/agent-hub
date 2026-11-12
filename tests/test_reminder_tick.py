@@ -292,6 +292,36 @@ class TestContent:
         assert payload["title"] == "晚间复盘"
         assert payload["url"] == "/delegate"
 
+    def test_suggest_focus_opens_the_timer(self, db, sent):
+        """「开始专注」必须换个落点。
+
+        这条之前是假的：action=suggest_focus 走的是和「只提醒」完全一样的分支，
+        到点只弹一条普通通知、点开回到提醒列表 —— 用户选了它和没选一样。
+        """
+        item = reminder_core.create(
+            OWNER, {"title": "该写作业了", "at": "12:00", "action": "suggest_focus"}
+        )
+        _due_now(item["id"], _ts(12, 0))
+        reminder_tick.run_one(reminder_tick.JOB_KEY, OWNER, _ts(12, 0))
+
+        payload = sent["calls"][0]["payload"]
+        assert payload["url"] == "/tools?tool=pomodoro"
+        assert "专注" in payload["body"]
+
+    def test_suggest_focus_keeps_its_own_note(self, db, sent):
+        """有备注就用备注，别用那句默认的「点一下开始一段专注」盖掉。"""
+        item = reminder_core.create(
+            OWNER,
+            {"title": "写高数", "note": "第三章习题", "at": "12:00", "action": "suggest_focus"},
+        )
+        _due_now(item["id"], _ts(12, 0))
+        reminder_tick.run_one(reminder_tick.JOB_KEY, OWNER, _ts(12, 0))
+        payload = sent["calls"][0]["payload"]
+        # 链接一起断言：只查 body 的话，专注分支被删掉时这条照样绿
+        # （普通通知也带 note），等于没在测「专注」这件事。
+        assert payload["url"] == "/tools?tool=pomodoro"
+        assert payload["body"] == "第三章习题"
+
 
 # ==================== 同刻合并 ====================
 

@@ -3279,6 +3279,40 @@ textarea.input {
   font-size: var(--fs-md);
 }
 
+/* 「提醒时做什么」下面那行解释。
+   它跟着选中项变，是**做选择用的**，所以不能塞进 hover 提示（手机上没 hover），
+   也不能做成灰色小字里的灰色小字 —— 用正文色偏淡一档，但字号不缩到看不见。 */
+.rem-actionhint {
+  margin: 4px 0 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+}
+
+/* 上课提醒卡的三条前提。用列表而不是一段话：它们是并列的「不然就不响」，
+   堆成一段必然被跳读，而任何一条漏掉的结果都是"订了却没反应"。 */
+.rem-calnotes {
+  margin: 0;
+  padding-left: 1.1em;
+  list-style: disc;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}
+.rem-calnotes > li + li {
+  margin-top: var(--space-2);
+}
+/* 这两个链接是 <a>，视觉高度 34px 够小，手指要 44px：
+   往上下各借 6px 扩热区，不改变排版（和图标按钮同一套做法）。 */
+.rem-calcard .btn {
+  position: relative;
+}
+.rem-calcard .btn::after {
+  content: "";
+  position: absolute;
+  inset: -6px -2px;
+}
+
 /* 来源开关：单列时「名字左 / 开关右」最好扫；两列时列尾会相邻，
    两个开关贴在一起就分不清归属，所以改成「固定名字宽 + 开关紧随其后」。 */
 .rem-srclist {

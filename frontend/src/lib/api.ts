@@ -2,6 +2,7 @@
 import type { Conversation, KbInfo, KbFile, FilePreview, SearchResult, Defaults, Message } from "./types";
 import type { KbProposal, KbProposalConfirmResult } from "./types";
 import type { DialogueCandidatesResp, ImportDialogueResult } from "./types";
+import type { CalendarLink } from "./types";
 import type {
   ReminderItem,
   ReminderSource,
@@ -739,6 +740,15 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ hour, minute }),
       }),
+  },
+
+  // ---------- 日历订阅 /api/calendar（4 端点）----------
+  //
+  // 现在前端只用课表那份。它是**安卓唯一还能到点响的路**：网页通知在国内
+  // 走不通 FCM，而系统日历用本机定时，断网、关浏览器都不影响。
+  // 走 tryRequest：端点没部署时返回 null，卡片整块不渲染，而不是亮一片红。
+  calendar: {
+    link: () => tryRequest<CalendarLink>("/api/calendar/link"),
   },
 
   // ---------- 提醒中心 /api/reminders（12 端点）----------

@@ -17,6 +17,8 @@ from __future__ import annotations
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from service import calendar as cal  # noqa: E402
@@ -171,6 +173,80 @@ class TestEscaping:
             assert len(line.encode("utf-8")) <= 75, line
 
 
+class TestAlarm:
+    """没有 VALARM 的课表只是一张画：日历里看得见，课前一声不响。
+
+    这是 2026-11-12 补的：`courses.ics` 早就能生成，但每个 VEVENT 里都没有
+    闹钟，用户订阅后"手机从来不提醒上课"——功能看着有，实际没有。
+    VALARM 是唯一不依赖推送通道的响铃路径（系统日历本机定时，断网也响）。
+    """
+
+    def test_every_event_has_an_alarm(self):
+        ics = cal.build_courses_ics("tok", SNAP)
+        assert ics.count("BEGIN:VEVENT") == 2
+        assert ics.count("BEGIN:VALARM") == 2
+        assert ics.count("END:VALARM") == 2
+
+    def test_alarm_lives_inside_its_own_event(self):
+        """VALARM 必须在 END:VEVENT 之前，否则客户端把它当成游离块丢掉。"""
+        for block in cal.build_courses_ics("tok", SNAP).split("BEGIN:VEVENT")[1:]:
+            head = block.split("END:VEVENT")[0]
+            assert "BEGIN:VALARM" in head
+            assert "END:VALARM" in head
+
+    def test_default_lead_is_ten_minutes(self):
+        ics = cal.build_courses_ics("tok", SNAP)
+        assert "TRIGGER:-PT10M" in ics
+        assert "10 分钟后上课：高等数学" in ics
+
+    def test_lead_can_be_shortened(self):
+        ics = cal.build_courses_ics("tok", SNAP, before_minutes=5)
+        assert "TRIGGER:-PT5M" in ics
+        assert "5 分钟后上课" in ics
+
+    def test_zero_lead_reads_as_now(self):
+        """提前量 0 时文案不能还说"N 分钟后"，否则锁屏上等于说谎。"""
+        ics = cal.build_courses_ics("tok", SNAP, before_minutes=0)
+        assert "TRIGGER:-PT0M" in ics
+        assert "现在上课：高等数学" in ics
+
+    @pytest.mark.parametrize(
+        "given, expect",
+        [
+            (-30, 0),  # 负数当 0：课后提醒没有意义
+            (999, 60),  # 超过一小时就是另一个上午的闹钟了
+            ("abc", 10),  # 拼错的参数退回默认，不能让整份日历 500
+            (None, 10),
+        ],
+    )
+    def test_out_of_range_falls_back(self, given, expect):
+        ics = cal.build_courses_ics("tok", SNAP, before_minutes=given)
+        assert f"TRIGGER:-PT{expect}M" in ics
+
+    def test_alarm_text_is_escaped_too(self):
+        """课名里的逗号在 SUMMARY 里转义了，闹钟文案里也得转 —— 同一段文字两处出现。"""
+        ics = cal.build_courses_ics("tok", SNAP)
+        alarms = [line for line in _lines(ics) if line.startswith("DESCRIPTION:") and "上课" in line]
+        assert len(alarms) == 2
+        assert any("大学物理\\, 实验" in a for a in alarms)
+
+    def test_alarm_lines_respect_folding(self):
+        """课名很长时闹钟文案会超 75 字节，必须跟着折行。
+
+        先断言"这行真的存在"再断言宽度 —— 只查宽度的话，闹钟整块被删掉
+        时也全绿（反证时抓到的：这条一开始是摆设）。
+        """
+        snap = {
+            "courses": [{"id": 1, "name": "超长课程名" * 8, "day": 0, "sections": [1], "weeks": None}],
+            "term": {"start": "2026-09-07", "weeks": 2},
+            "periods": {"starts": ["08:00"], "duration": 45},
+        }
+        ics = cal.build_courses_ics("tok", snap, before_minutes=15)
+        assert any(line.startswith("DESCRIPTION:15 分钟后上课：超长课程名") for line in _lines(ics))
+        for line in _lines(ics):
+            assert len(line.encode("utf-8")) <= 75, line
+
+
 class TestDegenerate:
     def test_no_term_returns_empty_calendar(self):
         """没设学期 → 空日历（不是 404）。日历里显示"还没课"比"订阅失败"诚实。"""
@@ -255,8 +331,43 @@ class TestEndpoint:
         body = res.text
         assert "BEGIN:VEVENT" in body
         assert "SUMMARY:高等数学 · 教三-201" in body
-        # 这份不该混进「每日提醒」那条
+        # 课表那份不能混进「每日提醒」的内容
         assert "知穗 · 看看今天的事" not in body
+
+    def test_before_comes_from_the_url(self, tmp_path, monkeypatch):
+        """提前量走 query：同一份课表，不同的人要不同的提前量。
+
+        放在服务端配置里的话，一个人改会把所有人的课表都改掉。
+        """
+        client = self._setup(tmp_path, monkeypatch)
+        campus_store.put("u1", "campus.schedule.courses.v2", SNAP, 1000)
+        token = calendar_store.get_or_create("u1")
+
+        body = client.get(f"/api/calendar/{token}/courses.ics?before=5").text
+        assert "TRIGGER:-PT5M" in body
+        assert "5 分钟后上课" in body
+
+    def test_default_before_is_ten(self, tmp_path, monkeypatch):
+        client = self._setup(tmp_path, monkeypatch)
+        campus_store.put("u1", "campus.schedule.courses.v2", SNAP, 1000)
+        token = calendar_store.get_or_create("u1")
+        assert "TRIGGER:-PT10M" in client.get(f"/api/calendar/{token}/courses.ics").text
+
+    def test_link_payload_exposes_courses_url(self, tmp_path, monkeypatch):
+        """前端要靠这份 payload 拼订阅地址；少了字段卡片就点不动。"""
+        client = self._setup(tmp_path, monkeypatch)
+        token = calendar_store.get_or_create("u1")
+        # /link 是登录态端点（别人的链接不该被随便取），测试里直接替换鉴权依赖
+        from core.auth import get_current_user
+
+        main.app.dependency_overrides[get_current_user] = lambda: "u1"
+        try:
+            data = client.get("/api/calendar/link").json()
+        finally:
+            main.app.dependency_overrides.clear()
+        assert data["token"] == token
+        assert data["courses_url"].endswith(f"/api/calendar/{token}/courses.ics")
+        assert data["courses_webcal_url"].startswith("webcal://")
 
     def test_daily_ics_still_works(self, tmp_path, monkeypatch):
         """两条端点并列：加课表不能把老的每天提醒搞坏。"""

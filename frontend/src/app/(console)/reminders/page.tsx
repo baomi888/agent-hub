@@ -49,6 +49,7 @@ import AiCaptureDrawer, {
 import type { CommitOutcome } from "@/components/reminders/AiCaptureDrawer";
 import ReminderAccess from "@/components/reminders/ReminderAccess";
 import MailAccess from "@/components/reminders/MailAccess";
+import CourseCalendar from "@/components/reminders/CourseCalendar";
 import { Callout, Field, Seg, SkeletonLines, Switch, ToastHost } from "@/components/console/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
@@ -89,11 +90,41 @@ const FREQ_OPTIONS: { value: ReminderFreq; label: string }[] = [
   { value: "once", label: "仅一次" },
 ];
 
+/**
+ * 每一档「提醒时做什么」到点之后**到底会发生什么**。
+ *
+ * 三个词原本全是行话：用户看得见「让助手帮我写」，但不知道谁会写、写什么；
+ * 「开始专注」更猜不出来。下拉里塞不下解释，就紧跟在控件下面写一行 ——
+ * 这是**选择依据**，不是补充说明，放在 hover 提示里等于没有（手机上根本没有 hover）。
+ */
+const ACTION_HINT: Record<string, string> = {
+  notify: "到点发一条通知，在通知栏里显示这件事，点开回到这个页面。",
+  agent_deliver: "到点把内容准备好，点通知直接看（今天的简报 / 委托）。",
+  suggest_focus: "到点直接打开专注计时，不用自己再去工具集里找。",
+  open_tool: "到点打开对应的工具页面。",
+};
+
+/**
+ * 「让助手帮我写」只在**手里真有内容**的来源上成立：每日回顾、四六级、打卡、
+ * 每日委托。自己建的提醒上没有东西可写，选它只会得到一条和「只提醒」一模一样的
+ * 通知 —— 那不如不列出来，免得用户以为助手会替他写作业。
+ *
+ * 老数据（在那个过滤之前建的）里可能有这个组合，界面上仍要能显示与保存，
+ * 见 `actionList` 的兜底那一段。
+ */
+const AGENT_SOURCES = new Set(["system", "cet", "checkin", "delegate"]);
+
 const ACTION_OPTIONS: { value: ReminderAction; label: string }[] = [
   { value: "notify", label: "只提醒" },
   { value: "agent_deliver", label: "让助手帮我写" },
   { value: "suggest_focus", label: "开始专注" },
 ];
+
+function actionOptionsFor(source: string): { value: ReminderAction; label: string }[] {
+  return AGENT_SOURCES.has(source)
+    ? ACTION_OPTIONS
+    : ACTION_OPTIONS.filter((o) => o.value !== "agent_deliver");
+}
 
 const WEEK_LABELS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 
@@ -1593,7 +1624,7 @@ function TaskDrawer({
               </div>
             ) : (
               <p className="rem-noSound">
-                不打开就不会收到任何通知；截止日期只用来排期和排序，它不会响。
+                不打开就不会收到任何通知；截止日期只用来排期和排序，它不会提醒你。
               </p>
             )}
           </div>
@@ -1729,6 +1760,14 @@ function ReminderDrawer({
   const isOwn = !editing || editing.source === "manual" || editing.source === "system";
 
   const pickSource = editing ? sourceName : (sources.find((s) => s.key === source)?.label ?? "自己定的");
+  // 选项按来源给。老数据里可能存着「自己定的 + 让助手帮我写」（过滤之前建的），
+  // 这时要把它补回列表 —— 否则 select 找不到对应 option 会显示第一项，
+  // 用户一保存就被静默改成了「只提醒」，他自己完全不知道。
+  const sourceKey = editing ? editing.source : source;
+  const baseActions = actionOptionsFor(sourceKey);
+  const actionList = baseActions.some((o) => o.value === action)
+    ? baseActions
+    : [...baseActions, { value: action, label: ACTION_LABEL[action] ?? action }];
   const freqLine =
     freq === "weekly"
       ? `每周${(WEEK_LABELS[weekday] ?? "周一").slice(1)} ${at}`
@@ -1862,13 +1901,15 @@ function ReminderDrawer({
               value={action}
               onChange={(e) => setAction(e.target.value as ReminderAction)}
             >
-              {ACTION_OPTIONS.map((o) => (
+              {actionList.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}
                 </option>
               ))}
             </select>
           </Field>
+          {/* 选择依据，不是补充说明：三个词都是行话，不解释等于让用户盲选 */}
+          <p className="rem-actionhint">{ACTION_HINT[action] ?? ""}</p>
 
           {/*
            * 「怎么送达」：`service/reminder_tick.py` 只认 channels 里的 push，
@@ -3356,6 +3397,10 @@ export default function RemindersPage() {
               「这台设备根本响不了的时候怎么办」。两件事连着发生，放一起
               用户才能在看到"这台收不到"之后立刻找到出路。 */}
           <MailAccess />
+          {/* 紧跟着邮件卡：上面两张都在回答「这台设备响不响」，
+              这张回答「上课这件事怎么保证响」。课表是唯一有确切时刻的数据，
+              所以它走系统日历，而不是再排一条推送 —— 安卓的推送在国内本来就不通。 */}
+          <CourseCalendar />
 
           <section className="card card-pad">
             <h3 className="card-title">免打扰时间</h3>

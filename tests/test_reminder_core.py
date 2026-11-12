@@ -154,10 +154,15 @@ class TestCreate:
             reminder_core.create("u1", _mk(channels="push,telegram"))
 
     def test_relative_trigger_rejected_for_now(self, fresh_db):
-        """第一波明确不支持相对时间：锚点数据还在 localStorage，收下就等于静默不响。"""
+        """相对时间（课前 / 到期前）仍然拒绝：它要按课表实时重算 next_fire_at，
+        而课表一改就得全场重排 —— 那是调度器的事。收下就等于静默不响。
+
+        拒绝文案里必须给出**能走的那条路**（系统日历订阅），
+        只说"还没开放"用户就卡在这里了。"""
         with pytest.raises(reminder_core.ReminderInvalid) as ei:
             reminder_core.create("u1", _mk(trigger_kind="relative"))
         assert "相对时间" in str(ei.value)
+        assert "上课提醒" in str(ei.value)
 
     def test_duplicate_channels_are_deduped(self, fresh_db):
         item = reminder_core.create("u1", _mk(channels="push, push,inapp"))
