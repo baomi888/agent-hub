@@ -3291,6 +3291,78 @@ textarea.input {
 
 /* 上课提醒卡的三条前提。用列表而不是一段话：它们是并列的「不然就不响」，
    堆成一段必然被跳读，而任何一条漏掉的结果都是"订了却没反应"。 */
+/* 平台说明：iOS 与安卓看到的是两段完全不同的话，所以它不能并进标题，
+   否则用户会以为「两种方法都要做」。 */
+.rem-calplat {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}
+
+/* 差一步/已拒绝这类「你能自己解决」的提示。左竖线而不是整块底色：
+   整块底色会把卡片切成上下两段，看起来像两个独立功能。 */
+.rem-calwarn {
+  margin: var(--space-8) 0 0;
+  padding-left: var(--space-10);
+  border-left: 3px solid var(--warning);
+  color: var(--warning-ink);
+  font-size: var(--fs-xs);
+  line-height: 1.65;
+}
+
+/* 接下来几次：时间在前、课名占满、提前量收尾。
+   三列都放一行是因为手机上「下一次 11月16日 07:40 高等数学」读起来是一句话，
+   拆成两行反而要回头找哪个时间和哪个课名配对。 */
+.rem-calnext {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-6);
+}
+.rem-calnext > li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  min-width: 0;
+}
+.rem-calnext b {
+  flex: none;
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+.rem-calnext span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rem-calnext i {
+  flex: none;
+  color: var(--text-3);
+  font-style: normal;
+}
+.rem-calempty {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+/* 备选的日历入口默认折起来。它和上面的开关是两件事，
+   摊开会让「我已经开了提醒，为什么还有两个按钮」。 */
+.rem-caldetails > summary {
+  min-height: var(--tap-min);
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
 .rem-calnotes {
   margin: 0;
   padding-left: 1.1em;

@@ -729,11 +729,15 @@ def list_reminders(owner_id: str, scope: str = "all", now: int | None = None) ->
     ★ `source='task'` 一律排除。待办的联动提醒由 `/api/tasks` 自己带出，
     在这里再列一遍，用户会看到两条一模一样的「交高数作业」，
     而且点开其中一条改时间，另一条不会变 —— 看起来像同步坏了。
+
+    ★ `source='timetable'` 同理排除。课表一次能生成十几条「高等数学 · 教三201」，
+    它们本来就在「校园 → 课程表」里按周几排好了，混进提醒列表只会把待办
+    和手建的提醒挤到看不见。上课提醒有自己的开关：`service/course_reminder.py`。
     """
     ensure()
     ts = timeutil.now_ts() if now is None else int(now)
     start, end = timeutil.day_bounds(timeutil.day_str(ts))
-    where = ["owner_id = ?", "source <> 'task'"]
+    where = ["owner_id = ?", "source NOT IN ('task', 'timetable')"]
     params: list[Any] = [owner_id]
     if scope == "paused":
         where.append("enabled = 0")

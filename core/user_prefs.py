@@ -235,7 +235,13 @@ def set_source_pref(owner_id: str, source: str, enabled: bool) -> dict[str, bool
 
 
 def day_count(owner_id: str, day: str | None = None) -> int:
-    """今天已经送达几条（合并通知算一条）。"""
+    """今天已经送达几条（合并通知算一条）。
+
+    ★ `source='timetable'` **不计入**：上课提醒的条数由课表决定，不受用户控制。
+    一天 8 节课 × 默认上限 6 条，第 7、8 节会被上限砍掉，而用户什么都没做错 ——
+    表现是「上午的课都提醒了，下午的课一条没有」，这比不限更容易被当成 bug。
+    它同样不该占掉「待办提醒」的额度。
+    """
     day = day or timeutil.day_str()
     start, end = timeutil.day_bounds(day)
     ensure()
@@ -246,6 +252,7 @@ def day_count(owner_id: str, day: str | None = None) -> int:
                 WHERE r.owner_id = ?
                   AND f.status = 'sent'
                   AND f.planned_at >= ? AND f.planned_at < ?
+                  AND r.source <> 'timetable'
                   AND COALESCE(f.detail, '') NOT LIKE 'merged_into:%'""",
             (owner_id, start, end),
         ).fetchone()

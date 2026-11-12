@@ -56,7 +56,7 @@ from datetime import datetime
 from typing import Any
 
 from core import config, mail_store, mailer, reminder_core, timeutil, user_prefs
-from service import push as push_svc
+from service import course_reminder, push as push_svc
 
 logger = logging.getLogger(__name__)
 
@@ -88,10 +88,15 @@ def _daily_brief(owner_id: str, planned_at: int) -> dict[str, Any] | None:
 
 
 def _notify_content(reminder: dict[str, Any]) -> dict[str, Any]:
+    # 上课提醒点开应该落在**课程表**，不是提醒列表：用户想知道的是
+    # 「下一节在哪、几点下课」，而提醒列表里没有这节课（`list_reminders`
+    # 把 timetable 排除了，见 core/reminder_core.py）。
+    # 落在提醒列表的话，点完看到的是一片自己的待办 —— 和那条通知毫无关系。
+    url = "/tools?tool=schedule" if str(reminder.get("source") or "") == "timetable" else "/reminders"
     return {
         "title": str(reminder.get("title") or "提醒")[:60],
         "body": str(reminder.get("note") or "")[:120],
-        "url": "/reminders",
+        "url": url,
     }
 
 
@@ -265,6 +270,18 @@ def due_subjects(job_key: str, planned_at: int) -> list[str]:
     这里 due 只出人，内容留到 run_one —— 而且 run_one 里只算一次，算完直接发。
     """
     try:
+        # ★ 课表同步必须排在 due_owners 之前，而且**每一轮都跑**。
+        #
+        # `source='timetable'` 的行是 `freq='once'`：响过一次 `advance()` 就把它
+        # `enabled=0`（见 reminder_core.advance）。不在这里重建，这门课从此再也不响，
+        # 而且列表上看起来只是「没有下一次」—— 用户只会说「上课提醒时好时不好」。
+        # 反过来，只在「这个人这一分钟有到期提醒」时才同步也不行：课表提醒的到期
+        # 时刻本来就不密集，链条一旦断掉就永远接不上。所以按 `course_reminder.owners()`
+        # 全量走一遍，靠 sync 内部的「值没变就不写」把开销压到一次读。
+        course_reminder.sync_all(planned_at)
+    except Exception:  # noqa: BLE001
+        logger.exception("reminder.tick course sync failed")
+    try:
         # 迟到的先推进（不补发），否则它会永远躺在「已到期」里被每轮扫出来
         reminder_core.catch_up(planned_at)
         return reminder_core.due_owners(planned_at)
@@ -302,14 +319,18 @@ def run_one(job_key: str, subject_id: str, planned_at: int) -> dict[str, Any]:
             reminder_core.record_fire(rid, at, reminder_core.STATUS_QUIET, "quiet_hours")
             reminder_core.advance(rid, planned_at)
             continue
-        if remaining <= 0:
+        if remaining <= 0 and source != "timetable":
             reminder_core.record_fire(rid, at, reminder_core.STATUS_CAP, f"cap={cap}")
             reminder_core.advance(rid, planned_at)
             continue
         # `task` 同理：待办提醒的开关是「待办详情里的提醒时间」，
         # 放进来源开关里会让「关掉某个来源」把别人的待办一起弄哑。
+        # `timetable` 也有自己的开关（`course_reminder_prefs.enabled`），
+        # 两套开关并存的结果一定是「开了一个、另一个还关着」，用户看到的
+        # 是「我明明打开了上课提醒，就是不响」。
         configurable = (
-            source in reminder_core.SOURCES and source not in ("manual", "system", "task")
+            source in reminder_core.SOURCES
+            and source not in ("manual", "system", "task", "timetable")
         )
         if configurable and not enabled_sources.get(source):
             # 设置页对用户的承诺是「关掉一个来源，已经建好的那几条会一起停」。

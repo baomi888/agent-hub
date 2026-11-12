@@ -42,12 +42,16 @@ router = APIRouter(dependencies=[Depends(get_current_user)])
 SCOPES = ("today", "week", "all", "paused")
 
 # 来源开关的展示顺序就是设置页那一行的顺序（规格 2.2）：
-# 四六级 打卡 番茄钟 课表 DDL 背单词 每日委托
+# 四六级 打卡 番茄钟 DDL 背单词 每日委托
+#
+# ★ `timetable` 不在这里。它有自己的开关（`/api/course-reminder` 那张「上课提醒」卡），
+#   同时出现在两处就是两个开关管一件事：用户在卡上打开、回到来源列表看到「课表」是关的，
+#   或者反过来 —— 无论哪种，他都没法从界面上判断到底哪个生效。
+#   `service/reminder_tick.run_one` 里也把 timetable 排除出 `configurable`，两处对齐。
 SOURCE_LABELS = (
     ("cet", "四六级"),
     ("checkin", "打卡"),
     ("focus", "番茄钟"),
-    ("timetable", "课表"),
     ("deadline", "DDL"),
     ("words", "背单词"),
     ("delegate", "每日委托"),
@@ -182,7 +186,7 @@ async def get_summary(uid: str = Depends(get_current_user)) -> dict:
 
 @router.get("/sources")
 async def get_sources(uid: str = Depends(get_current_user)) -> dict:
-    """七个来源的开关状态。
+    """六个来源的开关状态。
 
     `enabled` 用 `source_prefs` 的显式值；没有行 = 关（默认全关）。
     另外给 `selectable`，前端新建抽屉里就按这个顺序列，不再自己维护一份。
@@ -196,6 +200,14 @@ async def put_source(body: dict, uid: str = Depends(get_current_user)) -> dict:
     source = str(body.get("source") or "").strip()
     if not source:
         raise HTTPException(status_code=400, detail="source 缺失")
+    # ★ 只收 `SOURCE_LABELS` 里的那几个。`core.reminder_core.SOURCES` 比这里多
+    #   （还有 manual / system / task / timetable），其中 timetable 有自己的开关，
+    #   放进来就会被写成一个永远读不到的标记 —— 用户以为开了，实际没影响任何事。
+    if source not in {key for key, _ in SOURCE_LABELS}:
+        raise HTTPException(
+            status_code=400,
+            detail="这个来源没有开关。上课提醒请在「上课提醒」里设置。",
+        )
     raw = body.get("enabled")
     if isinstance(raw, str):
         enabled = raw.strip().lower() in {"1", "true", "yes", "on"}

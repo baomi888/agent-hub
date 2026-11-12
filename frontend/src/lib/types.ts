@@ -1076,6 +1076,30 @@ export type CalendarLink = {
   minute: number;
 };
 
+/**
+ * 上课提醒（`GET/PUT /api/course-reminder`）。
+ *
+ * 和 `CalendarLink` 是两条并行的路：iOS 走这里的系统通知（APNs 能到），
+ * 安卓走日历那份 `.ics`（网页通知在国内走不通）。
+ */
+export type CourseReminderState = {
+  enabled: boolean;
+  /** 课前几分钟提醒。只可能是 `leads` 里的某一档 */
+  lead_minutes: number;
+  /** 可选档位，由后端给 —— 前端自己列一份就会出现两边对不上 */
+  leads: number[];
+  default_lead: number;
+  /** 接下来几节课（已含提醒时刻），最多 3 条 */
+  next: {
+    title: string;
+    start_at: number;
+    fire_at: number;
+    lead: number;
+  }[];
+  /** 本次保存真的重建了几条；只用于「保存后立刻看到下一次」 */
+  synced: number | null;
+};
+
 /** 一台登记过的设备（GET /api/push/status 的 device_list 元素） */export type PushDevice = {
   /** 服务端 sub_id，移除时回传 */
   id: string;

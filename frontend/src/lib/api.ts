@@ -1,7 +1,7 @@
 // 后端 API 封装：统一错误处理 + 类型化（相对路径走 rewrites 代理）
 import type { Conversation, KbInfo, KbFile, FilePreview, SearchResult, Defaults, Message } from "./types";
 import type { KbProposal, KbProposalConfirmResult } from "./types";
-import type { DialogueCandidatesResp, ImportDialogueResult } from "./types";
+import type { DialogueCandidatesResp, ImportDialogueResult, CourseReminderState } from "./types";
 import type { CalendarLink } from "./types";
 import type {
   ReminderItem,
@@ -749,6 +749,21 @@ export const api = {
   // 走 tryRequest：端点没部署时返回 null，卡片整块不渲染，而不是亮一片红。
   calendar: {
     link: () => tryRequest<CalendarLink>("/api/calendar/link"),
+  },
+
+  // ---------- 上课提醒 /api/course-reminder（2 端点）----------
+  //
+  // 和上面那份日历文件并存，不是替换：iOS 装到主屏后能收到系统通知，
+  // 走这条真正的定时提醒；安卓的网页通知在国内走不通，继续用日历。
+  // 平台由前端判断（`lib/pwa.ts::detectPlatform`）—— 后端从 UA 猜
+  // 「iPhone 还是 iPad」容易误伤，而 iPadOS 的 UA 写着 Macintosh。
+  courseReminder: {
+    get: () => tryRequest<CourseReminderState>("/api/course-reminder"),
+    set: (patch: { enabled?: boolean; lead_minutes?: number }) =>
+      request<CourseReminderState>("/api/course-reminder", {
+        method: "PUT",
+        body: JSON.stringify(patch),
+      }),
   },
 
   // ---------- 提醒中心 /api/reminders（12 端点）----------

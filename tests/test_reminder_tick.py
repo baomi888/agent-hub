@@ -184,7 +184,7 @@ class TestGates:
     def test_disabled_source_stops_existing_reminder(self, db, sent):
         """设置页承诺「关掉来源，已经建好的那几条一起停」——必须真的停。"""
         item = reminder_core.create(
-            OWNER, {"title": "高数", "source": "timetable", "at": "12:00"}
+            OWNER, {"title": "高数", "source": "cet", "at": "12:00"}
         )
         _due_now(item["id"], _ts(12, 0))
 
@@ -194,17 +194,32 @@ class TestGates:
         assert sent["calls"] == []
         log = _fires(item["id"])[0]
         assert log["status"] == reminder_core.STATUS_EMPTY
-        assert log["detail"] == "source_disabled:timetable"
+        assert log["detail"] == "source_disabled:cet"
 
     def test_enabled_source_fires(self, db, sent):
-        user_prefs.set_source_pref(OWNER, "timetable", True)
+        user_prefs.set_source_pref(OWNER, "cet", True)
+        item = reminder_core.create(
+            OWNER, {"title": "高数", "source": "cet", "at": "12:00"}
+        )
+        _due_now(item["id"], _ts(12, 0))
+
+        assert reminder_tick.run_one(reminder_tick.JOB_KEY, OWNER, _ts(12, 0))["fired"] == 1
+        assert sent["calls"][0]["payload"]["title"] == "高数"
+
+    def test_timetable_ignores_the_source_switch(self, db, sent):
+        """课堂提醒的开关是「上课提醒」那张卡，不是来源列表。
+
+        `reminder_source_prefs` 默认全关（没有行 = 关）。如果 timetable 也走这道闸，
+        用户在卡上打开上课提醒、后端却按「来源没开」全部记 `skipped_empty` ——
+        表现是「我明明开了，就是不提醒」。两处开关管一件事必然出这种结果，
+        所以 timetable 被明确排除在外（`run_one` 里的 `configurable`）。
+        """
         item = reminder_core.create(
             OWNER, {"title": "高数", "source": "timetable", "at": "12:00"}
         )
         _due_now(item["id"], _ts(12, 0))
 
         assert reminder_tick.run_one(reminder_tick.JOB_KEY, OWNER, _ts(12, 0))["fired"] == 1
-        assert sent["calls"][0]["payload"]["title"] == "高数"
 
 
 # ==================== 内容来源 ====================

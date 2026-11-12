@@ -30,6 +30,7 @@ from api.capture import ws_router as capture_ws_router
 from api.cet import router as cet_router
 from api.chat import router as chat_router
 from api.checkin import router as checkin_router
+from api.course_reminder import router as course_reminder_router
 from api.delegate import router as delegate_router
 from api.feedback import router as feedback_router
 from api.focus import router as focus_router
@@ -219,6 +220,8 @@ app.include_router(push_router, prefix="/api/push", tags=["推送提醒"])
 # 能收到的提醒方式。语义是补位：推送零投递时才发信。
 app.include_router(mail_router, prefix="/api/mail", tags=["邮件提醒"])
 app.include_router(calendar_router, prefix="/api/calendar", tags=["日历提醒"])
+# 上课提醒（iOS 走这里的弹窗；安卓仍走上面那份 courses.ics）
+app.include_router(course_reminder_router, prefix="/api/course-reminder", tags=["上课提醒"])
 # 提醒时刻：一个值同时管 Web Push 与日历事件的起点，所以不挂在上面两组里
 app.include_router(remind_router, prefix="/api", tags=["提醒时刻"])
 # 提醒中心（独立模块）：提醒项 CRUD / 今日概览 / 来源开关 / 时间偏好 / 触发流水。

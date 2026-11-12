@@ -168,12 +168,17 @@ class TestSideEndpoints:
         assert "today" in body and "paused_count" in body
 
     def test_sources_default_all_off(self, client):
+        """六个来源，默认全关。
+
+        ★ 这里**故意**不含 `timetable`：上课提醒有自己的开关
+        （`/api/course-reminder`），同时出现在两处就是两个开关管一件事，
+        用户无法从界面判断哪个生效。所以它从来源列表里移除了。
+        """
         body = client.get("/api/reminders/sources").json()
         assert [s["key"] for s in body["sources"]] == [
             "cet",
             "checkin",
             "focus",
-            "timetable",
             "deadline",
             "words",
             "delegate",
@@ -181,12 +186,21 @@ class TestSideEndpoints:
         assert all(s["enabled"] is False for s in body["sources"])
 
     def test_sources_toggle(self, client):
-        res = client.put("/api/reminders/sources", json={"source": "timetable", "enabled": True})
+        res = client.put("/api/reminders/sources", json={"source": "cet", "enabled": True})
         assert res.status_code == 200
         # PUT 与 GET 必须同形状（都是 list），否则前端切完开关再渲染会拿到 dict
         assert isinstance(res.json()["sources"], list)
         body = client.get("/api/reminders/sources").json()
-        assert {s["key"]: s["enabled"] for s in body["sources"]}["timetable"] is True
+        assert {s["key"]: s["enabled"] for s in body["sources"]}["cet"] is True
+
+    def test_timetable_is_not_a_source_switch(self, client):
+        """改回去会被「两个开关管一件事」坑到，所以这里挡一道。"""
+        res = client.put(
+            "/api/reminders/sources", json={"source": "timetable", "enabled": True}
+        )
+        assert res.status_code == 400
+        keys = [s["key"] for s in client.get("/api/reminders/sources").json()["sources"]]
+        assert "timetable" not in keys
 
     def test_sources_reject_unknown(self, client):
         assert client.put("/api/reminders/sources", json={"source": "wechat", "enabled": True}).status_code == 400
