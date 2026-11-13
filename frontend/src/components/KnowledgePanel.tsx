@@ -838,10 +838,13 @@ export default function KnowledgePanel({
                         })}
                         {onRebuildKb && (
                           <li className="kb-file-foot">
+                            {/* 2026-11-13：tooltip 里原来写「会用当前处理方式重新向量化」，
+                                「向量化」是内部实现。用户按下这颗键要知道的是
+                                "会重算一遍、之前的问题可能对不上"，不是灌向量库。 */}
                             <button
                               type="button"
                               className="kb-rebuild"
-                              title={`按「${cpLabel}」把库里全部资料重新切一遍（会用当前处理方式重新向量化）`}
+                              title={`按「${cpLabel}」把库里全部资料重新切一遍（会重新算一遍，之前问过的回答可能对不上新切法）`}
                               onClick={() => onRebuildKb(k.kb_id)}
                             >
                               按「{cpLabel}」重新整理
