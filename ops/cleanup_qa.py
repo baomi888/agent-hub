@@ -17,6 +17,7 @@ import os
 import re
 import sqlite3
 import sys
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # 默认用项目主库；BAOMI_DB 可覆盖，方便在临时库上先验证脚本本身
@@ -87,6 +88,30 @@ def main() -> int:
             conn.execute(f"DELETE FROM {t} WHERE owner_id IN ({marks})", ids)
         except sqlite3.OperationalError:
             pass
+
+    # 删号前先立墓碑（与 core/account.delete_user 同一套约定）。
+    # 为什么非写不可：鉴权在库里查不到人时按「代数 0」放行（为兼容测试临时 uid），
+    # 所以只 DELETE users 行的话，这些账号浏览器里的旧 cookie 还能继续建会话、
+    # 写 usage —— 2026-11-13 就是这样留下 7 个孤儿会话 + 60 条孤儿 usage 的。
+    now = int(time.time())
+    try:
+        conn.executemany(
+            "INSERT OR REPLACE INTO deleted_users (uid, username, deleted_at, reason) "
+            "VALUES (?, ?, ?, ?)",
+            [(u["id"], u["username"], now, "cleanup_qa") for u in targets],
+        )
+    except sqlite3.OperationalError:
+        # 老库还没有这张表：建一次再补写，别因为缺表就跳过吊销
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS deleted_users ("
+            " uid TEXT PRIMARY KEY, username TEXT NOT NULL DEFAULT '',"
+            " deleted_at INTEGER NOT NULL, reason TEXT NOT NULL DEFAULT '')"
+        )
+        conn.executemany(
+            "INSERT OR REPLACE INTO deleted_users (uid, username, deleted_at, reason) "
+            "VALUES (?, ?, ?, ?)",
+            [(u["id"], u["username"], now, "cleanup_qa") for u in targets],
+        )
 
     conn.execute(f"DELETE FROM users WHERE id IN ({marks})", ids)
     conn.commit()

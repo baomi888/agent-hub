@@ -272,6 +272,11 @@ export default function DashboardPage() {
             <div className="l">
               注册用户 <span className="meta">（当前快照，不随筛选变化）</span>
             </div>
+            {/* 清理记录就写在卡片上：不然「总数比上个月少了」只能靠翻库解释。
+                没清理过就不显示，默认外观不变。 */}
+            {ov && (ov.users.purged ?? 0) > 0 && (
+              <div className="meta">本区间清理 {fmtNum(ov.users.purged ?? 0)} 个测试账号</div>
+            )}
           </div>
           <div className="card card-pad stat">
             <div className="n">{ov ? fmtNum(ov.users.new) : "—"}</div>

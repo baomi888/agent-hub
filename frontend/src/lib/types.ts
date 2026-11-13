@@ -822,6 +822,10 @@ export interface DashboardUsers {
   total: number;
   /** 区间内新增 */
   new: number;
+  /** 区间内被删除的账号数（清理测试号 / 用户注销）。
+   *  没有这个数，「总数从 177 掉到 169」看起来就是用户流失，实际多半是清了测试号。
+   *  老库还没建墓碑表时后端返回 0。 */
+  purged?: number;
 }
 
 export interface DashboardCalls {

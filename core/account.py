@@ -196,6 +196,16 @@ def _ensure_tables(force: bool = False) -> None:
             );
             -- NOCASE 让 ASCII 大小写视为同一个用户（Abc 和 abc 不能各注册一份）
             CREATE UNIQUE INDEX IF NOT EXISTS idx_users_name ON users(username COLLATE NOCASE);
+
+            -- 删号墓碑：见 core/session.py 同名表的注释。
+            -- 这里再建一次，是因为测试会把库换到临时目录、只跑 account._ensure_tables；
+            -- 不建的话 is_deleted() 会撞 `no such table`。
+            CREATE TABLE IF NOT EXISTS deleted_users (
+                uid        TEXT PRIMARY KEY,
+                username   TEXT NOT NULL DEFAULT '',
+                deleted_at INTEGER NOT NULL,
+                reason     TEXT NOT NULL DEFAULT ''
+            );
         """)
     _ensure_columns()
     # 建完才记路径：中途炸了下次还会重试，不会留下"以为建过"的假象
@@ -279,6 +289,48 @@ def get_user_by_username(name: str) -> dict | None:
             (normalize_name(name),),
         ).fetchone()
         return dict(row) if row else None
+
+
+def is_deleted(uid: str) -> bool:
+    """这个 uid 是不是被主动删掉的账号（墓碑表里有行）。
+
+    只在 `get_user()` 查不到人时才会被调用（正常用户的鉴权路径不付这次查询），
+    所以它必须便宜、且不能因为表缺失而抛异常 —— 老库没这张表时按"没删过"处理。
+    """
+    try:
+        with _conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM deleted_users WHERE uid = ? LIMIT 1", (uid,)
+            ).fetchone()
+            return row is not None
+    except sqlite3.OperationalError:
+        return False
+
+
+def delete_user(uid: str, reason: str = "") -> bool:
+    """删除账号，并让它的旧令牌立刻失效。
+
+    只删 users 行是**不够**的（这是 2026-11-13 线上实测出来的）：
+    `core/auth.current_user_id` 在库里查不到人时按「代数 0」放行，为的是兼容
+    测试里的临时 uid —— 结果是删掉的账号，浏览器里的旧 cookie 还能继续建会话、
+    写 usage，一晚上留下 7 个孤儿会话和 60 条孤儿 usage，看板上还显示成"活跃用户"。
+
+    所以这里同一事务写一条墓碑，由鉴权入口拦截。墓碑同时是审计记录：
+    看板要解释"注册用户为什么掉了"，查 deleted_users 比翻日志可靠。
+
+    返回 False 表示这个 uid 本来就不在 users 表里（重复删 / 拼错了 uid）。
+    """
+    with _conn() as conn:
+        row = conn.execute("SELECT username FROM users WHERE id = ?", (uid,)).fetchone()
+        if not row:
+            return False
+        conn.execute(
+            "INSERT OR REPLACE INTO deleted_users (uid, username, deleted_at, reason) "
+            "VALUES (?, ?, ?, ?)",
+            (uid, row["username"], int(time.time()), (reason or "")[:200]),
+        )
+        conn.execute("DELETE FROM users WHERE id = ?", (uid,))
+    return True
 
 
 def create_user(username: str, password: str) -> dict:

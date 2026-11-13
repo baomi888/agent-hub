@@ -18,7 +18,7 @@
  *   3. Word/表格/文本才走后端抽正文（浏览器打不开 docx），抽不出文字时
  *      （扫描件）明确提示"只能下载"，而不是给一个空白预览。
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import MascotLogo from "@/components/chat/MascotLogo";
@@ -52,6 +52,39 @@ function fmtSize(bytes: number): string {
 /** 能直接在浏览器里内嵌的类型（与后端 _INLINE_EXT 对齐） */
 const INLINE_EXT = new Set(["pdf", "png", "jpg", "jpeg", "webp", "gif"]);
 
+/**
+ * 窄屏（≤1024，手机 + 平板）判定。
+ *
+ * 为什么必须按设备分两套：`<iframe src="x.pdf">` 在 iOS Safari / 微信内置浏览器里
+ * 只会渲染第一页，手指上下滑不动、也没有全屏入口 —— 这是 WebKit 对 iframe 内 PDF
+ * 的限制，改 CSS 改不出来（把 iframe 撑到 100dvh 也一样，滑的仍是外层而不是 PDF）。
+ *
+ * 所以窄屏改成把 PDF 直链交给系统阅读器（自带滚动、双指缩放、全屏、页码）；
+ * 桌面保留 iframe，因为内嵌确实更顺手，没必要为了统一而退步。
+ *
+ * 用 matchMedia 而不是 CSS：这里要改的是「渲染什么元素」，不是「长什么样」。
+ * 服务端没有 window，getServerSnapshot 先按桌面渲染，客户端 hydrate 后立刻纠正，
+ * 不会出现两份 HTML 对不上的告警。
+ */
+const NARROW_QUERY = "(max-width: 1024px)";
+
+function subscribeNarrow(onChange: () => void) {
+  const mq = window.matchMedia(NARROW_QUERY);
+  mq.addEventListener("change", onChange);
+  return () => mq.removeEventListener("change", onChange);
+}
+
+function useIsNarrow(): boolean {
+  return useSyncExternalStore(
+    subscribeNarrow,
+    () => window.matchMedia(NARROW_QUERY).matches,
+    () => false,
+  );
+}
+
+/** 这份资料有没有「原版文件」可交给浏览器打开（PDF 原件，或 Word 导出的同名 PDF） */
+const hasNative = (f: OfficialKbFile) => INLINE_EXT.has(f.ext) || !!f.preview_file;
+
 export default function CourseLibraryPage() {
   const auth = useAuth();
   const router = useRouter();
@@ -65,6 +98,8 @@ export default function CourseLibraryPage() {
   const [opening, setOpening] = useState(false);
   /** 正在预览的那份资料；null = 没开预览 */
   const [viewing, setViewing] = useState<OfficialKbFile | null>(null);
+  /** 手机/平板：原版 PDF 不走弹层，直接交给系统阅读器 */
+  const narrow = useIsNarrow();
 
   const load = useCallback(async () => {
     if (!kbId) return;
@@ -229,11 +264,24 @@ export default function CourseLibraryPage() {
                           </span>
                         </span>
                         <span className="lib-file-acts">
-                          {f.preview && (
-                            <button type="button" className="lib-ghost" onClick={() => setViewing(f)}>
-                              预览
-                            </button>
-                          )}
+                          {f.preview &&
+                            (narrow && hasNative(f) ? (
+                              // 窄屏：直链 + target=_blank，交给系统 PDF 阅读器。
+                              // 用 <a> 而不是 window.open：iOS/微信会拦异步 window.open，
+                              // 而原生链接点击不受弹窗拦截策略影响。
+                              <a
+                                className="lib-ghost"
+                                href={api.officialKbFileUrl(data.kb_id, f.preview_file || f.name, true)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                预览
+                              </a>
+                            ) : (
+                              <button type="button" className="lib-ghost" onClick={() => setViewing(f)}>
+                                预览
+                              </button>
+                            ))}
                           {f.download ? (
                             <a
                               className="lib-open lib-file-dl"
@@ -267,6 +315,7 @@ export default function CourseLibraryPage() {
           key={viewing.name}
           kbId={data.kb_id}
           file={viewing}
+          narrow={narrow}
           onClose={() => setViewing(null)}
         />
       )}
@@ -283,10 +332,12 @@ export default function CourseLibraryPage() {
 function FileViewer({
   kbId,
   file,
+  narrow,
   onClose,
 }: {
   kbId: string;
   file: OfficialKbFile;
+  narrow: boolean;
   onClose: () => void;
 }) {
   const isInline = INLINE_EXT.has(file.ext);
@@ -368,7 +419,18 @@ function FileViewer({
         </div>
 
         <div className="lib-viewer-b">
-          {showPdf && (file.ext === "pdf" || previewFile) && (
+          {/* 窄屏不给 iframe：iOS/微信里它只画第一页、滑不动、也没有全屏入口。
+              这里只留一个明确的出口，把 PDF 交给系统阅读器（滚动/缩放/全屏都原生支持）。 */}
+          {showPdf && narrow && (file.ext === "pdf" || previewFile) && (
+            <div className="lib-viewer-tip">
+              <p>手机上看原版 PDF 需要交给系统阅读器，才能上下滚动、双指缩放和全屏。</p>
+              <a className="lib-share" href={src} target="_blank" rel="noopener noreferrer">
+                全屏打开
+              </a>
+            </div>
+          )}
+
+          {showPdf && !narrow && (file.ext === "pdf" || previewFile) && (
             <iframe className="lib-viewer-frame" src={src} title={base} />
           )}
 

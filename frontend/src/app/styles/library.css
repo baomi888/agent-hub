@@ -1255,8 +1255,24 @@
   .lib-courses {
     grid-template-columns: repeat(auto-fill, minmax(244px, 1fr));
   }
+  /* 预览在窄屏铺满：留 16px 边距只是浪费可读面积，而且 iOS 上手势容易
+     滑到底下的页面而不是弹层内容。配合 TSX 里"窄屏不渲染 iframe"一起看。 */
+  .lib-veil {
+    padding: 0;
+  }
   .lib-viewer {
-    width: min(960px, 96vw);
+    width: 100%;
+    height: 100dvh;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+  }
+  /* 刘海 / Home 指示条：顶栏下让一点，正文底部别被手势区盖住 */
+  .lib-viewer-h {
+    padding-top: calc(10px + env(safe-area-inset-top, 0px));
+  }
+  .lib-viewer-b {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 }
 
@@ -1288,6 +1304,8 @@
     border-radius: 0;
   }
   .lib-viewer-h {
-    padding: 10px 8px 10px 14px;
+    /* 这里必须重复带上 safe-area-top：本段写在 1024 段之后，
+       只写 padding 简写会把上面那条 calc 覆盖成 10px，刘海屏上顶栏会顶到摄像头。 */
+    padding: calc(10px + env(safe-area-inset-top, 0px)) 8px 10px 14px;
   }
 }

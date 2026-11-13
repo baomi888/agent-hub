@@ -352,6 +352,12 @@ def current_user_id(request: Request) -> str:
     from core import account  # 延迟导入：account 反过来 import 本模块的口令函数
 
     row = account.get_user(uid)
+    # 账号已被删除（清理测试号 / 用户注销）：墓碑表里有行就直接 401。
+    # 不拦的话，下面 auth_version 会按「库中无此人也当 0」处理，签名合法的旧 cookie
+    # 会一路放行 —— 删了号还能建会话、写 usage，看板把它算成活跃用户。
+    # 只在查不到人时才多查一次墓碑，正常用户的鉴权路径不受影响。
+    if row is None and account.is_deleted(uid):
+        raise HTTPException(status_code=401, detail="账号已注销，请重新登录")
     # 兼容既有测试/内部调用中的临时 uid：库里没有行时按代数 0 处理，
     # 是否允许该身份进入业务端点仍由各路由原有的 owner/权限校验决定。
     auth_version = int(row.get("token_valid_after") or 0) if row else 0

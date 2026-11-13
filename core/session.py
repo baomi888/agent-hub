@@ -115,6 +115,21 @@ def _init_db() -> None:
                 exp INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_revoked_exp ON revoked_tokens(exp);
+
+            -- 已删除账号的墓碑。
+            -- 为什么光删 users 行不够：current_user_id 里查不到人时按「代数 0」处理
+            -- （为兼容测试里的临时 uid），旧 cookie 照样能过鉴权、继续建会话写 usage。
+            -- 2026-11-13 实测就是这个后果：删了 8 个测试号，留下的旧令牌还在活动，
+            -- 产生 7 个孤儿会话 + 60 条孤儿 usage。
+            -- 所以删号必须留痕，鉴权入口看到墓碑直接 401。
+            -- 顺带当审计用：看板要解释「注册用户为什么掉了」，靠的就是这张表。
+            CREATE TABLE IF NOT EXISTS deleted_users (
+                uid        TEXT PRIMARY KEY,
+                username   TEXT NOT NULL DEFAULT '',
+                deleted_at INTEGER NOT NULL,
+                reason     TEXT NOT NULL DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_deleted_at ON deleted_users(deleted_at);
         """)
     with _get_conn() as conn:
         conn.executescript("""

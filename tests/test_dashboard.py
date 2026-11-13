@@ -673,3 +673,28 @@ def test_ranking_items_carry_labels(env, client):
     labels = {it["path"]: it["label"] for it in r.json()["items"]}
     assert labels["/api/chat/stream"] == "对话 · 提问（逐字回复）"
     assert labels["/api/kb/{sid}/upload"] == "知识库 · 上传文件"
+
+
+# ==================== E. 人数解释：清理 ≠ 流失（2026-11-13）====================
+
+
+def test_overview_reports_purged_accounts(env, client):
+    """注册用户掉人数时，看板要能说清是「清理了测试号」而不是「用户跑了」。
+
+    2026-11-13 实况：用户看到注册用户一小时前还是 177、现在 169，以为真实用户
+    在流失；实际是当天修公式时开的 8 个验证账号被清掉了。只给 total 的话，
+    这个解释每次都要翻库才能回答，所以 `purged` 必须跟 total 一起下发。
+    """
+    _login(client, ADMIN_NAME)
+    before = client.get("/api/admin/overview?days=7").json()["users"]
+    assert before["purged"] == 0
+
+    keep = account.create_user("qa_purge_keep", PASSWORD)["id"]
+    gone = account.create_user("qa_purge_gone", PASSWORD)["id"]
+    assert account.delete_user(gone, reason="cleanup_qa") is True
+
+    after = client.get("/api/admin/overview?days=7").json()["users"]
+    assert after["purged"] == 1
+    # 快照口径不变：total 是删完之后的真实人数（keep 在、gone 没了）
+    assert after["total"] == before["total"] + 1
+    assert account.get_user(keep) is not None

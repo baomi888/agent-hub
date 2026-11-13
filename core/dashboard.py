@@ -124,6 +124,11 @@ def _user_stats(start: int, end_excl: int) -> dict:
 
     `total` 是**当前快照**，不随 days 变化；`new` 才是区间内的。
     两者必须在 UI 上区分标注，否则用户切到"今日"看总数没变会以为筛选坏了。
+
+    `purged` 是 2026-11-13 加的：区间内被删掉的账号数。那天用户看到
+    「注册用户一小时前还是 177，现在 169」，以为真实用户流失 —— 实际是清理了
+    8 个验证账号。只给 total 的话，这种解释需求每次都得翻库才能回答，
+    所以在同一个响应里把「为什么掉」也带上。
     """
     from core import session as store
 
@@ -133,7 +138,16 @@ def _user_stats(start: int, end_excl: int) -> dict:
             "SELECT COUNT(*) FROM users WHERE created_at >= ? AND created_at < ?",
             (start, end_excl),
         ).fetchone()[0]
-    return {"total": int(total), "new": int(new)}
+        # 老库可能还没有 deleted_users（没跑过新版本启动），缺表按 0 处理，
+        # 不能让一张统计用的辅助表把整个看板打成 500。
+        try:
+            purged = conn.execute(
+                "SELECT COUNT(*) FROM deleted_users WHERE deleted_at >= ? AND deleted_at < ?",
+                (start, end_excl),
+            ).fetchone()[0]
+        except Exception:  # noqa: BLE001 — 表不存在/结构不符都按"没有清理记录"
+            purged = 0
+    return {"total": int(total), "new": int(new), "purged": int(purged)}
 
 
 def _series(day_list: list[str]) -> list[dict]:
