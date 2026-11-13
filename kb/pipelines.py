@@ -403,7 +403,11 @@ def set_public(
             meta.setdefault("official", False)
             # 老库没有这个字段：默认仅观看（可预览、不可下载），
             # 要开下载得库主自己点。
-            meta.setdefault("access", "preview")
+            #
+            # ★ 官方库例外：它的资料本来就是要发给所有人用的（导入脚本从不传 access）。
+            #   按"仅观看"落盘的话，广场卡片会写「仅观看」，而详情页因为 official
+            #   又允许下载 —— 同一个库两处说法。显式传了 access 的仍以传的为准。
+            meta.setdefault("access", "download" if meta["official"] else "preview")
             # 只在第一次公开时记时间；改简介不该让"分享于"变成今天
             if not meta.get("at"):
                 meta["at"] = int(time.time())
@@ -832,7 +836,16 @@ def list_public() -> list[dict]:
                     "official": bool(meta.get("official")),
                     # 别人能拿它做什么：preview=只能在线看，download=还能存原件。
                     # 老数据没有这个字段，按最保守的"仅观看"给。
-                    "access": "download" if meta.get("access") == "download" else "preview",
+                    #
+                    # ★ 官方库恒为 download：它的 access 从来没人设置过（导入脚本不传），
+                    #   按上面那行会算成 preview，而详情页与收藏列表都按"官方→可下载"
+                    #   处理 —— 两处口径不一致，广场卡片迟早显示成"仅观看"。
+                    #   归一化放在这里，而不是让每个调用方各判一次 official。
+                    "access": (
+                        "download"
+                        if meta.get("official") or meta.get("access") == "download"
+                        else "preview"
+                    ),
                 }
             )
     return result

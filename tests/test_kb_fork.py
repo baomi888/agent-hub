@@ -263,3 +263,27 @@ def test_access_defaults_to_preview_and_can_be_set():
     # 传别的值一律收敛成 preview，不能因为拼错就意外放开下载
     pipelines.set_public(ME, kid, True, access="whatever")
     assert pipelines.public_meta(kid)["access"] == "preview"
+
+
+def test_official_entry_is_always_download():
+    """官方库无论落在哪一层，对外都得说「可下载」。
+
+    官方库的 access 从来没人设置（导入脚本不传），早先 `set_public` 的
+    `setdefault("access", "preview")` 会把它落成"仅观看"，而详情页和收藏列表
+    都按"官方→download"处理 —— 同一个库三处两种说法：广场写「仅观看」，
+    点进去却能下载。这条钉住两条路都收敛到 download：
+      ① 新写入的官方库，落盘值就是 download；
+      ② 线上已经落成 preview 的老记录，读出来也要归一成 download。
+    """
+    kid, _ = pipelines.create_kb(ME, "官方归一化库")
+    pipelines.set_public(ME, kid, True, official=True)
+    # ① 写入路径
+    assert pipelines.public_meta(kid)["access"] == "download"
+
+    # ② 读路径：模拟线上老数据（official + preview 并存的那种）
+    with pipelines._REGISTRY_LOCK:
+        pipelines._KB_PUBLIC[kid]["access"] = "preview"
+        pipelines._save_public()
+    entry = next(x for x in pipelines.list_public() if x["kb_id"] == kid)
+    assert entry["official"] is True
+    assert entry["access"] == "download"
