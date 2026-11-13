@@ -55,6 +55,10 @@ export default function KnowledgePage() {
   /** 删库的二次确认（库 id）；删文件用下面那个 */
   const [confirmDelKb, setConfirmDelKb] = useState<string | null>(null);
   const [confirmDelFile, setConfirmDelFile] = useState<string | null>(null);
+  /** 「设为公开」的二次确认（库 id）。公开是把库交出去给人看，点一下就生效太草率：
+   *  简历、成绩单这类库，用户未必意识到「全站登录用户都能检索」是什么概念。
+   *  收回不设确认 —— 收回是止损，多一步只会拖慢。 */
+  const [confirmPub, setConfirmPub] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   /** 每个库上次用的切法（kb_id → 参数）。后端不记这件事，存在本地，
       和首页资料库面板共用同一份 baomi.kbChunk.v1 —— 两个入口改的是同一件事，
@@ -227,13 +231,16 @@ export default function KnowledgePage() {
   };
 
   /** 公开 / 收回公开。公开只放开「他人只读检索」一件事：文件清单、
-   *  上传、删除仍然只有库主能动。收回立即生效，别人的对话下一轮就挂不上。 */
+   *  上传、删除仍然只有库主能动。收回立即生效，别人的对话下一轮就挂不上。
+   *  调用方负责先过一道确认（见 confirmPub），这里只管发请求。 */
   const togglePublic = async () => {
     if (!active || busy) return;
     setBusy("public");
     try {
       const r = await api.setKbPublic(active.kb_id, !active.public);
       await refresh(active.kb_id);
+      // 成功才收起确认条；失败时留着，用户可以直接再点一次「确认公开」
+      setConfirmPub(null);
       showToast(
         "success",
         r.public ? "已公开：其他登录用户可以在对话里检索这个库（只读）" : "已收回公开：其他用户不再能检索这个库"
@@ -445,7 +452,11 @@ export default function KnowledgePage() {
                           ? "收回公开：其他用户将不能再检索这个库"
                           : "公开后其他登录用户可以在对话里检索这个库（只读）；文件清单与修改仍只有你能做"
                       }
-                      onClick={() => void togglePublic()}
+                      onClick={() => {
+                        // 公开要先确认（公开=把库交出去）；收回是止损，直接执行
+                        if (active.public) void togglePublic();
+                        else setConfirmPub(active.kb_id);
+                      }}
                     >
                       <CornIcon name="globe" />
                       {busy === "public" ? "处理中…" : active.public ? "收回公开" : "设为公开"}
@@ -470,6 +481,26 @@ export default function KnowledgePage() {
                     </button>
                   </div>
                 </div>
+
+                {confirmPub === active.kb_id && !active.public && (
+                  <div className="kbp-confirm kbp-confirm-info">
+                    <span>
+                      公开「{active.name}」？其他登录用户都能在对话里检索这 {files.length} 份资料，也能据它提问；
+                      文件清单、上传和删除仍然只有你能做，随时可以收回。
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={busy === "public"}
+                      onClick={() => void togglePublic()}
+                    >
+                      {busy === "public" ? "公开中…" : "确认公开"}
+                    </button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmPub(null)}>
+                      先不公开
+                    </button>
+                  </div>
+                )}
 
                 {confirmDelKb === active.kb_id && (
                   <div className="kbp-confirm">

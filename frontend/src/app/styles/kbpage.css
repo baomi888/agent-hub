@@ -439,6 +439,19 @@
   color: var(--red-ink);
 }
 
+/* 公开确认是同一个位置、同一套结构，但不是破坏性操作 —— 用主色而不是删除红，
+   否则用户会以为点下去是在删东西。
+   文案比删库那条长得多（要讲清「全站登录用户都能检索」到底意味着什么），
+   所以让 span 独占一行，按钮落到下一行，手机上不会被挤成窄条。 */
+.kbp-confirm-info {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.kbp-confirm-info > span {
+  flex: 1 1 100%;
+  line-height: var(--lh-body);
+}
+
 /* 空库时的一行提示：不是"空态"，上传区已经在上面了 —— 这里只补一句话，
    所以不给它 .kbp-empty 那套 40px 的上下留白 */
 .kbp-hint {
