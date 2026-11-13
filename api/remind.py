@@ -43,6 +43,7 @@ def _payload(uid: str) -> dict:
     """
     hour, minute = reminder_core.system_time(uid)
     dhour, dminute = reminder_core.default_time()
+    row = reminder_core.get_system(uid)
     return {
         "hour": hour,
         "minute": minute,
@@ -50,6 +51,11 @@ def _payload(uid: str) -> dict:
         # 默认值单独给：前端要区分「你没设过，这是全站默认」和「你设成了这个点」
         "default_hour": dhour,
         "default_minute": dminute,
+        # 新增（2026-11-13）：设置页要显示「这条现在是开着还是关着」。
+        # `exists=false` 表示连行都没有（从没设过），此时 hour/minute 是默认值。
+        # 只读，不在这里 `ensure_system` —— 那是 POST 的事。
+        "exists": row is not None,
+        "enabled": bool(row and row.get("enabled")),
         # 客户端不要自己写死档位。★ 第 1 条要求「新表支持 1–59 分钟」，但这个
         # 老契约还没放开：老前端是 select 下拉，放开 steps 它会变成空下拉。
         # 放开要等 /reminders 页面（第二波）上线一起改。

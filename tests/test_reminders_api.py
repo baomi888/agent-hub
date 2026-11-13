@@ -248,7 +248,11 @@ class TestSideEndpoints:
 
 class TestLegacyRemind:
     def test_shape_unchanged(self, client):
-        """字段一个都不能少：老前端照这个结构写的，少一个就是空白下拉。"""
+        """字段一个都不能少：老前端照这个结构写的，少一个就是空白下拉。
+
+        ★ 集合是**恰好相等**而不是包含：这一条故意拦「顺手多塞一个字段」——
+        2026-11-13 加 `exists` / `enabled` 时就是它先红的，那次是特意改的。
+        """
         body = client.get("/api/remind").json()
         assert set(body) == {
             "hour",
@@ -258,8 +262,37 @@ class TestLegacyRemind:
             "default_minute",
             "steps",
             "push_enabled",
+            # 2026-11-13：设置页要显示「这条现在开着还是关着」，
+            # 否则「还没设置过」和「被你关掉了」在界面上长得一模一样。
+            "exists",
+            "enabled",
         }
         assert body["steps"] == list(reminder_store.MINUTE_STEPS)
+
+    def test_new_user_reads_as_not_existing(self, client):
+        """从没设过：`exists=false` + 时间是全站默认 —— 但**不能建行**。"""
+        body = client.get("/api/remind").json()
+        assert body["exists"] is False
+        assert body["enabled"] is False
+        assert body["time"] == f"{body['default_hour']:02d}:{body['default_minute']:02d}"
+        assert reminder_core.get_system("u1") is None
+
+    def test_post_reports_it_enabled(self, client):
+        body = client.post("/api/remind", json={"hour": 7, "minute": 15}).json()
+        assert body["exists"] is True
+        assert body["enabled"] is True
+
+    def test_disabled_row_reads_as_closed(self, client):
+        """关掉之后 `enabled` 必须变 false：界面上「已关闭」和「没设过」
+        要靠这个区分（文案不同，改时间的行为也不同）。"""
+        client.post("/api/remind", json={"hour": 7, "minute": 0})
+        item = reminder_core.get_system("u1")
+        assert item is not None
+        client.patch(f"/api/reminders/{item['id']}", json={"enabled": False})
+
+        body = client.get("/api/remind").json()
+        assert body["exists"] is True
+        assert body["enabled"] is False
 
     def test_post_writes_both_stores(self, client):
         res = client.post("/api/remind", json={"hour": 7, "minute": 30})

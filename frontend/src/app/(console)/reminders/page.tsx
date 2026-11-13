@@ -67,6 +67,7 @@ import type {
   ReminderPrefs,
   ReminderSource,
   ReminderSummary,
+  RemindPref,
   Task,
   TaskBulkAction,
   TaskDraft,
@@ -89,6 +90,35 @@ const FREQ_OPTIONS: { value: ReminderFreq; label: string }[] = [
   { value: "weekly", label: "每周" },
   { value: "once", label: "仅一次" },
 ];
+
+/** 「每天几点」的小时档位。分钟档位不写死 —— 由 `/api/remind` 的 `steps` 给。 */
+const HOURS = Array.from({ length: 24 }, (_, i) => i);
+
+/**
+ * 「每天几点」的分钟下拉选项。
+ *
+ * 用服务端给的 `steps`（0/15/30/45）而不是 0–59，是因为后端 `_snap_time` 会把
+ * 分钟就近吸附到这四档：列出 20 分的话，用户选了会被存成 15，看起来像「选了没生效」。
+ * 当前值万一不在里面（老数据/契约变了），也要补进去 —— 否则 select 找不到匹配项，
+ * 显示成空白，用户会以为自己没设过时间。
+ */
+function minuteOptions(daily: RemindPref): number[] {
+  if (daily.steps.includes(daily.minute)) return daily.steps;
+  return [...daily.steps, daily.minute].sort((a, b) => a - b);
+}
+
+/**
+ * 「每天几点」卡片右侧的状态。
+ *
+ * 「已关闭」必须说清改时间会把它重新打开：`set_system_time` 的语义就是
+ * 「把这条改到这个点并且启用」（老接口 POST /api/remind 如此）。不说的话，
+ * 用户关掉之后碰了一下时间，第二天又收到通知，会以为是关不掉。
+ */
+function dailyHint(daily: RemindPref): string {
+  if (!daily.exists) return `还没设置过 · 现在按默认的 ${daily.time}`;
+  if (!daily.enabled) return `已关闭 · 改时间会重新开启`;
+  return `已开启 · 每天 ${daily.time}`;
+}
 
 /**
  * 每一档「提醒时做什么」到点之后**到底会发生什么**。
@@ -2025,6 +2055,8 @@ type Data = {
   sources: ReminderSource[];
   prefs: ReminderPrefs | null;
   push: PushStatus | null;
+  /** 「每天几点做回顾」（/api/remind）。端点没上线时为 null，那张卡整块不渲染 */
+  daily: RemindPref | null;
   /** 最近 50 条送达流水：用来把「今天已经响过的」捞回今天这一组 */
   fires: ReminderFire[];
 };
@@ -2091,7 +2123,7 @@ export default function RemindersPage() {
   // 也需要 today + upcoming 同时在手。读接口都走 tryRequest，端点没上线时
   // 各自返回 null，页面显示空态而不是红一片。
   const fetchAll = useCallback(async () => {
-    const [today, upcoming, all, completed, summary, list, remSummary, src, pf, push, fires] =
+    const [today, upcoming, all, completed, summary, list, remSummary, src, pf, push, fires, daily] =
       await Promise.all([
         api.tasks.list("today"),
         api.tasks.list("upcoming"),
@@ -2104,6 +2136,7 @@ export default function RemindersPage() {
         api.reminders.prefs(),
         api.push.status(),
         api.reminders.firesAll(50),
+        api.remind.get(),
       ]);
     return {
       tasks: {
@@ -2119,6 +2152,7 @@ export default function RemindersPage() {
       prefs: pf,
       push,
       fires: fires?.items ?? [],
+      daily,
     } satisfies Data;
   }, []);
 
@@ -2154,6 +2188,7 @@ export default function RemindersPage() {
   const sources = useMemo(() => data?.sources ?? [], [data]);
   const remSummary = data?.remSummary ?? null;
   const prefs = data?.prefs ?? null;
+  const daily = data?.daily ?? null;
 
   const listLabel = LIST_LABEL;
 
@@ -2806,6 +2841,25 @@ export default function RemindersPage() {
     [showToast]
   );
 
+  /** 「每天几点做回顾」。
+   *
+   * 为什么不复用 `savePrefs`：那个走 `/api/reminders/prefs`（免打扰/上限/来源开关），
+   * 这个走 `/api/remind` —— 老端点，一个值同时决定 Web Push 的时刻和日历里那条
+   * 每日事件的起点。两处混用会让「设置页改了、日历那条没动」变成玄学。
+   */
+  const saveDaily = useCallback(
+    async (hour: number, minute: number) => {
+      try {
+        const next = await api.remind.set(hour, minute);
+        setData((prev) => (prev ? { ...prev, daily: next } : prev));
+        showToast("success", `每天 ${next.time} 提醒`);
+      } catch (e) {
+        showToast("error", e instanceof Error ? e.message : "时间没存上，再试一次");
+      }
+    },
+    [showToast]
+  );
+
   const toggleSource = useCallback(
     async (key: string, next: boolean) => {
       try {
@@ -3401,6 +3455,47 @@ export default function RemindersPage() {
               这张回答「上课这件事怎么保证响」。课表是唯一有确切时刻的数据，
               所以它走系统日历，而不是再排一条推送 —— 安卓的推送在国内本来就不通。 */}
           <CourseCalendar />
+
+          {/* 「每天几点」在免打扰之前：它管「什么时候提醒」，免打扰管「什么时候
+              不提醒」，两件事成对，但前者是主设置。 */}
+          {daily ? (
+            <section className="card card-pad">
+              <h3 className="card-title">每天几点给你做回顾</h3>
+              <p className="mt-1 text-[var(--fs-xs)] text-[var(--text-3)]">
+                到点会把今天剩下的待办、六级和打卡合成一条通知。要不要收，开关在下面的
+                提醒列表里（「每日回顾」那条）—— 这里只管几点。
+              </p>
+              <div className="mt-3 flex items-center gap-2">
+                <select
+                  className="input !w-auto"
+                  aria-label="每天几点的小时"
+                  value={daily.hour}
+                  onChange={(e) => void saveDaily(Number(e.target.value), daily.minute)}
+                >
+                  {HOURS.map((h) => (
+                    <option key={h} value={h}>
+                      {String(h).padStart(2, "0")} 点
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="input !w-auto"
+                  aria-label="每天几点的分钟"
+                  value={daily.minute}
+                  onChange={(e) => void saveDaily(daily.hour, Number(e.target.value))}
+                >
+                  {minuteOptions(daily).map((m) => (
+                    <option key={m} value={m}>
+                      {String(m).padStart(2, "0")} 分
+                    </option>
+                  ))}
+                </select>
+                <span className="text-[var(--fs-xs)] text-[var(--text-3)]">
+                  {dailyHint(daily)}
+                </span>
+              </div>
+            </section>
+          ) : null}
 
           <section className="card card-pad">
             <h3 className="card-title">免打扰时间</h3>

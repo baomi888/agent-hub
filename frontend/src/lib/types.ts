@@ -1136,6 +1136,10 @@ export type RemindPref = {
   steps: number[];
   /** 服务端没配 VAPID 时为 false —— 此时改时间只影响日历 */
   push_enabled: boolean;
+  /** 「每日回顾」那条提醒是否已经在库里（false = 从没设过，hour/minute 是默认值） */
+  exists: boolean;
+  /** 那条提醒现在是否开着。关掉后改时间会把它重新打开（POST 语义如此） */
+  enabled: boolean;
 };
 
 export type PushSubscribeBody = {
