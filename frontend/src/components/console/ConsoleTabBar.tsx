@@ -68,7 +68,7 @@ export default function ConsoleTabBar({ isAdmin, onOpenChange }: Props) {
             aria-current={isCurrentNav(it.href, here) ? "page" : undefined}
             scroll={false}
           >
-            <NavIcon name={it.icon} className="h-[22px] w-[22px]" />
+            <NavIcon name={it.icon} className="h-[20px] w-[20px]" />
             <span>{it.label}</span>
           </Link>
         ))}
@@ -82,7 +82,7 @@ export default function ConsoleTabBar({ isAdmin, onOpenChange }: Props) {
           // 用户会以为自己不在任何页面里
           data-active={moreActive ? "1" : undefined}
         >
-          <NavIcon name="more" className="h-[22px] w-[22px]" />
+          <NavIcon name="more" className="h-[20px] w-[20px]" />
           <span>更多</span>
         </button>
       </nav>

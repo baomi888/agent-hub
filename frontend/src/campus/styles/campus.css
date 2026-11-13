@@ -27,6 +27,29 @@
   -webkit-overflow-scrolling: touch;
 }
 
+/*
+ * 让位于手机底部 tab（2026-11-13 第二轮）。
+ *
+ * 这一页不在控制台外壳里，`.console-scroll` 那条 padding-bottom 管不到它 ——
+ * 导航是单独挂的，让位也得单独写，否则最后一个工具面板的下沿永远压在 tab 底下。
+ * `--tabbar-h` 仍是 console.css 里那一个来源（globals.css 全局 @import 过，此处可用），
+ * 不在这里另写数字：哪天 tab 再变高，这一页才不会掉队。
+ */
+@media (max-width: 900px) {
+  .campus-scroll {
+    padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + 12px);
+  }
+  /*
+   * 「更多」面板打开时锁住底层。
+   * 用 :has() 而不是在组件里挂状态：面板是**条件渲染**的，它出现/消失本身就是信号，
+   * 再同步一份 class 就等于多一个会说谎的判据（第三批那次"底栏计数据说谎"就是这么来的）。
+   * 「更多」里放的是页面级入口，不是这一页里的弹窗，所以不能复用 campus-modal-open。
+   */
+  body:has(.tab-sheet) .campus-scroll {
+    overflow: hidden;
+  }
+}
+
 .campus-shell {
   --campus-max: 880px;
   --campus-gap: 12px;

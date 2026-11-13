@@ -27,6 +27,10 @@ NAV_TS = SRC / "lib" / "nav.ts"
 TABBAR_TSX = SRC / "components" / "console" / "ConsoleTabBar.tsx"
 LAYOUT_TSX = SRC / "components" / "console" / "ConsoleLayout.tsx"
 HOME_TSX = SRC / "app" / "page.tsx"
+# 工具集页在 (campus) 这个路由组里，目录名带括号
+TOOLS_PAGE = SRC / "app" / "(campus)" / "tools" / "page.tsx"
+CAMPUS_TABBAR = SRC / "campus" / "components" / "CampusTabBar.tsx"
+CAMPUS_CSS = SRC / "campus" / "styles" / "campus.css"
 
 
 def _read(p: Path) -> str:
@@ -197,6 +201,11 @@ def test_token_matches_the_tab_it_describes():
 
     这条是防"改了 tab 项高度、忘了改令牌"。数字对不上时，
     让位与遮挡之间就差那几个像素 —— 而它只在真机上最后一行才会露出来。
+
+    ★ 上下内边**从 CSS 里读**，不再写死 +8。
+      2026-11-13 第二轮把 padding 从 4 改成 3、命中区从 52 改成 44，
+      写死 8 的那版会红一次：红得住，但下次再调还得手改一遍预期，
+      改着改着就会有人直接把断言删掉。读出来才对得上"令牌描述 tab"这个本意。
     """
     css = _read(CONSOLE_CSS)
     m = re.search(r"--tabbar-h:\s*(\d+)px", css)
@@ -210,9 +219,15 @@ def test_token_matches_the_tab_it_describes():
     item_h = int(mh.group(1))
 
     assert item_h >= 44, f"tab 项只有 {item_h}px，低于 44 的触控下限"
-    # 上下各 4px 内边
-    assert total == item_h + 8, (
-        f"--tabbar-h={total} 与 tab 项高度 {item_h}+8 不一致，让位会算错"
+
+    # padding: 3px 6px calc(3px + env(...)) → 上 3 / 下 3
+    bar = _css_rule(block, ".tabbar")
+    pad = re.search(r"padding:\s*(\d+)px\s+\d+px\s+calc\((\d+)px", bar)
+    assert pad, f"tabbar 的 padding 不是「上 / 左右 / calc(下 + 安全区)」三值写法：{bar[:80]}"
+    top, bottom = int(pad.group(1)), int(pad.group(2))
+
+    assert total == item_h + top + bottom, (
+        f"--tabbar-h={total} 与 tab 实际高度 {item_h}(命中区)+{top}+{bottom} 不一致，让位会算错"
     )
 
 
@@ -284,3 +299,43 @@ def test_tabbar_closes_on_navigation():
     tab = _read(TABBAR_TSX)
     assert "setMoreOpen(false)" in tab
     assert "pathname]" in tab or "[pathname]" in tab, "面板的收起没有跟着路由走"
+
+
+# ==================== ⑤ 工具集页也要有 ====================
+
+
+def test_tools_page_has_the_same_tabbar():
+    """工具集（/tools）在 (campus) 路由组，不套外壳 —— 必须单独挂一次。
+
+    不挂的表现（用户 2026-11-13 反馈的原话）：从「更多」点进工具集，底部 tab
+    当场消失，想换个功能只能先点「← 回首页」再点一次目标。一级入口不该是这样。
+
+    和首页那条断言同一个道理：查的是**渲染**（`<CampusTabBar`），
+    不是"文件里出现过这个名字"—— 只留 import 的话组件根本不在 DOM 里。
+    """
+    page = _read(TOOLS_PAGE)
+    assert "<CampusTabBar" in page, "工具集页没有渲染底部 tab：进来就换不走了"
+
+    # 薄壳必须真的把 isAdmin 递下去，否则「更多」里会少两格（管理员最常用的两个入口）
+    wrapper = _read(CAMPUS_TABBAR)
+    assert "ConsoleTabBar" in wrapper and "isAdmin" in wrapper, (
+        "工具集那条 tab 没接 isAdmin：管理员的「工作流 / 看板」在「更多」里会凭空消失"
+    )
+
+
+def test_tools_page_makes_room_for_the_tab():
+    """工具集页的滚动容器也得让位。
+
+    它是 `height:100dvh` 自成一屏，`.console-scroll` 那条 padding-bottom 管不到 ——
+    不单独写的话，最后一个工具面板的下沿永远压在 tab 底下（番茄钟的按钮就在那）。
+    """
+    css = _read(CAMPUS_CSS)
+    block = _media_block(css, "@media (max-width: 900px)", "campus-scroll")
+    rules = _css_rules(block, ".campus-scroll")
+    assert any("var(--tabbar-h)" in r for r in rules), (
+        "工具集页没有为 tab 让位 —— 内容底部会被挡住"
+    )
+    # 不许另写数字：这个高度只该有一个来源（console.css 的 :root）
+    assert not re.search(r"padding-bottom:\s*calc\(\s*\d+px", "\n".join(rules)), (
+        "工具集页写死了 tab 高度，应该用 var(--tabbar-h)"
+    )
