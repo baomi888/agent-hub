@@ -1567,8 +1567,12 @@
   }
   .kb-board-send {
     /* 手机上主操作给足热区，别做成 28px 高的小按钮 */
+    min-height: 42px;
+    padding: 8px 18px;
+  }
+  .kb-board-emoji-btn {
     min-height: 36px;
-    padding: 7px 18px;
+    padding: 6px 12px;
   }
   .kb-board-sticker {
     width: 40px;
