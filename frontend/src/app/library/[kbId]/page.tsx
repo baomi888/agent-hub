@@ -23,6 +23,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import MascotLogo from "@/components/chat/MascotLogo";
 import CornIcon from "@/components/CornIcon";
+import KbBoard from "@/components/library/KbBoard";
 import AuthGate from "@/components/AuthGate";
 import { ToastHost } from "@/components/console/ui";
 import { api } from "@/lib/api";
@@ -304,6 +305,10 @@ export default function CourseLibraryPage() {
               这些资料由站点整理，供校内学习使用。转载或再发布请注明来源与许可（如 OpenStax 的
               CC BY-NC-SA 4.0）。
             </p>
+
+            {/* 留言板放在资料清单之后：这一页的主角是资料，讨论是附在后面的
+                —— 放在最上面会让人以为进的是论坛而不是课程资料页。 */}
+            <KbBoard kbId={data.kb_id} />
           </>
         )}
       </main>

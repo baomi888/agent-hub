@@ -22,6 +22,9 @@ from __future__ import annotations
   GET    /api/kb/public/{kb_id}        官方课程库详情（含文件清单）
   GET    /api/kb/public/{kb_id}/file   官方课程库原始文件（下载 / 内嵌预览）
   GET    /api/kb/public/{kb_id}/text   官方课程库资料正文预览
+  GET    /api/kb/public/{kb_id}/board  公开库留言（分页，游标 before）
+  POST   /api/kb/public/{kb_id}/board  发一条留言（纯文字）
+  DELETE /api/kb/public/{kb_id}/board/{post_id}  删留言（作者/库主/管理员）
   POST   /api/kb/{kb_id}/query         同步问答（公开库对全站登录用户开放）
 """
 
@@ -36,7 +39,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.schemas import KBQueryResponse
-from core import account, config, quota, upload
+from core import account, config, kb_board, quota, upload
 from core import session as store
 from core.auth import get_current_user
 from core.netsafe import assert_safe_url
@@ -288,8 +291,11 @@ async def delete_kb(kb_id: str, uid: str = Depends(get_current_user)) -> dict:
                 pipelines.get_or_create(uid, kb_id).delete()
 
             await asyncio.to_thread(_force_delete)
+            # 库都没了，留言也就没有了展示对象：这里物理删，不留软删的行
+            await asyncio.to_thread(kb_board.purge_kb, kb_id)
             return {"ok": True}
         raise HTTPException(status_code=404, detail=f"知识库不存在：{kb_id}")
+    await asyncio.to_thread(kb_board.purge_kb, kb_id)
     return {"ok": True}
 
 
@@ -353,11 +359,15 @@ async def list_public_kbs(uid: str = Depends(get_current_user)) -> dict:
     """
     kbs = await asyncio.to_thread(pipelines.list_public)
     mine = await asyncio.to_thread(pipelines.owned_kb_ids, uid)
+    # 留言数一次查全：广场上十几个库，逐个 count 就是十几次查询，而卡片上
+    # 「N 条留言」本来就是让人判断"这个库有没有人在讨论"的信号，不能没有。
+    post_counts = await asyncio.to_thread(kb_board.counts_by_kb)
     out = []
     for k in kbs:
         if k["kb_id"] in mine:
             continue
         k = dict(k)
+        k["posts"] = post_counts.get(k["kb_id"], 0)
         # 官方库没有真实账号，`_owner_display_name` 查不到人只会回空串；
         # 这里直接署名"官方"，避免卡片上出现"某位同学"这种明显不对的说法
         k["owner_name"] = "官方" if k.get("official") else await asyncio.to_thread(
@@ -1071,3 +1081,139 @@ async def download_remote(url: str, uid: str = Depends(get_current_user)) -> Res
         media_type=content_type or "application/octet-stream",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
     )
+
+
+# ==================== 公开库留言板（论坛式留言）====================
+#
+# 覆盖两类库：官方课程库 + 用户自己公开的库。两者在"能不能留言"上完全一样，
+# 区别只在"能不能看文件清单"（那是另一件事，见上面的 official 段）。
+#
+# 只收文字，没有图片、没有附件。表情就是普通字符（前端插入到正文里），
+# 所以这里不需要单独的表情字段 —— 多一个字段就多一处校验、多一种"这条
+# 到底算不算空"的边界，而它带来的能力（表情和文字分开存）根本用不到。
+
+
+class BoardPostIn(BaseModel):
+    body: str = Field("", description="留言正文，纯文字，最多 300 字")
+
+
+def _public_kb_or_404(kb_id: str) -> str:
+    """确认这是**已公开**的库，返回 owner；否则 404。
+
+    用户的私有库打到这里也是 404，与 `_must_own` 同一个理由：
+    403 等于告诉对方"这个 kb_id 是真的，只是你看不到"。
+    库主把库收回公开后，留言接口立刻跟着 404 —— 留言不会跟着库泄露出去。
+    """
+    owner = pipelines.owner_of(kb_id)
+    if not owner or not pipelines.is_public(kb_id):
+        raise HTTPException(status_code=404, detail="知识库不存在或没有公开")
+    return owner
+
+
+def _board_authors(posts: list[dict]) -> dict[str, dict]:
+    """一次查出这页留言的作者名与头像。
+
+    删号的人查不到 → 显示「已注销用户」，而不是空白：一条没有署名的留言
+    看起来像系统故障，写清楚"这个人注销了"反而是有用的信息。
+    """
+    users = account.get_users([p["user_id"] for p in posts])
+    out: dict[str, dict] = {}
+    for p in posts:
+        u = users.get(p["user_id"]) or {}
+        name = (u.get("nickname") or "").strip() or (u.get("username") or "").strip()
+        out[p["user_id"]] = {"name": name or "已注销用户", "avatar": u.get("avatar") or ""}
+    return out
+
+
+def _post_view(post: dict, authors: dict[str, dict], uid: str, kb_owner: str, admin: bool) -> dict:
+    a = authors.get(post["user_id"]) or {}
+    return {
+        "id": post["id"],
+        "body": post["body"],
+        "at": post["at"],
+        "author": {"name": a.get("name") or "已注销用户", "avatar": a.get("avatar") or ""},
+        "mine": post["user_id"] == uid,
+        # 作者能删自己的，库主能删自己库里的，管理员都能删。
+        # 前端据此决定要不要显示那个「删除」，但真正的判定在 DELETE 里再走一遍。
+        "can_delete": post["user_id"] == uid or kb_owner == uid or admin,
+    }
+
+
+@router.get("/public/{kb_id}/board")
+async def get_board(
+    kb_id: str,
+    limit: int = Query(kb_board.PAGE, ge=1, le=100),
+    before: int | None = Query(None, ge=1),
+    uid: str = Depends(get_current_user),
+) -> dict:
+    """一页留言，最新的在前。`before` 传上一页最后一条的 id 做游标。"""
+    owner = _public_kb_or_404(kb_id)
+
+    def _read() -> dict:
+        posts = kb_board.list_posts(kb_id, limit=limit, before=before)
+        total = kb_board.count_posts(kb_id)
+        return {"posts": posts, "total": total}
+
+    data = await asyncio.to_thread(_read)
+    posts = data["posts"]
+    authors = await asyncio.to_thread(_board_authors, posts)
+    admin = await asyncio.to_thread(quota._is_admin, uid)  # noqa: SLF001
+    meta = await asyncio.to_thread(pipelines.public_meta, kb_id)
+    return {
+        "kb_id": kb_id,
+        "name": await asyncio.to_thread(pipelines.name_of, kb_id) or kb_id,
+        "desc": meta.get("desc") or "",
+        "official": await asyncio.to_thread(pipelines.is_official, kb_id),
+        "owner_name": "官方" if meta.get("official") else "",
+        "total": data["total"],
+        "stickers": list(kb_board.STICKERS),
+        "posts": [_post_view(p, authors, uid, owner, admin) for p in posts],
+        # 这一页拿满了就说明可能还有：前端据此显示「加载更早」，不猜总数
+        "has_more": len(posts) >= limit and data["total"] > len(posts),
+    }
+
+
+@router.post("/public/{kb_id}/board")
+async def add_board_post(
+    kb_id: str, req: BoardPostIn, uid: str = Depends(get_current_user)
+) -> dict:
+    """发一条留言。纯文字，最多 300 字。"""
+    owner = _public_kb_or_404(kb_id)
+    text = (req.body or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="写点什么再发吧")
+    if len(text) > kb_board.MAX_LEN:
+        raise HTTPException(
+            status_code=400, detail=f"留言最多 {kb_board.MAX_LEN} 字，现在 {len(text)} 字"
+        )
+    try:
+        post = await asyncio.to_thread(kb_board.add_post, kb_id, uid, text)
+    except kb_board.TooFast as e:
+        detail = f"发得太快了，{e.wait} 秒后再试" if e.wait else "这个库一小时内的留言有点多，歇一会儿再来"
+        raise HTTPException(status_code=429, detail=detail) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    authors = await asyncio.to_thread(_board_authors, [post])
+    admin = await asyncio.to_thread(quota._is_admin, uid)  # noqa: SLF001
+    return {"post": _post_view(post, authors, uid, owner, admin)}
+
+
+@router.delete("/public/{kb_id}/board/{post_id}")
+async def delete_board_post(
+    kb_id: str, post_id: int, uid: str = Depends(get_current_user)
+) -> dict:
+    """删一条留言（软删）。作者本人 / 库主 / 管理员。"""
+    owner = _public_kb_or_404(kb_id)
+    post = await asyncio.to_thread(kb_board.get_post, post_id)
+    # 路径上的库必须和帖子的库是同一个：否则拿 A 库的路径去删 B 库的帖，
+    # 权限判断会按 A 库的库主身份放行。
+    if not post or post["kb_id"] != kb_id or post.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="这条留言不存在")
+    admin = await asyncio.to_thread(quota._is_admin, uid)  # noqa: SLF001
+    if not (post["user_id"] == uid or owner == uid or admin):
+        raise HTTPException(status_code=403, detail="只能删除自己的留言")
+    ok = await asyncio.to_thread(kb_board.delete_post, post_id, uid, kb_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="这条留言不存在")
+    return {"ok": True, "id": post_id}

@@ -16,7 +16,9 @@ import type { FontScale } from "@/lib/hooks/usePrefs";
 const CONSOLE_LINKS = [
   { href: "/delegate", icon: "clock", label: "委托", full: "每日委托" },
   { href: "/report", icon: "calendar", label: "总结", full: "每日总结" },
-  { href: "/checkin", icon: "star", label: "打卡", full: "打卡记录" },
+  // 2026-11-13 用户要求：第四个位置给「待办」。打卡仍可从对话的「今天」条进入，
+  // 但这一格要留给每天真正会点开的东西 —— 打卡是回顾，待办是接下来做什么。
+  { href: "/reminders", icon: "check", label: "待办", full: "待办与提醒" },
   { href: "/settings", icon: "settings", label: "设置", full: "设置" },
 ];
 

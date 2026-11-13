@@ -42,6 +42,7 @@ export type CornIconName =
   | "info" // 提示
   | "back" // 返回（左箭头）
   | "arrow" // 指向（右箭头）
+  | "smile" // 表情 / 留言板
   | "corn"; // 兜底：mini 知穗
 
 const INK_STROKE = { strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -523,9 +524,21 @@ function Arrow() {
   );
 }
 
+/* 表情：留言板的「表情」按钮。两个短竖当眼睛，弯的一笔当嘴 —— 与整套图标的
+   2.6~3.4 线宽保持一致，别为了"可爱"加圆点眼睛，那会让它在侧栏里显得脏。 */
+function Smile() {
+  return (
+    <g {...INK_STROKE}>
+      <circle cx="24" cy="24" r="16" fill="#FFFDF6" strokeWidth={3} />
+      <path d="M17.5 20 v2.2" strokeWidth={2.6} />
+      <path d="M30.5 20 v2.2" strokeWidth={2.6} />
+      <path d="M17 27.5 C19.8 31.4 28.2 31.4 31 27.5" fill="none" strokeWidth={2.8} />
+    </g>
+  );
+}
+
 const ICONS: Record<string, () => React.JSX.Element> = {
-  book: Book,
-  pen: Pen,
+  book: Book,  pen: Pen,
   notes: Notes,
   home: Home,
   bolt: Bolt,
@@ -555,6 +568,7 @@ const ICONS: Record<string, () => React.JSX.Element> = {
   info: Info,
   back: Back,
   arrow: Arrow,
+  smile: Smile,
   corn: Corn,
 };
 

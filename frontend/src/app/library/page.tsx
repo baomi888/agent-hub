@@ -19,6 +19,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import MascotLogo from "@/components/chat/MascotLogo";
 import CornIcon from "@/components/CornIcon";
+import KbBoard from "@/components/library/KbBoard";
 import AuthGate from "@/components/AuthGate";
 import { ToastHost } from "@/components/console/ui";
 import { api } from "@/lib/api";
@@ -50,6 +51,8 @@ export default function LibraryPage() {
   const [opening, setOpening] = useState<string | null>(null);
 
   const [shareOpen, setShareOpen] = useState(false);
+  /** 正在看哪个库的留言板；null = 没开 */
+  const [boardKb, setBoardKb] = useState<PublicKbInfo | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -320,15 +323,26 @@ export default function LibraryPage() {
                 </div>
                 <div className="lib-card-f">
                   <span className="lib-when">{k.at ? fmtWhen(k.at) + "分享" : "较早分享"}</span>
-                  <button
-                    type="button"
-                    className="lib-open"
-                    disabled={opening !== null}
-                    onClick={() => void openInChat(k)}
-                  >
-                    {opening === k.kb_id ? "打开中…" : "挂到我的对话"}
-                    {opening !== k.kb_id && <CornIcon name="arrow" className="h-3.5 w-3.5" />}
-                  </button>
+                  <span className="lib-card-acts">
+                    {/* 留言入口：数字 > 0 才显示条数，0 条时只说「留言」，
+                        免得一排「留言 0」把卡片下半区塞满。 */}
+                    <button
+                      type="button"
+                      className="lib-ghost lib-board-open"
+                      onClick={() => setBoardKb(k)}
+                    >
+                      留言{k.posts ? ` ${k.posts}` : ""}
+                    </button>
+                    <button
+                      type="button"
+                      className="lib-open"
+                      disabled={opening !== null}
+                      onClick={() => void openInChat(k)}
+                    >
+                      {opening === k.kb_id ? "打开中…" : "挂到我的对话"}
+                      {opening !== k.kb_id && <CornIcon name="arrow" className="h-3.5 w-3.5" />}
+                    </button>
+                  </span>
                 </div>
               </li>
             ))}
@@ -350,6 +364,41 @@ export default function LibraryPage() {
             showToast("success", `「${name}」已出现在广场上`);
           }}
         />
+      )}
+
+      {boardKb && (
+        <div className="lib-veil" onClick={() => setBoardKb(null)} role="presentation">
+          <div
+            className="lib-sheet lib-board-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${boardKb.name} 的留言板`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="lib-sheet-h">
+              <h2 title={boardKb.name}>{boardKb.name}</h2>
+              <button
+                type="button"
+                className="lib-sheet-x"
+                onClick={() => setBoardKb(null)}
+                aria-label="关闭留言板"
+              >
+                <CornIcon name="close" className="h-4 w-4" />
+              </button>
+            </div>
+            {/* 同学分享的库没有详情页（文件清单不给看），留言就挂在这个弹层里。
+                官方库的留言板在 /library/{kbId} 页脚，用的是同一个组件。 */}
+            <KbBoard
+              kbId={boardKb.kb_id}
+              compact
+              onCount={(n) =>
+                setPub((list) =>
+                  list.map((x) => (x.kb_id === boardKb.kb_id ? { ...x, posts: n } : x))
+                )
+              }
+            />
+          </div>
+        </div>
       )}
 
       <ToastHost toasts={toasts} />

@@ -1,6 +1,6 @@
 // 后端 API 封装：统一错误处理 + 类型化（相对路径走 rewrites 代理）
 import type { Conversation, KbInfo, KbFile, FilePreview, SearchResult, Defaults, Message } from "./types";
-import type { PublicKbInfo, OfficialKbDetail } from "./types";
+import type { PublicKbInfo, OfficialKbDetail, BoardData, BoardPost } from "./types";
 import type { KbProposal, KbProposalConfirmResult } from "./types";
 import type { DialogueCandidatesResp, ImportDialogueResult, CourseReminderState } from "./types";
 import type { CalendarLink } from "./types";
@@ -347,6 +347,22 @@ export const api = {
   officialKbFileUrl: (kbId: string, name: string, inline = false) =>
     `/api/kb/public/${encodeURIComponent(kbId)}/file?name=${encodeURIComponent(name)}` +
     (inline ? "&inline=1" : ""),
+  // ---------- 公开库留言板（论坛式留言）----------
+  /** 一页留言，最新在前。`before` 传上一页最后一条的 id 做游标（不是 offset） */
+  getKbBoard: (kbId: string, before?: number) =>
+    request<BoardData>(
+      `/api/kb/public/${encodeURIComponent(kbId)}/board` + (before ? `?before=${before}` : "")
+    ),
+  postKbBoard: (kbId: string, body: string) =>
+    request<{ post: BoardPost }>(`/api/kb/public/${encodeURIComponent(kbId)}/board`, {
+      method: "POST",
+      body: JSON.stringify({ body }),
+    }),
+  deleteKbBoardPost: (kbId: string, postId: number) =>
+    request<{ ok: boolean; id: number }>(
+      `/api/kb/public/${encodeURIComponent(kbId)}/board/${postId}`,
+      { method: "DELETE" }
+    ),
   createKb: (name: string) =>
     request<{ kb_id: string; name: string }>("/api/kb/create", {
       method: "POST",

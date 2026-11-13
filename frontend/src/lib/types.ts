@@ -49,6 +49,38 @@ export interface PublicKbInfo {
    * 只有这类库允许点进去看文件清单 —— 用户分享的库永远只给份数。
    */
   official?: boolean;
+  /** 留言板上的条数。0 = 还没人说话，卡片上就不显示这个数字 */
+  posts?: number;
+}
+
+/** 公开知识库留言板上的一条留言（GET /api/kb/public/{kb_id}/board） */
+export interface BoardPost {
+  id: number;
+  /** 纯文字。表情就是普通字符，和正文一起存 */
+  body: string;
+  /** Unix 秒 */
+  at: number;
+  author: { name: string; avatar: string };
+  /** 是不是自己写的（前端据此高亮） */
+  mine: boolean;
+  /** 作者本人 / 库主 / 管理员能看到删除按钮；真正的判定在后端 */
+  can_delete: boolean;
+}
+
+/** 一个公开库的留言板首屏（含官方表情候选） */
+export interface BoardData {
+  kb_id: string;
+  name: string;
+  desc: string;
+  official: boolean;
+  owner_name: string;
+  /** 留言总数（不是这一页的条数） */
+  total: number;
+  /** 「官方表情包」候选，由后端下发 —— 前端不硬编码，加表情不用改两处 */
+  stickers: string[];
+  posts: BoardPost[];
+  /** 还有更早的留言可以翻 */
+  has_more: boolean;
 }
 
 /** 官方课程库里的一份资料（GET /api/kb/public/{kb_id}） */

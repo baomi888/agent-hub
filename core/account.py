@@ -282,6 +282,25 @@ def get_user(uid: str) -> dict | None:
         return dict(row) if row else None
 
 
+def get_users(uids: list[str]) -> dict[str, dict]:
+    """批量取用户，返回 `{uid: user}`。
+
+    为什么需要：留言板一页 30 条，逐条 `get_user` 就是 30 次查询。
+    这里一条 `IN (...)` 就够了；查不到的人（注销、删号）直接不在返回里，
+    调用方按"没有这个人"处理，不用为它单独判空。
+    """
+    ids = [u for u in dict.fromkeys(uids or []) if u]
+    if not ids:
+        return {}
+    marks = ",".join("?" * len(ids))
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT " + _USER_COLS + " FROM users WHERE id IN (" + marks + ")",
+            ids,
+        ).fetchall()
+    return {r["id"]: dict(r) for r in rows}
+
+
 def get_user_by_username(name: str) -> dict | None:
     with _conn() as conn:
         row = conn.execute(

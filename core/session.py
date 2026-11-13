@@ -130,6 +130,23 @@ def _init_db() -> None:
                 reason     TEXT NOT NULL DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_deleted_at ON deleted_users(deleted_at);
+
+            -- 公开知识库留言板（论坛式留言）。
+            -- 只跟 kb_id 关联，不参与检索：删库/重建索引不该顺手抹掉别人说过的话，
+            -- 所以它既不进 kb_files.json，也不在 Chroma 里。
+            -- 软删（deleted_at 非空）而不是 DELETE：删帖这件事要能回溯
+            -- —— 用户投诉"我的留言被删了"时，得说得清是谁、什么时候删的。
+            CREATE TABLE IF NOT EXISTS kb_posts (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                kb_id      TEXT NOT NULL,
+                user_id    TEXT NOT NULL,
+                body       TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                deleted_at INTEGER,
+                deleted_by TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_kbpost_kb ON kb_posts(kb_id, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_kbpost_user ON kb_posts(user_id, created_at);
         """)
     with _get_conn() as conn:
         conn.executescript("""

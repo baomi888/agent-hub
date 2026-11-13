@@ -155,8 +155,19 @@ def test_public_list_excludes_caller_and_private(monkeypatch, kb_id):
     # 字段集合钉死：广场要展示的资料够用，且**没有**文件清单。
     # 一旦有人往这里顺手加了 files 明细、owner uid 之类，这条会红。
     # official 是 2026-11-13 加的唯一新字段：前端靠它把官方课程库单独分一区。
+    # posts 是同一天加的留言条数（卡片上「留言 N」用）—— 只给数量，同样不含清单。
     assert all(
-        set(k) == {"kb_id", "name", "chunks", "files", "owner_name", "desc", "at", "official"}
+        set(k) == {
+            "kb_id",
+            "name",
+            "chunks",
+            "files",
+            "owner_name",
+            "desc",
+            "at",
+            "official",
+            "posts",
+        }
         for k in theirs["kbs"]
     )
 

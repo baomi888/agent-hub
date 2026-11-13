@@ -1309,3 +1309,270 @@
     padding: calc(10px + env(safe-area-inset-top, 0px)) 8px 10px 14px;
   }
 }
+
+/* ============================================================
+   公开库留言板（2026-11-13）
+   官方库铺在详情页页脚，同学分享的库放在广场的弹层里 —— 同一个组件，
+   差别只在 .is-compact（弹层里不再重复引导语、输入框矮一行）。
+   视觉与资料清单同一套语言：不做成聊天泡泡。留言是"一栏一段"，
+   泡泡会把每条都框起来，十几条之后整页都是框，反而更难扫读。
+   ============================================================ */
+
+.kb-board {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.kb-board.is-compact {
+  margin-top: 8px;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.kb-board-h {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.kb-board-lead {
+  margin: 8px 0 12px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+}
+
+/* 输入区做成一块"纸"：留言框 + 工具条 + 表情面板共用一个边框，
+   否则三块各自带边，看起来像三个不相干的控件。 */
+.kb-board-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+}
+
+.kb-board-input {
+  width: 100%;
+  min-height: 56px;
+  resize: vertical;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+  outline: none;
+}
+
+.kb-board-input::placeholder {
+  color: var(--text-3);
+}
+
+.kb-board-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.kb-board-emoji-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.kb-board-emoji-btn:hover,
+.kb-board-emoji-btn.on {
+  background: var(--fill-3);
+  color: var(--ink);
+}
+
+.kb-board-count {
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.kb-board-send {
+  padding: 6px 16px;
+  font-size: var(--fs-sm);
+}
+
+.kb-board-emoji {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 6px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--fill-3);
+}
+
+.kb-board-sticker {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.kb-board-sticker:hover {
+  background: var(--fill-2);
+}
+
+.kb-board-tip {
+  margin: 0;
+  color: var(--red-ink);
+  font-size: var(--fs-xs);
+}
+
+.kb-board-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kb-post {
+  display: flex;
+  gap: 10px;
+  padding: 11px 10px;
+  border-radius: var(--radius-sm);
+}
+
+.kb-post:hover {
+  background: var(--fill-3);
+}
+
+/* 自己的留言给一层很淡的金底：方便在长列表里找回"我刚发的那条" */
+.kb-post.is-mine {
+  background: var(--accent-soft);
+}
+
+.kb-post-ava {
+  width: 32px;
+  height: 32px;
+  flex: none;
+}
+
+.kb-post-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.kb-post-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.kb-post-h b {
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.kb-post-h time {
+  font-variant-numeric: tabular-nums;
+}
+
+.kb-post-me {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent-tint);
+  color: var(--accent-ink);
+  font-size: 10px;
+}
+
+.kb-post-del {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.kb-post-del:hover {
+  color: var(--red-ink);
+}
+
+.kb-post-b {
+  margin: 3px 0 0;
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+  /* 保留用户敲的换行；长串（链接、公式）必须能断，否则手机上整页横向滚 */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.kb-board-empty {
+  margin: 18px 0;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.kb-board-more {
+  display: block;
+  margin: 12px auto 0;
+}
+
+/* 广场弹层：比分享弹层宽一点（留言一行放得下更多），
+   高度交给 .lib-sheet 的 max-height，内部整体滚动。 */
+.lib-board-sheet {
+  max-width: 560px;
+  max-height: min(88dvh, 800px);
+}
+
+.lib-card-acts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+@media (max-width: 640px) {
+  /* 手机上是"全屏面板"而不是居中卡片：留言要一边看一边打字，
+     上下都留白只会让软键盘弹起后可视区更小。 */
+  .lib-board-sheet {
+    width: 100%;
+    max-width: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
+    border: 0;
+    border-radius: 0;
+    padding: calc(12px + env(safe-area-inset-top, 0px)) 14px
+      calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+  .kb-board-send {
+    /* 手机上主操作给足热区，别做成 28px 高的小按钮 */
+    min-height: 36px;
+    padding: 7px 18px;
+  }
+  .kb-board-sticker {
+    width: 40px;
+    height: 40px;
+    font-size: 22px;
+  }
+}
