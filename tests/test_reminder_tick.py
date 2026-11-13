@@ -411,6 +411,12 @@ class TestTaskNotification:
         out = self._content(_ts(19, 0))
         assert out["title"] == "交实验报告 · 已过期"
 
+    def test_due_right_now_says_now(self, db):
+        """把提醒设成和截止同一时刻是常见做法（「到点就叫我」）。
+        那一分钟告诉他「已过期」纯属添堵。"""
+        out = self._content(_ts(20, 0))
+        assert out["title"] == "交实验报告 · 现在截止"
+
     def test_empty_note_falls_back_to_deadline(self, db):
         """备注空的时候，绝对时刻就是第二行唯一的信息，不能留白。"""
         out = self._content(_ts(22, 0), note=None)

@@ -134,8 +134,12 @@ def _due_gap_label(due_at: int, now: int) -> str:
     「还有 1 小时 47 分钟」精确但没人拿它做决定，还把行占满。
     """
     diff = int(due_at) - int(now)
-    if diff <= 0:
+    # 正点这一分钟说「现在截止」，不是「已过期」：用户把提醒设成和截止同一
+    # 时刻是常见做法（「到点就叫我」），这时告诉他「已经过期了」纯属添堵。
+    if diff <= -60:
         return "已过期"
+    if diff <= 0:
+        return "现在截止"
     if diff < 60:
         return "马上到期"
     if diff < 3600:
