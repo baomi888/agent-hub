@@ -31,6 +31,7 @@ HOME_TSX = SRC / "app" / "page.tsx"
 TOOLS_PAGE = SRC / "app" / "(campus)" / "tools" / "page.tsx"
 CAMPUS_TABBAR = SRC / "campus" / "components" / "CampusTabBar.tsx"
 CAMPUS_CSS = SRC / "campus" / "styles" / "campus.css"
+TOOLS_HUB = SRC / "campus" / "components" / "CampusToolsHub.tsx"
 
 
 def _read(p: Path) -> str:
@@ -308,7 +309,7 @@ def test_tools_page_has_the_same_tabbar():
     """工具集（/tools）在 (campus) 路由组，不套外壳 —— 必须单独挂一次。
 
     不挂的表现（用户 2026-11-13 反馈的原话）：从「更多」点进工具集，底部 tab
-    当场消失，想换个功能只能先点「← 回首页」再点一次目标。一级入口不该是这样。
+    当场消失，想换个功能只能先退回首页再点一次目标。一级入口不该是这样。
 
     和首页那条断言同一个道理：查的是**渲染**（`<CampusTabBar`），
     不是"文件里出现过这个名字"—— 只留 import 的话组件根本不在 DOM 里。
@@ -320,6 +321,29 @@ def test_tools_page_has_the_same_tabbar():
     wrapper = _read(CAMPUS_TABBAR)
     assert "ConsoleTabBar" in wrapper and "isAdmin" in wrapper, (
         "工具集那条 tab 没接 isAdmin：管理员的「工作流 / 看板」在「更多」里会凭空消失"
+    )
+
+
+def test_back_link_hides_on_phone_but_stays_on_desktop():
+    """「← 回首页」只在宽屏保留，900 以下整行收起。
+
+    两个方向都要钉住，少一边都会出事：
+      · 手机上不收 → 首屏白占一格，而且和底部 tab 功能重复；
+      · 宽屏也删 → (campus) 没有侧栏，PWA 独立窗口没有后退键，
+        宽屏用户就被关在工具集页里了（这是它 2026-11-07 被加进来的原因）。
+    所以断言分两半：CSS 隐藏的断点是 900，DOM 里那条 Link 仍在。
+    """
+    css = _read(CAMPUS_CSS)
+    block = _media_block(css, "@media (max-width: 900px)", "campus-bar")
+    rules = _css_rules(block, ".campus-bar")
+    # 取浏览器实际采用的值：同块里后面再写一句 display:flex 就该判红
+    assert _last_display("\n".join(rules)) == "none", (
+        "手机端没有收起返回栏 —— 有底部 tab 的地方不该再有返回入口"
+    )
+
+    hub = _read(TOOLS_HUB)
+    assert 'className="campus-back"' in hub, (
+        "把 DOM 也删了：宽屏没有侧栏、PWA 独立窗口没有后退键，就回不去了"
     )
 
 
