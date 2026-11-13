@@ -27,9 +27,11 @@ NAV_TS = SRC / "lib" / "nav.ts"
 TABBAR_TSX = SRC / "components" / "console" / "ConsoleTabBar.tsx"
 LAYOUT_TSX = SRC / "components" / "console" / "ConsoleLayout.tsx"
 HOME_TSX = SRC / "app" / "page.tsx"
-# 工具集页在 (campus) 这个路由组里，目录名带括号
-TOOLS_PAGE = SRC / "app" / "(campus)" / "tools" / "page.tsx"
-CAMPUS_TABBAR = SRC / "campus" / "components" / "CampusTabBar.tsx"
+# 工具集页和其它页一样住在 (console) 里，由 layout 统一挂外壳（2026-11-13 第三轮）
+TOOLS_PAGE = SRC / "app" / "(console)" / "tools" / "page.tsx"
+# 旧路由组。它必须一直是"不存在"的状态：两个组各有一份 tools/page.tsx 会撞路由，
+# 而 2026-10-30 那次双路由事故就是"删了文件、服务器上还留着"造成的。
+LEGACY_CAMPUS_GROUP = SRC / "app" / "(campus)"
 CAMPUS_CSS = SRC / "campus" / "styles" / "campus.css"
 TOOLS_HUB = SRC / "campus" / "components" / "CampusToolsHub.tsx"
 
@@ -114,6 +116,17 @@ def _media_block(css: str, query: str, must_contain: str | None = None) -> str:
                     break
         else:
             raise AssertionError(f"媒体查询没有闭合：{query}")
+
+
+def _strip_comments(text: str) -> str:
+    """去掉注释（CSS 只有 /* */，TS/TSX 还有 //）。
+
+    断言"某个类名不该出现"时必须先剥注释：这一轮删掉 .campus-scroll / .campus-bar
+    之后，文件里保留了好几段解释"它们为什么被删"的注释 ——
+    不剥的话，注释反而会让断言红，等于罚了写清楚原因的人。
+    """
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    return re.sub(r"(?m)^\s*//.*$", "", text)
 
 
 def _last_display(rule: str) -> str | None:
@@ -302,64 +315,118 @@ def test_tabbar_closes_on_navigation():
     assert "pathname]" in tab or "[pathname]" in tab, "面板的收起没有跟着路由走"
 
 
-# ==================== ⑤ 工具集页也要有 ====================
+# ==================== ⑤ 工具集页：和其它页一样住进外壳 ====================
 
 
-def test_tools_page_has_the_same_tabbar():
-    """工具集（/tools）在 (campus) 路由组，不套外壳 —— 必须单独挂一次。
+def test_tools_page_lives_in_the_console_group():
+    """工具集必须住在 (console) 里 —— 那是外壳（侧栏 + tab + 滚动）唯一的挂载点。
 
-    不挂的表现（用户 2026-11-13 反馈的原话）：从「更多」点进工具集，底部 tab
-    当场消失，想换个功能只能先退回首页再点一次目标。一级入口不该是这样。
+    用户 2026-11-13 的原话：「我不想点开工具集这个模块还要跳到一个独立的页面，
+    想要和跳转设置这些一样」。不在这个组里的表现是**整屏换掉**：
+    宽屏侧栏消失、手机底部 tab 消失，想换功能只能先点「← 回首页」。
 
-    和首页那条断言同一个道理：查的是**渲染**（`<CampusTabBar`），
-    不是"文件里出现过这个名字"—— 只留 import 的话组件根本不在 DOM 里。
+    断言查两件事：
+      · 文件在 (console)/tools 下（路由组决定外壳，别的都不算数）；
+      · 页面用 PageShell 出页头 —— 不用它的话就没有 pg-head，
+        进来第一眼和设置页长得不一样，"一样"只做了一半。
+    """
+    assert TOOLS_PAGE.exists(), f"工具集不在 (console) 组里：{TOOLS_PAGE}"
+    page = _read(TOOLS_PAGE)
+    assert "<PageShell" in page, "工具集页没有用 PageShell 出页头：和别的页对不齐"
+
+
+def test_tools_page_does_not_mount_its_own_tabbar():
+    """外壳已经有一条 tab，页面不许再加一条。
+
+    两条 fixed 在同一个 bottom:0 上会完全重叠：看起来只有一条，
+    但点击落到上面那条、无障碍树里读到两个导航，键盘 Tab 也会走两遍。
+    这是「原来单独挂一条」的遗留，并进外壳后必须拆掉。
     """
     page = _read(TOOLS_PAGE)
-    assert "<CampusTabBar" in page, "工具集页没有渲染底部 tab：进来就换不走了"
-
-    # 薄壳必须真的把 isAdmin 递下去，否则「更多」里会少两格（管理员最常用的两个入口）
-    wrapper = _read(CAMPUS_TABBAR)
-    assert "ConsoleTabBar" in wrapper and "isAdmin" in wrapper, (
-        "工具集那条 tab 没接 isAdmin：管理员的「工作流 / 看板」在「更多」里会凭空消失"
+    assert "ConsoleTabBar" not in _strip_comments(page), (
+        "工具集页又自己挂了一条 tab：外壳里已经有一条，两条会叠在同一个位置"
     )
 
 
-def test_back_link_hides_on_phone_but_stays_on_desktop():
-    """「← 回首页」只在宽屏保留，900 以下整行收起。
+def test_legacy_campus_group_is_gone():
+    """旧的 (campus) 路由组不能再出现。
 
-    两个方向都要钉住，少一边都会出事：
-      · 手机上不收 → 首屏白占一格，而且和底部 tab 功能重复；
-      · 宽屏也删 → (campus) 没有侧栏，PWA 独立窗口没有后退键，
-        宽屏用户就被关在工具集页里了（这是它 2026-11-07 被加进来的原因）。
-    所以断言分两半：CSS 隐藏的断点是 900，DOM 里那条 Link 仍在。
+    两个组各放一份 /tools 会直接撞路由（Next 构建期报错）；
+    更常见的是"本地删了、服务器上还在"——2026-10-30 那次双路由事故就是这么来的，
+    所以这条断言同时钉住仓库里没有它。
     """
-    css = _read(CAMPUS_CSS)
-    block = _media_block(css, "@media (max-width: 900px)", "campus-bar")
-    rules = _css_rules(block, ".campus-bar")
-    # 取浏览器实际采用的值：同块里后面再写一句 display:flex 就该判红
-    assert _last_display("\n".join(rules)) == "none", (
-        "手机端没有收起返回栏 —— 有底部 tab 的地方不该再有返回入口"
-    )
-
-    hub = _read(TOOLS_HUB)
-    assert 'className="campus-back"' in hub, (
-        "把 DOM 也删了：宽屏没有侧栏、PWA 独立窗口没有后退键，就回不去了"
+    assert not LEGACY_CAMPUS_GROUP.exists(), (
+        f"(campus) 组又回来了：{LEGACY_CAMPUS_GROUP} —— 会和 (console)/tools 撞路由"
     )
 
 
-def test_tools_page_makes_room_for_the_tab():
-    """工具集页的滚动容器也得让位。
+def test_back_link_is_gone_entirely():
+    """「← 回首页」整块删除，不是隐藏。
 
-    它是 `height:100dvh` 自成一屏，`.console-scroll` 那条 padding-bottom 管不到 ——
-    不单独写的话，最后一个工具面板的下沿永远压在 tab 底下（番茄钟的按钮就在那）。
+    它 2026-11-07 被加进来的唯一理由是：这一页不套外壳、宽屏没有侧栏、
+    PWA 独立窗口没有后退键 —— 不给入口就把人关在页面上。
+    并进 (console) 之后三个前提全部消失（宽屏有侧栏、手机有 tab），
+    再留着就是一个占首屏、功能重复的按钮。
+
+    ★ 先剥注释再判：文件里保留了说明"为什么删"的注释，
+      不剥的话注释反而会让这条断言红。
     """
-    css = _read(CAMPUS_CSS)
-    block = _media_block(css, "@media (max-width: 900px)", "campus-scroll")
-    rules = _css_rules(block, ".campus-scroll")
-    assert any("var(--tabbar-h)" in r for r in rules), (
-        "工具集页没有为 tab 让位 —— 内容底部会被挡住"
+    hub = _strip_comments(_read(TOOLS_HUB))
+    assert "campus-back" not in hub and "回首页" not in hub, (
+        "工具集页还留着返回入口 —— 侧栏和底部 tab 已经是出路了"
     )
-    # 不许另写数字：这个高度只该有一个来源（console.css 的 :root）
-    assert not re.search(r"padding-bottom:\s*calc\(\s*\d+px", "\n".join(rules)), (
-        "工具集页写死了 tab 高度，应该用 var(--tabbar-h)"
+    css = _strip_comments(_read(CAMPUS_CSS))
+    for dead in (".campus-bar", ".campus-back", ".campus-brand"):
+        assert dead not in css, f"{dead} 的样式还留着：DOM 都没了，它只会误导下一个人"
+
+
+def test_tools_page_does_not_build_its_own_scroll():
+    """工具集不许再自带滚动容器 —— 否则是外壳里套外壳。
+
+    `.campus-scroll` 是 `height:100dvh`，比父容器（外壳扣掉内边距后）还高：
+    结果是一条内层滚动条 + 一条外层滚动条，滚到底还会把滚动接力给外层
+    （iOS 上表现为整页弹一下）。底部让位也会同时存在两份，改一处忘一处
+    就是"最后一条永远压在 tab 底下"。
+    """
+    hub = _strip_comments(_read(TOOLS_HUB))
+    assert "campus-scroll" not in hub, "工具集组件里还有 .campus-scroll：双层滚动"
+    css = _strip_comments(_read(CAMPUS_CSS))
+    assert ".campus-scroll" not in css, ".campus-scroll 的规则还在（不再有元素用它）"
+
+
+def test_modal_scroll_lock_follows_the_scroll_container():
+    """弹窗锁滚动必须打到**真正滚的那一层**。
+
+    `scrollLock.ts` 只负责给 body 打 `campus-modal-open`，锁哪一层由 CSS 决定。
+    它原来打的是 `.campus-scroll`（页面自己的容器），容器搬走后这一条会**静默失效**：
+    弹窗开着，背后的工具集照样滚 —— 没有报错、没有红，只有手感不对。
+
+    所以断言两半：类还在打、目标已经是 `.console-scroll`。
+    """
+    lock = _read(SRC / "campus" / "logic" / "scrollLock.ts")
+    assert "campus-modal-open" in _strip_comments(lock), (
+        "锁滚动的类名被改了，CSS 那条选择器就再也命中不到"
+    )
+
+    css = _strip_comments(_read(CAMPUS_CSS))
+    assert "body.campus-modal-open .console-scroll" in css, (
+        "锁滚动的目标没跟着搬：弹窗打开时背后的页面还能滚"
+    )
+
+
+def test_gpa_table_anchors_its_sr_only_label():
+    """GPA 表格必须自带定位基准，否则它会把整个文档撑高 26px。
+
+    证据链（2026-11-13 并进外壳后实测）：
+      · /tools 的 document.scrollHeight 是 870，window.scrollTo 真能滚 26px；
+      · 同样外壳下的 /reminders 与 /settings 都是 844 / 滚不动 —— 不是外壳的锅；
+      · 溢出元素只有一个：GPA 表头里 Tailwind 的 `sr-only`（1px，position:absolute）。
+        表格没有定位祖先时它相对**初始包含块**定位，静态位置落在第 869px。
+
+    html 是 overflow:hidden 的固定视口，这一截滚轮滚不动，但**程序能滚**：
+    焦点跳到视口外的输入框时浏览器会把整页推上去，fixed 的底部 tab 会跟背景错位。
+    """
+    rule = _css_rule(_strip_comments(_read(CAMPUS_CSS)), ".campus-table")
+    assert "position: relative" in rule, (
+        "GPA 表格没有定位基准：表头那个 sr-only 会把文档撑高，整页能被程序滚动"
     )

@@ -12,43 +12,16 @@
    ============================================================ */
 
 /*
- * 滚动容器。
- * 全局 base.css（工作台外壳）把 html/body 设成 height:100% + overflow:hidden，
- * 板块路由没有外壳包裹，于是内容一超出视口就被裁掉，页面「钉死」不能滚。
- * 这里自己开一层：高度锁视口，纵向滚动，滚动条贴在视口右边而不是 880px 栏目边上。
- * overscroll-behavior: contain 防止滚到底后把滚动接力给外层（预览里会连带整页弹一下）。
- */
-.campus-scroll {
-  height: 100vh;
-  height: 100dvh;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-}
-
-/*
- * 让位于手机底部 tab（2026-11-13 第二轮）。
+ * ★ 这里曾经有个 .campus-scroll（height:100dvh + overflow-y:auto）。
+ *   2026-11-13 第三轮删掉了：工具集并进 (console) 路由组，滚动容器由外壳的
+ *   .console-scroll 提供。再留一层就是「外壳里套外壳」——
+ *   100dvh 比父容器高，会出现两条滚动条，而且底部让位要写两遍（外壳一遍、
+ *   这里一遍），改一处忘一处就是最后一条永远压在 tab 底下。
  *
- * 这一页不在控制台外壳里，`.console-scroll` 那条 padding-bottom 管不到它 ——
- * 导航是单独挂的，让位也得单独写，否则最后一个工具面板的下沿永远压在 tab 底下。
- * `--tabbar-h` 仍是 console.css 里那一个来源（globals.css 全局 @import 过，此处可用），
- * 不在这里另写数字：哪天 tab 再变高，这一页才不会掉队。
+ *   同理删掉的还有：900px 断点里的 tab 让位、`body:has(.tab-sheet)` 锁滚动、
+ *   .campus-bar（返回栏）、.campus-head（页头）——
+ *   前两条外壳已经做了，后两条由 PageShell 和侧栏接管。
  */
-@media (max-width: 900px) {
-  .campus-scroll {
-    padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + 12px);
-  }
-  /*
-   * 「更多」面板打开时锁住底层。
-   * 用 :has() 而不是在组件里挂状态：面板是**条件渲染**的，它出现/消失本身就是信号，
-   * 再同步一份 class 就等于多一个会说谎的判据（第三批那次"底栏计数据说谎"就是这么来的）。
-   * 「更多」里放的是页面级入口，不是这一页里的弹窗，所以不能复用 campus-modal-open。
-   */
-  body:has(.tab-sheet) .campus-scroll {
-    overflow: hidden;
-  }
-}
 
 .campus-shell {
   --campus-max: 880px;
@@ -96,10 +69,14 @@
   --t-draw: #7A6BA8;
   --t-draw-ink: #5E5189;
 
+  /* 版心仍是 880（六个工具按这个宽度排的，单词卡另有 1080）。
+     外面套着 .console-scroll 与 .console-page，两层内边距已经给足，
+     这里再写 28/16/72 的话顶部会多出 28px、底部多出 72px —— 页头被顶下去一大截。
+     所以内边距归零，只负责限宽和居中。 */
   width: 100%;
   max-width: var(--campus-max);
   margin: 0 auto;
-  padding: 28px 16px 72px;
+  padding: 0;
   color: var(--ink);
 }
 
@@ -276,80 +253,16 @@
   }
 }
 
-/* ---------- 返回栏（独立页专用，2026-11-07；手机端已收，2026-11-13） ---------- */
+/* ---------- 返回栏（已删除，2026-11-13 第三轮） ---------- */
 
 /*
- * 这一页不套控制台外壳，而桌面快捷方式打开的是 PWA 独立窗口，里面没有
- * 浏览器后退键。所以回程入口必须自己给，且要一直在页头（不随滚动消失）。
- * 尺寸跟 /install 那张公开页的 .tour-back 对齐：同一个动作在两页长得一样。
+ * 这一段原来放着 .campus-bar / .campus-back / .campus-brand。
+ * 它们存在的前提是「这一页不套外壳、宽屏没有侧栏、PWA 独立窗口没有后退键」——
+ * 并进 (console) 之后这个前提彻底消失了：宽屏有侧栏、手机有底部 tab，
+ * 返回入口不再需要自己造一个。DOM 与样式一并删除，不留在文件里。
  *
- * ★ 只在宽屏存在。900px 以下整行 display:none —— 这一页挂上了和控制台同一套
- *   底部 tab，换功能不必先回首页，"唯一出路口"的前提不成立；而手机首屏本来就紧，
- *   这一行（44 触控 + 8 间距）白占一格。断点用 900 而不是文件里惯用的 640，
- *   是为了跟 tab 的亮相点对齐：有 tab 的地方就不该同时有返回入口。
+ * 页头（.campus-head / .campus-title / .campus-sub）同理，已交给 PageShell。
  */
-.campus-bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-
-.campus-back {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 32px;
-  font-size: var(--fs-md);
-  color: var(--text-2);
-  text-decoration: none;
-  transition: var(--t-color);
-}
-
-.campus-back:hover,
-.campus-back:focus-visible {
-  color: var(--accent-ink);
-}
-
-.campus-brand {
-  margin-left: auto;
-  font-size: var(--fs-xs);
-  letter-spacing: var(--ls-wide);
-  color: var(--text-3);
-}
-
-/* 手机端整行收起：返回链接由底部 tab 取代，品牌小字留着只是又占一行。
-   断点跟 console.css 里 .tabbar 的 900 对齐，避免 641~900 出现"tab 和返回并存"。 */
-@media (max-width: 900px) {
-  .campus-bar {
-    display: none;
-  }
-}
-
-/* ---------- 页头 ---------- */
-
-.campus-head {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 20px;
-}
-
-.campus-title {
-  margin: 0;
-  font-family: var(--font-serif);
-  font-size: var(--fs-title);
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  color: var(--ink);
-}
-
-.campus-sub {
-  margin: 0;
-  font-size: var(--fs-md);
-  line-height: 1.7;
-  color: var(--text-3);
-}
 
 /* ---------- 工具切换（横向滚动，窄屏不换行挤压） ---------- */
 
@@ -808,9 +721,8 @@
 
 /* 窄屏三列会挤成一团，直接堆叠 */
 @media (max-width: 560px) {
-  .campus-shell {
-    padding: 20px 12px 56px;
-  }
+  /* 这里原来写 padding: 20px 12px 56px。内边距已交还给 .console-page /
+     .console-scroll（它们各自在 900 断点收过一档），这一层只留内容间距。 */
 
   .campus-stats {
     grid-template-columns: 1fr;
@@ -827,6 +739,24 @@
   width: 100%;
   border-collapse: collapse;
   font-size: var(--fs-md);
+  /*
+   * 为什么这一层需要定位基准（2026-11-13 第三轮，并进控制台外壳后才发现）：
+   *
+   * 表头有一格是 `<th><span class="sr-only">操作</span></th>`，那是 Tailwind 的
+   * sr-only —— `position: absolute` + 1px。表格没有定位祖先时，它相对**初始包含块**
+   * 定位，静态位置落在页面第 869px 处，于是 document.documentElement.scrollHeight
+   * 从 844 变成 870。
+   *
+   * html 是 `overflow: hidden`（工作台是固定视口外壳），这一截用户滚轮滚不动，
+   * 但 `window.scrollTo` 仍有 26px 余量：焦点跳到视口外的输入框时浏览器会把整页
+   * 推上去，fixed 的底部 tab 与背景瞬间错位一下。量出来的证据是
+   * 「/tools 能滚 26px，/reminders 和 /settings 都是 0」—— 不是外壳的问题。
+   *
+   * 给它一个定位基准就收干净了（实测 870 → 844）。不给 .campus-shell 加，
+   * 是因为 shell 里还有一批 absolute 元素（工具溢出菜单等）依赖更近的祖先，
+   * 动 shell 会连它们一起搬。
+   */
+  position: relative;
 }
 
 .campus-table th {
@@ -1160,7 +1090,11 @@
  * 弹窗开着时，背景那层滚动容器不再吃滚轮。
  * 现在只剩「本轮完成」提醒用得到 —— 最近记录 / 专注统计已改成页面内展开，不再锁滚动。
  */
-body.campus-modal-open .campus-scroll {
+/* 锁滚动的目标跟着搬家（2026-11-13 第三轮）：
+   原来是 .campus-scroll（这一页自己的滚动容器），并进 (console) 之后那个容器没了，
+   滚动发生在外壳的 .console-scroll 上。类名 body.campus-modal-open 保持不变 ——
+   scrollLock.ts 只负责打这个类，改目标只该动 CSS 这一处。 */
+body.campus-modal-open .console-scroll {
   overflow: hidden;
 }
 
@@ -2988,21 +2922,9 @@ body.campus-modal-open .campus-scroll {
     margin-top: auto;
   }
 
-  /* 页头瘦身：说明段整段收掉，标题降一档 —— 手机上没人来这一页读介绍 */
-  .campus-head {
-    gap: 0;
-    margin-bottom: 12px;
-  }
-
-  .campus-shell {
-    padding-top: 12px;
-  }
-
-  .campus-sub {
-    display: none;
-  }
-
-  /* 返回栏的触控高度与外边距随整行隐藏一并删除，见 .campus-bar 处的 900 断点 */
+  /* 页头与返回栏的收缩规则已随 .campus-head / .campus-bar 一并删除：
+     页头现在是 PageShell 的 .pg-head，手机上的压缩由 console.css 的
+     .pg-head / .pg-head--compact 统一管，不在这里另写一份。 */
 
   /*
    * 工具标签仍保持 2×3 一格不藏（见上面 720px 那条注释的理由），只把密度压下来：
@@ -3363,7 +3285,7 @@ body.campus-modal-open .campus-scroll {
  * 1440 的屏幕上左右各空掉 280 —— 一整页内容被捏在中间，看起来像没做完。
  *
  * 这里用 :has() 按「内容是谁」挑容器，而不是给 .campus-shell 加类：
- * 路由薄壳（app/(campus)/tools/page.tsx）不用动，其他五个工具照旧 880。
+ * 路由薄壳（app/(console)/tools/page.tsx）不用动，其他五个工具照旧 880。
  * 不支持 :has() 的浏览器退化成 880，也就是现状，不会崩。
  */
 .campus-shell:has(#campus-panel-words) {
@@ -5989,7 +5911,6 @@ body.campus-modal-open .campus-scroll {
     padding-bottom: calc(16px + env(safe-area-inset-bottom));
   }
 
-  .campus-shell {
-    padding-bottom: calc(72px + env(safe-area-inset-bottom));
-  }
+  /* .campus-shell 原来在这里补 72px + 安全区。内边距归零后这一步由
+     .console-scroll 承担（它的 padding-bottom 里已经带了 env(safe-area-inset-bottom)）。 */
 }

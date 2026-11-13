@@ -3,16 +3,20 @@
 /**
  * 校园工具集 · 板块容器
  *
- * 职责只有三件：页头、工具切换、渲染当前工具。
+ * 职责只有两件：工具切换、渲染当前工具。
  * 任何具体业务逻辑都不写在这里 —— 这一层要薄，薄到换工具时不需要动它。
  *
  * 六个工具已全部迁移到新实现，旧的静态页 /tools.html 仍然保留但不再被这里引用。
  * 以后新增工具：在 ToolNav 的 TOOL_LIST 里加一条、在下面的 PANELS 里加一行即可。
+ *
+ * ★ 页头与滚动容器都**不在这里**（2026-11-13 第三轮）：
+ *   页面并进了 (console) 路由组，滚动由 .console-scroll 提供、页头由 PageShell 提供、
+ *   返回入口由侧栏 / 底部 tab 提供。这一层只管「切哪个工具」。
+ *   再在这里开一层 height:100dvh 的话，就是外壳里套外壳 —— 两层滚动条。
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComponentType } from "react";
-import Link from "next/link";
 import GpaTool from "../tools/gpa/GpaTool";
 import PomodoroTool from "../tools/pomodoro/PomodoroTool";
 import ScheduleTool from "../tools/schedule/ScheduleTool";
@@ -172,86 +176,52 @@ export default function CampusToolsHub() {
 
   return (
     /*
-     * 外层这一圈是滚动容器，不是装饰。
-     * 全局 base.css 把 html/body 设成 height:100% + overflow:hidden（工作台是固定视口的外壳），
-     * 所以这一页如果不自己滚，内容一变高下半截就永远够不到 —— 番茄钟加了统计与同步之后
-     * 就撞上了这个坑。滚动条放在最外层，才不会卡在 880px 的栏目边上。
+     * 根节点就是 .campus-shell —— 它承载六支工具身份色（--t-gpa 等）和按键配色，
+     * 面板里的每一个颜色变量都从这里继承，所以这一层不能去。
+     * 但它的 padding 在内嵌时是 0（见 campus.css 的 .campus-shell 注释）：
+     * 外壳的 .console-scroll / .console-page 已经给过内边距，再叠一层就多出 28px。
+     *
+     * 不用 <main>：ConsoleLayout 里已经有一个 <main class="console-page">，
+     * 一个页面只能有一个 main。
      */
-    <div className="campus-scroll">
-      <main className="campus-shell">
-        {/*
-         * 这一行（返回 + 品牌字）现在只在宽屏存在，手机上由 CSS 整行隐掉
-         * （campus.css 的 `@media (max-width: 900px)`）。
-         *
-         * 为什么手机能收了（2026-11-13）：这一页挂上了和控制台同一套底部 tab，
-         * 换功能不用先回首页 —— 返回入口原本存在的理由（"唯一的出路口"）就没了。
-         * 它原本的由来（2026-11-07）：这一页不套控制台外壳，桌面快捷方式打开的
-         * 是 PWA 独立窗口（manifest display: standalone），窗口里没有后退按钮，
-         * 想回去只剩标题栏那个 × —— 一点整个应用就没了。**宽屏至今如此**：
-         * (campus) 路由组没有侧栏，900px 以上这一行仍是唯一的出路，所以 DOM 不能删。
-         *
-         * 目标写死 "/" 且用 replace，不调 router.back()：
-         *   · "/" 已登录是工作台、未登录是介绍页，两种情况都回得到"应用里"；
-         *   · back() 在独立窗口里历史为空时会直接关窗口，正是要避免的行为；
-         *   · replace 不新增历史，从设置页进来的人按后退仍是回设置页，
-         *     不会在 "/" 和这一页之间来回弹。
-         * 文案只写「回首页」，不按登录态分「回工作台 / 回首页」：
-         * "/" 对两种身份都是首页，这么说永远不错；也省掉一次 /auth/me 请求
-         * —— 这一页本来是免登录的，不该为一句文案把它绑上登录态。
-         */}
-        <div className="campus-bar">
-          <Link href="/" replace className="campus-back" aria-label="回首页（工具集是独立页面）">
-            <span aria-hidden="true">←</span> 回首页
-          </Link>
-          <span className="campus-brand">知穗 AGENT</span>
+    <div className="campus-shell">
+      <ToolNav active={active} onChange={changeTool} />
+
+      {/*
+       * 外面这层 div 是 `display: contents`（campus.css 的 .campus-panel-slot），
+       * 不产生盒子，所以版式与「Panel 直接挂在 shell 下」完全一致；
+       * 它存在的唯一目的是给宿主一个可以 `contains()` 的边界（判焦点、判弹窗）。
+       * id 与 ToolNav 里按钮的 aria-controls 对应 —— 这一对原来悬着，没有落地元素。
+       */}
+      <div
+        id={`campus-panel-${active}`}
+        ref={panelRef}
+        className="campus-panel-slot"
+      >
+        <Panel key={reload} />
+      </div>
+
+      {stale ? (
+        <div className="campus-remote" role="status">
+          <span className="campus-remote-text">
+            {label}在别处（另一台设备或另一个账号）已经变了。你正在这里编辑，先没动它。
+          </span>
+          <button
+            type="button"
+            className="campus-btn is-ghost campus-remote-btn"
+            onClick={bumpReload}
+          >
+            载入新的
+          </button>
+          <button
+            type="button"
+            className="campus-remote-dismiss"
+            onClick={() => setStale(false)}
+          >
+            先不看
+          </button>
         </div>
-
-        <header className="campus-head">
-          <h1 className="campus-title">校园工具集</h1>
-          <p className="campus-sub">
-            不用登录、不连教务，打开就能用。不登录时数据只存在这台设备的浏览器里；
-            登录后课表、DDL、背单词和番茄钟的记录可同步到云端，换设备也在。
-          </p>
-        </header>
-
-        <ToolNav active={active} onChange={changeTool} />
-
-        {/*
-         * 外面这层 div 是 `display: contents`（campus.css 的 .campus-panel-slot），
-         * 不产生盒子，所以版式与「Panel 直接挂在 shell 下」完全一致；
-         * 它存在的唯一目的是给宿主一个可以 `contains()` 的边界（判焦点、判弹窗）。
-         * id 与 ToolNav 里按钮的 aria-controls 对应 —— 这一对原来悬着，没有落地元素。
-         */}
-        <div
-          id={`campus-panel-${active}`}
-          ref={panelRef}
-          className="campus-panel-slot"
-        >
-          <Panel key={reload} />
-        </div>
-
-        {stale ? (
-          <div className="campus-remote" role="status">
-            <span className="campus-remote-text">
-              {label}在别处（另一台设备或另一个账号）已经变了。你正在这里编辑，先没动它。
-            </span>
-            <button
-              type="button"
-              className="campus-btn is-ghost campus-remote-btn"
-              onClick={bumpReload}
-            >
-              载入新的
-            </button>
-            <button
-              type="button"
-              className="campus-remote-dismiss"
-              onClick={() => setStale(false)}
-            >
-              先不看
-            </button>
-          </div>
-        ) : null}
-      </main>
+      ) : null}
     </div>
   );
 }

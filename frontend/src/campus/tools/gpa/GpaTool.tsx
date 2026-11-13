@@ -253,7 +253,7 @@ export default function GpaTool() {
         )}
 
         <p className="campus-card-note" style={{ marginTop: 12 }}>
-          数据只存在这台设备的浏览器里，不上传、不需要登录。清理浏览器数据会一并清掉。
+          数据先存在这台设备的浏览器里，登录后会同步到云端，换设备也在。清理浏览器数据会一并清掉本地那份。
         </p>
       </div>
     </div>
