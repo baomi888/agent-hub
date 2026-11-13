@@ -133,8 +133,12 @@
 @media (max-width: 899px) {
   main.workbench-main {
     margin: 8px;
-    height: calc(100vh - 16px);
-    height: calc(100dvh - 16px);
+    /* 底部要让出手机导航条的高度（2026-11-13 第三批）。
+       ★ 这条规则在 fx.css 里，加载在 base.css 之后 —— 在 base.css 里改
+         `main.workbench-main` 的高度是无效的（实测还是 100dvh - 16px，
+         输入区被压在 tab 底下 53px）。高度只取 --tabbar-h 这一个来源。 */
+    height: calc(100vh - 16px - var(--tabbar-h));
+    height: calc(100dvh - 16px - var(--tabbar-h) - env(safe-area-inset-bottom, 0px));
     border-radius: var(--radius-md);
   }
   .side-left {

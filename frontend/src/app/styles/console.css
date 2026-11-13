@@ -90,11 +90,14 @@
   text-align: left;
   transition: var(--t-color);
 }
+/* 图标与文字同色（跟着导航项走），不单独压暗一档。
+   之前写死 --text-3，整列图标比旁边的字暗一截，看起来像"这几个功能不可用"；
+   而导航图标的任务是帮人扫读，不是退到背景里。 */
 .nav-item svg {
-  width: 18px;
-  height: 18px;
+  width: 19px;
+  height: 19px;
   flex: none;
-  color: var(--text-3);
+  color: currentColor;
 }
 .nav-item:hover {
   background: var(--fill-2);
@@ -107,7 +110,8 @@
   font-weight: 600;
 }
 .nav-item[aria-current="page"] svg {
-  color: var(--accent-ink);
+  /* 已经 color: currentColor，选中态由父级文字色统一管 —— 这条留着只是明确意图 */
+  color: inherit;
 }
 .nav-sec {
   font-size: var(--fs-xs);
@@ -115,6 +119,28 @@
   color: var(--text-3);
   padding: var(--space-16) var(--space-10) var(--space-6);
   font-weight: 600;
+}
+
+/* ---------- 手机底部 tab ----------
+   桌面上的导航是竖排侧栏，手机上是底部一条 —— 同一个 NAV 的两套排法，
+   任何时刻只该出现一套。所以这里默认全关，≤900 才开（见文件末尾的媒体查询）。
+   用 display 而不是条件渲染：条件渲染要靠 JS 量宽度，首屏会先画错再纠正。 */
+.tabbar,
+.tab-sheet,
+.tab-sheet-scrim {
+  display: none;
+}
+
+/* 底部 tab 的高度，只此一处。
+   ★ 它必须是一个变量，因为有三处要"让"出这个高度：
+       ① .console-scroll 的 padding-bottom（内容别被压住）
+       ② .console-shell 的 min-height（短页面别多出一条假滚动条）
+       ③ base.css 的 main.workbench-main 高度（首页整屏卡片）
+     三处各自写死 60/72 的话，哪天把 tab 做高一档，就会有一处忘了跟 ——
+     表现是"最后一条待办永远被挡住"或者"短页面永远能滚动一下"。
+     不含 iPhone home 条的安全区（那要各自叠 env()）。 */
+:root {
+  --tabbar-h: 60px; /* 4(上内边) + 52(命中区) + 4(下内边) */
 }
 
 .console-page {
@@ -453,7 +479,9 @@
      深色主题下那是 #1A1610，滑块会变成深色压在金色轨道上（原型自带
      #FFFDF6 的 --paper，移植时不能照抄这个名字） */
   background: var(--step-2);
-  box-shadow: var(--shadow-1);
+  /* 关闭态的轨道是 --fill-1、滑块是 --step-2，两个都约等于纸色 ——
+     只靠一圈 1px --line 分不开。滑块用自己那档影子浮起来。 */
+  box-shadow: var(--knob-shadow);
   transition: transform 0.18s ease;
 }
 .switch[aria-checked="true"]::before {
@@ -1264,55 +1292,140 @@ textarea.input {
     grid-template-columns: minmax(0, 1fr);
   }
   .console-nav {
-    border-right: none;
-    border-bottom: 1px solid var(--line);
-    /* 手机上这块导航是"每次都要占的固定成本"，所以一直想用列数换行数。
-       现在是 9 个入口：4 列排出来是 4+4+1，最后一项孤零零一行，还是要 3 行；
-       5 列理论上能压成 2 行，但 390px 下每列只剩约 71px，放不下「每日委托」这种
-       4 字标签（要 82px）。所以定 3 列：每列约 118px，最长 4 字一行放得下，
-       9 项正好 3 行排满，不留孤行。
-       11-07：入口标签从「校园工具集」改成「工具集」—— 5 字在 4 列（83px）里会折成
-       「校园工具 / 集」两行，那是这次把列数改成 3 的直接原因；标签短了以后 3 列更宽松，
-       但列数保持 3 不变（2 行凑不出来，4 列又会留孤行）。 */
-    padding: var(--space-10);
+    /* 手机上整块让位给底部 tab（2026-11-13 第三批）。
+       换掉的是原来那套 3 列 × 3 行的网格：它把 9 个入口铺在内容上面，
+       光导航就占掉首屏 240px —— 手机上每次打开待办都要先滑过一遍导航。
+       竖排侧栏在 390px 宽度里没有任何立足空间，不缩小、不折叠，直接不渲染。 */
+    display: none;
   }
-  .nav-brand {
-    padding: var(--space-2) var(--space-4) var(--space-8);
-    gap: var(--space-6);
+  /* 把底部那条 tab 的高度从内容区里让出来，多留 12px 呼吸。
+     少算这一段的表现是：最后一条待办永远压在 tab 底下点不到。 */
+  .console-scroll {
+    padding-bottom: calc(var(--tabbar-h) + 12px + env(safe-area-inset-bottom, 0px));
   }
-  .nav-brand .logo {
-    width: 22px;
-    height: 22px;
+  /* 「更多」面板打开时锁住底层滚动：两层都能滚的话，手指在面板上滑会把后面的页面
+     一起带着走，面板本身反而纹丝不动。 */
+  .console-scroll.is-locked {
+    overflow: hidden;
   }
-  .nav-brand b {
-    font-size: var(--fs-md);
+  /* min-height 也要跟着扣：不扣的话，内容再短的页面（知识库空态）也会
+     多出整整一条 tab 的假滚动条。24 是 .console-scroll 的上内边距。 */
+  .console-shell {
+    min-height: calc(100dvh - 24px - var(--tabbar-h) - 12px - 24px);
   }
-  .console-nav nav {
+  .tabbar {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: var(--space-4);
-    padding-bottom: 0;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    /* 用卡片色而不是 --panel：浅色下 --panel 和页面底是同一个米色，
+       整条 tab 只剩一根 1px 的线，看着像文字浮在内容上。抬一档才是"压在最上面的那一层"。 */
+    background: var(--card-bg);
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -2px 10px -6px rgba(61, 47, 26, 0.28);
+    padding: 4px 6px calc(4px + env(safe-area-inset-bottom, 0px));
   }
-  .console-nav nav .nav-item {
-    width: 100%;
-    flex: none;
+  .dark .tabbar {
+    box-shadow: 0 -2px 10px -6px rgba(0, 0, 0, 0.6);
+  }
+  .tabbar-item {
+    min-height: 52px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
     justify-content: center;
-    gap: var(--space-5);
-    padding: var(--space-7) var(--space-4);
-    font-size: var(--fs-sm);
-    /* 退回紧凑高度：桌面那侧的 44px 在 3 列网格里会把整块拉高 36px，
-       而这一块本身要在第三批换成底部 tab（换完每项 48px、首屏还多出 200px）。
-       现在抬高的收益只是 9px 的手指余量，代价是首屏再少看一条待办。 */
-    min-height: 0;
-    /* 标签一律不许折行：折行会让某一行比别的行高，整块网格看着是歪的 */
+    gap: 3px;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    border-radius: var(--radius-sm);
+    transition: var(--t-color);
+  }
+  .tabbar-item span {
+    line-height: 1.1;
     white-space: nowrap;
   }
-  .console-nav nav .nav-item svg {
-    width: 16px;
-    height: 16px;
+  /* 选中态只给颜色和字重，不加金色底块：底部这一条已经有 5 个格子，
+     任何一块上色都会把其余四个衬成"不可点"。金色是留给"当前在哪"的。 */
+  .tabbar-item[aria-current="page"],
+  .tabbar-item[data-active="1"] {
+    color: var(--accent-ink);
   }
-  .nav-sec {
-    display: none;
+  .tabbar-item[aria-current="page"] span,
+  .tabbar-item[data-active="1"] span {
+    font-weight: 600;
+  }
+
+  /* ---------- 「更多」面板 ---------- */
+  .tab-sheet-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: rgba(61, 47, 26, 0.32);
+    animation: tab-fade 0.16s ease both;
+  }
+  .tab-sheet {
+    display: block;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 61;
+    max-height: 82dvh;
+    overflow-y: auto;
+    background: var(--card-bg);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -8px 28px rgba(61, 47, 26, 0.12);
+    padding: var(--space-8) var(--space-16) calc(var(--space-16) + env(safe-area-inset-bottom, 0px));
+    animation: tab-sheet-up 0.22s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+    outline: none;
+  }
+  .tab-sheet-grab {
+    width: 36px;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--fill-1);
+    margin: 0 auto var(--space-10);
+  }
+  .tab-sheet-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: var(--space-10);
+  }
+  .tab-sheet-head b {
+    font-family: var(--font-serif);
+    font-size: var(--fs-lg);
+  }
+  /* 三列而不是两列：多出来的高度直接变成"少滑一屏"，
+     而 390 宽下每格约 106px，「学习路径」四个字放得下。 */
+  .tab-sheet-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-8);
+  }
+  .tab-sheet-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-6);
+    min-height: 76px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--line);
+    background: var(--fill-4);
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+    transition: var(--t-color);
+  }
+  .tab-sheet-item[aria-current="page"] {
+    color: var(--accent-ink);
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
   }
   .console-page {
     padding: var(--space-16) var(--space-14) var(--space-32);
@@ -2707,6 +2820,38 @@ textarea.input {
   flex: 0 0 auto;
   min-height: 44px;
   padding: 0 var(--space-14);
+}
+/* 第三批把添加入口合并成一条，放在列表上方。原来它长在列表最底下，
+   空列表时那句官方文案还写着"在下面一行直接写" —— 而"下面"在屏幕外。 */
+.rem-quick--top {
+  margin-top: var(--space-16);
+  margin-bottom: var(--space-12);
+}
+/* 「整理」是次按钮：和「添加」同款描边，但更窄，靠图标区分功能。
+   不另造一种颜色 —— 同一条里两个按钮，谁更常用应该由位置和宽度说，
+   不该由第三种颜色说。 */
+.rem-quick-ai {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-5);
+  min-height: 44px;
+  padding: 0 var(--space-12);
+}
+.rem-quick-spark {
+  width: 15px;
+  height: 15px;
+  color: var(--accent-ink);
+}
+/* 窄屏把两个按钮的内边距收窄，把宽度还给输入框 ——
+   输入框才是这里唯一写字的地方。 */
+@media (max-width: 420px) {
+  .rem-quick form {
+    gap: var(--space-6);
+  }
+  .rem-quick .btn-import {
+    padding: 0 var(--space-10);
+  }
 }
 /* 「要提前提醒吗」三选一。这是**建议**不是表单：不选就等于不提醒，
    所以它用一条淡底横条，而不是再弹一层。 */
@@ -5298,6 +5443,27 @@ textarea.input {
     opacity: 1;
   }
 }
+/* 手机底部 tab 的「更多」面板：遮罩淡入 + 面板上滑。
+   上滑距离只有 24px —— 从屏幕外整个飞进来会让打开动作显得很重，
+   而这是一个"顺手展开一下"的次要面板。 */
+@keyframes tab-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes tab-sheet-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 @keyframes rem-cap-slide {
   from {
     opacity: 0;
@@ -5327,74 +5493,6 @@ textarea.input {
     opacity: 1;
     transform: translateY(-2px);
   }
-}
-
-/* ---------- 入口条 ---------- */
-/* 次入口：金色左缘 + 淡金渐变，和「+ 新建」的主位拉开层次。
-   不用图标库，也没有 emoji —— 一个自绘的火花就是它的记号。 */
-.rem-cap-strip {
-  display: flex;
-  width: 100%;
-  min-height: 64px;
-  margin-top: var(--space-16);
-  align-items: center;
-  gap: var(--space-12);
-  padding: 0 var(--space-16) 0 var(--space-14);
-  border: 1px solid var(--accent-line);
-  border-left: 3px solid var(--accent);
-  border-radius: var(--radius-md);
-  background: linear-gradient(90deg, var(--accent-soft), var(--step-2) 45%);
-  text-align: left;
-  box-shadow: var(--shadow-1);
-  transition: var(--t-color);
-}
-.rem-cap-strip:hover {
-  border-color: var(--accent);
-  background: linear-gradient(90deg, var(--accent-tint), var(--step-2) 52%);
-}
-.rem-cap-strip-mark {
-  display: grid;
-  width: 36px;
-  height: 36px;
-  flex: 0 0 auto;
-  place-items: center;
-  border: 1px solid var(--accent-line);
-  border-radius: 50%;
-  background: var(--accent-soft);
-  color: var(--accent-ink);
-}
-.rem-cap-strip-mark .rem-cap-spark { width: 18px; height: 18px; }
-.rem-cap-strip-copy {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: 1px;
-}
-.rem-cap-strip-kicker {
-  font-size: var(--fs-badge);
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  /* 2026-11-13：--accent-ink → --text-3。这是块上的小标签（"一句话添加"），
-     10px 的字配金色，在深底上既不够亮也不够暗，是最吃力的一处金。 */
-  color: var(--text-3);
-}
-.rem-cap-strip-text {
-  overflow: hidden;
-  font-size: var(--fs-lg);
-  color: var(--text-1);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.rem-cap-strip-mobile { display: none; }
-.rem-cap-strip-go {
-  margin-left: auto;
-  font-size: var(--fs-sm);
-  font-weight: 500;
-  /* 2026-11-13：--accent-ink → --text-2。它和旁边的金色星芒图标连着读，
-     一处金已经够指出"这块能点"；文字再金，整块就又变成第二个主操作。 */
-  color: var(--text-2);
-  white-space: nowrap;
 }
 
 /* ---------- 窄屏：抽屉改成底部铺 ---------- */
@@ -5435,11 +5533,7 @@ textarea.input {
   .rem-cap-ghost { min-height: 44px; }
   .rem-cap-primary { min-height: 46px; }
   .rem-cap-axis { --cap-gutter: 48px; }
-  .rem-cap-strip { min-height: 60px; gap: var(--space-10); padding: 0 var(--space-12); }
-  .rem-cap-strip-desktop { display: none; }
-  .rem-cap-strip-mobile { display: block; }
   /* 390 下「开始 →」会把示例句挤掉一半，入口本身已经说了要做什么 */
-  .rem-cap-strip-go { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

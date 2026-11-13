@@ -17,57 +17,16 @@
 //     知识库页一起消失了）。
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import AuthGate from "../AuthGate";
 import CornIcon from "../CornIcon";
+import NavIcon from "../NavIcon";
+import ConsoleTabBar from "./ConsoleTabBar";
 import GuideModal from "../guide/GuideModal";
 import AnnounceModal from "../announce/AnnounceModal";
 import { useAuth } from "@/lib/hooks/useAuth";
+import { isCurrentNav, visibleNav } from "@/lib/nav";
 import type { MeOut } from "@/lib/types";
-
-interface NavItem {
-  href: string;
-  icon: string;
-  label: string;
-  /** 只有开发者看得到（后端仍会二次校验，这里只是不给入口） */
-  adminOnly?: boolean;
-}
-
-const NAV: NavItem[] = [
-  { href: "/", icon: "notes", label: "对话" },
-  // 知识库是**独立页面**（2026-10-30）。原先它指向 /?kb=1，和「对话」落到同一个路由，
-  // 只是首页右栏抽屉被拉开 —— 用户的原话是"点击对话和点击知识库都是一样的跳转"。
-  { href: "/knowledge", icon: "book", label: "知识库" },
-  // 待办中心（独立模块，2026-11-09）。固定在第 3 位：它回答的是「什么时候做什么」，
-  // 比「每日委托」（生成什么）更靠前。★ 标签只能两个字：写「待办中心」会在手机
-  // 3 列网格里挤成两行、把整块导航撑高 —— 和当年「校园工具集」砍成「工具集」同一个坑。
-  // 2026-11-10 晚改名：原先叫「提醒」，但页面里的主体是待办，提醒只是它的一部分
-  // （「提示什么时候叫我」）。一个词在侧边栏、页标题、tab 三层各指一件事，
-  // 连作者自己都说不清区别 —— 统一成「待办」，提醒退回到属性位置。
-  { href: "/reminders", icon: "bell", label: "待办" },
-  { href: "/delegate", icon: "clock", label: "每日委托" },
-  { href: "/report", icon: "calendar", label: "总结" },
-  { href: "/checkin", icon: "star", label: "打卡" },
-  // 四六级备考工作区：计划 / 词汇本 / 模考分数（申报书 B3 的专项模块入口）
-  { href: "/cet", icon: "globe", label: "四六级" },
-  // 关卡式学习路径：12 关由真实学习数据判定（申报书 3.4 / 2.8）
-  { href: "/path", icon: "target", label: "学习路径" },
-  // 工具集是**独立单页**（GPA / 番茄钟 / 课程表 / 单词卡 / 倒计时 / 抽签），
-  // 不进控制台外壳，也不要求登录。从这里点出去就是换页，左导航仍留在原处；
-  // 之前的入口是首页下方那一行，用户反馈"找不到"，所以在这里给一条固定入口。
-  // ★ 标签只写「工具集」：写成「校园工具集」时手机上（3 列网格）挤成两行，
-  //   把整块导航撑高；完整名字留在那一页自己的标题和落地页里。
-  { href: "/tools", icon: "tools", label: "工具集" },
-  // 混合架构：工作流定义 + 切换规则。**这是开发者调试面，不是用户功能**
-  // —— 界面上摊着 UUID、任务 id、日志入口和可编辑的 JSON 定义。
-  // 2026-10-27 内测反馈："这个为啥要给用户看"。与 /dashboard 同一性质，因此同样加 adminOnly。
-  // 注意：这只是不给误点的机会，不是安全边界（真隐藏需要后端也返 404，本期没做）。
-  { href: "/flow", icon: "target", label: "工作流", adminOnly: true },
-  // 数据看板：开发者看"有多少人、在调什么接口、反馈堆了多少"。
-  // 只在 is_admin 时渲染入口 —— 但**真正的权限在后端**（非管理员返回 404，见 api/admin.py）。
-  { href: "/dashboard", icon: "briefcase", label: "看板", adminOnly: true },
-  { href: "/settings", icon: "settings", label: "设置" },
-];
 
 /**
  * 登录信息往下传一层。
@@ -112,6 +71,12 @@ export default function ConsoleLayout({ children }: { children: ReactNode }) {
   const auth = useAuth();
   const pathname = usePathname();
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  /* 「更多」面板开着时锁住底层滚动。开合状态归 ConsoleTabBar 自己管 ——
+     外壳只关心"要不要锁滚动"，所以它只收一个布尔值。
+     useCallback 不是过度优化：这个函数作为 prop 传进组件，
+     每次渲染新建一个的话，组件里那个 [onOpenChange] 的 effect 会每帧都跑一遍。 */
+  const [tabOpen, setTabOpen] = useState(false);
+  const onTabOpenChange = useCallback((open: boolean) => setTabOpen(open), []);
 
   // 必须 useMemo：Provider 的 value 每次渲染新建对象的话，所有消费者都会
   // 跟着重渲染，而这个外壳的子组件是整棵页面树。
@@ -144,6 +109,8 @@ export default function ConsoleLayout({ children }: { children: ReactNode }) {
   // 规范化的当前路径：去掉尾斜杠，查询串不参与比较
   const here = pathname.replace(/\/+$/, "") || "/";
 
+  const navItems = visibleNav(auth.me?.is_admin);
+
   return (
     <UserCtx.Provider value={account}>
       {/* 滚动容器必须由外壳自己提供。
@@ -151,36 +118,40 @@ export default function ConsoleLayout({ children }: { children: ReactNode }) {
           「固定视口、滚动发生在内部面板」的做法；控制台页面直接铺在 body 里，
           没有这层容器就会被内容顶出视口且无法滚动（移动端表现为「页面被固定死」）。
           height 用 dvh（移动端地址栏收起/展开时视口高度会变，vh 会算错）。 */}
-      <div className="console-scroll" ref={scrollRef}>
+      <div className={"console-scroll" + (tabOpen ? " is-locked" : "")} ref={scrollRef}>
         <div className="console-shell mx-auto" style={{ maxWidth: 1220 }}>
+          {/* 桌面侧栏。手机上整块隐藏（CSS 里 display:none），由下面的 .tabbar 顶替 ——
+              它原来在手机上是 3 列 × 3 行的网格，光导航就吃掉首屏 240px。 */}
           <aside className="console-nav">
             <div className="nav-brand">
               <CornIcon name="corn" className="logo" title="知穗" />
               <b>知穗</b>
             </div>
             <nav aria-label="主导航">
-              {NAV.filter((it) => !it.adminOnly || auth.me?.is_admin).map((it) => {
-                // 首页是精确匹配；其余按前缀匹配，将来 /knowledge/xxx 也能点亮同一项
-                const current = it.href === "/" ? here === "/" : here === it.href || here.startsWith(it.href + "/");
-                return (
-                  <Link
-                    key={it.href}
-                    href={it.href}
-                    className="nav-item"
-                    aria-current={current ? "page" : undefined}
-                    // 滚动容器是自己那层，别让 Next 去动 window
-                    scroll={false}
-                  >
-                    <CornIcon name={it.icon} />
-                    {it.label}
-                  </Link>
-                );
-              })}
+              {navItems.map((it) => (
+                <Link
+                  key={it.href}
+                  href={it.href}
+                  className="nav-item"
+                  aria-current={isCurrentNav(it.href, here) ? "page" : undefined}
+                  // 滚动容器是自己那层，别让 Next 去动 window
+                  scroll={false}
+                >
+                  <NavIcon name={it.icon} />
+                  {it.label}
+                </Link>
+              ))}
             </nav>
           </aside>
 
           <main className="console-page">{children}</main>
         </div>
+
+        {/* 手机底部 tab + 「更多」面板。固定在视口底部而不是贴在卡片里：
+            贴在卡片里会跟着内容滚走，滚到第二屏就没有导航了。
+            组件默认 display:none，≤900 才出现（CSS 控制，首屏不会抖）。
+            首页工作台也挂同一个组件 —— 否则从待办点「对话」回首页，导航会消失。 */}
+        <ConsoleTabBar isAdmin={auth.me?.is_admin} onOpenChange={setTabOpen} />
 
         {/* 首次进平台的上手说明也挂在这里：用户可能登录后直接落在 /path、/delegate，
             不一定先看到首页。和 ChatArea 那处不会重复 —— 首页不走这个 layout，

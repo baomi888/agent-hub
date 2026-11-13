@@ -3128,38 +3128,61 @@ export default function RemindersPage() {
       </section>
     ) : null;
 
-  /* AI 整理入口（v12）。它是**次入口**：主位仍然是右上角的「+ 新建」，
-     这里只负责"说一句，我替你拆"。多选/排序时不挂 —— 那两种模式正在挑行，
-     一个"再说一句"的入口只会把焦点和视线都抢走。
-
-     2026-11-11 把它从 listView 里提出来：原先它在 listView 内部，而空列表时
-     外层走的是 Callout 分支、listView 整个不渲染 —— 于是**新用户第一次进待办页
-     恰恰看不到这个入口**。空态才是最需要"说一句就行"的时刻。
-     现在它跟 isEmpty 无关，只跟 tab 和 mode 有关。 */
-  const captureStrip =
-    mode === "normal" ? (
-      <button
-        type="button"
-        className="rem-cap-strip"
-        onClick={() => setCaptureOpen(true)}
-        aria-label="一句话添加：打一句或说一段，自动拆成待办和提醒"
-      >
-        <span className="rem-cap-strip-mark" aria-hidden="true">
-          <Spark className="rem-cap-spark" />
-        </span>
-        <span className="rem-cap-strip-copy">
-          <span className="rem-cap-strip-kicker">一句话添加</span>
-          <span className="rem-cap-strip-text rem-cap-strip-desktop">
-            打字或说一句：明天下午交高数作业，周五社团开会…
-          </span>
-          <span className="rem-cap-strip-text rem-cap-strip-mobile">
-            说一句，自动拆成待办和提醒
-          </span>
-        </span>
-        <span className="rem-cap-strip-go" aria-hidden="true">
-          开始 →
-        </span>
-      </button>
+  /* 添加入口（2026-11-13 第三批合并）。
+     合并前这一页有**三个**入口，而且散在三个位置：
+       · 页头「+ 新建」→ 表单抽屉（精确控制：优先级、图标、清单、提醒）
+       · 列表上方那条大的「一句话添加」→ AI 拆分抽屉
+       · 列表最底下一行输入框 → 直接加一条
+     后两个说的是同一件事（"说一句就行"），却一个在顶上、一个要滚到底才看得见；
+     空列表时那句引导文案指向的输入框，恰恰在屏幕外。
+     现在合成一条：输入框 + 「添加」+ 「整理」。回车/添加 = 直接记一条；
+     「整理」= 把一整段话拆成多条（原 AI 抽屉，能力一点没少）。
+     页头「+ 新建」保留 —— 它管的是"我要精确设字段"，和"先记下来"是两件事。 */
+  const quickAddBar =
+    mode === "normal" && scope !== "completed" ? (
+      <div className="rem-quick rem-quick--top">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void addQuick();
+          }}
+        >
+          <input
+            className="input"
+            value={quick}
+            placeholder="记一条：明天 9 点交作业"
+            aria-label="快速添加待办"
+            onChange={(e) => setQuick(e.target.value)}
+          />
+          <button type="submit" className="btn-import" disabled={!quick.trim() || busy}>
+            添加
+          </button>
+          <button
+            type="button"
+            className="btn-import rem-quick-ai"
+            onClick={() => setCaptureOpen(true)}
+            aria-label="自动整理：把一整段话拆成几条待办和提醒"
+            title="把一整段话拆成几条"
+          >
+            <Spark className="rem-quick-spark" />
+            整理
+          </button>
+        </form>
+        {quickParse ? (
+          <div className="rem-quickchip" role="group" aria-label="要不要设提醒">
+            <span>「{quickParse.title}」要提前提醒吗？</span>
+            <button type="button" onClick={() => void applyQuickRemind(60)}>
+              提前 1 小时
+            </button>
+            <button type="button" onClick={() => void applyQuickRemind(0)}>
+              到时间提醒
+            </button>
+            <button type="button" onClick={() => void applyQuickRemind(null)}>
+              不提醒
+            </button>
+          </div>
+        ) : null}
+      </div>
     ) : null;
 
   // ===== 当前 tab 的两个区（待办 / 提醒）=====
@@ -3272,43 +3295,8 @@ export default function RemindersPage() {
         />
       ) : null}
 
-      {/* 建档的入口在「+ 新建」里也有；多选/排序时不放这里 ——
-          正在挑行的时候多一个输入框，光标和选择都容易跑掉 */}
-      {scope !== "completed" && mode === "normal" ? (
-        <div className="rem-quick">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              void addQuick();
-            }}
-          >
-            <input
-              className="input"
-              value={quick}
-              placeholder="记一条：明天 9 点交作业"
-              aria-label="快速添加待办"
-              onChange={(e) => setQuick(e.target.value)}
-            />
-            <button type="submit" className="btn-import" disabled={!quick.trim() || busy}>
-              添加
-            </button>
-          </form>
-          {quickParse ? (
-            <div className="rem-quickchip" role="group" aria-label="要不要设提醒">
-              <span>「{quickParse.title}」要提前提醒吗？</span>
-              <button type="button" onClick={() => void applyQuickRemind(60)}>
-                提前 1 小时
-              </button>
-              <button type="button" onClick={() => void applyQuickRemind(0)}>
-                到时间提醒
-              </button>
-              <button type="button" onClick={() => void applyQuickRemind(null)}>
-                不提醒
-              </button>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
+      {/* 快速添加已经合并到列表上方那一条（见 quickAddBar）。
+          原来这里还有一行输入框，要滚到底才看得见 —— 屏幕外的入口等于没有。 */}
 
       {sortSection}
 
@@ -3464,12 +3452,12 @@ export default function RemindersPage() {
 
       {!loading && tab === "list" ? (
         <>
-          {captureStrip}
+          {quickAddBar}
           {isEmpty ? (
             <Callout icon="bulb">
               <b>还没有待办</b>
               <br />
-              在下面一行直接写「明天 9 点交高数作业」，或者点右上角「+ 新建」。
+              在上面那行直接写「明天 9 点交高数作业」，或者点右上角「+ 新建」。
               <br />
               只设截止时间，不会收到提醒。想被提醒，记得打开「提醒我」。
             </Callout>
@@ -3506,6 +3494,9 @@ export default function RemindersPage() {
                   四种「选时间」并排出现，比配色不一致更容易被看见 —— 控件是一套语法。
                   step=900 让原生选择器只给 00/15/30/45，和 service 的档位对齐；
                   真被手动键入别的分钟，snapMinute 会在提交前吸附掉。 */}
+              {/* 说明句单独一行，不和控件并排。并排时 390px 下留给它的是
+                  一条不到 190px 的窄柱，「还没设置过 · 现在按默认的 20:00」
+                  被折成四行 —— 一行说明看起来像一段正文，卡片立刻变高。 */}
               <div className="mt-3 flex items-center gap-2">
                 <input
                   type="time"
@@ -3519,10 +3510,8 @@ export default function RemindersPage() {
                     void saveDaily(h, snapMinute(daily, m));
                   }}
                 />
-                <span className="text-[var(--fs-xs)] text-[var(--text-3)]">
-                  {dailyHint(daily)}
-                </span>
               </div>
+              <p className="mt-2 text-[var(--fs-xs)] text-[var(--text-3)]">{dailyHint(daily)}</p>
             </section>
           ) : null}
 

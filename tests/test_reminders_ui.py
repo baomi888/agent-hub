@@ -1337,11 +1337,13 @@ class TestCopySpeaksUserLanguage:
     """
 
     def test_nav_and_title_both_say_todo(self):
-        """一个词不能在侧边栏、页标题、tab 三层各指一件事。"""
-        nav = (ROOT / "frontend" / "src" / "components" / "console" / "ConsoleLayout.tsx").read_text(
-            encoding="utf-8"
-        )
-        assert '{ href: "/reminders", icon: "bell", label: "待办" }' in nav
+        """一个词不能在侧边栏、页标题、tab 三层各指一件事。
+
+        清单在 2026-11-13 第三批搬到了 `lib/nav.ts`（桌面侧栏、手机底部 tab、
+        「更多」面板三处共用一份），断言跟着搬 —— 但钉的还是同一件事。
+        """
+        nav = (ROOT / "frontend" / "src" / "lib" / "nav.ts").read_text(encoding="utf-8")
+        assert '{ href: "/reminders", icon: "task", label: "待办" }' in nav
         assert 'title="待办"' in _page()
         assert 'title="提醒 / 待办"' not in _page()
 
@@ -1990,37 +1992,64 @@ class TestUserCopyWords:
         src = 'const u = "https://myzhisui.cn/x"; const t = "推送";'
         assert "推送" in _strip_js_comments(src)
 
-class TestCaptureEntryVisibility:
-    """入口条必须与"列表是否为空"解耦。
+class TestQuickAddEntry:
+    """添加入口的不变量。
 
-    2026-11-11 线上抓到的真 bug：captureStrip 原先写在 listView 内部，
-    而空列表时外层走的是 Callout 分支、listView 整个不渲染 ——
-    **新用户第一次进待办页，恰恰看不到「一句话添加」**，而那正是最需要它的时刻。
-    离线 188 条 e2e 全绿也没抓到，因为测试数据都 seed 了任务（isEmpty=false）。
+    2026-11-11 线上抓到的真 bug：入口条原先写在 listView 内部，而空列表时外层
+    走的是 Callout 分支、listView 整个不渲染 —— **新用户第一次进待办页，恰恰
+    看不到添加入口**，而那正是最需要它的时刻。离线 188 条 e2e 全绿也没抓到，
+    因为测试数据都 seed 了任务（isEmpty=false）。
+
+    2026-11-13 第三批把「一句话添加」大条和列表底部那行输入框合成了一个
+    `quickAddBar`（变量改名，下面的三条不变量原样保留）—— 合并理由是
+    同一件事长在两个位置，其中一个还要滚到底才看得见。
     """
 
-    def test_strip_is_defined_outside_list_view(self):
+    def test_entry_is_defined_outside_list_view(self):
         """它得是个独立变量，不能长在 listView 里面。"""
         src = PAGE.read_text(encoding="utf-8")
-        assert "const captureStrip" in src, "入口条不见了"
-        assert src.index("const captureStrip") < src.index("const listView = ("), (
-            "captureStrip 又回到 listView 内部了 —— 空列表时它会跟着一起消失"
+        assert "const quickAddBar" in src, "添加入口不见了"
+        assert src.index("const quickAddBar") < src.index("const listView = ("), (
+            "入口又回到 listView 内部了 —— 空列表时它会跟着一起消失"
         )
 
-    def test_strip_renders_in_empty_branch_too(self):
-        """空态和列表是二选一的两条分支，入口条必须在分支之外。"""
+    def test_entry_renders_in_empty_branch_too(self):
+        """空态和列表是二选一的两条分支，入口必须在分支之外。"""
         src = PAGE.read_text(encoding="utf-8")
-        k = src.index("{captureStrip}")
+        k = src.index("{quickAddBar}")
         seg = src[k : k + 700]
-        assert "isEmpty" in seg, "captureStrip 没被放进 isEmpty 的判断里"
-        assert "listView" in seg, "captureStrip 后面应该紧接着 isEmpty ? 空态 : listView"
+        assert "isEmpty" in seg, "入口没被放进 isEmpty 的判断里"
+        assert "listView" in seg, "入口后面应该紧接着 isEmpty ? 空态 : listView"
 
-    def test_strip_hidden_in_select_and_sort(self):
-        """多选/排序时仍然不挂 —— 这是原设计，提出来之后不能顺手丢掉。"""
+    def test_entry_hidden_in_select_and_sort(self):
+        """多选/排序时仍然不挂 —— 这是原设计，合并之后不能顺手丢掉。"""
         src = PAGE.read_text(encoding="utf-8")
-        i = src.index("const captureStrip")
-        seg = src[i : i + 300]
-        assert 'mode === "normal"' in seg, "多选/排序时入口条应该收起"
+        i = src.index("const quickAddBar")
+        seg = src[i : i + 400]
+        assert 'mode === "normal"' in seg, "多选/排序时入口应该收起"
+
+    def test_only_one_way_to_type_a_task(self):
+        """合并的意义就在这里：整页只留一个"打字记一条"的输入框。
+
+        两个输入框（一个在顶上、一个在列表底部）时，用户会站在这两者之间犹豫，
+        而它们做的事完全一样；更糟的是其中那个在屏幕外。
+        页头的「+ 新建」不算：它开的是字段表单，不是"打一句就走"。
+        """
+        src = PAGE.read_text(encoding="utf-8")
+        assert src.count('aria-label="快速添加待办"') == 1, (
+            "页面里又出现了第二个快速添加输入框"
+        )
+        assert src.count("{quickAddBar}") == 1
+
+    def test_empty_copy_points_to_the_real_place(self):
+        """空态那句"在这儿直接写"必须指向输入框**实际所在的位置**。
+
+        文案写"下面"，而输入框在下面 —— 那是旧布局；现在已经挪到上面。
+        这种句子测试读不出对错，只能钉住它跟着布局一起改过。
+        """
+        src = PAGE.read_text(encoding="utf-8")
+        assert "在上面那行直接写" in src
+        assert "在下面一行直接写" not in src
 
 
 # ==================== 语音输入：全屏态与采集约束（2026-11-11）====================
