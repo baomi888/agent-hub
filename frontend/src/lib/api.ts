@@ -6,6 +6,8 @@ import type {
   BoardData,
   BoardPost,
   AccessMode,
+  FavoriteKbInfo,
+  ForkResult,
 } from "./types";
 import type { KbProposal, KbProposalConfirmResult } from "./types";
 import type { DialogueCandidatesResp, ImportDialogueResult, CourseReminderState } from "./types";
@@ -382,6 +384,33 @@ export const api = {
       `/api/kb/public/${encodeURIComponent(kbId)}/board/${postId}`,
       { method: "DELETE" }
     ),
+  // ---------- 公开库收藏 ----------
+  //
+  // 用 PUT/DELETE 而不是一个 toggle：toggle 在网络重试时会翻来覆去，
+  // 用户看到的状态和他以为的不一样。两条都是幂等的，重发安全。
+  addFavorite: (kbId: string) =>
+    request<{ kb_id: string; favorited: boolean; added: boolean; favs: number }>(
+      `/api/kb/public/${encodeURIComponent(kbId)}/favorite`,
+      { method: "PUT" }
+    ),
+  removeFavorite: (kbId: string) =>
+    request<{ kb_id: string; favorited: boolean; removed: boolean; favs: number }>(
+      `/api/kb/public/${encodeURIComponent(kbId)}/favorite`,
+      { method: "DELETE" }
+    ),
+  /** 我收藏的公开库，最近收藏的在前。带来源与作者（官方 / 某某 的库） */
+  listFavoriteKbs: () => request<{ kbs: FavoriteKbInfo[] }>("/api/kb/favorites"),
+  /**
+   * 把一个公开库复制成**自己的**库，之后可以往里加自己的资料。
+   *
+   * 不往源库里写（那会改到所有人看到的东西），而是复制一份：原件 + 预览件 +
+   * 向量都在自己名下。同一个库重复复制 → 更新那个副本，不会堆出第二个。
+   */
+  forkPublicKb: (kbId: string, name?: string) =>
+    request<ForkResult>(`/api/kb/public/${encodeURIComponent(kbId)}/fork`, {
+      method: "POST",
+      body: JSON.stringify(name ? { name } : {}),
+    }),
   createKb: (name: string) =>
     request<{ kb_id: string; name: string }>("/api/kb/create", {
       method: "POST",

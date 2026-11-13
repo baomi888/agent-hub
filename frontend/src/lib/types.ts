@@ -71,6 +71,55 @@ export interface PublicKbInfo {
   access?: "preview" | "download";
   /** 看过的人数（独立访客，同一个人重复打开只算一次） */
   views?: number;
+  /** 收藏数。比浏览更"重"的信号：看过是路过，收藏是有意留着 */
+  favs?: number;
+  /** 我收藏过这个库没有 */
+  favorited?: boolean;
+  /**
+   * 这个库名下一共有几个库（不同用户可能传来同名的库）。
+   * 1 = 没有重名，卡片上不出现同名筛选；>1 时前端给一个「同名 N 个」的入口。
+   */
+  same_name?: number;
+}
+
+/**
+ * GET /api/kb/favorites 单条：我收藏的一个公开库。
+ *
+ * 和广场卡片长得像，但多两件东西 —— 用户明确要求的：
+ *   `source` 说明它从哪来（"官方知识库" / "某某 的库"），
+ *   `favorited_at` 说明我什么时候收的（列表按它倒序）。
+ */
+export interface FavoriteKbInfo {
+  kb_id: string;
+  name: string;
+  desc: string;
+  official: boolean;
+  /** 来源，直接可展示：「官方知识库」/「张三 的库」 */
+  source: string;
+  /** 作者显示名。官方库是「官方」 */
+  owner_name: string;
+  access: AccessMode;
+  files: number;
+  chunks: number;
+  /** 库第一次公开的时间（秒）。0 = 老数据 */
+  at: number;
+  views: number;
+  favs: number;
+  posts: number;
+  favorited: boolean;
+  /** 我收藏这件事发生的时间（秒），列表按它倒序 */
+  favorited_at: number;
+}
+
+/** POST /api/kb/public/{kb_id}/fork 的返回：复制出来的那个库 */
+export interface ForkResult {
+  kb_id: string;
+  name: string;
+  files: number;
+  chunks: number;
+  /** 源库一共多少份资料 —— 和 files 不等时说明有几份原件缺失 */
+  from_files: number;
+  from_kb_id: string;
 }
 
 /** 公开知识库留言板上的一条留言（GET /api/kb/public/{kb_id}/board） */
@@ -148,6 +197,14 @@ export interface OfficialKbDetail {
   access?: "preview" | "download";
   /** 看过的人数（本次打开已计入） */
   views?: number;
+  /** 上传/分享日期（秒）。官方库是导入上线那天，用户库是第一次公开那天 */
+  uploads_at?: number;
+  /** 收藏数 */
+  favs?: number;
+  /** 我收藏过没有 */
+  favorited?: boolean;
+  /** 这个库是不是我自己的（自己的库不给收藏/复制按钮） */
+  mine?: boolean;
   files: OfficialKbFile[];
 }
 

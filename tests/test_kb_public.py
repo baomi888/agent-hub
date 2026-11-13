@@ -185,6 +185,11 @@ def test_public_list_excludes_caller_and_private(monkeypatch, kb_id):
             # views=看过的人数（独立访客）。两个都是展示用，仍不含清单。
             "access",
             "views",
+            # 紧接着同日第二轮：favs=收藏数、favorited=我收藏过没、
+            # same_name=同名库有几个（前端据此做同名筛选与热度排序）。
+            "favs",
+            "favorited",
+            "same_name",
         }
         for k in theirs["kbs"]
     )

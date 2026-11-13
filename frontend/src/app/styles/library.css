@@ -1803,3 +1803,192 @@
     white-space: nowrap;
   }
 }
+
+/* ---------- 2026-11-13 第三轮：收藏 / 上传日期 / 同名筛选 ---------- */
+
+/* 星标：常显，不靠 hover —— "我收过没有"是每张卡都要看的信息。
+   未收藏是描边、收藏后填满并转金色（金色在这套样式里代表"已选中"）。 */
+.lib-fav-btn {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: color 0.14s, background 0.14s, transform 0.14s;
+}
+.lib-fav-btn:hover {
+  background: var(--fill-3);
+  color: var(--accent-ink);
+}
+.lib-fav-btn.on {
+  color: var(--accent-ink);
+}
+/* 填满靠 fill：图标本身是描边画的，不填就只有颜色变化，一眼看不出来 */
+.lib-fav-btn.on svg {
+  fill: currentColor;
+}
+.lib-fav-btn:active {
+  transform: scale(0.88);
+}
+.lib-fav-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.lib-fav-btn svg {
+  stroke: currentColor;
+  stroke-width: 1.6;
+}
+
+/* 官方课程卡上的星标要浮在右上角：卡片整体是 <a>，
+   星标只能是兄弟节点，不能塞进链接里（<a> 里放 <button> 是非法嵌套） */
+.lib-course-wrap {
+  position: relative;
+}
+.lib-course-wrap .lib-fav-btn {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  /* 官方徽标也在右上，星标落在徽标左侧，两者不打架 */
+  margin-right: 42px;
+}
+/* 手机上没有 hover，28px 又偏小，补到 34px */
+@media (max-width: 640px) {
+  .lib-course-wrap .lib-fav-btn {
+    width: 34px;
+    height: 34px;
+    margin-right: 46px;
+  }
+}
+
+/* 课程卡里的日期/浏览数：夹在"份资料"和"查看资料"中间，
+   空间不够时先让它可以省略，不能把「查看资料」挤到换行 */
+.lib-course-when {
+  overflow: hidden;
+  flex: 1;
+  min-width: 0;
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 同名库提示：一行小字按钮，点进去只看这一个名字并转热度排序 */
+.lib-same {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 0 4px;
+  padding: 2px 7px;
+  border: 1px dashed var(--accent-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--accent-ink);
+  font-size: var(--fs-badge);
+  cursor: pointer;
+}
+.lib-same:hover {
+  background: var(--accent-tint);
+}
+
+/* 同名筛选生效时的说明条：不说清"为什么只剩两个库"，用户会以为库丢了 */
+.lib-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  background: var(--accent-tint);
+  color: var(--accent-ink);
+  font-size: var(--fs-xs);
+}
+
+/* 我的收藏库：行式列表。卡片式在这里太占地方 ——
+   收藏本来就是"我挑的那几个"，需要一眼扫完。 */
+.lib-favs {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 10px 0 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--line);
+  list-style: none;
+}
+
+.lib-fav-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: 10px 12px;
+  background: var(--card-bg);
+}
+
+.lib-fav-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+.lib-fav-main > b {
+  overflow: hidden;
+  font-size: var(--fs-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 来源 / 日期 / 浏览 / 份数 一排，放不下就换行 */
+.lib-fav-src {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-6);
+  color: var(--text-3);
+  font-size: var(--fs-badge);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 来源标：官方的一条金色描边，个人的走中性色。
+   金色只给官方，避免同学的库被误认成学校资料。 */
+.lib-src-tag {
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--fill-3);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.lib-src-tag.off {
+  border-color: var(--accent-line);
+  background: var(--accent-tint);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  /* 手机上一行放不下"名字 + 三个按钮"，按钮整体换到第二行右对齐 */
+  .lib-fav-row {
+    flex-wrap: wrap;
+  }
+  .lib-fav-row .lib-card-acts {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  /* 星标是可点的主操作，触控目标不能小于 40px */
+  .lib-fav-row .lib-fav-btn {
+    width: 40px;
+    height: 40px;
+  }
+}

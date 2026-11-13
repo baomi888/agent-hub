@@ -11,6 +11,7 @@
 // 数据直接走后端已有的 /api/kb 一组接口（与首页资料库面板同一套），
 // 不新增后端端点 —— 这里的"新"只是**摆放方式**新，能力与首页面板一致。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import PageShell from "@/components/console/PageShell";
 import CornIcon from "@/components/CornIcon";
 import SedimentModal from "@/components/chat/SedimentModal";
@@ -21,7 +22,7 @@ import { useToast } from "@/lib/hooks/useToast";
 import { fmtNum, fmtWhen } from "@/lib/time";
 import { CHUNK_PROFILES, nearestProfileId, profileParams, type ChunkProfileId } from "@/lib/chunkProfiles";
 import { loadKbChunks, saveKbChunks, type KbChunkMap } from "@/lib/kbChunkPrefs";
-import type { AccessMode, Defaults, FilePreview, KbFile, KbInfo } from "@/lib/types";
+import type { AccessMode, Defaults, FavoriteKbInfo, FilePreview, KbFile, KbInfo } from "@/lib/types";
 
 /** 文件类型标：只区分"读得出来的三类 + 其它"，不追求完整 MIME */
 function kindOf(name: string): "pdf" | "doc" | "text" | "other" {
@@ -45,6 +46,15 @@ export default function KnowledgePage() {
   const { toasts, showToast } = useToast();
 
   const [kbs, setKbs] = useState<KbInfo[]>([]);
+  /**
+   * 我收藏的公开库。
+   *
+   * 用户原话："二级导航的知识库那块也要有收藏知识库"。
+   * 这些库不是自己的 —— 不能在这里传文件、删资料，所以点一下跳去
+   * 公开详情页 /library/{kb_id}（那边能看清单、能预览），而不是在右侧面板里
+   * 假装它是自己的库。混在一起编辑，迟早会有人以为改了别人的东西。
+   */
+  const [favKbs, setFavKbs] = useState<FavoriteKbInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [defaults, setDefaults] = useState<Defaults | null>(null);
@@ -122,6 +132,11 @@ export default function KnowledgePage() {
   useEffect(() => {
     if (!authedId) return;
     void refresh();
+    // 收藏库：辅助列表，读不到就当空（不该因为广场接口抽风把整页拖垮）
+    api
+      .listFavoriteKbs()
+      .then((r) => setFavKbs(r.kbs))
+      .catch(() => {});
     // 切块默认值：后端是唯一权威，前端不硬编码 500/50
     api
       .defaults()
@@ -454,6 +469,35 @@ export default function KnowledgePage() {
                 </span>
               </button>
             ))}
+
+            {/* 收藏的公开库：不是自己的库，所以只能"去查看"，不能在这里编辑。
+                单独一组而不是混进上面的列表 —— 上面的每一行都能传文件、能删，
+                混在一起用户会以为收藏的库也能改。 */}
+            {favKbs.length > 0 && (
+              <div className="kbp-favs">
+                <p className="kbp-favs-head">
+                  收藏的公开库
+                  <span>{favKbs.length}</span>
+                </p>
+                {favKbs.map((k) => (
+                  <Link key={k.kb_id} href={`/library/${encodeURIComponent(k.kb_id)}`} className="kbp-fav">
+                    <CornIcon name="star" className="ico" />
+                    <span className="nm">
+                      <b title={k.name}>{k.name}</b>
+                      <span>
+                        {/* 来源与作者：官方写"官方知识库"，同学的写"某某 的库" */}
+                        来源{k.source}
+                        {k.at > 0 && ` · ${fmtWhen(k.at)}上传`}
+                      </span>
+                    </span>
+                  </Link>
+                ))}
+                <Link href="/library" className="kbp-fav-more">
+                  去广场挑更多
+                  <CornIcon name="arrow" className="ico" />
+                </Link>
+              </div>
+            )}
           </aside>
 
           {/* ---------- 右：当前库 ---------- */}

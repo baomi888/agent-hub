@@ -4,7 +4,7 @@
 // 视觉：暖米黄书本风格 · 大圆角 · 柔阴影 · 金色点缀
 import { useRef, useState, type RefObject } from "react";
 import Link from "next/link";
-import type { KbInfo, PublicKbInfo, SearchResult } from "@/lib/types";
+import type { KbInfo, PublicKbInfo, SearchResult, FavoriteKbInfo } from "@/lib/types";
 import {
   CHUNK_PROFILES,
   DEFAULT_PROFILE_ID,
@@ -16,6 +16,7 @@ import {
 } from "@/lib/chunkProfiles";
 import FilePreviewModal, { shortName } from "./FilePreviewModal";
 import CornIcon from "./CornIcon";
+import { fmtWhen } from "@/lib/time";
 
 const MAX_UPLOAD_MB = 100;
 
@@ -141,6 +142,13 @@ interface Props {
   kbs: KbInfo[];
   /** 全站公开库（别人的，只读检索源）。不传/为空就不渲染这个分组 */
   publicKbs?: PublicKbInfo[];
+  /**
+   * 我收藏的公开库。默认收起全站公开库、只把这组摆出来 ——
+   * 用户原话："一开始不要在这设置所有全站公开库，不是每个用户都需要全部"。
+   */
+  favKbs?: FavoriteKbInfo[];
+  /** 收藏 / 取消收藏（星标点了要立刻亮，乐观更新在 hook 里做） */
+  onToggleFavorite?: (kbId: string, on: boolean) => void;
   boundKb: string | null;
   onUpload: (kbId: string, files: File[], size?: number, overlap?: number) => Promise<void>;
   onSearch: (keyword: string) => Promise<SearchResult[]>;
@@ -188,6 +196,8 @@ interface Props {
 export default function KnowledgePanel({
   kbs,
   publicKbs,
+  favKbs,
+  onToggleFavorite,
   boundKb,
   onUpload,
   onSearch,
@@ -223,6 +233,8 @@ export default function KnowledgePanel({
   const [confirmDelId, setConfirmDelId] = useState<string | null>(null);
   // 展开哪个库的文件清单
   const [expandedKb, setExpandedKb] = useState<string | null>(null);
+  /** 全站公开库那一组默认收起：铺开会把用户自己的库挤到看不见 */
+  const [pubOpen, setPubOpen] = useState(false);
   // 待确认删除的单个文件，格式 `${kb_id}::${name}`
   const [confirmFile, setConfirmFile] = useState<string | null>(null);
   // 正在预览的文件（kb_id + 原始文件名 + 片段数）
@@ -908,13 +920,17 @@ export default function KnowledgePanel({
           </div>
         )}
 
-        {/* 全站公开库：别人的库，只读检索源。没有文件清单、没有删除，
-            与上面的私有库分组并列而不是混在一起——归属不同，能做的事也不同。 */}
-        {publicKbs && publicKbs.length > 0 && (
+        {/* 我的收藏库：用户自己挑的公开库。
+            放在全站公开库**之前**，因为这一组才是他日常要挂的；
+            全站那一组默认折叠 —— 十几个课程库一铺开，自己的库就被挤到看不见。 */}
+        {favKbs && favKbs.length > 0 && (
           <div className="mt-3">
-            <p className="kb-pub-head">全站公开库</p>
+            <p className="kb-pub-head">
+              我的收藏库
+              <span className="kb-pub-n">{favKbs.length}</span>
+            </p>
             <div className="flex flex-col">
-              {publicKbs.map((k) => {
+              {favKbs.map((k) => {
                 const bound = boundKb === k.kb_id;
                 return (
                   <div key={k.kb_id} className={`kb-row group ${bound ? "bound" : ""}`}>
@@ -923,8 +939,8 @@ export default function KnowledgePanel({
                       title={bound ? "取消绑定" : "绑定到当前对话"}
                       aria-label={
                         bound
-                          ? `取消绑定公开资料库：${k.name || k.kb_id}`
-                          : `绑定公开资料库到当前对话：${k.name || k.kb_id}`
+                          ? `取消绑定收藏库：${k.name}`
+                          : `绑定收藏库到当前对话：${k.name}`
                       }
                       aria-pressed={bound}
                       onClick={() => onBind(bound ? null : k.kb_id)}
@@ -937,17 +953,96 @@ export default function KnowledgePanel({
                     <div className="min-w-0 flex-1">
                       <div className="kb-name">{k.name || k.kb_id}</div>
                       <div className="kb-meta">
+                        {/* 来源与作者：官方的写"官方知识库"，同学的写"某某 的库" */}
+                        <span className="kb-src">来源{k.source}</span>
                         <span className="tag">{k.chunks} 片段</span>
-                        <span className="tag pub">公开</span>
+                        {k.at > 0 && <span className="tag">{fmtWhen(k.at)}</span>}
                       </div>
                     </div>
+                    <button
+                      type="button"
+                      className="kb-fav on"
+                      aria-pressed
+                      title="取消收藏"
+                      aria-label={`取消收藏：${k.name}`}
+                      onClick={() => onToggleFavorite?.(k.kb_id, false)}
+                    >
+                      <CornIcon name="star" className="h-3.5 w-3.5" />
+                    </button>
                   </div>
                 );
               })}
             </div>
-            <p className="mt-1.5 px-1 text-fs-xs text-faint">
-              别人的公开库：能挂进对话检索，但看不到文件清单，也不能修改。
-            </p>
+          </div>
+        )}
+
+        {/* 全站公开库：别人的库，只读检索源。没有文件清单、没有删除，
+            与上面的私有库分组并列而不是混在一起——归属不同，能做的事也不同。
+
+            ★ 默认收起（2026-11-13 用户要求）：站里已经有 9 门官方课程 + 同学分享，
+              全铺开会把右栏顶满，用户自己那几个库要滚半天才看得见。
+              收起后只留一行「共 N 个」，想挑就去广场；挑中了才会进"我的收藏库"。 */}
+        {publicKbs && publicKbs.length > 0 && (
+          <div className="mt-3">
+            <button
+              type="button"
+              className="kb-pub-head kb-pub-toggle"
+              aria-expanded={pubOpen}
+              onClick={() => setPubOpen((v) => !v)}
+            >
+              全站公开库
+              <span className="kb-pub-n">{publicKbs.length}</span>
+              <CornIcon name="arrow" className="kb-pub-chev" />
+            </button>
+            {pubOpen && (
+              <>
+                <div className="flex flex-col">
+                  {publicKbs.map((k) => {
+                    const bound = boundKb === k.kb_id;
+                    return (
+                      <div key={k.kb_id} className={`kb-row group ${bound ? "bound" : ""}`}>
+                        <button
+                          type="button"
+                          title={bound ? "取消绑定" : "绑定到当前对话"}
+                          aria-label={
+                            bound
+                              ? `取消绑定公开资料库：${k.name || k.kb_id}`
+                              : `绑定公开资料库到当前对话：${k.name || k.kb_id}`
+                          }
+                          aria-pressed={bound}
+                          onClick={() => onBind(bound ? null : k.kb_id)}
+                          className={`check ${bound ? "on" : ""}`}
+                        >
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M20 6L9 17l-5-5" />
+                          </svg>
+                        </button>
+                        <div className="min-w-0 flex-1">
+                          <div className="kb-name">{k.name || k.kb_id}</div>
+                          <div className="kb-meta">
+                            <span className="tag">{k.chunks} 片段</span>
+                            <span className="tag pub">公开</span>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className={"kb-fav" + (k.favorited ? " on" : "")}
+                          aria-pressed={!!k.favorited}
+                          title={k.favorited ? "取消收藏" : "收藏，之后在「我的收藏库」里找得到"}
+                          aria-label={`${k.favorited ? "取消收藏" : "收藏"}：${k.name || k.kb_id}`}
+                          onClick={() => onToggleFavorite?.(k.kb_id, !k.favorited)}
+                        >
+                          <CornIcon name="star" className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="mt-1.5 px-1 text-fs-xs text-faint">
+                  别人的公开库：能挂进对话检索，但看不到文件清单，也不能修改。
+                </p>
+              </>
+            )}
           </div>
         )}
       </div>

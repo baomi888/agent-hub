@@ -697,3 +697,159 @@
     flex: 1 1 100%;
   }
 }
+
+/* ---------- 2026-11-13 第三轮：详情页的收藏 / 复制成我的库 ---------- */
+
+/* 头部那一排里的星标：和几个统计数字并排，
+   用和广场卡片同一套 .lib-fav-btn 观感（金色 = 已收藏） */
+.lib-hero-fav {
+  width: 32px;
+  height: 32px;
+}
+@media (max-width: 640px) {
+  .lib-hero-fav {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+/* 「复制成我的库」区块：说明 + 按钮。
+   说明必须在按钮左边而不是藏进 tooltip —— 用户要知道"复制"到底发生了什么，
+   否则会以为是往官方库里加东西（那会改到所有人看到的内容）。 */
+.lib-fork {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px 14px;
+  border: 1px dashed var(--accent-line);
+  border-radius: var(--radius-md);
+  background: var(--accent-tint);
+}
+
+.lib-fork-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.lib-fork-text b {
+  color: var(--ink);
+  font-size: var(--fs-sm);
+}
+.lib-fork-text span {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-body);
+}
+
+.lib-fork-btn {
+  flex: none;
+  /* 复制要重新算向量，给个足够大的热区，别做成小链接 */
+  min-height: 34px;
+  padding: 0 14px;
+}
+
+@media (max-width: 640px) {
+  .lib-fork {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .lib-fork-btn {
+    min-height: 42px;
+  }
+}
+
+/* ---------- 2026-11-13 第三轮：左栏的「收藏的公开库」 ---------- */
+
+/* 与上面的自有库列表用一条虚线隔开：归属不同，能做的事也不同
+   （上面每一行都能传文件、能删；这里只能点进去看）。 */
+.kbp-favs {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+
+.kbp-favs-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  padding: 0 10px;
+  color: var(--text-3);
+  font-size: var(--fs-badge);
+  letter-spacing: 0.04em;
+}
+.kbp-favs-head span {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--fill-3);
+  font-variant-numeric: tabular-nums;
+  line-height: 15px;
+}
+
+.kbp-fav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  text-decoration: none;
+  transition: var(--t-color);
+}
+.kbp-fav:hover {
+  background: var(--fill-2);
+}
+/* 星标常亮金色：这一组里的每一行都是"我收藏过的"，
+   用灰图标会和普通库看起来一样，等于丢掉这组的身份标识 */
+.kbp-fav .ico {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  color: var(--accent-ink);
+  fill: var(--accent-ink);
+}
+.kbp-fav .nm {
+  min-width: 0;
+  flex: 1;
+}
+.kbp-fav .nm b {
+  display: block;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kbp-fav .nm span {
+  display: block;
+  overflow: hidden;
+  margin-top: 1px;
+  color: var(--text-3);
+  font-size: var(--fs-badge);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kbp-fav-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 4px 0 0 10px;
+  color: var(--accent-ink);
+  font-size: var(--fs-badge);
+  text-decoration: none;
+}
+.kbp-fav-more:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.kbp-fav-more .ico {
+  width: 12px;
+  height: 12px;
+}

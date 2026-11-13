@@ -692,6 +692,89 @@
   height: 1px;
   background: var(--line, var(--border));
 }
+/* 可折叠的组标题：整行可点，所以要把浏览器默认按钮外观清掉，
+   同时保留 44px 触控友好的热区（靠 padding 撑，不额外占布局高度） */
+.kb-pub-toggle {
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 4px 2px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  letter-spacing: 0.05em;
+}
+.kb-pub-toggle:hover {
+  color: var(--text-2, var(--text-3));
+}
+.kb-pub-toggle:focus-visible {
+  outline: 2px solid var(--accent, currentColor);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+/* 组名后面那个数字：一眼看出"收起时里面有几个"，
+   没有它收起就等于把一个分组藏成了看不见的状态 */
+.kb-pub-n {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  background: var(--chip, var(--surface-2));
+  border-radius: 999px;
+  padding: 0 5px;
+  line-height: 15px;
+  font-variant-numeric: tabular-nums;
+}
+/* 箭头的旋转角度就是展开状态本身（aria-expanded 之外的第二重提示） */
+.kb-pub-chev {
+  width: 12px;
+  height: 12px;
+  transform: rotate(90deg);
+  transition: transform 0.15s ease;
+}
+.kb-pub-toggle[aria-expanded="true"] .kb-pub-chev {
+  transform: rotate(270deg);
+}
+/* 收藏星标：未收藏是描边，收藏后填满 + 金色。
+   常显（不用 hover 才出现）—— "这个我收过没有" 是每一行都要看的信息 */
+.kb-fav {
+  border: none;
+  background: none;
+  padding: 4px;
+  cursor: pointer;
+  color: var(--text-3);
+  opacity: 0.6;
+  display: inline-flex;
+  transition: opacity 0.12s ease, color 0.12s ease, transform 0.12s ease;
+}
+.kb-fav:hover {
+  opacity: 1;
+  color: var(--accent-ink);
+}
+.kb-fav.on {
+  opacity: 1;
+  color: var(--accent-ink);
+}
+.kb-fav.on svg {
+  fill: currentColor;
+}
+.kb-fav:active {
+  transform: scale(0.9);
+}
+.kb-fav svg {
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.6;
+}
+/* 收藏行的来源署名：比标签更弱一档，但必须看得见 ——
+   用户要求"收藏的卡片要带上来源以及作者" */
+.kb-src {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .kb-del {
   border: none;
   background: none;

@@ -32,7 +32,7 @@ import { ToastHost } from "@/components/console/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { useToast } from "@/lib/hooks/useToast";
-import { fmtNum } from "@/lib/time";
+import { fmtNum, fmtWhen } from "@/lib/time";
 import type { OfficialKbDetail, OfficialKbFile } from "@/lib/types";
 
 /** 卡片左侧方块里的字：取名字第一个字符 */
@@ -104,6 +104,9 @@ export default function CourseLibraryPage() {
   const [viewing, setViewing] = useState<OfficialKbFile | null>(null);
   /** 资料名搜索。一个库里几十份资料时，靠滚着找太慢 */
   const [fileQuery, setFileQuery] = useState("");
+  /** 收藏 / 复制这两件事都要等接口，各自一个忙态防连点 */
+  const [favBusy, setFavBusy] = useState(false);
+  const [forking, setForking] = useState(false);
   /** 手机/平板：原版 PDF 不走弹层，直接交给系统阅读器 */
   const narrow = useIsNarrow();
 
@@ -152,6 +155,57 @@ export default function CourseLibraryPage() {
     } catch (e) {
       showToast("error", e instanceof Error ? e.message : "打开对话失败，请稍后重试");
       setOpening(false);
+    }
+  };
+
+  /** 收藏 / 取消收藏。先改本地状态：星标点下去要立刻亮，等一个来回会让人再点一次 */
+  const toggleFav = async () => {
+    if (!data || favBusy) return;
+    const on = !data.favorited;
+    setFavBusy(true);
+    setData((d) =>
+      d ? { ...d, favorited: on, favs: Math.max(0, (d.favs ?? 0) + (on ? 1 : -1)) } : d,
+    );
+    try {
+      const r = on ? await api.addFavorite(data.kb_id) : await api.removeFavorite(data.kb_id);
+      setData((d) => (d ? { ...d, favorited: r.favorited, favs: r.favs } : d));
+      showToast(
+        "success",
+        on ? "已收藏，在资料库面板的「我的收藏库」里能找到它" : "已取消收藏",
+      );
+    } catch (e) {
+      setData((d) =>
+        d ? { ...d, favorited: !on, favs: data.favs } : d,
+      );
+      showToast("error", e instanceof Error ? e.message : "操作失败，请稍后重试");
+    } finally {
+      setFavBusy(false);
+    }
+  };
+
+  /**
+   * 复制成我的库。
+   *
+   * 复制要重新 embedding，几十份资料要跑一会儿，所以按钮置为"复制中…"并禁点 ——
+   * 连点会产生两次复制请求，第二次虽然同名复用不会多出库，但会白跑一遍向量化。
+   * 完成后不跳转：用户当前正在看清单，把他弹走会丢掉正在看的位置；
+   * 给个成功提示 + 一个"去我的库"的入口就够了。
+   */
+  const forkIt = async () => {
+    if (!data || forking) return;
+    setForking(true);
+    try {
+      const r = await api.forkPublicKb(data.kb_id);
+      showToast(
+        "success",
+        r.files < r.from_files
+          ? `已复制 ${r.files} 份资料到「${r.name}」（源库 ${r.from_files} 份里有部分原件缺失）`
+          : `已复制 ${r.files} 份资料到「${r.name}」，现在可以往里加自己的资料了`,
+      );
+    } catch (e) {
+      showToast("error", e instanceof Error ? e.message : "复制失败，请稍后重试");
+    } finally {
+      setForking(false);
     }
   };
 
@@ -243,6 +297,32 @@ export default function CourseLibraryPage() {
                 <span className="lib-course-stat" title="看过这个库的人数">
                   <b>{fmtNum(data.views ?? 0)}</b> 人看过
                 </span>
+                <span className="lib-dot" />
+                <span className="lib-course-stat" title="收藏人数">
+                  <b>{fmtNum(data.favs ?? 0)}</b> 人收藏
+                </span>
+                {/* 上传/分享日期：用户要求"每个库都写上上传日期"。
+                    官方库是导入上线那天，同学库是第一次公开那天。 */}
+                {!!data.uploads_at && (
+                  <>
+                    <span className="lib-dot" />
+                    <span className="lib-course-stat">{fmtWhen(data.uploads_at)}上传</span>
+                  </>
+                )}
+                {/* 自己的库：收藏和复制都没有意义（已经在自己名下），直接不给按钮 */}
+                {!data.mine && (
+                  <button
+                    type="button"
+                    className={"lib-fav-btn lib-hero-fav" + (data.favorited ? " on" : "")}
+                    aria-pressed={!!data.favorited}
+                    aria-label={data.favorited ? "取消收藏" : "收藏这个库"}
+                    title={data.favorited ? "取消收藏" : "收藏，之后在「我的收藏库」里找得到"}
+                    disabled={favBusy}
+                    onClick={() => void toggleFav()}
+                  >
+                    <CornIcon name="star" className="h-4 w-4" />
+                  </button>
+                )}
                 <button
                   type="button"
                   className="lib-share lib-course-cta"
@@ -253,6 +333,28 @@ export default function CourseLibraryPage() {
                   {!opening && <CornIcon name="arrow" className="h-3.5 w-3.5" />}
                 </button>
               </div>
+              {/* 复制成我的库：用户原话"除了用官方知识库，还可以往官方知识库加自己的资料，
+                  形成自己的知识库"。实现是复制一份到自己名下 —— 往官方库写会改到所有人。
+                  所以文案必须说清"复制"而不是"加入"，否则用户会以为是共享编辑。 */}
+              {!data.mine && (
+                <div className="lib-fork">
+                  <div className="lib-fork-text">
+                    <b>想在这个库的基础上加自己的资料？</b>
+                    <span>
+                      复制一份到你名下（{fmtNum(data.files.length)} 份资料一起带过去），
+                      之后你往里加的东西只有你看得见，原库不受影响。
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="lib-ghost lib-fork-btn"
+                    disabled={forking || data.files.length === 0}
+                    onClick={() => void forkIt()}
+                  >
+                    {forking ? "复制中…" : "复制成我的库"}
+                  </button>
+                </div>
+              )}
             </section>
 
             {/* 资料名搜索：只在这个库资料够多时才出现（少于 7 份滚一下就到了，

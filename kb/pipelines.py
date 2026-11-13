@@ -35,6 +35,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import threading
 import time
 
@@ -512,9 +513,37 @@ def new_kb_id(owner: str, name: str) -> str:
 # ==================== CRUD ====================
 
 
+def find_by_name(owner: str, name: str) -> str | None:
+    """这个人的库里有叫这个名字的吗？返回 kb_id。
+
+    为什么要它：同名库应当**更新**而不是新建（用户要求"自己的公开库可以更新，
+    但不能乱改别人的"）。kb_id 是 owner+name 的哈希，理论上同名必然同 id，
+    但历史数据里可能有改名留下的旧记录，所以按名字再查一遍更稳。
+    """
+    target = (name or "").strip()
+    if not target:
+        return None
+    with _REGISTRY_LOCK:
+        _load_names()
+        _load_owners()
+        for kid, owner_id in _KB_OWNERS.items():
+            if owner_id == owner and (_KB_NAMES.get(kid) or "").strip() == target:
+                return kid
+    return None
+
+
 def create_kb(owner: str, name: str) -> tuple[str, str]:
-    """登记一个知识库（中文名亦可），返回 (kb_id, display_name)。"""
+    """登记一个知识库（中文名亦可），返回 (kb_id, display_name)。
+
+    ★ 同一个人重复建同名库 → 返回**已有的那个**，不新建。
+      这是"同学更新自己的公开库"能成立的前提：他再传一批资料到同名库，
+      别人收藏的那张卡指向的还是同一个 kb_id，不会变成两个各有一半资料的库。
+      不同用户建同名库仍然各是各的（kb_id 里混了 owner）。
+    """
     name = (name or "").strip()
+    existing = find_by_name(owner, name)
+    if existing:
+        return existing, name
     kb_id = new_kb_id(owner, name)
     with _REGISTRY_LOCK:
         # 先重读磁盘：同名库可能刚被另一个进程/线程建过，直接覆盖会把它的记录冲掉
@@ -663,6 +692,104 @@ def list_all(owner: str) -> list[dict]:
                 }
             )
     return result
+
+
+# fork 用的切片参数：与导入脚本一致（500/50）。不从源库读参数，
+# 因为片段的切法只影响检索粒度，不改变内容；统一一套更容易排查。
+FORK_CHUNK = 500
+FORK_OVERLAP = 50
+
+
+def fork_public(owner: str, src_kb_id: str, name: str | None = None) -> dict:
+    """把一个公开库复制成**自己的**库（"在官方库基础上加自己的资料"）。
+
+    为什么是复制而不是"引用"：检索链路是「一个会话 → 一个 kb_id → 一个
+    collection」。引用式（一次查两个库）要改检索、改提示词里的出处标注、
+    改会话绑定，改动面比复制大得多，而且用户看到的效果一样。
+
+    语义：
+      - 复制原文件 + 原版 PDF 预览件，重建向量（不共享 collection，
+        否则用户往自己的库里传东西会把官方库改脏）；
+      - 同名库**复用**（`create_kb` 已经这么做）：第二次复制是"更新"，
+        不会堆出第二个库，别人收藏的卡片也还指向同一个 kb_id；
+      - 只读源库：调用方必须先确认它是公开库（API 层用 `_public_detail_or_404`）。
+
+    解析失败的文件登记 0 段但原件照样复制 —— 和导入脚本同一个策略：
+    用户能下载到原件，比"整批失败"有用。
+    """
+    src_owner = owner_of(src_kb_id)
+    if not src_owner:
+        raise NotOwned(src_kb_id)
+    src_name = (name_of(src_kb_id) or src_kb_id).strip() or src_kb_id
+    target_name = (name or src_name).strip() or src_name
+
+    kid, display = create_kb(owner, target_name)
+    if owner_of(kid) != owner:
+        raise NotOwned(kid)
+
+    src_pipe = get_or_create(src_owner, src_kb_id, allow_public=True)
+    src_files = list_files_view(src_owner, src_kb_id, src_pipe)
+    ensure_source_dir(kid)
+
+    records: list[dict] = []
+    chunks_total = 0
+    for rec in src_files:
+        rel = rec.get("name") or ""
+        if not rel:
+            continue
+        src_path = source_path(src_kb_id, rel)
+        if not os.path.exists(src_path):
+            continue
+        dest = source_path(kid, rel)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        shutil.copy2(src_path, dest)
+
+        # 原版 PDF 预览件一起带过来：不带的话，复制出来的库点预览只能看抽出来的
+        # 纯文字，公式全是〔公式〕占位 —— 用户会以为复制丢了东西。
+        preview = rec.get("preview") or ""
+        if preview:
+            src_prev = source_path(src_kb_id, preview)
+            if os.path.exists(src_prev):
+                dprev = source_path(kid, preview)
+                os.makedirs(os.path.dirname(dprev), exist_ok=True)
+                shutil.copy2(src_prev, dprev)
+
+        try:
+            with kb_lock(kid):
+                pipe = get_or_create(owner, kid)
+                chunks = pipe.build_index(
+                    FORK_CHUNK,
+                    FORK_OVERLAP,
+                    [dest],
+                    mode="append",
+                    source_names=[rel],
+                )
+        except Exception:  # noqa: BLE001 —— 单个文件解析失败不该让整次复制失败
+            chunks = 0
+        chunks_total += int(chunks or 0)
+        records.append(
+            {
+                "name": rel,
+                "chunks": int(chunks or 0),
+                "added_at": int(time.time()),
+                "origin": "fork",
+                "size": os.path.getsize(dest),
+                "ext": os.path.splitext(rel)[1].lower().lstrip("."),
+                "preview": preview,
+            }
+        )
+
+    if records:
+        add_file_records(owner, kid, records)
+    return {
+        "kb_id": kid,
+        "name": display,
+        "files": len(records),
+        "chunks": chunks_total,
+        # 源库一共多少份、复制过来多少份：界面要能说清"少的那几份是什么情况"
+        "from_files": len(src_files),
+        "from_kb_id": src_kb_id,
+    }
 
 
 def list_public() -> list[dict]:

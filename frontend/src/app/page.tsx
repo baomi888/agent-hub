@@ -108,7 +108,7 @@ export default function Home() {
     deleteSession, deleteTurn, reloadSessions,
   } = sessions_;
   const {
-    kbs, publicKbs, kbNameMap, loading: kbsLoading,
+    kbs, publicKbs, favKbs, toggleFavorite, kbNameMap, loading: kbsLoading,
     refreshKbs, uploadFiles, deleteKbFile, rebuildKb, searchPreview, deleteKb,
     rememberChunk, chunkParamsOf,
   } = useKnowledge(showToast, chunkSize, chunkOverlap);
@@ -998,6 +998,8 @@ export default function Home() {
       <KnowledgePanel
         kbs={kbs}
         publicKbs={publicKbs}
+        favKbs={favKbs}
+        onToggleFavorite={(kbId, on) => void toggleFavorite(kbId, on)}
         boundKb={boundKb}
         onUpload={async (kbName, files, size, overlap) => {
           const kbId = await uploadFiles(kbName, files, size, overlap);

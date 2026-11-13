@@ -27,13 +27,23 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { useToast } from "@/lib/hooks/useToast";
 import { fmtNum, fmtWhen } from "@/lib/time";
-import type { AccessMode, KbInfo, PublicKbInfo } from "@/lib/types";
+import type { AccessMode, FavoriteKbInfo, KbInfo, PublicKbInfo } from "@/lib/types";
 
 /** 简介上限，与后端 VisibilityRequest.desc 的 max_length 保持一致 */
 const DESC_MAX = 200;
 
-/** 排序：最近分享 / 资料最多 / 最多人看（浏览数，2026-11-13 加） */
+/** 排序：最近分享 / 资料最多 / 最受欢迎（浏览 + 收藏） */
 type Sort = "new" | "big" | "hot";
+
+/**
+ * 热度分：浏览 + 收藏 × 5。
+ *
+ * 为什么不是一个纯加法：点开看一眼（浏览）和特意收藏留下来，意图强度差一个量级。
+ * 一个 100 人看过、0 人收藏的库，和一个 30 人看过、20 人收藏的库，
+ * 后者才是"大家真的在用"；等权相加会把它排在后面。
+ * 权重写死在注释里而不是配置项 —— 这是产品判断，不是可调参数。
+ */
+const heatOf = (k: PublicKbInfo) => (k.views ?? 0) + (k.favs ?? 0) * 5;
 
 /** 卡片左侧那个方块里的字：取库名第一个字符，空名兜一个「库」 */
 const markOf = (name: string) => (name || "").trim().slice(0, 1) || "库";
@@ -45,12 +55,20 @@ export default function LibraryPage() {
 
   const [pub, setPub] = useState<PublicKbInfo[]>([]);
   const [mine, setMine] = useState<KbInfo[]>([]);
+  const [favs, setFavs] = useState<FavoriteKbInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<Sort>("new");
   /** 正在为哪个库建会话（卡片按钮转圈用） */
   const [opening, setOpening] = useState<string | null>(null);
+  /** 正在等收藏接口返回的库（防连点，也让星标立刻有反馈） */
+  const [faving, setFaving] = useState<string | null>(null);
+  /**
+   * 同名筛选取的库名。不同用户会传来同名的库（"考研数学"能有五六份），
+   * 内容不同不能合并，所以给一个"只看这个名字"的开关，配合热度排序挑最值的那个。
+   */
+  const [sameName, setSameName] = useState<string | null>(null);
 
   const [shareOpen, setShareOpen] = useState(false);
   /** 正在看哪个库的留言板；null = 没开 */
@@ -60,10 +78,15 @@ export default function LibraryPage() {
     setLoading(true);
     setErr(null);
     try {
-      // 两个接口互不依赖，并行拉：广场列表 + 我的库（"我分享的"分组要用）
-      const [p, m] = await Promise.all([api.listPublicKbs(), api.listKbs()]);
+      // 三个接口互不依赖，并行拉：广场列表 + 我的库（"我分享的"分组） + 我的收藏
+      const [p, m, f] = await Promise.all([
+        api.listPublicKbs(),
+        api.listKbs(),
+        api.listFavoriteKbs().catch(() => ({ kbs: [] as FavoriteKbInfo[] })),
+      ]);
       setPub(p.kbs);
       setMine(m.kbs);
+      setFavs(f.kbs);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "加载失败，请稍后重试");
     } finally {
@@ -101,19 +124,57 @@ export default function LibraryPage() {
   const shared = useMemo(() => pub.filter((k) => !k.official), [pub]);
 
   const filtered = useMemo(() => {
-    const list = shared.filter(hit);
+    // 同名筛选：只看这一个名字下的多个库，横向比较哪份更值
+    const list = shared.filter((k) => hit(k) && (!sameName || k.name.trim() === sameName));
     // 排序都带第二关键字：刚分享的几个库如果段数一样，顺序不该每次刷新都变
     return [...list].sort((a, b) =>
       sort === "new"
         ? b.at - a.at || b.chunks - a.chunks
         : sort === "hot"
-          ? (b.views ?? 0) - (a.views ?? 0) || b.at - a.at
+          ? // 浏览 + 收藏加权：收藏是"特意留下"，比路过式浏览重得多
+            heatOf(b) - heatOf(a) || b.at - a.at
           : b.chunks - a.chunks || b.at - a.at,
     );
-  }, [shared, hit, sort]);
+  }, [shared, hit, sort, sameName]);
+
+  /**
+   * 收藏 / 取消收藏。
+   *
+   * 先改本地状态再发请求：星标点下去要立刻亮，等一个来回会让人以为没点上、
+   * 再点一次又变成取消。失败时回到原状并 toast。
+   */
+  const toggleFav = async (k: PublicKbInfo) => {
+    if (faving) return;
+    const on = !k.favorited;
+    setFaving(k.kb_id);
+    setPub((list) =>
+      list.map((x) =>
+        x.kb_id === k.kb_id
+          ? { ...x, favorited: on, favs: Math.max(0, (x.favs ?? 0) + (on ? 1 : -1)) }
+          : x,
+      ),
+    );
+    try {
+      const r = on ? await api.addFavorite(k.kb_id) : await api.removeFavorite(k.kb_id);
+      // 以后端的计数为准（别人的收藏会同时变，本地加减只是过渡态）
+      setPub((list) =>
+        list.map((x) => (x.kb_id === k.kb_id ? { ...x, favorited: r.favorited, favs: r.favs } : x)),
+      );
+      const f = await api.listFavoriteKbs();
+      setFavs(f.kbs);
+      showToast("success", on ? `已收藏「${k.name}」，在资料库的「我的收藏库」里能找到` : `已取消收藏「${k.name}」`);
+    } catch (e) {
+      setPub((list) =>
+        list.map((x) => (x.kb_id === k.kb_id ? { ...x, favorited: !on, favs: k.favs } : x)),
+      );
+      showToast("error", e instanceof Error ? e.message : "收藏失败，请稍后重试");
+    } finally {
+      setFaving(null);
+    }
+  };
 
   /** 从广场挂一个库：建好会话时就把 kb_id 绑上，进去直接能问 */
-  const openInChat = async (k: PublicKbInfo) => {
+  const openInChat = async (k: { kb_id: string; name: string }) => {
     if (opening) return;
     setOpening(k.kb_id);
     try {
@@ -122,6 +183,18 @@ export default function LibraryPage() {
     } catch (e) {
       showToast("error", e instanceof Error ? e.message : "打开对话失败，请稍后重试");
       setOpening(null);
+    }
+  };
+
+  /** 从「我的收藏库」里取消收藏。列表本身就少一条，所以这里直接把它抹掉 */
+  const unfav = async (k: FavoriteKbInfo) => {
+    try {
+      await api.removeFavorite(k.kb_id);
+      setFavs((list) => list.filter((x) => x.kb_id !== k.kb_id));
+      setPub((list) => list.map((x) => (x.kb_id === k.kb_id ? { ...x, favorited: false } : x)));
+      showToast("info", `已取消收藏「${k.name}」`);
+    } catch (e) {
+      showToast("error", e instanceof Error ? e.message : "取消失败，请稍后重试");
     }
   };
 
@@ -180,7 +253,7 @@ export default function LibraryPage() {
             </p>
             <ul className="lib-courses">
               {official.map((k) => (
-                <li key={k.kb_id}>
+                <li key={k.kb_id} className="lib-course-wrap">
                   <Link href={`/library/${encodeURIComponent(k.kb_id)}`} className="lib-course">
                     <span className="lib-course-h">
                       <span className="lib-course-mark" aria-hidden="true">
@@ -194,12 +267,30 @@ export default function LibraryPage() {
                     <span className="lib-course-d">{k.desc?.trim() || "这门课的资料还在整理"}</span>
                     <span className="lib-course-f">
                       <span>{fmtNum(k.files)} 份资料</span>
+                      {/* 上传日期：官方库是导入上线那天。用户要求"每个库都写上" */}
+                      <span className="lib-course-when">
+                        {k.at ? fmtWhen(k.at) : ""}
+                        {(k.views ?? 0) > 0 ? ` · ${fmtNum(k.views ?? 0)} 人看过` : ""}
+                      </span>
                       <span className="lib-course-go">
                         查看资料
                         <CornIcon name="arrow" className="h-3.5 w-3.5" />
                       </span>
                     </span>
                   </Link>
+                  {/* 星标必须是 Link 的**兄弟**而不是子节点：<a> 里放 <button> 是非法嵌套，
+                      移动端浏览器会各自按自己的规则修正 DOM，点收藏会连带跳转。 */}
+                  <button
+                    type="button"
+                    className={"lib-fav-btn" + (k.favorited ? " on" : "")}
+                    aria-pressed={!!k.favorited}
+                    aria-label={`${k.favorited ? "取消收藏" : "收藏"}：${k.name}`}
+                    title={k.favorited ? "取消收藏" : "收藏，之后在「我的收藏库」里找得到"}
+                    disabled={faving === k.kb_id}
+                    onClick={() => void toggleFav(k)}
+                  >
+                    <CornIcon name="star" className="h-4 w-4" />
+                  </button>
                 </li>
               ))}
             </ul>
@@ -225,6 +316,71 @@ export default function LibraryPage() {
                   <Link href="/knowledge" className="lib-link">
                     管理
                   </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {/* 我的收藏库：用户自己挑的那几个。
+            用户原话是"收藏后可以在主界面的资料库看到一个新的地方就是我的收藏库"，
+            广场这里也放一份 —— 他刚在下面点了星标，就该在这里立刻看到结果。 */}
+        {favs.length > 0 && (
+          <section className="lib-sec lib-fav-sec">
+            <div className="lib-sec-head">
+              <span className="eyebrow">我的收藏库</span>
+              <span className="rule" />
+              <span className="lib-count">{favs.length} 个</span>
+            </div>
+            <p className="lib-sec-lead">
+              收藏的库会出现在你工作台的资料库面板里，随时能挂到对话上检索。
+              每条都标了来源和上传日期 —— 官方的、同学分享的，一眼分得清。
+            </p>
+            <ul className="lib-favs">
+              {favs.map((k) => (
+                <li key={k.kb_id} className="lib-fav-row">
+                  <span className="lib-mark lib-mark-sm" aria-hidden="true">
+                    {markOf(k.name)}
+                  </span>
+                  <div className="lib-fav-main">
+                    <b title={k.name}>{k.name}</b>
+                    <span className="lib-fav-src">
+                      {/* 用户要求：官方写"来源官方知识库"，个人的写"来源某某 的库" */}
+                      <span className={"lib-src-tag" + (k.official ? " off" : "")}>
+                        来源{k.source}
+                      </span>
+                      {k.at > 0 && <span>{fmtWhen(k.at)}上传</span>}
+                      <span>{fmtNum(k.views)} 人看过</span>
+                      <span>{fmtNum(k.files)} 份资料</span>
+                      {k.access === "preview" && <span className="lib-access">仅观看</span>}
+                    </span>
+                  </div>
+                  <span className="lib-card-acts">
+                    <Link
+                      href={`/library/${encodeURIComponent(k.kb_id)}`}
+                      className="lib-ghost lib-view-link"
+                    >
+                      查看资料
+                    </Link>
+                    <button
+                      type="button"
+                      className="lib-open"
+                      disabled={opening !== null}
+                      onClick={() => void openInChat(k)}
+                    >
+                      {opening === k.kb_id ? "打开中…" : "挂到我的对话"}
+                    </button>
+                    <button
+                      type="button"
+                      className="lib-fav-btn on"
+                      aria-pressed
+                      aria-label={`取消收藏：${k.name}`}
+                      title="取消收藏"
+                      onClick={() => void unfav(k)}
+                    >
+                      <CornIcon name="star" className="h-4 w-4" />
+                    </button>
+                  </span>
                 </li>
               ))}
             </ul>
@@ -265,11 +421,24 @@ export default function LibraryPage() {
               资料最多
             </button>
             <button type="button" aria-pressed={sort === "hot"} onClick={() => setSort("hot")}>
-              最多人看
+              最受欢迎
             </button>
           </div>
           <span className="lib-count">{filtered.length} 个库</span>
         </div>
+
+        {/* 同名筛选生效时的清空条：不加这条，用户会以为"库怎么只剩两个了" */}
+        {sameName && (
+          <div className="lib-filter-bar">
+            <span>
+              只看叫「{sameName}」的库（{(pub.find((k) => k.name.trim() === sameName)?.same_name ?? 1)} 个），
+              按浏览和收藏排在前面
+            </span>
+            <button type="button" className="lib-ghost" onClick={() => setSameName(null)}>
+              看全部
+            </button>
+          </div>
+        )}
 
         {loading && (
           <div className="lib-grid" aria-busy="true">
@@ -326,7 +495,34 @@ export default function LibraryPage() {
                   <h3 className="lib-name" title={k.name}>
                     {k.name}
                   </h3>
+                  <button
+                    type="button"
+                    className={"lib-fav-btn" + (k.favorited ? " on" : "")}
+                    aria-pressed={!!k.favorited}
+                    aria-label={`${k.favorited ? "取消收藏" : "收藏"}：${k.name}`}
+                    title={k.favorited ? "取消收藏" : "收藏，之后在「我的收藏库」里找得到"}
+                    disabled={faving === k.kb_id}
+                    onClick={() => void toggleFav(k)}
+                  >
+                    <CornIcon name="star" className="h-4 w-4" />
+                  </button>
                 </div>
+                {/* 同名库：不同同学传来同名的库，内容不同不能替用户合并，
+                    但要说清"这个名字下还有 N 个"，并给一个横向比较的入口。 */}
+                {(k.same_name ?? 1) > 1 && (
+                  <button
+                    type="button"
+                    className="lib-same"
+                    onClick={() => {
+                      setSameName(k.name.trim());
+                      // 挑同名库时默认按热度排：浏览和收藏多的排前面，用户要的就是这个
+                      setSort("hot");
+                    }}
+                  >
+                    <CornIcon name="notes" className="h-3 w-3" />
+                    同名共 {k.same_name} 个，按热度比一比
+                  </button>
+                )}
                 <p className={"lib-card-d" + (k.desc?.trim() ? "" : " is-none")}>
                   {k.desc?.trim() || "这个库还没写简介"}
                 </p>
@@ -338,6 +534,7 @@ export default function LibraryPage() {
                   {/* 浏览数：独立访客。0 也显示 —— "还没人看过"本身就是信息，
                       而且它是"最多人看"排序的依据，藏起来排序就成了黑箱 */}
                   <span title="看过这个库的人数">{fmtNum(k.views ?? 0)} 人看过</span>
+                  <span title="收藏人数">{fmtNum(k.favs ?? 0)} 人收藏</span>
                   <span className="lib-owner" title="分享者">
                     <CornIcon name="user" className="h-3 w-3" />
                     {k.owner_name || "某位同学"}

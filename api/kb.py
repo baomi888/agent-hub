@@ -39,7 +39,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.schemas import KBQueryResponse
-from core import account, config, kb_board, kb_views, quota, upload
+from core import account, config, kb_board, kb_favs, kb_views, quota, upload
 from core import session as store
 from core.auth import get_current_user
 from core.netsafe import assert_safe_url
@@ -291,11 +291,16 @@ async def delete_kb(kb_id: str, uid: str = Depends(get_current_user)) -> dict:
                 pipelines.get_or_create(uid, kb_id).delete()
 
             await asyncio.to_thread(_force_delete)
-            # 库都没了，留言也就没有了展示对象：这里物理删，不留软删的行
+            # 库都没了，留言/浏览/收藏也就没有了展示对象：这里物理删，
+            # 不留软删的行（收藏不清的话，「我的收藏」里会留一张点开就 404 的卡片）
             await asyncio.to_thread(kb_board.purge_kb, kb_id)
+            await asyncio.to_thread(kb_views.purge_kb, kb_id)
+            await asyncio.to_thread(kb_favs.purge_kb, kb_id)
             return {"ok": True}
         raise HTTPException(status_code=404, detail=f"知识库不存在：{kb_id}")
     await asyncio.to_thread(kb_board.purge_kb, kb_id)
+    await asyncio.to_thread(kb_views.purge_kb, kb_id)
+    await asyncio.to_thread(kb_favs.purge_kb, kb_id)
     return {"ok": True}
 
 
@@ -313,6 +318,14 @@ class VisibilityRequest(BaseModel):
         None,
         pattern="^(preview|download)$",
         description="公开后别人能做什么：preview=仅观看（可预览不可下载），download=可下载。不传=不动",
+    )
+
+
+class ForkRequest(BaseModel):
+    name: str | None = Field(
+        None,
+        max_length=60,
+        description="副本的名字。不传 = 沿用源库名（同名会被复用/更新而不是新建）",
     )
 
 
@@ -377,6 +390,15 @@ async def list_public_kbs(uid: str = Depends(get_current_user)) -> dict:
     # 「N 条留言」本来就是让人判断"这个库有没有人在讨论"的信号，不能没有。
     post_counts = await asyncio.to_thread(kb_board.counts_by_kb)
     view_counts = await asyncio.to_thread(kb_views.counts)
+    fav_counts = await asyncio.to_thread(kb_favs.counts)
+    my_favs = await asyncio.to_thread(kb_favs.mine_ids, uid)
+    # 同名库：不同用户可能传来同名的库（"考研数学"会有好几份）。
+    # 广场不合并它们（内容不同，合并等于替用户做判断），但要告诉前端
+    # "这个名字下还有几个"，前端据此做同名筛选、并按热度排。
+    name_counts: dict[str, int] = {}
+    for k in kbs:
+        nm = (k.get("name") or "").strip()
+        name_counts[nm] = name_counts.get(nm, 0) + 1
     out = []
     for k in kbs:
         if k["kb_id"] in mine:
@@ -385,6 +407,10 @@ async def list_public_kbs(uid: str = Depends(get_current_user)) -> dict:
         k["posts"] = post_counts.get(k["kb_id"], 0)
         # 浏览数（独立访客）：卡片上「N 人看过」，也是"最多人用的库"这个排序的依据
         k["views"] = view_counts.get(k["kb_id"], 0)
+        # 收藏数：比浏览更"重"的信号（有意识收藏 vs 点进去看一眼）
+        k["favs"] = fav_counts.get(k["kb_id"], 0)
+        k["favorited"] = k["kb_id"] in my_favs
+        k["same_name"] = name_counts.get((k.get("name") or "").strip(), 1)
         # 官方库没有真实账号，`_owner_display_name` 查不到人只会回空串；
         # 这里直接署名"官方"，避免卡片上出现"某位同学"这种明显不对的说法
         k["owner_name"] = "官方" if k.get("official") else await asyncio.to_thread(
@@ -393,6 +419,117 @@ async def list_public_kbs(uid: str = Depends(get_current_user)) -> dict:
         k.pop("owner", None)
         out.append(k)
     return {"kbs": out}
+
+
+# ==================== 收藏（公开库）====================
+#
+# 收藏是"我留着它的清单"，和浏览（点进去就算）不是一回事，所以单独一张表、
+# 单独的读法。广场卡片上的星标、详情页的收藏按钮、以及"我的收藏"页共用这三条接口。
+# 用 PUT/DELETE 而不是一个 toggle 接口：toggle 在网络重试时会翻来覆去，
+# 用户看到的状态和他以为的会不一样。
+
+
+@router.put("/public/{kb_id}/favorite")
+async def add_favorite(kb_id: str, uid: str = Depends(get_current_user)) -> dict:
+    """收藏一个公开库。重复收藏是幂等的（返回 added=false）。"""
+    _public_kb_or_404(kb_id)
+    added = await asyncio.to_thread(kb_favs.add, kb_id, uid)
+    count = await asyncio.to_thread(kb_favs.count, kb_id)
+    return {"kb_id": kb_id, "favorited": True, "added": added, "favs": count}
+
+
+@router.delete("/public/{kb_id}/favorite")
+async def remove_favorite(kb_id: str, uid: str = Depends(get_current_user)) -> dict:
+    """取消收藏。本来没收藏也不报错（幂等）。"""
+    _public_kb_or_404(kb_id)
+    removed = await asyncio.to_thread(kb_favs.remove, kb_id, uid)
+    count = await asyncio.to_thread(kb_favs.count, kb_id)
+    return {"kb_id": kb_id, "favorited": False, "removed": removed, "favs": count}
+
+
+@router.get("/favorites")
+async def list_favorites(uid: str = Depends(get_current_user)) -> dict:
+    """我收藏的公开库，最近收藏的在前。
+
+    每条带**来源与作者**（用户要求）：
+      - 官方库 → `source = "官方知识库"`；
+      - 同学分享 → `source = "某某 的库"`。
+    库被收回公开 / 删掉之后就从这里消失 —— 收藏不是"永久快照"，
+    它只是指向那个库的一个标记；库没了，收藏一条点开 404 的卡片没有意义。
+    """
+    favs = await asyncio.to_thread(kb_favs.mine, uid)
+    if not favs:
+        return {"kbs": []}
+    public = await asyncio.to_thread(pipelines.list_public)
+    by_id = {k["kb_id"]: k for k in public}
+    post_counts = await asyncio.to_thread(kb_board.counts_by_kb)
+    view_counts = await asyncio.to_thread(kb_views.counts)
+    fav_counts = await asyncio.to_thread(kb_favs.counts)
+
+    out = []
+    for f in favs:
+        k = by_id.get(f["kb_id"])
+        if not k:
+            continue
+        official = bool(k.get("official"))
+        owner_name = "官方" if official else await asyncio.to_thread(
+            _owner_display_name, k["owner"]
+        )
+        out.append(
+            {
+                "kb_id": k["kb_id"],
+                "name": k["name"],
+                "desc": k.get("desc") or "",
+                "official": official,
+                "official_owner": official,
+                # 来源与作者是两件事：来源说明它从哪来，作者说明谁做的。
+                # 官方库没有"某位同学"这种作者，所以两者都写"官方知识库"。
+                "source": "官方知识库" if official else f"{owner_name} 的库",
+                "owner_name": owner_name,
+                "access": "download" if official else _access_of_from(k),
+                "files": k.get("files") or 0,
+                "chunks": k.get("chunks") or 0,
+                "at": int(k.get("at") or 0),
+                "views": view_counts.get(k["kb_id"], 0),
+                "favs": fav_counts.get(k["kb_id"], 0),
+                "posts": post_counts.get(k["kb_id"], 0),
+                "favorited": True,
+                "favorited_at": f["at"],
+            }
+        )
+    return {"kbs": out}
+
+
+def _access_of_from(k: dict) -> str:
+    """广场条目里的 access 已经是归一化过的（pipelines.list_public 里做的）。"""
+    return "download" if k.get("access") == "download" else "preview"
+
+
+@router.post("/public/{kb_id}/fork")
+async def fork_public_kb(
+    kb_id: str, req: ForkRequest, uid: str = Depends(get_current_user)
+) -> dict:
+    """把这个公开库复制成**我的**知识库，之后可以往里加自己的资料。
+
+    用户原话是"除了用官方知识库，还可以往官方知识库加自己的资料，形成自己的库"。
+    实现上不往官方库里写（那会改到所有人看到的东西），而是复制一份到自己名下：
+    原件 + 预览件 + 向量都复制，之后这个副本完全属于调用者。
+
+    同名复用：已经复制过同一个名字 → 更新那个副本，不新建第二个
+    （`pipelines.create_kb` 的语义），别人收藏的卡片也还指向同一个 kb_id。
+    """
+    owner, _meta = await asyncio.to_thread(_public_detail_or_404, kb_id)
+    # 复制要重新算一遍向量，按"嵌入"计费，防止有人一键把几十个库复制成自己的
+    await asyncio.to_thread(quota.guard, uid, "embed")
+    if owner == uid:
+        # 自己的库不用复制，直接说清楚（否则用户会看到"复制成功"却多了一个自己）
+        raise HTTPException(status_code=400, detail="这是你自己的库，不需要复制")
+    try:
+        out = await asyncio.to_thread(pipelines.fork_public, uid, kb_id, req.name)
+    except pipelines.NotOwned:
+        raise HTTPException(status_code=404, detail="知识库不存在或没有公开") from None
+    await asyncio.to_thread(quota.consume, uid, "embed")
+    return out
 
 
 # ============ 公开库详情与原文（官方库 + 用户主动公开的库）============
@@ -540,9 +677,15 @@ async def get_official_kb(kb_id: str, uid: str = Depends(get_current_user)) -> d
     data["owner_name"] = (
         "官方" if official else await asyncio.to_thread(_owner_display_name, owner)
     )
+    # 上传/分享日期：官方库是导入上线那天，用户库是第一次公开那天。
+    # 用户要求"每个库都写上上传日期"，卡片和详情都用这一个字段。
+    data["uploads_at"] = int(meta.get("at") or 0)
     # 记浏览放在最后：前面任何一步抛错（库被并发删掉）都不该算一次"看过"
     await asyncio.to_thread(kb_views.touch, kb_id, uid)
     data["views"] = await asyncio.to_thread(kb_views.count, kb_id)
+    data["favs"] = await asyncio.to_thread(kb_favs.count, kb_id)
+    data["favorited"] = await asyncio.to_thread(kb_favs.has, kb_id, uid)
+    data["mine"] = owner == uid
     return data
 
 

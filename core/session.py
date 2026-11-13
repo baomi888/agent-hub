@@ -195,6 +195,13 @@ def _init_db() -> None:
             " kb_id TEXT NOT NULL, uid TEXT NOT NULL, at INTEGER NOT NULL,"
             " PRIMARY KEY (kb_id, uid))"
         )
+        # 收藏：一个人一个库一条。与浏览分表 —— 浏览是无意识的（点进去就算），
+        # 收藏是有意识的清单，读法完全不同（见 core/kb_favs.py）
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS kb_favorites ("
+            " kb_id TEXT NOT NULL, uid TEXT NOT NULL, at INTEGER NOT NULL,"
+            " PRIMARY KEY (kb_id, uid))"
+        )
     with _get_conn() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS conversations (

@@ -3,7 +3,7 @@
 // 知识库域：库列表、名称映射、上传建库 / 联网建库进度 / 删库删文件 / 重建 / 搜索预览
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
-import type { KbInfo, PublicKbInfo, SearchResult } from "@/lib/types";
+import type { KbInfo, PublicKbInfo, SearchResult, FavoriteKbInfo } from "@/lib/types";
 import { describeParams, type ChunkParams } from "@/lib/chunkProfiles";
 import { forgetKbChunk, loadKbChunks, saveKbChunks, type KbChunkMap } from "@/lib/kbChunkPrefs";
 import type { ShowToast } from "./useToast";
@@ -13,6 +13,14 @@ export function useKnowledge(showToast: ShowToast, chunkSize: number, chunkOverl
   // 全站公开库（别人的）：挂进对话当检索源用。不是核心功能，
   // 拉取失败静默降级成空列表——不能因为它挡住自己的库列表。
   const [publicKbs, setPublicKbs] = useState<PublicKbInfo[]>([]);
+  /**
+   * 我收藏的公开库。
+   *
+   * 为什么单开一份而不是从 publicKbs 里筛：广场是"全站有什么"，收藏是
+   * "我选了哪些"。用户明确要求一开始不把全站公开库都铺在资料库里 ——
+   * 面板上默认只看收藏，想看全部再去广场挑。所以收藏必须独立成组。
+   */
+  const [favKbs, setFavKbs] = useState<FavoriteKbInfo[]>([]);
   // 首屏库列表还没回来：右栏渲染骨架
   const [loading, setLoading] = useState(true);
   // 每个库各自的处理方式（浏览器本地）。用 effect 读，避免 SSR 期访问 localStorage
@@ -56,25 +64,59 @@ export function useKnowledge(showToast: ShowToast, chunkSize: number, chunkOverl
       .listPublicKbs()
       .then((r) => setPublicKbs(r.kbs))
       .catch(() => {});
+    // 收藏同理：库被收回 / 删掉后收藏也会消失，跟着一起刷新才是真相
+    api
+      .listFavoriteKbs()
+      .then((r) => setFavKbs(r.kbs))
+      .catch(() => {});
   }, [showToast]);
 
   // 初始化：拉知识库列表（与 sessions/defaults 的请求并发）
   useEffect(() => {
     let alive = true;
     (async () => {
-      const [k, pub] = await Promise.all([
+      const [k, pub, fav] = await Promise.all([
         api.listKbs().catch(() => null),
         api.listPublicKbs().catch(() => null),
+        api.listFavoriteKbs().catch(() => null),
       ]);
       if (!alive) return;
       if (k) setKbs(k.kbs);
       if (pub) setPublicKbs(pub.kbs);
+      if (fav) setFavKbs(fav.kbs);
       setLoading(false);
     })();
     return () => {
       alive = false;
     };
   }, []);
+
+  /**
+   * 收藏 / 取消收藏。乐观更新列表，失败再回滚 ——
+   * 星标是"点一下就该亮"的东西，等一个来回的网络会让人以为没点上、再点一次。
+   */
+  const toggleFavorite = useCallback(
+    async (kbId: string, on: boolean) => {
+      const before = favKbs;
+      if (!on) {
+        setFavKbs((list) => list.filter((x) => x.kb_id !== kbId));
+      }
+      try {
+        if (on) {
+          await api.addFavorite(kbId);
+        } else {
+          await api.removeFavorite(kbId);
+        }
+        // 加收藏要把来源、作者、日期一起拿到手，本地拼不出来 → 重拉
+        const r = await api.listFavoriteKbs();
+        setFavKbs(r.kbs);
+      } catch (e) {
+        setFavKbs(before);
+        showToast("error", e instanceof Error ? e.message : "操作失败，请稍后重试");
+      }
+    },
+    [favKbs, showToast]
+  );
 
   // kb_id → 中文显示名映射（侧栏/顶栏展示用）
   const kbNameMap = useMemo(() => {
@@ -177,6 +219,8 @@ export function useKnowledge(showToast: ShowToast, chunkSize: number, chunkOverl
   return {
     kbs,
     publicKbs,
+    favKbs,
+    toggleFavorite,
     kbNameMap,
     loading,
     refreshKbs,
