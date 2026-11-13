@@ -162,14 +162,14 @@ export default function UsagePanel({ onClose }: Props) {
                 </div>
                 {Object.values(data.quota).some((q) => q.unlimited) ? (
                   <p className="mt-3 rounded-md border border-line bg-fill-3 px-3 py-2.5 text-fs-sm text-muted">
-                    管理员账号：问答与向量化均不限额度。限流防爆破仍在生效。
+                    管理员账号：问答与建库均不限额度。限流防爆破仍在生效。
                   </p>
                 ) : (
                   <div className="mt-3 flex flex-col gap-3">
                     {(
                       [
                         ["ask", "今日问答", "每轮对话消耗 1 次"],
-                        ["embed", "向量化分片", "上传/建库按片段计费"],
+                        ["embed", "资料建库", "上传或建库按片段计费"],
                       ] as const
                     ).map(([kind, label, hint]) => {
                       const q = data.quota[kind];
@@ -287,7 +287,7 @@ export default function UsagePanel({ onClose }: Props) {
   );
 }
 
-/** 近 7 日两根柱（问答 / 向量化），高度按各自峰值归一。零数据也画空槽保持节律 */
+/** 近 7 日两根柱（问答 / 建库），高度按各自峰值归一。零数据也画空槽保持节律 */
 function UsageBars({ history }: { history: UsageDay[] }) {
   const maxAsk = Math.max(1, ...history.map((d) => d.ask));
   const maxEmbed = Math.max(1, ...history.map((d) => d.embed));
@@ -296,7 +296,7 @@ function UsageBars({ history }: { history: UsageDay[] }) {
     <div className="mt-3">
       <div className="up-chart">
         {history.map((d) => (
-          <div key={d.day} className="up-col" title={`${d.day} · 问答 ${d.ask} · 向量化 ${d.embed}`}>
+          <div key={d.day} className="up-col" title={`${d.day} · 问答 ${d.ask} · 建库 ${d.embed}`}>
             <div className="up-col-bars">
               <span
                 className={`up-bar-v ask${d.ask === 0 ? " empty" : ""}`}
@@ -316,7 +316,7 @@ function UsageBars({ history }: { history: UsageDay[] }) {
           <i className="up-dot ask" /> 问答
         </span>
         <span className="inline-flex items-center gap-1">
-          <i className="up-dot embed" /> 向量化
+          <i className="up-dot embed" /> 建库
         </span>
         {allZero && <span className="text-faint">· 近 7 天还没有使用记录</span>}
       </div>
