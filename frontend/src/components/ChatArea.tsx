@@ -78,14 +78,20 @@ const TOP_K_MODES = [
   { value: 8, hint: "更全" },
 ] as const;
 
-/** 顶栏胶囊文案：管理员显示「无限额」，否则「问答 x/y · 向量化 a/b」 */
+/** 顶栏胶囊文案：管理员显示「无限额」，否则说清今天还能问几次。
+ *
+ * ★ 2026-11-13：原来是「问答 0/60 · 向量化 0/1000」。
+ *   两处都不对用户说话：「向量化」是把课件切块进向量库的次数，属于内部实现，
+ *   用户既改不了也不需要知道；「0/60」也没说清是哪一边 —— 第一次进来的人
+ *   会读成"我一次都不能问"。改成从用量倒推的剩余次数，并在快用完时才提。
+ */
 function quotaLine(q: Record<string, QuotaInfo>): string {
   if (Object.values(q).some((x) => x.unlimited)) return "无限额 · 管理员";
-  const fmt = (n: number) => (n === 0 ? "∞" : String(n));
-  const parts: string[] = [];
-  if (q["ask"]) parts.push(`问答 ${q["ask"].used}/${fmt(q["ask"].limit)}`);
-  if (q["embed"]) parts.push(`向量化 ${q["embed"].used}/${fmt(q["embed"].limit)}`);
-  return parts.join(" · ") || "用量";
+  const ask = q["ask"];
+  if (!ask) return "用量";
+  if (ask.limit === 0) return "今天不限次数";
+  const left = Math.max(ask.limit - ask.used, 0);
+  return left > 0 ? `今天还能问 ${left} 次` : "今天的次数用完了";
 }
 
 interface Props {

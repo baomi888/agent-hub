@@ -176,7 +176,8 @@ export default function MailAccess() {
         {!loaded
           ? "正在读邮件设置…"
           : !ready
-            ? "服务端还没配好发信账号，这台暂时收不到邮件提醒。"
+            // 2026-11-13：「服务端」是维护者的词，用户只关心"能不能用"。
+            ? "邮箱提醒暂时用不了，这台先收不到邮件。"
             : verified
               ? state?.enabled
                 ? `到点会发到 ${state?.address}。手机上收不到通知时，这封邮件就是你能看到的那一条。`

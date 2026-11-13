@@ -647,19 +647,24 @@ function PushHealth({ status, onOpen }: { status: PushStatus | null; onOpen: () 
   if (!status) return null;
   if (status.supported && status.subscribed) return null;
 
-  const title = status.supported ? "这个账号还没有能收提醒的设备" : "这个浏览器收不到提醒";
+  // 2026-11-13：一句说完。原来标题 + 一句说明各占一行，390 下是三行，
+  // 把首屏又往下推了一截；而第二句（"在设置里打开「提醒权限」"）和右边的
+  // 「去设置」按钮说的是同一件事 —— 按钮已经指路了，话就不必再说一遍。
+  const title = status.supported
+    ? "还没开提醒权限，到点不会通知你"
+    : "这个浏览器收不到提醒";
   return (
     <div className="rem-health" role="status">
       <CornIcon name="warn" className="h-4 w-4" />
       <div>
-        <b>{title}，到时间不会提醒你。</b>
-        <span>
-          {status.supported
-            ? "在设置里打开「提醒权限」，到点会通知你。"
-            : // 安卓的网页通知底层走 Google 服务，国内不通；日历那条路已删，
-              // 所以这里没有第二条路可指，只能说实话。
-              "安卓手机在国内收不到网页通知，换台电脑或 iPhone 打开提醒即可。"}
-        </span>
+        <b>{title}</b>
+        {status.supported ? null : (
+          <span>
+            {/* 安卓的网页通知底层走 Google 服务，国内不通；日历那条路已删，
+                所以这里没有第二条路可指，只能说实话。 */}
+            安卓的网页通知在国内连不上，换台电脑或 iPhone 打开即可。
+          </span>
+        )}
       </div>
       {/* 用按钮而不是链接：已经在待办页上了，链接会整页重载一次，
           回来滚到顶部、列表重新拉一遍 —— 只是切个标签，不该有这些代价。 */}
@@ -705,6 +710,10 @@ function NextCard({
   const title = isTask ? next.task.title : next.item.title;
   const when = fmtHM(toMs(next.at));
   const rest = now === null ? null : fmtRemaining(toMs(next.at), new Date(now));
+  /* 「还有 9 小时 16 分」默认是灰的，半小时内才转金。
+     为什么是 30 分钟：再远的时候它只是元信息，金色该留给"选中"和"主操作"；
+     半小时是"现在真该准备了"的那条线，也让这一处成为**唯一会变的强调**。 */
+  const soon = now !== null && toMs(next.at) - now >= 0 && toMs(next.at) - now <= 30 * 60 * 1000;
   const meta = isTask
     ? `${listLabel[next.task.list_key] ?? ""}${next.task.priority > 0 ? ` · ${PRIORITY_LABEL[next.task.priority]}` : ""}`
     : sourceLabel[next.item.source] ?? next.item.source;
@@ -713,7 +722,9 @@ function NextCard({
     <section className="rem-next" aria-label="下一件">
       <div className="rem-next-head">
         <span className="rem-next-when">{when}</span>
-        <span className="rem-next-rest">{rest ?? ""}</span>
+        <span className="rem-next-rest" data-soon={soon ? "1" : undefined}>
+          {rest ?? ""}
+        </span>
       </div>
       <h3 className="rem-next-title">
         {/* 只给待办挂图标：联动提醒的时刻由来源（课表/番茄钟）决定，

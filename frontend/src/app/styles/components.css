@@ -6,7 +6,11 @@
      不该落在装饰档上。--fs-badge 现在只留给序号/徽章/角标里的数字。 */
   font-size: var(--fs-xs);
   letter-spacing: var(--ls-wide);
-  color: var(--accent-ink);
+  /* ★ 2026-11-13 由 --accent-ink 改成 --text-3：眉题是"定位标签"，
+     既不是选中项也不是主操作，不该占金色预算。全站一屏的金色额度
+     （选中的 + 主操作）本来就不多，眉题每页都抢一份，页头先黄了一片。
+     现在它退回次级文字，金色留给真正要指的地方。 */
+  color: var(--text-3);
   font-weight: 500;
 }
 

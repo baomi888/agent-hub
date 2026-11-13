@@ -62,11 +62,14 @@ interface Props {
 const toMs = (ts: number) => (ts < 1e12 ? ts * 1000 : ts);
 
 function quotaLine(q: Record<string, QuotaInfo>): string {
-  const fmt = (n: number) => (n === 0 ? "∞" : String(n));
-  const parts: string[] = [];
-  if (q["ask"]) parts.push(`今日问答 ${q["ask"].used}/${fmt(q["ask"].limit)}`);
-  if (q["embed"]) parts.push(`向量化 ${q["embed"].used}/${fmt(q["embed"].limit)}`);
-  return parts.join(" · ");
+  // 2026-11-13：与顶栏胶囊同一套说法（ChatArea.quotaLine）。原来这里是
+  // 「今日问答 0/60 · 向量化 0/1000」——半个屏上出现两次「向量化」，
+  // 而它既不是用户能改的，也不是用户需要知道的。
+  const ask = q["ask"];
+  if (!ask) return "";
+  if (ask.limit === 0) return "今天不限次数";
+  const left = Math.max(ask.limit - ask.used, 0);
+  return left > 0 ? `今天还能问 ${left} 次` : "今天的次数用完了";
 }
 
 function groupSessions(list: Conversation[]) {
@@ -159,7 +162,12 @@ export default function Sidebar({
           <h1 className="truncate font-serif text-fs-xl font-bold leading-tight text-ink">
             知穗Agent
           </h1>
-          <p className="brand-sub truncate">知识库 · 多对话 · 智能体</p>
+          {/* 2026-11-13：原来写「知识库 · 多对话 · 智能体」，在桌面就截成
+              「知识库 · 多对话 · 智能…」。三个词里有两个是功能罗列，
+              对第一次进来的人没有信息量；换成一句它替谁做什么。
+              ★ 长度按 190px 侧栏量过：这行最多 9 个汉字，多一个字就会被
+              `.truncate` 切掉尾巴（上一版写 12 个字，照样断）。 */}
+          <p className="brand-sub truncate">课件笔记，一问就答</p>
         </div>
       </div>
 

@@ -2430,6 +2430,9 @@ textarea.input {
 .rem-health {
   display: flex;
   align-items: flex-start;
+  /* 2026-11-13：允许折行。390 宽下这一行是「图标 + 三行字 + 去设置」，
+     按钮原来可以被压到 40px 宽，"去设置"被拆成"去设 / 置"两行。 */
+  flex-wrap: wrap;
   gap: var(--space-10);
   margin-bottom: var(--space-12);
   padding: var(--space-10) var(--space-12);
@@ -2439,6 +2442,16 @@ textarea.input {
   background: var(--fill-3);
   font-size: var(--fs-xs);
   color: var(--text-2);
+}
+/* 文字块自己收缩换行，别把按钮挤变形 */
+.rem-health > div {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+/* 按钮不参与收缩：三个字的动作标签被拆行比"没地方放"更糟 */
+.rem-health > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 .rem-health > svg {
   flex: 0 0 auto;
@@ -2501,7 +2514,9 @@ textarea.input {
   color: var(--text-3);
 }
 .rem-tabs button[aria-pressed="true"] .rem-tabcount {
-  color: var(--accent-ink);
+  /* 2026-11-13：跟着退回次级。选中态已经由 tab 的淡金底 + 金描边表达了，
+     计数再金一次就是同一个意思说两遍。 */
+  color: var(--text-2);
 }
 
 /* ---------- 下一件 ----------
@@ -2531,8 +2546,17 @@ textarea.input {
 }
 .rem-next-rest {
   font-size: var(--fs-xs);
-  color: var(--accent-ink);
+  /* ★ 2026-11-13：默认改成次级文字，只有「30 分钟内」才转金（data-soon）。
+     原来它一直是 --accent-ink，于是"还有 9 小时 16 分"这种远字号也占着金色，
+     和「当前选中」「主操作」抢同一个强调位。远的时候它只是元信息，
+     近了才值得拉响 —— 这也是这张卡唯一的动态强调。 */
+  color: var(--text-2);
   font-variant-numeric: tabular-nums;
+}
+/* 半小时以内：这是全页唯一"会变"的强调，转金才有意义 */
+.rem-next-rest[data-soon="1"] {
+  color: var(--accent-ink);
+  font-weight: 500;
 }
 .rem-next-title {
   display: flex;
@@ -2704,7 +2728,11 @@ textarea.input {
   background: currentColor;
 }
 .rem-pritag[data-p="1"] {
-  color: var(--info);
+  /* ★ 2026-11-13 修的是**用错令牌**，不是色值：--info 是"当底色用"的深蓝
+     （tokens.css 注释写着"白字 7.17:1"），直接拿来当 12px 文字压在 --fill-3 上
+     只有 3.1:1，低于 AA 的 4.5。同一套分工里 --red / --red-ink 是分开的，
+     蓝色这一组漏了 —— 文字该用 --info-ink。 */
+  color: var(--info-ink);
   background: var(--fill-3);
 }
 .rem-pritag[data-p="2"] {
@@ -2890,7 +2918,9 @@ textarea.input {
   min-height: 44px;
   padding: 0 var(--space-8);
   font-size: var(--fs-xs);
-  color: var(--accent-ink);
+  /* 2026-11-13：由 --accent-ink 改成 --text-2。它是"换个视图看"的次入口，
+     不是选中也不是主操作；金色留给 tab 的当前选中，它一黄就把选中态盖住了。 */
+  color: var(--text-2);
 }
 .rem-groupmore:hover {
   text-decoration: underline;
@@ -3014,7 +3044,10 @@ textarea.input {
 .rem-count-row b {
   font-size: var(--fs-md);
   font-weight: 600;
-  color: var(--accent-ink);
+  /* 2026-11-13：由 --accent-ink 改成 --text-2。这里一行有 3–5 条倒计时，
+     每行的天数都金一次，一列下去就是一条金带 —— 那列数字是**数据**，
+     不是"选中"。越近越急这件事由排序本身表达（按 due 升序）。 */
+  color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
 .rem-count-title {
@@ -3517,9 +3550,13 @@ textarea.input {
   }
   .pg-head--compact .pg-sub {
     margin-top: 2px;
+    /* 2026-11-13：原来是 nowrap + ellipsis，390 下这句被切成
+       「…课表、打卡的提醒会自动排…」—— 恰好在"会自动排好"那里断，读者不知道
+       排的是什么。改成最多两行：够短就一行，长也只是多一行 12px，不用省略号。 */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     font-size: var(--fs-xs);
   }
 }
@@ -5256,7 +5293,9 @@ textarea.input {
   font-size: var(--fs-badge);
   font-weight: 600;
   letter-spacing: 0.14em;
-  color: var(--accent-ink);
+  /* 2026-11-13：--accent-ink → --text-3。这是块上的小标签（"一句话添加"），
+     10px 的字配金色，在深底上既不够亮也不够暗，是最吃力的一处金。 */
+  color: var(--text-3);
 }
 .rem-cap-strip-text {
   overflow: hidden;
@@ -5270,7 +5309,9 @@ textarea.input {
   margin-left: auto;
   font-size: var(--fs-sm);
   font-weight: 500;
-  color: var(--accent-ink);
+  /* 2026-11-13：--accent-ink → --text-2。它和旁边的金色星芒图标连着读，
+     一处金已经够指出"这块能点"；文字再金，整块就又变成第二个主操作。 */
+  color: var(--text-2);
   white-space: nowrap;
 }
 
@@ -5527,4 +5568,20 @@ textarea.input {
   .rem-cap-live-caret,
   .rem-cap-live-wait i { animation: none; }
   .rem-cap-live-wave i { transition: none; }
+}
+
+/* ---------- 四六级「建立我的备考档案」----------
+   2026-11-13：这张卡上唯一的主操作。原来是一枚 12px、8px 内边距的墨底小块，
+   在深色下墨底 #2E2618 压在卡片 #292217 上几乎看不出边界 —— 形状和对比度
+   两头都不成立，用户填完 5 行还得"找"最后一步。
+   这里改成金底 + --on-accent 深字（两套主题同向，实测 4.9:1 / 6.6:1），
+   与校园页主按钮是同一个解法；整张卡只有这一处金色实底。 */
+.cet-submit {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--fs-lg);
+  padding: 0 var(--space-20);
+}
+.cet-submit:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 88%, black);
 }

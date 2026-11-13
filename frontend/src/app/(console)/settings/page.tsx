@@ -55,7 +55,9 @@ import type {
 /** 配额维度的中文名。顺序即展示顺序 */
 const QUOTA_META: { key: string; label: string; unit: string }[] = [
   { key: "ask", label: "问答", unit: "次" },
-  { key: "embed", label: "向量化", unit: "次" },
+  // 2026-11-13：「向量化」改成「资料建库」。用户做过的那件事是"把资料丢进来建库"
+  // （界面上其它地方就写「开始建库」），不是"把文本切块灌进向量库"。
+  { key: "embed", label: "资料建库", unit: "次" },
   { key: "auto", label: "自动（定时）", unit: "次" },
 ];
 

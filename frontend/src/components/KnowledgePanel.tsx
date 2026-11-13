@@ -708,15 +708,15 @@ export default function KnowledgePanel({
             <p className="font-serif text-sm font-medium text-ink">还没有资料库</p>
             <div className="mt-4 space-y-2 text-left">
               <div className="flex items-start gap-2.5">
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent text-fs-badge font-bold text-white">1</span>
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--accent-tint)] text-fs-badge font-bold text-[var(--text-1)]">1</span>
                 <p className="text-xs text-muted">点上方「我的文件」或「网上的资料」开始建库</p>
               </div>
               <div className="flex items-start gap-2.5">
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent text-fs-badge font-bold text-white">2</span>
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--accent-tint)] text-fs-badge font-bold text-[var(--text-1)]">2</span>
                 <p className="text-xs text-muted">勾选资料库左侧的勾选框绑定到当前对话</p>
               </div>
               <div className="flex items-start gap-2.5">
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent text-fs-badge font-bold text-white">3</span>
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--accent-tint)] text-fs-badge font-bold text-[var(--text-1)]">3</span>
                 <p className="text-xs text-muted">回到左侧对话区开始提问</p>
               </div>
             </div>

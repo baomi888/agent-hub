@@ -335,7 +335,11 @@ function PlanEditor({
                 ...pill,
                 background: examDate === s.date ? "var(--accent-soft)" : "var(--surface)",
                 borderColor: examDate === s.date ? "var(--accent)" : "var(--line)",
-                color: examDate === s.date ? "var(--accent-ink)" : "var(--text-3)",
+                /* 2026-11-13：选中态的文字由金字改成正文色。
+                   淡金底 + 金描边已经说清"选的是它"，文字再金一次，
+                   一屏 5 个胶囊就是五块金 —— 而这张卡上真正的主操作
+                   （建立备考档案）反而要在这片金里找。 */
+                color: examDate === s.date ? "var(--text-1)" : "var(--text-3)",
               }}
             >
               {s.label}
@@ -349,13 +353,15 @@ function PlanEditor({
             style={{ ...input, padding: "6px 8px" }}
           />
         </div>
-        <p
-          style={{
-            fontSize: "var(--fs-xs)",
-            margin: "8px 0 0",
-            color: spanDays >= 1 ? "var(--accent-ink)" : "var(--red-ink)",
-          }}
-        >
+          <p
+            style={{
+              fontSize: "var(--fs-xs)",
+              margin: "8px 0 0",
+              // 2026-11-13：这句是"算出来的结果"，属于元信息，不是主操作也不是选中。
+              // 原来用 --accent-ink，于是卡片里多了一整句金 —— 出错时仍用红。
+              color: spanDays >= 1 ? "var(--text-2)" : "var(--red-ink)",
+            }}
+          >
           {spanDays >= 1
             ? `共 ${spanDays} 天（含今天）· 每天 ${mods.length} 个任务，共 ${spanDays * mods.length} 项`
             : "考试日不能早于今天"}
@@ -379,7 +385,8 @@ function PlanEditor({
                   ...pill,
                   background: on ? "var(--accent-soft)" : "var(--surface)",
                   borderColor: on ? "var(--accent)" : "var(--line)",
-                  color: on ? "var(--accent-ink)" : "var(--text-3)",
+                  // 同上面日期胶囊：选中的表达交给底和边，文字退回正文色
+                  color: on ? "var(--text-1)" : "var(--text-3)",
                 }}
               >
                 {on ? "✓ " : ""}
@@ -426,23 +433,30 @@ function PlanEditor({
         {onArchive ? (
           <button
             type="button"
+            className="btn-import"
             onClick={onArchive}
             disabled={busy}
             style={{
-              ...btn,
-              background: "transparent",
-              color: archiveDanger ? "var(--red-ink)" : "var(--text-3)",
-              border: `1px solid ${archiveDanger ? "var(--red)" : "var(--line)"}`,
+              minHeight: 44,
+              color: archiveDanger ? "var(--red-ink)" : "var(--text-2)",
+              borderColor: archiveDanger ? "var(--red)" : undefined,
             }}
           >
             {archiveLabel ?? "结束这个计划"}
           </button>
         ) : null}
+        {/* 2026-11-13：这张卡上唯一的主操作，之前是 12px、8px 内边距的一枚小实心块
+            （比旁边的配置胶囊还轻），落在 830px 宽卡片的右下角，用户填完 5 行要"找"。
+            现在：金色实底（全卡唯一的实心金）+ 深字 + 44px 高。
+            为什么不是 .btn-new 那种墨底：深色主题下墨底（#2E2618）压在卡片（#292217）
+            上几乎看不出边界，主操作等于隐形 —— 和校园页主按钮同一个解法
+            （金底 + --on-accent 深字）。 */}
         <button
           type="button"
+          className="btn-new cet-submit"
           onClick={submit}
           disabled={busy || !valid}
-          style={{ ...btn, opacity: busy || !valid ? 0.5 : 1 }}
+          style={{ minHeight: 44, opacity: busy || !valid ? 0.5 : 1 }}
         >
           {busy ? "保存中…" : initial ? "保存修改" : "建立我的备考档案"}
         </button>
@@ -700,8 +714,12 @@ export default function CetPage() {
             archiveDanger={confirmArchive}
           />
           {!plan ? (
+            /* 2026-11-13：删掉原来那句「还没有档案时会显示这个配置向导；建档之后
+               在这里随时能改。」——「配置向导」是写给维护者的词，学生看不懂；
+               而且它描述的正是用户眼前正在发生的事（"你在填表"），
+               属于把界面解释给用户听。 */
             <p style={{ fontSize: "var(--fs-xs)", color: "var(--text-3)", marginTop: 12, textAlign: "center" }}>
-              还没有档案时会显示这个配置向导；建档之后在这里随时能改。
+              填好就能开始，之后随时能回来改。
             </p>
           ) : null}
         </>
