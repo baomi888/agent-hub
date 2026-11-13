@@ -65,6 +65,12 @@ export default function LibraryPage() {
   /** 正在等收藏接口返回的库（防连点，也让星标立刻有反馈） */
   const [faving, setFaving] = useState<string | null>(null);
   /**
+   * 刚刚收藏成功的是哪个库 —— 只用来放一次「弹一下」的动画。
+   * 不能直接拿 `.on` 当动画触发器：首屏渲染时已收藏的卡片会一起弹，
+   * 一进页面满屏星星在跳，比没有动画更糟。
+   */
+  const [popped, setPopped] = useState<string | null>(null);
+  /**
    * 同名筛选取的库名。不同用户会传来同名的库（"考研数学"能有五六份），
    * 内容不同不能合并，所以给一个"只看这个名字"的开关，配合热度排序挑最值的那个。
    */
@@ -162,6 +168,11 @@ export default function LibraryPage() {
       );
       const f = await api.listFavoriteKbs();
       setFavs(f.kbs);
+      // 只在"收藏"时弹一下。取消收藏是"归零"，再弹就像在庆祝取消了
+      if (r.favorited) {
+        setPopped(k.kb_id);
+        window.setTimeout(() => setPopped((cur) => (cur === k.kb_id ? null : cur)), 420);
+      }
       showToast("success", on ? `已收藏「${k.name}」，在资料库的「我的收藏库」里能找到` : `已取消收藏「${k.name}」`);
     } catch (e) {
       setPub((list) =>
@@ -254,12 +265,38 @@ export default function LibraryPage() {
             <ul className="lib-courses">
               {official.map((k) => (
                 <li key={k.kb_id} className="lib-course-wrap">
-                  <Link href={`/library/${encodeURIComponent(k.kb_id)}`} className="lib-course">
+                  <div className="lib-course">
                     <span className="lib-course-h">
                       <span className="lib-course-mark" aria-hidden="true">
                         {markOf(k.name)}
                       </span>
-                      <span className="lib-badge-off">官方</span>
+                      {/* 星标和「官方」徽标在同一个 flex 组里，间距交给 gap。
+                          2026-11-13 晚之前星标是绝对定位 + margin-right 硬推到徽标
+                          左侧的，结果带收藏数时宽度一变就贴到徽标上 —— 用户看到的是
+                          "星和后面那个标叠在一起"。 */}
+                      <span className="lib-course-tags">
+                        <button
+                          type="button"
+                          className={
+                            "lib-fav-btn" +
+                            (k.favorited ? " on" : "") +
+                            (popped === k.kb_id ? " pop" : "")
+                          }
+                          aria-pressed={!!k.favorited}
+                          aria-label={`${k.favorited ? "取消收藏" : "收藏"}：${k.name}`}
+                          title={k.favorited ? "取消收藏" : "收藏，之后在「我的收藏库」里找得到"}
+                          disabled={faving === k.kb_id}
+                          onClick={() => void toggleFav(k)}
+                        >
+                          <CornIcon name="star" className="h-4 w-4" />
+                          {/* 收藏数：GitHub 那种「星 + 数字」。0 不显示数字 ——
+                              没人收过的时候，一个空心星自己就说完了 */}
+                          {(k.favs ?? 0) > 0 && (
+                            <span className="lib-fav-n">{fmtNum(k.favs ?? 0)}</span>
+                          )}
+                        </button>
+                        <span className="lib-badge-off">官方</span>
+                      </span>
                     </span>
                     <b className="lib-course-name" title={k.name}>
                       {k.name}
@@ -277,23 +314,16 @@ export default function LibraryPage() {
                         <CornIcon name="arrow" className="h-3.5 w-3.5" />
                       </span>
                     </span>
-                  </Link>
-                  {/* 星标必须是 Link 的**兄弟**而不是子节点：<a> 里放 <button> 是非法嵌套，
-                      移动端浏览器会各自按自己的规则修正 DOM，点收藏会连带跳转。 */}
-                  <button
-                    type="button"
-                    className={"lib-fav-btn" + (k.favorited ? " on" : "")}
-                    aria-pressed={!!k.favorited}
-                    aria-label={`${k.favorited ? "取消收藏" : "收藏"}：${k.name}`}
-                    title={k.favorited ? "取消收藏" : "收藏，之后在「我的收藏库」里找得到"}
-                    disabled={faving === k.kb_id}
-                    onClick={() => void toggleFav(k)}
-                  >
-                    <CornIcon name="star" className="h-4 w-4" />
-                    {/* 收藏数：GitHub 那种「星 + 数字」。0 不显示数字 ——
-                        没人收过的时候，一个空心星自己就说完了 */}
-                    {(k.favs ?? 0) > 0 && <span className="lib-fav-n">{fmtNum(k.favs ?? 0)}</span>}
-                  </button>
+                    {/* 整卡可点，但**不能**把卡片内容包进 <a>：<a> 里放 <button>
+                        是非法嵌套，手机上点收藏会连带跳详情页。改成一张透明的
+                        覆盖层链接盖在卡片上，星标再用 z-index 抬到它上面。
+                        顺带解决"卡片里所有文字都成了蓝色链接"的样式污染。 */}
+                    <Link
+                      href={`/library/${encodeURIComponent(k.kb_id)}`}
+                      className="lib-course-hit"
+                      aria-label={`打开「${k.name}」的资料清单`}
+                    />
+                  </div>
                 </li>
               ))}
             </ul>
@@ -503,7 +533,11 @@ export default function LibraryPage() {
                   </h3>
                   <button
                     type="button"
-                    className={"lib-fav-btn" + (k.favorited ? " on" : "")}
+                    className={
+                      "lib-fav-btn" +
+                      (k.favorited ? " on" : "") +
+                      (popped === k.kb_id ? " pop" : "")
+                    }
                     aria-pressed={!!k.favorited}
                     aria-label={`${k.favorited ? "取消收藏" : "收藏"}：${k.name}`}
                     title={k.favorited ? "取消收藏" : "收藏，之后在「我的收藏库」里找得到"}

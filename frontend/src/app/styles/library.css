@@ -404,6 +404,11 @@
 }
 
 .lib-name {
+  /* 名字吃满剩余宽度，星标才会靠右。
+     不给 flex 的话星标紧跟在名字后面，名字短时它浮在标题中间，
+     一列卡片看下来星标的位置参差不齐 */
+  flex: 1;
+  min-width: 0;
   margin: 0;
   overflow: hidden;
   font-size: var(--fs-md);
@@ -809,6 +814,7 @@
 }
 
 .lib-course {
+  position: relative;
   display: flex;
   height: 100%;
   flex-direction: column;
@@ -825,6 +831,26 @@
   transform: translateY(-2px);
   border-color: var(--line-strong);
   box-shadow: var(--shadow-2);
+}
+/* 键盘 Tab 到这张卡时也要有反馈：覆盖层链接抢走了控件的焦点框 */
+.lib-course:focus-within {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px var(--accent-tint);
+}
+
+/* 整卡的点击区：一张透明的链接盖在卡片上。
+   ★ 为什么不用 `<Link>` 把内容包起来：卡里有收藏按钮，而 <a> 里放 <button>
+   是非法嵌套 —— 手机上点收藏会连带跳详情页。这个坑之前靠"按钮放 <a> 外面 +
+   绝对定位"绕过去，代价是星标位置被 margin 硬编码，带收藏数时就和「官方」徽标叠上了。
+   现在反过来：内容自己排，链接只当一层膜。 */
+.lib-course-hit {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  border-radius: inherit;
+}
+.lib-course-hit:focus-visible {
+  outline: none;
 }
 
 .lib-course-h {
@@ -1840,6 +1866,7 @@
   display: inline-flex;
   flex: none;
   align-items: center;
+  justify-content: center;
   gap: 3px;
   min-width: 28px;
   height: 28px;
@@ -1849,14 +1876,31 @@
   background: transparent;
   color: var(--text-3);
   cursor: pointer;
-  transition: color 0.14s, background 0.14s, transform 0.14s;
+  /* transform 必须进 transition，否则 hover 只有颜色变化 ——
+     在 16px 的图标上几乎看不出来，用户的原话是"很死板、没有悬浮" */
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    transform 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.25),
+    box-shadow 0.18s ease;
 }
-.lib-fav-btn:hover {
-  background: var(--fill-3);
+.lib-fav-btn:hover:not(:disabled) {
+  background: var(--accent-tint);
   color: var(--accent-ink);
+  /* 抬起来 + 放大。只换颜色在这么小的图标上看不出"它可点" */
+  transform: translateY(-1px) scale(1.12);
 }
-.lib-fav-btn:active {
-  transform: scale(0.92);
+/* 空心星 hover 时描边加粗，像被点亮了一点 */
+.lib-fav-btn:hover:not(:disabled) svg path {
+  stroke-width: 2.9;
+}
+.lib-fav-btn:active:not(:disabled) {
+  transform: scale(0.88);
+  transition-duration: 0.08s;
+}
+.lib-fav-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .lib-fav-btn:disabled {
   opacity: 0.5;
@@ -1878,6 +1922,41 @@
   stroke-width: 2;
 }
 
+/* 收藏成功那一下"弹"一下。
+   ★ 触发条件是 JS 临时加的 .pop，不是 .on —— 挂到 .on 上的话，
+   首屏所有已收藏的卡片会一起弹，满屏星星在跳，比没有动画更吵。 */
+@keyframes lib-fav-pop {
+  0% {
+    transform: scale(1) rotate(0);
+  }
+  32% {
+    transform: scale(1.34) rotate(-12deg);
+  }
+  64% {
+    transform: scale(0.92) rotate(5deg);
+  }
+  100% {
+    transform: scale(1) rotate(0);
+  }
+}
+.lib-fav-btn.pop svg {
+  transform-origin: 50% 52%;
+  animation: lib-fav-pop 0.42s cubic-bezier(0.3, 0.9, 0.4, 1.1);
+}
+
+/* 系统开了"减少动态效果"就只保留颜色变化：旋转放大对前庭敏感的人不友好 */
+@media (prefers-reduced-motion: reduce) {
+  .lib-fav-btn,
+  .lib-fav-btn:hover:not(:disabled),
+  .lib-fav-btn:active:not(:disabled) {
+    transform: none;
+    transition: color 0.15s ease, background 0.15s ease;
+  }
+  .lib-fav-btn.pop svg {
+    animation: none;
+  }
+}
+
 /* 收藏数：GitHub 那种「星 + 数字」。0 不出数字（见 JSX）——
    一排 0 比没有更吵，而且"没人收过"用一个空心星就说完了 */
 .lib-fav-n {
@@ -1886,33 +1965,29 @@
   line-height: 1;
 }
 
-/* 官方课程卡上的星标要浮在右上角：卡片整体是 <a>，
-   星标只能是兄弟节点，不能塞进链接里（<a> 里放 <button> 是非法嵌套） */
-.lib-course-wrap {
+/* 官方课程卡右上角那一组：[星标 + 数字] [官方]
+   两者是同级 flex 子项，间距交给 gap —— 不再靠绝对定位 + margin 硬推。
+   上一版写的是 `right: 7px; margin-right: 36px`：位置被写死，数字一变宽
+   就往「官方」徽标上贴，用户看到的是"星和后面那个标叠在一起"。 */
+.lib-course-tags {
   position: relative;
+  /* 必须盖在 .lib-course-hit 之上，否则点星标会被那层覆盖链接接走 */
+  z-index: 2;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
 }
-.lib-course-wrap .lib-fav-btn {
-  position: absolute;
-  /* 和第一行（字标 + 官方徽标）的中线对齐：
-     卡片 padding-top 15 + 字标 38/2 - 星标 28/2 = 20。写 7 的话星标会浮在卡片顶部
-     而徽标在下面一截，看着像两个不相干的浮层 */
-  top: 20px;
-  right: 7px;
-  /* 官方徽标也在右上，星标落在徽标左侧。
-     ★ 这个值是反着长的：margin 每加 1px，星标与徽标的间距就少 1px
-     （星标是 right 定位 + margin-right，往里推的是它自己的右边缘）。
-     42 时实测只剩 6px，一串「★2 官方」读着像连体；36 给出 12px 呼吸 */
-  margin-right: 36px;
-}
+
 /* 手机上没有 hover，28px 又偏小，补到 34px。
    用 min-width 而不是 width：带收藏数时按钮要能自己长宽，写死会把数字压掉 */
 @media (max-width: 640px) {
-  .lib-course-wrap .lib-fav-btn {
+  .lib-course-tags .lib-fav-btn {
     min-width: 34px;
     height: 34px;
-    /* 手机上卡片 padding 是 13，字标中线 = 13 + 19 = 32；34 高的按钮 top = 32 - 17 */
-    top: 15px;
-    margin-right: 36px;
+  }
+  .lib-course-tags {
+    gap: 6px;
   }
 }
 

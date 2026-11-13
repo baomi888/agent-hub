@@ -64,19 +64,50 @@ def test_panel_favorite_rows_carry_source():
 
 
 def test_favorite_star_is_not_nested_in_link():
-    """官方课程卡上的星标必须是 `<a>` 的兄弟节点。
+    """官方课程卡上的星标不能落在 `<a>` 里，整卡又必须可点。
 
     `<a>` 里放 `<button>` 是非法嵌套：桌面端点了可能只收藏，
     手机上会连带跳进详情页 —— 用户以为自己只点了个星。
+
+    2026-11-13 晚改成了「覆盖层链接」：内容正常排在 `<div.lib-course>` 里，
+    再盖一层自闭合的 `<Link className="lib-course-hit" />` 当点击膜，星标用
+    z-index 抬到它上面。这条断言钉的就是"链接必须是自闭的"——
+    一旦有人为了方便把内容重新包进 `<Link>`，按钮就又进 `<a>` 了。
     """
     s = _read(LIBRARY)
-    start = s.index('className="lib-course"')
-    end = s.index("</Link>", start)
-    inner = s[start:end]
-    assert "lib-fav-btn" not in inner, (
-        "星标被塞进官方卡的 <Link> 里了：手机上点收藏会连带跳转"
+    i = s.index("lib-course-hit")
+    j = s.rindex("<Link", 0, i)
+    tag = s[j : s.index("/>", i) + 2]
+    assert "</Link>" not in tag, "覆盖层链接把卡片内容包起来了 → 星标又落进 <a> 里了"
+    assert "lib-course-tags" in s, "星标与「官方」徽标应该在同一组里排，靠 gap 控制间距"
+
+
+def test_course_star_is_not_absolutely_positioned():
+    """官方卡的星标不能再靠绝对定位 + margin 硬推位置。
+
+    旧写法是 `right: 7px; margin-right: 36px`：位置写死，收藏数一变宽
+    就往「官方」徽标上贴，用户在广场上看到的是"星和后面那个标叠在一起"。
+    间距应该由 flex 的 gap 给，宽度由内容自己决定。
+    """
+    css = _read(LIB_CSS)
+    assert ".lib-course-wrap .lib-fav-btn" not in css, (
+        "星标又被绝对定位回右上角了 —— 带收藏数时会压到「官方」徽标"
     )
-    assert "lib-course-wrap" in s, "课程卡外层容器没了，星标没地方绝对定位"
+    tags = css.index(".lib-course-tags {")
+    block = css[tags : css.index("}", tags)]
+    assert "gap:" in block, "星标与徽标的间距必须由 gap 给，不要再用 margin 反着算"
+
+
+def test_favorite_star_reacts_to_hover():
+    """星标要有悬浮反馈：抬起来 + 放大，不能只换颜色。
+
+    用户原话："点击的时候不是有那个悬浮吗？然后星星它是没有悬浮的，
+    然后就很死板"。16px 的图标只变颜色，肉眼几乎看不出来。
+    """
+    css = _read(LIB_CSS)
+    i = css.index(".lib-fav-btn:hover:not(:disabled) {")
+    block = css[i : css.index("}", i)]
+    assert "transform:" in block, "星标的 hover 只剩颜色变化了，看起来像块死图标"
 
 
 def test_library_page_shows_source_and_upload_date():
