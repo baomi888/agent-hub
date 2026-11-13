@@ -185,7 +185,12 @@ def test_tabbar_height_is_a_single_token():
 
 
 def test_every_offset_uses_that_token():
-    """三处让位（内容区、最短页高、首页工作台）都必须用变量，不许再写数字。"""
+    """两处让位（内容区、最短页高）必须用变量，不许再写数字。
+
+    ★ 首页工作台**不在**这个名单里：它 2026-11-13 起不挂 tab，
+      高度反过来要求「不许出现 var(--tabbar-h)」—— 见 ④ 的
+      `test_home_does_not_mount_the_tabbar`。别把这条当成漏改补回去。
+    """
     css = _read(CONSOLE_CSS)
     block = _media_block(css, "@media (max-width: 900px)", "tabbar")
 
@@ -198,16 +203,6 @@ def test_every_offset_uses_that_token():
     assert any("var(--tabbar-h)" in r for r in shell), (
         "最短页高没扣 tab —— 空页面会多出一条假滚动条"
     )
-
-    # 首页工作台的高度在 fx.css 的 899 断点里（不是在 base.css）：
-    # base.css 那条先加载，被 fx.css 整条覆盖，改它等于没改 —— 实测过。
-    home = _media_block(_read(FX_CSS), "@media (max-width: 899px)", "workbench-main")
-    heights = _all_decls(_css_rule(home, "main.workbench-main"), "height")
-    assert heights, "首页工作台没有设高度"
-    for h in heights:
-        assert "var(--tabbar-h)" in h, (
-            f"首页工作台这一档高度没扣 tab（{h}）—— 输入框那行提示会压在导航条底下"
-        )
 
 
 def test_token_matches_the_tab_it_describes():
@@ -289,20 +284,54 @@ def test_tabbar_reuses_the_shared_nav_list():
     )
 
 
-# ==================== ④ 首页也要有 ====================
+# ==================== ④ 首页刻意不挂 ====================
 
 
-def test_home_has_the_same_tabbar():
-    """首页（/）不走 ConsoleLayout，必须单独挂一次。
+def test_home_does_not_mount_the_tabbar():
+    """首页（/）不挂底部 tab —— 用户 2026-11-13 决定：「影响整体性」。
 
-    不挂的表现：从待办点「对话」回到首页，底部那条当场消失，
-    用户会以为导航坏了 —— 而这条路径是手机上每天走十几次的。
+    这一条**方向是反的**，别急着按老习惯改回去：
+      · 11-13 下午曾为了让「对话」入口常驻而在首页单独挂过一次；
+      · 同一天晚上用户看过真页面后要求撤掉 —— 工作台是整块满屏卡片，
+        底部压一条 50px 的导航把它切成两截。
+    控制台那 8 个页面仍由 ConsoleLayout 统一挂，所以 tab 没被废弃，
+    只是不在一级页面出现。
+
+    断言查两件事，缺一都不算撤干净：
+      · 注释剥掉后没有 `<ConsoleTabBar`（只留 import 的话组件不在 DOM 里，
+        而字符串检查照样通过 —— 反证抓到过这一条）；
+      · fx.css 里首页窄屏高度不再减 `--tabbar-h`（不然底部空出 50px 白边，
+        比原来被压住还难看）。
     """
-    home = _read(HOME_TSX)
-    # 断言的是**渲染**，不是"导入过"。只留 import 的话组件根本不在 DOM 里，
-    # 而字符串检查照样通过（反证时抓到过这一条）。
-    assert "<ConsoleTabBar" in home, "首页没有渲染底部 tab：从控制台回首页时导航会消失"
-    assert '"@/components/console/ConsoleTabBar"' in home
+    home = _strip_comments(_read(HOME_TSX))
+    assert "ConsoleTabBar" not in home, (
+        "首页又挂回底部 tab 了：用户明确要求主页面不要，工作台会被切成两截"
+    )
+
+    block = _media_block(_read(FX_CSS), "@media (max-width: 899px)", "workbench-main")
+    heights = _all_decls(_css_rule(block, "main.workbench-main"), "height")
+    assert heights, "首页工作台没有设高度"
+    for h in heights:
+        assert "var(--tabbar-h)" not in h, (
+            f"首页已经没 tab 了，高度还在扣它（{h}）—— 底部会空出一条白边"
+        )
+        assert "100dvh - 16px" in h or "100vh - 16px" in h, (
+            f"首页高度不是「满屏减上下 8px 外边距」（{h}）"
+        )
+
+
+def test_home_still_has_a_way_into_the_console():
+    """撤掉 tab 之后，手机从首页进控制台不能没路。
+
+    用户接受撤 tab，是因为还能进得去 —— 侧栏（手机是抽屉）和首页的入口卡片。
+    这条钉住侧栏还在渲染：真把 Sidebar 也删了，手机上就只剩「更多」那条死路。
+    """
+    home = _strip_comments(_read(HOME_TSX))
+    assert "<Sidebar" in home, "首页连侧栏都不挂了：手机上没有任何进控制台的入口"
+    nav = _read(NAV_TS)
+    assert '"/reminders"' in nav or "/reminders" in nav, (
+        "共享导航清单里没有待办 —— 侧栏和 tab 都靠它，删了等于两个入口一起断"
+    )
 
 
 def test_tabbar_closes_on_navigation():

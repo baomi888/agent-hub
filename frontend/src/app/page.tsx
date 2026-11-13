@@ -6,7 +6,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
-import ConsoleTabBar from "@/components/console/ConsoleTabBar";
 import ChatArea, { type ChatAttachment } from "@/components/ChatArea";
 import KnowledgePanel from "@/components/KnowledgePanel";
 import SedimentModal from "@/components/chat/SedimentModal";
@@ -909,10 +908,12 @@ export default function Home() {
 
   return (
     <main className="workbench-main page-fade flex overflow-hidden">
-      {/* 手机底部 tab。首页必须挂同一个组件：手机上它只出现在控制台那 8 个页面里，
-          从待办点「对话」回到这里就消失 —— 用户会以为导航坏了。
-          首页的整屏工作台布局没走 ConsoleLayout，所以得单独挂这一次。 */}
-      <ConsoleTabBar isAdmin={auth.me?.is_admin} />
+      {/* 首页**不挂**底部 tab（用户 2026-11-13 决定：「影响整体性」）。
+          工作台是一整块满屏卡片，底部压一条 50px 的导航会把它切成两截。
+          控制台那 8 个页面仍由 ConsoleLayout 统一挂 tab；从首页进它们的路径是
+          侧栏抽屉（手机左滑/左上角）与首页各个入口卡片，不依赖这条 tab。
+          ★ 撤掉 tab 后，fx.css 里 `main.workbench-main` 的窄屏高度也必须把
+            `- var(--tabbar-h)` 去掉，否则底部会空出 50px 白边。 */}
       {/* 「装到桌面」的首次提示。★ 刻意挂在登录态确定之后（这里或上面的登录门分支），
           不挂根布局：根布局会在登录门出现之前就渲染，组件判定「可以弹」→
           立刻写下 60 天冷却，等用户真登录进来就再也不弹了（线上实测，探针里
