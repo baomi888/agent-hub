@@ -75,6 +75,15 @@ _REGISTRY_LOCK = threading.RLock()
 # Chroma collection 合法字符：字母数字 . _ -，首尾必须字母数字，长度 3-63
 _SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{1,61}[a-zA-Z0-9]$")
 
+# 官方公开知识库的归属 id（2026-11-13）。
+#
+# 它**不是**一个登录账号——用户表里没有这个人，也不需要给它设密码。
+# 只在 kb_owners 表里占一个 owner 值，换来三个好处：
+#   1. 官方库天然不出现在任何真实用户的"我的知识库"列表里；
+#   2. 归属校验、公开登记、检索挂载全部沿用既有逻辑，一行特判都不用加；
+#   3. 导入脚本可以随时以这个身份重跑（幂等），不依赖谁的密码。
+OFFICIAL_OWNER = "official"
+
 
 class NotOwned(Exception):
     """知识库不属于当前用户（或根本无主）。
@@ -284,9 +293,13 @@ def _load_public() -> None:
                 "on": True,
                 "desc": str(v.get("desc") or ""),
                 "at": int(v.get("at") or 0),
+                # 官方库（2026-11-13）：站点自建的课程资料库。**只有它**允许
+                # 非库主看到文件清单并下载原文——那些资料本来就是公开课程材料；
+                # 用户自己分享的库永远只给数量，不给人翻文件。
+                "official": bool(v.get("official")),
             }
         elif v:
-            loaded[k] = {"on": True, "desc": "", "at": 0}
+            loaded[k] = {"on": True, "desc": "", "at": 0, "official": False}
     _KB_PUBLIC = loaded
 
 
@@ -327,16 +340,38 @@ def is_public(kb_id: str) -> bool:
         return kb_id in _KB_PUBLIC
 
 
-def set_public(owner: str, kb_id: str, on: bool, desc: str | None = None) -> dict:
+def is_official(kb_id: str) -> bool:
+    """该库是否是站点自建的官方课程库（公开且带 official 标记）。
+
+    两个条件都要：官方标记只在公开登记表里，收回公开就整条删掉，
+    所以"标记还在"本身就蕴含"还公开着"。这里仍然把两件事分开读，
+    是为了让调用方一眼看出门禁依赖的是哪两个前提。
+    """
+    with _REGISTRY_LOCK:
+        _reload_public_if_changed()
+        meta = _KB_PUBLIC.get(kb_id)
+        return bool(meta and meta.get("official") and meta.get("on"))
+
+
+def set_public(
+    owner: str, kb_id: str, on: bool, desc: str | None = None, official: bool | None = None
+) -> dict:
     """把库标记为公开 / 收回公开，可顺带写一句简介。只有库主有权切换，无权抛 NotOwned。
 
     切换的是「他人可否只读检索」，不动归属：文件清单、上传、删除
-    永远只认 owner，公开与否无关。
+    永远只认 owner，公开与否无关（唯一例外是 official 库，见下）。
 
     `desc` 三态，别搞混：
       - None（默认）→ 不动已有简介。收回公开时前端一般不传，别把用户写的话抹了。
       - ""          → 清空简介（广场上回落成"这个库还没写简介"）。
       - 非空串       → 覆盖。
+
+    `official` 三态（只有导入脚本会传）：
+      - None → 保持原样（普通用户分享走这条，永远拿不到官方标记）。
+      - True → 标为官方库，之后非库主也能列文件清单、下载原文。
+      - False → 取消官方标记。
+    ★ 收敛点就在这里：官方身份**只能**由服务端脚本写入，接口层（
+      `/visibility`）从不透传这个字段，所以用户没办法把自己的库伪装成官方。
     返回写进去的那条元信息，省得调用方再读一次盘。
     """
     if owner_of(kb_id) != owner:
@@ -347,8 +382,11 @@ def set_public(owner: str, kb_id: str, on: bool, desc: str | None = None) -> dic
             meta = dict(_KB_PUBLIC.get(kb_id) or {})
             if desc is not None:
                 meta["desc"] = desc
+            if official is not None:
+                meta["official"] = bool(official)
             meta["on"] = True
             meta.setdefault("desc", "")
+            meta.setdefault("official", False)
             # 只在第一次公开时记时间；改简介不该让"分享于"变成今天
             if not meta.get("at"):
                 meta["at"] = int(time.time())
@@ -358,9 +396,20 @@ def set_public(owner: str, kb_id: str, on: bool, desc: str | None = None) -> dic
             # 但留着壳意味着「在表里 ≠ 公开」，is_public / list_public 每个读点
             # 都要再判一次 on —— 漏一处就是把私有库当公开，这条不能拿便利换。
             _KB_PUBLIC.pop(kb_id, None)
-            meta = {"on": False, "desc": "", "at": 0}
+            meta = {"on": False, "desc": "", "at": 0, "official": False}
         _save_public()
         return meta
+
+
+def public_meta(kb_id: str) -> dict:
+    """公开登记表里该库的那条元信息；没公开（或已收回）返回空字典。
+
+    给 API 层读简介/官方标记用。之前这类读取直接摸 `_KB_PUBLIC` + 私有锁，
+    等于把"登记表的内部结构"泄漏给了调用方——换个存储就得改两处。
+    """
+    with _REGISTRY_LOCK:
+        _reload_public_if_changed()
+        return dict(_KB_PUBLIC.get(kb_id) or {})
 
 
 def name_of(kb_id: str | None) -> str | None:
@@ -627,6 +676,8 @@ def list_public() -> list[dict]:
                     "owner": owner,
                     "desc": meta.get("desc") or "",
                     "at": int(meta.get("at") or 0),
+                    # 官方课程库：前端据此分两个分区，并允许点进去看文件
+                    "official": bool(meta.get("official")),
                 }
             )
     return result

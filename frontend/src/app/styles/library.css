@@ -775,3 +775,401 @@
     padding: 16px 14px;
   }
 }
+
+/* ============================================================
+   官方公开知识库（2026-11-13）
+   与"同学分享的"区分开：这一区是课程资料，能点进去看文件、下载原件。
+   视觉上给一条金线 + 「官方」小徽标，但不用大面积金底 —— 金是全站主操作的颜色，
+   一片金会让下面那张卡片的「挂到对话」失去焦点。
+   ============================================================ */
+
+.lib-sec-lead {
+  margin: -2px 0 12px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-body);
+}
+
+.lib-official {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(180deg, var(--accent-soft), transparent 64%),
+    var(--card-bg);
+}
+
+.lib-courses {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(236px, 1fr));
+  gap: var(--space-10);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lib-course {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  gap: 6px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 0.18s, box-shadow 0.18s, transform 0.18s;
+}
+.lib-course:hover {
+  transform: translateY(-2px);
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-2);
+}
+
+.lib-course-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+
+.lib-course-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background: var(--accent-tint);
+  color: var(--accent-ink);
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+}
+.lib-course-mark-lg {
+  width: 54px;
+  height: 54px;
+  border-radius: 15px;
+  font-size: 26px;
+}
+
+.lib-badge-off {
+  flex: none;
+  padding: 1px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
+  border-radius: 999px;
+  background: var(--accent-tint);
+  color: var(--accent-ink);
+  font-size: var(--fs-badge);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.lib-course-name {
+  overflow: hidden;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 简介固定两行：卡片高度齐，一排里不会参差 */
+.lib-course-d {
+  display: -webkit-box;
+  min-height: calc(var(--fs-xs) * var(--lh-body) * 2);
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-body);
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.lib-course-f {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+  margin-top: auto;
+  padding-top: 9px;
+  border-top: 1px dashed var(--line);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.lib-course-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+/* ---------- 课程详情页 ---------- */
+
+.lib-course-hero {
+  margin-bottom: var(--space-16, 16px);
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(180deg, var(--accent-soft), transparent 70%),
+    var(--card-bg);
+}
+
+.lib-course-hero-h {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-14, 14px);
+}
+
+.lib-course-hero-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.lib-course-hero-text h2 {
+  margin: 6px 0 4px;
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: var(--fs-title);
+  font-weight: 700;
+  line-height: var(--lh-tight);
+}
+
+.lib-course-hero-text p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+}
+
+.lib-course-hero-f {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.lib-course-stat {
+  font-variant-numeric: tabular-nums;
+}
+.lib-course-stat b {
+  color: var(--ink);
+  font-size: var(--fs-md);
+  font-weight: 700;
+}
+
+.lib-course-cta {
+  margin-left: auto;
+}
+
+/* ---------- 资料清单 ---------- */
+
+.lib-folder {
+  margin-bottom: var(--space-20);
+}
+.lib-folder:last-of-type {
+  margin-bottom: 0;
+}
+
+.lib-files {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--line);
+  list-style: none;
+}
+
+.lib-file {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  padding: 10px 12px;
+  background: var(--card-bg);
+}
+
+.lib-file-ext {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 42px;
+  padding: 3px 0;
+  border-radius: 6px;
+  background: var(--fill-3);
+  color: var(--text-3);
+  font-size: var(--fs-badge);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.lib-file-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lib-file-main b {
+  overflow: hidden;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-file-meta {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.lib-file-acts {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-6);
+}
+
+/* <a> 借用按钮样式：下载是"给你一个文件"，跟"打开对话"同级 */
+.lib-file-dl {
+  text-decoration: none;
+}
+
+.lib-file-na {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.lib-empty-acts {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.lib-course-hero.lib-skel {
+  height: 126px;
+}
+.lib-file.lib-skel {
+  height: 54px;
+}
+
+/* ---------- 预览弹层 ---------- */
+
+.lib-viewer {
+  display: flex;
+  width: min(920px, 100%);
+  height: min(88dvh, 880px);
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-2);
+}
+
+.lib-viewer-h {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-8);
+  padding: 10px 12px 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.lib-viewer-h b {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-viewer-acts {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-6);
+}
+
+.lib-viewer-b {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  background: var(--bg-canvas);
+}
+
+.lib-viewer-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.lib-viewer-img {
+  display: block;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+/* 正文预览保留原文档的换行：Word 里的段落结构就是阅读节奏 */
+.lib-viewer-text {
+  margin: 0;
+  padding: 16px 18px;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.lib-viewer-tip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-10);
+  margin: 0;
+  padding: 40px 20px;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+
+@media (max-width: 560px) {
+  .lib-course-hero-h {
+    gap: var(--space-10);
+  }
+  .lib-course-hero-text h2 {
+    font-size: var(--fs-lg);
+  }
+  /* 手机上一行放不下「徽标 + 文件名 + 两个按钮」：按钮换到第二行，
+     左边留出徽标的宽度，看起来还是同一行的延续 */
+  .lib-file {
+    flex-wrap: wrap;
+    row-gap: var(--space-8);
+  }
+  .lib-file-acts {
+    width: 100%;
+    margin-left: 52px;
+  }
+  .lib-viewer {
+    height: 92dvh;
+  }
+}

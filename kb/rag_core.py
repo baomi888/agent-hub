@@ -10,6 +10,8 @@ from __future__ import annotations
     在 v1.x 中签名不变，直接复用。
 """
 
+import csv
+import json
 import logging
 import math
 import os
@@ -17,8 +19,10 @@ import re
 import threading
 import time
 import uuid
+import zipfile
 from collections import Counter, OrderedDict, defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from xml.etree import ElementTree as ET
 
 import chromadb
 from langchain_chroma import Chroma
@@ -29,9 +33,6 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from core import config, embed_guard, metrics, prompt_store
 from core.llm import get_embeddings, get_llm
-
-SUPPORTED_EXT = (".txt", ".md", ".pdf")  # .md 按纯文本加载，Markdown 语法不影响切片
-
 
 # ==================== Chroma 客户端单例 ====================
 
@@ -816,11 +817,147 @@ def rewrite_query(question: str, history) -> str:
 
 # ==================== 文档加载 ====================
 
+# 2026-11-13 起多了 docx / csv / jsonl：官方公开知识库的课程资料就是这些格式
+# （教材笔记是 Word、题库与语料是结构化文本）。三种都**只用标准库**解析：
+#   服务器是 3.10 的净环境，为「读个 Word」去装 python-docx（还要 lxml）
+#   会让"加个课程库"变成"改依赖"，而依赖一改就要重装整套环境。
+SUPPORTED_EXT = (".txt", ".md", ".pdf", ".docx", ".csv", ".jsonl", ".json")
+
+# docx 的正文在 word/document.xml 里，WordprocessingML 命名空间
+_DOCX_W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+
+def _docx_text(file_path: str) -> str:
+    """从 .docx 抽纯文字（段落 + 表格），不含样式与图片。
+
+    按 body 的直接子节点走：段落取文字，表格按行拼成 `甲 | 乙` 一行，
+    其它容器（如内容控件 sdt）递归进去。**不遍历全部 w:p**——表格里的段落
+    也是 w:p，一网打尽会让表格内容重复出现一遍。
+    """
+    with zipfile.ZipFile(file_path) as z:
+        xml = z.read("word/document.xml")
+    root = ET.fromstring(xml)
+    body = root.find(f"{_DOCX_W}body")
+    lines: list[str] = []
+
+    def _para_text(el) -> str:
+        return "".join(n.text or "" for n in el.iter(f"{_DOCX_W}t")).strip()
+
+    def _walk(el) -> None:
+        for child in el:
+            tag = child.tag
+            if tag == f"{_DOCX_W}p":
+                t = _para_text(child)
+                if t:
+                    lines.append(t)
+            elif tag == f"{_DOCX_W}tbl":
+                for row in child.iter(f"{_DOCX_W}tr"):
+                    cells = [_para_text(c) for c in row.findall(f"{_DOCX_W}tc")]
+                    if any(cells):
+                        lines.append(" | ".join(cells))
+            else:
+                _walk(child)
+
+    _walk(body if body is not None else root)
+    return "\n".join(lines)
+
+
+def _read_text_any_encoding(file_path: str) -> str:
+    """按 utf-8 → gbk 顺序读纯文本（Windows 记事本存的 GBK 文件很常见）。"""
+    for enc in ("utf-8-sig", "gbk"):
+        try:
+            with open(file_path, encoding=enc) as f:
+                return f.read()
+        except UnicodeDecodeError:
+            continue
+    # 两种都失败就用替换字符硬读：宁可少量乱码，也别让整份资料入不了库
+    with open(file_path, encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+
+def _record_line(obj) -> str:
+    """把一条结构化记录摊成「键：值；键：值」。
+
+    直接喂 JSON 原文也能检索，但命中后引用块里全是引号和括号，
+    学生看不懂；摊平成中文冒号后，预览与引用都像一行正常的资料。
+    列表/字典类型的值仍保留 JSON 形式（嵌套太深摊平只会更难读）。
+    """
+    if isinstance(obj, dict):
+        parts = []
+        for k, v in obj.items():
+            if v is None or v == "" or v == [] or v == {}:
+                continue
+            if isinstance(v, (dict, list)):
+                v = json.dumps(v, ensure_ascii=False)
+            parts.append(f"{k}：{v}")
+        return "；".join(parts)
+    if isinstance(obj, (list, tuple)):
+        return "；".join(_record_line(x) for x in obj)
+    return str(obj)
+
+
+def _jsonl_text(file_path: str) -> str:
+    """jsonl → 一行一条记录的可读文本；坏行原样保留，不丢内容。"""
+    out: list[str] = []
+    with open(file_path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                out.append(_record_line(json.loads(line)))
+            except (ValueError, TypeError):
+                out.append(line)
+    return "\n".join(x for x in out if x)
+
+
+def _json_text(file_path: str) -> str:
+    """json → 逐条展开（数组）或单条摊平（对象）；解析失败按纯文本读。"""
+    raw = _read_text_any_encoding(file_path)
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return raw
+    if isinstance(data, list):
+        return "\n".join(_record_line(x) for x in data)
+    return _record_line(data)
+
+
+def _csv_text(file_path: str) -> str:
+    """csv → 首行表头 + 每条记录「列名：值；列名：值」。
+
+    题库的 answers.csv 就两列（题号、答案），摊平后每行是「题号：3；答案：B」，
+    检索命中时一眼能看懂，而不是一串逗号。
+    """
+    rows: list[list[str]] = []
+    for enc in ("utf-8-sig", "gbk"):
+        try:
+            with open(file_path, encoding=enc, newline="") as f:
+                rows = list(csv.reader(f))
+            break
+        except UnicodeDecodeError:
+            continue
+    if not rows:
+        return ""
+    header = [h.strip() for h in rows[0]]
+    out = [" | ".join(header)]
+    for r in rows[1:]:
+        if not any((c or "").strip() for c in r):
+            continue
+        if header and len(header) >= len(r):
+            pairs = [f"{header[i]}：{c.strip()}" for i, c in enumerate(r) if (c or "").strip()]
+            out.append("；".join(pairs) if pairs else " | ".join(r))
+        else:
+            out.append(" | ".join(r))
+    return "\n".join(out)
+
 
 def load_document(file_path: str, source_name: str | None = None):
     """加载单个文档，返回 Document 列表。
 
-    支持格式：txt / md / pdf。txt 自动尝试 utf-8 和 gbk（Windows 记事本兜底）。
+    支持格式：txt / md / pdf / docx / csv / jsonl / json。
+    纯文本与 csv/jsonl/json 自动尝试 utf-8 和 gbk（Windows 记事本兜底）；
+    docx 与 pdf 分别走标准库 zip+xml 与 PyPDFLoader。
 
     Args:
         source_name: 写入 metadata["source"] 的展示名（一般用原始文件名）。
@@ -830,9 +967,20 @@ def load_document(file_path: str, source_name: str | None = None):
         raise FileNotFoundError(f"文件不存在：{file_path}")
     ext = os.path.splitext(file_path)[1].lower()
     if ext not in SUPPORTED_EXT:
-        raise ValueError(f"不支持的文档格式：'{ext}'（仅支持 txt/md/pdf）")
+        raise ValueError(
+            f"不支持的文档格式：'{ext}'（支持 txt / md / pdf / docx / csv / jsonl / json）"
+        )
 
-    if ext in (".txt", ".md"):
+    if ext in (".csv", ".jsonl", ".json", ".docx"):
+        # 这三种自己抽成纯文本，不走 TextLoader（它只认文本文件）
+        text = {
+            ".csv": _csv_text,
+            ".jsonl": _jsonl_text,
+            ".json": _json_text,
+            ".docx": _docx_text,
+        }[ext](file_path)
+        docs = [Document(page_content=text, metadata={})] if text.strip() else []
+    elif ext in (".txt", ".md"):
         try:
             docs = TextLoader(file_path, encoding="utf-8").load()
         except UnicodeDecodeError:
@@ -848,7 +996,8 @@ def load_document(file_path: str, source_name: str | None = None):
             ) from e
     if not docs or all(not (d.page_content or "").strip() for d in docs):
         raise ValueError(
-            "PDF 未提取到任何文字内容。若为扫描件请先 OCR，或导出为 TXT/Markdown 后再上传。"
+            f"没有从 {ext} 里提取到任何文字内容。若为扫描件（图片版 PDF / 截图版 Word）"
+            f"请先 OCR，或导出为 TXT/Markdown 后再上传。"
         )
 
     # 统一 source：用稳定的文件名而不是临时路径，并按页码保留定位信息

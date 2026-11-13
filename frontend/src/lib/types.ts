@@ -44,6 +44,39 @@ export interface PublicKbInfo {
   desc: string;
   /** 首次分享的时间（秒）。0 = 老数据，没有这条记录 */
   at: number;
+  /**
+   * 官方课程库（站点自建，非用户分享）。
+   * 只有这类库允许点进去看文件清单 —— 用户分享的库永远只给份数。
+   */
+  official?: boolean;
+}
+
+/** 官方课程库里的一份资料（GET /api/kb/public/{kb_id}） */
+export interface OfficialKbFile {
+  /** 展示名，可能带文件夹，如 `物理语料/formulas.jsonl` */
+  name: string;
+  /** 已建库的片段数；0 = 扫描件或抽取失败，只能下载原件 */
+  chunks: number;
+  added_at: number | null;
+  /** 字节数，后端按磁盘现算 */
+  size: number;
+  /** 小写扩展名，不带点 */
+  ext: string;
+  /** 能否在线预览 */
+  preview: boolean;
+  /** 原始文件是否还在（不在就只能看正文） */
+  download: boolean;
+}
+
+/** 官方课程库详情 */
+export interface OfficialKbDetail {
+  kb_id: string;
+  name: string;
+  desc: string;
+  chunks: number;
+  official: boolean;
+  owner_name: string;
+  files: OfficialKbFile[];
 }
 
 /**

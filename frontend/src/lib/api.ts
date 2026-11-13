@@ -1,6 +1,6 @@
 // 后端 API 封装：统一错误处理 + 类型化（相对路径走 rewrites 代理）
 import type { Conversation, KbInfo, KbFile, FilePreview, SearchResult, Defaults, Message } from "./types";
-import type { PublicKbInfo } from "./types";
+import type { PublicKbInfo, OfficialKbDetail } from "./types";
 import type { KbProposal, KbProposalConfirmResult } from "./types";
 import type { DialogueCandidatesResp, ImportDialogueResult, CourseReminderState } from "./types";
 import type { CalendarLink } from "./types";
@@ -330,6 +330,23 @@ export const api = {
     ),
   // 公开知识库广场：别人的公开库（后端已排除调用者自己的库）
   listPublicKbs: () => request<{ kbs: PublicKbInfo[] }>("/api/kb/public"),
+  // 官方课程库详情（含文件清单）。非官方库打这条会 404 —— 用户分享的库不给清单
+  getOfficialKb: (kbId: string) =>
+    request<OfficialKbDetail>(`/api/kb/public/${encodeURIComponent(kbId)}`),
+  // 官方库资料正文预览（Word / 文本 / 表格抽成纯文字；PDF 用下面的直链）
+  getOfficialKbText: (kbId: string, name: string) =>
+    request<{ name: string; truncated: boolean; content: string }>(
+      `/api/kb/public/${encodeURIComponent(kbId)}/text?name=${encodeURIComponent(name)}`
+    ),
+  /**
+   * 官方库原始文件的直链（给 <a download> 与 PDF 内嵌用）。
+   *
+   * 不走 request()：这条要的是浏览器自己处理字节流，而不是 JSON。
+   * 登录态在 HttpOnly Cookie 里，同源直链会自然带上，所以不额外加 token。
+   */
+  officialKbFileUrl: (kbId: string, name: string, inline = false) =>
+    `/api/kb/public/${encodeURIComponent(kbId)}/file?name=${encodeURIComponent(name)}` +
+    (inline ? "&inline=1" : ""),
   createKb: (name: string) =>
     request<{ kb_id: string; name: string }>("/api/kb/create", {
       method: "POST",

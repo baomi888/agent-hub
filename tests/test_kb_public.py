@@ -11,9 +11,11 @@ chroma / 数据目录全部落在临时目录。
 """
 
 import asyncio
+import io
 import os
 import sys
 import tempfile
+import zipfile
 from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -152,7 +154,11 @@ def test_public_list_excludes_caller_and_private(monkeypatch, kb_id):
     assert [k["kb_id"] for k in theirs["kbs"]] == [kb_id]
     # 字段集合钉死：广场要展示的资料够用，且**没有**文件清单。
     # 一旦有人往这里顺手加了 files 明细、owner uid 之类，这条会红。
-    assert all(set(k) == {"kb_id", "name", "chunks", "files", "owner_name", "desc", "at"} for k in theirs["kbs"])
+    # official 是 2026-11-13 加的唯一新字段：前端靠它把官方课程库单独分一区。
+    assert all(
+        set(k) == {"kb_id", "name", "chunks", "files", "owner_name", "desc", "at", "official"}
+        for k in theirs["kbs"]
+    )
 
     pipelines.set_public(OWNER, kb_id, False)
     assert asyncio.run(kb_api.list_public_kbs(OTHER))["kbs"] == []
@@ -230,3 +236,142 @@ def test_list_public_counts_files_without_leaking_names(kb_id):
     assert item["files"] == 2
     assert "真题2015.pdf" not in str(item)
     assert "错题本.md" not in str(item)
+
+# ==================== 官方课程库（2026-11-13）====================
+#
+# 官方库是"公开"的一种，但多放开一件事：别人能**看文件清单、下载原文**。
+# 这条边界只对 official 库生效 —— 普通用户分享的库依旧是"只给份数"。
+# 所以这里的测试分两组：官方库该通的要通，非官方库该 404 的必须 404。
+
+
+OFFICIAL = pipelines.OFFICIAL_OWNER
+
+
+def _put_source(kb_id: str, name: str, data: bytes) -> None:
+    """把一份资料落到该库的原始文件目录（source_path 的哈希命名规则照用）。"""
+    path = pipelines.source_path(kb_id, name)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+
+
+def _docx_bytes(text: str) -> bytes:
+    """造一个最小可解析的 docx：只要有 word/document.xml 就够 load_document 用。"""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr(
+            "word/document.xml",
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            f"<w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:body></w:document>",
+        )
+    return buf.getvalue()
+
+
+@pytest.fixture()
+def official_kb():
+    """一门官方课：归属 official、公开、带 official 标记。"""
+    kid, _ = pipelines.create_kb(OFFICIAL, "高等数学")
+    pipelines.set_public(OFFICIAL, kid, True, "各章单元测试与答案", official=True)
+    yield kid
+    pipelines.delete_kb(OFFICIAL, kid)
+
+
+def test_official_flag_roundtrip(official_kb):
+    assert pipelines.is_official(official_kb) is True
+    item = next(k for k in pipelines.list_public() if k["kb_id"] == official_kb)
+    assert item["official"] is True
+    assert item["desc"] == "各章单元测试与答案"
+
+    # 收回公开 = 官方身份一起没（标记就存在公开登记表里，没有第二处）
+    pipelines.set_public(OFFICIAL, official_kb, False)
+    assert pipelines.is_official(official_kb) is False
+    assert all(k["kb_id"] != official_kb for k in pipelines.list_public())
+
+
+def test_visibility_api_cannot_mint_official(kb_id):
+    """用户没法把自己的库伪装成官方。
+
+    这是本题最要紧的一条：official 只能由服务端导入脚本写。
+    /visibility 的请求体里根本没有这个字段，所以传什么都变不出官方身份。
+    """
+    out = asyncio.run(
+        kb_api.set_kb_visibility(kb_id, kb_api.VisibilityRequest(public=True, desc="假装官方"), OWNER)
+    )
+    assert out["public"] is True
+    assert pipelines.is_official(kb_id) is False
+
+    # 既然不是官方，官方详情接口对它就是 404 —— 文件清单照样不给
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(kb_api.get_official_kb(kb_id, OTHER))
+    assert e.value.status_code == 404
+
+
+def test_official_kb_is_not_in_any_users_list(official_kb):
+    """官方库不出现在任何人的"我的知识库"里（owner 不是真实账号）。"""
+    assert all(k["kb_id"] != official_kb for k in pipelines.list_all(OWNER))
+    assert all(k["kb_id"] != official_kb for k in pipelines.list_all(OTHER))
+
+
+def test_official_detail_lists_files_with_size(official_kb):
+    name = "高等数学（一）单元测试/第一章试卷.docx"
+    _put_source(official_kb, name, _docx_bytes("第一章 极限与连续"))
+    pipelines.add_file_records(OFFICIAL, official_kb, [{"name": name, "chunks": 3, "added_at": 1}])
+
+    out = asyncio.run(kb_api.get_official_kb(official_kb, OTHER))
+    assert out["name"] == "高等数学"
+    assert out["official"] is True
+    assert out["owner_name"] == "官方"
+    assert out["desc"] == "各章单元测试与答案"
+
+    f = out["files"][0]
+    assert f["name"] == name
+    assert f["size"] > 0
+    assert f["ext"] == "docx"
+    assert f["preview"] is True and f["download"] is True
+
+
+def test_official_file_serves_bytes_and_inline_flag(official_kb):
+    name = "复习题与答案/第一章.pdf"
+    _put_source(official_kb, name, b"%PDF-1.4\n%fake\n")
+    pipelines.add_file_records(OFFICIAL, official_kb, [{"name": name, "chunks": 0, "added_at": 1}])
+
+    dl = asyncio.run(kb_api.get_official_file(official_kb, name, 0, OTHER))
+    assert dl.headers["content-disposition"].startswith("attachment")
+    assert dl.media_type == "application/pdf"
+
+    inline = asyncio.run(kb_api.get_official_file(official_kb, name, 1, OTHER))
+    assert inline.headers["content-disposition"].startswith("inline")
+
+    # 清单里没有的名字一律 404：白名单是文件清单，不是路径拼接
+    for bad in ("../data/sessions.db", "不存在的资料.pdf", ""):
+        with pytest.raises(HTTPException) as e:
+            asyncio.run(kb_api.get_official_file(official_kb, bad, 0, OTHER))
+        assert e.value.status_code == 404
+
+
+def test_official_text_preview(official_kb):
+    name = "说明/README.md"
+    _put_source(official_kb, name, "这门课的官方资料说明。".encode())
+    pipelines.add_file_records(OFFICIAL, official_kb, [{"name": name, "chunks": 1, "added_at": 1}])
+
+    out = asyncio.run(kb_api.get_official_file_text(official_kb, name, OTHER))
+    assert "官方资料说明" in out["content"]
+    assert out["truncated"] is False
+
+
+def test_loader_reads_docx_csv_jsonl(tmp_path):
+    """三种新格式都要能抽出文字 —— 官方库的 Word / 题库 / 语料全靠它建索引。"""
+    docx = tmp_path / "a.docx"
+    docx.write_bytes(_docx_bytes("第一章 极限与连续"))
+    assert "极限与连续" in rc.load_document(str(docx))[0].page_content
+
+    csvp = tmp_path / "answers.csv"
+    csvp.write_text("题号,答案\n1,B\n", encoding="utf-8")
+    text = rc.load_document(str(csvp))[0].page_content
+    assert "题号：1" in text and "答案：B" in text
+
+    jsonl = tmp_path / "q.jsonl"
+    jsonl.write_text('{"题目":"极限的定义","答案":"ε-δ 语言"}\n坏行原样保留\n', encoding="utf-8")
+    text = rc.load_document(str(jsonl))[0].page_content
+    assert "题目：极限的定义" in text
+    assert "坏行原样保留" in text  # 坏行不能丢：宁可难看，也别悄悄吞资料

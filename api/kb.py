@@ -19,6 +19,9 @@ from __future__ import annotations
   DELETE /api/kb/{kb_id}/              删除知识库
   POST   /api/kb/{kb_id}/visibility    设置公开状态与广场简介（仅库主）
   GET    /api/kb/public                公开知识库广场列表（含简介/文件数/作者）
+  GET    /api/kb/public/{kb_id}        官方课程库详情（含文件清单）
+  GET    /api/kb/public/{kb_id}/file   官方课程库原始文件（下载 / 内嵌预览）
+  GET    /api/kb/public/{kb_id}/text   官方课程库资料正文预览
   POST   /api/kb/{kb_id}/query         同步问答（公开库对全站登录用户开放）
 """
 
@@ -26,9 +29,10 @@ import asyncio
 import os
 import re
 import time
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.schemas import KBQueryResponse
@@ -354,10 +358,187 @@ async def list_public_kbs(uid: str = Depends(get_current_user)) -> dict:
         if k["kb_id"] in mine:
             continue
         k = dict(k)
-        k["owner_name"] = await asyncio.to_thread(_owner_display_name, k["owner"])
+        # 官方库没有真实账号，`_owner_display_name` 查不到人只会回空串；
+        # 这里直接署名"官方"，避免卡片上出现"某位同学"这种明显不对的说法
+        k["owner_name"] = "官方" if k.get("official") else await asyncio.to_thread(
+            _owner_display_name, k["owner"]
+        )
         k.pop("owner", None)
         out.append(k)
     return {"kbs": out}
+
+
+# ==================== 官方课程库（只读，可看文件、可下原文）====================
+#
+# 与"用户分享的公开库"的区别只有一条，但这条不能含糊：
+#   - 用户分享的库：别人只能拿它做检索，**看不到文件清单**（广场列表里那句
+#     "文件清单仍然不给"仍然成立）；
+#   - 官方课程库：资料本身就是公开课程材料，允许列清单、在线预览、下载原文。
+# 所以下面每条路都先过 `_official_kb_or_404`，它同时要求
+# "在公开登记表里" + "带 official 标记"——用户自己发的库永远拿不到这个标记
+# （标记只有导入脚本能写，见 pipelines.set_public 的 official 参数）。
+
+# 浏览器能直接内嵌显示的：PDF 用内置阅读器，图片直接 <img>
+_INLINE_EXT = (".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif")
+# 需要后端先抽出文字再给前端渲染的（与 load_document 支持的文本类格式一致）
+_TEXT_EXT = (".txt", ".md", ".docx", ".csv", ".jsonl", ".json")
+
+_MEDIA_TYPES = {
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".txt": "text/plain; charset=utf-8",
+    ".md": "text/markdown; charset=utf-8",
+    ".csv": "text/csv; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".jsonl": "text/plain; charset=utf-8",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+
+
+def _official_kb_or_404(kb_id: str) -> str:
+    """确认这是官方公开库，返回它真正的 owner；否则 404。
+
+    ★ 404 而不是 403：和 `_must_own` 一个道理，403 等于承认"这个 kb_id 是真的"。
+    普通用户分享的库打到这里也是 404 —— 不给它任何"文件清单可读"的错觉。
+    """
+    owner = pipelines.owner_of(kb_id)
+    if not owner or not pipelines.is_official(kb_id):
+        raise HTTPException(status_code=404, detail="官方资料库不存在")
+    return owner
+
+
+def _official_file_record(owner: str, kb_id: str, name: str) -> dict:
+    """在官方库的文件清单里按展示名找一条记录；找不到 404。
+
+    这张清单同时是**白名单**：只有登记过的名字才允许读盘。
+    虽然 source_path 是哈希拼出来的、本身就穿越不出去，但"能读的文件
+    = 库里登记的文件"这条边界应该由清单来定，而不是依赖路径计算的副作用。
+    """
+    for rec in pipelines.list_files_view(
+        owner, kb_id, pipelines.get_or_create(owner, kb_id, allow_public=True)
+    ):
+        if rec.get("name") == name:
+            return rec
+    raise HTTPException(status_code=404, detail=f"资料不存在：{name}")
+
+
+@router.get("/public/{kb_id}")
+async def get_official_kb(kb_id: str, uid: str = Depends(get_current_user)) -> dict:
+    """官方课程库详情：课程简介 + 文件清单（名称、大小、能否预览）。
+
+    文件大小在这里现算（os.path.getsize）：清单本身不存大小也能算，
+    但存了会因为"文件被替换/迁移"而对不上，不如以磁盘为准。
+    """
+    owner = _official_kb_or_404(kb_id)
+
+    def _read() -> dict:
+        pipe = pipelines.get_or_create(owner, kb_id, allow_public=True)
+        files = []
+        for rec in pipelines.list_files_view(owner, kb_id, pipe):
+            name = rec.get("name") or ""
+            ext = os.path.splitext(name)[1].lower()
+            try:
+                size = os.path.getsize(pipelines.source_path(kb_id, name))
+            except OSError:
+                size = 0
+            files.append(
+                {
+                    "name": name,
+                    "chunks": rec.get("chunks") or 0,
+                    "added_at": rec.get("added_at"),
+                    "size": size,
+                    "ext": ext.lstrip("."),
+                    # 能不能在线看：PDF/图片内嵌，其余抽文字
+                    "preview": ext in _INLINE_EXT or ext in _TEXT_EXT,
+                    # 没留档（老数据）就只能看正文、下不了原件
+                    "download": size > 0,
+                }
+            )
+        return {
+            "kb_id": kb_id,
+            "name": pipelines.name_of(kb_id) or kb_id,
+            "chunks": pipe.count(),
+            "files": files,
+        }
+
+    data = await asyncio.to_thread(_read)
+    # 简介与"官方"署名走同一张公开登记表，省得前端再拼一次
+    meta = await asyncio.to_thread(pipelines.public_meta, kb_id)
+    data["desc"] = meta.get("desc") or ""
+    data["official"] = True
+    data["owner_name"] = "官方"
+    return data
+
+
+@router.get("/public/{kb_id}/file")
+async def get_official_file(
+    kb_id: str,
+    name: str,
+    inline: int = 0,
+    uid: str = Depends(get_current_user),
+) -> Response:
+    """取官方库里的原始文件。
+
+    inline=1 → `Content-Disposition: inline`，给 PDF/图片在页面里内嵌用；
+    默认 → `attachment`，浏览器直接下载。两条路返回的是**同一份字节**，
+    区别只在浏览器怎么处理，所以下载到的文件和预览看到的一定一致。
+    """
+    owner = _official_kb_or_404(kb_id)
+    # 清单校验 + 取扩展名（顺带把 path 定死，后面不再接受外部输入拼路径）
+    rec = await asyncio.to_thread(_official_file_record, owner, kb_id, name)
+    ext = os.path.splitext(rec.get("name") or "")[1].lower()
+    path = pipelines.source_path(kb_id, rec.get("name") or "")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="这份资料的原始文件没有留存，只能预览正文")
+
+    base = os.path.basename(name.replace("\\", "/"))
+    disp = "inline" if inline else "attachment"
+    return FileResponse(
+        path,
+        media_type=_MEDIA_TYPES.get(ext, "application/octet-stream"),
+        headers={
+            # RFC 5987：中文文件名必须走 filename*，filename= 只留 ASCII 兜底
+            "Content-Disposition": f"{disp}; filename*=UTF-8''{quote(base)}",
+            # 内容不会变（同名文件重导会换 kb_id 或覆盖），但仍别让中间层缓存旧稿
+            "Cache-Control": "private, max-age=300",
+        },
+    )
+
+
+@router.get("/public/{kb_id}/text")
+async def get_official_file_text(
+    kb_id: str, name: str, uid: str = Depends(get_current_user)
+) -> dict:
+    """官方库资料的正文预览（Word/文本/表格 → 纯文字）。
+
+    PDF 不走这里：浏览器自带阅读器比抽出来的文字好得多，前端直接内嵌
+    `/file?inline=1`。所以本接口对 PDF 也允许调用，只是没必要。
+    """
+    owner = _official_kb_or_404(kb_id)
+    rec = await asyncio.to_thread(_official_file_record, owner, kb_id, name)
+
+    def _read() -> dict:
+        path = pipelines.source_path(kb_id, rec.get("name") or "")
+        docs = load_document(path, source_name=rec.get("name"))
+        text = "\n\n".join((d.page_content or "") for d in docs)
+        return {
+            "name": rec.get("name"),
+            "truncated": len(text) > PREVIEW_MAX_CHARS,
+            "content": text[:PREVIEW_MAX_CHARS],
+        }
+
+    try:
+        return await asyncio.to_thread(_read)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="这份资料的原始文件没有留存") from None
+    except ValueError as e:
+        # 扫描件 / 解析失败：说清原因，别让前端只看到 500
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
 
 
 # ==================== 文件级管理 ====================

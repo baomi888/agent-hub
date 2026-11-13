@@ -76,9 +76,14 @@ export default function LibraryPage() {
 
   const minePublic = useMemo(() => mine.filter((k) => k.public), [mine]);
 
+  /** 官方课程库：站点自建、带 official 标记。它们出现在最前面，单独一种卡片。 */
+  const official = useMemo(() => pub.filter((k) => k.official), [pub]);
+  /** 同学分享的库：只能挂进对话检索，看不到文件清单 */
+  const shared = useMemo(() => pub.filter((k) => !k.official), [pub]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const hit = pub.filter(
+    const hit = shared.filter(
       (k) =>
         !q ||
         k.name.toLowerCase().includes(q) ||
@@ -89,7 +94,7 @@ export default function LibraryPage() {
     return [...hit].sort((a, b) =>
       sort === "new" ? b.at - a.at || b.chunks - a.chunks : b.chunks - a.chunks || b.at - a.at,
     );
-  }, [pub, query, sort]);
+  }, [shared, query, sort]);
 
   /** 从广场挂一个库：建好会话时就把 kb_id 绑上，进去直接能问 */
   const openInChat = async (k: PublicKbInfo) => {
@@ -122,7 +127,7 @@ export default function LibraryPage() {
           <MascotLogo className="lib-logo" />
           <div className="lib-head-text">
             <h1>公开知识库</h1>
-            <p>别人整理好的资料，挂进对话就能问</p>
+            <p>官方课程资料，点开就能看、能下载</p>
           </div>
           <Link href="/" className="lib-back" aria-label="返回工作台">
             <CornIcon name="back" className="h-4 w-4" />
@@ -134,10 +139,10 @@ export default function LibraryPage() {
       <main className="lib-main">
         <section className="lib-hero">
           <div>
-            <h2>这里放的是站内用户主动分享的资料库</h2>
+            <h2>官方课程资料，和同学分享的资料库</h2>
             <p>
-              挑一个挂进自己的对话，它就会拿里面的内容回答你。
-              <strong>你能查，但看不到文件清单、也改不了内容</strong>——这些仍然只有库主能做。
+              <strong>官方库</strong>是学校课程的配套资料，可以点进去看文件、下载原件；
+              <strong>同学分享的库</strong>只能挂进对话检索——你看不到它的文件清单，也改不了内容。
             </p>
           </div>
           <button type="button" className="lib-share" onClick={() => setShareOpen(true)}>
@@ -145,6 +150,44 @@ export default function LibraryPage() {
             分享我的知识库
           </button>
         </section>
+
+        {official.length > 0 && (
+          <section className="lib-sec lib-official">
+            <div className="lib-sec-head">
+              <span className="eyebrow">官方公开知识库</span>
+              <span className="rule" />
+              <span className="lib-count">{official.length} 门课程</span>
+            </div>
+            <p className="lib-sec-lead">
+              每门课一个库，收录该课程的官方资料。点进去可以逐份在线看，也可以下载到本地。
+            </p>
+            <ul className="lib-courses">
+              {official.map((k) => (
+                <li key={k.kb_id}>
+                  <Link href={`/library/${encodeURIComponent(k.kb_id)}`} className="lib-course">
+                    <span className="lib-course-h">
+                      <span className="lib-course-mark" aria-hidden="true">
+                        {markOf(k.name)}
+                      </span>
+                      <span className="lib-badge-off">官方</span>
+                    </span>
+                    <b className="lib-course-name" title={k.name}>
+                      {k.name}
+                    </b>
+                    <span className="lib-course-d">{k.desc?.trim() || "这门课的资料还在整理"}</span>
+                    <span className="lib-course-f">
+                      <span>{fmtNum(k.files)} 份资料</span>
+                      <span className="lib-course-go">
+                        查看资料
+                        <CornIcon name="arrow" className="h-3.5 w-3.5" />
+                      </span>
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         {minePublic.length > 0 && (
           <section className="lib-sec">
@@ -170,6 +213,16 @@ export default function LibraryPage() {
             </ul>
           </section>
         )}
+
+        <section className="lib-sec">
+          <div className="lib-sec-head">
+            <span className="eyebrow">同学分享的</span>
+            <span className="rule" />
+          </div>
+          <p className="lib-sec-lead">
+            挑一个挂进自己的对话，它就会拿里面的内容回答你。只能检索，看不到文件清单。
+          </p>
+        </section>
 
         <div className="lib-tools">
           <label className="lib-search">
