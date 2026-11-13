@@ -182,15 +182,22 @@ def test_public_desc_roundtrip(kb_id):
     assert item["desc"] == ""
 
 
-def test_desc_survives_withdraw(kb_id):
-    """收回后简介仍留在登记表里 —— 再分享一次不用重写。"""
+def test_withdraw_clears_registry_entry(kb_id):
+    """收回 = 整条登记删掉，包括简介。
+
+    这是刻意的取舍：留着 on=False 的壳可以省掉"下次再分享要重写简介"，
+    但那样「在表里」就不等于「公开」了，所有读点都得再判一次 on，
+    漏一处就把私有库当公开。安全边界不拿便利换。
+    """
     pipelines.set_public(OWNER, kb_id, True, "计算机组成原理笔记")
     pipelines.set_public(OWNER, kb_id, False)
     assert pipelines.is_public(kb_id) is False
     mine = pipelines.list_all(OWNER)
     row = next(k for k in mine if k["kb_id"] == kb_id)
     assert row["public"] is False
-    assert row["public_desc"] == "计算机组成原理笔记"
+    assert row["public_desc"] == ""  # 跟着登记一起没了
+    # 也不能在广场上留一行
+    assert all(k["kb_id"] != kb_id for k in pipelines.list_public())
 
 
 def test_legacy_bool_format_still_loads(kb_id):

@@ -354,6 +354,9 @@ def set_public(owner: str, kb_id: str, on: bool, desc: str | None = None) -> dic
                 meta["at"] = int(time.time())
             _KB_PUBLIC[kb_id] = meta
         else:
+            # 整条删掉，不留 on=False 的壳。代价是简介一起没了，再分享要重写；
+            # 但留着壳意味着「在表里 ≠ 公开」，is_public / list_public 每个读点
+            # 都要再判一次 on —— 漏一处就是把私有库当公开，这条不能拿便利换。
             _KB_PUBLIC.pop(kb_id, None)
             meta = {"on": False, "desc": "", "at": 0}
         _save_public()
@@ -565,7 +568,8 @@ def list_all(owner: str) -> list[dict]:
                     "files": files,
                     # 前端渲染「公开」标识与开关初态用；公开与否不影响这里能看到什么
                     "public": kb_id in _KB_PUBLIC,
-                    # 广场上那句简介。收回公开后仍留着，下次再分享不用重写
+                    # 广场上那句简介。只在公开期间有 —— 收回时整条登记会被删掉
+                    # （见 set_public：不留 on=False 的壳，避免读点漏判）
                     "public_desc": (_KB_PUBLIC.get(kb_id) or {}).get("desc", ""),
                 }
             )
