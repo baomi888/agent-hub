@@ -335,8 +335,56 @@ class TestNotificationDestination:
     def test_timetable_points_to_schedule_tool(self, fresh_db):
         out = self._content("timetable")
         assert out["url"] == "/tools?tool=schedule"
-        assert out["title"] == "心理学 · 二教A-302"
+        assert out["title"] == "心理学 · 20 分钟后上课"
+
+    def test_time_is_upstairs_and_room_is_downstairs(self, fresh_db):
+        """锁屏上两行各有各的活：一行说「什么课、还剩几分钟」，一行说「去哪」。
+
+        2026-11-13 用户看真机截图提的：原来两行都从课名/教室起头，
+        `计算机综合实验 · [官渡]学科楼 (三) 室 4...` 被截断，最该一眼看到的
+        「20 分钟后」挤在第二行开头。
+        """
+        out = self._content("timetable")
+        assert out["body"] == "二教A-302"
+        # 教室不能再在标题里出现一次：库里的 title 是「课名 · 教室」，
+        # 剥不干净就是「心理学 · 二教A-302 · 20 分钟后上课」，比改之前更挤。
+        assert "二教A-302" not in out["title"]
+        # 「几分钟后上课」只能在标题里，body 里再来一次就白占一行。
+        assert "分钟后上课" not in out["body"]
+
+    def test_course_without_room_falls_back_to_teacher(self, fresh_db):
+        """没填教室的课（体育、自习）不能只剩「20 分钟后上课」一行空正文。"""
+        from service import reminder_tick
+
+        item = {
+            "title": "体育",
+            "note": "20 分钟后上课；老师：张老师",
+            "channels": "push",
+            "action": "notify",
+            "source": "timetable",
+        }
+        out = reminder_tick.build_content("u1", item, NOW)
+        assert out["title"] == "体育 · 20 分钟后上课"
+        assert out["body"] == "老师：张老师"
 
     def test_manual_still_points_to_reminders(self, fresh_db):
         """别的来源不能跟着改：待办点开回提醒列表才是对的。"""
         assert self._content("manual")["url"] == "/reminders"
+
+    def test_row_from_sync_splits_correctly(self, fresh_db):
+        """真链路：库里的行 → build_content，不是手搓的 item。
+
+        上面几条的 `note` 是手写的，`_note()` 改了分隔符这里照样绿。
+        这条从 `sync()` 落库的行读，才管得住「拼接」和「拆解」是同一套格式。
+        """
+        from service import reminder_tick
+
+        _put()
+        cr.set_prefs("u1", enabled=True)
+        cr.sync("u1")
+        row = [r for r in _rows() if str(r["title"]).startswith("高等数学")][0]
+        assert row["note"] == "20 分钟后上课；教三201；老师：李老师"
+
+        out = reminder_tick.build_content("u1", row, NOW)
+        assert out["title"] == "高等数学 · 20 分钟后上课"
+        assert out["body"] == "教三201"

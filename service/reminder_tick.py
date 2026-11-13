@@ -56,7 +56,8 @@ from datetime import datetime
 from typing import Any
 
 from core import config, mail_store, mailer, reminder_core, timeutil, user_prefs
-from service import course_reminder, push as push_svc
+from service import course_reminder
+from service import push as push_svc
 
 logger = logging.getLogger(__name__)
 
@@ -87,16 +88,56 @@ def _daily_brief(owner_id: str, planned_at: int) -> dict[str, Any] | None:
         return None
 
 
+def _split_note(note: object) -> tuple[str, str, str]:
+    """`"20 分钟后上课；[官渡]学科楼 (三) 室 401；老师：张老师"` → (head, 教室, 老师)。
+
+    `service/course_reminder.py::_note` 的逆运算，用来把一句话拆回三个字段。
+    拆而不是改存储：`note` 还要给邮件兜底和 `_merge` 用，那边读的是整句。
+    """
+    segs = [s.strip() for s in str(note or "").split("；") if s.strip()]
+    head = segs[0] if segs else ""
+    room = next((s for s in segs[1:] if not s.startswith("老师")), "")
+    teacher = next((s for s in segs[1:] if s.startswith("老师")), "")
+    return head, room, teacher
+
+
+def _class_content(reminder: dict[str, Any]) -> dict[str, Any]:
+    """上课提醒的排版：上面一行「哪门课 · 还有多久」，下面一行「去哪」。
+
+    之前是 title=`课名 · 教室`、body=`20 分钟后上课；教室；老师`，两行都从
+    课名或教室起头，锁屏一行只放得下十几个字 —— 截出来是
+    `计算机综合实验 · [官渡]学科楼 (三) 室 4...` / `20 分钟后上课；[官渡]学科楼...`，
+    最该一眼看到的两件事（什么课、还剩几分钟）反而要拼着读。
+
+    为什么不把「20 分钟后上课」直接写进库里的 `title`：那条 title 还给
+    `course_reminder.upcoming()` 的「接下来几次课」清单用，一周后的课顶着
+    「20 分钟后上课」就是假话。相对时间只在**发通知这一刻**成立，所以只在这里拼。
+    """
+    head, room, teacher = _split_note(reminder.get("note"))
+    course = str(reminder.get("title") or "").strip() or "上课"
+    # 库里的 title 是「课名 · 教室」，教室已经在下面一行了，剥掉免得重复。
+    if room and course.endswith(room):
+        course = course[: -len(room)].rstrip(" ·").strip()
+    title = f"{course} · {head}" if head else course
+    return {
+        "title": title[:60],
+        # 教室优先、老师其次：教室被截断就没法用了，老师截断还猜得到。
+        "body": (room or teacher)[:120],
+        "url": "/tools?tool=schedule",
+    }
+
+
 def _notify_content(reminder: dict[str, Any]) -> dict[str, Any]:
     # 上课提醒点开应该落在**课程表**，不是提醒列表：用户想知道的是
     # 「下一节在哪、几点下课」，而提醒列表里没有这节课（`list_reminders`
     # 把 timetable 排除了，见 core/reminder_core.py）。
     # 落在提醒列表的话，点完看到的是一片自己的待办 —— 和那条通知毫无关系。
-    url = "/tools?tool=schedule" if str(reminder.get("source") or "") == "timetable" else "/reminders"
+    if str(reminder.get("source") or "") == "timetable":
+        return _class_content(reminder)
     return {
         "title": str(reminder.get("title") or "提醒")[:60],
         "body": str(reminder.get("note") or "")[:120],
-        "url": url,
+        "url": "/reminders",
     }
 
 
