@@ -290,12 +290,18 @@ function FileViewer({
   onClose: () => void;
 }) {
   const isInline = INLINE_EXT.has(file.ext);
+  /**
+   * 预览模式：
+   *   pdf  —— 浏览器阅读器，看的是"原版"（Word 用导入时导出的 PDF，PDF 原件直接读）
+   *   text —— 后端抽出来的正文，能选中复制，但公式只剩〔公式〕占位
+   * 有原版 PDF 时默认走 pdf，因为那才是学生要的"和原来一样"。
+   */
+  const previewFile = file.preview_file || "";
+  const [mode, setMode] = useState<"pdf" | "text">(previewFile || isInline ? "pdf" : "text");
   const [text, setText] = useState<string | null>(null);
   const [truncated, setTruncated] = useState(false);
-  const [state, setState] = useState<"idle" | "loading" | "ready" | "error">(
-    isInline ? "ready" : "loading"
-  );
   const [msg, setMsg] = useState("");
+  const showPdf = mode === "pdf" && (isInline || !!previewFile);
 
   // Esc 关闭：看资料时手一直在键盘上，找不到关闭按钮会很烦
   useEffect(() => {
@@ -307,29 +313,27 @@ function FileViewer({
   }, [onClose]);
 
   useEffect(() => {
-    if (isInline) return;
+    if (showPdf) return;
     let alive = true;
-    // 不在 effect 里同步 setState("loading")：初始值已经是 loading，
-    // 换一份资料时靠父层的 key 重挂组件拿回初始态（见下面 FileViewer 的 key）
     api
       .getOfficialKbText(kbId, file.name)
       .then((r) => {
         if (!alive) return;
         setText(r.content);
         setTruncated(r.truncated);
-        setState("ready");
+        setMsg("");
       })
       .catch((e: unknown) => {
         if (!alive) return;
+        setText(null);
         setMsg(e instanceof Error ? e.message : "这份资料没法在线看");
-        setState("error");
       });
     return () => {
       alive = false;
     };
-  }, [kbId, file.name, isInline]);
+  }, [kbId, file.name, showPdf]);
 
-  const src = api.officialKbFileUrl(kbId, file.name, true);
+  const src = api.officialKbFileUrl(kbId, previewFile || file.name, true);
   const { base } = splitName(file.name);
 
   return (
@@ -344,6 +348,16 @@ function FileViewer({
         <div className="lib-viewer-h">
           <b title={file.name}>{base}</b>
           <span className="lib-viewer-acts">
+            {previewFile && (
+              <button
+                type="button"
+                className="lib-ghost"
+                onClick={() => setMode((m) => (m === "pdf" ? "text" : "pdf"))}
+                title={mode === "pdf" ? "看抽出来的纯文字（可复制）" : "回到原版排版"}
+              >
+                {mode === "pdf" ? "文字版" : "原版"}
+              </button>
+            )}
             <a className="lib-ghost" href={api.officialKbFileUrl(kbId, file.name)}>
               下载
             </a>
@@ -354,9 +368,18 @@ function FileViewer({
         </div>
 
         <div className="lib-viewer-b">
-          {state === "loading" && <p className="lib-viewer-tip">正在读取…</p>}
+          {showPdf && (file.ext === "pdf" || previewFile) && (
+            <iframe className="lib-viewer-frame" src={src} title={base} />
+          )}
 
-          {state === "error" && (
+          {showPdf && file.ext !== "pdf" && !previewFile && (
+            // eslint-disable-next-line @next/next/no-img-element -- 认证直链，不走 next/image
+            <img className="lib-viewer-img" src={src} alt={base} />
+          )}
+
+          {!showPdf && !msg && text === null && <p className="lib-viewer-tip">正在读取…</p>}
+
+          {!showPdf && msg && (
             <div className="lib-viewer-tip">
               <p>{msg}</p>
               <a className="lib-share" href={api.officialKbFileUrl(kbId, file.name)}>
@@ -365,16 +388,7 @@ function FileViewer({
             </div>
           )}
 
-          {state === "ready" && isInline && file.ext === "pdf" && (
-            <iframe className="lib-viewer-frame" src={src} title={base} />
-          )}
-
-          {state === "ready" && isInline && file.ext !== "pdf" && (
-            // eslint-disable-next-line @next/next/no-img-element -- 认证直链，不走 next/image
-            <img className="lib-viewer-img" src={src} alt={base} />
-          )}
-
-          {state === "ready" && !isInline && (
+          {!showPdf && text !== null && (
             <>
               <pre className="lib-viewer-text">{text}</pre>
               {truncated && (

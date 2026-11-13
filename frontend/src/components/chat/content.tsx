@@ -1,6 +1,7 @@
 // 消息正文渲染：URL 自动 linkify + **粗体** + 换行；引用 refs 文本解析
 // 从 ChatArea.tsx 拆出（2026-09 重构），全部是纯函数，适合单测
 import type { ReactNode } from "react";
+import { MathTex, splitMath } from "@/lib/math";
 import type { WebSource } from "@/lib/types";
 import LinkCluster, { type LinkItem } from "./LinkCluster";
 
@@ -66,6 +67,19 @@ export function splitByUrl(text: string): Array<{ type: "text" | "url"; value: s
 }
 
 export function renderContent(text: string): ReactNode {
+  // 用户消息里也可能有公式（截图粘贴的题目、手打的 LaTeX），一并交给 KaTeX
+  const segs = splitMath(text);
+  if (segs.every((s) => s.type === "text")) return renderContentPlain(text);
+  return segs.map((s, i) =>
+    s.type === "text" ? (
+      <span key={i}>{renderContentPlain(s.value)}</span>
+    ) : (
+      <MathTex key={i} tex={s.value} display={s.type === "block"} />
+    )
+  );
+}
+
+function renderContentPlain(text: string): ReactNode {
   return text.split("**").map((part, i) => {
     const isBold = i % 2 === 1;
     const children = splitByUrl(part).map((seg, j) => {
@@ -109,6 +123,27 @@ const MD_INLINE_RE =
 
 /** 行内元素：行内代码 / 粗体 / 链接 / 删除线 / 引用角标 / 裸 URL */
 export function renderInline(
+  text: string,
+  keyPrefix = "i",
+  cites?: Map<number, WebSource>,
+  refAnchor?: (n: number) => string | null
+): ReactNode[] {
+  // 公式先切出去：`$x^2$` 里可能夹着 `_` `^` `\`，混在下面的标记正则里
+  // 会被拆得七零八落，必须先整段摘走再交给 KaTeX。
+  const segs = splitMath(text);
+  if (segs.every((s) => s.type === "text")) return renderInlinePlain(text, keyPrefix, cites, refAnchor);
+  const out: ReactNode[] = [];
+  segs.forEach((s, i) => {
+    if (s.type === "text") {
+      out.push(...renderInlinePlain(s.value, `${keyPrefix}-s${i}`, cites, refAnchor));
+    } else {
+      out.push(<MathTex key={`${keyPrefix}-math${i}`} tex={s.value} display={s.type === "block"} />);
+    }
+  });
+  return out;
+}
+
+function renderInlinePlain(
   text: string,
   keyPrefix = "i",
   cites?: Map<number, WebSource>,
@@ -466,6 +501,31 @@ export function renderMarkdown(
           <code>{buf.join("\n")}</code>
         </pre>
       );
+      continue;
+    }
+
+    // 跨行的块级公式：$$ 或 \[ 开头，一直收到同符号收尾。
+    // 必须先于段落处理：否则多行公式会被拆成若干段落，$ 与 \frac 散落在正文里。
+    const mOpen = /^\s*(\$\$|\\\[)(.*)$/.exec(line);
+    if (mOpen) {
+      const closer = mOpen[1] === "$$" ? "$$" : "\\]";
+      let rest = mOpen[2] ?? "";
+      i++;
+      if (rest.trim().endsWith(closer)) {
+        rest = rest.trim().slice(0, -closer.length);
+      } else {
+        const buf: string[] = rest.trim() ? [rest] : [];
+        while (i < lines.length) {
+          const cur = lines[i++];
+          if (cur.trim().endsWith(closer)) {
+            buf.push(cur.trim().slice(0, -closer.length));
+            break;
+          }
+          buf.push(cur);
+        }
+        rest = buf.join("\n");
+      }
+      if (rest.trim()) out.push(<MathTex key={nk()} tex={rest.trim()} display />);
       continue;
     }
 

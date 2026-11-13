@@ -70,6 +70,17 @@ def _file_path(src: str, course: dict, rel: str) -> str:
     return os.path.join(src, course["dir"].replace("/", os.sep), rel.replace("/", os.sep))
 
 
+def _pdf_twin_path(src: str, course: dict, rel: str) -> str:
+    """Word 的「原版 PDF」：`pdf/<key>/<相对路径>.pdf`。
+
+    为什么要有它：试卷里的公式是 OLE 对象（本质是 WMF 图片），抽文字时
+    一个字符都拿不到。纯文字预览读起来是"解：。"，和原件差得远。
+    本地用 Word 导一份 PDF，预览就走浏览器阅读器 —— 排版、公式、表格
+    跟原件一模一样，而下载仍然是原始 .docx。
+    """
+    return os.path.join(src, "pdf", course["key"], rel.replace("/", os.sep) + ".pdf")
+
+
 def _preview_chars(path: str) -> int:
     """建索引前先试读一次：字数、以及"能不能读出文字"。
 
@@ -141,6 +152,15 @@ def import_course(src: str, course: dict, *, force: bool, dry: bool) -> dict:
         shutil.copy2(path, dest)
         size = os.path.getsize(dest)
 
+        # 原版 PDF 一起落盘（只有 Word 会有）：预览走它，下载还走原件
+        twin = _pdf_twin_path(src, course, rel)
+        preview_name = ""
+        if os.path.exists(twin):
+            preview_name = "__preview__/" + rel + ".pdf"
+            pdest = pipelines.source_path(kb_id, preview_name)
+            os.makedirs(os.path.dirname(pdest), exist_ok=True)
+            shutil.copy2(twin, pdest)
+
         if not force and rel in have:
             chunks = int(have[rel].get("chunks") or 0)
             records.append(
@@ -151,6 +171,7 @@ def import_course(src: str, course: dict, *, force: bool, dry: bool) -> dict:
                     "origin": "official",
                     "size": size,
                     "ext": os.path.splitext(rel)[1].lower().lstrip("."),
+                    "preview": preview_name,
                 }
             )
             print(tag + f"  已入库（{chunks} 段），原件已刷新")
@@ -184,6 +205,7 @@ def import_course(src: str, course: dict, *, force: bool, dry: bool) -> dict:
                 "origin": "official",
                 "size": size,
                 "ext": os.path.splitext(rel)[1].lower().lstrip("."),
+                "preview": preview_name,
             }
         )
 

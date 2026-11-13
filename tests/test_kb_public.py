@@ -375,3 +375,79 @@ def test_loader_reads_docx_csv_jsonl(tmp_path):
     text = rc.load_document(str(jsonl))[0].page_content
     assert "题目：极限的定义" in text
     assert "坏行原样保留" in text  # 坏行不能丢：宁可难看，也别悄悄吞资料
+
+
+# ==================== 数学符号与预览保真（2026-11-13 晚）====================
+#
+# 三件事各自独立，但都是"学生看到乱码"的成因：
+#   1. PDF 里的希腊字母/运算符是字体私有区字符（U+F061 = α），必须还原；
+#   2. Word 里的公式是 OLE 图片对象，抽文字拿不到，要留〔公式〕标记；
+#   3. 预览要能读到"原版 PDF"，而不是抽出来的残缺正文。
+
+
+def test_math_text_restores_symbol_font():
+    from kb import math_text
+
+    raw = "向量\uF061\uF062线性无关，且\uF0F7\uF0F7"
+    out = math_text.clean_text(raw)
+    assert "α" in out and "β" in out
+    # 矩阵括号拼块压成一个，不能让 0xF0F7 漏到正文里
+    assert "\uF0F7" not in out
+    assert math_text.garble_ratio(out) == 0.0
+
+
+def test_math_text_distinguishes_mt_extra_codes():
+    from kb import math_text
+
+    # 0x61 在 Symbol 里是 α，在同一份 PDF 的 MT Extra 里是括号竖条：
+    # 给了 mt_codes 就必须按 MT Extra 解，不能一律当希腊字母
+    assert math_text.decode_pua("\uF061") == "α"
+    assert math_text.decode_pua("\uF061", mt_codes={0x61}) != "α"
+
+
+def test_docx_formula_placeholder(tmp_path):
+    """Word 里的公式对象不能凭空消失，至少要留下〔公式〕。"""
+    path = tmp_path / "with-formula.docx"
+    xml = (
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+        ' xmlns:o="urn:schemas-microsoft-com:office:office"'
+        ' xmlns:v="urn:schemas-microsoft-com:vml">'
+        "<w:body><w:p>"
+        "<w:r><w:t>5．选（C）因函数</w:t></w:r>"
+        "<w:r><w:object><v:shape><v:imagedata/></v:shape>"
+        '<o:OLEObject ProgID="Equation.DSMT4"/></w:object></w:r>'
+        "<w:r><w:t>可导，则</w:t></w:r>"
+        "</w:p></w:body></w:document>"
+    )
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("word/document.xml", xml)
+    text = rc.load_document(str(path))[0].page_content
+    assert "〔公式〕" in text
+    assert "选（C）" in text and "可导" in text
+
+
+def test_official_detail_exposes_preview_pdf(official_kb):
+    """Word 资料配了原版 PDF 时：清单给出 preview_file，且该文件读得到。"""
+    name = "高等数学（一）单元测试/第一章试卷.docx"
+    preview = "__preview__/" + name + ".pdf"
+    _put_source(official_kb, name, _docx_bytes("第一章 极限"))
+    _put_source(official_kb, preview, b"%PDF-1.4\n%preview\n")
+    pipelines.add_file_records(
+        pipelines.OFFICIAL_OWNER,
+        official_kb,
+        [{"name": name, "chunks": 3, "added_at": 1, "preview": preview}],
+    )
+
+    out = asyncio.run(kb_api.get_official_kb(official_kb, OTHER))
+    f = next(x for x in out["files"] if x["name"] == name)
+    assert f["preview_file"] == preview
+    assert f["preview"] is True
+
+    # 预览 PDF 不在清单里单列一行，但必须能读（否则预览 404）
+    resp = asyncio.run(kb_api.get_official_file(official_kb, preview, 0, OTHER))
+    assert resp.media_type == "application/pdf"
+
+    # 清单外仍然 404：preview 只是"这条记录的附属文件"，不是任意路径
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(kb_api.get_official_file(official_kb, "__preview__/随便.pdf", 0, OTHER))
+    assert e.value.status_code == 404

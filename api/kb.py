@@ -417,12 +417,19 @@ def _official_file_record(owner: str, kb_id: str, name: str) -> dict:
     这张清单同时是**白名单**：只有登记过的名字才允许读盘。
     虽然 source_path 是哈希拼出来的、本身就穿越不出去，但"能读的文件
     = 库里登记的文件"这条边界应该由清单来定，而不是依赖路径计算的副作用。
+
+    除了资料原名，也认记录里的 `preview`（Word 转出来的原版 PDF）——
+    它是给人看的预览载体，不在清单里单独列一行，但必须能读。
+    返回的记录带 `_matched`：真正要读盘的那个名字。
     """
     for rec in pipelines.list_files_view(
         owner, kb_id, pipelines.get_or_create(owner, kb_id, allow_public=True)
     ):
-        if rec.get("name") == name:
-            return rec
+        for candidate in (rec.get("name"), rec.get("preview")):
+            if candidate and candidate == name:
+                out = dict(rec)
+                out["_matched"] = candidate
+                return out
     raise HTTPException(status_code=404, detail=f"资料不存在：{name}")
 
 
@@ -452,8 +459,11 @@ async def get_official_kb(kb_id: str, uid: str = Depends(get_current_user)) -> d
                     "added_at": rec.get("added_at"),
                     "size": size,
                     "ext": ext.lstrip("."),
+                    # Word 的原版 PDF：有它就用浏览器阅读器看，排版与公式一字不差；
+                    # 没有才退回抽正文（正文里公式是〔公式〕占位）
+                    "preview_file": rec.get("preview") or "",
                     # 能不能在线看：PDF/图片内嵌，其余抽文字
-                    "preview": ext in _INLINE_EXT or ext in _TEXT_EXT,
+                    "preview": bool(rec.get("preview")) or ext in _INLINE_EXT or ext in _TEXT_EXT,
                     # 没留档（老数据）就只能看正文、下不了原件
                     "download": size > 0,
                 }
@@ -490,12 +500,14 @@ async def get_official_file(
     owner = _official_kb_or_404(kb_id)
     # 清单校验 + 取扩展名（顺带把 path 定死，后面不再接受外部输入拼路径）
     rec = await asyncio.to_thread(_official_file_record, owner, kb_id, name)
-    ext = os.path.splitext(rec.get("name") or "")[1].lower()
-    path = pipelines.source_path(kb_id, rec.get("name") or "")
+    serve = rec.get("_matched") or rec.get("name") or ""
+    ext = os.path.splitext(serve)[1].lower()
+    path = pipelines.source_path(kb_id, serve)
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="这份资料的原始文件没有留存，只能预览正文")
 
-    base = os.path.basename(name.replace("\\", "/"))
+    # 下载时仍用**资料原名**（学生拿到的是 .docx，不是预览用的 .pdf）
+    base = os.path.basename((rec.get("name") or name).replace("\\", "/"))
     disp = "inline" if inline else "attachment"
     return FileResponse(
         path,
@@ -522,7 +534,7 @@ async def get_official_file_text(
     rec = await asyncio.to_thread(_official_file_record, owner, kb_id, name)
 
     def _read() -> dict:
-        path = pipelines.source_path(kb_id, rec.get("name") or "")
+        path = pipelines.source_path(kb_id, rec.get("_matched") or rec.get("name") or "")
         docs = load_document(path, source_name=rec.get("name"))
         text = "\n\n".join((d.page_content or "") for d in docs)
         return {

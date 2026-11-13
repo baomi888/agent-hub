@@ -30,9 +30,11 @@ from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from pypdf import PdfReader
 
 from core import config, embed_guard, metrics, prompt_store
 from core.llm import get_embeddings, get_llm
+from kb import math_text
 
 # ==================== Chroma 客户端单例 ====================
 
@@ -825,6 +827,39 @@ SUPPORTED_EXT = (".txt", ".md", ".pdf", ".docx", ".csv", ".jsonl", ".json")
 
 # docx 的正文在 word/document.xml 里，WordprocessingML 命名空间
 _DOCX_W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+# 嵌入对象（公式/图表）的 ProgID 在 office 命名空间里，用来区分公式与普通图片
+_DOCX_O = "{urn:schemas-microsoft-com:office:office}"
+
+
+def _pdf_mtextra_codes(file_path: str) -> set[int]:
+    """扫一遍 PDF，记下"哪些字形号是 MT Extra 贡献的"。
+
+    为什么需要这一步：Symbol 与 MT Extra 的码位是重叠的 —— 0x61 在
+    Symbol 里是 α，在 MT Extra 里是括号竖条。只看字符本身分不出来，
+    只能先按字体统计一遍，再按码位区别对待。
+    扫不动（加密/损坏）就返回空集，退化成"全部按 Symbol 解"。
+    """
+    codes: set[int] = set()
+
+    def visitor(text, cm, tm, font_dict, font_size):
+        name = ""
+        try:
+            name = str((font_dict or {}).get("/BaseFont", "")).lower()
+        except Exception:
+            return
+        if "mt-extra" not in name and "mtextra" not in name:
+            return
+        for ch in text or "":
+            if "\ue000" <= ch <= "\uf8ff":
+                codes.add(ord(ch) - 0xF000)
+
+    try:
+        reader = PdfReader(file_path)
+        for page in reader.pages[:40]:  # 前 40 页足够统计出用到了哪些码位
+            page.extract_text(visitor_text=visitor)
+    except Exception:
+        return set()
+    return codes
 
 
 def _docx_text(file_path: str) -> str:
@@ -840,8 +875,34 @@ def _docx_text(file_path: str) -> str:
     body = root.find(f"{_DOCX_W}body")
     lines: list[str] = []
 
+    def _object_label(el) -> str:
+        """Word 里的嵌入对象：公式给「〔公式〕」，其余给「〔图〕」。
+
+        课程试卷的公式是 MathType/公式编辑器对象（OLE），本质是 WMF 图片，
+        XML 里一个字符都没有。原来直接跳过，正文就变成"解：。"这种断句，
+        模型读到只会说"资料里没有公式"。留个标记至少说明**这里原本有东西**，
+        既不假装读得懂，也不让它无声消失。
+        """
+        for ole in el.iter(f"{_DOCX_O}OLEObject"):
+            prog = (ole.get("ProgID") or "").lower()
+            if "equation" in prog or "mathtype" in prog or "dsmt" in prog:
+                return "〔公式〕"
+        return "〔图〕"
+
     def _para_text(el) -> str:
-        return "".join(n.text or "" for n in el.iter(f"{_DOCX_W}t")).strip()
+        parts: list[str] = []
+        for node in el.iter():
+            tag = node.tag
+            if tag == f"{_DOCX_W}t":
+                parts.append(node.text or "")
+            elif tag in (f"{_DOCX_W}object", f"{_DOCX_W}pict", f"{_DOCX_W}drawing"):
+                label = _object_label(node)
+                # 对象可能层层嵌套（pict 里套 drawing），同一种标记只留一个
+                if not parts or parts[-1] != label:
+                    parts.append(label)
+        text = "".join(parts).strip()
+        # 标记前后不许粘着文字：〔公式〕和句号挤在一起会看成乱码
+        return re.sub(r"\s*(〔(?:公式|图)〕)\s*", r" \1 ", text).strip()
 
     def _walk(el) -> None:
         for child in el:
@@ -1005,6 +1066,14 @@ def load_document(file_path: str, source_name: str | None = None):
         d.metadata["source_path"] = file_path
         if source_name:
             d.metadata["source"] = source_name
+
+    # 公式字体修复：PDF 里的 α、Σ、≤、矩阵括号常常以私有区字符出现
+    # （U+F0xx），不清掉就是"入库即乱码"。见 kb/math_text.py 的说明。
+    mt_codes = _pdf_mtextra_codes(file_path) if ext == ".pdf" else None
+    for d in docs:
+        fixed = math_text.clean_text(d.page_content or "", mt_codes=mt_codes)
+        if fixed != d.page_content:
+            d.page_content = fixed
     return docs
 
 

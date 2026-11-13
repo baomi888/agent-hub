@@ -62,6 +62,8 @@ export interface OfficialKbFile {
   size: number;
   /** 小写扩展名，不带点 */
   ext: string;
+  /** 原版 PDF 的库内名字（只有 Word 有）。预览读它，下载仍走 name */
+  preview_file?: string;
   /** 能否在线预览 */
   preview: boolean;
   /** 原始文件是否还在（不在就只能看正文） */

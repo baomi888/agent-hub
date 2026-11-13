@@ -1173,3 +1173,121 @@
     height: 92dvh;
   }
 }
+
+/* ============================================================
+   2026-11-13 晚：滚动修复 + 三端适配（手机 / 平板 / 桌面）
+   ============================================================ */
+
+/* ---------- 1. 滚动：这就是「整页滑不动」的根因 ----------
+   原来 .lib-root 只写了 min-height: 100dvh。内容一多，元素被撑到 2700px，
+   scrollHeight == clientHeight，overflow-y: auto 形同虚设；而 html / body
+   都是 overflow: hidden（App Shell 的 h-full），超出部分直接被裁掉 ——
+   于是浏览器滚不了、容器也滚不了，两页全死。
+   改成固定高度后，滚动条落在 .lib-root 自己身上，粘性顶栏也才有参照物。 */
+.lib-root {
+  height: 100dvh;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+
+/* ---------- 2. 桌面：内容区从 1080 放到 1280 ----------
+   1080 在 2K 屏上两侧各空 300px+，看着像把手机版拉宽了。
+   1280 配合下面的卡片最小宽 272，1440 及以上正好四列，
+   1024 平板三列，手机一列 —— 每一档都是整数列，不留半张卡。 */
+.lib-top-in,
+.lib-main {
+  max-width: 1280px;
+  padding-left: clamp(16px, 2vw, 30px);
+  padding-right: clamp(16px, 2vw, 30px);
+}
+
+.lib-main {
+  padding-top: 24px;
+  /* 手机上要给 Home 指示条留位置，否则最后一行贴着屏幕边 */
+  padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+}
+
+.lib-courses {
+  grid-template-columns: repeat(auto-fill, minmax(272px, 1fr));
+  gap: var(--space-12, 12px);
+}
+
+.lib-course {
+  padding: 15px 16px;
+}
+
+/* 桌面上一排四张卡时，简介两行足够；平板两列时反而能放下更多字，
+   所以不写死高度，只保证卡片自身等高 */
+.lib-course-d {
+  min-height: calc(var(--fs-xs) * var(--lh-body) * 2);
+}
+
+/* 课程详情：顶部信息条在宽屏上给更多内边距，右下按钮不贴边 */
+.lib-course-hero {
+  padding: 20px 22px;
+}
+
+.lib-official {
+  padding: 18px;
+}
+
+/* 资料行：桌面给悬停反馈，鼠标扫过能确认点的是哪一行 */
+.lib-file {
+  transition: background 0.14s;
+}
+.lib-file:hover {
+  background: var(--fill-3);
+}
+
+/* 预览弹层：宽屏放宽，长公式和表格才不用横向滚 */
+.lib-viewer {
+  width: min(1100px, 94vw);
+  height: min(92dvh, 940px);
+}
+
+/* ---------- 3. 平板（≤1024）：三列，边距收回一点 ---------- */
+@media (max-width: 1024px) {
+  .lib-main {
+    padding: 20px 20px calc(48px + env(safe-area-inset-bottom, 0px));
+  }
+  .lib-courses {
+    grid-template-columns: repeat(auto-fill, minmax(244px, 1fr));
+  }
+  .lib-viewer {
+    width: min(960px, 96vw);
+  }
+}
+
+/* ---------- 4. 手机（≤640）：一列，卡片信息按优先级重排 ---------- */
+@media (max-width: 640px) {
+  .lib-main {
+    padding: 16px 14px calc(40px + env(safe-area-inset-bottom, 0px));
+  }
+  /* 单列时卡片变宽，简介放到三行，别让"共 10 份 PDF"这类关键信息被截掉 */
+  .lib-courses {
+    grid-template-columns: 1fr;
+    gap: var(--space-10);
+  }
+  .lib-course {
+    padding: 13px 14px;
+  }
+  .lib-course-d {
+    min-height: 0;
+    -webkit-line-clamp: 3;
+  }
+  .lib-official {
+    padding: 14px 12px;
+  }
+  /* 预览在小屏上铺满，弹层里再套一层圆角只会浪费可读面积 */
+  .lib-viewer {
+    width: 100%;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+  .lib-viewer-h {
+    padding: 10px 8px 10px 14px;
+  }
+}

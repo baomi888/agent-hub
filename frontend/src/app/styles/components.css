@@ -829,3 +829,55 @@ button.kb-chip-unbound:hover {
 .session-swipe-wrap .session-swipe-btn:active {
   filter: brightness(0.92);
 }
+
+/* ============================================================
+   数学公式渲染（KaTeX）2026-11-13
+   模型输出 `$x^2$` / `\[\int_0^1\]` 时，正文里原本显示的是反斜杠原文，
+   现在由 KaTeX 排成公式。这里只管三件事：
+     1) 行内公式跟正文基线对齐，别把行高顶开；
+     2) 块级公式自己可以横向滚（长公式在手机上不撑破卡片）；
+     3) 渲染失败时回落成等宽原文并给一点底色，让人知道这是"没排出来的公式"，
+        而不是把它当普通文字吞掉。
+   ============================================================ */
+
+.math-inline {
+  display: inline;
+}
+.math-inline .katex {
+  /* 1.02 而不是 1：KaTeX 的 x-height 比正文小，等字号会显得局促 */
+  font-size: 1.02em;
+}
+
+.math-block {
+  display: block;
+  max-width: 100%;
+  margin: 10px 0;
+  padding: 2px 0;
+  /* 有些答案的公式比屏幕宽（长矩阵、连等式），横向滚动好过撑破布局 */
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.math-block .katex-display {
+  margin: 0;
+}
+.math-block .katex {
+  font-size: 1.05em;
+}
+
+/* 渲染失败：保留 tex 原文 + 灰底，别让用户以为公式丢了 */
+.math-raw {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--fill-3);
+  color: var(--text-2);
+  font-family: var(--font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
+  font-size: 0.92em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 引用卡片里的小片段也在渲染公式：那里字号小，块级公式要跟着收 */
+.ref-preview .math-block,
+.md-sm .math-block {
+  margin: 6px 0;
+}

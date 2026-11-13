@@ -1,6 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import PwaRegister from "@/components/PwaRegister";
+// KaTeX 的字体与排版样式必须在 globals.css 之前：globals 里我们对
+// .math-inline / .math-block 的微调要能盖住它的默认值。
+import "katex/dist/katex.min.css";
 import "./globals.css";
 
 const TITLE = "知穗Agent · 知识库 · 场景智能体 · 校园工具集";
