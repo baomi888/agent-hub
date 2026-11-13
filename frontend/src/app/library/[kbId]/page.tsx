@@ -293,13 +293,11 @@ export default function CourseLibraryPage() {
                   <b>{fmtNum(data.chunks)}</b> 段已建库
                 </span>
                 <span className="lib-dot" />
-                {/* 浏览数（独立访客）：本次打开已计入，所以新库第一次看就是 1 */}
+                {/* 浏览数（独立访客）：本次打开已计入，所以新库第一次看就是 1。
+                    收藏数不在这儿写一遍 —— 右边星标按钮上的数字就是它，
+                    同一行出现「2 人收藏 ★ 2」读起来像两个不同的数。 */}
                 <span className="lib-course-stat" title="看过这个库的人数">
                   <b>{fmtNum(data.views ?? 0)}</b> 人看过
-                </span>
-                <span className="lib-dot" />
-                <span className="lib-course-stat" title="收藏人数">
-                  <b>{fmtNum(data.favs ?? 0)}</b> 人收藏
                 </span>
                 {/* 上传/分享日期：用户要求"每个库都写上上传日期"。
                     官方库是导入上线那天，同学库是第一次公开那天。 */}
@@ -309,29 +307,35 @@ export default function CourseLibraryPage() {
                     <span className="lib-course-stat">{fmtWhen(data.uploads_at)}上传</span>
                   </>
                 )}
-                {/* 自己的库：收藏和复制都没有意义（已经在自己名下），直接不给按钮 */}
-                {!data.mine && (
+                {/* 右下两个动作成组靠右。
+                    自己的库：收藏和复制都没有意义（已经在自己名下），不给星标。 */}
+                <span className="lib-hero-acts">
+                  {!data.mine && (
+                    <button
+                      type="button"
+                      className={"lib-fav-btn lib-hero-fav" + (data.favorited ? " on" : "")}
+                      aria-pressed={!!data.favorited}
+                      aria-label={data.favorited ? "取消收藏" : "收藏这个库"}
+                      title={data.favorited ? "取消收藏" : "收藏，之后在「我的收藏库」里找得到"}
+                      disabled={favBusy}
+                      onClick={() => void toggleFav()}
+                    >
+                      <CornIcon name="star" className="h-4 w-4" />
+                      {(data.favs ?? 0) > 0 && (
+                        <span className="lib-fav-n">{fmtNum(data.favs ?? 0)}</span>
+                      )}
+                    </button>
+                  )}
                   <button
                     type="button"
-                    className={"lib-fav-btn lib-hero-fav" + (data.favorited ? " on" : "")}
-                    aria-pressed={!!data.favorited}
-                    aria-label={data.favorited ? "取消收藏" : "收藏这个库"}
-                    title={data.favorited ? "取消收藏" : "收藏，之后在「我的收藏库」里找得到"}
-                    disabled={favBusy}
-                    onClick={() => void toggleFav()}
+                    className="lib-share lib-course-cta"
+                    disabled={opening || data.chunks === 0}
+                    onClick={() => void openInChat()}
                   >
-                    <CornIcon name="star" className="h-4 w-4" />
+                    {opening ? "打开中…" : "挂到我的对话"}
+                    {!opening && <CornIcon name="arrow" className="h-3.5 w-3.5" />}
                   </button>
-                )}
-                <button
-                  type="button"
-                  className="lib-share lib-course-cta"
-                  disabled={opening || data.chunks === 0}
-                  onClick={() => void openInChat()}
-                >
-                  {opening ? "打开中…" : "挂到我的对话"}
-                  {!opening && <CornIcon name="arrow" className="h-3.5 w-3.5" />}
-                </button>
+                </span>
               </div>
               {/* 复制成我的库：用户原话"除了用官方知识库，还可以往官方知识库加自己的资料，
                   形成自己的知识库"。实现是复制一份到自己名下 —— 往官方库写会改到所有人。

@@ -223,16 +223,18 @@ export default function KbBoard({ kbId, compact = false, onCount }: Props) {
           )}
           <time dateTime={new Date(p.at * 1000).toISOString()}>{fmtWhen(p.at)}</time>
           <span className="kb-post-acts">
-            {!p.mine && (
-              <button
-                type="button"
-                className="kb-post-act"
-                onClick={() => startReply(p)}
-                aria-label={`回复 ${p.author.name}`}
-              >
-                回复
-              </button>
-            )}
+            {/* 回复对每一条开放，自己的也开放：之前只给别人的留言渲染，
+                而用户打开看到的往往正好是自己发的那条 —— 于是以为
+                「回复」这个功能根本没上线。论坛里也没有"不能回复自己"的说法。 */}
+            <button
+              type="button"
+              className="kb-post-act"
+              onClick={() => startReply(p)}
+              aria-label={`回复 ${p.author.name}`}
+            >
+              <CornIcon name="reply" className="kb-post-act-ico" />
+              回复
+            </button>
             {p.can_delete && (
               <button
                 type="button"

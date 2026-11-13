@@ -745,6 +745,8 @@
   color: var(--text-3);
   opacity: 0.6;
   display: inline-flex;
+  align-items: center;
+  gap: 3px;
   transition: opacity 0.12s ease, color 0.12s ease, transform 0.12s ease;
 }
 .kb-fav:hover {
@@ -755,16 +757,21 @@
   opacity: 1;
   color: var(--accent-ink);
 }
-.kb-fav.on svg {
-  fill: currentColor;
-}
 .kb-fav:active {
   transform: scale(0.9);
 }
-.kb-fav svg {
-  stroke: currentColor;
+/* 空心 / 实心按 path 收口：Star 的 path 自带 fill="#F5B840"（属性优先级最低），
+   写成 `.on svg { fill }` 只会落在 <svg> 上，被 path 自己的 fill 挡掉 ——
+   那条规则从来没生效过，未收藏时也显示成金色实心星。 */
+.kb-fav svg path {
   fill: none;
-  stroke-width: 1.6;
+  stroke: currentColor;
+  stroke-width: 2.4;
+}
+.kb-fav.on svg path {
+  fill: #f5b840;
+  stroke: #dc9f28;
+  stroke-width: 2;
 }
 /* 收藏行的来源署名：比标签更弱一档，但必须看得见 ——
    用户要求"收藏的卡片要带上来源以及作者" */

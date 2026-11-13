@@ -290,6 +290,9 @@ export default function LibraryPage() {
                     onClick={() => void toggleFav(k)}
                   >
                     <CornIcon name="star" className="h-4 w-4" />
+                    {/* 收藏数：GitHub 那种「星 + 数字」。0 不显示数字 ——
+                        没人收过的时候，一个空心星自己就说完了 */}
+                    {(k.favs ?? 0) > 0 && <span className="lib-fav-n">{fmtNum(k.favs ?? 0)}</span>}
                   </button>
                 </li>
               ))}
@@ -379,6 +382,9 @@ export default function LibraryPage() {
                       onClick={() => void unfav(k)}
                     >
                       <CornIcon name="star" className="h-4 w-4" />
+                      {(k.favs ?? 0) > 0 && (
+                        <span className="lib-fav-n">{fmtNum(k.favs ?? 0)}</span>
+                      )}
                     </button>
                   </span>
                 </li>
@@ -505,6 +511,7 @@ export default function LibraryPage() {
                     onClick={() => void toggleFav(k)}
                   >
                     <CornIcon name="star" className="h-4 w-4" />
+                    {(k.favs ?? 0) > 0 && <span className="lib-fav-n">{fmtNum(k.favs ?? 0)}</span>}
                   </button>
                 </div>
                 {/* 同名库：不同同学传来同名的库，内容不同不能替用户合并，

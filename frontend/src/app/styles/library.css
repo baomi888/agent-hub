@@ -970,6 +970,19 @@
   margin-left: auto;
 }
 
+/* 详情页右下角两个动作（星标 + 挂到对话）成组靠右。
+   不能只给星标写 margin-left:auto —— 两个 auto 外边距会平分剩余空间，
+   把星标推到统计文字和按钮中间，看着像个孤儿 */
+.lib-hero-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.lib-hero-acts .lib-course-cta {
+  margin-left: 0;
+}
+
 /* ---------- 资料清单 ---------- */
 
 .lib-folder {
@@ -1523,14 +1536,25 @@
 }
 
 .kb-post-act {
-  padding: 2px 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: var(--text-3);
+  /* 比 text-3 深一档：这两个是"操作"，不是元信息。
+     太淡的话用户会以为这行只有名字和时间，压根没发现能回复 */
+  color: var(--text-2);
   font-size: var(--fs-xs);
   line-height: 1.4;
   cursor: pointer;
+}
+
+.kb-post-act-ico {
+  flex: none;
+  width: 12px;
+  height: 12px;
 }
 
 .kb-post-act:hover {
@@ -1807,14 +1831,19 @@
 /* ---------- 2026-11-13 第三轮：收藏 / 上传日期 / 同名筛选 ---------- */
 
 /* 星标：常显，不靠 hover —— "我收过没有"是每张卡都要看的信息。
-   未收藏是描边、收藏后填满并转金色（金色在这套样式里代表"已选中"）。 */
+   ★ 空心 / 实心靠 fill 切换，而不是换图标：Star 的 path 上带着
+   fill="#F5B840"（presentation attribute，优先级最低），任何 CSS 都能盖掉它。
+   之前只写了 `.on svg { fill: currentColor }`，作用在 <svg> 上而 path 自己
+   带 fill —— 那条规则一次都没生效过，于是**未收藏也显示成金色实心星**，
+   用户看到的就是"全都是星星"。现在按 path 收口。 */
 .lib-fav-btn {
-  display: inline-grid;
+  display: inline-flex;
   flex: none;
-  place-items: center;
-  width: 28px;
+  align-items: center;
+  gap: 3px;
+  min-width: 28px;
   height: 28px;
-  padding: 0;
+  padding: 0 5px;
   border: 0;
   border-radius: 8px;
   background: transparent;
@@ -1826,23 +1855,35 @@
   background: var(--fill-3);
   color: var(--accent-ink);
 }
-.lib-fav-btn.on {
-  color: var(--accent-ink);
-}
-/* 填满靠 fill：图标本身是描边画的，不填就只有颜色变化，一眼看不出来 */
-.lib-fav-btn.on svg {
-  fill: currentColor;
-}
 .lib-fav-btn:active {
-  transform: scale(0.88);
+  transform: scale(0.92);
 }
 .lib-fav-btn:disabled {
   opacity: 0.5;
   cursor: default;
 }
-.lib-fav-btn svg {
+/* 未收藏：空心星 */
+.lib-fav-btn svg path {
+  fill: none;
   stroke: currentColor;
-  stroke-width: 1.6;
+  stroke-width: 2.4;
+}
+/* 已收藏：金色实心（金色在这套样式里代表"已选中"） */
+.lib-fav-btn.on {
+  color: var(--accent-ink);
+}
+.lib-fav-btn.on svg path {
+  fill: #f5b840;
+  stroke: #dc9f28;
+  stroke-width: 2;
+}
+
+/* 收藏数：GitHub 那种「星 + 数字」。0 不出数字（见 JSX）——
+   一排 0 比没有更吵，而且"没人收过"用一个空心星就说完了 */
+.lib-fav-n {
+  font-size: var(--fs-badge);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
 }
 
 /* 官方课程卡上的星标要浮在右上角：卡片整体是 <a>，
@@ -1852,17 +1893,26 @@
 }
 .lib-course-wrap .lib-fav-btn {
   position: absolute;
-  top: 7px;
+  /* 和第一行（字标 + 官方徽标）的中线对齐：
+     卡片 padding-top 15 + 字标 38/2 - 星标 28/2 = 20。写 7 的话星标会浮在卡片顶部
+     而徽标在下面一截，看着像两个不相干的浮层 */
+  top: 20px;
   right: 7px;
-  /* 官方徽标也在右上，星标落在徽标左侧，两者不打架 */
-  margin-right: 42px;
+  /* 官方徽标也在右上，星标落在徽标左侧。
+     ★ 这个值是反着长的：margin 每加 1px，星标与徽标的间距就少 1px
+     （星标是 right 定位 + margin-right，往里推的是它自己的右边缘）。
+     42 时实测只剩 6px，一串「★2 官方」读着像连体；36 给出 12px 呼吸 */
+  margin-right: 36px;
 }
-/* 手机上没有 hover，28px 又偏小，补到 34px */
+/* 手机上没有 hover，28px 又偏小，补到 34px。
+   用 min-width 而不是 width：带收藏数时按钮要能自己长宽，写死会把数字压掉 */
 @media (max-width: 640px) {
   .lib-course-wrap .lib-fav-btn {
-    width: 34px;
+    min-width: 34px;
     height: 34px;
-    margin-right: 46px;
+    /* 手机上卡片 padding 是 13，字标中线 = 13 + 19 = 32；34 高的按钮 top = 32 - 17 */
+    top: 15px;
+    margin-right: 36px;
   }
 }
 

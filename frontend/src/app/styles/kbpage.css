@@ -702,13 +702,29 @@
 
 /* 头部那一排里的星标：和几个统计数字并排，
    用和广场卡片同一套 .lib-fav-btn 观感（金色 = 已收藏） */
-.lib-hero-fav {
-  width: 32px;
+/* 详情页头部这个星标和「挂到我的对话」并排，得长得像按钮 ——
+   广场卡片上的星标浮在卡片右上，本身是卡片的一部分，不需要再加框
+   （所以只给 .lib-hero-fav 加，不加到 .lib-fav-btn 上）。
+   两个类一起写是为了压过 library.css 里 `.lib-fav-btn { border: 0 }`
+   —— 同优先级时后引入的 library.css 会赢，而它的 import 在 kbpage.css 之后 */
+.lib-fav-btn.lib-hero-fav {
+  /* min- 而不是 width：带上收藏数时按钮要能自己长宽 */
+  min-width: 32px;
   height: 32px;
+  border: 1px solid var(--line);
+  background: var(--card-bg);
+  color: var(--text-2);
+}
+.lib-fav-btn.lib-hero-fav.on {
+  border-color: var(--accent-line);
+  background: var(--accent-tint);
+  color: var(--accent-ink);
 }
 @media (max-width: 640px) {
-  .lib-hero-fav {
-    width: 40px;
+  /* 必须是双类选择器：单写 .lib-hero-fav 的优先级低于上面那条
+     .lib-fav-btn.lib-hero-fav，手机上的 40px 触控区会被压回 32px */
+  .lib-fav-btn.lib-hero-fav {
+    min-width: 40px;
     height: 40px;
   }
 }

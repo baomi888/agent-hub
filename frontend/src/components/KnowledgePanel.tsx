@@ -968,6 +968,7 @@ export default function KnowledgePanel({
                       onClick={() => onToggleFavorite?.(k.kb_id, false)}
                     >
                       <CornIcon name="star" className="h-3.5 w-3.5" />
+                      {(k.favs ?? 0) > 0 && <span className="lib-fav-n">{k.favs}</span>}
                     </button>
                   </div>
                 );
@@ -1033,6 +1034,7 @@ export default function KnowledgePanel({
                           onClick={() => onToggleFavorite?.(k.kb_id, !k.favorited)}
                         >
                           <CornIcon name="star" className="h-3.5 w-3.5" />
+                          {(k.favs ?? 0) > 0 && <span className="lib-fav-n">{k.favs}</span>}
                         </button>
                       </div>
                     );

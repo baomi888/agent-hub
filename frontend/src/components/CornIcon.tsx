@@ -34,6 +34,7 @@ export type CornIconName =
   | "bell" // 提醒
   | "calendar" // 日期
   | "star" // 收藏 / 重点
+  | "reply" // 回复（留言板楼中楼）
   | "link" // 链接 / 外链
   | "download" // 下载
   | "upload" // 上传
@@ -445,6 +446,20 @@ function Star() {
   );
 }
 
+/** 回复：一根折回来的箭头（留言板的「回复」按钮用） */
+function Reply() {
+  return (
+    <g {...INK_STROKE} fill="none">
+      <path d="M13 21 L7 27 L13 33" stroke="currentColor" strokeWidth={3} />
+      <path
+        d="M7 27 H28 a9 9 0 0 0 9-9 v-3"
+        stroke="currentColor"
+        strokeWidth={3}
+      />
+    </g>
+  );
+}
+
 /** 链接：外链 / 引用 */
 function Link() {
   return (
@@ -585,6 +600,7 @@ const ICONS: Record<string, () => React.JSX.Element> = {
   bell: Bell,
   calendar: Calendar,
   star: Star,
+  reply: Reply,
   link: Link,
   download: Download,
   upload: Upload,

@@ -20,6 +20,8 @@ SRC = ROOT / "frontend" / "src"
 PANEL = SRC / "components" / "KnowledgePanel.tsx"
 LIBRARY = SRC / "app" / "library" / "page.tsx"
 DETAIL = SRC / "app" / "library" / "[kbId]" / "page.tsx"
+LIB_CSS = SRC / "app" / "styles" / "library.css"
+BOARD = SRC / "components" / "library" / "KbBoard.tsx"
 
 
 def _read(p: Path) -> str:
@@ -102,3 +104,36 @@ def test_detail_page_explains_fork_is_a_copy():
     """
     s = _read(DETAIL)
     assert "复制一份到你名下" in s, "复制入口的说明丢了，用户会误解成往官方库里加东西"
+
+
+def test_unfav_star_is_hollow_and_faved_is_filled():
+    """未收藏的星必须是空心、已收藏才填金。
+
+    ★ 这里踩过一次坑：Star 图标的 path 上带着 fill="#F5B840"（presentation
+    attribute，优先级最低）。原来的 CSS 只写了 `.on svg { fill: currentColor }`
+    —— 作用在 <svg> 上，被 path 自己的 fill 挡掉，**从来没生效过**。
+    结果是未收藏也显示成金色实心星，用户看到满屏星星，根本分不清自己收过哪些。
+    所以按 path 收口，这条断言钉的就是"必须是 path 选择器"。
+    """
+    css = _read(LIB_CSS)
+    base = css.index(".lib-fav-btn svg path {")
+    block = css[base : css.index("}", base)]
+    assert "fill: none" in block, "未收藏的星标记被填成实心了 —— 用户看不出自己收过哪些"
+    assert "stroke: currentColor" in block, "空心星没有描边就什么都看不见"
+
+    on = css.index(".lib-fav-btn.on svg path {")
+    on_block = css[on : css.index("}", on)]
+    assert "#f5b840" in on_block.lower(), "收藏后的星标没填金色，跟未收藏分不出来"
+
+
+def test_board_reply_button_shows_on_own_posts():
+    """留言板的「回复」不能只在别人的留言上渲染。
+
+    用户第一次打开留言板时，看到的往往正好是自己发的那一条；
+    条件写成 !p.mine 的话，他会以为"回复"这个功能根本没上线（实际发生过）。
+    """
+    s = _read(BOARD)
+    seg = s[s.index("kb-post-acts") : s.index("kb-post-del")]
+    assert "!p.mine" not in seg, "回复按钮又被限制成只能回别人，自己的那条看不到入口"
+    assert "startReply(p)" in seg, "回复按钮的点击处理丢了"
+    assert "kb-post-act-ico" in seg, "回复按钮的图标丢了，两个灰字挤在名字后面发现不了"
