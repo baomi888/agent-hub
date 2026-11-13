@@ -4,7 +4,7 @@
 // 视觉：暖米黄书本风格 · 大圆角 · 柔阴影 · 金色点缀
 import { useRef, useState, type RefObject } from "react";
 import Link from "next/link";
-import type { KbInfo, SearchResult } from "@/lib/types";
+import type { KbInfo, PublicKbInfo, SearchResult } from "@/lib/types";
 import {
   CHUNK_PROFILES,
   DEFAULT_PROFILE_ID,
@@ -139,6 +139,8 @@ function ReadModePicker({
 
 interface Props {
   kbs: KbInfo[];
+  /** 全站公开库（别人的，只读检索源）。不传/为空就不渲染这个分组 */
+  publicKbs?: PublicKbInfo[];
   boundKb: string | null;
   onUpload: (kbId: string, files: File[], size?: number, overlap?: number) => Promise<void>;
   onSearch: (keyword: string) => Promise<SearchResult[]>;
@@ -185,6 +187,7 @@ interface Props {
 
 export default function KnowledgePanel({
   kbs,
+  publicKbs,
   boundKb,
   onUpload,
   onSearch,
@@ -754,6 +757,7 @@ export default function KnowledgePanel({
                       <span className="tag" title={`每段约 ${cp.size} 字，相邻重叠 ${cp.overlap} 字`}>
                         {cpLabel}
                       </span>
+                      {k.public && <span className="tag pub">公开</span>}
                       {files.length > 0 && (
                         <button
                           type="button"
@@ -901,6 +905,49 @@ export default function KnowledgePanel({
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* 全站公开库：别人的库，只读检索源。没有文件清单、没有删除，
+            与上面的私有库分组并列而不是混在一起——归属不同，能做的事也不同。 */}
+        {publicKbs && publicKbs.length > 0 && (
+          <div className="mt-3">
+            <p className="kb-pub-head">全站公开库</p>
+            <div className="flex flex-col">
+              {publicKbs.map((k) => {
+                const bound = boundKb === k.kb_id;
+                return (
+                  <div key={k.kb_id} className={`kb-row group ${bound ? "bound" : ""}`}>
+                    <button
+                      type="button"
+                      title={bound ? "取消绑定" : "绑定到当前对话"}
+                      aria-label={
+                        bound
+                          ? `取消绑定公开资料库：${k.name || k.kb_id}`
+                          : `绑定公开资料库到当前对话：${k.name || k.kb_id}`
+                      }
+                      aria-pressed={bound}
+                      onClick={() => onBind(bound ? null : k.kb_id)}
+                      className={`check ${bound ? "on" : ""}`}
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M20 6L9 17l-5-5" />
+                      </svg>
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      <div className="kb-name">{k.name || k.kb_id}</div>
+                      <div className="kb-meta">
+                        <span className="tag">{k.chunks} 片段</span>
+                        <span className="tag pub">公开</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="mt-1.5 px-1 text-fs-xs text-faint">
+              别人的公开库：能挂进对话检索，但看不到文件清单，也不能修改。
+            </p>
           </div>
         )}
       </div>

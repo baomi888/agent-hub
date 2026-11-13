@@ -15,9 +15,11 @@ from __future__ import annotations
   DELETE /api/kb/{kb_id}/files         删除单个文件
   POST   /api/kb/{kb_id}/rebuild       按切片参数重建整库
   GET    /api/kb/{kb_id}/              查看库状态
-  GET    /api/kb/                     列出所有知识库
-  DELETE /api/kb/{kb_id}/             删除知识库
-  POST   /api/kb/{kb_id}/query        同步问答
+  GET    /api/kb/                      列出所有知识库
+  DELETE /api/kb/{kb_id}/              删除知识库
+  POST   /api/kb/{kb_id}/visibility    设置公开状态（仅库主）
+  GET    /api/kb/public                全站公开库概要（不含文件清单）
+  POST   /api/kb/{kb_id}/query         同步问答（公开库对全站登录用户开放）
 """
 
 import asyncio
@@ -56,6 +58,17 @@ def _must_own(uid: str, kb_id: str) -> None:
     """
     if pipelines.owner_of(kb_id) != uid:
         raise HTTPException(status_code=404, detail=f"知识库不存在：{kb_id}")
+
+
+def _must_own_or_public(uid: str, kb_id: str) -> None:
+    """只读检索的放行门：库主放行，全站公开库对登录用户放行。
+
+    与 _must_own 的唯一区别就是公开库这一条例外——文件清单、上传、删除
+    等其余接口一律不走这里，仍然只认库主。无权时同样 404（不泄露存在性）。
+    """
+    if pipelines.owner_of(kb_id) == uid or pipelines.is_public(kb_id):
+        return
+    raise HTTPException(status_code=404, detail=f"知识库不存在：{kb_id}")
 
 
 # ==================== 上传 + 建库 ====================
@@ -193,11 +206,15 @@ async def query_kb(
     top_k: int = Query(default=3, gt=0, le=config.TOP_K_MAX),
     uid: str = Depends(get_current_user),
 ) -> dict:
-    """同步问答：返回带 [1][2] 引用角标的答案。"""
-    _must_own(uid, kb_id)
+    """同步问答：返回带 [1][2] 引用角标的答案。
+
+    公开库例外：别的登录用户也可以问（站内公开只放开检索这一件事），
+    额度记在**提问者**头上——消耗的是调用方自己的 ask 额度。
+    """
+    _must_own_or_public(uid, kb_id)
     # 一次问答 = 一次检索 + 一次 LLM，落到每日问答额度里
     await asyncio.to_thread(quota.consume, uid, "ask")
-    pipe = pipelines.get_or_create(uid, kb_id)
+    pipe = pipelines.get_or_create(uid, kb_id, allow_public=True)
     try:
         # 检索 + LLM 都是同步阻塞调用，丢到线程里跑，别占着事件循环
         answer, refs = await asyncio.to_thread(pipe.answer, question, top_k)
@@ -270,6 +287,43 @@ async def delete_kb(kb_id: str, uid: str = Depends(get_current_user)) -> dict:
             return {"ok": True}
         raise HTTPException(status_code=404, detail=f"知识库不存在：{kb_id}")
     return {"ok": True}
+
+
+# ==================== 公开共享（站内只读） ====================
+
+
+class VisibilityRequest(BaseModel):
+    public: bool = Field(..., description="true=公开，false=收回公开")
+
+
+@router.post("/{kb_id}/visibility")
+async def set_kb_visibility(
+    kb_id: str, req: VisibilityRequest, uid: str = Depends(get_current_user)
+) -> dict:
+    """设置知识库公开状态（仅库主）。
+
+    公开只放开「他人可只读检索」一件事：文件清单、上传、删除永远只有
+    库主能动。收回公开立即生效——别人的对话里还挂着这个库的话，下一轮
+    提问的认主逻辑会把它按"没绑"处理，不需要对方做什么。
+    """
+    _must_own(uid, kb_id)
+    try:
+        pipelines.set_public(uid, kb_id, req.public)
+    except pipelines.NotOwned:  # _must_own 之后库被并发删掉的窄窗口
+        raise HTTPException(status_code=404, detail=f"知识库不存在：{kb_id}") from None
+    return {"kb_id": kb_id, "public": req.public}
+
+
+@router.get("/public")
+async def list_public_kbs(uid: str = Depends(get_current_user)) -> dict:
+    """全站公开库概要，供其他用户挑一个挂进自己的对话做检索。
+
+    只回 kb_id / 名称 / 片段数，不含文件清单；调用者自己的库也不重复出现
+    （它们已经在 GET /api/kb/ 的列表里了，重复一份会让前端选择器出现两行）。
+    """
+    kbs = await asyncio.to_thread(pipelines.list_public)
+    mine = await asyncio.to_thread(pipelines.owned_kb_ids, uid)
+    return {"kbs": [k for k in kbs if k["kb_id"] not in mine]}
 
 
 # ==================== 文件级管理 ====================

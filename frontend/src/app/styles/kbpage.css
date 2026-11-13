@@ -158,6 +158,19 @@
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
+/* 站内公开标记：这个库别的登录用户也能挂进对话检索 */
+.kbp-pub {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  font-size: var(--fs-badge);
+  font-style: normal;
+  line-height: 16px;
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  color: var(--accent-ink);
+  vertical-align: 1px;
+}
 
 /* ---------- 右：当前库 ---------- */
 .kbp-main {

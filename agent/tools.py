@@ -143,8 +143,10 @@ def kb_search(query: str, top_k: int = 3, config: RunnableConfig = None) -> str:
         # 和同一条数据在 RAG 卡片上的 0.558 对不上。
         from kb.rag_core import _to_similarity, assess_grounding, grounding_note
 
-        # 归属在这一行校验：不是自己的库直接抛 NotOwned，落到下面的 except 里
-        pipe = pipelines.get_or_create(owner, kb_id)
+        # 归属在这一行校验：无权访问的库抛 NotOwned，落到下面的 except 里。
+        # allow_public：owner 注入的是提问者，绑定的可能是别人公开的库——
+        # 只读检索放行；私有库依旧拒绝，行为与改造前一致。
+        pipe = pipelines.get_or_create(owner, kb_id, allow_public=True)
         if pipe.peek() == 0:
             return "当前绑定的知识库为空，请先上传文档构建索引。"
 

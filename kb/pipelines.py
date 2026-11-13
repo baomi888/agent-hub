@@ -23,6 +23,11 @@ kb_id 在**创建时**就带上 owner 的哈希：`md5(owner|名称)[:12]`。
 由 tools/migrate_owner.py 显式指派给某个账号后才恢复。
 好处是完全不用动 Chroma 里的 collection（没法改名，硬改要重算），
 也不会出现"先登录的人顺手认领了别人的库"。
+
+站内公开（2026-11-13）：库主可以把库标记为公开，登记在 data/kb_public.json。
+公开只放开一件事：全站登录用户可以把这个库挂进对话做**只读检索**。
+文件清单、上传、删除、重建等路径仍然只认 owner，与公开与否无关——
+所以放行点必须显式传 allow_public=True，写路径漏传就是老行为，不会误放开。
 """
 
 import hashlib
@@ -47,6 +52,10 @@ _KB_NAMES: dict[str, str] = {}
 _KB_LOCKS: dict[str, threading.RLock] = {}
 # { kb_id: owner_id }  —— 归属表。没有记录 = 无主（改造前的老库），谁都访问不到
 _KB_OWNERS: dict[str, str] = {}
+# { kb_id: True }  —— 公开库登记表。在表里 = 全站登录用户可只读检索。
+# 语义刻意做成"集合"而不是每库一份可见范围配置：站内公开只有开/关两态，
+# 一张扁平表让"这个库公开吗"永远是一次 O(1) 查询，不用解析结构。
+_KB_PUBLIC: dict[str, bool] = {}
 # 上次读盘时两个注册表文件的 mtime（None = 还没读过）。
 # ★ 为什么需要：板块 D 起后台 worker 也会建库（自动沉淀），它写的是同两个 json，
 #   而 API 进程与 worker 是**两个服务**。原来"只在内存表为空时读一次"意味着
@@ -55,6 +64,7 @@ _KB_OWNERS: dict[str, str] = {}
 #   用 mtime 判重：命中时只 stat 一次，不解析 json。
 _KB_NAMES_MTIME: float | None = None
 _KB_OWNERS_MTIME: float | None = None
+_KB_PUBLIC_MTIME: float | None = None
 
 # 保护上面五个全局容器。用 RLock：内部函数会互相调用（add_file_records → get_or_create），
 # 普通 Lock 会在第二次 acquire 时把自己锁死
@@ -84,6 +94,11 @@ def _files_path() -> str:
 def _owners_path() -> str:
     """归属表持久化路径。"""
     return os.path.join(config.PROJECT_ROOT, "data", "kb_owners.json")
+
+
+def _public_path() -> str:
+    """公开库登记表持久化路径。"""
+    return os.path.join(config.PROJECT_ROOT, "data", "kb_public.json")
 
 
 # os.replace 在 Windows 上撞见"有人正开着目标文件"会抛 PermissionError
@@ -235,6 +250,38 @@ def _reload_owners_if_changed() -> None:
         _load_owners()
 
 
+def _load_public() -> None:
+    """从磁盘加载公开库登记表。调用方需持有 _REGISTRY_LOCK。"""
+    global _KB_PUBLIC, _KB_PUBLIC_MTIME
+    _KB_PUBLIC_MTIME = _mt(_public_path())
+    try:
+        with open(_public_path(), encoding="utf-8") as f:
+            data = json.load(f)
+        _KB_PUBLIC = (
+            {k: True for k, v in data.items() if isinstance(k, str) and v}
+            if isinstance(data, dict)
+            else {}
+        )
+    except Exception:
+        _KB_PUBLIC = {}
+
+
+def _save_public() -> None:
+    """持久化公开库登记表（原子写）。调用方需持有 _REGISTRY_LOCK。"""
+    global _KB_PUBLIC_MTIME
+    try:
+        _atomic_write_json(_public_path(), _KB_PUBLIC)
+        _KB_PUBLIC_MTIME = _mt(_public_path())
+    except Exception as e:
+        logging.getLogger(__name__).warning("公开库登记表落盘失败：%s", e)
+
+
+def _reload_public_if_changed() -> None:
+    """别的进程改过公开登记表就重读。调用方需持有 _REGISTRY_LOCK。"""
+    if _KB_PUBLIC_MTIME is None or _mt(_public_path()) != _KB_PUBLIC_MTIME:
+        _load_public()
+
+
 def owner_of(kb_id: str) -> str | None:
     """该知识库属于谁；无主返回 None。"""
     with _REGISTRY_LOCK:
@@ -247,6 +294,30 @@ def owned_kb_ids(owner: str) -> set[str]:
     with _REGISTRY_LOCK:
         _reload_owners_if_changed()
         return {k for k, v in _KB_OWNERS.items() if v == owner}
+
+
+def is_public(kb_id: str) -> bool:
+    """该库是否已对全站登录用户公开（只读检索）。"""
+    with _REGISTRY_LOCK:
+        _reload_public_if_changed()
+        return kb_id in _KB_PUBLIC
+
+
+def set_public(owner: str, kb_id: str, on: bool) -> None:
+    """把库标记为公开 / 收回公开。只有库主有权切换，无权抛 NotOwned。
+
+    切换的是「他人可否只读检索」，不动归属：文件清单、上传、删除
+    永远只认 owner，公开与否无关。
+    """
+    if owner_of(kb_id) != owner:
+        raise NotOwned(kb_id)
+    with _REGISTRY_LOCK:
+        _reload_public_if_changed()
+        if on:
+            _KB_PUBLIC[kb_id] = True
+        else:
+            _KB_PUBLIC.pop(kb_id, None)
+        _save_public()
 
 
 def name_of(kb_id: str | None) -> str | None:
@@ -355,20 +426,23 @@ def _get_or_create_raw(kb_id: str) -> RagPipeline:
         return _PIPELINES[kb_id]
 
 
-def get_or_create(owner: str, kb_id: str) -> RagPipeline:
-    """按 kb_id 获取 RagPipeline，不存在则新建。**不是自己的库直接抛 NotOwned**。
+def get_or_create(owner: str, kb_id: str, *, allow_public: bool = False) -> RagPipeline:
+    """按 kb_id 获取 RagPipeline，不存在则新建。**无权访问直接抛 NotOwned**。
 
     owner 放在第一个位置、没有默认值，和 core.session 一个道理：
     漏改的调用点会直接 TypeError，而不是悄悄拿到别人的库。
+
+    allow_public 只给「跨用户只读检索」的调用点用（公开库挂进对话）。
+    写路径不传它就是默认 False——漏改不会误放开，只会维持原拒绝行为。
     """
-    if owner_of(kb_id) != owner:
+    if owner_of(kb_id) != owner and not (allow_public and is_public(kb_id)):
         raise NotOwned(kb_id)
     return _get_or_create_raw(kb_id)
 
 
-def exists(owner: str, kb_id: str) -> bool:
-    """磁盘上是否存在这个知识库（且属于该用户）。"""
-    if owner_of(kb_id) != owner:
+def exists(owner: str, kb_id: str, *, allow_public: bool = False) -> bool:
+    """磁盘上是否存在这个知识库（且属于该用户，或已公开且 allow_public）。"""
+    if owner_of(kb_id) != owner and not (allow_public and is_public(kb_id)):
         return False
     with _REGISTRY_LOCK:
         if kb_id not in _PIPELINES:
@@ -389,10 +463,14 @@ def delete_kb(owner: str, kb_id: str) -> bool:
         _KB_FILES.pop(kb_id, None)
         _KB_NAMES.pop(kb_id, None)
         _KB_OWNERS.pop(kb_id, None)
+        # 库都没了，公开标记不能残留：否则 list_public 会一直跳过它（有 owner 才显示），
+        # 但同名新库（kb_id 不同）不受影响——这里清的是 id 级的登记
+        _KB_PUBLIC.pop(kb_id, None)
         _KB_LOCKS.pop(kb_id, None)
         _save_files()
         _save_names()
         _save_owners()
+        _save_public()
     # 原始文件一起清掉，否则删库后磁盘上还留着副本
     try:
         import shutil
@@ -424,6 +502,8 @@ def list_all(owner: str) -> list[dict]:
         # 名字表也要先对齐磁盘：worker 建的库名字存在同一个 json 里，
         # 不刷新的话列表里会出现"名字 = kb_id"这种半生不熟的一行
         _reload_names_if_changed()
+        # 公开标记同样可能被别的进程（worker/另一个 API 实例）改过
+        _reload_public_if_changed()
         for col_name in all_collections:
             if not col_name.startswith("kb_"):
                 continue
@@ -443,6 +523,8 @@ def list_all(owner: str) -> list[dict]:
                     "name": _KB_NAMES.get(kb_id, kb_id),  # 无映射时回退到 kb_id
                     "chunks": pipe.count(),
                     "files": files,
+                    # 前端渲染「公开」标识与开关初态用；公开与否不影响这里能看到什么
+                    "public": kb_id in _KB_PUBLIC,
                 }
             )
 
@@ -456,6 +538,35 @@ def list_all(owner: str) -> list[dict]:
                     "name": _KB_NAMES.get(kb_id, kb_id),
                     "chunks": 0,
                     "files": get_files(owner, kb_id),
+                    "public": kb_id in _KB_PUBLIC,
+                }
+            )
+    return result
+
+
+def list_public() -> list[dict]:
+    """全站公开库概要（kb_id / 名称 / 片段数），供其他用户挑选拿去挂载检索。
+
+    只给最少的元信息：文件清单、归属这些细节仍然只有库主能看到。
+    归属表里已经没有记录的（库删了、公开标记残留）直接跳过——
+    没有 owner 的公开库谁也检索不了，列出来只会让人点了挂载却一直空转。
+    """
+    with _REGISTRY_LOCK:
+        _reload_public_if_changed()
+        _reload_owners_if_changed()
+        _reload_names_if_changed()
+        result = []
+        for kb_id in _KB_PUBLIC:
+            if kb_id not in _KB_OWNERS:
+                continue
+            pipe = _get_or_create_raw(kb_id)
+            if pipe._vs is None:
+                pipe.get_or_open()
+            result.append(
+                {
+                    "kb_id": kb_id,
+                    "name": _KB_NAMES.get(kb_id, kb_id),
+                    "chunks": pipe.count(),
                 }
             )
     return result
@@ -636,6 +747,8 @@ def get_status(owner: str, kb_id: str) -> dict | None:
         if kb_id not in _PIPELINES:
             return None
         pipe = _PIPELINES[kb_id]
+        _reload_public_if_changed()
+        is_pub = kb_id in _KB_PUBLIC
     chunks = pipe.peek()
     params = pipe._params
     return {
@@ -645,6 +758,8 @@ def get_status(owner: str, kb_id: str) -> dict | None:
         "chunk_overlap": params[1] if params else None,
         # 同样走合并视图：单库状态页也要能看见对话沉淀进来的资料
         "files": list_files_view(owner, kb_id, pipe),
+        # 与 list_all 的 public 字段同口径：状态页也要渲染公开标识
+        "public": is_pub,
     }
 
 
@@ -660,6 +775,7 @@ def warmup() -> None:
     _load_names()
     _load_files()
     _load_owners()
+    _load_public()
     try:
         for col in chroma_client().list_collections():
             col_name = col.name

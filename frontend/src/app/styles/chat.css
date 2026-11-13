@@ -668,6 +668,30 @@
   /* 行高即高度：这枚徽章的高度就由它定，不进三档 */
   line-height: 15px;
 }
+/* 站内公开标记：这个库别人也能挂进对话检索 */
+.tag.pub {
+  color: var(--accent-ink);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  padding: 0 5px;
+  line-height: 15px;
+}
+/* 公开库分组的小标题：与面板里 .eyebrow 同级，但不需要上边距（自带 mt-3 容器） */
+.kb-pub-head {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  letter-spacing: 0.05em;
+  margin: 0 0 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.kb-pub-head::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line, var(--border));
+}
 .kb-del {
   border: none;
   background: none;

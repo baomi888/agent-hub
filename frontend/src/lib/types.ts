@@ -25,6 +25,15 @@ export interface KbInfo {
   name: string;
   chunks: number;
   files: KbFile[];
+  /** 库主是否已设为站内公开：其他登录用户可把这个库挂进对话只读检索 */
+  public?: boolean;
+}
+
+/** GET /api/kb/public 单条：全站公开库概要。别人的库，没有文件清单可看 */
+export interface PublicKbInfo {
+  kb_id: string;
+  name: string;
+  chunks: number;
 }
 
 /**

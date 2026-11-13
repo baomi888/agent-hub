@@ -62,7 +62,8 @@ class _StubPipe:
 
 def _install_stub(docs_scores):
     saved = pipelines.get_or_create
-    pipelines.get_or_create = lambda owner, kb_id: _StubPipe(docs_scores)
+    # **kwargs：kb_search 现在传 allow_public=True（公开库只读放行），桩必须接得住
+    pipelines.get_or_create = lambda owner, kb_id, **kwargs: _StubPipe(docs_scores)
     return saved
 
 

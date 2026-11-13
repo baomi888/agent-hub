@@ -349,7 +349,7 @@ class TestDialogueImport:
         # 去重就测不出来了（真实场景里库是持久的，不是每次请求新建）
         _pipe = FakePipe()
         monkeypatch.setattr(
-            kb_api.pipelines, "get_or_create", lambda owner, kb_id: _pipe
+            kb_api.pipelines, "get_or_create", lambda owner, kb_id, **kwargs: _pipe
         )
         token = create_token(UID, ttl_days=1, username="tester")
         # 不用 with：避免触发 lifespan 的 warmup（本组测试不需要真实向量库）

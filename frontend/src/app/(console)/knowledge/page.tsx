@@ -226,6 +226,25 @@ export default function KnowledgePage() {
     saveKbChunks(next);
   };
 
+  /** 公开 / 收回公开。公开只放开「他人只读检索」一件事：文件清单、
+   *  上传、删除仍然只有库主能动。收回立即生效，别人的对话下一轮就挂不上。 */
+  const togglePublic = async () => {
+    if (!active || busy) return;
+    setBusy("public");
+    try {
+      const r = await api.setKbPublic(active.kb_id, !active.public);
+      await refresh(active.kb_id);
+      showToast(
+        "success",
+        r.public ? "已公开：其他登录用户可以在对话里检索这个库（只读）" : "已收回公开：其他用户不再能检索这个库"
+      );
+    } catch (e) {
+      showToast("error", errMsg(e, "操作失败，请稍后重试"));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const importUrl = async () => {
     if (!active || !url.trim()) return;
     setBusy("import");
@@ -398,6 +417,7 @@ export default function KnowledgePage() {
                   <b title={k.name}>{k.name}</b>
                   <span>
                     {k.files.length} 份资料 · {fmtNum(k.chunks)} 段
+                    {k.public && <em className="kbp-pub">公开</em>}
                   </span>
                 </span>
               </button>
@@ -416,6 +436,20 @@ export default function KnowledgePage() {
                     </p>
                   </div>
                   <div className="kbp-acts">
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      disabled={busy !== null}
+                      title={
+                        active.public
+                          ? "收回公开：其他用户将不能再检索这个库"
+                          : "公开后其他登录用户可以在对话里检索这个库（只读）；文件清单与修改仍只有你能做"
+                      }
+                      onClick={() => void togglePublic()}
+                    >
+                      <CornIcon name="globe" />
+                      {busy === "public" ? "处理中…" : active.public ? "收回公开" : "设为公开"}
+                    </button>
                     <button
                       type="button"
                       className="btn btn-ghost btn-sm"

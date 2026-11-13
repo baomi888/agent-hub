@@ -1,5 +1,6 @@
 // 后端 API 封装：统一错误处理 + 类型化（相对路径走 rewrites 代理）
 import type { Conversation, KbInfo, KbFile, FilePreview, SearchResult, Defaults, Message } from "./types";
+import type { PublicKbInfo } from "./types";
 import type { KbProposal, KbProposalConfirmResult } from "./types";
 import type { DialogueCandidatesResp, ImportDialogueResult, CourseReminderState } from "./types";
 import type { CalendarLink } from "./types";
@@ -315,6 +316,14 @@ export const api = {
 
   // ---------- 知识库 ----------
   listKbs: () => request<{ kbs: KbInfo[] }>("/api/kb/"),
+  // 设置公开状态（仅库主）。公开只放开「他人只读检索」，文件清单与写操作仍私有
+  setKbPublic: (kbId: string, isPublic: boolean) =>
+    request<{ kb_id: string; public: boolean }>(
+      `/api/kb/${encodeURIComponent(kbId)}/visibility`,
+      { method: "POST", body: JSON.stringify({ public: isPublic }) }
+    ),
+  // 全站公开库概要，挂别人的库当检索源用（后端已排除调用者自己的库）
+  listPublicKbs: () => request<{ kbs: PublicKbInfo[] }>("/api/kb/public"),
   createKb: (name: string) =>
     request<{ kb_id: string; name: string }>("/api/kb/create", {
       method: "POST",

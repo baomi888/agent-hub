@@ -3,13 +3,16 @@
 // 知识库域：库列表、名称映射、上传建库 / 联网建库进度 / 删库删文件 / 重建 / 搜索预览
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
-import type { KbInfo, SearchResult } from "@/lib/types";
+import type { KbInfo, PublicKbInfo, SearchResult } from "@/lib/types";
 import { describeParams, type ChunkParams } from "@/lib/chunkProfiles";
 import { forgetKbChunk, loadKbChunks, saveKbChunks, type KbChunkMap } from "@/lib/kbChunkPrefs";
 import type { ShowToast } from "./useToast";
 
 export function useKnowledge(showToast: ShowToast, chunkSize: number, chunkOverlap: number) {
   const [kbs, setKbs] = useState<KbInfo[]>([]);
+  // 全站公开库（别人的）：挂进对话当检索源用。不是核心功能，
+  // 拉取失败静默降级成空列表——不能因为它挡住自己的库列表。
+  const [publicKbs, setPublicKbs] = useState<PublicKbInfo[]>([]);
   // 首屏库列表还没回来：右栏渲染骨架
   const [loading, setLoading] = useState(true);
   // 每个库各自的处理方式（浏览器本地）。用 effect 读，避免 SSR 期访问 localStorage
@@ -47,15 +50,25 @@ export function useKnowledge(showToast: ShowToast, chunkSize: number, chunkOverl
       // 删完库再刷新失败的话，右栏还挂着已经删掉的库，用户会以为没删掉、再点一次。
       showToast("error", "知识库列表刷新失败，请稍后重试");
     }
+    // 公开库顺带刷一份：自己的库变了，别人公开的库也可能增减。
+    // 失败不 toast——它是辅助列表，空着只是少几个可挂载的库。
+    api
+      .listPublicKbs()
+      .then((r) => setPublicKbs(r.kbs))
+      .catch(() => {});
   }, [showToast]);
 
   // 初始化：拉知识库列表（与 sessions/defaults 的请求并发）
   useEffect(() => {
     let alive = true;
     (async () => {
-      const k = await api.listKbs().catch(() => null);
+      const [k, pub] = await Promise.all([
+        api.listKbs().catch(() => null),
+        api.listPublicKbs().catch(() => null),
+      ]);
       if (!alive) return;
       if (k) setKbs(k.kbs);
+      if (pub) setPublicKbs(pub.kbs);
       setLoading(false);
     })();
     return () => {
@@ -163,6 +176,7 @@ export function useKnowledge(showToast: ShowToast, chunkSize: number, chunkOverl
 
   return {
     kbs,
+    publicKbs,
     kbNameMap,
     loading,
     refreshKbs,

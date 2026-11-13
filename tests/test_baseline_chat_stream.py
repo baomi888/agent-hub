@@ -104,9 +104,10 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(chat.store, "add_message", _fake_add)
     monkeypatch.setattr(chat.store, "rename_conversation", lambda *a, **k: None)
 
-    monkeypatch.setattr(chat.pipelines, "exists", lambda owner, kid: True)
+    monkeypatch.setattr(chat.pipelines, "exists", lambda owner, kid, **k: True)
     monkeypatch.setattr(chat.pipelines, "owner_of", lambda kid: OWNER)
-    monkeypatch.setattr(chat.pipelines, "get_or_create", lambda owner, kid: _FakePipe())
+    # **kwargs：认主放行后检索取实例会带 allow_public=True（公开库只读），桩要接得住
+    monkeypatch.setattr(chat.pipelines, "get_or_create", lambda owner, kid, **k: _FakePipe())
 
     monkeypatch.setattr(chat, "get_llm", lambda *a, **k: _FakeLLM())
     monkeypatch.setattr(chat, "_generate_title", lambda q: "固定标题")

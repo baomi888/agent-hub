@@ -991,10 +991,14 @@ async def _chat_stream_impl(
     kb_id = req.kb_id_override or conv.get("kb_id")
     # 前端可以塞任意 kb_id（kb_id_override），这里必须认一次主。
     # 不是自己的库按"没绑"处理：题照答，但不带别人的资料。
-    if kb_id and pipelines.owner_of(kb_id) != uid:
+    # 例外：全站公开库允许挂载——认主放行的是「只读检索」，
+    # 写路径（上传/删除）本来就不在聊天链路里，公开与否碰不到它们。
+    if kb_id and pipelines.owner_of(kb_id) != uid and not pipelines.is_public(kb_id):
         kb_id = None
     # exists() → peek() 要读 sqlite，是同步 I/O，别卡住事件循环
-    kb_exists = bool(kb_id and await asyncio.to_thread(pipelines.exists, uid, kb_id))
+    kb_exists = bool(
+        kb_id and await asyncio.to_thread(pipelines.exists, uid, kb_id, allow_public=True)
+    )
     plan = await _plan_route(req, req.question, kb_id, kb_exists)
     mode = plan.mode
 
@@ -1107,8 +1111,11 @@ async def _chat_stream_impl(
             vision_system += scenarios_mod.get_scenario_prompt(req.scenario)
             if kb_id and kb_exists:
                 try:
-                    # 同步检索会堵事件循环（embed_query 实测约 250ms），必须丢线程
-                    pipe = await asyncio.to_thread(pipelines.get_or_create, uid, kb_id)
+                    # 同步检索会堵事件循环（embed_query 实测约 250ms），必须丢线程。
+                    # allow_public：kb_id 已在上面认主（本人或公开库），这里只是放行取实例
+                    pipe = await asyncio.to_thread(
+                        pipelines.get_or_create, uid, kb_id, allow_public=True
+                    )
                     query, _, _ = await asyncio.to_thread(_retrieval_query, req.question, history)
                     docs_scores = await asyncio.to_thread(
                         pipe.retrieve_with_score, query, req.top_k, uid
@@ -1459,7 +1466,10 @@ async def _chat_stream_impl(
                 refs_block = ""
                 if plan.use_kb and kb_exists and kb_id:
                     try:
-                        pipe = await asyncio.to_thread(pipelines.get_or_create, uid, kb_id)
+                        # kb_id 已认主（本人或公开库），这里只是放行取实例
+                        pipe = await asyncio.to_thread(
+                            pipelines.get_or_create, uid, kb_id, allow_public=True
+                        )
                         rq, _changes, _rewritten = await asyncio.to_thread(
                             _retrieval_query, req.question, history
                         )
@@ -1644,7 +1654,10 @@ async def _chat_stream_impl(
             if changes or rewritten:
                 yield _sse("status", {"text": _enhance_note(changes, rewritten, query)})
             try:
-                pipe = await asyncio.to_thread(pipelines.get_or_create, uid, kb_id)
+                # kb_id 已在入口认主（本人或公开库），这里只是放行取实例
+                pipe = await asyncio.to_thread(
+                    pipelines.get_or_create, uid, kb_id, allow_public=True
+                )
                 docs_scores = await asyncio.to_thread(
                     pipe.retrieve_with_score, query, req.top_k, uid
                 )

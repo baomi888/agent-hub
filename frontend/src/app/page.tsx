@@ -109,7 +109,7 @@ export default function Home() {
     deleteSession, deleteTurn, reloadSessions,
   } = sessions_;
   const {
-    kbs, kbNameMap, loading: kbsLoading,
+    kbs, publicKbs, kbNameMap, loading: kbsLoading,
     refreshKbs, uploadFiles, deleteKbFile, rebuildKb, searchPreview, deleteKb,
     rememberChunk, chunkParamsOf,
   } = useKnowledge(showToast, chunkSize, chunkOverlap);
@@ -996,6 +996,7 @@ export default function Home() {
 
       <KnowledgePanel
         kbs={kbs}
+        publicKbs={publicKbs}
         boundKb={boundKb}
         onUpload={async (kbName, files, size, overlap) => {
           const kbId = await uploadFiles(kbName, files, size, overlap);
