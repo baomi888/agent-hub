@@ -341,6 +341,103 @@ class TestContent:
 # ==================== 同刻合并 ====================
 
 
+def _insert_task(
+    owner: str,
+    task_id: str,
+    *,
+    due_at: int | None,
+    title: str = "交实验报告",
+    note: str | None = None,
+) -> str:
+    """直接写一行 tasks。
+
+    不走 `task_core.create`：它要求 `remind_at > 真实 now`，而本文件的时刻钉在
+    2026-11-09。这里要测的是**排版**，不是「能不能建一条待办」。
+    """
+    from core import task_core
+
+    task_core.ensure()
+    with session._conn() as conn:
+        conn.execute(
+            """INSERT INTO tasks
+                  (id, owner_id, title, note, list_key, icon, priority, status,
+                   due_at, remind_at, completed_at, recurrence, parent_id, sort_order,
+                   created_at, updated_at)
+               VALUES (?,?,?,?,'inbox',NULL,0,'open',?,NULL,NULL,'none',NULL,0,1,1)""",
+            (task_id, owner, title, note, due_at),
+        )
+    return task_id
+
+
+class TestTaskNotification:
+    """待办提醒也是「上面一行说事、下面一行说细节」。
+
+    2026-11-13 用户看完上课提醒的新排版说「待办也要这样」。原来待办是
+    title=待办名、body=备注：备注一空正文就空，而「还有多久截止」这件事
+    从来没被说出来过 —— 用户得自己拿今天和 11-15 去减。
+    """
+
+    def _content(self, due_at, note=None, planned=None, task_id="t1"):
+        planned = _ts(20, 0) if planned is None else planned
+        _insert_task(OWNER, task_id, due_at=due_at, note=note)
+        item = {
+            "title": "交实验报告",
+            "note": note,
+            "source": "task",
+            "source_ref": task_id,
+            "channels": "push",
+            "action": "notify",
+        }
+        out = reminder_tick.build_content(OWNER, item, planned)
+        assert out is not None
+        return out
+
+    def test_hours_before_deadline(self, db):
+        out = self._content(_ts(22, 0), note="写第三章")
+        assert out["title"] == "交实验报告 · 还有 2 小时"
+        assert out["body"] == "写第三章"
+        assert "还有" not in out["body"], "相对时间只在标题，正文再来一次就白占一行"
+
+    def test_minutes_before_deadline(self, db):
+        out = self._content(_ts(20, 35))
+        assert out["title"] == "交实验报告 · 还有 35 分钟"
+
+    def test_days_before_deadline(self, db):
+        out = self._content(_ts(20, 0, day=12))
+        assert out["title"] == "交实验报告 · 还有 3 天"
+
+    def test_overdue_is_said_out_loud(self, db):
+        """发晚了（重试、静默时段顺延）不能还写「还有 -1 小时」。"""
+        out = self._content(_ts(19, 0))
+        assert out["title"] == "交实验报告 · 已过期"
+
+    def test_empty_note_falls_back_to_deadline(self, db):
+        """备注空的时候，绝对时刻就是第二行唯一的信息，不能留白。"""
+        out = self._content(_ts(22, 0), note=None)
+        assert out["body"] == "今天 22:00 截止"
+
+    def test_task_without_due_keeps_plain_title(self, db):
+        """只设了提醒、没设截止：没有任何时间可说，就别编一个。"""
+        out = self._content(None, note="记得带伞")
+        assert out["title"] == "交实验报告"
+        assert out["body"] == "记得带伞"
+
+    def test_deleted_task_does_not_break_the_push(self, db):
+        """待办已删、提醒行还没清干净时，这条通知必须照发 —— 不能 KeyError 掉。
+        「设了提醒不响」是最难查的一类，宁可少一句时间。"""
+        item = {
+            "title": "交实验报告",
+            "note": "写第三章",
+            "source": "task",
+            "source_ref": "gone",
+            "channels": "push",
+            "action": "notify",
+        }
+        out = reminder_tick.build_content(OWNER, item, _ts(20, 0))
+        assert out is not None
+        assert out["title"] == "交实验报告"
+
+
 class TestMerge:
     def test_two_reminders_same_minute_become_one_push(self, db, sent):
         a = reminder_core.create(OWNER, {"title": "复盘今天", "at": "12:00"})

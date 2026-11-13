@@ -127,13 +127,87 @@ def _class_content(reminder: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _notify_content(reminder: dict[str, Any]) -> dict[str, Any]:
+def _due_gap_label(due_at: int, now: int) -> str:
+    """距截止还有多久，说人话。
+
+    只给量级不给精度：锁屏一行，「还有 2 小时」够用了，
+    「还有 1 小时 47 分钟」精确但没人拿它做决定，还把行占满。
+    """
+    diff = int(due_at) - int(now)
+    if diff <= 0:
+        return "已过期"
+    if diff < 60:
+        return "马上到期"
+    if diff < 3600:
+        return f"还有 {diff // 60} 分钟"
+    if diff < 86400:
+        return f"还有 {diff // 3600} 小时"
+    return f"还有 {diff // 86400} 天"
+
+
+def _due_stamp_label(due_at: int, now: int) -> str:
+    """绝对时刻，只在备注为空时顶到第二行 —— 那时候它是唯一的信息。"""
+    due = datetime.fromtimestamp(int(due_at), timeutil.TZ)
+    today = datetime.fromtimestamp(int(now), timeutil.TZ).date()
+    hm = due.strftime("%H:%M")
+    days = (due.date() - today).days
+    if days == 0:
+        return f"今天 {hm} 截止"
+    if days == 1:
+        return f"明天 {hm} 截止"
+    if days == 2:
+        return f"后天 {hm} 截止"
+    return f"{due.month}月{due.day}日 {hm} 截止"
+
+
+def _task_content(
+    owner_id: str, reminder: dict[str, Any], planned_at: int
+) -> dict[str, Any]:
+    """待办提醒：上面「待办名 · 还有多久」，下面「备注」。
+
+    和上课提醒同一条道理（见 `_class_content`）：锁屏一行只放得下十几个字，
+    原来 title=`交实验报告`、body=`截止 11-15 23:59`，看着也不算挤 ——
+    但「还有多久」这件事根本没被说出来，用户得自己拿今天和 11-15 相减。
+
+    `due_at` 不在 reminders 行里：待办的提醒时刻是用户自己挑的（可以比截止
+    早一天），不是固定偏移，所以得回 tasks 表拿。拿不到（任务刚被删、
+    或者只设了提醒没设截止）就不拼时间 —— 宁可少一句，不编一个假时间。
+    """
+    title = str(reminder.get("title") or "待办")[:60]
+    note = str(reminder.get("note") or "").strip()
+
+    due_at: int | None = None
+    ref = str(reminder.get("source_ref") or "")
+    if ref:
+        try:
+            from core import task_core  # 函数内导入：task_core 依赖 reminder_core
+
+            task = task_core.get(owner_id, ref)
+            due_at = int(task["due_at"]) if task and task.get("due_at") else None
+        except Exception:  # noqa: BLE001 —— 查不到截止时间不该让这条提醒发不出去
+            logger.exception("task lookup failed owner=%s task=%s", owner_id, ref)
+
+    gap = _due_gap_label(due_at, planned_at) if due_at else ""
+    body = note or (_due_stamp_label(due_at, planned_at) if due_at else "")
+    return {
+        "title": f"{title} · {gap}" if gap else title,
+        "body": body[:120],
+        "url": "/reminders",
+    }
+
+
+def _notify_content(
+    owner_id: str, reminder: dict[str, Any], planned_at: int
+) -> dict[str, Any]:
     # 上课提醒点开应该落在**课程表**，不是提醒列表：用户想知道的是
     # 「下一节在哪、几点下课」，而提醒列表里没有这节课（`list_reminders`
     # 把 timetable 排除了，见 core/reminder_core.py）。
     # 落在提醒列表的话，点完看到的是一片自己的待办 —— 和那条通知毫无关系。
-    if str(reminder.get("source") or "") == "timetable":
+    source = str(reminder.get("source") or "")
+    if source == "timetable":
         return _class_content(reminder)
+    if source == "task":
+        return _task_content(owner_id, reminder, planned_at)
     return {
         "title": str(reminder.get("title") or "提醒")[:60],
         "body": str(reminder.get("note") or "")[:120],
@@ -163,7 +237,7 @@ def build_content(owner_id: str, reminder: dict[str, Any], planned_at: int) -> d
             "url": "/tools?tool=pomodoro",
         }
     if action != "agent_deliver":
-        return _notify_content(reminder)
+        return _notify_content(owner_id, reminder, planned_at)
 
     source = str(reminder.get("source") or "manual")
     if source == "system":
@@ -177,11 +251,11 @@ def build_content(owner_id: str, reminder: dict[str, Any], planned_at: int) -> d
         body = str(reminder.get("source_note") or reminder.get("note") or "")[:120]
         return {"title": title, "body": body, "url": "/delegate"}
     if source in _PLAIN_SOURCES:
-        return _notify_content(reminder)
+        return _notify_content(owner_id, reminder, planned_at)
 
     # 未知来源（数据里出现新值）：宁可发标题，也不要静默丢掉 ——
     # 静默丢掉的后果是「设了提醒不响」，那是最难查的一类。
-    return _notify_content(reminder)
+    return _notify_content(owner_id, reminder, planned_at)
 
 
 def _merge(batch: list[dict[str, Any]], planned_at: int) -> dict[str, Any]:
