@@ -451,6 +451,42 @@
   flex: 1 1 100%;
   line-height: var(--lh-body);
 }
+/* 简介输入：确认条本来就长，输入框单独占一行，按钮落到再下一行 */
+.kbp-pub-desc {
+  display: flex;
+  flex: 1 1 100%;
+  flex-direction: column;
+  gap: var(--space-4);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+.kbp-pub-desc textarea {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--card-bg);
+  color: var(--ink);
+  font-family: inherit;
+  /* 16px：iOS 对 <16px 的输入框会放大整页 */
+  font-size: var(--fs-lg);
+  line-height: var(--lh-body);
+  resize: vertical;
+}
+.kbp-pub-desc textarea:focus {
+  border-color: var(--line-strong);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.kbp-pub-desc textarea::placeholder {
+  color: var(--text-3);
+}
+.kbp-pub-desc em {
+  align-self: flex-end;
+  color: var(--text-3);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
 
 /* 空库时的一行提示：不是"空态"，上传区已经在上面了 —— 这里只补一句话，
    所以不给它 .kbp-empty 那套 40px 的上下留白 */

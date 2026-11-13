@@ -27,13 +27,23 @@ export interface KbInfo {
   files: KbFile[];
   /** 库主是否已设为站内公开：其他登录用户可把这个库挂进对话只读检索 */
   public?: boolean;
+  /** 公开时写在广场卡片上的那句简介。收回后仍保留，下次再分享不用重写 */
+  public_desc?: string;
 }
 
-/** GET /api/kb/public 单条：全站公开库概要。别人的库，没有文件清单可看 */
+/** GET /api/kb/public 单条：公开知识库广场上的一张卡片。别人的库，没有文件清单 */
 export interface PublicKbInfo {
   kb_id: string;
   name: string;
   chunks: number;
+  /** 库里的资料份数（只给数量，不给清单） */
+  files: number;
+  /** 库主显示名：昵称优先，没设过退回用户名；查不到人时为空串 */
+  owner_name: string;
+  /** 卡片上的简介，可能是空串（老数据或库主没写） */
+  desc: string;
+  /** 首次分享的时间（秒）。0 = 老数据，没有这条记录 */
+  at: number;
 }
 
 /**

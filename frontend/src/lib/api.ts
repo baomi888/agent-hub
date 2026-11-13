@@ -289,10 +289,12 @@ export const api = {
   // ---------- 会话 ----------
   listSessions: () =>
     request<{ sessions: Conversation[] }>("/api/sessions/"),
-  createSession: (title: string = "新对话") =>
+  /** kbId 只在「从广场挂一个公开库」这种场景传：建会话时就把库绑好，
+      免得用户进去后还要自己去右栏挑一次 */
+  createSession: (title: string = "新对话", kbId?: string) =>
     request<Conversation>("/api/sessions/", {
       method: "POST",
-      body: JSON.stringify({ title }),
+      body: JSON.stringify(kbId ? { title, kb_id: kbId } : { title }),
     }),
   getSession: (sid: string) =>
     request<Conversation & { messages: Message[] }>(`/api/sessions/${sid}/`),
@@ -317,12 +319,16 @@ export const api = {
   // ---------- 知识库 ----------
   listKbs: () => request<{ kbs: KbInfo[] }>("/api/kb/"),
   // 设置公开状态（仅库主）。公开只放开「他人只读检索」，文件清单与写操作仍私有
-  setKbPublic: (kbId: string, isPublic: boolean) =>
-    request<{ kb_id: string; public: boolean }>(
+  // 公开状态与广场简介。desc 不传 = 不动已有简介（收回时前端就不传）；传空串 = 清空
+  setKbPublic: (kbId: string, isPublic: boolean, desc?: string) =>
+    request<{ kb_id: string; public: boolean; desc: string }>(
       `/api/kb/${encodeURIComponent(kbId)}/visibility`,
-      { method: "POST", body: JSON.stringify({ public: isPublic }) }
+      {
+        method: "POST",
+        body: JSON.stringify(desc === undefined ? { public: isPublic } : { public: isPublic, desc }),
+      }
     ),
-  // 全站公开库概要，挂别人的库当检索源用（后端已排除调用者自己的库）
+  // 公开知识库广场：别人的公开库（后端已排除调用者自己的库）
   listPublicKbs: () => request<{ kbs: PublicKbInfo[] }>("/api/kb/public"),
   createKb: (name: string) =>
     request<{ kb_id: string; name: string }>("/api/kb/create", {

@@ -37,6 +37,9 @@
 @import "./styles/summary.css";
 /* 知识库独立页（/knowledge）：与首页右栏的资料库抽屉是两套形态 */
 @import "./styles/kbpage.css";
+/* 公开知识库广场（/library）：浏览态，卡片墙 + 搜索 + 分享弹层。
+   与 kbpage 是两件事（一个管理工作台、一个挑现成的），所以不并进去 */
+@import "./styles/library.css";
 /* 放在 kb 系列之后：它复用 .pv-card 骨架，只覆盖宽度，同优先级靠顺序生效 */
 @import "./styles/sediment.css";
 @import "./styles/layout.css";

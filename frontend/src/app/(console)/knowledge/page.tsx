@@ -55,10 +55,13 @@ export default function KnowledgePage() {
   /** 删库的二次确认（库 id）；删文件用下面那个 */
   const [confirmDelKb, setConfirmDelKb] = useState<string | null>(null);
   const [confirmDelFile, setConfirmDelFile] = useState<string | null>(null);
-  /** 「设为公开」的二次确认（库 id）。公开是把库交出去给人看，点一下就生效太草率：
+  /** 「分享到广场」的二次确认（库 id）。分享是把库交出去给人看，点一下就生效太草率：
    *  简历、成绩单这类库，用户未必意识到「全站登录用户都能检索」是什么概念。
-   *  收回不设确认 —— 收回是止损，多一步只会拖慢。 */
+   *  收回不设确认 —— 收回是止损，多一步只会拖慢。
+   *  改简介复用同一个确认条（区别只在按钮文案与 toast），所以下面还有一份草稿。 */
   const [confirmPub, setConfirmPub] = useState<string | null>(null);
+  /** 确认条里那句简介的草稿。打开确认条时用 public_desc 预填，收进 state 才能编辑 */
+  const [pubDesc, setPubDesc] = useState("");
   const [dragging, setDragging] = useState(false);
   /** 每个库上次用的切法（kb_id → 参数）。后端不记这件事，存在本地，
       和首页资料库面板共用同一份 baomi.kbChunk.v1 —— 两个入口改的是同一件事，
@@ -230,23 +233,38 @@ export default function KnowledgePage() {
     saveKbChunks(next);
   };
 
-  /** 公开 / 收回公开。公开只放开「他人只读检索」一件事：文件清单、
-   *  上传、删除仍然只有库主能动。收回立即生效，别人的对话下一轮就挂不上。
-   *  调用方负责先过一道确认（见 confirmPub），这里只管发请求。 */
-  const togglePublic = async () => {
+  /** 分享到广场 / 从广场收回 / 改简介。
+   *
+   *  2026-11-13 广场化：原来这里叫「设为公开」，现在这个动作的结果是
+   *  「出现在公开知识库广场上等别人挑」。同一件事，但说「分享」用户才知道
+   *  它的结果长什么样。
+   *  放开的仍然只有「他人只读检索」：文件清单、上传、删除只有库主能动。
+   *  收回立即生效，别人对话里挂着的这个库下一轮就检索不到了。 */
+  const shareToPlaza = async () => {
     if (!active || busy) return;
     setBusy("public");
     try {
-      const r = await api.setKbPublic(active.kb_id, !active.public);
+      await api.setKbPublic(active.kb_id, true, pubDesc.trim());
       await refresh(active.kb_id);
-      // 成功才收起确认条；失败时留着，用户可以直接再点一次「确认公开」
+      // 成功才收起确认条；失败时留着，用户可以直接再点一次
       setConfirmPub(null);
-      showToast(
-        "success",
-        r.public ? "已公开：其他登录用户可以在对话里检索这个库（只读）" : "已收回公开：其他用户不再能检索这个库"
-      );
+      showToast("success", `「${active.name}」已分享到广场，其他用户可以在对话里检索它`);
     } catch (e) {
-      showToast("error", errMsg(e, "操作失败，请稍后重试"));
+      showToast("error", errMsg(e, "分享失败，请稍后重试"));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const withdrawFromPlaza = async () => {
+    if (!active || busy) return;
+    setBusy("public");
+    try {
+      await api.setKbPublic(active.kb_id, false);
+      await refresh(active.kb_id);
+      showToast("success", "已从广场收回：其他用户不再能检索这个库");
+    } catch (e) {
+      showToast("error", errMsg(e, "收回失败，请稍后重试"));
     } finally {
       setBusy(null);
     }
@@ -449,18 +467,37 @@ export default function KnowledgePage() {
                       disabled={busy !== null}
                       title={
                         active.public
-                          ? "收回公开：其他用户将不能再检索这个库"
-                          : "公开后其他登录用户可以在对话里检索这个库（只读）；文件清单与修改仍只有你能做"
+                          ? "从广场收回：其他用户将不能再检索这个库"
+                          : "分享后其他登录用户可以在广场上看到并在对话里检索它（只读）；文件清单与修改仍只有你能做"
                       }
                       onClick={() => {
-                        // 公开要先确认（公开=把库交出去）；收回是止损，直接执行
-                        if (active.public) void togglePublic();
-                        else setConfirmPub(active.kb_id);
+                        // 分享要先过确认条（分享=把库交出去）；收回是止损，直接执行
+                        if (active.public) {
+                          void withdrawFromPlaza();
+                        } else {
+                          setPubDesc(active.public_desc ?? "");
+                          setConfirmPub(active.kb_id);
+                        }
                       }}
                     >
                       <CornIcon name="globe" />
-                      {busy === "public" ? "处理中…" : active.public ? "收回公开" : "设为公开"}
+                      {busy === "public" ? "处理中…" : active.public ? "从广场收回" : "分享到广场"}
                     </button>
+                    {active.public && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        disabled={busy !== null}
+                        title="改广场卡片上那句简介，不影响谁能检索"
+                        onClick={() => {
+                          setPubDesc(active.public_desc ?? "");
+                          setConfirmPub(active.kb_id);
+                        }}
+                      >
+                        <CornIcon name="pencil" />
+                        改简介
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="btn btn-ghost btn-sm"
@@ -482,22 +519,36 @@ export default function KnowledgePage() {
                   </div>
                 </div>
 
-                {confirmPub === active.kb_id && !active.public && (
+                {confirmPub === active.kb_id && (
                   <div className="kbp-confirm kbp-confirm-info">
                     <span>
-                      公开「{active.name}」？其他登录用户都能在对话里检索这 {files.length} 份资料，也能据它提问；
-                      文件清单、上传和删除仍然只有你能做，随时可以收回。
+                      {active.public
+                        ? `改一下「${active.name}」在广场上的简介。改简介不影响谁能检索它。`
+                        : `分享「${active.name}」到广场？其他登录用户都能在对话里检索这 ${files.length} 份资料，也能据它提问；
+                           文件清单、上传和删除仍然只有你能做，随时可以收回。`}
                     </span>
+                    <label className="kbp-pub-desc" htmlFor="kbp-pub-desc">
+                      <span>一句话简介（选填）</span>
+                      <textarea
+                        id="kbp-pub-desc"
+                        value={pubDesc}
+                        maxLength={200}
+                        rows={2}
+                        placeholder="例：考研数学一，近十年真题按章节整理，含错题标注"
+                        onChange={(e) => setPubDesc(e.target.value)}
+                      />
+                      <em>{pubDesc.length}/200</em>
+                    </label>
                     <button
                       type="button"
                       className="btn btn-primary btn-sm"
                       disabled={busy === "public"}
-                      onClick={() => void togglePublic()}
+                      onClick={() => void shareToPlaza()}
                     >
-                      {busy === "public" ? "公开中…" : "确认公开"}
+                      {busy === "public" ? "处理中…" : active.public ? "保存简介" : "确认分享"}
                     </button>
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmPub(null)}>
-                      先不公开
+                      {active.public ? "取消" : "先不分享"}
                     </button>
                   </div>
                 )}

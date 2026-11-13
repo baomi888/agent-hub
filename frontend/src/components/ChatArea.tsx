@@ -742,13 +742,13 @@ export default function ChatArea({
     onToggleKbPanel?.();
   };
 
-  // 首屏功能入口：模板广场 / 校园工具集 / 上传建库 / 让它研究
+  // 首屏功能入口：公开知识库广场 / 校园工具集 / 上传建库 / 让它研究
   const handleIntroEntry = (key: string) => {
     switch (key) {
-      case "template":
+      case "library":
         // 走路由跳转，不用 window.location.href：后者是整页刷新，
         // 浏览器会白一帧再重新加载整个应用（同一个 Next 应用内没必要）。
-        router.push("/templates");
+        router.push("/library");
         break;
       case "tools":
         window.open(TOOLS_URL, "_blank", "noopener,noreferrer");

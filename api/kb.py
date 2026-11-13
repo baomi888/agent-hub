@@ -17,8 +17,8 @@ from __future__ import annotations
   GET    /api/kb/{kb_id}/              查看库状态
   GET    /api/kb/                      列出所有知识库
   DELETE /api/kb/{kb_id}/              删除知识库
-  POST   /api/kb/{kb_id}/visibility    设置公开状态（仅库主）
-  GET    /api/kb/public                全站公开库概要（不含文件清单）
+  POST   /api/kb/{kb_id}/visibility    设置公开状态与广场简介（仅库主）
+  GET    /api/kb/public                公开知识库广场列表（含简介/文件数/作者）
   POST   /api/kb/{kb_id}/query         同步问答（公开库对全站登录用户开放）
 """
 
@@ -32,7 +32,7 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.schemas import KBQueryResponse
-from core import config, quota, upload
+from core import account, config, quota, upload
 from core import session as store
 from core.auth import get_current_user
 from core.netsafe import assert_safe_url
@@ -294,36 +294,70 @@ async def delete_kb(kb_id: str, uid: str = Depends(get_current_user)) -> dict:
 
 class VisibilityRequest(BaseModel):
     public: bool = Field(..., description="true=公开，false=收回公开")
+    desc: str | None = Field(
+        None,
+        max_length=200,
+        description="广场上那句简介。不传 = 不动已有简介；传空串 = 清空",
+    )
+
+
+def _owner_display_name(uid: str) -> str:
+    """公开库卡片上的作者名。
+
+    优先昵称，没设过退回用户名 —— 与 `core/account._public` 的回落规则一致
+    （那里空串表示"没设过"）。查不到人（注销、脏归属）返回空串，
+    前端会显示成「某位同学」，不至于让整张卡片因为一个名字加载失败。
+    """
+    try:
+        u = account.get_user(uid)
+    except Exception:
+        return ""
+    if not u:
+        return ""
+    return (u.get("nickname") or "").strip() or (u.get("username") or "").strip()
 
 
 @router.post("/{kb_id}/visibility")
 async def set_kb_visibility(
     kb_id: str, req: VisibilityRequest, uid: str = Depends(get_current_user)
 ) -> dict:
-    """设置知识库公开状态（仅库主）。
+    """设置知识库公开状态与广场简介（仅库主）。
 
     公开只放开「他人可只读检索」一件事：文件清单、上传、删除永远只有
     库主能动。收回公开立即生效——别人的对话里还挂着这个库的话，下一轮
     提问的认主逻辑会把它按"没绑"处理，不需要对方做什么。
     """
     _must_own(uid, kb_id)
+    # 简介归一化：纯空白等于没写。None 表示"这次别动简介"（收回时不传）
+    desc = req.desc.strip() if req.desc is not None else None
     try:
-        pipelines.set_public(uid, kb_id, req.public)
+        meta = pipelines.set_public(uid, kb_id, req.public, desc)
     except pipelines.NotOwned:  # _must_own 之后库被并发删掉的窄窗口
         raise HTTPException(status_code=404, detail=f"知识库不存在：{kb_id}") from None
-    return {"kb_id": kb_id, "public": req.public}
+    return {"kb_id": kb_id, "public": req.public, "desc": meta.get("desc") or ""}
 
 
 @router.get("/public")
 async def list_public_kbs(uid: str = Depends(get_current_user)) -> dict:
-    """全站公开库概要，供其他用户挑一个挂进自己的对话做检索。
+    """公开知识库广场的列表（全站登录用户可见）。
 
-    只回 kb_id / 名称 / 片段数，不含文件清单；调用者自己的库也不重复出现
-    （它们已经在 GET /api/kb/ 的列表里了，重复一份会让前端选择器出现两行）。
+    比"能检索"多回展示用元信息：简介、文件数、作者显示名、分享时间。
+    两条边界仍然守着：
+      - 不含文件清单，只给数量；
+      - 不回库主的 uid，只回显示名（uid 是内部标识，没必要抛给前端）。
+    调用者自己的库不重复出现 —— 它们在 GET /api/kb/ 里，广场另有「我的」分组。
     """
     kbs = await asyncio.to_thread(pipelines.list_public)
     mine = await asyncio.to_thread(pipelines.owned_kb_ids, uid)
-    return {"kbs": [k for k in kbs if k["kb_id"] not in mine]}
+    out = []
+    for k in kbs:
+        if k["kb_id"] in mine:
+            continue
+        k = dict(k)
+        k["owner_name"] = await asyncio.to_thread(_owner_display_name, k["owner"])
+        k.pop("owner", None)
+        out.append(k)
+    return {"kbs": out}
 
 
 # ==================== 文件级管理 ====================

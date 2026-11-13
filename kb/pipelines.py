@@ -52,10 +52,12 @@ _KB_NAMES: dict[str, str] = {}
 _KB_LOCKS: dict[str, threading.RLock] = {}
 # { kb_id: owner_id }  —— 归属表。没有记录 = 无主（改造前的老库），谁都访问不到
 _KB_OWNERS: dict[str, str] = {}
-# { kb_id: True }  —— 公开库登记表。在表里 = 全站登录用户可只读检索。
-# 语义刻意做成"集合"而不是每库一份可见范围配置：站内公开只有开/关两态，
-# 一张扁平表让"这个库公开吗"永远是一次 O(1) 查询，不用解析结构。
-_KB_PUBLIC: dict[str, bool] = {}
+# { kb_id: {"on": True, "desc": str, "at": int} } —— 公开库登记表。
+# 在表里 = 全站登录用户可只读检索（广场上能被人挑走挂进对话）。
+# 语义仍然是"集合"：站内公开只有开/关两态，一张扁平表让"这个库公开吗"
+# 永远是一次 O(1) 查询，不用解析结构。desc / at 只是广场用的展示信息，
+# 不参与任何权限判断 —— 判定只看 kb_id 在不在表里。
+_KB_PUBLIC: dict[str, dict] = {}
 # 上次读盘时两个注册表文件的 mtime（None = 还没读过）。
 # ★ 为什么需要：板块 D 起后台 worker 也会建库（自动沉淀），它写的是同两个 json，
 #   而 API 进程与 worker 是**两个服务**。原来"只在内存表为空时读一次"意味着
@@ -251,19 +253,41 @@ def _reload_owners_if_changed() -> None:
 
 
 def _load_public() -> None:
-    """从磁盘加载公开库登记表。调用方需持有 _REGISTRY_LOCK。"""
+    """从磁盘加载公开库登记表。调用方需持有 _REGISTRY_LOCK。
+
+    两种格式都认（2026-11-13 广场化时扩的元信息）：
+      - 旧：{"kb_x": true}                                     ← 只有开关
+      - 新：{"kb_x": {"on": true, "desc": "…", "at": 1763…}}    ← 带简介与分享时间
+    读进内存一律是后者，写出去也只会是后者 —— 所以升级不需要迁移脚本，
+    第一次有人碰这张表时旧条目自然被补成新结构。
+    旧条目没有 at，广场上按"很久以前"处理（前端不显示"刚分享"这种假信息）。
+    """
     global _KB_PUBLIC, _KB_PUBLIC_MTIME
     _KB_PUBLIC_MTIME = _mt(_public_path())
     try:
         with open(_public_path(), encoding="utf-8") as f:
             data = json.load(f)
-        _KB_PUBLIC = (
-            {k: True for k, v in data.items() if isinstance(k, str) and v}
-            if isinstance(data, dict)
-            else {}
-        )
     except Exception:
         _KB_PUBLIC = {}
+        return
+    if not isinstance(data, dict):
+        _KB_PUBLIC = {}
+        return
+    loaded: dict[str, dict] = {}
+    for k, v in data.items():
+        if not isinstance(k, str):
+            continue
+        if isinstance(v, dict):
+            if not v.get("on"):
+                continue
+            loaded[k] = {
+                "on": True,
+                "desc": str(v.get("desc") or ""),
+                "at": int(v.get("at") or 0),
+            }
+        elif v:
+            loaded[k] = {"on": True, "desc": "", "at": 0}
+    _KB_PUBLIC = loaded
 
 
 def _save_public() -> None:
@@ -303,21 +327,37 @@ def is_public(kb_id: str) -> bool:
         return kb_id in _KB_PUBLIC
 
 
-def set_public(owner: str, kb_id: str, on: bool) -> None:
-    """把库标记为公开 / 收回公开。只有库主有权切换，无权抛 NotOwned。
+def set_public(owner: str, kb_id: str, on: bool, desc: str | None = None) -> dict:
+    """把库标记为公开 / 收回公开，可顺带写一句简介。只有库主有权切换，无权抛 NotOwned。
 
     切换的是「他人可否只读检索」，不动归属：文件清单、上传、删除
     永远只认 owner，公开与否无关。
+
+    `desc` 三态，别搞混：
+      - None（默认）→ 不动已有简介。收回公开时前端一般不传，别把用户写的话抹了。
+      - ""          → 清空简介（广场上回落成"这个库还没写简介"）。
+      - 非空串       → 覆盖。
+    返回写进去的那条元信息，省得调用方再读一次盘。
     """
     if owner_of(kb_id) != owner:
         raise NotOwned(kb_id)
     with _REGISTRY_LOCK:
         _reload_public_if_changed()
         if on:
-            _KB_PUBLIC[kb_id] = True
+            meta = dict(_KB_PUBLIC.get(kb_id) or {})
+            if desc is not None:
+                meta["desc"] = desc
+            meta["on"] = True
+            meta.setdefault("desc", "")
+            # 只在第一次公开时记时间；改简介不该让"分享于"变成今天
+            if not meta.get("at"):
+                meta["at"] = int(time.time())
+            _KB_PUBLIC[kb_id] = meta
         else:
             _KB_PUBLIC.pop(kb_id, None)
+            meta = {"on": False, "desc": "", "at": 0}
         _save_public()
+        return meta
 
 
 def name_of(kb_id: str | None) -> str | None:
@@ -525,6 +565,8 @@ def list_all(owner: str) -> list[dict]:
                     "files": files,
                     # 前端渲染「公开」标识与开关初态用；公开与否不影响这里能看到什么
                     "public": kb_id in _KB_PUBLIC,
+                    # 广场上那句简介。收回公开后仍留着，下次再分享不用重写
+                    "public_desc": (_KB_PUBLIC.get(kb_id) or {}).get("desc", ""),
                 }
             )
 
@@ -539,25 +581,34 @@ def list_all(owner: str) -> list[dict]:
                     "chunks": 0,
                     "files": get_files(owner, kb_id),
                     "public": kb_id in _KB_PUBLIC,
+                    "public_desc": (_KB_PUBLIC.get(kb_id) or {}).get("desc", ""),
                 }
             )
     return result
 
 
 def list_public() -> list[dict]:
-    """全站公开库概要（kb_id / 名称 / 片段数），供其他用户挑选拿去挂载检索。
+    """全站公开库概要，供其他用户在广场里挑一个挂进对话检索。
 
-    只给最少的元信息：文件清单、归属这些细节仍然只有库主能看到。
-    归属表里已经没有记录的（库删了、公开标记残留）直接跳过——
+    除检索必需的 kb_id / 名称 / 片段数，再给一点**展示用**元信息
+    （简介、文件数、作者、分享时间）—— 只有库名和片段数的话，用户没法判断
+    这个库值不值得挂，广场就退化成一张列表。
+
+    但**文件清单仍然不给**：那是库主的东西，这里只回数量。
+    归属表里已经没有记录的（库删了、公开标记残留）直接跳过 ——
     没有 owner 的公开库谁也检索不了，列出来只会让人点了挂载却一直空转。
     """
     with _REGISTRY_LOCK:
         _reload_public_if_changed()
         _reload_owners_if_changed()
         _reload_names_if_changed()
+        # 文件清单是懒加载的（只有上传/删除/预览时才读盘），广场要文件数就得先补上。
+        # 代价是每次列广场读一次 kb_files.json：几十 KB 的小文件，比显示 0 份资料诚实。
+        _load_files()
         result = []
-        for kb_id in _KB_PUBLIC:
-            if kb_id not in _KB_OWNERS:
+        for kb_id, meta in _KB_PUBLIC.items():
+            owner = _KB_OWNERS.get(kb_id)
+            if not owner:
                 continue
             pipe = _get_or_create_raw(kb_id)
             if pipe._vs is None:
@@ -567,6 +618,11 @@ def list_public() -> list[dict]:
                     "kb_id": kb_id,
                     "name": _KB_NAMES.get(kb_id, kb_id),
                     "chunks": pipe.count(),
+                    "files": len(_KB_FILES.get(kb_id) or []),
+                    # owner 只给 id，显示名由 API 层补 —— 这一层不认识账户体系
+                    "owner": owner,
+                    "desc": meta.get("desc") or "",
+                    "at": int(meta.get("at") or 0),
                 }
             )
     return result

@@ -25,7 +25,7 @@ interface Props {
   activeSid: string | null;
   onSelect: (sid: string) => void;
   onCreate: () => void;
-  onOpenTemplates?: () => void;
+  onOpenLibrary?: () => void;
   onRename: (sid: string, title: string) => void;
   onDelete: (sid: string) => void;
   kbNameMap?: Record<string, string>;
@@ -97,7 +97,7 @@ export default function Sidebar({
   activeSid,
   onSelect,
   onCreate,
-  onOpenTemplates,
+  onOpenLibrary,
   onRename,
   onDelete,
   kbNameMap,
@@ -179,12 +179,14 @@ export default function Sidebar({
         </span>
       </button>
 
-      {/* 模板广场：平台化入口（描边次按钮，与新建对话形成主次） */}
-      {onOpenTemplates && (
-        <button onClick={onOpenTemplates} className="btn-import mt-2 w-full">
+      {/* 公开知识库广场：平台化入口（描边次按钮，与新建对话形成主次）。
+          2026-11-13 换掉原来的「模板广场」：那套预置提示词下线，
+          同一位置改成挑别人的公开资料库。 */}
+      {onOpenLibrary && (
+        <button onClick={onOpenLibrary} className="btn-import mt-2 w-full">
           <span className="inline-flex items-center justify-center gap-1.5">
-            <CornIcon name="store" className="h-4 w-4" title="模板广场" />
-            模板广场
+            <CornIcon name="store" className="h-4 w-4" title="公开知识库" />
+            公开知识库
           </span>
         </button>
       )}

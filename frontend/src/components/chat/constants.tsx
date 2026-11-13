@@ -46,13 +46,15 @@ export const PRIMARY_ENTRIES: {
 ];
 
 // 辅路动作。tools → 开校园工具集静态页、upload → 开资料库上传、
-// research → 预填研究引导（由 ChatArea 的 handleIntroEntry 接管）
+// library → 公开知识库广场、research → 预填研究引导（由 ChatArea 的 handleIntroEntry 接管）
 export const SECONDARY_ENTRIES: {
-  key: "template" | "tools" | "upload" | "research";
+  key: "library" | "tools" | "upload" | "research";
   label: string;
   icon: CornIconName;
 }[] = [
-  { key: "template", label: "模板广场", icon: "store" },
+  // 「模板广场」2026-11-13 换成「公开知识库」：那套预置提示词下线，
+  // 同一位置改成挑别人的公开资料库，挂进对话就能问（见 app/library）。
+  { key: "library", label: "公开知识库", icon: "store" },
   { key: "upload", label: "上传资料建库", icon: "notes" },
   { key: "research", label: "让它去研究", icon: "bulb" },
   // 入口标签统一写「工具集」（11-07）：左边导航、对话栏、这里用的是同一个名字，
@@ -61,7 +63,7 @@ export const SECONDARY_ENTRIES: {
 ];
 
 // 场景快选（SCENARIO_STARTERS）已随「场景选择撤出主界面」删除（10-14 晚）：
-// 场景化入口统一走模板广场，工作台不再摆场景选择器。
+// 场景化入口统一走公开知识库广场，工作台不再摆场景选择器。
 
 // ============ 工具调用：名称 → 中文标签 + 图标 ============
 export const TOOL_META: Record<string, { label: string; icon: ReactNode }> = {

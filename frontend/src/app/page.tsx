@@ -927,11 +927,11 @@ export default function Home() {
           setSidebarOpen(false); // 窄屏抽屉里点完会话就收起来
         }}
         onCreate={createSession}
-        onOpenTemplates={() => {
+        onOpenLibrary={() => {
           // 曾经是 window.location.href —— 那是**整页刷新**：浏览器白一帧、
-          // 重新下载整包 JS、再重新探活。模板广场本来就在同一个 Next 应用里，
+          // 重新下载整包 JS、再重新探活。广场本来就在同一个 Next 应用里，
           // 走路由跳转才有"页面被换掉"而不是"应用被重启"的观感。
-          router.push("/templates");
+          router.push("/library");
         }}
         onRename={renameSession}
         onDelete={deleteSession}

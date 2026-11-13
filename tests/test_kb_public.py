@@ -136,9 +136,9 @@ def test_files_and_visibility_stay_owner_only(monkeypatch, kb_id):
     with pytest.raises(HTTPException):
         asyncio.run(kb_api.set_kb_visibility(kb_id, kb_api.VisibilityRequest(public=False), OTHER))
 
-    # 库主自己不受影响
+    # 库主自己不受影响。返回里多了 desc：广场卡片要用它显示简介
     out = asyncio.run(kb_api.set_kb_visibility(kb_id, kb_api.VisibilityRequest(public=False), OWNER))
-    assert out == {"kb_id": kb_id, "public": False}
+    assert out == {"kb_id": kb_id, "public": False, "desc": ""}
 
 
 def test_public_list_excludes_caller_and_private(monkeypatch, kb_id):
@@ -150,8 +150,76 @@ def test_public_list_excludes_caller_and_private(monkeypatch, kb_id):
 
     theirs = asyncio.run(kb_api.list_public_kbs(OTHER))
     assert [k["kb_id"] for k in theirs["kbs"]] == [kb_id]
-    # 只给最少元信息：文件清单一旦出现在公开列表里就破防了
-    assert all(set(k) == {"kb_id", "name", "chunks"} for k in theirs["kbs"])
+    # 字段集合钉死：广场要展示的资料够用，且**没有**文件清单。
+    # 一旦有人往这里顺手加了 files 明细、owner uid 之类，这条会红。
+    assert all(set(k) == {"kb_id", "name", "chunks", "files", "owner_name", "desc", "at"} for k in theirs["kbs"])
 
     pipelines.set_public(OWNER, kb_id, False)
     assert asyncio.run(kb_api.list_public_kbs(OTHER))["kbs"] == []
+
+
+# ==================== 广场化：简介与展示用元信息（2026-11-13） ====================
+
+
+def test_public_desc_roundtrip(kb_id):
+    """简介写得进、读得出；改简介不动分享时间；不传 desc 不覆盖已有简介。"""
+    pipelines.set_public(OWNER, kb_id, True, "考研数学一，近十年真题按章节整理")
+    item = next(k for k in pipelines.list_public() if k["kb_id"] == kb_id)
+    assert item["desc"] == "考研数学一，近十年真题按章节整理"
+    assert item["at"] > 0
+    first_at = item["at"]
+
+    # 只改开关（desc=None）不能把用户写的话抹掉
+    pipelines.set_public(OWNER, kb_id, True)
+    item = next(k for k in pipelines.list_public() if k["kb_id"] == kb_id)
+    assert item["desc"] == "考研数学一，近十年真题按章节整理"
+    # 改简介不该让「分享于」变成今天
+    assert item["at"] == first_at
+
+    # 显式传空串才是清空
+    pipelines.set_public(OWNER, kb_id, True, "")
+    item = next(k for k in pipelines.list_public() if k["kb_id"] == kb_id)
+    assert item["desc"] == ""
+
+
+def test_desc_survives_withdraw(kb_id):
+    """收回后简介仍留在登记表里 —— 再分享一次不用重写。"""
+    pipelines.set_public(OWNER, kb_id, True, "计算机组成原理笔记")
+    pipelines.set_public(OWNER, kb_id, False)
+    assert pipelines.is_public(kb_id) is False
+    mine = pipelines.list_all(OWNER)
+    row = next(k for k in mine if k["kb_id"] == kb_id)
+    assert row["public"] is False
+    assert row["public_desc"] == "计算机组成原理笔记"
+
+
+def test_legacy_bool_format_still_loads(kb_id):
+    """旧登记表 {"kb_id": true} 要能被读成新结构，不能因为格式变了就整表丢光。"""
+    import json
+
+    path = pipelines._public_path()
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({kb_id: True}, f)
+    pipelines._KB_PUBLIC_MTIME = None  # 逼它重读
+    pipelines._load_public()
+    assert pipelines.is_public(kb_id) is True
+    item = next(k for k in pipelines.list_public() if k["kb_id"] == kb_id)
+    assert item["desc"] == ""  # 旧数据没有简介，不编一个出来
+    assert item["at"] == 0  # 也没有分享时间，前端会显示「较早分享」
+
+
+def test_list_public_counts_files_without_leaking_names(kb_id):
+    """广场要文件数，但只能给数量 —— 名字一个都不能出去。"""
+    pipelines.add_file_records(
+        OWNER,
+        kb_id,
+        [
+            {"name": "真题2015.pdf", "chunks": 12, "added_at": 1},
+            {"name": "错题本.md", "chunks": 5, "added_at": 2},
+        ],
+    )
+    pipelines.set_public(OWNER, kb_id, True)
+    item = next(k for k in pipelines.list_public() if k["kb_id"] == kb_id)
+    assert item["files"] == 2
+    assert "真题2015.pdf" not in str(item)
+    assert "错题本.md" not in str(item)

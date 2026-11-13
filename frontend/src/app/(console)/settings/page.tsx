@@ -282,8 +282,8 @@ export default function SettingsPage() {
               ) : profile.picks.length === 0 ? (
                 <>
                   <p className="hint" style={{ marginTop: 8 }}>
-                    还没选过。选 1~3 个方向后，模板广场会按你的兴趣排序，
-                    每日委托也会默认用对应方向 —— 省掉每次重新自我介绍。
+                    还没选过。选 1~3 个方向后，每日委托会默认用对应方向 ——
+                    省掉每次重新自我介绍。
                   </p>
                   <button
                     type="button"

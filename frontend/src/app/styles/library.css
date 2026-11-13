@@ -1,0 +1,777 @@
+/* ============================================================
+   公开知识库广场（/library）
+   视觉沿用苞米地笔记本：暖纸底、卡纸抬一级、金色只给主操作。
+   版式与「知识库」页区分开：那边是左列表右详情的工作台，
+   这边是**浏览**——卡片墙 + 搜索 + 排序，不需要常驻侧栏。
+   ============================================================ */
+
+.lib-boot {
+  display: flex;
+  min-height: 100dvh;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-canvas);
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.lib-root {
+  min-height: 100dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--bg-canvas);
+  color: var(--ink);
+}
+
+/* ---------- 顶栏 ---------- */
+
+.lib-top {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-canvas) 88%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.lib-top-in {
+  display: flex;
+  max-width: 1080px;
+  align-items: center;
+  gap: var(--space-10);
+  margin: 0 auto;
+  padding: 14px 20px;
+}
+
+.lib-logo {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  object-fit: contain;
+}
+
+.lib-head-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.lib-head-text h1 {
+  margin: 0;
+  overflow: hidden;
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: var(--fs-title);
+  font-weight: 700;
+  line-height: var(--lh-tight);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-head-text p {
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-back {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-5);
+  padding: 6px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  transition: border-color 0.16s, color 0.16s, background 0.16s;
+}
+.lib-back:hover {
+  border-color: var(--line-strong);
+  background: var(--fill-3);
+  color: var(--ink);
+}
+
+/* ---------- 主体 ---------- */
+
+.lib-main {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 22px 20px 56px;
+}
+
+/* 开场：说清这里是什么，右边给唯一的主动作 */
+.lib-hero {
+  display: flex;
+  align-items: center;
+  gap: var(--space-16);
+  margin-bottom: var(--space-24, 24px);
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(180deg, var(--accent-soft), transparent 72%),
+    var(--card-bg);
+}
+
+.lib-hero h2 {
+  margin: 0 0 4px;
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  line-height: var(--lh-tight);
+}
+
+.lib-hero p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+}
+.lib-hero p strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* 金色实底主操作：全站只有一处主按钮，不给第二个金底抢注意力 */
+.lib-share {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-6);
+  padding: 9px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.16s, transform 0.16s;
+}
+.lib-share:hover {
+  filter: brightness(1.05);
+}
+.lib-share:active {
+  transform: translateY(1px);
+}
+.lib-share:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* 次要操作：描边，别和金底打架 */
+.lib-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: border-color 0.16s, background 0.16s, color 0.16s;
+}
+.lib-ghost:hover {
+  border-color: var(--line-strong);
+  background: var(--fill-3);
+  color: var(--ink);
+}
+.lib-ghost:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---------- 分组标题（与四屏页面同一套） ---------- */
+
+.lib-sec {
+  margin-bottom: var(--space-20, 20px);
+}
+
+.lib-sec-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin-bottom: var(--space-10);
+}
+
+.lib-count {
+  flex: none;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 我分享的 ---------- */
+
+.lib-mine {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--line);
+  list-style: none;
+}
+
+.lib-mine-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: 9px 12px;
+  background: var(--card-bg);
+  font-size: var(--fs-sm);
+}
+
+.lib-mine-name {
+  flex: none;
+  max-width: 34%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-mine-desc {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-mine-badge {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent-tint);
+  color: var(--accent-ink);
+  font-size: var(--fs-badge);
+  font-weight: 600;
+}
+
+.lib-link {
+  flex: none;
+  color: var(--accent-ink);
+  font-size: var(--fs-xs);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+}
+.lib-link:hover {
+  color: var(--ink);
+}
+
+/* ---------- 工具条 ---------- */
+
+.lib-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  margin-bottom: var(--space-14, 14px);
+  flex-wrap: wrap;
+}
+
+.lib-search {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 240px;
+  align-items: center;
+  gap: var(--space-7);
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card-bg);
+  color: var(--text-3);
+  transition: border-color 0.16s, box-shadow 0.16s;
+}
+.lib-search:focus-within {
+  border-color: var(--line-strong);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.lib-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  padding: 9px 0;
+  background: transparent;
+  color: var(--ink);
+  /* 16px 起步：iOS 对 <16px 的输入框会放大整页 */
+  font-size: 16px;
+  outline: none;
+}
+.lib-search input::placeholder {
+  color: var(--text-3);
+}
+.lib-search button {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--fill-2);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.lib-sort {
+  display: inline-flex;
+  flex: none;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card-bg);
+}
+.lib-sort button {
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition: background 0.16s, color 0.16s;
+}
+.lib-sort button:hover {
+  color: var(--ink);
+}
+.lib-sort button[aria-pressed="true"] {
+  background: var(--accent-tint);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+/* ---------- 卡片墙 ---------- */
+
+.lib-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+  gap: var(--space-12, 12px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lib-card {
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-1);
+  transition: border-color 0.18s, box-shadow 0.18s, transform 0.18s;
+}
+.lib-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-2);
+}
+
+.lib-card-h {
+  display: flex;
+  align-items: center;
+  gap: var(--space-9, 9px);
+  min-width: 0;
+}
+
+.lib-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--accent-tint);
+  color: var(--accent-ink);
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+}
+.lib-mark-sm {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  font-size: var(--fs-sm);
+}
+
+.lib-name {
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 简介固定两行高：卡片高度才会齐，不然一排里长短不一会像没对齐 */
+.lib-card-d {
+  display: -webkit-box;
+  min-height: calc(var(--fs-sm) * var(--lh-body) * 2);
+  margin: 10px 0 0;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.lib-card-d.is-none {
+  color: var(--text-3);
+  font-style: italic;
+}
+
+.lib-card-m {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  margin-top: auto;
+  padding-top: 12px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.lib-dot::before {
+  content: "·";
+}
+
+.lib-owner {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-card-f {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+
+.lib-when {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.lib-open {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  padding: 5px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.16s, color 0.16s, border-color 0.16s;
+}
+.lib-open:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.lib-open:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 骨架屏：只要占位，不做闪动 —— 几百毫秒的事，动画反而更吵 */
+.lib-skel {
+  height: 148px;
+  background: var(--fill-4);
+  box-shadow: none;
+}
+
+/* ---------- 空态 / 页脚 ---------- */
+
+.lib-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-8);
+  padding: 56px 20px;
+  text-align: center;
+}
+
+.lib-empty-icon {
+  width: 34px;
+  height: 34px;
+  color: var(--text-3);
+  opacity: 0.6;
+}
+
+.lib-empty-t {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+
+.lib-empty-d {
+  max-width: 420px;
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+}
+
+.lib-foot {
+  margin: var(--space-24, 24px) 0 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-body);
+  text-align: center;
+}
+
+/* ---------- 分享弹层 ---------- */
+
+.lib-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(35, 28, 17, 0.42);
+  backdrop-filter: blur(2px);
+}
+
+.lib-sheet {
+  display: flex;
+  width: 100%;
+  max-width: 480px;
+  max-height: min(86dvh, 720px);
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-2);
+}
+
+.lib-sheet-h {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.lib-sheet-h h2 {
+  flex: 1;
+  margin: 0;
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: var(--fs-title);
+  font-weight: 700;
+}
+
+.lib-sheet-x {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.lib-sheet-x:hover {
+  background: var(--fill-3);
+  color: var(--ink);
+}
+
+.lib-sheet-lead {
+  margin: 8px 0 14px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+}
+.lib-sheet-lead strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.lib-sheet-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-8);
+  margin: 12px 0 6px;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.lib-sheet-count {
+  color: var(--text-3);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.lib-pick {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lib-pick-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: var(--space-8);
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.16s, background 0.16s;
+}
+.lib-pick-item:hover {
+  background: var(--fill-3);
+}
+.lib-pick-item.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.lib-pick-item > svg {
+  flex: none;
+  color: var(--accent-ink);
+}
+
+.lib-pick-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+}
+.lib-pick-main b {
+  overflow: hidden;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lib-pick-main span {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.lib-desc {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-canvas);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 16px;
+  line-height: var(--lh-body);
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.16s, box-shadow 0.16s;
+}
+.lib-desc:focus {
+  border-color: var(--line-strong);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.lib-desc::placeholder {
+  color: var(--text-3);
+}
+
+.lib-sheet-err {
+  margin: 10px 0 0;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(180, 71, 47, 0.08);
+  color: var(--red-ink);
+  font-size: var(--fs-sm);
+}
+
+.lib-sheet-f {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-8);
+  margin-top: 16px;
+}
+
+.lib-sheet-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-8);
+  padding: 28px 8px 16px;
+  text-align: center;
+}
+
+/* ---------- 窄屏 ---------- */
+
+@media (max-width: 640px) {
+  .lib-top-in {
+    padding: 11px 14px;
+  }
+  /* 标题下面的那句在小屏上挤掉返回按钮，收起来 */
+  .lib-head-text p {
+    display: none;
+  }
+  .lib-main {
+    padding: 16px 14px 40px;
+  }
+  .lib-hero {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-12, 12px);
+  }
+  .lib-hero h2 {
+    font-size: var(--fs-lg);
+  }
+  .lib-share {
+    justify-content: center;
+  }
+  .lib-grid {
+    grid-template-columns: 1fr;
+  }
+  /* 小屏上"我分享的"那行挤四个元素会换行，简介让位给库名与状态 */
+  .lib-mine-desc {
+    display: none;
+  }
+  .lib-tools {
+    gap: var(--space-8);
+  }
+  .lib-search {
+    flex-basis: 100%;
+  }
+  .lib-sheet {
+    max-height: 92dvh;
+    padding: 16px 14px;
+  }
+}
