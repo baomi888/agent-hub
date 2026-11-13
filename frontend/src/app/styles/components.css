@@ -440,6 +440,7 @@ button.kb-chip-unbound:hover {
 
 /* 图标文字按钮 */
 .icon-btn {
+  position: relative;
   background: none;
   border: none;
   cursor: pointer;
@@ -452,6 +453,18 @@ button.kb-chip-unbound:hover {
   letter-spacing: var(--ls-tight);
   transition: var(--t-color);
   border-radius: var(--radius-sm);
+}
+/* 图标按钮的视觉本体只有 25–28px，命中区补到 44×44。
+   用绝对定位的 ::after 而不是撑大 padding：视觉尺寸不变，布局不跟着动。
+   这一类按钮周围是工具栏/行内留白，补出去盖到的都是不可点区域。 */
+.icon-btn::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100%, 44px);
+  height: max(100%, 44px);
+  transform: translate(-50%, -50%);
 }
 .icon-btn:hover {
   color: var(--accent-ink);

@@ -91,20 +91,24 @@ const FREQ_OPTIONS: { value: ReminderFreq; label: string }[] = [
   { value: "once", label: "仅一次" },
 ];
 
-/** 「每天几点」的小时档位。分钟档位不写死 —— 由 `/api/remind` 的 `steps` 给。 */
-const HOURS = Array.from({ length: 24 }, (_, i) => i);
-
 /**
- * 「每天几点」的分钟下拉选项。
+ * 把任意分钟吸附到服务端的档位上（0/15/30/45）。
  *
- * 用服务端给的 `steps`（0/15/30/45）而不是 0–59，是因为后端 `_snap_time` 会把
- * 分钟就近吸附到这四档：列出 20 分的话，用户选了会被存成 15，看起来像「选了没生效」。
- * 当前值万一不在里面（老数据/契约变了），也要补进去 —— 否则 select 找不到匹配项，
- * 显示成空白，用户会以为自己没设过时间。
+ * 后端 `core/reminder_core._snap_time` 会把分钟就近吸附到这四档；前端先吸附一次，
+ * 用户看到的值和存进去的值才一致。不吸附的话，「选了 20 分、存成 15 分」
+ * 在用户那里就是「选了没生效」，而且他找不到原因。
+ * 就近规则与后端逐字相同（取绝对差最小、并列时取靠前一档）。
  */
-function minuteOptions(daily: RemindPref): number[] {
-  if (daily.steps.includes(daily.minute)) return daily.steps;
-  return [...daily.steps, daily.minute].sort((a, b) => a - b);
+function snapMinute(daily: RemindPref, minute: number): number {
+  if (daily.steps.includes(minute)) return minute;
+  return daily.steps.reduce((best, s) => (Math.abs(s - minute) < Math.abs(best - minute) ? s : best));
+}
+
+/** `daily.time` → `<input type="time">` 要的 `HH:MM`（老数据可能没有前导零） */
+function dailyTimeValue(daily: RemindPref): string {
+  const [h, m] = daily.time.split(":").map((n) => Number(n));
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return "08:00";
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
 /**
@@ -2852,6 +2856,28 @@ export default function RemindersPage() {
     [showToast]
   );
 
+  /**
+   * 「每天最多提醒几次」的 −/+ 步进。
+   *
+   * 只留一个 number 输入框时，用户要先点进去、清空、再敲数字；手机上还会弹全键盘。
+   * 这个值实际只在 1–20 之间挪一两格，−/+ 比键盘快，也输不出 0 或 99。
+   * 点一次就存（输入框要等 blur）—— 按下本身就是一次明确的动作。
+   */
+  const bumpCap = useCallback(
+    (delta: number) => {
+      const min = prefs?.cap_min ?? 1;
+      const max = prefs?.cap_max ?? 20;
+      const cur = prefs?.daily_cap ?? 6;
+      const next = Math.max(min, Math.min(max, cur + delta));
+      if (next === cur) return;
+      setData((prev) =>
+        prev?.prefs ? { ...prev, prefs: { ...prev.prefs, daily_cap: next } } : prev
+      );
+      void savePrefs({ daily_cap: next });
+    },
+    [prefs, savePrefs]
+  );
+
   /** 「每天几点做回顾」。
    *
    * 为什么不复用 `savePrefs`：那个走 `/api/reminders/prefs`（免打扰/上限/来源开关），
@@ -3472,35 +3498,27 @@ export default function RemindersPage() {
           {daily ? (
             <section className="card card-pad">
               <h3 className="card-title">每天几点给你做回顾</h3>
-              <p className="mt-1 text-[var(--fs-xs)] text-[var(--text-3)]">
-                到点会把今天剩下的待办、六级和打卡合成一条通知。要不要收，开关在下面的
-                提醒列表里（「每日回顾」那条）—— 这里只管几点。
+              <p className="mt-1 text-[var(--fs-sm)] text-[var(--text-3)]">
+                到点会把今天剩下的待办、六级和打卡合成一条通知。这里只改时间，
+                要不要收在下面提醒列表的「每日回顾」那条里。
               </p>
+              {/* 与「免打扰」同一个控件（type=time），不再用两个 select。
+                  四种「选时间」并排出现，比配色不一致更容易被看见 —— 控件是一套语法。
+                  step=900 让原生选择器只给 00/15/30/45，和 service 的档位对齐；
+                  真被手动键入别的分钟，snapMinute 会在提交前吸附掉。 */}
               <div className="mt-3 flex items-center gap-2">
-                <select
+                <input
+                  type="time"
                   className="input !w-auto"
-                  aria-label="每天几点的小时"
-                  value={daily.hour}
-                  onChange={(e) => void saveDaily(Number(e.target.value), daily.minute)}
-                >
-                  {HOURS.map((h) => (
-                    <option key={h} value={h}>
-                      {String(h).padStart(2, "0")} 点
-                    </option>
-                  ))}
-                </select>
-                <select
-                  className="input !w-auto"
-                  aria-label="每天几点的分钟"
-                  value={daily.minute}
-                  onChange={(e) => void saveDaily(daily.hour, Number(e.target.value))}
-                >
-                  {minuteOptions(daily).map((m) => (
-                    <option key={m} value={m}>
-                      {String(m).padStart(2, "0")} 分
-                    </option>
-                  ))}
-                </select>
+                  aria-label="每天几点做回顾"
+                  step={900}
+                  value={dailyTimeValue(daily)}
+                  onChange={(e) => {
+                    const [h, m] = e.target.value.split(":").map(Number);
+                    if (!Number.isFinite(h) || !Number.isFinite(m)) return;
+                    void saveDaily(h, snapMinute(daily, m));
+                  }}
+                />
                 <span className="text-[var(--fs-xs)] text-[var(--text-3)]">
                   {dailyHint(daily)}
                 </span>
@@ -3510,7 +3528,7 @@ export default function RemindersPage() {
 
           <section className="card card-pad">
             <h3 className="card-title">免打扰时间</h3>
-            <p className="mt-1 text-[var(--fs-xs)] text-[var(--text-3)]">
+            <p className="mt-1 text-[var(--fs-sm)] text-[var(--text-3)]">
               这段时间里的提醒<b>不会发出，也不会事后补发</b>。
             </p>
             <div className="mt-3 flex items-center gap-2">
@@ -3542,24 +3560,48 @@ export default function RemindersPage() {
 
           <section className="card card-pad">
             <h3 className="card-title">每天最多提醒几次</h3>
-            <p className="mt-1 text-[var(--fs-xs)] text-[var(--text-3)]">
+            <p className="mt-1 text-[var(--fs-sm)] text-[var(--text-3)]">
               同一分钟的多条提醒会合并成一条通知，合并后算一次。这个上限只限制发出多少条，
               不影响你建多少提醒。
             </p>
+            {/* − [6] + 步进。输入框留着（可以直接敲），但不再是唯一入口 ——
+                只有它时，手机上得先弹全键盘才能把这个数挪一格。 */}
             <div className="mt-3 flex items-center gap-2">
-              <input
-                type="number"
-                min={prefs?.cap_min ?? 1}
-                max={prefs?.cap_max ?? 20}
-                className="input !w-24"
-                value={prefs?.daily_cap ?? 6}
-                onChange={(e) =>
-                  setData((p) =>
-                    p?.prefs ? { ...p, prefs: { ...p.prefs, daily_cap: Number(e.target.value) } } : p
-                  )
-                }
-                onBlur={(e) => void savePrefs({ daily_cap: Number(e.target.value) })}
-              />
+              <div className="num-step">
+                <button
+                  type="button"
+                  className="num-step-btn"
+                  aria-label="少一次"
+                  disabled={(prefs?.daily_cap ?? 6) <= (prefs?.cap_min ?? 1)}
+                  onClick={() => bumpCap(-1)}
+                >
+                  −
+                </button>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={prefs?.cap_min ?? 1}
+                  max={prefs?.cap_max ?? 20}
+                  className="input num-step-in"
+                  aria-label="每天最多提醒几次"
+                  value={prefs?.daily_cap ?? 6}
+                  onChange={(e) =>
+                    setData((p) =>
+                      p?.prefs ? { ...p, prefs: { ...p.prefs, daily_cap: Number(e.target.value) } } : p
+                    )
+                  }
+                  onBlur={(e) => void savePrefs({ daily_cap: Number(e.target.value) })}
+                />
+                <button
+                  type="button"
+                  className="num-step-btn"
+                  aria-label="多一次"
+                  disabled={(prefs?.daily_cap ?? 6) >= (prefs?.cap_max ?? 20)}
+                  onClick={() => bumpCap(1)}
+                >
+                  +
+                </button>
+              </div>
               <span className="text-[var(--fs-xs)] text-[var(--text-3)]">
                 次（{prefs?.cap_min ?? 1}–{prefs?.cap_max ?? 20}）
               </span>
@@ -3568,7 +3610,7 @@ export default function RemindersPage() {
 
           <section className="card card-pad">
             <h3 className="card-title">哪些功能会提醒你</h3>
-            <p className="mt-1 text-[var(--fs-xs)] text-[var(--text-3)]">
+            <p className="mt-1 text-[var(--fs-sm)] text-[var(--text-3)]">
               关掉一个功能，它安排的提醒都会停。你自己建的待办和提醒不受影响。
             </p>
             {/* 两列：7 个来源原来竖排 7 行、每行只有「名字 + 开关」，
@@ -3592,7 +3634,7 @@ export default function RemindersPage() {
           </section>
 
           {prefs ? (
-            <p className="text-[var(--fs-xs)] text-[var(--text-3)]">
+            <p className="text-[var(--fs-sm)] text-[var(--text-3)]">
               免打扰 {prefs.quiet_start}–{prefs.quiet_end} · 每天最多提醒 {prefs.daily_cap} 次
             </p>
           ) : null}

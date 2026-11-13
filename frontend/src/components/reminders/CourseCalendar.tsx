@@ -272,7 +272,7 @@ export default function CourseCalendar() {
           {/* 日历留作备选：有人就是想让它在自带日历里也出现一条 */}
           <details className="rem-caldetails mt-3">
             <summary>也想在手机自带的日历里看到课表</summary>
-            <p className="mt-2 text-[var(--fs-xs)] text-[var(--text-3)]">
+            <p className="mt-2 text-[var(--fs-sm)] text-[var(--text-3)]">
               两件事可以同时开：上面的提醒是弹一条通知，日历是把整学期课表画进日历。
             </p>
             <div className="row gap-2 mt-2" style={{ flexWrap: "wrap" }}>

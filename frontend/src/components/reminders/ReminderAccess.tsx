@@ -223,11 +223,11 @@ export default function ReminderAccess() {
         />
       </div>
 
-      <p className="mt-1 text-[var(--fs-xs)] text-[var(--text-3)]">{hint}</p>
+      <p className="mt-1 text-[var(--fs-sm)] text-[var(--text-3)]">{hint}</p>
 
       {alive.length > 0 ? (
         <div className="mt-3">
-          <p className="text-[var(--fs-xs)] text-[var(--text-3)]">
+          <p className="text-[var(--fs-sm)] text-[var(--text-3)]">
             已开启提醒 {alive.length} 台
           </p>
           {alive.map((d) => {
@@ -251,14 +251,14 @@ export default function ReminderAccess() {
                       <span className="text-[var(--fs-xs)] text-[var(--text-3)]"> · 这台</span>
                     ) : null}
                   </div>
-                  <p className="mt-0.5 text-[var(--fs-xs)] text-[var(--text-3)]">
+                  <p className="mt-0.5 text-[var(--fs-sm)] text-[var(--text-3)]">
                     {d.last_ok_at ? `最近成功 ${fmtTs(d.last_ok_at)}` : "已登记，还没发过"}
                   </p>
                 </div>
                 {/* 本机不在这里给按钮：上面的开关就是它的开关，两个控件管一件事
                     只会让人怀疑自己点的是哪一个 */}
                 {isMine ? (
-                  <span className="text-[var(--fs-xs)] text-[var(--text-3)]">用上面的开关</span>
+                  <span className="text-[var(--fs-sm)] text-[var(--text-3)]">用上面的开关</span>
                 ) : (
                   <button
                     type="button"
@@ -288,7 +288,7 @@ export default function ReminderAccess() {
       ) : null}
 
       {note ? (
-        <p className="mt-2 text-[var(--fs-xs)] text-[var(--text-3)]">{note}</p>
+        <p className="mt-2 text-[var(--fs-sm)] text-[var(--text-3)]">{note}</p>
       ) : null}
     </section>
   );

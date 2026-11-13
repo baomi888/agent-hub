@@ -172,7 +172,7 @@ export default function MailAccess() {
         ) : null}
       </div>
 
-      <p className="mt-1 text-[var(--fs-xs)] text-[var(--text-3)]">
+      <p className="mt-1 text-[var(--fs-sm)] text-[var(--text-3)]">
         {!loaded
           ? "正在读邮件设置…"
           : !ready
@@ -188,7 +188,7 @@ export default function MailAccess() {
       {/* 验证码已发出：填码 + 重发 */}
       {state?.pending ? (
         <div className="mt-3">
-          <p className="text-[var(--fs-xs)] text-[var(--text-3)]">
+          <p className="text-[var(--fs-sm)] text-[var(--text-3)]">
             验证码已发到 {state.address}，{fmtLeft(left)}内有效
           </p>
           <div className="row gap-2 mt-2" style={{ alignItems: "center" }}>
@@ -296,7 +296,7 @@ export default function MailAccess() {
       ) : null}
 
       {note ? (
-        <p className="mt-2 text-[var(--fs-xs)] text-[var(--text-3)]">{note}</p>
+        <p className="mt-2 text-[var(--fs-sm)] text-[var(--text-3)]">{note}</p>
       ) : null}
     </section>
   );

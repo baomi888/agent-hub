@@ -78,6 +78,11 @@
   align-items: center;
   gap: var(--space-8);
   padding: var(--space-8) var(--space-10);
+  /* 触控下限：导航是每页点十几次的地方，34px 高会让手指点在两行之间点错。
+     44 是项目自己的规矩，桌面这一侧四周都是空白，直接抬高度没有副作用。
+     手机那套 3 列网格暂不动 —— 那一块要整体换成底部 tab（第三批），
+     现在单独抬高只会把首屏再挤一屏。 */
+  min-height: 44px;
   border-radius: var(--radius-sm);
   font-size: var(--fs-md);
   color: var(--text-2);
@@ -259,8 +264,10 @@
 .btn-sm {
   padding: 7px 12px;
   font-size: var(--fs-sm);
-  /* 小按钮不再往下缩：34px 是「桌面密度」与「点得中」的下限 */
-  min-height: 34px;
+  /* 34 → 38：34 是「桌面鼠标」的下限，但设置页这类按钮在手机上也点，
+     26–34px 高的按钮手指经常擦过去。38 不改变卡片密度观感，只是把
+     padding 吃掉的那几像素还给命中区 */
+  min-height: 38px;
 }
 .btn-danger {
   border-color: rgba(180, 71, 47, 0.35);
@@ -389,7 +396,10 @@
   margin: 0 0 var(--space-10);
 }
 .hint {
-  font-size: var(--fs-xs);
+  /* 说明句走 sm 不走 xs：这一档承载的是**给人读的整句**，
+     13px 撑一整段话是上一轮「字太小」的原始出处（R5 硬规则：
+     超过 15 个字的句子不许用 xs，见 tokens.css 字号段） */
+  font-size: var(--fs-sm);
   color: var(--text-3);
   margin: var(--space-10) 0 0;
   line-height: var(--lh-body);
@@ -498,6 +508,68 @@ textarea.input {
   resize: vertical;
   line-height: var(--lh-body);
 }
+
+/* 数字步进：− [6] + 。三个控件贴成一条、共享一圈描边，读成"一个控件"。
+   按钮视觉 40px 高（与输入框齐平），命中区用 ::after 补到 44px ——
+   手指点在边上那 2px 是最常见的误触来源。 */
+.num-step {
+  display: inline-flex;
+  align-items: stretch;
+}
+.num-step .num-step-btn {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  min-height: 40px;
+  border: 1px solid var(--input-border);
+  background: var(--step-2);
+  color: var(--text-2);
+  font-size: var(--fs-lg);
+  line-height: 1;
+  flex: none;
+  transition: var(--t-color);
+}
+.dark .num-step .num-step-btn {
+  background: var(--step-1);
+}
+.num-step .num-step-btn:first-child {
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  border-right: 0;
+}
+.num-step .num-step-btn:last-child {
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  border-left: 0;
+}
+.num-step .num-step-btn:hover:not(:disabled) {
+  background: var(--fill-3);
+  color: var(--text-1);
+}
+.num-step .num-step-btn:disabled {
+  color: var(--text-3);
+  opacity: 0.45;
+  cursor: default;
+}
+.num-step .num-step-btn::after {
+  content: "";
+  position: absolute;
+  inset: -2px -2px;
+}
+.num-step .num-step-in {
+  width: 56px;
+  text-align: center;
+  border-radius: 0;
+}
+/* 去掉原生上下箭头：56px 宽的框里再塞两条细三角，会和左右两个按钮抢视线 */
+.num-step .num-step-in::-webkit-outer-spin-button,
+.num-step .num-step-in::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.num-step .num-step-in {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
 .field + .field {
   margin-top: var(--space-14);
 }
@@ -513,7 +585,13 @@ textarea.input {
   overflow: hidden;
 }
 .seg button {
-  padding: var(--space-6) var(--space-12);
+  /* 44 高而不是 32：这是每个页面顶部的切换器，每天点几十次。
+     靠 min-height 而不是 ::after 补命中区 —— .seg 上有 overflow:hidden
+     （用来裁圆角），补出去的部分会被裁掉，做出来是个假的 44。 */
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 var(--space-12);
   font-size: var(--fs-sm);
   color: var(--text-2);
   transition: var(--t-color);
@@ -1222,6 +1300,10 @@ textarea.input {
     gap: var(--space-5);
     padding: var(--space-7) var(--space-4);
     font-size: var(--fs-sm);
+    /* 退回紧凑高度：桌面那侧的 44px 在 3 列网格里会把整块拉高 36px，
+       而这一块本身要在第三批换成底部 tab（换完每项 48px、首屏还多出 200px）。
+       现在抬高的收益只是 9px 的手指余量，代价是首屏再少看一条待办。 */
+    min-height: 0;
     /* 标签一律不许折行：折行会让某一行比别的行高，整块网格看着是歪的 */
     white-space: nowrap;
   }

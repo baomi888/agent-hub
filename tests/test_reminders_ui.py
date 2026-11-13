@@ -2577,8 +2577,9 @@ class TestDailyTimeEntry:
     想改几点却只能删掉重建 —— 而「删了重建」会丢掉送达流水，
     也解释不了「为什么不能直接改」。
 
-    这一组同时钉住两条不给回退的路：分钟档位必须来自服务端、关闭态必须说清
-    「改时间会重新开启」。
+    2026-11-13 第二批把控件从「两个 select」换成 `type=time`（与免打扰同款）。
+    下面几条钉的是**换完之后仍然成立**的约束，不是当时那一版的实现细节：
+    分钟仍受服务端档位约束、卡里仍不许长开关、关闭态仍要说清会被重新开启。
     """
 
     def test_settings_has_the_control(self):
@@ -2588,19 +2589,30 @@ class TestDailyTimeEntry:
         assert "api.remind.get()" in page
         assert "api.remind.set(" in page
 
-    def test_minutes_come_from_the_server(self):
-        """分钟档位不能写死 0–59。
+    def test_uses_the_same_control_as_quiet_hours(self):
+        """同一屏里四种「选时间」是上一轮的毛病：两个 select + 两个 type=time。
 
-        后端 `_snap_time` 只接受 0/15/30/45，前端列出 20 分的话，用户选了会被
-        存成 15 —— 界面上看就是「我选的时间没生效」，而且找不到原因。
+        控件是一套语法，同一屏里出现两种选时间的方式，比配色不一致更容易被看见。
+        现在统一成 type=time —— 这张卡里不许再出现 select。
+        """
+        page = _page()
+        i = page.index("每天几点给你做回顾")
+        block = page[i : i + 2000]
+        assert 'type="time"' in block, "每天几点必须用 type=time（与免打扰同款）"
+        assert "<select" not in block, "这张卡里不许再有 select"
+
+    def test_minutes_come_from_the_server(self):
+        """分钟仍然只允许 0/15/30/45，且档位来自服务端。
+
+        后端 `_snap_time` 只接受这四档。换成 type=time 之后，
+        「可选范围」由两件事一起保证：`step={900}` 让原生选择器只给这四档，
+        `snapMinute` 把手动键入的分钟在提交前吸附掉。
+        少任何一个，用户都会遇到「选了 20 分、存成 15 分」却说不出原因。
         """
         page = _page()
         assert "daily.steps" in page, "分钟档位必须取 /api/remind 的 steps"
-        assert "minuteOptions" in page
-
-    def test_hour_options_cover_the_whole_day(self):
-        """0–23 点都要有：只给「早 8 点到晚 10 点」会让上夜班/早起的人无从选。"""
-        assert "length: 24" in _page()
+        assert "snapMinute" in page, "手动键入的分钟必须在提交前吸附"
+        assert "step={900}" in page, "原生时间选择器必须按 15 分钟步进"
 
     def test_closed_state_says_editing_reopens_it(self):
         """关掉之后改时间会重新启用（`set_system_time` 的语义就是「改到这个点并启用」）。
@@ -2615,60 +2627,7 @@ class TestDailyTimeEntry:
         同一件事两个开关必然打架 —— 用户在卡上关了，列表里还显示开着，
         或者反过来，而两边都读同一个 `enabled`。
         """
-        # 卡里只允许两个 select（时/分），不许出现 Switch
         page = _page()
         i = page.index("每天几点给你做回顾")
-        block = page[i : i + 1600]
-        assert "<Switch" not in block, "设置卡里又长出一个开关，会和列表里那条打架"
-
-
-class TestDailyTimeEntry:
-    """「每天几点做回顾」必须在设置页有入口（2026-11-13 补上）。
-
-    在这之前这个值只活在库里和调度器里：用户能在列表里看到「每日回顾」那条，
-    想改几点却只能删掉重建 —— 而「删了重建」会丢掉送达流水，
-    也解释不了「为什么不能直接改」。
-
-    这一组同时钉住两条不给回退的路：分钟档位必须来自服务端、关闭态必须说清
-    「改时间会重新开启」。
-    """
-
-    def test_settings_has_the_control(self):
-        page = _page()
-        assert "每天几点给你做回顾" in page
-        # 读要能读到当前值，写要真的写回去 —— 只有半边的入口等于摆设
-        assert "api.remind.get()" in page
-        assert "api.remind.set(" in page
-
-    def test_minutes_come_from_the_server(self):
-        """分钟档位不能写死 0–59。
-
-        后端 `_snap_time` 只接受 0/15/30/45，前端列出 20 分的话，用户选了会被
-        存成 15 —— 界面上看就是「我选的时间没生效」，而且找不到原因。
-        """
-        page = _page()
-        assert "daily.steps" in page, "分钟档位必须取 /api/remind 的 steps"
-        assert "minuteOptions" in page
-
-    def test_hour_options_cover_the_whole_day(self):
-        """0–23 点都要有：只给「早 8 点到晚 10 点」会让上夜班/早起的人无从选。"""
-        assert "length: 24" in _page()
-
-    def test_closed_state_says_editing_reopens_it(self):
-        """关掉之后改时间会重新启用（`set_system_time` 的语义就是「改到这个点并启用」）。
-
-        不写这句，用户关掉后碰了一下时间、第二天又收到通知，会以为关不掉。
-        """
-        assert "改时间会重新开启" in _page()
-
-    def test_switches_stay_in_one_place(self):
-        """这张卡不另开一个开关：列表里那条「每日回顾」已经是开关。
-
-        同一件事两个开关必然打架 —— 用户在卡上关了，列表里还显示开着，
-        或者反过来，而两边都读同一个 `enabled`。
-        """
-        # 卡里只允许两个 select（时/分），不许出现 Switch
-        page = _page()
-        i = page.index("每天几点给你做回顾")
-        block = page[i : i + 1600]
+        block = page[i : i + 2000]
         assert "<Switch" not in block, "设置卡里又长出一个开关，会和列表里那条打架"

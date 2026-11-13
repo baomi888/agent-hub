@@ -243,6 +243,7 @@
   gap: var(--space-2);
 }
 .fs-picker-opts button {
+  position: relative;
   border: none;
   background: none;
   cursor: pointer;
@@ -250,9 +251,22 @@
   white-space: nowrap;
   font-size: var(--fs-sm);
   color: var(--text-2);
-  padding: 4px 7px;
+  /* 只抬高度不抬宽度：19 个字宽 + 四个 chip 已经贴满 190px 侧栏，
+     左右再加 padding 会把「标准」挤到第二行。高度 30→36 换来的
+     是竖着点的时候不容易擦到相邻那格 */
+  display: inline-grid;
+  place-items: center;
+  min-height: 36px;
+  padding: 0 7px;
   border-radius: 999px;
   transition: background-color 0.18s ease, color 0.18s ease;
+}
+/* 命中区补到 44 高，水平只扩 1px —— chip 之间只有 2px 缝，
+   左右扩多了会盖住隔壁那个按钮 */
+.fs-picker-opts button::after {
+  content: "";
+  position: absolute;
+  inset: -4px -1px;
 }
 .fs-picker-opts button:hover {
   color: var(--text-1);
