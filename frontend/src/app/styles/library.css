@@ -1417,6 +1417,11 @@
   border: 1px dashed var(--line);
   border-radius: var(--radius-sm);
   background: var(--fill-3);
+  /* 48 个表情不折成一屏：面板限高内部滚动，否则输入区被推走一大截。
+     overscroll-behavior 防止滚到头继续带动整页（手机上一滑就跑到页面别处） */
+  max-height: 172px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .kb-board-sticker {
@@ -1480,8 +1485,12 @@
 
 .kb-post-h {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  /* 一行放不下（金标 + 名字 + 我 + 回复@ + 时间 + 操作）就换行，
+     不允许挤压或横向溢出 —— 390px 上这几个元素真的排不下 */
+  row-gap: 3px;
   color: var(--text-3);
   font-size: var(--fs-xs);
 }
@@ -1504,17 +1513,68 @@
   font-size: 10px;
 }
 
-.kb-post-del {
+.kb-post-acts {
+  /* 操作区靠右：删除/回复都在这儿，别让它们把名字和时间挤走 */
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
   margin-left: auto;
+}
+
+.kb-post-act {
+  padding: 2px 5px;
   border: 0;
+  border-radius: 5px;
   background: transparent;
   color: var(--text-3);
   font-size: var(--fs-xs);
+  line-height: 1.4;
   cursor: pointer;
+}
+
+.kb-post-act:hover {
+  background: var(--fill-2);
+  color: var(--accent-ink);
 }
 
 .kb-post-del:hover {
   color: var(--red-ink);
+}
+
+/* 管理员金标。做成"金属小牌"而不是纯色块：纯色在浅纸底上更像警告条，
+   一道顶部内高光 + 一道极淡投影才像徽章。字色用 --on-accent 系的深褐，
+   压在金底上是 6:1 以上，深色主题下同样成立（金不变、字仍深）。 */
+.kb-role {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, #e8bc66 0%, #c8892a 58%, #b0761f 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    0 1px 2px rgba(122, 81, 13, 0.2);
+  color: #2a2113;
+  font-size: 10px;
+  font-weight: 600;
+  font-style: normal;
+  letter-spacing: 0.02em;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+/* 「回复 @某某」：说明这条在回谁。金色文字，与名字区分开 */
+.kb-post-to {
+  flex: none;
+  color: var(--accent-ink);
+  font-size: var(--fs-xs);
+}
+
+/* 被选中要回复的那条给一层淡金底，输入框离得远时也知道自己在回谁 */
+.kb-post.is-target {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .kb-post-b {
@@ -1525,6 +1585,72 @@
   /* 保留用户敲的换行；长串（链接、公式）必须能断，否则手机上整页横向滚 */
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* ---------- 楼中楼：一栋楼里的回复（只有两级）----------
+   左边一条竖线是论坛最省空间的层级表达：比缩进整块少占宽度，手机上还能读。
+   缩进只给 12px —— 再深一点，390px 屏上每行就只剩二十来个字了。 */
+.kb-replies {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 6px 0 0;
+  padding: 0 0 0 12px;
+  border-left: 2px solid var(--accent-line);
+  list-style: none;
+}
+
+.kb-post.kb-reply {
+  padding: 7px 8px;
+  border-radius: var(--radius-sm);
+}
+
+/* 回复的头像小一号：视觉上"比楼主轻"，一眼能分出层级 */
+.kb-post-ava.is-reply {
+  width: 24px;
+  height: 24px;
+}
+
+.kb-reply .kb-post-h b {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+/* 输入框上方的「回复 @某某  取消」条 */
+.kb-board-replying {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px 5px 10px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: var(--accent-soft);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+
+.kb-board-replying b {
+  color: var(--accent-ink);
+}
+
+.kb-board-replying button {
+  margin-left: auto;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.kb-board-replying button:hover {
+  color: var(--red-ink);
+}
+
+/* 回复状态下输入框和上面那条提示连成一块，圆角只留下面 */
+.kb-board-replying + .kb-board-input {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
 }
 
 .kb-board-empty {
@@ -1578,5 +1704,102 @@
     width: 40px;
     height: 40px;
     font-size: 22px;
+  }
+  /* 回复/删除是文字按钮，桌面上 20px 高够用；手机上手指点不中，
+     补到 30px 高（再高就把两行的头部撑成三行） */
+  .kb-post-act {
+    min-height: 30px;
+    padding: 4px 8px;
+  }
+  /* 手机上缩进只留 10px：390 宽减掉两侧 32 + 头像 32 后，
+     每多缩 1px 都是从正文里扣的 */
+  .kb-replies {
+    padding-left: 10px;
+  }
+}
+
+/* ---------- 2026-11-13：公开库的访问方式 / 浏览数 / 资料搜索 ---------- */
+
+/* 「仅观看」标：与管理员金标区分开，用中性描边而不是金色 ——
+   金色在这套样式里代表"官方/选中"，这里表达的是"受限"。 */
+.lib-access {
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--fill-3);
+  color: var(--text-3);
+  font-size: 10px;
+  line-height: 1.7;
+  white-space: nowrap;
+}
+
+/* 分享弹层里的"别人能做什么"：两张并排的选项卡，选中描金 */
+.lib-access-pick {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 1fr;
+  margin-bottom: 14px;
+}
+
+.lib-access-opt {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--fill-3);
+  text-align: left;
+  cursor: pointer;
+}
+
+.lib-access-opt b {
+  color: var(--ink);
+  font-size: var(--fs-sm);
+}
+
+.lib-access-opt span {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+.lib-access-opt:hover {
+  border-color: var(--accent-line);
+}
+
+.lib-access-opt.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.lib-access-opt.on b {
+  color: var(--accent-ink);
+}
+
+/* 卡片上的「查看资料」：和留言按钮同样式，但它是链接 */
+.lib-view-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+/* 详情页的资料搜索：和广场那个 .lib-search 同一副样子，
+   只是这里单独控制上下间距 */
+.lib-file-search {
+  margin: 4px 0 14px;
+}
+
+@media (max-width: 640px) {
+  /* 手机上两列选项卡会把说明文字压成三行，改成上下两块 */
+  .lib-access-pick {
+    grid-template-columns: 1fr;
+  }
+  .lib-access-opt {
+    padding: 9px 11px;
+  }
+  /* 资料行本来就窄，「仅观看」这一列别换行 */
+  .lib-file-na {
+    white-space: nowrap;
   }
 }

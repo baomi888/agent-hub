@@ -21,7 +21,7 @@ import { useToast } from "@/lib/hooks/useToast";
 import { fmtNum, fmtWhen } from "@/lib/time";
 import { CHUNK_PROFILES, nearestProfileId, profileParams, type ChunkProfileId } from "@/lib/chunkProfiles";
 import { loadKbChunks, saveKbChunks, type KbChunkMap } from "@/lib/kbChunkPrefs";
-import type { Defaults, FilePreview, KbFile, KbInfo } from "@/lib/types";
+import type { AccessMode, Defaults, FilePreview, KbFile, KbInfo } from "@/lib/types";
 
 /** 文件类型标：只区分"读得出来的三类 + 其它"，不追求完整 MIME */
 function kindOf(name: string): "pdf" | "doc" | "text" | "other" {
@@ -62,6 +62,8 @@ export default function KnowledgePage() {
   const [confirmPub, setConfirmPub] = useState<string | null>(null);
   /** 确认条里那句简介的草稿。打开确认条时用 public_desc 预填，收进 state 才能编辑 */
   const [pubDesc, setPubDesc] = useState("");
+  /** 公开期间别人能做什么：仅观看 / 可下载（2026-11-13） */
+  const [pubAccess, setPubAccess] = useState<AccessMode>("preview");
   const [dragging, setDragging] = useState(false);
   /** 每个库上次用的切法（kb_id → 参数）。后端不记这件事，存在本地，
       和首页资料库面板共用同一份 baomi.kbChunk.v1 —— 两个入口改的是同一件事，
@@ -244,11 +246,16 @@ export default function KnowledgePage() {
     if (!active || busy) return;
     setBusy("public");
     try {
-      await api.setKbPublic(active.kb_id, true, pubDesc.trim());
+      await api.setKbPublic(active.kb_id, true, pubDesc.trim(), pubAccess);
       await refresh(active.kb_id);
       // 成功才收起确认条；失败时留着，用户可以直接再点一次
       setConfirmPub(null);
-      showToast("success", `「${active.name}」已分享到广场，其他用户可以在对话里检索它`);
+      showToast(
+        "success",
+        `「${active.name}」已分享到广场，其他用户可以在对话里检索它${
+          pubAccess === "download" ? "并下载原件" : "、在线预览（不提供下载）"
+        }`,
+      );
     } catch (e) {
       showToast("error", errMsg(e, "分享失败，请稍后重试"));
     } finally {
@@ -476,6 +483,7 @@ export default function KnowledgePage() {
                           void withdrawFromPlaza();
                         } else {
                           setPubDesc(active.public_desc ?? "");
+                          setPubAccess(active.public_access ?? "preview");
                           setConfirmPub(active.kb_id);
                         }
                       }}
@@ -491,6 +499,7 @@ export default function KnowledgePage() {
                         title="改广场卡片上那句简介，不影响谁能检索"
                         onClick={() => {
                           setPubDesc(active.public_desc ?? "");
+                          setPubAccess(active.public_access ?? "preview");
                           setConfirmPub(active.kb_id);
                         }}
                       >
@@ -524,8 +533,8 @@ export default function KnowledgePage() {
                     <span>
                       {active.public
                         ? `改一下「${active.name}」在广场上的简介。改简介不影响谁能检索它。`
-                        : `分享「${active.name}」到广场？其他登录用户都能在对话里检索这 ${files.length} 份资料，也能据它提问；
-                           文件清单、上传和删除仍然只有你能做，随时可以收回。`}
+                        : `分享「${active.name}」到广场？其他登录用户都能在对话里检索这 ${files.length} 份资料，
+                           也能点进去看清单。上传和删除仍然只有你能做，随时可以收回。`}
                     </span>
                     <label className="kbp-pub-desc" htmlFor="kbp-pub-desc">
                       <span>一句话简介（选填）</span>
@@ -539,13 +548,36 @@ export default function KnowledgePage() {
                       />
                       <em>{pubDesc.length}/200</em>
                     </label>
+                    <div className="kbp-access">
+                      <span>别人能做什么</span>
+                      <div className="kbp-access-pick" role="radiogroup" aria-label="访问方式">
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={pubAccess === "preview"}
+                          className={"kbp-access-opt" + (pubAccess === "preview" ? " on" : "")}
+                          onClick={() => setPubAccess("preview")}
+                        >
+                          仅观看<span>能看清单和预览，不能下载</span>
+                        </button>
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={pubAccess === "download"}
+                          className={"kbp-access-opt" + (pubAccess === "download" ? " on" : "")}
+                          onClick={() => setPubAccess("download")}
+                        >
+                          可以下载<span>还能把原件存到本地</span>
+                        </button>
+                      </div>
+                    </div>
                     <button
                       type="button"
                       className="btn btn-primary btn-sm"
                       disabled={busy === "public"}
                       onClick={() => void shareToPlaza()}
                     >
-                      {busy === "public" ? "处理中…" : active.public ? "保存简介" : "确认分享"}
+                      {busy === "public" ? "处理中…" : active.public ? "保存设置" : "确认分享"}
                     </button>
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmPub(null)}>
                       {active.public ? "取消" : "先不分享"}

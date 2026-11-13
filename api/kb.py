@@ -39,7 +39,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.schemas import KBQueryResponse
-from core import account, config, kb_board, quota, upload
+from core import account, config, kb_board, kb_views, quota, upload
 from core import session as store
 from core.auth import get_current_user
 from core.netsafe import assert_safe_url
@@ -309,6 +309,11 @@ class VisibilityRequest(BaseModel):
         max_length=200,
         description="广场上那句简介。不传 = 不动已有简介；传空串 = 清空",
     )
+    access: str | None = Field(
+        None,
+        pattern="^(preview|download)$",
+        description="公开后别人能做什么：preview=仅观看（可预览不可下载），download=可下载。不传=不动",
+    )
 
 
 def _owner_display_name(uid: str) -> str:
@@ -331,29 +336,38 @@ def _owner_display_name(uid: str) -> str:
 async def set_kb_visibility(
     kb_id: str, req: VisibilityRequest, uid: str = Depends(get_current_user)
 ) -> dict:
-    """设置知识库公开状态与广场简介（仅库主）。
+    """设置知识库公开状态、广场简介与访问方式（仅库主）。
 
-    公开只放开「他人可只读检索」一件事：文件清单、上传、删除永远只有
-    库主能动。收回公开立即生效——别人的对话里还挂着这个库的话，下一轮
-    提问的认主逻辑会把它按"没绑"处理，不需要对方做什么。
+    公开后别人能做什么由 `access` 决定（2026-11-13 起）：
+      - `preview`（默认）→ 能看文件清单、在线预览，**不能下载原件**；
+      - `download`      → 再加一项"下载原件"。
+    文件清单从此也对同学分享的库开放了 —— 这是用户明确要的（"同学可以设置
+    仅观看还是可以下载"）。上传、删除、改归属仍然只有库主能动。
+    收回公开立即生效——别人的对话里还挂着这个库的话，下一轮提问的认主
+    逻辑会把它按"没绑"处理，不需要对方做什么。
     """
     _must_own(uid, kb_id)
     # 简介归一化：纯空白等于没写。None 表示"这次别动简介"（收回时不传）
     desc = req.desc.strip() if req.desc is not None else None
     try:
-        meta = pipelines.set_public(uid, kb_id, req.public, desc)
+        meta = pipelines.set_public(uid, kb_id, req.public, desc, access=req.access)
     except pipelines.NotOwned:  # _must_own 之后库被并发删掉的窄窗口
         raise HTTPException(status_code=404, detail=f"知识库不存在：{kb_id}") from None
-    return {"kb_id": kb_id, "public": req.public, "desc": meta.get("desc") or ""}
+    return {
+        "kb_id": kb_id,
+        "public": req.public,
+        "desc": meta.get("desc") or "",
+        "access": "download" if meta.get("access") == "download" else "preview",
+    }
 
 
 @router.get("/public")
 async def list_public_kbs(uid: str = Depends(get_current_user)) -> dict:
     """公开知识库广场的列表（全站登录用户可见）。
 
-    比"能检索"多回展示用元信息：简介、文件数、作者显示名、分享时间。
-    两条边界仍然守着：
-      - 不含文件清单，只给数量；
+    比"能检索"多回展示用元信息：简介、文件数、作者显示名、分享时间、留言数、
+    浏览数。两条边界仍然守着：
+      - **列表里**不含文件清单，只给数量（清单要点进详情才给，见 `GET /public/{kb_id}`）；
       - 不回库主的 uid，只回显示名（uid 是内部标识，没必要抛给前端）。
     调用者自己的库不重复出现 —— 它们在 GET /api/kb/ 里，广场另有「我的」分组。
     """
@@ -362,12 +376,15 @@ async def list_public_kbs(uid: str = Depends(get_current_user)) -> dict:
     # 留言数一次查全：广场上十几个库，逐个 count 就是十几次查询，而卡片上
     # 「N 条留言」本来就是让人判断"这个库有没有人在讨论"的信号，不能没有。
     post_counts = await asyncio.to_thread(kb_board.counts_by_kb)
+    view_counts = await asyncio.to_thread(kb_views.counts)
     out = []
     for k in kbs:
         if k["kb_id"] in mine:
             continue
         k = dict(k)
         k["posts"] = post_counts.get(k["kb_id"], 0)
+        # 浏览数（独立访客）：卡片上「N 人看过」，也是"最多人用的库"这个排序的依据
+        k["views"] = view_counts.get(k["kb_id"], 0)
         # 官方库没有真实账号，`_owner_display_name` 查不到人只会回空串；
         # 这里直接署名"官方"，避免卡片上出现"某位同学"这种明显不对的说法
         k["owner_name"] = "官方" if k.get("official") else await asyncio.to_thread(
@@ -378,15 +395,17 @@ async def list_public_kbs(uid: str = Depends(get_current_user)) -> dict:
     return {"kbs": out}
 
 
-# ==================== 官方课程库（只读，可看文件、可下原文）====================
+# ============ 公开库详情与原文（官方库 + 用户主动公开的库）============
 #
-# 与"用户分享的公开库"的区别只有一条，但这条不能含糊：
-#   - 用户分享的库：别人只能拿它做检索，**看不到文件清单**（广场列表里那句
-#     "文件清单仍然不给"仍然成立）；
-#   - 官方课程库：资料本身就是公开课程材料，允许列清单、在线预览、下载原文。
-# 所以下面每条路都先过 `_official_kb_or_404`，它同时要求
-# "在公开登记表里" + "带 official 标记"——用户自己发的库永远拿不到这个标记
-# （标记只有导入脚本能写，见 pipelines.set_public 的 official 参数）。
+# 2026-11-13 之前只有官方库能列清单：同学分享的库"只能检索，看不到文件"。
+# 用户后来要求"同学分享的库也能预览、能下载，由库主自己定仅观看还是可下载"，
+# 于是这三条路（详情 / 原文 / 正文）统一改走 `_public_detail_or_404`：
+#   - **能看清单**：所有已公开的库（官方 + 同学公开）；
+#   - **能不能下载**：官方库始终可以；用户库看 `access`（preview/download）；
+#   - **上传/删除/改归属**：仍然只认库主（`_must_own`），公开与此无关。
+# 官方标记本身仍然只有导入脚本能写；用户库即使公开也拿不到"官方"。
+# 所以 `_official_kb_or_404` 保留给"必须确认是官方"的场合（如统计官方资料用量），
+# 上面三条路不再用它。
 
 # 浏览器能直接内嵌显示的：PDF 用内置阅读器，图片直接 <img>
 _INLINE_EXT = (".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif")
@@ -413,7 +432,8 @@ def _official_kb_or_404(kb_id: str) -> str:
     """确认这是官方公开库，返回它真正的 owner；否则 404。
 
     ★ 404 而不是 403：和 `_must_own` 一个道理，403 等于承认"这个 kb_id 是真的"。
-    普通用户分享的库打到这里也是 404 —— 不给它任何"文件清单可读"的错觉。
+    详情/原文/正文三条路已经改走 `_public_detail_or_404`（同学公开的库也能看），
+    这个函数留给"确实要区分官方"的调用方。
     """
     owner = pipelines.owner_of(kb_id)
     if not owner or not pipelines.is_official(kb_id):
@@ -422,7 +442,7 @@ def _official_kb_or_404(kb_id: str) -> str:
 
 
 def _official_file_record(owner: str, kb_id: str, name: str) -> dict:
-    """在官方库的文件清单里按展示名找一条记录；找不到 404。
+    """在公开库的文件清单里按展示名找一条记录；找不到 404。
 
     这张清单同时是**白名单**：只有登记过的名字才允许读盘。
     虽然 source_path 是哈希拼出来的、本身就穿越不出去，但"能读的文件
@@ -443,14 +463,41 @@ def _official_file_record(owner: str, kb_id: str, name: str) -> dict:
     raise HTTPException(status_code=404, detail=f"资料不存在：{name}")
 
 
+def _public_detail_or_404(kb_id: str) -> tuple[str, dict]:
+    """这个库能不能被别人打开看资料：官方库，或用户主动公开的库。
+
+    返回 `(owner, meta)`。私有库一律 404 —— 与 `_must_own` 同一个道理：
+    403 等于告诉对方"这个 kb_id 是真的，只是你看不到"。
+
+    ★ 2026-11-13 起用户分享的库也走这条路（用户要求"同学也可以自定义
+      仅观看还是可以下载"）。能不能看清单不再由 official 独占；
+      "能不能下载"由库主的 `access` 决定，官方库始终可下载。
+    """
+    owner = pipelines.owner_of(kb_id)
+    if not owner or not pipelines.is_public(kb_id):
+        raise HTTPException(status_code=404, detail="知识库不存在或没有公开")
+    return owner, pipelines.public_meta(kb_id)
+
+
+def _access_of(meta: dict) -> str:
+    """老数据没有 access 字段 → 按最保守的"仅观看"处理。"""
+    return "download" if meta.get("access") == "download" else "preview"
+
+
 @router.get("/public/{kb_id}")
 async def get_official_kb(kb_id: str, uid: str = Depends(get_current_user)) -> dict:
-    """官方课程库详情：课程简介 + 文件清单（名称、大小、能否预览）。
+    """公开库详情：简介 + 文件清单（名称、大小、能否预览、能否下载）。
 
     文件大小在这里现算（os.path.getsize）：清单本身不存大小也能算，
     但存了会因为"文件被替换/迁移"而对不上，不如以磁盘为准。
+
+    每次打开都记一次浏览（同一人只记一次，见 core/kb_views.py）：
+    "哪个库最多人用"是用户明确要的指标，放在详情页而不是广场列表，
+    是因为广场只是扫一眼卡片，点进去才算真的用了。
     """
-    owner = _official_kb_or_404(kb_id)
+    owner, meta = await asyncio.to_thread(_public_detail_or_404, kb_id)
+    official = bool(meta.get("official"))
+    access = "download" if official else _access_of(meta)
 
     def _read() -> dict:
         pipe = pipelines.get_or_create(owner, kb_id, allow_public=True)
@@ -474,8 +521,9 @@ async def get_official_kb(kb_id: str, uid: str = Depends(get_current_user)) -> d
                     "preview_file": rec.get("preview") or "",
                     # 能不能在线看：PDF/图片内嵌，其余抽文字
                     "preview": bool(rec.get("preview")) or ext in _INLINE_EXT or ext in _TEXT_EXT,
-                    # 没留档（老数据）就只能看正文、下不了原件
-                    "download": size > 0,
+                    # 有原件**且**库主允许下载，才给下载按钮。
+                    # 仅观看的库，这里直接 false —— 前端不用自己再判 access
+                    "download": size > 0 and access == "download",
                 }
             )
         return {
@@ -486,11 +534,15 @@ async def get_official_kb(kb_id: str, uid: str = Depends(get_current_user)) -> d
         }
 
     data = await asyncio.to_thread(_read)
-    # 简介与"官方"署名走同一张公开登记表，省得前端再拼一次
-    meta = await asyncio.to_thread(pipelines.public_meta, kb_id)
     data["desc"] = meta.get("desc") or ""
-    data["official"] = True
-    data["owner_name"] = "官方"
+    data["official"] = official
+    data["access"] = access
+    data["owner_name"] = (
+        "官方" if official else await asyncio.to_thread(_owner_display_name, owner)
+    )
+    # 记浏览放在最后：前面任何一步抛错（库被并发删掉）都不该算一次"看过"
+    await asyncio.to_thread(kb_views.touch, kb_id, uid)
+    data["views"] = await asyncio.to_thread(kb_views.count, kb_id)
     return data
 
 
@@ -501,13 +553,21 @@ async def get_official_file(
     inline: int = 0,
     uid: str = Depends(get_current_user),
 ) -> Response:
-    """取官方库里的原始文件。
+    """取公开库里的原始文件。
 
     inline=1 → `Content-Disposition: inline`，给 PDF/图片在页面里内嵌用；
     默认 → `attachment`，浏览器直接下载。两条路返回的是**同一份字节**，
     区别只在浏览器怎么处理，所以下载到的文件和预览看到的一定一致。
+
+    ★ 库主设为"仅观看"时，只有 inline 这一条路可用（默认 403）：
+      预览必须能读，下载不该给。注意这是**接口层**的限制 ——
+      浏览器终究能把内嵌的字节存下来，它挡住的是"我们主动提供下载"，
+      不是"技术上绝对取不到"。UI 上别把它说成加密。
     """
-    owner = _official_kb_or_404(kb_id)
+    owner, meta = await asyncio.to_thread(_public_detail_or_404, kb_id)
+    official = bool(meta.get("official"))
+    if not inline and not official and _access_of(meta) != "download":
+        raise HTTPException(status_code=403, detail="库主设置为仅观看，这份资料不能下载")
     # 清单校验 + 取扩展名（顺带把 path 定死，后面不再接受外部输入拼路径）
     rec = await asyncio.to_thread(_official_file_record, owner, kb_id, name)
     serve = rec.get("_matched") or rec.get("name") or ""
@@ -535,12 +595,13 @@ async def get_official_file(
 async def get_official_file_text(
     kb_id: str, name: str, uid: str = Depends(get_current_user)
 ) -> dict:
-    """官方库资料的正文预览（Word/文本/表格 → 纯文字）。
+    """公开库资料的正文预览（Word/文本/表格 → 纯文字）。
 
     PDF 不走这里：浏览器自带阅读器比抽出来的文字好得多，前端直接内嵌
     `/file?inline=1`。所以本接口对 PDF 也允许调用，只是没必要。
+    "仅观看"的库同样能用：这就是它的"看"。
     """
-    owner = _official_kb_or_404(kb_id)
+    owner, _meta = await asyncio.to_thread(_public_detail_or_404, kb_id)
     rec = await asyncio.to_thread(_official_file_record, owner, kb_id, name)
 
     def _read() -> dict:
@@ -1095,6 +1156,9 @@ async def download_remote(url: str, uid: str = Depends(get_current_user)) -> Res
 
 class BoardPostIn(BaseModel):
     body: str = Field("", description="留言正文，纯文字，最多 300 字")
+    reply_to: int | None = Field(
+        None, description="要回复的留言 id；不带就是新开一楼（顶层）"
+    )
 
 
 def _public_kb_or_404(kb_id: str) -> str:
@@ -1110,33 +1174,98 @@ def _public_kb_or_404(kb_id: str) -> str:
     return owner
 
 
+def _admin_sets() -> tuple[set[str], set[str]]:
+    """管理员的 (uid 集合, 小写用户名集合)。
+
+    为什么不逐条调 `quota._is_admin`：它对不在 ADMIN_UIDS 里的人要**反查用户名**
+    （一次查询）。一页 30 条留言就是 30 次查询，而 `_board_authors` 手里
+    本来就有 username —— 拿现成的比一对集合就行，零查询。
+    判定顺序与 `_is_admin` 保持一致：uid 优先，用户名兜底。
+    """
+    uids = {u for u in (getattr(config, "ADMIN_UIDS", None) or ()) if u}
+    names = {
+        (n or "").strip().lower()
+        for n in (getattr(config, "ADMIN_USERNAMES", None) or ())
+        if (n or "").strip()
+    }
+    return uids, names
+
+
 def _board_authors(posts: list[dict]) -> dict[str, dict]:
-    """一次查出这页留言的作者名与头像。
+    """一次查出这页留言的作者名、头像、是否管理员。
 
     删号的人查不到 → 显示「已注销用户」，而不是空白：一条没有署名的留言
     看起来像系统故障，写清楚"这个人注销了"反而是有用的信息。
     """
     users = account.get_users([p["user_id"] for p in posts])
+    admin_uids, admin_names = _admin_sets()
     out: dict[str, dict] = {}
     for p in posts:
         u = users.get(p["user_id"]) or {}
         name = (u.get("nickname") or "").strip() or (u.get("username") or "").strip()
-        out[p["user_id"]] = {"name": name or "已注销用户", "avatar": u.get("avatar") or ""}
+        uname = (u.get("username") or "").strip().lower()
+        admin = p["user_id"] in admin_uids or (bool(uname) and uname in admin_names)
+        out[p["user_id"]] = {
+            "name": name or "已注销用户",
+            "avatar": u.get("avatar") or "",
+            # 查不到用户时一律 False：一个已经注销的号不该还顶着金标说话
+            "admin": bool(admin and u),
+        }
     return out
 
 
-def _post_view(post: dict, authors: dict[str, dict], uid: str, kb_owner: str, admin: bool) -> dict:
+def _post_view(
+    post: dict,
+    authors: dict[str, dict],
+    names: dict[int, str],
+    uid: str,
+    kb_owner: str,
+    admin: bool,
+) -> dict:
     a = authors.get(post["user_id"]) or {}
+    rt = int(post.get("reply_to_id") or 0)
+    root = int(post.get("root_id") or 0)
     return {
         "id": post["id"],
         "body": post["body"],
         "at": post["at"],
-        "author": {"name": a.get("name") or "已注销用户", "avatar": a.get("avatar") or ""},
+        "author": {
+            "name": a.get("name") or "已注销用户",
+            "avatar": a.get("avatar") or "",
+            "admin": bool(a.get("admin")),
+        },
         "mine": post["user_id"] == uid,
         # 作者能删自己的，库主能删自己库里的，管理员都能删。
         # 前端据此决定要不要显示那个「删除」，但真正的判定在 DELETE 里再走一遍。
         "can_delete": post["user_id"] == uid or kb_owner == uid or admin,
+        # 只在"回复的是楼里某条回复"时点名：直接回复楼主时，位置本身已经
+        # 说明对象了，再加一行「回复 @楼主」只是噪音。
+        "reply_to": (
+            {"id": rt, "name": names.get(rt) or "某条留言"} if rt and rt != root else None
+        ),
     }
+
+
+def _thread_view(
+    root: dict,
+    kids: list[dict],
+    authors: dict[str, dict],
+    uid: str,
+    kb_owner: str,
+    admin: bool,
+) -> dict:
+    """一栋楼的完整视图：顶层帖 + 它的回复。
+
+    `names` 用来把 reply_to_id 翻成名字。回复只可能指向同一栋楼里的帖，
+    所以用这一批就够了，不用再查库。
+    """
+    everyone = [root, *kids]
+    names = {p["id"]: (authors.get(p["user_id"]) or {}).get("name") or "已注销用户" for p in everyone}
+    view = _post_view(root, authors, names, uid, kb_owner, admin)
+    view["replies"] = [
+        _post_view(p, authors, names, uid, kb_owner, admin) for p in kids
+    ]
+    return view
 
 
 @router.get("/public/{kb_id}/board")
@@ -1146,17 +1275,19 @@ async def get_board(
     before: int | None = Query(None, ge=1),
     uid: str = Depends(get_current_user),
 ) -> dict:
-    """一页留言，最新的在前。`before` 传上一页最后一条的 id 做游标。"""
+    """一页顶层留言（各自带回复），最新的楼在前。`before` 传上一页最后一栋楼的 id。"""
     owner = _public_kb_or_404(kb_id)
 
-    def _read() -> dict:
-        posts = kb_board.list_posts(kb_id, limit=limit, before=before)
-        total = kb_board.count_posts(kb_id)
-        return {"posts": posts, "total": total}
+    def _read() -> tuple[list[dict], tuple[int, int]]:
+        return (
+            kb_board.list_threads(kb_id, limit=limit, before=before),
+            kb_board.stats(kb_id),
+        )
 
-    data = await asyncio.to_thread(_read)
-    posts = data["posts"]
-    authors = await asyncio.to_thread(_board_authors, posts)
+    threads, (total, tops) = await asyncio.to_thread(_read)
+    # 作者信息按"这页所有帖（含回复）"一次查齐，不受回复层数影响
+    flat = [p for t in threads for p in [t, *t["replies"]]]
+    authors = await asyncio.to_thread(_board_authors, flat) if flat else {}
     admin = await asyncio.to_thread(quota._is_admin, uid)  # noqa: SLF001
     meta = await asyncio.to_thread(pipelines.public_meta, kb_id)
     return {
@@ -1165,11 +1296,14 @@ async def get_board(
         "desc": meta.get("desc") or "",
         "official": await asyncio.to_thread(pipelines.is_official, kb_id),
         "owner_name": "官方" if meta.get("official") else "",
-        "total": data["total"],
+        "total": total,
         "stickers": list(kb_board.STICKERS),
-        "posts": [_post_view(p, authors, uid, owner, admin) for p in posts],
-        # 这一页拿满了就说明可能还有：前端据此显示「加载更早」，不猜总数
-        "has_more": len(posts) >= limit and data["total"] > len(posts),
+        "posts": [
+            _thread_view(t, t["replies"], authors, uid, owner, admin) for t in threads
+        ],
+        # 用**顶层帖数**判断，不是总条数：一栋楼里聊了 20 句时总数是 21，
+        # 但这一页只带回 1 栋楼，用总数会让「加载更早」永远亮着。
+        "has_more": len(threads) >= limit and tops > len(threads),
     }
 
 
@@ -1177,7 +1311,11 @@ async def get_board(
 async def add_board_post(
     kb_id: str, req: BoardPostIn, uid: str = Depends(get_current_user)
 ) -> dict:
-    """发一条留言。纯文字，最多 300 字。"""
+    """发一条留言，或者回复某一条（`reply_to`）。纯文字，最多 300 字。
+
+    返回里带整栋楼的最新样子：前端拿它直接替换那一楼，不用重拉整页
+    —— 重拉会把用户正在看的位置顶走，而且多一次往返。
+    """
     owner = _public_kb_or_404(kb_id)
     text = (req.body or "").strip()
     if not text:
@@ -1187,23 +1325,33 @@ async def add_board_post(
             status_code=400, detail=f"留言最多 {kb_board.MAX_LEN} 字，现在 {len(text)} 字"
         )
     try:
-        post = await asyncio.to_thread(kb_board.add_post, kb_id, uid, text)
+        post = await asyncio.to_thread(kb_board.add_post, kb_id, uid, text, req.reply_to)
     except kb_board.TooFast as e:
         detail = f"发得太快了，{e.wait} 秒后再试" if e.wait else "这个库一小时内的留言有点多，歇一会儿再来"
         raise HTTPException(status_code=429, detail=detail) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    authors = await asyncio.to_thread(_board_authors, [post])
+    root_id = int(post["root_id"] or post["id"])
+
+    def _build() -> tuple[dict, list[dict]]:
+        root = kb_board.get_post(root_id) or post
+        return root, kb_board.replies_of(root_id)
+
+    root, kids = await asyncio.to_thread(_build)
+    authors = await asyncio.to_thread(_board_authors, [root, *kids])
     admin = await asyncio.to_thread(quota._is_admin, uid)  # noqa: SLF001
-    return {"post": _post_view(post, authors, uid, owner, admin)}
+    thread = _thread_view(root, kids, authors, uid, owner, admin)
+    new_id = post["id"]
+    mine = next((p for p in [thread, *thread.get("replies", [])] if p["id"] == new_id), thread)
+    return {"post": mine, "thread": thread}
 
 
 @router.delete("/public/{kb_id}/board/{post_id}")
 async def delete_board_post(
     kb_id: str, post_id: int, uid: str = Depends(get_current_user)
 ) -> dict:
-    """删一条留言（软删）。作者本人 / 库主 / 管理员。"""
+    """删一条留言（软删）。作者本人 / 库主 / 管理员。删顶层帖会连带它的回复。"""
     owner = _public_kb_or_404(kb_id)
     post = await asyncio.to_thread(kb_board.get_post, post_id)
     # 路径上的库必须和帖子的库是同一个：否则拿 A 库的路径去删 B 库的帖，
@@ -1213,7 +1361,9 @@ async def delete_board_post(
     admin = await asyncio.to_thread(quota._is_admin, uid)  # noqa: SLF001
     if not (post["user_id"] == uid or owner == uid or admin):
         raise HTTPException(status_code=403, detail="只能删除自己的留言")
-    ok = await asyncio.to_thread(kb_board.delete_post, post_id, uid, kb_id)
-    if not ok:
+    # 删楼主会连回复一起删，所以这里返回条数而不是布尔：前端要按实际
+    # 消失的条数减计数，否则「N 条」会越用越偏。
+    removed = await asyncio.to_thread(kb_board.delete_post, post_id, uid, kb_id)
+    if not removed:
         raise HTTPException(status_code=404, detail="这条留言不存在")
-    return {"ok": True, "id": post_id}
+    return {"ok": True, "id": post_id, "removed": removed, "root_id": post.get("root_id") or 0}

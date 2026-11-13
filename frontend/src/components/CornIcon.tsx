@@ -29,6 +29,7 @@ export type CornIconName =
   | "trash" // 删除
   | "close" // 关闭 / 取消
   | "check" // 确认 / 完成
+  | "task" // 待办清单（与二级导航同形：勾选框 + 两条线）
   | "clock" // 倒计时 / 时间
   | "bell" // 提醒
   | "calendar" // 日期
@@ -352,6 +353,30 @@ function Check() {
   );
 }
 
+/**
+ * 待办清单：勾选框 + 右侧两条短线（2026-11-13）。
+ *
+ * 形状与**底部二级导航里的 task**同构（方框 + 勾 + 两条列表线），因为它是
+ * 从导航那边搬过来的：同一个功能在两个位置必须是同一个图案，否则用户会
+ * 以为是两件事。勾用品牌玉米金，其余走墨线，和整套图标一致。
+ */
+function Task() {
+  return (
+    <g {...INK_STROKE}>
+      {/* 勾选框 */}
+      <rect x="7" y="10" width="20" height="20" rx="6" fill="#FFFDF6" strokeWidth={3} />
+      {/* 勾：金色，比框线粗一点，小尺寸下才看得清 */}
+      <path d="M12 20.5 L16 24.5 L23 14.5" stroke="#F5B840" strokeWidth={3.4} fill="none" />
+      {/* 右侧两条线：对应"清单条目" */}
+      <path d="M32.5 16 H41" strokeWidth={3} />
+      <path d="M32.5 24 H41" strokeWidth={3} />
+      {/* 底部两条：长的一条 + 短的一条，避免两根等长像 = 号 */}
+      <path d="M7 37 H30" strokeWidth={3} />
+      <path d="M7 42.5 H21" strokeWidth={3} />
+    </g>
+  );
+}
+
 /** 铃铛：提醒（形态与 Clock/Calendar 同一套圆头墨线，金色只用在铃锤） */
 function Bell() {
   return (
@@ -555,6 +580,7 @@ const ICONS: Record<string, () => React.JSX.Element> = {
   trash: Trash,
   close: Close,
   check: Check,
+  task: Task,
   clock: Clock,
   bell: Bell,
   calendar: Calendar,

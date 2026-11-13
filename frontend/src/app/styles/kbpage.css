@@ -640,3 +640,60 @@
     opacity: 1;
   }
 }
+
+/* 公开确认条里的"别人能做什么"（2026-11-13）
+   独占一行：确认条本来就长，挤在按钮旁边会把两个选项压成两行小字。 */
+.kbp-access {
+  display: flex;
+  flex: 1 1 100%;
+  flex-direction: column;
+  gap: var(--space-4);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+
+.kbp-access-pick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.kbp-access-opt {
+  display: flex;
+  flex: 1 1 160px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--card-bg);
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.kbp-access-opt span {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+}
+
+.kbp-access-opt.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.kbp-access-opt.on span {
+  color: var(--accent-ink);
+  opacity: 0.85;
+}
+
+@media (max-width: 640px) {
+  /* 手机上两个选项各占一整行：160px 的 flex-basis 会在 340px 宽里
+     挤成"仅观看 能看清单和预览…"两截断行 */
+  .kbp-access-opt {
+    flex: 1 1 100%;
+  }
+}

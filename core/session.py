@@ -99,6 +99,30 @@ def _get_conn() -> None:
         raise
 
 
+def _add_missing_columns(conn, table: str, columns: dict[str, str]) -> None:
+    """给已存在的表补列（幂等）。
+
+    为什么需要：`CREATE TABLE IF NOT EXISTS` 对老库一行都不生效，新加的列
+    在老库上根本不存在 —— 之后任何一条用到它的查询都会在运行期报
+    `no such column`，而且是"本地新库全绿、线上老库全崩"这种最难查的形态。
+
+    键是列名、值是列定义（`"INTEGER NOT NULL DEFAULT 0"`）。以后加字段往调用方的
+    字典里加一行就行，不用写迁移脚本、也不用记住上线时要手动 ALTER。
+    """
+    have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+    for col, ddl in columns.items():
+        if col not in have:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+
+
+# kb_posts 的增量列（2026-11-13 楼中楼）。放模块级是为了让 kb_board 也能直接用
+# 同一份定义 —— 两处各抄一份，迟早抄漏一个。
+_KB_POST_ADD_COLUMNS: dict[str, str] = {
+    "root_id": "INTEGER NOT NULL DEFAULT 0",
+    "reply_to_id": "INTEGER NOT NULL DEFAULT 0",
+}
+
+
 def _init_db() -> None:
     """首次运行时创建表（幂等）。
 
@@ -136,18 +160,41 @@ def _init_db() -> None:
             -- 所以它既不进 kb_files.json，也不在 Chroma 里。
             -- 软删（deleted_at 非空）而不是 DELETE：删帖这件事要能回溯
             -- —— 用户投诉"我的留言被删了"时，得说得清是谁、什么时候删的。
+            -- root_id / reply_to_id 支撑「楼中楼」（2026-11-13）：
+            --   root_id = 0        → 这条是楼主帖（顶层）
+            --   root_id = 顶层帖 id → 这条是挂在某楼下的回复，**只有两级**
+            --   reply_to_id        → 具体回复的是谁（楼中楼里回复别人时 != root_id，
+            --                        前端据此显示「回复 @某某」）
+            -- 为什么封两级而不是无限树：Discuz 的楼中楼、微博、YouTube 都是两级。
+            -- 手机屏幕缩进三次就没宽度了，而"回复某条回复"的真实需求只是点名，
+            -- 一句 @ 就能表达，不需要再缩一层。
             CREATE TABLE IF NOT EXISTS kb_posts (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                kb_id      TEXT NOT NULL,
-                user_id    TEXT NOT NULL,
-                body       TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
-                deleted_at INTEGER,
-                deleted_by TEXT
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                kb_id       TEXT NOT NULL,
+                user_id     TEXT NOT NULL,
+                body        TEXT NOT NULL,
+                created_at  INTEGER NOT NULL,
+                deleted_at  INTEGER,
+                deleted_by  TEXT,
+                root_id     INTEGER NOT NULL DEFAULT 0,
+                reply_to_id INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_kbpost_kb ON kb_posts(kb_id, id DESC);
             CREATE INDEX IF NOT EXISTS idx_kbpost_user ON kb_posts(user_id, created_at);
         """)
+        # 老库补列要**在建索引之前**：`CREATE TABLE IF NOT EXISTS` 对已存在的
+        # kb_posts 一行都不生效，先建 `root_id` 上的索引会报 no such column。
+        _add_missing_columns(conn, "kb_posts", _KB_POST_ADD_COLUMNS)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_kbpost_root ON kb_posts(kb_id, root_id, id)"
+        )
+        # 知识库浏览量：一个人对同一个库只留一行（口径是"多少人看过"，
+        # 不是"被打开过多少次"，理由见 core/kb_views.py 顶部）
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS kb_views ("
+            " kb_id TEXT NOT NULL, uid TEXT NOT NULL, at INTEGER NOT NULL,"
+            " PRIMARY KEY (kb_id, uid))"
+        )
     with _get_conn() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS conversations (

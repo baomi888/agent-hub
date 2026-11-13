@@ -10,13 +10,18 @@
  * 塞进弹层。两处各写一份列表 + 输入框，最后必然漂移成"详情页能删、弹层不能删"
  * 这种毛病 —— 差异只在容器的 CSS，`compact` 一个开关就够了。
  *
- * 三条取舍：
+ * 几条取舍：
  *   1. **表情由后端下发**（`stickers`）。前端硬编码一份的话，以后加一个表情
  *      要改两处、还得确保两端顺序一致，不如多传几十字节。
  *   2. 表情直接拼进正文，不单独存字段。它是普通字符，存成一个独立的
  *      `sticker` 列只会多出"只有表情没有文字"这条边界，没有别的好处。
- *   3. 分页用游标（`before=最后一条的 id`）而不是页码：留言板会一边看一边有人发，
- *      offset 分页在这种情况下会重复或漏条。
+ *   3. 分页用游标（`before` = 最后一栋楼的 id）而不是页码：留言板会一边看一边
+ *      有人发，offset 分页在这种情况下会重复或漏条。
+ *   4. **回复只做两级**（楼中楼）：顶层帖下面挂一层回复，回复里再回复别人时，
+ *      新回复仍挂在同一栋楼下、只标一句「回复 @某某」。Discuz 的楼中楼、
+ *      微博、YouTube 都是这个结构 —— 手机缩进三次就没有正文宽度了。
+ *   5. 发完/删完只改本地那一楼，不重拉整页：重拉会把用户正在看的位置顶走，
+ *      还多一次往返。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -37,6 +42,12 @@ interface Props {
   onCount?: (n: number) => void;
 }
 
+/** 正在回复谁。`id` 是被回复的那条留言（顶层或回复都行） */
+interface ReplyTarget {
+  id: number;
+  name: string;
+}
+
 export default function KbBoard({ kbId, compact = false, onCount }: Props) {
   const [data, setData] = useState<BoardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -49,7 +60,10 @@ export default function KbBoard({ kbId, compact = false, onCount }: Props) {
   const [emojiOpen, setEmojiOpen] = useState(false);
   /** 正在翻更早的留言 */
   const [moreBusy, setMoreBusy] = useState(false);
+  /** 当前回复对象；null = 新开一楼 */
+  const [replyTo, setReplyTo] = useState<ReplyTarget | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const formRef = useRef<HTMLDivElement | null>(null);
 
   // onCount 是从父组件传下来的，父组件每渲染一次就是新函数 —— 放进 load 的
   // 依赖里会让它在父组件随便一次 state 变化后重新拉一遍留言。用 ref 取最新的。
@@ -80,9 +94,14 @@ export default function KbBoard({ kbId, compact = false, onCount }: Props) {
     return () => window.clearTimeout(t);
   }, [kbId, load]);
 
-  const bump = (posts: BoardPost[], total: number) => {
-    setData((d) => (d ? { ...d, posts, total } : d));
-    countRef.current?.(total);
+  const startReply = (p: BoardPost) => {
+    if (p.mine) return;
+    setReplyTo({ id: p.id, name: p.author.name });
+    setTip("");
+    // 手机上输入框可能在几屏之外：先滚过去再聚焦，否则键盘弹出来挡住的是
+    // 一条和这次操作无关的内容
+    formRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    window.requestAnimationFrame(() => taRef.current?.focus());
   };
 
   const send = async () => {
@@ -91,11 +110,29 @@ export default function KbBoard({ kbId, compact = false, onCount }: Props) {
     setSending(true);
     setTip("");
     try {
-      const r = await api.postKbBoard(kbId, body);
-      const d = data;
-      bump([r.post, ...(d?.posts ?? [])], (d?.total ?? 0) + 1);
+      const r = await api.postKbBoard(kbId, body, replyTo?.id);
+      const nextTotal = (data?.total ?? 0) + 1;
+      setData((d) => {
+        if (!d) return d;
+        const idx = d.posts.findIndex((x) => x.id === r.thread.id);
+        // 新开一楼 → 插到最前（列表是最新在前）；回复 → 原地替换那一栋楼
+        const posts =
+          idx >= 0
+            ? d.posts.map((x) => (x.id === r.thread.id ? r.thread : x))
+            : [r.thread, ...d.posts];
+        return { ...d, posts, total: nextTotal };
+      });
+      countRef.current?.(nextTotal);
       setText("");
       setEmojiOpen(false);
+      setReplyTo(null);
+      // 新回复在楼的末尾，可能已经滚出视口了 —— 拉回来看一眼
+      window.requestAnimationFrame(() => {
+        document.getElementById(`kb-post-${r.post.id}`)?.scrollIntoView({
+          block: "nearest",
+          behavior: "smooth",
+        });
+      });
     } catch (e) {
       setTip(e instanceof Error ? e.message : "发送失败，请稍后重试");
     } finally {
@@ -103,15 +140,24 @@ export default function KbBoard({ kbId, compact = false, onCount }: Props) {
     }
   };
 
-  const remove = async (p: BoardPost) => {
-    if (!window.confirm("删除这条留言？删了就看不到了。")) return;
+  const remove = async (p: BoardPost, isReply: boolean) => {
+    const ask = isReply
+      ? "删除这条回复？删了就看不到了。"
+      : "删除这条留言？它下面的回复会一起消失。";
+    if (!window.confirm(ask)) return;
     try {
-      await api.deleteKbBoardPost(kbId, p.id);
-      const d = data;
-      bump(
-        (d?.posts ?? []).filter((x) => x.id !== p.id),
-        Math.max(0, (d?.total ?? 1) - 1)
-      );
+      const r = await api.deleteKbBoardPost(kbId, p.id);
+      const gone = r.removed || 1;
+      const nextTotal = Math.max(0, (data?.total ?? 1) - gone);
+      setData((cur) => {
+        if (!cur) return cur;
+        const posts = cur.posts
+          .filter((t) => t.id !== p.id) // 删的是楼主 → 整栋楼没了
+          .map((t) => ({ ...t, replies: (t.replies ?? []).filter((x) => x.id !== p.id) }));
+        return { ...cur, posts, total: nextTotal };
+      });
+      countRef.current?.(nextTotal);
+      if (replyTo?.id === p.id) setReplyTo(null);
     } catch (e) {
       setTip(e instanceof Error ? e.message : "删除失败，请稍后重试");
     }
@@ -149,6 +195,67 @@ export default function KbBoard({ kbId, compact = false, onCount }: Props) {
     });
   };
 
+  /** 一条留言/回复的公共渲染。顶层与回复只差头像大小和层级，其余完全一致 */
+  const renderPost = (p: BoardPost, isReply: boolean) => (
+    <li
+      className={
+        "kb-post" +
+        (p.mine ? " is-mine" : "") +
+        (isReply ? " kb-reply" : "") +
+        (replyTo?.id === p.id ? " is-target" : "")
+      }
+      key={p.id}
+      id={`kb-post-${p.id}`}
+    >
+      <UserAvatar
+        avatar={p.author.avatar}
+        name={p.author.name}
+        className={isReply ? "kb-post-ava is-reply" : "kb-post-ava"}
+      />
+      <div className="kb-post-main">
+        <div className="kb-post-h">
+          {/* 金色管理员标：只在这里出现，位置在名字之前 */}
+          {p.author.admin && <span className="kb-role">管理员</span>}
+          <b>{p.author.name}</b>
+          {p.mine && <span className="kb-post-me">我</span>}
+          {p.reply_to && (
+            <span className="kb-post-to">回复 @{p.reply_to.name}</span>
+          )}
+          <time dateTime={new Date(p.at * 1000).toISOString()}>{fmtWhen(p.at)}</time>
+          <span className="kb-post-acts">
+            {!p.mine && (
+              <button
+                type="button"
+                className="kb-post-act"
+                onClick={() => startReply(p)}
+                aria-label={`回复 ${p.author.name}`}
+              >
+                回复
+              </button>
+            )}
+            {p.can_delete && (
+              <button
+                type="button"
+                className="kb-post-act kb-post-del"
+                onClick={() => void remove(p, isReply)}
+                aria-label="删除这条留言"
+              >
+                删除
+              </button>
+            )}
+          </span>
+        </div>
+        <p className="kb-post-b">{p.body}</p>
+
+        {(p.replies?.length ?? 0) > 0 && (
+          <ul className="kb-replies">
+            {p.replies!.map((r) => renderPost(r, true))}
+          </ul>
+        )}
+      </div>
+    </li>
+  );
+
   const total = data?.total ?? 0;
   const posts = data?.posts ?? [];
 
@@ -162,19 +269,39 @@ export default function KbBoard({ kbId, compact = false, onCount }: Props) {
 
       {!compact && (
         <p className="kb-board-lead">
-          对这个库有想法、有补充、有疑问，都可以写在这里。只能发文字和表情，不发文件。
+          对这个库有想法、有补充、有疑问，都可以写在这里。可以回复某一条，只能发文字和表情，不发文件。
         </p>
       )}
 
-      <div className="kb-board-form">
+      <div className="kb-board-form" ref={formRef}>
+        {replyTo && (
+          <div className="kb-board-replying">
+            <span>
+              回复 <b>@{replyTo.name}</b>
+            </span>
+            <button
+              type="button"
+              onClick={() => setReplyTo(null)}
+              aria-label="取消回复"
+            >
+              取消
+            </button>
+          </div>
+        )}
         <textarea
           ref={taRef}
           className="kb-board-input"
           value={text}
           maxLength={MAX_LEN}
           rows={compact ? 2 : 3}
-          placeholder={compact ? "说点什么…" : "写下你的问题或补充…"}
-          aria-label="留言内容"
+          placeholder={
+            replyTo
+              ? `回复 @${replyTo.name}…`
+              : compact
+                ? "说点什么…"
+                : "写下你的问题或补充…"
+          }
+          aria-label={replyTo ? `回复 ${replyTo.name}` : "留言内容"}
           onChange={(e) => {
             setText(e.target.value);
             if (tip) setTip("");
@@ -184,6 +311,10 @@ export default function KbBoard({ kbId, compact = false, onCount }: Props) {
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
               e.preventDefault();
               void send();
+            }
+            // Escape 退出回复状态：输入框里没有别的"取消"语义
+            if (e.key === "Escape" && replyTo) {
+              setReplyTo(null);
             }
           }}
         />
@@ -223,7 +354,7 @@ export default function KbBoard({ kbId, compact = false, onCount }: Props) {
             disabled={sending || !text.trim()}
             onClick={() => void send()}
           >
-            {sending ? "发送中…" : "发送"}
+            {sending ? "发送中…" : replyTo ? "回复" : "发送"}
           </button>
         </div>
         {tip && <p className="kb-board-tip">{tip}</p>}
@@ -243,37 +374,7 @@ export default function KbBoard({ kbId, compact = false, onCount }: Props) {
       )}
 
       {posts.length > 0 && (
-        <ul className="kb-board-list">
-          {posts.map((p) => (
-            <li className={"kb-post" + (p.mine ? " is-mine" : "")} key={p.id}>
-              <UserAvatar
-                avatar={p.author.avatar}
-                name={p.author.name}
-                className="kb-post-ava"
-              />
-              <div className="kb-post-main">
-                <div className="kb-post-h">
-                  <b>{p.author.name}</b>
-                  {p.mine && <span className="kb-post-me">我</span>}
-                  <time dateTime={new Date(p.at * 1000).toISOString()}>
-                    {fmtWhen(p.at)}
-                  </time>
-                  {p.can_delete && (
-                    <button
-                      type="button"
-                      className="kb-post-del"
-                      onClick={() => void remove(p)}
-                      aria-label="删除这条留言"
-                    >
-                      删除
-                    </button>
-                  )}
-                </div>
-                <p className="kb-post-b">{p.body}</p>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <ul className="kb-board-list">{posts.map((p) => renderPost(p, false))}</ul>
       )}
 
       {data?.has_more && (

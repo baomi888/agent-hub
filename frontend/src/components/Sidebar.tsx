@@ -18,7 +18,9 @@ const CONSOLE_LINKS = [
   { href: "/report", icon: "calendar", label: "总结", full: "每日总结" },
   // 2026-11-13 用户要求：第四个位置给「待办」。打卡仍可从对话的「今天」条进入，
   // 但这一格要留给每天真正会点开的东西 —— 打卡是回顾，待办是接下来做什么。
-  { href: "/reminders", icon: "check", label: "待办", full: "待办与提醒" },
+  // 图标用 `task` 而不是 `check`：底部二级导航里"待办"就是 task，
+  // 同一个功能在两处的图案必须一样，否则会像两件事。
+  { href: "/reminders", icon: "task", label: "待办", full: "待办与提醒" },
   { href: "/settings", icon: "settings", label: "设置", full: "设置" },
 ];
 

@@ -354,12 +354,21 @@ def is_official(kb_id: str) -> bool:
 
 
 def set_public(
-    owner: str, kb_id: str, on: bool, desc: str | None = None, official: bool | None = None
+    owner: str,
+    kb_id: str,
+    on: bool,
+    desc: str | None = None,
+    official: bool | None = None,
+    access: str | None = None,
 ) -> dict:
-    """把库标记为公开 / 收回公开，可顺带写一句简介。只有库主有权切换，无权抛 NotOwned。
+    """把库标记为公开 / 收回公开，可顺带写一句简介与访问方式。只有库主有权切换。
 
-    切换的是「他人可否只读检索」，不动归属：文件清单、上传、删除
-    永远只认 owner，公开与否无关（唯一例外是 official 库，见下）。
+    `access` 是公开后**别人能拿它做什么**（2026-11-13 用户要求，两种）：
+      - `"preview"`（默认）→ 别人可以看文件清单、在线预览，但不能下载原件；
+      - `"download"`      → 再加一项"下载原件"。
+    两者都能检索、都能看清单 —— 区别只在最后那一下"存到本地"。
+    没传（None）就不动，老库读出空值时调用方按 `"preview"` 处理：
+    新增能力（能看清单）是用户明确要的，但"能下载"必须由库主自己点开。
 
     `desc` 三态，别搞混：
       - None（默认）→ 不动已有简介。收回公开时前端一般不传，别把用户写的话抹了。
@@ -384,9 +393,16 @@ def set_public(
                 meta["desc"] = desc
             if official is not None:
                 meta["official"] = bool(official)
+            if access is not None:
+                # 白名单收口：调用方可能来自请求体，任何非法值都当"仅观看"，
+                # 绝不能让一个手滑的字符串变成"可下载"
+                meta["access"] = "download" if access == "download" else "preview"
             meta["on"] = True
             meta.setdefault("desc", "")
             meta.setdefault("official", False)
+            # 老库没有这个字段：默认仅观看（可预览、不可下载），
+            # 要开下载得库主自己点。
+            meta.setdefault("access", "preview")
             # 只在第一次公开时记时间；改简介不该让"分享于"变成今天
             if not meta.get("at"):
                 meta["at"] = int(time.time())
@@ -396,9 +412,14 @@ def set_public(
             # 但留着壳意味着「在表里 ≠ 公开」，is_public / list_public 每个读点
             # 都要再判一次 on —— 漏一处就是把私有库当公开，这条不能拿便利换。
             _KB_PUBLIC.pop(kb_id, None)
-            meta = {"on": False, "desc": "", "at": 0, "official": False}
+            meta = {"on": False, "desc": "", "at": 0, "official": False, "access": "preview"}
         _save_public()
         return meta
+
+
+def _access_of(meta: dict) -> str:
+    """登记表里的访问方式；老数据（没这个字段）按最保守的"仅观看"。"""
+    return "download" if meta.get("access") == "download" else "preview"
 
 
 def public_meta(kb_id: str) -> dict:
@@ -620,6 +641,9 @@ def list_all(owner: str) -> list[dict]:
                     # 广场上那句简介。只在公开期间有 —— 收回时整条登记会被删掉
                     # （见 set_public：不留 on=False 的壳，避免读点漏判）
                     "public_desc": (_KB_PUBLIC.get(kb_id) or {}).get("desc", ""),
+                    # 仅观看还是可下载。只在公开期间有意义；没设置的按"仅观看"给，
+                    # 前端据此把开关摆在正确的那一档
+                    "public_access": _access_of(_KB_PUBLIC.get(kb_id) or {}),
                 }
             )
 
@@ -635,6 +659,7 @@ def list_all(owner: str) -> list[dict]:
                     "files": get_files(owner, kb_id),
                     "public": kb_id in _KB_PUBLIC,
                     "public_desc": (_KB_PUBLIC.get(kb_id) or {}).get("desc", ""),
+                    "public_access": _access_of(_KB_PUBLIC.get(kb_id) or {}),
                 }
             )
     return result
@@ -678,6 +703,9 @@ def list_public() -> list[dict]:
                     "at": int(meta.get("at") or 0),
                     # 官方课程库：前端据此分两个分区，并允许点进去看文件
                     "official": bool(meta.get("official")),
+                    # 别人能拿它做什么：preview=只能在线看，download=还能存原件。
+                    # 老数据没有这个字段，按最保守的"仅观看"给。
+                    "access": "download" if meta.get("access") == "download" else "preview",
                 }
             )
     return result

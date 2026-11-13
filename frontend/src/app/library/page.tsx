@@ -10,7 +10,8 @@
  * 所以把"挑模板"换成"挑资料库"——同一块位置、同一件事，但交付物更实。
  *
  * 三条边界（后端也在守，前端只是不误导）：
- *   1. 别人的库只能读：挂进对话做检索，看不到文件清单、改不了内容；
+ *   1. 别人的库只能读：可以挂进对话检索、可以点进去看清单和预览；
+ *      **能不能下载由库主决定**（仅观看 / 可下载），改内容永远只有库主能做；
  *   2. 自己的库主动公开才会出现在这里，随时可以收回；
  *   3. 简介是唯一由库主写的展示信息 —— 不写就不编，卡片上直说"还没写简介"。
  */
@@ -26,12 +27,13 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { useToast } from "@/lib/hooks/useToast";
 import { fmtNum, fmtWhen } from "@/lib/time";
-import type { KbInfo, PublicKbInfo } from "@/lib/types";
+import type { AccessMode, KbInfo, PublicKbInfo } from "@/lib/types";
 
 /** 简介上限，与后端 VisibilityRequest.desc 的 max_length 保持一致 */
 const DESC_MAX = 200;
 
-type Sort = "new" | "big";
+/** 排序：最近分享 / 资料最多 / 最多人看（浏览数，2026-11-13 加） */
+type Sort = "new" | "big" | "hot";
 
 /** 卡片左侧那个方块里的字：取库名第一个字符，空名兜一个「库」 */
 const markOf = (name: string) => (name || "").trim().slice(0, 1) || "库";
@@ -79,25 +81,36 @@ export default function LibraryPage() {
 
   const minePublic = useMemo(() => mine.filter((k) => k.public), [mine]);
 
+  /** 命中搜索词：库名 / 简介 / 作者 —— 官方和同学库用同一套判定 */
+  const hit = useCallback(
+    (k: PublicKbInfo) => {
+      const q = query.trim().toLowerCase();
+      if (!q) return true;
+      return (
+        k.name.toLowerCase().includes(q) ||
+        (k.desc || "").toLowerCase().includes(q) ||
+        (k.owner_name || "").toLowerCase().includes(q)
+      );
+    },
+    [query],
+  );
+
   /** 官方课程库：站点自建、带 official 标记。它们出现在最前面，单独一种卡片。 */
-  const official = useMemo(() => pub.filter((k) => k.official), [pub]);
-  /** 同学分享的库：只能挂进对话检索，看不到文件清单 */
+  const official = useMemo(() => pub.filter((k) => k.official && hit(k)), [pub, hit]);
+  /** 同学分享的库：能看清单、能预览；能不能下载看库主的设置 */
   const shared = useMemo(() => pub.filter((k) => !k.official), [pub]);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const hit = shared.filter(
-      (k) =>
-        !q ||
-        k.name.toLowerCase().includes(q) ||
-        (k.desc || "").toLowerCase().includes(q) ||
-        (k.owner_name || "").toLowerCase().includes(q),
-    );
+    const list = shared.filter(hit);
     // 排序都带第二关键字：刚分享的几个库如果段数一样，顺序不该每次刷新都变
-    return [...hit].sort((a, b) =>
-      sort === "new" ? b.at - a.at || b.chunks - a.chunks : b.chunks - a.chunks || b.at - a.at,
+    return [...list].sort((a, b) =>
+      sort === "new"
+        ? b.at - a.at || b.chunks - a.chunks
+        : sort === "hot"
+          ? (b.views ?? 0) - (a.views ?? 0) || b.at - a.at
+          : b.chunks - a.chunks || b.at - a.at,
     );
-  }, [shared, query, sort]);
+  }, [shared, hit, sort]);
 
   /** 从广场挂一个库：建好会话时就把 kb_id 绑上，进去直接能问 */
   const openInChat = async (k: PublicKbInfo) => {
@@ -130,7 +143,7 @@ export default function LibraryPage() {
           <MascotLogo className="lib-logo" />
           <div className="lib-head-text">
             <h1>公开知识库</h1>
-            <p>官方课程资料，点开就能看、能下载</p>
+            <p>官方课程资料与同学分享的资料库，点开就能看</p>
           </div>
           <Link href="/" className="lib-back" aria-label="返回工作台">
             <CornIcon name="back" className="h-4 w-4" />
@@ -145,7 +158,8 @@ export default function LibraryPage() {
             <h2>官方课程资料，和同学分享的资料库</h2>
             <p>
               <strong>官方库</strong>是学校课程的配套资料，可以点进去看文件、下载原件；
-              <strong>同学分享的库</strong>只能挂进对话检索——你看不到它的文件清单，也改不了内容。
+              <strong>同学分享的库</strong>也能点进去看清单和预览，能不能下载由分享的同学决定。
+              两者都能挂进你的对话做检索。
             </p>
           </div>
           <button type="button" className="lib-share" onClick={() => setShareOpen(true)}>
@@ -223,7 +237,8 @@ export default function LibraryPage() {
             <span className="rule" />
           </div>
           <p className="lib-sec-lead">
-            挑一个挂进自己的对话，它就会拿里面的内容回答你。只能检索，看不到文件清单。
+            挑一个挂进自己的对话，它就会拿里面的内容回答你；也能点进去看资料清单。
+            标着「仅观看」的库可以预览，但下载按钮是关着的 —— 那是分享的同学自己选的。
           </p>
         </section>
 
@@ -249,6 +264,9 @@ export default function LibraryPage() {
             <button type="button" aria-pressed={sort === "big"} onClick={() => setSort("big")}>
               资料最多
             </button>
+            <button type="button" aria-pressed={sort === "hot"} onClick={() => setSort("hot")}>
+              最多人看
+            </button>
           </div>
           <span className="lib-count">{filtered.length} 个库</span>
         </div>
@@ -271,7 +289,7 @@ export default function LibraryPage() {
           </div>
         )}
 
-        {!loading && !err && filtered.length === 0 && (
+        {!loading && !err && filtered.length === 0 && official.length === 0 && (
           <div className="lib-empty">
             <CornIcon name="store" className="lib-empty-icon" />
             {query ? (
@@ -316,14 +334,32 @@ export default function LibraryPage() {
                   <span>{fmtNum(k.files)} 份资料</span>
                   <span className="lib-dot" />
                   <span>{fmtNum(k.chunks)} 段</span>
+                  <span className="lib-dot" />
+                  {/* 浏览数：独立访客。0 也显示 —— "还没人看过"本身就是信息，
+                      而且它是"最多人看"排序的依据，藏起来排序就成了黑箱 */}
+                  <span title="看过这个库的人数">{fmtNum(k.views ?? 0)} 人看过</span>
                   <span className="lib-owner" title="分享者">
                     <CornIcon name="user" className="h-3 w-3" />
                     {k.owner_name || "某位同学"}
                   </span>
+                  {/* 只有"仅观看"才需要说明：可下载是常态，不用额外加一个标 */}
+                  {k.access === "preview" && (
+                    <span className="lib-access" title="库主只允许在线观看，不提供下载">
+                      仅观看
+                    </span>
+                  )}
                 </div>
                 <div className="lib-card-f">
                   <span className="lib-when">{k.at ? fmtWhen(k.at) + "分享" : "较早分享"}</span>
                   <span className="lib-card-acts">
+                    {/* 查看资料：2026-11-13 起同学分享的库也有详情页（清单 + 预览），
+                        能不能下载由库主设的 access 决定，这里不做判断。 */}
+                    <Link
+                      href={`/library/${encodeURIComponent(k.kb_id)}`}
+                      className="lib-ghost lib-view-link"
+                    >
+                      查看资料
+                    </Link>
                     {/* 留言入口：数字 > 0 才显示条数，0 条时只说「留言」，
                         免得一排「留言 0」把卡片下半区塞满。 */}
                     <button
@@ -422,6 +458,8 @@ function ShareSheet({
   const usable = useMemo(() => kbs.filter((k) => k.chunks > 0), [kbs]);
   const [picked, setPicked] = useState<string | null>(usable[0]?.kb_id ?? null);
   const [desc, setDesc] = useState(usable[0]?.public_desc ?? "");
+  /** 别人能做什么。默认"仅观看"：新增能力要用户自己点开，不该替他放开下载 */
+  const [access, setAccess] = useState<AccessMode>("preview");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const firstRef = useRef<HTMLButtonElement | null>(null);
@@ -449,7 +487,7 @@ function ShareSheet({
     setBusy(true);
     setErr(null);
     try {
-      await api.setKbPublic(k.kb_id, true, desc.trim());
+      await api.setKbPublic(k.kb_id, true, desc.trim(), access);
       await onDone(k.name);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "分享失败，请稍后重试");
@@ -491,8 +529,8 @@ function ShareSheet({
         ) : (
           <>
             <p className="lib-sheet-lead">
-              选一个库，写一句它是干什么的。公开后全站登录用户都能在对话里检索它，
-              <strong>文件清单和修改仍然只有你能做</strong>，随时可以收回。
+              选一个库，写一句它是干什么的。公开后全站登录用户都能在对话里检索它、
+              点进去看资料清单，<strong>改内容仍然只有你能做</strong>，随时可以收回。
             </p>
 
             <div className="lib-sheet-label">选哪个库</div>
@@ -537,6 +575,30 @@ function ShareSheet({
               placeholder="例：考研数学一，近十年真题按章节整理，含错题标注"
               onChange={(e) => setDesc(e.target.value)}
             />
+
+            <div className="lib-sheet-label">别人能做什么</div>
+            <div className="lib-access-pick" role="radiogroup" aria-label="访问方式">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={access === "preview"}
+                className={"lib-access-opt" + (access === "preview" ? " on" : "")}
+                onClick={() => setAccess("preview")}
+              >
+                <b>仅观看</b>
+                <span>能看清单、能在线预览，不提供下载按钮</span>
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={access === "download"}
+                className={"lib-access-opt" + (access === "download" ? " on" : "")}
+                onClick={() => setAccess("download")}
+              >
+                <b>可以下载</b>
+                <span>在上面基础上，还能把原件存到本地</span>
+              </button>
+            </div>
 
             {err && <p className="lib-sheet-err">{err}</p>}
 

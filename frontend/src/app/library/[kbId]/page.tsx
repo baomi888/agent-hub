@@ -1,7 +1,10 @@
 "use client";
 
 /**
- * 官方课程资料页（/library/{kb_id}）。
+ * 公开资料页（/library/{kb_id}）。
+ *
+ * 2026-11-13 起**同学分享的库也能进这一页**（由库主决定仅观看还是可下载），
+ * 所以页面上不再写死"官方"：徽标、副标题、页脚按 `data.official` 分叉。
  *
  * 广场上点「查看资料」进到这里：一门课一页，列出这门课的全部官方资料，
  * 每份都能**在线看**或者**下载到本地**。
@@ -99,6 +102,8 @@ export default function CourseLibraryPage() {
   const [opening, setOpening] = useState(false);
   /** 正在预览的那份资料；null = 没开预览 */
   const [viewing, setViewing] = useState<OfficialKbFile | null>(null);
+  /** 资料名搜索。一个库里几十份资料时，靠滚着找太慢 */
+  const [fileQuery, setFileQuery] = useState("");
   /** 手机/平板：原版 PDF 不走弹层，直接交给系统阅读器 */
   const narrow = useIsNarrow();
 
@@ -125,15 +130,18 @@ export default function CourseLibraryPage() {
 
   /** 按文件夹分组，保持后端返回的原始顺序（导入时排好的） */
   const groups = useMemo(() => {
+    const q = fileQuery.trim().toLowerCase();
+    // 搜索匹配「资料名」整体（含文件夹前缀）：用户记得的多半是"第三章"，而不是完整路径
+    const files = (data?.files ?? []).filter((f) => !q || f.name.toLowerCase().includes(q));
     const out: { folder: string; files: OfficialKbFile[] }[] = [];
-    for (const f of data?.files ?? []) {
+    for (const f of files) {
       const { folder } = splitName(f.name);
       const last = out[out.length - 1];
       if (last && last.folder === folder) last.files.push(f);
       else out.push({ folder, files: [f] });
     }
     return out;
-  }, [data]);
+  }, [data, fileQuery]);
 
   const openInChat = async () => {
     if (!data || opening) return;
@@ -164,8 +172,13 @@ export default function CourseLibraryPage() {
         <div className="lib-top-in">
           <MascotLogo className="lib-logo" />
           <div className="lib-head-text">
-            <h1>{data?.name || "课程资料"}</h1>
-            <p>官方公开知识库 · 在线预览或下载</p>
+            <h1>{data?.name || "资料库"}</h1>
+            <p>
+              {data?.official
+                ? "官方公开知识库 · 在线预览或下载"
+                : "同学分享的资料库 · " +
+                  (data?.access === "download" ? "可在线预览、可下载" : "仅可在线预览")}
+            </p>
           </div>
           <Link href="/library" className="lib-back" aria-label="返回公开知识库">
             <CornIcon name="back" className="h-4 w-4" />
@@ -190,7 +203,7 @@ export default function CourseLibraryPage() {
           <div className="lib-empty">
             <CornIcon name="book" className="lib-empty-icon" />
             <p className="lib-empty-t">{err}</p>
-            <p className="lib-empty-d">可能是这门课的资料还没上线，或者链接不对。</p>
+            <p className="lib-empty-d">可能是这个库还没公开、被收回了，或者链接不对。</p>
             <div className="lib-empty-acts">
               <button type="button" className="lib-ghost" onClick={() => void load()}>
                 重试
@@ -210,7 +223,9 @@ export default function CourseLibraryPage() {
                   {markOf(data.name)}
                 </span>
                 <div className="lib-course-hero-text">
-                  <span className="lib-badge-off">官方资料</span>
+                  <span className="lib-badge-off">
+                    {data.official ? "官方资料" : `由 ${data.owner_name || "同学"} 分享`}
+                  </span>
                   <h2>{data.name}</h2>
                   <p>{data.desc?.trim() || "这门课的资料还在整理，先把已有的用起来。"}</p>
                 </div>
@@ -222,6 +237,11 @@ export default function CourseLibraryPage() {
                 <span className="lib-dot" />
                 <span className="lib-course-stat">
                   <b>{fmtNum(data.chunks)}</b> 段已建库
+                </span>
+                <span className="lib-dot" />
+                {/* 浏览数（独立访客）：本次打开已计入，所以新库第一次看就是 1 */}
+                <span className="lib-course-stat" title="看过这个库的人数">
+                  <b>{fmtNum(data.views ?? 0)}</b> 人看过
                 </span>
                 <button
                   type="button"
@@ -235,10 +255,35 @@ export default function CourseLibraryPage() {
               </div>
             </section>
 
+            {/* 资料名搜索：只在这个库资料够多时才出现（少于 7 份滚一下就到了，
+                多一个搜索框反而让首屏更挤） */}
+            {(data.files.length > 6 || fileQuery.trim() !== "") && (
+              <label className="lib-search lib-file-search">
+                <CornIcon name="search" className="h-4 w-4" />
+                <input
+                  value={fileQuery}
+                  onChange={(e) => setFileQuery(e.target.value)}
+                  placeholder="搜资料名，如「第三章」或「真题」"
+                  aria-label="搜索这个库里的资料"
+                />
+                {fileQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setFileQuery("")}
+                    aria-label="清空资料搜索"
+                  >
+                    <CornIcon name="close" className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </label>
+            )}
+
             {groups.length === 0 && (
               <div className="lib-empty">
                 <CornIcon name="book" className="lib-empty-icon" />
-                <p className="lib-empty-t">这门课还没有资料</p>
+                <p className="lib-empty-t">
+                  {fileQuery.trim() ? `没搜到「${fileQuery.trim()}」` : "这个库还没有资料"}
+                </p>
               </div>
             )}
 
@@ -290,6 +335,12 @@ export default function CourseLibraryPage() {
                             >
                               下载
                             </a>
+                          ) : data.access === "preview" ? (
+                            // 库主设了仅观看：这里必须说清是**规则**不让下，
+                            // 而不是原件丢了 —— 两者的处理方法完全不一样
+                            <span className="lib-file-na" title="库主设置为仅观看">
+                              仅观看
+                            </span>
                           ) : (
                             <span className="lib-file-na">原件未留存</span>
                           )}
@@ -302,8 +353,9 @@ export default function CourseLibraryPage() {
             ))}
 
             <p className="lib-foot">
-              这些资料由站点整理，供校内学习使用。转载或再发布请注明来源与许可（如 OpenStax 的
-              CC BY-NC-SA 4.0）。
+              {data.official
+                ? "这些资料由站点整理，供校内学习使用。转载或再发布请注明来源与许可（如 OpenStax 的 CC BY-NC-SA 4.0）。"
+                : "这些资料由同学自愿分享，仅供校内学习使用。要转载请先征得分享者同意。"}
             </p>
 
             {/* 留言板放在资料清单之后：这一页的主角是资料，讨论是附在后面的

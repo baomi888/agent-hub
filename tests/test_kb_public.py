@@ -44,6 +44,19 @@ OWNER = "u_owner"
 OTHER = "u_other"
 
 
+@pytest.fixture(autouse=True)
+def _no_views(monkeypatch):
+    """浏览计数在这里一律置空。
+
+    这条文件不换 session 库（它只关心 chroma 与公开登记），详情接口一记浏览
+    就会写到仓库里的 data/sessions.db —— 测试污染真实用户数据，
+    正是 MEMORY 里反复强调不能做的事。计数的真实行为在 test_kb_views.py 里测。
+    """
+    monkeypatch.setattr(kb_api.kb_views, "touch", lambda *a, **k: None)
+    monkeypatch.setattr(kb_api.kb_views, "count", lambda *a, **k: 0)
+    monkeypatch.setattr(kb_api.kb_views, "counts", lambda *a, **k: {})
+
+
 def _no_quota(monkeypatch):
     monkeypatch.setattr(kb_api.quota, "guard", lambda *a, **k: None)
     monkeypatch.setattr(kb_api.quota, "consume", lambda *a, **k: None)
@@ -140,7 +153,8 @@ def test_files_and_visibility_stay_owner_only(monkeypatch, kb_id):
 
     # 库主自己不受影响。返回里多了 desc：广场卡片要用它显示简介
     out = asyncio.run(kb_api.set_kb_visibility(kb_id, kb_api.VisibilityRequest(public=False), OWNER))
-    assert out == {"kb_id": kb_id, "public": False, "desc": ""}
+    # 返回多了 access：前端保存后要立刻回显"仅观看/可下载"的选择
+    assert out == {"kb_id": kb_id, "public": False, "desc": "", "access": "preview"}
 
 
 def test_public_list_excludes_caller_and_private(monkeypatch, kb_id):
@@ -167,6 +181,10 @@ def test_public_list_excludes_caller_and_private(monkeypatch, kb_id):
             "at",
             "official",
             "posts",
+            # 2026-11-13 新增：access=别人能做什么（preview/download），
+            # views=看过的人数（独立访客）。两个都是展示用，仍不含清单。
+            "access",
+            "views",
         }
         for k in theirs["kbs"]
     )
@@ -304,6 +322,10 @@ def test_visibility_api_cannot_mint_official(kb_id):
 
     这是本题最要紧的一条：official 只能由服务端导入脚本写。
     /visibility 的请求体里根本没有这个字段，所以传什么都变不出官方身份。
+
+    2026-11-13 起行为变了一半：**同学公开的库也能看清单了**（用户要求），
+    但"能看清单"不等于"是官方"——详情里 official 仍是 False、
+    署名不是"官方"、默认只给看不能下。这三条就是防伪装的落点。
     """
     out = asyncio.run(
         kb_api.set_kb_visibility(kb_id, kb_api.VisibilityRequest(public=True, desc="假装官方"), OWNER)
@@ -311,7 +333,56 @@ def test_visibility_api_cannot_mint_official(kb_id):
     assert out["public"] is True
     assert pipelines.is_official(kb_id) is False
 
-    # 既然不是官方，官方详情接口对它就是 404 —— 文件清单照样不给
+    # 请求体里塞 official 也没用：模型里没这个字段，多传的被丢掉
+    asyncio.run(
+        kb_api.set_kb_visibility(
+            kb_id,
+            kb_api.VisibilityRequest(public=True, **{"official": True}),  # type: ignore[arg-type]
+            OWNER,
+        )
+    )
+    assert pipelines.is_official(kb_id) is False
+
+    detail = asyncio.run(kb_api.get_official_kb(kb_id, OTHER))
+    assert detail["official"] is False
+    assert detail["owner_name"] != "官方"
+    # 默认仅观看：清单里每份资料都不给下载
+    assert detail["access"] == "preview"
+    assert all(f["download"] is False for f in detail["files"])
+
+
+def test_preview_only_blocks_download_but_allows_inline(kb_id):
+    """仅观看：`/file` 不带 inline 必须 403，带 inline 放行。
+
+    403 与 404 的区别在这里是刻意的：库是公开的、名字也是真的，
+    只是不许下载 —— 说"不存在"会让用户以为文件丢了。
+    """
+    asyncio.run(kb_api.set_kb_visibility(kb_id, kb_api.VisibilityRequest(public=True), OWNER))
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(kb_api.get_official_file(kb_id, "第一章.pdf", 0, OTHER))
+    assert e.value.status_code == 403
+    assert "仅观看" in e.value.detail
+
+    # inline=1 过了那道闸，往下走才发现文件不存在 → 404（不是 403）
+    with pytest.raises(HTTPException) as e2:
+        asyncio.run(kb_api.get_official_file(kb_id, "第一章.pdf", 1, OTHER))
+    assert e2.value.status_code == 404
+
+
+def test_download_allowed_when_owner_opts_in(kb_id):
+    """库主开了"可下载"：下载不再被 403 挡住（文件不存在仍是 404）。"""
+    asyncio.run(
+        kb_api.set_kb_visibility(
+            kb_id, kb_api.VisibilityRequest(public=True, access="download"), OWNER
+        )
+    )
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(kb_api.get_official_file(kb_id, "第一章.pdf", 0, OTHER))
+    assert e.value.status_code == 404  # 不是 403：闸已经放行，卡在"没这个文件"
+
+
+def test_private_kb_detail_still_404(kb_id):
+    """只观看不等于所有人能看：没公开的库，详情接口照样 404。"""
     with pytest.raises(HTTPException) as e:
         asyncio.run(kb_api.get_official_kb(kb_id, OTHER))
     assert e.value.status_code == 404

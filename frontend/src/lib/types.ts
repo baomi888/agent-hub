@@ -29,9 +29,19 @@ export interface KbInfo {
   public?: boolean;
   /** 公开时写在广场卡片上的那句简介。只在公开期间有 —— 收回时随登记一起清掉 */
   public_desc?: string;
+  /** 公开期间别人能做什么（2026-11-13）。未设置按"仅观看"给 */
+  public_access?: AccessMode;
 }
 
 /** GET /api/kb/public 单条：公开知识库广场上的一张卡片。别人的库，没有文件清单 */
+/**
+ * 公开库的访问方式（2026-11-13）。
+ *   preview  —— 仅观看：能看清单、能在线预览，不给下载
+ *   download —— 可下载：在上面基础上再给原件
+ * 两种都能被检索、都能留言，区别只在最后那一下"存到本地"。
+ */
+export type AccessMode = "preview" | "download";
+
 export interface PublicKbInfo {
   kb_id: string;
   name: string;
@@ -46,11 +56,21 @@ export interface PublicKbInfo {
   at: number;
   /**
    * 官方课程库（站点自建，非用户分享）。
-   * 只有这类库允许点进去看文件清单 —— 用户分享的库永远只给份数。
+   * 2026-11-13 起用户分享的库也能点进去看清单，所以它不再决定"能不能进"，
+   * 只决定分区、徽标和署名。
    */
   official?: boolean;
   /** 留言板上的条数。0 = 还没人说话，卡片上就不显示这个数字 */
   posts?: number;
+  /**
+   * 别人能拿这个库做什么：
+   *   preview  —— 能看清单、能在线看，不能下载原件（默认）
+   *   download —— 再加一项"下载原件"
+   * 官方库恒为 download。
+   */
+  access?: "preview" | "download";
+  /** 看过的人数（独立访客，同一个人重复打开只算一次） */
+  views?: number;
 }
 
 /** 公开知识库留言板上的一条留言（GET /api/kb/public/{kb_id}/board） */
@@ -60,11 +80,23 @@ export interface BoardPost {
   body: string;
   /** Unix 秒 */
   at: number;
-  author: { name: string; avatar: string };
+  author: {
+    name: string;
+    avatar: string;
+    /** 管理员：名字前挂金色「管理员」标 */
+    admin: boolean;
+  };
   /** 是不是自己写的（前端据此高亮） */
   mine: boolean;
   /** 作者本人 / 库主 / 管理员能看到删除按钮；真正的判定在后端 */
   can_delete: boolean;
+  /**
+   * 回复的是楼里某条回复时，点名对象。
+   * 直接回复楼主、或新开一楼时为 null —— 位置本身就说明了对象。
+   */
+  reply_to: { id: number; name: string } | null;
+  /** 只有顶层帖有：挂在它下面的回复（时间正序）。两级封顶，回复里不会再嵌套 */
+  replies?: BoardPost[];
 }
 
 /** 一个公开库的留言板首屏（含官方表情候选） */
@@ -108,8 +140,14 @@ export interface OfficialKbDetail {
   name: string;
   desc: string;
   chunks: number;
+  /** 是不是官方课程库。false = 同学公开的库（也有清单，但署名和徽标不同） */
   official: boolean;
+  /** 官方 → "官方"；同学库 → 库主的昵称/用户名 */
   owner_name: string;
+  /** 见 PublicKbInfo.access */
+  access?: "preview" | "download";
+  /** 看过的人数（本次打开已计入） */
+  views?: number;
   files: OfficialKbFile[];
 }
 

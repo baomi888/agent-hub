@@ -187,3 +187,140 @@ def test_purge_removes_all_posts_of_kb(client, env, kb):
     assert kb_board.count_posts(KB) == 2
     assert kb_board.purge_kb(KB) == 2
     assert kb_board.count_posts(KB) == 0
+
+
+# ==================== 五、楼中楼回复（2026-11-13）====================
+# 结构钉死：两级。顶层帖 + 挂在它下面的回复；回复里再回复，仍然挂在同一栋楼，
+# 只多一个「回复 @某某」。Discuz 楼中楼 / 微博 / YouTube 都是这么做的。
+
+
+def _reply(client: TestClient, body: str, reply_to: int) -> dict:
+    return client.post(f"/api/kb/public/{KB}/board", json={"body": body, "reply_to": reply_to})
+
+
+def test_reply_attaches_under_the_thread(client, env, kb):
+    _as(client, "alice")
+    root = _post(client, "这章的习题答案在哪？").json()["post"]
+
+    _as(client, "bob")
+    r = _reply(client, "在最后一页", root["id"])
+    assert r.status_code == 200
+    assert r.json()["post"]["reply_to"] is None  # 直接回楼主，不点名
+
+    _as(client, "alice")
+    data = client.get(f"/api/kb/public/{KB}/board").json()
+    # 回复不单独占一个"楼"：列表里仍然只有 1 栋，回复在它的 replies 里
+    assert len(data["posts"]) == 1
+    assert data["posts"][0]["id"] == root["id"]
+    assert [x["body"] for x in data["posts"][0]["replies"]] == ["在最后一页"]
+    # 「N 条」是含回复的总数，用户关心的是热闹程度
+    assert data["total"] == 2
+
+
+def test_reply_to_a_reply_stays_two_levels(client, env, kb):
+    """回复"楼里的某条回复"时不许再挖一层：新回复仍挂在楼主下，只点名。"""
+    _as(client, "alice")
+    root = _post(client, "楼主").json()["post"]
+    first = _reply(client, "第一条回复", root["id"]).json()["post"]
+
+    _as(client, "bob")
+    second = _reply(client, "回上面那条", first["id"]).json()["post"]
+    assert second["reply_to"]["id"] == first["id"]
+    # 点名的是被回复的那个人（第一条回复是 alice 写的），不是楼主也不是自己
+    assert second["reply_to"]["name"] == "alice"
+
+    data = client.get(f"/api/kb/public/{KB}/board").json()
+    assert len(data["posts"]) == 1
+    kids = data["posts"][0]["replies"]
+    assert len(kids) == 2
+    # 关键：第二条回复的 replies 字段不存在/为空，说明没有被挂成第三层
+    assert not kids[1].get("replies")
+    assert kids[1]["reply_to"]["id"] == first["id"]
+    assert kids[1]["body"] == "回上面那条"
+
+
+def test_reply_cannot_cross_kb(client, env, kb):
+    """拿别的库的帖 id 来回复必须被拒：否则留言会串库，B 库的楼里冒出 A 库的对话。"""
+    _as(client, "alice")
+    assert _post(client, "本库的帖").status_code == 200
+    # 直接往另一个库写一条（不走 API，免得又要顶一份 pipelines 桩）
+    foreign = kb_board.add_post("otherkb", "someone", "别库的帖")
+    assert kb_board.get_post(foreign["id"])["kb_id"] == "otherkb"
+
+    r = _reply(client, "跨库回复", foreign["id"])
+    assert r.status_code == 400
+    assert "不存在" in r.json()["detail"]
+
+    # 不存在的 id 同样要 400，而不是悄悄挂成新楼
+    assert _reply(client, "回幽灵", 999999).status_code == 400
+    assert client.get(f"/api/kb/public/{KB}/board").json()["total"] == 1
+
+
+def test_delete_thread_removes_its_replies(client, env, kb):
+    """删楼主连回复一起删，且返回实际消失的条数（前端按它减计数）。"""
+    _as(client, "alice")
+    root = _post(client, "楼主").json()["post"]
+    _reply(client, "回复一", root["id"])
+    _reply(client, "回复二", root["id"])
+    assert client.get(f"/api/kb/public/{KB}/board").json()["total"] == 3
+
+    r = client.delete(f"/api/kb/public/{KB}/board/{root['id']}")
+    assert r.status_code == 200
+    assert r.json()["removed"] == 3
+
+    data = client.get(f"/api/kb/public/{KB}/board").json()
+    assert data["total"] == 0
+    assert data["posts"] == []
+
+
+def test_delete_one_reply_keeps_the_thread(client, env, kb):
+    _as(client, "alice")
+    root = _post(client, "楼主").json()["post"]
+    _as(client, "bob")
+    rid = _reply(client, "这条要删", root["id"]).json()["post"]["id"]
+
+    assert client.delete(f"/api/kb/public/{KB}/board/{rid}").json()["removed"] == 1
+    data = client.get(f"/api/kb/public/{KB}/board").json()
+    assert data["total"] == 1
+    assert data["posts"][0]["replies"] == []
+
+
+def test_has_more_counts_threads_not_posts(client, env, kb):
+    """一栋楼聊了 3 句时，总数是 4 但只有 1 栋楼 —— 不能因此显示「加载更早」。
+
+    这里就是 `has_more` 用错口径的现场：用总条数判断会永远为真，
+    用户一直点「加载更早」什么也加载不出来。
+    """
+    _as(client, "alice")
+    root = _post(client, "楼主").json()["post"]
+    _reply(client, "r1", root["id"])
+    _reply(client, "r2", root["id"])
+
+    data = client.get(f"/api/kb/public/{KB}/board?limit=1").json()
+    assert data["total"] == 3
+    assert len(data["posts"]) == 1
+    assert data["has_more"] is False
+
+
+def test_admin_gets_gold_badge(client, env, kb):
+    """管理员名字前要有金标：author.admin 由后端下发，前端只负责画。"""
+    _as(client, "alice")
+    _post(client, "普通用户")
+
+    _as(client, "devadmin")  # env 里 ADMIN_USERNAMES = ["devadmin"]
+    r = _post(client, "官方回复")
+    assert r.status_code == 200
+    assert r.json()["post"]["author"]["admin"] is True
+
+    data = client.get(f"/api/kb/public/{KB}/board").json()
+    by_body = {p["body"]: p for p in data["posts"]}
+    assert by_body["普通用户"]["author"]["admin"] is False
+    assert by_body["官方回复"]["author"]["admin"] is True
+
+
+def test_admin_can_delete_any_post(client, env, kb):
+    _as(client, "alice")
+    pid = _post(client, "会被管理员删掉").json()["post"]["id"]
+
+    _as(client, "devadmin")
+    assert client.delete(f"/api/kb/public/{KB}/board/{pid}").status_code == 200

@@ -1,6 +1,12 @@
 // 后端 API 封装：统一错误处理 + 类型化（相对路径走 rewrites 代理）
 import type { Conversation, KbInfo, KbFile, FilePreview, SearchResult, Defaults, Message } from "./types";
-import type { PublicKbInfo, OfficialKbDetail, BoardData, BoardPost } from "./types";
+import type {
+  PublicKbInfo,
+  OfficialKbDetail,
+  BoardData,
+  BoardPost,
+  AccessMode,
+} from "./types";
 import type { KbProposal, KbProposalConfirmResult } from "./types";
 import type { DialogueCandidatesResp, ImportDialogueResult, CourseReminderState } from "./types";
 import type { CalendarLink } from "./types";
@@ -320,12 +326,20 @@ export const api = {
   listKbs: () => request<{ kbs: KbInfo[] }>("/api/kb/"),
   // 设置公开状态（仅库主）。公开只放开「他人只读检索」，文件清单与写操作仍私有
   // 公开状态与广场简介。desc 不传 = 不动已有简介（收回时前端就不传）；传空串 = 清空
-  setKbPublic: (kbId: string, isPublic: boolean, desc?: string) =>
-    request<{ kb_id: string; public: boolean; desc: string }>(
+  /**
+   * 公开 / 收回，并可选地设置"仅观看还是可下载"。
+   * `access` 不传 = 不动已有设置（接收回公开这种只改一半的动作）。
+   */
+  setKbPublic: (kbId: string, isPublic: boolean, desc?: string, access?: AccessMode) =>
+    request<{ kb_id: string; public: boolean; desc: string; access: AccessMode }>(
       `/api/kb/${encodeURIComponent(kbId)}/visibility`,
       {
         method: "POST",
-        body: JSON.stringify(desc === undefined ? { public: isPublic } : { public: isPublic, desc }),
+        body: JSON.stringify({
+          public: isPublic,
+          ...(desc === undefined ? {} : { desc }),
+          ...(access === undefined ? {} : { access }),
+        }),
       }
     ),
   // 公开知识库广场：别人的公开库（后端已排除调用者自己的库）
@@ -353,13 +367,18 @@ export const api = {
     request<BoardData>(
       `/api/kb/public/${encodeURIComponent(kbId)}/board` + (before ? `?before=${before}` : "")
     ),
-  postKbBoard: (kbId: string, body: string) =>
-    request<{ post: BoardPost }>(`/api/kb/public/${encodeURIComponent(kbId)}/board`, {
-      method: "POST",
-      body: JSON.stringify({ body }),
-    }),
+  postKbBoard: (kbId: string, body: string, replyTo?: number) =>
+    request<{ post: BoardPost; thread: BoardPost }>(
+      `/api/kb/public/${encodeURIComponent(kbId)}/board`,
+      {
+        method: "POST",
+        // 不带 reply_to = 新开一楼；带了就是回复某条（后端两级封顶）
+        body: JSON.stringify(replyTo ? { body, reply_to: replyTo } : { body }),
+      }
+    ),
   deleteKbBoardPost: (kbId: string, postId: number) =>
-    request<{ ok: boolean; id: number }>(
+    // removed = 实际消失的条数（删楼主会连带它的回复），计数要按它减
+    request<{ ok: boolean; id: number; removed: number }>(
       `/api/kb/public/${encodeURIComponent(kbId)}/board/${postId}`,
       { method: "DELETE" }
     ),
