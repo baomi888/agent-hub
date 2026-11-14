@@ -364,6 +364,9 @@ def test_cat_counts_and_stats(env, client, kb):
     assert by["ask"] == 3 and by["res"] == 1 and by["exp"] == 0
     assert d["total"] == 4
     assert d["replies"] == 1
+    # 今日新增只数主帖。口径一旦含回复，页面上就会出现
+    # 「全部话题 4」旁边写着「今日新增 5 条」—— 比总数还大。
+    assert d["today"] == 4, "今日新增把回复也算进去了（4 个话题 + 1 条回复会写成 5）"
     # 站务公告对普通用户不可发
     assert {c["key"]: c["postable"] for c in d["cats"]}["meta"] is False
 

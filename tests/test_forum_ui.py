@@ -177,9 +177,28 @@ def test_notice_bar_shows_the_latest_one_only():
 def test_pinned_rows_render_before_normal_topics():
     """置顶必须真的排在前面 —— `pinned` 只是数据，顺序由渲染决定。"""
     s = _read(FORUM_PAGE)
-    a = s.index("{pinned.map((t) => renderRow(t, true))}")
+    a = s.index("{listPins.map((t) => renderRow(t, true))}")
     b = s.index("{topics.map((t) => renderRow(t))}")
     assert a < b, "公告被渲染到了普通帖子后面，置顶等于没做"
+
+
+def test_notice_post_is_not_repeated_in_the_list():
+    """公告条已经说了的那一条，列表里不再重复。
+
+    手机 390 宽时，同一句标题会在相隔约 150px 的地方出现两次：
+    顶部横幅一次、列表首行一次。只去掉摘要不够，重复的是标题本身。
+
+    但**不能简单地把它从列表里删掉**：用户点一次关闭，那一期公告就再也
+    找不到入口了。所以关闭后要回到列表 —— 这一条断言钉的是这个条件分支，
+    不是"少渲染一行"。
+    """
+    s = _read(FORUM_PAGE)
+    assert "const listPins = notice ? pinned.filter((t) => t.id !== notice.id) : pinned;" in s, (
+        "公告条和列表首行又同时显示同一条公告了；或者关闭公告条后那一条没有回到列表"
+    )
+    # 列表、空态、渲染条件三处都必须跟着 listPins 走，留一处用 pinned 就会
+    # 出现"列表空着但空态不出现"这种对不上的状态
+    assert s.count("listPins.length + topics.length") == 2, "空态与列表的渲染条件没有一起换成 listPins"
 
 
 def test_compose_does_not_preselect_a_board_i_cannot_post_to():
@@ -279,3 +298,61 @@ def test_mobile_chip_strip_fades_instead_of_cutting():
         "没算过板块条有没有滚到底，遮罩会一直留着"
     )
     assert 'addEventListener("scroll"' in page, "没监听横向滚动，滚到底了遮罩也不撤"
+
+
+# ---------------------------------------------------------------------------
+# 2026-11-14 第二轮（按 oil-ui 0.33.4 复查）。下面三条钉的都是一模一样的
+# 毛病：同一件事在两个地方说了两遍，或者该有回应的动作没有回应。
+# ---------------------------------------------------------------------------
+
+
+def test_detail_hides_the_zero_reply_counter():
+    """0 条回复时，标题下不挂「0 条回复」。
+
+    列表里 0 回复早就不显示计数了（"一圈灰 0 比没人回本身更显眼"），
+    详情页却还无条件写着「站务公告 · 0 条回复」—— 同一条规则两个页面两个口径。
+    那句话的信息量是零：它只是用一行字宣布"这里什么都没有"。
+    """
+    s = _read(FORUM_DETAIL)
+    assert "{topic.reply_n > 0 && <span>{topic.reply_n} 条回复</span>}" in s, (
+        "详情页又开始无条件渲染回复数了；0 回复时它会写着「0 条回复」"
+    )
+
+
+def test_entry_says_the_unit_out_loud():
+    """列表里的回复数写「1 条回复」，不写「1 回复」。
+
+    「1 回复」是名词短语压在数字后面，手机端掉到第二行时读起来像一句
+    独立的备注；「1 条回复」才是一句话，也才对得上详情页的写法。
+    """
+    s = _read(FORUM_PAGE)
+    assert "<span>条回复</span>" in s, "回复数又退回成「1 回复」了"
+    assert "<span>回复</span>" not in s, "还有一处写着光秃秃的「回复」"
+
+
+def test_pill_buttons_give_press_feedback():
+    """胶囊按钮按下要有回应。
+
+    这一排原来只有 hover 上浮，按下去什么都不发生 —— 手指点下去没有反应，
+    会以为没点到。全局 .btn-new 靠背景变深回应，论坛这排靠轻微下陷，
+    同时把阴影收掉，才像"陷下去"而不是"缩小了"。
+    """
+    css = _read(FORUM_CSS)
+    for sel in (".fm-new:active", ".fm-chip:active", ".fm-tab:active"):
+        assert sel in css, f"{sel} 没有按下样式，点下去不会有任何回应"
+    assert "scale(0.97)" in css, "按下没有变形；暖纸上只改阴影几乎看不出来"
+
+
+def test_sort_tabs_do_not_reuse_the_chip_shape():
+    """排序用下划线，不再用胶囊。
+
+    板块 chip 和排序 tab 上下紧挨着，两排原来都是同款胶囊 + 同款淡金选中底，
+    眼睛分不清哪排是选板块、哪排是换排序；把板块改成淡金底之后，
+    两排干脆一模一样了。排序是"同一批内容的另一种看法"，用轻得多的
+    下划线，两排就读成两个维度。
+    """
+    css = _read(FORUM_CSS)
+    tab = _css_rule(css, ".fm-tab")
+    assert "border-radius: 999px" not in tab, "排序又变回胶囊了，和板块 chip 撞成同款"
+    on = _css_rule(css, ".fm-tab.on")
+    assert "box-shadow: inset 0 -2px 0" in on, "排序的选中指示不是那条下划线"

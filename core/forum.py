@@ -217,14 +217,19 @@ def count_by_cat() -> dict[str, int]:
 
 
 def stats() -> dict:
-    """广场头部那几个数字。三条标量，一条 SQL 拿完。"""
+    """广场头部那几个数字。三条标量，一条 SQL 拿完。
+
+    `today` 必须和 `topics` 同口径（只数主帖），否则页面上会出现
+    「全部话题 3」旁边写着「今日新增 4 条」—— 4 是 3 个主帖加 1 条回复，
+    数字比总数还大，读的人会以为哪边坏了。
+    """
     kb_board._ensure()  # noqa: SLF001
     with store._get_conn() as conn:  # noqa: SLF001
         row = conn.execute(
             "SELECT "
             " SUM(CASE WHEN root_id = 0 AND cat != '' THEN 1 ELSE 0 END), "
             " SUM(CASE WHEN root_id != 0 THEN 1 ELSE 0 END), "
-            " SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) "
+            " SUM(CASE WHEN root_id = 0 AND cat != '' AND created_at >= ? THEN 1 ELSE 0 END) "
             "FROM kb_posts WHERE deleted_at IS NULL",
             (_today_start(),),
         ).fetchone()

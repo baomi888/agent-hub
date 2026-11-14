@@ -304,6 +304,15 @@ export default function ForumPage() {
   const hotLive = hot.filter((t) => t.reply_n > 0);
   /** 顶部横幅用的那一条。关过一次就不再挡视线 */
   const notice = pinned[0] && String(pinned[0].id) !== closedNotice ? pinned[0] : null;
+  /**
+   * 公告条已经说了这一条，列表里就不再重复它。
+   *
+   * 手机上这一条的标题本来会在同一屏出现两次：顶部横幅一次，列表首行一次，
+   * 两句相隔约 150px。只去掉摘要不够 —— 重复的是标题本身。
+   *
+   * 关掉横幅后它要回到列表：否则用户关一次，那一期公告就再也找不到入口了。
+   */
+  const listPins = notice ? pinned.filter((t) => t.id !== notice.id) : pinned;
 
   const closeNotice = () => {
     if (!notice) return;
@@ -360,7 +369,7 @@ export default function ForumPage() {
         {t.reply_n > 0 && (
           <div className="fm-count">
             <b>{t.reply_n}</b>
-            <span>回复</span>
+            <span>条回复</span>
           </div>
         )}
         {/* 整行可点靠这张覆盖层链接：`<a>` 里不能嵌 `<button>`，
@@ -615,8 +624,9 @@ export default function ForumPage() {
             </p>
           )}
           {/* 空态要能接着做事，不是一句"还没有人发帖"就完了。
-              "搜不到"和"板块空着"是两种处境：前者要能退回全量，后者要能迈出第一步 */}
-          {!loading && !err && pinned.length + topics.length === 0 && (
+              "搜不到"和"板块空着"是两种处境：前者要能退回全量，后者要能迈出第一步。
+              公告条吸走唯一一条内容时不算空 —— 那种情况下页面上确实有东西可看 */}
+          {!loading && !err && !notice && listPins.length + topics.length === 0 && (
             <div className="fm-blank">
               <p className="fm-blank-t">
                 {dq ? `没有找到包含「${dq}」的话题` : cat ? `「${catName}」还没有人发帖` : "还没有人发帖"}
@@ -639,10 +649,10 @@ export default function ForumPage() {
             </div>
           )}
 
-          {pinned.length + topics.length > 0 && (
+          {listPins.length + topics.length > 0 && (
             <>
               <ul className="fm-list">
-                {pinned.map((t) => renderRow(t, true))}
+                {listPins.map((t) => renderRow(t, true))}
                 {topics.map((t) => renderRow(t))}
               </ul>
               {/* 列表结束得有个句号。三条内容下面直接接一整屏空白，

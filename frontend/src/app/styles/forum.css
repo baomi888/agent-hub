@@ -259,6 +259,18 @@
   outline: var(--ring-accent);
 }
 
+/* 按下反馈：原来这一排胶囊只有 hover 上浮，按下去什么都不发生 ——
+   手指或鼠标点下去的那一下没有回应，会以为没点到。
+   80ms 到位、松手由 transition 自己弹回；阴影同时收掉，
+   才像"陷下去"而不是"缩小了" */
+.fm-new:active,
+.fm-chip:active,
+.fm-tab:active {
+  transform: scale(0.97);
+  box-shadow: none;
+  transition-duration: 80ms;
+}
+
 /* ---------- 三栏 ---------- */
 
 .fm-wrap {
@@ -400,7 +412,10 @@
 }
 
 .fm-chip.on {
-  border-color: var(--accent);
+  /* 选中态和左栏「全部话题」用同一套：淡金底、无描边。
+     同页两种选中语言（左边淡底、这里金边）会让人以为它们是两种控件。
+     border 保留 1px 但透明，盒子尺寸不变 —— 否则点一下它会缩 1px */
+  border-color: transparent;
   background: var(--accent-soft);
   color: var(--accent-ink);
   font-weight: 700;
@@ -451,9 +466,12 @@
   /* flex:none + nowrap 缺一不可：窄屏下 flex 子项会被压缩，
      "最新" 被挤成"最/新"竖排两行 —— 第一版就是这样 */
   flex: none;
-  padding: 5px 12px;
-  border: 1px solid transparent;
-  border-radius: 999px;
+  padding: 5px 10px;
+  /* 不走胶囊：上面那排板块 chip 已经是胶囊了，两排同款上下相邻时，
+     眼睛分不清哪排是选板块、哪排是换排序。排序是「同一批内容的另一种看法」，
+     用下划线这种轻得多的指示，两排就读成两个维度了 */
+  border: 0;
+  border-radius: 0;
   background: transparent;
   color: var(--text-3);
   font-size: var(--fs-xs);
@@ -468,8 +486,10 @@
 }
 
 .fm-tab.on {
-  border-color: var(--accent-line-soft);
-  background: var(--accent-soft);
+  /* 2px 金色下划线：位置和形状都跟胶囊拉开距离，
+     又不会像「左侧淡金底」那样跟板块 chip 撞成同一种语言 */
+  background: transparent;
+  box-shadow: inset 0 -2px 0 var(--accent);
   color: var(--accent-ink);
   font-weight: 700;
 }
@@ -1000,8 +1020,11 @@
   line-height: 1.35;
   letter-spacing: var(--ls-tight);
   word-break: break-word;
-  /* 手机上 30 字的标题必然折两行，不加这一条时第二行只剩「没了」两个字，
-     看起来像排版断了（孤字）。balance 让两行长度接近 */
+  /* 两行标题怎么断，只有两个选项，都试过：
+       pretty  → 首行塞满 19 字，末行只剩「没了」两个字，像排版断了
+       balance → 两行 12/10 均衡，代价是「十一月更新」被劈成「…更 / 新…」
+     取 balance：孤字最显眼，而拆词是中文按字断行的常态，读得懂。
+     字号降到 19px 断点完全不变（实测），所以调字号解决不了这件事。 */
   text-wrap: balance;
 }
 
@@ -1131,10 +1154,8 @@
     display: flex;
   }
 
-  .fm-crumb,
-  .fm-search {
-    /* 面包屑在手机上没地方放；搜索挪到板块 chip 之后也没地方，宁可先不给，
-       也不要放一个占半屏的输入框把列表推下去 */
+  .fm-crumb {
+    /* 面包屑在这个宽度没地方放：站名 + 分隔 + 两级路径，挤掉搜索和发帖按钮 */
     display: none;
   }
 
@@ -1200,6 +1221,9 @@
     min-width: 0;
     padding-top: 0;
     justify-content: flex-start;
+    /* 掉到第二行时本来和元信息隔着 10px 的栅格间距，读起来像一句独立的
+       备注。收紧到贴住上一行，它才是这一条帖子的活跃度 */
+    margin-top: -5px;
   }
 
   .fm-ex {
@@ -1217,6 +1241,15 @@
   .fm-floors .kb-post-act {
     min-height: 32px;
     padding: 0 8px;
+  }
+}
+
+/* 搜索框留到 640 才隐藏。720 是平板竖屏，也是桌面浏览器 200% 缩放后的
+   CSS 视口 —— 那个宽度放得下搜索框，而放大阅读的人比谁都需要它。
+   只有真手机（≤640）才让位：那里一行要装站名、标题、搜索和发帖按钮，装不下 */
+@media (max-width: 640px) {
+  .fm-search {
+    display: none;
   }
 }
 
