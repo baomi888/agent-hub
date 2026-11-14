@@ -3,6 +3,9 @@
 路由清单：
   GET   /api/admin/overview              总览（用户数 / 调用统计 / 趋势 / 反馈计数）
   GET   /api/admin/apis                  接口排行（按路由模板聚合）
+  GET   /api/admin/failures              失败明细（带人话原因）
+  GET   /api/admin/real-users            真实用户使用数据（排除内部/测试账号）
+  POST  /api/admin/users/{target}/internal  标记/取消内部账号
   GET   /api/admin/feedback              反馈列表（可选按状态筛）
   PATCH /api/admin/feedback/{fid}        改反馈状态（严格按流转表，不允许回退）
   GET   /api/admin/dict                  分类/状态字典（前端不得硬编码）
@@ -32,7 +35,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from core import dashboard, quota, user_feedback
+from core import account, dashboard, quota, user_feedback
 from core.auth import get_current_user
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -182,4 +185,48 @@ async def dict_api(uid: str = Depends(get_current_user)) -> dict:
     """分类 / 状态字典 + 流转表 + 长度限制。前端按钮与校验全部从这里取。"""
     _require_admin(uid)
     return user_feedback.dict_payload()
+
+
+# ==================== 真实用户使用数据（2026-11-15）====================
+
+
+@router.get("/real-users")
+async def real_users(
+    days: int = Query(7, ge=1, le=90),
+    limit: int = Query(20, ge=1, le=50),
+    uid: str = Depends(get_current_user),
+) -> dict:
+    """真实用户使用数据（口径见字典 §2.8 / 契约见 §7.8）。
+
+    与 `/overview` **并列而不是加个开关**：两者的分母不同，混在一个筛选里
+    会让人以为"切了筛选总数会变"，实际是换了统计对象。所以各自独立，
+    由响应里的 `calls` 四桶（真实 / 内部 / 已注销 / 未登录）保证两块能对上账。
+    """
+    _require_admin(uid)
+    return await asyncio.to_thread(dashboard.real_user_view, days, limit)
+
+
+class InternalPatch(BaseModel):
+    internal: bool = Field(..., description="true = 标为内部/测试账号；false = 取消")
+
+
+@router.post("/users/{target}/internal")
+async def set_user_internal(
+    target: str, req: InternalPatch, uid: str = Depends(get_current_user)
+) -> dict:
+    """标记 / 取消标记某个账号为内部账号。
+
+    路径参数用 `{target}` 而不是 `{uid}`：函数参数里已经有一个 `uid`
+    （当前管理员自己），同名会让 FastAPI 把两者绑到同一个值上 ——
+    结果是"管理员永远只能标记自己"。这类错误不会报错，只会静默改错行。
+
+    uid 不存在返回 **404**（与 `_require_admin` 的伪装一致：不确认这个 uid 是否存在）。
+    """
+    _require_admin(uid)
+    if not target:
+        raise HTTPException(status_code=404, detail="Not Found")
+    ok = await asyncio.to_thread(account.set_internal, target, req.internal)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Not Found")
+    return {"ok": True, "uid": target, "internal": req.internal}
 

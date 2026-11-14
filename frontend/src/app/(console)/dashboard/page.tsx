@@ -36,6 +36,7 @@ import type {
   FailuresResp,
   FeedbackDict,
   FeedbackStatus,
+  RealUsersResp,
   UserFeedbackItem,
 } from "@/lib/types";
 
@@ -71,6 +72,15 @@ const STATUS_ORDER: FeedbackStatus[] = ["open", "doing", "done", "closed"];
 
 const AUTO_REFRESH_MS = 30_000;
 
+// 「真实用户」区块的两个统计维度。切换只改渲染哪张表，不重新请求 ——
+// 两个维度各 20 行，一次拉回来比切一次发一次请求更省，也不会切出"加载中"的闪烁。
+type RealDim = "feature" | "user";
+
+const REAL_DIM_OPTIONS: { value: RealDim; label: string; hint: string }[] = [
+  { value: "feature", label: "按功能", hint: "真实用户在调哪些功能，以及每个功能有多少人用过" },
+  { value: "user", label: "按用户", hint: "谁在用、用了多少次、活跃了几天" },
+];
+
 function fmtTime(ts: number): string {
   if (!ts) return "";
   const d = new Date(ts * 1000);
@@ -82,6 +92,12 @@ function fmtClock(d: Date | null): string {
   if (!d) return "";
   const p = (n: number) => String(n).padStart(2, "0");
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+/** 比例 → 百分数。null（分母为 0）显示 —，不显示 0.0% —— 那是"算出了零"，两回事 */
+function fmtPct(v: number | null | undefined): string {
+  if (v === null || v === undefined) return "—";
+  return `${(v * 100).toFixed(1)}%`;
 }
 
 export default function DashboardPage() {
@@ -96,6 +112,11 @@ export default function DashboardPage() {
   const [apis, setApis] = useState<ApiRankResp | null>(null);
   // 失败明细：让页面自己回答"为什么失败"，不用去服务器 grep 日志
   const [fails, setFails] = useState<FailuresResp | null>(null);
+  // 真实用户视角：与 ov 并列的独立口径，加载失败不影响上面那些数字
+  const [real, setReal] = useState<RealUsersResp | null>(null);
+  const [realDim, setRealDim] = useState<RealDim>("feature");
+  // 正在提交标记的 uid（防连点；标记后端只有一条 UPDATE，不需要全局 busy）
+  const [markingUid, setMarkingUid] = useState<string | null>(null);
   const [fb, setFb] = useState<AdminFeedbackResp | null>(null);
   const [fbStatus, setFbStatus] = useState("");
   const [dict, setDict] = useState<FeedbackDict | null>(null);
@@ -125,6 +146,10 @@ export default function DashboardPage() {
       .failures(days, 20)
       .then(setFails)
       .catch(() => setFails(null));
+    api.admin
+      .realUsers(days, 20)
+      .then(setReal)
+      .catch(() => setReal(null));
     api.admin
       .feedback(fbStatus, 30, 0)
       .then(setFb)
@@ -202,6 +227,29 @@ export default function DashboardPage() {
     [load]
   );
 
+  /**
+   * 标记 / 取消标记内部账号。
+   *
+   * 成功后**重拉整块**，而不是本地把这一行从列表里移掉：一次标记会同时改变
+   * 「真实调用次数、活跃用户数、人均、两个维度的排行、四桶分解」——
+   * 本地删一行就得把这六处一起改，漏一处就出现"上面写着 3 个用户、
+   * 表里有 2 行"这种对不上账的页面。让后端算完，前端照着画。
+   */
+  const markInternal = useCallback(
+    async (target: string, internal: boolean) => {
+      setMarkingUid(target);
+      try {
+        await api.admin.setUserInternal(target, internal);
+        load();
+      } catch (e) {
+        setOvErr(e instanceof Error ? e.message : "标记失败");
+      } finally {
+        setMarkingUid(null);
+      }
+    },
+    [load]
+  );
+
   // 登录态还没确定：先什么都不渲染。
   // 不能"先画骨架再判断"—— 骨架里带着"数据看板"标题，非管理员会看到它闪一下，
   // 那也是一次泄露。宁可空白一瞬。
@@ -215,6 +263,9 @@ export default function DashboardPage() {
 
   const noCalls = ov !== null && ov.calls.total === 0;
   const peakCalls = ov ? Math.max(1, ...ov.series.map((x) => x.calls)) : 1;
+  // 真实用户趋势的横轴基准单独算：两个区块的量级差一个数量级时，
+  // 共用基准会让真实用户那条几乎看不见（看着像"没人用"）
+  const realPeak = real ? Math.max(1, ...real.series.map((x) => x.calls)) : 1;
 
   return (
     <PageShell
@@ -362,6 +413,372 @@ export default function DashboardPage() {
               </>
             )}
           </div>
+        </section>
+
+        {/* ============ 真实用户使用数据（与上方并列的另一套口径） ============ */}
+        {/*
+          为什么不做成上方总览的一个筛选开关：
+            · 两者的**分母不同**（上面是全量，这里是排除内部账号后的子集），
+              一个开关会让人以为"筛掉了数据"，实际是换了统计对象；
+            · 成功率、平均耗时这些指标换分母就失去可比性，混在一起会引出
+              "为什么切了筛选成功率也变了"这种没法解释的问题。
+          代价是要用户自己看两块，所以下面用「口径对照」把两块**对上账**：
+              全量 = 真实 + 内部 + 已注销 + 未登录
+          对不上账的看板，看第二眼就没人信了。
+        */}
+        <section>
+          <p className="sec-label">
+            真实用户使用数据{" "}
+            <span className="meta">（另一套口径：排除内部/测试账号与管理员）</span>
+          </p>
+
+          {!real ? (
+            <div className="card card-pad">
+              <SkeletonLines widths={["100%", "88%", "72%"]} />
+            </div>
+          ) : (
+            <>
+              {/* 一个都没标记时必须说实话。否则这里与上方数字完全相同，
+                  用户会以为"功能没生效"，而不是"还没配置"。 */}
+              {real.internal.marked === 0 ? (
+                <Callout icon="info">
+                  还没有标记任何内部/测试账号，所以本视图与上方全量<b>暂时相同</b>。
+                  在下面「已标记的内部账号」里逐个标记，或跑
+                  <code>tools/mark_internal_users.py</code> 批量回填；
+                  标记之后这里才只算真实用户。
+                </Callout>
+              ) : null}
+
+              <div className="grid4" style={{ marginBottom: 10 }}>
+                <div className="card card-pad stat">
+                  <div className="n">{fmtNum(real.calls.real)}</div>
+                  <div className="l">
+                    真实用户调用 <span className="stat-scope">区间</span>
+                  </div>
+                  <div className="meta">占全量 {fmtPct(real.calls.share)}</div>
+                </div>
+                <div className="card card-pad stat">
+                  <div className="n">{fmtNum(real.users.active)}</div>
+                  <div className="l">
+                    活跃真实用户 <span className="stat-scope">区间</span>
+                  </div>
+                  <div className="meta">人均 {real.users.per_user} 次调用</div>
+                </div>
+                <div className="card card-pad stat">
+                  <div className="n">
+                    {ov?.range.days === 1 ? "—" : fmtNum(real.users.returning)}
+                  </div>
+                  <div className="l">回访用户</div>
+                  <div className="meta">
+                    {ov?.range.days === 1
+                      ? "今日算不出回访（要看两天以上）"
+                      : `≥2 天有调用 · 只来过一天 ${fmtNum(real.users.single_day)} 人`}
+                  </div>
+                </div>
+                <div className="card card-pad stat">
+                  <div className="n">{fmtNum(real.users.total)}</div>
+                  <div className="l">
+                    真实账号 <span className="stat-scope">全量</span>
+                  </div>
+                  <div className="meta">区间新增 {fmtNum(real.users.new)}</div>
+                </div>
+              </div>
+
+              <div className="grid2">
+                {/* ---- 口径对照：让两块数字能对上账 ---- */}
+                <div className="card card-pad">
+                  <div
+                    className="tr apis th"
+                    style={{ display: "grid", gridTemplateColumns: "1fr 72px 60px", gap: 8 }}
+                  >
+                    <span>口径分解</span>
+                    <span>调用</span>
+                    <span>占比</span>
+                  </div>
+                  {(
+                    [
+                      { key: "real", label: "真实用户", v: real.calls.real, cls: "" },
+                      { key: "internal", label: "内部/测试账号", v: real.calls.internal, cls: "" },
+                      { key: "orphan", label: "已注销/未知账号", v: real.calls.orphan, cls: "" },
+                      { key: "anonymous", label: "未登录请求", v: real.calls.anonymous, cls: "" },
+                    ] as const
+                  ).map((b) => (
+                    <div
+                      className="tr apis"
+                      key={b.key}
+                      style={{ display: "grid", gridTemplateColumns: "1fr 72px 60px", gap: 8 }}
+                    >
+                      <span style={{ fontSize: "var(--fs-xs)", color: "var(--ink)" }}>{b.label}</span>
+                      <span>{fmtNum(b.v)}</span>
+                      <span className="meta">
+                        {fmtPct(real.calls.total ? b.v / real.calls.total : null)}
+                      </span>
+                    </div>
+                  ))}
+                  <div
+                    className="tr apis"
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 72px 60px",
+                      gap: 8,
+                      borderTop: "1px solid var(--line)",
+                      marginTop: 4,
+                      paddingTop: 6,
+                    }}
+                  >
+                    <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-2)" }}>
+                      合计（= 上方「API 调用次数」）
+                    </span>
+                    <span>{fmtNum(real.calls.total)}</span>
+                    <span className="meta">100%</span>
+                  </div>
+                  <p className="hint" style={{ marginBottom: 0 }}>
+                    四类互斥且穷尽，加起来应当<b>等于</b>上方全量调用数。对不上就说明有调用
+                    没被归进任何一类，那是要修的 bug。
+                  </p>
+                </div>
+
+                {/* ---- 趋势：调用量 + 活跃用户数双序列 ---- */}
+                <div className="card card-pad">
+                  {real.series.every((s) => s.calls === 0) ? (
+                    <p className="hint" style={{ marginTop: 0 }}>
+                      区间内没有真实用户的调用。
+                    </p>
+                  ) : (
+                    <>
+                      {real.series.map((s) => (
+                        <div
+                          className="row"
+                          key={s.day}
+                          style={{ alignItems: "center", gap: 10, marginBottom: 6 }}
+                        >
+                          <span className="meta" style={{ width: 52, flex: "0 0 52px" }}>
+                            {s.day.slice(5)}
+                          </span>
+                          <div className="bar" style={{ flex: 1 }}>
+                            <i style={{ width: `${Math.round((s.calls / realPeak) * 100)}%` }} />
+                          </div>
+                          <span className="meta" style={{ width: 96, textAlign: "right" }}>
+                            {fmtNum(s.calls)} · {s.users} 人
+                          </span>
+                        </div>
+                      ))}
+                      <p className="hint" style={{ marginBottom: 0 }}>
+                        左侧条是<b>调用量</b>，右侧「N 人」是当天有调用的<b>真实用户数</b>。
+                        调用量涨而人数不涨，说明是同一批人在反复用（或有人在脚本刷）。
+                      </p>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* ---- 两个统计维度：只换渲染哪张表，不再请求 ---- */}
+              <div className="card card-pad" style={{ marginTop: 10 }}>
+                <div className="row" style={{ gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+                  <Seg
+                    ariaLabel="统计维度"
+                    options={REAL_DIM_OPTIONS}
+                    value={realDim}
+                    onChange={(v) => setRealDim(v as RealDim)}
+                  />
+                  <span className="meta" style={{ marginLeft: "auto" }}>
+                    共 {fmtNum(real.calls.real)} 次调用 · {real.users.active} 个真实用户
+                  </span>
+                </div>
+
+                {realDim === "feature" ? (
+                  real.by_feature.length === 0 ? (
+                    <p className="hint" style={{ marginTop: 0 }}>
+                      这个区间没有真实用户的调用记录。
+                    </p>
+                  ) : (
+                    <>
+                      <div
+                        className="tr apis th"
+                        style={{ display: "grid", gridTemplateColumns: "1fr 64px 64px", gap: 8 }}
+                      >
+                        <span>功能</span>
+                        <span>次数</span>
+                        <span>用户数</span>
+                      </div>
+                      {real.by_feature.map((it) => (
+                        <div
+                          className="tr apis"
+                          key={`${it.method} ${it.path}`}
+                          style={{ display: "grid", gridTemplateColumns: "1fr 64px 64px", gap: 8 }}
+                          title={`${it.method} ${it.path}`}
+                        >
+                          <span style={{ minWidth: 0, overflow: "hidden" }}>
+                            <span
+                              style={{
+                                display: "block",
+                                fontSize: "var(--fs-xs)",
+                                color: "var(--ink)",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {it.label}
+                            </span>
+                            <span
+                              className="mono"
+                              style={{
+                                display: "block",
+                                fontSize: "var(--fs-xs)",
+                                color: "var(--text-3)",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {it.method} {it.path}
+                            </span>
+                          </span>
+                          <span>{fmtNum(it.calls)}</span>
+                          <span className="meta">{it.users}</span>
+                        </div>
+                      ))}
+                      <p className="hint" style={{ marginBottom: 0 }}>
+                        「用户数」是<b>用过这个功能的真实用户数</b>。次数高但用户数只有 1 ——
+                        说明是单人在反复调用，不是功能受欢迎。
+                      </p>
+                    </>
+                  )
+                ) : real.by_user.length === 0 ? (
+                  <p className="hint" style={{ marginTop: 0 }}>
+                    这个区间没有真实用户的调用记录。
+                  </p>
+                ) : (
+                  <>
+                    <div
+                      className="tr apis th"
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 60px 54px 92px 64px",
+                        gap: 8,
+                      }}
+                    >
+                      <span>账号</span>
+                      <span>调用</span>
+                      <span>天数</span>
+                      <span>最后</span>
+                      <span />
+                    </div>
+                    {real.by_user.map((it) => (
+                      <div
+                        className="tr apis"
+                        key={it.uid}
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "1fr 60px 54px 92px 64px",
+                          gap: 8,
+                          alignItems: "center",
+                        }}
+                        title={it.uid}
+                      >
+                        <span
+                          style={{
+                            minWidth: 0,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            fontSize: "var(--fs-xs)",
+                            color: "var(--ink)",
+                          }}
+                        >
+                          {it.username || it.uid.slice(0, 8)}
+                        </span>
+                        <span>{fmtNum(it.calls)}</span>
+                        <span className="meta">{it.days}</span>
+                        <span className="meta">{fmtTime(it.last_ts)}</span>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          disabled={markingUid === it.uid}
+                          title="如果这是自测号，标为内部账号后它会从本视图里消失"
+                          onClick={() => void markInternal(it.uid, true)}
+                        >
+                          {markingUid === it.uid ? "…" : "标为内部"}
+                        </button>
+                      </div>
+                    ))}
+                    <p className="hint" style={{ marginBottom: 0 }}>
+                      标错的账号可以在下面「已标记的内部账号」里取消。
+                      「天数」= 这个账号在区间内有调用的自然日数。
+                    </p>
+                  </>
+                )}
+              </div>
+
+              {/* ---- 已标记清单：包含本区间 0 次调用的，否则标错了没法撤回 ---- */}
+              <div className="card card-pad" style={{ marginTop: 10 }}>
+                <div className="row" style={{ gap: 8, marginBottom: 8 }}>
+                  <span className="sec-label" style={{ margin: 0 }}>
+                    已标记的内部账号
+                  </span>
+                  <span className="meta">
+                    共 {real.internal.accounts} 个（人工标记 {real.internal.marked} · 管理员{" "}
+                    {real.internal.admins}）· 本区间产生 {fmtNum(real.internal.calls)} 次调用
+                  </span>
+                </div>
+                {real.internal.marked === 0 ? (
+                  <p className="hint" style={{ margin: 0 }}>
+                    还没有人工标记的账号。管理员由配置（ADMIN_UIDS / ADMIN_USERNAMES）自动排除，
+                    不需要标。
+                  </p>
+                ) : (
+                  <>
+                    {real.internal.list.map((it) => (
+                      <div
+                        className="row"
+                        key={it.uid}
+                        style={{ gap: 8, alignItems: "center", padding: "4px 0" }}
+                      >
+                        <span
+                          style={{
+                            minWidth: 0,
+                            flex: 1,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            fontSize: "var(--fs-xs)",
+                          }}
+                          title={it.uid}
+                        >
+                          {it.username || it.uid.slice(0, 8)}
+                        </span>
+                        <span className="meta" style={{ width: 72, textAlign: "right" }}>
+                          {fmtNum(it.calls)} 次
+                        </span>
+                        <span className="meta" style={{ width: 88, textAlign: "right" }}>
+                          {it.last_ts ? fmtTime(it.last_ts) : "未调用"}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          disabled={markingUid === it.uid}
+                          onClick={() => void markInternal(it.uid, false)}
+                        >
+                          {markingUid === it.uid ? "…" : "取消标记"}
+                        </button>
+                      </div>
+                    ))}
+                    <p className="hint" style={{ marginBottom: 0 }}>
+                      取消标记后它会重新算进真实用户 —— 上一行「真实用户调用」会立刻变大。
+                    </p>
+                  </>
+                )}
+              </div>
+
+              <p className="hint" style={{ margin: "8px 0 0" }}>
+                口径定义：<b>真实用户</b> = 账号存在、未被标记为内部、且不在管理员名单里的
+                uid 所产生的调用。<b>未登录请求</b>（打开页面时的身份探测、注册/登录本身）
+                不属于任何用户，因此单列，不计入真实用户。明细口径见
+                <code>docs/数据看板_2026-10-27/口径与数据字典.md</code> §2.8。
+              </p>
+            </>
+          )}
         </section>
 
         {/* ============ 失败原因（不用去服务器 grep 日志） ============ */}

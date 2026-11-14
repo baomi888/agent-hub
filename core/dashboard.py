@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from core import api_labels, apilog, timeutil, user_feedback
+from core import api_labels, apilog, config, timeutil, user_feedback
 
 # ---------- 失败口径（唯一一处定义，别在 SQL 里各写一遍） ----------
 #
@@ -321,5 +321,304 @@ def failures(days: int = 7, limit: int = 20) -> dict:
         "ignorable": [x for x in recent if x["expected"]],
         "top": [item(x, False) for x in agg],
         "range": {"days": r["days"], "start": r["start"], "end": r["end"]},
+    }
+
+
+# ==================== 真实用户使用数据（2026-11-15）====================
+#
+# 为什么单开一个视图，而不是给总览加个筛选开关
+# ------------------------------------------------
+# 总览回答的是「这台机器被调了多少次」，真实用户视图回答的是「有多少真人、
+# 用得多深」。两者分母不同，混在一个开关里会出现「切了筛选，成功率也跟着变」——
+# 那会让人以为在筛选数据，实际是在换统计对象。所以做成并列的两块，
+# 各自带自己的口径标签，并由「口径对照」把两块**能对上账**：
+#
+#     全量调用 = 真实用户 + 内部账号 + 已注销/未知账号 + 未登录请求
+#
+# 四个桶必须互斥且穷尽，否则用户拿计算器一减就发现对不上，然后再也不信这个页面。
+#
+# 桶的判定（顺序即优先级，与 core/account.py 的注释一致）
+# ------------------------------------------------------
+#   anonymous —— uid 为空：未登录请求（401 探测、注册/登录本身、公开页）
+#   orphan    —— uid 有值但 users 里查不到：已注销账号的历史调用
+#   internal  —— is_internal = 1，或 uid 在 ADMIN_UIDS/ADMIN_USERNAMES 里
+#   real      —— 其余
+#
+# 为什么管理员要单独算：管理员的调用里有看板刷新、审核、批量运维，
+# 那不是"用户在用产品"。而且 `api/admin/*` 虽已在采集层被排除（见 apilog.EXCLUDE），
+# 管理员打开首页、翻资料库同样会产生普通接口调用，不排掉就永远有一个假活跃用户。
+#
+# 为什么不按用户名猜测试账号：`gd67254984`、`ct67620262` 这类脚本生成的号长得像
+# 机器，而 `12345`、`111`、`456` 是真人随手起的名字 —— 规则一写就会误伤，
+# 而且误伤了没人发现。所以判定只认**显式标记**，猜测那一层放在
+# `tools/mark_internal_users.py` 里，且默认 dry-run 要人确认。
+
+
+def _admin_uids() -> list[str]:
+    """管理员 uid 列表（ADMIN_UIDS 直取 + ADMIN_USERNAMES 反查）。
+
+    每个请求查一次（一条按用户名索引的 SELECT，毫秒级）。不做进程内缓存：
+    `.env` 改完重启才生效这件事已经够容易忘了，再叠一层缓存会让"我明明改了
+    管理员名单"变成新的排查项。
+    """
+    ids = [x for x in (getattr(config, "ADMIN_UIDS", None) or ()) if x]
+    names = [x for x in (getattr(config, "ADMIN_USERNAMES", None) or ()) if x]
+    if names:
+        from core import session as store
+
+        with store._get_conn() as conn:  # noqa: SLF001
+            marks = ",".join("?" * len(names))
+            rows = conn.execute(
+                "SELECT id FROM users WHERE username IN (" + marks + ")", names
+            ).fetchall()
+            ids.extend(str(r[0]) for r in rows)
+    return list(dict.fromkeys(ids))
+
+
+# 真实用户视角的 FROM/WHERE 前半段。四个聚合查询共用，避免各写一遍走样。
+_REAL_FROM = "FROM api_call_logs al LEFT JOIN users u ON u.id = al.uid WHERE al.ts >= ? AND al.ts < ?"
+
+
+def _real_where(admin_ids: list[str]) -> tuple[str, list]:
+    """真实用户视角的额外条件（以 AND 开头，供拼在 `_REAL_FROM` 之后）。
+
+    参数顺序固定为 (start, end, *admin_ids) —— 调用方按这个顺序给值。
+    """
+    frag = [
+        "al.uid IS NOT NULL",
+        "al.uid <> ''",
+        # LEFT JOIN 没命中 = 账号已注销：不算"现在的用户"，
+        # 但它的调用量会进 orphan 桶，所以账还是平的
+        "u.id IS NOT NULL",
+        "u.is_internal = 0",
+    ]
+    if admin_ids:
+        frag.append("al.uid NOT IN (" + ",".join("?" * len(admin_ids)) + ")")
+    return " AND " + " AND ".join(frag), list(admin_ids)
+
+
+def _bucket_counts(conn, start: int, end_excl: int, admin_ids: list[str]) -> dict:
+    """把区间内所有调用切成四个互斥的桶（见本节顶部注释）。"""
+    admin_case = ""
+    params: list = []
+    if admin_ids:
+        admin_case = " OR al.uid IN (" + ",".join("?" * len(admin_ids)) + ")"
+        params = list(admin_ids)
+    sql = (
+        "SELECT CASE"
+        "    WHEN al.uid IS NULL OR al.uid = '' THEN 'anonymous'"
+        "    WHEN u.id IS NULL THEN 'orphan'"
+        "    WHEN u.is_internal = 1" + admin_case + " THEN 'internal'"
+        "    ELSE 'real' END AS bucket,"
+        "  COUNT(*) AS calls"
+        "  FROM api_call_logs al LEFT JOIN users u ON u.id = al.uid"
+        "  WHERE al.ts >= ? AND al.ts < ?"
+        "  GROUP BY bucket"
+    )
+    # 参数顺序必须跟 SQL 文本里 ? 出现的顺序一致：CASE 在前，WHERE 在后
+    rows = conn.execute(sql, params + [start, end_excl]).fetchall()
+    out = {"real": 0, "internal": 0, "orphan": 0, "anonymous": 0}
+    for r in rows:
+        out[str(r["bucket"])] = int(r["calls"] or 0)
+    return out
+
+
+def _real_series(conn, day_list: list[str], admin_ids: list[str]) -> tuple[list[dict], dict]:
+    """逐日的「真实调用量 + 活跃真实用户数」，顺带算每个人活跃了几天。
+
+    逐天查而不是一次 GROUP BY：与 `_series` 同一理由（见模块 docstring 第 2 条），
+    而且这里还要顺带收集 `uid -> 活跃日集合`，用 Python 归并比写窗口函数清楚。
+    30 天 × 几十个活跃用户，成本可以忽略。
+    """
+    frag, ap = _real_where(admin_ids)
+    out: list[dict] = []
+    days_by_uid: dict[str, set[str]] = {}
+    for day in day_list:
+        s, e = timeutil.day_bounds(day)
+        rows = conn.execute(
+            "SELECT al.uid AS uid, COUNT(*) AS n " + _REAL_FROM + frag + " GROUP BY al.uid",
+            (s, e, *ap),
+        ).fetchall()
+        calls = 0
+        for r in rows:
+            n = int(r["n"] or 0)
+            calls += n
+            days_by_uid.setdefault(str(r["uid"]), set()).add(day)
+        out.append({"day": day, "calls": calls, "users": len(rows)})
+    return out, days_by_uid
+
+
+def _real_by_feature(conn, start: int, end_excl: int, admin_ids: list[str], limit: int) -> list[dict]:
+    """按功能（路由模板）聚合，但只算真实用户的调用。
+
+    `users` 是这个功能被多少个**真实用户**用过 —— 比调用次数更能说明"是不是
+    只有一个人在刷"。全量排行里没有这个数，因为那里 uid 可能为空。
+    """
+    frag, ap = _real_where(admin_ids)
+    rows = conn.execute(
+        "SELECT al.path AS path, al.method AS method, COUNT(*) AS calls,"
+        "       COUNT(DISTINCT al.uid) AS users "
+        + _REAL_FROM
+        + frag
+        + " GROUP BY al.path, al.method ORDER BY calls DESC, al.path ASC, al.method ASC LIMIT ?",
+        (start, end_excl, *ap, limit),
+    ).fetchall()
+    return [
+        {
+            "path": str(x["path"]),
+            "method": str(x["method"]),
+            "label": api_labels.label_for(str(x["method"]), str(x["path"])),
+            "calls": int(x["calls"] or 0),
+            "users": int(x["users"] or 0),
+        }
+        for x in rows
+    ]
+
+
+def _real_by_user(
+    conn, start: int, end_excl: int, admin_ids: list[str], days_by_uid: dict, limit: int
+) -> list[dict]:
+    """按账号聚合（真实用户榜）。
+
+    显示 username 而不是 uid：看板是管理员看的，"谁在用"必须能对上人。
+    昵称优先（用户自己设的显示名），没设过昵称就用登录名 —— 与全站一致。
+    """
+    frag, ap = _real_where(admin_ids)
+    rows = conn.execute(
+        "SELECT al.uid AS uid, COUNT(*) AS calls, COALESCE(MAX(al.ts), 0) AS last_ts,"
+        "       u.username AS username, u.nickname AS nickname "
+        + _REAL_FROM
+        + frag
+        + " GROUP BY al.uid ORDER BY calls DESC, last_ts DESC LIMIT ?",
+        (start, end_excl, *ap, limit),
+    ).fetchall()
+    return [
+        {
+            "uid": str(x["uid"]),
+            "username": str(x["nickname"] or x["username"] or ""),
+            "calls": int(x["calls"] or 0),
+            # 活跃天数来自逐日那趟的归并结果，不重复查一次
+            "days": len(days_by_uid.get(str(x["uid"]), ())),
+            "last_ts": int(x["last_ts"] or 0),
+        }
+        for x in rows
+    ]
+
+
+def _internal_accounts(conn, start: int, end_excl: int, limit: int = 30) -> tuple[list[dict], int]:
+    """被标记的内部账号 + 它们在本区间的调用量（含 0 次）。
+
+    为什么要列出 0 次的：标错的账号如果这区间没调用，就永远不出现在任何榜上，
+    也就永远没办法在看板上取消标记 —— 必须给一个"全部已标记"的出口。
+    """
+    rows = conn.execute(
+        "SELECT u.id AS uid, u.username AS username, u.nickname AS nickname,"
+        "       COUNT(al.id) AS calls, COALESCE(MAX(al.ts), 0) AS last_ts"
+        "  FROM users u"
+        "  LEFT JOIN api_call_logs al ON al.uid = u.id AND al.ts >= ? AND al.ts < ?"
+        " WHERE u.is_internal = 1"
+        " GROUP BY u.id ORDER BY calls DESC, u.created_at DESC LIMIT ?",
+        (start, end_excl, max(1, min(200, int(limit)))),
+    ).fetchall()
+    total = conn.execute("SELECT COUNT(*) FROM users WHERE is_internal = 1").fetchone()[0]
+    return (
+        [
+            {
+                "uid": str(x["uid"]),
+                "username": str(x["nickname"] or x["username"] or ""),
+                "calls": int(x["calls"] or 0),
+                "last_ts": int(x["last_ts"] or 0),
+            }
+            for x in rows
+        ],
+        int(total or 0),
+    )
+
+
+def _real_user_snapshot(conn, start: int, end_excl: int, admin_ids: list[str]) -> dict:
+    """真实用户账号的快照口径（不随区间变化）。"""
+    args: list = []
+    clause = "WHERE is_internal = 0"
+    if admin_ids:
+        clause += " AND id NOT IN (" + ",".join("?" * len(admin_ids)) + ")"
+        args = list(admin_ids)
+    total = conn.execute("SELECT COUNT(*) FROM users " + clause, args).fetchone()[0]
+    new = conn.execute(
+        "SELECT COUNT(*) FROM users " + clause + " AND created_at >= ? AND created_at < ?",
+        (*args, start, end_excl),
+    ).fetchone()[0]
+    return {"total": int(total or 0), "new": int(new or 0)}
+
+
+def real_user_view(days: int = 7, limit: int = 20) -> dict:
+    """真实用户使用数据（口径见字典 §2.8，接口见 §7.8）。
+
+    一次返回四块：卡片指标 / 口径对照 / 逐日趋势 / 两个维度的明细
+    （按功能、按账号）。前端用一次请求画整块，切维度不再请求 ——
+    两个维度各 20 行，合起来也远小于一次往返的开销。
+    """
+    r = range_of(days)
+    limit = max(1, min(50, int(limit)))
+    apilog.ensure()
+    admin_ids = _admin_uids()
+    from core import session as store
+
+    with store._get_conn() as conn:  # noqa: SLF001
+        buckets = _bucket_counts(conn, r["start"], r["end_exclusive"], admin_ids)
+        series, days_by_uid = _real_series(conn, r["days_list"], admin_ids)
+        by_feature = _real_by_feature(conn, r["start"], r["end_exclusive"], admin_ids, limit)
+        by_user = _real_by_user(
+            conn, r["start"], r["end_exclusive"], admin_ids, days_by_uid, limit
+        )
+        internal_list, internal_total = _internal_accounts(
+            conn, r["start"], r["end_exclusive"]
+        )
+        snap = _real_user_snapshot(conn, r["start"], r["end_exclusive"], admin_ids)
+
+    real_calls = buckets["real"]
+    total_calls = sum(buckets.values())
+    active = len(days_by_uid)
+    # 回访 = 在区间内至少两个自然日有调用。days=1 时恒为 0，
+    # 前端要显示「今日算不出回访」而不是显示 0（0 会被读成"全是新来的一次性用户"）
+    returning = sum(1 for d in days_by_uid.values() if len(d) >= 2)
+    total_days = sum(len(d) for d in days_by_uid.values())
+    return {
+        "range": {
+            "days": r["days"],
+            "start": r["start"],
+            "end": r["end"],
+            "tz": r["tz"],
+        },
+        "calls": {
+            "real": real_calls,
+            # 占比的分子分母都摆出来：只给一个 3.2% 没人能核对，
+            # 而"真实 1180 / 全量 36659"这种写法一眼就能验算
+            "total": total_calls,
+            "share": round(real_calls / total_calls, 4) if total_calls else None,
+            "internal": buckets["internal"],
+            "orphan": buckets["orphan"],
+            "anonymous": buckets["anonymous"],
+        },
+        "users": {
+            "active": active,
+            "returning": returning,
+            "single_day": active - returning,
+            "per_user": round(real_calls / active, 1) if active else 0.0,
+            "avg_days": round(total_days / active, 1) if active else 0.0,
+            # 快照口径（不随区间变），与 `users.active` 不是一回事，UI 上要分开标
+            "total": snap["total"],
+            "new": snap["new"],
+        },
+        "internal": {
+            # 标记总数 = 人工标记 + 管理员（管理员不需要标记，按配置即时排除）
+            "accounts": internal_total + len(admin_ids),
+            "marked": internal_total,
+            "admins": len(admin_ids),
+            "calls": buckets["internal"],
+            "list": internal_list,
+        },
+        "series": series,
+        "by_feature": by_feature,
+        "by_user": by_user,
     }
 

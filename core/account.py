@@ -192,7 +192,11 @@ def _ensure_tables(force: bool = False) -> None:
                 password_hash TEXT NOT NULL,
                 created_at    INTEGER NOT NULL,
                 last_login_at INTEGER,
-                status        INTEGER NOT NULL DEFAULT 1
+                status        INTEGER NOT NULL DEFAULT 1,
+                -- 1 = 内部/测试账号（开发者自测、脚本注册、演示号）。
+                -- 看板的「真实用户」视图靠它把自测数据剔出去，
+                -- 详见 core/dashboard.real_user_view 与 tools/mark_internal_users.py。
+                is_internal   INTEGER NOT NULL DEFAULT 0
             );
             -- NOCASE 让 ASCII 大小写视为同一个用户（Abc 和 abc 不能各注册一份）
             CREATE UNIQUE INDEX IF NOT EXISTS idx_users_name ON users(username COLLATE NOCASE);
@@ -255,6 +259,15 @@ def _ensure_columns() -> None:
             # 也不受服务器时钟回拨影响。0 = 从未触发，对存量令牌零影响。
             conn.execute(
                 "ALTER TABLE users ADD COLUMN token_valid_after INTEGER NOT NULL DEFAULT 0"
+            )
+        if "is_internal" not in cols:
+            # 内部/测试账号标记（2026-11-15）。默认 0，存量账号一律按真实用户算 ——
+            # **这个默认值是刻意的**：宁可先把自测数据混在真实数据里（看板会显示
+            # 「内部账号 0 个」，一眼看得出没标），也不能反过来把真实用户默认打成
+            # 内部账号，那会让「真实用户数」凭空变小、且没人会去核对。
+            # 回填走 tools/mark_internal_users.py（默认 dry-run，需人工确认才写）。
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN is_internal INTEGER NOT NULL DEFAULT 0"
             )
 
 
@@ -472,6 +485,76 @@ def set_status(uid: str, status: int) -> bool:
 def touch_login(uid: str) -> None:
     with _conn() as conn:
         conn.execute("UPDATE users SET last_login_at = ? WHERE id = ?", (int(time.time()), uid))
+
+
+# ==================== 内部 / 测试账号标记（2026-11-15）====================
+#
+# 为什么需要这一列：看板原来只有「全量」一个口径，而全量里混着大量自测数据 ——
+# 脚本注册的 probe/demo/shot 账号、开发者自己的演示号。线上 171 个账号里能认出
+# 十几个是自测号，本地库更极端（336 个里只有几个像真人）。于是「注册用户 336」
+# 和「API 调用 5 万次」这两个数字对产品的判断毫无帮助，也没法回答
+# 「真实用户到底用不用」。这一列就是把「谁是自己人」变成可查的事实，而不是靠
+# 用户名猜 —— 猜错了没人会发现，而且下次换个命名风格就失效。
+#
+# 判定优先级（与 core/dashboard.real_user_view 保持一致）：
+#   1. ADMIN_UIDS / ADMIN_USERNAMES 里的账号 —— **永远算内部**，不需要标记。
+#      理由：管理员的调用本来就包含看板刷新、审核、批量运维，天然不是用户行为。
+#   2. 本列 is_internal = 1 —— 人工标记（看板上的按钮，或回填工具）。
+#   3. 其余 = 真实用户。
+#
+# 注意：这一列**不参与鉴权、不参与配额**，纯粹是统计口径。删掉它最坏的结果是
+# 看板数字变回混着自测数据，不会影响任何人的登录。
+
+
+def set_internal(uid: str, internal: bool) -> bool:
+    """标记 / 取消标记内部账号，返回是否真的改到了行。
+
+    返回 False = 这个 uid 不存在（调用方按 404 处理，不要静默当成功 ——
+    否则前端点了「标为内部」看着按钮变灰，刷新后又回来，没人知道是 uid 错了）。
+    """
+    with _conn() as conn:
+        cur = conn.execute(
+            "UPDATE users SET is_internal = ? WHERE id = ?",
+            (1 if internal else 0, uid),
+        )
+        return bool(cur.rowcount)
+
+
+def internal_ids() -> set[str]:
+    """被标记为内部账号的 uid 集合（不含管理员名单，那一层由调用方另算）。"""
+    with _conn() as conn:
+        return {r[0] for r in conn.execute("SELECT id FROM users WHERE is_internal = 1")}
+
+
+def list_users(
+    q: str = "", internal: str = "all", limit: int = 50, offset: int = 0
+) -> tuple[list[dict], int]:
+    """管理员用的账号列表（按注册时间倒序）。
+
+    `internal` 三态：`all` / `0` / `1`。用字符串而不是 bool，是因为
+    "不过滤"和"筛非内部"是两个不同语义，bool 表达不了第三个状态。
+    `q` 按用户名 / 昵称模糊匹配，转义 `%` 与 `_` —— 管理员搜 `_` 时不该匹配全部。
+    """
+    where = []
+    args: list[object] = []
+    if q:
+        like = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        where.append("(username LIKE ? ESCAPE '\\' OR nickname LIKE ? ESCAPE '\\')")
+        args.extend([like, like])
+    if internal in ("0", "1"):
+        where.append("is_internal = ?")
+        args.append(int(internal))
+    clause = ("WHERE " + " AND ".join(where)) if where else ""
+    limit = max(1, min(200, int(limit)))
+    offset = max(0, int(offset))
+    with _conn() as conn:
+        total = conn.execute(f"SELECT COUNT(*) FROM users {clause}", args).fetchone()[0]
+        rows = conn.execute(
+            "SELECT id, username, nickname, created_at, last_login_at, status, is_internal "
+            f"FROM users {clause} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+            (*args, limit, offset),
+        ).fetchall()
+    return [dict(r) for r in rows], int(total)
 
 
 # ==================== 账号自助：昵称 / 头像 / 密码 / 登录名 ====================

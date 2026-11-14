@@ -1060,6 +1060,87 @@ export interface MyFeedbackResp {
   total: number;
 }
 
+// ==================== 真实用户使用数据（2026-11-15）====================
+//
+// 与 DashboardOverview 并列，不是它的子集：两者的"分母"不同。
+// `calls` 里的四个桶互斥且穷尽，加起来等于同区间的全量调用 ——
+// 页面靠这一点让两块数据能对上账（对不上账的看板没人信）。
+
+/** 真实用户视角的调用量 + 四桶分解（口径见字典 §2.8） */
+export interface RealUsersCalls {
+  /** 真实用户产生的调用 */
+  real: number;
+  /** 同区间全量调用（真实 + 内部 + 已注销 + 未登录） */
+  total: number;
+  /** real / total；全量为 0 时为 null（不返回 0.0 假装算出了个 0%） */
+  share: number | null;
+  /** 内部/测试账号（人工标记 + 管理员名单） */
+  internal: number;
+  /** uid 有值但账号已注销的历史调用 */
+  orphan: number;
+  /** 未登录请求（401 探测、注册/登录本身、公开页） */
+  anonymous: number;
+}
+
+export interface RealUsersUsers {
+  /** 区间内有调用的真实用户数（去重） */
+  active: number;
+  /** 其中至少两个自然日都有调用的（days=1 时恒为 0，前端不该直接显示 0） */
+  returning: number;
+  /** 只在一天里出现过的 */
+  single_day: number;
+  /** 人均调用次数（real / active） */
+  per_user: number;
+  /** 人均活跃天数 */
+  avg_days: number;
+  /** 真实账号总数 —— **快照**，不随区间变 */
+  total: number;
+  /** 区间内新注册的真实账号 */
+  new: number;
+}
+
+export interface RealUserItem {
+  uid: string;
+  /** 昵称优先，没设过是登录名 */
+  username: string;
+  calls: number;
+  /** 活跃天数（仅 by_user 里有） */
+  days?: number;
+  last_ts: number;
+}
+
+export interface RealFeatureItem {
+  path: string;
+  method: string;
+  /** 中文业务名（后端 core/api_labels.py 是唯一来源） */
+  label: string;
+  calls: number;
+  /** 用过这个功能的真实用户数 —— 比调用次数更能看出"是不是一个人在刷" */
+  users: number;
+}
+
+export interface RealUsersResp {
+  range: DashboardRange;
+  calls: RealUsersCalls;
+  users: RealUsersUsers;
+  internal: {
+    /** 被排除的账号总数（标记 + 管理员） */
+    accounts: number;
+    /** 其中人工标记的 */
+    marked: number;
+    /** 其中管理员（按配置即时排除，不需要标记） */
+    admins: number;
+    /** 它们产生的调用数（= calls.internal） */
+    calls: number;
+    /** 已标记清单（含本区间 0 次调用的，否则标错了没法取消） */
+    list: RealUserItem[];
+  };
+  series: { day: string; calls: number; users: number }[];
+  by_feature: RealFeatureItem[];
+  by_user: RealUserItem[];
+}
+
+
 export interface FeedbackDict {
   categories: { value: string; label: string }[];
   statuses: { value: string; label: string }[];

@@ -64,6 +64,7 @@ import type {
   DashboardOverview,
   ApiRankResp,
   FailuresResp,
+  RealUsersResp,
   AdminFeedbackResp,
   MyFeedbackResp,
   FeedbackDict,
@@ -809,6 +810,20 @@ export const api = {
         body: JSON.stringify({ reply }),
       }),
     dict: () => request<FeedbackDict>("/api/admin/dict"),
+    /**
+     * 真实用户使用数据（排除内部/测试账号）。
+     *
+     * 单独一个端点而不是给 overview 加 `real=1`：两者分母不同，
+     * 一个开关会让人以为"筛掉了数据"，实际是换了统计对象。
+     */
+    realUsers: (days = 7, limit = 20) =>
+      request<RealUsersResp>(`/api/admin/real-users?days=${days}&limit=${limit}`),
+    /** 标记 / 取消标记内部账号。后端 uid 不存在时 404（不确认存在性） */
+    setUserInternal: (target: string, internal: boolean) =>
+      request<{ ok: boolean; uid: string; internal: boolean }>(
+        `/api/admin/users/${encodeURIComponent(target)}/internal`,
+        { method: "POST", body: JSON.stringify({ internal }) }
+      ),
   },
 
   // ---------- 模板广场 ----------
