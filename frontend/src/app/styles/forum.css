@@ -984,6 +984,43 @@
   content: "";
 }
 
+/* 句号旁边那句"还有一条在顶上"。
+   它不是装饰：左栏的「全部话题 3」把横幅里那条也算进去了，列表却只有两行，
+   差一行的时候人是会怀疑页面没加载完的。
+   形状照抄顶部那条 `.fm-notice-tag`（同为"标签式小物件"），只多出 hover 与按下的回应；
+   做成按钮而不是纯文字 —— 既然说了"在顶部"，就得能一键回去；
+   `flex: none` + `nowrap` 是防它被两侧的延伸线压成两行字（窄屏上真会） */
+.fm-end-up {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--fill-3);
+  color: var(--accent-ink);
+  font: inherit;
+  letter-spacing: 0;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+.fm-end-up svg {
+  width: 11px;
+  height: 11px;
+  transform: rotate(-90deg);
+}
+
+.fm-end-up:hover {
+  background: var(--accent-tint);
+}
+
+.fm-end-up:active {
+  transform: scale(0.97);
+}
+
 /* ---------- 详情页 ---------- */
 
 .fm-detail {

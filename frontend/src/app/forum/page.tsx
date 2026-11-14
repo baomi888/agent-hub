@@ -136,6 +136,8 @@ export default function ForumPage() {
   /** 手机上的板块条是否已滚到最右 —— 决定右边那条渐隐遮罩要不要留着 */
   const [chipEnd, setChipEnd] = useState(false);
   const chipRef = useRef<HTMLDivElement | null>(null);
+  /** 顶部公告条本体。列表底那句「另有 1 条在顶部」点一下要能回去 */
+  const noticeRef = useRef<HTMLDivElement | null>(null);
 
   // 搜索防抖：停止输入 280ms 才发请求。手速快的人一次请求都不会多发。
   useEffect(() => {
@@ -314,6 +316,23 @@ export default function ForumPage() {
    */
   const listPins = notice ? pinned.filter((t) => t.id !== notice.id) : pinned;
 
+  /**
+   * 横幅吸走的那条公告不在列表里。
+   *
+   * 于是左栏写「全部话题 3」、列表只有 2 行 —— 对不上账时读的人第一反应是
+   * "是不是还有几条没加载出来"，而不是"哦有一条在顶上"。底部那句就是补这个账的。
+   */
+  const noticeAside = notice ? pinned.length - listPins.length : 0;
+
+  const jumpToNotice = () => {
+    const el = noticeRef.current;
+    if (!el) return;
+    const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el.scrollIntoView({ behavior: calm ? "auto" : "smooth", block: "center" });
+    // 只滚不聚焦的话，键盘用户点了还在原地：焦点留在按钮上，Tab 继续从列表往下走
+    el.querySelector<HTMLElement>("a,button")?.focus({ preventScroll: true });
+  };
+
   const closeNotice = () => {
     if (!notice) return;
     const id = String(notice.id);
@@ -418,7 +437,7 @@ export default function ForumPage() {
       {/* 站务公告横幅：放在三栏之上、通栏，进论坛第一眼就是它。
           只显示最新一条 —— 两条公告叠在一起就成了公告区，反而没人读 */}
       {notice && (
-        <div className="fm-notice">
+        <div className="fm-notice" ref={noticeRef}>
           <div className="fm-notice-in">
             <span className="fm-notice-tag">
               <CornIcon name="bell" className="h-3.5 w-3.5" />
@@ -656,8 +675,20 @@ export default function ForumPage() {
                 {topics.map((t) => renderRow(t))}
               </ul>
               {/* 列表结束得有个句号。三条内容下面直接接一整屏空白，
-                  读起来像"还没加载完"，而不是"就这些" */}
-              {!hasMore && <p className="fm-end">到底了</p>}
+                  读起来像"还没加载完"，而不是"就这些"。
+                  横幅吸走的那条也在这儿交回给读的人：句号前面补一句"还有一条在顶上"，
+                  否则左栏的计数永远比列表多一行 */}
+              {!hasMore && (
+                <p className="fm-end">
+                  <span>到底了</span>
+                  {noticeAside > 0 && (
+                    <button type="button" className="fm-end-up" onClick={jumpToNotice}>
+                      <CornIcon name="arrow" className="h-3 w-3" />
+                      另有 {noticeAside} 条公告在顶部
+                    </button>
+                  )}
+                </p>
+              )}
             </>
           )}
 

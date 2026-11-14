@@ -5134,7 +5134,7 @@ textarea.input {
   border-radius: var(--radius-xs);
 }
 .rem-cap-nrmd-caret {
-  font-size: 9px;
+  font-size: var(--fs-badge);
   line-height: 1;
   transition: transform 0.15s ease;
 }

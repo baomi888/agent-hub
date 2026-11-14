@@ -1369,7 +1369,7 @@ body.campus-modal-open .console-scroll {
 .campus-pomo-sound-sum::before {
   content: "▸";
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: var(--fs-badge);
   color: var(--text-3);
   transition: transform 0.15s ease;
 }
@@ -2353,6 +2353,13 @@ body.campus-modal-open .console-scroll {
  * 10px 单字，混在「周一 8」后面还挤得下；B4 把每列压到 45px 时也不会溢出 ——
  * 只放一个字是有意的，写成「放假」「调休」在窄列里会换行。
  *
+ * ★ 这里是全站唯一**故意不进 --fs-badge 11px 底线**的一组（还有同文件里
+ *   compact 周视图的几个：.campus-week.is-compact 的 mark/date/room/teacher、
+ *   .campus-daycell-dow/-mark、窄屏的 .campus-week-slot-time）。
+ *   原因不是"忘了改"：它们的容器宽度是算出来的 41–45px 栅格，11px 的「休」
+ *   加上内边距会把「周一 8」顶出格子，而周视图一溢出就是整列错位。
+ *   改这一组之前先量 B4 窄列，别照抄"全站 ≥11px"这句话。
+ *
  * 颜色之外还有字（A06）：色弱用户分不出灰和橙，但「休」和「班」两个字认得出来。
  */
 .campus-week-mark {
@@ -3136,7 +3143,7 @@ body.campus-modal-open .console-scroll {
 }
 
 .campus-chip small {
-  font-size: 10px;
+  font-size: var(--fs-badge);
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
@@ -3233,7 +3240,7 @@ body.campus-modal-open .console-scroll {
 }
 
 .campus-flip-eg-tag {
-  font-size: 10px;
+  font-size: var(--fs-badge);
   color: var(--text-3);
   letter-spacing: 0.08em;
 }

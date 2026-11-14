@@ -973,7 +973,7 @@ class TestAiCaptureShell:
         assert "outline: none" in sub[: sub.index("}")]
 
     def test_small_print_is_not_typeset_at_badge_size(self):
-        """底栏汇总句是给人读的：不许借 --fs-badge（10px）。"""
+        """底栏汇总句是给人读的：不许借 --fs-badge（角标档，2026-11-14 起 11px）。"""
         css = CONSOLE_CSS.read_text(encoding="utf-8")
         assert "font-size: var(--fs-xs)" in _css_block(css, ".rem-cap-summary {")
 

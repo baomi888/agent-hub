@@ -168,8 +168,12 @@ def test_notice_bar_shows_the_latest_one_only():
     """横幅只放最新一条：两条叠在一起就成了"公告区"，横幅反而没人读。"""
     s = _read(FORUM_PAGE)
     assert "pinned[0]" in s
-    # 横幅里的标题、链接都必须来自同一条 notice
-    seg = s[s.index('<div className="fm-notice">') : s.index("<div className=\"fm-wrap\">")]
+    # 横幅里的标题、链接都必须来自同一条 notice。
+    # 开标签用正则而不是写死 `<div className="fm-notice">`：横幅上后来挂了 ref
+    # （底部"另有 N 条在顶部"要跳回来），写死的话加个属性这条就假红
+    m = re.search(r'<div className="fm-notice"[^>]*>', s)
+    assert m, "公告条不见了"
+    seg = s[m.start() : s.index('<div className="fm-wrap">')]
     assert "notice.title" in seg and "{notice.id}" in seg
     assert "pinned[1]" not in seg, "横幅里塞了第二条公告，横杠会变成两行"
 
@@ -356,3 +360,80 @@ def test_sort_tabs_do_not_reuse_the_chip_shape():
     assert "border-radius: 999px" not in tab, "排序又变回胶囊了，和板块 chip 撞成同款"
     on = _css_rule(css, ".fm-tab.on")
     assert "box-shadow: inset 0 -2px 0" in on, "排序的选中指示不是那条下划线"
+
+
+def test_list_bottom_accounts_for_the_notice_it_moved_upstairs():
+    """列表到底时，得交代"还有一条在顶上"。
+
+    左栏「全部话题 3」把横幅里那条也算进去了，列表却只有两行 ——
+    差一行的时候人第一反应是"是不是没加载完"，不是"哦有一条在顶上"。
+    所以句号旁边补一句，而且必须能点回顶部：只说"在顶部"不给入口，
+    等于让用户自己滚回去找。
+    """
+    s = _read(FORUM_PAGE)
+    assert "const noticeAside = notice ? pinned.length - listPins.length : 0;" in s, (
+        "列表底没有交代被横幅吸走的那一条，左栏计数和列表行数又对不上了"
+    )
+    assert 'onClick={jumpToNotice}' in s, "那句提示只是个装饰，点不动"
+    assert "另有 {noticeAside} 条公告在顶部" in s, "句子里写的不是实际被吸走的条数"
+    assert 'ref={noticeRef}' in s, "没有指向公告条的锚点，跳回去无目标"
+
+    css = _read(FORUM_CSS)
+    rule = _css_rule(css, ".fm-end-up")
+    # 两侧是 flex:1 的延伸线，不给 flex:none + nowrap 就会被压成两行字
+    assert "flex: none" in rule, "窄屏上这句提示会被两侧的线挤成两行"
+    assert "white-space: nowrap" in rule, "窄屏上这句提示会折行"
+    assert "rotate(-90deg)" in css, "箭头没有转成向上，指向和「在顶部」相反"
+
+
+SMALL_FONT_EXEMPT = (".campus-week", ".campus-daycell")
+
+
+def _css_font_sizes():
+    """遍历所有真正会被打包的 CSS，产出 (文件, 选择器, px)。
+
+    `_backup/` 是历史版本、不进构建，扫进来只会得到一堆假警报。
+    """
+    for path in sorted((SRC).rglob("*.css")):
+        if "_backup" in path.parts or "node_modules" in path.parts:
+            continue
+        sel = ""
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if line.endswith("{") and not line.startswith("@"):
+                sel = line[:-1].strip()
+            m = re.search(r"font-size:\s*([\d.]+)px", line)
+            if m:
+                yield path, sel, float(m.group(1))
+
+
+def test_no_text_is_smaller_than_eleven_px():
+    """全站不该再有 9px / 10px 的字。
+
+    10px 汉字在 1x 屏上是 10 个物理像素，一横一竖挤进同一个像素格 ——
+    那不是"小一档"，是糊。「休 / 班」「条回复」「仅观看」都踩过。
+
+    唯一豁免是校园周视图那几格：容器是算出来的 41–45px 栅格，
+    11px 的「休」加内边距会把「周一 8」顶出格子，一溢出就是整列错位。
+    豁免靠选择器前缀认，不靠行号 —— 行号一改就失效。
+    """
+    offenders = []
+    for path, sel, px in _css_font_sizes():
+        if px >= 11:
+            continue
+        if any(sel.startswith(p) or f" {p}" in f" {sel}" for p in SMALL_FONT_EXEMPT):
+            continue
+        offenders.append(f"{path.relative_to(ROOT)}:{sel or '<无选择器>'}={px}px")
+    assert not offenders, "这些地方的字还在 11px 以下：\n  " + "\n  ".join(offenders)
+
+
+def test_badge_token_is_at_least_eleven_px():
+    """`--fs-badge` 是 11px，不是 10px。
+
+    这个值一改全站 40 多处角标跟着动，是最省事的那个开关；
+    改回去也最省事，所以单独钉一条。
+    """
+    css = _read(SRC / "app" / "styles" / "tokens.css")
+    m = re.search(r"--fs-badge:\s*([\d.]+)rem", css)
+    assert m, "--fs-badge 不见了"
+    assert float(m.group(1)) >= 0.6875, f"--fs-badge 掉到 {m.group(1)}rem（<11px）了"

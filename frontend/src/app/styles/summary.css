@@ -251,7 +251,7 @@
   padding: 0 4px;
   border-radius: 999px;
   background: var(--accent-soft);
-  font-size: 10px;
+  font-size: var(--fs-badge);
   font-style: normal;
   font-variant-numeric: tabular-nums;
   color: var(--accent-ink);
