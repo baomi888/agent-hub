@@ -1645,6 +1645,12 @@ export interface ForumCats {
   replies: number;
   /** 今日新增条数（话题 + 回复） */
   today: number;
+  /**
+   * 举报原因选项。**由服务端下发，不在前端抄一份** —— 举报理由和"下架原因"
+   * 是两套词（读者不会举报"与板块无关"，但必须能举报"违法信息"），
+   * 前端硬编码一份就会和 backend 的枚举慢慢漂开。
+   */
+  report_reasons: ForumModReason[];
 }
 
 /** 列表里的一条话题 */
@@ -1687,6 +1693,20 @@ export interface ForumTopic {
    * 意味着这张图能永久缓存（图一变哈希就变，不会看到旧图）。
    */
   images: string[];
+  /**
+   * 楼中楼预览：最后一条可见回复。
+   *
+   * 没有回复时是 `null`（而不是一个空 body 的对象）—— 前端判真假一次就够，
+   * 不用再判 body 是否为空。列表卡只显示一行，长回复由后端截到摘要长度。
+   */
+  last: {
+    /** 最后一条回复的正文，已压成一行并截断 */
+    body: string;
+    /** 回复者昵称；查不到（注销）时为空串 */
+    by: string;
+    /** 最后这条是我自己回的 */
+    mine: boolean;
+  } | null;
 }
 
 /** `POST /api/forum/upload` 的返回 */
@@ -1715,11 +1735,13 @@ export interface ForumModReason {
   label: string;
 }
 
-/** `GET /api/forum/mod/queue` —— 待审 + 被申诉 + 三个计数 */
+/** `GET /api/forum/mod/queue` —— 待审 + 被申诉 + 被举报 + 四个计数 */
 export interface ForumModQueue {
-  stats: { pending: number; appeals: number; removed: number };
+  stats: { pending: number; appeals: number; removed: number; reported: number };
   pending: ForumTopic[];
   appeals: ForumTopic[];
+  /** 被读者举报、还没下架的。和 `pending` 会重叠（一条新帖可能同时两处都在） */
+  reported: ForumTopic[];
   reasons: ForumModReason[];
 }
 

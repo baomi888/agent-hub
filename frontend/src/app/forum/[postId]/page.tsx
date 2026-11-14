@@ -62,15 +62,27 @@ export default function ForumTopicPage() {
   const [appealing, setAppealing] = useState(false);
   /** 正在放大看的那张图的 hash，空串 = 没开灯箱 */
   const [big, setBig] = useState("");
+  // ---- 举报 ----
+  // 面板只记"在举报哪一层的谁"，不记整条帖：楼层数据可能被 load() 刷新替换，
+  // 存 id + 名字就够，提交时只需要 id。
+  const [report, setReport] = useState<{ id: number; name: string } | null>(null);
+  const [reportReason, setReportReason] = useState("");
+  const [reportBusy, setReportBusy] = useState(false);
+  // 本页举报过的楼层 id。只活在这一个页面实例里 —— 刷新后会变成"又能举报"，
+  // 但后端 UNIQUE(post_id, uid) 兜住了，重复只会返回 dup 而不是多算一次。
+  const [reported, setReported] = useState<number[]>([]);
+  const [reasons, setReasons] = useState<{ key: string; label: string }[]>([]);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const formRef = useRef<HTMLDivElement | null>(null);
 
-  /* 灯箱开着的时候：ESC 关掉，并把页面滚动锁住。
+  /* 灯箱或举报面板开着的时候：ESC 关掉，并把页面滚动锁住。
      不锁的话背景会跟着手指滑，看起来像两张图在互相顶 */
   useEffect(() => {
-    if (!big) return;
+    if (!big && !report) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setBig("");
+      if (e.key !== "Escape") return;
+      if (report) setReport(null);
+      else setBig("");
     };
     window.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
@@ -79,7 +91,7 @@ export default function ForumTopicPage() {
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = prev;
     };
-  }, [big]);
+  }, [big, report]);
 
   const load = useCallback(async () => {
     if (!postId || Number.isNaN(postId)) {
@@ -151,11 +163,44 @@ export default function ForumTopicPage() {
     }
   };
 
+  const openReport = async (p: BoardPost) => {
+    setTip("");
+    setReport({ id: p.id, name: p.author.name });
+    setReportReason("");
+    if (reasons.length) return;
+    // 举报原因从服务端拿。这里**懒加载**而不是页面进来就拉：绝大多数人不会
+    // 举报，为了一次可能不发生的操作先占一个请求不值得。
+    try {
+      const c = await api.getForumCats();
+      setReasons(c.report_reasons ?? []);
+    } catch {
+      // 拿不到就让"提交"一直灰着，用户能看出是选项没加载出来，
+      // 比给一个空列表然后点提交报 400 要好
+    }
+  };
+
+  const sendReport = async () => {
+    if (!report || !reportReason || reportBusy) return;
+    setReportBusy(true);
+    try {
+      await api.reportForumTopic(report.id, reportReason);
+      // 重复举报后端也返回成功（dup），前端不区分：对用户来说
+      // "已经记下了" 就是这个操作唯一该给出的反馈
+      setReported((prev) => (prev.includes(report.id) ? prev : [...prev, report.id]));
+      setReport(null);
+      setReportReason("");
+      setTip("已收到举报，管理员会看。");
+    } catch (e) {
+      setTip(e instanceof Error ? e.message : "举报没提交上，稍后再试");
+    } finally {
+      setReportBusy(false);
+    }
+  };
+
   const appeal = async () => {
     if (appealing) return;
     setAppealing(true);
-    setTip("");
-    try {
+    setTip("");    try {
       await api.appealForumTopic(postId);
       setAppealed(true);
     } catch (e) {
@@ -229,6 +274,23 @@ export default function ForumTopicPage() {
                 删除
               </button>
             )}
+            {/* 自己的楼层不给举报入口 —— 等于举报自己，点了后端也会拒。
+                举报过的楼层换成静态「已举报」，不给第二次点击的机会：
+                留着按钮，用户会以为没生效。 */}
+            {!p.mine &&
+              (reported.includes(p.id) ? (
+                <span className="kb-post-act is-done">已举报</span>
+              ) : (
+                <button
+                  type="button"
+                  className="kb-post-act"
+                  onClick={() => void openReport(p)}
+                  aria-label={`举报 ${p.author.name} 的这条`}
+                >
+                  <CornIcon name="warn" className="kb-post-act-ico" />
+                  举报
+                </button>
+              ))}
           </span>
         </div>
         <p className="kb-post-b">{p.body}</p>
@@ -498,6 +560,69 @@ export default function ForumTopicPage() {
           >
             <CornIcon name="close" className="h-5 w-5" />
           </button>
+        </div>
+      )}
+
+      {/* 举报面板。**不写"举报成功，我们会尽快处理"** —— 这个站没有客服，
+          能兑现的承诺只有一句"管理员会看"。写了做不到的话，用户下次就不报了。 */}
+      {report && (
+        <div
+          className="tb-report"
+          role="dialog"
+          aria-modal="true"
+          aria-label="举报"
+          onClick={() => setReport(null)}
+        >
+          <div className="tb-report-in" onClick={(e) => e.stopPropagation()}>
+            <div className="tb-report-h">
+              <b>举报 {report.name} 的这条</b>
+              <button
+                type="button"
+                className="tb-report-x"
+                aria-label="关闭"
+                onClick={() => setReport(null)}
+              >
+                <CornIcon name="close" className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="tb-report-opts" role="radiogroup" aria-label="举报原因">
+              {reasons.map((r) => (
+                <button
+                  key={r.key}
+                  type="button"
+                  role="radio"
+                  aria-checked={reportReason === r.key}
+                  className={"tb-report-opt" + (reportReason === r.key ? " on" : "")}
+                  onClick={() => setReportReason(r.key)}
+                >
+                  {r.label}
+                </button>
+              ))}
+              {!reasons.length && (
+                <p className="tb-report-wait">原因加载中…如果一直不出来，关掉重进这页。</p>
+              )}
+            </div>
+            <p className="tb-report-note">
+              举报只有管理员能看到，对方不会收到通知。同一条帖每台设备只能报一次。
+            </p>
+            <div className="tb-report-acts">
+              <button
+                type="button"
+                className="tb-report-btn"
+                onClick={() => setReport(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="tb-report-btn primary"
+                disabled={!reportReason || reportBusy}
+                onClick={() => void sendReport()}
+              >
+                {reportBusy ? "提交中…" : "提交举报"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

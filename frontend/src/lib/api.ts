@@ -477,6 +477,18 @@ export const api = {
   /** 申请复核。只能点一次，重复点后端返回 400（那是"已经申请过了"，不是故障） */
   appealForumTopic: (id: number) =>
     request<{ ok: boolean }>(`/api/forum/topics/${id}/appeal`, { method: "POST" }),
+  /**
+   * 举报一条帖。
+   *
+   * 重复举报**不是错误**：后端返回 200 + `dup: true`，只是不再计数。
+   * 前端照常提示「已收到」即可 —— 弹一句「你举报过了」读起来像被拒绝，
+   * 用户会换个理由再点一次。
+   */
+  reportForumTopic: (id: number, reason: string) =>
+    request<{ ok: boolean; dup: boolean; count: number }>(
+      `/api/forum/topics/${id}/report`,
+      { method: "POST", body: JSON.stringify({ reason }) },
+    ),
   getForumModQueue: () => request<ForumModQueue>("/api/forum/mod/queue"),
   /**
    * 管理员的判定。三个动作一个接口 —— 它们改的是同一行。

@@ -531,3 +531,103 @@ def test_badge_token_is_at_least_eleven_px():
     m = re.search(r"--fs-badge:\s*([\d.]+)rem", css)
     assert m, "--fs-badge 不见了"
     assert float(m.group(1)) >= 0.6875, f"--fs-badge 掉到 {m.group(1)}rem（<11px）了"
+
+
+# ==================== 举报入口 ====================
+
+
+def test_detail_floor_offers_report_but_not_on_my_own():
+    """详情页每层都能举报，**自己的楼层除外**。
+
+    自己的楼层给举报按钮 = 让人举报自己：点了后端拒，用户以为界面坏了。
+    """
+    page = _read(FORUM_DETAIL)
+    assert "openReport(p)" in page, "楼层上没有举报入口"
+    assert "!p.mine" in page, "举报入口没有排除自己的楼层"
+    assert 'className="tb-report"' in page, "举报面板没挂到页面上"
+
+
+def test_report_panel_lists_reasons_from_the_server():
+    """举报原因是**服务端下发**的，前端不许抄一份。
+
+    抄一份的后果不是立刻出错，而是三个月后后端加了个「诈骗」选项、
+    前端还是那六个 —— 两边的举报理由悄悄不一致，谁也不知道。
+    所以这里反着断言：详情页里不该出现任何理由文案字面量。
+    """
+    page = _read(FORUM_DETAIL)
+    assert "report_reasons" in page, "没从 cats 接口取举报原因"
+    for label in ("广告或引流", "辱骂或人身攻击", "色情低俗", "违法或危险信息"):
+        assert label not in page, f"前端硬编码了举报原因「{label}」—— 该由服务端下发"
+
+
+def test_report_submit_does_not_pretend_to_review():
+    """提交后的提示不能写「我们会尽快处理」。
+
+    这个站没有客服，能兑现的只有「管理员会看」。写了做不到的话，
+    用户下次就不报了 —— 那比没有举报入口更糟。
+
+    ★ 只查 `setTip(...)` 的实参，不查整份源码：注释里写着「不写『我们会
+      尽快处理』」正是在解释这条规则，全文搜会把这段解释本身判成违规。
+      第一次写这条断言就是这么红的（36 过 1 红，红的那条是断言自己的注释）。
+    """
+    page = _read(FORUM_DETAIL)
+    assert "已收到举报" in page
+    assert not re.search(r'setTip\(\s*"[^"]*尽快', page), "提示语承诺了做不到的事"
+    assert not re.search(r'setTip\(\s*"[^"]*成功', page), "别对用户说「举报成功」—— 那等于承诺处理"
+
+
+def test_report_panel_has_a_rule_in_css():
+    """精确到 `{`：`.tb-report` 是 `.tb-report-in` / `.tb-report-opt` 的前缀，
+    用 `in css` 判断的话把规则改名成 `.tb-report-removed` 也照样绿（第 35 条）。"""
+    css = _read(FORUM_TB)
+    assert re.search(r"\.tb-report\s*\{", css), "举报遮罩没有样式"
+    assert re.search(r"\.tb-report-in\s*\{", css), "举报卡片没有样式"
+    assert re.search(r"\.tb-report-opt\.on\s*\{", css), "选中的理由没有视觉反馈"
+
+
+# ==================== 列表楼中楼 ====================
+
+
+def test_list_card_previews_the_last_reply():
+    """列表卡上有一行「谁：最新一句」。没有这条，读者只能靠回复数猜。"""
+    page = _read(FORUM_PAGE)
+    assert "t.last" in page, "列表卡没用上 last 字段"
+    assert 'className="tb-lzl"' in page, "楼中楼预览没有挂载点"
+    assert 'className="tb-lzl-by"' in page and 'className="tb-lzl-b"' in page
+
+
+def test_last_reply_preview_is_single_line():
+    """预览必须是**一行**、超出省略。
+
+    两行会把一条卡片撑高一行，一屏能扫过的帖子数直接少一条 ——
+    而列表的用途是扫，不是读。
+    """
+    css = _read(FORUM_TB)
+    block = css[css.index(".tb-lzl-b {") :]
+    block = block[: block.index("}")]
+    assert "white-space: nowrap" in block, "预览会折行"
+    assert "text-overflow: ellipsis" in block, "长回复不会省略，会把卡片撑开"
+
+
+def test_author_name_in_preview_is_capped():
+    """作者名限宽：一个 20 字的昵称能把正文挤到只剩两个字。"""
+    css = _read(FORUM_TB)
+    block = css[css.index(".tb-lzl-by {") :]
+    block = block[: block.index("}")]
+    assert "max-width" in block, "作者名没限宽"
+    assert "ellipsis" in block
+
+
+# ==================== 管理台举报 tab ====================
+
+
+def test_admin_has_a_reported_tab():
+    """管理台四个 tab：待审 / 申诉 / 举报。
+
+    没有这个 tab 的话，举报只会让帖子在「待审」里排序靠前 ——
+    早就审过的老帖被举报，管理员根本不会回头再看一眼。
+    """
+    page = _read(FORUM_PAGE)
+    assert '"reported"' in page, "管理台没有举报 tab"
+    assert "adm.stats.reported" in page, "举报 tab 没有计数"
+    assert "adm?.reported" in page, "举报 tab 没有数据源"

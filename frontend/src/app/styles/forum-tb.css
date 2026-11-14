@@ -1772,3 +1772,181 @@
   .tb-crumb > a,
   .tb-crumb > i { display: none; }
 }
+
+/* ---------- 楼中楼预览（列表卡） ----------
+   一行、超出省略。**不做两行**：列表的用途是「扫」，一条变三行会让一屏
+   能看到的帖子数直接减半。作者名单独一段并限宽，否则一个长昵称会把正文
+   挤到只剩两个字。整行是链接，点哪儿都进详情。 */
+.tb-lzl {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  margin: 8px 0 0;
+  padding: 0 2px;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  text-decoration: none;
+}
+
+.tb-lzl-by {
+  flex: none;
+  max-width: 6.5em;
+  overflow: hidden;
+  color: var(--accent-ink);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 全角冒号用伪元素加：放在 JSX 里会被算进可复制文本，
+   复制出去就变成「张三：xxx」这种带分隔符的名字 */
+.tb-lzl-by::after { content: "："; }
+
+.tb-lzl-b {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tb-lzl:hover .tb-lzl-b { color: var(--ink); }
+
+/* ---------- 举报面板 ----------
+   和灯箱同一层，但底色浅、卡片是纸色：举报要读文字，压在暗底上读起来累。
+   点遮罩关闭，点卡片不关（卡片内 stopPropagation）。 */
+.tb-report {
+  position: fixed;
+  inset: 0;
+  z-index: 93;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(18, 13, 6, 0.42);
+}
+
+.tb-report-in {
+  width: min(420px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg-canvas);
+  box-shadow: 0 18px 48px rgba(40, 30, 10, 0.18);
+}
+
+.tb-report-h {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tb-report-h b {
+  color: var(--ink);
+  font-size: var(--fs-md);
+}
+
+.tb-report-x {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.tb-report-x:hover {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.tb-report-opts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 14px 0 0;
+}
+
+.tb-report-opt {
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+.tb-report-opt:hover { border-color: var(--line-strong); }
+
+.tb-report-opt.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.tb-report-wait {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-badge);
+  line-height: 1.6;
+}
+
+.tb-report-note {
+  margin: 12px 0 0;
+  color: var(--text-3);
+  font-size: var(--fs-badge);
+  line-height: 1.65;
+}
+
+.tb-report-acts {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+.tb-report-btn {
+  height: 34px;
+  padding: 0 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.tb-report-btn.primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.tb-report-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* 390 宽下两列会把「辱骂或人身攻击」压成竖排 —— 一列更好读 */
+@media (max-width: 420px) {
+  .tb-report-opts { grid-template-columns: 1fr; }
+}
+
+/* 已举报：静态文字，不给点。灰掉而不是隐藏 —— 隐藏会让人怀疑
+   刚才那一下到底生效没有，然后去别的地方再点一次 */
+.kb-post-act.is-done {
+  color: var(--text-3);
+  cursor: default;
+}

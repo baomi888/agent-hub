@@ -114,6 +114,22 @@ _LAST_AT = (
 # COALESCE 不能省：ALTER 加列时 NOT NULL DEFAULT '' 会把老行填成空串，
 # 但**任何绕过 _ensure 直接建表的地方**（测试里就有）仍可能留 NULL。
 # `NULL != 'removed'` 的结果是 NULL 而不是 true，那条帖会从列表里凭空消失。
+# 列表卡上的「楼中楼」预览：最后一条可见回复的正文和作者。
+#
+# 用两个标量子查询而不是 `LEFT JOIN kb_posts lr ON ...`：`_LIST_COLS` 被 5 个
+# 查询复用，每个的 FROM 都只有 `FROM kb_posts p`。改成 JOIN 要同步改 5 处 FROM，
+# 漏一处就是「某个页面整块变空」那种 bug，而且不报错。子查询走
+# `idx_kbpost_forum(root_id, cat, id DESC)` 的前缀，一次索引定位就够。
+# 两个子查询查的是同一行，重复写一遍是为了保持 _LIST_COLS 是一个纯 SELECT 片段。
+_LAST_REPLY = (
+    "COALESCE((SELECT r.body FROM kb_posts r WHERE r.root_id = p.id "
+    "AND r.deleted_at IS NULL AND COALESCE(r.status, '') != 'removed' "
+    "ORDER BY r.id DESC LIMIT 1), '') AS last_body, "
+    "COALESCE((SELECT r.user_id FROM kb_posts r WHERE r.root_id = p.id "
+    "AND r.deleted_at IS NULL AND COALESCE(r.status, '') != 'removed' "
+    "ORDER BY r.id DESC LIMIT 1), '') AS last_uid"
+)
+
 _LIST_COLS = (
     "p.id, p.kb_id, p.user_id, p.title, p.cat, p.body, p.created_at, "
     "p.root_id, p.reply_to_id, "
@@ -124,7 +140,8 @@ _LIST_COLS = (
     "COALESCE(p.appeal_at, 0) AS appeal_at, "
     "COALESCE(p.report_n, 0) AS report_n, "
     "COALESCE(p.images, '') AS images, "
-    f"{_REPLY_N} AS reply_n, COALESCE({_LAST_AT}, p.created_at) AS last_at"
+    f"{_REPLY_N} AS reply_n, COALESCE({_LAST_AT}, p.created_at) AS last_at, "
+    f"{_LAST_REPLY}"
 )
 
 # 两种排序。`new` 用 id 游标翻页（id 与时间同向，游标永远单调）；
@@ -351,6 +368,26 @@ REMOVE_REASONS: tuple[tuple[str, str], ...] = (
 REMOVE_LABEL: dict[str, str] = {k: label for k, label in REMOVE_REASONS}
 REMOVE_KEYS: frozenset[str] = frozenset(k for k, _ in REMOVE_REASONS)
 
+# 举报是**读者视角**的入口，跟下架原因是两套词，别合并成一个枚举。
+# 「与板块无关」读者不会去举报（那是管理员的判断），所以举报里没有；
+# 「违法或危险信息」读者必须能选，但下架原因里没有 —— 那种内容管理员
+# 通常直接删掉并报备，不走常规原因。两套词的差别本身就是信息。
+REPORT_REASONS: tuple[tuple[str, str], ...] = (
+    ("ad", "广告或引流"),
+    ("abuse", "辱骂或人身攻击"),
+    ("porn", "色情低俗"),
+    ("illegal", "违法或危险信息"),
+    ("privacy", "泄露他人隐私"),
+    ("other", "其他"),
+)
+REPORT_LABEL: dict[str, str] = {k: label for k, label in REPORT_REASONS}
+REPORT_KEYS: frozenset[str] = frozenset(k for k, _ in REPORT_REASONS)
+
+# 同一条帖被**不同设备**报够这么多次，管理台里会顶到队列前面。
+# 不是自动下架 —— 这个论坛是学生互助场景，三条举报就能让内容消失，
+# 第一个被误伤的一定是那个说话不好听但没做错事的人。
+REPORT_ALERT = 3
+
 # 新帖不进热门的窗口。30 分钟：管理员扫一眼够用，而"占座""失物"这类
 # 时效内容在半小时里还能走时间序被人看到，不至于白等。
 COOL_SECONDS = 30 * 60
@@ -412,7 +449,7 @@ def list_mine(uid: str, limit: int = 50) -> list[dict]:
 
 
 def mod_stats() -> dict:
-    """管理台三个 tab 的数字。一条 SQL 扫完，别为一个角标再往返一次。"""
+    """管理台四个 tab 的数字。一条 SQL 扫完，别为一个角标再往返一次。"""
     kb_board._ensure()  # noqa: SLF001
     with store._get_conn() as conn:  # noqa: SLF001
         row = conn.execute(
@@ -421,7 +458,9 @@ def mod_stats() -> dict:
             "  AND COALESCE(status, '') != 'removed' THEN 1 ELSE 0 END), "
             " SUM(CASE WHEN COALESCE(status, '') = 'removed' "
             "  AND COALESCE(appeal_at, 0) > 0 THEN 1 ELSE 0 END), "
-            " SUM(CASE WHEN COALESCE(status, '') = 'removed' THEN 1 ELSE 0 END) "
+            " SUM(CASE WHEN COALESCE(status, '') = 'removed' THEN 1 ELSE 0 END), "
+            " SUM(CASE WHEN COALESCE(report_n, 0) > 0 "
+            "  AND COALESCE(status, '') != 'removed' THEN 1 ELSE 0 END) "
             "FROM kb_posts "
             "WHERE deleted_at IS NULL AND root_id = 0 AND cat != ''"
         ).fetchone()
@@ -429,6 +468,7 @@ def mod_stats() -> dict:
         "pending": int((row and row[0]) or 0),
         "appeals": int((row and row[1]) or 0),
         "removed": int((row and row[2]) or 0),
+        "reported": int((row and row[3]) or 0),
     }
 
 
@@ -460,7 +500,12 @@ def review(post_id: int, action: str, by: str, reason: str = "") -> dict | None:
         if not exists:
             return None
         conn.execute(
-            "UPDATE kb_posts SET reviewed_at = ?, reviewed_by = ? WHERE id = ?",
+            # report_n 一起清零：它是**待处理的举报数**，不是历史累计。
+            # 不清零的话管理台的「举报」tab 永远挂着已经判过的帖子，
+            # 三次之后管理员就学会无视那个 tab 了 —— 工作队列必须能被清空。
+            # 真的历史在 forum_reports 表里，一行没删，要统计随时能数。
+            "UPDATE kb_posts SET reviewed_at = ?, reviewed_by = ?, report_n = 0 "
+            "WHERE id = ?",
             (now, by, int(post_id)),
         )
         if action == "remove":
@@ -494,3 +539,83 @@ def appeal(post_id: int, by_uid: str, note: str = "") -> bool:
             (_now(), (note or "").strip()[:200], int(post_id), by_uid),
         )
     return bool(cur.rowcount)
+
+
+def _ensure_reports() -> None:
+    """建举报表。放在函数里而不是 session 的建表大清单里 —— 那块是
+    全站表结构，改它要连带考虑老库迁移；举报表是论坛自己的，独立建、
+    独立升级，互不牵连。"""
+    with store._get_conn() as conn:  # noqa: SLF001
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS forum_reports ("
+            " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " post_id INTEGER NOT NULL,"
+            " uid TEXT NOT NULL,"
+            " reason TEXT NOT NULL,"
+            " at INTEGER NOT NULL,"
+            " UNIQUE(post_id, uid))"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_freport_post "
+            "ON forum_reports(post_id, at DESC)"
+        )
+
+
+def report(post_id: int, by_uid: str, reason: str) -> dict:
+    """读者举报一条帖，返回 `{ok, dup, count}`。
+
+    **一台设备对同一条帖只算一次**（表上有 UNIQUE(post_id, uid)）。免登录论坛
+    没有账号成本，一个人狂点十次必须只算一次，否则举报数一点意义都没有。
+    反过来，十个同学各报一次是真的信号 —— 所以限定的是「每人一次」而不是
+    「每条帖总共只收几次」。
+
+    拒绝的三种情况（帖不存在 / 已下架 / 自己发的）返回同一个 `ok=False`：
+    分开说等于告诉外人"这条存在、而且被下架了"。
+    """
+    if reason not in REPORT_KEYS:
+        raise ValueError("举报原因不合法")
+    kb_board._ensure()  # noqa: SLF001
+    _ensure_reports()
+    with store._get_conn() as conn:  # noqa: SLF001
+        row = conn.execute(
+            "SELECT user_id, COALESCE(status, '') AS status FROM kb_posts "
+            "WHERE id = ? AND deleted_at IS NULL AND root_id = 0 AND cat != ''",
+            (int(post_id),),
+        ).fetchone()
+        if not row or row["status"] == "removed" or row["user_id"] == by_uid:
+            return {"ok": False, "dup": False, "count": 0}
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO forum_reports (post_id, uid, reason, at) "
+            "VALUES (?, ?, ?, ?)",
+            (int(post_id), by_uid, reason, _now()),
+        )
+        dup = cur.rowcount == 0
+        # 回写的是**真实行数**，不是 report_n + 1。重复举报时 +1 会让数字虚高，
+        # 而管理台排序恰恰看这个数字 —— 虚高的那条会挤掉真正要紧的。
+        n = conn.execute(
+            "SELECT COUNT(*) FROM forum_reports WHERE post_id = ?", (int(post_id),)
+        ).fetchone()[0]
+        conn.execute(
+            "UPDATE kb_posts SET report_n = ? WHERE id = ?", (int(n), int(post_id))
+        )
+    return {"ok": True, "dup": dup, "count": int(n)}
+
+
+def reported(limit: int = 20) -> list[dict]:
+    """被举报过、还没下架、也还没处理的话题。举报数多的在前。
+
+    不排除 `reviewed_at > 0`：一条早就通过审的老帖今天被举报，照样该看。
+    这就是「举报」tab 和「待审」tab 的区别 —— 前者是读者送上门的信号，
+    后者是发帖时的时间队列。
+    """
+    kb_board._ensure()  # noqa: SLF001
+    with store._get_conn() as conn:  # noqa: SLF001
+        rows = conn.execute(
+            f"SELECT {_LIST_COLS} FROM kb_posts p "
+            "WHERE p.deleted_at IS NULL AND p.root_id = 0 AND p.cat != '' "
+            f"{_visible()} AND COALESCE(p.report_n, 0) > 0 "
+            "ORDER BY COALESCE(p.report_n, 0) DESC, reply_n DESC, p.id DESC "
+            "LIMIT ?",
+            (max(1, min(int(limit), 100)),),
+        ).fetchall()
+    return [dict(r) for r in rows]

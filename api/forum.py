@@ -10,8 +10,11 @@ from __future__ import annotations
   PATCH  /api/forum/topics/{id}       标「已解决」（楼主 / 管理员）
   DELETE /api/forum/topics/{id}       删话题（作者 / 管理员）
   POST   /api/forum/topics/{id}/replies  回复某个话题或某一层
+  POST   /api/forum/topics/{id}/report   举报（每人每条一次，不同设备各算一次）
   POST   /api/forum/upload            上传一张配图（前端已压好，服务端不解码）
   GET    /api/forum/img/{hash}        取配图（公开、内容哈希命名、永久可缓存）
+  GET    /api/forum/mod/queue         管理台：待审 / 申诉 / 被举报 + 计数
+  POST   /api/forum/mod/{id}          管理员判定：通过 / 下架 / 撤销下架
 
 它和 `/api/kb/public/{kb_id}/board` 的关系：**同一张表、两套门禁**。
   - 留言板只认"这个库公开着"，看的是 `kb_id`；
@@ -75,6 +78,10 @@ class ReplyIn(BaseModel):
 class ModIn(BaseModel):
     action: str = Field(..., description="approve / remove / restore")
     reason: str = Field("", description="下架原因 key，见 queue 响应里的 reasons")
+
+
+class ReportIn(BaseModel):
+    reason: str = Field(..., description="举报原因 key，见 GET /cats 的 report_reasons")
 
 
 def anon_uid(request: Request, response: Response) -> str:
@@ -170,6 +177,10 @@ def _kb_briefs(rows: list[dict]) -> dict[str, dict]:
 
 def _topic_view(row: dict, authors: dict[str, dict], uid: str, libs: dict[str, dict]) -> dict:
     a = authors.get(row["user_id"]) or {}
+    # 楼中楼预览：最后一条可见回复。`excerpt_of` 顺手做掉换行和连续空白，
+    # 否则多行回复在列表卡里会撑出一个大洞。
+    last_body = (row.get("last_body") or "").strip()
+    last_uid = row.get("last_uid") or ""
     return {
         "id": int(row["id"]),
         "title": forum.title_of(row),
@@ -191,6 +202,17 @@ def _topic_view(row: dict, authors: dict[str, dict], uid: str, libs: dict[str, d
         # 只给出哈希，完整 URL 由前端拼（`/api/forum/img/<hash>`）。存哈希的好处
         # 是同一张图被多人发时只有一个文件，前端也不用记路径。
         "images": forum_image.parse(row.get("images") or ""),
+        # 列表卡上那句「某某：……」的来源。没有回复时给 None 而不是空对象 ——
+        # 前端判 `last` 真假就够了，不用再判断 body 是否为空。
+        "last": (
+            {
+                "body": forum.excerpt_of({"body": last_body}),
+                "by": (authors.get(last_uid) or {}).get("name") or "",
+                "mine": last_uid == uid,
+            }
+            if last_body
+            else None
+        ),
         "author": {
             "name": a.get("name") or "已注销用户",
             "avatar": a.get("avatar") or "",
@@ -198,6 +220,23 @@ def _topic_view(row: dict, authors: dict[str, dict], uid: str, libs: dict[str, d
         },
         "kb": libs.get(row["kb_id"]),
     }
+
+
+async def _authors_with_last(rows: list[dict]) -> dict[str, dict]:
+    """作者映射，外加**楼中楼最后回复者**的名字。
+
+    `_board_authors` 只按 `user_id` 查；最后回复者是另一批 uid（在 `last_uid`）。
+    不补这一步，列表卡上的预览就只能写「有人回复了」—— 那还不如不显示，
+    因为读者想知道的是「谁在说话」。两次查询都是同一条批量 `get_users`，
+    额外的代价可以忽略。
+    """
+    if not rows:
+        return {}
+    out = await asyncio.to_thread(_board_authors, rows)
+    extra = [{"user_id": u} for u in {r.get("last_uid") for r in rows} if u]
+    if extra:
+        out.update(await asyncio.to_thread(_board_authors, extra))
+    return out
 
 
 def _as_post(row: dict) -> dict:
@@ -244,6 +283,9 @@ async def get_cats(uid: str = Depends(anon_uid)) -> dict:
         "total": int(sum(counts.values())),
         "replies": stat["replies"],
         "today": stat["today"],
+        # 举报原因从服务端下发，不在前端抄一份：文案改一次全站生效，
+        # 和「下架原因传 key、label 出库」是同一个原则。
+        "report_reasons": [{"key": k, "label": v} for k, v in forum.REPORT_REASONS],
     }
 
 
@@ -283,7 +325,7 @@ async def list_topics(
         [r["id"] for r in pinned_rows],
     )
     all_rows = [*pinned_rows, *rows]
-    authors = await asyncio.to_thread(_board_authors, all_rows) if all_rows else {}
+    authors = await _authors_with_last(all_rows) if all_rows else {}
     libs = await asyncio.to_thread(_kb_briefs, all_rows)
     return {
         "posts": [_topic_view(r, authors, uid, libs) for r in rows],
@@ -302,7 +344,7 @@ async def get_topic(post_id: int, uid: str = Depends(anon_uid)) -> dict:
     # 下架之后原链接还要能打开。直接 404 会让人以为网站坏了 —— 尤其这条
     # 链接可能已经被分享到班级群里，点进来是"页面不存在"比"已下架"伤害更大。
     if (row.get("status") or "") == "removed":
-        authors = await asyncio.to_thread(_board_authors, [row])
+        authors = await _authors_with_last([row])
         libs = await asyncio.to_thread(_kb_briefs, [row])
         mine = row["user_id"] == uid
         return {
@@ -325,7 +367,7 @@ async def get_topic(post_id: int, uid: str = Depends(anon_uid)) -> dict:
 
     kids = await asyncio.to_thread(kb_board.replies_of, post_id)
     flat = [_as_post(row), *kids]
-    authors = await asyncio.to_thread(_board_authors, flat)
+    authors = await _authors_with_last(flat)
     admin = await asyncio.to_thread(_is_admin, uid)
     libs = await asyncio.to_thread(_kb_briefs, [row])
     # 库主也能删自己库下面被带到论坛来的话题 —— 与留言板同一条规则，
@@ -404,7 +446,7 @@ async def create_topic(req: TopicIn, uid: str = Depends(anon_uid)) -> dict:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     row = await asyncio.to_thread(forum.get_topic, post["id"])
-    authors = await asyncio.to_thread(_board_authors, [post])
+    authors = await _authors_with_last([post])
     libs = await asyncio.to_thread(_kb_briefs, [row]) if row else {}
     return {"topic": _topic_view(row, authors, uid, libs) if row else None}
 
@@ -536,7 +578,7 @@ async def add_reply(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     kids = await asyncio.to_thread(kb_board.replies_of, post_id)
-    authors = await asyncio.to_thread(_board_authors, [post])
+    authors = await _authors_with_last([post])
     admin = await asyncio.to_thread(_is_admin, uid)
     libs = await asyncio.to_thread(_kb_briefs, [topic])
     owner = (libs.get(topic["kb_id"]) and pipelines.owner_of(topic["kb_id"])) or ""
@@ -598,7 +640,7 @@ async def my_topics(
     界面上必须写清"靠这台设备认出来的" —— 写成"我的账号"就是在撒谎。
     """
     rows = await asyncio.to_thread(forum.list_mine, uid, limit)
-    authors = await asyncio.to_thread(_board_authors, rows) if rows else {}
+    authors = await _authors_with_last(rows) if rows else {}
     libs = await asyncio.to_thread(_kb_briefs, rows)
     return {
         "posts": [_topic_view(r, authors, uid, libs) for r in rows],
@@ -617,6 +659,31 @@ async def appeal_topic(post_id: int, uid: str = Depends(anon_uid)) -> dict:
     return {"ok": True}
 
 
+@router.post("/topics/{post_id}/report")
+async def report_topic(
+    post_id: int, req: ReportIn, uid: str = Depends(anon_uid)
+) -> dict:
+    """读者举报一条帖。
+
+    重复举报返回 200 + `dup=true`，**不返回 400**：用户第二次点，最合理的
+    反馈是「已经记下了」；回一句「你举报过了」读起来像被拒绝，用户会以为
+    第一次没生效，于是换个理由再点一次 —— 那才是真的刷。
+
+    每人每小时 20 次：正常人翻十页也报不到 20 条，批量点举报会在这里被拦。
+    """
+    try:
+        await asyncio.to_thread(quota.hit, f"forum_report:{uid}", 20)
+    except quota.RateLimited as e:
+        raise HTTPException(status_code=429, detail=str(e)) from e
+    try:
+        r = await asyncio.to_thread(forum.report, post_id, uid, req.reason)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not r["ok"]:
+        raise HTTPException(status_code=400, detail="这条帖现在不能举报")
+    return r
+
+
 # ============================================================
 # 管理台（先发后审）
 # ============================================================
@@ -631,25 +698,31 @@ async def _require_admin(uid: str) -> None:
 
 @router.get("/mod/queue")
 async def mod_queue(admin: str = Depends(get_current_user)) -> dict:
-    """待审 + 被申诉 + 三个计数，一次拿齐。
+    """待审 + 被申诉 + 被举报 + 四个计数，一次拿齐。
 
     队列里没有"通过过的"（`reviewed_at > 0` 已被排除），也没有已下架的。
     管理员打开就是"现在该看的"，不用自己筛 —— 筛选条件放在服务端，
     前端多一个 tab 就多一处可能和规则不一致的实现。
+
+    「被举报」和「待审」会重叠：一条刚发出来就被举报的帖，两个 tab 都有。
+    这不是 bug —— 它们是两个不同的视角（发帖时间队列 / 读者送上门的信号），
+    管理员在任一处判完，`reviewed_at` 与 `report_n` 同时被更新，两边一起消失。
     """
     await _require_admin(admin)
-    pending, appeals = await asyncio.gather(
+    pending, appeals, reported = await asyncio.gather(
         asyncio.to_thread(forum.review_queue, 40),
         asyncio.to_thread(forum.list_appeals, 20),
+        asyncio.to_thread(forum.reported, 20),
     )
     stat = await asyncio.to_thread(forum.mod_stats)
-    rows = [*pending, *appeals]
-    authors = await asyncio.to_thread(_board_authors, rows) if rows else {}
+    rows = [*pending, *appeals, *reported]
+    authors = await _authors_with_last(rows) if rows else {}
     libs = await asyncio.to_thread(_kb_briefs, rows)
     return {
         "stats": stat,
         "pending": [_topic_view(r, authors, admin, libs) for r in pending],
         "appeals": [_topic_view(r, authors, admin, libs) for r in appeals],
+        "reported": [_topic_view(r, authors, admin, libs) for r in reported],
         "reasons": [{"key": k, "label": v} for k, v in forum.REMOVE_REASONS],
     }
 
@@ -669,6 +742,6 @@ async def mod_review(
         raise HTTPException(status_code=400, detail=str(e)) from e
     if not row:
         raise HTTPException(status_code=404, detail="这条不存在")
-    authors = await asyncio.to_thread(_board_authors, [row])
+    authors = await _authors_with_last([row])
     libs = await asyncio.to_thread(_kb_briefs, [row])
     return {"topic": _topic_view(row, authors, admin, libs)}

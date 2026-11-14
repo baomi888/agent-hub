@@ -175,7 +175,7 @@ export default function ForumPage() {
   const [adm, setAdm] = useState<ForumModQueue | null>(null);
   const [admBusy, setAdmBusy] = useState(false);
   const [admErr, setAdmErr] = useState("");
-  const [admTab, setAdmTab] = useState<"pending" | "appeals">("pending");
+  const [admTab, setAdmTab] = useState<"pending" | "appeals" | "reported">("pending");
   /** 正在选下架原因的那条 id，0 = 没在选 */
   const [picking, setPicking] = useState(0);
   const [reason, setReason] = useState("");
@@ -602,6 +602,18 @@ export default function ForumPage() {
           </Link>
         )}
 
+        {/* 楼中楼预览：最后一条回复。只给一行 —— 列表里能扫过多少条帖子
+            比"把某一条的最新回复看全"重要得多。它回答的是"这楼里刚有人说话吗、
+            说的是什么"，一行够用。整行可点，进详情。 */}
+        {t.last && (
+          <Link className="tb-lzl" href={topicHref(t.id)}>
+            <span className="tb-lzl-by">
+              {t.last.mine ? "我" : t.last.by || "有人"}
+            </span>
+            <span className="tb-lzl-b">{t.last.body}</span>
+          </Link>
+        )}
+
         <div className="tb-acts">
           <Link className="tb-act reply" href={topicHref(t.id)}>
             <CornIcon name="reply" className="h-3.5 w-3.5" />
@@ -633,7 +645,12 @@ export default function ForumPage() {
     );
   };
 
-  const admList = admTab === "pending" ? (adm?.pending ?? []) : (adm?.appeals ?? []);
+  const admList =
+    admTab === "pending"
+      ? (adm?.pending ?? [])
+      : admTab === "appeals"
+        ? (adm?.appeals ?? [])
+        : (adm?.reported ?? []);
 
   return (
     <div className="tb-root" ref={rootRef}>
@@ -1264,6 +1281,15 @@ export default function ForumPage() {
               >
                 申诉 {adm ? <b>{adm.stats.appeals}</b> : null}
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={admTab === "reported"}
+                className={"tb-adm-tab" + (admTab === "reported" ? " on" : "")}
+                onClick={() => setAdmTab("reported")}
+              >
+                举报 {adm ? <b>{adm.stats.reported}</b> : null}
+              </button>
             </div>
 
             <div className="tb-adm-list">
@@ -1278,7 +1304,11 @@ export default function ForumPage() {
               )}
               {adm && admList.length === 0 && (
                 <p className="tb-adm-empty">
-                  {admTab === "pending" ? "没有待审的帖子。" : "没有待复核的申诉。"}
+                  {admTab === "pending"
+                    ? "没有待审的帖子。"
+                    : admTab === "appeals"
+                      ? "没有待复核的申诉。"
+                      : "没有待处理的举报。"}
                 </p>
               )}
               {adm &&
