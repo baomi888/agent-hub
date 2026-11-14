@@ -51,12 +51,13 @@ _ALLOWED_LINES = {
     "lib/chatStatus.ts": re.compile(r"\bre:\s*/"),
 }
 
-# 不扫的两处：
-#  · _backup/          旧版快照，不参与构建
-#  · app/forum/        论坛页由另一个会话在改（同一批里也会把「公开知识库」改成
-#                      「公开资料库」）。等它合并后应当删掉这条豁免，否则论坛里的
-#                      旧词永远扫不出来。
-_SKIP_PREFIX = ("_backup/", "app/forum/")
+# 不扫的只有一处：
+# · _backup/  旧版快照，不参与构建
+#
+# 这里原本还有 `app/forum/` —— 论坛页当时由另一个会话在改，怕两边打架先跳过。
+# **2026-11-14 第 19 轮已合并，豁免删除**：留着的话论坛页里的「知识库」永远
+# 扫不出来，而"跳过某个目录"这种事一旦写进去就没人再回头看。
+_SKIP_PREFIX = ("_backup/",)
 
 
 def test_ui_never_says_zhishiku():
