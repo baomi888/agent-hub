@@ -808,8 +808,11 @@ export default function ChatArea({
 
   return (
     <section className="book-spine flex h-full min-w-0 flex-1 flex-col">
-      {/* 顶栏 */}
-      <div className="flex items-center gap-2 border-b border-line px-5 py-3">
+      {/* 顶栏。
+          ★ 2026-11-14 第七批：左右内边距改走 --chat-px，和下面消息区、输入区
+            同一条竖线。三处原来各自写 px-5 / px-6 / px-6，手机上标题比正文
+            还靠外 1px，看着像两套栅格。 */}
+      <div className="chat-px chat-topbar flex items-center gap-2 border-b border-line">
         {onOpenSidebar && (
           <button
             onClick={onOpenSidebar}
@@ -822,12 +825,12 @@ export default function ChatArea({
             </svg>
           </button>
         )}
-        <span className="truncate font-serif text-sm font-medium text-ink">
+        <span className="min-w-0 truncate font-serif text-sm font-medium text-ink">
           {sessionTitle ?? "新对话"}
         </span>
         {boundKb ? (
           <span
-            className="kb-chip min-w-0 max-w-[44vw]"
+            className="kb-chip min-w-0 max-w-[38vw] sm:max-w-[44vw]"
             title={kbNameMap?.[boundKb] ?? boundKb}
           >
             <span className="dot" />
@@ -854,7 +857,7 @@ export default function ChatArea({
           <button
             type="button"
             onClick={onToggleKbPanel}
-            className="kb-chip kb-chip-unbound min-w-0 max-w-[44vw]"
+            className="kb-chip kb-chip-unbound min-w-0 max-w-[38vw] sm:max-w-[44vw]"
             title="当前会话未绑定资料库，点此从右侧选择"
             aria-label="当前会话未绑定资料库，点此选择"
           >
@@ -921,14 +924,17 @@ export default function ChatArea({
           onScroll={onScroll}
           className="h-full overflow-y-auto overflow-x-hidden [overflow-anchor:none]"
         >
-          <div className="chat-measure mx-auto flex min-h-full flex-col px-6 pb-4 pt-6">
+          <div className="chat-measure chat-px chat-msgpad mx-auto flex min-h-full flex-col">
           {messages.length === 0 ? (
             // 欢迎页：主路径是「直接问」，首屏摆两块——
             // ① 功能入口（持续陪伴三卡 + 一次性动作小胶囊）② 三句示例
             // （场景快选已撤出主界面：场景化入口统一走模板广场，10-14 晚）
             <div className="welcome">
+              {/* 首屏吉祥物：尺寸由 --hero-mark 决定（宽档 / 矮窗档各一档），
+                  不再在这里写死 h-[52px] —— 写死了就和 welcome.css 的
+                  两个高度档打架，改一处忘一处。 */}
               <MascotLogo
-                className="hero-logo mx-auto mb-2 h-[52px] w-[52px] object-contain"
+                className="hero-logo mx-auto mb-2"
                 mood={messages.some((m) => m.streaming) ? "thinking" : "idle"}
                 tiltKey={`${capValue.kb ? 1 : 0}${capValue.web ? 1 : 0}`}
               />
@@ -1024,7 +1030,7 @@ export default function ChatArea({
               <p className="welcome-foot">问完的每一句，都能翻回原文。</p>
             </div>
           ) : (
-            <div className="space-y-6">
+            <div className="chat-msgs">
               {messages.map((m, idx) => {
                 let userQ: string | undefined;
                 if (m.role === "assistant") {
@@ -1088,7 +1094,7 @@ export default function ChatArea({
       {/* 检索设置：只留「参考几段资料」。
           切片参数是建库时的事，已经移到右侧资料库面板按库单独设置 */}
       {showParams && (
-        <div className="chat-measure mx-auto px-6 pb-2">
+        <div className="chat-measure chat-px mx-auto pb-2">
           <div className="fade-up rounded-xl border border-line-strong bg-panel p-4">
             <div className="flex items-baseline justify-between gap-2">
               <span className="text-sm font-medium text-ink">每次回答参考几段资料？</span>
@@ -1152,9 +1158,11 @@ export default function ChatArea({
         </div>
       )}
 
-      {/* 底部：能力开关 + 反馈 / 工具集 + 输入框 */}
-      <div className="chat-measure mx-auto px-6 pb-5">
-        <div className="composer-bar mb-2 flex flex-wrap items-center gap-2 sm:gap-3">
+      {/* 底部：能力开关 + 反馈 / 工具集 + 输入框。
+          ★ 内边距走 --chat-px / --chat-dock-pb：手机档的底部留白要叠 iOS
+            安全区（home 指示条），写死 pb-5 的话输入框会被压在横条上。 */}
+      <div className="chat-measure chat-px chat-dock mx-auto">
+        <div className="composer-bar chat-bar-gap flex flex-wrap items-center gap-2 sm:gap-3">
           {/* 2026-10-31 批 B：四档模式条下架，两枚能力开关常驻。
               原因：模式条把「检索 / 联网 / 走流程」混在一个字段里，用户选「检索」
               其实还想不想联网、允不允许调工具都说不清；后端新契约只有两个开关，
@@ -1438,7 +1446,7 @@ export default function ChatArea({
             rows={1}
             placeholder="随便问点什么…"
             aria-label="输入问题"
-            className="max-h-40 flex-1 resize-none bg-transparent px-2 py-2.5 text-msg leading-relaxed text-text outline-none placeholder:text-faint"
+            className="composer-input max-h-40 flex-1 resize-none bg-transparent text-msg leading-relaxed text-text outline-none placeholder:text-faint"
           />
           {sending || playing ? (
             <button

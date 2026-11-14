@@ -553,6 +553,12 @@ export function renderMarkdown(
     // 表格：当前行含 | 且下一行是分隔行
     if (line.includes("|") && i + 1 < lines.length && isTableSep(lines[i + 1]) && !/^\s*[-*•]\s/.test(line)) {
       const head = splitTableRow(line);
+      // 表头去掉 markdown 记号后的纯文本，写进每格的 data-label。
+      // 手机端表格会转成"标签 + 值"的竖排卡片（见 components.css 的 ≤560 档），
+      // 那时 thead 是 display:none，每个值靠这个属性说明自己属于哪一列。
+      const labels = head.map((c) =>
+        c.replace(/[*`]/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").trim()
+      );
       const rows: string[][] = [];
       i += 2;
       while (i < lines.length && lines[i].includes("|") && lines[i].trim()) rows.push(splitTableRow(lines[i++]));
@@ -564,7 +570,11 @@ export function renderMarkdown(
             </thead>
             <tbody>
               {rows.map((r, ri) => (
-                <tr key={ri}>{r.map((c, ci) => <td key={ci}>{inlineOf(c, `${ri}-${ci}`)}</td>)}</tr>
+                <tr key={ri}>
+                  {r.map((c, ci) => (
+                    <td key={ci} data-label={labels[ci] ?? ""}>{inlineOf(c, `${ri}-${ci}`)}</td>
+                  ))}
+                </tr>
               ))}
             </tbody>
           </table>

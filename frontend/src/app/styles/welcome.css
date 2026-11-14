@@ -16,6 +16,30 @@
   background: radial-gradient(640px 380px at 50% 16%, var(--accent-soft) 0%, transparent 72%);
   /* 一次协调的首屏入场：整块一起上浮淡入，不做错峰 */
   animation: fadeUp 0.5s cubic-bezier(0.4, 0, 0.2, 1) both;
+  /* 首屏吉祥物尺寸：三端各一档，矮窗再让一档。
+     ★ 2026-11-14 第七批：原来 JSX 里写死 h-[52px]，随后被下面两个
+       max-height 档覆盖成 44 / 38，等于桌面端永远是 44 —— 一个值三处写，
+       改哪儿都对不上。现在只留这一个变量，JSX 里不再出现尺寸。 */
+  --hero-mark: 48px;
+}
+@media (min-width: 768px) {
+  .welcome { --hero-mark: 52px; }
+}
+@media (min-width: 1280px) {
+  .welcome { --hero-mark: 56px; }
+}
+.welcome .hero-logo {
+  width: var(--hero-mark);
+  height: var(--hero-mark);
+  object-fit: contain;
+}
+/* 矮窗优先于宽档：1080×629 那种笔记本窗口里，56px 的吉祥物会把输入框顶出首屏。
+   顺序不能反 —— 两条特异性相同，后写的胜。 */
+@media (max-height: 800px) {
+  .welcome { --hero-mark: 40px; }
+}
+@media (max-height: 720px) {
+  .welcome { --hero-mark: 38px; }
 }
 
 /* ============ 首屏 Hero 签名区 ============ */
@@ -431,7 +455,7 @@
    三步引导 / 三张日更大卡 / 一行小胶囊。 */
 @media (max-height: 919px) {
   .welcome { padding: 10px 0 6px; }
-  .welcome .hero-logo { height: 44px; width: 44px; margin-bottom: 2px; }
+  .welcome .hero-logo { margin-bottom: 2px; }
   .hero-title { font-size: calc(var(--hero-fs, 34px) * 0.88); }
   .welcome-sub { margin-top: 4px; }
   /* 这条仍服务于 /path 页的「这条路是什么」提示卡（复用了 .onboard 外壳）；
@@ -459,7 +483,7 @@
      「字太小」本来就是这一档最容易犯的错，把字退回去等于把需求做反 */
   .chat-measure:has(.welcome) { padding-top: 4px; padding-bottom: 2px; }
   .welcome { padding: 2px 0 0; }
-  .welcome .hero-logo { height: 38px; width: 38px; margin-bottom: 2px; }
+  .welcome .hero-logo { margin-bottom: 2px; }
   /* 眉题不再单独压字号：它已经落在 --fs-xs（13px）的下限上，
      再压就破 R3 的「可读文字不小于 13px」。这一档只收留白 */
   .welcome .eyebrow { margin-bottom: 1px; }

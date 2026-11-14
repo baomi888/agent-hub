@@ -1,3 +1,91 @@
+/* ---------- 对话区版心与间距（三端一套令牌） ----------
+   ★ 2026-11-14 第七批：手机上「能看到的字太少」。
+     390×844 实测（改前）：正文 268px / 16px = **每行 16.8 字**，
+     而 768 与 1440 都是 38.5 字 —— 差的不是字号，是三处横向占用叠加：
+       左右各 24px 内边距 + 44px 头像 + 12px 间距 = 56px 全从正文里扣。
+     改后（≤560）：内边距 14 + 头像 26 + 间距 8 → 正文 310px = **19.4 字/行**。
+     ★ 为什么不再往下抠：390 的物理满宽只有 24 字（390/16），头像少于 26px
+       就只剩一个黄点（44px 时能看清眨眼 / 腮红 / 思考态嘴变○，26px 只剩轮廓）。
+       要满宽就得摘掉头像 —— 用户明确要「保留吉祥物」，所以这是有意的取舍。
+     ★ 平板（561–1023）刻意**不动横向**：768 下正文 616px、38.5 字/行本来就在
+       中文舒服区（30–40），为了"三端一致"去改它只会把它推出舒服区。
+       平板只收顶栏与底部留白，并让头像降到 34（比手机大、比桌面小）。 */
+:root {
+  --chat-px: 24px;
+  --chat-topbar-y: 12px;
+  --chat-msg-pt: 24px;
+  --chat-msg-pb: 16px;
+  --chat-dock-pb: 20px;
+  --chat-bar-gap: 8px;
+  --chat-msgs-gap: 24px;
+  --ai-mark: 44px;
+  --ai-mark-top: 8px;
+}
+@media (max-width: 1023px) {
+  :root {
+    --chat-topbar-y: 10px;
+    --chat-msg-pt: 20px;
+    --chat-dock-pb: 16px;
+    --ai-mark: 34px;
+  }
+}
+@media (max-width: 560px) {
+  :root {
+    --chat-px: 14px;
+    --chat-topbar-y: 8px;
+    --chat-msg-pt: 16px;
+    --chat-msg-pb: 12px;
+    --chat-dock-pb: 12px;
+    --chat-bar-gap: 6px;
+    --chat-msgs-gap: 18px;
+    --ai-mark: 26px;
+    --ai-mark-top: 6px;
+  }
+}
+@media (max-width: 340px) {
+  :root {
+    --chat-px: 12px;
+    --ai-mark: 22px;
+  }
+}
+
+/* 三处容器共用同一条左右竖线（顶栏 / 消息区 / 输入区）。
+   过去各写各的（px-5 / px-6 / px-6），手机上标题比正文还靠外几像素。 */
+.chat-px {
+  padding-left: var(--chat-px);
+  padding-right: var(--chat-px);
+}
+.chat-topbar {
+  padding-top: var(--chat-topbar-y);
+  padding-bottom: var(--chat-topbar-y);
+}
+.chat-msgpad {
+  padding-top: var(--chat-msg-pt);
+  padding-bottom: var(--chat-msg-pb);
+}
+/* 底部留白叠 iOS 安全区：viewport-fit=cover 之后，home 指示条那 34px 会
+   压在输入框上（iOS Safari 实测）。用 env 而不是写死，横屏时为 0。 */
+.chat-dock {
+  padding-bottom: calc(var(--chat-dock-pb) + env(safe-area-inset-bottom, 0px));
+}
+.chat-bar-gap {
+  margin-bottom: var(--chat-bar-gap);
+}
+/* 消息之间的节奏。原来用 Tailwind 的 space-y-6（24px），手机上一屏
+   只能放两条 —— 改由令牌控制，手机 18px。 */
+.chat-msgs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--chat-msgs-gap);
+}
+/* AI 消息左侧的吉祥物头像。宽高同源，改一处即可整端缩放 */
+.ai-mark {
+  width: var(--ai-mark);
+  height: var(--ai-mark);
+  flex: none;
+  margin-top: var(--ai-mark-top);
+}
+
 /* ---------- 能力开关：检索 / 智能联网（DeepSeek 式双药丸） ----------
    替代原四档模式条（2026-10-31 批 B 起常驻，不再是 ?caps=1 的预览）。
    ★ 第一版是"文字 + 拨动轨道"，10-30 晚推翻重做，理由见 CapToggles.tsx 头注释。
@@ -290,6 +378,11 @@
 .input-row:focus-within {
   border-color: var(--accent);
 }
+/* 输入框里的文本域：内边距从工具类搬到这里 —— 手机上要单独收一档，
+   写在 JSX 里就得写两份 className（还容易漏 base 那份）。 */
+.composer-input {
+  padding: 10px 8px;
+}
 .dark .input-row {
   box-shadow: var(--shadow-1);
 }
@@ -517,6 +610,49 @@
   opacity: 0.3;
   cursor: default;
   transform: none;
+}
+
+/* ---------- 手机档：把输入框整体收小一档（72px → 56px） ----------
+   ★ 2026-11-14 第七批。用户的诉求是「对话框小一点 + 能看到的字多一点」，
+     这两个其实是同一件事：底部占多少高度，滚动区就少多少。
+     实测 390×844：改前 composer 128px（能力条 28 + 间距 8 + 输入框 72 + 底 20），
+     改后 100px（26 + 6 + 56 + 12）—— 一次让出 28px 给消息区。
+   ★ 高度怎么算的：文本域 6 + 26(行高) + 6 = 38，加内边距 8×2 与上下边框 = 56。
+     发送键 32 比文本域矮，align-items:flex-end 让它贴底，不会把框顶高。
+   ★ 为什么字号一格都不退：--msg-fs 是用户的字号档位，动它等于改用户设置；
+     而且 iOS 聚焦放大那条线就是 16px（见 a11y.css），退下去会触发聚焦缩放。 */
+@media (max-width: 560px) {
+  .input-row {
+    padding: 8px 10px;
+    border-radius: 14px;
+    gap: 8px;
+  }
+  .composer-input {
+    padding: 6px 6px;
+  }
+  .send {
+    width: 32px;
+    height: 32px;
+  }
+  .send svg {
+    width: 14px;
+    height: 14px;
+  }
+  /* 定位针与加号：20px 的图标在 56px 高的框里显得过大，降到 18；
+     padding 上下收到 4px，让图标的视觉中线对齐 32px 发送键 */
+  .attach,
+  .geo-btn {
+    padding: 4px 1px;
+  }
+  .attach svg,
+  .geo-btn svg {
+    width: 18px;
+    height: 18px;
+  }
+  /* 头像与正文的间距：26 + 8 = 34px 的左侧占用（桌面是 44 + 12 = 56） */
+  .ai-msg {
+    gap: 8px;
+  }
 }
 
 /* 资料库行：玻璃态便签 */

@@ -744,6 +744,54 @@ button.kb-chip-unbound:hover {
 .md-table td + td,
 .md-table th + th { border-left: 1px solid var(--line); }
 
+/* 手机：表格转成"标签 + 值"的竖排卡片，不再横向溢出。
+   ★ 改前是 `width:100%` 把 5 列压成"一个字一列"：线上实测那张六级分数表，
+     「A、B篇（长对话+篇章）」竖排 6 行、「每题1.5分，共15分」竖排 5 行。
+   ★ 中间的过渡方案是 min-width + 横向滚动（.md-table-wrap 本来就有 overflow-x），
+     实测能读，但两个问题：① 142px 之外的内容看不见，而手机没有任何滚动条提示，
+     用户只会以为表格坏了；② 滑到右边时表头已经滚出视野，看不出那列是什么。
+   ★ 所以改成卡片：thead 隐藏，每个 td 靠 data-label（由 content.tsx 从表头
+     剥掉 markdown 记号后写入）自己说明属于哪一列。宽度不再溢出，也不用滑。
+     桌面完全不受影响 —— 这条只在 ≤560 生效。 */
+@media (max-width: 560px) {
+  .md-table,
+  .md-table tbody {
+    display: block;
+    width: 100%;
+  }
+  .md-table thead {
+    display: none;
+  }
+  .md-table tr {
+    display: block;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .md-table tr:last-child {
+    border-bottom: none;
+  }
+  .md-table td {
+    display: flex;
+    gap: 10px;
+    padding: 1px 0;
+    border: 0;
+    vertical-align: top;
+  }
+  .md-table td + td {
+    border-left: none;
+  }
+  /* 标签列固定 68px：够放"得分率"这种三字表头，又不至于把值挤成一列字。
+     行高与正文一致，值折行时标签不会跟着变高（flex 的 align 默认 stretch）。 */
+  .md-table td::before {
+    content: attr(data-label);
+    flex: 0 0 68px;
+    font-family: var(--font-serif);
+    font-size: var(--fs-xs);
+    line-height: 1.75;
+    color: var(--text-3);
+  }
+}
+
 /* ============ 侧栏会话：手机左滑操作（改名 / 删除） ============
    结构：wrap(relative,overflow:hidden) > [操作区(绝对定位) + .session(文字层)]
    touch-action: pan-y 让浏览器只管竖向滚动，横向手势归我们

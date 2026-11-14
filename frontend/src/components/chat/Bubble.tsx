@@ -97,7 +97,9 @@ const Bubble = memo(function Bubble({
   if (m.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[75%]">
+        {/* 手机上放到 85%：390 宽下 75% 只有 243px，一句 20 字的话要折两行，
+            而同一屏的 AI 正文每行能放 19 字 —— 提问反而比回答更挤，看着错位。 */}
+        <div className="max-w-[85%] sm:max-w-[75%]">
           {m.attachments && m.attachments.length > 0 && (
             <div className="msg-attachments">
               {m.attachments.map((a) =>
@@ -210,8 +212,10 @@ const Bubble = memo(function Bubble({
 
   return (
     <div className="ai-msg flex gap-3">
-      {/* 44px 才能看清神态：眨眼 / 腮红 / 思考时嘴变○，28px 时这些彩蛋全是噪点 */}
-      <HubMark className="h-11 w-11 flex-shrink-0 mt-2" thinking={m.streaming} />
+      {/* 尺寸由 .ai-mark 的 --ai-mark 决定：桌面 44（能看清眨眼 / 腮红 /
+          思考时嘴变○），平板 32，手机 26 —— 手机上 44px 头像会把正文挤到
+          每行 16.8 字（390×844 实测），这是"能看到的字太少"的主因之一。 */}
+      <HubMark className="ai-mark" thinking={m.streaming} />
       <div className="min-w-0 flex-1 pt-0.5">
         {/* 工具调用条：进行中显形（转圈 + 已用工具），结束后收成可展开记录 */}
         {m.toolCalls && m.toolCalls.length > 0 && (
