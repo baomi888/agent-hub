@@ -396,7 +396,7 @@ export const api = {
   getForumCats: () => request<ForumCats>("/api/forum/cats"),
   /**
    * 话题列表。
-   * `before` 只在 sort=new 下有效 —— 热榜/未解决按分数排序，分数一动游标就失效，
+   * `before` 只在 sort=new 下有效 —— 热榜按分数排序，分数一动游标就失效，
    * 后端直接忽略并返回 has_more=false（前端据此不显示「加载更多」）。
    */
   listForumTopics: (p: {
@@ -425,11 +425,6 @@ export const api = {
     request<{ post: BoardPost; reply_n: number }>(`/api/forum/topics/${id}/replies`, {
       method: "POST",
       body: JSON.stringify(replyTo ? { body, reply_to: replyTo } : { body }),
-    }),
-  setForumSolved: (id: number, solved: boolean) =>
-    request<{ ok: boolean; id: number; solved: boolean }>(`/api/forum/topics/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ solved }),
     }),
   deleteForumTopic: (id: number) =>
     request<{ ok: boolean; id: number; removed: number }>(`/api/forum/topics/${id}`, {

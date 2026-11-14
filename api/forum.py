@@ -47,10 +47,6 @@ class ReplyIn(BaseModel):
     reply_to: int | None = Field(None, description="回复哪一层；不带就是回楼主")
 
 
-class TopicPatch(BaseModel):
-    solved: bool | None = Field(None, description="标记 / 取消「已解决」")
-
-
 def _norm_cat(cat: str) -> str:
     """校验板块 key。空串合法（= 没板块，但论坛发帖必须给板块，见 POST 里）。"""
     c = (cat or "").strip()
@@ -91,7 +87,6 @@ def _topic_view(row: dict, authors: dict[str, dict], uid: str, libs: dict[str, d
         "excerpt": forum.excerpt_of(row),
         "cat": row["cat"],
         "cat_label": forum.CAT_LABEL.get(row["cat"], ""),
-        "solved": bool(row["solved"]),
         "at": int(row["created_at"]),
         "last_at": int(row["last_at"]),
         "reply_n": int(row["reply_n"]),
@@ -155,7 +150,7 @@ async def get_cats(uid: str = Depends(get_current_user)) -> dict:
 @router.get("/topics")
 async def list_topics(
     cat: str | None = Query(None, description="板块 key，不传 = 全部"),
-    sort: str = Query("new", pattern="^(new|hot|unsolved)$"),
+    sort: str = Query("new", pattern="^(new|hot)$"),
     before: int | None = Query(None, ge=1, description="上一页最后一条的 id（仅 sort=new）"),
     limit: int = Query(forum.PAGE, ge=1, le=50),
     q: str = Query("", max_length=60, description="标题或正文关键词"),
@@ -163,17 +158,36 @@ async def list_topics(
 ) -> dict:
     """话题列表。
 
-    `sort=hot` / `sort=unsolved` **不支持翻页**（`has_more` 恒为 false）：
-    它们按分数排序，分数一变游标就失效，硬做只会重复或漏条。热榜看 Top 20 够用。
+    `sort=hot` **不支持翻页**（`has_more` 恒为 false）：它按分数排序，分数一变
+    游标就失效，硬做只会重复或漏条。热榜看 Top 20 够用。
+
+    只有 `new` / `hot` 两种：这个论坛是拿来讨论和分享的，没有"提问—解决"的
+    闭环，所以既没有「已解决」标记，也没有「未解决」筛选。
+    
+    `pinned` 只在「全部话题 + 第一页 + 没搜索」时给：公告在所有话题之上是站务
+    惯例，但用户点进「求资料」或在搜关键词时，他明确要的不是公告。
     """
     clean = _norm_cat(cat or "")
-    rows, has_more = await asyncio.to_thread(
-        forum.list_topics, clean or None, sort, before, limit, q
+    first_page = not clean and not before and not (q or "").strip() and sort == "new"
+
+    pinned_rows = (
+        await asyncio.to_thread(forum.list_pinned, 2) if first_page else []
     )
-    authors = await asyncio.to_thread(_board_authors, rows) if rows else {}
-    libs = await asyncio.to_thread(_kb_briefs, rows)
+    rows, has_more = await asyncio.to_thread(
+        forum.list_topics,
+        clean or None,
+        sort,
+        before,
+        limit,
+        q,
+        [r["id"] for r in pinned_rows],
+    )
+    all_rows = [*pinned_rows, *rows]
+    authors = await asyncio.to_thread(_board_authors, all_rows) if all_rows else {}
+    libs = await asyncio.to_thread(_kb_briefs, all_rows)
     return {
         "posts": [_topic_view(r, authors, uid, libs) for r in rows],
+        "pinned": [_topic_view(r, authors, uid, libs) for r in pinned_rows],
         "has_more": bool(has_more) and sort == "new",
     }
 
@@ -202,9 +216,6 @@ async def get_topic(post_id: int, uid: str = Depends(get_current_user)) -> dict:
         "topic": _topic_view(row, authors, uid, libs),
         "body": row["body"],
         "posts": [floor, *[_post_view(p, authors, names, uid, owner, admin) for p in kids]],
-        # 标「已解决」只给楼主和管理员：路人觉得"这题答上了"不算数，
-        # 提问的人自己说解决了才算。
-        "can_solve": row["user_id"] == uid or admin,
         "stickers": list(kb_board.STICKERS),
         "max_reply": kb_board.MAX_LEN,
     }
@@ -311,23 +322,6 @@ async def add_reply(
         "post": _post_view(mine, authors, names, uid, owner, admin),
         "reply_n": len(kids),
     }
-
-
-@router.patch("/topics/{post_id}")
-async def patch_topic(
-    post_id: int, req: TopicPatch, uid: str = Depends(get_current_user)
-) -> dict:
-    """目前只开放「已解决」。改标题/板块会破坏别人引用过的那句话，不做。"""
-    topic = await asyncio.to_thread(forum.get_topic, post_id)
-    if not topic or topic.get("deleted_at") or not topic["cat"]:
-        raise HTTPException(status_code=404, detail="这个话题不存在")
-    admin = await asyncio.to_thread(_is_admin, uid)
-    if not (topic["user_id"] == uid or admin):
-        raise HTTPException(status_code=403, detail="只有楼主能标记解决状态")
-    if req.solved is None:
-        raise HTTPException(status_code=400, detail="没有要改的字段")
-    await asyncio.to_thread(forum.set_solved, post_id, req.solved)
-    return {"ok": True, "id": post_id, "solved": bool(req.solved)}
 
 
 @router.delete("/topics/{post_id}")

@@ -142,3 +142,65 @@ def test_stats_text_carries_a_unit():
     for m in re.finditer(r"今日新增 \{fmtNum\(stat\.today\)\}", code):
         tail = code[m.end() : m.end() + 6]
         assert tail.startswith(" 条"), f"「今日新增 N」后面缺单位，实际是：{tail!r}"
+
+
+def test_notice_bar_is_keyed_by_post_id():
+    """顶部公告条的「关掉过」必须按公告 id 存。
+
+    存成 true/false 的话，关过一次以后所有人**永远**看不到任何公告了 ——
+    这类"一次选择变永久开关"的错误不会报错，只会让人以为公告功能没做。
+    """
+    s = _read(FORUM_PAGE)
+    assert "NOTICE_KEY" in s, "公告条的本地标记不见了"
+    i = s.index("const closeNotice")
+    seg = s[i : i + 500]
+    assert "String(notice.id)" in seg, "关掉时存的不是公告 id"
+    # 只断言"id 来自 notice"是不够的：把写入值换成常量 "1"，那条断言照样绿
+    # （反证时真踩到了）。必须咬住 setItem 的第二个参数就是 id。
+    assert "localStorage.setItem(NOTICE_KEY, id)" in seg, (
+        "写进本地的是别的值而不是这条公告的 id，下一条公告不会再出现"
+    )
+
+
+def test_notice_bar_shows_the_latest_one_only():
+    """横幅只放最新一条：两条叠在一起就成了"公告区"，横幅反而没人读。"""
+    s = _read(FORUM_PAGE)
+    assert "pinned[0]" in s
+    # 横幅里的标题、链接都必须来自同一条 notice
+    seg = s[s.index('<div className="fm-notice">') : s.index("<div className=\"fm-wrap\">")]
+    assert "notice.title" in seg and "{notice.id}" in seg
+    assert "pinned[1]" not in seg, "横幅里塞了第二条公告，横杠会变成两行"
+
+
+def test_pinned_rows_render_before_normal_topics():
+    """置顶必须真的排在前面 —— `pinned` 只是数据，顺序由渲染决定。"""
+    s = _read(FORUM_PAGE)
+    a = s.index("{pinned.map((t) => renderRow(t, true))}")
+    b = s.index("{topics.map((t) => renderRow(t))}")
+    assert a < b, "公告被渲染到了普通帖子后面，置顶等于没做"
+
+
+def test_compose_does_not_preselect_a_board_i_cannot_post_to():
+    """点进「站务公告」再点发帖：下拉里没有这个选项，不能把它带进去。
+
+    带进去的后果是 select 的 value 不在 options 里，框里显示空白，
+    点发布才被后端 403 —— 用户会以为是坏了。
+    """
+    s = _read(FORUM_PAGE)
+    i = s.index("const openCompose")
+    seg = s[i : i + 700]
+    assert "postable" in seg, "默认选板块时没检查这个板块我能不能发"
+
+
+def test_solved_feature_leaves_no_trace_in_the_ui():
+    """「已解决」在界面上必须一处都不剩。
+
+    这类功能下线最容易漏的是中间那层：页面上的按钮删了，`api.ts` 里的封装还在，
+    下一个人照着 `setForumSolved` 去写页面，就把后端已经删掉的端点又调起来了。
+    """
+    assert '"unsolved"' not in _read(FORUM_PAGE), "排序里还留着「还没解决」"
+    assert "fm-tag ok" not in _read(FORUM_PAGE), "列表里还留着「已解决」标签"
+    assert "setForumSolved" not in _read(FORUM_DETAIL), "详情页还在调标记接口"
+    assert "can_solve" not in _read(FORUM_DETAIL), "详情页还依赖 can_solve 字段"
+    assert "setForumSolved" not in _read(SRC / "lib" / "api.ts"), "api.ts 里还留着接口封装"
+    assert "fm-solve" not in _read(FORUM_CSS), "forum.css 里还留着按钮样式"

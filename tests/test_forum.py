@@ -9,9 +9,10 @@
      （按板块筛永远筛不出来），所以非法 key 必须在写库之前拒掉。
   3. **两级楼**。回复回复仍然挂在同一个顶层帖下，`reply_to_id` 只负责"回复 @谁"。
      做成无限树的话手机缩进三次就没正文宽度了。
-  4. **权限**：只有作者 / 所属库的库主 / 管理员能删；只有楼主能标「已解决」。
-     路人觉得"这题答上了"不算数。
-  5. **排序与筛选**：`hot` 按回复数、`unsolved` 过滤已解决、`q` 命中标题或正文。
+  4. **权限**：只有作者 / 所属库的库主 / 管理员能删。
+  5. **排序与筛选**：`hot` 按回复数、`q` 命中标题或正文。
+  6. **没有「已解决」**：论坛只用于讨论分享，`sort=unsolved` 与 PATCH 端点都已下线，
+     传进来必须被拒（422 / 405），而不是被悄悄当成 `new` 处理。
 
 不启真 chroma：库的归属与公开状态用 monkeypatch 顶掉，只测论坛自己的读写。
 """
@@ -87,9 +88,11 @@ def _topic(client: TestClient, title: str, body: str = "正文", cat: str = "ask
 
 
 def _titles(client: TestClient, **params) -> list[str]:
+    """列表页上看到的标题，按顺序。置顶在最前 —— 和用户看到的顺序一致。"""
     r = client.get("/api/forum/topics", params=params)
     assert r.status_code == 200, r.text
-    return [p["title"] for p in r.json()["posts"]]
+    d = r.json()
+    return [p["title"] for p in (*d.get("pinned", []), *d["posts"])]
 
 
 # ==================== ① cat 是分界线 ====================
@@ -266,20 +269,6 @@ def test_only_author_or_owner_can_delete(env, client, kb):
     assert _titles(client) == []
 
 
-def test_only_author_can_mark_solved(env, client, kb):
-    _as(client, "alice")
-    t = _topic(client, "谁的帖")
-
-    _as(client, "bob")
-    r = client.patch(f"/api/forum/topics/{t['id']}", json={"solved": True})
-    assert r.status_code == 403
-
-    _as(client, "alice")
-    r = client.patch(f"/api/forum/topics/{t['id']}", json={"solved": True})
-    assert r.status_code == 200
-    assert client.get(f"/api/forum/topics/{t['id']}").json()["topic"]["solved"] is True
-
-
 def test_deleting_a_reply_keeps_the_thread(env, client, kb):
     """删单条回复不能把整栋楼带走 —— 接口同时支持两种粒度。"""
     _as(client, "alice")
@@ -298,16 +287,6 @@ def test_deleting_a_reply_keeps_the_thread(env, client, kb):
 
 
 # ==================== ⑤ 排序 / 筛选 / 搜索 ====================
-
-
-def test_solved_topic_leaves_the_unsolved_feed(env, client, kb):
-    _as(client, "alice")
-    a = _topic(client, "已经解决的那题")
-    _topic(client, "还没解决的那题")
-
-    client.patch(f"/api/forum/topics/{a['id']}", json={"solved": True})
-    assert _titles(client, sort="unsolved") == ["还没解决的那题"]
-    assert set(_titles(client)) == {"已经解决的那题", "还没解决的那题"}
 
 
 def test_hot_sorts_by_reply_count(env, client, kb):
@@ -342,7 +321,7 @@ def test_cat_filter(env, client, kb):
 
 
 def test_has_more_only_for_time_order(env, client, kb):
-    """hot / unsolved 不假装能翻页（分数排序下 id 游标会失效）。"""
+    """hot 不假装能翻页（分数排序下 id 游标会失效）。"""
     _as(client, "alice")
     for i in range(3):
         _topic(client, f"话题{i}")
@@ -397,3 +376,86 @@ def test_private_kb_cannot_be_used_as_source(env, client, kb, monkeypatch):
         "/api/forum/topics", json={"title": "t", "body": "b", "cat": "ask", "kb_id": KB}
     )
     assert r.status_code == 404
+
+
+# ==================== ⑥ 站务公告：板块首位 + 置顶 + 只有管理员能发 ====================
+
+
+def test_notice_cat_is_the_first_one(env, client, kb):
+    """站务公告必须是第一个板块。
+
+    左栏、手机 chip 条、发帖面板都读同一个 CATS 顺序，所以这一条钉住顺序，
+    三个位置就一起对了。公告沉到最后一个板块，等于把"官方说过什么"藏起来。
+    """
+    assert forum.CATS[0][0] == "meta"
+    _as(client, "alice")  # /cats 要登录，没登录拿到的是 401 的 detail
+    assert client.get("/api/forum/cats").json()["cats"][0]["key"] == "meta"
+
+
+def test_only_admin_can_post_a_notice(env, client, kb):
+    """普通人往站务公告发帖必须 403。
+
+    `postable` 只是给前端做下拉用的提示，真正的闸门在后端 —— 光靠前端隐藏入口，
+    改一下请求就绕过去了。
+    """
+    _as(client, "alice")
+    r = client.post("/api/forum/topics", json={"title": "假公告", "body": "b", "cat": "meta"})
+    assert r.status_code == 403
+    assert _titles(client) == []
+
+    _as(client, "devadmin")
+    _topic(client, "真公告", cat="meta")
+    assert _titles(client) == ["真公告"]
+    by = {c["key"]: c["postable"] for c in client.get("/api/forum/cats").json()["cats"]}
+    assert by["meta"] is True
+
+
+def test_notices_are_pinned_but_only_on_the_first_page_of_all(env, client, kb):
+    """公告排在所有话题之前，但从 `posts` 里剔掉（不重复出现），且只在首屏给。
+
+    用户点进「求资料」或在搜关键词时，要的不是公告 —— 那种情况下 pinned 为空。
+    """
+    _as(client, "alice")
+    _topic(client, "普通提问")
+    _as(client, "devadmin")
+    notice = _topic(client, "论坛规则", cat="meta")
+
+    d = client.get("/api/forum/topics").json()
+    assert [p["title"] for p in d["pinned"]] == ["论坛规则"]
+    assert [p["title"] for p in d["posts"]] == ["普通提问"], "公告在 posts 里重复出现了"
+    assert d["pinned"][0]["id"] == notice["id"]
+
+    # 按板块筛 / 翻第二页 / 搜索：都不给置顶
+    assert client.get("/api/forum/topics", params={"cat": "ask"}).json()["pinned"] == []
+    assert client.get("/api/forum/topics", params={"q": "提问"}).json()["pinned"] == []
+    assert client.get("/api/forum/topics", params={"sort": "hot"}).json()["pinned"] == []
+
+
+def test_pinned_list_keeps_two_at_most(env, client, kb):
+    """置顶超过两条就不再是"公告"，而是"公告区" —— 第一屏会被官方内容占满。"""
+    _as(client, "devadmin")
+    for i in range(3):
+        _topic(client, f"公告 {i}", cat="meta")
+    d = client.get("/api/forum/topics").json()
+    assert [p["title"] for p in d["pinned"]] == ["公告 2", "公告 1"]
+
+
+# ==================== ⑦ 「已解决」已下线 ====================
+
+
+def test_solved_feature_is_gone(env, client, kb):
+    """「已解决」整套下线：排序值被拒、PATCH 端点不存在、响应里没有这两个字段。
+
+    只删前端的按钮是不够的 —— 只要 PATCH 还在，老前端缓存或别人写个脚本
+    照样能改标记，列表里就会冒出前端不认识的状态，而且没有入口能改回来。
+    """
+    _as(client, "alice")
+    t = _topic(client, "随便聊聊")
+
+    assert client.get("/api/forum/topics", params={"sort": "unsolved"}).status_code == 422
+    assert client.patch(f"/api/forum/topics/{t['id']}", json={"solved": True}).status_code == 405
+
+    d = client.get(f"/api/forum/topics/{t['id']}").json()
+    assert "can_solve" not in d
+    assert "solved" not in d["topic"]
+    assert "solved" not in client.get("/api/forum/topics").json()["posts"][0]

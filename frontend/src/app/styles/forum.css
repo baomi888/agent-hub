@@ -88,6 +88,96 @@
   white-space: nowrap;
 }
 
+/* ---------- 站务公告横幅 ----------
+   通栏贴在顶栏下面，宽屏与三栏同宽（同一个 1280 / clamp 内边距），
+   这样它看起来是"页面的一条"，而不是浮在内容上的一张卡片。
+   底色用 --accent-soft（金 10%）而不是实心金：公告是常驻元素，
+   一整条饱和金色每天进来都撞一次眼睛，反而会被自动忽略。 */
+.fm-notice {
+  border-bottom: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.fm-notice-in {
+  display: flex;
+  max-width: 1280px;
+  align-items: center;
+  gap: 10px;
+  margin: 0 auto;
+  padding: 8px clamp(16px, 2vw, 30px);
+}
+
+.fm-notice-tag {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--fs-badge);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.fm-notice-t {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fm-notice-t:hover {
+  color: var(--accent-ink);
+}
+
+.fm-notice-d {
+  flex: none;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+/* 「查看」推到底：标题长短不一时，右边的操作位置要固定，
+   否则同一条横杠上元素会跟着标题左右漂 */
+.fm-notice-more {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  color: var(--accent-ink);
+  font-size: var(--fs-xs);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.fm-notice-x {
+  display: inline-flex;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+.fm-notice-x:hover {
+  background: var(--accent-tint);
+  color: var(--ink);
+}
+
 .fm-crumb a {
   color: var(--text-2);
   text-decoration: none;
@@ -486,14 +576,22 @@
   line-height: 1.6;
 }
 
-.fm-tag.ok {
-  background: rgba(30, 122, 70, 0.12);
-  color: var(--success-ink);
-}
-
 .fm-tag.gold {
   background: var(--accent-soft);
   color: var(--accent-ink);
+}
+
+/* 「置顶」比普通板块标签重一档：它是位置说明，不是分类说明。
+   用实心金 + 深墨字，和「管理员」那种淡底标签区分开。 */
+.fm-tag.pin {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 700;
+}
+
+/* 置顶行的左侧那道金边：列表里最上面两条永远是公告，不必靠时间判断 */
+.fm-row.is-pin {
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .fm-tag.top {
@@ -802,34 +900,6 @@
   font-size: var(--fs-xs);
 }
 
-.fm-solve {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  margin-left: auto;
-  padding: 5px 12px;
-  border: 1px solid var(--accent-line);
-  border-radius: 999px;
-  background: var(--step-2);
-  color: var(--accent-ink);
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  cursor: pointer;
-  transition: var(--t-color), var(--t-move);
-}
-
-.fm-solve:hover {
-  transform: translateY(-1px);
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.fm-solve.on {
-  border-color: var(--success);
-  background: rgba(30, 122, 70, 0.12);
-  color: var(--success-ink);
-}
-
 /* 楼层列表直接复用 `.kb-post` 系列，这里只补容器间距与分隔线 */
 .fm-floors {
   display: flex;
@@ -907,6 +977,22 @@
     padding-top: 16px;
   }
 
+  /* 手机上只留「公告 + 标题 + 关闭」，时间和"查看"都收掉：
+     390 宽减去两侧 14px，一条横杠塞不下四段文字，标题会被压成省略号 */
+  .fm-notice-in {
+    gap: 8px;
+    padding: 7px 14px;
+  }
+
+  .fm-notice-d,
+  .fm-notice-more {
+    display: none;
+  }
+
+  .fm-notice-t {
+    font-size: var(--fs-xs);
+  }
+
   .fm-side {
     display: none;
   }
@@ -949,7 +1035,7 @@
   }
 
   /* 手机上标题允许折两行：一行放不下 25 个汉字，硬截会只剩半句，
-     而标签（板块 / 已解决）跟着换到下一行反而更好读 */
+     而板块标签跟着换到下一行反而更好读 */
   .fm-title-t {
     display: -webkit-box;
     overflow: hidden;
@@ -987,8 +1073,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .fm-new:hover,
-  .fm-solve:hover {
+  .fm-new:hover {
     transform: none;
   }
 }

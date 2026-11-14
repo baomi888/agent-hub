@@ -1618,11 +1618,14 @@ export interface CaptureParseResult {
 // 「楼主一层 + 若干回复」，`posts[0]` 固定是楼主。所以详情页的楼层渲染
 // 和 `KbBoard` 长得一样，不需要第二套。
 //
-// 区别只在：话题有 `title` / `cat`（板块）/ `solved`，并且可以挂一个来源库。
+// 区别只在：话题有 `title` / `cat`（板块），并且可以挂一个来源库。
+//
+// ★ 刻意**没有**「已解决 / 未解决」：这个论坛是讨论与分享用的，不是答疑系统。
+//   没有"提问—解决"的闭环，也就不该有"这题答上了吗"这个状态。
 // ============================================================
 
-/** 三种排序。`hot` / `unsolved` 不支持翻页（后端按分数排序，游标会失效） */
-export type ForumSort = "new" | "hot" | "unsolved";
+/** 两种排序。`hot` 不支持翻页（后端按分数排序，游标会失效） */
+export type ForumSort = "new" | "hot";
 
 export interface ForumCat {
   key: string;
@@ -1653,7 +1656,6 @@ export interface ForumTopic {
   excerpt: string;
   cat: string;
   cat_label: string;
-  solved: boolean;
   /** 发布时间（Unix 秒） */
   at: number;
   /** 楼里最后一次活动的时间；没回复时等于 at */
@@ -1667,6 +1669,12 @@ export interface ForumTopic {
 
 export interface ForumTopicPage {
   posts: ForumTopic[];
+  /**
+   * 置顶的站务公告（最多 2 条，最新的在前）。
+   * 只有「全部话题 + 第一页 + 没搜索」时非空，其余场景后端给空数组，
+   * 所以前端不用自己判断"该不该显示公告"。
+   */
+  pinned?: ForumTopic[];
   has_more: boolean;
 }
 
@@ -1676,8 +1684,6 @@ export interface ForumDetail {
   body: string;
   /** 楼主 + 全部回复。第 0 项恒为楼主 */
   posts: BoardPost[];
-  /** 楼主或管理员才能标「已解决」 */
-  can_solve: boolean;
   stickers: string[];
   /** 回复字数上限，由后端下发 —— 前端不硬编码 */
   max_reply: number;

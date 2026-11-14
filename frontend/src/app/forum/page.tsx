@@ -32,10 +32,23 @@ const TITLE_MAX = 60;
 /** 正文上限，与后端 kb_board.TOPIC_LEN 一致 */
 const BODY_MAX = 2000;
 
+/**
+ * 顶部公告条「关掉过」的标记。
+ *
+ * 存的是**公告 id** 而不是一个布尔值：下一期公告发出来 id 变了，条子自己会
+ * 重新出现。存 true/false 的话，关过一次以后所有人永远看不到任何公告。
+ */
+const NOTICE_KEY = "baomi:forum-notice-closed";
+
+/**
+ * 两种排序，没有「还没解决」。
+ *
+ * 这个论坛是拿来讨论和分享的，不是答疑系统 —— 没有"提问—解决"的闭环，
+ * 挂一个"未解决"筛选只会让人以为该有人来认领这些问题。
+ */
 const SORTS: { key: ForumSort; label: string }[] = [
   { key: "new", label: "最新" },
   { key: "hot", label: "最热" },
-  { key: "unsolved", label: "还没解决" },
 ];
 
 /**
@@ -68,6 +81,23 @@ export default function ForumPage() {
   const [cats, setCats] = useState<ForumCat[]>([]);
   const [stat, setStat] = useState({ total: 0, replies: 0, today: 0 });
   const [topics, setTopics] = useState<ForumTopic[]>([]);
+  /** 置顶的站务公告，最多 2 条。后端只在「全部话题 + 第一页」时给 */
+  const [pinned, setPinned] = useState<ForumTopic[]>([]);
+  /**
+   * 用户关掉过哪一条公告（存 id）。空串 = 没关过。
+   *
+   * 初始化时直接读 localStorage 而不是在 effect 里补一次：公告条要等接口
+   * 回来才有内容，首屏渲染时 `pinned` 一定是空的，所以这里早读晚读都不会
+   * 出现"先闪一下再消失"。
+   */
+  const [closedNotice, setClosedNotice] = useState(() => {
+    if (typeof window === "undefined") return "";
+    try {
+      return window.localStorage.getItem(NOTICE_KEY) || "";
+    } catch {
+      return "";
+    }
+  });
   const [hot, setHot] = useState<ForumTopic[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [sort, setSort] = useState<ForumSort>("new");
@@ -111,6 +141,7 @@ export default function ForumPage() {
         limit: 20,
       });
       setTopics(r.posts);
+      setPinned(r.pinned ?? []);
       setHasMore(r.has_more);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "话题加载失败");
@@ -172,8 +203,10 @@ export default function ForumPage() {
   const openCompose = () => {
     setCompOpen(true);
     setCTip("");
-    // 默认选中当前正在看的板块 —— 用户点进"求资料"再点发帖，意思已经很明显了
-    if (!cCat && cat) setCCat(cat);
+    // 默认选中当前正在看的板块 —— 用户点进"求资料"再点发帖，意思已经很明显了。
+    // 但「站务公告」只有管理员能发：普通人点进那个板块再点发帖时，不能把它
+    // 带进下拉，否则选项里没有这个 value，下拉框会显示成空白。
+    if (!cCat && cat && cats.some((c) => c.key === cat && c.postable)) setCCat(cat);
     window.requestAnimationFrame(() =>
       compRef.current?.scrollIntoView({ block: "center", behavior: "smooth" })
     );
@@ -238,6 +271,60 @@ export default function ForumPage() {
 
   const postable = cats.filter((c) => c.postable);
   const catName = cat ? (cats.find((c) => c.key === cat)?.label ?? "") : "";
+  /** 顶部横幅用的那一条。关过一次就不再挡视线 */
+  const notice = pinned[0] && String(pinned[0].id) !== closedNotice ? pinned[0] : null;
+
+  const closeNotice = () => {
+    if (!notice) return;
+    const id = String(notice.id);
+    setClosedNotice(id);
+    try {
+      window.localStorage.setItem(NOTICE_KEY, id);
+    } catch {
+      // 存不进去也不影响这一次关闭
+    }
+  };
+
+  /**
+   * 一行话题。
+   *
+   * 置顶行和普通行只有两点不同：多一枚「置顶」标、多一个 `is-pin` 类。
+   * 抽成一个函数而不是写两份 JSX —— 两份的话，以后加个作者头像之类的改动，
+   * 另一份一定会忘。
+   */
+  const renderRow = (t: ForumTopic, isPin = false) => (
+    <li className={`fm-row${isPin ? " is-pin" : ""}`} key={isPin ? `pin-${t.id}` : t.id}>
+      <div className="fm-mark" aria-hidden="true">
+        {markOf(t)}
+      </div>
+      <div className="fm-body">
+        <p className="fm-title">
+          {isPin && <span className="fm-tag pin">置顶</span>}
+          <span className="fm-title-t">{t.title}</span>
+          <span className="fm-tag">{t.cat_label}</span>
+        </p>
+        <p className="fm-ex">{t.excerpt}</p>
+        <div className="fm-meta">
+          <b>{t.author.name}</b>
+          {t.author.admin && <span className="fm-tag gold">管理员</span>}
+          <span>{fmtWhen(t.at)}</span>
+          {t.kb && (
+            <Link className="fm-src" href={`/library/${encodeURIComponent(t.kb.id)}`}>
+              <CornIcon name="book" className="h-3 w-3" />
+              <span>{t.kb.name}</span>
+            </Link>
+          )}
+        </div>
+      </div>
+      <div className={"fm-count" + (t.reply_n ? "" : " zero")}>
+        <b>{t.reply_n}</b>
+        <span>回复</span>
+      </div>
+      {/* 整行可点靠这张覆盖层链接：`<a>` 里不能嵌 `<button>`，
+          而这一行里带着来源库链接，所以不能用 <a> 包内容 */}
+      <Link href={`/forum/${t.id}`} className="fm-hit" aria-label={`打开话题 ${t.title}`} />
+    </li>
+  );
 
   return (
     <div className="fm-root">
@@ -274,6 +361,36 @@ export default function ForumPage() {
           </button>
         </div>
       </header>
+
+      {/* 站务公告横幅：放在三栏之上、通栏，进论坛第一眼就是它。
+          只显示最新一条 —— 两条公告叠在一起就成了公告区，反而没人读 */}
+      {notice && (
+        <div className="fm-notice">
+          <div className="fm-notice-in">
+            <span className="fm-notice-tag">
+              <CornIcon name="bell" className="h-3.5 w-3.5" />
+              公告
+            </span>
+            <Link className="fm-notice-t" href={`/forum/${notice.id}`}>
+              {notice.title}
+            </Link>
+            <span className="fm-notice-d">{fmtWhen(notice.at)}</span>
+            <Link className="fm-notice-more" href={`/forum/${notice.id}`}>
+              查看
+              <CornIcon name="arrow" className="h-3 w-3" />
+            </Link>
+            <button
+              type="button"
+              className="fm-notice-x"
+              onClick={closeNotice}
+              aria-label="关闭这条公告"
+              title="关闭（下一条公告还会出现）"
+            >
+              <CornIcon name="close" className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="fm-wrap">
         {/* ---------- 左栏：板块 ---------- */}
@@ -444,7 +561,7 @@ export default function ForumPage() {
               </button>
             </p>
           )}
-          {!loading && !err && topics.length === 0 && (
+          {!loading && !err && pinned.length + topics.length === 0 && (
             <p className="fm-empty">
               {dq
                 ? `没有找到包含「${dq}」的话题。`
@@ -452,45 +569,10 @@ export default function ForumPage() {
             </p>
           )}
 
-          {topics.length > 0 && (
+          {pinned.length + topics.length > 0 && (
             <ul className="fm-list">
-              {topics.map((t) => (
-                <li className="fm-row" key={t.id}>
-                  <div className="fm-mark" aria-hidden="true">
-                    {markOf(t)}
-                  </div>
-                  <div className="fm-body">
-                    <p className="fm-title">
-                      <span className="fm-title-t">{t.title}</span>
-                      {t.solved && <span className="fm-tag ok">已解决</span>}
-                      <span className="fm-tag">{t.cat_label}</span>
-                    </p>
-                    <p className="fm-ex">{t.excerpt}</p>
-                    <div className="fm-meta">
-                      <b>{t.author.name}</b>
-                      {t.author.admin && <span className="fm-tag gold">管理员</span>}
-                      <span>{fmtWhen(t.at)}</span>
-                      {t.kb && (
-                        <Link className="fm-src" href={`/library/${encodeURIComponent(t.kb.id)}`}>
-                          <CornIcon name="book" className="h-3 w-3" />
-                          <span>{t.kb.name}</span>
-                        </Link>
-                      )}
-                    </div>
-                  </div>
-                  <div className={"fm-count" + (t.reply_n ? "" : " zero")}>
-                    <b>{t.reply_n}</b>
-                    <span>回复</span>
-                  </div>
-                  {/* 整行可点靠这张覆盖层链接：`<a>` 里不能嵌 `<button>`，
-                      而这一行里带着来源库链接，所以不能用 <a> 包内容 */}
-                  <Link
-                    href={`/forum/${t.id}`}
-                    className="fm-hit"
-                    aria-label={`打开话题 ${t.title}`}
-                  />
-                </li>
-              ))}
+              {pinned.map((t) => renderRow(t, true))}
+              {topics.map((t) => renderRow(t))}
             </ul>
           )}
 
@@ -524,7 +606,7 @@ export default function ForumPage() {
               <li>标题写清楚问题，别写「求助」两个字。</li>
               <li>同一件事不要重复开帖，在原帖里补。</li>
               <li>求到的资料请传进知识库，别在楼层里刷外链。</li>
-              <li>提问的人自己标「已解决」，好答案才沉不下去。</li>
+              <li>想补充就在原帖里接着说，不必为同一件事另开一条。</li>
             </ul>
           </div>
         </aside>

@@ -8,9 +8,10 @@
  * 「我」标记或回复按钮尺寸，论坛这里会悄悄不跟着变 —— 两处长得一样、
  * 修一处坏一处，是这类页面最常见的债。
  *
- * 两个和留言板不同的地方：
- *   1. 楼主那一层是**正文**（2000 字），不截断，要能读完；
- *   2. 楼主可以标「已解决」—— 答疑类没有这个标记，好答案会沉底。
+ * 和留言板只有一处不同：楼主那一层是**正文**（2000 字），不截断，要能读完。
+ *
+ * ★ 没有「已解决」这套：论坛只用来讨论和分享，不是答疑系统。真做了这个标记，
+ *   一半帖子会永远挂在"未解决"上，另一半会被误标成"解决了"因而没人再回。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -44,7 +45,6 @@ export default function ForumTopicPage() {
   const [tip, setTip] = useState("");
   const [replyTo, setReplyTo] = useState<ReplyTarget | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
-  const [solving, setSolving] = useState(false);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const formRef = useRef<HTMLDivElement | null>(null);
 
@@ -115,21 +115,6 @@ export default function ForumTopicPage() {
       else await load();
     } catch (e) {
       setTip(e instanceof Error ? e.message : "删除失败，请稍后重试");
-    }
-  };
-
-  const toggleSolved = async () => {
-    if (!data || solving) return;
-    setSolving(true);
-    setTip("");
-    try {
-      const next = !data.topic.solved;
-      await api.setForumSolved(postId, next);
-      setData((d) => (d ? { ...d, topic: { ...d.topic, solved: next } } : d));
-    } catch (e) {
-      setTip(e instanceof Error ? e.message : "操作失败，请稍后重试");
-    } finally {
-      setSolving(false);
     }
   };
 
@@ -271,7 +256,6 @@ export default function ForumTopicPage() {
               <h1>{topic.title}</h1>
               <div className="fm-dtags">
                 <span className="fm-tag">{topic.cat_label}</span>
-                {topic.solved && <span className="fm-tag ok">已解决</span>}
                 {topic.kb && (
                   <Link className="fm-src" href={`/library/${encodeURIComponent(topic.kb.id)}`}>
                     <CornIcon name="book" className="h-3 w-3" />
@@ -281,17 +265,6 @@ export default function ForumTopicPage() {
                 <span>
                   {topic.author.name} · {fmtWhen(topic.at)} · {topic.reply_n} 条回复
                 </span>
-                {data.can_solve && (
-                  <button
-                    type="button"
-                    className={"fm-solve" + (topic.solved ? " on" : "")}
-                    disabled={solving}
-                    onClick={() => void toggleSolved()}
-                  >
-                    <CornIcon name="check" className="h-3.5 w-3.5" />
-                    {topic.solved ? "已解决" : "标记已解决"}
-                  </button>
-                )}
               </div>
             </div>
 

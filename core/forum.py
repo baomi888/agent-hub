@@ -31,12 +31,14 @@ from core import session as store
 # 为什么按"话题类型"分而不是按课程分：9 门官方课 + 同学分享的库会越滚越多，
 # 按库分栏最后左栏会变成第二个资料广场。库的关系用帖子上的来源 chip 表达就够了。
 CATS: tuple[tuple[str, str, str], ...] = (
+    # 站务公告排第一：它是"官方说的话"，进论坛第一眼该看到的是规则和更新，
+    # 而不是别人的提问。左栏、手机 chip 条、发帖面板都读这个顺序。
+    ("meta", "站务公告", "论坛规则、版本更新、维护通知"),
     ("ask", "课程答疑", "听不懂的地方、习题、考点"),
     ("res", "求资料", "真题、笔记、课件"),
     ("exp", "学习经验", "选课、复习、踩坑"),
     ("team", "组队自习", "找人一起、约时间地点"),
     ("kbfb", "库内容反馈", "资料有错、缺页、建议补充"),
-    ("meta", "站务公告", "论坛本身的规则与公告"),
 )
 
 CAT_KEYS: frozenset[str] = frozenset(k for k, _, _ in CATS)
@@ -105,22 +107,23 @@ _LAST_AT = (
 # root_id / reply_to_id 也带上：删单条回复要走同一条查询，而回复的 cat 是空的,
 # 光看 cat 分不出"根本不存在的 id"和"这是一条回复"。
 _LIST_COLS = (
-    "p.id, p.kb_id, p.user_id, p.title, p.cat, p.solved, p.body, p.created_at, "
+    "p.id, p.kb_id, p.user_id, p.title, p.cat, p.body, p.created_at, "
     "p.root_id, p.reply_to_id, "
     f"{_REPLY_N} AS reply_n, COALESCE({_LAST_AT}, p.created_at) AS last_at"
 )
 
-# 三种排序。`new` 用 id 游标翻页（id 与时间同向，游标永远单调）；
-# `hot` / `unsolved` 用**分数**排序，分数一变游标就失效 —— 所以这两种只给首屏，
-# 不假装能翻页（`has_more` 恒为 False）。热榜本来也就是看个 Top 20。
+# 两种排序。`new` 用 id 游标翻页（id 与时间同向，游标永远单调）；
+# `hot` 用**分数**排序，分数一变游标就失效 —— 所以只给首屏，不假装能翻页
+# （`has_more` 恒为 False）。热榜本来也就是看个 Top 20。
+#
+# 没有 `unsolved`：这个论坛是讨论与分享，没有"提问—解决"的闭环。
 _ORDERS = {
     "new": "p.id DESC",
     "hot": "reply_n DESC, last_at DESC, p.id DESC",
-    "unsolved": "last_at DESC, p.id DESC",
 }
 
 
-def _base_where(cat: str | None, sort: str, q: str = "") -> tuple[str, list[object]]:
+def _base_where(cat: str | None, q: str = "") -> tuple[str, list[object]]:
     """论坛列表的公共 WHERE：顶层帖、没删、有板块。
 
     `cat != ''` 这一条是**论坛与留言板的分界线**，不能省。
@@ -130,8 +133,6 @@ def _base_where(cat: str | None, sort: str, q: str = "") -> tuple[str, list[obje
     if cat:
         sql += " AND p.cat = ?"
         args.append(cat)
-    if sort == "unsolved":
-        sql += " AND p.solved = 0"
     if q:
         # 标题或正文包含。LIKE 不做全文索引，但论坛这一量级（几百条）
         # 全表扫一遍是微秒级，上 FTS5 要为它单独维护一张影子表和触发器，
@@ -147,23 +148,31 @@ def list_topics(
     before: int | None = None,
     limit: int = PAGE,
     q: str = "",
+    exclude: list[int] | None = None,
 ) -> tuple[list[dict], bool]:
     """一页话题，返回 `(rows, has_more)`。
 
     多取一条来判断"还有没有下一页"，而不是再发一次 COUNT：COUNT 要扫全表，
     而且两次查询之间有人发帖的话，两个数字对不上，用户会看到"还有更多"
     点下去却是空的。
+
+    `exclude` 是被上面置顶拿走的 id。在 SQL 里排除而不是查回来再过滤：
+    后者会让这一页少两条，翻页时"这一页比上一页短一截"看起来像丢数据。
     """
     kb_board._ensure()  # noqa: SLF001 —— 建表/补列的唯一入口，不抄第二份
     limit = max(1, min(int(limit or PAGE), 50))
     sort = sort if sort in _ORDERS else "new"
 
-    where, args = _base_where(cat, sort, (q or "").strip())
+    where, args = _base_where(cat, (q or "").strip())
     # 游标只对时间序有效。热榜传了 before 也忽略 —— 悄悄按错误语义翻页，
     # 比干脆不支持更难查。
     if before and sort == "new":
         where += " AND p.id < ?"
         args.append(int(before))
+    if exclude:
+        marks = ",".join("?" * len(exclude))
+        where += " AND p.id NOT IN (" + marks + ")"
+        args.extend(int(x) for x in exclude)
 
     sql = f"SELECT {_LIST_COLS} FROM kb_posts p {where} ORDER BY {_ORDERS[sort]} LIMIT ?"
     args.append(limit + 1)
@@ -173,6 +182,27 @@ def list_topics(
 
     has_more = len(rows) > limit
     return [dict(r) for r in rows[:limit]], has_more
+
+
+def list_pinned(limit: int = 2) -> list[dict]:
+    """置顶的站务公告（最新的在前）。
+
+    为什么置顶而不是靠排序自然浮上来：公告发出去一周之后，它会被新提问压下去，
+    而"论坛规则改了""维护时间"这种内容恰恰是随时该看得见的。所以由板块决定
+    位置，不由时间决定。
+
+    只取 2 条：置顶超过两条就不再是"公告"，而是"公告区"——列表第一屏会被
+    官方内容占满，用户反而找不到别人问的问题。
+    """
+    kb_board._ensure()  # noqa: SLF001
+    with store._get_conn() as conn:  # noqa: SLF001
+        rows = conn.execute(
+            f"SELECT {_LIST_COLS} FROM kb_posts p "
+            "WHERE p.deleted_at IS NULL AND p.root_id = 0 AND p.cat = 'meta' "
+            "ORDER BY p.id DESC LIMIT ?",
+            (max(1, int(limit)),),
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def count_by_cat() -> dict[str, int]:
@@ -214,17 +244,6 @@ def get_topic(post_id: int) -> dict | None:
             (int(post_id),),
         ).fetchone()
     return dict(r) if r else None
-
-
-def set_solved(post_id: int, solved: bool) -> bool:
-    """标「已解决」/ 取消。返回是否真的改动了（0 行 = 帖不存在）。"""
-    kb_board._ensure()  # noqa: SLF001
-    with store._get_conn() as conn:  # noqa: SLF001
-        cur = conn.execute(
-            "UPDATE kb_posts SET solved = ? WHERE id = ? AND deleted_at IS NULL",
-            (1 if solved else 0, int(post_id)),
-        )
-        return bool(cur.rowcount)
 
 
 def purge_user(uid: str) -> int:
