@@ -20,14 +20,17 @@
   --chat-msgs-gap: 24px;
   --ai-mark: 44px;
   --ai-mark-top: 8px;
-  /* 工作台卡片自身距屏幕边缘的距离。数值必须与 base.css（14px）与
-     fx.css 窄屏档（8px）保持一致 —— 它在这里的用途是「把安全区里已经
-     被卡片外边距占掉的那一段扣掉」，见 .chat-dock。 */
-  --app-edge-y: 14px;
+  /* 工作台卡片自身距屏幕边缘的距离。**第九批起纸张贴边 → 0**。
+     它只用于「把安全区里已经被卡片外边距占掉的那一段扣掉」，见 .chat-dock：
+     值为 0 时公式退化成 max(留白, 安全区)，即底部整份让给 home 指示条。
+     若将来又把纸改回浮动卡片，这里必须跟着 base.css / fx.css 的 margin 一起改。 */
+  --app-edge-y: 0px;
 }
 @media (max-width: 899px) {
   :root {
-    --app-edge-y: 8px;
+    /* 与根同值：显式写出是为了让两档都看得见 —— 这一档才是卡片外边距
+       曾经为 8px 的地方，将来若改回浮动卡片，漏改这里就是"只在手机上错" */
+    --app-edge-y: 0px;
   }
 }
 @media (max-width: 1023px) {

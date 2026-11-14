@@ -373,8 +373,14 @@ def test_home_does_not_mount_the_tabbar():
         assert "var(--tabbar-h)" not in h, (
             f"首页已经没 tab 了，高度还在扣它（{h}）—— 底部会空出一条白边"
         )
-        assert "100dvh - 16px" in h or "100vh - 16px" in h, (
-            f"首页高度不是「满屏减上下 8px 外边距」（{h}）"
+        # ★ 2026-11-14（第九批）：纸铺到视口边缘，上下各 8px 的外边距归零，
+        #   高度算式从「满屏减 16px」变成「满屏减安全区」。这里查的是
+        #   "没有多扣外边距"，而不是某个具体数字 —— 否则下次调边距又假红。
+        assert not re.search(r"-\s*16px", h), (
+            f"首页高度还在减上下 8px 外边距（{h}）—— 纸已贴边，减了会空一条"
+        )
+        assert "safe-area-inset-top" in h, (
+            f"首页高度没减顶部安全区（{h}）—— 刘海会把内容压住"
         )
 
 

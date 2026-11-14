@@ -132,15 +132,15 @@
 /* 窄屏：左栏也变浮层抽屉，主区几乎占满 */
 @media (max-width: 899px) {
   main.workbench-main {
-    /* 与 base.css 同一套：上边距 + 刘海高度，高度同步减掉（见那里的注释） */
-    margin: calc(8px + env(safe-area-inset-top, 0px)) 8px 8px;
+    /* 与 base.css 同一套：只让安全区，不再留卡片外边距（第九批起纸贴边） */
+    margin: env(safe-area-inset-top, 0px) 0 0;
     /* 首页已不挂底部 tab（2026-11-13），所以这里**不扣** --tabbar-h：
        扣了会空出一条 50px 的白边，比之前被压住还难看。
        ★ 高度写在 fx.css 而不是 base.css —— fx.css 加载在后，整条覆盖。
        ★ --tabbar-h 仍然存在，给控制台那 8 个页面的 .console-scroll / .console-shell 用。 */
-    height: calc(100vh - 16px - env(safe-area-inset-top, 0px));
-    height: calc(100dvh - 16px - env(safe-area-inset-top, 0px));
-    border-radius: var(--radius-md);
+    height: calc(100vh - env(safe-area-inset-top, 0px));
+    height: calc(100dvh - env(safe-area-inset-top, 0px));
+    border-radius: 0;
   }
   .side-left {
     position: fixed;
@@ -164,11 +164,12 @@
   .side-left::after {
     border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
   }
-  /* 窄屏收紧版面留白，避免内容被挤成一条 */
-  .book-spine {
-    background-image: var(--noise);
-    background-size: 180px 180px;
-  }
+  /* ★ 第九批删掉了这里原有的
+       .book-spine { background-image: var(--noise); background-size: 180px 180px; }
+     它是历史遗留：纸面已经由 main.workbench-main 铺满整屏，窄屏再给书脊叠一层
+     噪点就成了"两层纹理"，密度翻倍、显脏，而且只在 ≤899 出现 —— 桌面永远看不出来。
+     线上探针就是在这儿抓到 390/768 的 .book-spine 仍有 background-image，
+     而 1440 是 none。 */
 }
 
 /* ============ 首屏骨架：别让空态先闪一下 ============ */

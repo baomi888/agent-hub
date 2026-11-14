@@ -77,16 +77,13 @@
   }
 }
 
-/* 中间聊天区：干净的纸面 + 噪点
-   原先的「书脊中缝」在桌面端呈现为一道贯穿上下的生硬竖带，
-   视觉上像渲染瑕疵而非纸张隐喻，已移除；只保留纸色与噪点纹理 */
+/* 中间聊天区：书脊只留定位，**不自己铺底色与纹理**。
+   原先的「书脊中缝」在桌面端是一道贯穿上下的生硬竖带，像渲染瑕疵而非
+   纸张隐喻，已移除。第九批又把剩下的纸色与噪点也上移到 main.workbench-main：
+   两层 noise 叠在一起会显脏，且铺在这里时侧栏是另一种白，一张纸就有了接缝。
+   现在它完全透明，视觉上直接是那张纸的一部分。 */
 .book-spine {
   position: relative;
-  background-color: var(--bg-canvas);
-  background-image: var(--noise);
-  background-size: 180px 180px;
-  background-position: left top;
-  background-repeat: repeat;
 }
 
 /* 消息正文：保留 pre-wrap，同时让内联链接可换行 */

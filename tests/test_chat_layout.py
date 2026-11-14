@@ -54,6 +54,16 @@ def _code(src: str) -> str:
     return src
 
 
+def _css(src: str) -> str:
+    """剥掉 CSS 注释。
+
+    断言必须只对"会生效的规则"说话：我在 fx.css 里把删掉的旧规则原文写进
+    注释留档（`.book-spine { background-image: var(--noise) }`），
+    不剥注释这条断言就永远红；而为了变绿去放宽成子串，注释又会变成假绿的温床。
+    """
+    return re.sub(r"/\*.*?\*/", "", src, flags=re.S)
+
+
 def _media(css: str) -> dict[str, str]:
     """把 `@media (...)` 的块体取出来，键是括号里的条件原文。
 
@@ -173,38 +183,106 @@ def test_app_edge_matches_card_margin():
     这个令牌的唯一用途是「从安全区里扣掉卡片外边距」。它一旦与
     base.css / fx.css 的真实 margin 漂移，扣除量就是错的：
       · 扣多了 → 输入框压到 home 指示条上（点不到）
-      · 扣少了 → 又变成这一批要修的留白过多
+      · 扣少了 → 又变成「留白过多」
     两边都是"只在真机上看得出来"的错，所以在这里钉死。
+
+    ★ 2026-11-14（第九批）：纸铺到视口边缘，卡片外边距归 0。
+      形状从 `calc(Npx + env(top)) Npx Npx` 变成 `env(top) 0 0`，
+      所以这条断言不再是"抓数字比对"，而是"断言贴边 + 令牌同步归零"。
+      抓的还是形状而不是具体值：只要水平仍是 0、顶部只有安全区，
+      就是一张贴边的纸。
     """
     base = _read(SRC / "app" / "styles" / "base.css")
     fx = _read(SRC / "app" / "styles" / "fx.css")
     chat = _read(CHAT_CSS)
 
-    m_base = re.search(
-        r"main\.workbench-main\s*\{[^}]*?margin:\s*calc\((\d+)px \+ env\(safe-area-inset-top",
-        base,
-        re.S,
-    )
-    assert m_base, "base.css 的 main.workbench-main 外边距形状变了"
-    m_fx = re.search(
-        r"main\.workbench-main\s*\{[^}]*?margin:\s*calc\((\d+)px \+ env\(safe-area-inset-top",
-        fx,
-        re.S,
-    )
-    assert m_fx, "fx.css 的窄屏外边距形状变了"
-    assert m_base.group(1) == "14" and m_fx.group(1) == "8", (
-        "卡片外边距改了，chat.css 的 --app-edge-y 也要跟着改"
-    )
+    flat = r"margin:\s*env\(safe-area-inset-top,\s*0px\)\s+0\s+0\s*;"
+    for name, css in (("base.css", base), ("fx.css 窄屏", fx)):
+        m = re.search(
+            r"main\.workbench-main\s*\{[^}]*?" + flat,
+            css,
+            re.S,
+        )
+        assert m, (
+            f"{name} 的 main.workbench-main 不是贴边形状（应为 "
+            "`margin: env(safe-area-inset-top, 0px) 0 0`）"
+        )
 
     root = chat.split("@media")[0]
-    assert f"--app-edge-y: {m_base.group(1)}px" in root, (
-        f"桌面档 --app-edge-y 与 base.css 的 {m_base.group(1)}px 不一致"
+    assert "--app-edge-y: 0px" in root, (
+        "纸已贴边，--app-edge-y 必须归 0；留着 14/8 会把安全区扣少一截，"
+        "iPhone 上输入框压到 home 指示条"
     )
     narrow = _media(chat).get("max-width: 899px")
-    assert narrow, "没有 ≤899 档（这一档的卡片外边距才是 8px）"
-    assert f"--app-edge-y: {m_fx.group(1)}px" in narrow, (
-        f"窄屏档 --app-edge-y 与 fx.css 的 {m_fx.group(1)}px 不一致"
+    assert narrow, "没有 ≤899 档"
+    assert "--app-edge-y: 0px" in narrow, "窄屏档 --app-edge-y 没跟着归 0"
+
+
+def test_paper_reaches_viewport_edge():
+    """纸要铺到视口边缘：无边距、无圆角、无外投影，高度只让安全区。
+
+    这三条是一组的，缺一条就露馅：
+      · 留 margin      → 四周露出 body 的桌面渐变，纸上又套了一圈
+      · 留 border-radius → 四个角切回桌面底，"铺满"立刻破功
+      · 高度不扣安全区  → 底部被 body 的 overflow:hidden 裁掉一条
+    """
+    base = _read(SRC / "app" / "styles" / "base.css")
+    css = _rule(base, "main.workbench-main")
+    assert "border-radius: 0" in css, "贴边之后还留着圆角，四角会露出桌面底"
+    assert re.search(r"height:\s*calc\(100dvh - env\(safe-area-inset-top", css), (
+        "高度还在减 28px（旧的卡片上下边距），贴边后会把底部裁掉"
     )
+    assert "28px" not in css, "旧边距的 28px 仍留在高度算式里"
+    # 外投影失去意义：贴边后没有"外面"，留着只会在四边压出一道暗边
+    shadow = re.search(r"box-shadow:\s*([^;]+);", css)
+    assert shadow, "没有 box-shadow 声明（应只保留 inset 书脊凹影）"
+    assert shadow.group(1).strip().startswith("inset"), (
+        "还有外投影：贴边后它没有落点，只会在屏幕四边压出暗边"
+    )
+
+
+def test_paper_texture_lives_on_main_only():
+    """纸张纹理只能铺一层，且在 main 上。
+
+    改前 main 与 .book-spine 各有一份 `--noise`，叠起来噪点密度翻倍，
+    而且侧栏与对话区会呈现两种白。第九批把纹理上移到 main，
+    .book-spine 必须彻底透明 —— 否则它自己的底色会把纹理盖掉，
+    "从边到底连续"就只对侧栏成立。
+    """
+    base = _css(_read(SRC / "app" / "styles" / "base.css"))
+    layout = _css(_read(SRC / "app" / "styles" / "layout.css"))
+
+    main_rule = _rule(base, "main.workbench-main")
+    assert "var(--noise)" in main_rule, "main 上没有铺纤维纹理"
+    assert "background-color: var(--bg-canvas)" in main_rule, (
+        "main 上缺纸底色，纹理是半透明的，没有底会直接看到 body"
+    )
+
+    spine = _rule(layout, ".book-spine")
+    assert "background" not in spine, (
+        ".book-spine 又自己铺背景了：会把 main 的纹理盖掉，且两层 noise 叠脏"
+    )
+
+    # ★ 必须扫**全文**、且两处都扫：第一版只查了 layout.css 的那条规则，
+    #   而 fx.css 的 ≤899 档里还藏着一条 `.book-spine { background-image: var(--noise) }`
+    #   —— 线上探针 390/768 的 background-image 不是 none、1440 才是，才把它揪出来。
+    #   "只扫自己刚改的那个文件"正是本项目反复踩的假绿形状。
+    fx = _css(_read(SRC / "app" / "styles" / "fx.css"))
+    for name, css in (("layout.css", layout), ("fx.css", fx)):
+        stray = re.findall(r"\.book-spine\s*\{[^}]*background", css)
+        assert not stray, (
+            f"{name} 里还有 {len(stray)} 处给 .book-spine 铺背景"
+            "（含媒体查询内的：窄屏会变成两层纹理，桌面看不出来）"
+        )
+
+
+def test_measure_grows_with_paper():
+    """纸变大 28px，栏宽跟着放大同等比例，别"纸变大、字没变"。"""
+    tokens = _read(SRC / "app" / "styles" / "tokens.css")
+    m = re.search(r"--measure:\s*(\d+)px", tokens)
+    assert m, "没有 --measure"
+    assert int(m.group(1)) >= 736, "栏宽没跟着放大，纸上会显空"
+    assert int(m.group(1)) <= 760, "栏宽放过头了：中文一行超过 48 字会读不下去"
 
 
 # ---------- 输入框：手机 72 → 56 ----------
