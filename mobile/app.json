@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "知穗",
+    "slug": "zhisui",
+    "scheme": "zhisui",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "cn.myzhisui.zhisui",
+      "supportsTablet": false,
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "选择照片发到论坛、或设置头像。不上传时不会读取你的相册。",
+        "NSCameraUsageDescription": "拍一张照片直接发到论坛。不拍照时不会使用相机。",
+        "NSPhotoLibraryAddUsageDescription": "把论坛里的图片保存到相册。",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "cn.myzhisui.zhisui",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#EDE4C8"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 180,
+          "resizeMode": "contain",
+          "backgroundColor": "#EDE4C8",
+          "dark": {
+            "backgroundColor": "#1A1610"
+          }
+        }
+      ]
+    ]
+  }
+}
