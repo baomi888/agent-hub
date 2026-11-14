@@ -16,6 +16,24 @@ os.chdir(PROJECT_ROOT)  # 切到根目录，让 .env / data / chroma_db 相对�
 # 从项目根加载 .env
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
+
+def _env_int(name: str, default: int) -> int:
+    """读整数环境变量：**非法值不抛异常**，退回默认值。
+
+    为什么不用裸 ``int(os.getenv(...))``：这些开关（如
+    ``PROMPT_LEAK_DENSE_MIN_HITS``、``TOOL_APPROVAL_TTL_SECONDS``）的用途就是
+    "线上临时调参/回滚"，而 ``.env`` 里多写一个空格、跟一句 ``# 注释``、
+    或手滑写成 ``2.5``，裸 int 会在 **import 阶段**抛 ValueError——
+    不是"这个开关失效"，而是**所有 worker 起不来**。调参口子不该能把服务打挂。
+    """
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+
 # ---------- 大模型（DeepSeek Chat）----------
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
@@ -427,7 +445,7 @@ PROMPT_LEAK_OUTPUT_GUARD_ENABLED = os.getenv("PROMPT_LEAK_OUTPUT_GUARD_ENABLED",
 # L3 三级判定里"连续指纹窗口命中 >= N 判 hard"的 N。
 # 默认 3：良性样本（22 条提问 + 正常回答）的每轮命中窗口数最大为 0，
 # 留 2 个窗口余量。改小会更早拒答，改大会让更长片段走 soft 中和。
-PROMPT_LEAK_DENSE_MIN_HITS = int(os.getenv("PROMPT_LEAK_DENSE_MIN_HITS", "3") or "3")
+PROMPT_LEAK_DENSE_MIN_HITS = _env_int("PROMPT_LEAK_DENSE_MIN_HITS", 3)
 
 # ---------- L0 指令/数据分离（2026-11-08）----------
 # 检索片段 / 联网正文 / 用户上传分别用不同标签包裹，并在 system prompt 里声明
@@ -445,7 +463,7 @@ TOOL_APPROVAL_REAL_CONFIRM_ENABLED = os.getenv(
     "TOOL_APPROVAL_REAL_CONFIRM_ENABLED", "1"
 ) not in ("0", "false", "False")
 # 一次性 token 的有效期（秒）。默认 120：够用户看清参数再点，又不至于长期悬挂。
-TOOL_APPROVAL_TTL_SECONDS = int(os.getenv("TOOL_APPROVAL_TTL_SECONDS", "120"))
+TOOL_APPROVAL_TTL_SECONDS = _env_int("TOOL_APPROVAL_TTL_SECONDS", 120)
 
 # ② 路由 Fast Path：两个能力开关都关 / 显式 workflow_id 时不调路由模型。置 0 回退旧行为。
 ROUTER_FASTPATH_ENABLED = os.getenv("ROUTER_FASTPATH_ENABLED", "1") not in (

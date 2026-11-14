@@ -54,6 +54,8 @@ soft 分支**不重生成、不调模型、不动配额、不引入流中途停�
 开关（core/config.py，默认全开，置 0 可一键回滚）
   PROMPT_LEAK_GUARD_ENABLED / PROMPT_LEAK_INPUT_GUARD_ENABLED /
   PROMPT_LEAK_OUTPUT_GUARD_ENABLED
+  PROMPT_LEAK_DENSE_MIN_HITS —— dense 判 hard 的连续窗口数阈值，默认 3
+  （见 ``_DENSE_MIN_HITS_DEFAULT`` 的取值依据），用于线上调参与回滚。
 """
 
 from __future__ import annotations
@@ -67,8 +69,8 @@ import re
 import secrets
 import threading
 import unicodedata
+from collections import OrderedDict
 from dataclasses import dataclass
-from urllib.parse import quote
 
 from core import config
 from core.agent_prompts import AGENT_SYSTEM_PROMPT
@@ -84,19 +86,30 @@ REFUSAL_TEXT = (
 
 # 进程级随机 canary：攻击者无法从源码/历史对话里预先知道它，所以
 # "翻译/改写系统提示词"只要还带着它，就会被输出层抓住；而正常回答不会出现它。
+# 生命周期：每进程启动重新生成——若怀疑它已出现在日志或泄露样本里，重启即可轮换。
+# 它只保护"带 canary 的那几条"，不保护不含 canary 的短规则；那一层由 24 字指纹兜底。
 _CANARY = "SYS-CANARY-" + secrets.token_hex(8)
 
-# 指纹长度 / 流式未下发窗口。
-# ⚠️ 不变量：HOLDBACK >= SHINGLE_LEN。soft（中和）分支完全依赖它：
-# 只要 holdback 不小于指纹长度，任何**新形成**的 24 字指纹一定还落在未下发的
-# 窗口里，替换不会碰已发送的字符；holdback 一旦小于指纹长度，命中段可能已经
-# 发送，替换会造成前后文错位，soft 替换方案失效。
-# 因此这里在导入时自检、直接报错，不允许静默降级（见 _check_holdback）。
+# 指纹长度 / 流式窗口。三条不变量在导入时自检（见 _check_invariants）：
+#   1) HOLDBACK >= SHINGLE_LEN：任何**新形成**的 24 字指纹一定还在未下发窗口里，
+#      soft 替换不会碰已发送的字符；
+#   2) _NORM_TAIL >= _CHUNK + HOLDBACK：单次 feed 按 _CHUNK 切块后，该块可能要
+#      下发的字符必定落在本轮检测窗口内（否则一次喂很长的 delta 会漏检前段）；
+#   3) _NORM_TAIL <= _RAW_TAIL：归一化窗口不能长过它来源的原文窗口。
+# 任何一条被破坏就直接报错，不允许静默降级。
 SHINGLE_LEN = 24
 HOLDBACK = 48
-_HOLD = HOLDBACK
 _NORM_TAIL = 480
 _RAW_TAIL = 1200
+# 单次检测块上限：384 + HOLDBACK(48) = 432 <= _NORM_TAIL(480)，留 48 字余量。
+_CHUNK = 384
+# 受保护文本条数上限：system prompt 若每轮带时间戳/会话信息，不设上限会无限增长，
+# 并让指纹缓存每轮全量重建。
+_MAX_PROTECTED = 64
+# 这几个标签是**固定核心**：RAG / Agent / 纯对话三条路径各自的 system prompt。
+# 它们价值最高，且数量恒定，不参与 LRU 淘汰——否则 64 个场景变体一拥而上，
+# 最先被挤掉的正好是最该保护的基线文本（m-003）。
+_PINNED_LABELS = frozenset({"system_prompt", "rag_system_prompt", "plain_system_prompt"})
 
 # 连续指纹窗口命中达到 N 个（即连续命中段宽度 >= SHINGLE_LEN + N - 1）判 hard。
 # N=3 的依据：用仓库内现有良性问答样本（tests/test_prompt_leak_attack.py 的
@@ -107,7 +120,12 @@ _DENSE_MIN_HITS_DEFAULT = 3
 
 
 def _dense_min_hits() -> int:
-    """连续指纹窗口的 hard 阈值 N（可被 config 覆盖，便于线上调参与回滚）。"""
+    """连续指纹窗口的 hard 阈值 N（可被 config 覆盖，便于线上调参与回滚）。
+
+    下限固定为 2：N=1 意味着"命中任意一个 24 字窗口就拒答"，正常回答里
+    偶然撞上一条 protected 片段的概率就不再可忽略，等于把 soft 档废掉。
+    这是**有意的硬下限**，不是漏改（配置成 1 会被抬到 2）。
+    """
     value = getattr(config, "PROMPT_LEAK_DENSE_MIN_HITS", _DENSE_MIN_HITS_DEFAULT)
     try:
         return max(2, int(value))
@@ -115,7 +133,7 @@ def _dense_min_hits() -> int:
         return _DENSE_MIN_HITS_DEFAULT
 
 
-def _check_holdback(hold: int = _HOLD, shingle_len: int = SHINGLE_LEN) -> None:
+def _check_holdback(hold: int = HOLDBACK, shingle_len: int = SHINGLE_LEN) -> None:
     """启动自检：holdback 必须 >= 指纹长度，否则 soft 分支不可用。
 
     holdback 一旦小于指纹长度，命中段可能已下发，替换会造成前后文错位，
@@ -128,7 +146,27 @@ def _check_holdback(hold: int = _HOLD, shingle_len: int = SHINGLE_LEN) -> None:
         )
 
 
-_check_holdback()
+def _check_invariants() -> None:
+    """启动自检：流式窗口的三条不变量（见文件顶部常量注释）。
+
+    ``_NORM_TAIL >= _CHUNK + HOLDBACK`` 是"大 delta 不漏检"的前提：
+    feed 把超长 delta 切成 <= _CHUNK 的块，每块新增的字符加上 holdback 必须
+    落在归一化检测窗口内，否则被下发的前缀没经过检测。
+    """
+    _check_holdback()
+    if _NORM_TAIL < _CHUNK + HOLDBACK:
+        raise RuntimeError(
+            f"prompt_security: _NORM_TAIL({_NORM_TAIL}) < _CHUNK({_CHUNK}) + "
+            f"HOLDBACK({HOLDBACK})，超长 delta 的前段会未经检测就下发"
+        )
+    if _RAW_TAIL < _NORM_TAIL:
+        raise RuntimeError(
+            f"prompt_security: _RAW_TAIL({_RAW_TAIL}) < _NORM_TAIL({_NORM_TAIL})，"
+            "归一化窗口会超出原文窗口"
+        )
+
+
+_check_invariants()
 
 
 class Severity(enum.Enum):
@@ -179,10 +217,24 @@ class Verdict:
 
 # 动态注册的受保护文本（system prompt / 工具 description）。
 # text -> 标签（用于 soft 日志指认"哪段内容被试探"）；构建指纹时加锁快照。
+# 用 OrderedDict 做 LRU：条数上限见 _MAX_PROTECTED。
 _protected_lock = threading.Lock()
-_protected_texts: dict[str, str] = {AGENT_SYSTEM_PROMPT: "system_prompt"}
+_protected_texts: OrderedDict[str, str] = OrderedDict(
+    {AGENT_SYSTEM_PROMPT: "system_prompt"}
+)
 _shingle_cache: frozenset[str] | None = None
 _shingle_labels: dict[str, str] = {}
+# 检测视图（去标点/空白）下的同一套指纹。L3 的"格式变形"绕过靠它兜底，
+# 见 _detect_view 的说明。与普通索引同时失效、同时重建。
+_shingle_cache_dv: frozenset[str] | None = None
+_shingle_labels_dv: dict[str, str] = {}
+# 单条文本的切片缓存：文本 -> (普通指纹切片, 检测视图指纹切片)。
+# 只在文本首次登记/条款首次构建时算一次，之后重建只做集合合并（M-004）。
+_slice_cache: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {}
+# 登记代次：构建指纹库期间若有人登记新文本，本次构建结果作废、不写回缓存。
+# 没有它就会出现"构建到一半、别人把缓存标记为脏、自己又把旧结果写回去"，
+# 新登记的那条在整个缓存周期里都匹配不到（漏检窗口）。
+_shingle_gen = 0
 
 _ZW_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff]")
 _WS_RE = re.compile(r"[ \t\r\n\u00a0\u3000]+")
@@ -276,14 +328,51 @@ def _normalize_with_map(text: str) -> tuple[str, list[tuple[int, int]]]:
     return "".join(out_chars), out_spans
 
 
+_ESCAPE_RE = re.compile(r"\\u([0-9a-fA-F]{4})")
+# 只在两个汉字之间的那个空格要删：用断言写成一次 regex 替换（C 级），
+# 比逐字符判 "前一个字是汉字、后一个字是汉字" 的 Python 循环快一个数量级。
+_CJK_SPACE_RE = re.compile(r"(?<=[\u4e00-\u9fff]) (?=[\u4e00-\u9fff])")
+
+
 def _normalize(text: str) -> str:
     """统一大小写/全角/空白/零宽，供规则与指纹匹配（不保留映射）。
 
     只做"不改变语义"的归一化：NFKC 处理全角，去零宽字符对抗
     ``系\\u200b统\\u200b提\\u200b示\\u200b词`` 这类拆字绕过，跨 CJK 的空白
     直接删除（``输  出`` → ``输出``），中文/英文规则可以共用同一套正则。
+
+    实现是**整串 C 级流水线**（``sub`` / ``normalize`` / ``translate`` / ``lower``），
+    与 :func:`_normalize_with_map` 逐码点版本等价——除了一个刻意的差异：
+    整串 NFKC 会把「基字母 + 组合记号」合成一个字符（``e`` + U+0301 → ``é``），
+    逐码点不会。对检测而言合成后更规范，也更难靠插入组合记号绕过；中文语料上
+    两种写法输出完全一致（见 tests 里的等价性用例）。
+
+    为什么分成两个函数：``_normalize_with_map`` 每个字符都要分配一个
+    ``(start, end)`` 元组，1200 字约 0.75 ms；而流式过滤每帧都要跑一遍，
+    绝大多数帧的结论是"没命中"，根本用不到映射。热路径用这个无映射版本，
+    只有真的判到 soft、需要定位替换区间时才回落到带映射版本。
     """
-    return _normalize_with_map(text)[0]
+    s = text or ""
+    if not s:
+        return ""
+    if "\\u" in s:
+        s = _ESCAPE_RE.sub(lambda m: chr(int(m.group(1), 16)), s)
+    s = _ZW_RE.sub("", s)
+    s = unicodedata.normalize("NFKC", s)
+    s = s.translate(_QUOTE_MAP).lower()
+    s = _WS_RE.sub(" ", s)
+    s = _CJK_SPACE_RE.sub("", s)
+    return s.strip()
+
+
+def normalize_text(text: str) -> str:
+    """对外暴露的归一化入口。
+
+    存在的理由：入站判定（``detect_prompt_extraction``）与 soft 观测
+    （``classify``）要看同一句话，调用方算一次传进去即可，不必各付一次 CPU。
+    归一化规则本身是内部实现细节，别在别处另写一套。
+    """
+    return _normalize(text)
 
 
 # ==================== 结构特征 / 短指纹（并入自原 core/leak_guard.py）====================
@@ -306,6 +395,9 @@ SHORT_FINGERPRINTS = (
 # 内部工具名：单独出现不算泄露（前端本来就会展示"正在调用 web_search"），
 # 必须和 schema 结构同时出现才判。
 _INTERNAL_TOOLS = ("kb_search", "web_search", "get_weather", "download_file")
+# 正则里复用的工具名分支：新增工具只改上面的元组，本文件三处正则自动跟上。
+_TOOL_ALT = "|".join(map(re.escape, _INTERNAL_TOOLS))
+_INTERNAL_TOOL_RE = re.compile(_TOOL_ALT, re.I)
 
 # 输出侧：整段配置导出的结构特征（不只认"某个工具名 + parameters"）
 _SCHEMA_SHAPE = re.compile(r'"(parameters|input_schema)"\s*:|"type"\s*:\s*"function"', re.I)
@@ -315,9 +407,7 @@ _ROLE_DUMP = re.compile(r'"role"\s*:\s*"(system|developer)"', re.I)
 
 # 光有 role=system 不算泄露（问"system message 是什么"时模型给通用示例是正常答案），
 # 必须同时出现本项目的内部标识才判。
-_ROLE_DUMP_STRONG = re.compile(
-    r"(系统提示词|系统指令|kb_search|web_search|get_weather|download_file)", re.I
-)
+_ROLE_DUMP_STRONG = re.compile(r"(系统提示词|系统指令|" + _TOOL_ALT + r")", re.I)
 
 # 自述式开头：模型自己说"以下是我的系统提示词"
 _PROMPT_HEADER = re.compile(
@@ -378,21 +468,23 @@ def find_leak(text: str) -> str | None:
         return "提示词自述开头"
     if _ROLE_DUMP.search(s) and _ROLE_DUMP_STRONG.search(s):
         return "对话结构导出"
-    if _SCHEMA_SHAPE.search(s) and any(t in s for t in _INTERNAL_TOOLS):
+    if _SCHEMA_SHAPE.search(s) and _INTERNAL_TOOL_RE.search(s):
         return "工具 schema 结构"
     return None
 
 
-def classify(text: str) -> str | None:
+def classify(text: str, _normalized: str | None = None) -> str | None:
     """入站粗筛：返回 ``"block"`` / ``"soft"`` / None。
 
     block = 明确在索要内部配置，直接拒答、不送模型；
     soft  = 像格式转换式导出，但正常用户也会这么说，放行 + 交给输出过滤；
     None  = 正常请求。
 
+    ``_normalized`` 供调用方复用已经算好的归一化结果（避免同一句话归一化两次）。
+
     这是第一道门，不是安全边界：真正兜底的是工具鉴权与输出过滤，所以宁可少拒。
     """
-    s = _normalize(text or "")
+    s = _normalize(text or "") if _normalized is None else _normalized
     if not s:
         return None
     if _OVERRIDE.search(s):
@@ -602,7 +694,16 @@ _EXTRACT_SIGNAL = re.compile(
 
 
 def _classify_intent(norm: str) -> str:
-    """规则命中后判意图：有索取信号一律 block；纯能力/规则提问才 benign。"""
+    """规则命中后判意图：**索要原文/导出格式**一律 block；只**问内容/能力**才 benign。
+
+    口径（与 security_clause 第 6 条一致，刻意的选择）：
+      - block：逐字 / 完整 / 原样 / 贴出来 / 编码 / 导出成 JSON 等——目标是拿到原文；
+      - benign："你的系统提示词是什么""内部规则都有哪些内容"——目标是了解**内容**，
+        由模型按条款 6 用概括语言回答（禁止逐字引用）。这不是漏防：原文一旦被
+        吐出来，仍由 L3 的 canary / 24 字指纹 / 结构特征拦下。
+    反过来把 benign 一律改判 block，会让"你能做什么""你的规则是什么"这类正常
+    提问直接吃固定拒答——那才是误杀，也是本模块刻意避免的。
+    """
     if _EXTRACT_SIGNAL.search(norm):
         return INTENT_BLOCK
     if _BENIGN_QUESTION.search(norm):
@@ -610,25 +711,30 @@ def _classify_intent(norm: str) -> str:
     return INTENT_BLOCK
 
 
-def detect_prompt_extraction(text: str) -> tuple[str, str] | None:
+def detect_prompt_extraction(
+    text: str, _normalized: str | None = None
+) -> tuple[str, str] | None:
     """命中提示词/工具泄露意图时返回 ``(rule_id, intent)``，否则 None。
 
     intent 只有两种：``INTENT_BLOCK``（默认，按恶意索取处理）与
     ``INTENT_BENIGN``（询问能力/规则/工作方式，调用方放行）。benign 只在
     "规则命中但没有任何索取原文信号"时给出；这一层不调用模型。
+
+    ``_normalized`` 供调用方复用已经算好的归一化结果。入站检测与 soft 观测
+    以前各归一化一次同一句话，长提问上等于白付一倍 CPU。
     """
     if not getattr(config, "PROMPT_LEAK_GUARD_ENABLED", True):
         return None
     if not getattr(config, "PROMPT_LEAK_INPUT_GUARD_ENABLED", True):
         return None
-    norm = _normalize(text)
+    norm = _normalize(text) if _normalized is None else _normalized
     if not norm:
         return None
     # 结构粗筛（原 leak_guard.classify）先跑：它的 block 档认的是"动作 + 目标"配对，
     # 对 payload.tools / role-content 这类**没有中文机密词**的导出尤其重要。
     # 只借它的 block 档；soft 档（格式转换）在这里不生效，仍交给下面的 _RULES
     # 与意图分流判断，避免把"翻译成 JSON"这类真攻击放成良性。
-    if classify(text) == "block":
+    if classify(text, _normalized=norm) == "block":
         return "structural_export", INTENT_BLOCK
     for rule_id, pattern in _RULES:
         if pattern.search(norm):
@@ -677,18 +783,34 @@ def register_protected_text(text: str, label: str = "") -> None:
 
     ``label`` 进服务端 soft 日志（如 ``tool:web_search``），用于事后判断
     "有人在系统性试探哪块配置"；标签本身绝不下发。
+
+    条数上限 ``_MAX_PROTECTED``（LRU 淘汰）：system prompt 若每轮带时间戳 /
+    会话信息，无限累积会分别造成内存增长与"每轮全量重建指纹"的 CPU 开销。
     """
-    global _shingle_cache
+    global _shingle_cache, _shingle_cache_dv, _shingle_gen
     if not isinstance(text, str):
         return
     t = text.strip()
-    if len(t) < SHINGLE_LEN:
+    # 用归一化长度判断：<24 字的文本根本建不出指纹，不必占位。
+    if not t or len(_normalize(t)) < SHINGLE_LEN:
         return
     with _protected_lock:
         if t in _protected_texts:
+            _protected_texts.move_to_end(t)
             return
         _protected_texts[t] = label or "protected"
+        if len(_protected_texts) > _MAX_PROTECTED:
+            # 优先淘汰"非核心"里最久未用的那条；核心文本不参与淘汰
+            victim = next(
+                (k for k, v in _protected_texts.items() if v not in _PINNED_LABELS), None
+            )
+            if victim is None:  # 全是核心（不可能到 64 条，兜底而已）
+                victim = next(iter(_protected_texts))
+            _protected_texts.pop(victim, None)
+        # 两套索引共用同一个失效点，避免"普通索引更新了、检测视图还是旧的"
+        _shingle_gen += 1
         _shingle_cache = None
+        _shingle_cache_dv = None
 
 
 def protected_texts() -> tuple[str, ...]:
@@ -697,42 +819,131 @@ def protected_texts() -> tuple[str, ...]:
         return tuple(sorted(_protected_texts))
 
 
-def _shingle_index() -> tuple[frozenset[str], dict[str, str]]:
+_refusal_norm = ""  # 延迟初始化：_shingle_index 第一次构建时填
+
+
+def _detect_view(norm: str) -> tuple[str, list[int]]:
+    """指纹匹配专用视图：只保留数字 / 小写拉丁 / 汉字，其余字符全部剔除。
+
+    为什么需要它（2026-11-14 修复的绕过面）
+    ------------------------------------
+    24 字指纹要求**连续** 24 个字符。模型只要在字之间插任意标点
+    （``你、是、一、个…``）或在中英混排里插空格，窗口就被切断，指纹全失配——
+    实测"逐字插空格""逐字插点号"两种变体都能把整段系统提示词吐出来而判 pass。
+    归一化里的"汉字间空格删除"只认 ``\\u4e00-\\u9fff``，中文标点（。、，：「」）
+    不是汉字，所以那种折法救不了这种变形。
+
+    检测视图把标点与空白一律丢掉（``你是一个助手。本轮`` → ``你是一个助手本轮``），
+    索引侧与匹配侧用同一套视图，插什么都没用。返回的 ``idx`` 是视图第 i 个字符
+    在 ``norm`` 里的下标，用于把命中区间映射回去做 soft 替换。
+    """
+    out: list[str] = []
+    idx: list[int] = []
+    for i, ch in enumerate(norm):
+        if "0" <= ch <= "9" or "a" <= ch <= "z" or "\u4e00" <= ch <= "\u9fff":
+            out.append(ch)
+            idx.append(i)
+    return "".join(out), idx
+
+
+def _slices_for(text: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """一条受保护文本的指纹切片（按文本缓存，M-004）。
+
+    以前每次登记新文本都 ``_shingle_cache = None``，下次构建要把 64 条文本
+    **全部重新归一化 + 重新切片**（实测 71.8 ms/次，且发生在 agent 构建路径上）。
+    归一化本身刚刚提速，但更根本的问题是"没变的文本不该重算"——这里按文本
+    缓存切片结果，重建时只做集合合并。
+    """
+    cached = _slice_cache.get(text)
+    if cached is not None:
+        return cached
+    norm = _normalize(text)
+    if len(norm) < SHINGLE_LEN:
+        result: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
+    else:
+        norm_slices = tuple(norm[i : i + SHINGLE_LEN]
+                            for i in range(0, len(norm) - SHINGLE_LEN + 1, 6))
+        dv, _ = _detect_view(norm)
+        dv_slices = tuple(dv[i : i + SHINGLE_LEN]
+                          for i in range(0, len(dv) - SHINGLE_LEN + 1, 6))
+        result = (norm_slices, dv_slices)
+    _slice_cache[text] = result
+    return result
+
+
+def _shingle_index(_retry: int = 0) -> tuple[frozenset[str], dict[str, str]]:
     """受保护文本的 24 字连续指纹集合 + 指纹→来源标签映射（缓存）。"""
-    global _shingle_cache, _shingle_labels
+    global _shingle_cache, _shingle_labels, _shingle_cache_dv, _shingle_labels_dv
     cached = _shingle_cache
     if cached is not None:
         return cached, _shingle_labels
 
-    refusal_norm = _normalize(REFUSAL_TEXT)
+    global _refusal_norm
+    if not _refusal_norm:
+        _refusal_norm = _normalize(REFUSAL_TEXT)
+    refusal_norm = _refusal_norm
     with _protected_lock:
+        gen = _shingle_gen
         texts = tuple(_protected_texts.items())
+        # 缓存只保留仍在册的文本，避免 LRU 淘汰后切片缓存变成内存垃圾
+        for stale in [k for k in _slice_cache if k not in _protected_texts]:
+            _slice_cache.pop(stale, None)
+
     out: set[str] = set()
     labels: dict[str, str] = {}
+    out_dv: set[str] = set()
+    labels_dv: dict[str, str] = {}
+    # 步长 6 保证格式变化（插空格/换行/标点）时仍有大量窗口命中。
     for text, label in texts:
-        norm = _normalize(text)
-        if len(norm) < SHINGLE_LEN:
-            continue
-        # 步长 6 保证格式变化（插空格/换行/标点）时仍有大量窗口命中。
-        for i in range(0, len(norm) - SHINGLE_LEN + 1, 6):
-            sh = norm[i : i + SHINGLE_LEN]
+        norm_slices, dv_slices = _slices_for(text)
+        for sh in norm_slices:
             if sh in refusal_norm:  # 拒答自身的片段不保护
                 continue
             out.add(sh)
             labels.setdefault(sh, label)
+        for sh in dv_slices:
+            out_dv.add(sh)
+            labels_dv.setdefault(sh, label)
     # 安全条款本身也保护：它含 canary，且是"最后一段"，最常被整段 dump。
-    clause = _normalize(security_clause())
-    for i in range(0, len(clause) - SHINGLE_LEN + 1, 6):
-        sh = clause[i : i + SHINGLE_LEN]
+    clause_slices, clause_slices_dv = _slices_for(security_clause())
+    for sh in clause_slices:
         if sh in refusal_norm:
             continue
         out.add(sh)
         labels.setdefault(sh, "security_clause")
+    for sh in clause_slices_dv:
+        out_dv.add(sh)
+        labels_dv.setdefault(sh, "security_clause")
 
+    # 先写 labels、最后写 cache：cache 非 None 就是"有效"的标志，
+    # 反过来的话读者可能拿到新 cache 配旧 labels（soft 日志会指错来源）。
     frozen = frozenset(out)
-    _shingle_cache = frozen
-    _shingle_labels = labels
-    return frozen, labels
+    frozen_dv = frozenset(out_dv)
+    with _protected_lock:
+        # 构建期间有新文本登记（代次变了）→ 本次结果已经过时，不能写回缓存，
+        # 否则它会一直"看起来有效"，新登记的那条在这个缓存周期内永远不会被匹配。
+        if gen == _shingle_gen:
+            _shingle_labels = labels
+            _shingle_labels_dv = labels_dv
+            _shingle_cache_dv = frozen_dv
+            _shingle_cache = frozen
+        else:
+            _shingle_cache = None
+            _shingle_cache_dv = None
+    if _shingle_cache is not None:
+        return _shingle_cache, _shingle_labels
+    if _retry >= 3:
+        # 极端并发下（每构建一次就有人登记）直接用本次结果，别再重试：
+        # 结果只是可能少一条刚登记的文本，比卡在这里强。
+        return frozen, labels
+    return _shingle_index(_retry + 1)
+
+
+def _shingle_index_dv() -> tuple[frozenset[str], dict[str, str]]:
+    """检测视图下的指纹集合（首次构建时顺带把普通索引也建好）。"""
+    if _shingle_cache_dv is None:
+        _shingle_index()
+    return _shingle_cache_dv or frozenset(), _shingle_labels_dv
 
 
 def _shingles() -> frozenset[str]:
@@ -758,10 +969,10 @@ _STRUCT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "tool_schema_json",
         re.compile(
-            r'"(?:name|function)"\s*:\s*"(?:kb_search|web_search|get_weather|download_file)"'
+            r'"(?:name|function)"\s*:\s*"(?:' + _TOOL_ALT + r')"'
             r'[^。！？\n]{0,80}?"(?:parameters|parameters_schema|args_schema|description)"'
             r'|"(?:parameters|properties|args_schema)"\s*:\s*\{[^。！？\n]{0,300}?'
-            r'"(?:kb_search|web_search|get_weather|download_file)"'
+            r'"(?:' + _TOOL_ALT + r')"'
         ),
     ),
     (
@@ -770,21 +981,39 @@ _STRUCT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
 )
 
+# 这三个是"通用协议形状"：OpenAI / Anthropic 文档式的教学示例也会命中
+# （用户问"role/content 的格式怎么写"时模型给的标准示例）。必须同时出现
+# 本项目内部工具名才判泄露，否则就是误杀——真正整段 dump 会被 24 字指纹兜住。
+_STRUCT_GENERIC_SHAPES = frozenset(
+    {"role_system_json", "role_content_json", "messages_array_json"}
+)
+
 # 编码绕过：输出里出现 base64/rot13/hex 的秘密时也要拦。
 _B64_RE = re.compile(r"[A-Za-z0-9+/]{24,}={0,2}")
 _HEX_RE = re.compile(r"(?:[0-9a-fA-F]{2}){16,}")
+_LATIN_RE = re.compile(r"[A-Za-z]")
 
 
 def _canary_variants() -> tuple[str, ...]:
+    """canary 的直配变体：统一小写后与归一化文本（本身就是小写）比对。
+
+    调用侧用 ``low.find(variant)``，所以变体必须是小写——``raw.upper()`` 或
+    rot13 结果（全大写）原样留在集合里永远匹配不到，只是死代码。
+    base64 不进直配集合：它区分大小写，没有稳定的小写形式；编码后的 canary
+    由 ``_scan_encoded`` 解码后匹配明文。
+    """
     raw = _CANARY
-    variants = {raw.lower(), raw.upper(), quote(raw), codecs.encode(raw, "rot13")}
+    variants = {raw, codecs.encode(raw, "rot13")}
     for enc in (raw, raw.lower()):
-        variants.add(base64.b64encode(enc.encode("utf-8")).decode("ascii").rstrip("=").lower())
-        variants.add(enc.encode("utf-8").hex().lower())
-    return tuple(sorted(v for v in variants if len(v) >= 12))
+        variants.add(enc.encode("utf-8").hex())
+    return tuple(sorted({v.lower() for v in variants if len(v) >= 12}))
 
 
 _CANARY_SET = frozenset(_canary_variants())
+# 检测视图下的同一批变体（连字符等被剔除后形态变了，必须重新算一份）
+_CANARY_SET_DV = frozenset(
+    v for v in (_detect_view(x)[0] for x in _CANARY_SET) if len(v) >= 12
+)
 
 
 def _merge_spans(
@@ -818,7 +1047,12 @@ def _run_hit_count(run: tuple[int, int]) -> int:
 def _analyze_normalized(
     norm: str,
 ) -> tuple[Severity, str, tuple[tuple[int, int], ...], str]:
-    """已归一化文本的分级判定：canary → 结构化 → 指纹（密集 hard / 稀疏 soft）。"""
+    """已归一化文本的分级判定：canary → 结构化 → 指纹（密集 hard / 稀疏 soft）。
+
+    指纹做**两遍**：先按归一化文本匹配（能精确定位、支撑 soft 替换），
+    再按检测视图匹配（去标点/空白，专治"逐字插标点/插空格"这类格式变形）。
+    第二遍命中一律映射回 ``norm`` 坐标，所以 soft 替换仍然精确。
+    """
     if not norm:
         return Severity.PASS, Reason.NONE, (), ""
     low = norm.lower()
@@ -826,25 +1060,60 @@ def _analyze_normalized(
         idx = low.find(variant)
         if idx >= 0:
             return Severity.HARD, Reason.CANARY, ((idx, idx + len(variant)),), "canary"
+    # canary 也要在检测视图上认一遍：拆成 "S Y S - C A N A R Y" 就绕过了上一轮。
+    dv, dv_idx = _detect_view(low)
+    if dv:
+        for variant in _CANARY_SET_DV:
+            idx = dv.find(variant)
+            if idx >= 0:
+                start, end = dv_idx[idx], dv_idx[idx + len(variant) - 1] + 1
+                return Severity.HARD, Reason.CANARY, ((start, end),), "canary"
     for name, pattern in _STRUCT_PATTERNS:
         match = pattern.search(low)
-        if match:
-            return Severity.HARD, Reason.STRUCT, ((match.start(), match.end()),), name
+        if not match:
+            continue
+        # 通用协议形状要配内部工具名才判：否则"role/content 格式怎么写"这类
+        # 正常教学回答会被当成 dump 拒掉。纯粹整段 dump 仍由指纹层兜底。
+        if name in _STRUCT_GENERIC_SHAPES and not _INTERNAL_TOOL_RE.search(low):
+            continue
+        return Severity.HARD, Reason.STRUCT, ((match.start(), match.end()),), name
 
+    threshold = _dense_min_hits()
     shingles, labels = _shingle_index()
     runs = _fingerprint_runs(low, shingles)
+    if runs and any(_run_hit_count(run) >= threshold for run in runs):
+        label = labels.get(low[runs[0][0] : runs[0][0] + SHINGLE_LEN], "protected")
+        return Severity.HARD, Reason.FINGERPRINT_DENSE, tuple(runs), label
+
+    # 第二遍：检测视图（去标点/空白）。命中区间由 dv_idx 映射回 norm 坐标，
+    # 因此既能判 hard，也能给 soft 提供可替换的精确区间。
+    shingles_dv, labels_dv = _shingle_index_dv()
+    runs_dv = _fingerprint_runs(dv, shingles_dv) if dv else []
+    if runs_dv:
+        mapped = tuple(
+            (dv_idx[s], dv_idx[e - 1] + 1) for s, e in runs_dv if e > s
+        )
+        label_dv = labels_dv.get(dv[runs_dv[0][0] : runs_dv[0][0] + SHINGLE_LEN], "protected")
+        if any(_run_hit_count(run) >= threshold for run in runs_dv):
+            return Severity.HARD, Reason.FINGERPRINT_DENSE, mapped, label_dv
+        # 普通索引已经有 soft 命中时优先用它（区间更贴合原文），否则用检测视图的。
+        if not runs and mapped:
+            return Severity.SOFT, Reason.FINGERPRINT_SPARSE, mapped, label_dv
+
     if not runs:
         return Severity.PASS, Reason.NONE, (), ""
     label = labels.get(low[runs[0][0] : runs[0][0] + SHINGLE_LEN], "protected")
     # "连续指纹窗口命中 >= N" 才算 dense；零星 1~N-1 个窗口是 soft。
-    threshold = _dense_min_hits()
-    if any(_run_hit_count(run) >= threshold for run in runs):
-        return Severity.HARD, Reason.FINGERPRINT_DENSE, tuple(runs), label
     return Severity.SOFT, Reason.FINGERPRINT_SPARSE, tuple(runs), label
 
 
 def _decode_encoded(raw: str) -> list[str]:
-    """把输出里的 base64/hex 片段解出来，返回可读文本候选。"""
+    """把输出里的 base64/hex 片段解出来，返回可读文本候选。
+
+    每条分支都先做"有没有可能"的廉价判定：正常中文回答里三条正则都是空匹配，
+    以前仍然会走一遍 ``rot13`` 编码 + 整串归一化 + 完整 ``_analyze_normalized``，
+    是流式过滤单帧开销的第二大来源（第一是带映射归一化）。
+    """
     out: list[str] = []
     for m in _B64_RE.finditer(raw):
         chunk = m.group(0)
@@ -863,8 +1132,11 @@ def _decode_encoded(raw: str) -> list[str]:
             continue
         if text and any(ch.isprintable() for ch in text):
             out.append(text)
-    # rot13 只影响拉丁字母；中文提示词靠 canary 的 rot13 变体抓。
-    out.append(codecs.encode(raw, "rot13"))
+    # rot13 只影响拉丁字母：整段中文 rot13 后与原文逐字相同，再归一化一遍纯属
+    # 重复劳动。canary 的 rot13 形式已经由 _CANARY_SET 直配覆盖，这里只补
+    # "纯拉丁字母被整体 rot13" 的情形。
+    if _LATIN_RE.search(raw):
+        out.append(codecs.encode(raw, "rot13"))
     return out
 
 
@@ -886,10 +1158,13 @@ def _scan_encoded(raw: str) -> str | None:
 
 
 def detect_leak(text: str) -> Verdict:
-    """完整文本泄露检测（三级判定）。
+    """完整文本泄露检测（三级判定），给非流式场景用；流式请用 ``LeakFilter``。
 
-    ``spans`` 是归一化坐标；调用方要替换时需用 ``_map_norm_spans_to_raw``
-    映射回原文。编码命中无法定位区间，只返回 HARD。
+    ⚠️ ``Verdict.spans`` 是**归一化坐标**（NFKC / 去零宽 / 空白折叠 / 小写之后），
+    不是 ``text`` 的下标。要按区间替换原文时必须先
+    ``_map_norm_spans_to_raw(spans, _normalize_with_map(text)[1])``，
+    直接拿 spans 去切原始字符串会错位。
+    编码命中无法定位回原始区间，只返回 HARD（spans 为空）。
     """
     if not getattr(config, "PROMPT_LEAK_GUARD_ENABLED", True):
         return Verdict()
@@ -995,25 +1270,40 @@ class LeakFilter:
         返回 ``(severity, reason, spans_norm, origin, detail, norm_len)``：
         soft 的 ``spans`` 保持**归一化坐标**，由调用方决定哪些段已经"定稿"
         （后面已经有非命中字符，不会再长成 dense）后再映射回原文。
+
+        性能：热路径只用无映射的 :func:`_normalize`（整串 C 级），绝大多数帧
+        判 pass 就结束；只有真的判到 soft、需要把区间映射回原文时才回落到
+        :func:`_normalize_with_map` 重建一次坐标。每字符分配一个 ``(start, end)``
+        元组的代价很大，不该在"没命中"的帧上付。
         """
         # 先跑确定性的结构/短指纹（<24 字，24 字窗口认不出）：
         # 命中就是 hard，不必再走归一化与 shingle 统计。
         structural = find_leak(self._raw_tail[-_SHORT_WINDOW:])
         if structural:
             return Severity.HARD, structural, (), [], "structural", 0
-        norm, origin = _normalize_with_map(self._raw_tail)
+        norm = _normalize(self._raw_tail)
         if len(norm) > _NORM_TAIL:
             norm = norm[-_NORM_TAIL:]
-            origin = origin[-_NORM_TAIL:]
         severity, reason, spans, detail = _analyze_normalized(norm)
+        if severity is Severity.PASS:
+            encoded = _scan_encoded(self._raw_tail)
+            if encoded:
+                return Severity.HARD, encoded, (), [], "encoded", len(norm)
+            return Severity.PASS, Reason.NONE, (), [], "", len(norm)
         if severity is Severity.HARD:
             return severity, reason, (), [], detail, len(norm)
-        if severity is Severity.SOFT:
-            return severity, reason, spans, origin, detail, len(norm)
-        encoded = _scan_encoded(self._raw_tail)
-        if encoded:
-            return Severity.HARD, encoded, (), [], "encoded", len(norm)
-        return Severity.PASS, Reason.NONE, (), [], "", len(norm)
+        # SOFT：只有这一条分支需要坐标，才付带映射归一化的钱。
+        norm_m, origin = _normalize_with_map(self._raw_tail)
+        if len(norm_m) > _NORM_TAIL:
+            norm_m = norm_m[-_NORM_TAIL:]
+            origin = origin[-_NORM_TAIL:]
+        if norm_m != norm:
+            # 两种归一化在组合记号上可能差一个字符（见 _normalize 说明）；
+            # 坐标必须与 spans 同源，重算一次判定。
+            severity, reason, spans, detail = _analyze_normalized(norm_m)
+            if severity is not Severity.SOFT:
+                return severity, reason, (), [], detail, len(norm_m)
+        return severity, reason, spans, origin, detail, len(norm_m)
 
     def _neutralize(self, raw_spans: list[tuple[int, int]]) -> None:
         """把 ``_raw_tail`` 坐标的命中段替换掉（pending 与 raw_tail 同步改）。
@@ -1022,7 +1312,10 @@ class LeakFilter:
         收回，硬替换会让前后文错位；剩下的半段留在 pending 里，下一轮与新文本
         重新检测（本轮不吐任何字符 = "再压一轮"）。
         """
-        # pending 是 raw_tail 的后缀（或反过来），统一用偏移换算到 pending 坐标
+        # pending 是 raw_tail 的后缀（或反过来），统一用偏移换算到 pending 坐标。
+        # base < 0（pending 比 raw_tail 短）时下界 -base 生效：只有 raw_tail 末尾
+        # len(pending) 个字符还对应 pending，更早的命中段已经下发，不能替换。
+        # base >= 0 时下界为负、上界 >= len(raw_tail)，裁剪是恒等变换。
         base = len(self._pending) - len(self._raw_tail)
         pending_spans = [
             (s + base, e + base)
@@ -1038,6 +1331,21 @@ class LeakFilter:
         self._emitted_any = True
 
     def feed(self, delta: str) -> list[str]:
+        if self.blocked or not delta:
+            return []
+        # 超长 delta 必须切块：_analyze_tail 只看最近 _RAW_TAIL / _NORM_TAIL 个字符，
+        # 一次喂 5000 字会让最前面那一截**未经检测**就跟着 pending 前缀下发，
+        # "指纹成形前不发送"的不变量被破坏。切块粒度由 _CHUNK 与 _check_invariants 保证。
+        if len(delta) <= _CHUNK:
+            return self._feed_once(delta)
+        out: list[str] = []
+        for i in range(0, len(delta), _CHUNK):
+            out.extend(self._feed_once(delta[i : i + _CHUNK]))
+            if self.blocked:
+                break
+        return out
+
+    def _feed_once(self, delta: str) -> list[str]:
         if self.blocked or not delta:
             return []
         self._pending += delta
@@ -1078,10 +1386,10 @@ class LeakFilter:
             # 保守：本轮不吐任何字符，下一轮重新检测后再决定。
             return []
 
-        if len(self._pending) <= _HOLD:
+        if len(self._pending) <= HOLDBACK:
             return []
-        out = self._pending[:-_HOLD]
-        self._pending = self._pending[-_HOLD:]
+        out = self._pending[:-HOLDBACK]
+        self._pending = self._pending[-HOLDBACK:]
         # 已下发过前缀：剩余尾巴无法再按原始帧对应，flush 时合并成一段。
         self._pending_parts = []
         self._emitted_any = True
@@ -1126,3 +1434,28 @@ class LeakFilter:
         self._pending = ""
         self._pending_parts = []
         return parts
+
+
+__all__ = [
+    "HOLDBACK",
+    "INTENT_BENIGN",
+    "INTENT_BLOCK",
+    "REFUSAL_TEXT",
+    "SHINGLE_LEN",
+    "SOFT_NEUTRAL_TEXT",
+    "LeakDetected",
+    "LeakFilter",
+    "Reason",
+    "Severity",
+    "StreamGuard",
+    "Verdict",
+    "canary",
+    "classify",
+    "detect_leak",
+    "detect_prompt_extraction",
+    "find_leak",
+    "looks_like_extraction",
+    "protected_texts",
+    "register_protected_text",
+    "security_clause",
+]

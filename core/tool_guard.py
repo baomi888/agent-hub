@@ -33,6 +33,7 @@ import contextvars
 import hashlib
 import json
 import os
+import secrets
 import time
 from typing import Any
 
@@ -144,7 +145,11 @@ def truncate_output(tool_name: str, text: str, limit: int) -> str:
         return text
     n = len(text)
     try:
-        path = os.path.join(_spill_dir(), f"{tool_name}_{int(time.time() * 1000)}.txt")
+        # 文件名带随机后缀：多 worker / 同毫秒并发时 `{tool}_{ms}.txt` 会撞名，
+        # 后写的直接覆盖前一个，落盘路径指向错误的正文。
+        path = os.path.join(
+            _spill_dir(), f"{tool_name}_{int(time.time() * 1000)}_{secrets.token_hex(3)}.txt"
+        )
         with open(path, "w", encoding="utf-8") as f:
             f.write(text)
         return (
@@ -310,8 +315,15 @@ _FAILURE_HINTS = (
     "检索不可用",
 )
 
+# 长度上限：错误文案都很短，正常检索结果动不动上千字。
+# 没有这个上限时，知识库里只要有一段讲"这个概念不存在"的正文被检索回来，
+# 就会把 kb_search 整轮封掉——把"确实查到了资料"误判成"工具确定失败"。
+_FAILURE_MAX_CHARS = 240
+
 
 def _looks_like_deterministic_failure(text: str) -> bool:
+    if not isinstance(text, str) or len(text) > _FAILURE_MAX_CHARS:
+        return False
     return any(h in text for h in _FAILURE_HINTS)
 
 
