@@ -125,3 +125,20 @@ def test_forum_is_reachable_from_the_sidebar():
     m = re.search(r'\{ href: "/forum"[^}]*label: "([^"]+)"', nav)
     assert m, "nav.ts 里的 /forum 缺少 label"
     assert len(m.group(1)) == 2, "导航标签超过两个字会在手机上换行、把导航撑高"
+
+
+def test_stats_text_carries_a_unit():
+    """统计数字后面必须带单位。
+
+    线上第一版写的是「今日 8」，后面什么都没有 —— 截图里看着像文字被截断了，
+    实际是文案漏了「条」。这种错误编译不会报、接口也不会错，只有人看见。
+    """
+    s = _read(FORUM_PAGE)
+    # 注释里也会出现这些字样，先剥掉再判 —— 断言被注释误伤过一次，别再来一次
+    code = re.sub(r"\{/\*.*?\*/\}", "", s, flags=re.S)
+    assert "今日 8" not in code  # 防的是"数字直接结尾"那种写法
+    # 两处（左栏底部 / 工具条右侧）都要是「今日新增 N 条」的形状
+    assert code.count("今日新增") >= 2, "统计文案又退回成没有单位的「今日 N」了"
+    for m in re.finditer(r"今日新增 \{fmtNum\(stat\.today\)\}", code):
+        tail = code[m.end() : m.end() + 6]
+        assert tail.startswith(" 条"), f"「今日新增 N」后面缺单位，实际是：{tail!r}"

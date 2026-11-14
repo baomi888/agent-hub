@@ -302,7 +302,8 @@ export default function ForumPage() {
             ))}
             <div className="fm-side-stat">
               <span>{fmtNum(stat.replies)} 条回复</span>
-              <span>今日 {fmtNum(stat.today)}</span>
+              {/* 数字后面必须带单位，否则线上看着像文字被截断 */}
+              <span>今日新增 {fmtNum(stat.today)} 条</span>
             </div>
           </div>
         </aside>
@@ -430,8 +431,7 @@ export default function ForumPage() {
               </button>
             ))}
             <span className="fm-bar-stat">
-              {fmtNum(stat.total)} 个话题 · {fmtNum(stat.replies)} 条回复 · 今日{" "}
-              {fmtNum(stat.today)}
+              {fmtNum(stat.total)} 个话题 · 今日新增 {fmtNum(stat.today)} 条
             </span>
           </div>
 
