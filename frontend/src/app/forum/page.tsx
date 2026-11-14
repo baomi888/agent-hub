@@ -68,11 +68,21 @@ const CAT_MARK: Record<string, string> = {
   exp: "经验",
   team: "组队",
   kbfb: "反馈",
-  meta: "公告",
+  meta: "站务",
 };
 
-const markOf = (t: ForumTopic) =>
-  (t.kb?.name || CAT_MARK[t.cat] || t.cat_label || "帖子").trim().slice(0, 2);
+/**
+ * 方块里的两个字。
+ *
+ * meta 板块里其实混着两种东西：置顶的站务公告，和同学自己对平台提的意见
+ * （"能不能加个 XX"）。前者写「公告」、后者写「站务」—— 一条学生发的建议
+ * 左边标着「公告」，旁边再挂一个「站务公告」的标签，看起来就像官方发的。
+ */
+const markOf = (t: ForumTopic, isPin = false) => {
+  if (t.kb?.name) return t.kb.name.trim().slice(0, 2);
+  if (isPin) return "公告";
+  return (CAT_MARK[t.cat] || t.cat_label || "帖子").trim().slice(0, 2);
+};
 
 export default function ForumPage() {
   const auth = useAuth();
@@ -123,6 +133,9 @@ export default function ForumPage() {
   const [sending, setSending] = useState(false);
   const [cTip, setCTip] = useState("");
   const compRef = useRef<HTMLDivElement | null>(null);
+  /** 手机上的板块条是否已滚到最右 —— 决定右边那条渐隐遮罩要不要留着 */
+  const [chipEnd, setChipEnd] = useState(false);
+  const chipRef = useRef<HTMLDivElement | null>(null);
 
   // 搜索防抖：停止输入 280ms 才发请求。手速快的人一次请求都不会多发。
   useEffect(() => {
@@ -178,6 +191,22 @@ export default function ForumPage() {
     const t = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(t);
   }, [load]);
+
+  // 手机上的板块条一定放不下七个 chip：右侧不给渐隐，最后那个板块看起来
+  // 就是"被切坏了"（截图上「学习经验」只剩「学习经」）。滚到尽头再把遮罩
+  // 撤掉，否则最后一个 chip 会永远淡着半边。
+  useEffect(() => {
+    const el = chipRef.current;
+    if (!el) return;
+    const sync = () => setChipEnd(el.scrollLeft + el.clientWidth >= el.scrollWidth - 2);
+    sync();
+    el.addEventListener("scroll", sync, { passive: true });
+    window.addEventListener("resize", sync);
+    return () => {
+      el.removeEventListener("scroll", sync);
+      window.removeEventListener("resize", sync);
+    };
+  }, [cats.length]);
 
   const loadMore = async () => {
     const last = topics[topics.length - 1];
@@ -271,6 +300,8 @@ export default function ForumPage() {
 
   const postable = cats.filter((c) => c.postable);
   const catName = cat ? (cats.find((c) => c.key === cat)?.label ?? "") : "";
+  /** 右栏只留"真的有人在聊"的：热榜排序在 0 回复时等于最新，和中间那栏重复 */
+  const hotLive = hot.filter((t) => t.reply_n > 0);
   /** 顶部横幅用的那一条。关过一次就不再挡视线 */
   const notice = pinned[0] && String(pinned[0].id) !== closedNotice ? pinned[0] : null;
 
@@ -288,43 +319,56 @@ export default function ForumPage() {
   /**
    * 一行话题。
    *
-   * 置顶行和普通行只有两点不同：多一枚「置顶」标、多一个 `is-pin` 类。
-   * 抽成一个函数而不是写两份 JSX —— 两份的话，以后加个作者头像之类的改动，
-   * 另一份一定会忘。
+   * 置顶行和普通行有三点不同：多一枚「置顶」标、多一个 `is-pin` 类、
+   * **不显示摘要**。抽成一个函数而不是写两份 JSX —— 两份的话，以后加个
+   * 作者头像之类的改动，另一份一定会忘。
+   *
+   * 为什么公告行不给摘要：它的正文此刻正躺在页面顶部那条公告条里、
+   * 点进去还是同一段话。同一条信息在一屏里出现三次，读的人会开始跳读
+   * 整个页面 —— 删掉演示帖之后只剩三条内容时，这一点特别刺眼。
    */
-  const renderRow = (t: ForumTopic, isPin = false) => (
-    <li className={`fm-row${isPin ? " is-pin" : ""}`} key={isPin ? `pin-${t.id}` : t.id}>
-      <div className="fm-mark" aria-hidden="true">
-        {markOf(t)}
-      </div>
-      <div className="fm-body">
-        <p className="fm-title">
-          {isPin && <span className="fm-tag pin">置顶</span>}
-          <span className="fm-title-t">{t.title}</span>
-          <span className="fm-tag">{t.cat_label}</span>
-        </p>
-        <p className="fm-ex">{t.excerpt}</p>
-        <div className="fm-meta">
-          <b>{t.author.name}</b>
-          {t.author.admin && <span className="fm-tag gold">管理员</span>}
-          <span>{fmtWhen(t.at)}</span>
-          {t.kb && (
-            <Link className="fm-src" href={`/library/${encodeURIComponent(t.kb.id)}`}>
-              <CornIcon name="book" className="h-3 w-3" />
-              <span>{t.kb.name}</span>
-            </Link>
-          )}
+  const renderRow = (t: ForumTopic, isPin = false) => {
+    // 左边方块已经说了板块。右边再挂一个同样的板块名，是把一句话说两遍；
+    // 只有当方块取自库名（"高等"）时，标签才补上缺的那半句（"答疑"）。
+    const showCat = Boolean(t.kb);
+    return (
+      <li className={`fm-row${isPin ? " is-pin" : ""}`} key={isPin ? `pin-${t.id}` : t.id}>
+        <div className="fm-mark" aria-hidden="true">
+          {markOf(t, isPin)}
         </div>
-      </div>
-      <div className={"fm-count" + (t.reply_n ? "" : " zero")}>
-        <b>{t.reply_n}</b>
-        <span>回复</span>
-      </div>
-      {/* 整行可点靠这张覆盖层链接：`<a>` 里不能嵌 `<button>`，
-          而这一行里带着来源库链接，所以不能用 <a> 包内容 */}
-      <Link href={`/forum/${t.id}`} className="fm-hit" aria-label={`打开话题 ${t.title}`} />
-    </li>
-  );
+        <div className="fm-body">
+          <p className="fm-title">
+            {isPin && <span className="fm-tag pin">置顶</span>}
+            <span className="fm-title-t">{t.title}</span>
+            {showCat && <span className="fm-tag">{t.cat_label}</span>}
+          </p>
+          {!isPin && <p className="fm-ex">{t.excerpt}</p>}
+          <div className="fm-meta">
+            <b>{t.author.name}</b>
+            {t.author.admin && <span className="fm-tag gold">管理员</span>}
+            <span>{fmtWhen(t.at)}</span>
+            {t.kb && (
+              <Link className="fm-src" href={`/library/${encodeURIComponent(t.kb.id)}`}>
+                <CornIcon name="book" className="h-3 w-3" />
+                <span>{t.kb.name}</span>
+              </Link>
+            )}
+          </div>
+        </div>
+        {/* 0 回复时不占位置：一圈灰 0 挂在右侧，比"没有回复"这件事本身更显眼，
+            还把标题列挤窄 42px */}
+        {t.reply_n > 0 && (
+          <div className="fm-count">
+            <b>{t.reply_n}</b>
+            <span>回复</span>
+          </div>
+        )}
+        {/* 整行可点靠这张覆盖层链接：`<a>` 里不能嵌 `<button>`，
+            而这一行里带着来源库链接，所以不能用 <a> 包内容 */}
+        <Link href={`/forum/${t.id}`} className="fm-hit" aria-label={`打开话题 ${t.title}`} />
+      </li>
+    );
+  };
 
   return (
     <div className="fm-root">
@@ -341,8 +385,8 @@ export default function ForumPage() {
           <div className="fm-crumb">
             <Link href="/">工作台</Link>
             <i>/</i>
-            <Link href="/library">公开知识库</Link>
-            <i>·</i>
+            <span>论坛</span>
+            <i>/</i>
             <span>{catName || "全部话题"}</span>
           </div>
           <div className="fm-search">
@@ -400,44 +444,52 @@ export default function ForumPage() {
             <button
               type="button"
               className={"fm-cat" + (cat === "" ? " on" : "")}
+              aria-current={cat === "" ? "true" : undefined}
               onClick={() => setCat("")}
             >
               全部话题
-              <span className="fm-cat-n">{fmtNum(stat.total)}</span>
+              <span className={"fm-cat-n" + (stat.total ? "" : " zero")}>
+                {fmtNum(stat.total)}
+              </span>
             </button>
             {cats.map((c) => (
               <button
                 key={c.key}
                 type="button"
                 className={"fm-cat" + (cat === c.key ? " on" : "")}
+                aria-current={cat === c.key ? "true" : undefined}
                 onClick={() => setCat(c.key)}
                 title={c.hint}
               >
                 {c.label}
-                <span className="fm-cat-n">{fmtNum(c.n)}</span>
+                {/* 0 的计数压到最淡：六个板块里五个是 0 时，一列同样重的数字
+                    会让"哪个板块真的有内容"要逐个去读 */}
+                <span className={"fm-cat-n" + (c.n ? "" : " zero")}>{fmtNum(c.n)}</span>
               </button>
             ))}
-            <div className="fm-side-stat">
-              <span>{fmtNum(stat.replies)} 条回复</span>
-              {/* 数字后面必须带单位，否则线上看着像文字被截断 */}
-              <span>今日新增 {fmtNum(stat.today)} 条</span>
-            </div>
+            {/* 这里原来有一行「1 条回复」。它没有主语、和上面七个板块同排，
+                读起来像第八个板块；而且"1 条回复"这个事实在每条帖子的右侧
+                已经各自写过了。删掉比给它编个标签干净 */}
           </div>
         </aside>
 
         {/* ---------- 中间：列表 ---------- */}
         <main className="fm-main">
           <div className="fm-hero">
-            <h2>{catName || "大家都在问什么"}</h2>
-            <p>
-              公开知识库里的讨论都汇到这里。
-              <b>问问题、求资料、写经验、找人自习</b>，都在这儿；
-              想讨论某个库里的资料，发帖时把它选上。
-            </p>
+            <h2>{catName || "大家都在聊什么"}</h2>
+            {/* 说明只留一句。原来那半句"问问题、求资料、写经验、找人自习"
+                是左栏板块清单的散文版 —— 四个板块名已经列在那儿了，
+                在首屏再复述一遍，占的是列表的位置 */}
+            <p>公开知识库里的讨论都汇到这里。</p>
           </div>
 
           {/* 手机上左栏隐藏，板块靠这一条横向 chip 选 */}
-          <div className="fm-cats-m" role="tablist" aria-label="板块">
+          <div
+            className={"fm-cats-m" + (chipEnd ? " at-end" : "")}
+            role="tablist"
+            aria-label="板块"
+            ref={chipRef}
+          >
             <button
               type="button"
               className={"fm-chip" + (cat === "" ? " on" : "")}
@@ -504,9 +556,6 @@ export default function ForumPage() {
                     </button>
                   ))}
                 </div>
-                <span className="fm-comp-count">
-                  {cBody.length}/{BODY_MAX}
-                </span>
               </div>
               <div className="fm-comp-bar">
                 <select
@@ -522,10 +571,14 @@ export default function ForumPage() {
                     </option>
                   ))}
                 </select>
+                {/* 计数挪到这一行：六个板块 chip 已经占满上一行，
+                    0/2000 挤在它们尾巴上像是又一个板块 */}
+                <span className="fm-comp-count">
+                  {cBody.length}/{BODY_MAX}
+                </span>
                 <button
                   type="button"
                   className="fm-new"
-                  style={{ marginLeft: "auto" }}
                   disabled={sending}
                   onClick={() => void submit()}
                 >
@@ -547,9 +600,9 @@ export default function ForumPage() {
                 {s.label}
               </button>
             ))}
-            <span className="fm-bar-stat">
-              {fmtNum(stat.total)} 个话题 · 今日新增 {fmtNum(stat.today)} 条
-            </span>
+            {/* 统计跟着排序 tab 走，不推到大老远右边：放到最右时它和「最热」
+                之间隔着半个屏，1024 上看着像飘在空里的孤字 */}
+            <span className="fm-bar-stat">今日新增 {fmtNum(stat.today)} 条</span>
           </div>
 
           {loading && <p className="fm-empty">正在加载话题…</p>}
@@ -561,19 +614,41 @@ export default function ForumPage() {
               </button>
             </p>
           )}
+          {/* 空态要能接着做事，不是一句"还没有人发帖"就完了。
+              "搜不到"和"板块空着"是两种处境：前者要能退回全量，后者要能迈出第一步 */}
           {!loading && !err && pinned.length + topics.length === 0 && (
-            <p className="fm-empty">
-              {dq
-                ? `没有找到包含「${dq}」的话题。`
-                : "这个板块还没有人发帖，做第一个。"}
-            </p>
+            <div className="fm-blank">
+              <p className="fm-blank-t">
+                {dq ? `没有找到包含「${dq}」的话题` : cat ? `「${catName}」还没有人发帖` : "还没有人发帖"}
+              </p>
+              <p className="fm-blank-p">
+                {dq
+                  ? "换个说法，或者把关键词缩短到两三个字。"
+                  : "第一个说话的人，往往能得到最认真的回答。"}
+              </p>
+              {dq ? (
+                <button type="button" className="lib-ghost" onClick={() => setQ("")}>
+                  清空搜索
+                </button>
+              ) : (
+                <button type="button" className="fm-new" onClick={openCompose}>
+                  <CornIcon name="plus" className="h-4 w-4" />
+                  发第一个话题
+                </button>
+              )}
+            </div>
           )}
 
           {pinned.length + topics.length > 0 && (
-            <ul className="fm-list">
-              {pinned.map((t) => renderRow(t, true))}
-              {topics.map((t) => renderRow(t))}
-            </ul>
+            <>
+              <ul className="fm-list">
+                {pinned.map((t) => renderRow(t, true))}
+                {topics.map((t) => renderRow(t))}
+              </ul>
+              {/* 列表结束得有个句号。三条内容下面直接接一整屏空白，
+                  读起来像"还没加载完"，而不是"就这些" */}
+              {!hasMore && <p className="fm-end">到底了</p>}
+            </>
           )}
 
           {hasMore && sort === "new" && (
@@ -590,23 +665,26 @@ export default function ForumPage() {
 
         {/* ---------- 右栏 ---------- */}
         <aside className="fm-hot" aria-label="热帖">
-          <div className="fm-box">
-            <p className="fm-box-t">本周热帖</p>
-            {hot.length === 0 && <p className="fm-rules">还没有热帖，先发一个。</p>}
-            {hot.map((t, i) => (
-              <Link key={t.id} className="fm-hot-item" href={`/forum/${t.id}`}>
-                <span className="fm-hot-n">{i + 1}</span>
-                <span className="fm-hot-t">{t.title}</span>
-              </Link>
-            ))}
-          </div>
+          {/* 只有"有人在接话"的话题攒到 3 条以上，这一栏才单独成列。
+              热榜在 0 回复时退化成最新、在只有 1 条时等于把列表第三行再抄一遍 ——
+              一栏只有一条的"热帖榜"读起来不是榜，是重复 */}
+          {hotLive.length >= 3 && (
+            <div className="fm-box">
+              <p className="fm-box-t">这几条有人接话</p>
+              {hotLive.map((t, i) => (
+                <Link key={t.id} className="fm-hot-item" href={`/forum/${t.id}`}>
+                  <span className="fm-hot-n">{i + 1}</span>
+                  <span className="fm-hot-t">{t.title}</span>
+                </Link>
+              ))}
+            </div>
+          )}
           <div className="fm-box">
             <p className="fm-box-t">发帖须知</p>
             <ul className="fm-rules">
-              <li>标题写清楚问题，别写「求助」两个字。</li>
-              <li>同一件事不要重复开帖，在原帖里补。</li>
-              <li>求到的资料请传进知识库，别在楼层里刷外链。</li>
-              <li>想补充就在原帖里接着说，不必为同一件事另开一条。</li>
+              <li>标题写清问题，别只写「求助」。</li>
+              <li>想补充就在原帖里接着说。</li>
+              <li>资料传进知识库，别刷外链。</li>
             </ul>
           </div>
         </aside>

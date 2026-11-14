@@ -263,7 +263,9 @@
 
 .fm-wrap {
   display: grid;
-  grid-template-columns: 208px minmax(0, 1fr) 264px;
+  /* 右栏 264 → 276：264 时"发帖须知"每条 14 个汉字正好换行，
+     行末剩一个字（"个字。"单独一行）。加宽 12px 刚好放下一条 */
+  grid-template-columns: 208px minmax(0, 1fr) 276px;
   gap: 22px;
   max-width: 1280px;
   margin: 0 auto;
@@ -348,20 +350,16 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 0 压到几乎只是纸上的一个印：六个板块里五个是 0 时，一列同样重的数字
+   会让"哪个板块真的有内容"需要逐个去读 */
+.fm-cat-n.zero {
+  color: var(--text-3);
+  opacity: 0.45;
+}
+
 .fm-cat.on .fm-cat-n {
   color: var(--accent-ink);
   opacity: 0.75;
-}
-
-.fm-side-stat {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  margin-top: 8px;
-  padding-top: 10px;
-  border-top: 1px dashed var(--line);
-  color: var(--text-3);
-  font-size: var(--fs-xs);
 }
 
 /* 手机上的板块：横向 chip 条。左栏在 ≤880 被隐藏，没有这一条就选不了板块 */
@@ -369,8 +367,20 @@
   display: none;
   gap: 8px;
   overflow-x: auto;
-  padding: 0 2px 2px;
+  /* 尾部留 10px：最后一个 chip 能整个滚进来，而不是永远贴着屏幕边 */
+  padding: 0 10px 2px 2px;
   scrollbar-width: none;
+  /* 右端渐隐：七个 chip 一定放不下，不给遮罩的话最后那个板块看起来是
+     "被切坏了"（手机截图上「学习经验」只剩「学习经」三个字）。
+     滚到尽头时 JS 挂上 .at-end 撤掉它，否则最后一个 chip 会永远淡着半边。
+     带宽 56px：44px 只淡掉一个半字，残留的半个字形像字体渲染出了问题 */
+  mask-image: linear-gradient(to right, #000 calc(100% - 56px), transparent);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 56px), transparent);
+}
+
+.fm-cats-m.at-end {
+  mask-image: none;
+  -webkit-mask-image: none;
 }
 
 .fm-cats-m::-webkit-scrollbar {
@@ -406,23 +416,20 @@
 }
 
 .fm-hero h2 {
-  margin: 0 0 6px;
-  font-size: clamp(20px, 2.4vw, 26px);
+  margin: 0 0 4px;
+  font-size: clamp(19px, 2.1vw, 23px);
   font-weight: 700;
   letter-spacing: var(--ls-tight);
 }
 
+/* 一行，不再换三行。首屏这一块原来占掉 90px（手机上近 140px），
+   而它说的是"论坛是什么"—— 用户已经点进来了，这句话的价值在第二屏之后 */
 .fm-hero p {
   max-width: 46em;
   margin: 0;
   color: var(--text-3);
   font-size: var(--fs-sm);
   line-height: var(--lh-body);
-}
-
-.fm-hero b {
-  color: var(--ink);
-  font-weight: 600;
 }
 
 .fm-bar {
@@ -467,9 +474,13 @@
   font-weight: 700;
 }
 
+/* 紧跟在 tab 后面，用一条竖线隔开。原来是 margin-left:auto 推到最右，
+   在 1024 上和「最热」隔着半个屏，看上去像一句飘着的孤字 */
 .fm-bar-stat {
   flex: none;
-  margin-left: auto;
+  margin-left: 4px;
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
   color: var(--text-3);
   font-size: var(--fs-xs);
   white-space: nowrap;
@@ -491,9 +502,9 @@
   /* 40px 是"放得下两个字"的最小宽度（2×11px + 左右各 9px 内边距）。
      写 34px 时两个字会被挤成上下两行，方块变成一根竖条 */
   grid-template-columns: 40px minmax(0, 1fr) auto;
-  gap: 12px;
+  gap: 0 12px;
   align-items: start;
-  padding: 15px 12px;
+  padding: 13px 12px;
   border-radius: var(--radius-sm);
   transition: background-color 0.14s ease;
 }
@@ -539,6 +550,7 @@
   letter-spacing: -0.02em;
   /* 只放两个字，必须不换行：换行就被挤成上下两排，方块变成一条 */
   white-space: nowrap;
+  transition: var(--t-color);
 }
 
 .fm-body {
@@ -581,28 +593,33 @@
   color: var(--accent-ink);
 }
 
-/* 「置顶」比普通板块标签重一档：它是位置说明，不是分类说明。
-   用实心金 + 深墨字，和「管理员」那种淡底标签区分开。 */
+/* 「置顶」说位置，「公告」说类型。原来两个都用金：左边一颗淡金方块、
+   右边一块实心金标，一条帖子上两处同等重的强调，互相把对方压下去。
+   位置信息比类型弱一档，所以这里退回中性底色 + 加重字重，
+   金色只留给方块（"这是一条公告"才是这条帖的本质） */
 .fm-tag.pin {
-  background: var(--accent);
-  color: var(--on-accent);
+  color: var(--text-2);
   font-weight: 700;
 }
 
-/* 置顶行的左侧那道金边：列表里最上面两条永远是公告，不必靠时间判断 */
+/* 置顶行左侧那道金边：列表里最上面两条永远是公告，不必靠时间判断。
+   底色也给一档 --fill-4，并比普通帖紧一档：公告行没有摘要（正文在顶部
+   公告条里），两行就够，免得两条公告把首屏占满 */
 .fm-row.is-pin {
+  padding-top: 10px;
+  padding-bottom: 10px;
+  background: var(--fill-4);
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
-.fm-tag.top {
-  background: var(--accent);
-  color: var(--on-accent);
+.fm-row.is-pin .fm-title {
+  margin-bottom: 2px;
 }
 
 .fm-ex {
   display: -webkit-box;
   overflow: hidden;
-  margin: 0 0 6px;
+  margin: 0 0 5px;
   color: var(--text-3);
   font-size: var(--fs-sm);
   line-height: 1.6;
@@ -674,12 +691,6 @@
   font-weight: 700;
 }
 
-.fm-count.zero b {
-  color: var(--text-3);
-  font-weight: 400;
-  opacity: 0.5;
-}
-
 /* ---------- 右栏：热帖 ---------- */
 
 .fm-hot-item {
@@ -732,6 +743,15 @@
 
 .fm-rules li::marker {
   color: var(--accent);
+}
+
+/* 右栏没有"有人在聊"的话题时的一句话。它不是空态，
+   是"这一栏暂时没事可报"—— 所以用说明文字的重量，不占一块卡片的位置 */
+.fm-hot-none {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: 1.75;
 }
 
 /* ---------- 发话题面板 ---------- */
@@ -832,6 +852,12 @@
   font-size: var(--fs-xs);
 }
 
+/* 发布按钮跟计数一起靠右：面板底部那条横杠上，左边是"挂哪个库"，
+   右边是"发出去"，中间是还没写完的字数 */
+.fm-comp-bar .fm-new {
+  margin-left: 10px;
+}
+
 .fm-comp-tip {
   margin: 0;
   color: var(--red-ink);
@@ -847,9 +873,95 @@
   text-align: center;
 }
 
+/* 虚线框 = 一张还没写字的纸。
+   删掉演示帖之后，这里就是页面的第一眼，所以它不能只是一行居中的灰字：
+   得说清"为什么空"，并且能就地接着做事 */
+.fm-blank {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 34px 24px 32px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--fill-4);
+}
+
+.fm-blank-t {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--fs-md);
+  font-weight: 700;
+}
+
+.fm-blank-p {
+  margin: 0 0 10px;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+}
+
+/* ---------- 动效 ----------
+   三处，都只回答"这一下发生了什么"：公告条落下来（页面顶部多了一条），
+   发帖面板长出来（我点的就是这个），空态浮现（内容变成了这样）。
+   不做出场滚动、不做逐条淡入 —— 论坛是每天要扫的列表，动得越多越烦。 */
+
+@keyframes fm-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes fm-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fm-notice-in {
+    animation: fm-drop 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .fm-comp,
+  .fm-blank {
+    animation: fm-rise 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+}
+
+/* hover 时方块跟着亮一下：整行可点这件事，光靠背景那一层 0.07 的墨
+   在暖纸上几乎看不出来，方块是行里唯一一块有色区域，拿它做反馈最省 */
+.fm-row:hover .fm-mark {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+
 .fm-more {
   align-self: center;
   margin-top: 6px;
+}
+
+/* 列表到底。三条内容下面直接接一整屏空白，读起来像"还没加载完"，
+   所以这里必须是一个"终止符"：一条细线 + 一句话，线以上都是内容 */
+.fm-end {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 20px 0 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  letter-spacing: var(--ls-mid);
+}
+
+.fm-end::before,
+.fm-end::after {
+  height: 1px;
+  flex: 1;
+  background: var(--line);
+  content: "";
 }
 
 /* ---------- 详情页 ---------- */
@@ -888,6 +1000,9 @@
   line-height: 1.35;
   letter-spacing: var(--ls-tight);
   word-break: break-word;
+  /* 手机上 30 字的标题必然折两行，不加这一条时第二行只剩「没了」两个字，
+     看起来像排版断了（孤字）。balance 让两行长度接近 */
+  text-wrap: balance;
 }
 
 .fm-dtags {
@@ -908,6 +1023,12 @@
   margin: 0;
   padding: 0;
   list-style: none;
+  /* 正文与作者行共用一个阅读宽度：38 个汉字。
+     ★ 必须是 rem，不能写 em —— `.kb-post-h` 的字号是 13px、正文是 15px，
+       同一个 `38em` 在两处会算成 494 和 570，右边界差 76px，
+       「删除」就悬在正文右边 76px 的错位上（量出来的，肉眼只觉得别扭）。
+       35.625rem = 570px @ 16px 根字号，用户调大字号时一起放大 */
+  --fm-read: 35.625rem;
 }
 
 .fm-floors > .kb-post {
@@ -930,10 +1051,19 @@
 }
 
 /* 楼主那一层是**正文**，不是"一句话"：字号提到 15px、行高 1.85，
-   2000 字的长帖才读得下去。回复保持原尺寸 —— 盖楼是短句。 */
+   2000 字的长帖才读得下去。回复保持原尺寸 —— 盖楼是短句。
+   ★ 行长收到 38em（≈38 个汉字/行）。原来铺满 860px 的容器，
+     一行 48 字，读到行尾要甩头，而这是本站最长的一段连续文字 */
 .fm-floors > .kb-post:first-child .kb-post-b {
+  max-width: var(--fm-read);
   font-size: var(--fs-md);
   line-height: 1.85;
+}
+
+/* 作者行收到同一个宽度：不然它铺满 750px，「删除」被甩到正文右侧 300px 的
+   空白里，孤零零一个红字。收过来之后它正好压在正文右边界上 */
+.fm-floors .kb-post-h {
+  max-width: var(--fm-read);
 }
 
 .fm-reply {
@@ -1002,11 +1132,29 @@
   }
 
   .fm-crumb,
-  .fm-search,
-  .fm-bar-stat {
-    /* 统计数字在手机上挤掉排序 tab 的宽度（第一版把「最新」压成了竖排两行），
-       而它本来就是"补信息"，手机上没有位置就不给 */
+  .fm-search {
+    /* 面包屑在手机上没地方放；搜索挪到板块 chip 之后也没地方，宁可先不给，
+       也不要放一个占半屏的输入框把列表推下去 */
     display: none;
+  }
+
+  /* 首屏这一句说明在手机上是纯成本：它把列表推到 380px 以下，
+     而它说的是"论坛是什么"，用户已经点进来了 */
+  .fm-hero p {
+    display: none;
+  }
+
+  /* 详情页楼层改成单列：头像独占一行，正文就能拿到整个 358px。
+     原来头像占掉左侧 42px，正文只剩 18–19 字/行，长帖里不断出现
+     「…它自己判 / 断」这种单字行 —— 这是手机上最直接的阅读损伤 */
+  .fm-floors > .kb-post {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .fm-floors > .kb-post .kb-post-ava {
+    width: 26px;
+    height: 26px;
   }
 
   .fm-head-text h1 {
@@ -1020,8 +1168,8 @@
   /* 手机上帖子行收窄：方块保持能放下两个字（34px），回复数移到元信息行 */
   .fm-row {
     grid-template-columns: 34px minmax(0, 1fr);
-    gap: 10px;
-    padding: 11px 6px;
+    gap: 2px 10px;
+    padding: 12px 6px;
   }
 
   .fm-mark {

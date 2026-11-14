@@ -223,11 +223,12 @@ export default function ForumTopicPage() {
             <h1>论坛中心</h1>
           </div>
           <div className="fm-crumb">
+            <Link href="/">工作台</Link>
             <i>/</i>
             <Link href="/forum">论坛</Link>
             {topic && (
               <>
-                <i>·</i>
+                <i>/</i>
                 <span>{topic.cat_label}</span>
               </>
             )}
@@ -262,9 +263,10 @@ export default function ForumTopicPage() {
                     <span>{topic.kb.name}</span>
                   </Link>
                 )}
-                <span>
-                  {topic.author.name} · {fmtWhen(topic.at)} · {topic.reply_n} 条回复
-                </span>
+                {/* 作者和时间只写在楼层头那一处。原来标题下面也写一遍
+                    「苞米呀 · 今天 10:15 · 0 条回复」，紧接着楼主的头里又是
+                    「管理员 苞米呀 楼主 今天 10:15」—— 同一句话上下隔 20px 说两遍 */}
+                <span>{topic.reply_n} 条回复</span>
               </div>
             </div>
 

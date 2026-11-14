@@ -137,8 +137,10 @@ def test_stats_text_carries_a_unit():
     # 注释里也会出现这些字样，先剥掉再判 —— 断言被注释误伤过一次，别再来一次
     code = re.sub(r"\{/\*.*?\*/\}", "", s, flags=re.S)
     assert "今日 8" not in code  # 防的是"数字直接结尾"那种写法
-    # 两处（左栏底部 / 工具条右侧）都要是「今日新增 N 条」的形状
-    assert code.count("今日新增") >= 2, "统计文案又退回成没有单位的「今日 N」了"
+    # 2026-11-14 起「今日新增」只剩工具条右侧一处：左栏也有过一条，
+    # 和上面的「全部话题 N」是同一个数字，一屏里说两遍。这里钉住的是
+    # "只要出现就必须带单位"，不是"必须出现两次"。
+    assert code.count("今日新增") >= 1, "统计文案又退回成没有单位的「今日 N」了"
     for m in re.finditer(r"今日新增 \{fmtNum\(stat\.today\)\}", code):
         tail = code[m.end() : m.end() + 6]
         assert tail.startswith(" 条"), f"「今日新增 N」后面缺单位，实际是：{tail!r}"
@@ -204,3 +206,76 @@ def test_solved_feature_leaves_no_trace_in_the_ui():
     assert "can_solve" not in _read(FORUM_DETAIL), "详情页还依赖 can_solve 字段"
     assert "setForumSolved" not in _read(SRC / "lib" / "api.ts"), "api.ts 里还留着接口封装"
     assert "fm-solve" not in _read(FORUM_CSS), "forum.css 里还留着按钮样式"
+
+
+# ---------------------------------------------------------------------------
+# 2026-11-14 那一轮视觉优化的取舍。下面四条钉的都是"看起来像少了个字段、
+# 于是下一个人顺手补回来"的地方 —— 补回来不会报错，只是同一句话在一屏里
+# 说三遍，读的人开始跳读整页。
+# ---------------------------------------------------------------------------
+
+
+def test_pinned_row_drops_the_excerpt():
+    """公告行不显示摘要。
+
+    它的正文就在页面顶部那条公告条里，点进去还是同一段话。列表里再铺两行
+    摘要，同一条信息一屏出现三次 —— 删掉演示帖、只剩三条内容时最明显。
+    """
+    s = _read(FORUM_PAGE)
+    assert '{!isPin && <p className="fm-ex">{t.excerpt}</p>}' in s, (
+        "公告行又开始显示摘要了；要么去掉摘要，要么别在顶部公告条里重复同一条"
+    )
+
+
+def test_zero_reply_rows_drop_the_counter():
+    """0 回复的帖子不挂那个"0 回复"。
+
+    一圈灰 0 挂在右侧，比"这条没人回"本身更显眼，还把标题列挤窄 42px。
+    """
+    s = _read(FORUM_PAGE)
+    i = s.index("{t.reply_n > 0 && (")
+    seg = s[i : i + 220]
+    assert 'className="fm-count"' in seg, "有回复时的计数块不见了"
+    assert 'className={"fm-count"' not in s, "计数又变回无条件渲染了"
+
+
+def test_hot_column_skips_topics_without_replies():
+    """右栏不列 0 回复的话题。
+
+    热榜按 reply_n 排序，全是 0 时它退化成"最新几条"，而那几条此刻正在
+    中间那栏原样列着 —— 右栏于是变成列表的复读机。
+    """
+    s = _read(FORUM_PAGE)
+    assert "hot.filter((t) => t.reply_n > 0)" in s, "右栏又变成列表的复读机了"
+    # 只有 1 条"有人接话"时也不算榜：一栏只有一条，等于把列表的某一行再抄一遍。
+    # 阈值是这一栏存在的理由，删掉它就退回"1 条也单列"
+    assert "hotLive.length >= 3" in s, "热帖栏在只有一两条时也会占掉一整列"
+    i = s.index('aria-label="热帖"')
+    seg = s[i:]
+    assert "hotLive.map(" in seg and "hot.map(" not in seg, "右栏渲染的还是未过滤的 hot"
+
+
+def test_mobile_chip_strip_fades_instead_of_cutting():
+    """手机上的板块条要右端渐隐，且滚到底时撤掉。
+
+    七个 chip 一定放不下。不给遮罩，最后一个板块看起来是"被切坏了"
+    （截图上「学习经验」只剩「学习经」）；一直留着遮罩，最后一个 chip
+    又会永远淡着半边 —— 两个都要，所以两侧都得钉。
+    """
+    css = _read(FORUM_CSS)
+    rule = _css_rule(css, ".fm-cats-m")
+    # 不能用 `"mask-image" in rule`：`-webkit-mask-image` 里也含这个子串，
+    # 把标准那一行删掉、只剩前缀版本，断言照样是绿的（反证时抓到的）。
+    assert re.search(r"(?<!-)mask-image:\s*linear-gradient", rule), (
+        "板块条右端没有渐隐，最后那个板块会被硬切"
+    )
+    # 选择器要连大括号一起钉：只判 ".fm-cats-m.at-end" 这个子串的话，
+    # 把它改名成 .at-endX 仍然是绿的（反证时抓到的）
+    assert re.search(r"\.fm-cats-m\.at-end\s*\{", css), "滚到尽头时没有撤掉遮罩的规则"
+    # 页面必须真的算过滚动位置。只判 "有 chipEnd 这个词" 太弱 —— 把算法改成
+    # 恒真/恒假，那条断言照样绿
+    page = _read(FORUM_PAGE)
+    assert re.search(r"el\.scrollLeft \+ el\.clientWidth >= el\.scrollWidth", page), (
+        "没算过板块条有没有滚到底，遮罩会一直留着"
+    )
+    assert 'addEventListener("scroll"' in page, "没监听横向滚动，滚到底了遮罩也不撤"
