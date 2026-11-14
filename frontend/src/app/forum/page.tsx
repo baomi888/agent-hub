@@ -914,27 +914,30 @@ export default function ForumPage() {
                 </div>
               </div>
 
-              <div className="tb-field">
-                <label className="tb-label" htmlFor="tb-kb">
-                  关联资料库 <span>选填</span>
-                </label>
-                <select
-                  id="tb-kb"
-                  className="tb-select"
-                  value={cKb}
-                  onChange={(e) => setCKb(e.target.value)}
-                >
-                  <option value="">不关联</option>
-                  {kbs.map((k) => (
-                    <option key={k.kb_id} value={k.kb_id}>
-                      {k.name}
-                    </option>
-                  ))}
-                </select>
-                <p className="tb-tip">
-                  选上之后，这条话题也会出现在那个库的留言板里。
-                </p>
-              </div>
+              {/* 未登录时 /api/kb/public 是 401，库清单拿不到 —— 这个下拉会只剩
+                  一个「不关联」，看起来像坏了。拿不到就不显示：这个字段本来就是选填，
+                  少一个"只有一个选项的下拉"比多一个假控件好 */}
+              {kbs.length > 0 && (
+                <div className="tb-field">
+                  <label className="tb-label" htmlFor="tb-kb">
+                    关联资料库 <span>选填</span>
+                  </label>
+                  <select
+                    id="tb-kb"
+                    className="tb-select"
+                    value={cKb}
+                    onChange={(e) => setCKb(e.target.value)}
+                  >
+                    <option value="">不关联</option>
+                    {kbs.map((k) => (
+                      <option key={k.kb_id} value={k.kb_id}>
+                        {k.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="tb-tip">选上之后，这条话题也会出现在那个库的留言板里。</p>
+                </div>
+              )}
 
               {cTip && <p className="tb-comp-tip">{cTip}</p>}
             </div>
