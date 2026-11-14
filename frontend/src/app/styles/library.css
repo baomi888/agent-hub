@@ -29,6 +29,11 @@
   position: sticky;
   top: 0;
   z-index: 10;
+  /* ★ 2026-11-14（iOS 内测）：黑透状态栏下顶栏让出刘海高度。
+     加在这里而不是 .lib-top-in：背景与 blur 一起铺到状态栏底下，
+     视觉上是"顶栏延伸进状态栏"，不会露出一条同色空白。
+     注意别和下面的 .lib-viewer-h 搞混 —— 那个是 PDF 预览器的头，不是这个顶栏。 */
+  padding-top: env(safe-area-inset-top, 0px);
   border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--bg-canvas) 88%, transparent);
   backdrop-filter: blur(10px);

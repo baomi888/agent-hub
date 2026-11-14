@@ -46,10 +46,14 @@ button, input, textarea, select {
 main.workbench-main {
   position: relative;
   z-index: 1;
-  margin: 14px;
+  /* ★ 2026-11-14（iOS 内测）：黑透状态栏下把卡片整体下移一个刘海高度。
+     上边距加多少，高度就减多少 —— 两者必须成对出现，否则卡片底边会被
+     body 的 overflow:hidden 裁掉一条（这就是当初 h-screen + margin 那个 bug 的形状）。
+     安全区为 0 时，结果与改动前逐像素相同。 */
+  margin: calc(14px + env(safe-area-inset-top, 0px)) 14px 14px;
   /* 关键修复：原来靠 h-screen + margin，比视口高 28px，底部被裁 */
-  height: calc(100vh - 28px);
-  height: calc(100dvh - 28px);
+  height: calc(100vh - 28px - env(safe-area-inset-top, 0px));
+  height: calc(100dvh - 28px - env(safe-area-inset-top, 0px));
   border-radius: var(--radius-lg);
   overflow: hidden;
   box-shadow:

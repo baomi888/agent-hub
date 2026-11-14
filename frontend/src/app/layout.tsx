@@ -12,6 +12,23 @@ import "./globals.css";
  * 用户会以为导航里那个是另一处。
  */
 const TITLE = "知穗Agent · 资料库 · 场景智能体 · 校园工具集";
+
+/* iOS 从主屏打开时的启动画面。
+   不提供的话那一瞬是纯白 —— 页面本身是米黄纸色，切换时闪一下白，
+   观感立刻从"App"掉回"网页"。图片由 tools 里的脚本生成（纸色底 + 居中图标）。
+   media 三要素必须同时写全（宽 / 高 / 像素比），少一个就会串到别的机型上：
+   只用宽度的话，同宽的 SE 与 12 mini 会互相抢，结果是其中一台被拉伸变形。 */
+const SPLASH: { w: number; h: number; dpr: number; file: string }[] = [
+  { w: 375, h: 667, dpr: 2, file: "750x1334.png" },
+  { w: 375, h: 812, dpr: 3, file: "1125x2436.png" },
+  { w: 414, h: 896, dpr: 2, file: "828x1792.png" },
+  { w: 414, h: 896, dpr: 3, file: "1242x2688.png" },
+  { w: 390, h: 844, dpr: 3, file: "1170x2532.png" },
+  { w: 393, h: 852, dpr: 3, file: "1179x2556.png" },
+  { w: 428, h: 926, dpr: 3, file: "1284x2778.png" },
+  { w: 430, h: 932, dpr: 3, file: "1290x2796.png" },
+  { w: 440, h: 956, dpr: 3, file: "1320x2868.png" },
+];
 // 定位对齐「备考 + 求职」两大主场景（10-14 晚场景撤出后，旧三场景名不再出现在主界面）
 const DESC = "为大学生的 AI 素养平台：备考与求职智能体，资料库问答，附 GPA 分析、番茄钟等校园工具集";
 
@@ -41,7 +58,17 @@ export const metadata: Metadata = {
   appleWebApp: {
     title: "知穗Agent",
     capable: true,
-    statusBarStyle: "default",
+    /* ★ 2026-11-14（iOS 内测）：default → black-translucent。
+       default 下 iOS 用浅色状态栏配黑字，而我们的深色模式背景是 #1A1610，
+       深纸上写黑字 = 状态栏里什么都看不见。black-translucent 让内容铺到
+       状态栏底下、状态栏文字转白，深色下才有对比。
+       ★ 代价与前提：改成黑透之后 env(safe-area-inset-top) 从 0 变成 47px，
+       所有顶层容器都必须自己让出这一条，否则页头被刘海压住。已经补过的五处：
+         .console-scroll（console.css）、.tb-top（forum-tb.css）、
+         main.workbench-main（base.css + fx.css 窄屏）、.tour（install-tour.css）、
+         .auth-stage（auth.css）；资料库的 .lib-top 本来就有（library.css:1311）。
+       新增全屏滚动容器时，必须同样处理 —— 这是这个模式唯一的硬约束。 */
+    statusBarStyle: "black-translucent",
   },
   openGraph: {
     title: TITLE,
@@ -85,6 +112,16 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             汇报演示时一旦外链挂掉设计感会直接塌成系统默认字体。
             重新生成见 tools/subset_fonts_project.py。 */}
         <link rel="stylesheet" href="/fonts/fonts.css" />
+        {/* iOS 主屏启动画面。必须是 9 个独立 link —— 这个 rel 不支持 srcset，
+            每种机型靠 media 精确命中，命中不了就退回系统默认的白屏。 */}
+        {SPLASH.map((s) => (
+          <link
+            key={s.file}
+            rel="apple-touch-startup-image"
+            media={`(device-width: ${s.w}px) and (device-height: ${s.h}px) and (-webkit-device-pixel-ratio: ${s.dpr})`}
+            href={`/splash/${s.file}`}
+          />
+        ))}
       </head>
       <body className="min-h-full">
         {children}

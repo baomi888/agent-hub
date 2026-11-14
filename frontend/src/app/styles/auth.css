@@ -20,7 +20,8 @@
   min-height: 100dvh;
   display: grid;
   place-items: center;
-  padding: var(--space-24) var(--space-16) calc(var(--space-24) + env(safe-area-inset-bottom, 0px));
+  padding: calc(var(--space-24) + env(safe-area-inset-top, 0px)) var(--space-16)
+    calc(var(--space-24) + env(safe-area-inset-bottom, 0px));
   /* 光从左上打过来：登录页没有别的景深线索，全靠这层渐变把卡片托起来 */
   background:
     radial-gradient(120% 78% at 50% -12%, var(--canvas-light) 0%, transparent 58%),

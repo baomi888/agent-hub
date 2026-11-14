@@ -26,7 +26,13 @@
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   background: var(--bg-canvas);
-  padding: var(--space-24) var(--space-16) calc(var(--space-24) + env(safe-area-inset-bottom, 0px));
+  /* ★ 2026-11-14（iOS 内测）：顶部安全区。
+     只有 statusBarStyle 改成 black-translucent（内容延伸到状态栏下方）时
+     env(safe-area-inset-top) 才非 0；此时不补这 47px，页头会被刘海/状态栏压住。
+     在 default 模式下它恒为 0，加了也不会改变任何现有布局 —— 这是一条
+     「不改状态栏就无害、改了状态栏就必须有」的铺垫。 */
+  padding: calc(var(--space-24) + env(safe-area-inset-top, 0px)) var(--space-16)
+    calc(var(--space-24) + env(safe-area-inset-bottom, 0px));
 }
 @media (min-width: 640px) {
   .console-scroll {
@@ -40,8 +46,9 @@
   display: grid;
   /* 至少占满一屏：内容短的页面（知识库空态、还没生成总结的那天）如果只有 400px 高，
      一张薄卡贴在上沿、下面大片空纸，侧栏的背景也断在半腰 —— 看起来像没加载完。
-     减去的是 .console-scroll 的上下内边距（24 + 24），否则会多出一个滚动条。 */
-  min-height: calc(100dvh - 48px);
+     减去的是 .console-scroll 的上下内边距（24 + 24 + 顶部安全区），否则会多出一个滚动条。
+     安全区那项在 default 状态栏模式下恒为 0。 */
+  min-height: calc(100dvh - 48px - env(safe-area-inset-top, 0px));
   /* minmax(0, 1fr) 而不是 1fr：1fr 展开是 minmax(auto, 1fr)，而 auto 的下界
      取「本列所有网格项的 min-content」——移动端导航那六个不可断的中文条目会
      把列撑到 453px（视口只有 390），.console-page 跟着变宽、右边被裁。
@@ -1330,9 +1337,10 @@ textarea.input {
     overflow: hidden;
   }
   /* min-height 也要跟着扣：不扣的话，内容再短的页面（知识库空态）也会
-     多出整整一条 tab 的假滚动条。24 是 .console-scroll 的上内边距。 */
+     多出整整一条 tab 的假滚动条。24 是 .console-scroll 的上内边距
+     （黑透状态栏模式下还要再扣顶部安全区）。 */
   .console-shell {
-    min-height: calc(100dvh - 24px - var(--tabbar-h) - 12px - 24px);
+    min-height: calc(100dvh - 24px - var(--tabbar-h) - 12px - 24px - env(safe-area-inset-top, 0px));
   }
   .tabbar {
     display: grid;

@@ -42,6 +42,11 @@
   position: sticky;
   top: 0;
   z-index: 30;
+  /* ★ 2026-11-14（iOS 内测）：黑透状态栏下，顶栏要自己让出刘海高度。
+     加在 .tb-top 而不是 .tb-top-in 上：这样背景色和 backdrop 模糊会一起
+     铺到状态栏底下，视觉上是「顶栏延伸进状态栏」，而不是顶栏上方露出一条
+     与页面同色的空白。default 模式下该值为 0，不影响现状。 */
+  padding-top: env(safe-area-inset-top, 0px);
   border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--bg-canvas) 92%, transparent);
   backdrop-filter: blur(8px);

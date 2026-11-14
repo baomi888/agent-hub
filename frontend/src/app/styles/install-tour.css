@@ -14,7 +14,9 @@
   height: 100dvh;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 14px;
+  /* 顶部安全区：/install 与 /reminder 共用这个壳，也是 iOS 用户最容易
+     第一眼看到的页面（还没装到主屏就已经在看了），不能贴刘海 */
+  padding: calc(14px + env(safe-area-inset-top, 0px)) 14px 14px;
   -webkit-overflow-scrolling: touch;
 }
 
