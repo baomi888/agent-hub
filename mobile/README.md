@@ -1,5 +1,17 @@
 # 知穗 App（iOS / Android）
 
+> **状态：暂停（2026-11-14 决策）。不要删除本目录。**
+>
+> 决定：**暂不投入 iOS 客户端**，移动端继续用 PWA（Safari 添加到主屏幕）承载。
+> 原因是 PWA 已经能覆盖当下的核心需求，而 iOS 客户端的唯一增量价值是
+> 「给不认识的人分发」+「不依赖 Safari」，这两件事要等 Web 端成熟后再做。
+>
+> 保留价值：工程**已验证可构建**（`tsc` 通过、`expo-doctor` 20/20、
+> iOS bundle 612 模块 977KB），Apple 账号到位后三条命令就能出包。
+> 删掉等于将来重做一遍选型、踩坑和验证。
+>
+> 恢复的判据见文末「十、什么时候重启」。
+
 Expo + `react-native-webview` 的外壳，里面装的是 `https://myzhisui.cn`。
 **业务代码只有一份（Web），App 是它的原生容器。**
 
@@ -212,3 +224,60 @@ npx eas build --platform ios --profile preview
 | 点「选图片」App 直接退出 | `infoPlist` 里缺用途描述 |
 | App 里滚动卡顿 | WebView 里的长列表；如果持续，考虑把该页做成原生 |
 | 本机 `npx expo export` 报 `hermesc.exe ... code: 6` | 本机环境问题，**不是代码问题**：① hermesc 往系统 Temp 写临时文件被沙箱拒绝；② 项目路径含中文（`E:\项目资料\...`），LLVM 8 时代的 hermesc 处理不了非 ASCII 路径。**EAS 云端是 Linux，不受影响。** 本地要自证代码没问题，用 `npx expo export --platform ios --no-bytecode` —— 能打出 bundle（612 模块 / 977KB）就说明依赖图和导入都正确 |
+
+---
+
+## 十、什么时候重启
+
+**暂停不等于放弃。** 下面是恢复的三个触发条件，任一成立就该重启这条线。
+写在这里是为了避免「等 Web 成熟」变成一个永远不成立的模糊承诺。
+
+### 触发条件（任一）
+
+1. **出现非团队成员的真实用户想要装**。PWA 的死穴就在这里：你没法把
+   「添加到主屏幕」教给一个陌生人，也没法让它出现在应用商店里被搜到。
+   只要有人问「有 App 吗 / 在哪下载」，就说明分发需求真实存在了。
+2. **推送的到达率不够用**。PWA 推送在 iOS 上依赖「已添加到主屏幕 + 用户授权
+   + 未清理站点数据」三件事同时成立，任何一环断了就静默失效，而**你无法知道
+   用户的订阅什么时候掉了**。App 的 APNs token 反而更稳定。
+3. **有人愿意出这 688**（学校账号 / 经费 / 报销批下来）。成本一旦不是障碍，
+   这条线的性价比立刻翻过来。
+
+### 重启时要做的（按顺序，别跳）
+
+```bash
+# 1. 自检工程还是好的（几分钟，不用账号）
+cd mobile
+npx tsc --noEmit
+npx expo-doctor
+npx expo export --platform ios --no-bytecode   # 能出 bundle 就说明依赖没烂
+
+# 2. 账号到位后的三条命令（见「五」与「五之二」）
+npx eas login
+npx eas device:create        # 收 UDID，100 台上限
+npx eas build --platform ios --profile preview
+```
+
+### 重启前必须先确认的一件事
+
+**核对 `app.json` 里的 `version` 与 `buildNumber`**，以及 `bundleIdentifier`
+是否还是 `cn.myzhisui.zhisui`。这三个字段一旦上传过就不能改，改错了只能换新
+bundle id 重新来过。
+
+---
+
+## 十一、这次暂停，哪些工作没有白做
+
+暂停时最容易误判的是「前面做的都浪费了」。实际上这批改动里，**只有 Android/iOS
+的原生壳是暂停的，其余全部服务于现在正在用的 PWA**：
+
+| 改动 | 现在的用途 |
+|---|---|
+| `layout.tsx` 的 `viewportFit: "cover"` | PWA 全屏时安全区才生效，否则 iOS 上恒为 0 |
+| 六处容器的 `safe-area-inset-top` | PWA 黑透状态栏下内容不被刘海压 |
+| 9 张 `apple-touch-startup-image` 启动屏 | **PWA 从主屏幕启动同样用它** |
+| `statusBarStyle: black-translucent` | PWA 的状态栏样式，同一份配置 |
+| 学习路径挪进手机 tab | Web 端导航，与 App 无关 |
+| `tools/make_ios_splash.py` / `make_app_icons.py` | 改尺寸表后重跑，PWA 与 App 共用素材 |
+
+**唯一暂时用不上的是 `mobile/` 这个壳**，而它的恢复成本是「账号到位后跑三条命令」。
