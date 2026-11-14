@@ -212,7 +212,6 @@ export default function ReportPage() {
 
   return (
     <PageShell
-      eyebrow="每日总结"
       title={date && date !== todayStr ? prettyDate(date) : "今天学了什么"}
       sub="聊过的东西容易忘。每天留一份小结，带出处。"
       width={860}

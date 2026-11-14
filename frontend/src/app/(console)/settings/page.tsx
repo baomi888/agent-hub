@@ -216,15 +216,7 @@ export default function SettingsPage() {
   }, [router]);
 
   return (
-    <PageShell
-      eyebrow="你的偏好"
-      title="设置"
-      sub={
-        isAdmin
-          ? "账号、外观、检索、隐私、用量，以及知穗现在会哪些工具、后台任务有没有在跑。"
-          : "账号、外观、检索、隐私和用量。"
-      }
-    >
+    <PageShell title="设置">
       {/* 右列只有管理员有。只剩一列时不能再走 .grid2 的两条轨道 ——
           左列占 1.25fr、右边空着 1fr，整页像被撕掉一半。 */}
       <div className={isAdmin ? "grid2" : "grid2 one-col"}>
@@ -247,8 +239,9 @@ export default function SettingsPage() {
             </button>
             {/* 这里原来写的是「「修改密码」还没做好，先置灰」——
                 密码功能上线后这句话就成了错的：按钮明明是亮的，页面却在说它没做。
-                现在改成一句真实的、用户可能真会问的话。 */}
-            <p className="hint">密码、昵称、头像都能在这里改。改登录名要验证一次密码。</p>
+                2026-11-14：句子前半「密码、昵称、头像都能在这里改」是把上面那张卡的
+                字段念一遍，删掉；只留「改登录名要验证密码」这条布局看不见的规则。 */}
+            <p className="hint">改登录名要先验证一次密码。</p>
           </section>
 
           {/* 兴趣方向：30 条定稿词表（core/tag_taxonomy.py）。
@@ -460,7 +453,7 @@ export default function SettingsPage() {
                   <SkeletonLines widths={["60%", "44%"]} />
                 </div>
               ) : kbs.length === 0 ? (
-                <p className="hint">还没有资料库。上传讲义或论文后，在这里能看到它占了多少片段。</p>
+                <p className="hint">还没有资料库。上传后会显示每个库占多少片段。</p>
               ) : (
                 <div style={{ marginTop: 10 }}>
                   {kbs.map((k) => (

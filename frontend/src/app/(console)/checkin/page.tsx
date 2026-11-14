@@ -448,7 +448,6 @@ export default function CheckinPage() {
 
   return (
     <PageShell
-      eyebrow="把今天记下来"
       title="打卡"
       sub={
         <>

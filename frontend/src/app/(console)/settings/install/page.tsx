@@ -26,7 +26,6 @@ export const metadata: Metadata = {
 export default function SettingsInstallPage() {
   return (
     <PageShell
-      eyebrow="装成 App"
       title="装到桌面"
       sub="一步一图，电脑、安卓、苹果分开写。装好后从桌面图标点开就是全屏工作台，没有地址栏。"
       actions={

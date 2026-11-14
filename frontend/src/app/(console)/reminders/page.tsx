@@ -3423,7 +3423,6 @@ export default function RemindersPage() {
   return (
     <PageShell
       compact
-      eyebrow="什么时候做什么"
       title="待办"
       sub="设了提醒时间，到时会通知你；课表、打卡的提醒会自动排好。"
       actions={

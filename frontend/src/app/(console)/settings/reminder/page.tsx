@@ -21,9 +21,8 @@ export const metadata: Metadata = {
 export default function SettingsReminderPage() {
   return (
     <PageShell
-      eyebrow="到点提醒"
       title="打开提醒"
-      sub="权限只有一处：待办 → 设置 → 提醒权限。苹果要先装到主屏，安卓多数机型在国内收不到，两页都写清了。"
+      sub="苹果要先装到主屏才收得到；安卓多数机型在国内收不到推送。"
       actions={
         <Link href="/reminders?tab=settings" className="btn btn-ghost btn-sm">
           去打开提醒

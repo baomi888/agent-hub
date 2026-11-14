@@ -35,7 +35,6 @@ export const metadata: Metadata = {
 export default function CampusToolsPage() {
   return (
     <PageShell
-      eyebrow="校园生活"
       title="工具集"
       sub="不用连教务，打开就能用。数据先存在这台设备上，登录后会同步到云端，换设备也在。"
     >

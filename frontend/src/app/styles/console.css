@@ -3766,8 +3766,10 @@ textarea.input {
   }
 
   /* 页头瘦身（PageShell compact）：只给量过的页面用，默认不生效。
-     390 下原来「眉题 + 标题 + 两行说明 + 操作」要 160px，现在是 96 上下：
-     眉题藏掉（-18）、说明限一行（-19）、标题压到 18px（-6）。 */
+     390 下原来「眉题 + 标题 + 两行说明 + 操作」要 160px，现在是 96 上下。
+     ★ 2026-11-14：眉题全站退场（只剩 dashboard / flow 两个 admin 调试面有，
+       而它们都不用 compact），所以「藏眉题」那条规则已经没有对象，一并删掉。
+       现在这一档只做两件事：说明限两行（-19）、标题压到 18px（-6）。 */
   .pg-head--compact {
     align-items: center;
     gap: var(--space-8);
@@ -3775,9 +3777,6 @@ textarea.input {
   }
   .pg-head--compact > div:first-child {
     min-width: 0;
-  }
-  .pg-head--compact .eyebrow {
-    display: none;
   }
   .pg-head--compact h2 {
     font-size: 1.125rem;

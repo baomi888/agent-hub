@@ -641,9 +641,8 @@ export default function CetPage() {
 
   return (
     <PageShell
-      eyebrow="专项备考"
       title="四六级备考工作区"
-      sub="按你的考试日期和每天能练的内容生成任务，随时可改。词卡按遗忘曲线复习，分数画成趋势。"
+      sub="词卡按遗忘曲线复习，不用你自己排哪天该过哪一批。"
       actions={
         plan && !editing ? (
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>

@@ -187,9 +187,8 @@ export default function PathPage() {
 
   return (
     <PageShell
-      eyebrow="学习路径"
       title="12 关，一关一关过"
-      sub="从「把资料放进来」走到「让它每天替你跑」——走完这 12 关，知穗才算真的配成你自己的。"
+      sub="从「把资料放进来」走到「让它每天替你跑」，走完才算配成你自己的。"
       actions={
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {p && (

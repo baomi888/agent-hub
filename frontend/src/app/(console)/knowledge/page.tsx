@@ -339,7 +339,6 @@ export default function KnowledgePage() {
 
   return (
     <PageShell
-      eyebrow="知识库"
       title="我的资料库"
       sub="课件、笔记、论文都可以放进来。对话时选中它，回答就会先从这里找依据。"
       actions={

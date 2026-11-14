@@ -513,7 +513,6 @@ export default function DelegatePage() {
 
   return (
     <PageShell
-      eyebrow="自动替你干活"
       title="每日委托"
       sub={
         <>

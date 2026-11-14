@@ -66,9 +66,10 @@ export default function DrawTool() {
           </span>
         </div>
 
-        <p className="campus-card-note" style={{ marginTop: 0 }}>
-          写清事由和名额，把参与者名单贴进来（每行一个，模拟群友接龙），点「开奖」随机抽出中签者。
-        </p>
+        {/* 2026-11-14：这里原来有一段「写清事由和名额，把参与者名单贴进来（每行一个，
+            模拟群友接龙），点「开奖」随机抽出中签者。」——它在把下面三个控件的
+            标签和按钮按顺序念一遍。唯一的真约束「每行一个」已经在名单框的
+            placeholder 里写着，所以整段删掉，让表单自己说话。 */}
 
         <div className="campus-field" style={{ marginBottom: 12 }}>
           <span>抽签事由</span>

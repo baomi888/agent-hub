@@ -221,14 +221,10 @@ export default function DashboardPage() {
       eyebrow="管理 · 内部"
       title="数据看板"
       sub={
-        <>
-          有多少人、在调什么、哪里慢、哪里在报错。
-          <span className="meta">
-            {" "}
-            口径见 口径与数据字典.md；采集延迟 ≤ 3 秒{auto ? "，页面每 30 秒自动刷新" : ""}
-            {fetchedAt ? `（上次 ${fmtClock(fetchedAt)}）` : ""}。
-          </span>
-        </>
+        <span className="meta">
+          口径见 口径与数据字典.md；采集延迟 ≤ 3 秒{auto ? "，页面每 30 秒自动刷新" : ""}
+          {fetchedAt ? `（上次 ${fmtClock(fetchedAt)}）` : ""}。
+        </span>
       }
       actions={
         <>

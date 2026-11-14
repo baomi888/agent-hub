@@ -7,20 +7,36 @@
 import type { ReactNode } from "react";
 
 interface Props {
-  /** 眉题（设计稿里的 P4 · /delegate 那一行小字） */
-  eyebrow: string;
+  /**
+   * 眉题（标题上方那行小字）。**默认不传**。
+   *
+   * 2026-11-14 全站文案审查后只剩 admin 那两个页面（dashboard / flow）配了
+   * 「管理 · 内部」，它标记"这里是调试面"——这件事布局表达不出来。
+   * 其余 11 页原来那句（「校园生活」「你的偏好」「每日总结」…）都在替
+   * 侧栏高亮和标题重说一遍，已全部删除。
+   * 加新页面时先问一句：这句话布局说得出来吗？说得出来就别加。
+   */
+  eyebrow?: string;
   title: string;
-  sub: ReactNode;
+  /**
+   * 标题下面那句说明。**只有它承载布局看不见的事实时才传**：
+   * 口径、限制、后果、隐私边界。
+   *
+   * 删之前先反问：去掉这句，用户会不会做一个错误的决定？
+   * 会 → 它是 R2，留，但一屏只准出现一次；
+   * 不会（只是在把下面几个分区 / 几张卡念一遍）→ 它就是 R1，别写。
+   */
+  sub?: ReactNode;
   /** 页头右侧的操作区 */
   actions?: ReactNode;
   /** 内容区最大宽度：需要阅读栏宽度的页面（如总结）传窄一点 */
   width?: number;
   /**
-   * 手机上把页头压扁：藏起眉题、说明收成一行。
+   * 手机上把页头压扁：说明收成最多两行、标题压到 18px。
    *
-   * 只在窄屏生效，桌面完全不变 —— 眉题（「P7 · 待办」）是给桌面看的定位信息，
-   * 手机上它占 18px 却不提供任何行动线索，而这一页首屏的每一像素都要留给待办本身。
-   * 默认 false：别的页面没量过「省下来能不能换来一条内容」，不跟着动。
+   * 只在窄屏生效，桌面完全不变。默认 false：别的页面没量过
+   * 「省下来能不能换来一条内容」，不跟着动。
+   * （原来它还会藏掉眉题，2026-11-14 眉题全站退场后那段规则已无对象，一并删了。）
    */
   compact?: boolean;
   children: ReactNode;
@@ -39,9 +55,9 @@ export default function PageShell({
     <div className="pg-wrap" style={width ? { maxWidth: width } : undefined}>
       <div className={compact ? "pg-head pg-head--compact" : "pg-head"}>
         <div>
-          <p className="eyebrow">{eyebrow}</p>
+          {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
           <h2>{title}</h2>
-          <p className="pg-sub">{sub}</p>
+          {sub ? <p className="pg-sub">{sub}</p> : null}
         </div>
         {actions ? <div className="pg-actions">{actions}</div> : null}
       </div>
