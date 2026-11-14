@@ -28,6 +28,7 @@ KNOWLEDGE = SRC / "app" / "(console)" / "knowledge" / "page.tsx"
 LIBRARY = SRC / "app" / "library" / "page.tsx"
 SYNC_BAR = SRC / "campus" / "tools" / "pomodoro" / "SyncBar.tsx"
 POMODORO = SRC / "campus" / "tools" / "pomodoro" / "PomodoroTool.tsx"
+FOCUS_SYNC = SRC / "campus" / "logic" / "focusSync.ts"
 
 # 注释：块注释（含 JSX 的 {/* ... */}）与整行 //。
 # ★ 必须先剥：注释里会引用旧文案做解释（"原来写的是「知识库」"），
@@ -106,6 +107,23 @@ def test_public_library_uses_same_word():
     assert "<h1>公开资料库</h1>" in lib, "公开广场的 h1 没跟着统一（应为「公开资料库」）"
 
 
+# ==================== ②b 后端返回的展示串也算界面文案 ====================
+
+def test_backend_display_string_matches_ui():
+    """`api/kb.py` 收藏接口里的 `source` 是**给用户看的字符串**，不是判定值。
+
+    ★ 这条是补漏：第一轮只扫了 frontend/src，源码里干净了，线上「我的资料库」
+      页面上却还挂着「来源官方知识库」—— 那句话是后端拼好返回的。
+      判定字段是 `official`（布尔），`source` 只负责显示，所以它可以跟着改。
+    """
+    kb = (ROOT / "api" / "kb.py").read_text(encoding="utf-8")
+    # 按"键值对"精确匹配，不用「"官方知识库" 在整个文件里不出现」那种写法：
+    # 516 行的 docstring 里抄着用户原话（"除了用官方知识库，还可以…"），
+    # 那是历史引语，改了就是篡改记录。
+    assert '"source": "官方知识库"' not in kb, "api/kb.py 的展示串还叫「官方知识库」"
+    assert '"source": "官方资料库"' in kb, "api/kb.py 没有返回「官方资料库」"
+
+
 # ==================== ③ 同步条：成功时不说话 ====================
 
 def test_sync_bar_is_silent_when_synced():
@@ -130,3 +148,17 @@ def test_pomodoro_no_longer_keeps_sync_timestamp():
     assert re.search(r"useState<\{ status: SyncStatus; message: string \}>", src), (
         "同步状态里还留着 at 字段"
     )
+
+
+def test_sync_error_is_not_raw_exception_text():
+    """失败原因不能把 `Failed to fetch` 这种原样透给用户。
+
+    原来 `message: error instanceof Error ? error.message : …` 直接把异常串
+    拼进「未同步」那一行 —— 断网时用户看到的是八级英语。
+    """
+    src = _code(FOCUS_SYNC)
+    assert "message: error instanceof Error ? error.message" not in src, (
+        "又直接透传原始异常串了"
+    )
+    assert "syncErrorText" in src, "没有把失败原因翻译成人话"
+    assert "instanceof TypeError" in src, "网络层失败（TypeError）没被单独识别"

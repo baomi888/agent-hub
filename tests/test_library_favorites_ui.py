@@ -58,7 +58,7 @@ def test_panel_lists_favorites_before_all_public():
 
 
 def test_panel_favorite_rows_carry_source():
-    """收藏行要写出来源（官方知识库 / 某某 的库）。"""
+    """收藏行要写出来源（官方资料库 / 某某 的库）。"""
     s = _read(PANEL)
     assert "来源{k.source}" in s, "收藏行丢了来源署名，用户分不清官方还是同学的库"
 

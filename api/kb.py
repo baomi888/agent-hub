@@ -452,8 +452,10 @@ async def list_favorites(uid: str = Depends(get_current_user)) -> dict:
     """我收藏的公开库，最近收藏的在前。
 
     每条带**来源与作者**（用户要求）：
-      - 官方库 → `source = "官方知识库"`；
+      - 官方库 → `source = "官方资料库"`；
       - 同学分享 → `source = "某某 的库"`。
+    ★ 这里返回的是**给用户看的字符串**，不是判定值（判定看 `official` 字段）。
+      2026-11-14 界面统一改叫「资料库」，所以它跟着改 —— 前端只负责显示。
     库被收回公开 / 删掉之后就从这里消失 —— 收藏不是"永久快照"，
     它只是指向那个库的一个标记；库没了，收藏一条点开 404 的卡片没有意义。
     """
@@ -483,8 +485,8 @@ async def list_favorites(uid: str = Depends(get_current_user)) -> dict:
                 "official": official,
                 "official_owner": official,
                 # 来源与作者是两件事：来源说明它从哪来，作者说明谁做的。
-                # 官方库没有"某位同学"这种作者，所以两者都写"官方知识库"。
-                "source": "官方知识库" if official else f"{owner_name} 的库",
+                # 官方库没有"某位同学"这种作者，所以两者都写"官方资料库"。
+                "source": "官方资料库" if official else f"{owner_name} 的库",
                 "owner_name": owner_name,
                 "access": "download" if official else _access_of_from(k),
                 "files": k.get("files") or 0,

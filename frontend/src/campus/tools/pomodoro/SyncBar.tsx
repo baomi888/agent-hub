@@ -37,7 +37,7 @@ export default function SyncBar({ status, message, onSync }: SyncBarProps) {
 
       <div className="campus-sync-text">
         <b>{guest ? "仅本机" : "未同步"}</b>
-        <span>{guest ? message : `${message}计时不受影响，记录不会丢。`}</span>
+        <span>{guest ? message : `${message}。计时不受影响，记录不会丢。`}</span>
       </div>
 
       {guest ? (

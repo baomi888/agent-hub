@@ -2,7 +2,7 @@
 
 钉住三件事：
   1. 幂等：重复收藏不涨数、重复取消不报错（网络重试很常见）；
-  2. 我的收藏带**来源与作者**（"官方知识库" / "某某 的库"）——
+  2. 我的收藏带**来源与作者**（"官方资料库" / "某某 的库"）——
      用户明确要求这一条，它是收藏列表能被看懂的前提；
   3. 库没了，收藏跟着没了：否则「我的收藏」里会出现点开就 404 的卡片。
 """
@@ -106,9 +106,9 @@ def test_favorites_list_carries_source_and_author(client, env, kb):
     out = client.get("/api/kb/favorites").json()["kbs"]
     assert len(out) == 1
     item = out[0]
-    # 官方库：来源与署名都是"官方知识库"，不能出现"某位同学"
+    # 官方库：来源与署名都是"官方资料库"，不能出现"某位同学"
     assert item["official"] is True
-    assert item["source"] == "官方知识库"
+    assert item["source"] == "官方资料库"
     assert item["owner_name"] == "官方"
     # 上传/分享日期跟着一起来（用户要求每个库都标）
     assert item["at"] == 1763000000

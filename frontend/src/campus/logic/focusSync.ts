@@ -127,6 +127,21 @@ export async function pullAll(): Promise<SyncSnapshot> {
 }
 
 /**
+ * 失败原因翻译成人话。
+ *
+ * `fetch` 在网络层失败时抛的是 `TypeError: Failed to fetch` —— 一句英文技术报错，
+ * 原来被原样拼进「未同步」那一行给用户看。断网、被插件拦、DNS 挂都长这样，
+ * 对用户是同一件事：连不上。
+ *
+ * HTTP 那类保留原文（例如「上报记录失败（HTTP 500）」）：里面带状态码，排查时有用。
+ * ★ 返回的句子**不带结尾句号** —— 调用方（SyncBar）会在后面接一句后果说明。
+ */
+function syncErrorText(error: unknown): string {
+  if (error instanceof TypeError) return "连不上服务器";
+  return error instanceof Error ? error.message : "同步失败";
+}
+
+/**
  * 一次完整同步：上报待同步的 → 拉取云端的 → 合并。
  *
  * 顺序不能反：先推后拉，拉回来的那份才包含「刚刚推上去的记录」的 `syncedAt`，
@@ -141,7 +156,7 @@ export async function syncAll(local: SyncSnapshot): Promise<SyncOutcome> {
       pushedSessions: 0,
       pushedTasks: 0,
       pulled: 0,
-      message: "当前离线，记录先存在本机，联网后会自动补传。",
+      message: "当前离线，记录先存在本机，联网后会自动补传",
     };
   }
 
@@ -153,7 +168,7 @@ export async function syncAll(local: SyncSnapshot): Promise<SyncOutcome> {
       pushedSessions: 0,
       pushedTasks: 0,
       pulled: 0,
-      message: "数据存在这台设备上。登录后可跨设备同步。",
+      message: "数据只存在这台设备上，换台电脑或清了浏览器就没了。",
     };
   }
 
@@ -185,7 +200,7 @@ export async function syncAll(local: SyncSnapshot): Promise<SyncOutcome> {
       pushedSessions: 0,
       pushedTasks: 0,
       pulled: 0,
-      message: error instanceof Error ? error.message : "同步失败，稍后自动重试。",
+      message: syncErrorText(error),
     };
   }
 }
