@@ -20,6 +20,15 @@
   --chat-msgs-gap: 24px;
   --ai-mark: 44px;
   --ai-mark-top: 8px;
+  /* 工作台卡片自身距屏幕边缘的距离。数值必须与 base.css（14px）与
+     fx.css 窄屏档（8px）保持一致 —— 它在这里的用途是「把安全区里已经
+     被卡片外边距占掉的那一段扣掉」，见 .chat-dock。 */
+  --app-edge-y: 14px;
+}
+@media (max-width: 899px) {
+  :root {
+    --app-edge-y: 8px;
+  }
 }
 @media (max-width: 1023px) {
   :root {
@@ -63,10 +72,23 @@
   padding-top: var(--chat-msg-pt);
   padding-bottom: var(--chat-msg-pb);
 }
-/* 底部留白叠 iOS 安全区：viewport-fit=cover 之后，home 指示条那 34px 会
-   压在输入框上（iOS Safari 实测）。用 env 而不是写死，横屏时为 0。 */
+/* 底部留白 + iOS 安全区。
+   ★ 2026-11-14 第八批（用户真机反馈「底部留白有点多」）：
+     上一版写的是 calc(12px + env(safe-area-inset-bottom))，iPhone 上
+     12 + 34 = 46，再叠卡片自己的 8px 外边距 → 输入框底离屏幕底 54px。
+     问题在于**安全区被整份叠了一遍**：main.workbench-main 的底边距本身
+     只有 8px，那 8px 已经在 34px 安全区里面了，卡片内只需要再让出
+     34 − 8 = 26px 就能完全避开 home 指示条。
+     所以改成 max(留白, 安全区 − 卡片外边距)：
+       · iPhone（安全区 34，卡片 8）→ max(12, 26) = 26 → 离屏幕底 34px
+       · Android / 桌面（安全区 0）  → max(12, −8) = 12，与改前逐像素相同
+       · iPad（安全区 20，卡片 8）   → max(12, 12) = 12（原来 12+20=32）
+     横屏时安全区为 0，max 自然落回 12，不会多出一条空白。 */
 .chat-dock {
-  padding-bottom: calc(var(--chat-dock-pb) + env(safe-area-inset-bottom, 0px));
+  padding-bottom: max(
+    var(--chat-dock-pb),
+    calc(env(safe-area-inset-bottom, 0px) - var(--app-edge-y))
+  );
 }
 .chat-bar-gap {
   margin-bottom: var(--chat-bar-gap);

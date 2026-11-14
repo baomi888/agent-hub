@@ -143,16 +143,68 @@ def test_padding_rules_follow_tokens():
 
 
 def test_dock_padding_includes_safe_area():
-    """底部留白必须叠 env(safe-area-inset-bottom)。
+    """底部留白必须让开 iOS 安全区，但**不许整份叠加**。
 
     viewport-fit=cover 之后 iOS 的 home 指示条会压住页面底部 34px；
     写死 padding-bottom 的输入框会被压在横条上（真机上点不到发送键）。
-    横屏时 env 为 0，所以用 calc 而不是固定值。
+
+    ★ 2026-11-14 第八批：上一版写的是 `calc(12px + env(...))`，真机上
+      12 + 34 = 46，再叠卡片自己的 8px 外边距 → 输入框离屏幕底 54px，
+      用户反馈「底部留白有点多」。根因不是数字太大，是**重复计算**：
+      卡片底边距屏幕只有 8px，那 8px 已经在 34px 安全区里面了，
+      卡片内只需要再让出 34 − 8 = 26px。
+      所以契约从"用 calc 加"变成"用 max 取大、并且减掉卡片外边距"。
     """
     dock = _rule(_read(CHAT_CSS), ".chat-dock")
-    assert "env(safe-area-inset-bottom" in dock, "底部留白没有叠安全区"
+    assert "env(safe-area-inset-bottom" in dock, "底部留白没有让开安全区"
     assert "--chat-dock-pb" in dock, "底部留白没走令牌"
-    assert "calc(" in dock, "不是 calc 的话横屏会多出一条空白"
+    assert "max(" in dock, "应该是 max(留白, 安全区 − 卡片外边距)，不是相加"
+    assert "--app-edge-y" in dock, "没有扣掉卡片自身的外边距（那就是重复计算安全区）"
+    # 这条是真正的反例形状：相加会让 iPhone 上多出 8px，且横屏看不出、
+    # 桌面看不出、headless 里 env 恒为 0 也看不出 —— 只有真机才现形。
+    assert not re.search(r"\+\s*env\(safe-area-inset-bottom", dock), (
+        "又把安全区整份加上了：iPhone 会变成 12+34=46，叠加卡片 8px 后离屏幕底 54px"
+    )
+
+
+def test_app_edge_matches_card_margin():
+    """`--app-edge-y` 必须与 workbench-main 的真实外边距一致。
+
+    这个令牌的唯一用途是「从安全区里扣掉卡片外边距」。它一旦与
+    base.css / fx.css 的真实 margin 漂移，扣除量就是错的：
+      · 扣多了 → 输入框压到 home 指示条上（点不到）
+      · 扣少了 → 又变成这一批要修的留白过多
+    两边都是"只在真机上看得出来"的错，所以在这里钉死。
+    """
+    base = _read(SRC / "app" / "styles" / "base.css")
+    fx = _read(SRC / "app" / "styles" / "fx.css")
+    chat = _read(CHAT_CSS)
+
+    m_base = re.search(
+        r"main\.workbench-main\s*\{[^}]*?margin:\s*calc\((\d+)px \+ env\(safe-area-inset-top",
+        base,
+        re.S,
+    )
+    assert m_base, "base.css 的 main.workbench-main 外边距形状变了"
+    m_fx = re.search(
+        r"main\.workbench-main\s*\{[^}]*?margin:\s*calc\((\d+)px \+ env\(safe-area-inset-top",
+        fx,
+        re.S,
+    )
+    assert m_fx, "fx.css 的窄屏外边距形状变了"
+    assert m_base.group(1) == "14" and m_fx.group(1) == "8", (
+        "卡片外边距改了，chat.css 的 --app-edge-y 也要跟着改"
+    )
+
+    root = chat.split("@media")[0]
+    assert f"--app-edge-y: {m_base.group(1)}px" in root, (
+        f"桌面档 --app-edge-y 与 base.css 的 {m_base.group(1)}px 不一致"
+    )
+    narrow = _media(chat).get("max-width: 899px")
+    assert narrow, "没有 ≤899 档（这一档的卡片外边距才是 8px）"
+    assert f"--app-edge-y: {m_fx.group(1)}px" in narrow, (
+        f"窄屏档 --app-edge-y 与 fx.css 的 {m_fx.group(1)}px 不一致"
+    )
 
 
 # ---------- 输入框：手机 72 → 56 ----------
