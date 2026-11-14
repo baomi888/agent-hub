@@ -1442,29 +1442,81 @@ textarea.input {
   }
   /* 三列而不是两列：多出来的高度直接变成"少滑一屏"，
      而 390 宽下每格约 106px，「学习路径」四个字放得下。 */
+  /* ★ 2026-11-15：三列 → **两列**。
+     三列时每格 114px，只放得下两个字加一个图标，第二行必然剩空格子
+     （管理员 4 项时剩 2 格、加「看板」后 5 项时剩 1 格）—— 量出来面板 276px 高里
+     只有 160px 是内容，其余是把手、标题和两片空白，这就是「二级导航过于空旷」。
+     两列每格 175px 刚好够「名称 + 一句用途」，且 4 项 = 2×2 填满、5 项 = 2+2+1。
+     用 flex-wrap 而不是 grid：grid 的末行项目会左对齐留空，
+     flex 配 justify-content:center 能让最后那一个居中，缺角不明显。 */
   .tab-sheet-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
     gap: var(--space-8);
   }
   .tab-sheet-item {
+    /* (100% - 1 个 gap) / 2 —— 两列等宽，gap 是 8，所以扣 4 */
+    flex: 0 0 calc(50% - var(--space-4));
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
-    justify-content: center;
-    gap: var(--space-6);
-    min-height: 76px;
+    justify-content: flex-start;
+    gap: var(--space-10);
+    min-height: 58px;
+    padding: 0 var(--space-12);
     border-radius: var(--radius-md);
     border: 1px solid var(--line);
     background: var(--fill-4);
+    text-align: left;
     font-size: var(--fs-sm);
     color: var(--text-2);
     transition: var(--t-color);
+  }
+  /* 图标不参与压缩：文字一长，flex 会先挤图标，20px 被挤到 14px 就变形了 */
+  .tab-sheet-item .tab-sheet-ico {
+    width: 20px;
+    height: 20px;
+    flex: none;
+  }
+  /* 文字块：名称在上、用途在下，两行都单行截断。
+     min-width:0 是必须的 —— 少了它 flex 子项的最小宽度等于内容宽度，
+     溢出不会触发省略号，而是把整个格子撑破。 */
+  .tab-sheet-tx {
+    display: grid;
+    gap: 1px;
+    min-width: 0;
+  }
+  .tab-sheet-tx b {
+    font-weight: 500;
+    font-size: var(--fs-sm);
+    line-height: 1.25;
+    color: var(--text-1);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tab-sheet-tx em {
+    font-style: normal;
+    /* 13px（--fs-xs）而不是 11px 的 --fs-badge：那个令牌的注释写的是
+       「只放 1–2 个字或数字」，而这里是 6–8 个字的说明句，用角标字号读不清。
+       两列 175px 一格，扣掉图标和内边距还有 121px，13px 放得下 9 个中文字。 */
+    font-size: var(--fs-xs);
+    line-height: 1.3;
+    color: var(--text-3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .tab-sheet-item[aria-current="page"] {
     color: var(--accent-ink);
     border-color: var(--accent-line);
     background: var(--accent-soft);
+  }
+  /* 当前页那一格：名称跟着强调色走，用途仍退在后面 ——
+     两行都用强调色会让"我在哪"和"这是干什么的"糊成一句 */
+  .tab-sheet-item[aria-current="page"] .tab-sheet-tx b {
+    color: var(--accent-ink);
   }
   .console-page {
     padding: var(--space-16) var(--space-14) var(--space-32);

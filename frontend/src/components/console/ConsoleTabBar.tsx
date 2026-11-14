@@ -122,8 +122,14 @@ export default function ConsoleTabBar({ isAdmin, onOpenChange }: Props) {
                   aria-current={isCurrentNav(it.href, here) ? "page" : undefined}
                   scroll={false}
                 >
-                  <NavIcon name={it.icon} className="h-[20px] w-[20px]" />
-                  <span>{it.label}</span>
+                  <NavIcon name={it.icon} className="tab-sheet-ico" />
+                  {/* 名称 + 一句用途。hint 是可选的：没写 hint 的项只显示名称，
+                      靠 .tab-sheet-item 的 align-items 保持图标与文字仍然对齐。
+                      不用 title 属性兜底 —— 手机上没有 hover，写了也看不到。 */}
+                  <span className="tab-sheet-tx">
+                    <b>{it.label}</b>
+                    {it.hint ? <em>{it.hint}</em> : null}
+                  </span>
                 </Link>
               ))}
             </div>

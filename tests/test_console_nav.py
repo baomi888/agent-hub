@@ -326,6 +326,77 @@ def test_learning_path_owns_a_mobile_tab_slot():
     )
 
 
+def test_admin_dashboard_has_a_mobile_entry():
+    """管理员页面「看板」必须能在手机上进得去（2026-11-15 事故复盘）。
+
+    事故：2026-11-14 的 iOS 内测把 `/dashboard` 标成 `desktopOnly`，当时写在
+    方案里的理由是"已是 adminOnly，手机上永不需要"。结果管理员在手机上点开
+    「更多」只有 4 项，找不到看板，报「数据面板再次无法显示」。
+    查下来：后端 `/api/admin/overview` 200、`/api/auth/me` 的 `is_admin` 为 true、
+    390 宽直接打开 `/dashboard` 渲染 13 张卡且横向溢出 0 —— 坏的只有这一个入口，
+    而**所有测试照样绿**（拓扑没坏，入口消失了）。
+
+    这条守的是"入口存在"，不是"页面好看"：
+      · 不能 `desktopOnly`（会被 mobileMoreNav 过滤，手机上彻底消失）
+      · 不能 `mobileTab`（会挤掉一个高频功能的一级格位）
+      · 必须 `adminOnly`（普通用户不该看到这个入口）
+    """
+    nav = _strip_comments(_read(NAV_TS))
+    m = re.search(r'\{[^{}]*href: "/dashboard"[^{}]*\}', nav, re.S)
+    assert m, "nav.ts 里找不到 /dashboard 那一条，正则失效"
+    entry = m.group(0)
+    assert "desktopOnly" not in entry, (
+        "看板又被移出移动端了 —— 管理员在手机上再也看不到数据面板（2026-11-15 报过）"
+    )
+    assert "mobileTab" not in entry, "看板不该占底部 tab 格位，它是低频的管理页"
+    assert "adminOnly: true" in entry, "看板没有 adminOnly，普通用户会看到入口"
+
+
+def test_more_panel_items_all_carry_a_hint():
+    """「更多」面板里每一项都要有一句用途说明（2026-11-15）。
+
+    起因：面板原先是 3 列网格，4 项排成 3+1、第二行空两格，用户的原话是
+    "这个二级导航显示过于空旷"。空的另一半原因在内容本身：格子里只有两个字，
+    「工具集」到底装了 GPA 还是番茄钟，看名字猜不出来。现在两列 + 每格一句 13px 说明。
+
+    没有 hint 的项会退回"只有名称"的矮格子，把两列的节奏打断；
+    hint 写成复述（「资料库」下面再写「资料库管理」）等于白占一行，所以也禁。
+    """
+    nav = _strip_comments(_read(NAV_TS))
+    checked = 0
+    for m in re.finditer(r"\{([^{}]*href:\s*\"[^\"]+\"[^{}]*)\}", nav, re.S):
+        body = m.group(1)
+        href = re.search(r'href:\s*"([^"]+)"', body).group(1)
+        # 进了底部 tab 的、或彻底移出移动端的，都不在「更多」面板里
+        if "mobileTab" in body or "desktopOnly" in body:
+            continue
+        label_m = re.search(r'label:\s*"([^"]+)"', body)
+        label = label_m.group(1) if label_m else ""
+        assert "hint:" in body, f"「更多」里的 {href} 没有 hint，面板会缺一块内容"
+        hint_m = re.search(r'hint:\s*"([^"]+)"', body)
+        assert hint_m, f"{href} 的 hint 是空字符串"
+        hint = hint_m.group(1)
+        assert hint != label, f"{href} 的 hint 只是复述了名称（{hint}）"
+        assert len(hint) <= 12, f"{href} 的 hint 太长（{len(hint)} 字），窄格会被省略号截掉"
+        checked += 1
+    # 扫描型断言必须同时断言"扫到了几个"——路径/写法一变就红（topics/05 第 32 条）
+    assert checked >= 4, f"只扫到 {checked} 个「更多」项，正则可能已经失效"
+
+
+def test_more_panel_is_two_columns_not_three():
+    """面板必须两列等宽（2026-11-15）：三列时每格只有 114px，塞不下用途说明。
+
+    锁的是结果（两列）而不是写法，但 `flex: 0 0 calc(50%` 就是它的实现；
+    如果有人换回 `grid-template-columns: repeat(3`，说明这次改动被整个回退了。
+    """
+    css = _strip_comments(_read(CONSOLE_CSS))
+    grid = _css_rule(css, ".tab-sheet-grid")
+    assert "flex-wrap: wrap" in grid, "面板不是 flex-wrap，末行那一项没法居中"
+    assert "repeat(3" not in grid, "面板又变回三列了 —— 114px 一格放不下用途说明"
+    item = _css_rule(css, ".tab-sheet-item")
+    assert "calc(50%" in item, "面板项不是半宽，两列会退回三列"
+
+
 def test_console_only_pages_are_kept_off_mobile():
     """移出移动端的三个模块必须真的标了 desktopOnly（且桌面仍可见）。
 

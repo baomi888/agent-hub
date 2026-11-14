@@ -1343,7 +1343,17 @@ class TestCopySpeaksUserLanguage:
         「更多」面板三处共用一份），断言跟着搬 —— 但钉的还是同一件事。
         """
         nav = (ROOT / "frontend" / "src" / "lib" / "nav.ts").read_text(encoding="utf-8")
-        assert '{ href: "/reminders", icon: "task", label: "待办" }' in nav
+        # ★ 2026-11-15：原来钉的是整行字面量
+        #   `{ href: "/reminders", icon: "task", label: "待办" }`。
+        #   这一批给「更多」面板里的每一项加了 `hint`（一句用途说明），
+        #   字面量对不上就红了 —— 但红的是"写法变了"，不是"又改回叫提醒了"。
+        #   改成按 href 定位那一条再查 label：断言要钉的是**用词**，
+        #   不是那一行里还有没有别的字段。
+        m = re.search(r'\{ href: "/reminders"[^}]*\}', nav)
+        assert m, "nav.ts 里找不到 /reminders 那一条（正则失效或条目被删）"
+        entry = m.group(0)
+        assert 'label: "待办"' in entry
+        assert 'label: "提醒"' not in entry
         assert 'title="待办"' in _page()
         assert 'title="提醒 / 待办"' not in _page()
 
