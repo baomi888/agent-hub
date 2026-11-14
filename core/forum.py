@@ -106,9 +106,23 @@ _LAST_AT = (
 
 # root_id / reply_to_id 也带上：删单条回复要走同一条查询，而回复的 cat 是空的,
 # 光看 cat 分不出"根本不存在的 id"和"这是一条回复"。
+#
+# status 那一串是给「先发后审」用的。列表页其实只需要 status，但管理台要
+# 顺着同一份 SELECT 拿到原因和时间 —— 分成两条 SQL 的话，两边的行形状不同，
+# `_topic_view` 就得为管理台再写一份，迟早在某个字段上飘掉。
+#
+# COALESCE 不能省：ALTER 加列时 NOT NULL DEFAULT '' 会把老行填成空串，
+# 但**任何绕过 _ensure 直接建表的地方**（测试里就有）仍可能留 NULL。
+# `NULL != 'removed'` 的结果是 NULL 而不是 true，那条帖会从列表里凭空消失。
 _LIST_COLS = (
     "p.id, p.kb_id, p.user_id, p.title, p.cat, p.body, p.created_at, "
     "p.root_id, p.reply_to_id, "
+    "COALESCE(p.status, '') AS status, "
+    "COALESCE(p.removed_reason, '') AS removed_reason, "
+    "COALESCE(p.removed_at, 0) AS removed_at, "
+    "COALESCE(p.reviewed_at, 0) AS reviewed_at, "
+    "COALESCE(p.appeal_at, 0) AS appeal_at, "
+    "COALESCE(p.report_n, 0) AS report_n, "
     f"{_REPLY_N} AS reply_n, COALESCE({_LAST_AT}, p.created_at) AS last_at"
 )
 
@@ -123,12 +137,25 @@ _ORDERS = {
 }
 
 
+def _visible() -> str:
+    """一条帖子对**普通读者**可见的条件。所有面向读者的查询都必须带上它。
+
+    单独抽出来是因为它会被 5 个地方用到（列表、置顶、计数、统计、详情）。
+    抄五遍的话，将来加一种新状态（比如"仅作者可见"）就会漏掉其中一处 ——
+    漏掉的那一处会把下架内容泄露出去，而且不报错。
+    """
+    return "AND COALESCE(p.status, '') != 'removed'"
+
+
 def _base_where(cat: str | None, q: str = "") -> tuple[str, list[object]]:
-    """论坛列表的公共 WHERE：顶层帖、没删、有板块。
+    """论坛列表的公共 WHERE：顶层帖、没删、有板块、没下架。
 
     `cat != ''` 这一条是**论坛与留言板的分界线**，不能省。
+    `status != 'removed'` 是**下架即从列表消失**，也不能省 —— 少了它，
+    管理员点了下架，帖还挂在首页，等于没删。
     """
     sql = "WHERE p.deleted_at IS NULL AND p.root_id = 0 AND p.cat != ''"
+    sql += " " + _visible()
     args: list[object] = []
     if cat:
         sql += " AND p.cat = ?"
@@ -174,7 +201,21 @@ def list_topics(
         where += " AND p.id NOT IN (" + marks + ")"
         args.extend(int(x) for x in exclude)
 
-    sql = f"SELECT {_LIST_COLS} FROM kb_posts p {where} ORDER BY {_ORDERS[sort]} LIMIT ?"
+    order = _ORDERS[sort]
+    if sort == "hot":
+        # 降权窗口：新帖排到热榜**末尾**，而不是从榜上抹掉。
+        #
+        # 一开始写的是 `AND created_at <= cut`（直接排除），被既有用例打回来了：
+        # 一个刚起步的站，所有帖子都在半小时内 → 热榜整个是空的，看起来像坏了。
+        # 排到末尾既保住了前几名的曝光质量（真正要防的是"广告占了推荐位"），
+        # 又不会出现空榜。窗口内的帖仍然可以被往下翻到 —— 那本来就是时间序。
+        cut = int(_now() - COOL_SECONDS)
+        order = (
+            f"CASE WHEN p.created_at > {cut} THEN 1 ELSE 0 END, "
+            "reply_n DESC, last_at DESC, p.id DESC"
+        )
+
+    sql = f"SELECT {_LIST_COLS} FROM kb_posts p {where} ORDER BY {order} LIMIT ?"
     args.append(limit + 1)
 
     with store._get_conn() as conn:  # noqa: SLF001
@@ -199,6 +240,7 @@ def list_pinned(limit: int = 2) -> list[dict]:
         rows = conn.execute(
             f"SELECT {_LIST_COLS} FROM kb_posts p "
             "WHERE p.deleted_at IS NULL AND p.root_id = 0 AND p.cat = 'meta' "
+            f"{_visible()} "
             "ORDER BY p.id DESC LIMIT ?",
             (max(1, int(limit)),),
         ).fetchall()
@@ -206,12 +248,17 @@ def list_pinned(limit: int = 2) -> list[dict]:
 
 
 def count_by_cat() -> dict[str, int]:
-    """每个板块有多少话题。一条 GROUP BY，左栏的计数就齐了。"""
+    """每个板块有多少话题。一条 GROUP BY，左栏的计数就齐了。
+
+    计数也要排除已下架的：左栏写着「求资料 12」、点进去只有 11 条，
+    是那种看起来像丢数据的小数差。
+    """
     kb_board._ensure()  # noqa: SLF001
     with store._get_conn() as conn:  # noqa: SLF001
         rows = conn.execute(
-            "SELECT cat, COUNT(*) FROM kb_posts "
-            "WHERE deleted_at IS NULL AND root_id = 0 AND cat != '' GROUP BY cat"
+            "SELECT p.cat, COUNT(*) FROM kb_posts p "
+            "WHERE p.deleted_at IS NULL AND p.root_id = 0 AND p.cat != '' "
+            f"{_visible()} GROUP BY p.cat"
         ).fetchall()
     return {r[0]: int(r[1]) for r in rows}
 
@@ -227,10 +274,16 @@ def stats() -> dict:
     with store._get_conn() as conn:  # noqa: SLF001
         row = conn.execute(
             "SELECT "
-            " SUM(CASE WHEN root_id = 0 AND cat != '' THEN 1 ELSE 0 END), "
-            " SUM(CASE WHEN root_id != 0 THEN 1 ELSE 0 END), "
-            " SUM(CASE WHEN root_id = 0 AND cat != '' AND created_at >= ? THEN 1 ELSE 0 END) "
-            "FROM kb_posts WHERE deleted_at IS NULL",
+            " SUM(CASE WHEN p.root_id = 0 AND p.cat != '' "
+            f"  {_visible()} THEN 1 ELSE 0 END), "
+            # 回复数要排除"挂在已下架主帖下面的"：那栋楼读者已经点不进去了,
+            # 把它算进"回复 N"会让页头数字和列表对不上。
+            " SUM(CASE WHEN p.root_id != 0 AND NOT EXISTS ("
+            "   SELECT 1 FROM kb_posts t WHERE t.id = p.root_id"
+            "   AND COALESCE(t.status, '') = 'removed') THEN 1 ELSE 0 END), "
+            " SUM(CASE WHEN p.root_id = 0 AND p.cat != '' "
+            f"  {_visible()} AND p.created_at >= ? THEN 1 ELSE 0 END) "
+            "FROM kb_posts p WHERE p.deleted_at IS NULL",
             (_today_start(),),
         ).fetchone()
     return {
@@ -275,3 +328,168 @@ def purge_user(uid: str) -> int:
         cur = conn.execute("DELETE FROM kb_posts WHERE user_id = ?", (uid,))
         n += int(cur.rowcount or 0)
     return n
+
+
+# ============================================================
+# 先发后审（2026-11-14）
+#
+# 为什么是先发后审：这是校内小站，发帖量低、都是抬头不见低头见的同学，
+# 先审后发会让"四楼靠窗空着"这种**时效性内容**在审核的十分钟里失去意义。
+# 代价是脏内容有窗口期，所以配套了降权：新帖 30 分钟内不进热门（见 api 层）。
+#
+# 为什么原因要枚举成 key：文案会改（"广告" → "广告或引流"），数据不该跟着改。
+# 存 key，展示时查 label，改一次文案全站生效。
+# ============================================================
+
+REMOVE_REASONS: tuple[tuple[str, str], ...] = (
+    ("ad", "含广告或引流信息"),
+    ("abuse", "人身攻击"),
+    ("privacy", "泄露隐私"),
+    ("offtopic", "与板块无关"),
+)
+REMOVE_LABEL: dict[str, str] = {k: label for k, label in REMOVE_REASONS}
+REMOVE_KEYS: frozenset[str] = frozenset(k for k, _ in REMOVE_REASONS)
+
+# 新帖不进热门的窗口。30 分钟：管理员扫一眼够用，而"占座""失物"这类
+# 时效内容在半小时里还能走时间序被人看到，不至于白等。
+COOL_SECONDS = 30 * 60
+
+
+def review_queue(limit: int = 40) -> list[dict]:
+    """待审：还没人看过的顶层话题。
+
+    排序**不是按时间**，而是先看被举报数、再看回复数：一条已经有 12 条回复的
+    帖子已经在影响别人了，比刚发出来没人搭理的那条更该先看一眼。
+    按时间排会让队列头永远是最新发的，而不是最要紧的。
+
+    `reviewed_at = 0` 是"没看过"。通过和下架都会写它 —— 不写的话，
+    管理员每次打开队列都要重新判一遍已经判过的东西。
+    """
+    kb_board._ensure()  # noqa: SLF001
+    with store._get_conn() as conn:  # noqa: SLF001
+        rows = conn.execute(
+            f"SELECT {_LIST_COLS} FROM kb_posts p "
+            "WHERE p.deleted_at IS NULL AND p.root_id = 0 AND p.cat != '' "
+            f"{_visible()} AND COALESCE(p.reviewed_at, 0) = 0 "
+            "ORDER BY COALESCE(p.report_n, 0) DESC, reply_n DESC, p.id DESC "
+            "LIMIT ?",
+            (max(1, min(int(limit), 100)),),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def list_appeals(limit: int = 50) -> list[dict]:
+    """已下架且作者申诉过的。申诉本身就是"请再看一眼"的信号，排在前面。"""
+    kb_board._ensure()  # noqa: SLF001
+    with store._get_conn() as conn:  # noqa: SLF001
+        rows = conn.execute(
+            f"SELECT {_LIST_COLS} FROM kb_posts p "
+            "WHERE p.deleted_at IS NULL AND p.root_id = 0 AND p.cat != '' "
+            "AND COALESCE(p.status, '') = 'removed' "
+            "AND COALESCE(p.appeal_at, 0) > 0 "
+            "ORDER BY p.appeal_at DESC LIMIT ?",
+            (max(1, min(int(limit), 100)),),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def list_mine(uid: str, limit: int = 50) -> list[dict]:
+    """这台设备发过的帖，**含已下架的** —— 那正是最该被看到的一条。
+
+    不排除 removed 是这里和其余查询唯一的分歧点，也是整个"通知"的落点：
+    免登录没有收件箱，作者只能靠回访时在这里看到原因。
+    """
+    kb_board._ensure()  # noqa: SLF001
+    with store._get_conn() as conn:  # noqa: SLF001
+        rows = conn.execute(
+            f"SELECT {_LIST_COLS} FROM kb_posts p "
+            "WHERE p.deleted_at IS NULL AND p.root_id = 0 AND p.cat != '' "
+            "AND p.user_id = ? ORDER BY p.id DESC LIMIT ?",
+            (uid, max(1, min(int(limit), 100))),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mod_stats() -> dict:
+    """管理台三个 tab 的数字。一条 SQL 扫完，别为一个角标再往返一次。"""
+    kb_board._ensure()  # noqa: SLF001
+    with store._get_conn() as conn:  # noqa: SLF001
+        row = conn.execute(
+            "SELECT "
+            " SUM(CASE WHEN COALESCE(reviewed_at, 0) = 0 "
+            "  AND COALESCE(status, '') != 'removed' THEN 1 ELSE 0 END), "
+            " SUM(CASE WHEN COALESCE(status, '') = 'removed' "
+            "  AND COALESCE(appeal_at, 0) > 0 THEN 1 ELSE 0 END), "
+            " SUM(CASE WHEN COALESCE(status, '') = 'removed' THEN 1 ELSE 0 END) "
+            "FROM kb_posts "
+            "WHERE deleted_at IS NULL AND root_id = 0 AND cat != ''"
+        ).fetchone()
+    return {
+        "pending": int((row and row[0]) or 0),
+        "appeals": int((row and row[1]) or 0),
+        "removed": int((row and row[2]) or 0),
+    }
+
+
+def review(post_id: int, action: str, by: str, reason: str = "") -> dict | None:
+    """管理员的一次判定，返回改完的行（不存在 → None）。
+
+    action:
+      approve  通过。只记 reviewed_at / reviewed_by，status 不动。
+               不把正常态写成 'live'：那样所有查询都要记得它也等于正常，
+               将来少写一处就是"通过的帖子从列表消失"。
+      remove   下架。reason 必须是 REMOVE_KEYS 里的一个 —— 不给原因的下架，
+               作者只会觉得东西被吞了，而且复核时管理员自己也想不起为什么。
+      restore  撤销下架（申诉核实后）。reason 保留不动，留痕。
+    """
+    if action not in ("approve", "remove", "restore"):
+        raise ValueError("不认识的操作")
+    if action == "remove" and reason not in REMOVE_KEYS:
+        raise ValueError("下架要选一个原因")
+    kb_board._ensure()  # noqa: SLF001
+    now = _now()
+    with store._get_conn() as conn:  # noqa: SLF001
+        # 先确认这行存在且是顶层帖：UPDATE 的 rowcount 也受 WHERE 影响，
+        # 拿它当"不存在"的判断会把"已经是这个状态"误判成 404。
+        exists = conn.execute(
+            "SELECT 1 FROM kb_posts WHERE id = ? AND deleted_at IS NULL "
+            "AND root_id = 0 AND cat != ''",
+            (int(post_id),),
+        ).fetchone()
+        if not exists:
+            return None
+        conn.execute(
+            "UPDATE kb_posts SET reviewed_at = ?, reviewed_by = ? WHERE id = ?",
+            (now, by, int(post_id)),
+        )
+        if action == "remove":
+            conn.execute(
+                "UPDATE kb_posts SET status = 'removed', removed_reason = ?, "
+                "removed_by = ?, removed_at = ? WHERE id = ?",
+                (reason, by, now, int(post_id)),
+            )
+        elif action == "restore":
+            conn.execute(
+                "UPDATE kb_posts SET status = '', removed_reason = '', "
+                "removed_by = '', removed_at = 0 WHERE id = ?",
+                (int(post_id),),
+            )
+    return get_topic(post_id)
+
+
+def appeal(post_id: int, by_uid: str, note: str = "") -> bool:
+    """作者申请复核。只有**本人 + 确实处于下架状态 + 还没申诉过**才成立。
+
+    返回 False 时不区分是哪一条不满足 —— 对作者来说，这三种情况的表现都该是
+    "这个操作现在做不了"，分别给出提示反而泄露了帖子的状态给非作者。
+    """
+    kb_board._ensure()  # noqa: SLF001
+    with store._get_conn() as conn:  # noqa: SLF001
+        cur = conn.execute(
+            "UPDATE kb_posts SET appeal_at = ?, appeal_note = ? "
+            "WHERE id = ? AND user_id = ? "
+            "AND COALESCE(status, '') = 'removed' "
+            "AND COALESCE(appeal_at, 0) = 0",
+            (_now(), (note or "").strip()[:200], int(post_id), by_uid),
+        )
+    return bool(cur.rowcount)

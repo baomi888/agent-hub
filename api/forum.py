@@ -20,16 +20,23 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from api.kb import _board_authors, _post_view
-from core import forum, kb_board, quota
-from core.auth import get_current_user
+from core import anon, forum, kb_board, quota
+from core.auth import _is_secure_request, current_user_id, get_current_user
 from kb import pipelines
 
-# 论坛和留言板一样要登录：发言是要署名的，匿名会让"举报/删除"没有对象
-router = APIRouter(dependencies=[Depends(get_current_user)])
+# 论坛**不挂全局登录依赖**：它现在是免登录的（发帖只要一枚设备 cookie）。
+# 管理员接口（/mod/*）单独要求真登录 + 管理员身份 —— 权限逐条声明，
+# 不靠"整个 router 都要登录"这一条兜底。
+#
+# 这条改动是产品变更带来的：原来论坛是登录用户的讨论区，发言天然有对象；
+# 现在定位成站内随手发一句的地方（占座、问一句、出个闲置），注册会把
+# 发帖率打到地板。身份退化成"一枚设备 cookie"，但删除 / 举报 / 追溯
+# 仍然有对象，见 core/anon.py 里写清的代价。
+router = APIRouter()
 
 # 标题长度上限，与前端输入框的 maxLength 一致。后端再截一次是因为 curl 也能发。
 TITLE_MAX = kb_board.MAX_TITLE
@@ -45,6 +52,41 @@ class TopicIn(BaseModel):
 class ReplyIn(BaseModel):
     body: str = Field("", description="回复正文，最多 300 字")
     reply_to: int | None = Field(None, description="回复哪一层；不带就是回楼主")
+
+
+class ModIn(BaseModel):
+    action: str = Field(..., description="approve / remove / restore")
+    reason: str = Field("", description="下架原因 key，见 queue 响应里的 reasons")
+
+
+def anon_uid(request: Request, response: Response) -> str:
+    """登录了就返回真 uid，没登录就发一枚设备 cookie 并返回匿名 uid。
+
+    两种身份走同一个返回值，所以下游（发帖、删除、我的帖）不需要
+    "如果是匿名就换一套逻辑" —— 它们只看见一个 uid。
+
+    优先级：登录用户 > cookie。一个人登录着的时候发帖应该署真名，
+    而不是被浏览器里残留的匿名 cookie 顶掉。
+    """
+    try:
+        return current_user_id(request)
+    except HTTPException:
+        pass
+    raw = (request.cookies.get(anon.COOKIE) or "").strip()
+    if not anon.is_valid(raw):
+        raw = anon.new_token()
+        # httponly 必须：昵称是从这个值派生的，JS 读不到就没有
+        # "偷一个 uid 来冒名发帖"的口子。
+        response.set_cookie(
+            anon.COOKIE,
+            raw,
+            max_age=anon.MAX_AGE,
+            httponly=True,
+            samesite="lax",
+            secure=_is_secure_request(request),  # noqa: SLF001 —— 与登录 cookie 同一判定
+            path="/",
+        )
+    return anon.uid_of(raw)
 
 
 def _norm_cat(cat: str) -> str:
@@ -91,6 +133,14 @@ def _topic_view(row: dict, authors: dict[str, dict], uid: str, libs: dict[str, d
         "last_at": int(row["last_at"]),
         "reply_n": int(row["reply_n"]),
         "mine": row["user_id"] == uid,
+        # 对外只暴露 live / removed 两种。库里的正常态是空串 —— 那个值
+        # 不该漏到前端，否则每处判断都要同时考虑 "" 和 "live" 是同一件事。
+        "status": "removed" if (row.get("status") or "") == "removed" else "live",
+        # 原因是 key 落库、label 出库：文案改一次全站生效，老数据不用动。
+        "removed_reason": forum.REMOVE_LABEL.get(row.get("removed_reason") or "", ""),
+        "removed_at": int(row.get("removed_at") or 0),
+        "appeal_at": int(row.get("appeal_at") or 0),
+        "report_n": int(row.get("report_n") or 0),
         "author": {
             "name": a.get("name") or "已注销用户",
             "avatar": a.get("avatar") or "",
@@ -121,7 +171,7 @@ def _is_admin(uid: str) -> bool:
 
 
 @router.get("/cats")
-async def get_cats(uid: str = Depends(get_current_user)) -> dict:
+async def get_cats(uid: str = Depends(anon_uid)) -> dict:
     """板块 + 计数 + 广场统计。首屏一次拿齐，省一次往返。"""
     counts, stat = await asyncio.to_thread(
         lambda: (forum.count_by_cat(), forum.stats())
@@ -154,7 +204,7 @@ async def list_topics(
     before: int | None = Query(None, ge=1, description="上一页最后一条的 id（仅 sort=new）"),
     limit: int = Query(forum.PAGE, ge=1, le=50),
     q: str = Query("", max_length=60, description="标题或正文关键词"),
-    uid: str = Depends(get_current_user),
+    uid: str = Depends(anon_uid),
 ) -> dict:
     """话题列表。
 
@@ -193,11 +243,35 @@ async def list_topics(
 
 
 @router.get("/topics/{post_id}")
-async def get_topic(post_id: int, uid: str = Depends(get_current_user)) -> dict:
+async def get_topic(post_id: int, uid: str = Depends(anon_uid)) -> dict:
     """话题详情：标题区 + 全部楼层（楼主一层 + 回复若干）。"""
     row = await asyncio.to_thread(forum.get_topic, post_id)
     if not row or row.get("deleted_at") or not row["cat"]:
         raise HTTPException(status_code=404, detail="这个话题不存在")
+
+    # 下架之后原链接还要能打开。直接 404 会让人以为网站坏了 —— 尤其这条
+    # 链接可能已经被分享到班级群里，点进来是"页面不存在"比"已下架"伤害更大。
+    if (row.get("status") or "") == "removed":
+        authors = await asyncio.to_thread(_board_authors, [row])
+        libs = await asyncio.to_thread(_kb_briefs, [row])
+        mine = row["user_id"] == uid
+        return {
+            "topic": _topic_view(row, authors, uid, libs),
+            "body": "",
+            "posts": [],
+            "removed": True,
+            # 原因只给作者。别人看到"已下架"就够了 —— 公布原因等于把违规
+            # 细节二次传播，也让作者在同学面前被点名。
+            "reason": (
+                forum.REMOVE_LABEL.get(row.get("removed_reason") or "", "")
+                if mine
+                else ""
+            ),
+            "can_appeal": mine and int(row.get("appeal_at") or 0) == 0,
+            "stickers": list(kb_board.STICKERS),
+            # 0 就是"不能回复"。前端据此把输入框收掉，而不是让人写完再报错。
+            "max_reply": 0,
+        }
 
     kids = await asyncio.to_thread(kb_board.replies_of, post_id)
     flat = [_as_post(row), *kids]
@@ -218,11 +292,17 @@ async def get_topic(post_id: int, uid: str = Depends(get_current_user)) -> dict:
         "posts": [floor, *[_post_view(p, authors, names, uid, owner, admin) for p in kids]],
         "stickers": list(kb_board.STICKERS),
         "max_reply": kb_board.MAX_LEN,
+        # 正常态也把这三个字段给上（removed=False / 空原因 / 不能申诉）。
+        # 让响应形状与下架分支一致：前端不用写 `"removed" in data`，
+        # 少一处"有时候有、有时候没有"的字段就少一处判断错的机会。
+        "removed": False,
+        "reason": "",
+        "can_appeal": False,
     }
 
 
 @router.post("/topics")
-async def create_topic(req: TopicIn, uid: str = Depends(get_current_user)) -> dict:
+async def create_topic(req: TopicIn, uid: str = Depends(anon_uid)) -> dict:
     """发一个话题。板块必填、标题必填，正文可以只有一句。"""
     cat = _norm_cat(req.cat)
     if not cat:
@@ -269,7 +349,7 @@ async def create_topic(req: TopicIn, uid: str = Depends(get_current_user)) -> di
 
 @router.post("/topics/{post_id}/replies")
 async def add_reply(
-    post_id: int, req: ReplyIn, uid: str = Depends(get_current_user)
+    post_id: int, req: ReplyIn, uid: str = Depends(anon_uid)
 ) -> dict:
     """回复话题，或者回复楼里的某一层（仍只落两层）。"""
     topic = await asyncio.to_thread(forum.get_topic, post_id)
@@ -325,7 +405,7 @@ async def add_reply(
 
 
 @router.delete("/topics/{post_id}")
-async def delete_topic(post_id: int, uid: str = Depends(get_current_user)) -> dict:
+async def delete_topic(post_id: int, uid: str = Depends(anon_uid)) -> dict:
     """软删话题，或者删楼里的**单条回复**。
 
     同一个接口两种粒度，因为删的都是 kb_posts 里的行 —— 分成
@@ -353,3 +433,96 @@ async def delete_topic(post_id: int, uid: str = Depends(get_current_user)) -> di
     if not removed:
         raise HTTPException(status_code=404, detail="这条不存在")
     return {"ok": True, "id": post_id, "removed": removed, "root_id": root_id}
+
+
+# ============================================================
+# 免登录的两条：我发的帖 / 申请复核
+# ============================================================
+
+
+@router.get("/mine")
+async def my_topics(
+    limit: int = Query(50, ge=1, le=100),
+    uid: str = Depends(anon_uid),
+) -> dict:
+    """这台设备发过的帖，**含已下架的**。
+
+    免登录没有消息中心，这个接口就是"通知"的落点：作者回访时在
+    「我发的帖」里看到哪条被判违规、原因是什么、能不能申诉。
+    界面上必须写清"靠这台设备认出来的" —— 写成"我的账号"就是在撒谎。
+    """
+    rows = await asyncio.to_thread(forum.list_mine, uid, limit)
+    authors = await asyncio.to_thread(_board_authors, rows) if rows else {}
+    libs = await asyncio.to_thread(_kb_briefs, rows)
+    return {
+        "posts": [_topic_view(r, authors, uid, libs) for r in rows],
+        "removed_n": sum(1 for r in rows if (r.get("status") or "") == "removed"),
+    }
+
+
+@router.post("/topics/{post_id}/appeal")
+async def appeal_topic(post_id: int, uid: str = Depends(anon_uid)) -> dict:
+    """作者申请复核。只能点一次 —— 反复点会把管理台刷满，复核就变成噪音。"""
+    ok = await asyncio.to_thread(forum.appeal, post_id, uid)
+    if not ok:
+        raise HTTPException(
+            status_code=400, detail="这条现在不能申请复核（可能已经申请过了）"
+        )
+    return {"ok": True}
+
+
+# ============================================================
+# 管理台（先发后审）
+# ============================================================
+
+
+async def _require_admin(uid: str) -> None:
+    """管理员门禁。抽成函数是因为几个端点都要它 —— 逐个抄一遍，
+    迟早有一个写成 `if not admin: pass`（这种错不会报错，只是不拦）。"""
+    if not await asyncio.to_thread(_is_admin, uid):
+        raise HTTPException(status_code=403, detail="只有管理员能进管理台")
+
+
+@router.get("/mod/queue")
+async def mod_queue(admin: str = Depends(get_current_user)) -> dict:
+    """待审 + 被申诉 + 三个计数，一次拿齐。
+
+    队列里没有"通过过的"（`reviewed_at > 0` 已被排除），也没有已下架的。
+    管理员打开就是"现在该看的"，不用自己筛 —— 筛选条件放在服务端，
+    前端多一个 tab 就多一处可能和规则不一致的实现。
+    """
+    await _require_admin(admin)
+    pending, appeals = await asyncio.gather(
+        asyncio.to_thread(forum.review_queue, 40),
+        asyncio.to_thread(forum.list_appeals, 20),
+    )
+    stat = await asyncio.to_thread(forum.mod_stats)
+    rows = [*pending, *appeals]
+    authors = await asyncio.to_thread(_board_authors, rows) if rows else {}
+    libs = await asyncio.to_thread(_kb_briefs, rows)
+    return {
+        "stats": stat,
+        "pending": [_topic_view(r, authors, admin, libs) for r in pending],
+        "appeals": [_topic_view(r, authors, admin, libs) for r in appeals],
+        "reasons": [{"key": k, "label": v} for k, v in forum.REMOVE_REASONS],
+    }
+
+
+@router.post("/mod/{post_id}")
+async def mod_review(
+    post_id: int, req: ModIn, admin: str = Depends(get_current_user)
+) -> dict:
+    """通过 / 下架 / 撤销下架。三个动作一个接口 —— 它们改的是同一行、
+    记的是同两个字段；拆成三个端点只会让前端的 URL 变长，规则还是同一套。"""
+    await _require_admin(admin)
+    try:
+        row = await asyncio.to_thread(
+            forum.review, post_id, req.action, admin, req.reason
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not row:
+        raise HTTPException(status_code=404, detail="这条不存在")
+    authors = await asyncio.to_thread(_board_authors, [row])
+    libs = await asyncio.to_thread(_kb_briefs, [row])
+    return {"topic": _topic_view(row, authors, admin, libs)}

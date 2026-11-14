@@ -17,12 +17,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 
-import AuthGate from "@/components/AuthGate";
 import CornIcon from "@/components/CornIcon";
 import MascotLogo from "@/components/chat/MascotLogo";
 import UserAvatar from "@/components/settings/UserAvatar";
 import { api } from "@/lib/api";
-import { useAuth } from "@/lib/hooks/useAuth";
 import { fmtWhen } from "@/lib/time";
 import type { BoardPost, ForumDetail } from "@/lib/types";
 
@@ -32,7 +30,6 @@ interface ReplyTarget {
 }
 
 export default function ForumTopicPage() {
-  const auth = useAuth();
   const router = useRouter();
   const params = useParams<{ postId: string }>();
   const postId = Number(params?.postId ?? 0);
@@ -194,18 +191,9 @@ export default function ForumTopicPage() {
     </li>
   );
 
-  if (auth.loading) {
-    return (
-      <div className="fm-boot">
-        <p>正在确认登录状态...</p>
-      </div>
-    );
-  }
-  if (!auth.me) {
-    return (
-      <AuthGate allowSignup={auth.allowSignup} onLogin={auth.login} onRegister={auth.register} />
-    );
-  }
+  /* 论坛不再要求登录（2026-11-14）。这一页更要放开 —— 帖子链接会被转发到
+     群里，点进来先看到登录框是最劝退的一种；也不需要先等 auth 就绪，
+     否则首屏会闪一句「正在确认登录状态」。 */
 
   const topic = data?.topic;
   const floor = data?.posts?.[0];

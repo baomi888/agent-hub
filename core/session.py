@@ -124,12 +124,30 @@ def _add_missing_columns(conn, table: str, columns: dict[str, str]) -> None:
 #       —— 自动把「说一句」的留言搬进论坛，标题只能靠截正文猜，板块也只能靠猜，
 #       那是把垃圾往首页搬，不是聚合。
 #     · solved 只对顶层帖有意义，回复上永远是 0。
+#   status 系列              2026-11-14 先发后审
+#     · status 空串 = 正常，'removed' = 已下架。**不回填历史行**：
+#       NOT NULL DEFAULT '' 让老数据天然就是正常态，回填反而多一次全表写。
+#     · 用空串而不是 'live'：判断点只有一处（是不是 removed），
+#       多一个值就多一个"忘了它也等于正常"的机会。
+#     · reviewed_* 记"管理员看过了"。不记的话待审队列永远翻出同一条，
+#       管理员每次打开都要重新判一遍已经判过的东西。
+#     · appeal_* 是作者申诉。有它才谈得上"下架可以争一句"，
+#       否则下架就是单向的，作者只会觉得东西被吞了。
 _KB_POST_ADD_COLUMNS: dict[str, str] = {
     "root_id": "INTEGER NOT NULL DEFAULT 0",
     "reply_to_id": "INTEGER NOT NULL DEFAULT 0",
     "title": "TEXT NOT NULL DEFAULT ''",
     "cat": "TEXT NOT NULL DEFAULT ''",
     "solved": "INTEGER NOT NULL DEFAULT 0",
+    "status": "TEXT NOT NULL DEFAULT ''",
+    "removed_reason": "TEXT NOT NULL DEFAULT ''",
+    "removed_by": "TEXT NOT NULL DEFAULT ''",
+    "removed_at": "INTEGER NOT NULL DEFAULT 0",
+    "reviewed_at": "INTEGER NOT NULL DEFAULT 0",
+    "reviewed_by": "TEXT NOT NULL DEFAULT ''",
+    "appeal_at": "INTEGER NOT NULL DEFAULT 0",
+    "appeal_note": "TEXT NOT NULL DEFAULT ''",
+    "report_n": "INTEGER NOT NULL DEFAULT 0",
 }
 
 

@@ -19,11 +19,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import AuthGate from "@/components/AuthGate";
 import CornIcon from "@/components/CornIcon";
 import MascotLogo from "@/components/chat/MascotLogo";
 import { api } from "@/lib/api";
-import { useAuth } from "@/lib/hooks/useAuth";
 import { fmtNum, fmtWhen } from "@/lib/time";
 import type { ForumCat, ForumSort, ForumTopic, PublicKbInfo } from "@/lib/types";
 
@@ -85,7 +83,6 @@ const markOf = (t: ForumTopic, isPin = false) => {
 };
 
 export default function ForumPage() {
-  const auth = useAuth();
   const router = useRouter();
 
   const [cats, setCats] = useState<ForumCat[]>([]);
@@ -287,18 +284,10 @@ export default function ForumPage() {
     }
   };
 
-  if (auth.loading) {
-    return (
-      <div className="fm-boot">
-        <p>正在确认登录状态...</p>
-      </div>
-    );
-  }
-  if (!auth.me) {
-    return (
-      <AuthGate allowSignup={auth.allowSignup} onLogin={auth.login} onRegister={auth.register} />
-    );
-  }
+  /* 论坛不再要求登录（2026-11-14）。没登录的人由后端发一枚设备 cookie，
+     发帖署名「玉米NNNN」，删自己的帖、看「我发的帖」都照常。
+     所以这里既不需要 AuthGate，也不需要先等 auth 就绪 —— 等它只会让
+     首屏先闪一句「正在确认登录状态」，而这句对免登录用户毫无意义。 */
 
   const postable = cats.filter((c) => c.postable);
   const catName = cat ? (cats.find((c) => c.key === cat)?.label ?? "") : "";

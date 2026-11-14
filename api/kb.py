@@ -39,7 +39,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.schemas import KBQueryResponse
-from core import account, config, kb_board, kb_favs, kb_views, quota, upload
+from core import account, anon, config, kb_board, kb_favs, kb_views, quota, upload
 from core import session as store
 from core.auth import get_current_user
 from core.netsafe import assert_safe_url
@@ -1346,6 +1346,10 @@ def _board_authors(posts: list[dict]) -> dict[str, dict]:
     for p in posts:
         u = users.get(p["user_id"]) or {}
         name = (u.get("nickname") or "").strip() or (u.get("username") or "").strip()
+        # 匿名帖在 users 表里查不到。昵称由 uid 派生（同一台设备永远同名），
+        # 否则所有匿名帖都会署「已注销用户」—— 那读起来像这个人的账号被删了。
+        if not name and anon.is_anon(p["user_id"]):
+            name = anon.name_of(p["user_id"])
         uname = (u.get("username") or "").strip().lower()
         admin = p["user_id"] in admin_uids or (bool(uname) and uname in admin_names)
         out[p["user_id"]] = {
