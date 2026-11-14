@@ -784,6 +784,63 @@
   text-align: center;
 }
 
+/*
+ * 空表：一行状态，不加虚线框。
+ *
+ * 原来这里是 `<p class="campus-empty">还没有课程。点「添加课程」手动录入，
+ * 或「载入示例」先看看效果。</p>` —— 虚线框 28px 上下内边距，框里那句话在念
+ * 上方 20px 处两个按钮的名字。表头还在场，本身已经说明「这里会列课程」，
+ * 缺的是数据不是说明。
+ */
+.campus-row-empty {
+  padding: 18px 6px;
+  color: var(--text-3);
+  text-align: center;
+}
+
+/*
+ * 换算表（GPA）：摘要一行、展开两列。
+ *
+ * 收起时高度是「一行 fs-sm」，和「加权均分」那句口径文案基本等高 ——
+ * 切算法时卡片不再跳（换之前 390 宽下整行差 48px）。
+ * 不用 `max-height` 硬裁：表格行数随算法变（标准 10 档 / 北大合并后 8 档）。
+ */
+.campus-scale {
+  width: 100%;
+  max-width: 320px;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.campus-scale th,
+.campus-scale td {
+  padding: 4px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+
+.campus-scale th {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-3);
+  border-bottom-color: var(--line-strong);
+}
+
+.campus-scale td {
+  color: var(--text-2);
+}
+
+/* 这一列是数字，右对齐才能一眼扫出「几档对应 4.0」 */
+.campus-scale td.is-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.campus-scale tr:last-child td {
+  border-bottom: 0;
+}
+
 /* ---------- 空态 ---------- */
 
 .campus-empty {
@@ -858,7 +915,18 @@
 }
 
 .campus-details summary {
+  padding: 2px 0;
   cursor: pointer;
+}
+
+/* 可点的东西要有可点的反馈：导入教程那处 summary 原来只有 cursor:pointer，
+   触屏上等于零提示 */
+.campus-details summary:hover {
+  color: var(--accent-ink);
+}
+
+.campus-details[open] summary {
+  margin-bottom: 6px;
 }
 
 .campus-prompt {

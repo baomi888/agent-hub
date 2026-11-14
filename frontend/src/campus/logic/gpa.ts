@@ -36,6 +36,43 @@ const TABLES: Record<Exclude<GpaAlgo, "wavg">, ReadonlyArray<readonly [number, n
   ],
 };
 
+/** 档位的可读形式：只表达下限，不编造上限 */
+export interface GpaScaleRow {
+  /** 下限；`null` 表示「低于上一档」的兜底区间（< 60） */
+  from: number | null;
+  point: number;
+}
+
+/**
+ * 换算表的可读形式，给界面渲染用。
+ *
+ * 为什么从 TABLES 派生而不是在组件里手写一遍：
+ * 原来界面上那段「90=4.0、85=3.7……」是手写字符串，和这里的阈值表各活各的，
+ * 改了一个忘了另一个就会出现「说明写 85、代码按 84 算」这种最难查的错。
+ * 现在只有 TABLES 一个真相，界面是它的投影。
+ *
+ * 相邻两档绩点相同时合并到较低下限（北大表 63 与 60 都是 1.0），
+ * 这不改变任何输入的结果，只是少一行、少一个让人以为是打字错误的重复。
+ */
+export function gpaScale(algo: Exclude<GpaAlgo, "wavg">): GpaScaleRow[] {
+  const table = TABLES[algo];
+  const out: GpaScaleRow[] = [];
+
+  for (const [min, point] of table) {
+    if (min === 0) break; // 兜底档单独追加，不能当成「≥ 0」
+    const last = out[out.length - 1];
+    if (last && last.point === point) {
+      last.from = min; // 合并：保留下限更低的那一档
+      continue;
+    }
+    out.push({ from: min, point });
+  }
+
+  const zero = table.find(([min]) => min === 0);
+  if (zero) out.push({ from: null, point: zero[1] });
+  return out;
+}
+
 /** 单科换算：加权均分档直接返回原始分，不折算 */
 export function scoreToGpa(score: number, algo: GpaAlgo): number {
   if (algo === "wavg") return score;

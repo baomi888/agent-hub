@@ -24,6 +24,47 @@ function toMsg(e: unknown): string {
   return m && m.trim() ? m : "没能改成，请稍后重试";
 }
 
+/** 串里有没有 4 位以上的连号（1234 / abcd / 9876）—— 字典第一把就试这个 */
+function hasRun(pwd: string, minRun = 4): boolean {
+  let up = 1;
+  let down = 1;
+  for (let i = 1; i < pwd.length; i += 1) {
+    const step = pwd.charCodeAt(i) - pwd.charCodeAt(i - 1);
+    up = step === 1 ? up + 1 : 1;
+    down = step === -1 ? down + 1 : 1;
+    if (up >= minRun || down >= minRun) return true;
+  }
+  return false;
+}
+
+/**
+ * 新密码的实时反馈。
+ *
+ * 原来是输入框下面一行常驻灰字「至少 8 位。别用生日和学号，那是最先被试的几个。」
+ * —— 没输之前念一遍规则，输了之后也不告诉他现在差多少。改成随输入说话：
+ *  - 没输 → 什么都不显示（不预先念规则）；
+ *  - 不足 8 位 → 报差额，这是唯一会挡住提交的硬条件；
+ *  - 够了但形状弱 → 说一句为什么弱（纯数字 / 整串同字符 / 连号）；
+ *  - 够了且不弱 → 闭嘴。「还差 N 位」消失本身就是「可以提交了」的信号，
+ *    再挂一行「✓ 符合要求」等于把屏幕又念了一遍。
+ *
+ * 返回 null 表示不说话。
+ */
+function pwdHint(pwd: string): { text: string; weak: boolean } | null {
+  if (pwd.length === 0) return null;
+  if (pwd.length < 8) return { text: `还差 ${8 - pwd.length} 位`, weak: false };
+  if (/^\d+$/.test(pwd)) {
+    return { text: "纯数字的密码最先被试，加两个字母就稳很多。", weak: true };
+  }
+  if (/^(.)\1+$/.test(pwd)) {
+    return { text: "整串是同一个字符，等于只有一位。", weak: true };
+  }
+  if (hasRun(pwd)) {
+    return { text: "有四位以上连号，猜的人第一轮就会试。", weak: true };
+  }
+  return null;
+}
+
 export default function PasswordDialog({ open, onClose }: Props) {
   const [oldPwd, setOldPwd] = useState("");
   const [newPwd, setNewPwd] = useState("");
@@ -47,6 +88,8 @@ export default function PasswordDialog({ open, onClose }: Props) {
     }, 0);
     return () => window.clearTimeout(t);
   }, [open]);
+
+  const hint = pwdHint(newPwd);
 
   async function submit(e?: React.FormEvent) {
     e?.preventDefault();
@@ -142,9 +185,18 @@ export default function PasswordDialog({ open, onClose }: Props) {
             type="password"
             autoComplete="new-password"
             value={newPwd}
+            aria-describedby={hint ? "acct-pw-hint" : undefined}
             onChange={(e) => setNewPwd(e.target.value)}
           />
-          <span className="hint">至少 8 位。别用生日和学号，那是最先被试的几个。</span>
+          {hint && (
+            <span
+              id="acct-pw-hint"
+              className={`hint acct-pw-hint${hint.weak ? " is-weak" : ""}`}
+              role="status"
+            >
+              {hint.text}
+            </span>
+          )}
         </label>
         <label className="acct-field">
           <span className="acct-label">再输一次新密码</span>

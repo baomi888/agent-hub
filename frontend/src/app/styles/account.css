@@ -511,6 +511,16 @@
   line-height: 1.5;
 }
 
+/* 新密码的实时反馈：间距交给 .acct-field 的 gap，别再叠一层 margin-top */
+.acct-pw-hint {
+  margin: 0;
+}
+
+/* 弱口令那句是「换了会更安全」的警示，不是错误（不挡提交），用 warning 不用 red */
+.acct-pw-hint.is-weak {
+  color: var(--warning-ink);
+}
+
 /* 当前登录名：改名弹窗里常驻显示，防止改完忘了自己原来叫什么 */
 .acct-now {
   display: flex;

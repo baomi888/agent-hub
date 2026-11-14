@@ -13,28 +13,34 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { computeGpa, parseLegacyGpa, SAMPLE_ROWS } from "../../logic/gpa";
+import { computeGpa, gpaScale, parseLegacyGpa, SAMPLE_ROWS } from "../../logic/gpa";
+import type { GpaScaleRow } from "../../logic/gpa";
 import { CAMPUS_KEYS, LEGACY_KEYS } from "../../storage/keys";
 import { readWithMigration, writeJson } from "../../storage";
 import type { GpaAlgo, GpaRow } from "../../types";
 
-/** 算法说明文案，与旧版 ALGO_DESC 保持一致（用户已经熟悉这套说法） */
-const ALGO_OPTIONS: ReadonlyArray<{ value: GpaAlgo; label: string; desc: string }> = [
-  {
-    value: "std4",
-    label: "标准 4.0",
-    desc: "90=4.0、85=3.7、82=3.3、78=3.0、75=2.7、72=2.3、68=2.0、64=1.5、60=1.0，低于 60 记 0。",
-  },
-  {
-    value: "pku",
-    label: "北大 4.0",
-    desc: "90=4.0、85=3.7、83=3.3、80=3.0、77=2.7、73=2.3、70=2.0、67=1.5、63 与 60 均记 1.0，低于 60 记 0。",
-  },
-  {
-    value: "wavg",
-    label: "加权均分",
-    desc: "直接用原始成绩按学分加权，不折算绩点。",
-  },
+/**
+ * 换算方式。
+ *
+ * `scale` 与 `note` 二选一：
+ *  - 有换算表的（标准 / 北大）走 `<details>` 收起 —— 十行分数档常显在页面上，
+ *    既没人逐行读，又会在窄屏把卡片撑高（实测 390 宽切换算法整块高度差 48px）；
+ *  - 「加权均分」没有表，只有一句口径，且这句是**必须常显**的：
+ *    切过去以后总分含义变了，不说等于让人看错数。
+ *
+ * 表本身从 logic/gpa.ts 的 TABLES 派生，不在这里手写第二份。
+ */
+type AlgoOption = {
+  value: GpaAlgo;
+  label: string;
+  scale?: GpaScaleRow[];
+  note?: string;
+};
+
+const ALGO_OPTIONS: readonly AlgoOption[] = [
+  { value: "std4", label: "标准 4.0", scale: gpaScale("std4") },
+  { value: "pku", label: "北大 4.0", scale: gpaScale("pku") },
+  { value: "wavg", label: "加权均分", note: "直接用原始成绩按学分加权，不折算绩点。" },
 ];
 
 interface GpaSnapshot {
@@ -146,10 +152,38 @@ export default function GpaTool() {
               ))}
             </select>
           </label>
-          <p className="campus-card-note" style={{ flex: "1 1 260px", margin: 0 }}>
-            {activeAlgo.desc}
-          </p>
         </div>
+
+        {activeAlgo.scale ? (
+          // key={algo}：换算法时重挂一次，展开过的表自动收回 —— 否则切到北大
+          // 会直接露出「标准 4.0」那次展开的状态，看起来像是没换成功
+          <details className="campus-details" key={algo}>
+            <summary>{activeAlgo.label} · 换算表</summary>
+            <table className="campus-scale">
+              <caption className="sr-only">
+                {activeAlgo.label}：成绩下限与对应绩点，低于 60 记 0
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">成绩</th>
+                  <th scope="col">绩点</th>
+                </tr>
+              </thead>
+              <tbody>
+                {activeAlgo.scale.map((row) => (
+                  <tr key={row.from === null ? "below" : row.from}>
+                    <td>{row.from === null ? "不足 60" : `≥ ${row.from}`}</td>
+                    <td className="is-num">{row.point.toFixed(1)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
+        ) : (
+          <p className="campus-card-note" style={{ marginTop: 10, marginBottom: 0 }}>
+            {activeAlgo.note}
+          </p>
+        )}
       </div>
 
       {/* 成绩单 */}
@@ -166,91 +200,95 @@ export default function GpaTool() {
           </div>
         </div>
 
-        {rows.length === 0 ? (
-          <p className="campus-empty">
-            还没有课程。点「添加课程」手动录入，或「载入示例」先看看效果。
-          </p>
-        ) : (
-          <table className="campus-table">
-            <thead>
+        {/* 空态不另起一个虚线框：框里那句话在念上方两个按钮的名字（「点添加课程、
+            或载入示例」），而按钮就在上方 20px 处。表格空着 + 表头在场，本身就说明
+            「这里会列课程」，缺的是数据不是说明。 */}
+        <table className="campus-table">
+          <thead>
+            <tr>
+              <th scope="col">课程</th>
+              <th scope="col" style={{ width: 88 }}>
+                学分
+              </th>
+              <th scope="col" style={{ width: 88 }}>
+                成绩
+              </th>
+              <th scope="col" style={{ width: 72, textAlign: "center" }}>
+                绩点
+              </th>
+              <th scope="col" style={{ width: 56 }}>
+                <span className="sr-only">操作</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && (
               <tr>
-                <th scope="col">课程</th>
-                <th scope="col" style={{ width: 88 }}>
-                  学分
-                </th>
-                <th scope="col" style={{ width: 88 }}>
-                  成绩
-                </th>
-                <th scope="col" style={{ width: 72, textAlign: "center" }}>
-                  绩点
-                </th>
-                <th scope="col" style={{ width: 56 }}>
-                  <span className="sr-only">操作</span>
-                </th>
+                <td colSpan={5} className="campus-row-empty">
+                  还没有课程
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, index) => {
-                const detail = summary.rows[index];
-                return (
-                  <tr key={index}>
-                    <td>
-                      <input
-                        className="campus-input"
-                        type="text"
-                        value={row.name}
-                        placeholder="如：高等数学"
-                        aria-label={`第 ${index + 1} 门课程名称`}
-                        onChange={(event) => updateRow(index, { name: event.target.value })}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        className="campus-input"
-                        type="number"
-                        min={0}
-                        step={0.5}
-                        value={row.credit === 0 ? "" : String(row.credit)}
-                        placeholder="3"
-                        aria-label={`第 ${index + 1} 门课程学分`}
-                        onChange={(event) =>
-                          updateRow(index, { credit: toNumber(event.target.value) ?? 0 })
-                        }
-                      />
-                    </td>
-                    <td>
-                      <input
-                        className="campus-input"
-                        type="number"
-                        min={0}
-                        max={100}
-                        step={1}
-                        value={row.score === null ? "" : String(row.score)}
-                        placeholder="85"
-                        aria-label={`第 ${index + 1} 门课程成绩`}
-                        onChange={(event) => updateRow(index, { score: toNumber(event.target.value) })}
-                      />
-                    </td>
-                    <td className="is-num">
-                      {detail?.point == null ? "—" : detail.point.toFixed(1)}
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="campus-btn is-danger"
-                        aria-label={`删除第 ${index + 1} 门课程`}
-                        title="删除该行"
-                        onClick={() => removeRow(index)}
-                      >
-                        删
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
+            )}
+            {rows.map((row, index) => {
+              const detail = summary.rows[index];
+              return (
+                <tr key={index}>
+                  <td>
+                    <input
+                      className="campus-input"
+                      type="text"
+                      value={row.name}
+                      placeholder="如：高等数学"
+                      aria-label={`第 ${index + 1} 门课程名称`}
+                      onChange={(event) => updateRow(index, { name: event.target.value })}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="campus-input"
+                      type="number"
+                      min={0}
+                      step={0.5}
+                      value={row.credit === 0 ? "" : String(row.credit)}
+                      placeholder="3"
+                      aria-label={`第 ${index + 1} 门课程学分`}
+                      onChange={(event) =>
+                        updateRow(index, { credit: toNumber(event.target.value) ?? 0 })
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="campus-input"
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={row.score === null ? "" : String(row.score)}
+                      placeholder="85"
+                      aria-label={`第 ${index + 1} 门课程成绩`}
+                      onChange={(event) => updateRow(index, { score: toNumber(event.target.value) })}
+                    />
+                  </td>
+                  <td className="is-num">
+                    {detail?.point == null ? "—" : detail.point.toFixed(1)}
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="campus-btn is-danger"
+                      aria-label={`删除第 ${index + 1} 门课程`}
+                      title="删除该行"
+                      onClick={() => removeRow(index)}
+                    >
+                      删
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
 
         <p className="campus-card-note" style={{ marginTop: 12 }}>
           数据先存在这台设备的浏览器里，登录后会同步到云端，换设备也在。清理浏览器数据会一并清掉本地那份。

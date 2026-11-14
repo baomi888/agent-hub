@@ -36,16 +36,17 @@ REM = CONSOLE / "reminders" / "page.tsx"
 TOOLS = CONSOLE / "tools" / "page.tsx"
 SETTINGS = CONSOLE / "settings" / "page.tsx"
 
-# JSX 注释：{/* ... */}（可跨行）与整行 // 注释。
+# 注释：块注释 `/* ... */`（含 JSX 里的 `{/* ... */}`）与整行 `//`。
 # ★ 必须先剥注释再查文案：注释里会引用被删掉的句子做解释（"原来这里写的是…"），
-#   不剥就会把说明性注释当成页面上真实渲染的字。
-_JSX_COMMENT = re.compile(r"\{/\*.*?\*/\}", re.S)
+#   不剥就会把说明性注释当成页面上真实渲染的字，于是"已经删干净了"的断言永远为假。
+#   JSX 注释原来单独写过一条正则，后来发现 JSDoc 同样会把原句抄一遍，就统一按块注释剥了。
+_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
 _LINE_COMMENT = re.compile(r"^[ \t]*//.*$", re.M)
 _TAG = re.compile(r"<[^>]+>")
 
 
 def _code(path: Path) -> str:
-    return _LINE_COMMENT.sub("", _JSX_COMMENT.sub("", path.read_text(encoding="utf-8")))
+    return _LINE_COMMENT.sub("", _BLOCK_COMMENT.sub("", path.read_text(encoding="utf-8")))
 
 
 # ==================== ① 指标卡不挂括号 ====================
@@ -202,3 +203,82 @@ def test_settings_hint_sits_beside_the_account_card():
     assert i_card < i_hint < i_button, (
         "提示句不在账号卡与上手说明按钮之间 —— 它读起来会像在解释那个按钮"
     )
+
+
+# ==================== 第三批：把说明变成控件 ====================
+#
+# 前两批做的是「删」和「挪」。这批换个思路：**说明之所以要写，是因为控件不说话**。
+# 让控件自己说话，那段说明就不必存在了。
+
+GPA_TOOL = ROOT / "frontend" / "src" / "campus" / "tools" / "gpa" / "GpaTool.tsx"
+GPA_LOGIC = ROOT / "frontend" / "src" / "campus" / "logic" / "gpa.ts"
+PWD_DIALOG = ROOT / "frontend" / "src" / "components" / "settings" / "PasswordDialog.tsx"
+
+
+def test_gpa_scale_is_collapsed_and_derived_from_the_real_table():
+    """换算表默认收起，且档位必须从 logic 的 TABLES 派生，不许在组件里再手写一份。
+
+    原来那张表是一段手写字符串（「90=4.0、85=3.7……」），和 `logic/gpa.ts` 的
+    阈值表各活各的：改了一个忘了另一个，就会出现"说明写 85、代码按 84 算"。
+    更直接的问题是它在窄屏把卡片撑高 —— 390 宽下切换算法，整块高度差 48px。
+
+    这条断言守两件事：① 手写串不能回来；② 表只能从 `gpaScale()` 来。
+    """
+    tool = _code(GPA_TOOL)
+    logic = _code(GPA_LOGIC)
+
+    assert "export function gpaScale" in logic, "logic 层没有导出的换算表投影函数"
+    derived = tool.count("scale: gpaScale(")
+    assert derived == 2, (
+        f"换算表派生调用有 {derived} 处，应为 2 处（标准 / 北大）；"
+        "加权均分没有档位表，只有一句口径"
+    )
+
+    # 手写串不许回来。这三段是原来那段 desc 的特征片段。
+    for frag in ("90=4.0", "85=3.7", "63 与 60 均记 1.0"):
+        assert frag not in tool, f"手写的换算说明又回来了：「{frag}」"
+
+    # 必须是可展开的 details，且摘要说明是哪套算法的表（否则用户不知道点开看的是什么）
+    assert re.search(r"<details[^>]*campus-details", tool), "换算表没有收进 <details>"
+    assert "<summary>" in tool and "activeAlgo.label" in tool.split("<summary>")[1][:80], (
+        "details 的摘要里没有带算法名"
+    )
+
+
+def test_password_rule_speaks_only_when_it_has_something_to_say():
+    """密码规则不许常显，改成随输入给反馈。
+
+    原来是输入框下面一行常驻灰字「至少 8 位。别用生日和学号，那是最先被试的几个。」
+    —— 没输之前先把规则念一遍，输了之后也不告诉他还差多少。
+
+    现在：没有输入 → 什么都不显示；不足 8 位 → 报差额；够了但形状弱 → 说为什么弱；
+    够了且不弱 → 闭嘴（「还差 N 位」消失本身就是可以提交的信号）。
+    """
+    src = _code(PWD_DIALOG)
+
+    assert "至少 8 位。别用生日和学号" not in src, "常显的静态规则又回来了"
+    assert "pwdHint" in src, "实时反馈函数不见了"
+    assert re.search(r"\{hint &&", src), "提示不是按条件渲染的 —— 空输入时也会占一行"
+    assert 'role="status"' in src, "变化中的提示需要 role=status，否则读屏不会播报"
+
+    # 三条判据各守一件事：硬条件（位数）、形状（纯数字 / 同字符 / 连号）
+    for marker in ("还差 ", "纯数字", "连号"):
+        assert marker in src, f"弱口令判据少了一条：「{marker}」"
+
+    # 硬条件必须仍然挡住提交 —— 前端的 8 位校验不能改成只提示不拦
+    assert re.search(r"newPwd\.length < 8", src), "提交前的 8 位校验被删了"
+
+
+def test_gpa_empty_state_is_a_row_not_a_lecture():
+    """成绩单空态是一行状态，不是虚线框里的一段教程。
+
+    原来：「还没有课程。点「添加课程」手动录入，或「载入示例」先看看效果。」
+    两个按钮就在上方 20px 处，这句话在念它们的名字。表头在场，
+    本身已经说明「这里会列课程」，缺的是数据不是说明。
+    """
+    src = _code(GPA_TOOL)
+    assert "campus-row-empty" in src, "空态没有收进表格行"
+    assert "还没有课程" in src, "空态文字丢了 —— 表头在场也要有一句状态"
+
+    for frag in ("点「添加课程」", "「载入示例」先看看效果"):
+        assert frag not in src, f"空态又在念按钮名：「{frag}」"
