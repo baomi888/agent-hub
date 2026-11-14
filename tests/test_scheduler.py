@@ -20,8 +20,14 @@ import sqlite3
 import sys
 import tempfile
 import unittest
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+
+# 线上是 Python 3.10，没有 `datetime.UTC`（3.11 才加）。这个测试文件曾经写
+# `from datetime import UTC`，在本机 3.12 上全绿，一上服务器整个 tests/ 目录
+# **收集就失败** —— 后面几百条一条都跑不到，而报错只是 `ImportError`。
+# 这不是测试的细节问题，正是线上禁 `datetime.UTC` 那条硬规矩本身。
+UTC = timezone.utc
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

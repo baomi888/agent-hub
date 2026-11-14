@@ -10,6 +10,8 @@ from __future__ import annotations
   PATCH  /api/forum/topics/{id}       标「已解决」（楼主 / 管理员）
   DELETE /api/forum/topics/{id}       删话题（作者 / 管理员）
   POST   /api/forum/topics/{id}/replies  回复某个话题或某一层
+  POST   /api/forum/upload            上传一张配图（前端已压好，服务端不解码）
+  GET    /api/forum/img/{hash}        取配图（公开、内容哈希命名、永久可缓存）
 
 它和 `/api/kb/public/{kb_id}/board` 的关系：**同一张表、两套门禁**。
   - 留言板只认"这个库公开着"，看的是 `kb_id`；
@@ -19,14 +21,26 @@ from __future__ import annotations
 """
 
 import asyncio
+import os
+import tempfile
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from api.kb import _board_authors, _post_view
-from core import anon, forum, kb_board, quota
+from core import anon, forum, kb_board, quota, upload
 from core.auth import _is_secure_request, current_user_id, get_current_user
 from kb import pipelines
+from service import forum_image
 
 # 论坛**不挂全局登录依赖**：它现在是免登录的（发帖只要一枚设备 cookie）。
 # 管理员接口（/mod/*）单独要求真登录 + 管理员身份 —— 权限逐条声明，
@@ -47,6 +61,10 @@ class TopicIn(BaseModel):
     body: str = Field("", description="话题正文，最多 2000 字")
     cat: str = Field("", description="板块 key，见 GET /api/forum/cats")
     kb_id: str = Field("", description="关联的公开知识库 id，可空")
+    images: list[str] = Field(
+        default_factory=list,
+        description="配图哈希列表，最多 9 张。先调 POST /api/forum/upload 拿哈希",
+    )
 
 
 class ReplyIn(BaseModel):
@@ -97,6 +115,35 @@ def _norm_cat(cat: str) -> str:
     return c
 
 
+def _clean_images(raw: list[str]) -> list[str]:
+    """发帖时校验配图哈希：格式合法、数量不超、文件真的在。
+
+    **必须一条条查文件存在**，不能只信客户端给的哈希。少了这一步，
+    任何人发帖时随便填 9 个哈希，帖子上就挂着 9 个破图 —— 破图比没图更糟，
+    它看起来像站坏了。多花的是 9 次 stat，几微秒。
+
+    去重放在这里而不是靠前端：同一张图选两次是很容易发生的事（双击、拖拽重复），
+    而内容哈希相同意味着本来就是同一个文件，存两次没有意义。
+    """
+    out: list[str] = []
+    for h in raw:
+        h = (h or "").strip()
+        if not h:
+            continue
+        if not forum_image.is_hash(h):
+            raise HTTPException(status_code=400, detail="图片参数不合法，重新传一次")
+        if h not in out:
+            out.append(h)
+    if len(out) > forum_image.MAX_IMAGES:
+        raise HTTPException(
+            status_code=400, detail=f"一帖最多 {forum_image.MAX_IMAGES} 张图"
+        )
+    for h in out:
+        if not forum_image.path_of(h):
+            raise HTTPException(status_code=404, detail="有一张图没找到，重新传一次")
+    return out
+
+
 def _kb_brief(kb_id: str) -> dict | None:
     """话题上的来源库 chip。库没了/名字查不到 → 不给 chip，而不是显示一串 id。"""
     if not kb_id:
@@ -141,6 +188,9 @@ def _topic_view(row: dict, authors: dict[str, dict], uid: str, libs: dict[str, d
         "removed_at": int(row.get("removed_at") or 0),
         "appeal_at": int(row.get("appeal_at") or 0),
         "report_n": int(row.get("report_n") or 0),
+        # 只给出哈希，完整 URL 由前端拼（`/api/forum/img/<hash>`）。存哈希的好处
+        # 是同一张图被多人发时只有一个文件，前端也不用记路径。
+        "images": forum_image.parse(row.get("images") or ""),
         "author": {
             "name": a.get("name") or "已注销用户",
             "avatar": a.get("avatar") or "",
@@ -313,8 +363,9 @@ async def create_topic(req: TopicIn, uid: str = Depends(anon_uid)) -> dict:
     if len(title) > TITLE_MAX:
         title = title[:TITLE_MAX]
     body = (req.body or "").strip()
-    if not body:
-        raise HTTPException(status_code=400, detail="正文不能为空")
+    # 正文允许为空：一句「周三晚缺两人」本身就是完整内容，或者用户只想发张
+    # 板书照片、懒得再描述一遍。前端面板上写的是「正文 选填」，这里强制非空
+    # 就变成了两套规矩 —— 而且用户看到的是一句莫名其妙的「正文不能为空」。
     if len(body) > kb_board.TOPIC_LEN:
         raise HTTPException(
             status_code=400,
@@ -331,9 +382,20 @@ async def create_topic(req: TopicIn, uid: str = Depends(anon_uid)) -> dict:
         if not owner or not await asyncio.to_thread(pipelines.is_public, kb_id):
             raise HTTPException(status_code=404, detail="这个知识库不存在或没有公开")
 
+    imgs = await asyncio.to_thread(_clean_images, req.images or [])
+
     try:
         post = await asyncio.to_thread(
-            kb_board.add_post, kb_id, uid, body, None, title, cat, kb_board.TOPIC_LEN
+            kb_board.add_post,
+            kb_id,
+            uid,
+            body,
+            None,
+            title,
+            cat,
+            kb_board.TOPIC_LEN,
+            forum_image.dump(imgs),
+            True,  # allow_empty：论坛帖可以只有标题
         )
     except kb_board.TooFast as e:
         detail = f"发得太快了，{e.wait} 秒后再试" if e.wait else "这一小时发得有点多，歇一会儿再来"
@@ -345,6 +407,90 @@ async def create_topic(req: TopicIn, uid: str = Depends(anon_uid)) -> dict:
     authors = await asyncio.to_thread(_board_authors, [post])
     libs = await asyncio.to_thread(_kb_briefs, [row]) if row else {}
     return {"topic": _topic_view(row, authors, uid, libs) if row else None}
+
+
+@router.post("/upload")
+async def upload_image(
+    # 不写 `= File(...)`：与 api/kb.py / api/auth.py 的写法保持一致，也避开
+    # ruff 的 B008（函数默认值里做调用）。FastAPI 对 UploadFile 注解本来就按
+    # multipart 文件处理。
+    file: UploadFile,
+    uid: str = Depends(anon_uid),
+) -> dict:
+    """上传一张配图。
+
+    **前端已经压好了**（长边 2048 / WebP / q0.82，约 350–500KB），所以这里的
+    默认路径只读文件头：校验格式、尺寸、像素数、体积、有没有 EXIF，然后按内容
+    哈希落盘 —— 一个像素都不解码。
+
+    为什么这么计较：解码一张 1200 万像素的原图峰值 53MB，缩完转 WebP 要 79MB，
+    而这台机器 `available` 只剩 400MB。9 张图同时解码就是 714MB，uvicorn 会被
+    OOM 杀掉，用户只看到「连接被重置」。把压缩挪到用户手机上，服务端就只剩 IO。
+
+    绕过前端的原图（体积超标 / PNG / 带 GPS 的 JPEG）会走重压路径，串行执行。
+    """
+    # 每小时 40 张。一帖最多 9 张，等于能发 4 帖；正常人够用，批量灌图会在这里
+    # 被拦住。头像那边是 10 次/小时 —— 发帖时点选图比换头像频繁得多。
+    try:
+        await asyncio.to_thread(quota.hit, f"forum_img:{uid}", 40)
+    except quota.RateLimited as e:
+        raise HTTPException(status_code=429, detail=str(e)) from e
+
+    upload.check_declared_size(file, forum_image.MAX_BYTES)
+
+    tmp = ""
+    try:
+        fd, tmp = tempfile.mkstemp(prefix="forum_img_", suffix=".upload")
+        os.close(fd)
+        # 分块落盘而不是 `await file.read()`：后者会把整个 body 读成 bytes，
+        # 9 张并发上传就是 18MB 驻留 —— 与知识库、头像是同一份实现。
+        await upload.save_stream(file, tmp, forum_image.MAX_BYTES)
+        if os.path.getsize(tmp) == 0:
+            raise forum_image.ImageError("这个文件是空的，换一张试试")
+        info = await asyncio.to_thread(forum_image.store, tmp, file.filename or "")
+    except forum_image.ImageError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    finally:
+        if tmp and os.path.exists(tmp):
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass  # 删不掉只是留个临时文件，不影响这次上传
+
+    return {
+        "hash": info["hash"],
+        "url": f"/api/forum/img/{info['hash']}",
+        "w": info["w"],
+        "h": info["h"],
+        "bytes": info["bytes"],
+        # 走没走重压。前端不需要它，但排查"为什么这张传得慢"时要看这个字段
+        "rescued": info["rescued"],
+    }
+
+
+@router.get("/img/{hash}")
+def get_image(hash: str):
+    """返回配图。
+
+    **公开可读**：`<img src>` 是最简单的消费方式；强制鉴权会让每张图多一次
+    401 判定，还会让浏览器缓存失效。hash 是内容指纹，猜不出来也就谈不上枚举。
+
+    可以永久缓存：URL 里带内容哈希，图变了 URL 必变（`immutable`）。
+
+    路径穿越不用操心：`path_of` 里的 `is_hash` 只放行 16 位小写 hex，
+    `../` 这类输入在拼路径之前就被挡掉了。
+
+    下架帖的图不会跟着失效 —— 内容和直链是两回事，百度、微博都一样。真要让
+    一张图彻底消失得走「删文件 + 清所有引用它的帖」，那是另一个量级的动作。
+    """
+    p = forum_image.path_of(hash)
+    if not p:
+        raise HTTPException(status_code=404, detail="图片不存在")
+    return FileResponse(
+        p,
+        media_type="image/webp",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
 
 
 @router.post("/topics/{post_id}/replies")

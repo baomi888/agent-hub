@@ -123,6 +123,7 @@ _LIST_COLS = (
     "COALESCE(p.reviewed_at, 0) AS reviewed_at, "
     "COALESCE(p.appeal_at, 0) AS appeal_at, "
     "COALESCE(p.report_n, 0) AS report_n, "
+    "COALESCE(p.images, '') AS images, "
     f"{_REPLY_N} AS reply_n, COALESCE({_LAST_AT}, p.created_at) AS last_at"
 )
 

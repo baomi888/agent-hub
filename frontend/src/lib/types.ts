@@ -1680,6 +1680,26 @@ export interface ForumTopic {
   author: { name: string; avatar: string; admin: boolean };
   /** 来源知识库；不挂库的话题为 null */
   kb: { id: string; name: string; official: boolean } | null;
+  /**
+   * 配图的内容哈希列表（最多 9 个），空数组 = 没图。取图用 `/api/forum/img/<hash>`。
+   *
+   * 存哈希而不是 URL：同一张图被多人发时磁盘上只有一份，而且 URL 里带内容指纹
+   * 意味着这张图能永久缓存（图一变哈希就变，不会看到旧图）。
+   */
+  images: string[];
+}
+
+/** `POST /api/forum/upload` 的返回 */
+export interface ForumUpload {
+  /** 内容指纹，发帖时把它放进 `images` 数组 */
+  hash: string;
+  /** 方便直接塞进 `<img src>` */
+  url: string;
+  w: number;
+  h: number;
+  bytes: number;
+  /** 服务端是否重压过（体积超标 / 带 EXIF 的原图才会走这条路） */
+  rescued: boolean;
 }
 
 /** `GET /api/forum/mine` —— 这台设备发过的帖，含已下架的 */

@@ -148,6 +148,11 @@ _KB_POST_ADD_COLUMNS: dict[str, str] = {
     "appeal_at": "INTEGER NOT NULL DEFAULT 0",
     "appeal_note": "TEXT NOT NULL DEFAULT ''",
     "report_n": "INTEGER NOT NULL DEFAULT 0",
+    # 配图：逗号分隔的 16 位内容哈希（空串 = 没有图）。存哈希而不是路径，
+    # 因为文件按内容命名 —— 同一张课本照片被 20 个人发，磁盘上只留一份。
+    # 不用 JSON 存数组：分隔符是 ASCII、hash 里不会出现，parse 永远有结果，
+    # 而且空串天然就是"无图"，不用区分 "[]" 和 "" 两种空。
+    "images": "TEXT NOT NULL DEFAULT ''",
 }
 
 

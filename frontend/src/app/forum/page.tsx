@@ -23,7 +23,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import CornIcon from "@/components/CornIcon";
-import { api } from "@/lib/api";
+import { avatarIconName, avatarImageUrl } from "@/components/settings/UserAvatar";
+import { api, forumImgUrl } from "@/lib/api";
+import { fmtBytes, compressImage } from "@/lib/compressImage";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { fmtNum, fmtWhen } from "@/lib/time";
 import type {
@@ -39,6 +41,8 @@ import type {
 const TITLE_MAX = 60;
 /** 正文上限，与后端 kb_board.TOPIC_LEN 一致 */
 const BODY_MAX = 2000;
+/** 一帖最多几张图，与后端 service/forum_image.MAX_IMAGES 一致 */
+const IMG_MAX = 9;
 
 /**
  * 顶部公告条「关掉过」的标记。
@@ -145,6 +149,19 @@ export default function ForumPage() {
   const [sending, setSending] = useState(false);
   const [cTip, setCTip] = useState("");
   const titleRef = useRef<HTMLInputElement | null>(null);
+
+  // ---- 配图 ----
+  /**
+   * 已上传成功的图。存 hash + 尺寸，不存 File —— File 会一直占着用户手机内存，
+   * 而上传完就已经没用了。9 张 6MB 的原图留在内存里，中端手机会明显卡。
+   */
+  const [imgs, setImgs] = useState<
+    { hash: string; w: number; h: number; bytes: number }[]
+  >([]);
+  /** 正在压缩/上传的张数。用它禁用「加图」并按张数算剩余额度 */
+  const [imgBusy, setImgBusy] = useState(0);
+  const [imgTip, setImgTip] = useState("");
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
   // ---- 我发的帖 ----
   const [mineOpen, setMineOpen] = useState(false);
@@ -314,6 +331,50 @@ export default function ForumPage() {
     }
   };
 
+  /**
+   * 选图 → 压缩 → 上传，**一张一张串行做**。
+   *
+   * 并发上传 9 张会在用户自己的 4G 上互相抢带宽，总时间反而更长；压缩本身也吃
+   * 手机 CPU，同时开 9 个 canvas 会让中端机卡一下。串行还有个好处：中途某张
+   * 失败时，前面已经上传成功的图不会跟着丢。
+   *
+   * 压缩和上传都发生在用户设备上（见 lib/compressImage.ts）—— 服务端收到的是
+   * 400KB 的成品，只落盘不解码。这是这套方案能在那台 400MB 可用内存的机器上
+   * 跑起来的原因。
+   */
+  const onPickImages = async (picked: FileList | null) => {
+    const all = Array.from(picked || []);
+    if (!all.length) return;
+    setImgTip("");
+    const room = IMG_MAX - imgs.length - imgBusy;
+    if (room <= 0) {
+      setImgTip(`一帖最多 ${IMG_MAX} 张图`);
+      return;
+    }
+    const list = all.slice(0, room);
+    if (all.length > room) setImgTip(`还能加 ${room} 张，多出来的没放进去`);
+
+    setImgBusy((n) => n + list.length);
+    for (const f of list) {
+      try {
+        const c = await compressImage(f);
+        const up = await api.uploadForumImage(c.file);
+        // 用函数式更新：用户可能在上传途中又点了加图，闭包里的 imgs 是旧的。
+        // 同一张图选两次时 hash 相同，直接跳过 —— 服务端也会去重，但先在
+        // 前端拦掉就不会出现两个一模一样的缩略图。
+        setImgs((prev) =>
+          prev.length >= IMG_MAX || prev.some((p) => p.hash === up.hash)
+            ? prev
+            : [...prev, { hash: up.hash, w: up.w, h: up.h, bytes: up.bytes }]
+        );
+      } catch (e) {
+        setImgTip(e instanceof Error ? e.message : "这张图没传上去");
+      } finally {
+        setImgBusy((n) => n - 1);
+      }
+    }
+  };
+
   const submit = async () => {
     if (sending) return;
     const title = cTitle.trim();
@@ -322,6 +383,8 @@ export default function ForumPage() {
     // 图可以不配。正文也要求非空的话，一句"周三晚缺两人"就没法发了。
     if (!title) return setCTip("给话题起个标题");
     if (!cCat) return setCTip("先选一个板块");
+    // 还在传的时候提交，发出去的帖会少几张图，而用户以为自己选了 9 张
+    if (imgBusy > 0) return setCTip("图片还在传，稍等一下");
     setSending(true);
     setCTip("");
     try {
@@ -330,11 +393,14 @@ export default function ForumPage() {
         body,
         cat: cCat,
         ...(cKb ? { kb_id: cKb } : {}),
+        ...(imgs.length ? { images: imgs.map((i) => i.hash) } : {}),
       });
       setCompOpen(false);
       setCTitle("");
       setCBody("");
       setCKb("");
+      setImgs([]);
+      setImgTip("");
       if (r.topic) {
         // 发完直接进详情：比停在列表里更符合"我要看我的帖"
         router.push(topicHref(r.topic.id));
@@ -475,12 +541,25 @@ export default function ForumPage() {
   /** 一条话题 */
   const renderPost = (t: ForumTopic, isPin = false) => {
     const av = avatarOf(t.author.name);
+    // 三种形态的优先级和 settings/UserAvatar 一致：图片 > 内置图标 > 首字母。
+    // **这里原本只取了首字母**（第 17 轮视觉重写时写漏的），结果登录用户
+    // 在设置里传的头像到了论坛列表就变回一个"玉"字方块 —— 而点进详情页
+    // 又是真头像，同一份数据两处长相不一样，用户会以为头像设置坏了。
+    const avImg = avatarImageUrl(t.author.avatar);
+    const avIcon = avatarIconName(t.author.avatar);
     const canRemove = isAdmin;
     return (
       <article className="tb-post" key={isPin ? `pin-${t.id}` : t.id}>
         <div className="tb-ph">
           <span className={`tb-av${av.cls}`} aria-hidden="true">
-            {av.ch}
+            {avImg ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={avImg} alt="" />
+            ) : avIcon ? (
+              <CornIcon name={avIcon} className="h-4 w-4" />
+            ) : (
+              av.ch
+            )}
           </span>
           <div className="tb-who">
             <div className="tb-who-n">
@@ -509,6 +588,19 @@ export default function ForumPage() {
         </h3>
 
         {t.excerpt && <p className="tb-text">{t.excerpt}</p>}
+
+        {/* 列表只放第一张 + 总数，不做九宫格：九宫格会把一屏能扫过的帖子数
+            从六七条压到两三条，而列表的用途是"挑一条点进去"，不是看图。
+            想看全部，点进详情，那里才是九宫格。 */}
+        {t.images.length > 0 && (
+          <Link className="tb-cover" href={topicHref(t.id)} aria-label="查看配图">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={forumImgUrl(t.images[0])} alt="" loading="lazy" />
+            {t.images.length > 1 && (
+              <span className="tb-cover-n">共 {t.images.length} 张</span>
+            )}
+          </Link>
+        )}
 
         <div className="tb-acts">
           <Link className="tb-act reply" href={topicHref(t.id)}>
@@ -891,6 +983,74 @@ export default function ForumPage() {
                 />
                 <p className="tb-tip">
                   {cBody.length}/{BODY_MAX}
+                </p>
+              </div>
+
+              {/* 配图放在正文之后、板块之前：读的人顺着"我要说什么"往下走，
+                  写完正文才想"要不要配张图"。放最上面会让人先去翻相册再想话题。 */}
+              <div className="tb-field">
+                <p className="tb-label">
+                  配图 <span>选填，最多 {IMG_MAX} 张</span>
+                </p>
+                <div className="tb-picks">
+                  {imgs.map((im, i) => (
+                    <div className="tb-pick" key={im.hash}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={forumImgUrl(im.hash)}
+                        alt={`配图 ${i + 1}`}
+                        width={im.w}
+                        height={im.h}
+                        loading="lazy"
+                      />
+                      <button
+                        type="button"
+                        className="tb-pick-x"
+                        aria-label={`删掉第 ${i + 1} 张`}
+                        onClick={() =>
+                          setImgs((p) => p.filter((x) => x.hash !== im.hash))
+                        }
+                      >
+                        <CornIcon name="close" className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                  {/* 正在处理的那张用一个骨架占位。没有它的话，用户点了 9 张图
+                      会看到方块一个一个凭空出现，中间那几秒像什么都没发生 */}
+                  {imgBusy > 0 && (
+                    <div className="tb-pick ghost" aria-hidden="true">
+                      <span />
+                    </div>
+                  )}
+                  {imgs.length + imgBusy < IMG_MAX && (
+                    <button
+                      type="button"
+                      className="tb-pick add"
+                      onClick={() => fileRef.current?.click()}
+                      disabled={imgBusy > 0}
+                    >
+                      <CornIcon name="plus" className="h-4 w-4" />
+                      <span>加图</span>
+                    </button>
+                  )}
+                </div>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  hidden
+                  onChange={(e) => {
+                    const picked = e.target.files;
+                    // 处理完把 value 清空：不清的话再选同一个文件不会触发 onChange
+                    void onPickImages(picked).then(() => {
+                      if (fileRef.current) fileRef.current.value = "";
+                    });
+                  }}
+                />
+                <p className={imgTip ? "tb-tip warn" : "tb-tip"}>
+                  {imgTip ||
+                    "图片在你的手机上就压好再传，原图不保留 —— 照片里的位置信息也不会跟着上传。"}
                 </p>
               </div>
 

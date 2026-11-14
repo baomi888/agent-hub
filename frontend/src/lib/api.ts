@@ -15,6 +15,7 @@ import type {
   ForumSort,
   ForumTopic,
   ForumTopicPage,
+  ForumUpload,
 } from "./types";
 import type { KbProposal, KbProposalConfirmResult } from "./types";
 import type { DialogueCandidatesResp, ImportDialogueResult, CourseReminderState } from "./types";
@@ -300,6 +301,14 @@ export async function previewEnhance(
   }
 }
 
+/**
+ * 配图直链。
+ *
+ * hash 是内容指纹（sha256 前 16 位），所以同一个 URL 的内容永远不变 —— 后端
+ * 给它配了 `immutable` 的强缓存，第二次打开帖子不会再走一次网络。
+ */
+export const forumImgUrl = (hash: string): string => `/api/forum/img/${hash}`;
+
 export const api = {
   // ---------- 会话 ----------
   listSessions: () =>
@@ -418,11 +427,37 @@ export const api = {
     return request<ForumTopicPage>("/api/forum/topics" + (qs ? `?${qs}` : ""));
   },
   getForumTopic: (id: number) => request<ForumDetail>(`/api/forum/topics/${id}`),
-  createForumTopic: (p: { title: string; body: string; cat: string; kb_id?: string }) =>
+  createForumTopic: (p: {
+    title: string;
+    body: string;
+    cat: string;
+    kb_id?: string;
+    images?: string[];
+  }) =>
     request<{ topic: ForumTopic | null }>("/api/forum/topics", {
       method: "POST",
       body: JSON.stringify(p),
     }),
+
+  /**
+   * 上传一张配图。
+   *
+   * `headers: {}` 是必须的 —— `request` 默认塞 `Content-Type: application/json`，
+   * 传 FormData 时这个头会让后端按 JSON 解析，multipart 直接 422。清空之后浏览器
+   * 自己补 `multipart/form-data; boundary=...`。
+   *
+   * 超时给到 60s：弱网下 400KB 也可能传半分钟，用默认的 15s 会误判成失败。
+   * 注意传进来的 `file` 应该是 `compressImage()` 的输出，不是用户选的原始文件。
+   */
+  uploadForumImage: (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<ForumUpload>(
+      "/api/forum/upload",
+      { method: "POST", body: fd, headers: {} },
+      { timeoutMs: 60_000 }
+    );
+  },
   replyForumTopic: (id: number, body: string, replyTo?: number) =>
     request<{ post: BoardPost; reply_n: number }>(`/api/forum/topics/${id}/replies`, {
       method: "POST",

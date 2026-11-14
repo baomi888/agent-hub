@@ -23,13 +23,25 @@ import { useParams, useRouter } from "next/navigation";
 
 import CornIcon from "@/components/CornIcon";
 import UserAvatar from "@/components/settings/UserAvatar";
-import { api } from "@/lib/api";
+import { api, forumImgUrl } from "@/lib/api";
 import { fmtWhen } from "@/lib/time";
 import type { BoardPost, ForumDetail } from "@/lib/types";
 
 interface ReplyTarget {
   id: number;
   name: string;
+}
+
+/**
+ * 图片网格的列数。
+ *
+ * 1 张给整宽（一张竖构图放两列里会窄得看不清）；2 张并排；3 张以上九宫格。
+ * 不做"1 大 2 小"那种混合布局：图片数量一变版式就跳，同一屏里两种节奏会显乱。
+ */
+function gridCls(n: number): string {
+  if (n <= 1) return "one";
+  if (n === 2) return "two";
+  return "many";
 }
 
 export default function ForumTopicPage() {
@@ -48,8 +60,26 @@ export default function ForumTopicPage() {
   /** 申诉已提交（本地即时反馈，避免要刷新才看见） */
   const [appealed, setAppealed] = useState(false);
   const [appealing, setAppealing] = useState(false);
+  /** 正在放大看的那张图的 hash，空串 = 没开灯箱 */
+  const [big, setBig] = useState("");
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const formRef = useRef<HTMLDivElement | null>(null);
+
+  /* 灯箱开着的时候：ESC 关掉，并把页面滚动锁住。
+     不锁的话背景会跟着手指滑，看起来像两张图在互相顶 */
+  useEffect(() => {
+    if (!big) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setBig("");
+    };
+    window.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [big]);
 
   const load = useCallback(async () => {
     if (!postId || Number.isNaN(postId)) {
@@ -202,6 +232,32 @@ export default function ForumTopicPage() {
           </span>
         </div>
         <p className="kb-post-b">{p.body}</p>
+        {/* 配图跟着楼主正文走。放在标题下面会让"正文"和"图"被标题隔开，
+            读起来像两个不相干的东西；放在楼层里则和这条帖是一个整体 */}
+        {(() => {
+          const imgs = isRoot ? data?.topic?.images ?? [] : [];
+          if (!imgs.length) return null;
+          return (
+            <div className={"tb-dimgs " + gridCls(imgs.length)}>
+              {imgs.map((h, i) => (
+                <button
+                  type="button"
+                  className="tb-dimg"
+                  key={h}
+                  onClick={() => setBig(h)}
+                  aria-label={`查看第 ${i + 1} 张图`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={forumImgUrl(h)}
+                    alt=""
+                    loading={i > 1 ? "lazy" : undefined}
+                  />
+                </button>
+              ))}
+            </div>
+          );
+        })()}
         {!isRoot && (p.replies?.length ?? 0) > 0 && (
           <ul className="kb-replies">{p.replies!.map((r) => renderFloor(r, false))}</ul>
         )}
@@ -421,6 +477,29 @@ export default function ForumTopicPage() {
           </>
         )}
       </main>
+
+      {/* 灯箱。点背景或按 ESC 关闭 —— 手机上必须留一个大面积可点区域，
+          只给一个 22px 的关闭按钮，手指会点不中 */}
+      {big && (
+        <div
+          className="tb-viewer"
+          role="dialog"
+          aria-modal="true"
+          aria-label="查看大图"
+          onClick={() => setBig("")}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={forumImgUrl(big)} alt="" />
+          <button
+            type="button"
+            className="tb-viewer-x"
+            aria-label="关闭"
+            onClick={() => setBig("")}
+          >
+            <CornIcon name="close" className="h-5 w-5" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -707,11 +707,19 @@
   color: var(--accent-ink);
   font-size: var(--fs-badge);
   font-weight: 600;
+  /* 两侧是 flex:1 的延伸线，380 宽时把中间压到不足 120px ——
+     「另有 1 条公告在顶部」会被挤成两行，那一行的高度把"到底了"顶歪。
+     旧皮肤 .fm-end-up 有这一条，换成 tb-* 时漏了（断言搬过来才发现的）。 */
+  white-space: nowrap;
   cursor: pointer;
   transition: var(--t-color);
 }
 
 .tb-end-up:hover { background: var(--accent-soft); }
+
+/* 箭头指向「上」：CornIcon 的 arrow 是右箭头，直接用会和「在顶部」这句话打架
+   —— 点它其实是往上滚。旧皮肤 .fm-end-up 里转过，换 tb-* 时漏了。 */
+.tb-end-up svg { transform: rotate(-90deg); }
 
 /* 加载更早：一条幽灵按钮，不抢视觉 */
 .tb-more {
@@ -985,6 +993,126 @@
   color: var(--text-3);
   font-size: var(--fs-badge);
   line-height: 1.65;
+}
+
+/* 校验失败的提示（图没传上去、太张多了）。用红而不是加粗：
+   这一行本来就 11px，加粗在暖纸底上几乎看不出变化 */
+.tb-tip.warn { color: var(--red-ink); }
+
+/* ---------- 配图 ----------
+   列宽用 auto-fill 让浏览器自己算，不写死三列：面板在 390 的手机上只有 302 宽，
+   96×3 + 8×2 = 304，差 2px 就换行 —— 上一轮"加图方块掉到第二行"就是这个原因。
+   minmax(78px, 1fr) 让窄屏自动落到 3 列，宽屏自然铺 4 列，不会差几个像素。
+   方块之间不设行高，靠 aspect-ratio 撑成正方形。 */
+.tb-picks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+  gap: 8px;
+  max-width: 352px;
+}
+
+.tb-pick {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--fill-2);
+}
+
+.tb-pick img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 删除按钮压深色底。图片什么颜色都有，白底按钮放到一张浅色照片上就消失了。
+   20px 是能点中的下限（iOS 建议 44，但缩略图只有 78px，再大就盖住图了） */
+.tb-pick-x {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(30, 22, 10, 0.62);
+  color: #fff;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+.tb-pick-x:hover { background: rgba(30, 22, 10, 0.85); }
+
+/* 上传中的占位。没有它的话，点了 9 张图会看到方块一个一个凭空出现，
+   中间那几秒像什么都没发生，用户会再点一次 */
+.tb-pick.ghost {
+  background: var(--fill-3);
+  animation: tb-breathe 1.1s ease-in-out infinite;
+}
+
+@keyframes tb-breathe {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tb-pick.ghost { animation: none; opacity: 0.7; }
+}
+
+.tb-pick.add {
+  display: grid;
+  place-items: center;
+  gap: 1px;
+  border: 1px dashed var(--line-strong);
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--fs-badge);
+  line-height: 1;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+.tb-pick.add:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.tb-pick.add:disabled { cursor: default; opacity: 0.55; }
+
+/* ---------- 列表里的封面 ----------
+   只放第一张，不做九宫格：一屏能扫过的帖子数会从六七条压到两三条，
+   而列表的用途是"挑一条点进去"。想看全部，点进详情。 */
+.tb-cover {
+  position: relative;
+  display: block;
+  margin-top: 10px;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--fill-2);
+}
+
+.tb-cover img {
+  display: block;
+  width: 100%;
+  /* 封高上限用 vh 而不是死像素：横图在窄屏上按宽度铺满后能到 300 多高，
+     一条帖子就占掉半屏 */
+  max-height: min(240px, 42vh);
+  object-fit: cover;
+}
+
+.tb-cover-n {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(30, 22, 10, 0.62);
+  color: #fff;
+  font-size: var(--fs-badge);
 }
 
 .tb-pills { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -1415,6 +1543,85 @@
 .tb-dgone p { margin: 0; color: var(--text-2); font-size: var(--fs-sm); line-height: 1.7; }
 
 .tb-dgone .tb-gone-hint { margin-top: 6px; color: var(--text-3); font-size: var(--fs-xs); }
+
+/* ---------- 详情页配图 ----------
+   1 张给整宽：竖构图放进两列会窄到看不清
+   2 张并排
+   3 张以上九宫格（9 张正好三行，是贴吧和朋友圈都验证过的密度） */
+.tb-dimgs {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.tb-dimgs.one { grid-template-columns: 1fr; }
+.tb-dimgs.two { grid-template-columns: 1fr 1fr; }
+.tb-dimgs.many { grid-template-columns: repeat(3, 1fr); }
+
+.tb-dimg {
+  display: block;
+  width: 100%;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--fill-2);
+  cursor: zoom-in;
+  transition: var(--t-color);
+}
+
+.tb-dimg img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 九宫格里统一成正方形，否则每行高度不一样，网格会参差。
+   单图和双图保持原始比例 —— 那时候没有对齐问题，裁成方图只会丢内容 */
+.tb-dimgs.many .tb-dimg { aspect-ratio: 1; }
+.tb-dimgs.one .tb-dimg img { max-height: min(520px, 62vh); object-fit: contain; }
+.tb-dimgs.two .tb-dimg img { max-height: min(320px, 42vh); }
+
+.tb-dimg:hover img { opacity: 0.94; }
+
+/* ---------- 灯箱 ---------- */
+.tb-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 92;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(18, 13, 6, 0.88);
+  cursor: zoom-out;
+}
+
+.tb-viewer img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--radius-sm);
+}
+
+/* 关闭按钮固定在右上角，不跟着图片尺寸跑 —— 图很宽时它会跑到画面外面 */
+.tb-viewer-x {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+.tb-viewer-x:hover { background: rgba(255, 255, 255, 0.26); }
 
 .tb-floors {
   margin: 14px 0 0;

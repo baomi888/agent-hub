@@ -145,14 +145,22 @@ def test_unknown_cat_is_rejected_before_write(env, client, kb):
 
 
 def test_topic_requires_cat_and_title(env, client, kb):
+    """板块和标题必填；**正文可以不写**。
+
+    正文可空是刻意的：面板上写的是「正文 选填」，而且一句「周三晚图书馆
+    缺两人」标题已经把话说完了，或者用户只想发一张板书照片。原来这里断言
+    「只有标题 → 400」，端到端点了发布才发现面板和接口两套规矩，用户拿到
+    的是一句莫名其妙的「正文不能为空」。
+    """
     _as(client, "alice")
     assert client.post("/api/forum/topics", json={"title": "t", "body": "b"}).status_code == 400
     assert (
         client.post("/api/forum/topics", json={"body": "b", "cat": "ask"}).status_code == 400
     )
-    assert (
-        client.post("/api/forum/topics", json={"title": "t", "cat": "ask"}).status_code == 400
-    )
+    # 只有标题、不写正文 —— 允许
+    r = client.post("/api/forum/topics", json={"title": "周三晚图书馆缺两人", "cat": "ask"})
+    assert r.status_code == 200, r.text
+    assert r.json()["topic"]["excerpt"] == ""
 
 
 def test_meta_cat_is_admin_only(env, client, kb):

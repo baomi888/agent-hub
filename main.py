@@ -64,7 +64,30 @@ from core import account, apilog, config, llm_gate, quota, reminder_core
 from core import router as route_engine
 from kb import pipelines
 from service import avatar as avatar_store
-from service import daily
+from service import daily, forum_image
+
+
+async def _forum_img_sweep_loop() -> None:
+    """每 6 小时清一次没人认领的论坛配图。
+
+    **为什么必须有这个循环**：用户选了图、面板关掉、最后没发帖 —— 文件已经落盘，
+    但没有任何 `kb_posts.images` 引用它。一张 400KB，攒久了会把 21GB 吃出洞，
+    而且这种泄漏在数据库里完全看不出来（没有行、没有记录，只有磁盘上的文件）。
+
+    首轮延迟 10 分钟再跑：启动时正忙着预热 chroma 和路由，别在这时候抢磁盘 IO。
+    保留期 24 小时 —— 用户可能开着面板去翻资料，半小时后才回来发。
+    """
+    await asyncio.sleep(600)
+    while True:
+        try:
+            n = await asyncio.to_thread(forum_image.cleanup_orphans, 24)
+            if n:
+                print(f"[配图清理] 删除 {n} 个未被引用的图片")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 —— 清理失败不能拖垮服务
+            print(f"[启动警告] 配图清理失败（6 小时后重试）：{e}")
+        await asyncio.sleep(6 * 3600)
 
 
 async def _apilog_flush_loop() -> None:
@@ -142,14 +165,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         print(f"[启动警告] 管理员配置自检失败：{e}")
     # API 调用采集的定时落库：低流量下没有它，最后几条会一直卡在内存缓冲里
     flush_task = asyncio.create_task(_apilog_flush_loop())
+    sweep_task = asyncio.create_task(_forum_img_sweep_loop())
     try:
         yield
     finally:
         flush_task.cancel()
-        try:
-            await flush_task
-        except asyncio.CancelledError:
-            pass
+        sweep_task.cancel()
+        for t in (flush_task, sweep_task):
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
         # 退出前最后落一次：否则正常停机时缓冲里那几十条就丢了
         try:
             await asyncio.to_thread(apilog.flush)

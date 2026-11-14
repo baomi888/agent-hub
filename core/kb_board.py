@@ -311,6 +311,8 @@ def add_post(
     title: str = "",
     cat: str = "",
     limit: int = MAX_LEN,
+    images: str = "",
+    allow_empty: bool = False,
 ) -> dict:
     """写一条留言或一条回复。正文合法性由 API 层先校验（这里只兜一次空值）。
 
@@ -324,9 +326,17 @@ def add_post(
       - 库内留言两个都给空串，行为和以前完全一致；
       - 论坛话题给标题 + 板块。`kb_id` 为空串表示这帖不挂任何库。
     回复行一律不带 title/cat（它们只属于顶层帖，回复上的值是垃圾）。
+
+    `images` 是逗号分隔的图片内容哈希，只有顶层帖会带。回复不带图 ——
+    楼中楼里塞配图会让楼层结构失控，而且手机端一条回复下面挂九宫格根本没法看。
+
+    `allow_empty` 只给论坛话题用。留言板和回复要求必须写字（一条留言没内容就是
+    噪音），但论坛帖可以只有标题：一句「周三晚缺两人」本身就是完整内容，
+    或者用户只想发张板书照片、懒得再描述一遍。前端面板上写的也是「正文 选填」，
+    这里强制非空就成了两套规矩。
     """
     text = (body or "").strip()
-    if not text:
+    if not text and not allow_empty:
         raise ValueError("留言不能为空")
     if len(text) > limit:
         raise ValueError(f"最多 {limit} 字，现在 {len(text)} 字")
@@ -354,12 +364,23 @@ def add_post(
     now = _now()
     clean_title = (title or "").strip()[:MAX_TITLE]
     clean_cat = (cat or "").strip()
+    clean_images = (images or "").strip() if not reply_id else ""
     with store._get_conn() as conn:  # noqa: SLF001
         cur = conn.execute(
             "INSERT INTO kb_posts "
-            "(kb_id, user_id, body, created_at, root_id, reply_to_id, title, cat) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (kb_id, uid, text, now, root_id, reply_id, clean_title, clean_cat),
+            "(kb_id, user_id, body, created_at, root_id, reply_to_id, title, cat, images) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                kb_id,
+                uid,
+                text,
+                now,
+                root_id,
+                reply_id,
+                clean_title,
+                clean_cat,
+                clean_images,
+            ),
         )
         pid = int(cur.lastrowid or 0)
     return {
