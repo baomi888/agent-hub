@@ -63,7 +63,8 @@ npx expo start
 ### 前提
 
 1. **Expo 账号**（免费）：https://expo.dev/signup
-2. **Apple Developer Program**（$99/年）—— 没有它，包构建出来也传不上 TestFlight
+2. **Apple Developer Program**（$99/年，个人账号即可）—— 走 Ad Hoc 或 TestFlight 都绕不过它。
+   没有它，包构建出来也签不了名、装不上任何一台真机
 
 ### 步骤
 
@@ -99,9 +100,78 @@ npx eas submit --platform ios --profile production
 
 ---
 
-## 六、把 5 个人拉进来
+## 五之二、不上 TestFlight，直接浏览器装（Ad Hoc）
+
+`eas.json` 里 `preview` 的 `distribution: "internal"` 就是这条路：**产物是 Ad Hoc 签名的 ipa，
+浏览器点链接直接装到桌面，全程没有 Apple 审核、没有 TestFlight、不进 App Store。**
+
+### 但它**不会**出现「信任企业级开发者」
+
+这一点必须说清，否则装的时候会以为失败了：
+
+| | Ad Hoc（`internal`） | 企业证书（In-House） |
+|---|---|---|
+| 账号 | Developer Program $99 | **Enterprise Program $299** |
+| 门槛 | 身份证 | D-U-N-S + 公司实体 + 苹果人工审核 + 年营收/员工规模 |
+| 设备上限 | **100 台/年，按 UDID 白名单** | 不限 |
+| 设置里「信任」 | **不需要** | 必须（设置 → 通用 → VPN与设备管理） |
+| 掉签风险 | 无 | **有，滥用被封是常态**（国内「掉签」就是它） |
+
+那个「改设置同意信任」的步骤是**企业证书**的特征。企业账号学生团队基本申不下来，
+而且苹果对滥用查得很紧——一旦封证书，**所有用户的 App 在同一秒内全部打不开**，
+只能等重新签名发版。所以这条路不走，也不该走。
+
+Ad Hoc 是苹果官方给的正规做法，做的是同一件事，只是不需要那一步信任。
+
+### 步骤
+
+```bash
+cd mobile
+
+# 1. 收集设备：生成注册链接，发给每个人
+npx eas device:create
+```
+
+它会给你一个 `https://expo.dev/register-device/...` 链接。**用 Safari 打开**，会下载一个
+描述文件 → 去「设置」顶部点「已下载描述文件」→ 安装 → 输锁屏密码 → UDID 自动上报到
+Expo 和你的 Apple 账号。**不用装 Apple Configurator，不用连电脑。**
+
+```bash
+# 2. 看设备登记上了没（必须出现他们的 UDID 才能继续）
+npx eas device:list
+
+# 3. 构建（profile preview 就是 ad-hoc）
+npx eas build --platform ios --profile preview
+```
+
+构建完在 https://expo.dev 的构建详情页有 **Install** 按钮（带二维码）。
+把它发给测试的人，**Safari 打开 → 点 Install → 弹窗点「安装」→ 桌面出现图标，直接能开**。
+
+### 三个必须知道的硬约束
+
+1. **设备位是消耗品。** 100 台上限，**同一个 UDID 占位后当年不释放**（次年续费时可清理）。
+   别拿它做公开分发，只给内测这几个人。
+2. **证书 1 年到期，到期那天所有已装的 App 立刻打不开**，要重新签一遍再发。
+   **在手机日历里存一条「11 个月后」的提醒**，这是 Ad Hoc 唯一的运维负担。
+3. **协议上限是「测试」。** 给团队成员/老师内测没问题；拿它给不认识的用户长期用，
+   严格说违反开发者协议。真要对外开放，还是得上 App Store 或 TestFlight。
+
+### 装不上时按这个顺序查
+
+| 症状 | 原因 |
+|---|---|
+| 「无法安装此 App，因为无法验证其完整性」 | 这台设备的 UDID **没登记**，或登记后没重新构建 |
+| 点链接没反应 / 一直在转 | 用了**微信或 QQ 浏览器**打开的。必须 Safari |
+| 装完点开闪退 | 证书被吊销（检查 developer.apple.com → Certificates） |
+| 提示「已到达设备上限」 | 100 台满了，去后台删掉不用的设备再重建 |
+
+---
+
+## 六、把 5 个人拉进来（TestFlight 路线，二选一）
 
 **内部测试员不需要苹果审核**，这是下周能出结果的关键。
+但 Ad Hoc（上面那节）更直接：**不用建 App Store Connect 记录、不用装 TestFlight App**。
+两条路选一条即可，别都做。
 
 1. App Store Connect → **用户和访问** → 邀请 5 个人（需要他们的 Apple ID 邮箱），
    角色给「开发者」或「营销」都行，**不需要给 Admin**
