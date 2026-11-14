@@ -841,6 +841,24 @@
   border-bottom: 0;
 }
 
+/*
+ * 「加权均分」那一档的口径句。
+ *
+ * 它和上面收起态的 <summary> 是同一张卡里的两种状态，切换时高度必须一致，
+ * 否则 select 一改，下面的成绩单就跳 5px：
+ *   summary  = fs-sm(14) × lh-body(1.65) + padding 2×2 = 27.1px，margin-top 12
+ *   card-note = fs-md(15) × 1.6 = 24px，margin-top 10  ← 差 5.1px
+ * 这里把四个量（字号 / 行高 / padding / margin）全对齐到 summary 那一侧。
+ * 不写死 px：字号与行高仍走令牌，令牌一调两边一起走。
+ */
+.campus-scale-note {
+  margin: 12px 0 0;
+  padding: 2px 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+  color: var(--text-2);
+}
+
 /* ---------- 空态 ---------- */
 
 .campus-empty {

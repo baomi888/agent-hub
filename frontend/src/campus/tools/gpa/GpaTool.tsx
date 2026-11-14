@@ -180,9 +180,11 @@ export default function GpaTool() {
             </table>
           </details>
         ) : (
-          <p className="campus-card-note" style={{ marginTop: 10, marginBottom: 0 }}>
-            {activeAlgo.note}
-          </p>
+          // 加权均分没有档位表，只有一句口径 —— 但它必须常显：切过去以后总分含义变了。
+          // 用 .campus-scale-note 而不是 .campus-card-note，是为了和收起态的
+          // <summary> 严格同高（同字号、同行高、同 padding、同 margin），
+          // 否则切到这一档时整张卡会矮 5px，下面的成绩单跟着跳一下。
+          <p className="campus-scale-note">{activeAlgo.note}</p>
         )}
       </div>
 
@@ -207,16 +209,16 @@ export default function GpaTool() {
           <thead>
             <tr>
               <th scope="col">课程</th>
-              <th scope="col" style={{ width: 88 }}>
+              <th scope="col" style={{ width: 66 }}>
                 学分
               </th>
-              <th scope="col" style={{ width: 88 }}>
+              <th scope="col" style={{ width: 66 }}>
                 成绩
               </th>
-              <th scope="col" style={{ width: 72, textAlign: "center" }}>
+              <th scope="col" style={{ width: 56, textAlign: "center" }}>
                 绩点
               </th>
-              <th scope="col" style={{ width: 56 }}>
+              <th scope="col" style={{ width: 52 }}>
                 <span className="sr-only">操作</span>
               </th>
             </tr>

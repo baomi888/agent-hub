@@ -244,6 +244,18 @@ def test_gpa_scale_is_collapsed_and_derived_from_the_real_table():
         "details 的摘要里没有带算法名"
     )
 
+    # 「加权均分」那档没有表，但它那一句必须和收起态 summary 同高 ——
+    # 否则 select 一改，整张卡矮 5px，下面的成绩单跟着跳。
+    # 判据：用专门的 .campus-scale-note（CSS 里四个量对齐 summary），
+    # 不许退回通用的 .campus-card-note（15px / 1.6 / margin-top 10）。
+    assert 'className="campus-scale-note"' in tool, (
+        "口径句没有用与 summary 同高的类 —— 切算法时卡片会跳"
+    )
+    css = _code(ROOT / "frontend/src/campus/styles/campus.css")
+    # ★ 必须带 `{`：只查子串的话，把规则改名成 `.campus-scale-note-removed`
+    #   也能通过（它包含 `.campus-scale-note`），断言就成了一点用没有的摆设。
+    assert re.search(r"\.campus-scale-note\s*\{", css), "CSS 里没有 .campus-scale-note 的规则"
+
 
 def test_password_rule_speaks_only_when_it_has_something_to_say():
     """密码规则不许常显，改成随输入给反馈。
