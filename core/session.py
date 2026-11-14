@@ -115,11 +115,21 @@ def _add_missing_columns(conn, table: str, columns: dict[str, str]) -> None:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
 
 
-# kb_posts 的增量列（2026-11-13 楼中楼）。放模块级是为了让 kb_board 也能直接用
-# 同一份定义 —— 两处各抄一份，迟早抄漏一个。
+# kb_posts 的增量列。放模块级是为了让 kb_board 也能直接用同一份定义
+# —— 两处各抄一份，迟早抄漏一个。
+#
+#   root_id / reply_to_id  2026-11-13 楼中楼
+#   title / cat / solved   2026-11-14 论坛中心
+#     · cat 非空才进论坛列表。库内留言（cat 为空）仍然只出现在库详情页的留言板里
+#       —— 自动把「说一句」的留言搬进论坛，标题只能靠截正文猜，板块也只能靠猜，
+#       那是把垃圾往首页搬，不是聚合。
+#     · solved 只对顶层帖有意义，回复上永远是 0。
 _KB_POST_ADD_COLUMNS: dict[str, str] = {
     "root_id": "INTEGER NOT NULL DEFAULT 0",
     "reply_to_id": "INTEGER NOT NULL DEFAULT 0",
+    "title": "TEXT NOT NULL DEFAULT ''",
+    "cat": "TEXT NOT NULL DEFAULT ''",
+    "solved": "INTEGER NOT NULL DEFAULT 0",
 }
 
 
@@ -177,7 +187,10 @@ def _init_db() -> None:
                 deleted_at  INTEGER,
                 deleted_by  TEXT,
                 root_id     INTEGER NOT NULL DEFAULT 0,
-                reply_to_id INTEGER NOT NULL DEFAULT 0
+                reply_to_id INTEGER NOT NULL DEFAULT 0,
+                title       TEXT NOT NULL DEFAULT '',
+                cat         TEXT NOT NULL DEFAULT '',
+                solved      INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_kbpost_kb ON kb_posts(kb_id, id DESC);
             CREATE INDEX IF NOT EXISTS idx_kbpost_user ON kb_posts(user_id, created_at);
@@ -187,6 +200,11 @@ def _init_db() -> None:
         _add_missing_columns(conn, "kb_posts", _KB_POST_ADD_COLUMNS)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_kbpost_root ON kb_posts(kb_id, root_id, id)"
+        )
+        # 论坛列表：按板块取顶层帖。同样必须等 `cat` 补完列再建，否则老库上
+        # 这条语句会先于 ALTER 执行、报 no such column。
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_kbpost_forum ON kb_posts(root_id, cat, id DESC)"
         )
         # 知识库浏览量：一个人对同一个库只留一行（口径是"多少人看过"，
         # 不是"被打开过多少次"，理由见 core/kb_views.py 顶部）

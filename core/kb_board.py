@@ -33,6 +33,15 @@ from core import session as store
 # 别人的一句话挤出一屏（留言板是"说一句"，不是发文章）。
 MAX_LEN = 300
 
+# 论坛话题正文的上限。论坛是"发一个帖子"，要说清背景、贴步骤、列选项，
+# 300 字不够用；2000 字约等于手机输入 50 行，再长就该写成文档放进知识库了。
+# 回复仍然走 MAX_LEN —— 盖楼是短句，不是第二篇文章。
+TOPIC_LEN = 2000
+
+# 话题标题上限。25 字在手机一行放得下、桌面列表里也不会撑破两行；
+# 超了直接截断而不是报错 —— 标题被截断用户能忍，发帖失败不能忍。
+MAX_TITLE = 60
+
 # 一页多少条：手机上一屏大约放得下 6~8 条，30 条够翻三四屏。
 # 这里数的是**顶层帖**，回复跟着所属的楼一起出来，不单独占一页的名额
 # —— 否则一栋楼里聊了 20 句，第一页就只剩两栋楼了。
@@ -148,6 +157,10 @@ def _ensure() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_kbpost_root ON kb_posts(kb_id, root_id, id)"
         )
+        # 论坛列表要按板块筛顶层帖；列同样是 ALTER 补的，索引也得等补完再建
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_kbpost_forum ON kb_posts(root_id, cat, id DESC)"
+        )
     _READY.add(path)
 
 
@@ -157,13 +170,16 @@ def _now() -> int:
 
 # 两条帖子的公共列。多一个字段要改两处 SQL 时，漏一处就是运行期 KeyError，
 # 所以拼成常量。
-_POST_COLS = "id, kb_id, user_id, body, created_at, root_id, reply_to_id"
+_POST_COLS = "id, kb_id, user_id, title, cat, solved, body, created_at, root_id, reply_to_id"
 
 
 def _row_to_post(r) -> dict:
     return {
         "id": int(r["id"]),
         "user_id": r["user_id"],
+        "title": r["title"] or "",
+        "cat": r["cat"] or "",
+        "solved": bool(r["solved"]),
         "body": r["body"],
         "at": int(r["created_at"]),
         "root_id": int(r["root_id"] or 0),
@@ -287,7 +303,15 @@ class TooFast(Exception):
         self.wait = wait
 
 
-def add_post(kb_id: str, uid: str, body: str, reply_to: int | None = None) -> dict:
+def add_post(
+    kb_id: str,
+    uid: str,
+    body: str,
+    reply_to: int | None = None,
+    title: str = "",
+    cat: str = "",
+    limit: int = MAX_LEN,
+) -> dict:
     """写一条留言或一条回复。正文合法性由 API 层先校验（这里只兜一次空值）。
 
     `reply_to` 是被回复的那条帖 id。两级封顶的处理就在这里：
@@ -295,12 +319,17 @@ def add_post(kb_id: str, uid: str, body: str, reply_to: int | None = None) -> di
       - 回复**某条回复** → 新帖仍挂在这栋楼下（root_id 取它的 root_id），
         只把 reply_to_id 指向那条回复，前端显示成「回复 @某某」。
     所以不管点的是哪一层，库里都只有两层，列表结构永远可预测。
+
+    `title` / `cat` 是论坛中心（2026-11-14）加的两个字段：
+      - 库内留言两个都给空串，行为和以前完全一致；
+      - 论坛话题给标题 + 板块。`kb_id` 为空串表示这帖不挂任何库。
+    回复行一律不带 title/cat（它们只属于顶层帖，回复上的值是垃圾）。
     """
     text = (body or "").strip()
     if not text:
         raise ValueError("留言不能为空")
-    if len(text) > MAX_LEN:
-        raise ValueError(f"留言最多 {MAX_LEN} 字")
+    if len(text) > limit:
+        raise ValueError(f"最多 {limit} 字，现在 {len(text)} 字")
 
     root_id = 0
     reply_id = 0
@@ -308,6 +337,8 @@ def add_post(kb_id: str, uid: str, body: str, reply_to: int | None = None) -> di
         target = get_post(int(reply_to))
         # 三条都必须成立：存在、没删、在同一个库。
         # 只判"存在"的话，拿别的库的帖 id 也能挂上去 —— 留言就会串库。
+        # 空 kb_id（论坛里的独立话题）同理：只有同为空串的帖能互相回复，
+        # 拿一个挂库的帖 id 到这里会被挡掉。
         if not target or target.get("deleted_at") or target["kb_id"] != kb_id:
             raise ValueError("要回复的留言不存在或已被删除")
         root_id = int(target["root_id"] or target["id"])
@@ -321,16 +352,22 @@ def add_post(kb_id: str, uid: str, body: str, reply_to: int | None = None) -> di
 
     _ensure()
     now = _now()
+    clean_title = (title or "").strip()[:MAX_TITLE]
+    clean_cat = (cat or "").strip()
     with store._get_conn() as conn:  # noqa: SLF001
         cur = conn.execute(
-            "INSERT INTO kb_posts (kb_id, user_id, body, created_at, root_id, reply_to_id) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (kb_id, uid, text, now, root_id, reply_id),
+            "INSERT INTO kb_posts "
+            "(kb_id, user_id, body, created_at, root_id, reply_to_id, title, cat) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (kb_id, uid, text, now, root_id, reply_id, clean_title, clean_cat),
         )
         pid = int(cur.lastrowid or 0)
     return {
         "id": pid,
         "user_id": uid,
+        "title": clean_title,
+        "cat": clean_cat,
+        "solved": False,
         "body": text,
         "at": now,
         "root_id": root_id,

@@ -8,6 +8,11 @@ import type {
   AccessMode,
   FavoriteKbInfo,
   ForkResult,
+  ForumCats,
+  ForumDetail,
+  ForumSort,
+  ForumTopic,
+  ForumTopicPage,
 } from "./types";
 import type { KbProposal, KbProposalConfirmResult } from "./types";
 import type { DialogueCandidatesResp, ImportDialogueResult, CourseReminderState } from "./types";
@@ -384,6 +389,52 @@ export const api = {
       `/api/kb/public/${encodeURIComponent(kbId)}/board/${postId}`,
       { method: "DELETE" }
     ),
+  // ---------- 论坛中心（/api/forum）----------
+  //
+  // 板块清单 + 计数一次拿齐：左栏要显示每个板块有几条，广场头部要显示总数，
+  // 分成两条接口就是两次往返，而它们本来就是同一次聚合出来的。
+  getForumCats: () => request<ForumCats>("/api/forum/cats"),
+  /**
+   * 话题列表。
+   * `before` 只在 sort=new 下有效 —— 热榜/未解决按分数排序，分数一动游标就失效，
+   * 后端直接忽略并返回 has_more=false（前端据此不显示「加载更多」）。
+   */
+  listForumTopics: (p: {
+    cat?: string;
+    sort?: ForumSort;
+    before?: number;
+    limit?: number;
+    q?: string;
+  } = {}) => {
+    const q = new URLSearchParams();
+    if (p.cat) q.set("cat", p.cat);
+    if (p.sort) q.set("sort", p.sort);
+    if (p.before) q.set("before", String(p.before));
+    if (p.limit) q.set("limit", String(p.limit));
+    if (p.q) q.set("q", p.q);
+    const qs = q.toString();
+    return request<ForumTopicPage>("/api/forum/topics" + (qs ? `?${qs}` : ""));
+  },
+  getForumTopic: (id: number) => request<ForumDetail>(`/api/forum/topics/${id}`),
+  createForumTopic: (p: { title: string; body: string; cat: string; kb_id?: string }) =>
+    request<{ topic: ForumTopic | null }>("/api/forum/topics", {
+      method: "POST",
+      body: JSON.stringify(p),
+    }),
+  replyForumTopic: (id: number, body: string, replyTo?: number) =>
+    request<{ post: BoardPost; reply_n: number }>(`/api/forum/topics/${id}/replies`, {
+      method: "POST",
+      body: JSON.stringify(replyTo ? { body, reply_to: replyTo } : { body }),
+    }),
+  setForumSolved: (id: number, solved: boolean) =>
+    request<{ ok: boolean; id: number; solved: boolean }>(`/api/forum/topics/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ solved }),
+    }),
+  deleteForumTopic: (id: number) =>
+    request<{ ok: boolean; id: number; removed: number }>(`/api/forum/topics/${id}`, {
+      method: "DELETE",
+    }),
   // ---------- 公开库收藏 ----------
   //
   // 用 PUT/DELETE 而不是一个 toggle：toggle 在网络重试时会翻来覆去，

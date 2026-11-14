@@ -168,3 +168,18 @@ def test_board_reply_button_shows_on_own_posts():
     assert "!p.mine" not in seg, "回复按钮又被限制成只能回别人，自己的那条看不到入口"
     assert "startReply(p)" in seg, "回复按钮的点击处理丢了"
     assert "kb-post-act-ico" in seg, "回复按钮的图标丢了，两个灰字挤在名字后面发现不了"
+
+
+def test_start_reply_does_not_block_own_posts():
+    """`startReply` 里不能再用 `p.mine` 提前 return。
+
+    上面那条只钉住了**渲染**。第四批放开渲染条件时，这一处拦截漏了：
+    自己的留言上「回复」按钮好好地在，点下去毫无反应 —— 比不渲染更像"功能坏了"。
+    两处是两个独立的闸门，只开一个等于没开。
+    """
+    s = _read(BOARD)
+    seg = s[s.index("const startReply = ") : s.index("const send = ")]
+    # 注释里明写了"曾经这么拦过"，所以要剔掉行注释再断言 —— 断的是代码，不是说明文字
+    code = "\n".join(ln for ln in seg.splitlines() if not ln.lstrip().startswith("//"))
+    assert ".mine" not in code, "startReply 又把「自己的留言」挡掉了，点了没反应"
+    assert "setReplyTo(" in code, "startReply 没有真的设置回复对象"

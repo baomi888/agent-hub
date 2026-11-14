@@ -16,6 +16,7 @@ import type { JSX } from "react";
 export type NavIconName =
   | "chat"
   | "book"
+  | "forum"
   | "task"
   | "clock"
   | "summary"
@@ -191,9 +192,23 @@ function MoreNav() {
   );
 }
 
+/* 论坛：上下两块版块条（左方块 + 右两条线）。
+   刻意不用"对话气泡"——那和 chat 在 18px 下糊成同一个轮廓，
+   而导航图标唯一的任务是"在一列里被一眼区分" */
+function ForumNav() {
+  return (
+    <g {...S}>
+      <rect x="4" y="4.6" width="16" height="6.6" rx="2" />
+      <rect x="4" y="13.4" width="16" height="6" rx="2" />
+      <path d="M7.6 7.9h3.4M7.6 16.4h6" strokeWidth={1.6} />
+    </g>
+  );
+}
+
 const ICONS: Record<NavIconName, () => JSX.Element> = {
   chat: Chat,
   book: BookNav,
+  forum: ForumNav,
   task: TaskNav,
   clock: ClockNav,
   summary: SummaryNav,

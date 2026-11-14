@@ -34,6 +34,7 @@ from api.course_reminder import router as course_reminder_router
 from api.delegate import router as delegate_router
 from api.feedback import router as feedback_router
 from api.focus import router as focus_router
+from api.forum import router as forum_router
 from api.geo import router as geo_router
 from api.hybrid import router as hybrid_router
 from api.kb import router as kb_router
@@ -260,6 +261,9 @@ app.include_router(prefs_router, prefix="/api/prefs", tags=["用户偏好"])
 # 校园工具集 · 番茄钟专注记录同步（B6）：会话幂等追加 + 任务后写胜。
 # 只存「学什么、多久」，不存任何对话内容
 app.include_router(focus_router, prefix="/api/campus/focus", tags=["校园工具集"])
+# 论坛中心（2026-11-14）：跟公开知识库的留言板共用 kb_posts 一张表，靠 cat 分线
+# —— cat 非空才算论坛话题，库里的留言不搬上广场（理由见 core/forum.py 顶部）。
+app.include_router(forum_router, prefix="/api/forum", tags=["论坛中心"])
 # 一句话整理（v13 · Phase B）：一句话 → 待办/提醒 proposal。
 # **只读 + 调模型，不写库**；写库在 Phase C 由前端逐条调 /api/tasks 与 /api/reminders
 app.include_router(capture_router, prefix="/api/capture", tags=["AI 整理"])

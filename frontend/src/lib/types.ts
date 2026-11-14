@@ -1610,3 +1610,75 @@ export interface CaptureParseResult {
   /** 没被采纳的句子 / 超出的条目，一句话说明 */
   unresolved: string[];
 }
+
+// ============================================================
+// 论坛中心（/forum，2026-11-14）
+//
+// 与公开知识库留言板共用同一套楼层结构（`BoardPost`）：一个话题就是
+// 「楼主一层 + 若干回复」，`posts[0]` 固定是楼主。所以详情页的楼层渲染
+// 和 `KbBoard` 长得一样，不需要第二套。
+//
+// 区别只在：话题有 `title` / `cat`（板块）/ `solved`，并且可以挂一个来源库。
+// ============================================================
+
+/** 三种排序。`hot` / `unsolved` 不支持翻页（后端按分数排序，游标会失效） */
+export type ForumSort = "new" | "hot" | "unsolved";
+
+export interface ForumCat {
+  key: string;
+  label: string;
+  hint: string;
+  /** 这个板块下的话题数 */
+  n: number;
+  /** 我能不能往这里发（站务公告只有管理员能发） */
+  postable: boolean;
+}
+
+export interface ForumCats {
+  cats: ForumCat[];
+  /** 全部板块的话题总数 */
+  total: number;
+  /** 全站回复条数 */
+  replies: number;
+  /** 今日新增条数（话题 + 回复） */
+  today: number;
+}
+
+/** 列表里的一条话题 */
+export interface ForumTopic {
+  id: number;
+  /** 标题。用户没填时后端用正文前 24 字兜底，所以这里一定有值 */
+  title: string;
+  /** 正文摘要，纯文本、已压成一行 */
+  excerpt: string;
+  cat: string;
+  cat_label: string;
+  solved: boolean;
+  /** 发布时间（Unix 秒） */
+  at: number;
+  /** 楼里最后一次活动的时间；没回复时等于 at */
+  last_at: number;
+  reply_n: number;
+  mine: boolean;
+  author: { name: string; avatar: string; admin: boolean };
+  /** 来源知识库；不挂库的话题为 null */
+  kb: { id: string; name: string; official: boolean } | null;
+}
+
+export interface ForumTopicPage {
+  posts: ForumTopic[];
+  has_more: boolean;
+}
+
+export interface ForumDetail {
+  topic: ForumTopic;
+  /** 楼主正文（完整，不截断）。`posts[0].body` 也是它 */
+  body: string;
+  /** 楼主 + 全部回复。第 0 项恒为楼主 */
+  posts: BoardPost[];
+  /** 楼主或管理员才能标「已解决」 */
+  can_solve: boolean;
+  stickers: string[];
+  /** 回复字数上限，由后端下发 —— 前端不硬编码 */
+  max_reply: number;
+}

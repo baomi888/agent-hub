@@ -40,6 +40,10 @@
 /* 公开知识库广场（/library）：浏览态，卡片墙 + 搜索 + 分享弹层。
    与 kbpage 是两件事（一个管理工作台、一个挑现成的），所以不并进去 */
 @import "./styles/library.css";
+/* 论坛中心（/forum）：三栏广场 + 帖子详情。
+   放在 library.css 之后 —— 详情页的楼层直接复用 library.css 里的 `.kb-post`
+   系列（顶层选择器），这里补的 `.fm-floors > .kb-post` 是覆盖，靠顺序生效 */
+@import "./styles/forum.css";
 /* 放在 kb 系列之后：它复用 .pv-card 骨架，只覆盖宽度，同优先级靠顺序生效 */
 @import "./styles/sediment.css";
 @import "./styles/layout.css";

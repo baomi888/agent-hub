@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>知穗 · 论坛中心 — 效果图</title>
+<style>
+/* ============================================================
+   知穗 · 公开知识库论坛中心  效果图（2026-11-14）
+   直接复刻 frontend/src/app/styles/tokens.css 的浅色令牌，
+   类名与正式实现保持同一套命名习惯，方便照着落地。
+   不用 emoji（前端约定禁 emoji），图标一律 CSS 画的。
+   ============================================================ */
+:root{
+  --step-0:#EDE4C8; --step-1:#F5F0E1; --step-2:#FDFAF2;
+  --ink:#3D2F1A; --text-2:#5A4C33; --text-3:#6F6044;
+  --accent:#C8892A; --accent-ink:#7A510D;
+  --accent-soft:rgba(200,137,42,.10); --accent-tint:rgba(200,137,42,.18);
+  --accent-line:rgba(200,137,42,.15);
+  --red:#B4472F; --red-ink:#A03E28;
+  --success:#1E7A46; --success-ink:#2A6B45;
+  --info:#2A5A8A; --info-ink:#2A5A8A;
+  --warning:#8A5A0A; --warning-ink:#7A4E08;
+  --line:rgba(61,47,26,.10); --line-strong:rgba(61,47,26,.25);
+  --fill-1:rgba(61,47,26,.12); --fill-2:rgba(61,47,26,.07);
+  --fill-3:rgba(61,47,26,.035); --fill-4:rgba(61,47,26,.018);
+  --input-border:#D8CCB0;
+  --shadow-1:0 1px 2px rgba(80,60,30,.06);
+  --shadow-2:0 2px 8px rgba(80,60,30,.10);
+  --r-xs:4px; --r-sm:8px; --r-md:12px; --r-lg:16px;
+  --serif:"LXGW WenKai Screen","Noto Serif SC","Songti SC",Georgia,serif;
+  --sans:"PingFang SC","Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;}
+body{
+  background:var(--step-1); color:var(--ink); font-family:var(--sans);
+  font-size:15px; line-height:1.65; -webkit-font-smoothing:antialiased;
+}
+button{font-family:inherit; cursor:pointer;}
+a{color:inherit; text-decoration:none;}
+
+/* ---------- 顶栏 ---------- */
+.top{
+  position:sticky; top:0; z-index:20;
+  border-bottom:1px solid var(--line);
+  background:color-mix(in srgb,var(--step-1) 90%,transparent);
+  backdrop-filter:blur(10px);
+}
+.top-in{display:flex; align-items:center; gap:13px; max-width:1240px; margin:0 auto; padding:11px 20px;}
+.logo{
+  width:32px;height:32px;flex:none;display:grid;place-items:center;
+  border-radius:9px;background:linear-gradient(150deg,#E8BC66,#C8892A 62%,#B0761F);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 1px 2px rgba(122,81,13,.22);
+  color:#2A2113;font-family:var(--serif);font-size:17px;font-weight:700;line-height:1;
+}
+.brand{min-width:0;}
+.brand b{display:block;font-family:var(--serif);font-size:17px;line-height:1.25;letter-spacing:.01em;}
+.brand span{display:block;color:var(--text-3);font-size:12px;line-height:1.3;}
+.crumb{color:var(--text-3);font-size:13px;white-space:nowrap;margin-left:4px;}
+.crumb b{color:var(--text-2);font-weight:600;}
+.top-search{
+  display:flex;align-items:center;gap:7px;margin-left:auto;
+  padding:0 12px;height:34px;width:238px;
+  border:1px solid var(--input-border);border-radius:999px;background:var(--step-2);
+  color:var(--text-3);font-size:13px;box-shadow:var(--shadow-1);
+}
+.mag{
+  position:relative;flex:none;width:11px;height:11px;border:1.6px solid var(--text-3);
+  border-radius:50%;opacity:.75;
+}
+.mag::after{content:"";position:absolute;right:-3px;bottom:-2px;width:5px;height:1.6px;
+  background:var(--text-3);transform:rotate(45deg);border-radius:1px;}
+.top-search kbd{
+  margin-left:auto;padding:0 5px;border:1px solid var(--line);border-radius:4px;
+  background:var(--fill-3);font-family:inherit;font-size:10px;color:var(--text-3);
+}
+.btn-gold{
+  display:inline-flex;align-items:center;justify-content:center;gap:5px;height:34px;padding:0 15px;
+  border:1px solid #8E5C12;border-radius:var(--r-sm);
+  background:linear-gradient(180deg,#D89A34,#C8892A);color:#2A2113;
+  font-size:13px;font-weight:600;box-shadow:var(--shadow-1);white-space:nowrap;
+  transition:transform .14s ease,filter .14s ease;
+}
+.btn-gold:hover{filter:brightness(1.05);transform:translateY(-1px);}
+.btn-ghost{
+  display:inline-flex;align-items:center;justify-content:center;gap:5px;height:30px;padding:0 11px;
+  border:1px solid var(--line);border-radius:var(--r-sm);background:transparent;
+  color:var(--text-2);font-size:13px;white-space:nowrap;
+  transition:background .14s,border-color .14s,color .14s;
+}
+.btn-ghost:hover{background:var(--fill-3);border-color:var(--line-strong);color:var(--ink);}
+.proto{
+  padding:1px 6px;border:1px dashed var(--line-strong);border-radius:999px;
+  color:var(--text-3);font-size:10px;letter-spacing:.06em;white-space:nowrap;
+}
+
+/* ---------- 三栏骨架 ---------- */
+.wrap{
+  display:grid;grid-template-columns:214px minmax(0,1fr) 262px;
+  gap:20px;max-width:1240px;margin:0 auto;padding:20px 20px 72px;
+}
+/* ★ 断点必须放在各组件基础样式**之后**：同特异性下选择器按出现顺序决胜，
+   写在前面会被后面那行 `.side-l{display:flex}` 覆盖掉（第一版就这么失效过）。*/
+
+/* ---------- 左栏：板块 ---------- */
+.side-l{display:flex;flex-direction:column;gap:14px;position:sticky;top:74px;align-self:start;}
+.card{
+  border:1px solid var(--line);border-radius:var(--r-md);background:var(--step-2);
+  box-shadow:var(--shadow-1);
+}
+.side-h{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:11px 12px 8px;color:var(--text-3);font-size:11px;letter-spacing:.2em;
+}
+.cats{list-style:none;margin:0;padding:2px 8px 10px;display:flex;flex-direction:column;gap:1px;}
+.cat{
+  display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;
+  border:0;border-radius:var(--r-sm);background:transparent;
+  color:var(--text-2);font-size:14px;text-align:left;transition:background .14s,color .14s;
+}
+.cat:hover{background:var(--fill-3);color:var(--ink);}
+.cat .dot{width:6px;height:6px;flex:none;border-radius:50%;background:var(--line-strong);}
+.cat.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600;}
+.cat.on .dot{background:var(--accent);}
+.cat .n{margin-left:auto;color:var(--text-3);font-size:12px;font-variant-numeric:tabular-nums;}
+.cat.on .n{color:var(--accent-ink);}
+.side-stat{padding:0 14px 14px;display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.side-stat div{display:flex;flex-direction:column;}
+.side-stat b{font-family:var(--serif);font-size:19px;line-height:1.25;font-variant-numeric:tabular-nums;}
+.side-stat span{color:var(--text-3);font-size:11px;}
+
+/* ---------- 主区 hero ---------- */
+.hero{
+  display:flex;align-items:center;gap:18px;
+  padding:15px 18px;margin-bottom:14px;
+  border:1px solid var(--line);border-radius:var(--r-md);
+  background:linear-gradient(180deg,var(--accent-soft),transparent 72%),var(--step-2);
+}
+.hero .h-txt{min-width:0;flex:1;}
+.hero h1{margin:0;font-family:var(--serif);font-size:21px;line-height:1.3;letter-spacing:.01em;}
+.hero p{margin:5px 0 0;color:var(--text-2);font-size:13px;line-height:1.75;}
+.hero p b{color:var(--ink);font-weight:600;}
+/* 在线人数的绿点：从 hero 挪到工具条后仍然保留"有人在"的那点活气，
+   但不占说明句的宽度（原先它把说明句挤成三行） */
+.live-dot{
+  display:inline-block;width:6px;height:6px;margin:0 3px 0 1px;border-radius:50%;
+  background:var(--success);box-shadow:0 0 0 3px rgba(30,122,70,.13);vertical-align:1px;
+}
+
+/* 工具条 */
+.bar{display:flex;align-items:center;gap:5px;margin-bottom:10px;flex-wrap:wrap;}
+.tab{
+  padding:5px 12px;border:1px solid transparent;border-radius:999px;
+  background:transparent;color:var(--text-2);font-size:13px;transition:all .14s;
+}
+.tab:hover{background:var(--fill-3);color:var(--ink);}
+.tab.on{border-color:var(--accent-line);background:var(--accent-soft);color:var(--accent-ink);font-weight:600;}
+.bar .sp{margin-left:auto;color:var(--text-3);font-size:12px;}
+
+/* 帖子列表 */
+.posts{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:var(--r-md);
+  background:var(--step-2);box-shadow:var(--shadow-1);overflow:hidden;}
+.post{
+  display:flex;gap:12px;padding:13px 14px;border-bottom:1px solid var(--line);
+  background:transparent;transition:background .14s;position:relative;
+}
+.post:last-child{border-bottom:0;}
+.post:hover{background:var(--fill-3);}
+.post:hover .post-t{color:var(--accent-ink);}
+.mark{
+  width:36px;height:36px;flex:none;display:grid;place-items:center;margin-top:1px;
+  border:1px solid var(--accent-line);border-radius:var(--r-sm);
+  background:var(--accent-soft);color:var(--accent-ink);
+  font-size:11px;font-weight:600;letter-spacing:0;line-height:1.1;
+  white-space:nowrap;word-break:keep-all;
+}
+.post-main{min-width:0;flex:1;}
+.post-t{
+  margin:0;font-size:15px;font-weight:600;line-height:1.45;color:var(--ink);
+  transition:color .14s;display:flex;align-items:center;gap:7px;flex-wrap:wrap;
+}
+.post-d{margin:3px 0 0;color:var(--text-2);font-size:13px;line-height:1.6;
+  display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;}
+.post-m{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;color:var(--text-3);font-size:12px;}
+.post-m .sep{width:3px;height:3px;flex:none;border-radius:50%;background:var(--line-strong);}
+.from{
+  display:inline-flex;align-items:center;gap:5px;padding:0 7px 0 5px;
+  border:1px solid var(--accent-line);border-radius:999px;
+  background:var(--step-1);color:var(--accent-ink);font-size:11px;white-space:nowrap;
+}
+.bk{width:8px;height:10px;flex:none;border-radius:1.5px;border:1px solid #B0761F;background:#E8BC66;}
+.cnt{
+  flex:none;align-self:center;min-width:40px;padding:3px 8px;
+  border-radius:var(--r-sm);background:var(--fill-3);color:var(--text-2);
+  font-size:12px;font-variant-numeric:tabular-nums;text-align:center;line-height:1.25;
+}
+.cnt b{display:block;font-family:var(--serif);font-size:15px;color:var(--ink);}
+.cnt span{font-size:10px;color:var(--text-3);}
+.post.hot .cnt{background:var(--accent-soft);}
+.post.hot .cnt b{color:var(--accent-ink);}
+
+/* 标签 */
+.tag{
+  display:inline-flex;align-items:center;gap:3px;padding:0 6px;
+  border-radius:4px;font-size:10px;font-weight:600;line-height:1.7;white-space:nowrap;
+  border:1px solid transparent;
+}
+.tag.solved{background:rgba(30,122,70,.10);border-color:rgba(30,122,70,.22);color:var(--success-ink);}
+.tag.elite{background:var(--accent-tint);border-color:var(--accent-line);color:var(--accent-ink);}
+.tag.official{background:linear-gradient(135deg,#E8BC66,#C8892A 58%,#B0761F);color:#2A2113;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.5);}
+.tag.ask{background:rgba(42,90,138,.09);border-color:rgba(42,90,138,.20);color:var(--info-ink);}
+.tag.open{background:var(--fill-3);border-color:var(--line);color:var(--text-2);}
+
+/* ---------- 右栏 ---------- */
+.side-r{display:flex;flex-direction:column;gap:14px;position:sticky;top:74px;align-self:start;}
+.hot-list{list-style:none;margin:0;padding:2px 12px 11px;display:flex;flex-direction:column;}
+.hot-list li{display:flex;gap:7px;padding:6px 0;border-bottom:1px dashed var(--line);
+  font-size:12.5px;line-height:1.5;}
+.hot-list li:last-child{border-bottom:0;}
+.hot-list .rk{flex:none;width:15px;font-family:var(--serif);font-size:13px;color:var(--text-3);
+  font-variant-numeric:tabular-nums;}
+.hot-list li:nth-child(1) .rk,.hot-list li:nth-child(2) .rk,.hot-list li:nth-child(3) .rk{
+  color:var(--accent);font-weight:700;}
+.hot-list a{color:var(--text-2);}
+.hot-list a:hover{color:var(--accent-ink);}
+.people{list-style:none;margin:0;padding:2px 12px 12px;display:flex;flex-direction:column;gap:9px;}
+.people li{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-2);}
+.ava{
+  width:26px;height:26px;flex:none;display:grid;place-items:center;border-radius:50%;
+  background:var(--accent-tint);color:var(--accent-ink);font-size:12px;font-weight:600;
+}
+.people .k{margin-left:auto;color:var(--text-3);font-size:11px;}
+.rules{padding:2px 14px 14px;color:var(--text-2);font-size:12.5px;line-height:1.7;}
+.rules ol{margin:0;padding-left:15px;}
+.rules li{margin-bottom:3px;}
+.rules li::marker{color:var(--accent);}
+
+/* ---------- 详情视图 ---------- */
+#detail{display:none;}
+body.detail-open #list{display:none;}
+body.detail-open #detail{display:block;}
+.d-back{margin-bottom:10px;}
+.d-head{padding:16px 18px 14px;border:1px solid var(--line);border-radius:var(--r-md) var(--r-md) 0 0;
+  border-bottom:0;background:var(--step-2);box-shadow:var(--shadow-1);}
+.d-cat{display:inline-flex;align-items:center;gap:5px;margin-bottom:7px;color:var(--accent-ink);font-size:12px;}
+.d-head h1{margin:0;font-family:var(--serif);font-size:20px;line-height:1.45;letter-spacing:.01em;}
+.d-by{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:9px;color:var(--text-3);font-size:12px;}
+.d-by .ava{width:24px;height:24px;font-size:11px;}
+.d-by b{color:var(--text-2);font-size:13px;font-weight:600;}
+.d-body{padding:16px 18px;border:1px solid var(--line);border-bottom:0;background:var(--step-2);
+  font-size:14.5px;line-height:1.85;color:var(--ink);}
+.d-body p{margin:0 0 11px;}
+.d-body p:last-child{margin-bottom:0;}
+.d-body .quote{
+  margin:0 0 12px;padding:9px 12px;border-left:2px solid var(--accent-line);
+  background:var(--fill-3);border-radius:0 var(--r-sm) var(--r-sm) 0;
+  color:var(--text-2);font-size:13px;line-height:1.85;
+}
+.d-acts{display:flex;gap:8px;padding:11px 18px;border:1px solid var(--line);
+  border-radius:0 0 var(--r-md) var(--r-md);background:var(--step-1);box-shadow:var(--shadow-1);}
+
+/* 楼层 */
+.floors{margin-top:16px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--step-2);
+  box-shadow:var(--shadow-1);}
+.floors-h{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--line);
+  color:var(--text-3);font-size:11px;letter-spacing:.2em;}
+.floors-h .rule{flex:1;height:1px;background:var(--line);}
+.floor{display:flex;gap:11px;padding:13px 16px;border-bottom:1px solid var(--line);}
+.floor:last-child{border-bottom:0;}
+.floor.mine{background:var(--accent-soft);}
+.floor .ava{width:30px;height:30px;}
+.floor-main{min-width:0;flex:1;}
+.floor-h{display:flex;align-items:center;gap:7px;flex-wrap:wrap;color:var(--text-3);font-size:12px;}
+.floor-h b{color:var(--ink);font-size:13px;font-weight:600;}
+.me{display:inline-flex;align-items:center;padding:0 6px;border-radius:999px;
+  background:var(--accent-tint);color:var(--accent-ink);font-size:10px;font-weight:600;line-height:1.7;}
+.role{display:inline-block;padding:1px 6px;border-radius:4px;
+  background:linear-gradient(135deg,#E8BC66,#C8892A 58%,#B0761F);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.5),0 1px 2px rgba(122,81,13,.2);
+  color:#2A2113;font-size:10px;font-weight:600;line-height:1.6;}
+.floor-h .acts{margin-left:auto;display:inline-flex;gap:2px;opacity:0;transition:opacity .14s;}
+.floor:hover .acts,.floor.mine .acts{opacity:1;}
+.f-act{display:inline-flex;align-items:center;gap:3px;padding:2px 6px;border:0;border-radius:5px;
+  background:transparent;color:var(--text-2);font-size:12px;}
+.f-act:hover{background:var(--fill-2);color:var(--accent-ink);}
+.floor-b{margin:3px 0 0;font-size:14px;line-height:1.8;color:var(--ink);}
+.floor-b .at{color:var(--accent-ink);}
+.floor-foot{margin-top:5px;color:var(--text-3);font-size:11px;}
+.kids{margin:8px 0 0;padding:0 0 0 12px;border-left:2px solid rgba(200,137,42,.30);list-style:none;
+  display:flex;flex-direction:column;gap:8px;}
+.kid{display:flex;gap:8px;}
+.kid .ava{width:22px;height:22px;font-size:10px;}
+.kid-main{min-width:0;flex:1;}
+.kid-h{display:flex;align-items:center;gap:6px;flex-wrap:wrap;color:var(--text-3);font-size:11.5px;}
+.kid-h b{color:var(--text-2);font-size:12px;}
+
+/* 回复框 */
+.composer{margin-top:14px;padding:12px;border:1px solid var(--input-border);border-radius:var(--r-md);
+  background:var(--step-2);box-shadow:var(--shadow-1);}
+.replying{display:none;align-items:center;gap:8px;margin:-12px -12px 10px;padding:6px 10px;
+  border-radius:var(--r-md) var(--r-md) 0 0;background:var(--accent-soft);color:var(--text-2);font-size:12px;}
+.composer.is-replying .replying{display:flex;}
+.replying b{color:var(--accent-ink);}
+.replying button{margin-left:auto;border:0;background:transparent;color:var(--text-3);font-size:12px;
+  padding:2px 6px;border-radius:5px;}
+.replying button:hover{color:var(--red-ink);}
+.composer textarea{
+  width:100%;min-height:62px;padding:0;border:0;background:transparent;color:var(--ink);
+  font:inherit;font-size:14px;line-height:1.75;outline:none;resize:vertical;
+}
+.composer textarea::placeholder{color:var(--text-3);}
+.c-bar{display:flex;align-items:center;gap:10px;margin-top:8px;}
+.c-count{margin-left:auto;color:var(--text-3);font-size:11px;font-variant-numeric:tabular-nums;}
+.c-tip{margin:8px 0 0;color:var(--text-3);font-size:11.5px;}
+.c-tip b{color:var(--accent-ink);}
+
+/* 相关库卡 */
+.rel{display:flex;align-items:center;gap:11px;margin-top:14px;padding:12px 14px;
+  border:1px solid var(--line);border-radius:var(--r-md);background:var(--step-2);box-shadow:var(--shadow-1);}
+.rel .mark{width:36px;height:36px;margin:0;}
+.rel-main{min-width:0;flex:1;}
+.rel-main b{display:block;font-size:14px;line-height:1.35;}
+.rel-main span{color:var(--text-3);font-size:12px;}
+
+/* 手机底部发帖 */
+.fab{display:none;}
+
+/* ============ 断点（务必留在文件最后，原因见上） ============ */
+@media (max-width:1120px){
+  .wrap{grid-template-columns:200px minmax(0,1fr);}
+  .side-r{display:none;}
+}
+@media (max-width:880px){
+  .wrap{grid-template-columns:minmax(0,1fr);padding:14px 14px 96px;gap:14px;}
+  .side-l{display:none;}
+  .top-search{display:none;}
+  .crumb{display:none;}
+  .proto{display:none;}
+  .hero p br{display:none;}
+  .fab{
+    display:flex;position:fixed;left:14px;right:14px;bottom:calc(14px + env(safe-area-inset-bottom,0px));
+    z-index:30;align-items:center;justify-content:center;gap:6px;height:48px;border-radius:999px;
+    border:1px solid #8E5C12;background:linear-gradient(180deg,#D89A34,#C8892A);
+    color:#2A2113;font-size:15px;font-weight:600;box-shadow:0 4px 14px rgba(122,81,13,.28);
+  }
+  .hero{flex-direction:column;align-items:flex-start;gap:9px;padding:14px;}
+  .hero .live{margin-left:0;}
+  .post{padding:12px 12px;gap:10px;}
+  .post-d{display:none;}
+  .cnt{min-width:34px;padding:2px 6px;}
+  .d-head,.d-body,.floors,.composer{border-radius:var(--r-sm);}
+  .d-head,.d-body{padding:13px 14px;}
+  .floor{padding:12px;}
+  .floor-h .acts{opacity:1;}
+  .post-m{gap:6px;}
+}
+</style>
+</head>
+<body>
+
+<!-- ================= 顶栏 ================= -->
+<header class="top">
+  <div class="top-in">
+    <span class="logo">穗</span>
+    <div class="brand">
+      <b>知穗 · 论坛</b>
+      <span>全校同学的学习讨论区</span>
+    </div>
+    <span class="crumb">公开知识库 / <b>论坛中心</b></span>
+    <div class="top-search">
+      <span class="mag"></span><span>搜帖子、课程或同学</span><kbd>/</kbd>
+    </div>
+    <span class="proto">效果图 · 非线上</span>
+    <button class="btn-gold">＋ 发新帖</button>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- ================= 左栏 ================= -->
+  <aside class="side-l">
+    <div class="card">
+      <div class="side-h"><span>板块</span></div>
+      <ul class="cats">
+        <li><button class="cat on" data-cat="all"><span class="dot"></span>全部讨论<span class="n">251</span></button></li>
+        <li><button class="cat" data-cat="ask"><span class="dot"></span>课程答疑<span class="n">128</span></button></li>
+        <li><button class="cat" data-cat="want"><span class="dot"></span>求资料<span class="n">64</span></button></li>
+        <li><button class="cat" data-cat="exp"><span class="dot"></span>学习经验<span class="n">31</span></button></li>
+        <li><button class="cat" data-cat="team"><span class="dot"></span>组队自习<span class="n">18</span></button></li>
+        <li><button class="cat" data-cat="fb"><span class="dot"></span>库内容反馈<span class="n">7</span></button></li>
+        <li><button class="cat" data-cat="sys"><span class="dot"></span>站务公告<span class="n">3</span></button></li>
+      </ul>
+      <div class="side-stat">
+        <div><b>86</b><span>本周新帖</span></div>
+        <div><b>1,204</b><span>本周回复</span></div>
+        <div><b>37</b><span>今日在线</span></div>
+        <div><b>9</b><span>官方库</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="side-h"><span>我的</span></div>
+      <ul class="cats">
+        <li><button class="cat"><span class="dot"></span>我发起的<span class="n">4</span></button></li>
+        <li><button class="cat"><span class="dot"></span>我回复的<span class="n">11</span></button></li>
+        <li><button class="cat"><span class="dot"></span>我关注的<span class="n">6</span></button></li>
+      </ul>
+    </div>
+  </aside>
+
+  <!-- ================= 列表视图 ================= -->
+  <main id="list">
+    <div class="hero">
+      <div class="h-txt">
+        <h1>论坛中心</h1>
+        <p>公开知识库里的讨论都汇到这里。库里的留言自动进对应板块，你也可以单独开新话题。<br />
+          <b>问问题、求资料、写经验、找人自习</b>，都在这儿。</p>
+      </div>
+    </div>
+
+    <div class="bar">
+      <button class="tab on">最新</button>
+      <button class="tab">最热</button>
+      <button class="tab">还没解决</button>
+      <button class="tab">我参与的</button>
+      <span class="sp">251 个话题 · <span class="live-dot"></span>37 人在线 · 今日 12 条新回复</span>
+    </div>
+
+    <ul class="posts">
+      <li class="post hot" data-cat="ask" onclick="openDetail()">
+        <div class="mark">高数</div>
+        <div class="post-main">
+          <h3 class="post-t">
+            第十一章曲线积分：什么时候该用格林公式，什么时候只能硬算？
+            <span class="tag solved">已解决</span>
+            <span class="tag elite">精华</span>
+          </h3>
+          <p class="post-d">做到 P213 第 7 题卡住了，L 不闭合的时候补线要怎么补，有没有通用的判断顺序……</p>
+          <div class="post-m">
+            <span class="from"><i class="bk"></i>高等数学（下）</span>
+            <span>李知遥</span><span class="sep"></span>
+            <span>2 小时前</span><span class="sep"></span>
+            <span>最后回复 王叙</span>
+          </div>
+        </div>
+        <div class="cnt"><b>23</b><span>回复</span></div>
+      </li>
+
+      <li class="post" data-cat="want" onclick="openDetail()">
+        <div class="mark">线代</div>
+        <div class="post-main">
+          <h3 class="post-t">求 2024 秋线性代数期末真题，不要答案版</h3>
+          <p class="post-d">只想要题干，想自己先做一遍再对答案。有同学存了扫描件吗？可以互换我手里的概率论。</p>
+          <div class="post-m">
+            <span class="from"><i class="bk"></i>线性代数</span>
+            <span>陈默</span><span class="sep"></span>
+            <span>4 小时前</span><span class="sep"></span>
+            <span>8 条回复</span>
+          </div>
+        </div>
+        <div class="cnt"><b>8</b><span>回复</span></div>
+      </li>
+
+      <li class="post" data-cat="exp" onclick="openDetail()">
+        <div class="mark">概率</div>
+        <div class="post-main">
+          <h3 class="post-t">概率论 83 分，把我的复习顺序写下来，供参考</h3>
+          <p class="post-d">先过一遍教材例题 → 只做课后奇数题 → 最后两周只刷真题错题本。别一上来就刷真题，真的会崩。</p>
+          <div class="post-m">
+            <span class="from"><i class="bk"></i>概率论与数理统计</span>
+            <span>周雨桐</span><span class="sep"></span>
+            <span>昨天 21:40</span><span class="sep"></span>
+            <span>41 条回复</span>
+          </div>
+        </div>
+        <div class="cnt hot"><b>41</b><span>回复</span></div>
+      </li>
+
+      <li class="post" data-cat="fb" onclick="openDetail()">
+        <div class="mark">数据</div>
+        <div class="post-main">
+          <h3 class="post-t">
+            官方《数据结构》讲义 P44 的 AVL 删除例子好像写错了
+            <span class="tag official">官方</span>
+          </h3>
+          <p class="post-d">按讲义的双旋方向转完，树高是 3 不是 2。我用代码跑了一遍，附了截图。</p>
+          <div class="post-m">
+            <span class="from"><i class="bk"></i>数据结构 · 官方库</span>
+            <span>王叙</span><span class="sep"></span>
+            <span>昨天 18:02</span><span class="sep"></span>
+            <span>管理员已回复</span>
+          </div>
+        </div>
+        <div class="cnt"><b>5</b><span>回复</span></div>
+      </li>
+
+      <li class="post" data-cat="team" onclick="openDetail()">
+        <div class="mark">计组</div>
+        <div class="post-main">
+          <h3 class="post-t">流水线数据冲突那张图，有人能讲一遍吗
+            <span class="tag ask">未解决</span>
+          </h3>
+          <p class="post-d">讲义上是「转发 + 停顿」两种处理，但真题里总要算平均 CPI，我不确定哪种情况该算几次停顿。</p>
+          <div class="post-m">
+            <span class="from"><i class="bk"></i>计算机组成原理</span>
+            <span>赵一鸣</span><span class="sep"></span>
+            <span>今天 10:04</span><span class="sep"></span>
+            <span>2 条回复</span>
+          </div>
+        </div>
+        <div class="cnt"><b>2</b><span>回复</span></div>
+      </li>
+
+      <li class="post" data-cat="team" onclick="openDetail()">
+        <div class="mark">自习</div>
+        <div class="post-main">
+          <h3 class="post-t">周三晚图书馆四楼 A 区，缺两个人一起刷题</h3>
+          <p class="post-d">19:00–22:00，主要做计组和数字逻辑。安静桌，不聊天，中途可以互相问题。</p>
+          <div class="post-m">
+            <span>赵一鸣</span><span class="sep"></span>
+            <span>今天 09:12</span><span class="sep"></span>
+            <span>3 条回复</span>
+          </div>
+        </div>
+        <div class="cnt"><b>3</b><span>回复</span></div>
+      </li>
+
+      <li class="post" data-cat="ask" onclick="openDetail()">
+        <div class="mark">英语</div>
+        <div class="post-main">
+          <h3 class="post-t">六级听力一直卡在 130 分，精听到底怎么精？
+            <span class="tag ask">未解决</span>
+          </h3>
+          <p class="post-d">试过听写、跟读、做笔记，分数就是不动。想知道有没有人真的靠精听提上去过。</p>
+          <div class="post-m">
+            <span class="from"><i class="bk"></i>六级真题精讲</span>
+            <span>林小满</span><span class="sep"></span>
+            <span>今天 08:30</span><span class="sep"></span>
+            <span>6 条回复</span>
+          </div>
+        </div>
+        <div class="cnt"><b>6</b><span>回复</span></div>
+      </li>
+
+      <li class="post" data-cat="sys" onclick="openDetail()">
+        <div class="mark">站务</div>
+        <div class="post-main">
+          <h3 class="post-t">论坛试运行：前两周不删帖，有问题直接在这儿说
+            <span class="tag open">置顶</span>
+          </h3>
+          <p class="post-d">发帖规则只有三条，写在右栏。功能上的建议、觉得不好用的地方，都欢迎提。</p>
+          <div class="post-m">
+            <span>知穗团队</span><span class="sep"></span>
+            <span>11 月 12 日</span><span class="sep"></span>
+            <span>19 条回复</span>
+          </div>
+        </div>
+        <div class="cnt"><b>19</b><span>回复</span></div>
+      </li>
+    </ul>
+  </main>
+
+  <!-- ================= 详情视图 ================= -->
+  <main id="detail">
+    <button class="btn-ghost d-back" onclick="closeDetail()">← 返回论坛中心</button>
+
+    <div class="d-head">
+      <div class="d-cat">课程答疑 · 高等数学（下）</div>
+      <h1>第十一章曲线积分：什么时候该用格林公式，什么时候只能硬算？</h1>
+      <div class="d-by">
+        <span class="ava">李</span>
+        <b>李知遥</b>
+        <span>·</span>
+        <span>今天 08:12</span>
+        <span>·</span>
+        <span>1,248 次浏览</span>
+        <span class="tag solved">已解决</span>
+        <span class="tag elite">精华</span>
+      </div>
+    </div>
+
+    <div class="d-body">
+      <p>做到 P213 第 7 题的时候彻底卡住了。题目给的曲线 L 不闭合，我下意识就想补一条线用格林公式，但补完之后算出来的结果和答案差一个负号。</p>
+      <p>翻讲义只写了「L 为闭曲线时可用格林公式」，没说 L 不闭合该怎么办。想问的是：</p>
+      <div class="quote">
+        1. 不闭合的曲线，补线有没有固定的选法？<br />
+        2. 补完以后方向怎么定，为什么我总是差个负号？<br />
+        3. 什么时候干脆硬算比补线快？
+      </div>
+      <p>附了我的草稿，第三行开始应该就错了。</p>
+    </div>
+
+    <div class="d-acts">
+      <button class="btn-gold">写回复</button>
+      <button class="btn-ghost">收藏</button>
+      <button class="btn-ghost">更多</button>
+    </div>
+
+    <!-- 相关库 -->
+    <div class="rel">
+      <div class="mark">高数</div>
+      <div class="rel-main">
+        <b>高等数学（下）· 官方库</b>
+        <span>172 份资料 · 4,820 段 · 23 人收藏</span>
+      </div>
+      <button class="btn-ghost">看资料</button>
+    </div>
+
+    <!-- 楼层 -->
+    <div class="floors">
+      <div class="floors-h"><span>23 条回复</span><span class="rule"></span><span>最早在前</span></div>
+
+      <!-- 1 楼：楼主自己补充 —— 这就是「自己给自己评论」 -->
+      <div class="floor mine">
+        <span class="ava">李</span>
+        <div class="floor-main">
+          <div class="floor-h">
+            <b>李知遥</b><span class="me">我</span>
+            <span>今天 08:20</span>
+            <span class="acts">
+              <button class="f-act" onclick="startReply('李知遥')">↩ 回复</button>
+              <button class="f-act">删除</button>
+            </span>
+          </div>
+          <p class="floor-b">补一句：草稿图我刚才传错了，第 3 行那条是我划掉的旧算法，别管它。</p>
+          <div class="floor-foot">楼主补充 · 自己的楼也可以继续回复</div>
+        </div>
+      </div>
+
+      <!-- 2 楼 -->
+      <div class="floor">
+        <span class="ava">王</span>
+        <div class="floor-main">
+          <div class="floor-h">
+            <b>王叙</b>
+            <span>今天 08:41</span>
+            <span class="acts">
+              <button class="f-act" onclick="startReply('王叙')">↩ 回复</button>
+            </span>
+          </div>
+          <p class="floor-b">负号的问题是方向。补的线要和 L 一起构成<b>正向</b>闭曲线（沿边界走，区域在左手边），
+            算完再用「闭曲线积分 − 补线积分」。你大概率是把补线当成反向用了。</p>
+          <div class="floor-foot">
+            <span class="tag solved">被采纳</span>
+          </div>
+
+          <ul class="kids">
+            <li class="kid">
+              <span class="ava">李</span>
+              <div class="kid-main">
+                <div class="kid-h"><b>李知遥</b><span class="me">我</span>
+                  <span>回复 <span class="at">@王叙</span></span><span>08:52</span></div>
+                <p class="floor-b">对，就是这个。我就是直接减了没管方向。谢谢！</p>
+              </div>
+            </li>
+            <li class="kid">
+              <span class="ava">周</span>
+              <div class="kid-main">
+                <div class="kid-h"><b>周雨桐</b><span>回复 <span class="at">@王叙</span></span><span>09:30</span></div>
+                <p class="floor-b">补充一句：常考的补线其实就三种，x 轴、y 轴、圆弧，别去凑更复杂的。</p>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- 3 楼：官方 -->
+      <div class="floor">
+        <span class="ava">官</span>
+        <div class="floor-main">
+          <div class="floor-h">
+            <span class="role">官方</span><b>知穗助教</b>
+            <span>今天 10:05</span>
+            <span class="acts">
+              <button class="f-act" onclick="startReply('知穗助教')">↩ 回复</button>
+            </span>
+          </div>
+          <p class="floor-b">这个问答已经整理进《高等数学（下）》库的「常见错误」一节，下一版讲义会带上。
+            判断顺序可以记成：<b>先看闭不闭 → 不闭就补 → 补完校方向 → 再决定硬算还是公式</b>。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 回复框 -->
+    <div class="composer" id="composer">
+      <div class="replying">
+        <span>回复 <b>@<span id="rep-to">—</span></b></span>
+        <button onclick="cancelReply()">取消</button>
+      </div>
+      <textarea id="ta" placeholder="写下你的回复…（Ctrl + Enter 发送）"></textarea>
+      <div class="c-bar">
+        <button class="btn-ghost">表情</button>
+        <span class="c-count">0/300</span>
+        <button class="btn-gold" id="send">发送</button>
+      </div>
+      <p class="c-tip">自己发的楼层也能回复 —— 用来补充、更正，或者隔天来追一句结果。可以连续发，不用等别人。</p>
+    </div>
+  </main>
+
+  <!-- ================= 右栏 ================= -->
+  <aside class="side-r">
+    <div class="card">
+      <div class="side-h"><span>本周热帖</span></div>
+      <ul class="hot-list">
+        <li><span class="rk">1</span><a href="#">概率论 83 分，把我的复习顺序写下来</a></li>
+        <li><span class="rk">2</span><a href="#">曲线积分什么时候该用格林公式</a></li>
+        <li><span class="rk">3</span><a href="#">计组流水线冲突，有没有一张图能看懂</a></li>
+        <li><span class="rk">4</span><a href="#">求 2024 秋线性代数期末真题</a></li>
+        <li><span class="rk">5</span><a href="#">六级听力卡在 130，精听到底怎么精</a></li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="side-h"><span>活跃同学</span></div>
+      <ul class="people">
+        <li><span class="ava">王</span>王叙<span class="k">本周 18 条</span></li>
+        <li><span class="ava">周</span>周雨桐<span class="k">本周 12 条</span></li>
+        <li><span class="ava">赵</span>赵一鸣<span class="k">本周 9 条</span></li>
+        <li><span class="ava">林</span>林小满<span class="k">本周 7 条</span></li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="side-h"><span>发帖须知</span></div>
+      <div class="rules">
+        <ol>
+          <li>不发整份教材和收费资料</li>
+          <li>不点人，只讨论题</li>
+          <li>问题解决了回一句结论</li>
+        </ol>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<button class="fab" onclick="fabClick()">＋ 发新帖</button>
+
+<script>
+/* 详情页里这颗按钮改成"写回复"：同一个位置只承担"当前这一屏最想做的事" */
+function fabClick(){
+  if(document.body.classList.contains('detail-open')){
+    document.getElementById('composer').scrollIntoView({block:'center',behavior:'smooth'});
+    setTimeout(function(){document.getElementById('ta').focus();},260);
+  }
+}
+function syncFab(){
+  document.querySelector('.fab').textContent =
+    document.body.classList.contains('detail-open') ? '写回复' : '＋ 发新帖';
+}
+function setCat(cat){
+  document.querySelectorAll('.cat').forEach(function(b){
+    b.classList.toggle('on', b.dataset.cat===cat);
+  });
+}
+function openDetail(){
+  document.body.classList.add('detail-open');
+  setCat('ask');                      // 详情页停在"课程答疑"，左栏跟着走
+  syncFab();
+  history.replaceState(null,'','#detail');
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function closeDetail(){
+  document.body.classList.remove('detail-open');
+  setCat('all');
+  syncFab();
+  history.replaceState(null,'','#');
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+// 直接用 #detail 打开详情页（截图 / 分享给同事看某一屏）
+if(location.hash==='#detail'){
+  document.body.classList.add('detail-open');
+  setCat('ask');
+  syncFab();
+}
+
+function startReply(name){
+  const c=document.getElementById('composer');
+  document.getElementById('rep-to').textContent=name;
+  c.classList.add('is-replying');
+  c.scrollIntoView({block:'center',behavior:'smooth'});
+  setTimeout(()=>document.getElementById('ta').focus(),260);
+}
+function cancelReply(){ document.getElementById('composer').classList.remove('is-replying'); }
+
+document.querySelectorAll('.cat').forEach(b=>{
+  b.addEventListener('click',()=>{
+    document.querySelectorAll('.cat').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+    const c=b.dataset.cat;
+    document.querySelectorAll('.post').forEach(p=>{
+      p.style.display=(!c||c==='all'||p.dataset.cat===c)?'':'none';
+    });
+  });
+});
+document.querySelectorAll('.tab').forEach(b=>{
+  b.addEventListener('click',()=>{
+    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+  });
+});
+const ta=document.getElementById('ta'), cc=document.querySelector('.c-count');
+ta.addEventListener('input',()=>{ cc.textContent=Math.min(ta.value.length,300)+'/300'; });
+ta.addEventListener('keydown',e=>{ if((e.metaKey||e.ctrlKey)&&e.key==='Enter') e.preventDefault(); });
+</script>
+</body>
+</html>

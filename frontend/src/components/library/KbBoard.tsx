@@ -95,7 +95,11 @@ export default function KbBoard({ kbId, compact = false, onCount }: Props) {
   }, [kbId, load]);
 
   const startReply = (p: BoardPost) => {
-    if (p.mine) return;
+    // 自己的留言同样可以回复。论坛里没有"不能回自己"的说法，而且这是真实需求：
+    // 发完想起漏了一句、隔天来补个结果、把答案追加在自己楼下。
+    // ★ 这里曾经留着 `if (p.mine) return;` —— 按钮渲染出来了、点下去什么都不会发生，
+    //   比不渲染更容易让人以为"功能坏了"（用户就是这么反馈的）。渲染条件与这一处
+    //   拦截必须同时放开，`test_start_reply_does_not_block_own_posts` 钉住。
     setReplyTo({ id: p.id, name: p.author.name });
     setTip("");
     // 手机上输入框可能在几屏之外：先滚过去再聚焦，否则键盘弹出来挡住的是

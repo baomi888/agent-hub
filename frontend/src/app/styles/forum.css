@@ -1,0 +1,994 @@
+/* ============================================================
+   论坛中心（/forum、/forum/[postId]）
+
+   视觉沿用苞米地笔记本那套令牌（暖纸底、卡纸抬一级、金色只给主操作），
+   与 /library 是同一个"广场"家族，所以不用新配色、不用新字体。
+   版式借的是 V2EX / NodeSeek 的信息密度：一行一帖、左板块标记、右回复数，
+   扫一眼就知道哪条有人接话。
+
+   与 /library 的两处不同：
+     1. 三栏。左栏是**板块**（固定 6 个），右栏是热帖 Top5 —— 论坛要让人
+        "不搜索也能逛"，靠的就是这两栏。
+     2. 楼层的样式**不复制**：详情页直接用 library.css 里的 `.kb-post` 系列
+        （它们都是顶层选择器，没挂在 `.kb-board` 下面）。复制一份的话，
+        以后改留言板的高亮色，论坛这里会悄悄不动。
+   ============================================================ */
+
+/* ---------- 外壳：固定高度 + 自己滚 ----------
+   和 `.lib-root` 同一个坑：html / body 都是 overflow:hidden，
+   只写 min-height 的话元素被内容撑高、scrollHeight == clientHeight，
+   浏览器和容器都滚不了，整页"卡死"。 */
+.fm-boot {
+  display: flex;
+  min-height: 100dvh;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-canvas);
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.fm-root {
+  height: 100dvh;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  background: var(--bg-canvas);
+  color: var(--ink);
+}
+
+/* ---------- 顶栏 ---------- */
+
+.fm-top {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-canvas) 88%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.fm-top-in {
+  display: flex;
+  max-width: 1280px;
+  align-items: center;
+  gap: 12px;
+  margin: 0 auto;
+  padding: 12px clamp(16px, 2vw, 30px);
+}
+
+.fm-logo {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  object-fit: contain;
+}
+
+.fm-head-text {
+  min-width: 0;
+  flex: none;
+}
+
+.fm-head-text h1 {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  letter-spacing: var(--ls-tight);
+  white-space: nowrap;
+}
+
+.fm-crumb {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.fm-crumb a {
+  color: var(--text-2);
+  text-decoration: none;
+}
+
+.fm-crumb a:hover {
+  color: var(--accent-ink);
+}
+
+.fm-crumb i {
+  opacity: 0.5;
+  font-style: normal;
+}
+
+/* 搜索框：放在标题右侧，宽度靠 flex:1 吃掉剩余空间 —— 写死宽度的话
+   1024 上会挤掉发帖按钮。 */
+.fm-search {
+  position: relative;
+  min-width: 0;
+  flex: 1;
+  max-width: 320px;
+  margin-left: auto;
+}
+
+.fm-search input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px 0 32px;
+  border: 1px solid var(--input-border);
+  border-radius: 999px;
+  background: var(--step-2);
+  color: var(--ink);
+  font-size: var(--fs-sm);
+}
+
+.fm-search input::placeholder {
+  color: var(--text-3);
+}
+
+.fm-search input:focus-visible {
+  border-color: var(--accent);
+  outline: var(--ring-accent);
+}
+
+.fm-search svg {
+  position: absolute;
+  top: 50%;
+  left: 11px;
+  width: 14px;
+  height: 14px;
+  transform: translateY(-50%);
+  color: var(--text-3);
+  pointer-events: none;
+}
+
+.fm-new {
+  display: inline-flex;
+  height: 34px;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  cursor: pointer;
+  transition: var(--t-color), var(--t-move);
+}
+
+.fm-new:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-2);
+}
+
+.fm-new:focus-visible {
+  outline: var(--ring-accent);
+}
+
+/* ---------- 三栏 ---------- */
+
+.fm-wrap {
+  display: grid;
+  grid-template-columns: 208px minmax(0, 1fr) 264px;
+  gap: 22px;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 22px clamp(16px, 2vw, 30px) calc(56px + env(safe-area-inset-bottom, 0px));
+  align-items: start;
+}
+
+.fm-side {
+  position: sticky;
+  top: 74px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* 热帖栏不 sticky：它比板块栏长，跟着滚更自然 */
+.fm-hot {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.fm-box {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--step-2);
+  box-shadow: var(--shadow-1);
+}
+
+.fm-box-t {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: var(--ls-mid);
+}
+
+.fm-box-t::after {
+  height: 1px;
+  flex: 1;
+  background: var(--line);
+  content: "";
+}
+
+/* ---------- 左栏：板块 ---------- */
+
+.fm-cat {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+.fm-cat:hover {
+  background: var(--fill-3);
+  color: var(--ink);
+}
+
+.fm-cat.on {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+
+.fm-cat-n {
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: var(--fs-badge);
+  font-variant-numeric: tabular-nums;
+}
+
+.fm-cat.on .fm-cat-n {
+  color: var(--accent-ink);
+  opacity: 0.75;
+}
+
+.fm-side-stat {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+/* 手机上的板块：横向 chip 条。左栏在 ≤880 被隐藏，没有这一条就选不了板块 */
+.fm-cats-m {
+  display: none;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 0 2px 2px;
+  scrollbar-width: none;
+}
+
+.fm-cats-m::-webkit-scrollbar {
+  display: none;
+}
+
+.fm-chip {
+  flex: none;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--step-2);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.fm-chip.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+
+/* ---------- 中间：hero + 工具条 ---------- */
+
+.fm-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.fm-hero h2 {
+  margin: 0 0 6px;
+  font-size: clamp(20px, 2.4vw, 26px);
+  font-weight: 700;
+  letter-spacing: var(--ls-tight);
+}
+
+.fm-hero p {
+  max-width: 46em;
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+}
+
+.fm-hero b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.fm-bar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  scrollbar-width: none;
+}
+
+.fm-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.fm-tab {
+  /* flex:none + nowrap 缺一不可：窄屏下 flex 子项会被压缩，
+     "最新" 被挤成"最/新"竖排两行 —— 第一版就是这样 */
+  flex: none;
+  padding: 5px 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+.fm-tab:hover {
+  background: var(--fill-3);
+  color: var(--ink);
+}
+
+.fm-tab.on {
+  border-color: var(--accent-line-soft);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+
+.fm-bar-stat {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+/* ---------- 帖子行 ---------- */
+
+.fm-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fm-row {
+  position: relative;
+  display: grid;
+  /* 40px 是"放得下两个字"的最小宽度（2×11px + 左右各 9px 内边距）。
+     写 34px 时两个字会被挤成上下两行，方块变成一根竖条 */
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 15px 12px;
+  border-radius: var(--radius-sm);
+  transition: background-color 0.14s ease;
+}
+
+/* 行与行之间必须有分隔线。
+   只靠 hover 变色的话，一屏七条帖子读起来是一整坨，眼睛找不到行的起点 ——
+   实际截图就是这样，看着像一段没分段的文字。
+   用 --line（0.10）在纸底上几乎看不见，这里单独给一档 0.16 的分隔色。 */
+.fm-row + .fm-row {
+  border-top: 1px solid rgba(61, 47, 26, 0.16);
+}
+
+.fm-row:hover {
+  background: var(--step-2);
+}
+
+/* 整行可点，又要在行内放标签按钮时不能把 <a> 包一层（<a> 里嵌 <button>
+   是非法嵌套，移动端会连带跳转）。所以内容正常排，末尾放一张自闭合的
+   覆盖层链接，层级压在内容之上、按钮之下。 */
+.fm-hit {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: var(--radius-sm);
+}
+
+.fm-hit:focus-visible {
+  outline: var(--ring-accent);
+}
+
+.fm-mark {
+  display: flex;
+  width: 40px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: var(--fs-badge);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  /* 只放两个字，必须不换行：换行就被挤成上下两排，方块变成一条 */
+  white-space: nowrap;
+}
+
+.fm-body {
+  min-width: 0;
+}
+
+.fm-title {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 4px;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.fm-title-t {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fm-tag {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--fill-2);
+  color: var(--text-3);
+  font-size: var(--fs-badge);
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+.fm-tag.ok {
+  background: rgba(30, 122, 70, 0.12);
+  color: var(--success-ink);
+}
+
+.fm-tag.gold {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.fm-tag.top {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.fm-ex {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0 0 6px;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  -webkit-box-orient: vertical;
+  /* 两行。只给一行时，摘要在中间被硬切，用户看不出这条帖到底问了什么，
+     而两行刚好够「背景 + 卡在哪」—— 再多就抢了标题的位置。 */
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.fm-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.fm-meta b {
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+/* 来源库 chip：论坛不是另起一个平行世界，每条帖子都要能追回它讨论的那个库 */
+.fm-src {
+  display: inline-flex;
+  position: relative;
+  z-index: 2; /* 压在整行那张覆盖层链接之上，否则点它会被当成"点进帖子" */
+  align-items: center;
+  gap: 4px;
+  max-width: 180px;
+  padding: 1px 7px;
+  border: 1px solid var(--accent-line-soft);
+  border-radius: 999px;
+  color: var(--accent-ink);
+  text-decoration: none;
+  transition: var(--t-color);
+}
+
+.fm-src:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.fm-src span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fm-count {
+  display: flex;
+  min-width: 42px;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  padding-top: 2px;
+  color: var(--text-3);
+  font-size: var(--fs-badge);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+}
+
+.fm-count b {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+
+.fm-count.zero b {
+  color: var(--text-3);
+  font-weight: 400;
+  opacity: 0.5;
+}
+
+/* ---------- 右栏：热帖 ---------- */
+
+.fm-hot-item {
+  display: flex;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px dashed var(--line);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  text-decoration: none;
+}
+
+.fm-hot-item:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.fm-hot-item:hover {
+  color: var(--accent-ink);
+}
+
+.fm-hot-n {
+  flex: none;
+  width: 15px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.fm-hot-item:nth-child(-n + 3) .fm-hot-n {
+  color: var(--accent);
+}
+
+.fm-hot-t {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.fm-rules {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: 1.75;
+}
+
+.fm-rules li::marker {
+  color: var(--accent);
+}
+
+/* ---------- 发话题面板 ---------- */
+
+.fm-comp {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-md);
+  background: var(--step-2);
+  box-shadow: var(--shadow-2);
+}
+
+.fm-comp-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+
+.fm-comp-h button {
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.fm-comp-h button:hover {
+  background: var(--fill-2);
+  color: var(--ink);
+}
+
+.fm-comp-title {
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius-sm);
+  background: var(--step-1);
+  color: var(--ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.fm-comp-title::placeholder {
+  color: var(--text-3);
+  font-weight: 400;
+}
+
+.fm-comp-title:focus-visible,
+.fm-comp textarea:focus-visible {
+  border-color: var(--accent);
+  outline: var(--ring-accent);
+}
+
+.fm-comp textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius-sm);
+  background: var(--step-1);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+  resize: vertical;
+}
+
+.fm-comp-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fm-cats-sel {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fm-count,
+.fm-comp-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.fm-comp-count {
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.fm-comp-tip {
+  margin: 0;
+  color: var(--red-ink);
+  font-size: var(--fs-xs);
+}
+
+/* ---------- 空态 / 加载 ---------- */
+
+.fm-empty {
+  padding: 40px 16px;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+
+.fm-more {
+  align-self: center;
+  margin-top: 6px;
+}
+
+/* ---------- 详情页 ---------- */
+
+.fm-detail {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 20px clamp(16px, 2vw, 30px) calc(64px + env(safe-area-inset-bottom, 0px));
+}
+
+.fm-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 14px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--step-2);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  text-decoration: none;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+.fm-back:hover {
+  border-color: var(--accent-line);
+  color: var(--accent-ink);
+}
+
+.fm-dhead h1 {
+  margin: 0 0 8px;
+  font-size: clamp(20px, 2.6vw, 27px);
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: var(--ls-tight);
+  word-break: break-word;
+}
+
+.fm-dtags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  margin-bottom: 14px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.fm-solve {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 5px 12px;
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  background: var(--step-2);
+  color: var(--accent-ink);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--t-color), var(--t-move);
+}
+
+.fm-solve:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.fm-solve.on {
+  border-color: var(--success);
+  background: rgba(30, 122, 70, 0.12);
+  color: var(--success-ink);
+}
+
+/* 楼层列表直接复用 `.kb-post` 系列，这里只补容器间距与分隔线 */
+.fm-floors {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fm-floors > .kb-post {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+.fm-floors > .kb-post:hover {
+  background: transparent;
+}
+
+.fm-floors > .kb-post.is-mine {
+  /* 自己的楼层不整块染色（列表里全是金底就看不清哪条是重点了），
+     只在左侧留一道金边 —— 和「我」那个小标配合就够了 */
+  background: transparent;
+  box-shadow: inset 2px 0 0 var(--accent);
+  padding-left: 10px;
+}
+
+/* 楼主那一层是**正文**，不是"一句话"：字号提到 15px、行高 1.85，
+   2000 字的长帖才读得下去。回复保持原尺寸 —— 盖楼是短句。 */
+.fm-floors > .kb-post:first-child .kb-post-b {
+  font-size: var(--fs-md);
+  line-height: 1.85;
+}
+
+.fm-reply {
+  margin-top: 20px;
+}
+
+.fm-reply-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: var(--ls-mid);
+}
+
+.fm-reply-h::after {
+  height: 1px;
+  flex: 1;
+  background: var(--line);
+  content: "";
+}
+
+/* ---------- 平板与手机 ---------- */
+
+@media (max-width: 1120px) {
+  .fm-wrap {
+    grid-template-columns: 190px minmax(0, 1fr);
+  }
+
+  .fm-hot {
+    display: none;
+  }
+}
+
+@media (max-width: 880px) {
+  .fm-wrap {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+    padding-top: 16px;
+  }
+
+  .fm-side {
+    display: none;
+  }
+
+  .fm-cats-m {
+    display: flex;
+  }
+
+  .fm-crumb,
+  .fm-search,
+  .fm-bar-stat {
+    /* 统计数字在手机上挤掉排序 tab 的宽度（第一版把「最新」压成了竖排两行），
+       而它本来就是"补信息"，手机上没有位置就不给 */
+    display: none;
+  }
+
+  .fm-head-text h1 {
+    font-size: var(--fs-md);
+  }
+
+  .fm-new {
+    margin-left: auto;
+  }
+
+  /* 手机上帖子行收窄：方块保持能放下两个字（34px），回复数移到元信息行 */
+  .fm-row {
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 10px;
+    padding: 11px 6px;
+  }
+
+  .fm-mark {
+    width: 34px;
+    height: 30px;
+    font-size: var(--fs-badge);
+  }
+
+  .fm-title {
+    font-size: var(--fs-sm);
+  }
+
+  /* 手机上标题允许折两行：一行放不下 25 个汉字，硬截会只剩半句，
+     而标签（板块 / 已解决）跟着换到下一行反而更好读 */
+  .fm-title-t {
+    display: -webkit-box;
+    overflow: hidden;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+  }
+
+  .fm-count {
+    grid-column: 2;
+    flex-direction: row;
+    gap: 4px;
+    min-width: 0;
+    padding-top: 0;
+    justify-content: flex-start;
+  }
+
+  .fm-ex {
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    font-size: var(--fs-xs);
+  }
+
+  .fm-detail {
+    padding-top: 14px;
+  }
+
+  /* 手机触控目标不小于 32px：「回复 / 删除」原来只有 26px 高，
+     两个按钮又挨着，点错的概率比点对还高 */
+  .fm-floors .kb-post-act {
+    min-height: 32px;
+    padding: 0 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fm-new:hover,
+  .fm-solve:hover {
+    transform: none;
+  }
+}
