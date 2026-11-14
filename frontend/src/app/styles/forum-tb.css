@@ -1,0 +1,1567 @@
+/* ============================================================
+   论坛中心 · 贴吧三栏版（2026-11-14）
+
+   形式取自百度贴吧：左板块列表 / 中间宽幅信息流 / 右栏侧卡。
+   与 fm-* 的旧版是两套皮肤，不共用：旧版一行一帖、密度高；
+   这一版把每条帖当成一张"卡"来读 —— 头像、板块、标题、摘要、
+   回复预览、操作行，先看到内容再决定点不点进去。
+
+   为什么另起一个文件而不是改 forum.css：
+   话题详情页的楼层仍复用 library.css 的 .kb-post 系列，
+   而旧版列表的 .fm-* 规则散落在 1300 行里，边改边删极易误伤
+   详情页。新增前缀 tb- 与 fm- 并存，删旧版时只需整段移除。
+
+   三条已知坑（都在效果图阶段踩过）：
+     1. figure 的浏览器默认 margin 是 1em 40px —— 不清掉，
+        图片会被挤掉 80px 且整体右移，和标题对不齐。
+     2. flex 里 flex:1 与 margin:auto 互斥 —— 顶栏要真正居中
+        必须用 grid 的 1fr auto 1fr。
+     3. 中性灰底放在暖纸页面上会被读成偏青 —— 楼中楼底色
+        用暖金的低透明度，不用 --fill-* 的冷灰。
+   ============================================================ */
+
+/* ---------- 外壳 ----------
+   和 .fm-root / .lib-root 同一个坑：html、body 都是 overflow:hidden，
+   只写 min-height 的话容器被内容撑高、scrollHeight == clientHeight，
+   浏览器和容器都滚不了，整页"卡死"。 */
+.tb-root {
+  height: 100dvh;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  background: var(--bg-canvas);
+  color: var(--ink);
+}
+
+/* 页面里所有图都不带浏览器默认外边距 */
+.tb-root figure { margin: 0; }
+
+/* ---------- 顶栏 ---------- */
+.tb-top {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-canvas) 92%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+/* 三列 1fr auto 1fr：中间那列才能真的落在视口中线上。
+   用 flex + margin:auto + flex:1 的话，flex:1 先把空间吃光了，
+   margin:auto 无空间可分，搜索框会被推到偏左 71px ——
+   顶栏看起来"重心偏"却说不出哪里偏。 */
+.tb-top-in {
+  display: grid;
+  max-width: 1320px;
+  height: 56px;
+  align-items: center;
+  gap: 16px;
+  grid-template-columns: 1fr minmax(0, 460px) 1fr;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.tb-logo {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  justify-self: start;
+  color: var(--ink);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.tb-logo-mark {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--accent);
+  box-shadow: var(--shadow-1);
+}
+
+/* 站名是这一页的 h1，但外观要保持"logo 旁边那行字"：
+   h1 默认的 2em 字号和上下 margin 会把 56px 的顶栏直接撑爆 */
+.tb-logo-t {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* 搜索框：不做成胶囊输入条，只做一条下划线式搜索 ——
+   顶栏里已经有主按钮，再加一个描边大框会和它抢注意力 */
+.tb-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--step-2);
+  transition: var(--t-color);
+}
+
+.tb-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.tb-search svg { flex: none; color: var(--text-3); }
+
+.tb-search input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  outline: none;
+}
+
+.tb-search input::placeholder { color: var(--text-3); }
+
+/* iOS Safari 聚焦 <16px 的输入框会放大整页且不还原。
+   a11y.css 里有全局兜底，这里再钉一次，避免以后有人改顺序时失效 */
+@media (max-width: 900px) {
+  .tb-search input { font-size: var(--fs-lg); }
+}
+
+.tb-top-acts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-self: end;
+}
+
+/* 详情页顶栏中间的面包屑。列表页这一格是搜索框，详情页没有搜索，
+   放"我在哪"比留一个空档有用 —— 从群里点进来的链接，第一眼要能
+   看出这是哪个站、哪个板块 */
+.tb-crumb {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  justify-self: center;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.tb-crumb a { color: var(--text-3); }
+.tb-crumb a:hover { color: var(--accent-ink); }
+
+.tb-crumb i {
+  font-style: normal;
+  opacity: 0.5;
+}
+
+.tb-crumb span {
+  overflow: hidden;
+  color: var(--text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tb-new {
+  display: inline-flex;
+  height: 34px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--t-color), transform 0.12s ease;
+}
+
+.tb-new:hover { background: #D28F2C; }
+.tb-new:active { transform: scale(0.97); }
+.tb-new:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* ---------- 三栏 ---------- */
+.tb-wrap {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  max-width: 1320px;
+  align-items: start;
+  gap: 20px;
+  grid-template-columns: 208px minmax(0, 1fr) 296px;
+  margin: 0 auto;
+  padding: 20px 24px 80px;
+}
+
+/* ---------- 左：板块 ---------- */
+.tb-rail {
+  position: sticky;
+  top: 76px;
+}
+
+/* 左右两栏同色、同描边、同一档阴影：它们是同一层的"家具"。
+   左栏若用 --step-0（比右栏深一档），看起来像一个被选中的大按钮，
+   而不是一条可以一直放着的列表 */
+.tb-rail-card {
+  padding: 10px 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--step-2);
+  box-shadow: var(--shadow-1);
+}
+
+.tb-rail-h {
+  margin: 8px 8px 6px;
+  color: var(--text-3);
+  font-size: var(--fs-badge);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.tb-rail-h:first-child { margin-top: 0; }
+
+.tb-bar {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+.tb-bar:hover { background: var(--fill-2); }
+
+.tb-bar.on {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px rgba(200, 137, 42, 0.28);
+}
+
+.tb-bar-ico {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  place-items: center;
+  border-radius: 7px;
+  background: var(--step-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+}
+
+.tb-bar.on .tb-bar-ico {
+  background: var(--accent-tint);
+  box-shadow: inset 0 0 0 1px rgba(200, 137, 42, 0.34);
+  /* 不用 --accent-ink：金色字压在金底上对比度只有 2.35:1，11px 的字那样等于看不清。
+     选中靠底色和描边表达，字保持墨色 */
+  color: var(--ink);
+}
+
+.tb-bar-n {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tb-bar.on .tb-bar-n { color: var(--ink); font-weight: 600; }
+
+.tb-bar-c {
+  flex: none;
+  color: var(--text-3);
+  font-size: var(--fs-badge);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 0 的计数压到最淡：六个板块里五个是 0 时，一列同样重的数字
+   会让"哪个板块真的有内容"要逐个去读 */
+.tb-bar-c.zero { opacity: 0.45; }
+
+/* 管理台角标：有活要干的时候才红 */
+.tb-bar-c.todo {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(164, 64, 47, 0.12);
+  color: var(--red-ink);
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+
+/* ---------- 中：信息流 ---------- */
+.tb-feed { min-width: 0; }
+
+/* 排序栏：下划线式 tab。
+   不用胶囊选中块 —— 左栏已经有一整套"选中=淡金底"的语言，
+   中间再出现一次会让人以为这一栏也能当筛选器长期挂着。
+   横线贴底，和下面的帖子列表共用一条基线 */
+.tb-sorts {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 6px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tb-sort {
+  position: relative;
+  padding: 7px 1px 9px;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+.tb-sort:hover { color: var(--ink); }
+
+.tb-sort.on { color: var(--ink); }
+
+.tb-sort.on::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  content: "";
+}
+
+.tb-sort-stat {
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 一条帖子。首屏不放"规则横幅"：横幅横在第一条前面，
+   第一眼看到的是说明而不是别人的内容，而且它讲的和右栏是同一件事 ——
+   一处够了。"不用登录"交给右栏第一卡和发帖面板底部各说一次 */
+.tb-post {
+  padding: 18px 0 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tb-post:last-child { border-bottom: 0; }
+
+/* 帖子头：头像 + 作者 + 板块 + 时间。
+   不做「关注」—— 没有账号就没有关注列表，硬加一个按钮只是摆设 */
+.tb-ph {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 9px;
+}
+
+.tb-av {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--accent-tint);
+  color: var(--accent-ink);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+}
+
+.tb-av img { width: 100%; height: 100%; object-fit: cover; }
+
+/* 四种备选色，按昵称哈希取一个。同一个人每次都是同一个色 ——
+   随机取色的话刷新一次头像就换一个颜色，比全同色更乱 */
+.tb-av.alt1 { background: rgba(120, 148, 118, 0.22); color: #3F5A3B; }
+.tb-av.alt2 { background: rgba(122, 132, 160, 0.22); color: #444C68; }
+.tb-av.alt3 { background: rgba(176, 116, 96, 0.20); color: #6E3E30; }
+.tb-av.alt4 { background: rgba(112, 134, 128, 0.22); color: #3B5450; }
+
+.tb-who { min-width: 0; flex: 1; }
+
+.tb-who-n {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.tb-tag {
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--fill-2);
+  color: var(--text-3);
+  font-size: var(--fs-badge);
+  font-weight: 400;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.tb-tag.gold {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.tb-tag.pin {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.tb-who-m {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--text-3);
+  font-size: var(--fs-badge);
+}
+
+/* 板块名做成可点的：点一下就去那个板块。
+   写成金色而不是蓝链接 —— 站里没有第二个链接色，蓝色会像外链 */
+.tb-bar-inline {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-ink);
+  font-size: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tb-bar-inline:hover { text-decoration: underline; }
+
+/* 标题是这条帖子的"入口"。18px 才和图/摘要形成两个重心：
+   内容告诉你是什么，标题告诉你值不值得点。
+   限两行：不封顶的话长标题会把下面的内容整个推下去 */
+.tb-title {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* 整条帖子可点：标题里放 <a>，覆盖层只补"点空白也能进"。
+   不用 <a> 包整张卡 —— 卡里还有板块按钮和来源库链接，
+   <a> 里嵌 <button> 是无效 HTML，点了会串 */
+.tb-title a { color: inherit; }
+
+.tb-title a:hover { color: var(--accent-ink); }
+
+/* 纯文字帖的摘要。标题封 2 行、摘要封 3 行 ——
+   列表里要读的是"这条在说什么"，不是读完全文；
+   字号差（18 / 15）刚好够分主次，不用再加色块 */
+.tb-text {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-md);
+  line-height: 1.75;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+/* 楼中楼预览：底色用暖金低透明度，不用中性灰 ——
+   中性灰放在这满页暖纸里会被眼睛看成偏青，一块"绿底"非常跳 */
+.tb-re {
+  margin: 10px 0 0;
+  padding: 9px 13px 10px 14px;
+  border-left: 2px solid rgba(200, 137, 42, 0.34);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: rgba(200, 137, 42, 0.07);
+  font-size: var(--fs-xs);
+  line-height: 1.72;
+}
+
+.tb-re ul { margin: 0; padding: 0; }
+
+.tb-re li {
+  display: flex;
+  gap: 6px;
+  list-style: none;
+}
+
+.tb-re li + li { margin-top: 4px; }
+
+/* 说话人比内容轻：名字做成金色加粗会比回复本身还抢眼，
+   读起来像三个标题接着三句附注 */
+.tb-re-n { flex: none; color: var(--text-3); font-weight: 600; }
+
+.tb-re-t { min-width: 0; color: var(--text-2); }
+
+.tb-re-more {
+  display: inline-block;
+  margin-top: 3px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.tb-re-more:hover { color: var(--accent-ink); }
+
+/* 操作行。13px 才够当"这一条怎么办"的入口；
+   gap 交给按钮自己的内边距，点按区因此有 30px 高（手机上拇指够得着） */
+.tb-acts {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.tb-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+  font-variant-numeric: tabular-nums;
+  text-decoration: none;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+.tb-act:hover { background: var(--fill-2); color: var(--accent-ink); }
+.tb-act:active { background: var(--fill-1); transform: scale(0.96); }
+
+/* 回复是这一条帖子上唯一的主动作，另外两个是附带动作 */
+.tb-act.reply { color: var(--accent-ink); font-weight: 600; }
+
+/* 来源库 chip 靠右：它回答的是"这条从哪来"，不是"这条怎么办" */
+.tb-act.src {
+  margin-left: auto;
+  max-width: 45%;
+  overflow: hidden;
+  color: var(--accent-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tb-act.src span { overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- 公告横幅 ----------
+   和帖子列表分开：公告是"站方说的话"，帖子是"同学说的话"。
+   但也不做成另一个卡片 —— 它就在列表最上面，一屏之内不该有
+   两种卡片语言 */
+.tb-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-bottom: 12px;
+  padding: 11px 12px;
+  border: 1px solid rgba(200, 137, 42, 0.30);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+}
+
+.tb-notice-tag {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-xs);
+  background: rgba(200, 137, 42, 0.18);
+  color: var(--accent-ink);
+  font-size: var(--fs-badge);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.tb-notice-main { min-width: 0; flex: 1; }
+
+.tb-notice-t {
+  display: block;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tb-notice-t:hover { color: var(--accent-ink); }
+
+.tb-notice-m {
+  margin: 3px 0 0;
+  color: var(--text-3);
+  font-size: var(--fs-badge);
+}
+
+.tb-notice-x {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+.tb-notice-x:hover { background: var(--fill-2); color: var(--ink); }
+
+/* ---------- 列表底部 ----------
+   "每屏 12 条、滚到底自动接上"是写给人看的实现说明，不该出现在界面上。
+   正在加载就转个圈，到底就说"到底了" */
+.tb-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 26px 22px 10px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.tb-loading::before {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border: 2px solid var(--fill-1);
+  border-top-color: var(--accent);
+  border-radius: 999px;
+  content: "";
+  animation: tb-spin 0.75s linear infinite;
+}
+
+@keyframes tb-spin { to { transform: rotate(360deg); } }
+
+/* 减少动效偏好下别转 —— 页面里一直转的东西很碍事 */
+@media (prefers-reduced-motion: reduce) {
+  .tb-loading::before { animation: none; }
+}
+
+.tb-end {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 22px 8px 8px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.tb-end::before,
+.tb-end::after {
+  width: 28px;
+  height: 1px;
+  background: var(--line);
+  content: "";
+}
+
+/* 列表底那句"另有 N 条公告在顶部"：它补的是左栏计数和行数对不上的账。
+   做成按钮而不是纯文字，因为不说"能点"就没人点 */
+.tb-end-up {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--accent-ink);
+  font-size: var(--fs-badge);
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+.tb-end-up:hover { background: var(--accent-soft); }
+
+/* 加载更早：一条幽灵按钮，不抢视觉 */
+.tb-more {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--step-2);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+.tb-more:hover { border-color: var(--line-strong); color: var(--ink); }
+.tb-more:disabled { opacity: 0.6; cursor: default; }
+
+/* ---------- 空态 ----------
+   空态要能接着做事，不是一句"还没有人发帖"就完了。
+   "搜不到"和"板块空着"是两种处境：前者要能退回全量，后者要能迈出第一步 */
+.tb-blank {
+  padding: 52px 20px 40px;
+  text-align: center;
+}
+
+.tb-blank-t {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--fs-xl);
+  font-weight: 700;
+}
+
+.tb-blank-p {
+  margin: 8px 0 18px;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+}
+
+.tb-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--step-2);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+.tb-ghost:hover { background: var(--fill-2); color: var(--ink); }
+
+/* ---------- 右：侧卡 ---------- */
+.tb-side {
+  position: sticky;
+  top: 76px;
+  display: grid;
+  gap: 14px;
+}
+
+.tb-card {
+  padding: 14px 16px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--step-2);
+  box-shadow: var(--shadow-1);
+}
+
+.tb-card-t {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 10px;
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+
+.tb-card-t svg { flex: none; color: var(--accent); }
+
+.tb-rules {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* 这里不能用 flex —— li 里混着文字和 <b>，一 flex 就把它们拆成
+   三个并排的格子，句子被撕成"主 / 必须带图 / ，一句话说明可以不写"。
+   小圆点用绝对定位，不参与排版 */
+.tb-rules li {
+  position: relative;
+  padding: 5px 0 5px 12px;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  line-height: 1.65;
+}
+
+.tb-rules li::before {
+  position: absolute;
+  top: 5px;
+  left: 1px;
+  color: var(--accent);
+  content: "·";
+  font-weight: 700;
+}
+
+.tb-rules b { color: var(--ink); font-weight: 600; }
+
+.tb-hot {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: h;
+}
+
+.tb-hot li { counter-increment: h; }
+
+.tb-hot a {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 0;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+.tb-hot a:hover { color: var(--accent-ink); }
+
+.tb-hot a::before {
+  flex: none;
+  width: 14px;
+  color: var(--text-3);
+  content: counter(h);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.tb-hot li:nth-child(-n + 3) a::before { color: var(--accent); }
+
+.tb-hot-t {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.tb-today {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  line-height: 1.75;
+}
+
+.tb-today b {
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 弹层底座 ----------
+   发帖、我发的帖、管理台共用一层遮罩。
+   不用 <dialog>：它的默认样式在 Safari 上要写一堆重置，
+   而且焦点陷阱在 React 里还是得自己补 */
+.tb-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(61, 47, 26, 0.42);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+.tb-mask.on { opacity: 1; pointer-events: auto; }
+
+.tb-comp {
+  width: min(760px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 18px 20px 20px;
+  border-radius: var(--radius-lg);
+  background: var(--step-2);
+  box-shadow: 0 12px 40px rgba(60, 43, 18, 0.16);
+  transform: translateY(8px);
+  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.tb-mask.on .tb-comp { transform: none; }
+
+.tb-comp-h {
+  display: flex;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.tb-comp-h h2 {
+  flex: 1;
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.tb-x {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+.tb-x:hover { background: var(--fill-2); color: var(--ink); }
+
+.tb-field { margin-top: 14px; }
+
+.tb-compose > .tb-field:first-child { margin-top: 0; }
+
+.tb-label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 6px;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.tb-label span { color: var(--text-3); font-size: var(--fs-badge); font-weight: 400; }
+
+.tb-input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--step-1);
+  color: var(--ink);
+  font-size: var(--fs-md);
+  outline: none;
+  transition: var(--t-color), box-shadow 0.14s ease;
+}
+
+.tb-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* textarea 默认是等宽字体和固定 2 行高。不写这两条，
+   输入框里的字会和上面标题不是同一套排版 */
+.tb-area {
+  min-height: 96px;
+  font-family: inherit;
+  line-height: 1.7;
+  resize: vertical;
+}
+
+/* 字段说明。比 label 再轻一档 —— 它是"规则"，不是"要填的东西" */
+.tb-tip {
+  margin: 7px 0 0;
+  color: var(--text-3);
+  font-size: var(--fs-badge);
+  line-height: 1.65;
+}
+
+.tb-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.tb-pill {
+  padding: 4px 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--fill-3);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+.tb-pill:hover { background: var(--fill-2); }
+
+/* 选中态和左栏选中的板块同一套（淡金底 + 1px 金描边）：
+   同一个"选中"概念，不该在两个地方长成两个样子。
+   border 保留 1px transparent —— 否则点一下盒子缩 1px，整行会跳 */
+.tb-pill.on {
+  background: var(--accent-tint);
+  box-shadow: inset 0 0 0 1px rgba(200, 137, 42, 0.34);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.tb-select {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--step-1);
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  outline: none;
+}
+
+.tb-select:focus { border-color: var(--accent); }
+
+.tb-comp-f {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.tb-comp-note {
+  flex: 1;
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-badge);
+  line-height: 1.65;
+}
+
+.tb-comp-tip {
+  margin: 10px 0 0;
+  color: var(--red-ink);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+}
+
+.tb-pub {
+  flex: none;
+  padding: 9px 22px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--t-color), transform 0.12s ease;
+}
+
+.tb-pub:disabled {
+  background: var(--fill-1);
+  color: var(--text-3);
+  cursor: not-allowed;
+}
+
+.tb-pub:not(:disabled):active { transform: scale(0.97); }
+
+/* ---------- 状态徽章 ----------
+   先发后审没有"审核中" —— 发出去就是公开的，
+   作者侧只可能是「已发布」或「已下架」。多造一个中间态会让人以为要等 */
+.tb-state {
+  display: inline-flex;
+  flex: none;
+  height: 20px;
+  align-items: center;
+  padding: 0 7px;
+  border-radius: var(--radius-xs);
+  background: var(--accent-tint);
+  color: var(--accent-ink);
+  font-size: var(--fs-badge);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.tb-state.bad { background: rgba(164, 64, 47, 0.11); color: var(--red-ink); }
+
+/* ---------- 我发的帖 ---------- */
+.tb-sheet {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-height: calc(100vh - 48px);
+  border-radius: var(--radius-lg);
+  background: var(--step-2);
+  box-shadow: 0 12px 40px rgba(60, 43, 18, 0.16);
+  transform: translateY(8px);
+  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.tb-mask.on .tb-sheet { transform: none; }
+
+.tb-sheet-h {
+  position: relative;
+  padding: 16px 50px 12px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* .tb-x 在 .tb-comp-h 里是靠 flex 被推到右边的，这两个容器不是 flex ——
+   不改成绝对定位，关闭按钮会掉到说明文字下面去 */
+.tb-sheet-h .tb-x,
+.tb-admin-h .tb-x { position: absolute; top: 12px; right: 12px; }
+
+.tb-sheet-h h2 { margin: 0; font-size: var(--fs-lg); font-weight: 600; }
+
+.tb-sheet-h p {
+  margin: 3px 0 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+}
+
+.tb-sheet-b { overflow: auto; }
+
+.tb-sheet-f {
+  padding: 11px 18px;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  background: var(--fill-4);
+}
+
+.tb-sheet-f p { margin: 0; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.6; }
+.tb-sheet-f b { color: var(--text-2); font-weight: 600; }
+
+.tb-my { padding: 13px 18px; border-bottom: 1px solid var(--line); }
+.tb-my:last-child { border-bottom: 0; }
+
+.tb-my-h { display: flex; align-items: flex-start; gap: 8px; }
+
+.tb-my-h h3 {
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.tb-my-h h3 a { color: inherit; }
+.tb-my-h h3 a:hover { color: var(--accent-ink); }
+
+.tb-my-m { margin: 4px 0 0; color: var(--text-3); font-size: var(--fs-xs); }
+
+/* 下架说明：暖红虚线框。别用中性灰底 —— 暖纸面上会读成偏青 */
+.tb-gone {
+  margin-top: 9px;
+  padding: 10px 11px;
+  border: 1px dashed rgba(164, 64, 47, 0.38);
+  border-radius: var(--radius-sm);
+  background: rgba(164, 64, 47, 0.055);
+}
+
+.tb-gone p { margin: 0; color: var(--text-2); font-size: var(--fs-xs); line-height: 1.6; }
+.tb-gone b { color: var(--red-ink); font-weight: 600; }
+.tb-gone .tb-gone-hint { margin-top: 3px; color: var(--text-3); }
+
+.tb-appeal {
+  margin-top: 9px;
+  padding: 5px 11px;
+  border: 1px solid rgba(164, 64, 47, 0.35);
+  border-radius: var(--radius-xs);
+  background: var(--step-2);
+  color: var(--red-ink);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+.tb-appeal:hover { background: rgba(164, 64, 47, 0.09); }
+.tb-appeal:disabled { opacity: 0.6; cursor: default; }
+
+/* ---------- 管理台 ---------- */
+.tb-admin {
+  display: flex;
+  flex-direction: column;
+  width: min(720px, 100%);
+  max-height: calc(100vh - 48px);
+  border-radius: var(--radius-lg);
+  background: var(--step-2);
+  box-shadow: 0 12px 40px rgba(60, 43, 18, 0.16);
+  transform: translateY(8px);
+  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.tb-mask.on .tb-admin { transform: none; }
+
+.tb-admin-h { position: relative; padding: 16px 50px 12px 18px; }
+
+.tb-admin-h h2 { margin: 0; font-size: var(--fs-lg); font-weight: 600; }
+
+.tb-admin-h p {
+  margin: 3px 0 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+}
+
+.tb-adm-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tb-adm-tab {
+  padding: 7px 10px 9px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+.tb-adm-tab b { margin-left: 4px; color: var(--red-ink); font-weight: 600; }
+
+.tb-adm-tab.on { border-bottom-color: var(--accent); color: var(--ink); }
+
+.tb-adm-list { overflow: auto; padding: 4px 18px 14px; }
+
+.tb-adm-row { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.tb-adm-row:last-child { border-bottom: 0; }
+
+.tb-adm-top { display: flex; align-items: flex-start; gap: 10px; }
+
+.tb-adm-main { min-width: 0; flex: 1; }
+
+.tb-adm-main h3 {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.tb-adm-main h3 a { color: inherit; }
+.tb-adm-main h3 a:hover { color: var(--accent-ink); }
+
+.tb-adm-m { margin: 3px 0 0; color: var(--text-3); font-size: var(--fs-xs); }
+
+.tb-adm-q {
+  margin: 6px 0 0;
+  padding: 7px 9px;
+  border-left: 2px solid rgba(200, 137, 42, 0.34);
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+  background: var(--fill-3);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+}
+
+.tb-adm-acts { display: flex; flex: none; gap: 6px; }
+
+.tb-adm-ok,
+.tb-adm-no {
+  height: 28px;
+  padding: 0 11px;
+  border-radius: var(--radius-xs);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+.tb-adm-ok {
+  border: 1px solid var(--line-strong);
+  background: var(--step-2);
+  color: var(--text-2);
+}
+
+.tb-adm-ok:hover { background: var(--fill-2); color: var(--ink); }
+
+.tb-adm-no {
+  border: 1px solid transparent;
+  background: rgba(164, 64, 47, 0.10);
+  color: var(--red-ink);
+}
+
+.tb-adm-no:hover { background: rgba(164, 64, 47, 0.18); }
+
+/* 下架必须填原因 —— 不填原因的下架，作者只会觉得东西被吞了 */
+.tb-reasons {
+  display: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+
+.tb-adm-row.picking .tb-reasons { display: flex; }
+
+.tb-reason {
+  padding: 4px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--step-2);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+.tb-reason:hover { border-color: rgba(164, 64, 47, 0.4); color: var(--red-ink); }
+
+.tb-reason.on {
+  border-color: rgba(164, 64, 47, 0.55);
+  background: rgba(164, 64, 47, 0.10);
+  color: var(--red-ink);
+  font-weight: 600;
+}
+
+.tb-adm-go {
+  margin-left: auto;
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--red-ink);
+  color: #FDFAF2;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 0.4;
+  pointer-events: none;
+  transition: var(--t-color), opacity 0.14s ease;
+}
+
+.tb-adm-go.ready { opacity: 1; pointer-events: auto; }
+
+.tb-adm-row.done .tb-adm-acts,
+.tb-adm-row.done .tb-reasons { display: none; }
+
+.tb-adm-done {
+  margin: 8px 0 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+}
+
+.tb-adm-done b { color: var(--red-ink); font-weight: 600; }
+
+.tb-adm-empty { padding: 34px 8px; color: var(--text-3); font-size: var(--fs-sm); text-align: center; }
+
+/* ---------- 详情页 ----------
+   楼层本身复用 library.css 的 .kb-post 系列（不复制样式，
+   否则以后调留言板的「我」标记，论坛这里会悄悄不跟着变）。
+   这里只补外壳与标题区 */
+.tb-detail {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 22px 24px 80px;
+}
+
+.tb-dhead { margin-bottom: 6px; }
+
+.tb-dhead h1 {
+  margin: 0 0 10px;
+  color: var(--ink);
+  font-size: var(--fs-title);
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.tb-dtags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.tb-dbadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: var(--radius-xs);
+  background: rgba(164, 64, 47, 0.10);
+  color: var(--red-ink);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+/* 下架后的说明块。别人看到的是这一块，作者多一行原因和一个申诉入口 */
+.tb-dgone {
+  margin: 16px 0 0;
+  padding: 16px 18px;
+  border: 1px dashed rgba(164, 64, 47, 0.38);
+  border-radius: var(--radius-md);
+  background: rgba(164, 64, 47, 0.055);
+}
+
+.tb-dgone h2 { margin: 0 0 6px; color: var(--red-ink); font-size: var(--fs-lg); font-weight: 700; }
+
+.tb-dgone p { margin: 0; color: var(--text-2); font-size: var(--fs-sm); line-height: 1.7; }
+
+.tb-dgone .tb-gone-hint { margin-top: 6px; color: var(--text-3); font-size: var(--fs-xs); }
+
+.tb-floors {
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tb-reply {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.tb-reply-h {
+  margin: 0 0 10px;
+  color: var(--ink);
+  font-size: var(--fs-md);
+  font-weight: 700;
+}
+
+.tb-bye {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 18px 0 0;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--step-2);
+  box-shadow: var(--shadow-1);
+}
+
+.tb-bye p { margin: 0; color: var(--text-2); font-size: var(--fs-sm); line-height: 1.7; }
+.tb-bye b { color: var(--ink); font-weight: 600; }
+
+/* ---------- 断点 ----------
+   1280 收起右栏（贴吧同样在窄屏先砍榜单）；
+   760 左栏转成顶部横向 chip —— 与论坛原有的手机形态一致 */
+@media (max-width: 1280px) {
+  .tb-wrap { grid-template-columns: 200px minmax(0, 1fr); }
+  .tb-side { display: none; }
+}
+
+@media (max-width: 760px) {
+  /* 手机上别再给搜索框固定 460 —— 两端都是 auto，中间吃掉剩下的 */
+  .tb-top-in {
+    gap: 10px;
+    padding: 0 14px;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .tb-logo-t { display: none; }
+
+  .tb-new {
+    min-width: 40px;
+    min-height: 40px;
+    justify-content: center;
+    padding: 0 13px;
+  }
+
+  .tb-wrap {
+    display: block;
+    padding: 12px 12px 64px;
+  }
+
+  .tb-rail {
+    position: static;
+    margin-bottom: 10px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    /* 右边一条渐隐 = "还能往右拨"。不留这条，末尾半个 chip 会被当成排版错误。
+       44px 而不是 34px：chip 是描边胶囊，内容稀疏，太窄的渐变看不出来 */
+    mask-image: linear-gradient(to right, #000 calc(100% - 44px), transparent);
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 44px), transparent);
+  }
+
+  .tb-rail.at-end {
+    mask-image: none;
+    -webkit-mask-image: none;
+  }
+
+  .tb-rail::-webkit-scrollbar { display: none; }
+
+  /* 手机上不再用一个胶囊装住整排 chip —— 容器本身是胶囊、里面每个 chip
+     也是胶囊，双层圆角叠在一起像一长条搜索框。容器退成透明，描边交给每个 chip */
+  .tb-rail-card {
+    display: flex;
+    gap: 6px;
+    overflow: visible;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    white-space: nowrap;
+  }
+
+  .tb-rail-h,
+  .tb-bar-ico,
+  .tb-bar-c { display: none; }
+
+  .tb-bar {
+    width: auto;
+    flex: none;
+    padding: 4px 12px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+  }
+
+  .tb-bar.on { border-color: rgba(200, 137, 42, 0.42); box-shadow: none; }
+
+  .tb-bar-n { overflow: visible; font-size: var(--fs-xs); }
+
+  .tb-title { font-size: var(--fs-lg); }
+
+  .tb-sorts { gap: 14px; }
+
+  .tb-sort-stat { font-size: var(--fs-badge); }
+
+  .tb-comp-f { flex-wrap: wrap; }
+  .tb-comp-note { flex-basis: 100%; order: 2; }
+  .tb-pub { width: 100%; order: 1; }
+
+  /* 弹层在手机上要贴着屏幕走：24px 的内边距会白白吃掉 48px 宽 */
+  .tb-mask { padding: 16px; }
+
+  .tb-sheet,
+  .tb-admin { max-height: calc(100vh - 32px); }
+
+  /* 管理台的行：标题和按钮挤一行会互相压，按钮整体掉到下一行铺满 */
+  .tb-adm-top { flex-wrap: wrap; }
+  .tb-adm-acts { width: 100%; }
+  .tb-adm-ok,
+  .tb-adm-no { height: 34px; flex: 1; }
+
+  .tb-detail { padding: 16px 14px 64px; }
+
+  .tb-dhead h1 { font-size: var(--fs-xl); }
+
+  /* 手机上操作行别再挂来源库 —— 三个按钮加一个库名在 390 宽会折成两行 */
+  .tb-act.src { max-width: 100%; margin-left: 0; }
+
+  .tb-notice { flex-wrap: wrap; }
+  .tb-notice-main { flex-basis: calc(100% - 33px); }
+
+  /* 面包屑只留最末一级（当前板块）：390 宽放不下「工作台 / 论坛 / 答疑」，
+     挤成两行会把顶栏撑高，而前两级本来一个返回箭头就够了 */
+  .tb-crumb > a,
+  .tb-crumb > i { display: none; }
+}

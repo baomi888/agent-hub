@@ -1,14 +1,18 @@
 "use client";
 
 /**
- * 话题详情（/forum/[postId]）。
+ * 话题详情（/forum/[postId]）· 贴吧三栏版的外壳。
  *
  * 楼层结构直接复用留言板那套（`kb-post` / `kb-post-h` / `kb-replies` 等类名，
  * 它们在 library.css 里都是顶层选择器）。另写一套的话，以后调留言板的
  * 「我」标记或回复按钮尺寸，论坛这里会悄悄不跟着变 —— 两处长得一样、
  * 修一处坏一处，是这类页面最常见的债。
  *
- * 和留言板只有一处不同：楼主那一层是**正文**（2000 字），不截断，要能读完。
+ * 和留言板只有三处不同：
+ *   1. 楼主那一层是**正文**（2000 字），不截断，要能读完。
+ *   2. 顶栏与列表页同一套（tb-*），否则点进来像换了个站。
+ *   3. **下架之后这一页仍然打得开**：链接可能已经被转发到班级群，
+ *      点进来是 404 比"已下架"伤害更大。作者能看到原因并申诉，别人只看到下架。
  *
  * ★ 没有「已解决」这套：论坛只用来讨论和分享，不是答疑系统。真做了这个标记，
  *   一半帖子会永远挂在"未解决"上，另一半会被误标成"解决了"因而没人再回。
@@ -18,7 +22,6 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 
 import CornIcon from "@/components/CornIcon";
-import MascotLogo from "@/components/chat/MascotLogo";
 import UserAvatar from "@/components/settings/UserAvatar";
 import { api } from "@/lib/api";
 import { fmtWhen } from "@/lib/time";
@@ -42,6 +45,9 @@ export default function ForumTopicPage() {
   const [tip, setTip] = useState("");
   const [replyTo, setReplyTo] = useState<ReplyTarget | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  /** 申诉已提交（本地即时反馈，避免要刷新才看见） */
+  const [appealed, setAppealed] = useState(false);
+  const [appealing, setAppealing] = useState(false);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const formRef = useRef<HTMLDivElement | null>(null);
 
@@ -115,6 +121,20 @@ export default function ForumTopicPage() {
     }
   };
 
+  const appeal = async () => {
+    if (appealing) return;
+    setAppealing(true);
+    setTip("");
+    try {
+      await api.appealForumTopic(postId);
+      setAppealed(true);
+    } catch (e) {
+      setTip(e instanceof Error ? e.message : "申请失败，请稍后重试");
+    } finally {
+      setAppealing(false);
+    }
+  };
+
   const insertSticker = (s: string) => {
     const el = taRef.current;
     const max = data?.max_reply ?? 300;
@@ -183,9 +203,7 @@ export default function ForumTopicPage() {
         </div>
         <p className="kb-post-b">{p.body}</p>
         {!isRoot && (p.replies?.length ?? 0) > 0 && (
-          <ul className="kb-replies">
-            {p.replies!.map((r) => renderFloor(r, false))}
-          </ul>
+          <ul className="kb-replies">{p.replies!.map((r) => renderFloor(r, false))}</ul>
         )}
       </div>
     </li>
@@ -199,18 +217,19 @@ export default function ForumTopicPage() {
   const floor = data?.posts?.[0];
   const replies = data?.posts?.slice(1) ?? [];
   const max = data?.max_reply ?? 300;
+  const gone = Boolean(data?.removed);
 
   return (
-    <div className="fm-root">
-      <header className="fm-top">
-        <div className="fm-top-in">
-          <Link href="/forum" aria-label="返回论坛列表">
-            <MascotLogo className="fm-logo" />
+    <div className="tb-root">
+      <header className="tb-top">
+        <div className="tb-top-in">
+          <Link href="/forum" className="tb-logo" aria-label="返回论坛">
+            <span className="tb-logo-mark">
+              <CornIcon name="task" className="h-4 w-4" />
+            </span>
+            <span className="tb-logo-t">知穗论坛</span>
           </Link>
-          <div className="fm-head-text">
-            <h1>论坛中心</h1>
-          </div>
-          <div className="fm-crumb">
+          <div className="tb-crumb">
             <Link href="/">工作台</Link>
             <i>/</i>
             <Link href="/forum">论坛</Link>
@@ -221,123 +240,184 @@ export default function ForumTopicPage() {
               </>
             )}
           </div>
-          <Link href="/forum" className="fm-new" style={{ marginLeft: "auto" }}>
-            <CornIcon name="back" className="h-4 w-4" />
-            返回列表
-          </Link>
+          <div className="tb-top-acts">
+            <Link href="/forum" className="tb-new">
+              <CornIcon name="back" className="h-4 w-4" />
+              返回列表
+            </Link>
+          </div>
         </div>
       </header>
 
-      <main className="fm-detail">
-        {loading && <p className="fm-empty">正在加载话题…</p>}
+      <main className="tb-detail">
+        {loading && (
+          <p className="tb-loading" role="status">
+            正在加载话题
+          </p>
+        )}
+
         {!loading && err && (
-          <p className="fm-empty">
-            {err}{" "}
-            <button type="button" className="lib-ghost" onClick={() => void load()}>
+          <div className="tb-blank">
+            <p className="tb-blank-t">{err}</p>
+            <p className="tb-blank-p">可能被作者删了，或者链接被复制坏了。</p>
+            <button type="button" className="tb-ghost" onClick={() => void load()}>
               重试
             </button>
-          </p>
+          </div>
         )}
 
         {!loading && !err && topic && (
           <>
-            <div className="fm-dhead">
+            <div className="tb-dhead">
               <h1>{topic.title}</h1>
-              <div className="fm-dtags">
-                <span className="fm-tag">{topic.cat_label}</span>
+              <div className="tb-dtags">
+                {/* 板块做成纯标签，不做"点一下回列表筛这个板块" ——
+                    列表页不读 URL 上的 cat，点了会跳回全部话题，
+                    那比不能点更让人困惑。要做就得让列表页接 searchParams，
+                    属于另一件事，不在这一批里塞 */}
+                <span className="tb-tag">{topic.cat_label}</span>
                 {topic.kb && (
-                  <Link className="fm-src" href={`/library/${encodeURIComponent(topic.kb.id)}`}>
-                    <CornIcon name="book" className="h-3 w-3" />
-                    <span>{topic.kb.name}</span>
+                  <Link
+                    className="tb-bar-inline"
+                    href={`/library/${encodeURIComponent(topic.kb.id)}`}
+                  >
+                    {topic.kb.name}
                   </Link>
                 )}
                 {/* 作者和时间只写在楼层头那一处。原来标题下面也写一遍
                     「苞米呀 · 今天 10:15 · 0 条回复」，紧接着楼主的头里又是
                     「管理员 苞米呀 楼主 今天 10:15」—— 同一句话上下隔 20px 说两遍。
-                    0 条回复时整个计数都不出现：列表里已经这么处理，
-                    详情页写「0 条回复」等于用一行字宣布"这里什么都没有" */}
-                {topic.reply_n > 0 && <span>{topic.reply_n} 条回复</span>}
-              </div>
-            </div>
-
-            <ul className="fm-floors">
-              {floor && renderFloor(floor, true)}
-              {replies.map((p) => renderFloor(p, false))}
-            </ul>
-
-            <div className="fm-reply" ref={formRef}>
-              <p className="fm-reply-h">回复</p>
-              <div className="kb-board-form">
-                {replyTo && (
-                  <div className="kb-board-replying">
-                    <span>
-                      回复 <b>@{replyTo.name}</b>
-                    </span>
-                    <button type="button" onClick={() => setReplyTo(null)} aria-label="取消回复">
-                      取消
-                    </button>
-                  </div>
-                )}
-                <textarea
-                  ref={taRef}
-                  className="kb-board-input"
-                  value={text}
-                  maxLength={max}
-                  rows={3}
-                  placeholder={replyTo ? `回复 @${replyTo.name}…` : "说点什么…"}
-                  aria-label={replyTo ? `回复 ${replyTo.name}` : "回复内容"}
-                  onChange={(e) => {
-                    setText(e.target.value);
-                    if (tip) setTip("");
-                  }}
-                  onKeyDown={(e) => {
-                    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                      e.preventDefault();
-                      void send();
-                    }
-                    if (e.key === "Escape" && replyTo) setReplyTo(null);
-                  }}
-                />
-                {emojiOpen && (
-                  <div className="kb-board-emoji" role="group" aria-label="官方表情">
-                    {(data?.stickers ?? []).map((s) => (
-                      <button
-                        key={s}
-                        type="button"
-                        className="kb-board-sticker"
-                        onClick={() => insertSticker(s)}
-                        aria-label={`插入表情 ${s}`}
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <div className="kb-board-bar">
-                  <button
-                    type="button"
-                    className={"kb-board-emoji-btn" + (emojiOpen ? " on" : "")}
-                    aria-expanded={emojiOpen}
-                    onClick={() => setEmojiOpen((v) => !v)}
-                  >
-                    <CornIcon name="smile" className="h-4 w-4" />
-                    表情
-                  </button>
-                  <span className="kb-board-count">
-                    {text.length}/{max}
+                    0 条回复时整个计数都不出现：列表里已经这么处理。
+                    下架时也不出现：楼层整块被藏了，写「1 条回复」却在下面
+                    找不到任何一条，读起来像加载失败 */}
+                {topic.reply_n > 0 && !gone && <span>{topic.reply_n} 条回复</span>}
+                {gone && (
+                  <span className="tb-dbadge">
+                    <CornIcon name="warn" className="h-3.5 w-3.5" />
+                    已下架
                   </span>
-                  <button
-                    type="button"
-                    className="lib-share kb-board-send"
-                    disabled={sending || !text.trim()}
-                    onClick={() => void send()}
-                  >
-                    {sending ? "发送中…" : replyTo ? "回复" : "发送"}
-                  </button>
-                </div>
-                {tip && <p className="kb-board-tip">{tip}</p>}
+                )}
               </div>
             </div>
+
+            {gone ? (
+              /* 下架之后这一页仍然能打开。别人看到的是"已下架"，作者多一行
+                 原因和一个申诉入口 —— 原因不公开：公布违规细节等于二次传播，
+                 也让作者在同学面前被点名 */
+              <div className="tb-dgone">
+                <h2>这条因违反社区规范被下架</h2>
+                {data?.reason ? (
+                  <p>
+                    原因：<b>{data.reason}</b>
+                  </p>
+                ) : (
+                  <p>具体原因只对作者本人显示。</p>
+                )}
+                <p className="tb-gone-hint">
+                  原链接保留这个说明，不会变成"页面不存在"。
+                  {data?.reason ? "确认是误判可以申请复核。" : ""}
+                </p>
+                {data?.can_appeal &&
+                  (appealed ? (
+                    <p className="tb-gone-hint">已提交复核，管理员会再看一遍。</p>
+                  ) : (
+                    <button
+                      type="button"
+                      className="tb-appeal"
+                      disabled={appealing}
+                      onClick={() => void appeal()}
+                    >
+                      {appealing ? "提交中…" : "申请复核"}
+                    </button>
+                  ))}
+                {tip && <p className="tb-comp-tip">{tip}</p>}
+              </div>
+            ) : (
+              <>
+                <ul className="tb-floors">
+                  {floor && renderFloor(floor, true)}
+                  {replies.map((p) => renderFloor(p, false))}
+                </ul>
+
+                <div className="tb-reply" ref={formRef}>
+                  <p className="tb-reply-h">回复</p>
+                  <div className="kb-board-form">
+                    {replyTo && (
+                      <div className="kb-board-replying">
+                        <span>
+                          回复 <b>@{replyTo.name}</b>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setReplyTo(null)}
+                          aria-label="取消回复"
+                        >
+                          取消
+                        </button>
+                      </div>
+                    )}
+                    <textarea
+                      ref={taRef}
+                      className="kb-board-input"
+                      value={text}
+                      maxLength={max}
+                      rows={3}
+                      placeholder={replyTo ? `回复 @${replyTo.name}…` : "说点什么…"}
+                      aria-label={replyTo ? `回复 ${replyTo.name}` : "回复内容"}
+                      onChange={(e) => {
+                        setText(e.target.value);
+                        if (tip) setTip("");
+                      }}
+                      onKeyDown={(e) => {
+                        if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                          e.preventDefault();
+                          void send();
+                        }
+                        if (e.key === "Escape" && replyTo) setReplyTo(null);
+                      }}
+                    />
+                    {emojiOpen && (
+                      <div className="kb-board-emoji" role="group" aria-label="官方表情">
+                        {(data?.stickers ?? []).map((s) => (
+                          <button
+                            key={s}
+                            type="button"
+                            className="kb-board-sticker"
+                            onClick={() => insertSticker(s)}
+                            aria-label={`插入表情 ${s}`}
+                          >
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <div className="kb-board-bar">
+                      <button
+                        type="button"
+                        className={"kb-board-emoji-btn" + (emojiOpen ? " on" : "")}
+                        aria-expanded={emojiOpen}
+                        onClick={() => setEmojiOpen((v) => !v)}
+                      >
+                        <CornIcon name="smile" className="h-4 w-4" />
+                        表情
+                      </button>
+                      <span className="kb-board-count">
+                        {text.length}/{max}
+                      </span>
+                      <button
+                        type="button"
+                        className="lib-share kb-board-send"
+                        disabled={sending || !text.trim()}
+                        onClick={() => void send()}
+                      >
+                        {sending ? "发送中…" : replyTo ? "回复" : "发送"}
+                      </button>
+                    </div>
+                    {tip && <p className="kb-board-tip">{tip}</p>}
+                  </div>
+                </div>
+              </>
+            )}
           </>
         )}
       </main>

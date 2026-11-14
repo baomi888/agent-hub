@@ -10,6 +10,8 @@ import type {
   ForkResult,
   ForumCats,
   ForumDetail,
+  ForumMinePage,
+  ForumModQueue,
   ForumSort,
   ForumTopic,
   ForumTopicPage,
@@ -429,6 +431,30 @@ export const api = {
   deleteForumTopic: (id: number) =>
     request<{ ok: boolean; id: number; removed: number }>(`/api/forum/topics/${id}`, {
       method: "DELETE",
+    }),
+  /**
+   * 这台设备发过的帖，**含已下架的**。
+   *
+   * 免登录没有收件箱，这就是"通知"的落点：作者回访时在这里看到哪条被判违规、
+   * 原因是什么、能不能申诉。别把它写成"我的账号"——身份来自设备 cookie。
+   */
+  listMyForumTopics: () => request<ForumMinePage>("/api/forum/mine"),
+  /** 申请复核。只能点一次，重复点后端返回 400（那是"已经申请过了"，不是故障） */
+  appealForumTopic: (id: number) =>
+    request<{ ok: boolean }>(`/api/forum/topics/${id}/appeal`, { method: "POST" }),
+  getForumModQueue: () => request<ForumModQueue>("/api/forum/mod/queue"),
+  /**
+   * 管理员的判定。三个动作一个接口 —— 它们改的是同一行。
+   * `remove` 必须带 reason（后端 REMOVE_KEYS 里的 key），不带直接 400。
+   */
+  reviewForumTopic: (
+    id: number,
+    action: "approve" | "remove" | "restore",
+    reason = ""
+  ) =>
+    request<{ topic: ForumTopic }>(`/api/forum/mod/${id}`, {
+      method: "POST",
+      body: JSON.stringify({ action, reason }),
     }),
   // ---------- 公开库收藏 ----------
   //

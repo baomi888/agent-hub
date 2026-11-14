@@ -1662,9 +1662,45 @@ export interface ForumTopic {
   last_at: number;
   reply_n: number;
   mine: boolean;
+  /**
+   * 先发后审的两种状态。
+   *
+   * 后端库里正常态是空串，到这一层已经被归一成 "live" —— 前端只判这两个值，
+   * 不用在每处同时想着 "" 和 "live" 是同一件事。
+   * 没有"审核中"：发出去就是公开的，多一个中间态会让人以为要等审核。
+   */
+  status: "live" | "removed";
+  /** 下架原因（中文 label，未下架时为空串）。**只在自己发的帖里给** */
+  removed_reason: string;
+  removed_at: number;
+  /** 作者点过申诉的时间；0 = 没申诉过 */
+  appeal_at: number;
+  /** 被举报次数。列表里不显示，管理台用它排序 */
+  report_n: number;
   author: { name: string; avatar: string; admin: boolean };
   /** 来源知识库；不挂库的话题为 null */
   kb: { id: string; name: string; official: boolean } | null;
+}
+
+/** `GET /api/forum/mine` —— 这台设备发过的帖，含已下架的 */
+export interface ForumMinePage {
+  posts: ForumTopic[];
+  /** 其中被下架了几条。左栏角标用它，0 时不显示 */
+  removed_n: number;
+}
+
+/** 管理台的一个下架原因选项 */
+export interface ForumModReason {
+  key: string;
+  label: string;
+}
+
+/** `GET /api/forum/mod/queue` —— 待审 + 被申诉 + 三个计数 */
+export interface ForumModQueue {
+  stats: { pending: number; appeals: number; removed: number };
+  pending: ForumTopic[];
+  appeals: ForumTopic[];
+  reasons: ForumModReason[];
 }
 
 export interface ForumTopicPage {
@@ -1682,9 +1718,21 @@ export interface ForumDetail {
   topic: ForumTopic;
   /** 楼主正文（完整，不截断）。`posts[0].body` 也是它 */
   body: string;
-  /** 楼主 + 全部回复。第 0 项恒为楼主 */
+  /** 楼主 + 全部回复。第 0 项恒为楼主；**下架时为空数组** */
   posts: BoardPost[];
   stickers: string[];
-  /** 回复字数上限，由后端下发 —— 前端不硬编码 */
+  /** 回复字数上限，由后端下发 —— 前端不硬编码。下架时是 0（= 不能回复） */
   max_reply: number;
+  /**
+   * 这条被下架了。
+   *
+   * 原链接仍然 200：直接 404 会让人以为网站坏了 —— 尤其链接可能已经
+   * 被转发到班级群里。三种状态字段在正常态也返回（false / "" / false），
+   * 所以前端不用判 `"removed" in data`。
+   */
+  removed: boolean;
+  /** 下架原因。**只在自己发的帖里有值**，别人恒为空串 */
+  reason: string;
+  /** 还能不能点申诉（作者且没申诉过） */
+  can_appeal: boolean;
 }
