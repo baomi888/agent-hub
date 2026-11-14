@@ -837,8 +837,8 @@ export default function ChatArea({
             {onUnbindKb && (
               <button
                 onClick={onUnbindKb}
-                title="解绑知识库"
-                aria-label="解绑知识库"
+                title="解绑资料库"
+                aria-label="解绑资料库"
                 className="kb-unbind ml-0.5 text-faint transition hover:text-red"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" className="h-3 w-3" aria-hidden="true">

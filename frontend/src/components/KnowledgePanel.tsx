@@ -904,7 +904,7 @@ export default function KnowledgePanel({
                     </span>
                   ) : (
                     <button
-                      title="删除知识库"
+                      title="删除资料库"
                       aria-label={`删除资料库：${k.name || k.kb_id}`}
                       className="kb-del"
                       onClick={() => setConfirmDelId(k.kb_id)}

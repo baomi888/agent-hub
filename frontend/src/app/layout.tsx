@@ -6,9 +6,14 @@ import PwaRegister from "@/components/PwaRegister";
 import "katex/dist/katex.min.css";
 import "./globals.css";
 
-const TITLE = "知穗Agent · 知识库 · 场景智能体 · 校园工具集";
+/*
+ * 对外称呼统一用「资料库」：侧栏、页面标题、右栏面板、空状态都是这个词。
+ * 「知识库」是后端命名（kb_*）和技术术语，不出现在界面里 —— 一个东西两个名字，
+ * 用户会以为导航里那个是另一处。
+ */
+const TITLE = "知穗Agent · 资料库 · 场景智能体 · 校园工具集";
 // 定位对齐「备考 + 求职」两大主场景（10-14 晚场景撤出后，旧三场景名不再出现在主界面）
-const DESC = "为大学生的 AI 素养平台：备考与求职智能体，知识库问答，附 GPA 分析、番茄钟等校园工具集";
+const DESC = "为大学生的 AI 素养平台：备考与求职智能体，资料库问答，附 GPA 分析、番茄钟等校园工具集";
 
 export const metadata: Metadata = {
   title: TITLE,

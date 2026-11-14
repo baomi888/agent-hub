@@ -189,8 +189,8 @@ export default function Sidebar({
       {onOpenLibrary && (
         <button onClick={onOpenLibrary} className="btn-import mt-2 w-full">
           <span className="inline-flex items-center justify-center gap-1.5">
-            <CornIcon name="store" className="h-4 w-4" title="公开知识库" />
-            公开知识库
+            <CornIcon name="store" className="h-4 w-4" title="公开资料库" />
+            公开资料库
           </span>
         </button>
       )}

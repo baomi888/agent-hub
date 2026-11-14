@@ -179,11 +179,10 @@ export default function PomodoroTool() {
    * 第二次才真正全屏。留一个常驻节点，第一次点击就能一步到位。
    */
   const stageHostRef = useRef<HTMLDivElement | null>(null);
-  /** 云同步状态。`checking` 是首屏还没问过服务器时的样子 */
-  const [sync, setSync] = useState<{ status: SyncStatus; message: string; at: number | null }>({
+  /** 云同步状态。`checking` 是首屏还没问过服务器时的样子 —— 只有 guest / error 会显示出来 */
+  const [sync, setSync] = useState<{ status: SyncStatus; message: string }>({
     status: "checking",
     message: "",
-    at: null,
   });
 
   const running = timer !== null && !isPaused(timer);
@@ -218,7 +217,7 @@ export default function PomodoroTool() {
     saveSessions(sessions);
     setTasks(tasks);
     setSessions(sessions);
-    setSync({ status: "synced", message: outcome.message, at: Date.now() });
+    setSync({ status: "synced", message: outcome.message });
   }, []);
 
   // 首屏恢复。effect 里读外部存储在 React 文档里是允许的例外：
@@ -694,12 +693,7 @@ export default function PomodoroTool() {
 
   return (
     <div id="campus-panel-pomodoro" role="tabpanel" aria-label="番茄钟">
-      <SyncBar
-        status={sync.status}
-        message={sync.message}
-        lastSyncedAt={sync.at}
-        onSync={() => void runSync()}
-      />
+      <SyncBar status={sync.status} message={sync.message} onSync={() => void runSync()} />
 
       {/*
         全屏宿主。**它始终在页面上**（收起时是个空盒子，高度为 0），专注视图渲染在它里面。

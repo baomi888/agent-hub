@@ -1,11 +1,11 @@
 "use client";
 
 /**
- * 公开知识库广场（/library）。
+ * 公开资料库广场（/library）。
  *
  * 2026-11-13 起取代原来的「模板广场」（/templates 现在重定向到这里）。
  * 为什么换：模板广场回答的是「我不知道拿 AI 干什么」，但它给的是一套
- * 预置提示词；而用户真正缺的常常是**可以问的资料**。站内公开知识库上线后，
+ * 预置提示词；而用户真正缺的常常是**可以问的资料**。站内公开资料库上线后，
  * 别人的资料本来就能挂进自己的对话检索，缺的只是一个"能看见、能挑"的地方。
  * 所以把"挑模板"换成"挑资料库"——同一块位置、同一件事，但交付物更实。
  *
@@ -226,7 +226,7 @@ export default function LibraryPage() {
         <div className="lib-top-in">
           <MascotLogo className="lib-logo" />
           <div className="lib-head-text">
-            <h1>公开知识库</h1>
+            <h1>公开资料库</h1>
             <p>官方课程资料与同学分享的资料库，点开就能看</p>
           </div>
           <Link href="/" className="lib-back" aria-label="返回工作台">
@@ -248,14 +248,14 @@ export default function LibraryPage() {
           </div>
           <button type="button" className="lib-share" onClick={() => setShareOpen(true)}>
             <CornIcon name="upload" className="h-4 w-4" />
-            分享我的知识库
+            分享我的资料库
           </button>
         </section>
 
         {official.length > 0 && (
           <section className="lib-sec lib-official">
             <div className="lib-sec-head">
-              <span className="eyebrow">官方公开知识库</span>
+              <span className="eyebrow">官方公开资料库</span>
               <span className="rule" />
               <span className="lib-count">{official.length} 门课程</span>
             </div>
@@ -378,7 +378,7 @@ export default function LibraryPage() {
                   <div className="lib-fav-main">
                     <b title={k.name}>{k.name}</b>
                     <span className="lib-fav-src">
-                      {/* 用户要求：官方写"来源官方知识库"，个人的写"来源某某 的库" */}
+                      {/* 用户要求：官方写"来源官方资料库"，个人的写"来源某某 的库" */}
                       <span className={"lib-src-tag" + (k.official ? " off" : "")}>
                         来源{k.source}
                       </span>
@@ -441,7 +441,7 @@ export default function LibraryPage() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="搜库名、简介或作者"
-              aria-label="搜索公开知识库"
+              aria-label="搜索公开资料库"
             />
             {query && (
               <button type="button" onClick={() => setQuery("")} aria-label="清空搜索">
@@ -513,7 +513,7 @@ export default function LibraryPage() {
                 </p>
                 <button type="button" className="lib-share" onClick={() => setShareOpen(true)}>
                   <CornIcon name="upload" className="h-4 w-4" />
-                  分享我的知识库
+                  分享我的资料库
                 </button>
               </>
             )}
@@ -743,7 +743,7 @@ function ShareSheet({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="lib-sheet-h">
-          <h2 id="lib-share-title">分享我的知识库</h2>
+          <h2 id="lib-share-title">分享我的资料库</h2>
           <button type="button" className="lib-sheet-x" onClick={onClose} aria-label="关闭">
             <CornIcon name="close" className="h-4 w-4" />
           </button>
@@ -752,16 +752,16 @@ function ShareSheet({
         {usable.length === 0 ? (
           <div className="lib-sheet-empty">
             <p className="lib-empty-t">
-              {kbs.length === 0 ? "你还没有知识库" : "你的知识库里还没有资料"}
+              {kbs.length === 0 ? "你还没有资料库" : "你的资料库里还没有资料"}
             </p>
             <p className="lib-empty-d">
               {kbs.length === 0
-                ? "先去知识库传一份资料，再回来分享。"
+                ? "先去资料库传一份资料，再回来分享。"
                 : "空库分享出去别人也检索不到东西，先传几份资料吧。"}
             </p>
             <Link href="/knowledge" className="lib-share">
               <CornIcon name="book" className="h-4 w-4" />
-              去知识库
+              去资料库
             </Link>
           </div>
         ) : (

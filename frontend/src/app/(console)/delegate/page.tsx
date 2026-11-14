@@ -889,7 +889,7 @@ export default function DelegatePage() {
                   </select>
                 </Field>
 
-                <Field label="绑定知识库（可选）" hint="绑了之后生成时只参考这个库">
+                <Field label="绑定资料库（可选）" hint="绑了之后生成时只参考这个库">
                   <select
                     className="input"
                     value={form.kbId}

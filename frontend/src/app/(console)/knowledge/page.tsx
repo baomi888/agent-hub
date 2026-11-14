@@ -120,7 +120,7 @@ export default function KnowledgePage() {
           return list[0]?.kb_id ?? null;
         });
       } catch (e) {
-        showToast("error", errMsg(e, "知识库列表读不到，请稍后重试"));
+        showToast("error", errMsg(e, "资料库列表读不到，请稍后重试"));
       } finally {
         setLoading(false);
       }
@@ -218,7 +218,7 @@ export default function KnowledgePage() {
       setConfirmDelKb(null);
       // 删掉的是当前选中的库时，refresh 会自动退回第一个
       await refresh();
-      showToast("info", "知识库已删除");
+      showToast("info", "资料库已删除");
     } catch (e) {
       showToast("error", errMsg(e, "删除失败，请稍后重试"));
     } finally {

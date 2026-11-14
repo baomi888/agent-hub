@@ -5217,8 +5217,12 @@ body.campus-modal-open .console-scroll {
 /* ---------- 番茄钟 · 云同步状态条（B6） ---------- */
 
 /*
- * 放在番茄钟最上面：位置高于所有数据，「数据在哪」应该在看到数字之前就交代清楚。
- * 四种状态用同一套结构，只换圆点颜色 —— 用户读的是那行字，不是颜色。
+ * 只在「自动同步办不到」时出现（SyncBar 在正常态直接返回 null）：
+ * 未登录 / 同步失败。同步是进页面、网络恢复、页面重新可见时自动跑的，
+ * 成功不该占一行版面。
+ *
+ * 所以这里只有两种配色。原来 is-synced / is-syncing / is-checking 的圆点规则
+ * 在没有常显状态之后成了死规则，已删 —— 留着会让人以为还存在第三种显示态。
  */
 .campus-sync {
   display: flex;
@@ -5240,32 +5244,12 @@ body.campus-modal-open .console-scroll {
   border-radius: 50%;
 }
 
-.campus-sync.is-synced .campus-sync-dot {
-  background: var(--accent);
-}
-
 .campus-sync.is-error .campus-sync-dot {
   background: var(--red);
 }
 
 .campus-sync.is-guest .campus-sync-dot {
   background: var(--line-strong);
-}
-
-.campus-sync.is-syncing .campus-sync-dot,
-.campus-sync.is-checking .campus-sync-dot {
-  background: var(--accent);
-  animation: campus-sync-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes campus-sync-pulse {
-  0%,
-  100% {
-    opacity: 0.35;
-  }
-  50% {
-    opacity: 1;
-  }
 }
 
 .campus-sync-text {

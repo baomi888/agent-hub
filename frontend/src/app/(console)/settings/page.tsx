@@ -409,7 +409,7 @@ export default function SettingsPage() {
           </section>
 
           <section>
-            <p className="sec-label">知识库沉淀</p>
+            <p className="sec-label">资料库沉淀</p>
             <div className="card card-pad">
               <div
                 className="row"
@@ -472,7 +472,7 @@ export default function SettingsPage() {
               <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: "var(--fs-md)" }}>数据留存</div>
-                  <div className="meta">对话会发给模型服务做推理；知识库与索引留在本机。</div>
+                  <div className="meta">对话会发给模型服务做推理；资料库与索引留在本机。</div>
                 </div>
                 <button
                   type="button"

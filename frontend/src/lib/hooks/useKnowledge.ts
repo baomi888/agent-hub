@@ -56,7 +56,7 @@ export function useKnowledge(showToast: ShowToast, chunkSize: number, chunkOverl
       console.error(e);
       // 同文件里 deleteKb / rebuildKb / deleteKbFile 失败都会 toast，只有这里静默：
       // 删完库再刷新失败的话，右栏还挂着已经删掉的库，用户会以为没删掉、再点一次。
-      showToast("error", "知识库列表刷新失败，请稍后重试");
+      showToast("error", "资料库列表刷新失败，请稍后重试");
     }
     // 公开库顺带刷一份：自己的库变了，别人公开的库也可能增减。
     // 失败不 toast——它是辅助列表，空着只是少几个可挂载的库。
@@ -209,7 +209,7 @@ export function useKnowledge(showToast: ShowToast, chunkSize: number, chunkOverl
         delete next[kbId];
         return next;
       });
-      showToast("info", "知识库已删除");
+      showToast("info", "资料库已删除");
       refreshKbs();
     } catch (e) {
       showToast("error", "删除失败，请稍后重试");

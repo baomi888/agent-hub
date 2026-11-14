@@ -54,7 +54,7 @@ export const SECONDARY_ENTRIES: {
 }[] = [
   // 「模板广场」2026-11-13 换成「公开知识库」：那套预置提示词下线，
   // 同一位置改成挑别人的公开资料库，挂进对话就能问（见 app/library）。
-  { key: "library", label: "公开知识库", icon: "store" },
+  { key: "library", label: "公开资料库", icon: "store" },
   { key: "upload", label: "上传资料建库", icon: "notes" },
   { key: "research", label: "让它去研究", icon: "bulb" },
   // 入口标签统一写「工具集」（11-07）：左边导航、对话栏、这里用的是同一个名字，
@@ -68,7 +68,7 @@ export const SECONDARY_ENTRIES: {
 // ============ 工具调用：名称 → 中文标签 + 图标 ============
 export const TOOL_META: Record<string, { label: string; icon: ReactNode }> = {
   kb_search: {
-    label: "知识库检索",
+    label: "资料库检索",
     icon: (
       <svg viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <circle cx="11" cy="11" r="7" />

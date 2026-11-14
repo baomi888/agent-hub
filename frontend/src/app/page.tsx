@@ -777,7 +777,7 @@ export default function Home() {
     try {
       const conv = await api.bindKb(sid, kbId);
       setSessions((prev) => prev.map((c) => (c.id === sid ? conv : c)));
-      showToast(kbId ? "success" : "info", kbId ? "已绑定知识库" : "已解绑知识库");
+      showToast(kbId ? "success" : "info", kbId ? "已绑定资料库" : "已解绑资料库");
     } catch (e) {
       showToast("error", "绑定失败，请稍后重试");
     }

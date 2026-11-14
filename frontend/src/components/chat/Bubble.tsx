@@ -275,7 +275,7 @@ const Bubble = memo(function Bubble({
                 <span className="ga-title">
                   {m.grounding.strength === "medium"
                     ? "只找到内容沾边的资料"
-                    : "知识库里没有找到直接依据"}
+                    : "资料库里没有找到直接依据"}
                 </span>
                 {m.grounding.strength === "low"
                   ? `已检索到 ${m.grounding.count} 条片段，但相似度都低于 0.45${
@@ -285,7 +285,7 @@ const Bubble = memo(function Bubble({
                       m.grounding.best !== null ? `（最高相似度 ${m.grounding.best.toFixed(2)}）` : ""
                     }，只是沾边、不够构成直接依据，请以你自己的判断为准。`}
                 <span className="ga-hint">
-                  补一份对口文档进这个知识库，或直接改用联网搜索，会更准。
+                  补一份对口文档进这个资料库，或直接改用联网搜索，会更准。
                 </span>
               </div>
             </div>

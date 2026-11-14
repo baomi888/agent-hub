@@ -229,14 +229,14 @@ export default function CourseLibraryPage() {
             <h1>{data?.name || "资料库"}</h1>
             <p>
               {data?.official
-                ? "官方公开知识库 · 在线预览或下载"
+                ? "官方公开资料库 · 在线预览或下载"
                 : "同学分享的资料库 · " +
                   (data?.access === "download" ? "可在线预览、可下载" : "仅可在线预览")}
             </p>
           </div>
-          <Link href="/library" className="lib-back" aria-label="返回公开知识库">
+          <Link href="/library" className="lib-back" aria-label="返回公开资料库">
             <CornIcon name="back" className="h-4 w-4" />
-            <span>公开知识库</span>
+            <span>公开资料库</span>
           </Link>
         </div>
       </header>
@@ -263,7 +263,7 @@ export default function CourseLibraryPage() {
                 重试
               </button>
               <Link href="/library" className="lib-share">
-                回公开知识库
+                回公开资料库
               </Link>
             </div>
           </div>
