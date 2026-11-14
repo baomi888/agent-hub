@@ -931,6 +931,23 @@ textarea.input {
   color: var(--text-3);
   margin-top: var(--space-2);
 }
+/* 指标卡的口径角标（2026-11-14）。
+   「注册用户」和「待处理反馈」是当前快照，不跟随上方的时间范围 —— 这条信息原来
+   写成括号挂在标签后面，四张卡各挂一句，卡面被括号塞满。改成同一个角标，
+   规则只在页头说一次：「标『全量』的是当前快照」。
+   ★ 字号取 --fs-badge（11px），不要随手写 10px：全站角标只有一个档位。 */
+.stat-scope {
+  display: inline-block;
+  margin-left: var(--space-4);
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: var(--fs-badge);
+  line-height: 1.5;
+  color: var(--text-3);
+  white-space: nowrap;
+  vertical-align: 1px;
+}
 .hours {
   display: flex;
   align-items: flex-end;

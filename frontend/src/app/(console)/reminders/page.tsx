@@ -3232,8 +3232,15 @@ export default function RemindersPage() {
 
   const taskTotal = taskBlocks.reduce((n, b) => n + b.items.length, 0) + doneTail.length;
   const remTotal = remBlocks.reduce((n, b) => n + b.items.length, 0);
-  const showTaskSub = taskBlocks.length + (doneTail.length > 0 ? 1 : 0) > 1;
   const showRemSub = remBlocks.length > 1;
+  /**
+   * 主区要不要出小标题：只在主区**自己**分成两段以上时才出（「接下来 7 天 / 更远」）。
+   *
+   * ★ 不能把 doneTail 算进来。算进来的后果是：今天 tab 只要有一条已完成，
+   * 主区就冒出一个小标题「今天」—— 而上面的 tab 正写着「今天」，同一个词在同一屏出现两次。
+   * 「今天完成」自己有标题（它由下面单独渲染，不走这个开关），所以单段主区直接平铺。
+   */
+  const showTaskSub = taskBlocks.length > 1;
 
   const taskEmpty =
     scope === "today"
@@ -3322,13 +3329,18 @@ export default function RemindersPage() {
         </div>
       ) : null}
 
-      {/* ===== 待办区 =====
+      {/* ===== 任务区 =====
           区域常驻，哪怕 0 条 —— 「这里是空的」和「这里没有这个区」是两件事，
-          上一版空分组 return null，用户在一屏里什么都找不到。 */}
+          上一版空分组 return null，用户在一屏里什么都找不到。
+
+          ★ 标题是「任务」不是「待办」：整页标题已经叫「待办」，同一个词在 DOM 里
+          出现两个 h2，读屏按标题跳转时分不清层级（2026-11-14）。「任务 / 提醒」
+          是一对同层的对象名，比「待办 / 提醒」更对称 —— 后者一个是待办事项、
+          一个是通知方式，不在同一根轴上。 */}
       {mode !== "sort" ? (
-        <section className="rem-sect" data-kind="task" aria-label="待办">
+        <section className="rem-sect" data-kind="task" aria-label="任务">
           <div className="rem-sect-hd">
-            <h2 className="rem-sect-title">待办</h2>
+            <h2 className="rem-sect-title">任务</h2>
             <span className="rem-sect-n">{taskTotal} 条</span>
           </div>
           {showTaskSub ? (

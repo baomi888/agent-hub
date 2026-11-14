@@ -220,9 +220,15 @@ export default function DashboardPage() {
     <PageShell
       eyebrow="管理 · 内部"
       title="数据看板"
+      // 一句话讲清三件事：谁跟随筛选、谁不跟随、口径怎么算。
+      //
+      // 原来这四句话分散在四张卡的标签里，每张卡挂一个括号，卡面被括号塞满；
+      // 而「口径见 口径与数据字典.md」是个仓库文件名 —— 线上用户点不开、也搜不到，
+      // 属于只对开发者有意义的死引用，一并删掉。
       sub={
         <span className="meta">
-          口径见 口径与数据字典.md；采集延迟 ≤ 3 秒{auto ? "，页面每 30 秒自动刷新" : ""}
+          数字跟随上方时间范围，标「全量」的是当前快照。成功率与失败次数已排除未登录探测与空总结，
+          耗时取均值、不是 p95。采集延迟 ≤ 3 秒{auto ? "，页面每 30 秒自动刷新" : ""}
           {fetchedAt ? `（上次 ${fmtClock(fetchedAt)}）` : ""}。
         </span>
       }
@@ -266,7 +272,7 @@ export default function DashboardPage() {
           <div className="card card-pad stat">
             <div className="n">{ov ? fmtNum(ov.users.total) : "—"}</div>
             <div className="l">
-              注册用户 <span className="meta">（当前快照，不随筛选变化）</span>
+              注册用户 <span className="stat-scope">全量</span>
             </div>
             {/* 清理记录就写在卡片上：不然「总数比上个月少了」只能靠翻库解释。
                 没清理过就不显示，默认外观不变。 */}
@@ -290,9 +296,7 @@ export default function DashboardPage() {
                   : `${(ov.calls.success_rate * 100).toFixed(1)}%`
                 : "—"}
             </div>
-            <div className="l">
-              成功率 <span className="meta">（不含未登录探测、报告空态）</span>
-            </div>
+            <div className="l">成功率</div>
           </div>
         </div>
 
@@ -300,9 +304,7 @@ export default function DashboardPage() {
         <div className="grid4">
           <div className="card card-pad stat">
             <div className="n">{ov ? `${fmtNum(ov.calls.avg_ms)} ms` : "—"}</div>
-            <div className="l">
-              平均耗时 <span className="meta">（均值，非 p95）</span>
-            </div>
+            <div className="l">平均耗时</div>
           </div>
           <div className="card card-pad stat">
             <div className="n">{ov ? `${fmtNum(ov.calls.max_ms)} ms` : "—"}</div>
@@ -310,12 +312,12 @@ export default function DashboardPage() {
           </div>
           <div className="card card-pad stat">
             <div className="n">{ov ? fmtNum(ov.calls.failed) : "—"}</div>
-            <div className="l">失败次数（不含未登录、空总结）</div>
+            <div className="l">失败次数</div>
           </div>
           <div className="card card-pad stat">
             <div className="n">{ov ? fmtNum(ov.feedback.open) : "—"}</div>
             <div className="l">
-              待处理反馈 <span className="meta">（全量，不受筛选影响）</span>
+              待处理反馈 <span className="stat-scope">全量</span>
             </div>
           </div>
         </div>

@@ -225,6 +225,13 @@ export default function SettingsPage() {
           <section>
             <p className="sec-label">账号</p>
             <AccountCard onLogout={logout} />
+            {/* 这条规则必须紧贴账号卡：它解释的是上面那张卡里的「登录名」，
+                原来排在下方的「再看一次上手说明」按钮之后，读起来像是在解释那个按钮。
+                句子的前半「密码、昵称、头像都能在这里改」是把卡里的字段念一遍，
+                2026-11-14 已删，只留布局看不见的那条规则。 */}
+            <p className="hint" style={{ marginTop: 10 }}>
+              改登录名要先验证一次密码。
+            </p>
             {/* 首次进平台那张上手说明只弹一次。入口放账号下面而不是另起一块：
                 它属于"我这个账号的事"，和改密码 / 退出登录同一类。 */}
             <button
@@ -237,11 +244,6 @@ export default function SettingsPage() {
               <CornIcon name="bulb" />
               再看一次上手说明
             </button>
-            {/* 这里原来写的是「「修改密码」还没做好，先置灰」——
-                密码功能上线后这句话就成了错的：按钮明明是亮的，页面却在说它没做。
-                2026-11-14：句子前半「密码、昵称、头像都能在这里改」是把上面那张卡的
-                字段念一遍，删掉；只留「改登录名要验证密码」这条布局看不见的规则。 */}
-            <p className="hint">改登录名要先验证一次密码。</p>
           </section>
 
           {/* 兴趣方向：30 条定稿词表（core/tag_taxonomy.py）。
