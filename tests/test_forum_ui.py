@@ -7,8 +7,14 @@
 （`styles/forum-tb.css`），这份文件当时没跟着改，于是出现两种病：
 一半断言直接红（`fm-hit`、`fm-cats-m` 这些类名不存在了），另一半**照样绿**
 却是在检查一份已经不上屏的死 CSS —— 后者更危险，它让人以为有人在看着。
-这次统一把"列表"的断言指到 `forum-tb.css` / `tb-*`，`forum.css` 只保留
-它还在负责的部分（详情页外壳 + 楼层复用 `library.css`）。
+那次先把"列表"的断言指到 `forum-tb.css` / `tb-*`，`forum.css` 留了一部分。
+
+⚠️ **随后详情页也换成了 `tb-*`，`forum.css` 彻底没人用**（162 条选择器
+全部以 `.fm-` 开头、src 里零个 `fm-` 类名、两个 keyframes 只被它自己引用）。
+2026-11-14 晚把它删了，同时把下面几条指着它的断言改成"只许有一套皮肤"。
+删的时候最容易被漏掉的不是 CSS，是**测试**：断言的实参变成一个不存在的
+路径，`read_text` 会直接抛 FileNotFoundError —— 那是运气好；运气不好的是
+断言写成 `not in`，文件不在了它永远绿。
 
   1. 列表用**明确的链接**（标题 + 回复），不用覆盖层 `<a>`
      （`<a>` 里嵌 `<button>` 是非法嵌套，移动端会连带跳转）。
@@ -16,6 +22,7 @@
   3. 左栏名字必须 nowrap + 省略号，否则"课程答疑"折行把整栏撑高。
   4. 手机上左栏不能 display:none，要变成横向 chip 条，否则选不了板块。
   5. 楼层样式必须复用 `.kb-post`，不许在论坛皮肤里再抄一套。
+  6. **论坛只许有一套皮肤**：类名定义与使用是闭环的，没有孤儿规则。
 """
 
 from __future__ import annotations
@@ -28,7 +35,6 @@ SRC = ROOT / "frontend" / "src"
 
 FORUM_PAGE = SRC / "app" / "forum" / "page.tsx"
 FORUM_DETAIL = SRC / "app" / "forum" / "[postId]" / "page.tsx"
-FORUM_CSS = SRC / "app" / "styles" / "forum.css"
 FORUM_TB = SRC / "app" / "styles" / "forum-tb.css"
 GLOBALS = SRC / "app" / "globals.css"
 NAV = SRC / "lib" / "nav.ts"
@@ -115,10 +121,10 @@ def test_floors_reuse_the_board_post_classes():
     for cls in ("kb-post", "kb-post-h", "kb-post-b", "kb-post-act"):
         assert cls in detail, f"详情页没有复用 {cls}"
 
-    for css_path in (FORUM_CSS, FORUM_TB):
-        css = _read(css_path)
-        # 允许出现 `.tb-detail .kb-post` 这种覆盖，但不允许重新定义 .kb-post 本体
-        assert not re.search(r"^\.kb-post\s*\{", css, re.M), f"{css_path.name} 重定义了 .kb-post"
+    # 允许出现 `.tb-detail .kb-post` 这种覆盖，但不允许重新定义 .kb-post 本体
+    assert not re.search(r"^\.kb-post\s*\{", _read(FORUM_TB), re.M), (
+        "forum-tb.css 重定义了 .kb-post"
+    )
 
 
 def test_mobile_rail_becomes_a_chip_strip():
@@ -146,24 +152,93 @@ def test_mobile_rail_becomes_a_chip_strip():
     assert ".tb-side { display: none" in wide, "1280 以下右侧说明栏该让位（三栏塞不下）"
 
 
-def test_forum_css_loads_after_library_css():
-    """论坛皮肤依赖 library.css 的顺序（楼层覆盖靠同优先级后到者赢）。"""
-    g = _read(GLOBALS)
-    assert g.index('"./styles/library.css"') < g.index('"./styles/forum.css"'), (
-        "forum.css 被放到了 library.css 前面，楼层覆盖会失效"
+def test_forum_has_exactly_one_skin():
+    """论坛只许有一套皮肤。旧的 `.fm-*` 那套不许回来。
+
+    2026-11-14 晚删掉了 `styles/forum.css`（32KB / 162 条选择器）：
+    列表页第 17 轮换 `tb-`、详情页随后也换掉，之后 src 里**零个** fm- 类名。
+    删之前逐条核过：162 条选择器全部以 `.fm-` 开头，没有一条全局覆盖，
+    `fm-drop` / `fm-rise` 两个 keyframes 也只被它自己的 `animation` 引用 ——
+    所以删掉不改变任何渲染。留着的唯一后果，是下一个人以为论坛有两套皮肤要同步。
+
+    三条一起钉：文件不在了、globals 不再 import 它、src 里没有任何 `.fm-` 规则。
+    最后一条是防"换个文件名复活"的 —— 只判前两条的话，把文件改叫
+    `forum-legacy.css` 再 import 进来，断言照样绿。
+    """
+    assert not (SRC / "app" / "styles" / "forum.css").exists(), (
+        "forum.css 又回来了；论坛只保留 forum-tb.css 一套皮肤"
     )
+    g = _read(GLOBALS)
+    assert "./styles/forum.css" not in g, "globals.css 还在 import 已删除的 forum.css"
+
+    css_files = [p for p in SRC.rglob("*.css") if "_backup" not in p.parts]
+    assert len(css_files) >= 15, f"只扫到 {len(css_files)} 个 CSS 文件，路径一改这条就空转"
+    leftovers = []
+    for p in css_files:
+        src = re.sub(r"/\*.*?\*/", "", p.read_text(encoding="utf-8"), flags=re.S)
+        for sel in re.findall(r"\.(fm-[a-z0-9-]+)", src):
+            leftovers.append(f"{p.relative_to(SRC)}:.{sel}")
+    assert not leftovers, "还有 .fm- 规则没清干净：\n  " + "\n  ".join(sorted(set(leftovers))[:10])
 
 
-def test_forum_skins_load_in_order():
-    """tb 皮肤必须在旧 forum.css 之后引入。
+def test_forum_skin_loads_after_library_css():
+    """皮肤必须排在 library.css 之后（楼层覆盖靠同优先级"后到者赢"）。
 
-    `forum-tb.css` 里的 `.tb-detail` / `.tb-dhead` 要覆盖旧外壳，
-    两者优先级相同，靠的就是"后到者赢"。顺序一颠倒，详情页标题会被旧样式吃掉。
+    详情页的楼层直接复用 library.css 的 `.kb-post` 系列，论坛只在
+    `.tb-detail .kb-post` 这种后代选择器上补差量。顺序一颠倒，补的差量
+    会被 library.css 的原文盖掉 —— 表现是"某些地方看着不像改过"，
+    而不是报错。
     """
     g = _read(GLOBALS)
-    assert g.index('"./styles/forum.css"') < g.index('"./styles/forum-tb.css"'), (
-        "forum-tb.css 排到了 forum.css 前面，tb 外壳覆盖不掉旧外壳"
+    assert g.index('"./styles/library.css"') < g.index('"./styles/forum-tb.css"'), (
+        "forum-tb.css 被排到了 library.css 前面，楼层覆盖会失效"
     )
+
+
+def test_skin_classes_are_closed_under_use():
+    """类名闭环：页面用到的每个 tb- 类都有样式，样式里的每个 tb- 类都有页面用。
+
+    比"删掉这套皮肤"更容易复发的是**搬家搬一半**：第 18 轮把楼中楼预览从
+    `.tb-re` 改名成 `.tb-lzl`，页面全改了，CSS 里那 5 条 `.tb-re*` 一条没删 ——
+    页面上看不出任何区别，只是有人下次翻 CSS 时会以为它还在用。
+    反方向更糟：页面上写了 `className="tb-xxx"`，CSS 里没有，元素静默退化成
+    浏览器默认样式（无边框、无内边距），看着"只是朴素了点"。
+
+    ★ 两条都要配数量下限。只判集合相等的话，正则一失效两边都是空集，
+      集合相等照样成立 —— 这正是第 32 条说的空转。
+    """
+    defined = set(re.findall(r"\.(tb-[a-z0-9-]+)", _read(FORUM_TB)))
+    used = set()
+    for p in (FORUM_PAGE, FORUM_DETAIL):
+        # htmlFor / id 里也有 tb-body、tb-kb 这种值，它们不是类名。
+        # 不剥掉的话，这两个会永远被判成"用了但没定义"。
+        src = re.sub(r'(htmlFor|id)="[^"]*"', "", _read(p))
+        used |= set(re.findall(r"tb-[a-z0-9-]+", src))
+
+    assert len(defined) >= 100, f"CSS 里只解析出 {len(defined)} 个 tb- 类，正则失效了"
+    assert len(used) >= 100, f"页面里只解析出 {len(used)} 个 tb- 类，正则失效了"
+
+    undefined = sorted(used - defined)
+    assert not undefined, f"这些类写了但 CSS 里没有，样式会静默丢失：{undefined}"
+    orphan = sorted(defined - used)
+    assert not orphan, f"这些规则已经没有任何元素在用（改名残留）：{orphan}"
+
+
+def test_detail_body_keeps_a_readable_measure():
+    """详情页正文一行 30–40 个汉字，不随屏幕变宽。
+
+    实测（2026-11-14）：版心 900px 时，1024 / 1440 / 1920 三档都是
+    **52 字/行**（正文 16px，可用宽 832px）。超过 45 就开始丢行 ——
+    读到行尾找不到下一行的开头，人得用手指点着读。
+    中文长文的舒服区是 30–40 字，所以版心收到 720（可用宽约 652px ≈ 40 字）。
+    两头都判：上界防"又改回 900"，下界防"收得过窄变成一列竖排"。
+    """
+    rule = _css_rule(_read(FORUM_TB), ".tb-detail")
+    m = re.search(r"max-width:\s*(\d+)px", rule)
+    assert m, ".tb-detail 没有 max-width —— 正文会一路铺到屏幕边缘"
+    px = int(m.group(1))
+    assert px <= 760, f"版心 {px}px，一行超过 45 字了，读到行尾会丢行"
+    assert px >= 560, f"版心 {px}px，一行不到 30 字，读起来像一列竖排"
 
 
 def test_forum_is_reachable_from_the_sidebar():
@@ -298,6 +373,28 @@ def test_hot_column_skips_topics_without_replies():
     assert "hotLive.map(" in seg and "hot.map(" not in seg, "右栏渲染的还是未过滤的 hot"
 
 
+def test_mobile_top_bar_does_not_repeat_the_board_name():
+    """手机顶栏不显示面包屑：它的末级和标题下的板块标签是同一个词。
+
+    截图上顶栏「站务公告」与标题下方约 40px 的「站务公告 · 1 条回复」
+    是同一个词。手机上顶栏的前两级本来就不可用（logo 与「返回列表」
+    都指向 /forum），所以它剩下的作用只有把同一个词先说一遍。
+
+    ★ 必须 visibility 而不是 display:none —— 顶栏是三列栅格
+      （logo / 面包屑 / 右侧按钮），摘掉中间那一项，后面的按钮会自动
+      补到第二列（460 那格），看着像飘到了中间偏左。
+    """
+    css = _read(FORUM_TB)
+    block = css[css.index("@media (max-width: 760px)") :]
+    m = re.search(r"\.tb-crumb\s*\{([^}]*)\}", block)
+    assert m, "760 断点里没有处理面包屑"
+    body = m.group(1)
+    assert "visibility: hidden" in body, "手机上面包屑没藏住，板块名会在 40px 内说两遍"
+    assert "display: none" not in body, "用 display:none 会把「返回列表」挤到中间列"
+    # 藏掉面包屑之后返回入口必须还在，否则手机上退不出去
+    assert "返回列表" in _read(FORUM_DETAIL), "藏了面包屑又没留返回入口"
+
+
 def test_mobile_chip_strip_fades_instead_of_cutting():
     """手机上的板块条要右端渐隐，且滚到底时撤掉。
 
@@ -352,7 +449,8 @@ def test_solved_feature_leaves_no_trace_in_the_ui():
     assert "setForumSolved" not in _read(FORUM_DETAIL), "详情页还在调标记接口"
     assert "can_solve" not in _read(FORUM_DETAIL), "详情页还依赖 can_solve 字段"
     assert "setForumSolved" not in _read(SRC / "lib" / "api.ts"), "api.ts 里还留着接口封装"
-    assert "fm-solve" not in _read(FORUM_CSS), "forum.css 里还留着按钮样式"
+    # `fm-solve` 那条原来是查 forum.css 的；文件已删，改成"任何皮肤里都不许有"
+    assert not re.search(r"\.fm-solve", _read(FORUM_TB)), "forum-tb.css 里还留着已解决按钮样式"
 
 
 # ---------------------------------------------------------------------------

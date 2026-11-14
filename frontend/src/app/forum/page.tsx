@@ -16,7 +16,8 @@
  *   5. **先发后审**。发出去就是公开的，管理员事后看到违规才下架，下架必填原因，
  *      作者在「我发的帖」里能看到原因并申诉。所以这里没有"审核中"这个状态。
  *
- * 视觉在 styles/forum-tb.css（前缀 tb-），不再用旧的 fm-* 列表皮肤。
+ * 视觉在 styles/forum-tb.css（前缀 tb-）。旧的 fm-* 那套已于 2026-11-14 删除 ——
+ * 列表页第 17 轮换掉、详情页随后也换掉，之后再没有任何 fm-* 类名上屏。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";

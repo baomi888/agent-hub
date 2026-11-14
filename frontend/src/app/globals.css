@@ -41,13 +41,13 @@
    与 kbpage 是两件事（一个管理工作台、一个挑现成的），所以不并进去 */
 @import "./styles/library.css";
 /* 论坛中心（/forum）：三栏广场 + 帖子详情。
-   放在 library.css 之后 —— 详情页的楼层直接复用 library.css 里的 `.kb-post`
-   系列（顶层选择器），这里补的 `.fm-floors > .kb-post` 是覆盖，靠顺序生效 */
-@import "./styles/forum.css";
-/* 论坛列表的贴吧三栏皮肤（2026-11-14）。与 forum.css 是两套皮肤、两个前缀
-   （tb- 与 fm-），并存不冲突：列表页已经换成 tb-，详情页的楼层仍用
-   library.css 的 .kb-post，由 forum.css 里的 .fm-* 负责外壳。
-   放在 forum.css 之后 —— 详情页的 tb-detail / tb-dhead 要能覆盖旧外壳 */
+   只有这一套皮肤。旧的 `.fm-*` 那套（32KB / 162 条选择器）已于 2026-11-14 删除：
+   列表页第 17 轮换 tb-、详情页随后也换掉，之后扫描确认 src 里**零个** fm- 类名，
+   再把 162 条选择器逐条过了一遍 —— 全部以 `.fm-` 开头，没有一条全局覆盖，
+   `fm-drop` / `fm-rise` 两个 keyframes 也只被 fm-* 自己引用。留着它不会报错，
+   只会让下一个人以为论坛还有第二套皮肤要同步维护。
+   位置仍有讲究：必须排在 library.css 之后 —— 楼层复用 library.css 的 `.kb-post`
+   系列，`.tb-detail .kb-post` 这类覆盖靠同优先级"后到者赢" */
 @import "./styles/forum-tb.css";
 /* 放在 kb 系列之后：它复用 .pv-card 骨架，只覆盖宽度，同优先级靠顺序生效 */
 @import "./styles/sediment.css";

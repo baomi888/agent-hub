@@ -493,47 +493,6 @@
   -webkit-line-clamp: 3;
 }
 
-/* 楼中楼预览：底色用暖金低透明度，不用中性灰 ——
-   中性灰放在这满页暖纸里会被眼睛看成偏青，一块"绿底"非常跳 */
-.tb-re {
-  margin: 10px 0 0;
-  padding: 9px 13px 10px 14px;
-  border-left: 2px solid rgba(200, 137, 42, 0.34);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  background: rgba(200, 137, 42, 0.07);
-  font-size: var(--fs-xs);
-  line-height: 1.72;
-}
-
-.tb-re ul { margin: 0; padding: 0; }
-
-.tb-re li {
-  display: flex;
-  gap: 6px;
-  list-style: none;
-}
-
-.tb-re li + li { margin-top: 4px; }
-
-/* 说话人比内容轻：名字做成金色加粗会比回复本身还抢眼，
-   读起来像三个标题接着三句附注 */
-.tb-re-n { flex: none; color: var(--text-3); font-weight: 600; }
-
-.tb-re-t { min-width: 0; color: var(--text-2); }
-
-.tb-re-more {
-  display: inline-block;
-  margin-top: 3px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--text-3);
-  font-size: var(--fs-xs);
-  cursor: pointer;
-}
-
-.tb-re-more:hover { color: var(--accent-ink); }
-
 /* 操作行。13px 才够当"这一条怎么办"的入口；
    gap 交给按钮自己的内边距，点按区因此有 30px 高（手机上拇指够得着） */
 .tb-acts {
@@ -1493,7 +1452,12 @@
    否则以后调留言板的「我」标记，论坛这里会悄悄不跟着变）。
    这里只补外壳与标题区 */
 .tb-detail {
-  max-width: 900px;
+  /* 720 而不是 900：这不是审美，是一行能放多少字。
+     正文 16px，720 减去容器与卡片的左右内边距后约 652px，即一行约 40 个汉字。
+     版心 900 时实测是 52 字/行（1024 / 1440 / 1920 三档一样宽），
+     超过 45 就开始丢行 —— 读到行尾找不到下一行的开头，得用手指点着读。
+     中文长文的舒服区是 30–40 字，40 是上限那一端，再宽的屏幕也不放大。 */
+  max-width: 720px;
   margin: 0 auto;
   padding: 22px 24px 80px;
 }
@@ -1642,21 +1606,6 @@
   font-weight: 700;
 }
 
-.tb-bye {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  margin: 18px 0 0;
-  padding: 16px 18px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--step-2);
-  box-shadow: var(--shadow-1);
-}
-
-.tb-bye p { margin: 0; color: var(--text-2); font-size: var(--fs-sm); line-height: 1.7; }
-.tb-bye b { color: var(--ink); font-weight: 600; }
-
 /* ---------- 断点 ----------
    1280 收起右栏（贴吧同样在窄屏先砍榜单）；
    760 左栏转成顶部横向 chip —— 与论坛原有的手机形态一致 */
@@ -1767,10 +1716,19 @@
   .tb-notice { flex-wrap: wrap; }
   .tb-notice-main { flex-basis: calc(100% - 33px); }
 
-  /* 面包屑只留最末一级（当前板块）：390 宽放不下「工作台 / 论坛 / 答疑」，
-     挤成两行会把顶栏撑高，而前两级本来一个返回箭头就够了 */
-  .tb-crumb > a,
-  .tb-crumb > i { display: none; }
+  /* 面包屑在手机上不再显示。
+     上一版只留最末一级（当前板块），理由是 390 宽放不下三级。留着才发现：
+     那一级和标题下面 40px 处的板块标签是**同一个词**——顶栏「站务公告」，
+     紧跟着标题下面又一行「站务公告 · 1 条回复」。手机上顶栏本来就没有
+     前两级可导航（logo 与「返回列表」都指向 /forum），它剩下的作用
+     只有把同一个词先说一遍。
+
+     ★ 用 visibility 而不是 display:none：顶栏是
+       `grid-template-columns: 1fr minmax(0,460px) 1fr` 三列对应
+       logo / 面包屑 / 右侧按钮。display:none 会把这一项从栅格里摘掉，
+       后面的「返回列表」自动补到第二列（460 那格），按钮就飘到中间偏左了。
+       visibility 保留占位，三个子项各在各列，两侧照样贴边。 */
+  .tb-crumb { visibility: hidden; }
 }
 
 /* ---------- 楼中楼预览（列表卡） ----------
