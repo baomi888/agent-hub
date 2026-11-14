@@ -254,6 +254,23 @@ def test_grid_columns_match_primary_count():
     assert m, "清单里没有 TAB_PRIMARY_COUNT"
     primary = int(m.group(1))
 
+    # ★ 2026-11-14（iOS 内测改造）：tab 不再由"前 N 项切片"决定，而是每项显式标
+    #   `mobileTab: 1..N`。于是多了一层必须钉住的耦合：**标记出来的格位数量与编号
+    #   必须正好是 1..TAB_PRIMARY_COUNT**。
+    #   缺号 → 中间留一个空格位；重号 → 排序后有一项被挤掉；多一项 → 第 6 格换行。
+    #   三种都只表现为"底部导航看着怪"，接口全 200、控制台无报错。
+    #   只匹配对象字面量里的 `mobileTab: 1,`（注释里出现过 `mobileTab: 1..4` 这种说明，
+    #   不加 `[,}]` 边界会把它算成一项 —— 这正是 topics/05 里"X in src 被同类名误命中"）。
+    slots = [int(s) for s in re.findall(r"mobileTab:\s*(\d+)\s*[,}]", nav)]
+    assert slots, "没有任何一项标记 mobileTab —— 手机底部 tab 会是空的"
+    assert sorted(slots) == list(range(1, primary + 1)), (
+        f"mobileTab 应为 1..{primary} 连续，实际是 {sorted(slots)}"
+    )
+
+    # 互斥配置：mobileTab 说"进 tab"，desktopOnly 说"移动端别出现"，两个同时写没有意义
+    for blk in re.findall(r"\{[^{}]*desktopOnly:\s*true[^{}]*\}", nav):
+        assert "mobileTab" not in blk, f"同时标了 mobileTab 和 desktopOnly，配置矛盾：{blk[:60]}"
+
     css = _read(CONSOLE_CSS)
     block = _media_block(css, "@media (max-width: 900px)", "tabbar")
     rule = _css_rule(block, ".tabbar")
@@ -279,9 +296,50 @@ def test_tabbar_reuses_the_shared_nav_list():
         assert '@/lib/nav' in src, f"{path.name} 自己写了份导航清单"
 
     tab = _read(TABBAR_TSX)
-    assert "visibleNav(" in tab and "TAB_PRIMARY_COUNT" in tab, (
-        "底部 tab 没有从共享清单切片 —— 前四项必须和桌面侧栏同序"
+    # ★ 2026-11-14 改：旧断言要求 `TAB_PRIMARY_COUNT` 出现在 TabBar 里（那是"切片"模型的
+    #   证据）。现在模型换成按 `mobileTab` 筛选、按 `desktopOnly` 排除，两个筛选函数
+    #   都必须来自 lib/nav —— 否则"手机上怎么找不到 X"会从字符串层面重新长出来。
+    assert "mobileTabNav(" in tab and "mobileMoreNav(" in tab, (
+        "底部 tab 没有从共享清单按 mobileTab / desktopOnly 筛选"
     )
+    assert "@/lib/nav" in tab
+
+
+def test_learning_path_owns_a_mobile_tab_slot():
+    """「学习路径」必须占一个一级 tab 格位（2026-11-14 iOS 内测改造的起因）。
+
+    改造前它在 NAV 里排第 9 —— 桌面顺序是按"什么时候做什么"排的，合理；
+    但手机底部 tab 当时取 `slice(0, 4)`，于是它的入口在「更多」面板里还要往下翻。
+    而它的产品定位是「和对话平行」（申报书 3.4），实际却连一级入口都没有。
+
+    这条守的是**产品要求**，不是代码风格：有人把 `mobileTab: 2` 删掉、
+    或者顺手把它标成 `desktopOnly`，手机上就再也找不到它，而所有测试照样绿
+    （拓扑没坏，只是入口消失了）。
+    """
+    nav = _read(NAV_TS)
+    m = re.search(r'\{ href: "/path"[^}]*\}', nav)
+    assert m, "nav.ts 里找不到 /path 那一条，正则失效"
+    entry = m.group(0)
+    assert "desktopOnly" not in entry, "学习路径被移出移动端了 —— 它与「对话」同等重要"
+    assert re.search(r"mobileTab:\s*\d+", entry), (
+        "学习路径没有 mobileTab 格位，手机上会退到「更多」里"
+    )
+
+
+def test_console_only_pages_are_kept_off_mobile():
+    """移出移动端的三个模块必须真的标了 desktopOnly（且桌面仍可见）。
+
+    2026-11-14 决定：每日委托 / 总结 / 四六级 只留桌面。
+    理由分别是「任务生成后实际落在对话」「对比型报表窄屏读不出结论」「备考要排计划、手机不适用」。
+    这一条双向守：既防止有人改回去，也防止有人顺手把它们从 NAV 里整条删掉
+    （那样桌面侧栏会少三个入口 —— "移出移动端"从来不是"删功能"）。
+    """
+    nav = _read(NAV_TS)
+    for href in ("/delegate", "/report", "/cet"):
+        m = re.search(r'\{ href: "' + href + r'"[^}]*\}', nav)
+        assert m, f"nav.ts 里找不到 {href}，它应该还在桌面侧栏里"
+        entry = m.group(0)
+        assert "desktopOnly: true" in entry, f"{href} 没有标 desktopOnly，手机上会重新出现"
 
 
 # ==================== ④ 首页刻意不挂 ====================

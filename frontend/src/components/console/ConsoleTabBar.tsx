@@ -11,14 +11,20 @@
  * 撤掉 tab 时连带要改的是 fx.css 里 `main.workbench-main` 的窄屏高度：
  * 那里原来写了 `- var(--tabbar-h)`，不减掉会空出一条白边（见该处注释）。
  *
- * 内容与排序全部来自 `lib/nav`：前 4 项进 tab，其余进「更多」面板。
+ * 内容与排序全部来自 `lib/nav`：被 `mobileTab` 标记的进 tab，其余进「更多」面板。
  * 桌面侧栏用的是同一份清单，三处不会各自漂移。
+ *
+ * ★ 2026-11-14 iOS 内测改造：**不再是"前 4 项切片"**。
+ *   旧写法 `items.slice(0, TAB_PRIMARY_COUNT)` 跟着桌面顺序走，导致「学习路径」
+ *   （桌面排第 9）在手机上没有任何一级入口 —— 而它的定位是和「对话」平行的。
+ *   现在改由 `mobileTab` 显式指定格位、`desktopOnly` 标记「桌面有、手机没有」，
+ *   详见 lib/nav.ts 顶部注释。
  */
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import NavIcon from "../NavIcon";
-import { TAB_PRIMARY_COUNT, isCurrentNav, visibleNav } from "@/lib/nav";
+import { isCurrentNav, mobileMoreNav, mobileTabNav } from "@/lib/nav";
 
 type Props = {
   isAdmin?: boolean;
@@ -32,9 +38,8 @@ export default function ConsoleTabBar({ isAdmin, onOpenChange }: Props) {
   const sheetRef = useRef<HTMLDivElement | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
 
-  const items = visibleNav(isAdmin);
-  const primaryNav = items.slice(0, TAB_PRIMARY_COUNT);
-  const moreNav = items.slice(TAB_PRIMARY_COUNT);
+  const primaryNav = mobileTabNav(isAdmin);
+  const moreNav = mobileMoreNav(isAdmin);
   const moreActive = moreNav.some((it) => isCurrentNav(it.href, here));
 
   // 换页就把面板收起来：从面板里点「设置」跳过去后，面板还盖在新页面上，

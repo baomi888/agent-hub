@@ -1,9 +1,20 @@
 /**
  * 控制台导航清单 —— 桌面侧栏、手机底部 tab、「更多」面板三处共用一份。
  *
- * 为什么单独成文件：手机底部 tab 只放前 4 项，其余进「更多」。
- * 如果各写一份清单，两边迟早漂移（"手机上怎么找不到 X"就是这么来的）。
- * 现在只改这里的顺序，侧栏和底部 tab 一起变。
+ * 为什么单独成文件：三处各写一份清单迟早漂移（"手机上怎么找不到 X"就是这么来的）。
+ *
+ * ★ 2026-11-14 iOS 内测改造：**移动端不再是「前 4 项」**。
+ *
+ * 旧模型是 `items.slice(0, TAB_PRIMARY_COUNT)` —— 直接拿桌面顺序的前四项。
+ * 结果：「学习路径」在 NAV 里排第 9（桌面顺序是按"什么时候做什么"排的），
+ * 而它和「对话」同等重要，在手机上却要进「更多」翻到第 9 项才有入口。
+ *
+ * 现在拆成两个维度：
+ *   · NAV 的数组顺序 = **桌面侧栏**顺序
+ *   · `mobileTab: 1..4` = **手机底部 tab** 的位置
+ *   · `desktopOnly` = 桌面有、移动端彻底不出现（连「更多」里也没有）
+ *
+ * 「移出移动端」只影响导航入口，不动路由、不动后端、不删代码 —— 完全可逆。
  */
 
 export interface NavItem {
@@ -13,58 +24,109 @@ export interface NavItem {
   label: string;
   /** 只有开发者看得到（后端仍会二次校验，这里只是不给入口） */
   adminOnly?: boolean;
+  /**
+   * 手机底部 tab 的格位（1 起，必须连续）。
+   * 不填 = 不进 tab，落到「更多」面板里（除非 desktopOnly）。
+   * 用**数字**而不是布尔：tab 顺序要和桌面顺序解耦，否则又变成"改顺序要同时看两处"。
+   */
+  mobileTab?: number;
+  /** 那个格位之后的内容：桌面侧栏照旧可见，手机连「更多」里都不出现 */
+  desktopOnly?: boolean;
 }
 
 export const NAV: NavItem[] = [
-  { href: "/", icon: "chat", label: "对话" },
+  // 对话是最高频入口，手机 tab 第 1 格。
+  { href: "/", icon: "chat", label: "对话", mobileTab: 1 },
   // 资料库是**独立页面**（2026-10-30）。原先它指向 /?kb=1，和「对话」落到同一个路由，
   // 只是首页右栏抽屉被拉开 —— 用户的原话是"点击对话和点击知识库都是一样的跳转"。
   // ★ 2026-11-14 改名：侧栏原写「知识库」，而这一页自己的标题、右栏面板、空状态
   //   全都叫「资料库」（我的资料库 / 全部资料库 / 建第一个资料库）。同一个东西两个名字，
   //   用户会以为导航里那个是另一处 —— 统一成「资料库」，后端 kb_* 命名不动。
+  // ★ 移动端：不进 tab，落「更多」。检索型操作在手机上不高频，但确实会用。
   { href: "/knowledge", icon: "book", label: "资料库" },
   // 论坛中心（2026-11-14）：公开知识库里的讨论汇到一处。
   // 紧跟「知识库」是因为它们是一对 —— 一个是资料、一个是关于资料的讨论；
   // 放到「总结」「打卡」后面会让人以为它是个统计页。
   // ★ 标签只能两个字：「论坛中心」在手机 3 列网格里会挤成两行、把导航撑高
   //   （和「校园工具集」→「工具集」同一个坑）。完整名字在页面标题里。
-  { href: "/forum", icon: "forum", label: "论坛" },
+  // ★ 移动端 tab 第 3 格：UGC 浏览是手机的原生场景。
+  { href: "/forum", icon: "forum", label: "论坛", mobileTab: 3 },
   // 待办中心（独立模块，2026-11-09）。固定在第 3 位：它回答的是「什么时候做什么」，
   // 比「每日委托」（生成什么）更靠前。★ 标签只能两个字：写「待办中心」会在手机
   // 3 列网格里挤成两行、把整块导航撑高 —— 和当年「校园工具集」砍成「工具集」同一个坑。
   // 2026-11-10 晚改名：原先叫「提醒」，但页面里的主体是待办，提醒只是它的一部分
   // （「提示什么时候叫我」）。一个词在侧边栏、页标题、tab 三层各指一件事，
   // 连作者自己都说不清区别 —— 统一成「待办」，提醒退回到属性位置。
+  // ★ 移动端：不进 tab（3769 行是全站最重的页面，值得单独真机走查），落「更多」。
   { href: "/reminders", icon: "task", label: "待办" },
-  { href: "/delegate", icon: "clock", label: "每日委托" },
-  { href: "/report", icon: "summary", label: "总结" },
-  { href: "/checkin", icon: "star", label: "打卡" },
+  // 每日委托：移动端移出（desktopOnly）。
+  // 理由是任务生成完之后，用户实际落在的是「对话」——委托页在手机上没有独立场景，
+  // 而它 1072 行的体量会拖慢真机验证。桌面侧栏照旧可见。
+  { href: "/delegate", icon: "clock", label: "每日委托", desktopOnly: true },
+  // 总结：移动端移出。它是对比型报表（需要横向看几天/几周），窄屏体验差；
+  // 手机用户要看结论的话，「学习路径」和「打卡」已经承担了这件事。
+  { href: "/report", icon: "summary", label: "总结", desktopOnly: true },
+  // 打卡：轻交互、每天一次，是手机最合适的形态，tab 第 4 格。
+  { href: "/checkin", icon: "star", label: "打卡", mobileTab: 4 },
   // 四六级备考工作区：计划 / 词汇本 / 模考分数（申报书 B3 的专项模块入口）
-  { href: "/cet", icon: "globe", label: "四六级" },
+  // ★ 移动端移出：备考是长周期、要排计划做模考的活，主要在电脑上做；
+  //   手机端的碎片学习需求由「工具集」里的单词卡覆盖，不需要重复入口。
+  { href: "/cet", icon: "globe", label: "四六级", desktopOnly: true },
   // 关卡式学习路径：12 关由真实学习数据判定（申报书 3.4 / 2.8）
-  { href: "/path", icon: "path", label: "学习路径" },
+  // ★ 移动端 tab 第 2 格 —— 这就是 2026-11-14 这次改造的核心：
+  //   它的定位是「和对话平行」，那它在手机上就必须有一个一级入口，
+  //   而不是藏在「更多」的第 9 项里。
+  { href: "/path", icon: "path", label: "学习路径", mobileTab: 2 },
   // 工具集是**独立单页**（GPA / 番茄钟 / 课程表 / 单词卡 / 倒计时 / 抽签），
   // 不进控制台外壳，也不要求登录。从这里点出去就是换页，左导航仍留在原处；
   // 之前的入口是首页下方那一行，用户反馈"找不到"，所以在这里给一条固定入口。
   // ★ 标签只写「工具集」：写成「校园工具集」时手机上（3 列网格）挤成两行，
   //   把整块导航撑高；完整名字留在那一页自己的标题和落地页里。
+  // ★ 移动端：不进 tab，落「更多」。
   { href: "/tools", icon: "tools", label: "工具集" },
   // 混合架构：工作流定义 + 切换规则。**这是开发者调试面，不是用户功能**
   // —— 界面上摊着 UUID、任务 id、日志入口和可编辑的 JSON 定义。
   // 2026-10-27 内测反馈："这个为啥要给用户看"。与 /dashboard 同一性质，因此同样加 adminOnly。
   // 注意：这只是不给误点的机会，不是安全边界（真隐藏需要后端也返 404，本期没做）。
-  { href: "/flow", icon: "flow", label: "工作流", adminOnly: true },
+  { href: "/flow", icon: "flow", label: "工作流", adminOnly: true, desktopOnly: true },
   // 数据看板：开发者看"有多少人、在调什么接口、反馈堆了多少"。
   // 只在 is_admin 时渲染入口 —— 但**真正的权限在后端**（非管理员返回 404，见 api/admin.py）。
-  { href: "/dashboard", icon: "dashboard", label: "看板", adminOnly: true },
+  { href: "/dashboard", icon: "dashboard", label: "看板", adminOnly: true, desktopOnly: true },
+  // 设置：移动端落「更多」。手机上改设置是低频但必要（头像、昵称、主题）。
   { href: "/settings", icon: "settings", label: "设置" },
 ];
 
-/** 手机底部 tab 占几格（不含「更多」）。改这个数就同时改了底部 tab 和「更多」的内容。 */
+/**
+ * 手机底部 tab 有几格（**不含**「更多」按钮）。
+ *
+ * 必须与 `console.css` 里 `.tabbar { grid-template-columns: repeat(N+1, ...) }` 对齐，
+ * 也要与 `mobileTab` 标记的项数一致 —— 三者任一不符，第 6 个 tab 会悄悄挤进第 5 格、
+ * 或者最后一格空着，两种都只有截图才看得出来。
+ * `tests/test_console_nav.py` 同时锁这三处。
+ */
 export const TAB_PRIMARY_COUNT = 4;
 
 export function visibleNav(isAdmin: boolean | undefined): NavItem[] {
   return NAV.filter((it) => !it.adminOnly || isAdmin);
+}
+
+/**
+ * 手机底部 tab 的项，**按 mobileTab 数字升序**（不是按 NAV 顺序）。
+ *
+ * 顺序单独定义，是为了让「桌面侧栏怎么排」和「手机 tab 怎么排」互不牵制 ——
+ * 以前改桌面顺序会顺手改掉手机 tab，反过来也一样，这是"手机上怎么找不到 X"的根。
+ */
+export function mobileTabNav(isAdmin: boolean | undefined): NavItem[] {
+  return visibleNav(isAdmin)
+    .filter((it) => !it.desktopOnly && typeof it.mobileTab === "number")
+    .sort((a, b) => (a.mobileTab as number) - (b.mobileTab as number));
+}
+
+/** 「更多」面板里的项：移动端可见、但没占 tab 格位。顺序沿用桌面顺序。 */
+export function mobileMoreNav(isAdmin: boolean | undefined): NavItem[] {
+  return visibleNav(isAdmin).filter(
+    (it) => !it.desktopOnly && typeof it.mobileTab !== "number",
+  );
 }
 
 /** 首页是精确匹配；其余按前缀匹配，将来 /knowledge/xxx 也能点亮同一项。 */

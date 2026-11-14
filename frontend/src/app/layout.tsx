@@ -54,6 +54,13 @@ export const metadata: Metadata = {
 /* 地址栏配色跟随纸色：浅色是 step-0 的米黄，深色是深纸。
    不写的话移动端浏览器顶栏会是一块和系统默认色打架的灰 */
 export const viewport: Viewport = {
+  /* ★ 2026-11-14（iOS 内测）：viewportFit 是 env(safe-area-inset-*) 生效的**前提**。
+     没有 `cover`，iOS 上这些环境变量恒为 0 —— 全站那几十处 safe-area 写法
+     （console.css / library.css / announce.css）等于没写，刘海与 Home 指示条会压住内容。
+     这一条此前从未在真机独立窗口里验过（与论坛线"未上真机"是同一笔欠账）。 */
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#EDE4C8" },
     { media: "(prefers-color-scheme: dark)", color: "#1A1610" },
