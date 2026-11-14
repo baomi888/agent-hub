@@ -1336,7 +1336,14 @@ textarea.input {
   }
   .tabbar {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    /* 上限 128px/列而不是纯 1fr：390 下 5 列各 75，和原来一样；
+       但 640–900 这段（大手机横屏、小平板竖屏）五个 tab 会被拉成各 180px 的
+       巨型按钮，一条横跨 899px 的底栏，看着不像导航像横幅。
+       128 是「中文两到四个字 + 图标」的舒适上限。
+       背景和上边框仍铺满全宽，只有内容是居中的 —— 换成整条 max-width 会
+       在两侧露出页面底，底部那条线突然断掉。 */
+    grid-template-columns: repeat(5, minmax(0, 128px));
+    justify-content: center;
     position: fixed;
     left: 0;
     right: 0;

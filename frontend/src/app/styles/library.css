@@ -1552,6 +1552,22 @@
   font-size: var(--fs-badge);
 }
 
+/* 深色下「楼主」必须换个做法。浅色是「淡金底 + 深棕字」，对比 5.5:1；
+   深色下 --accent-ink 变成亮金 #E0A03A，压在 --accent-tint 的淡金底上
+   成了同色系对撞，11px 只剩 4.15:1。
+   这里不再给它底色，改成一道内描边 + 次级文字色。
+   底色因此从「金 alpha 叠出来的 #5A421D」退回父层 #382B16，
+   --text-2 压在上面是 6.86:1，比原来的 4.15 宽出一大截。
+   顺带把语义分开：实心金牌只留给「管理员」那种权限身份，
+   「楼主」是位置标注，中性描边就够，不该和权限徽章抢视线。
+   用 inset 阴影而不是 border：边框会把这个小药丸撑高 2px，
+   跟旁边的「管理员」标不在一条基线上。 */
+.dark .kb-post-me {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text-2);
+}
+
 .kb-post-acts {
   /* 操作区靠右：删除/回复都在这儿，别让它们把名字和时间挤走 */
   display: inline-flex;
