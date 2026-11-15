@@ -87,7 +87,12 @@ def ensure() -> None:
                 method  TEXT NOT NULL,
                 status  INTEGER NOT NULL,
                 dur_ms  INTEGER NOT NULL,
-                uid     TEXT
+                uid     TEXT,
+                -- 1 = 这条请求是自动化验证流量（脚本带 X-Verify: 1 且由内部账号发出）。
+                -- 为什么要在**请求**上标而不是只在账号上标：同一账号既可能是人点，
+                -- 也可能是脚本在跑（截图/取证都复用登录态）。只按账号排除会把真人的
+                -- 使用一起抹掉，只按 UA 排除又能被任何人伪造。
+                internal INTEGER NOT NULL DEFAULT 0
             );
             -- 三个索引对应看板的三类查询：时间范围 / 按接口排行 / 成功失败统计。
             -- 600k 行下无索引是秒级全表扫，有索引是毫秒级（文档 §8）
@@ -95,6 +100,14 @@ def ensure() -> None:
             CREATE INDEX IF NOT EXISTS idx_apilog_path_ts ON api_call_logs(path, ts);
             CREATE INDEX IF NOT EXISTS idx_apilog_status_ts ON api_call_logs(status, ts);
         """)
+        # 老库补列：`CREATE TABLE IF NOT EXISTS` 对已存在的表什么都不做，
+        # 不加这一步，升级后所有写入都会因为列不存在而整批失败 ——
+        # 而 flush 会吞异常（统计不能影响业务），表现为"看板突然不再更新"，没有任何报错。
+        cols = {str(r[1]) for r in conn.execute("PRAGMA table_info(api_call_logs)")}
+        if "internal" not in cols:
+            conn.execute(
+                "ALTER TABLE api_call_logs ADD COLUMN internal INTEGER NOT NULL DEFAULT 0"
+            )
     _READY.add(path)
 
 
@@ -137,16 +150,28 @@ def record(
     status: int,
     dur_ms: int,
     uid: str | None = None,
+    internal: int = 0,
 ) -> bool:
     """塞一条进缓冲。返回 True 表示「现在该 flush 了」，由调用方负责调度。
 
     为什么把调度交给调用方：本模块要能在**同步**测试里调用（没有事件循环），
     而生产路径在 async 中间件里、希望 `create_task(to_thread(...))` 不阻塞响应。
     把 asyncio 相关的东西留在中间件里，模块本身保持纯同步、零依赖。
+
+    `internal=1` 表示这条是自动化验证流量。**判定不能在这里做**：本模块只负责
+    存，谁能打这个标由 `core/verify_tag.py` 决定（必须由内部账号发出才采信）。
     """
     if not should_record(path):
         return False
-    row = (int(time.time()), path[:200], method[:10], int(status), max(0, int(dur_ms)), uid or None)
+    row = (
+        int(time.time()),
+        path[:200],
+        method[:10],
+        int(status),
+        max(0, int(dur_ms)),
+        uid or None,
+        1 if internal else 0,
+    )
     _BUF.append(row)
     if len(_BUF) >= BATCH:
         return True
@@ -178,8 +203,8 @@ def flush() -> int:
 
         with store._get_conn() as conn:  # noqa: SLF001
             conn.executemany(
-                "INSERT INTO api_call_logs (ts, path, method, status, dur_ms, uid) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO api_call_logs (ts, path, method, status, dur_ms, uid, internal) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
         _maybe_purge()

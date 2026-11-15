@@ -333,16 +333,27 @@ def failures(days: int = 7, limit: int = 20) -> dict:
 # 那会让人以为在筛选数据，实际是在换统计对象。所以做成并列的两块，
 # 各自带自己的口径标签，并由「口径对照」把两块**能对上账**：
 #
-#     全量调用 = 真实用户 + 内部账号 + 已注销/未知账号 + 未登录请求
+#     全量调用 = 真实用户 + 被动访问 + 内部账号 + 已注销/未知账号 + 未登录请求
 #
-# 四个桶必须互斥且穷尽，否则用户拿计算器一减就发现对不上，然后再也不信这个页面。
+# 五个桶必须互斥且穷尽，否则用户拿计算器一减就发现对不上，然后再也不信这个页面。
 #
 # 桶的判定（顺序即优先级，与 core/account.py 的注释一致）
 # ------------------------------------------------------
 #   anonymous —— uid 为空：未登录请求（401 探测、注册/登录本身、公开页）
 #   orphan    —— uid 有值但 users 里查不到：已注销账号的历史调用
-#   internal  —— is_internal = 1，或 uid 在 ADMIN_UIDS/ADMIN_USERNAMES 里
-#   real      —— 其余
+#   internal  —— `al.internal = 1`（自动化验证流量），或 is_internal = 1，
+#                或 uid 在 ADMIN_UIDS/ADMIN_USERNAMES 里
+#   real      —— 账号正常，且**在区间内至少发起过 1 次对话**（`/api/chat/stream`）
+#   passive   —— 账号正常，但区间内只有读接口调用、一次对话都没发起过
+#
+# 为什么"真实用户"必须带对话这个条件（2026-11-15 实测后加）
+# --------------------------------------------------------
+# 一次页面进入会扇出 6~11 个读接口（kb / kb/favorites / kb/public / sessions /
+# auth/me / today …）。只按"任意接口调用"计活跃，用无头浏览器把界面跑一遍就能
+# 凭空造出几个"人均上百次调用"的用户 —— 当天实测三个测试号 300 次调用，
+# 对话 0 次、消息 0 条，面板却显示"3 个活跃真实用户、人均 100 次"。
+# 对话是唯一无法被页面扇出伪造的行为，所以把它作为"真的在用产品"的判据。
+# 只浏览不对话的账号不丢弃、也不假装成真实用户，单列为 passive 让账继续平。
 #
 # 为什么管理员要单独算：管理员的调用里有看板刷新、审核、批量运维，
 # 那不是"用户在用产品"。而且 `api/admin/*` 虽已在采集层被排除（见 apilog.EXCLUDE），
@@ -375,14 +386,29 @@ def _admin_uids() -> list[str]:
     return list(dict.fromkeys(ids))
 
 
-# 真实用户视角的 FROM/WHERE 前半段。四个聚合查询共用，避免各写一遍走样。
+# 真实用户视角的 FROM/WHERE 前半段。五个聚合查询共用，避免各写一遍走样。
 _REAL_FROM = "FROM api_call_logs al LEFT JOIN users u ON u.id = al.uid WHERE al.ts >= ? AND al.ts < ?"
 
+# "发起过对话"的接口。只认这一个：它是唯一会真的调用模型、产生额度的入口，
+# 页面扇出伪造不出来（其余读接口一次进页就会打 6~11 个）。
+CHAT_PATH = "/api/chat/stream"
 
-def _real_where(admin_ids: list[str]) -> tuple[str, list]:
+# 区间内有对话行为的 uid 子查询。三个占位符依次是 (path, start, end)。
+# 打标为自动化的对话（`internal = 1`）不算 —— 否则我们自己跑一次对话验证，
+# 就能把测试号"洗成"真实用户。
+_CHAT_UIDS = (
+    "SELECT DISTINCT c.uid FROM api_call_logs c"
+    " WHERE c.path = ? AND c.internal = 0 AND c.uid IS NOT NULL AND c.uid <> ''"
+    "   AND c.ts >= ? AND c.ts < ?"
+)
+
+
+def _real_where(admin_ids: list[str], start: int, end_excl: int) -> tuple[str, list]:
     """真实用户视角的额外条件（以 AND 开头，供拼在 `_REAL_FROM` 之后）。
 
-    参数顺序固定为 (start, end, *admin_ids) —— 调用方按这个顺序给值。
+    参数顺序固定为 (start, end, *返回的 params) —— 调用方按这个顺序给值，
+    与 `_REAL_FROM` 里的两个占位符接上。返回的 params 里还含着对话子查询的
+    (path, start, end)，所以调用方**不要**自己再拼 start/end。
     """
     frag = [
         "al.uid IS NOT NULL",
@@ -391,14 +417,20 @@ def _real_where(admin_ids: list[str]) -> tuple[str, list]:
         # 但它的调用量会进 orphan 桶，所以账还是平的
         "u.id IS NOT NULL",
         "u.is_internal = 0",
+        # 自动化验证流量（X-Verify 打标）不进真实用户
+        "al.internal = 0",
+        # ★ 必须真的发起过对话。见本节顶部注释：页面扇出能凭空造出活跃用户。
+        "al.uid IN (" + _CHAT_UIDS + ")",
     ]
+    params: list = [CHAT_PATH, start, end_excl]
     if admin_ids:
         frag.append("al.uid NOT IN (" + ",".join("?" * len(admin_ids)) + ")")
-    return " AND " + " AND ".join(frag), list(admin_ids)
+        params.extend(admin_ids)
+    return " AND " + " AND ".join(frag), params
 
 
 def _bucket_counts(conn, start: int, end_excl: int, admin_ids: list[str]) -> dict:
-    """把区间内所有调用切成四个互斥的桶（见本节顶部注释）。"""
+    """把区间内所有调用切成五个互斥的桶（见本节顶部注释）。"""
     admin_case = ""
     params: list = []
     if admin_ids:
@@ -408,31 +440,43 @@ def _bucket_counts(conn, start: int, end_excl: int, admin_ids: list[str]) -> dic
         "SELECT CASE"
         "    WHEN al.uid IS NULL OR al.uid = '' THEN 'anonymous'"
         "    WHEN u.id IS NULL THEN 'orphan'"
+        # 请求级打标优先于账号标记：脚本可能带着真人账号的登录态跑
+        "    WHEN al.internal = 1 THEN 'internal'"
         "    WHEN u.is_internal = 1" + admin_case + " THEN 'internal'"
-        "    ELSE 'real' END AS bucket,"
+        "    WHEN al.uid IN (" + _CHAT_UIDS + ") THEN 'real'"
+        "    ELSE 'passive' END AS bucket,"
         "  COUNT(*) AS calls"
         "  FROM api_call_logs al LEFT JOIN users u ON u.id = al.uid"
         "  WHERE al.ts >= ? AND al.ts < ?"
         "  GROUP BY bucket"
     )
-    # 参数顺序必须跟 SQL 文本里 ? 出现的顺序一致：CASE 在前，WHERE 在后
-    rows = conn.execute(sql, params + [start, end_excl]).fetchall()
-    out = {"real": 0, "internal": 0, "orphan": 0, "anonymous": 0}
+    # 参数顺序必须跟 SQL 文本里 ? 出现的顺序一致：
+    # CASE 里的管理员名单 → CASE 里的对话子查询(path,start,end) → WHERE 的 start,end
+    rows = conn.execute(
+        sql, params + [CHAT_PATH, start, end_excl, start, end_excl]
+    ).fetchall()
+    out = {"real": 0, "passive": 0, "internal": 0, "orphan": 0, "anonymous": 0}
     for r in rows:
         out[str(r["bucket"])] = int(r["calls"] or 0)
     return out
 
 
-def _real_series(conn, day_list: list[str], admin_ids: list[str]) -> tuple[list[dict], dict]:
+def _real_series(
+    conn, day_list: list[str], admin_ids: list[str], start: int, end_excl: int
+) -> tuple[list[dict], dict]:
     """逐日的「真实调用量 + 活跃真实用户数」，顺带算每个人活跃了几天。
 
     逐天查而不是一次 GROUP BY：与 `_series` 同一理由（见模块 docstring 第 2 条），
     而且这里还要顺带收集 `uid -> 活跃日集合`，用 Python 归并比写窗口函数清楚。
     30 天 × 几十个活跃用户，成本可以忽略。
+
+    ★ 对话子查询的窗口是**整个区间**，不是当天：真实用户是"区间内聊过"的账号，
+      不是"当天聊过"的。否则"昨天聊、今天只翻列表"的人，今天的调用会从 `real`
+      里消失，而卡片上的 real 是按区间算的 —— `sum(series) == real` 立刻对不上。
     """
-    frag, ap = _real_where(admin_ids)
     out: list[dict] = []
     days_by_uid: dict[str, set[str]] = {}
+    frag, ap = _real_where(admin_ids, start, end_excl)
     for day in day_list:
         s, e = timeutil.day_bounds(day)
         rows = conn.execute(
@@ -454,7 +498,7 @@ def _real_by_feature(conn, start: int, end_excl: int, admin_ids: list[str], limi
     `users` 是这个功能被多少个**真实用户**用过 —— 比调用次数更能说明"是不是
     只有一个人在刷"。全量排行里没有这个数，因为那里 uid 可能为空。
     """
-    frag, ap = _real_where(admin_ids)
+    frag, ap = _real_where(admin_ids, start, end_excl)
     rows = conn.execute(
         "SELECT al.path AS path, al.method AS method, COUNT(*) AS calls,"
         "       COUNT(DISTINCT al.uid) AS users "
@@ -483,7 +527,7 @@ def _real_by_user(
     显示 username 而不是 uid：看板是管理员看的，"谁在用"必须能对上人。
     昵称优先（用户自己设的显示名），没设过昵称就用登录名 —— 与全站一致。
     """
-    frag, ap = _real_where(admin_ids)
+    frag, ap = _real_where(admin_ids, start, end_excl)
     rows = conn.execute(
         "SELECT al.uid AS uid, COUNT(*) AS calls, COALESCE(MAX(al.ts), 0) AS last_ts,"
         "       u.username AS username, u.nickname AS nickname "
@@ -535,19 +579,50 @@ def _internal_accounts(conn, start: int, end_excl: int, limit: int = 30) -> tupl
     )
 
 
+def _real_chat_calls(conn, start: int, end_excl: int, admin_ids: list[str]) -> int:
+    """真实用户发起的**对话次数**（`real` 桶的子集，不是独立桶）。
+
+    为什么要单列：`real` 桶里 90% 以上是页面扇出的读接口，看不出"到底聊了几句"。
+    这个数才是真正消耗模型的量，也是判断"有没有人在用"最直接的证据。
+    """
+    frag, ap = _real_where(admin_ids, start, end_excl)
+    row = conn.execute(
+        "SELECT COUNT(*) AS n " + _REAL_FROM + frag + " AND al.path = ?",
+        (start, end_excl, *ap, CHAT_PATH),
+    ).fetchone()
+    return int(row["n"] or 0)
+
+
 def _real_user_snapshot(conn, start: int, end_excl: int, admin_ids: list[str]) -> dict:
-    """真实用户账号的快照口径（不随区间变化）。"""
+    """账号快照。三个数三种口径，UI 上必须分开写清楚：
+
+    - `total`   注册账号总数（未标内部、非管理员）—— **账号口径，不随区间变**
+    - `new`     其中注册时间落在区间内的
+    - `chatted` 调用日志保留期内**真的发起过对话**的账号数 —— 这才是"真实用户"
+
+    `total` 不能当"真实用户数"用：里面混着注册了但一次没聊过的号，
+    包括我们自己的测试号（标记之前）。
+    """
     args: list = []
-    clause = "WHERE is_internal = 0"
+    clause = "WHERE u.is_internal = 0"
     if admin_ids:
-        clause += " AND id NOT IN (" + ",".join("?" * len(admin_ids)) + ")"
+        clause += " AND u.id NOT IN (" + ",".join("?" * len(admin_ids)) + ")"
         args = list(admin_ids)
-    total = conn.execute("SELECT COUNT(*) FROM users " + clause, args).fetchone()[0]
+    total = conn.execute("SELECT COUNT(*) FROM users u " + clause, args).fetchone()[0]
     new = conn.execute(
-        "SELECT COUNT(*) FROM users " + clause + " AND created_at >= ? AND created_at < ?",
+        "SELECT COUNT(*) FROM users u "
+        + clause
+        + " AND u.created_at >= ? AND u.created_at < ?",
         (*args, start, end_excl),
     ).fetchone()[0]
-    return {"total": int(total or 0), "new": int(new or 0)}
+    chatted = conn.execute(
+        "SELECT COUNT(*) FROM users u "
+        + clause
+        + " AND EXISTS (SELECT 1 FROM api_call_logs c"
+        + " WHERE c.uid = u.id AND c.path = ? AND c.internal = 0)",
+        (*args, CHAT_PATH),
+    ).fetchone()[0]
+    return {"total": int(total or 0), "new": int(new or 0), "chatted": int(chatted or 0)}
 
 
 def real_user_view(days: int = 7, limit: int = 20) -> dict:
@@ -565,7 +640,9 @@ def real_user_view(days: int = 7, limit: int = 20) -> dict:
 
     with store._get_conn() as conn:  # noqa: SLF001
         buckets = _bucket_counts(conn, r["start"], r["end_exclusive"], admin_ids)
-        series, days_by_uid = _real_series(conn, r["days_list"], admin_ids)
+        series, days_by_uid = _real_series(
+            conn, r["days_list"], admin_ids, r["start"], r["end_exclusive"]
+        )
         by_feature = _real_by_feature(conn, r["start"], r["end_exclusive"], admin_ids, limit)
         by_user = _real_by_user(
             conn, r["start"], r["end_exclusive"], admin_ids, days_by_uid, limit
@@ -574,6 +651,7 @@ def real_user_view(days: int = 7, limit: int = 20) -> dict:
             conn, r["start"], r["end_exclusive"]
         )
         snap = _real_user_snapshot(conn, r["start"], r["end_exclusive"], admin_ids)
+        chat_calls = _real_chat_calls(conn, r["start"], r["end_exclusive"], admin_ids)
 
     real_calls = buckets["real"]
     total_calls = sum(buckets.values())
@@ -598,6 +676,11 @@ def real_user_view(days: int = 7, limit: int = 20) -> dict:
             "internal": buckets["internal"],
             "orphan": buckets["orphan"],
             "anonymous": buckets["anonymous"],
+            # 注册了、登录了，但区间内一次对话都没发起过（只有页面扇出的读接口）。
+            # 单列而不是并进 real：并进去就会再犯"无头浏览器跑一遍=多几个活跃用户"。
+            "passive": buckets["passive"],
+            # 真实用户发起的对话次数（real 的子集，不是独立桶 —— 别拿去和五个桶相加）
+            "chat": chat_calls,
         },
         "users": {
             "active": active,
@@ -608,6 +691,8 @@ def real_user_view(days: int = 7, limit: int = 20) -> dict:
             # 快照口径（不随区间变），与 `users.active` 不是一回事，UI 上要分开标
             "total": snap["total"],
             "new": snap["new"],
+            # 日志保留期内真的发起过对话的账号数 —— 这个才是"真实账号"
+            "chatted": snap["chatted"],
         },
         "internal": {
             # 标记总数 = 人工标记 + 管理员（管理员不需要标记，按配置即时排除）

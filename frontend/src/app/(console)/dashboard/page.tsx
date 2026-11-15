@@ -423,13 +423,15 @@ export default function DashboardPage() {
             · 成功率、平均耗时这些指标换分母就失去可比性，混在一起会引出
               "为什么切了筛选成功率也变了"这种没法解释的问题。
           代价是要用户自己看两块，所以下面用「口径对照」把两块**对上账**：
-              全量 = 真实 + 内部 + 已注销 + 未登录
+              全量 = 真实 + 被动访问 + 内部 + 已注销 + 未登录
           对不上账的看板，看第二眼就没人信了。
         */}
         <section>
           <p className="sec-label">
             真实用户使用数据{" "}
-            <span className="meta">（另一套口径：排除内部/测试账号与管理员）</span>
+            <span className="meta">
+              （另一套口径：只算区间内发起过对话的账号，排除内部/测试账号与管理员）
+            </span>
           </p>
 
           {!real ? (
@@ -438,14 +440,14 @@ export default function DashboardPage() {
             </div>
           ) : (
             <>
-              {/* 一个都没标记时必须说实话。否则这里与上方数字完全相同，
-                  用户会以为"功能没生效"，而不是"还没配置"。 */}
+              {/* 一个都没标记时必须说实话：本视图与上方数字不同，原因不是"功能没生效"，
+                  而是它只算发起过对话的账号 —— 没标记时差异来自「被动访问」那一行。 */}
               {real.internal.marked === 0 ? (
                 <Callout icon="info">
-                  还没有标记任何内部/测试账号，所以本视图与上方全量<b>暂时相同</b>。
-                  在下面「已标记的内部账号」里逐个标记，或跑
-                  <code>tools/mark_internal_users.py</code> 批量回填；
-                  标记之后这里才只算真实用户。
+                  还没有标记任何内部/测试账号。本视图与上方全量<b>仍然不同</b>：它只算
+                  区间内发起过对话的账号，只浏览不对话的调用落在下面「被动访问」。
+                  自测号请在「已标记的内部账号」里逐个标记，或跑
+                  <code>tools/mark_internal_users.py</code> 批量回填。
                 </Callout>
               ) : null}
 
@@ -455,7 +457,9 @@ export default function DashboardPage() {
                   <div className="l">
                     真实用户调用 <span className="stat-scope">区间</span>
                   </div>
-                  <div className="meta">占全量 {fmtPct(real.calls.share)}</div>
+                  <div className="meta">
+                    占全量 {fmtPct(real.calls.share)} · 其中对话 {fmtNum(real.calls.chat)} 次
+                  </div>
                 </div>
                 <div className="card card-pad stat">
                   <div className="n">{fmtNum(real.users.active)}</div>
@@ -476,11 +480,13 @@ export default function DashboardPage() {
                   </div>
                 </div>
                 <div className="card card-pad stat">
-                  <div className="n">{fmtNum(real.users.total)}</div>
+                  <div className="n">{fmtNum(real.users.chatted)}</div>
                   <div className="l">
-                    真实账号 <span className="stat-scope">全量</span>
+                    用过对话的真实账号 <span className="stat-scope">全量</span>
                   </div>
-                  <div className="meta">区间新增 {fmtNum(real.users.new)}</div>
+                  <div className="meta">
+                    注册账号 {fmtNum(real.users.total)} · 区间新增 {fmtNum(real.users.new)}
+                  </div>
                 </div>
               </div>
 
@@ -497,8 +503,9 @@ export default function DashboardPage() {
                   </div>
                   {(
                     [
-                      { key: "real", label: "真实用户", v: real.calls.real, cls: "" },
-                      { key: "internal", label: "内部/测试账号", v: real.calls.internal, cls: "" },
+                      { key: "real", label: "真实用户（有过对话）", v: real.calls.real, cls: "" },
+                      { key: "passive", label: "被动访问（未对话）", v: real.calls.passive, cls: "" },
+                      { key: "internal", label: "内部/测试/验证流量", v: real.calls.internal, cls: "" },
                       { key: "orphan", label: "已注销/未知账号", v: real.calls.orphan, cls: "" },
                       { key: "anonymous", label: "未登录请求", v: real.calls.anonymous, cls: "" },
                     ] as const
@@ -533,7 +540,7 @@ export default function DashboardPage() {
                     <span className="meta">100%</span>
                   </div>
                   <p className="hint" style={{ marginBottom: 0 }}>
-                    四类互斥且穷尽，加起来应当<b>等于</b>上方全量调用数。对不上就说明有调用
+                    五类互斥且穷尽，加起来应当<b>等于</b>上方全量调用数。对不上就说明有调用
                     没被归进任何一类，那是要修的 bug。
                   </p>
                 </div>
@@ -564,8 +571,9 @@ export default function DashboardPage() {
                         </div>
                       ))}
                       <p className="hint" style={{ marginBottom: 0 }}>
-                        左侧条是<b>调用量</b>，右侧「N 人」是当天有调用的<b>真实用户数</b>。
-                        调用量涨而人数不涨，说明是同一批人在反复用（或有人在脚本刷）。
+                        左侧条是<b>调用量</b>，右侧「N 人」是当天有调用的<b>真实用户数</b>
+                        （这些账号在区间内至少发起过 1 次对话）。调用量涨而人数不涨，
+                        说明是同一批人在反复用（或有人在脚本刷）。
                       </p>
                     </>
                   )}
@@ -771,12 +779,42 @@ export default function DashboardPage() {
                 )}
               </div>
 
-              <p className="hint" style={{ margin: "8px 0 0" }}>
-                口径定义：<b>真实用户</b> = 账号存在、未被标记为内部、且不在管理员名单里的
-                uid 所产生的调用。<b>未登录请求</b>（打开页面时的身份探测、注册/登录本身）
-                不属于任何用户，因此单列，不计入真实用户。明细口径见
-                <code>docs/数据看板_2026-10-27/口径与数据字典.md</code> §2.8。
-              </p>
+              {/* 数据来源与口径必须写在页面上：这一块的价值全在"能不能被核对"，
+                  藏在文档里等于没有 —— 看到数字的人第一句就是"这数据哪来的"。 */}
+              <div className="card card-pad" style={{ marginTop: 10 }}>
+                <span className="sec-label" style={{ margin: 0 }}>
+                  数据来源与统计口径
+                </span>
+                <ul className="hint" style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                  <li>
+                    <b>数据来源</b>：服务端中间件逐条采集的 <code>api_call_logs</code> 表
+                    （每个 <code>/api/</code> 业务请求一行：时间、路由模板、方法、状态码、耗时、
+                    uid、是否自动化打标），保留 90 天。<b>本页没有模拟或占位数据</b>，
+                    每个数字都能用 SQL 复算。
+                  </li>
+                  <li>
+                    <b>真实用户</b>：账号存在、未被标为内部、不在管理员名单，且<b>区间内至少发起
+                    1 次对话</b>（<code>POST /api/chat/stream</code>）。不按「调过任意接口」计：
+                    一次进页会扇出 6~11 个读接口，那样算会把页面加载当成使用行为。
+                  </li>
+                  <li>
+                    <b>被动访问</b>：登录了但一次对话都没发起，只有列表/详情这类读接口。
+                  </li>
+                  <li>
+                    <b>内部/测试/验证流量</b>：人工标记的内部账号、管理员，以及带{" "}
+                    <code>X-Verify: 1</code> 且由内部账号发出的自动化请求（采集层写入{" "}
+                    <code>api_call_logs.internal</code>，普通用户加这个头不生效）。
+                  </li>
+                  <li>
+                    <b>未登录 / 已注销</b>：uid 为空的身份探测与注册登录本身；uid 有值但账号
+                    已删除的历史调用。
+                  </li>
+                </ul>
+                <p className="hint" style={{ margin: "6px 0 0" }}>
+                  字段定义与对账 SQL 见{" "}
+                  <code>docs/数据看板_2026-10-27/口径与数据字典.md</code> §2.8。
+                </p>
+              </div>
             </>
           )}
         </section>

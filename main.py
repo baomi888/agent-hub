@@ -61,6 +61,7 @@ from api.today import router as today_router
 from api.usage import router as usage_router
 from api.user_feedback import router as user_feedback_router
 from core import account, apilog, config, llm_gate, quota, reminder_core
+from core import verify_tag
 from core import router as route_engine
 from kb import pipelines
 from service import avatar as avatar_store
@@ -476,7 +477,13 @@ async def collect_api_call(request: Request, call_next: Callable[[Request], Any]
         try:
             dur_ms = int((time.perf_counter() - t0) * 1000)
             uid = str(getattr(request.state, "uid", "") or "") or None
-            if apilog.record(request.method, _route_template(request), code, dur_ms, uid):
+            # 自动化验证流量打标：声明（X-Verify: 1）+ 身份（内部账号/管理员）
+            # 同时成立才采信 —— 普通用户加这个头不会生效，否则任何人都能
+            # 让自己从"真实用户"统计里消失（见 core/verify_tag.py）。
+            verify = 1 if verify_tag.is_verify(request.headers.get(verify_tag.VERIFY_HEADER), uid) else 0
+            if apilog.record(
+                request.method, _route_template(request), code, dur_ms, uid, verify
+            ):
                 _spawn_flush()
         except Exception:  # noqa: BLE001 —— 采集失败绝不能让请求失败
             pass

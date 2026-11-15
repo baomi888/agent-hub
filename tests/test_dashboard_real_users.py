@@ -1,16 +1,18 @@
 """真实用户使用数据视图的回归（2026-11-15）。
 
-口径依据：`docs/数据看板_2026-10-27/口径与数据字典.md` §2.8 / §7.8。
+口径依据：`docs/数据看板_2026-10-27/口径与数据字典.md` §2.8。
 
-这个文件锁的是**四件事**，每一件坏了都不会报错、只会让数字悄悄错：
+这个文件锁的是**五件事**，每一件坏了都不会报错、只会让数字悄悄错：
 
-  1. **四桶互斥且穷尽**：真实 / 内部 / 已注销 / 未登录 加起来必须等于同区间
-     的全量调用数。对不上账的看板，用户拿计算器一减就再也不信了。
-  2. **内部账号与管理员都不进"真实"**。管理员靠 config 即时排除（不依赖标记），
+  1. **五桶互斥且穷尽**：真实 / 被动访问 / 内部 / 已注销 / 未登录 加起来必须等于
+     同区间的全量调用数。对不上账的看板，用户拿计算器一减就再也不信了。
+  2. **"真实用户"必须真的发起过对话**：只按"调过任意接口"计活跃，用无头浏览器
+     把界面跑一遍就能凭空造出几个"人均上百次"的用户（2026-11-15 实测：
+     三个测试号 300 次调用、0 次对话，面板显示"3 个真实用户、人均 100 次"）。
+  3. **内部账号、管理员、自动化打标流量都不进"真实"**。管理员靠 config 即时排除，
      这样"新配一个管理员却忘了他会被算成真实用户"这种漏法不成立。
-  3. **已注销账号不能算成真实用户**：它们的 uid 还在日志里，但 users 里已经没有行。
-     算进去会让"活跃用户数"包含一批再也不会上线的人。
-  4. **标记是双向的且可撤销**：取消标记后数字必须变回来 —— 否则标错一次就永久污染。
+  4. **已注销账号不能算成真实用户**：它们的 uid 还在日志里，但 users 里已经没有行。
+  5. **标记是双向的且可撤销**：取消标记后数字必须变回来 —— 否则标错一次就永久污染。
 """
 
 from __future__ import annotations
@@ -27,6 +29,8 @@ PASSWORD = "secret123"
 
 # 一个"日志里有 uid、users 里没有行"的 uid —— 模拟已注销账号
 GONE_UID = "uid-gone-0001"
+
+CHAT = dashboard.CHAT_PATH
 
 
 @pytest.fixture()
@@ -74,7 +78,13 @@ def _mk_user(name: str) -> str:
     return account.create_user(name, PASSWORD)["id"]
 
 
-def _seed(uid: str | None, n: int, path: str = "/api/tasks", day_index: int = -1) -> None:
+def _seed(
+    uid: str | None,
+    n: int,
+    path: str = "/api/tasks",
+    day_index: int = -1,
+    internal: int = 0,
+) -> None:
     """往 api_call_logs 里塞 n 条。
 
     `day_index=-1` 是区间内最近的一天（今天），`-2` 是前天 ——
@@ -86,35 +96,83 @@ def _seed(uid: str | None, n: int, path: str = "/api/tasks", day_index: int = -1
     ts = s + 3600  # 当天的 01:00，稳稳落在这一天里
     with session._get_conn() as conn:  # noqa: SLF001
         conn.executemany(
-            "INSERT INTO api_call_logs (ts, path, method, status, dur_ms, uid) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            [(ts, path, "GET", 200, 12, uid) for _ in range(n)],
+            "INSERT INTO api_call_logs (ts, path, method, status, dur_ms, uid, internal) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [(ts, path, "POST" if path == CHAT else "GET", 200, 12, uid, internal) for _ in range(n)],
         )
 
 
-# ==================== A. 四桶分解 ====================
+def _seed_chat(uid: str, n: int = 1, day_index: int = -1) -> None:
+    """给账号塞 n 次对话 —— 这是"真实用户"的唯一判据。"""
+    _seed(uid, n, path=CHAT, day_index=day_index)
 
 
-def test_four_buckets_add_up_to_total(env):
-    """四桶之和 = 全量调用数。这条是整块视图的可信度基础。"""
+# ==================== A. 五桶分解 ====================
+
+
+def test_five_buckets_add_up_to_total(env):
+    """五桶之和 = 全量调用数。这条是整块视图的可信度基础。"""
     real_uid = _mk_user("realuser")
+    passive_uid = _mk_user("lurker")
     qa_uid = _mk_user("qa_probe")
     account.set_internal(qa_uid, True)
-    _seed(real_uid, 5)
+    _seed_chat(real_uid, 1)
+    _seed(real_uid, 4)  # 聊过的人，其余调用也归"真实用户"
+    _seed(passive_uid, 3)  # 只浏览、没对话 -> passive
     _seed(qa_uid, 3)
     _seed(GONE_UID, 2)  # 有 uid，users 里没有行
     _seed(None, 4)  # 未登录: uid 为空
 
     calls = dashboard.real_user_view(7)["calls"]
-    assert calls["real"] == 5
+    assert calls["real"] == 5, "聊过的账号的其余调用没有算进真实用户"
+    assert calls["passive"] == 3, "只浏览不对话的调用没有单列出来"
     assert calls["internal"] == 3, "被标记账号的调用没有进 internal 桶"
     assert calls["orphan"] == 2, "uid 不在 users 里的调用没有进 orphan 桶"
     assert calls["anonymous"] == 4, "uid 为空的调用没有进 anonymous 桶"
-    assert calls["total"] == 14
+    assert calls["total"] == 17
     assert (
-        calls["real"] + calls["internal"] + calls["orphan"] + calls["anonymous"]
-    ) == calls["total"], "四桶没有做到互斥且穷尽 —— 用户一减就会发现对不上账"
-    assert calls["share"] == round(5 / 14, 4)
+        calls["real"]
+        + calls["passive"]
+        + calls["internal"]
+        + calls["orphan"]
+        + calls["anonymous"]
+    ) == calls["total"], "五桶没有做到互斥且穷尽 —— 用户一减就会发现对不上账"
+    assert calls["share"] == round(5 / 17, 4)
+
+
+def test_browsing_without_chat_is_not_a_real_user(env):
+    """★ 核心回归：只翻页面、一次对话都没发起的账号不算真实用户。
+
+    这条如果不成立，用无头浏览器把界面跑一遍就会造出"人均上百次调用"的假用户
+    （2026-11-15 的事故形态）。所以宁可让它红，也不能让它悄悄变绿。
+    """
+    uid = _mk_user("browser_only")
+    _seed(uid, 50, path="/api/kb/")
+    _seed(uid, 30, path="/api/sessions/")
+
+    v = dashboard.real_user_view(7)
+    assert v["calls"]["real"] == 0, "只浏览的账号被算成了真实用户"
+    assert v["calls"]["passive"] == 80
+    assert v["users"]["active"] == 0
+    assert v["by_user"] == []
+    assert all(s["calls"] == 0 for s in v["series"]), "逐日趋势里出现了假的真实调用"
+
+
+def test_a_chat_makes_every_call_of_that_account_real(env):
+    """聊过一次之后，**当天所有调用**都算真实用户 —— 数字才和"人真的在用"对得上。
+
+    反过来说：如果只统计对话本身，`real` 会从几十次掉到个位数，
+    页面扇出的读接口又变成"没人产生"的幽灵流量。
+    """
+    uid = _mk_user("chatty")
+    _seed_chat(uid, 2)
+    _seed(uid, 9, path="/api/kb/")
+    v = dashboard.real_user_view(7)
+    assert v["calls"]["real"] == 11
+    assert v["calls"]["chat"] == 2, "对话次数应当只数 /api/chat/stream"
+    assert v["calls"]["passive"] == 0
+    assert v["users"]["active"] == 1
+    assert v["users"]["per_user"] == 11.0
 
 
 def test_share_is_null_when_no_calls(env):
@@ -124,6 +182,21 @@ def test_share_is_null_when_no_calls(env):
     assert view["calls"]["share"] is None
 
 
+def test_verify_tagged_requests_are_not_real(env):
+    """请求级打标（`internal = 1`）的调用不算真实用户，哪怕账号是真的。
+
+    这一条对应"脚本带着真人登录态跑截图"：按账号排除会连真人的使用一起抹掉，
+    只按 UA 排除又能被伪造，所以判据落在请求上。
+    """
+    uid = _mk_user("mixed")
+    _seed_chat(uid, 1)
+    _seed(uid, 5, internal=1)  # 同一账号，其中 5 条是自动化
+    v = dashboard.real_user_view(7)
+    assert v["calls"]["real"] == 1
+    assert v["calls"]["internal"] == 5
+    assert v["calls"]["total"] == 6
+
+
 def test_admin_excluded_without_explicit_flag(env):
     """管理员按 config 即时排除，不依赖 is_internal 标记。
 
@@ -131,8 +204,11 @@ def test_admin_excluded_without_explicit_flag(env):
     而没人会想到去看 config。
     """
     admin_uid = _mk_user(ADMIN_NAME)  # 未标记，只在 ADMIN_USERNAMES 里
-    _seed(admin_uid, 9)
-    _seed(_mk_user("realuser"), 2)
+    _seed_chat(admin_uid, 1)
+    _seed(admin_uid, 8)
+    real_uid = _mk_user("realuser")
+    _seed_chat(real_uid, 1)
+    _seed(real_uid, 1)
     view = dashboard.real_user_view(7)
     assert view["calls"]["real"] == 2, "管理员被算成了真实用户"
     assert view["calls"]["internal"] == 9
@@ -146,7 +222,8 @@ def test_admin_excluded_without_explicit_flag(env):
 def test_marked_account_leaves_real_and_comes_back(env):
     """标记 → 数字变小；取消 → 数字复原。标错一次不该永久污染。"""
     uid = _mk_user("somescript")
-    _seed(uid, 7)
+    _seed_chat(uid, 1)
+    _seed(uid, 6)
     assert dashboard.real_user_view(7)["calls"]["real"] == 7
 
     assert account.set_internal(uid, True) is True
@@ -172,6 +249,17 @@ def test_internal_list_includes_accounts_with_zero_calls(env):
     assert view["internal"]["marked"] == 1
 
 
+def test_account_snapshot_separates_registered_and_chatted(env):
+    """注册账号数 ≠ 真实账号数：注册了没聊过的号不能冒充"真实用户"。"""
+    a = _mk_user("talker")
+    _seed_chat(a, 1)
+    _mk_user("silent_one")
+    _mk_user("silent_two")
+    u = dashboard.real_user_view(7)["users"]
+    assert u["total"] == 3, "注册账号总数（未标内部）"
+    assert u["chatted"] == 1, "只有真的聊过的那个算真实账号"
+
+
 # ==================== C. 两个统计维度 ====================
 
 
@@ -187,11 +275,12 @@ def test_bucket_and_detail_queries_agree(env):
     b = _mk_user("u_agree_b")
     qa = _mk_user("qa_agree")
     account.set_internal(qa, True)
-    _seed(a, 4, path="/api/tasks")
-    _seed(b, 3, path="/api/kb/public")
+    _seed_chat(a, 1)
+    _seed(a, 3, path="/api/tasks")
+    _seed_chat(b, 1)
+    _seed(b, 2, path="/api/kb/public")
     # ★ 内部账号必须**真的产生调用**。只建号不 seed 的话，即使明细查询漏掉了
     #   is_internal 条件，两边的数字也不会分叉 —— 这条断言就变成永远为真
-    #   （第一次写成本文件时就是这个漏洞，反证 18/18 全绿才发现）
     _seed(qa, 9, path="/api/tasks")
     _seed(GONE_UID, 5)  # 已注销：只能进 orphan
     _seed(None, 6)  # 未登录：只能进 anonymous
@@ -208,6 +297,8 @@ def test_by_feature_counts_distinct_users_not_calls(env):
     """一个用户刷 10 次，用户数必须是 1 —— 否则"功能受欢迎"会被单人刷出来。"""
     a = _mk_user("user_a")
     b = _mk_user("user_b")
+    _seed_chat(a, 1)
+    _seed_chat(b, 1)
     _seed(a, 10, path="/api/tasks")
     _seed(b, 1, path="/api/tasks")
     _seed(None, 50, path="/api/tasks")  # 未登录的不能算进用户数
@@ -220,11 +311,12 @@ def test_by_feature_counts_distinct_users_not_calls(env):
 def test_by_user_reports_active_days(env):
     """活跃天数按自然日去重，同一天调用 5 次仍然是 1 天。"""
     uid = _mk_user("day_user")
+    _seed_chat(uid, 1, day_index=-1)
     _seed(uid, 5, day_index=-1)
     _seed(uid, 3, day_index=-2)
     items = dashboard.real_user_view(7)["by_user"]
     row = next(x for x in items if x["uid"] == uid)
-    assert row["calls"] == 8
+    assert row["calls"] == 9
     assert row["days"] == 2
 
 
@@ -232,8 +324,10 @@ def test_returning_users_requires_two_days(env):
     """回的来客 = 至少两天有调用。一天来 100 次仍算"只来过一天"。"""
     a = _mk_user("two_days")
     b = _mk_user("one_day")
+    _seed_chat(a, 1, day_index=-1)
     _seed(a, 1, day_index=-1)
     _seed(a, 1, day_index=-3)
+    _seed_chat(b, 1, day_index=-1)
     _seed(b, 100, day_index=-1)
     u = dashboard.real_user_view(7)["users"]
     assert u["active"] == 2
@@ -263,6 +357,10 @@ def test_real_users_payload_shape(client):
     d = r.json()
     for key in ("range", "calls", "users", "internal", "series", "by_feature", "by_user"):
         assert key in d, "响应缺字段: " + key
+    for key in ("real", "passive", "internal", "orphan", "anonymous", "chat", "total"):
+        assert key in d["calls"], "calls 缺字段: " + key
+    for key in ("active", "returning", "total", "new", "chatted", "per_user"):
+        assert key in d["users"], "users 缺字段: " + key
     assert len(d["series"]) == 7, "趋势必须覆盖区间内每一天（含 0 的那天）"
     assert d["range"]["days"] == 7
 
@@ -271,7 +369,8 @@ def test_mark_endpoint_changes_view(client):
     """走接口标记后，同一接口再拉一次，真实调用数必须立刻变小。"""
     _login(client, ADMIN_NAME)
     target = _mk_user("scripted")
-    _seed(target, 6)
+    _seed_chat(target, 1)
+    _seed(target, 5)
     before = client.get("/api/admin/real-users?days=7").json()
     assert before["calls"]["real"] == 6
 
@@ -310,8 +409,35 @@ def test_is_internal_column_is_added_and_idempotent(env):
 
 
 def test_existing_accounts_default_to_real(env):
-    """存量账号默认是真实用户。默认值反过来会让「真实用户数」凭空变小。"""
+    """存量账号默认不是内部账号。默认值反过来会让「真实用户数」凭空变小。"""
     uid = _mk_user("oldaccount")
     with session._get_conn() as conn:  # noqa: SLF001
         row = conn.execute("SELECT is_internal FROM users WHERE id = ?", (uid,)).fetchone()
     assert int(row[0]) == 0
+
+
+def test_apilog_internal_column_is_migrated_on_old_table(env):
+    """老库没有 api_call_logs.internal：ensure 要能补上，且默认 0。
+
+    漏了迁移的后果不是报错（flush 吞异常），而是**看板从此不再更新**，
+    所以在升级路径上必须有一条断言。
+    """
+    with session._get_conn() as conn:  # noqa: SLF001
+        conn.execute("DROP TABLE IF EXISTS api_call_logs")
+        conn.execute(
+            "CREATE TABLE api_call_logs (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " ts INTEGER NOT NULL, path TEXT NOT NULL, method TEXT NOT NULL,"
+            " status INTEGER NOT NULL, dur_ms INTEGER NOT NULL, uid TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO api_call_logs (ts, path, method, status, dur_ms, uid)"
+            " VALUES (?, '/api/tasks', 'GET', 200, 5, NULL)",
+            (int(timeutil.now_ts()),),
+        )
+    apilog._READY.clear()
+    apilog.ensure()
+    with session._get_conn() as conn:  # noqa: SLF001
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(api_call_logs)")}
+    assert "internal" in cols
+    apilog.record("GET", "/api/tasks", 200, 5, None)
+    assert apilog.flush() >= 1, "补列之后写入仍然失败（INSERT 的列数与表不匹配）"

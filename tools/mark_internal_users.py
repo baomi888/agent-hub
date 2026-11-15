@@ -19,6 +19,9 @@
     python tools/mark_internal_users.py --unmark --apply
     python tools/mark_internal_users.py --unmark --apply --names demo_shiyan,qelive1023a
 
+    # 4. 人工点名标记（名字规则故意不认 `12345` 这类，但人看过证据就可以点名）
+    python tools/mark_internal_users.py --names 114514,12345,o_iiw --apply
+
     # 4. 对着一份拷贝试算，别碰生产
     python tools/mark_internal_users.py --db data/sessions.db
 
@@ -149,7 +152,7 @@ def main() -> int:
     ap.add_argument("--db", default="", help="库路径，默认取 config 里的主库")
     ap.add_argument("--apply", action="store_true", help="真的写库（默认只打印）")
     ap.add_argument("--unmark", action="store_true", help="反向：取消标记")
-    ap.add_argument("--names", default="", help="只处理这些用户名（逗号分隔），配合 --unmark 用")
+    ap.add_argument("--names", default="", help="只处理这些用户名（逗号分隔）。配合 --unmark 是取消标记；不带 --unmark 时=人工点名标记，跳过名字规则")
     ap.add_argument("--days", type=int, default=30, help="影响面按最近多少天算，默认 30")
     args = ap.parse_args()
 
@@ -184,10 +187,21 @@ def main() -> int:
         "SELECT COUNT(*) FROM api_call_logs WHERE ts >= ?", (cutoff,)
     ).fetchone()[0]
 
+    names = [n.strip() for n in args.names.split(",") if n.strip()]
     if args.unmark:
-        names = [n.strip() for n in args.names.split(",") if n.strip()]
         targets = [r for r in rows if r["is_internal"] == 1 and (not names or r["username"] in names)]
         verb = "取消标记"
+    elif names:
+        # 人工点名：跳过 classify 直接标。规则故意不认 `12345` 这种名字，
+        # 但人已经看过证据（0 条会话、0 条消息、全是无头浏览器）就可以点名标。
+        # 点错的名字必须报出来，不能静默成功 —— 否则"我明明标了"会变成新的排查项。
+        known = {str(r["username"]) for r in rows}
+        missing = [n for n in names if n not in known]
+        if missing:
+            print("!! 这些用户名在库里找不到: " + ",".join(missing))
+            return 4
+        targets = [r for r in rows if r["is_internal"] == 0 and r["username"] in names]
+        verb = "标为内部（人工点名）"
     else:
         targets = [r for r in rows if r["is_internal"] == 0 and classify(r["username"])]
         verb = "标为内部"
@@ -204,7 +218,12 @@ def main() -> int:
     hit_calls = sum(int(r["calls"] or 0) for r in targets)
     width = max([len(str(r["username"])) for r in targets] + [8])
     for r in targets:
-        why = "已标记" if args.unmark else classify(str(r["username"]))
+        if args.unmark:
+            why = "已标记"
+        elif names:
+            why = "人工点名（有证据，不靠名字猜）"
+        else:
+            why = classify(str(r["username"]))
         print(
             "  %-*s  %7d 次  %5.1f 小时前注册  %s"
             % (width, r["username"], int(r["calls"] or 0), (time.time() - r["created_at"]) / 3600, why)

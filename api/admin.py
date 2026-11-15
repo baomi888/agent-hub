@@ -35,7 +35,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from core import account, dashboard, quota, user_feedback
+from core import account, dashboard, quota, user_feedback, verify_tag
 from core.auth import get_current_user
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -228,5 +228,8 @@ async def set_user_internal(
     ok = await asyncio.to_thread(account.set_internal, target, req.internal)
     if not ok:
         raise HTTPException(status_code=404, detail="Not Found")
+    # 内部账号集合有 60s 缓存（采集层用它判定 X-Verify 是否可信）。
+    # 标记完立刻失效，否则"刚标为内部"的账号这一分钟内的验证流量仍会被算成真实用户。
+    verify_tag.invalidate()
     return {"ok": True, "uid": target, "internal": req.internal}
 
