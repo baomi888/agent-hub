@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>知穗 · 11 月更新 第 3 期 宣传图</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --step-0: #EDE4C8;
+    --step-1: #F5F0E1;
+    --step-2: #FDFAF2;
+    --desk-0: #F3EAD8;
+    --ink: #3D2F1A;
+    --ink-2: #5A4C33;
+    --ink-3: #6F6044;
+    --accent: #C8892A;
+    --accent-ink: #7A510D;
+    --line: rgba(61, 47, 26, 0.12);
+    --line-strong: rgba(61, 47, 26, 0.26);
+    --serif: "Noto Serif SC", "Songti SC", serif;
+    --sans: "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  }
+
+  html, body { width: 1080px; height: 1440px; }
+  body {
+    font-family: var(--sans);
+    color: var(--ink);
+    background: var(--desk-0);
+    -webkit-font-smoothing: antialiased;
+    position: relative;
+    overflow: hidden;
+  }
+
+  body::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(rgba(61, 47, 26, 0.10) 1px, transparent 1px);
+    background-size: 16px 16px;
+    opacity: .55;
+  }
+
+  .sheet {
+    position: absolute;
+    left: 38px; right: 38px; top: 30px; bottom: 28px;
+    background: var(--step-2);
+    border: 1px solid var(--line-strong);
+    box-shadow: 0 16px 40px rgba(61, 47, 26, .13);
+    padding: 48px 64px 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .sheet::before {
+    content: "";
+    position: absolute;
+    left: 28px; top: 36px; bottom: 36px;
+    width: 1px;
+    background-image: repeating-linear-gradient(to bottom, var(--line-strong) 0 7px, transparent 7px 15px);
+    opacity: .65;
+  }
+
+  .head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding-bottom: 13px;
+    border-bottom: 1px solid var(--line);
+  }
+  .brand { font-family: var(--serif); font-size: 23px; letter-spacing: .16em; }
+  .brand .dot { color: var(--accent); margin: 0 6px; }
+  .issue { font-size: 18px; letter-spacing: .1em; color: var(--ink-3); }
+  .issue em { font-style: normal; color: var(--accent-ink); }
+
+  .kicker {
+    margin-top: 22px;
+    font-size: 20px;
+    letter-spacing: .18em;
+    color: var(--accent-ink);
+  }
+  h1 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 112px;
+    line-height: 1.04;
+    letter-spacing: .06em;
+    margin-top: 4px;
+  }
+  .sub {
+    margin-top: 12px;
+    font-size: 28px;
+    line-height: 1.66;
+    color: var(--ink-2);
+    max-width: 660px;
+  }
+  .sub b { font-weight: 500; color: var(--ink); }
+
+  .mascot {
+    position: absolute;
+    right: 66px; top: 146px;
+    width: 150px; height: 150px;
+  }
+  .mascot svg { width: 100%; height: 100%; display: block; }
+
+  /* ---------- 主视觉：论坛三栏 ---------- */
+  .stage {
+    margin-top: 22px;
+    height: 286px;
+    border: 2px solid var(--ink);
+    border-radius: 9px;
+    background: var(--step-1);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .winbar {
+    height: 30px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--line);
+    background: var(--step-0);
+    flex: none;
+  }
+  .winbar i { width: 8px; height: 8px; border-radius: 50%; background: rgba(61,47,26,.22); }
+  .winbar span { margin-left: 8px; font-size: 12px; color: var(--ink-3); letter-spacing: .08em; }
+  .winbar .url { margin-left: auto; font-size: 11px; letter-spacing: .04em; color: rgba(61,47,26,.32); }
+
+  .winbody { flex: 1; display: flex; min-height: 0; }
+
+  /* 左：板块 */
+  .col-cat {
+    width: 176px;
+    border-right: 1px solid var(--line);
+    background: var(--step-0);
+    padding: 14px 12px;
+    display: flex; flex-direction: column; gap: 6px;
+    flex: none;
+  }
+  .cat-h { font-size: 10px; letter-spacing: .14em; color: rgba(61,47,26,.38); margin-bottom: 2px; }
+  .cat {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 12px; color: var(--ink-2);
+    padding: 4px 8px; border-radius: 4px;
+  }
+  .cat b { font-weight: 400; font-size: 10px; color: rgba(61,47,26,.34); }
+  .cat.on { background: rgba(200,137,42,.16); color: var(--ink); }
+  .cat.on b { color: var(--accent-ink); }
+
+  /* 中：列表 */
+  .col-list { flex: 1; padding: 12px 14px; display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+  .row {
+    display: flex; flex-direction: column; gap: 5px;
+    padding: 8px 10px;
+    border-bottom: 1px dashed var(--line);
+  }
+  .row:last-child { border-bottom: 0; }
+  .row-t { display: flex; align-items: center; gap: 8px; }
+  .chip {
+    font-size: 9px; line-height: 1; padding: 3px 5px; border-radius: 3px;
+    background: rgba(200,137,42,.18); color: var(--accent-ink); letter-spacing: .04em;
+    flex: none;
+  }
+  .chip.k { background: rgba(61,47,26,.08); color: var(--ink-3); }
+  .rt { font-size: 14px; color: var(--ink); letter-spacing: .01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row-b { font-size: 11px; color: rgba(61,47,26,.44); line-height: 1.45; }
+  .row-m { font-size: 10px; color: rgba(61,47,26,.3); }
+
+  /* 右：公告 */
+  .col-aside { width: 200px; border-left: 1px solid var(--line); padding: 14px 12px; flex: none; display: flex; flex-direction: column; gap: 10px; }
+  .aside-h { font-size: 10px; letter-spacing: .14em; color: rgba(61,47,26,.38); }
+  .notice {
+    border-left: 3px solid rgba(200,137,42,.6);
+    padding: 3px 0 3px 9px;
+    display: flex; flex-direction: column; gap: 5px;
+  }
+  .notice p { font-size: 12px; line-height: 1.5; color: var(--ink-2); }
+  .notice span { font-size: 10px; color: rgba(61,47,26,.34); }
+  .postbtn {
+    margin-top: auto;
+    height: 30px; border-radius: 4px;
+    background: var(--accent);
+    color: #2A2113;
+    font-size: 12px; letter-spacing: .04em;
+    display: grid; place-items: center;
+  }
+
+  .tagline {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 14px;
+    font-size: 18px;
+    color: var(--ink-3);
+  }
+  .tagline::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background-image: repeating-linear-gradient(to right, var(--line-strong) 0 6px, transparent 6px 12px);
+  }
+
+  /* ---------- 三条 ---------- */
+  .list {
+    margin-top: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 17px;
+  }
+  .item { display: flex; gap: 18px; align-items: flex-start; }
+  .no {
+    font-family: var(--serif);
+    font-size: 21px;
+    color: var(--accent-ink);
+    letter-spacing: .08em;
+    padding-top: 3px;
+    flex: none;
+    width: 30px;
+  }
+  .it-body { flex: 1; }
+  .it-title {
+    font-family: var(--serif);
+    font-size: 30px;
+    letter-spacing: .02em;
+    line-height: 1.3;
+  }
+  .it-desc {
+    margin-top: 5px;
+    font-size: 21px;
+    line-height: 1.5;
+    color: var(--ink-2);
+  }
+  .it-desc b { font-weight: 500; color: var(--accent-ink); }
+
+  /* ---------- 底部 ---------- */
+  .foot {
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    gap: 26px;
+    padding: 16px 0 22px;
+    border-top: 1px solid var(--line);
+  }
+  .qrbox {
+    width: 232px; height: 232px;
+    background: #fff;
+    padding: 9px;
+    border: 1px solid var(--line-strong);
+    box-shadow: 0 7px 18px rgba(61,47,26,.10);
+    flex: none;
+  }
+  .qrbox img { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+  .foot-txt { padding-bottom: 4px; }
+  .foot-title { font-family: var(--serif); font-size: 40px; line-height: 1.2; }
+  .foot-url { margin-top: 7px; font-size: 24px; letter-spacing: .06em; color: var(--accent-ink); }
+  .foot-note { margin-top: 9px; font-size: 19px; line-height: 1.6; color: var(--ink-3); }
+  .foot-note span { display: block; }
+</style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="head">
+      <div class="brand">知穗<span class="dot">·</span>苞米地</div>
+      <div class="issue">十一月更新 <em>第 3 期</em> ｜ 2026.11.15</div>
+    </div>
+
+    <p class="kicker">这一期最想说的一件事</p>
+    <h1>论坛开张</h1>
+
+    <div class="mascot">
+      <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+        <g stroke-linecap="round" stroke-linejoin="round" stroke="#3D2F1A">
+          <path d="M52 22 C51 15 55 11 60 10 M60 22 C60 14 63 11 67 9 M67 22 C69 16 72 14 76 13" fill="none" stroke-width="4"/>
+          <path d="M42 78 C28 80 19 92 17 106 C31 104 42 95 46 84 Z" fill="#7C9A54" stroke-width="5"/>
+          <path d="M78 78 C92 80 101 92 103 106 C89 104 78 95 74 84 Z" fill="#8FAF62" stroke-width="5"/>
+          <rect x="37" y="24" width="46" height="68" rx="23" fill="#F5B840" stroke-width="5"/>
+          <g clip-path="url(#cob3)" fill="none" stroke-width="3" opacity=".28">
+            <path d="M48.5 28 C46 45 46 70 48.5 90"/><path d="M71.5 28 C74 45 74 70 71.5 90"/>
+            <path d="M38 34 C50 38 70 38 82 34"/><path d="M38 42 C50 46 70 46 82 42"/>
+            <path d="M38 76 C50 80 70 80 82 76"/><path d="M38 84 C50 88 70 88 82 84"/>
+          </g>
+          <clipPath id="cob3"><rect x="37" y="24" width="46" height="68" rx="23"/></clipPath>
+          <circle cx="52" cy="57" r="4.6" fill="#3D2F1A" stroke="none"/>
+          <circle cx="68" cy="57" r="4.6" fill="#3D2F1A" stroke="none"/>
+          <circle cx="53.6" cy="55.4" r="1.7" fill="#FFFDF6" stroke="none"/>
+          <circle cx="69.6" cy="55.4" r="1.7" fill="#FFFDF6" stroke="none"/>
+          <path d="M53.5 67 Q60 73 66.5 67" fill="none" stroke-width="4"/>
+          <ellipse cx="44.5" cy="64" rx="4.2" ry="2.6" fill="#EF8A56" opacity=".55" stroke="none"/>
+          <ellipse cx="75.5" cy="64" rx="4.2" ry="2.6" fill="#EF8A56" opacity=".55" stroke="none"/>
+        </g>
+      </svg>
+    </div>
+
+    <p class="sub">
+      不用注册就能说一句。<br>
+      <b>问课、求资料、找人自习</b>，都在里面。
+    </p>
+
+    <div class="stage">
+      <div class="winbar">
+        <i></i><i></i><i></i>
+        <span>知穗论坛</span>
+        <span class="url">myzhisui.cn/forum</span>
+      </div>
+      <div class="winbody">
+        <div class="col-cat">
+          <div class="cat-h">板块</div>
+          <div class="cat on"><span>站务公告</span><b>2</b></div>
+          <div class="cat"><span>课程答疑</span><b>18</b></div>
+          <div class="cat"><span>求资料</span><b>27</b></div>
+          <div class="cat"><span>学习经验</span><b>11</b></div>
+          <div class="cat"><span>组队自习</span><b>9</b></div>
+          <div class="cat"><span>库内容反馈</span><b>4</b></div>
+        </div>
+        <div class="col-list">
+          <div class="row">
+            <div class="row-t"><span class="chip">置顶</span><span class="rt">第 3 期 · 十一月更新：论坛开张</span></div>
+            <div class="row-b">这一期开了论坛，也把九门课的资料摆成了「官方课程库」…</div>
+            <div class="row-m">管理员 · 刚刚 · 0 回复</div>
+          </div>
+          <div class="row">
+            <div class="row-t"><span class="chip k">课程答疑</span><span class="rt">洛必达法则什么时候能用？</span></div>
+            <div class="row-b">课本上只写了「0/0 或 ∞/∞ 型」，但上下都得能求导这条没写…</div>
+            <div class="row-m">同学 · 23 分钟前 · 3 回复</div>
+          </div>
+          <div class="row">
+            <div class="row-t"><span class="chip k">组队自习</span><span class="rt">周三晚图书馆四楼，缺两个人</span></div>
+            <div class="row-b">18:30–22:00，东侧靠窗那排。各学各的，来不了说一声就行。</div>
+            <div class="row-m">同学 · 1 小时前 · 1 回复</div>
+          </div>
+        </div>
+        <div class="col-aside">
+          <div class="aside-h">公告</div>
+          <div class="notice">
+            <p>论坛现在不用登录也能发。</p>
+            <span>先发后审 · 有问题可举报</span>
+          </div>
+          <div class="notice">
+            <p>九门课、73 份资料已上架。</p>
+            <span>可在线看，也可下载</span>
+          </div>
+          <div class="postbtn">发一个话题</div>
+        </div>
+      </div>
+    </div>
+
+    <p class="tagline">六个板块 · 能发图 · 楼中楼 · 先发后审</p>
+
+    <div class="list">
+      <div class="item">
+        <span class="no">01</span>
+        <div class="it-body">
+          <div class="it-title">九门课的资料，在线看也下载</div>
+          <div class="it-desc">「公开知识库」里多了一区<b>官方课程库</b>：9 门课、73 份，<br>公式不再是乱码；看中了可以收藏，也能复制成自己的一份。</div>
+        </div>
+      </div>
+      <div class="item">
+        <span class="no">02</span>
+        <div class="it-body">
+          <div class="it-title">提醒真的会响了</div>
+          <div class="it-desc">课表默认提前 <b>20 分钟</b>提醒，待办分四档轻重、急的置顶；<br>安卓收不到推送时，还有邮件这条兜底的路。</div>
+        </div>
+      </div>
+      <div class="item">
+        <span class="no">03</span>
+        <div class="it-body">
+          <div class="it-title">说话的时候，字跟着出来</div>
+          <div class="it-desc">话筒点开就是边说边出字，中间停一下想词也不会被打断。</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="foot">
+      <div class="qrbox"><img src="qr_myzhisui.png" alt="扫码打开知穗"></div>
+      <div class="foot-txt">
+        <p class="foot-title">扫码直接用</p>
+        <p class="foot-url">myzhisui.cn</p>
+        <p class="foot-note">
+          <span>不登录也能先逛，论坛发帖不用注册。</span>
+          <span>手机上还能「添加到主屏幕」，点开就是全屏。</span>
+        </p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
