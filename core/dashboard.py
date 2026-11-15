@@ -341,10 +341,17 @@ def failures(days: int = 7, limit: int = 20) -> dict:
 # ------------------------------------------------------
 #   anonymous —— uid 为空：未登录请求（401 探测、注册/登录本身、公开页）
 #   orphan    —— uid 有值但 users 里查不到：已注销账号的历史调用
-#   internal  —— `al.internal = 1`（自动化验证流量），或 is_internal = 1，
-#                或 uid 在 ADMIN_UIDS/ADMIN_USERNAMES 里
-#   real      —— 账号正常，且**在区间内至少发起过 1 次对话**（`/api/chat/stream`）
-#   passive   —— 账号正常，但区间内只有读接口调用、一次对话都没发起过
+#   internal  —— `al.internal = 1`（自动化验证流量）、或 `al.client` 是无头浏览器/脚本、
+#                或 is_internal = 1、或 uid 在 ADMIN_UIDS/ADMIN_USERNAMES 里
+#   real      —— 账号正常、客户端是真人浏览器，且**在区间内至少发起过 1 次对话**
+#   passive   —— 账号正常（真浏览器），但区间内只有读接口调用、一次对话都没发起过
+#
+# 为什么 11-15 又补了"客户端"这一条
+# ----------------------------------
+# 上一版只认 `internal`（脚本自报 `X-Verify` + 内部身份）。复查发现截图脚本
+# 走的是浏览器导航，**根本加不了自定义头**，于是它带着真人账号 `苞米呀` 的 cookie
+# 把全站翻了一遍：单小时 1444 次、7 天 12772 次，占 real 桶 96%。UA 是请求里
+# 唯一不会被脚本忘掉的东西，所以把它变成与 `internal` 等价的判据（见 `_AUTO_CLIENTS`）。
 #
 # 为什么"真实用户"必须带对话这个条件（2026-11-15 实测后加）
 # --------------------------------------------------------
@@ -393,12 +400,25 @@ _REAL_FROM = "FROM api_call_logs al LEFT JOIN users u ON u.id = al.uid WHERE al.
 # 页面扇出伪造不出来（其余读接口一次进页就会打 6~11 个）。
 CHAT_PATH = "/api/chat/stream"
 
+# 「这条调用不是真人点的」的客户端取值（`core/verify_tag.classify_ua` 的分类）。
+#
+# 为什么要和 `internal` 并列而不是只认 `internal`：2026-11-15 复查发现，
+# 真人账号（苞米呀）被截图脚本带着 cookie 跑了 12772 次调用，而脚本走的是
+# 浏览器导航、加不了 `X-Verify` 头，于是 `internal` 全是 0 —— 面板把脚本的
+# 页面扇出当成了"人均上百次"的真实使用。UA 是请求里唯一不会被忘掉的东西。
+#
+# 两处必须用同一个字符串：`_real_where`（把调用排除出去）和 `_bucket_counts`
+# 的 CASE（把它归进 internal 桶）。只用一处会让五桶相加 ≠ 总数。
+_AUTO_CLIENTS = "('headless', 'script')"
+
 # 区间内有对话行为的 uid 子查询。三个占位符依次是 (path, start, end)。
 # 打标为自动化的对话（`internal = 1`）不算 —— 否则我们自己跑一次对话验证，
-# 就能把测试号"洗成"真实用户。
+# 就能把测试号"洗成"真实用户。自动化客户端的对话同样不算：脚本跑一轮
+# `/api/chat/stream` 是"验证模型能出字"，不是"有人想聊"。
 _CHAT_UIDS = (
     "SELECT DISTINCT c.uid FROM api_call_logs c"
     " WHERE c.path = ? AND c.internal = 0 AND c.uid IS NOT NULL AND c.uid <> ''"
+    "   AND c.client NOT IN " + _AUTO_CLIENTS +
     "   AND c.ts >= ? AND c.ts < ?"
 )
 
@@ -417,8 +437,11 @@ def _real_where(admin_ids: list[str], start: int, end_excl: int) -> tuple[str, l
         # 但它的调用量会进 orphan 桶，所以账还是平的
         "u.id IS NOT NULL",
         "u.is_internal = 0",
-        # 自动化验证流量（X-Verify 打标）不进真实用户
+        # 自动化验证流量（X-Verify 打标 / 内部账号）不进真实用户
         "al.internal = 0",
+        # 自动化客户端（无头浏览器、curl 之类）也不进。这一条不能省：
+        # 截图脚本带的是真人 cookie，账号维度完全正常，只有 UA 露馅。
+        "al.client NOT IN " + _AUTO_CLIENTS,
         # ★ 必须真的发起过对话。见本节顶部注释：页面扇出能凭空造出活跃用户。
         "al.uid IN (" + _CHAT_UIDS + ")",
     ]
@@ -440,8 +463,10 @@ def _bucket_counts(conn, start: int, end_excl: int, admin_ids: list[str]) -> dic
         "SELECT CASE"
         "    WHEN al.uid IS NULL OR al.uid = '' THEN 'anonymous'"
         "    WHEN u.id IS NULL THEN 'orphan'"
-        # 请求级打标优先于账号标记：脚本可能带着真人账号的登录态跑
-        "    WHEN al.internal = 1 THEN 'internal'"
+        # 请求级打标优先于账号标记：脚本可能带着真人账号的登录态跑。
+        # 自动化客户端同样归 internal —— 必须与 `_real_where` 用同一组取值，
+        # 否则「被 real 排除掉的调用」会在桶里凭空消失，五桶相加对不上总数。
+        "    WHEN al.internal = 1 OR al.client IN " + _AUTO_CLIENTS + " THEN 'internal'"
         "    WHEN u.is_internal = 1" + admin_case + " THEN 'internal'"
         "    WHEN al.uid IN (" + _CHAT_UIDS + ") THEN 'real'"
         "    ELSE 'passive' END AS bucket,"
@@ -593,6 +618,35 @@ def _real_chat_calls(conn, start: int, end_excl: int, admin_ids: list[str]) -> i
     return int(row["n"] or 0)
 
 
+def _automated_breakdown(conn, start: int, end_excl: int) -> dict:
+    """区间内被判定为自动化的调用，按客户端类型拆开（用于面板上明示剔除量）。
+
+    为什么要把这个数摆到页面上：干净的数字最容易被怀疑成"调过参"。给出
+    「一共剔除 N 次，其中无头 M / 脚本 K，来自 P 个账号」，读的人才能自己去
+    明细里核对 —— 也才能在"是不是有人在刷"时立刻看到证据，而不是被悄悄洗掉。
+
+    `accounts` 只统计**非内部标记**的账号：内部账号本来就整体排除，
+    把它们算进来会让这个数字大得没法解释。
+    """
+    row = conn.execute(
+        "SELECT"
+        " COALESCE(SUM(CASE WHEN al.client = 'headless' THEN 1 ELSE 0 END), 0) AS headless,"
+        " COALESCE(SUM(CASE WHEN al.client = 'script' THEN 1 ELSE 0 END), 0) AS script,"
+        " COUNT(*) AS total,"
+        " COUNT(DISTINCT al.uid) AS accounts"
+        "  FROM api_call_logs al LEFT JOIN users u ON u.id = al.uid"
+        " WHERE al.ts >= ? AND al.ts < ? AND al.client IN " + _AUTO_CLIENTS +
+        "   AND (u.id IS NULL OR u.is_internal = 0)",
+        (start, end_excl),
+    ).fetchone()
+    return {
+        "total": int(row["total"] or 0),
+        "headless": int(row["headless"] or 0),
+        "script": int(row["script"] or 0),
+        "accounts": int(row["accounts"] or 0),
+    }
+
+
 def _real_user_snapshot(conn, start: int, end_excl: int, admin_ids: list[str]) -> dict:
     """账号快照。三个数三种口径，UI 上必须分开写清楚：
 
@@ -619,7 +673,8 @@ def _real_user_snapshot(conn, start: int, end_excl: int, admin_ids: list[str]) -
         "SELECT COUNT(*) FROM users u "
         + clause
         + " AND EXISTS (SELECT 1 FROM api_call_logs c"
-        + " WHERE c.uid = u.id AND c.path = ? AND c.internal = 0)",
+        + " WHERE c.uid = u.id AND c.path = ? AND c.internal = 0"
+        + "   AND c.client NOT IN " + _AUTO_CLIENTS + ")",
         (*args, CHAT_PATH),
     ).fetchone()[0]
     return {"total": int(total or 0), "new": int(new or 0), "chatted": int(chatted or 0)}
@@ -652,6 +707,7 @@ def real_user_view(days: int = 7, limit: int = 20) -> dict:
         )
         snap = _real_user_snapshot(conn, r["start"], r["end_exclusive"], admin_ids)
         chat_calls = _real_chat_calls(conn, r["start"], r["end_exclusive"], admin_ids)
+        automated = _automated_breakdown(conn, r["start"], r["end_exclusive"])
 
     real_calls = buckets["real"]
     total_calls = sum(buckets.values())
@@ -681,6 +737,9 @@ def real_user_view(days: int = 7, limit: int = 20) -> dict:
             "passive": buckets["passive"],
             # 真实用户发起的对话次数（real 的子集，不是独立桶 —— 别拿去和五个桶相加）
             "chat": chat_calls,
+            # 被剔除的自动化调用（已包含在 internal 桶里，这里只是把它拆开明示：
+            # 无头浏览器 / 脚本 / 来自几个账号）。口径上它**不是第 6 个桶**。
+            "automated": automated,
         },
         "users": {
             "active": active,

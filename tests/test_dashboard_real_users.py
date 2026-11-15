@@ -84,11 +84,16 @@ def _seed(
     path: str = "/api/tasks",
     day_index: int = -1,
     internal: int = 0,
+    client: str = "",
 ) -> None:
     """往 api_call_logs 里塞 n 条。
 
     `day_index=-1` 是区间内最近的一天（今天），`-2` 是前天 ——
     用 `timeutil.day_bounds` 取边界，绝不手算 86400（会有跨日/时区错位）。
+
+    `client` 是客户端类型（browser/headless/script）。**默认空串**是有意的：
+    历史行（加列之前）就是空串，测试默认走"老旧数据"这条路，才能顺带保证
+    升级不会把过去的数据全判成自动化。
     """
     days = timeutil.recent_days(7)
     day = days[day_index]
@@ -96,15 +101,18 @@ def _seed(
     ts = s + 3600  # 当天的 01:00，稳稳落在这一天里
     with session._get_conn() as conn:  # noqa: SLF001
         conn.executemany(
-            "INSERT INTO api_call_logs (ts, path, method, status, dur_ms, uid, internal) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            [(ts, path, "POST" if path == CHAT else "GET", 200, 12, uid, internal) for _ in range(n)],
+            "INSERT INTO api_call_logs (ts, path, method, status, dur_ms, uid, internal, client) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (ts, path, "POST" if path == CHAT else "GET", 200, 12, uid, internal, client)
+                for _ in range(n)
+            ],
         )
 
 
-def _seed_chat(uid: str, n: int = 1, day_index: int = -1) -> None:
+def _seed_chat(uid: str, n: int = 1, day_index: int = -1, client: str = "") -> None:
     """给账号塞 n 次对话 —— 这是"真实用户"的唯一判据。"""
-    _seed(uid, n, path=CHAT, day_index=day_index)
+    _seed(uid, n, path=CHAT, day_index=day_index, client=client)
 
 
 # ==================== A. 五桶分解 ====================
@@ -173,6 +181,72 @@ def test_a_chat_makes_every_call_of_that_account_real(env):
     assert v["calls"]["passive"] == 0
     assert v["users"]["active"] == 1
     assert v["users"]["per_user"] == 11.0
+
+
+def test_headless_client_calls_are_not_real(env):
+    """★ 核心回归（11-15 第二次事故的形态）：截图脚本带着**真人 cookie** 跑无头浏览器。
+
+    账号维度完全正常（有对话、非内部），只有 UA 露馅 —— 这正是上一版口径漏掉的那类：
+    `苞米呀` 7 天 12772 次调用里 85.6% 是同 IP 的 `HeadlessChrome`，把"真实用户"
+    桶的 96% 变成了脚本的页面扇出。所以这些调用必须进 internal，一条都不能留在 real。
+
+    同时锁住"账要平"：被排除的调用不能凭空消失，必须出现在 internal 桶里。
+    """
+    uid = _mk_user("swept_by_script")
+    _seed_chat(uid, 1)  # 真人当天真的聊过一次 -> 账号本身是真实用户
+    _seed(uid, 5, client="browser")  # 他自己翻的页
+    _seed(uid, 40, client="headless")  # 截图脚本扫出来的
+
+    v = dashboard.real_user_view(7)
+    calls = v["calls"]
+    assert calls["real"] == 6, "无头浏览器的调用被算进了真实用户 —— 这正是上次的事故"
+    # ★ 上面那条查的是「五桶 CASE」，而「趋势 / 按账号 / 按功能」走的是另一条
+    #   `_real_where`。两条 SQL 都带着 client 条件，但**只断言其中一条**的话：
+    #   把 `_real_where` 里的条件删掉，五桶照样是 6，趋势里却会多出 40 次 ——
+    #   2026-11-15 的反证脚本就是这样抓到本断言原来写在错的那条 SQL 上。
+    assert sum(s["calls"] for s in v["series"]) == 6, "逐日趋势里混进了自动化调用"
+    assert [u["calls"] for u in v["by_user"]] == [6], "按账号明细里混进了自动化调用"
+    assert sum(f["calls"] for f in v["by_feature"]) == 6, "按功能明细里混进了自动化调用"
+    assert calls["internal"] == 40
+    assert calls["automated"]["total"] == 40
+    assert calls["automated"]["headless"] == 40
+    assert calls["automated"]["script"] == 0
+    assert calls["automated"]["accounts"] == 1, "剔除量来自几个账号必须能看出来"
+    assert (
+        calls["real"]
+        + calls["passive"]
+        + calls["internal"]
+        + calls["orphan"]
+        + calls["anonymous"]
+    ) == calls["total"], "把调用排除出 real 之后，它必须在 internal 桶里，否则账对不上"
+
+
+def test_script_client_chat_does_not_make_a_real_user(env):
+    """脚本跑一次对话不算"有人想聊"：`/api/chat/stream` 也要看客户端。
+
+    否则健康检查/回归脚本每隔几分钟聊一句，就能把一个测试号永久洗成"活跃真实用户"。
+    """
+    uid = _mk_user("script_chatter")
+    _seed(uid, 3, path=CHAT, client="script")
+    _seed(uid, 7, path="/api/kb/", client="browser")
+
+    v = dashboard.real_user_view(7)
+    assert v["calls"]["real"] == 0, "脚本的对话把账号洗成了真实用户"
+    assert v["calls"]["passive"] == 7, "真浏览的调用应当留在 passive，不该被一起排除"
+    assert v["calls"]["internal"] == 3
+    assert v["users"]["active"] == 0
+
+
+def test_legacy_rows_without_client_are_still_real(env):
+    """加列之前的历史行 `client` 是空串 —— 不能被当成自动化误杀。
+
+    这一条是给"升级后老数据全变 0"兜底的：空串的语义是"当时没记录"，
+    不是"当时是无头浏览器"。
+    """
+    uid = _mk_user("legacy")
+    _seed_chat(uid, 1, client="")
+    _seed(uid, 4, client="")
+    assert dashboard.real_user_view(7)["calls"]["real"] == 5
 
 
 def test_share_is_null_when_no_calls(env):

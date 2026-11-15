@@ -1091,6 +1091,17 @@ export interface RealUsersCalls {
    * ★ 不要拿去和上面五个桶相加：它已经包含在 real 里。
    */
   chat: number;
+  /**
+   * 被判定为自动化、已从 real 里剔除的调用（**已包含在 internal 桶里**，
+   * 这里是拆开明示：无头浏览器 / 脚本 / 来自几个账号）。
+   * ★ 同样不是第 6 个桶，别拿去相加。
+   */
+  automated: {
+    total: number;
+    headless: number;
+    script: number;
+    accounts: number;
+  };
 }
 
 export interface RealUsersUsers {

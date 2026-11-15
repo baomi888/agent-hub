@@ -477,12 +477,19 @@ async def collect_api_call(request: Request, call_next: Callable[[Request], Any]
         try:
             dur_ms = int((time.perf_counter() - t0) * 1000)
             uid = str(getattr(request.state, "uid", "") or "") or None
-            # 自动化验证流量打标：声明（X-Verify: 1）+ 身份（内部账号/管理员）
-            # 同时成立才采信 —— 普通用户加这个头不会生效，否则任何人都能
-            # 让自己从"真实用户"统计里消失（见 core/verify_tag.py）。
-            verify = 1 if verify_tag.is_verify(request.headers.get(verify_tag.VERIFY_HEADER), uid) else 0
+            # 自动化验证流量打标，两层判据（见 core/verify_tag.py）：
+            #   ① `X-Verify: 1` + 身份（内部账号/管理员）同时成立才采信 ——
+            #      普通用户加这个头不会生效，否则任何人都能让自己从统计里消失；
+            #   ② 客户端 UA 本身就是无头浏览器/脚本 —— 不需要声明也不需要身份。
+            #      11-15 的污染（真人账号被截图脚本带出 12772 次调用）就是
+            #      因为截图走的是浏览器导航，加不了自定义头。
+            ua = request.headers.get("user-agent")
+            client = verify_tag.classify_ua(ua)
+            verify = 1 if verify_tag.is_verify(
+                request.headers.get(verify_tag.VERIFY_HEADER), uid, ua
+            ) else 0
             if apilog.record(
-                request.method, _route_template(request), code, dur_ms, uid, verify
+                request.method, _route_template(request), code, dur_ms, uid, verify, client
             ):
                 _spawn_flush()
         except Exception:  # noqa: BLE001 —— 采集失败绝不能让请求失败

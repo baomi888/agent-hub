@@ -88,11 +88,17 @@ def ensure() -> None:
                 status  INTEGER NOT NULL,
                 dur_ms  INTEGER NOT NULL,
                 uid     TEXT,
-                -- 1 = 这条请求是自动化验证流量（脚本带 X-Verify: 1 且由内部账号发出）。
+                -- 1 = 这条请求是自动化验证流量（脚本带 X-Verify: 1 且由内部账号发出，
+                -- 或客户端 UA 直接就是无头浏览器/脚本）。
                 -- 为什么要在**请求**上标而不是只在账号上标：同一账号既可能是人点，
                 -- 也可能是脚本在跑（截图/取证都复用登录态）。只按账号排除会把真人的
                 -- 使用一起抹掉，只按 UA 排除又能被任何人伪造。
-                internal INTEGER NOT NULL DEFAULT 0
+                internal INTEGER NOT NULL DEFAULT 0,
+                -- 请求的客户端类型：browser / headless / script / ''（空=UA 缺失）。
+                -- 为什么存下来而不是每次现算：UA 只在请求里活着，事后审计（"这 12000 次
+                -- 调用到底是谁打的"）只能靠这一列。2026-11-15 就是因为它不存在，
+                -- 只能回头翻 nginx 日志按秒做匹配。
+                client TEXT NOT NULL DEFAULT ''
             );
             -- 三个索引对应看板的三类查询：时间范围 / 按接口排行 / 成功失败统计。
             -- 600k 行下无索引是秒级全表扫，有索引是毫秒级（文档 §8）
@@ -108,6 +114,11 @@ def ensure() -> None:
             conn.execute(
                 "ALTER TABLE api_call_logs ADD COLUMN internal INTEGER NOT NULL DEFAULT 0"
             )
+        if "client" not in cols:
+            conn.execute("ALTER TABLE api_call_logs ADD COLUMN client TEXT NOT NULL DEFAULT ''")
+        # client 有索引才划算：看板每次都要 `client IN ('headless','script')` 做反连接，
+        # 而 600k 行全表扫是秒级。范围查询仍然走 idx_apilog_ts。
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_apilog_client_ts ON api_call_logs(client, ts)")
     _READY.add(path)
 
 
@@ -151,6 +162,7 @@ def record(
     dur_ms: int,
     uid: str | None = None,
     internal: int = 0,
+    client: str = "",
 ) -> bool:
     """塞一条进缓冲。返回 True 表示「现在该 flush 了」，由调用方负责调度。
 
@@ -160,6 +172,11 @@ def record(
 
     `internal=1` 表示这条是自动化验证流量。**判定不能在这里做**：本模块只负责
     存，谁能打这个标由 `core/verify_tag.py` 决定（必须由内部账号发出才采信）。
+
+    `client` 是请求的客户端类型（`core/verify_tag.classify_ua` 的返回值）。
+    它和 `internal` 是**两件事**：`internal` 是"我们已经认定这条不是真人点的"，
+    `client` 是"客户端长什么样"这个客观事实。留着 `client` 才能事后复核
+    "当初那条判定对不对"，也才能在面板上把自动化流量按来源拆开。
     """
     if not should_record(path):
         return False
@@ -171,6 +188,7 @@ def record(
         max(0, int(dur_ms)),
         uid or None,
         1 if internal else 0,
+        (client or "")[:16],
     )
     _BUF.append(row)
     if len(_BUF) >= BATCH:
@@ -203,8 +221,8 @@ def flush() -> int:
 
         with store._get_conn() as conn:  # noqa: SLF001
             conn.executemany(
-                "INSERT INTO api_call_logs (ts, path, method, status, dur_ms, uid, internal) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO api_call_logs (ts, path, method, status, dur_ms, uid, internal, client) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
         _maybe_purge()

@@ -84,14 +84,36 @@ def test_metric_cards_hold_a_label_not_a_rule():
 
 
 def test_scope_badge_marks_exactly_the_unfiltered_cards():
-    """「全量」角标必须恰好标在那两张不跟随筛选的卡上，多一个少一个都是错。"""
+    """「全量」角标必须恰好标在**不跟随筛选**的那几张卡上，多一个少一个都是错。
+
+    ★ 从「数个数」改成「按卡片绑定含义」（2026-11-15 第 22 批改）：
+      原来断言 `len(badges) == 2`，于是每加一张快照卡就得改数字，
+      改数字比想清楚"这张卡到底跟不跟随筛选"容易得多 —— 断言就退化成计数器。
+      现在把标签和角标绑起来查：多一张卡没标、标错一张、给跟随筛选的卡标「全量」，
+      都会指名道姓地红。
+    """
     src = _code(DASH)
-    badges = re.findall(r'<span className="stat-scope">([^<]*)</span>', src)
-    assert len(badges) == 2, (
-        f"「全量」角标有 {len(badges)} 个，应为 2 个（注册用户、待处理反馈）。\n"
-        "标多了会让跟随筛选的数字看起来也不变，标少了那张卡就没有口径提示。"
+    blocks = [m.group(1) for m in _STAT_LABEL.finditer(src)]
+
+    # 每张指标卡的标签块 → 它挂了什么角标（没挂为空）
+    got: dict[str, str] = {}
+    for block in blocks:
+        badge = re.search(r'<span className="stat-scope">([^<]*)</span>', block)
+        # 先把角标整段（含文字）摘掉再取标签，否则标签会变成「注册用户全量」
+        text = _TAG.sub("", re.sub(r'<span className="stat-scope">[^<]*</span>', "", block))
+        label = text.strip().replace(" ", "")
+        if badge:
+            got[label] = badge.group(1)
+
+    # 不跟随筛选的卡：注册用户（账号总数）、待处理反馈（队列长度）、
+    # 用过对话的真实账号（日志保留期内的快照）
+    expect = {"注册用户": "全量", "待处理反馈": "全量", "用过对话的真实账号": "全量"}
+    assert got == expect, (
+        "「全量」角标挂错了位置。\n"
+        f"  期望：{expect}\n  实际：{got}\n"
+        "规则：只有不随上方时间范围变化的卡才挂「全量」；跟随筛选的卡什么都不挂"
+        "（页头已经写明「不标的是当前区间」）。"
     )
-    assert set(badges) == {"全量"}, f"角标文案不统一：{badges}"
 
     # 角标的含义必须由页头说清楚，否则它只是个看不懂的符号。
     assert "标「全量」的是当前快照" in src, (

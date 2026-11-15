@@ -454,18 +454,14 @@ export default function DashboardPage() {
               <div className="grid4" style={{ marginBottom: 10 }}>
                 <div className="card card-pad stat">
                   <div className="n">{fmtNum(real.calls.real)}</div>
-                  <div className="l">
-                    真实用户调用 <span className="stat-scope">区间</span>
-                  </div>
+                  <div className="l">真实用户调用</div>
                   <div className="meta">
                     占全量 {fmtPct(real.calls.share)} · 其中对话 {fmtNum(real.calls.chat)} 次
                   </div>
                 </div>
                 <div className="card card-pad stat">
                   <div className="n">{fmtNum(real.users.active)}</div>
-                  <div className="l">
-                    活跃真实用户 <span className="stat-scope">区间</span>
-                  </div>
+                  <div className="l">活跃真实用户</div>
                   <div className="meta">人均 {real.users.per_user} 次调用</div>
                 </div>
                 <div className="card card-pad stat">
@@ -485,7 +481,8 @@ export default function DashboardPage() {
                     用过对话的真实账号 <span className="stat-scope">全量</span>
                   </div>
                   <div className="meta">
-                    注册账号 {fmtNum(real.users.total)} · 区间新增 {fmtNum(real.users.new)}
+                    注册账号 {fmtNum(real.users.total)}（不含内部/管理员）· 区间新增{" "}
+                    {fmtNum(real.users.new)}
                   </div>
                 </div>
               </div>
@@ -543,6 +540,17 @@ export default function DashboardPage() {
                     五类互斥且穷尽，加起来应当<b>等于</b>上方全量调用数。对不上就说明有调用
                     没被归进任何一类，那是要修的 bug。
                   </p>
+                  {/* 把"剔除了多少"直接摆出来。干净的数字最容易被当成调过参，
+                      给出剔除量和来源，读的人才能自己去明细里核对。 */}
+                  {real.calls.automated.total > 0 && (
+                    <p className="hint" style={{ margin: "6px 0 0", color: "var(--text-2)" }}>
+                      其中 <b>{fmtNum(real.calls.automated.total)}</b> 次是自动化调用（无头浏览器{" "}
+                      {fmtNum(real.calls.automated.headless)} · 脚本{" "}
+                      {fmtNum(real.calls.automated.script)}，来自{" "}
+                      {real.calls.automated.accounts} 个账号），
+                      已计入上面的「内部/测试/验证流量」，<b>不在</b>真实用户里。
+                    </p>
+                  )}
                 </div>
 
                 {/* ---- 趋势：调用量 + 活跃用户数双序列 ---- */}
@@ -789,21 +797,24 @@ export default function DashboardPage() {
                   <li>
                     <b>数据来源</b>：服务端中间件逐条采集的 <code>api_call_logs</code> 表
                     （每个 <code>/api/</code> 业务请求一行：时间、路由模板、方法、状态码、耗时、
-                    uid、是否自动化打标），保留 90 天。<b>本页没有模拟或占位数据</b>，
+                    uid、客户端类型、是否自动化打标），保留 90 天。<b>本页没有模拟或占位数据</b>，
                     每个数字都能用 SQL 复算。
                   </li>
                   <li>
-                    <b>真实用户</b>：账号存在、未被标为内部、不在管理员名单，且<b>区间内至少发起
-                    1 次对话</b>（<code>POST /api/chat/stream</code>）。不按「调过任意接口」计：
-                    一次进页会扇出 6~11 个读接口，那样算会把页面加载当成使用行为。
+                    <b>真实用户</b>：账号存在、未被标为内部、不在管理员名单、客户端是真人浏览器，且
+                    <b>区间内至少发起过 1 次对话</b>（<code>POST /api/chat/stream</code>）。不按
+                    「调过任意接口」计：一次进页会扇出 6~11 个读接口，那样算会把页面加载当成使用行为。
                   </li>
                   <li>
                     <b>被动访问</b>：登录了但一次对话都没发起，只有列表/详情这类读接口。
                   </li>
                   <li>
-                    <b>内部/测试/验证流量</b>：人工标记的内部账号、管理员，以及带{" "}
-                    <code>X-Verify: 1</code> 且由内部账号发出的自动化请求（采集层写入{" "}
-                    <code>api_call_logs.internal</code>，普通用户加这个头不生效）。
+                    <b>内部/测试/验证流量</b>：人工标记的内部账号、管理员、带{" "}
+                    <code>X-Verify: 1</code> 且由内部账号发出的请求，以及<b>客户端本身是自动化</b>的
+                    请求（UA 为 <code>HeadlessChrome</code> 等无头浏览器，或 <code>curl</code>/
+                    <code>python-requests</code> 这类脚本）。按 UA 判是因为截图脚本走浏览器导航、
+                    根本加不了自定义头 —— 上一版只认请求头，结果脚本带着真人账号的登录态跑出了
+                    上万次"真实用户调用"。
                   </li>
                   <li>
                     <b>未登录 / 已注销</b>：uid 为空的身份探测与注册登录本身；uid 有值但账号
@@ -811,8 +822,8 @@ export default function DashboardPage() {
                   </li>
                 </ul>
                 <p className="hint" style={{ margin: "6px 0 0" }}>
-                  字段定义与对账 SQL 见{" "}
-                  <code>docs/数据看板_2026-10-27/口径与数据字典.md</code> §2.8。
+                  对账方式：五类相加应当等于上方全量调用数；任一数字都能按上面这几条口径在{" "}
+                  <code>api_call_logs</code> 表里复算出来。口径若有调整，页面上这句话会同步改。
                 </p>
               </div>
             </>

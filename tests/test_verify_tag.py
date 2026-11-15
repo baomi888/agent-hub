@@ -65,7 +65,7 @@ def _login(client: TestClient, uid: str, name: str) -> None:
 
 
 def _rows(**where) -> list:
-    sql = "SELECT path, uid, internal FROM api_call_logs"
+    sql = "SELECT path, uid, internal, client FROM api_call_logs"
     args: list = []
     if where:
         sql += " WHERE " + " AND ".join(k + " = ?" for k in where)
@@ -155,3 +155,94 @@ def test_same_account_without_header_stays_real(client, env):
     apilog.flush()
     rows = [r for r in _rows() if r["path"] == "/api/auth/me/"]
     assert rows and all(int(r["internal"]) == 0 for r in rows)
+
+
+# ==================== C. UA 自动识别（11-15 补的第二层判据）====================
+#
+# 为什么必须补这一层：截图脚本走的是**浏览器导航**，加不了自定义请求头，
+# 所以第一层 `X-Verify` 对它 100% 失效。实测 `苞米呀`（真人账号）7 天 12772 次
+# 调用里 85.6% 是同一个 IP 的 `HeadlessChrome` —— 账号维度完全正常，只有 UA 露馅。
+
+# 线上真实出现过的那条 UA（HeadlessChrome + Edg 后缀，容易被当成普通 Edge 放过）
+HEADLESS_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) HeadlessChrome/157.0.0.0 Safari/537.36 Edg/157.0.0.0"
+)
+
+
+@pytest.mark.parametrize(
+    "ua, want",
+    [
+        (None, ""),
+        ("", ""),
+        # 真浏览器：一条都不能误判 —— 判错的代价是真人从"真实用户"里消失且没人发现
+        (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            " (KHTML, like Gecko) Chrome/140.0 Safari/537.36",
+            "browser",
+        ),
+        (
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)"
+            " AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+            "browser",
+        ),
+        (
+            "Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36"
+            " (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36",
+            "browser",
+        ),
+        # App 内置 WebView 的 UA 里可能顺带出现 java/ 之类，不能被标记词误伤
+        (
+            "Mozilla/5.0 (Linux; Android 4.0) AppleWebKit/537.36 java/1.0",
+            "browser",
+        ),
+        (HEADLESS_UA, "headless"),
+        ("curl/8.4.0", "script"),
+        ("python-requests/2.31.0", "script"),
+        ("Go-http-client/1.1", "script"),
+    ],
+)
+def test_classify_ua(ua, want):
+    """UA 归类矩阵：宁可漏判（数字偏高还能查），也不能误判（真人被藏起来）。"""
+    assert verify_tag.classify_ua(ua) == want
+
+
+def test_headless_ua_is_tagged_without_header_or_identity(env):
+    """★ 核心回归：普通账号 + 无头浏览器 → 直接打标。
+
+    不需要 `X-Verify`，也不需要内部身份。若这里要求身份，`苞米呀` 那 12772 次
+    调用就永远洗不干净 —— 他恰恰是个普通账号。
+    """
+    assert verify_tag.is_verify(None, "some-normal-uid", HEADLESS_UA) is True
+    # 反过来：同一句话换成真浏览器，没有请求头就不能打标，否则真人会消失
+    assert verify_tag.is_verify(None, "some-normal-uid", "Mozilla/5.0 (iPhone)") is False
+
+
+def test_headless_browser_is_tagged_end_to_end(client, env):
+    """端到端：无头浏览器的请求要进 internal 桶，并且 client 列要留下证据。
+
+    `client` 列不是装饰：没有它，事后只能像 11-15 那样回头翻 nginx 日志按秒做匹配，
+    而日志只留 14 天。
+    """
+    uid = _mk("plainuser")
+    _login(client, uid, "plainuser")
+    client.get("/api/auth/me/", headers={"User-Agent": HEADLESS_UA})
+    apilog.flush()
+    rows = [r for r in _rows() if r["path"] == "/api/auth/me/"]
+    assert rows, "请求没有被采集（先看 apilog.should_record）"
+    assert all(int(r["internal"]) == 1 for r in rows), "无头浏览器的请求没有被自动打标"
+    assert all(r["client"] == "headless" for r in rows), "client 列没落库，事后无法复核"
+
+
+def test_normal_browser_is_recorded_as_browser(client, env):
+    """真人浏览器要落成 `browser` 且不打标 —— 这是 real 桶的唯一合法门票。"""
+    uid = _mk("plainuser")
+    _login(client, uid, "plainuser")
+    client.get(
+        "/api/auth/me/",
+        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+    )
+    apilog.flush()
+    rows = [r for r in _rows() if r["path"] == "/api/auth/me/"]
+    assert rows and all(r["client"] == "browser" for r in rows)
+    assert all(int(r["internal"]) == 0 for r in rows)
