@@ -938,7 +938,7 @@ export default function ForumPage() {
             </h4>
             <ul className="tb-rules">
               <li>
-                <b>不用注册，也不用登录。</b>昵称自动起。
+                <b>昵称自动起</b>，不用自己想名字。
               </li>
               <li>
                 写个标题就能发，<b>正文可以不写</b>。

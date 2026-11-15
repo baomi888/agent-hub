@@ -239,3 +239,22 @@ def test_modal_is_mounted_on_both_landing_pages():
     assert "AnnounceModal" in console, "控制台没挂公告"
     # 挂载点必须传 userId：没有 uid 记不住已读，未登录用户每次进来都会被拦
     assert re.search(r"<AnnounceModal[^>]*userId=", home + console), "没传 userId"
+
+
+def test_copy_never_tells_users_posting_needs_no_login():
+    """2026-11-15 16:42 用户要求：**这是实现细节，用户不需要知道**。
+
+    当时公告第 01 条写的是「没登录也能发 —— 认的是你这台设备」，论坛右栏侧卡
+    第一句是「不用注册，也不用登录」。两处都清掉了，并且不许以别的说法回来。
+
+    ★ 论坛页的注释里有 5 处「免登录」（给维护者看的），必须先 `_code()` 剥掉，
+      否则这条断言要么恒红、要么为了绿而放宽成永远不匹配。
+    """
+    forum = _code(_read(SRC / "app" / "forum" / "page.tsx"))
+    ann = _code(_read(ANN_TS))
+    assert len(forum) > 5000, "论坛页代码没读到，断言等于没跑"
+    assert len(ann) > 1000, "公告代码没读到"
+    banned = ("免注册", "不用注册", "不注册", "无需注册", "免登录发布", "不用登录也能", "没登录也能")
+    for src, name in ((forum, "forum/page.tsx"), (ann, "announcements.ts")):
+        hit = [w for w in banned if w in src]
+        assert not hit, f"{name} 又出现了「不登录也能发」的说法：{hit}"
