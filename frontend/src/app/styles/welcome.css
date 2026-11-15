@@ -6,10 +6,24 @@
   flex: 1;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  /* ★ 2026-11-15 第 18 批：**垂直居中 → 上对齐**。
+     居中时实测：390×844 上吉祥物上方空 148、卡片下方空 147；768×1024 是 183/186。
+     也就是一屏里近 370px 不承载任何信息，内容被挤成悬在中间的一条横带，
+     而真正需要空间的卡片反倒是全屏最紧的东西（手机 68px、说明文字被迫 display:none）。
+     上对齐后两块空并成一块，落在「内容」与「输入框」之间 —— 那是输入区该有的呼吸，
+     读起来是"内容在上、输入在下"，不是"内容悬在半空"。
+     空多少交给 --wel-top（下一段就是它的值），不写死，矮窗自然收小。
+     ★ 也不再需要 justify-content: safe center —— 那条是为了"居中且溢出时别两头切"，
+       上对齐天然没有这个问题。 */
+  justify-content: flex-start;
+  /* 空多少交给 --wel-top：跟视口高度走（9vh），不写死。
+     ★ 上限 96：768×1024 那种"很高但内容只有 360px"的屏幕，上对齐 + 贴顶会留下
+       200px 的下半屏空场；高度档 <=919 那一档另给 32（见文末），
+       于是"高屏略微下沉、矮屏贴近顶部"，两头都不空。 */
+  --wel-top: clamp(24px, 9vh, 96px);
   /* R3 字号 +1px 之后，原来 20px 的上下留白会把首屏顶出 15px。
      按方案里的口径用**间距**补偿而不是把字退回去：留白 20 → 12 */
-  padding: 12px 0;
+  padding: var(--wel-top) 0 12px;
   text-align: center;
   /* Logo 与标题后方一层极淡的暖金光晕，让首屏有个柔和的视觉锚点
      （大半径 + 晚收尾，避免出现边缘可辨的"云块"） */
@@ -163,7 +177,11 @@
      不要再各写一份 width/height —— 竖排时代三处写死过 36/24/24，
      改一处忘两处，档位之间就对不上了。 */
 .entry-card {
-  --ec-icon: 40px;
+  /* ★ 2026-11-15 第 18 批：图标 / 圆角 / 标签三样改成 3 档单调递增（30·36·44 / 12·14·14 / 14·15·16），
+     原来只有两档且中档比大档还大一截的写法：
+       ≤639 圆角 12、图标 30；≥640 圆角 16、图标 44 —— 640 处一次跳 14px。
+     断点是"换档"，换档要有方向；两档之间差 14px 的跳变说明中间那档是拍出来的。 */
+  --ec-icon: 36px;
   --ec-gap: 11px;
   display: flex;
   flex-direction: row;
@@ -174,7 +192,7 @@
   padding: 11px 14px;
   background: var(--card-bg);
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  border-radius: 14px;
   box-shadow: 0 1px 2px rgba(80, 60, 30, 0.05);
   cursor: pointer;
   transition: var(--t-color), var(--t-move);
@@ -218,7 +236,8 @@
 }
 .entry-card .ec-label {
   font-family: var(--font-serif);
-  font-size: var(--fs-lg);
+  /* 15px（中间档）：14 / 15 / 16 三档，与图标、圆角同向 —— 大屏只抬一档，不跳两档 */
+  font-size: var(--fs-md);
   font-weight: 700;
   color: var(--ink);
   line-height: var(--lh-tight);
@@ -253,10 +272,12 @@
   transform: rotate(45deg) translate(2px, -2px);
 }
 
-/* 桌面三列并排，单卡变窄，图标给足 44 才撑得住视觉重量 */
-@media (min-width: 640px) {
+/* 桌面三列并排，单卡变窄 —— 大屏再抬一档图标（44）撑住视觉重量。
+   中间档（640–1279）走基类的 36：三档 30 / 36 / 44，图标与圆角都往上走一个方向。 */
+@media (min-width: 1280px) {
   .entry-card { --ec-icon: 44px; }
   .entry-card .ec-icon svg { width: 26px; height: 26px; }
+  .entry-card .ec-label { font-size: var(--fs-lg); }
 }
 
 /* 手机（≤639）：横排卡改成**竖排小格**，三列不放说明文字。
@@ -272,9 +293,12 @@
     align-items: center;
     justify-content: center;
     gap: 5px;
-    min-height: 68px;
+    /* 68 → 76（2026-11-15 第 18 批）：首屏改成上对齐之后空出来的高度给了这里 ——
+       一格 72.6 是当时全屏最矮的可点目标（比输入框还矮），而说明文字又被逼着藏起来。
+       只加高不加字：76 仍然一行放得下六格，390×844 完全不滚动。 */
+    min-height: 76px;
     padding: 9px 4px;
-    border-radius: var(--radius-md);
+    border-radius: 12px;
     text-align: center;
   }
   .entry-card .ec-icon svg { width: 20px; height: 20px; }
@@ -441,13 +465,6 @@
    ★ 层级规矩：这两段必须放在文件末尾 —— 它们和上面的基样式特异性相同，
      写在前面会被覆盖（第一版就这么翻车，量出来的高度一个都没变）。 */
 
-/* 溢出时不要裁掉顶部：justify-content:center 在内容高于容器时会把两头都切掉，
-   safe 关键字让它退化成 flex-start。老浏览器读不到第二行，退回普通 center。 */
-.welcome {
-  justify-content: center;
-  justify-content: safe center;
-}
-
 /* 档 A（≤919px）：窗口已放不下完整版。
    2026-11-15 之后这一档要收的只剩页脚：
      · 页脚那句信任文案（"问完的每一句，都能翻回原文"）
@@ -456,9 +473,13 @@
      还剩 100px 余量 —— 而两组之间的关系正是靠这两个小标题说清的，
      藏掉之后六格会变成一坨没有分层的方块。 */
 @media (max-height: 919px) {
-  .welcome { padding: 10px 0 6px; }
+  /* --wel-top 跟着收，否则上面那条 padding 简写会把基类的 clamp 覆盖成 10px ——
+     两个值都要从一个变量出，不然"某一档忘了跟着改"就是下一次的偏移。
+     ★ 2026-11-15：这一档收的是"再大就顶出屏"的部分，不是把留白清零。
+       第一版写死 10px，实测吉祥物离顶栏只剩 7px —— 上对齐不等于贴边。
+       4vh / 上下限 20–32：844 与 900 都是 32，768 是 30.7，矮窗自然收小。 */
+  .welcome { --wel-top: clamp(20px, 4vh, 32px); padding: var(--wel-top) 0 6px; }
   .welcome .hero-logo { margin-bottom: 2px; }
-  .hero-title { font-size: calc(var(--hero-fs, 34px) * 0.88); }
   .welcome-sub { margin-top: 4px; }
   /* 这条仍服务于 /path 页的「这条路是什么」提示卡（复用了 .onboard 外壳）；
      首页的引导条已删，不再有第二步 */
@@ -472,6 +493,17 @@
   .welcome-foot { display: none; }
 }
 
+/* 标题收一档的门槛单独一条（≤860px），不跟上面的 ≤919 共用。
+   上面那一档收的是留白与页脚，性质是"排版变紧"；标题缩到 0.88 是"字变小"。
+   原先它挂在 ≤919 上，于是 900 高的桌面（还剩 140px 余量）也被波及：
+   实测 1440×900 的 h1 = 31.9px，比 768×1024 的 36.3px 还小 4.4px —— 屏幕越大标题越小。
+   门槛按"真的放不下"的窗口（≤860：1366×768 / 1080×629 那类）来定。
+   ★ 刻意不采纳"h1 定 30/34/38 三档"的写法：--hero-fs 是用户字号档位的派生值
+     （--msg-fs × 2.2667），写死三档等于让"调大字号"这项设置对标题失效。 */
+@media (max-height: 860px) {
+  .hero-title { font-size: calc(var(--hero-fs, 34px) * 0.88); }
+}
+
 /* 档 B（≤720px）：再让一层 —— 给 1080×629 那种小窗口用。
    这一步开始动"内容本身"而不只是留白：
      · 三步引导每步下面那半句"怎么做"收起来，只留动作名（选个学习方向 / 已经有库 / 在下面问一句）
@@ -481,7 +513,10 @@
   /* R3 字号 +1px 后这一档又差 14px。全部从留白里出，一个字都不往回压 ——
      「字太小」本来就是这一档最容易犯的错，把字退回去等于把需求做反 */
   .chat-measure:has(.welcome) { padding-top: 4px; padding-bottom: 2px; }
-  .welcome { padding: 2px 0 0; }
+  /* 2px → 8px：垂直居中的年代这个值只是"内边距"，看不出差别；
+     改成上对齐之后它直接等于"吉祥物离顶栏多远"，2px 会让吉祥物贴在顶栏下沿。
+     8 是这一档还付得起的上限（375×667 上仍有 43px 余量）。 */
+  .welcome { --wel-top: 8px; padding: var(--wel-top) 0 0; }
   .welcome .hero-logo { margin-bottom: 2px; }
   /* 眉题不再单独压字号：它已经落在 --fs-xs（13px）的下限上，
      再压就破 R3 的「可读文字不小于 13px」。这一档只收留白 */
@@ -498,7 +533,7 @@
   .welcome-daily { margin-top: 6px; }
   /* 档 B（1080×629 那种小窗口）：横排已经替这一档省掉一百多像素，
      图标不必再压到 24（竖排时代的极限值，横排下会小到认不出） */
-  .entry-card { --ec-icon: 34px; --ec-gap: 9px; padding: 7px 11px; border-radius: var(--radius-md); }
+  .entry-card { --ec-icon: 34px; --ec-gap: 9px; padding: 7px 11px; border-radius: 14px; }
   .entry-card .ec-icon svg { width: 20px; height: 20px; }
   .entry-card .ec-label { font-size: var(--fs-md); }
 }
@@ -715,19 +750,34 @@
   color: var(--ink);
 }
 
+/* 「不再提示」的关闭键。
+   ★ 2026-11-15 第 18 批：原来 22×20 的裸字形 + opacity .35。
+     两个问题：① 直径不到 24 的触控下限，而它离「打开提醒」只有 8px ——
+     最小的目标紧贴最大的按钮，是最容易误触的组合；② 35% 的墨色叠在纸上
+     等效亮度约 #B4A88F，非文字对比度 1.7:1（控件下限 3:1），淡到像装饰。
+     现在：28×28 命中区 + 与按钮 12px 间距 + 用 --text-3 全值（不叠 opacity）。
+     右缘仍是 nudge 的 12px 内缩，和上面那条「去做」落在同一条竖线上。 */
 .push-nudge .pn-x {
   flex: 0 0 auto;
-  padding: 2px 4px 2px 2px;
-  font-size: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-left: 4px; /* nudge 的 gap 8 + 这 4 = 与按钮 12px */
+  padding: 0;
+  font-size: 17px;
   line-height: 1;
-  color: var(--ink);
-  opacity: 0.35;
+  color: var(--text-3);
   background: transparent;
   border: 0;
+  border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: var(--t-color);
 }
 .push-nudge .pn-x:hover {
-  opacity: 0.7;
+  color: var(--ink);
+  background: var(--fill-2);
 }
 
 .push-nudge .pn-btn:focus-visible,

@@ -13,7 +13,9 @@
   align-items: center;
   gap: 6px;
   flex: none;
-  height: 28px;
+  /* ★ 2026-11-15 第 18 批：28 → 30，与「检索 / 智能联网 / 工具集」同一套规格。
+     这一行四颗是同一权重的开关，2px 的矮一截并排时最刺眼（比宽度不齐还明显）。 */
+  height: 30px;
   padding: 0 11px;
   border-radius: 999px;
   border: 1px solid var(--accent);
@@ -66,13 +68,22 @@
     animation: none;
   }
 }
-/* 窄屏只收紧内边距：这一行左边还有 5 个模式按钮。
-   以前这里还要把「内测反馈」换成更短的「反馈」（.fb-mode-text-sm），
-   现在文案本身就是「反馈」，两档宽度都放得下 —— 那份影子副本已删，
-   ★ 但不能退化成"只留圆点"：一个孤零零的金色圆点会被读成状态指示灯，没人会去点它。 */
+/* 窄屏退一步：与 chat.css 里「胶囊一档」同值，但**必须写在这里** ——
+   globals.css 的 @import 顺序是 welcome → chat → … → feedback（第 27 行），
+   feedback.css 的基类规则排在 chat.css 的媒体查询之后，同特异性下后者胜，
+   于是 chat.css 里那条 ≤560 的 padding 管不到这颗。写在别处就是"看起来统一了、
+   实际没生效"（2026-11-15 第 18 批复盘发现的，量出来 9 vs 11）。
+   ★ 也不能退化成"只留圆点"：一个孤零零的金色圆点会被读成状态指示灯。 */
 @media (max-width: 560px) {
   .fb-mode-cta {
     padding: 0 9px;
+    gap: 5px;
+  }
+}
+@media (max-width: 420px) {
+  .fb-mode-cta {
+    height: 28px;
+    padding: 0 8px;
   }
 }
 

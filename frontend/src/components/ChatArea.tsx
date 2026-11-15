@@ -1094,7 +1094,10 @@ export default function ChatArea({
           ★ 内边距走 --chat-px / --chat-dock-pb：手机档的底部留白要叠 iOS
             安全区（home 指示条），写死 pb-5 的话输入框会被压在横条上。 */}
       <div className="chat-measure chat-px chat-dock mx-auto">
-        <div className="composer-bar chat-bar-gap flex flex-wrap items-center gap-2 sm:gap-3">
+        {/* ★ gap 只留一档（8px）：四颗胶囊是同一权重的开关，原来桌面档是
+            gap-2 组内 8 + sm:gap-3 组间 12，「检索·智能联网」与「反馈·工具集」
+            两对之间的节奏不一致，同一行出现两种间距。2026-11-15 第 18 批去掉 sm:gap-3。 */}
+        <div className="composer-bar chat-bar-gap flex flex-wrap items-center gap-2">
           {/* 2026-10-31 批 B：四档模式条下架，两枚能力开关常驻。
               原因：模式条把「检索 / 联网 / 走流程」混在一个字段里，用户选「检索」
               其实还想不想联网、允不允许调工具都说不清；后端新契约只有两个开关，

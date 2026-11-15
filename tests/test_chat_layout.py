@@ -1,7 +1,7 @@
 """首页对话区的三端尺寸不变量（2026-11-14 第七批）。
 
 这一批改的全是"编译过、页面能开、但手机上就是不舒服"的地方：
-  · 输入框 72px 高 → 56px（用户原话「对话框小一点」）
+  · 输入框 72px 高 → 56px（用户原话「对话框小一点」），第 18 批按审计回补到 60px
   · 手机正文 268px / 每行 16.8 字 → 310px / 19.4 字（「能看到的字太少」）
   · 顶栏 / 消息区 / 输入区统一走 --chat-px（原来各写 px-5 / px-6 / px-6）
   · 底部留白叠 iOS 安全区（viewport-fit=cover 之后不补，输入框压在 home 条上）
@@ -30,6 +30,7 @@ SRC = ROOT / "frontend" / "src"
 
 CHAT_CSS = SRC / "app" / "styles" / "chat.css"
 WELCOME_CSS = SRC / "app" / "styles" / "welcome.css"
+FEEDBACK_CSS = SRC / "app" / "styles" / "feedback.css"
 LAYOUT_CSS = SRC / "app" / "styles" / "layout.css"
 COMPONENTS_CSS = SRC / "app" / "styles" / "components.css"
 CHAT_AREA = SRC / "components" / "ChatArea.tsx"
@@ -553,3 +554,209 @@ def test_forum_has_an_icon_of_its_own():
     assert '| "forum"' in icon, "CornIconName 里没有 forum"
     assert "forum: Forum" in icon, "ICONS 表里没注册 forum（会退化成玉米）"
     assert "function Forum()" in icon, "没有 Forum 这个图形"
+
+
+# ---------- 2026-11-15 第 18 批：审计 P1 五条 ----------
+#
+# 这一批改的全是"数值/档位"，没有一处是结构性的，所以断言必须钉住**关系**：
+#   · 首屏内容贴上部（而不是"padding 等于 10px"）
+#   · 卡片三样规格只往上走一个方向（30<36<44、12≤14≤14、14<15<16）
+#   · 同一行四颗胶囊一套规格（高/字号/内边距三处一致）
+#   · × 是个够大的靶子（≥24px）且没有靠 opacity 压淡
+#   · 输入框有高度下限（不是靠 padding 凑出来的 56）
+# 写死"某个读数等于多少"没有意义 —— 那些数字是量出来的，不是推出来的。
+
+
+def test_welcome_anchors_its_content_to_the_top():
+    """首屏内容贴着上部，空出来的高度不再被切成上下两半。
+
+    改前是 `justify-content: center`（后来又补了 safe）：实测 390×844 上
+    吉祥物上方空 148、卡片下方空 147；768×1024 是 183/186 —— 一屏近 370px
+    不承载任何信息，内容被挤成悬在中间的一条横带，而卡片反而是全屏最紧的东西。
+
+    ★ 上对齐 != 贴边：留白走 --wel-top = clamp(20px, 6vh, 56px)。
+      第一版把高度档写成 10px，实测吉祥物离顶栏只剩 7px。
+    """
+    css = _css(_read(WELCOME_CSS))
+    base = _rule(css, ".welcome")
+    assert "justify-content: flex-start" in base, "首屏又回到垂直居中了"
+    assert "safe center" not in css, "safe center 那套还在（上对齐之后它没有意义）"
+
+    m = re.search(r"--wel-top:\s*clamp\(([^)]*)\)", base)
+    assert m, "首屏上留白没有走 --wel-top（写死 px 的话矮窗会顶出屏）"
+    assert "vh" in m.group(1), "--wel-top 不跟视口高度走"
+
+    media = _media(css)
+    for cond in ("max-height: 919px", "max-height: 720px"):
+        block = media.get(cond)
+        assert block, f"高度档 {cond} 不见了"
+        assert "--wel-top" in block, (
+            f"{cond} 里的 padding 简写没带上 --wel-top —— 它会把基类的 clamp 盖成固定值"
+        )
+
+
+def test_hero_title_shrinks_by_height_not_by_screen_size():
+    """1440×900 的 h1 不能比 768×1024 的还小。
+
+    改前实测：31.9（390×844）/ 36.3（768×1024）/ 31.9（1440×900）。
+    宽度档算得没错 —— 是 0.88 那一档挂在了 `max-height: 919px` 上，
+    900 高的桌面窗口（还剩 140px 余量）也被波及，于是"屏幕越大标题越小"。
+
+    ★ 刻意不采纳评审建议的"h1 定 30/34/38 三档"：--hero-fs 是用户字号档位的
+      派生值（--msg-fs × 2.2667），写死三档等于让"调大字号"这项设置对标题失效。
+    """
+    css = _css(_read(WELCOME_CSS))
+    media = _media(css)
+
+    wide = media.get("max-height: 919px")
+    assert wide, "高度档（max-height: 919px）不见了"
+    assert ".hero-title" not in wide, (
+        "标题的缩字还挂在 919 这一档上 —— 900 高的桌面会被压成比平板还小"
+    )
+
+    tight = media.get("max-height: 860px")
+    assert tight, "没有单独给标题的矮窗档（max-height: 860px）"
+    m = re.search(r"\.hero-title\s*\{([^}]*)\}", tight)
+    assert m, "矮窗档里没有 .hero-title"
+    assert "0.88" in m.group(1), "矮窗档没有把标题收到 0.88"
+    assert "var(--hero-fs" in m.group(1), "标题缩字写死了 px —— 用户调大字号时标题不跟"
+
+    assert "var(--hero-fs" in _rule(css, ".hero-title"), "基类标题不再从 --hero-fs 派生"
+
+
+def test_entry_card_scale_climbs_in_one_direction():
+    """卡片的图标 / 圆角 / 标签，三档只往上走一个方向。
+
+    改前只有两档，并且 640 处一次跳 14px（图标 30 → 44）、圆角 12 → 16 ——
+    断点是"换档"，换档要有方向，跳这么大说明中间那档是拍出来的数。
+    """
+    css = _css(_read(WELCOME_CSS))
+    media = _media(css)
+
+    base = _rule(css, ".entry-card")
+    mid_icon = int(re.search(r"--ec-icon:\s*(\d+)px", base).group(1))
+    mid_r = int(re.search(r"border-radius:\s*(\d+)px", base).group(1))
+    assert re.search(r"font-size:\s*var\(--fs-md\)", _rule(css, ".entry-card .ec-label")), (
+        "中间档标签不是 15px（--fs-md）"
+    )
+
+    big = _rule(media["min-width: 1280px"], ".entry-card")
+    big_icon = int(re.search(r"--ec-icon:\s*(\d+)px", big).group(1))
+    big_label = _rule(media["min-width: 1280px"], ".entry-card .ec-label")
+    assert "var(--fs-lg)" in big_label, "大屏标签没有回到 16px（--fs-lg）"
+
+    phone = _rule(media["max-width: 639px"], ".entry-card")
+    phone_icon = int(re.search(r"--ec-icon:\s*(\d+)px", phone).group(1))
+    phone_r = int(re.search(r"border-radius:\s*(\d+)px", phone).group(1))
+
+    assert phone_icon < mid_icon < big_icon, (
+        f"图标档位不是单调递增：{phone_icon} / {mid_icon} / {big_icon}"
+    )
+    assert phone_r <= mid_r <= mid_r, f"圆角档位往回缩了：{phone_r} / {mid_r}"
+    # 相邻两档的差不能超过 8px，否则又变成"640 那一跳"
+    assert mid_icon - phone_icon <= 8 and big_icon - mid_icon <= 8, (
+        f"相邻档差太大（{phone_icon}/{mid_icon}/{big_icon}），换档会跳"
+    )
+
+
+def test_composer_chips_share_one_spec():
+    """检索 / 智能联网 / 反馈 / 工具集是同一权重的开关，必须一套规格。
+
+    改前同一行里：能力开关 30 高 15px 字，反馈 28 高 14px 字，工具集 28 高 14px
+    且内边距 12 —— 四种长相。高度差 2px 并排时比宽度不齐还刺眼。
+    """
+    chat = _css(_read(CHAT_CSS))
+    fb = _css(_read(FEEDBACK_CSS))
+
+    for name, body in (
+        (".cap-chip", _rule(chat, ".cap-chip")),
+        (".tools-link", _rule(chat, ".tools-link")),
+        (".fb-mode-cta", _rule(fb, ".fb-mode-cta")),
+    ):
+        assert re.search(r"height:\s*30px", body), f"{name} 高度不是 30px"
+        assert "font-size: var(--fs-sm)" in body, f"{name} 字号不是 --fs-sm（14）"
+        assert re.search(r"padding:\s*0 11px", body), f"{name} 内边距不是 0 11px"
+
+    # 组内与组间间距必须一致：原来 gap-2（8）与 sm:gap-3（12）在同一行混着
+    area = _code(_read(CHAT_AREA))
+    assert "sm:gap-3" not in area, "工具行还留着两档间距（组内 8 / 组间 12，节奏不齐）"
+
+    # 窄屏两档：四颗一起退。反馈那条必须写在 feedback.css —— globals.css 的
+    # @import 顺序是 chat(11) → … → feedback(27)，写在 chat.css 里的媒体查询
+    # 会被 feedback 的基类规则盖掉（实测 9 vs 11，看起来统一了其实没生效）。
+    phone = _media(chat).get("max-width: 560px", "")
+    assert re.search(r"\.cap-chip,\s*\.tools-link\s*\{[^}]*padding:\s*0 9px", phone), (
+        "能力开关与工具集没有一起退到 9px"
+    )
+    phone_fb = _media(fb).get("max-width: 560px", "")
+    assert re.search(r"\.fb-mode-cta\s*\{[^}]*padding:\s*0 9px", phone_fb), (
+        "反馈那颗的窄屏档没写在 feedback.css（会被同文件里的基类盖掉）"
+    )
+
+
+def test_push_nudge_close_key_is_a_real_tap_target():
+    """「×」（不再提示）是这一行最小、最靠边的键，必须够得着、看得见。
+
+    改前 22×20、opacity .35：等效亮度约 #B4A88F，非文字对比度 1.7:1
+    （控件下限 3:1，R3 的 13px 那套管的是文字，管不到它），
+    而且离「打开提醒」只有 8px —— 最小的目标紧贴最大的按钮，是最容易误触的组合。
+    """
+    css = _css(_read(WELCOME_CSS))
+    x = _rule(css, ".push-nudge .pn-x")
+    w = re.search(r"width:\s*(\d+)px", x)
+    h = re.search(r"height:\s*(\d+)px", x)
+    assert w and int(w.group(1)) >= 24, f"× 的命中区还不到 24px：{w and w.group(1)}"
+    assert h and int(h.group(1)) >= 24, f"× 的高度还不到 24px：{h and h.group(1)}"
+    assert "opacity" not in x, "× 又用 opacity 压淡了（非文字对比度会掉到 3:1 以下）"
+    assert "var(--text-3)" in x, "× 不是 --text-3（次要文字那一档）"
+    assert re.search(r"margin-left:\s*4px", x), (
+        "× 与「打开提醒」之间没拉开间距（nudge 的 gap 8 + 这 4 = 12）"
+    )
+
+
+def _pad_right(body: str) -> str:
+    """取 `padding` 简写里的右侧值。
+
+    CSS 简写：1 值=四边，2 值=上下/左右，3 值=上/左右/下，4 值=上/右/下/左。
+    ★ 三值与四值的右侧都在**第 2 个**位置，"取最后一个"会拿到左边
+      （`.push-nudge` 的 `3px 12px 3px 19px` 实测被读成 19px）。
+    """
+    m = re.search(r"padding:\s*([^;]+);", body)
+    assert m, "规则里没有 padding 简写"
+    parts = m.group(1).split()
+    return parts[0] if len(parts) == 1 else parts[1]
+
+
+def test_today_row_and_nudge_share_the_right_inset():
+    """「今天」条与「每日提醒」行的右侧控件要落在同一条竖线上。
+
+    实测（本次改前）：卡右缘 376 /「去做」363 /「×」364 /「打开提醒」334。
+    前三个是两条线（363 与 364 差 1px 是卡片的 1px 边框，子像素），
+    真正被挤开的是「打开提醒」—— 因为「×」排在它右边，这是结构性的，
+    不强行对齐；能守住的是两条：右内缩必须同值，否则连"两条线"都保不住。
+    """
+    css = _css(_read(WELCOME_CSS))
+    strip = _rule(css, ".today-strip")
+    nudge = _rule(css, ".push-nudge")
+    assert _pad_right(strip) == _pad_right(nudge) == "12px", (
+        f"两条的右内缩不一致：{_pad_right(strip)} vs {_pad_right(nudge)}"
+    )
+
+
+def test_phone_composer_height_is_a_floor_not_padding_math():
+    """手机输入框要有高度下限，不能继续靠"字高 + padding"凑。
+
+    改前 56px 是靠 26 行高 + 6×2 内边距 + 边框算出来的，改任何一个数就变高变矮；
+    审计还指出它比卡片（72.6）还矮，是全屏最矮的主要控件。
+    现在 60px：文本域 min-height 42（26 行高 + 8×2 内边距）+ 行内边距 8×2 + 边框。
+    """
+    chat = _css(_read(CHAT_CSS))
+    phone = _media(chat).get("max-width: 560px")
+    assert phone, "chat.css 没有手机档"
+    m = re.search(r"\.composer-input\s*\{([^}]*)\}", phone)
+    assert m, "手机档没有单独的 .composer-input 规则"
+    mh = re.search(r"min-height:\s*(\d+)px", m.group(1))
+    assert mh, "输入框没有高度下限（还是靠 padding 凑出来的 56）"
+    assert int(mh.group(1)) >= 42, f"文本域下限 {mh.group(1)}px，输入框整体回到 56 以下"
+    # 上下内边距要对称，否则单行文字会沉在下沿（上 6 下 10 那种）
+    assert re.search(r"padding:\s*8px 6px", m.group(1)), "文本域上下内边距不对称"

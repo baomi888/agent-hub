@@ -132,12 +132,17 @@
   align-items: center;
   gap: 6px;
   height: 30px;
-  padding: 0 12px 0 10px;
+  /* ★ 2026-11-15 第 18 批：这一行四颗胶囊统一成一套规格（高 30 / fs 14 / 内边距 11 / gap 6）。
+     改前同一行里「检索·智能联网」是 30 高 15px 字，「反馈」是 28 高 14px 字，
+     「工具集」28 高 14px 且内边距 12 —— 同一个权重的四个开关，四种长相。
+     字号取 --fs-sm（14，工具条/按钮那一档）而不是 15：胶囊是工具、不是正文，
+     --fs-md 是列表项与卡片正文的档位。 */
+  padding: 0 11px;
   border: 1px solid var(--input-border);
   border-radius: 999px;
   background: transparent;
   color: var(--text-2);
-  font-size: var(--fs-md);
+  font-size: var(--fs-sm);
   letter-spacing: var(--ls-tight);
   white-space: nowrap;
   cursor: pointer;
@@ -238,21 +243,6 @@
   }
 }
 
-/* 窄屏：这一行还要塞下「反馈」胶囊和齿轮。
-   两颗 chip 只有 ~176px，比原来 4 个模式按钮省得多；
-   390px 下让内边距和字号各退一步（12px 是这一行的下限，不再往下缩） */
-@media (max-width: 420px) {
-  .cap-chips {
-    gap: 6px;
-  }
-  .cap-chip {
-    height: 28px;
-    padding: 0 9px 0 8px;
-    gap: 5px;
-    font-size: var(--fs-sm);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .cap-chip.seq {
     transition-delay: 0s;
@@ -265,14 +255,15 @@
 
 /* 工具集入口（10-14 从侧栏搬到对话栏；11-07 再挪到「反馈」右边、同一行）。
    它是跳出去的外链，不是当前会话的属性 —— 所以描边 + 灰字，金只留给 hover，
-   不跟「反馈」（金底金边，是行动）抢强度。高度锁 28px 和「反馈」齐平：
-   两颗并排时不齐高最刺眼，比宽度不对还明显。 */
+   不跟「反馈」（金底金边，是行动）抢强度。
+   ★ 高度跟上面两颗胶囊同一套（30 / fs 14 / 内边距 11）：原先这里锁的是 28 + 12，
+   与「反馈」28 对齐了，却比左边的能力开关（30）矮 2px —— 只对齐了半行。 */
 .tools-link {
   display: inline-flex;
   align-items: center;
   gap: var(--space-6);
-  height: 28px;
-  padding: 0 12px;
+  height: 30px;
+  padding: 0 11px;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--fill-3);
@@ -296,6 +287,31 @@
 }
 .tools-link:hover svg {
   color: var(--accent-ink);
+}
+
+/* 窄屏：这一行还要塞下「反馈」胶囊和齿轮。
+   ★ 2026-11-15 第 18 批：这一档的胶囊统一成一组数值，不再各退各的 ——
+     四颗是同一权重的开关，任何一颗单独落后都会在并排时露出来。
+     「反馈」（.fb-mode-cta）的对应两条在 feedback.css 里：那个文件的 @import
+     排在 chat.css 之后，写在这里会被它的基类规则盖掉（实测过，见那边的注释）。 */
+@media (max-width: 560px) {
+  .cap-chip,
+  .tools-link {
+    padding: 0 9px;
+    gap: 5px;
+  }
+}
+/* 390px 一档：高度也退一格（30 → 28），但仍是两颗一起退 */
+@media (max-width: 420px) {
+  .cap-chips {
+    gap: 6px;
+  }
+  .cap-chip,
+  .tools-link {
+    height: 28px;
+    padding: 0 8px;
+    gap: 5px;
+  }
 }
 
 /* 反馈 + 工具集这一组：整体不参与收缩（宁可折行也不把字挤扁），
@@ -330,13 +346,8 @@
   .composer-bar .gear {
     display: none;
   }
-  .tools-link {
-    padding: 0 9px;
-    gap: 5px;
-  }
-  .fb-mode-cta {
-    padding: 0 8px;
-  }
+  /* 四颗胶囊的内边距/高度统一在上面那条「胶囊一档」里，这里不再单独退 ——
+     原来这里给工具集写 9、给反馈写 8，和上面那条各写各的，就是"同排不同规格"的来源。 */
 }
 /* 360px 一档（多数安卓机）：实测这一行要 302px，而内容区只有 294px ——
    差 8px 就会横向溢出（数字来自 .workbuddy/pp/measure_composer.js，不是估的）。
@@ -345,9 +356,6 @@
    为什么不摘「反馈」的呼吸点：那个点是"这里能说话"的唯一暗示。
    ★ 隐藏的是包图标的那层 span，不是 svg —— CornIcon 的 svg 带内联 display:block。 */
 @media (max-width: 380px) {
-  .tools-link {
-    padding: 0 9px;
-  }
   .tools-link .tools-ico {
     display: none;
   }
@@ -637,13 +645,18 @@
   transform: none;
 }
 
-/* ---------- 手机档：把输入框整体收小一档（72px → 56px） ----------
+/* ---------- 手机档：把输入框整体收小一档（72px → 60px） ----------
    ★ 2026-11-14 第七批。用户的诉求是「对话框小一点 + 能看到的字多一点」，
      这两个其实是同一件事：底部占多少高度，滚动区就少多少。
      实测 390×844：改前 composer 128px（能力条 28 + 间距 8 + 输入框 72 + 底 20），
-     改后 100px（26 + 6 + 56 + 12）—— 一次让出 28px 给消息区。
-   ★ 高度怎么算的：文本域 6 + 26(行高) + 6 = 38，加内边距 8×2 与上下边框 = 56。
+     改后 104px（28 + 6 + 60 + 12）—— 让出 24px 给消息区。
+   ★ 高度怎么算的：文本域 8 + 26(行高) + 8 = 42，加内边距 8×2 与上下边框 = 60。
      发送键 32 比文本域矮，align-items:flex-end 让它贴底，不会把框顶高。
+   ★ 2026-11-15 第 18 批：56 → 60。审计指出「输入框是这一屏最矮的主要控件
+     （56 比卡片还矮），触控目标偏小」—— 这是真的，但上一批 56 是照用户
+     「对话框小一点」压出来的，所以只回补 4px，不做审计建议的 clamp(60px,7vh,72px)：
+     那条在 900 高的桌面上会把框压到 63（72 → 63），而输入框的高度该由手指和视线定，
+     不该跟着窗口高度缩。手机补到 60、桌面留 72，差距从 29% 收到 20%。
    ★ 为什么字号一格都不退：--msg-fs 是用户的字号档位，动它等于改用户设置；
      而且 iOS 聚焦放大那条线就是 16px（见 a11y.css），退下去会触发聚焦缩放。 */
 @media (max-width: 560px) {
@@ -653,7 +666,11 @@
     gap: 8px;
   }
   .composer-input {
-    padding: 6px 6px;
+    /* min-height 而不是给 .input-row 加：行是 flex + align-items:flex-end，
+       给行加最小高度只会让文字沉到底部、上方多出一块空白；
+       撑高文本域则上下内边距对称。42 = 26 行高 + 8×2。 */
+    min-height: 42px;
+    padding: 8px 6px;
   }
   .send {
     width: 32px;
