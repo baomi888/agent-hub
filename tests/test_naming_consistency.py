@@ -19,6 +19,10 @@
    该成立的事。删掉；但「仅本机」「未同步」留着 —— 那两句说的是后果
    （换设备看不看得到、记录会不会丢），不是状态。
 
+3. **那个 AI 的正式称呼只有一个：「AI 助手」**（2026-11-15 第 25 批用户定名）。
+   但**只管对外**：站内原有的「让助手帮我写」「学习助手」等说法照旧，
+   用户明确要求"不要全站替换"。见 ④ 那一节。
+
 ★ 每条都按"故意改坏一次必须变红"验证过（output/_counterproof_batch4.py）。
 """
 
@@ -253,3 +257,78 @@ def test_sync_error_is_not_raw_exception_text():
     )
     assert "syncErrorText" in src, "没有把失败原因翻译成人话"
     assert "instanceof TypeError" in src, "网络层失败（TypeError）没被单独识别"
+
+
+# ==================== ④ 正式称呼只有一个：AI 助手 ====================
+
+# 2026-11-15 第 25 批用户定名：「AI 助手」是**对外正式称呼**。
+#
+# ★ 同一批里用户当场纠了一句：「那个说辞不要改变，就是不要全站替换」。
+#   所以这一节**不管站内原有的说法** ——
+#   「让助手帮我写」「助手的分析」「知穗是个会自己动手的学习助手」全部照旧。
+#   那些是产品里已经用惯的词，为了术语整齐去改它们，等于让用过的人
+#   重新认一遍按钮，换来的只是"文档看着整齐"。
+#
+#   这条只管一件窄事：**不许多出一个新名字**。正式称呼只有那一个；
+#   以后写对外文案（公告 / 海报 / 朋友圈）用它，别临时发明「AI 助理」
+#   「智能助手」，也别写不带空格的「AI助手」。
+_ASSISTANT = "AI 助手"
+
+# 别的叫法一个都不许出现。带空格与不带空格是两种写法，所以两种都列 ——
+# 只列带空格的，等于放过「AI助手」这个最容易顺手打出来的版本。
+#
+# ★ 这里**故意不列**「学习助手」「写作助手」这类：
+#   前者是新手引导里原本就在用的说法（不是"新发明的名字"），
+#   后者只活在 prototypes 的原型稿里。把它们列进来就变成"逼着改现有说辞"，
+#   而那正是用户不要的。
+_ASSISTANT_ALIASES = (
+    "AI助手",
+    "AI助理",
+    "AI 助理",
+    "ai助手",
+    "ai 助手",
+    "AI小助手",
+    "AI 小助手",
+    "智能助手",
+)
+
+
+def test_no_new_name_for_the_assistant():
+    """不许给那个 AI 再起一个新名字（**原有说法不动**，见上面的注释）。
+
+    ★ 这条刻意不查"裸「助手」"：界面上「让助手帮我写」这类说法一共 5 处，
+      正是用户要求保留的。查它们就等于把上一版的做法换个地方重来一遍。
+    """
+    hits: list[str] = []
+    scanned = 0
+
+    for path in SRC.rglob("*.ts*"):
+        rel = path.relative_to(SRC).as_posix()
+        if rel.startswith(_SKIP_PREFIX):
+            continue
+        scanned += 1
+        for lineno, line in enumerate(_code(path).splitlines(), 1):
+            for alias in _ASSISTANT_ALIASES:
+                if alias in line:
+                    hits.append(f"{rel}:{lineno}  {line.strip()[:70]}")
+                    break
+
+    # 护栏的护栏：glob 失效时一个文件都扫不到，hits 空着反而变绿
+    assert scanned >= 150, f"只扫到 {scanned} 个文件，扫描范围可能坏了"
+    assert not hits, (
+        f"出现了别的叫法（正式称呼只有「{_ASSISTANT}」）：\n  " + "\n  ".join(hits)
+    )
+
+
+def test_release_notes_call_it_the_formal_name():
+    """对外文案里真的用上了这个名字 —— 否则"定了名"就只活在测试里。
+
+    只钉公告：它是每一期写给所有人看的那份，也是对外口径的锚。
+    海报与朋友圈是 `docs/宣传图/` 里的静态产物，不在这条的范围（人工比对）。
+    """
+    src = _code(SRC / "lib" / "announcements.ts")
+    assert _ASSISTANT in src, (
+        f"最新一期公告里没有出现「{_ASSISTANT}」—— 对外正式称呼定了却没人用"
+    )
+
+

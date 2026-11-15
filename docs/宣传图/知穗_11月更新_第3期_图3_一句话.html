@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>知穗 · 11 月更新 第 3 期 图 3 · 一句话</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --step-0: #EDE4C8;
+    --step-1: #F5F0E1;
+    --step-2: #FDFAF2;
+    --desk-0: #F3EAD8;
+    --ink: #3D2F1A;
+    --ink-2: #5A4C33;
+    --ink-3: #6F6044;
+    --accent: #C8892A;
+    --accent-ink: #7A510D;
+    --line: rgba(61, 47, 26, 0.12);
+    --line-strong: rgba(61, 47, 26, 0.26);
+    --serif: "Noto Serif SC", "Songti SC", serif;
+    --sans: "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  }
+
+  html, body { width: 1080px; height: 1440px; }
+  body {
+    font-family: var(--sans);
+    color: var(--ink);
+    background: var(--desk-0);
+    -webkit-font-smoothing: antialiased;
+    position: relative;
+    overflow: hidden;
+  }
+
+  body::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(rgba(61, 47, 26, 0.10) 1px, transparent 1px);
+    background-size: 16px 16px;
+    opacity: .55;
+  }
+
+  .sheet {
+    position: absolute;
+    left: 38px; right: 38px; top: 30px; bottom: 28px;
+    background: var(--step-2);
+    border: 1px solid var(--line-strong);
+    box-shadow: 0 16px 40px rgba(61, 47, 26, .13);
+    padding: 44px 64px 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    overflow: hidden;
+  }
+
+  .sheet::before {
+    content: "";
+    position: absolute;
+    left: 28px; top: 36px; bottom: 36px;
+    width: 1px;
+    background-image: repeating-linear-gradient(to bottom, var(--line-strong) 0 7px, transparent 7px 15px);
+    opacity: .65;
+  }
+
+  .head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .brand { font-family: var(--serif); font-size: 23px; letter-spacing: .16em; }
+  .brand .dot { color: var(--accent); margin: 0 6px; }
+  .issue { font-size: 18px; letter-spacing: .1em; color: var(--ink-3); }
+  .issue em { font-style: normal; color: var(--accent-ink); }
+
+  .kicker {
+    margin-top: 26px;
+    font-size: 20px;
+    letter-spacing: .18em;
+    color: var(--accent-ink);
+  }
+  h1 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 82px;
+    line-height: 1.08;
+    letter-spacing: .02em;
+    margin-top: 8px;
+    white-space: nowrap;
+  }
+  h1 .sp { color: var(--accent); }
+  .sub {
+    margin-top: 14px;
+    font-size: 25px;
+    line-height: 1.62;
+    color: var(--ink-2);
+  }
+  .sub b { font-weight: 500; color: var(--ink); }
+
+  /* ---------- 三段式：你说的 → 它整理的 → 你勾的 ---------- */
+  .flow { position: relative; }
+
+  .who {
+    font-size: 17px;
+    letter-spacing: .1em;
+    color: var(--ink-3);
+  }
+  .who.r { text-align: right; margin-bottom: 10px; }
+  /* 第二段标签离清单要近：原来给它 96px（挂在 .list 的 margin-top 上），
+     结果标签孤零零浮在中间，箭头也接不上两头 */
+  .who.lead { margin-top: 54px; margin-bottom: 9px; }
+
+  .bubble {
+    margin-left: auto;
+    width: 470px;
+    background: rgba(200, 137, 42, .14);
+    border: 1px solid rgba(200, 137, 42, .40);
+    border-radius: 16px 16px 4px 16px;
+    padding: 20px 24px;
+    font-size: 21px;
+    line-height: 1.58;
+    color: var(--ink);
+    box-shadow: 0 5px 14px rgba(61, 47, 26, .06);
+  }
+
+  /* 箭头挂在清单上（.list 的负 top），不靠手算绝对坐标 ——
+     气泡或清单的行数一变，箭头仍然贴在清单顶边上 */
+  .list .arrow {
+    position: absolute;
+    right: 80px;
+    top: -96px;
+    width: 170px;
+    height: 96px;
+  }
+
+  .list {
+    position: relative;
+    width: 690px;
+    border: 1px solid var(--line-strong);
+    border-radius: 12px;
+    background: var(--step-2);
+    box-shadow: 0 8px 20px rgba(61, 47, 26, .08);
+    /* 不能 overflow:hidden —— 箭头挂在 top:-88 上，会被裁掉。
+       圆角改由首尾两块自己收 */
+  }
+  .list-h {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 14px 22px;
+    background: var(--step-1);
+    border-bottom: 1px dashed var(--line-strong);
+    border-radius: 11px 11px 0 0;
+    font-size: 16px;
+    letter-spacing: .08em;
+    color: var(--ink-3);
+  }
+  .list-h b { font-weight: 500; color: var(--accent-ink); font-size: 18px; letter-spacing: .02em; }
+
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 19px 22px;
+    border-bottom: 1px dashed var(--line);
+  }
+  /* 勾上的样子：广告语说的"勾哪条才写哪条"必须看得见 */
+  .ck {
+    flex: none;
+    width: 22px; height: 22px;
+    border-radius: 5px;
+    border: 2px solid var(--accent);
+    background: rgba(200, 137, 42, .55);
+    box-shadow: inset 0 0 0 3px #FFFDF6;
+    position: relative;
+  }
+  .ck::after {
+    content: "";
+    position: absolute;
+    left: 6px; top: 2px;
+    width: 6px; height: 11px;
+    border-right: 2.5px solid #7A510D;
+    border-bottom: 2.5px solid #7A510D;
+    transform: rotate(38deg);
+  }
+  .row .t { font-size: 23px; color: var(--ink); }
+  .row .m {
+    margin-left: auto;
+    font-size: 20px;
+    color: var(--accent-ink);
+    letter-spacing: .02em;
+    flex: none;
+  }
+
+  /* 课表那条：菱形而不是勾选框 —— 它不是待办，是已经排好的课 */
+  .crow {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 17px 22px;
+    background: rgba(61, 47, 26, .035);
+    border-radius: 0 0 11px 11px;
+    font-size: 20px;
+    color: var(--ink-2);
+  }
+  .dia {
+    flex: none;
+    width: 15px; height: 15px;
+    background: rgba(200, 137, 42, .5);
+    border: 1.5px solid var(--accent);
+    transform: rotate(45deg);
+    margin: 0 3.5px;
+  }
+  .crow .m { margin-left: auto; font-size: 18px; color: var(--ink-3); }
+
+  .commit {
+    width: 470px;
+    margin-top: 26px;
+    height: 58px;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #2A2113;
+    font-size: 21px;
+    letter-spacing: .06em;
+    display: grid;
+    place-items: center;
+    box-shadow: 0 6px 16px rgba(200, 137, 42, .3);
+  }
+
+  .cap {
+    padding: 16px 22px;
+    border: 1px dashed var(--line-strong);
+    border-radius: 8px;
+    background: var(--step-1);
+    font-size: 20px;
+    color: var(--ink-2);
+  }
+  .cap b { font-weight: 500; color: var(--accent-ink); }
+
+  /* ---------- 底部（与图 1、图 2 同一块）---------- */
+  .foot {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 20px 0 26px;
+    border-top: 1px solid var(--line);
+  }
+  .qrbox {
+    width: 214px; height: 214px;
+    background: #fff;
+    padding: 8px;
+    border: 1px solid var(--line-strong);
+    box-shadow: 0 7px 18px rgba(61, 47, 26, .10);
+    flex: none;
+  }
+  .qrbox img { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+  .foot-txt { padding-bottom: 2px; }
+  .foot-title { font-family: var(--serif); font-size: 38px; line-height: 1.2; }
+  .foot-url { margin-top: 6px; font-size: 24px; letter-spacing: .06em; color: var(--accent-ink); }
+  .foot-note { margin-top: 8px; font-size: 18px; line-height: 1.6; color: var(--ink-3); }
+  .foot-note span { display: block; }
+  .mascot { margin-left: auto; width: 112px; height: 112px; flex: none; }
+  .mascot svg { width: 100%; height: 100%; display: block; }
+</style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="head">
+      <div class="brand">知穗<span class="dot">·</span>苞米地</div>
+      <div class="issue">十一月更新 <em>第 3 期</em> ｜ 2026.11.15</div>
+    </div>
+
+    <div class="top">
+      <p class="kicker">AI 待办与提醒</p>
+      <h1>一句话，它给排好了</h1>
+      <p class="sub">
+        打一段没头绪的话也行，整理成条目，<b>由你逐条勾选</b>。
+      </p>
+    </div>
+
+    <div class="flow">
+      <div class="who r">你说的</div>
+      <div class="bubble">
+        明天下午三点交高数作业<br>周三晚上自习
+      </div>
+
+      <div class="who lead">它整理的</div>
+      <div class="list">
+        <!-- 斜着落，不正中垂直 —— 垂直箭头会读成流程图。
+             挂在清单上沿，气泡换行也不会跟丢 -->
+        <svg class="arrow" viewBox="0 0 170 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M158 6 C 150 38, 120 62, 34 74"
+                stroke="#C8892A" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="2 10"/>
+          <path d="M34 74 L16 74 M34 74 L25 89"
+                stroke="#C8892A" stroke-width="3.2" stroke-linecap="round"/>
+        </svg>
+        <div class="list-h">拆成 <b>2 条</b>，每条一个时刻</div>
+        <div class="row"><span class="ck"></span><span class="t">交高数作业</span><span class="m">15:00</span></div>
+        <div class="row"><span class="ck"></span><span class="t">图书馆自习</span><span class="m">周三 18:30</span></div>
+        <div class="crow"><span class="dia"></span><span class="t">高数</span><span class="m">08:00 · 提前 20 分钟</span></div>
+      </div>
+
+      <div class="commit">加入 2 条 · 设 2 个提醒</div>
+    </div>
+
+    <div class="cap">
+      课表默认<b>提前 20 分钟</b>提醒；推送没送到时，改用<b>邮件</b>兜底。
+    </div>
+
+    <div class="foot">
+      <div class="qrbox"><img src="qr_myzhisui.png" alt="扫码打开知穗"></div>
+      <div class="foot-txt">
+        <p class="foot-title">扫码访问</p>
+        <p class="foot-url">myzhisui.cn</p>
+        <p class="foot-note">
+          <span>支持添加到主屏幕，以全屏方式打开。</span>
+        </p>
+      </div>
+      <div class="mascot">
+        <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+          <g stroke-linecap="round" stroke-linejoin="round" stroke="#3D2F1A">
+            <path d="M52 22 C51 15 55 11 60 10 M60 22 C60 14 63 11 67 9 M67 22 C69 16 72 14 76 13" fill="none" stroke-width="4"/>
+            <path d="M42 78 C28 80 19 92 17 106 C31 104 42 95 46 84 Z" fill="#7C9A54" stroke-width="5"/>
+            <path d="M78 78 C92 80 101 92 103 106 C89 104 78 95 74 84 Z" fill="#8FAF62" stroke-width="5"/>
+            <rect x="37" y="24" width="46" height="68" rx="23" fill="#F5B840" stroke-width="5"/>
+            <g clip-path="url(#cob3c)" fill="none" stroke-width="3" opacity=".28">
+              <path d="M48.5 28 C46 45 46 70 48.5 90"/><path d="M71.5 28 C74 45 74 70 71.5 90"/>
+              <path d="M38 34 C50 38 70 38 82 34"/><path d="M38 42 C50 46 70 46 82 42"/>
+              <path d="M38 76 C50 80 70 80 82 76"/><path d="M38 84 C50 88 70 88 82 84"/>
+            </g>
+            <clipPath id="cob3c"><rect x="37" y="24" width="46" height="68" rx="23"/></clipPath>
+            <circle cx="52" cy="57" r="4.6" fill="#3D2F1A" stroke="none"/>
+            <circle cx="68" cy="57" r="4.6" fill="#3D2F1A" stroke="none"/>
+            <circle cx="53.6" cy="55.4" r="1.7" fill="#FFFDF6" stroke="none"/>
+            <circle cx="69.6" cy="55.4" r="1.7" fill="#FFFDF6" stroke="none"/>
+            <path d="M53.5 67 Q60 73 66.5 67" fill="none" stroke-width="4"/>
+            <ellipse cx="44.5" cy="64" rx="4.2" ry="2.6" fill="#EF8A56" opacity=".55" stroke="none"/>
+            <ellipse cx="75.5" cy="64" rx="4.2" ry="2.6" fill="#EF8A56" opacity=".55" stroke="none"/>
+          </g>
+        </svg>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
