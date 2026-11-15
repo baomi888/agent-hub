@@ -488,9 +488,13 @@ async def list_favorites(uid: str = Depends(get_current_user)) -> dict:
                 "official": official,
                 "official_owner": official,
                 # 来源与作者是两件事：来源说明它从哪来，作者说明谁做的。
-                # 官方库没有"某位同学"这种作者，所以两者都写"官方课程库"
-                # （"官方"是 owner_name，"官方课程库"是 source —— 与广场眉题同词）。
-                "source": "官方课程库" if official else f"{owner_name} 的库",
+                # 官方库没有"某位同学"这种作者，所以两者都写"官方知识库"
+                # （"官方"是 owner_name，"官方知识库"是 source —— 与广场眉题同词）。
+                # ★ 2026-11-15 第 24 批从"官方课程库"改过来（用户定名）。
+                #   判定字段是布尔 official，source 只负责显示，所以能跟着改；
+                #   改这里必须同时改广场眉题，tests/test_naming_consistency.py
+                #   要求两者逐字相等。
+                "source": "官方知识库" if official else f"{owner_name} 的库",
                 "owner_name": owner_name,
                 "access": "download" if official else _access_of_from(k),
                 "files": k.get("files") or 0,

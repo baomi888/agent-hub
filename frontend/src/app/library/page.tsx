@@ -255,11 +255,14 @@ export default function LibraryPage() {
         {official.length > 0 && (
           <section className="lib-sec lib-official">
             <div className="lib-sec-head">
-              {/* 2026-11-15 第 19 批：「官方公开知识库」读着叠（官方＋公开＋知识库），
-                  改回代码里本来就在用的叫法「官方课程库」。这一区的兄弟眉题是
-                  「我分享的 / 我的收藏库 / 同学分享的」—— 都短，只有它一个五字叠词。
-                  计数的「N 门课程」不动：「官方课程库 · 3 门课程」是自然说法。 */}
-              <span className="eyebrow">官方课程库</span>
+              {/* 2026-11-15 第 24 批：用户定名「官方知识库」。
+                  历史两次都在这一个词上来回：第 19 批叫「官方公开知识库」（读着叠：
+                  官方＋公开＋知识库），改成「官方课程库」；第 24 批用户看第 3 期
+                  文案后说「那个不叫课程库，应该叫官方知识库」—— 定名权在产品，
+                  所以这里跟着改，同时把命名守卫的豁免词从「公开知识库」一个
+                  改成「公开知识库 / 官方知识库」两个整词（「个人知识库」照样红）。
+                  计数的「N 门课程」不动：每个库就是一门课，「官方知识库 · 9 门课程」。 */}
+              <span className="eyebrow">官方知识库</span>
               <span className="rule" />
               <span className="lib-count">{official.length} 门课程</span>
             </div>

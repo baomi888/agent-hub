@@ -106,9 +106,12 @@ def test_favorites_list_carries_source_and_author(client, env, kb):
     out = client.get("/api/kb/favorites").json()["kbs"]
     assert len(out) == 1
     item = out[0]
-    # 官方库：来源是"官方课程库"、署名是"官方"，不能出现"某位同学"
+    # 官方库：来源是"官方知识库"、署名是"官方"，不能出现"某位同学"
+    # ★ 这个字面量与广场眉题必须同词，由 tests/test_naming_consistency.py
+    #   `test_backend_display_string_matches_ui` 兜着（改名要两处一起红，才不会分叉）。
+    #   2026-11-15 第 24 批从"官方课程库"改成"官方知识库"（用户定名）。
     assert item["official"] is True
-    assert item["source"] == "官方课程库"
+    assert item["source"] == "官方知识库"
     assert item["owner_name"] == "官方"
     # 上传/分享日期跟着一起来（用户要求每个库都标）
     assert item["at"] == 1763000000

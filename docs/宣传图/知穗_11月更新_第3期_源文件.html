@@ -93,7 +93,7 @@
   h1 .sp { color: var(--accent); font-size: .56em; vertical-align: .16em; margin: 0 12px; }
   .sub {
     margin-top: 14px;
-    font-size: 27px;
+    font-size: 25px;
     line-height: 1.62;
     color: var(--ink-2);
   }
@@ -198,13 +198,27 @@
     width: 14px; height: 14px; border-radius: 3px;
     border: 1.5px solid rgba(61, 47, 26, .42); flex: none;
   }
+  /* 勾上的样子：用户自己选剩下的两条 —— 广告说的"勾哪条才写哪条"要看得见 */
+  .box.on {
+    border-color: var(--accent);
+    background: rgba(200, 137, 42, .55);
+    box-shadow: inset 0 0 0 2px #FFFDF6;
+  }
+  /* 底部那颗主按钮的示意：写后果（加入几条、设几个提醒），不写"确定" */
+  .commit {
+    margin-top: auto;
+    height: 26px; border-radius: 4px;
+    background: rgba(200, 137, 42, .92);
+    color: #2A2113; font-size: 11.5px; letter-spacing: .04em;
+    display: grid; place-items: center;
+  }
   .tt { font-size: 13px; color: var(--ink); white-space: nowrap; }
   .tm {
     margin-left: auto; font-size: 11.5px; color: var(--accent-ink);
     letter-spacing: .02em; flex: none;
   }
   .courseline {
-    margin-top: auto;
+    margin-top: 8px;
     display: flex; align-items: center; gap: 7px;
     border-top: 1px dashed var(--line-strong);
     padding-top: 9px;
@@ -319,19 +333,35 @@
       <div class="issue">十一月更新 <em>第 3 期</em> ｜ 2026.11.15</div>
     </div>
 
-    <p class="kicker">新增与改进</p>
-    <h1>论坛<span class="sp">·</span>待办<span class="sp">·</span>课程库</h1>
+    <p class="kicker">十一月更新 · 三项主要变更</p>
+    <h1>待办<span class="sp">·</span>论坛<span class="sp">·</span>公开知识库</h1>
 
     <p class="sub">
-      新增<b>论坛</b>与<b>官方课程库</b>，待办与提醒已重做。
+      待办内置 <b>AI 助手</b>，说一句话就整理成条目；<b>论坛</b>与<b>公开知识库</b>同步上线。
     </p>
 
     <div class="trio">
-      <!-- 1 论坛 -->
+      <!-- 1 待办（AI 助手：说一句 → 整理成条 → 勾选才写入）-->
+      <div class="cell">
+        <div class="art">
+          <div class="bubble">明天下午三点交高数作业<br>周三晚上自习</div>
+          <div class="sortline"><span class="dn"></span>整理为 2 条</div>
+          <div class="todo"><span class="box on"></span><span class="tt">交高数作业</span><span class="tm">15:00</span></div>
+          <div class="todo"><span class="box on"></span><span class="tt">图书馆自习</span><span class="tm">周三 18:30</span></div>
+          <div class="commit">加入 2 条 · 设 2 个提醒</div>
+          <div class="courseline"><b>课表</b>08:00 高数 · 提前 20 分钟</div>
+        </div>
+        <div class="txt">
+          <div class="it-title">AI 待办与提醒</div>
+          <div class="it-desc">说一句，它整理成条目；<br>勾哪条、提不提醒都由你定。</div>
+        </div>
+      </div>
+
+      <!-- 2 论坛 -->
       <div class="cell">
         <div class="art">
           <div class="cat-h">6 个板块</div>
-          <div class="frow"><span class="fchip">置顶</span><span class="fbar a"></span></div>
+          <div class="frow"><span class="fchip">公告</span><span class="fbar a"></span></div>
           <div class="frow"><span class="fchip k">答疑</span><span class="fbar b"></span></div>
           <div class="frow"><span class="fchip k">组队</span><span class="fbar c"></span></div>
           <div class="frow"><span class="fchip k">经验</span><span class="fbar b"></span></div>
@@ -339,26 +369,11 @@
         </div>
         <div class="txt">
           <div class="it-title">论坛上线</div>
-          <div class="it-desc">6 个板块，支持图文发帖、<br>楼中楼回复与举报。</div>
+          <div class="it-desc">6 个板块，图文发帖、楼中楼<br>回复、举报、搜索与官方公告。</div>
         </div>
       </div>
 
-      <!-- 2 待办 -->
-      <div class="cell">
-        <div class="art">
-          <div class="bubble">明天下午三点交高数作业<br>周三晚上自习</div>
-          <div class="sortline"><span class="dn"></span>解析为 2 条</div>
-          <div class="todo"><span class="box"></span><span class="tt">交高数作业</span><span class="tm">15:00</span></div>
-          <div class="todo"><span class="box"></span><span class="tt">图书馆自习</span><span class="tm">周三 18:30</span></div>
-          <div class="courseline"><b>课表</b>08:00 高数 · 提前 20 分钟提醒</div>
-        </div>
-        <div class="txt">
-          <div class="it-title">待办与提醒重做</div>
-          <div class="it-desc">输入一句话生成待办，<br>确认后写入，课表自动排入。</div>
-        </div>
-      </div>
-
-      <!-- 3 课程库 -->
+      <!-- 3 公开知识库 -->
       <div class="cell">
         <div class="art">
           <div class="shelf">
@@ -369,21 +384,21 @@
             <div class="book b5"><i></i><i></i><em></em></div>
           </div>
           <div class="shelfbase"></div>
-          <div class="cnt"><span class="n">9 门课</span><span class="u">73 份资料</span></div>
-          <div class="dl">在线阅读 · 下载</div>
+          <div class="cnt"><span class="n">9 个库</span><span class="u">73 份资料</span></div>
+          <div class="dl">加到对话 · 在线阅读 · 下载</div>
         </div>
         <div class="txt">
-          <div class="it-title">官方课程库</div>
-          <div class="it-desc">原文可在线翻阅并下载，<br>公式正常渲染。</div>
+          <div class="it-title">公开知识库</div>
+          <div class="it-desc">官方题库与同学分享的库，<br>加进对话，提问时直接检索。</div>
         </div>
       </div>
     </div>
 
     <div class="also">
       <div class="also-h">其他改进</div>
-      <div class="also-row"><span>语音</span><span>识别结果实时上屏，中间停顿不再被截断</span></div>
-      <div class="also-row"><span>手机</span><span>底部导航四格；除桌面端专属页面，其余均可在移动端进入</span></div>
-      <div class="also-row"><span>视觉</span><span>深色卡片对比度提升；首页「论坛」字重统一</span></div>
+      <div class="also-row"><span>排版</span><span>正文行宽与字号重排，每行约 19.4 字，一屏读到更多</span></div>
+      <div class="also-row"><span>深色</span><span>五层底色统一，卡片不再糊进背景</span></div>
+      <div class="also-row"><span>手机</span><span>底部导航四格；宽表格改为卡片式，无需横拖</span></div>
     </div>
 
     <div class="foot">
