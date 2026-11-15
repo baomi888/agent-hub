@@ -8,7 +8,7 @@ import MascotLogo from "./chat/MascotLogo";
 import CornIcon from "./CornIcon";
 import NavIcon from "./NavIcon";
 import UserAvatar from "./settings/UserAvatar";
-import { chatRailNav } from "@/lib/nav";
+import { chatRailNav, railLayout } from "@/lib/nav";
 import type { Conversation, QuotaInfo } from "@/lib/types";
 import type { FontScale } from "@/lib/hooks/usePrefs";
 
@@ -144,9 +144,12 @@ export default function Sidebar({
     return groupSessions(filtered);
   }, [sessions, query]);
 
-  /** 模块入口：桌面 12 项 / 手机 8 项（管理员各 +1），全部来自 lib/nav.ts。
+  /** 模块入口：桌面 11 项 / 手机 7 项（管理员），全部来自 lib/nav.ts。
    *  手机上的判据是 overlay（这一栏此时就是抽屉、也是唯一的模块入口）。 */
   const railNav = useMemo(() => chatRailNav(isAdmin, overlay), [isAdmin, overlay]);
+  /** 3 列排版；余 1 末项通栏、余 2 末两项各占半行，末行不留空格子
+   *  （见 nav.ts 的 railLayout —— 用户 2026-11-15 报的"缺两个入口后有空缺"）。 */
+  const rail = useMemo(() => railLayout(railNav.length), [railNav.length]);
 
   return (
     <aside
@@ -193,13 +196,26 @@ export default function Sidebar({
       {/* 模块入口：来自 lib/nav.ts（和桌面侧栏、手机底部 tab、「更多」面板同一份清单）。
           2026-11-15 之前这里是硬编码的 4 个金描边按钮，手机上进得来出不去 ——
           手机没有底部 tab，抽屉就是唯一的模块入口，缺项等于断头路。
-          3 列紧凑格而不是 2 列大按钮：12 个金框会变成一堵"按钮墙"，
+          3 列紧凑格而不是 2 列大按钮：11 个金框会变成一堵"按钮墙"，
           导航应该像列表。图标走 NavIcon（不是 CornIcon）—— 同一个功能在
-          底部 tab 和这里必须是同一个图案，否则会像两件事。 */}
-      <div className="side-nav mt-3">
+          底部 tab 和这里必须是同一个图案，否则会像两件事。
+          ★ 图标外面套一层 .side-ico：纯线性图标在米色纸上只有 1.85 描边，
+            11 个排在一起会糊成一片浅灰；给每个图标一块浅金底衬，
+            形状才有"块"的重量感（用户 2026-11-15 反馈"给图标补充填充色"）。 */}
+      <div
+        className={`side-nav mt-3${
+          rail.fill === "wide"
+            ? " side-nav--wide-last"
+            : rail.fill === "pair"
+              ? " side-nav--pair-last"
+              : ""
+        }`}
+      >
         {railNav.map((it) => (
           <Link key={it.href} href={it.href} className="side-entry" title={it.label}>
-            <NavIcon name={it.icon} className="side-entry-ico" />
+            <span className="side-ico">
+              <NavIcon name={it.icon} className="side-entry-ico" />
+            </span>
             <span>{it.label}</span>
           </Link>
         ))}

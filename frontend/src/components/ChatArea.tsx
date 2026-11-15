@@ -7,12 +7,11 @@
 // 本文件只保留主组件（顶栏 + 欢迎页 + 消息区 + 输入区）。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import MascotLogo from "./chat/MascotLogo";
 import CornIcon from "./CornIcon";
 import { api } from "@/lib/api";
 import type { RefSource, QuotaInfo } from "@/lib/types";
-import { EXAMPLES, PRIMARY_ENTRIES, SECONDARY_ENTRIES, TOOLS_URL } from "./chat/constants";
+import { HOME_GROUPS, TOOLS_URL } from "./chat/constants";
 import TodayStrip from "./chat/TodayStrip";
 import PushNudge from "./chat/PushNudge";
 import { isPlanRequest, stripPlanHint } from "./chat/plan";
@@ -211,7 +210,6 @@ export default function ChatArea({
   onOpenUsage,
   userId = null,
 }: Props) {
-  const router = useRouter();
   const [input, setInput] = useState("");
   const [showParams, setShowParams] = useState(false);
   // 「自己填」展开：想直接敲数字的少数人才会点
@@ -720,48 +718,6 @@ export default function ChatArea({
     onSend(q, atts, undefined, isPlanRequest(q));
   };
 
-  const fillExample = (q: string) => {
-    setInput(q);
-    inputRef.current?.focus();
-  };
-
-  // 进料路径②：让它带着题目去联网研究——光标留在末尾，等用户补上题目
-  const startResearch = () => {
-    setInput("帮我研究一下：");
-    requestAnimationFrame(() => {
-      const el = inputRef.current;
-      if (!el) return;
-      el.focus();
-      el.setSelectionRange(el.value.length, el.value.length);
-    });
-  };
-
-  // 进料路径③：用户自己给资料——把资料库面板推到他面前
-  const openUpload = () => {
-    if (kbPanelOpen) return;
-    onToggleKbPanel?.();
-  };
-
-  // 首屏功能入口：公开知识库广场 / 校园工具集 / 上传建库 / 让它研究
-  const handleIntroEntry = (key: string) => {
-    switch (key) {
-      case "library":
-        // 走路由跳转，不用 window.location.href：后者是整页刷新，
-        // 浏览器会白一帧再重新加载整个应用（同一个 Next 应用内没必要）。
-        router.push("/library");
-        break;
-      case "tools":
-        window.open(TOOLS_URL, "_blank", "noopener,noreferrer");
-        break;
-      case "upload":
-        openUpload();
-        break;
-      case "research":
-        startResearch();
-        break;
-    }
-  };
-
   const handleForward = useCallback((text: string) => {
     setInput(text);
     inputRef.current?.focus();
@@ -964,68 +920,44 @@ export default function ChatArea({
                   今天条不出现时它也不出现，所以新用户首屏仍然干净。 */}
               {todayHasAny && <PushNudge enabled={!!userId} />}
 
-              {/* ② 主线：三个持续陪伴功能。原来这里是四宫格，四件平级，
-                  结果「模板广场」这种一次性动作和「每日委托」这种天天用的能力
-                  一样醒目 —— 而知穗的差别恰恰在后面那类。改成两层之后，
-                  主线是大卡 + 有标题栏，辅路缩成一行小胶囊。 */}
-              <div className="welcome-daily mt-4 w-full">
-                <div className="welcome-section-head">
-                  <span className="eyebrow">让知穗每天做点什么</span>
-                  <span className="rule" />
+              {/* ② 主操作区：两组、六项，全部是「真去一个地方」的入口。
+                  ★ 2026-11-15 重排（用户要求）：撤掉原来那行四个小胶囊和三张示例卡，
+                    主线从 3 项扩到 6 项，补上论坛 / 公开知识库 / 待办。
+                  两组各 3 项是**排版前提**：三端都正好 3 列 × 2 行，没有空格子。
+                  组二用 .is-soft 降一档（无投影、图标底衬换成中性色）——
+                    「知穗替你做」和「你自己去翻」不该一样重。 */}
+              {HOME_GROUPS.map((g, gi) => (
+                <div
+                  key={g.key}
+                  className={`welcome-daily w-full ${gi === 0 ? "mt-4" : "mt-3.5 is-soft"}`}
+                >
+                  <div className="welcome-section-head">
+                    <span className="eyebrow">{g.title}</span>
+                    <span className="rule" />
+                  </div>
+                  <div className="mt-2 grid w-full grid-cols-3 gap-2">
+                    {g.items.map((e) => (
+                      <Link
+                        key={e.href}
+                        href={e.href}
+                        className="entry-card"
+                        aria-label={`${e.label}：${e.hint}`}
+                      >
+                        <span className="ec-icon">
+                          <CornIcon name={e.icon} className="h-6 w-6" title={e.label} />
+                        </span>
+                        {/* 横排：图标在左、文字在右。label 与 hint 必须包成一列，
+                            否则三个 span 会并排站成三栏（横排改造时踩过）。
+                            ★ 手机（≤639）这一格改成竖排且隐去 hint —— 见 welcome.css 对应档。 */}
+                        <span className="ec-text">
+                          <span className="ec-label">{e.label}</span>
+                          <span className="ec-hint">{e.hint}</span>
+                        </span>
+                      </Link>
+                    ))}
+                  </div>
                 </div>
-                <div className="mt-2.5 grid w-full grid-cols-1 gap-2.5 sm:grid-cols-3">
-                  {PRIMARY_ENTRIES.map((e) => (
-                    <Link
-                      key={e.href}
-                      href={e.href}
-                      className="entry-card"
-                      aria-label={`${e.label}：${e.hint}`}
-                    >
-                      <span className="ec-icon">
-                        <CornIcon name={e.icon} className="h-6 w-6" title={e.label} />
-                      </span>
-                      {/* 横排：图标在左、文字在右。label 与 hint 必须包成一列，
-                          否则三个 span 会并排站成三栏（横排改造时踩过）。 */}
-                      <span className="ec-text">
-                        <span className="ec-label">{e.label}</span>
-                        <span className="ec-hint">{e.hint}</span>
-                      </span>
-                    </Link>
-                  ))}
-                </div>
-              </div>
-
-              {/* ③ 辅路：一次性动作，收成一行小入口 */}
-              <div className="welcome-mini mt-2.5 flex w-full flex-wrap justify-center gap-2">
-                {SECONDARY_ENTRIES.map((e) => (
-                  <button
-                    key={e.key}
-                    type="button"
-                    onClick={() => handleIntroEntry(e.key)}
-                    className="entry-mini"
-                    title={e.label}
-                  >
-                    <CornIcon name={e.icon} className="h-4 w-4" />
-                    {e.label}
-                  </button>
-                ))}
-              </div>
-
-              {/* ③ 次级示例：三句能立刻点的话，三列等宽便签；min-w-0 让长句在卡内截断不溢出
-                  矮屏（≤700px 高）整行让位：一屏放得下「品牌 + 三张日更大卡」比多摆三句示例更值 */}
-              <div className="welcome-egs mt-3 grid w-full grid-cols-1 gap-2 sm:grid-cols-3">
-                {EXAMPLES.map((e) => (
-                  <button
-                    key={e.q}
-                    onClick={() => fillExample(e.q)}
-                    className="welcome-eg"
-                    title={e.q}
-                  >
-                    <span className="welcome-eg-hint">{e.hint}</span>
-                    <span className="q">{e.q}</span>
-                  </button>
-                ))}
-              </div>
+              ))}
 
               <p className="welcome-foot">问完的每一句，都能翻回原文。</p>
             </div>

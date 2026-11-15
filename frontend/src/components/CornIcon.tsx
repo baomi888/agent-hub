@@ -11,6 +11,7 @@
  * 未知 name（含历史残留 emoji）一律回退到 mini 知穗，保证永不显示成系统 emoji。
  */
 export type CornIconName =
+  | "forum" // 论坛（上下两块版块条，2026-11-15 新增）
   | "book" // 考研复习
   | "pen" // 论文写作
   | "notes" // 课程笔记
@@ -577,7 +578,24 @@ function Smile() {
   );
 }
 
+/** 论坛：上下两块版块条（与 NavIcon 的 `forum` 同形，放大成插画版）。
+    刻意不用"对话气泡"：那和 chat 在 24px 下会糊成同一个轮廓。
+    右上角那点金色和右下角那条金线，是它和 `notes`（一张纸 + 几行字）的区别。 */
+function Forum() {
+  return (
+    <g {...INK_STROKE}>
+      <rect x="6" y="7" width="36" height="15" rx="5" fill="#FFFDF6" strokeWidth={3} />
+      <rect x="6" y="26" width="36" height="15" rx="5" fill="#FFFDF6" strokeWidth={3} />
+      <path d="M12.5 14.5 h9" strokeWidth={2.8} />
+      <circle cx="34" cy="14.5" r="2.2" fill="#F5B840" stroke="none" />
+      <path d="M12.5 33.5 h15" strokeWidth={2.8} />
+      <path d="M31.5 33.5 h4.5" stroke="#F5B840" strokeWidth={2.8} />
+    </g>
+  );
+}
+
 const ICONS: Record<string, () => React.JSX.Element> = {
+  forum: Forum,
   book: Book,  pen: Pen,
   notes: Notes,
   home: Home,

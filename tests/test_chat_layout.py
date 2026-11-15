@@ -409,3 +409,115 @@ def test_table_turns_into_cards_on_phone():
     base = _rule(css, ".md-table")
     assert "width: 100%" in base, "桌面表格宽度规则被改掉了"
     assert "display: block" not in base, "块级化漏到了桌面档"
+
+
+# ---------- 首屏主操作区（2026-11-15 第 12 批） ----------
+
+CONSTANTS_TSX = SRC / "components" / "chat" / "constants.tsx"
+CORN_ICON = SRC / "components" / "CornIcon.tsx"
+
+
+def _home_groups() -> list[tuple[str, list[str]]]:
+    """把 constants.tsx 的 HOME_GROUPS 解析成 [(组 key, [href...])]。
+
+    为什么要解析而不是断言源码里"出现过某个 href"：这一批的需求是**分组**
+    （哪三项一组、每组几项），而子串断言对"某一项被搬到另一组""某一组只剩
+    两项"完全无感 —— 那正是"六格变五格、末行缺角"的起点。
+    """
+    src = _code(_read(CONSTANTS_TSX))
+    assert "export const HOME_GROUPS" in src, "首屏动作区的数据不在 HOME_GROUPS 里"
+    i = src.index("export const HOME_GROUPS")
+    body = src[i : src.index("\n];", i)]
+    out: list[tuple[str, list[str]]] = []
+    for m in re.finditer(r'key:\s*"(\w+)"([\s\S]*?)items:\s*\[([\s\S]*?)\]', body):
+        out.append((m.group(1), re.findall(r'href:\s*"([^"]+)"', m.group(3))))
+    # 扫描型断言必须同时报"扫到了几组"，否则正则失效会静默通过（硬约束 32）
+    assert len(out) == 2, f"解析出 {len(out)} 组，正则可能失效：{out}"
+    return out
+
+
+def test_home_actions_are_two_rows_of_three():
+    """六项分两组、每组三项 —— 这是「三端都 3 列 2 行、没有空格子」的前提。
+
+    用户 2026-11-15 的要求：除了每日委托 / 每日总结 / 打卡记录，再补
+    论坛 / 公开知识库 / 待办，并且要「合理设计排列、分组和视觉层级」。
+    3+3 是唯一能做到「每组正好一整行」的分法；4+2 或 5+1 都会让某一行缺角。
+    """
+    groups = _home_groups()
+    for key, hrefs in groups:
+        assert len(hrefs) == 3, f"「{key}」组有 {len(hrefs)} 项，一组必须是 3 项（3 列一整行）"
+    flat = [h for _, hrefs in groups for h in hrefs]
+    assert len(set(flat)) == 6, f"六项里有重复：{flat}"
+    for href in ("/delegate", "/report", "/checkin", "/reminders", "/library", "/forum"):
+        assert href in flat, f"主操作区缺 {href}"
+
+
+def test_home_no_longer_has_the_chip_row_or_example_cards():
+    """四个小胶囊和三张示例卡必须真的消失（用户明确要求删掉）。
+
+    删的是「渲染」，不是「样式」—— 留着 `.entry-mini` 这类死类名，
+    下一个人会以为那排胶囊还在用，改样式时白改一场。
+    """
+    area = _code(_read(CHAT_AREA))
+    consts = _code(_read(CONSTANTS_TSX))
+    for word in ("理资料", "写论文", "出题目"):
+        assert word not in area and word not in consts, f"「{word}」示例卡还在"
+    for name in ("EXAMPLES", "SECONDARY_ENTRIES", "PRIMARY_ENTRIES"):
+        assert name not in area and name not in consts, f"{name} 还留着，数据与渲染必须一起撤"
+    assert "entry-mini" not in area, "小胶囊还在渲染"
+
+    # 样式侧同样不许留孤儿规则（只有 /path 页的 .onboard 复用了 welcome.css，其余没有）
+    css = _css(_read(WELCOME_CSS))
+    for cls in (".entry-mini", ".welcome-eg", ".welcome-egs", ".welcome-mini"):
+        assert cls + " {" not in css and cls + "," not in css, f"{cls} 的样式成了孤儿"
+
+
+def test_home_cards_are_three_columns_on_all_three_widths():
+    """三端都是 3 列：桌面横排带说明，手机竖排只留标签。
+
+    手机如果把六张卡竖着排成 6 行（每张 58px），输入框会被顶出首屏 ——
+    这正是 2026-10-30 那批花力气解决的问题，不能在这一批退回去。
+    """
+    area = _code(_read(CHAT_AREA))
+    assert "grid-cols-3" in area, "主操作区不是 3 列（两列会让 3 项分成 2+1，右边永远空着）"
+
+    css = _css(_read(WELCOME_CSS))
+    base = _rule(css, ".entry-card")
+    assert "flex-direction: row" in base, "桌面卡不是横排（图标左、文字右）"
+
+    phone = _media(css).get("max-width: 639px")
+    assert phone, "welcome.css 没有手机档"
+    pcard = _rule(phone, ".entry-card")
+    assert "flex-direction: column" in pcard, "手机卡没有改成竖排"
+    assert re.search(r"min-height:\s*(\d+)px", pcard), "手机卡没给最小高度，触控区会塌"
+    mh = int(re.search(r"min-height:\s*(\d+)px", pcard).group(1))
+    assert mh >= 44, f"手机卡最小高度 {mh}px 低于 44 的触控下限"
+    assert re.search(r"\.ec-hint\s*\{[^}]*display:\s*none", phone), (
+        "手机档没隐藏说明文字 —— 107px 里它会折成两行、把格子撑到 90px"
+    )
+
+
+def test_second_group_is_one_step_lighter():
+    """第二组「常去的地方」要比第一组轻一档，但不能轻到看不出是按钮。
+
+    做法只动三处：底色透明、投影去掉、图标底衬换中性色；边框保留 ——
+    去掉边框会变成"漂浮的文字块"，比不降级更难看。
+    """
+    css = _css(_read(WELCOME_CSS))
+    soft = _rule(css, ".welcome-daily.is-soft .entry-card")
+    assert "background: transparent" in soft, "第二组没有降底色"
+    assert "box-shadow: none" in soft, "第二组还留着投影，和第一组一样重"
+    ico = _rule(css, ".welcome-daily.is-soft .entry-card .ec-icon")
+    assert "var(--fill-2)" in ico, "第二组图标没用中性底衬，两组图标会一样重"
+
+
+def test_forum_has_an_icon_of_its_own():
+    """论坛入口必须有图标，且要和控制台导航里那个 `forum` 同一个形状语言。
+
+    没有它时 CornIcon 会静默退化成玉米（`ICONS[name] ?? Corn`）——
+    页面上照样能看，只是论坛变成一根玉米，而所有测试都绿。
+    """
+    icon = _code(_read(CORN_ICON))
+    assert '| "forum"' in icon, "CornIconName 里没有 forum"
+    assert "forum: Forum" in icon, "ICONS 表里没注册 forum（会退化成玉米）"
+    assert "function Forum()" in icon, "没有 Forum 这个图形"

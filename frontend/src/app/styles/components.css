@@ -107,28 +107,47 @@
    不像 12 个主按钮），只在 hover / 当前页时给底色与描边。
    桌面 12 项 = 4 行整，手机 8 项 = 3+3+2，末行居中（flex-wrap + center，
    grid 的末行只能左对齐）。 */
+/* 模块格：3 列紧凑格。
+   ★ 2026-11-15 从 flex-wrap 换成 grid：换列数的判据不是"窗口多宽"而是"有几项"
+     （见 nav.ts 的 railLayout）。
+   ★ 栅格拆成 6 条轨道、普通格各跨 2 条，是为了让**余数也能补**：
+     余 1 时末项跨 6 条（通栏）、余 2 时末两项各跨 3 条（各半行）。
+     flex 表达不了这两种补法 —— 而"末行缺角"正是用户这次报的问题
+     （7 项 = 3+3+1、11 项 = 3+3+3+2 都缺）。 */
 .side-nav {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--space-6) var(--space-4);
+}
+/* 余 1 时末项通栏：横排（图标左、文字右），读起来像列表的最后一行，
+   而不是一格孤零零的按钮。 */
+.side-nav--wide-last > .side-entry:last-child {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  gap: var(--space-6);
   justify-content: center;
-  gap: var(--space-4);
+}
+/* 余 2 时末两项各占半行：11 项 = 3+3+3+[2]，桌面管理员就是这个数。
+   不补的话右边空一格 —— 管理员自己看着不齐，"整齐"就只在普通用户那里成立。 */
+.side-nav--pair-last > .side-entry:nth-last-child(-n + 2) {
+  grid-column: span 3;
 }
 .side-entry {
-  /* 三列：减掉两道 gap 再三等分。用 flex-basis 而不是 grid，是为了末行能居中 */
-  flex: 0 0 calc((100% - var(--space-4) * 2) / 3);
+  grid-column: span 2;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-3);
-  min-height: 46px;
-  padding: var(--space-6) var(--space-4);
+  gap: var(--space-4);
+  /* 50px 而不是 46：图标多了一层 26px 的底衬，46 会把文字压到贴着下边框 */
+  min-height: 50px;
+  padding: var(--space-5) var(--space-3);
   /* 透明描边而不是 none：hover 时只换颜色，不因为多出 1px 边框而抖一下 */
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--text-2);
-  /* 13px 而不是 14px：「学习路径」四个字 4×13=52px，格子内容宽 57px；
-     14px 时会溢出到 ellipsis 变成「学习路…」 */
+  /* 13px 而不是 14px：「每日委托」四个字 4×13=52px，格子内容宽 57px；
+     14px 时会溢出到 ellipsis 变成「每日委…」 */
   font-size: var(--fs-xs);
   letter-spacing: 0;
   line-height: 1.15;
@@ -136,21 +155,44 @@
   cursor: pointer;
   transition: var(--t-color);
 }
-.side-entry-ico {
-  /* 18px：和底部 tab 的图标同尺寸。颜色比文字深一档 —— 缩到 18px 后描边变细，
-     颜色再淡就糊成一片（沿用原 .side-entry svg 的结论） */
-  width: 18px;
-  height: 18px;
+/* 图标底衬：给纯线性图标一块浅金方片。
+   为什么需要它（2026-11-15 用户要「为图标补充填充色」）：NavIcon 是 1.85 描边的
+   空心线，11 个排在一列时整体只有一层浅灰，形状之间靠轮廓区分、没有重量；
+   加一块 26px 的圆角底衬之后，每个入口先被看见的是"一块色"，再是形状。
+   ★ 26px 是上限：再大就把 50px 的格子撑高，会话列表要跟着让位。 */
+.side-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 8px;
+  background: var(--accent-soft);
   color: var(--ink);
+  transition: var(--t-color);
+}
+.side-entry-ico {
+  /* 16px：底衬 26px 减去两侧各 5px 呼吸。颜色跟着底衬的容器走 */
+  width: 16px;
+  height: 16px;
+  color: inherit;
 }
 .side-entry:hover {
   background: var(--fill-2);
   border-color: var(--accent-line);
   color: var(--ink);
 }
+.side-entry:hover .side-ico {
+  background: var(--accent-tint);
+}
 .side-entry[aria-current="page"] {
   background: var(--accent-soft);
   border-color: var(--accent-line);
+  color: var(--accent-ink);
+}
+.side-entry[aria-current="page"] .side-ico {
+  background: var(--accent-tint);
   color: var(--accent-ink);
 }
 

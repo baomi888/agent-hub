@@ -7,12 +7,59 @@ import type { CornIconName } from "@/components/CornIcon";
 // 输入区上方的两枚开关（检索 / 智能联网）直接表达。留在这里只会让
 // 「哪些地方还在讲四档」变得看不出来。
 
-// 首屏示例：三条都是「现在就能点、点了就有结果」的问题，
-// 反映当前主力能力（资料库 / 场景化写作 / 出题），不再强调旧的四类工具
-export const EXAMPLES: { hint: string; q: string }[] = [
-  { hint: "理资料", q: "帮我把这份笔记整理成知识卡片" },
-  { hint: "写论文", q: "给我搭一个论文的三级提纲" },
-  { hint: "出题目", q: "根据课程笔记，给我出 3 道自测题" },
+// ============ 首屏主操作区：两组、六个「真去一个地方」的入口 ============
+//
+// ★ 2026-11-15 重排（用户要求）。删掉的是两样东西：
+//   ① 一行的四个小胶囊（公开资料库 / 上传资料建库 / 让它去研究 / 工具集）
+//   ② 三张示例卡（理资料 / 写论文 / 出题目）
+//   主线从 3 项扩到 6 项：每日委托 / 每日总结 / 打卡记录 + 论坛 / 公开知识库 / 待办。
+//
+// 为什么删示例卡：那三张卡把「一句话就能问」演示了一遍，但点下去是**填进输入框**，
+// 不是去一个地方 —— 和另外六项是两种东西，摆在一起会让人以为它们同级。
+// 想演示"能问什么"，用户直接打字比点一张卡更省事。
+//
+// 分组：组一「每天」= 知穗替你做（这是知穗区别于通用助手的地方）；
+//       组二「常去」= 你自己去翻（待办是自己排的，另两个是别人的内容）。
+// ★ 两组各 3 项，是**排版前提**：三端都正好 3 列 × 2 行，没有空格子。
+//   加第 7 项之前先想清楚它落在哪一组、那一组还剩几格 —— 否则又会出现
+//   「最后一行孤零零一个」的老问题（侧栏这次刚修过同一个毛病）。
+export type HomeAction = {
+  href: string;
+  label: string;
+  /** 说明只写用途、不超过 9 字（约 108px）；超了桌面三列时会被截断 */
+  hint: string;
+  /** CornIcon 的双色插画名（不是 NavIcon 的线性名） */
+  icon: CornIconName;
+};
+
+export const HOME_GROUPS: {
+  key: "daily" | "visit";
+  title: string;
+  items: HomeAction[];
+}[] = [
+  {
+    key: "daily",
+    title: "让知穗每天做点什么",
+    items: [
+      { href: "/delegate", label: "每日委托", hint: "定好时间，知穗去做", icon: "clock" },
+      { href: "/report", label: "每日总结", hint: "把今日问答压成结论", icon: "calendar" },
+      { href: "/checkin", label: "打卡记录", hint: "把学到的分享出去", icon: "star" },
+    ],
+  },
+  {
+    key: "visit",
+    title: "常去的地方",
+    items: [
+      // 待办原本只在侧栏/「更多」里，用户要它进主操作区 —— 它确实是每天要看的。
+      { href: "/reminders", label: "待办", hint: "今天要做什么", icon: "task" },
+      // 用户这次说的「公开知识库」就是 /library 那个广场。**标签仍写「公开资料库」**：
+      // 站内已经有了同一条命名纪律（`tests/test_naming_consistency.py`：界面统一叫
+      // 资料库，后端 kb_* 不改），而且左栏那个按钮本来就写着「公开资料库」——
+      // 同一个入口在同一屏出现两个名字，正是 2026-11-14 花力气消灭过的问题。
+      { href: "/library", label: "公开资料库", hint: "挑一个库，直接问", icon: "store" },
+      { href: "/forum", label: "论坛", hint: "看看别人在问什么", icon: "forum" },
+    ],
+  },
 ];
 
 // 校园工具集入口（新版 React 实现，路由 /tools，免登录）。
@@ -22,45 +69,6 @@ export const EXAMPLES: { hint: string; q: string }[] = [
 // 新版的番茄钟云同步、任务库等功能全看不到。旧页文件保留作实现对照，
 // 见 campus/logic/gpa.ts 的算法对照注释；next.config.ts 里 /tools.html 已 301 到 /tools。
 export const TOOLS_URL = "/tools";
-
-// 首屏入口（10-14 重排为「主次两层」）。
-//
-// 为什么拆两层：原来是一个四宫格（模板广场 / 校园工具集 / 上传建库 / 让它去研究），
-// 四件平级 —— 但其中三件是**一次性动作**，而「每日委托 / 每日总结 / 打卡」才是
-// 知穗区别于通用助手的部分（持续陪着你，而不是答完就走）。平级摆在一起，
-// 差异化功能反而没有存在感。所以：
-//   主线 = 三个持续陪伴功能（各自是独立页面，用 Link 跳）
-//   辅路 = 三个一次性动作（留在首屏，但缩小成一行）
-export const PRIMARY_ENTRIES: {
-  href: string;
-  label: string;
-  hint: string;
-  icon: CornIconName;
-}[] = [
-  // ★ 说明文字控制在 9 字以内（约 108px）。桌面三列时单卡 217px，
-  //   44px 图标 + 两侧 13px 内边距 + 箭头之后只剩约 118px 给文字，
-  //   10 字（120px）就会折行并把「知穗」「问答」这类词拆到两行。
-  { href: "/delegate", label: "每日委托", hint: "定好时间，知穗去做", icon: "clock" },
-  { href: "/report", label: "每日总结", hint: "把今日问答压成结论", icon: "calendar" },
-  { href: "/checkin", label: "打卡记录", hint: "把学到的分享出去", icon: "star" },
-];
-
-// 辅路动作。tools → 开校园工具集静态页、upload → 开资料库上传、
-// library → 公开知识库广场、research → 预填研究引导（由 ChatArea 的 handleIntroEntry 接管）
-export const SECONDARY_ENTRIES: {
-  key: "library" | "tools" | "upload" | "research";
-  label: string;
-  icon: CornIconName;
-}[] = [
-  // 「模板广场」2026-11-13 换成「公开知识库」：那套预置提示词下线，
-  // 同一位置改成挑别人的公开资料库，挂进对话就能问（见 app/library）。
-  { key: "library", label: "公开资料库", icon: "store" },
-  { key: "upload", label: "上传资料建库", icon: "notes" },
-  { key: "research", label: "让它去研究", icon: "bulb" },
-  // 入口标签统一写「工具集」（11-07）：左边导航、对话栏、这里用的是同一个名字，
-  // 完整的「校园工具集」只留在那一页自己的标题和落地页里。
-  { key: "tools", label: "工具集", icon: "tools" },
-];
 
 // 场景快选（SCENARIO_STARTERS）已随「场景选择撤出主界面」删除（10-14 晚）：
 // 场景化入口统一走公开知识库广场，工作台不再摆场景选择器。

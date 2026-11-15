@@ -96,48 +96,6 @@
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 8' preserveAspectRatio='none'%3E%3Cpath d='M2 6 Q 22 1.5 46 4.5 T 74 4 T 98 3' fill='none' stroke='%23E0A03A' stroke-width='2.2' stroke-linecap='round' opacity='.75'/%3E%3C/svg%3E");
 }
 
-/* 示例句：像贴在纸边上的便签条（眉题在上、问题在下，三列等宽对齐） */
-.welcome-eg {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-3);
-  width: 100%;
-  padding: 10px 13px;
-  font-size: var(--fs-md);
-  line-height: var(--lh-body);
-  color: var(--text-1);
-  background: var(--card-bg);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  box-shadow: 0 1px 2px rgba(80, 60, 30, 0.05);
-  cursor: pointer;
-  text-align: center;
-  transition: var(--t-color);
-}
-/* 便签条 hover 不再上浮：纸不会被鼠标顶起来。只换边框与底色 */
-.welcome-eg:hover {
-  border-color: var(--accent);
-  background: var(--fill-2);
-}
-/* 长句在便签内截断：纵向 flex 里必须显式 min-width:0，否则 flex 子项
-   默认 min-width:auto 不收缩，文字会顶破卡片边界 */
-.welcome-eg .q {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
-}
-.welcome-eg-hint {
-  flex: none;
-  font-family: var(--font-serif);
-  font-size: var(--fs-xs);
-  font-weight: 700;
-  letter-spacing: var(--ls-wide);
-  color: var(--accent-ink);
-}
-
 /* 弱化的第二行：进料入口 */
 .welcome-link {
   background: none;
@@ -290,35 +248,55 @@
   .entry-card .ec-icon svg { width: 26px; height: 26px; }
 }
 
-/* 辅路入口：一次性动作，一行小胶囊。
-   外形与对话栏那个「校园工具集」(.tools-link) 一致 —— 同一类东西用同一套壳。 */
-.entry-mini {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-6);
-  padding: 5px 12px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--fill-3);
-  font-size: var(--fs-sm);
-  color: var(--text-2);
-  white-space: nowrap;
-  cursor: pointer;
-  transition: var(--t-color);
+/* 手机（≤639）：横排卡改成**竖排小格**，三列不放说明文字。
+   ★ 2026-11-15：主操作区从 3 项变 6 项之后，390 宽下如果还是「一行一张全宽大卡」，
+     六张就是 6×58 = 348px，输入框会被顶出首屏 —— 这正是 10-30 那批花力气解决的问题。
+   ★ 三列而不是两列：两组各 3 项，三列才是「一组一整行」。两列会把 3 项分成
+     2+1，第二行右边永远空着（用户这次报的就是这种空缺）。
+   ★ 单格 107×68：宽够放五个汉字（「公开资料库」5×13=65px），高过 44 的触控下限。 */
+@media (max-width: 639px) {
+  .entry-card {
+    --ec-icon: 30px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-height: 68px;
+    padding: 9px 4px;
+    border-radius: var(--radius-md);
+    text-align: center;
+  }
+  .entry-card .ec-icon svg { width: 20px; height: 20px; }
+  /* flex:none 让文字块按内容宽度居中；不禁用 min-width:0 也不会溢出（nowrap 不在这一档用） */
+  .entry-card .ec-text { flex: none; align-items: center; gap: 0; }
+  .entry-card .ec-label { font-size: var(--fs-sm); letter-spacing: 0; }
+  /* 说明文字在 107px 里会折成两行、把格子撑到 90px+，整屏又放不下 ——
+     它的作用在桌面（"工具集到底装了什么"），手机上标签本身已经说清 */
+  .entry-card .ec-hint { display: none; }
+  /* 竖排之后右箭头没有落点（文字在下、图标在上），留着只会顶在右上角 */
+  .entry-card::after { display: none; }
+  /* 手机点按没有 hover，用不上浮：位移在触屏上会变成"点了以后整块跳一下" */
+  .entry-card:hover { transform: none; }
 }
-.entry-mini svg {
-  flex: none;
-  color: var(--text-3);
+
+/* 第二组（常去的地方）：**降一档**，不是另起一套。
+   第一组是"知穗替你做"（差异化），第二组是"你自己去翻" —— 两件事不该一样重。
+   做法只动三处：底色透明、投影去掉、图标底衬从金色换成中性灰。
+   边框保留：去掉边框会变成"漂浮的文字块"，比降级更难看。 */
+.welcome-daily.is-soft .entry-card {
+  background: transparent;
+  box-shadow: none;
 }
-.entry-mini:hover,
-.entry-mini:focus-visible {
-  color: var(--ink);
-  border-color: var(--accent);
+.welcome-daily.is-soft .entry-card .ec-icon {
   background: var(--fill-2);
-  outline: none;
+  color: var(--ink);
 }
-.entry-mini:hover svg,
-.entry-mini:focus-visible svg {
+.welcome-daily.is-soft .entry-card:hover {
+  background: var(--fill-3);
+  box-shadow: none;
+}
+.welcome-daily.is-soft .entry-card:hover .ec-icon {
+  background: var(--accent-soft);
   color: var(--accent-ink);
 }
 
@@ -447,12 +425,12 @@
 }
 
 /* 档 A（≤919px）：窗口已放不下完整版。
-   让掉三样最占地方、又不是"必须第一眼看到"的东西：
-     · 三句示例（点一句就能问，但它只是辅助；模板广场仍是常驻入口）
-     · 页脚那句信任文案
-     · 「让知穗每天做点什么」的分区小标题（三张卡自己有标题）
-   留下的正好是用户那张目标截图的东西：吉祥物 / 眉题 / 标题 / 副标题 /
-   三步引导 / 三张日更大卡 / 一行小胶囊。 */
+   2026-11-15 之后这一档要收的只剩页脚：
+     · 页脚那句信任文案（"问完的每一句，都能翻回原文"）
+   ★ 分区小标题**不再隐藏**。它原来被删是因为首屏要同时放三张大卡 + 一行胶囊
+     + 三句示例，塞不下；现在那两样都撤了，换成两组各三格，实测 390×844 上
+     还剩 100px 余量 —— 而两组之间的关系正是靠这两个小标题说清的，
+     藏掉之后六格会变成一坨没有分层的方块。 */
 @media (max-height: 919px) {
   .welcome { padding: 10px 0 6px; }
   .welcome .hero-logo { margin-bottom: 2px; }
@@ -461,15 +439,12 @@
   /* 这条仍服务于 /path 页的「这条路是什么」提示卡（复用了 .onboard 外壳）；
      首页的引导条已删，不再有第二步 */
   .onboard { margin-top: 12px; padding: 9px 12px 10px; }
-  .welcome-daily { margin-top: 10px; }
-  .welcome-section-head { display: none; }
+  .welcome-daily { margin-top: 8px; }
   /* 横排后这里不能再只收 gap（那会变成图标与文字贴在一起 3px）：
      省高度改从上下 padding 出。
      ★ 图标在两个高度档里都**不再降档**：横排已经把单卡从 106 压到 58，
        再回去压图标等于把刚做出来的"放大图标"又抵消掉。 */
   .entry-card { --ec-gap: 10px; padding: 8px 13px; }
-  .welcome-mini { margin-top: 8px; }
-  .welcome-egs,
   .welcome-foot { display: none; }
 }
 
@@ -502,8 +477,6 @@
   .entry-card { --ec-icon: 34px; --ec-gap: 9px; padding: 7px 11px; border-radius: var(--radius-md); }
   .entry-card .ec-icon svg { width: 20px; height: 20px; }
   .entry-card .ec-label { font-size: var(--fs-md); }
-  .entry-mini { padding: 2px 10px; }
-  .welcome-mini { margin-top: 4px; }
 }
 
 /* ---------- 「今天」条（首屏唯一按天变的内容） ----------

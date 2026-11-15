@@ -134,9 +134,14 @@ def test_dark_post_me_drops_the_gold_on_gold():
 def test_tabbar_caps_its_column_width():
     """底部 tab 的每一列都要有宽度上限。
 
-    纯 `repeat(5, minmax(0, 1fr))` 在 640–900 这段（大手机横屏、小平板竖屏）
-    会把五个 tab 摊成各 180px 的巨块 —— 一条横跨 899px 的底栏。
-    390 下仍然是各 75px，所以手机形态不受影响。
+    纯 `repeat(N, minmax(0, 1fr))` 在 640–900 这段（大手机横屏、小平板竖屏）
+    会把 tab 摊成各 200px 以上的巨块 —— 一条横跨 899px 的底栏。
+    390 下每列 97px，所以手机形态不受影响。
+
+    ★ 列数不进这条断言（2026-11-15：`repeat(5…)` 写死之后，「学习路径」下线、
+      tab 变 4 列时它会红在一句毫不相干的话上）。列数与清单的一致性由
+      `test_console_nav.py::test_grid_columns_match_primary_count` 负责，
+      这里只管「有没有像素上限」这一件事。
     """
     css = CONSOLE.read_text(encoding="utf-8")
     blocks = [m for m in re.finditer(r"\.tabbar\s*\{([^}]*)\}", css)]
@@ -145,7 +150,7 @@ def test_tabbar_caps_its_column_width():
     # 手机档那条（带 grid-template-columns 的）才是要检查的对象
     cols = [b.group(1) for b in blocks if "grid-template-columns" in b.group(1)]
     assert len(cols) == 1, f"带列定义的 .tabbar 规则应恰好 1 条，实际 {len(cols)}"
-    m = re.search(r"repeat\(\s*5\s*,\s*minmax\(\s*0\s*,\s*(\d+)px\s*\)\s*\)", cols[0])
+    m = re.search(r"repeat\(\s*\d+\s*,\s*minmax\(\s*0\s*,\s*(\d+)px\s*\)\s*\)", cols[0])
     assert m, "tabbar 列定义没有像素上限，640–900 会被拉成巨型按钮"
     cap = int(m.group(1))
-    assert cap <= 160, f"tabbar 单列上限 {cap}px 太宽，五个 tab 合起来仍会像横幅"
+    assert cap <= 160, f"tabbar 单列上限 {cap}px 太宽，四个 tab 合起来仍会像横幅"

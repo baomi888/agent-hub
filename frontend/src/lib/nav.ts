@@ -62,8 +62,8 @@ export const NAV: NavItem[] = [
   // 放到「总结」「打卡」后面会让人以为它是个统计页。
   // ★ 标签只能两个字：「论坛中心」在手机 3 列网格里会挤成两行、把导航撑高
   //   （和「校园工具集」→「工具集」同一个坑）。完整名字在页面标题里。
-  // ★ 移动端 tab 第 3 格：UGC 浏览是手机的原生场景。
-  { href: "/forum", icon: "forum", label: "论坛", mobileTab: 3 },
+  // ★ 移动端 tab 第 2 格：UGC 浏览是手机的原生场景。
+  { href: "/forum", icon: "forum", label: "论坛", mobileTab: 2 },
   // 待办中心（独立模块，2026-11-09）。固定在第 3 位：它回答的是「什么时候做什么」，
   // 比「每日委托」（生成什么）更靠前。★ 标签只能两个字：写「待办中心」会在手机
   // 3 列网格里挤成两行、把整块导航撑高 —— 和当年「校园工具集」砍成「工具集」同一个坑。
@@ -79,17 +79,19 @@ export const NAV: NavItem[] = [
   // 总结：移动端移出。它是对比型报表（需要横向看几天/几周），窄屏体验差；
   // 手机用户要看结论的话，「学习路径」和「打卡」已经承担了这件事。
   { href: "/report", icon: "summary", label: "总结", desktopOnly: true },
-  // 打卡：轻交互、每天一次，是手机最合适的形态，tab 第 4 格。
-  { href: "/checkin", icon: "star", label: "打卡", mobileTab: 4 },
+  // 打卡：轻交互、每天一次，是手机最合适的形态，tab 第 3 格。
+  { href: "/checkin", icon: "star", label: "打卡", mobileTab: 3 },
   // 四六级备考工作区：计划 / 词汇本 / 模考分数（申报书 B3 的专项模块入口）
   // ★ 移动端移出：备考是长周期、要排计划做模考的活，主要在电脑上做；
   //   手机端的碎片学习需求由「工具集」里的单词卡覆盖，不需要重复入口。
   { href: "/cet", icon: "globe", label: "四六级", desktopOnly: true },
-  // 关卡式学习路径：12 关由真实学习数据判定（申报书 3.4 / 2.8）
-  // ★ 移动端 tab 第 2 格 —— 这就是 2026-11-14 这次改造的核心：
-  //   它的定位是「和对话平行」，那它在手机上就必须有一个一级入口，
-  //   而不是藏在「更多」的第 9 项里。
-  { href: "/path", icon: "path", label: "学习路径", mobileTab: 2 },
+  // ★ 2026-11-15 用户要求：**关掉「学习路径」的导航入口**。
+  //   `/path` 页面、接口、12 关的判定逻辑一律保留（`service/path.py` 与
+  //   `tests/test_path.py` 都没动），去掉的只是这条导航项 —— 完全可逆：
+  //   把这两行加回来、并把 TAB_PRIMARY_COUNT 改回 4 即可。
+  //   连带影响：手机底部 tab 从 4 格回到 3 格（对话 / 论坛 / 打卡），
+  //   编号必须保持 1..N 连续，否则中间会留一个空格位（tests 会红）。
+  // { href: "/path", icon: "path", label: "学习路径", mobileTab: 2 },
   // 工具集是**独立单页**（GPA / 番茄钟 / 课程表 / 单词卡 / 倒计时 / 抽签），
   // 不进控制台外壳，也不要求登录。从这里点出去就是换页，左导航仍留在原处；
   // 之前的入口是首页下方那一行，用户反馈"找不到"，所以在这里给一条固定入口。
@@ -133,8 +135,10 @@ export const NAV: NavItem[] = [
  * 也要与 `mobileTab` 标记的项数一致 —— 三者任一不符，第 6 个 tab 会悄悄挤进第 5 格、
  * 或者最后一格空着，两种都只有截图才看得出来。
  * `tests/test_console_nav.py` 同时锁这三处。
+ *
+ * 2026-11-15：4 → 3（「学习路径」的入口已按用户要求关掉，tab 跟着少一格）。
  */
-export const TAB_PRIMARY_COUNT = 4;
+export const TAB_PRIMARY_COUNT = 3;
 
 export function visibleNav(isAdmin: boolean | undefined): NavItem[] {
   return NAV.filter((it) => !it.adminOnly || isAdmin);
@@ -175,6 +179,26 @@ export function mobileMoreNav(isAdmin: boolean | undefined): NavItem[] {
  */
 export function chatRailNav(isAdmin: boolean | undefined, narrow: boolean): NavItem[] {
   return visibleNav(isAdmin).filter((it) => it.href !== "/" && !(narrow && it.desktopOnly));
+}
+
+/**
+ * 侧栏模块格的排版参数：**3 列，末行不留空格子**。
+ *
+ * 为什么要算（2026-11-15 用户反馈「普通用户缺两项之后出现空缺」）：
+ * 项数除以 3 有余数时，末行会缺角 —— 余 1 时只剩孤零零一个（7 项 = 3+3+1），
+ * 余 2 时右边空一格（11 项 = 3+3+3+2，而桌面管理员就是 11 项）。
+ * 两种都得补，否则"整齐"只在普通用户那里成立、管理员自己看着还是不齐。
+ *
+ * 实现上把栅格拆成 6 条轨道：普通格各跨 2 条（= 3 列），余数用它补齐 ——
+ *   · 余 1 → 末项跨 6 条（整行通栏，横排）
+ *   · 余 2 → 末两项各跨 3 条（各占半行）
+ * 为什么不干脆用 4 列填满：侧栏固定 240px，4 列每格 48px，「每日委托」四个字
+ * 52px 就开始省略号 —— 为了一个空格子换来两处截断，不值。
+ */
+export type RailLayout = { cols: number; fill: "none" | "wide" | "pair" };
+export function railLayout(count: number): RailLayout {
+  const rem = count % 3;
+  return { cols: 6, fill: rem === 1 ? "wide" : rem === 2 ? "pair" : "none" };
 }
 
 /** 首页是精确匹配；其余按前缀匹配，将来 /knowledge/xxx 也能点亮同一项。 */

@@ -150,7 +150,9 @@ def _nav_entries(nav: str) -> dict[str, str]:
     for m in _NAV_ENTRY_RE.finditer(_strip_comments(nav)):
         out[m.group(1)] = m.group(0)
     # 硬约束：解析不到就说明正则失效了，不能靠"空集合也满足所有条件"混过去
-    assert len(out) >= 13, f"nav.ts 只解析出 {len(out)} 条，正则可能失效：{sorted(out)}"
+    # 12 = 2026-11-15 现状（13 减掉已下线的「学习路径」）。这条路只防"正则失效"，
+    # 不防"少了一条" —— 少一条由上面对 /knowledge /forum /checkin 的点名断言兜底。
+    assert len(out) >= 12, f"nav.ts 只解析出 {len(out)} 条，正则可能失效：{sorted(out)}"
     return out
 
 
@@ -309,7 +311,9 @@ def test_grid_columns_match_primary_count():
     两边各写各的数字时，谁也不会报错：清单多一项，第 6 个 tab 悄悄挤进第 5 格；
     少一项，最后一格空着。两种都只有截图才看得出来。
     """
-    nav = _read(NAV_TS)
+    # ★ 必须剥注释：nav.ts 里留着一行被注释掉的「学习路径」（含 mobileTab: 2），
+    #   不剥会把它算成一个格位 —— "注释掉了但还在计数"这类假红/假绿最难查。
+    nav = _strip_comments(_read(NAV_TS))
     m = re.search(r"TAB_PRIMARY_COUNT\s*=\s*(\d+)", nav)
     assert m, "清单里没有 TAB_PRIMARY_COUNT"
     primary = int(m.group(1))
@@ -365,25 +369,25 @@ def test_tabbar_reuses_the_shared_nav_list():
     assert "@/lib/nav" in tab
 
 
-def test_learning_path_owns_a_mobile_tab_slot():
-    """「学习路径」必须占一个一级 tab 格位（2026-11-14 iOS 内测改造的起因）。
+def test_learning_path_is_off_the_nav_but_its_page_survives():
+    """「学习路径」的**导航入口**已按用户要求下线（2026-11-15），页面本身保留。
 
-    改造前它在 NAV 里排第 9 —— 桌面顺序是按"什么时候做什么"排的，合理；
-    但手机底部 tab 当时取 `slice(0, 4)`，于是它的入口在「更多」面板里还要往下翻。
-    而它的产品定位是「和对话平行」（申报书 3.4），实际却连一级入口都没有。
+    来龙去脉值得记一笔：2026-11-14 为了让它有手机一级入口，专门把底部 tab
+    从"取前四项"改成显式的 `mobileTab: 2`；一天后用户要求把入口整个拿掉。
+    两件事都成立 —— 入口是产品决策，路由与 12 关的判定逻辑是资产，
+    后者一行都不能跟着删（`service/path.py` + `tests/test_path.py` 仍在跑）。
 
-    这条守的是**产品要求**，不是代码风格：有人把 `mobileTab: 2` 删掉、
-    或者顺手把它标成 `desktopOnly`，手机上就再也找不到它，而所有测试照样绿
-    （拓扑没坏，只是入口消失了）。
+    所以这条同时守两头：
+      · 入口不许悄悄回来（加回来就要同步 TAB_PRIMARY_COUNT 与 CSS 列数，
+        否则底部 tab 中间会留一个空格位 —— tests 会红在别处，很难定位）
+      · 页面不许跟着被删（删入口顺手删页面，是"清理"最容易过头的方向）
     """
-    nav = _read(NAV_TS)
-    m = re.search(r'\{ href: "/path"[^}]*\}', nav)
-    assert m, "nav.ts 里找不到 /path 那一条，正则失效"
-    entry = m.group(0)
-    assert "desktopOnly" not in entry, "学习路径被移出移动端了 —— 它与「对话」同等重要"
-    assert re.search(r"mobileTab:\s*\d+", entry), (
-        "学习路径没有 mobileTab 格位，手机上会退到「更多」里"
+    nav = _strip_comments(_read(NAV_TS))
+    assert 'href: "/path"' not in nav, (
+        "「学习路径」的导航入口又回来了：请同步 mobileTab 编号 / TAB_PRIMARY_COUNT / CSS 列数"
     )
+    page = SRC / "app" / "(console)" / "path" / "page.tsx"
+    assert page.exists(), "学习路径的页面被连带删掉了 —— 入口下线不等于功能下线"
 
 
 def test_admin_dashboard_has_a_mobile_entry():
@@ -582,7 +586,7 @@ def test_home_rail_covers_every_mobile_destination():
         missing = sorted(set(reachable) - set(rail))
         assert not missing, f"手机抽屉里缺这些入口（管理员={is_admin}）：{missing}"
         # 三个最容易"顺手被移出移动端"的页面单独点名，可读性优先于求差集
-        for href in ("/knowledge", "/forum", "/path", "/checkin"):
+        for href in ("/knowledge", "/forum", "/checkin", "/reminders"):
             assert href in rail, f"手机抽屉里没有 {href}"
         # 反向：窄屏不该出现桌面专属页
         for href in ("/flow", "/delegate", "/report", "/cet"):
@@ -600,26 +604,63 @@ def test_home_rail_covers_every_mobile_destination():
     assert "/flow" not in desk_user and "/dashboard" not in desk_user
 
 
-def test_home_rail_is_three_compact_columns():
-    """模块格是 3 列紧凑格，末行居中 —— 不是原来 2×2 的金描边大按钮。
+def test_home_rail_is_a_full_three_column_grid():
+    """模块格是 3 列紧凑格，且**末行不许留空格子**。
 
-    12 个金框会变成一堵"按钮墙"：导航应该像列表，主操作才描金边。
-    而 8 项（手机非管理员）除以 3 余 2，`grid` 的末行只能左对齐，
-    所以用 `flex-wrap` + `justify-content: center` —— 与「更多」面板同一处理。
+    旧版是 flex-wrap + 末行居中，项数余 1 时（管理员手机 7 项 = 3+3+1）会剩下
+    孤零零一格，读起来像页面没做完。用户 2026-11-15 的原话是「普通用户缺两个
+    入口之后仍要整齐、间距一致、不出现空缺」—— 普通用户那边去掉「学习路径」
+    正好 6 项 = 3×2，管理员那边余 1，所以要一个能同时照顾两种数的排法。
+    现在换成 grid：余 1 时最后一项 `grid-column: 1 / -1` 通栏；余 2 时那一对居中。
+    为什么不用 4 列把它填满：侧栏固定 240px，4 列每格 48px，「每日委托」四个字
+    52px 就开始省略号 —— 为一个空格子换来两处截断不值。
+
+    这条同时钉四件事，缺一件"整齐"就只剩一半：
+      · 列数是 3（不是 2 / 4）
+      · 余 1 的判据在 nav.ts 里算（不用 :nth-child 在 CSS 里猜）
+      · 组件真的把那个类挂上去了
+      · 图标有底衬（用户要的「填充色」就是这一块）
     """
     css = _strip_comments(_read(COMPONENTS_CSS))
-    nav = _css_rule(css, ".side-nav")
-    assert "flex-wrap: wrap" in nav, "模块格没有换行——项数一变就会挤成一行"
-    assert "justify-content: center" in nav, "末行没有居中，8 项时会缺一角"
-
+    grid = _css_rule(css, ".side-nav")
+    assert "display: grid" in grid, "模块格不是网格 —— 末行补位只能靠 grid-column 表达"
+    cols = re.search(r"grid-template-columns:\s*repeat\((\d+)", grid)
+    assert cols, f"模块格没有列定义：{grid[:90]}"
+    tracks = int(cols.group(1))
     entry = _css_rule(css, ".side-entry")
-    basis = _all_decls(entry, "flex")
-    assert any("/ 3)" in v for v in basis), f"模块格不是三列（flex: {basis}）"
-    # 13px 是量出来的下限：「学习路径」四个字在 65px 格子里正好不截断
+    span = " ".join(_all_decls(entry, "grid-column"))
+    m = re.search(r"span\s+(\d+)", span)
+    assert m, f"模块格没有声明跨几条轨道（{span!r}）"
+    assert tracks / int(m.group(1)) == 3, (
+        f"{tracks} 条轨道 / 每格跨 {m.group(1)} 条 = {tracks / int(m.group(1))} 列，不是 3 列"
+    )
+
+    wide = _css_rule(css, ".side-nav--wide-last > .side-entry:last-child")
+    assert "grid-column: 1 / -1" in wide, "余 1 时末项没有通栏，7 项会剩下孤零零一格"
+    pair = _css_rule(css, ".side-nav--pair-last > .side-entry:nth-last-child(-n + 2)")
+    assert "span 3" in pair, "余 2 时末两项没有各占半行，11 项右侧会空一格"
+
     assert "var(--fs-xs)" in " ".join(_all_decls(entry, "font-size")), (
-        "模块格字号不是 --fs-xs（14px 会把「学习路径」截成「学习路…」）"
+        "模块格字号不是 --fs-xs（14px 会把「每日委托」截成「每日委…」）"
     )
     assert "nowrap" in entry, "标签允许换行的话，四个字的项会把整行撑高"
+
+    # 图标底衬：NavIcon 是 1.85 描边的空心线，一排十一块排下来只有一层浅灰
+    ico = _css_rule(css, ".side-ico")
+    assert "var(--accent-soft)" in ico and "26px" in ico, (
+        "图标没有浅金底衬 —— 用户要的「填充色」就是这一块，去掉等于把需求撤回"
+    )
+
+    body = _ts_func(_strip_comments(_read(NAV_TS)), "railLayout")
+    assert re.search(r"count\s*%\s*3", body), "railLayout 没有按 3 列取余"
+    assert '"wide"' in body and '"pair"' in body, (
+        "railLayout 没同时处理余 1（通栏）和余 2（末两项各半行）"
+    )
+    sb = _strip_comments(_read(SIDEBAR_TSX))
+    assert "railLayout(" in sb, "侧栏没有按 railLayout 算出的列数排"
+    assert "side-nav--wide-last" in sb and "side-nav--pair-last" in sb, (
+        "侧栏没有把两种补位类都挂到容器上"
+    )
 
 
 def test_tabbar_closes_on_navigation():
