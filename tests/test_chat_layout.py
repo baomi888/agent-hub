@@ -519,6 +519,12 @@ def test_second_group_is_flat_not_a_faded_card():
     assert "transform: none" in m.group(1), (
         "第二组悬停会抬起 —— 它本来就是平铺在纸上的，抬起后与第一组同形"
     )
+    # 静态规则的 `.welcome-daily.is-soft .entry-card`(0,3,0) 高于 `.entry-card:hover`(0,2,0)，
+    # 悬停规则里不显式写 border-color，就会被静态那条的 transparent 压住 ——
+    # 线上实测过一次：悬停只剩淡底，而第一组是"金边 + 淡底"，两种反馈语言。
+    assert "border-color: var(--accent)" in m.group(1), (
+        "第二组悬停没有金描边（会被静态规则的 border-color:transparent 压掉）"
+    )
 
 
 def test_welcome_section_head_sits_on_the_card_axis():

@@ -311,6 +311,10 @@
 .welcome-daily.is-soft .entry-card:hover,
 .welcome-daily.is-soft .entry-card:focus-visible {
   background: var(--fill-2);
+  /* ★ 必须显式写：上面那条静态规则的 `.welcome-daily.is-soft .entry-card`
+     特异性(0,3,0)高于 `.entry-card:hover`(0,2,0)，会把金描边一起压成 transparent ——
+     于是悬停只剩一层淡底，而第一组悬停是"金边 + 淡底"。线上实测确认过这一点。 */
+  border-color: var(--accent);
   transform: none;
   box-shadow: none;
 }
