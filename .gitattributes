@@ -1,0 +1,4 @@
+# 运维脚本要原样拷到 Linux 执行，CRLF 会导致 "bad interpreter" / "\r: command not found"
+ops/cloudmonitor/*.sh      text eol=lf
+ops/cloudmonitor/*.service text eol=lf
+ops/cloudmonitor/*.timer   text eol=lf
