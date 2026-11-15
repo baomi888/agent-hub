@@ -255,6 +255,50 @@ def test_copy_never_tells_users_posting_needs_no_login():
     assert len(forum) > 5000, "论坛页代码没读到，断言等于没跑"
     assert len(ann) > 1000, "公告代码没读到"
     banned = ("免注册", "不用注册", "不注册", "无需注册", "免登录发布", "不用登录也能", "没登录也能")
-    for src, name in ((forum, "forum/page.tsx"), (ann, "announcements.ts")):
+    for src, name in ((forum, "app/forum/page.tsx"), (ann, "announcements.ts")):
         hit = [w for w in banned if w in src]
         assert not hit, f"{name} 又出现了「不登录也能发」的说法：{hit}"
+
+
+# ---------------------------------------------------------------- 语气本身
+
+
+# 口语助词 + 口语短语。前两期就是按「像同学在群里讲话」写的，是历史事实；
+# 这条**只钉最新一期**，规则从第 3 期起生效。
+COLLOQUIAL = (
+    "呀",
+    "哟",
+    "啦",
+    "嘛",
+    "哈",
+    "诶",
+    "都行",
+    "随便",
+    "顺手",
+    "不用",
+    "想说的",
+    "一下子",
+)
+
+
+def test_copy_reads_like_a_release_note_not_a_chat():
+    """2026-11-15 17:50 用户要求：太口语，要 App Store 那种版本说明的严谨感。
+
+    判据是**可数的**，不是"读着像不像"：
+      · 不用语气助词（呀 / 啦 / 嘛 / 哈）；
+      · 不用口语短语（都行 / 随便 / 顺手 / 不用 / 想说的）；
+      · 小标题是名词短语而不是带情绪的句子（这条交给人工看，不写成正则 ——
+        情绪没有词表，"想说的话有地方放了"能凑出十条同义句）。
+
+    ★ 数量下限两条：正则失效与「这一期变短了」要分开。段数 < 30 或字数 ≤ 500，
+      都说明取到的不是整期，此时断言等于没跑（本仓库栽过三次）。
+      ★ 下限不是拍脑袋：这版实测 42 段 / 778 字，砍掉一半条目会掉到 ~32 段 / ~478 字，
+      必须至少有一条拦住它（第一版把字数下限定成 400，反证 3 就漏了）。
+    """
+    newest = _entries()[0]
+    strs = re.findall(r'"((?:[^"\\]|\\.)*)"', newest)
+    assert len(strs) >= 30, f"只取到 {len(strs)} 段文案，解析可能失效"
+    text = "".join(_plain(s) for s in strs)
+    assert len(text) > 500, f"整期只有 {len(text)} 字，取到的不是完整一期"
+    hit = [w for w in COLLOQUIAL if w in text]
+    assert not hit, f"最新一期出现了口语写法：{hit}"
