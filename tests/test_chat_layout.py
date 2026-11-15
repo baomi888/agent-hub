@@ -497,18 +497,44 @@ def test_home_cards_are_three_columns_on_all_three_widths():
     )
 
 
-def test_second_group_is_one_step_lighter():
-    """第二组「常去的地方」要比第一组轻一档，但不能轻到看不出是按钮。
+def test_second_group_is_flat_not_a_faded_card():
+    """第二组「常去的地方」要**换一种形态**，不是给第一组打个折。
 
-    做法只动三处：底色透明、投影去掉、图标底衬换中性色；边框保留 ——
-    去掉边框会变成"漂浮的文字块"，比不降级更难看。
+    ★ 2026-11-15：上一版是"底色透明 + 边框保留"，而那条边框与第一组**是同一条**
+      rgba(61,47,26,.1)、尺寸圆角也完全相同，只差有没有填充 —— 在纸纹底上
+      读成"未启用 / 禁用"。现在改无框平铺：底色、边框、投影都去掉，
+      只留图标底衬（没有它这一组就只剩三行漂浮的文字），悬停不抬起。
     """
     css = _css(_read(WELCOME_CSS))
     soft = _rule(css, ".welcome-daily.is-soft .entry-card")
-    assert "background: transparent" in soft, "第二组没有降底色"
+    assert "background: transparent" in soft, "第二组又铺上底色了"
+    assert re.search(r"border-color:\s*transparent", soft), (
+        "第二组还留着和第一组同一条边框 —— 同框同尺寸只差填充，会读成禁用态"
+    )
     assert "box-shadow: none" in soft, "第二组还留着投影，和第一组一样重"
     ico = _rule(css, ".welcome-daily.is-soft .entry-card .ec-icon")
     assert "var(--fill-2)" in ico, "第二组图标没用中性底衬，两组图标会一样重"
+    m = re.search(r"\.welcome-daily\.is-soft \.entry-card:hover,[^{]*\{([^}]*)\}", css)
+    assert m, "第二组没有独立的悬停规则"
+    assert "transform: none" in m.group(1), (
+        "第二组悬停会抬起 —— 它本来就是平铺在纸上的，抬起后与第一组同形"
+    )
+
+
+def test_welcome_section_head_sits_on_the_card_axis():
+    """分区标题的文字左缘必须和卡片网格同轴（不许被眉题短线顶出去 36px）。
+
+    眉题两侧的 26px 短线是给 Hero 那句「苞米地 · 智能体工作台」做的页眉装饰，
+    两侧对称才成立。分区标题右边接的是 `.rule`，只剩左边一条短线，
+    实测 1440 下标题文字 402 / 卡片网格 366 —— 恒定内缩 36px（26 线 + 10 gap）。
+    """
+    css = _css(_read(WELCOME_CSS))
+    m = re.search(
+        r"\.welcome-section-head \.eyebrow::before,\s*\.welcome-section-head \.eyebrow::after\s*\{([^}]*)\}",
+        css,
+    )
+    assert m, "welcome.css 没有收掉分区标题眉题的短线，标题会被顶出卡片左缘"
+    assert "display: none" in m.group(1), "分区标题眉题的短线没有真的隐藏"
 
 
 def test_forum_has_an_icon_of_its_own():

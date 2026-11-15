@@ -35,7 +35,7 @@ MASCOT_TSX = ROOT / "frontend" / "src" / "components" / "chat" / "MascotLogo.tsx
 # 深色下真实出现过的「弱文字身后的底色」，取自 output/log-dark-audit.txt。
 # 名字对应实测时打出来的元素，方便回头对图上位置。
 DARK_BASES = {
-    "step-2 卡片": (41, 34, 23),  # #292217
+    "step-2 卡片": (54, 46, 29),  # #362E1D（2026-11-15 由 #292217 提起，见下条断言）
     "kbp-read 底": (46, 39, 27),  # #2E271B
     "settings code 底": (51, 44, 32),  # #332C20
     "tb-notice 底": (51, 45, 33),  # #332D21
@@ -44,6 +44,12 @@ DARK_BASES = {
 }
 
 MIN_RATIO = 4.5  # WCAG AA，正文与小字的门槛
+
+# 深色「纸底」的**渲染值**（2026-11-15 首屏实测，不含任何卡片）：
+# --step-1 是 #211B11(33,27,17)，但 main 上还叠着一层 4% 的亮暖色噪点，
+# 渲染出来是 ~38,32,22。判定"卡片有没有真的抬起"必须用这个值，
+# 用令牌值会高估 5/255，正是上一版把 #292217 判成"够用"的原因。
+PAPER_RENDERED = (39, 33, 23)
 
 
 def _lum(rgb: tuple[int, int, int]) -> float:
@@ -102,6 +108,31 @@ def test_dark_text3_clears_aa_on_every_measured_layer():
         if r < MIN_RATIO:
             bad.append(f"{name} {r:.2f}:1")
     assert not bad, "--text-3 在这些深色底上低于 4.5:1 → " + "；".join(bad)
+
+
+def test_dark_raised_card_is_a_real_step_above_the_paper():
+    """深色下「卡片」要比纸底真的高出一档，不能只剩一条描边。
+
+    起因（2026-11-15 首页评审）：深色截图上纸底 rgb(39,33,23)、卡内 rgb(41,34,23)，
+    只差 2/255。看上去像"卡片没铺满"，实际是噪点吃掉了整级阶梯：
+    `main.workbench-main` 的背景里有一层亮暖色噪点（深色为 4% alpha），
+    把纸从令牌值 33,27,17 抬到 ~38,32,22，而卡片是不透明色块、把噪点盖住了。
+    所以这里量的是**渲染后的纸底**（PAPER_RENDERED），不是 --step-1 的令牌值。
+
+    反证：把 --step-2 改回 #292217，ΔL* 只有 0.6，这条必红。
+    """
+
+    def lstar(rgb: tuple[int, int, int]) -> float:
+        y = _lum(rgb)
+        return 116 * y ** (1 / 3) - 16 if y > 0.008856 else 903.3 * y
+
+    dark = _dark_block()
+    card = _hex(_token(dark, "step-2"))
+    delta = lstar(card) - lstar(PAPER_RENDERED)
+    assert delta >= 5.0, (
+        f"深色卡片比纸底只高 {delta:.1f} 个 L*（<5）—— 卡片会糊进纸里，"
+        "只剩 1px 描边。纸底已含 4% 暖色噪点的提亮，不要直接拿 --step-1 令牌值比。"
+    )
 
 
 def test_dark_text3_stays_below_text2():

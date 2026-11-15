@@ -134,6 +134,17 @@
 .welcome-section-head .eyebrow {
   flex: none;
 }
+/* ★ 2026-11-15：把眉题自带的两条 26px 短线在这一档收掉。
+   它们来自 `.welcome .eyebrow::before/::after`（那是给 Hero 眉题做"页眉装饰"的，
+   两侧对称才成立），但分区标题里只有左边一条短线、右边接的是 .rule ——
+   实测 1440：标题文字左缘 402，卡片网格左缘 366，**恒定内缩 36px**
+   （26px 线 + 10px gap），既不对齐卡片也不对齐页面文字轴；
+   同时左边线 26px、右边 .rule 467px，左右悬殊像没画完。
+   收掉之后标题直接压在 --chat-px 这条轴上，右侧 .rule 从文字尾延伸。 */
+.welcome-section-head .eyebrow::before,
+.welcome-section-head .eyebrow::after {
+  display: none;
+}
 .welcome-section-head .rule {
   flex: 1;
   height: 1px;
@@ -279,23 +290,32 @@
   .entry-card:hover { transform: none; }
 }
 
-/* 第二组（常去的地方）：**降一档**，不是另起一套。
-   第一组是"知穗替你做"（差异化），第二组是"你自己去翻" —— 两件事不该一样重。
-   做法只动三处：底色透明、投影去掉、图标底衬从金色换成中性灰。
-   边框保留：去掉边框会变成"漂浮的文字块"，比降级更难看。 */
+/* 第二组（常去的地方）：**换一种形态**，不是给第一组打个折。
+   第一组是"知穗替你做"（抬起的一张卡），第二组是"你自己去翻"（平铺在纸面上）。
+   ★ 2026-11-15 改：上一版是"底色透明 + 边框保留"，而边框与第一组**是同一条**
+     rgba(61,47,26,.1)，同尺寸、同圆角、只差有没有填充 —— 在纸纹底上读成
+     "未启用 / 禁用"，不是"次要"；深色下两组都只剩描边，区分彻底消失。
+     现在按"无框列表项"做：去掉边框与底色，只留图标底衬与文字，
+     层级由"卡面（抬起）"对"纸面（平铺）"来说，不再靠边框深浅。
+     图标底衬保留 --fill-2：没有它，这一组就只剩三行漂浮的文字。
+     悬停沿用统一的「金描边 + 淡底」，但不抬起 —— 它本来就是贴在纸上的。 */
 .welcome-daily.is-soft .entry-card {
   background: transparent;
+  border-color: transparent;
   box-shadow: none;
 }
 .welcome-daily.is-soft .entry-card .ec-icon {
   background: var(--fill-2);
   color: var(--ink);
 }
-.welcome-daily.is-soft .entry-card:hover {
-  background: var(--fill-3);
+.welcome-daily.is-soft .entry-card:hover,
+.welcome-daily.is-soft .entry-card:focus-visible {
+  background: var(--fill-2);
+  transform: none;
   box-shadow: none;
 }
-.welcome-daily.is-soft .entry-card:hover .ec-icon {
+.welcome-daily.is-soft .entry-card:hover .ec-icon,
+.welcome-daily.is-soft .entry-card:focus-visible .ec-icon {
   background: var(--accent-soft);
   color: var(--accent-ink);
 }
