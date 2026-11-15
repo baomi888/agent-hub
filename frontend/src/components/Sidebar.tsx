@@ -6,23 +6,11 @@ import { useMemo, useRef, useState, type RefObject } from "react";
 import Link from "next/link";
 import MascotLogo from "./chat/MascotLogo";
 import CornIcon from "./CornIcon";
+import NavIcon from "./NavIcon";
 import UserAvatar from "./settings/UserAvatar";
+import { chatRailNav } from "@/lib/nav";
 import type { Conversation, QuotaInfo } from "@/lib/types";
 import type { FontScale } from "@/lib/hooks/usePrefs";
-
-/** 工作台之外的四屏入口。图标排一行，避免再堆四个通栏按钮把侧栏撑满 */
-// 四屏入口。label 只用两个字：侧栏是 240px、移动端是抽屉，四个格子横排两行，
-// 字太长会把格子撑到换行；全称放 title，悬停能看到（也供读屏器读）。
-const CONSOLE_LINKS = [
-  { href: "/delegate", icon: "clock", label: "委托", full: "每日委托" },
-  { href: "/report", icon: "calendar", label: "总结", full: "每日总结" },
-  // 2026-11-13 用户要求：第四个位置给「待办」。打卡仍可从对话的「今天」条进入，
-  // 但这一格要留给每天真正会点开的东西 —— 打卡是回顾，待办是接下来做什么。
-  // 图标用 `task` 而不是 `check`：底部二级导航里"待办"就是 task，
-  // 同一个功能在两处的图案必须一样，否则会像两件事。
-  { href: "/reminders", icon: "task", label: "待办", full: "待办与提醒" },
-  { href: "/settings", icon: "settings", label: "设置", full: "设置" },
-];
 
 interface Props {
   sessions: Conversation[];
@@ -52,6 +40,9 @@ interface Props {
   onRetryLoad?: () => void;
   /** 当前登录用户名（登录门放进来之后才有值）。用于 title 与首字母兜底 */
   username?: string;
+  /** 是否管理员：只有它决定「看板 / 工作流」这两项要不要出现在模块格里。
+   *  后端仍会二次校验，这里只是不给入口（与 nav.ts 的 adminOnly 同一语义）。 */
+  isAdmin?: boolean;
   /** 显示名：昵称优先，没设过就是 username。不传则直接用 username */
   displayName?: string;
   /** 头像值：""（首字母）/ "icon:<name>" / "img:<hash>" */
@@ -121,6 +112,7 @@ export default function Sidebar({
   quota,
   onOpenUsage,
   onLogout,
+  isAdmin = false,
 }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -151,6 +143,10 @@ export default function Sidebar({
       : sessions;
     return groupSessions(filtered);
   }, [sessions, query]);
+
+  /** 模块入口：桌面 12 项 / 手机 8 项（管理员各 +1），全部来自 lib/nav.ts。
+   *  手机上的判据是 overlay（这一栏此时就是抽屉、也是唯一的模块入口）。 */
+  const railNav = useMemo(() => chatRailNav(isAdmin, overlay), [isAdmin, overlay]);
 
   return (
     <aside
@@ -194,21 +190,16 @@ export default function Sidebar({
           </span>
         </button>
       )}
-      {/* 四屏入口：每日委托 / 总结 / 打卡 / 设置。
-          图标在上、文字在下 —— 之前是四个纯图标方块，用户认不出是干什么的（10-14 反馈）。
-          2×2 而不是四个横排：横排时每格只有 45px 宽，放不下文字，热区也窄。
-          校园工具集已从这里移走，改挂在对话栏（它是"发消息前顺手用一下"的入口，
-          放在侧栏等于让它和会话列表抢轴线的注意力，也够不着使用场景）。 */}
-      <div className="mt-3 grid grid-cols-2 gap-1.5">
-        {CONSOLE_LINKS.map((it) => (
-          <Link
-            key={it.href}
-            href={it.href}
-            className="side-entry"
-            title={it.full}
-            aria-label={it.full}
-          >
-            <CornIcon name={it.icon} className="h-[18px] w-[18px]" />
+      {/* 模块入口：来自 lib/nav.ts（和桌面侧栏、手机底部 tab、「更多」面板同一份清单）。
+          2026-11-15 之前这里是硬编码的 4 个金描边按钮，手机上进得来出不去 ——
+          手机没有底部 tab，抽屉就是唯一的模块入口，缺项等于断头路。
+          3 列紧凑格而不是 2 列大按钮：12 个金框会变成一堵"按钮墙"，
+          导航应该像列表。图标走 NavIcon（不是 CornIcon）—— 同一个功能在
+          底部 tab 和这里必须是同一个图案，否则会像两件事。 */}
+      <div className="side-nav mt-3">
+        {railNav.map((it) => (
+          <Link key={it.href} href={it.href} className="side-entry" title={it.label}>
+            <NavIcon name={it.icon} className="side-entry-ico" />
             <span>{it.label}</span>
           </Link>
         ))}

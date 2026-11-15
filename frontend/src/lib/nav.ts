@@ -159,6 +159,24 @@ export function mobileMoreNav(isAdmin: boolean | undefined): NavItem[] {
   );
 }
 
+/**
+ * 对话页左栏的模块入口（桌面轨道与手机抽屉共用同一份）。
+ *
+ * 为什么需要它（2026-11-15）：对话页不在 `(console)` 外壳里，它自己那栏曾经
+ * 硬编码了 4 个入口（委托 / 总结 / 待办 / 设置），和这里完全没有关系 —— 于是
+ *   · 手机上这一栏是**唯一**的模块入口（对话页没有底部 tab），却少了
+ *     资料库 / 论坛 / 学习路径 / 打卡 / 工具集 / 看板，用户"出不去"；
+ *   · 硬编码的两个恰好在 NAV 里标着 `desktopOnly`（手机上彻底不出现），
+ *     同一份清单在两处给出了相反的答案。
+ * 所以对话页也改从这里派生：排除「对话」自己（当前页），
+ * 手机（narrow）按 `desktopOnly` 语义过滤，桌面保留全部。
+ *
+ * 桌面 12 项 / 手机 8 项（管理员各 +1）。渲染在 3 列紧凑格里，见 `.side-entry`。
+ */
+export function chatRailNav(isAdmin: boolean | undefined, narrow: boolean): NavItem[] {
+  return visibleNav(isAdmin).filter((it) => it.href !== "/" && !(narrow && it.desktopOnly));
+}
+
 /** 首页是精确匹配；其余按前缀匹配，将来 /knowledge/xxx 也能点亮同一项。 */
 export function isCurrentNav(href: string, here: string): boolean {
   return href === "/" ? here === "/" : here === href || here.startsWith(href + "/");

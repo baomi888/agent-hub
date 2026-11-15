@@ -96,36 +96,62 @@
   transform: scaleX(0);
 }
 
-/* 侧栏四屏入口（每日委托 / 总结 / 打卡 / 设置）。
-   图标在上、文字在下拼成 2×2 —— 之前是四个纯图标方块，用户认不出是干什么的。
-   视觉沿用 .btn-import 的金描边（次按钮=可点但不抢主操作），只把排布换成纵向：
-   两字标签 + 56px 高，热区比原来的 40px 方块明显更大，也好按。 */
+/* 对话页左栏的模块入口（2026-11-15 重做）。
+   原来是硬编码的 4 个金描边按钮拼成 2×2（每日委托 / 总结 / 待办 / 设置）。
+   三个后果：① 清单和 lib/nav.ts 脱钩，手机抽屉里只有这 4 项，而对话页在手机上
+   **没有底部 tab**，等于资料库 / 论坛 / 学习路径 / 打卡 / 工具集 / 看板全部无路可走；
+   ② 其中「委托 / 总结」在 NAV 里恰恰标着 desktopOnly（手机上彻底不出现），
+   同一份清单两处给了相反的答案；③ 12 个金框会变成一堵"按钮墙"。
+
+   现在是 3 列紧凑格：图标在上、两到四个字在下，**默认不描边**（导航该像列表，
+   不像 12 个主按钮），只在 hover / 当前页时给底色与描边。
+   桌面 12 项 = 4 行整，手机 8 项 = 3+3+2，末行居中（flex-wrap + center，
+   grid 的末行只能左对齐）。 */
+.side-nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-4);
+}
 .side-entry {
+  /* 三列：减掉两道 gap 再三等分。用 flex-basis 而不是 grid，是为了末行能居中 */
+  flex: 0 0 calc((100% - var(--space-4) * 2) / 3);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: var(--space-3);
-  min-height: 56px;
-  padding: var(--space-7) var(--space-4);
-  border: 1px solid var(--accent);
+  min-height: 46px;
+  padding: var(--space-6) var(--space-4);
+  /* 透明描边而不是 none：hover 时只换颜色，不因为多出 1px 边框而抖一下 */
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background: transparent;
   color: var(--text-2);
-  font-size: var(--fs-sm);
-  letter-spacing: var(--ls-tight);
-  line-height: 1;
+  /* 13px 而不是 14px：「学习路径」四个字 4×13=52px，格子内容宽 57px；
+     14px 时会溢出到 ellipsis 变成「学习路…」 */
+  font-size: var(--fs-xs);
+  letter-spacing: 0;
+  line-height: 1.15;
+  white-space: nowrap;
   cursor: pointer;
   transition: var(--t-color);
 }
-.side-entry svg {
-  /* 图标比文字深一档：缩到 18px 后描边变细，颜色再淡就糊成一片 */
+.side-entry-ico {
+  /* 18px：和底部 tab 的图标同尺寸。颜色比文字深一档 —— 缩到 18px 后描边变细，
+     颜色再淡就糊成一片（沿用原 .side-entry svg 的结论） */
+  width: 18px;
+  height: 18px;
   color: var(--ink);
 }
 .side-entry:hover {
   background: var(--fill-2);
-  border-color: var(--accent-ink);
+  border-color: var(--accent-line);
   color: var(--ink);
+}
+.side-entry[aria-current="page"] {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--accent-ink);
 }
 
 /* 两种进料入口：我上传 / 它去搜 */

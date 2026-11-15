@@ -27,6 +27,10 @@ NAV_TS = SRC / "lib" / "nav.ts"
 TABBAR_TSX = SRC / "components" / "console" / "ConsoleTabBar.tsx"
 LAYOUT_TSX = SRC / "components" / "console" / "ConsoleLayout.tsx"
 HOME_TSX = SRC / "app" / "page.tsx"
+# 对话页左栏（桌面轨道 / 手机抽屉）。它不在 (console) 外壳里，自己拿一份导航 ——
+# 2026-11-15 之前是硬编码 4 项，手机上进得来出不去。
+SIDEBAR_TSX = SRC / "components" / "Sidebar.tsx"
+COMPONENTS_CSS = SRC / "app" / "styles" / "components.css"
 # 工具集页和其它页一样住在 (console) 里，由 layout 统一挂外壳（2026-11-13 第三轮）
 TOOLS_PAGE = SRC / "app" / "(console)" / "tools" / "page.tsx"
 # 旧路由组。它必须一直是"不存在"的状态：两个组各有一份 tools/page.tsx 会撞路由，
@@ -127,6 +131,62 @@ def _strip_comments(text: str) -> str:
     """
     text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
     return re.sub(r"(?m)^\s*//.*$", "", text)
+
+
+# 一条 NAV 记录：`{` 到 `}` 之间没有嵌套花括号，里面带一个 `href: "..."`。
+# 先剥注释再匹配，否则"解释某个入口为什么被移出"的注释会被当成真记录
+# （`{ href: "/x" ... }` 这种就写在注释里过）。
+_NAV_ENTRY_RE = re.compile(r"\{[^{}]*href:\s*\"([^\"]+)\"[^{}]*\}")
+
+
+def _nav_entries(nav: str) -> dict[str, str]:
+    """把 nav.ts 解析成 {href: 这条记录的原文}，用来在测试里复算筛选结果。
+
+    为什么不直接在 TS 里跑：前端没有测试运行器，而"抽屉里到底有几项"
+    恰恰是这次事故的判据。用 6 行 Python 复算，比"断言源码里出现了某个函数名"
+    更能发现"某个入口悄悄消失了"。
+    """
+    out: dict[str, str] = {}
+    for m in _NAV_ENTRY_RE.finditer(_strip_comments(nav)):
+        out[m.group(1)] = m.group(0)
+    # 硬约束：解析不到就说明正则失效了，不能靠"空集合也满足所有条件"混过去
+    assert len(out) >= 13, f"nav.ts 只解析出 {len(out)} 条，正则可能失效：{sorted(out)}"
+    return out
+
+
+def _ts_func(src: str, name: str) -> str:
+    """取 `export function name(...) { ... }` 的函数体（朴素括号计数）。
+
+    用来验"筛选逻辑本身"：只断言 nav.ts 里的**数据**是对的，还不够 ——
+    把 `visibleNav(isAdmin)` 写成 `visibleNav(true)`（等于对所有人展示开发者页面），
+    数据一个字没变，所有数据断言照样绿。反证第 ④ 条就是这么漏掉的。
+    """
+    i = src.find(f"export function {name}(")
+    assert i >= 0, f"nav.ts 里没有 {name}()"
+    brace = src.index("{", i)
+    depth = 0
+    for j in range(brace, len(src)):
+        if src[j] == "{":
+            depth += 1
+        elif src[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return src[brace + 1 : j]
+    raise AssertionError(f"{name}() 没有闭合")
+
+
+def _chat_rail(entries: dict[str, str], is_admin: bool, narrow: bool) -> list[str]:
+    """`chatRailNav()` 的等价实现：排除「对话」自己、按 adminOnly / desktopOnly 过滤。"""
+    rails: list[str] = []
+    for href, body in entries.items():
+        if href == "/":
+            continue
+        if "adminOnly: true" in body and not is_admin:
+            continue
+        if narrow and "desktopOnly: true" in body:
+            continue
+        rails.append(href)
+    return rails
 
 
 def _last_display(rule: str) -> str | None:
@@ -467,6 +527,99 @@ def test_home_still_has_a_way_into_the_console():
     assert '"/reminders"' in nav or "/reminders" in nav, (
         "共享导航清单里没有待办 —— 侧栏和 tab 都靠它，删了等于两个入口一起断"
     )
+
+
+def test_home_rail_is_derived_from_the_shared_nav_list():
+    """对话页左栏不许再自己写一份清单（2026-11-15 事故）。
+
+    事故经过：`Sidebar.tsx` 里硬编码了 4 个入口（委托 / 总结 / 待办 / 设置），
+    和 `lib/nav.ts` 毫无关系。而对话页在手机上**没有底部 tab** —— 这一栏就是
+    唯一的模块入口。于是手机上资料库 / 论坛 / 学习路径 / 打卡 / 工具集 / 看板
+    全部无路可走；更荒谬的是硬编码里那两个「委托 / 总结」在 NAV 里恰恰标着
+    `desktopOnly`（手机上彻底不出现），同一份清单在两处给出了相反的答案。
+
+    这条守的是"同源"本身：一旦有人又把 href 写回组件里，两处清单立刻可以再次
+    漂移 —— 而漂移的表现是"页面全都正常、接口全都 200、某个入口就是不见了"。
+    """
+    sb = _strip_comments(_read(SIDEBAR_TSX))
+    assert "@/lib/nav" in sb, "对话页左栏没有引用共享导航清单"
+    assert "chatRailNav(" in sb, (
+        "对话页左栏没有走 chatRailNav()：自己筛一遍必然漏掉 adminOnly / desktopOnly 的语义"
+    )
+    # 筛选逻辑本身也要验：只验 nav.ts 的数据，把 visibleNav(isAdmin) 改成
+    # visibleNav(true) 这种"对所有人展示开发者页面"的错误一个都拦不住（反证第 ④ 条）。
+    body = _ts_func(_strip_comments(_read(NAV_TS)), "chatRailNav")
+    assert "visibleNav(isAdmin)" in body, "chatRailNav 没有按 isAdmin 过滤，管理员入口会漏给别人"
+    assert 'it.href !== "/"' in body, "chatRailNav 把「对话」自己也列进去了（当前页不该出现在导航里）"
+    assert re.search(r"!\s*\(\s*narrow\s*&&\s*it\.desktopOnly\s*\)", body), (
+        "chatRailNav 没有在窄屏排除 desktopOnly —— 手机上会冒出 /flow 这种窄屏做不了的页面"
+    )
+    # 组件里再出现任何一条站内路径字面量，就是"第二份清单"重新长出来的信号
+    stray = re.findall(r"\"(/[a-z][a-z0-9/_-]*)\"", sb)
+    assert not stray, f"Sidebar.tsx 里还有硬编码的站内路径：{stray}"
+
+
+def test_home_rail_covers_every_mobile_destination():
+    """手机上能到的地方，抽屉里必须都有 —— 一个都不能少。
+
+    2026-11-15 实测：抽屉里只有 4 项，`/knowledge`、`/forum`、`/path`、
+    `/checkin`、`/tools`、`/dashboard` 全部缺失。所以这里不是抽查几个，
+    而是把 nav.ts 复算一遍求差集：手机可达集合 - 抽屉集合 = ∅。
+    同时反向确认 `desktopOnly` 在窄屏确实被排除（否则手机上会冒出
+    /flow 这种"窄屏根本做不了"的页面）。
+    """
+    entries = _nav_entries(_read(NAV_TS))
+    for is_admin in (False, True):
+        rail = _chat_rail(entries, is_admin, narrow=True)
+        reachable = [
+            href
+            for href, body in entries.items()
+            if href != "/"
+            and "desktopOnly: true" not in body
+            and ("adminOnly: true" not in body or is_admin)
+        ]
+        assert reachable, "手机可达集合为空，解析肯定错了"
+        missing = sorted(set(reachable) - set(rail))
+        assert not missing, f"手机抽屉里缺这些入口（管理员={is_admin}）：{missing}"
+        # 三个最容易"顺手被移出移动端"的页面单独点名，可读性优先于求差集
+        for href in ("/knowledge", "/forum", "/path", "/checkin"):
+            assert href in rail, f"手机抽屉里没有 {href}"
+        # 反向：窄屏不该出现桌面专属页
+        for href in ("/flow", "/delegate", "/report", "/cet"):
+            assert href not in rail, f"窄屏抽屉里不该有 {href}（nav.ts 标了 desktopOnly）"
+
+    # 桌面拿全量：把 12 条都端上来，管理员多出看板与工作流
+    desk_admin = _chat_rail(entries, True, narrow=False)
+    assert len(desk_admin) == len(entries) - 1, (
+        f"桌面轨道应当是「除对话外全量」，实际 {len(desk_admin)}/{len(entries) - 1}"
+    )
+    for href in ("/delegate", "/report", "/cet", "/flow", "/dashboard"):
+        assert href in desk_admin, f"桌面轨道丢了 {href}"
+    # 非管理员桌面不应该看见两个开发者页面
+    desk_user = _chat_rail(entries, False, narrow=False)
+    assert "/flow" not in desk_user and "/dashboard" not in desk_user
+
+
+def test_home_rail_is_three_compact_columns():
+    """模块格是 3 列紧凑格，末行居中 —— 不是原来 2×2 的金描边大按钮。
+
+    12 个金框会变成一堵"按钮墙"：导航应该像列表，主操作才描金边。
+    而 8 项（手机非管理员）除以 3 余 2，`grid` 的末行只能左对齐，
+    所以用 `flex-wrap` + `justify-content: center` —— 与「更多」面板同一处理。
+    """
+    css = _strip_comments(_read(COMPONENTS_CSS))
+    nav = _css_rule(css, ".side-nav")
+    assert "flex-wrap: wrap" in nav, "模块格没有换行——项数一变就会挤成一行"
+    assert "justify-content: center" in nav, "末行没有居中，8 项时会缺一角"
+
+    entry = _css_rule(css, ".side-entry")
+    basis = _all_decls(entry, "flex")
+    assert any("/ 3)" in v for v in basis), f"模块格不是三列（flex: {basis}）"
+    # 13px 是量出来的下限：「学习路径」四个字在 65px 格子里正好不截断
+    assert "var(--fs-xs)" in " ".join(_all_decls(entry, "font-size")), (
+        "模块格字号不是 --fs-xs（14px 会把「学习路径」截成「学习路…」）"
+    )
+    assert "nowrap" in entry, "标签允许换行的话，四个字的项会把整行撑高"
 
 
 def test_tabbar_closes_on_navigation():
