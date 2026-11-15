@@ -425,7 +425,7 @@ venv/Scripts/python.exe -m pytest tests -q     # 2037 项
 | 第 3 期版本更新怎么写的 | [`docs/版本更新_第3期_2026-11-15.md`](docs/版本更新_第3期_2026-11-15.md) |
 | 部署与排障 | [`部署说明.md`](部署说明.md) |
 | AI 模块那一轮的完整交付 | [`docs/AI模块-20261013/`](docs/AI模块-20261013/README.md) |
-| 变更历史 | [`CHANGELOG.md`](CHANGELOG.md)（停在 10-16，尚未补齐这三周） |
+| 变更历史 | [`CHANGELOG.md`](CHANGELOG.md)（按日回填至 2026-11-15） |
 | 参与开发 | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 
 ---
