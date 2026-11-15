@@ -56,8 +56,12 @@ TARGET_UPEM = 2048
 
 def gb2312_chars():
     out = set()
-    for hi in range(0xA1, 0xFE):
-        for lo in range(0xA1, 0xFE):
+    # ★ 上界必须是 0xFF 不是 0xFE：GB2312 的区码/位码都到 0xFE，
+    #   `range(0xA1, 0xFE)` 会丢掉**每一区的最后一个字**（low=0xFE 那一列）
+    #   和最后一个区（hi=0xFE）。2026-11-15 实测漏了 威 掐 摸 晓 浸 牺 玄 等，
+    #   于是这些字在 Noto Sans 子集里也没有字形，落到系统宋体上。
+    for hi in range(0xA1, 0xFF):
+        for lo in range(0xA1, 0xFF):
             try:
                 out.add(bytes([hi, lo]).decode("gb2312"))
             except Exception:

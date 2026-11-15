@@ -59,6 +59,14 @@ langgraph-checkpoint-sqlite>=3.1
 python-dotenv>=1.0,<2
 pydantic>=2.0,<3
 
+# ---------- 字体子集（工具/测试用，不在运行路径上）----------
+# tools/subset_fonts_project.py 要重新裁 woff2；tests/test_font_subset_coverage.py
+# 要读 woff2 的 cmap 校验"界面上出现的字都在子集里"。
+# 故意不加 try/except 跳过：这条守卫一旦静默跳过，就等于没有守卫
+# （2026-11-15「坛」字回退成宋体，就是没有守卫才由用户截图发现的）。
+fonttools>=4.40,<5
+brotli>=1.1,<2
+
 # ---------- 图片处理 ----------
 # 聊天附件压缩可缺省降级；头像上传会在启动时 import Pillow，因此这里是硬依赖。
 pillow>=10.0,<13
