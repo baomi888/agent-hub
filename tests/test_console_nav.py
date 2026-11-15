@@ -462,19 +462,38 @@ def test_more_panel_is_two_columns_not_three():
 
 
 def test_console_only_pages_are_kept_off_mobile():
-    """移出移动端的三个模块必须真的标了 desktopOnly（且桌面仍可见）。
+    """桌面专属只剩「四六级」与「工作流」，委托 / 总结**必须**回到移动端。
 
-    2026-11-14 决定：每日委托 / 总结 / 四六级 只留桌面。
-    理由分别是「任务生成后实际落在对话」「对比型报表窄屏读不出结论」「备考要排计划、手机不适用」。
-    这一条双向守：既防止有人改回去，也防止有人顺手把它们从 NAV 里整条删掉
-    （那样桌面侧栏会少三个入口 —— "移出移动端"从来不是"删功能"）。
+    2026-11-14 决定把 每日委托 / 总结 / 四六级 只留桌面；
+    2026-11-15 晚用户报「我的手机端的每日总结和每日委托去哪里了？看不到」，
+    前两个被撤回移动端（详见 nav.ts 那两条的注释），四六级保持桌面专属。
+    所以这条现在守两件事：
+
+      · `/cet`、`/flow` 仍然标着 desktopOnly —— 四六级要排计划做模考，
+        工作流要编辑 200 字符的 JSON，窄屏确实做不了；
+      · `/delegate`、`/report` **不许** 再标 desktopOnly —— 这是撤回点，
+        改回去等于把同一个 bug 再种一遍：手机上它们只有首屏卡这一条路，
+        而首屏卡片只在 `messages.length === 0` 时渲染，聊过一句就全没了。
     """
-    nav = _read(NAV_TS)
-    for href in ("/delegate", "/report", "/cet"):
-        m = re.search(r'\{ href: "' + href + r'"[^}]*\}', nav)
+    nav = _strip_comments(_read(NAV_TS))
+    for href in ("/cet", "/flow"):
+        m = re.search(r'\{[^{}]*href: "' + href + r'"[^{}]*\}', nav, re.S)
         assert m, f"nav.ts 里找不到 {href}，它应该还在桌面侧栏里"
         entry = m.group(0)
         assert "desktopOnly: true" in entry, f"{href} 没有标 desktopOnly，手机上会重新出现"
+
+    for href in ("/delegate", "/report"):
+        m = re.search(r'\{[^{}]*href: "' + href + r'"[^{}]*\}', nav, re.S)
+        assert m, f"nav.ts 里找不到 {href}，它应该还在导航清单里"
+        entry = m.group(0)
+        assert "desktopOnly" not in entry, (
+            f"{href} 又被标成 desktopOnly 了 —— 手机上会彻底没有入口"
+            "（2026-11-15 用户报过「手机端看不到每日总结和每日委托」）"
+        )
+        assert "mobileTab" not in entry, (
+            f"{href} 不该占底部 tab 格位：底栏只有 对话/论坛/打卡 + 更多，"
+            "它该落在「更多」面板里"
+        )
 
 
 # ==================== ④ 首页刻意不挂 ====================
@@ -589,8 +608,12 @@ def test_home_rail_covers_every_mobile_destination():
         for href in ("/knowledge", "/forum", "/checkin", "/reminders"):
             assert href in rail, f"手机抽屉里没有 {href}"
         # 反向：窄屏不该出现桌面专属页
-        for href in ("/flow", "/delegate", "/report", "/cet"):
+        for href in ("/flow", "/cet"):
             assert href not in rail, f"窄屏抽屉里不该有 {href}（nav.ts 标了 desktopOnly）"
+        # ★ 2026-11-15 晚撤回点：委托 / 总结必须回到手机抽屉里。
+        #   它们曾经只靠首屏那两张卡当入口，而首屏在聊过一句之后就整块消失。
+        for href in ("/delegate", "/report"):
+            assert href in rail, f"手机抽屉里又没有 {href} 了"
 
     # 桌面拿全量：把 12 条都端上来，管理员多出看板与工作流
     desk_admin = _chat_rail(entries, True, narrow=False)
