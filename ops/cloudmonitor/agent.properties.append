@@ -1,0 +1,13 @@
+# ===== 2026-11-15 本地覆盖：放宽自监控阈值，避免构建/部署把 agent 打死 =====
+# 事故：2026-11-14 22:09:32 io read speed=3378KB/s 连续 4 次超 256KB/s => will exit
+# 这台机器一次 next build / cp -a / chroma 447MB 加载都能到几 MB/s，256KB/s 太紧。
+#
+# ★ 单位是「字节/秒」，不是 KB/s。实测填 20480 后日志打印 [>=20.00KB/s]，
+#   即 20480/1024 = 20，除以一次 1024 就显示为 KB/s。默认 256KB/s = 262144。
+#   下面给 20MB/s = 20*1024*1024 = 20971520，留约 6 倍余量（事故峰值 3.3MB/s）。
+agent.resource.io.read.speed.limit=20971520
+agent.resource.io.write.speed.limit=20971520
+# 连续超限次数 4 -> 8，给偶发 IO 尖峰留缓冲
+agent.resource.exceed.limit=8
+# 24 小时内"不再拉起"的累计次数 4 -> 8
+agent.status.resource.count=8

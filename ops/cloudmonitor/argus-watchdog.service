@@ -1,0 +1,8 @@
+[Unit]
+Description=argusagent watchdog (recover cloud monitor agent after self-kill)
+Documentation=file:///usr/local/bin/argus-watchdog.sh
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/argus-watchdog.sh

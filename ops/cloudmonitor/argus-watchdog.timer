@@ -1,0 +1,11 @@
+[Unit]
+Description=Run argusagent watchdog every 5 minutes
+
+[Timer]
+OnBootSec=120
+OnUnitActiveSec=300
+AccuracySec=30
+Unit=argus-watchdog.service
+
+[Install]
+WantedBy=timers.target
