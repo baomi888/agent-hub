@@ -735,3 +735,86 @@ def test_admin_has_a_reported_tab():
     assert '"reported"' in page, "管理台没有举报 tab"
     assert "adm.stats.reported" in page, "举报 tab 没有计数"
     assert "adm?.reported" in page, "举报 tab 没有数据源"
+
+
+# ==================== 左上角「回工作台」 ====================
+
+
+def test_home_link_says_what_it_does_on_every_width():
+    """左上角那个方块必须说清"点了回工作台"。
+
+    2026-11-15 用户截图来问「左上角这个小图标是什么」。查下来是三件事叠在一起：
+
+      ① 桌面端它旁边是「知穗论坛」四个字，站名即入口是 Web 的通用惯例，
+         但鼠标悬停没有任何说明（站内其它图标按钮都有 title）；
+      ② 手机端 .tb-logo-t 一藏，这一行只剩一个 28px 的方块；
+      ③ 方块里画的是「待办清单」图标（CornIcon name="task"），
+         既不像按钮，也和"主页"没有半点关系。
+
+    三条缺一条都还是"用户看不懂"。所以这里守三样：
+    桌面有 title、手机有可见文字、手机块里换成左箭头。
+    """
+    page = _read(FORUM_PAGE)
+    m = re.search(r'<Link href="/" className="tb-logo"[^>]*>', page)
+    assert m, "列表页找不到回工作台的 logo 链接（选择器变了？）"
+    tag = m.group(0)
+    assert 'title="返回工作台"' in tag, (
+        "桌面端没有悬停说明 —— 鼠标用户看不出这个方块能回工作台"
+    )
+    assert 'aria-label="返回工作台"' in tag, "读屏器也没拿到这个链接的用途"
+
+    # 手机端那三个字必须真的在 DOM 里。只写 CSS 或只写 aria-label 都不算：
+    # 触摸屏上没有 hover，读屏器也不是每个用户都开。
+    assert re.search(r'<span className="tb-home-t">\s*工作台\s*</span>', page), (
+        "手机端那句话没写出来，等于这一行还是一个光秃秃的方块"
+    )
+
+    css = _read(FORUM_TB)
+    assert re.search(r"\.tb-home-t\s*\{[^}]*display:\s*none", css), (
+        "「工作台」默认就该藏着：桌面端旁边已经有站名，多这三个字是重复"
+    )
+
+    block = css[css.index("@media (max-width: 760px)") :]
+    assert re.search(r"\.tb-home-t\s*\{\s*display:\s*inline-block", block), (
+        "760 断点里没让「工作台」出现 —— 手机上依旧只剩一个方块"
+    )
+    assert re.search(r"\.tb-mark-brand\s*\{\s*display:\s*none", block) and re.search(
+        r"\.tb-mark-back\s*\{\s*display:\s*block", block
+    ), "手机端方块里的图标没换成左箭头，「待办清单」在手机上不表达「返回」"
+    # ★ 必须是 BackMark（纯 currentColor 的箭头），不能是 CornIcon 的 back：
+    #   后者的 V 形是写死的品牌金，压在 --accent 方块上只剩 1.5:1，
+    #   屏幕上只看得见一条横线（第一版就是这么上线的）。
+    #   早先这条断言写的是 `<CornIcon name="back"` —— 那段字符串恰好也出现在
+    #   组件的注释里，于是注释一在就恒绿。改成认组件名，注释里的文字骗不过它。
+    assert re.search(
+        r'<span className="tb-mark-back">\s*<BackMark />\s*</span>', page
+    ), "手机端那个左箭头不是纯 currentColor 的 BackMark，压在金底上会看不见"
+
+
+def test_mobile_hides_the_site_name_without_losing_the_h1():
+    """手机端藏站名要用 sr-only，不能 display:none。
+
+    列表页那句「知穗论坛」是整页唯一的 h1。`display: none` 会把标题连同
+    无障碍树一起摘掉 —— 视觉上看不出任何区别，所以这个坑一直是隐形的
+    （它比"手机上看不见标题"更糟：读屏用户会听到一个没有标题的页面）。
+    """
+    css = _read(FORUM_TB)
+    block = css[css.index("@media (max-width: 760px)") :]
+    m = re.search(r"\.tb-logo-t\s*\{([^}]*)\}", block)
+    assert m, "760 断点里没有处理站名"
+    body = m.group(1)
+    assert "display: none" not in body, (
+        "站名用了 display:none，唯一那个 h1 从无障碍树里消失了（要 sr-only）"
+    )
+    assert "clip-path" in body and "1px" in body, "sr-only 的写法不完整，标题会真的显形"
+    assert re.search(r'<h1 className="tb-logo-t">知穗论坛</h1>', _read(FORUM_PAGE)), (
+        "列表页的标题不是 h1 了"
+    )
+
+
+def test_detail_logo_also_explains_itself():
+    """详情页那个方块指向论坛列表，右侧已有「返回列表」，只需补悬停说明。"""
+    detail = _read(FORUM_DETAIL)
+    m = re.search(r'<Link href="/forum" className="tb-logo"[^>]*>', detail)
+    assert m, "详情页找不到 logo 链接"
+    assert "title=" in m.group(0), "详情页的 logo 没有悬停说明"

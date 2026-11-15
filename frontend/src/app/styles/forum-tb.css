@@ -87,7 +87,11 @@
   place-items: center;
   border-radius: 8px;
   background: var(--accent);
+  /* 方块里一律用「压在金底上的墨色」(#2A2113 / #231C11)，不跟 --ink 走：
+     深色主题下 --ink 是浅米，压亮金只有 2:1 —— 里面的图标会糊成一片。 */
+  color: var(--on-accent);
   box-shadow: var(--shadow-1);
+  transition: filter 0.16s, transform 0.16s;
 }
 
 /* 站名是这一页的 h1，但外观要保持"logo 旁边那行字"：
@@ -98,6 +102,37 @@
   font-weight: 700;
   line-height: 1.4;
   white-space: nowrap;
+}
+
+/* ---------- 回工作台：手机端才露出的那一段 ----------
+   桌面端这里只有「知穗论坛」四个字（站名即入口，是 Web 的通用惯例），
+   手机端站名让位给搜索框，于是「工作台」三个字 + 块里的左箭头接替它。
+
+   两个图标各自包一层 span，而不是给 <CornIcon> 直接挂 display:none ——
+   CornIcon 的 <svg style="display:block"> 是内联样式，会盖掉类里的
+   display，改不动。包一层是最省事的解法。 */
+.tb-home-t {
+  display: none;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-2);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.tb-mark-back {
+  display: none;
+}
+
+/* 它现在是个真的按钮，按下和悬停都得有反馈 ——
+   只有 cursor:pointer 的话，触摸屏上根本看不出点没点中。 */
+.tb-logo:hover .tb-home-t {
+  color: var(--ink);
+}
+.tb-logo:hover .tb-logo-mark {
+  filter: brightness(0.93);
+}
+.tb-logo:active .tb-logo-mark {
+  transform: translateY(1px);
 }
 
 /* 搜索框：不做成胶囊输入条，只做一条下划线式搜索 ——
@@ -1631,7 +1666,25 @@
     grid-template-columns: auto minmax(0, 1fr) auto;
   }
 
-  .tb-logo-t { display: none; }
+  /* 站名让位给「工作台」那三个字。
+     ★ 用 sr-only 而不是 display:none：列表页这句「知穗论坛」是整页唯一的
+       h1，display:none 会连同读屏器一起摘掉（视觉上看不出区别，所以这个
+       坑一直没被发现）。视觉上仍然是「看不见」，布局也不占位。 */
+  .tb-logo-t {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    border: 0;
+  }
+
+  /* 方块里的图标换成左箭头：手机端这行只剩它一个图形，
+     「待办清单」既不像按钮也不指向主页。 */
+  .tb-mark-brand { display: none; }
+  .tb-mark-back { display: block; }
+  .tb-home-t { display: inline-block; }
 
   .tb-new {
     min-width: 40px;

@@ -341,7 +341,9 @@ export default function ForumTopicPage() {
     <div className="tb-root">
       <header className="tb-top">
         <div className="tb-top-in">
-          <Link href="/forum" className="tb-logo" aria-label="返回论坛">
+          {/* 详情页的方块指向论坛列表，右侧已经有「返回列表」这四个字，
+              不需要像列表页那样再补一段文字；补个悬停说明即可。 */}
+          <Link href="/forum" className="tb-logo" title="返回论坛列表" aria-label="返回论坛">
             <span className="tb-logo-mark">
               <CornIcon name="task" className="h-4 w-4" />
             </span>

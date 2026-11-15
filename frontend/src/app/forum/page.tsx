@@ -65,6 +65,36 @@ const SORTS: { key: ForumSort; label: string }[] = [
 ];
 
 /**
+ * 左上角方块在手机端用的左箭头。
+ *
+ * ★ 为什么不直接用 CornIcon 里那个 back 图标：它的 V 形写死了品牌金
+ *   `#F5B840`，而它所在的方块底色是 `--accent`（同样偏金）。两金相叠约
+ *   1.5:1，屏幕上只剩中间那条深色横线 —— 看着像一道减号，不像箭头。
+ *   CornIcon 里 `back` 是为「米色底 + 深棕描边」那个场景画的（详情页的
+ *   「返回列表」按钮），不能为了这一处改掉它。
+ *   这里照同样的形状重画一个，整条描边都走 currentColor。
+ */
+function BackMark() {
+  return (
+    <svg
+      viewBox="0 0 48 48"
+      width={16}
+      height={16}
+      style={{ display: "block" }}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={3.4}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M38 24 H12" />
+      <path d="M21.5 14 L11 24 L21.5 34" />
+    </svg>
+  );
+}
+
+/**
  * 左栏方块里的一个字。
  *
  * 一个字的方案在旧版上线时验过：同一板块三条帖左边全是"答、答、答"，
@@ -657,12 +687,24 @@ export default function ForumPage() {
     <div className="tb-root" ref={rootRef}>
       <header className="tb-top">
         <div className="tb-top-in">
-          {/* 站名就是这一页的 h1。手机上是隐藏的（.tb-logo-t），
-              a11y 上仍有标题存在 */}
-          <Link href="/" className="tb-logo" aria-label="返回工作台">
+          {/* 回工作台。
+              ★ 2026-11-15：桌面端「知穗论坛」这四个字本身就是可点的站名，
+                但它在手机端让位给搜索框（.tb-logo-t → sr-only），于是那一行
+                只剩一个 28px 的方块 —— 方块里画的是「待办清单」图标，
+                既不像按钮，也跟"主页"没有半点关系。用户截图问"这个是什么"。
+                所以手机端方块里换成左箭头，右边补三个字「工作台」：
+                比原来藏起来的四字标题更窄，却把动作说清楚了。
+              title 是桌面端的悬停说明（站内其它图标按钮同样用原生 title）。 */}
+          <Link href="/" className="tb-logo" title="返回工作台" aria-label="返回工作台">
             <span className="tb-logo-mark">
-              <CornIcon name="task" className="h-4 w-4" />
+              <span className="tb-mark-brand">
+                <CornIcon name="task" className="h-4 w-4" />
+              </span>
+              <span className="tb-mark-back">
+                <BackMark />
+              </span>
             </span>
+            <span className="tb-home-t">工作台</span>
             <h1 className="tb-logo-t">知穗论坛</h1>
           </Link>
 
