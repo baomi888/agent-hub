@@ -86,7 +86,7 @@ export interface PublicKbInfo {
  * GET /api/kb/favorites 单条：我收藏的一个公开库。
  *
  * 和广场卡片长得像，但多两件东西 —— 用户明确要求的：
- *   `source` 说明它从哪来（"官方知识库" / "某某 的库"），
+ *   `source` 说明它从哪来（"官方课程库" / "某某 的库"），
  *   `favorited_at` 说明我什么时候收的（列表按它倒序）。
  */
 export interface FavoriteKbInfo {
@@ -94,7 +94,7 @@ export interface FavoriteKbInfo {
   name: string;
   desc: string;
   official: boolean;
-  /** 来源，直接可展示：「官方知识库」/「张三 的库」 */
+  /** 来源，直接可展示：「官方课程库」/「张三 的库」（由后端拼好，前端不加工） */
   source: string;
   /** 作者显示名。官方库是「官方」 */
   owner_name: string;

@@ -255,7 +255,11 @@ export default function LibraryPage() {
         {official.length > 0 && (
           <section className="lib-sec lib-official">
             <div className="lib-sec-head">
-              <span className="eyebrow">官方公开知识库</span>
+              {/* 2026-11-15 第 19 批：「官方公开知识库」读着叠（官方＋公开＋知识库），
+                  改回代码里本来就在用的叫法「官方课程库」。这一区的兄弟眉题是
+                  「我分享的 / 我的收藏库 / 同学分享的」—— 都短，只有它一个五字叠词。
+                  计数的「N 门课程」不动：「官方课程库 · 3 门课程」是自然说法。 */}
+              <span className="eyebrow">官方课程库</span>
               <span className="rule" />
               <span className="lib-count">{official.length} 门课程</span>
             </div>
@@ -378,7 +382,9 @@ export default function LibraryPage() {
                   <div className="lib-fav-main">
                     <b title={k.name}>{k.name}</b>
                     <span className="lib-fav-src">
-                      {/* 用户要求：官方写"来源官方资料库"，个人的写"来源某某 的库" */}
+                      {/* 后端拼好来源串（官方 →「官方课程库」/ 个人 →「某某 的库」），
+                          这里只加「来源」二字，不加工 —— 两个名字在前后端各写一份
+                          就一定会分叉（第 19 批就是靠这条注释发现后端还是旧词的） */}
                       <span className={"lib-src-tag" + (k.official ? " off" : "")}>
                         来源{k.source}
                       </span>

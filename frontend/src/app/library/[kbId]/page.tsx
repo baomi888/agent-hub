@@ -229,7 +229,7 @@ export default function CourseLibraryPage() {
             <h1>{data?.name || "资料库"}</h1>
             <p>
               {data?.official
-                ? "官方公开知识库 · 在线预览或下载"
+                ? "官方课程库 · 在线预览或下载"
                 : "同学分享的资料库 · " +
                   (data?.access === "download" ? "可在线预览、可下载" : "仅可在线预览")}
             </p>

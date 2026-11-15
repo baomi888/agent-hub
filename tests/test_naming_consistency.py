@@ -144,19 +144,57 @@ def test_public_library_uses_the_name_the_user_chose():
 
 # ==================== ②b 后端返回的展示串也算界面文案 ====================
 
+# 广场页「官方」那一区：拿它的眉题当**唯一真名**，别处都往它上对。
+# ★ 必须锚在 section 上，不能全页找第一个 <span className="eyebrow">：
+#   这一页有四个区（官方 / 我分享的 / 我的收藏库 / 同学分享的），
+#   按"第一个"找会随排版顺序变化而静默指错区。
+_OFFICIAL_SECTION = re.compile(
+    r'<section className="lib-sec lib-official">.*?<span className="eyebrow">([^<]+)</span>',
+    re.S,
+)
+
+
+def _official_section_name() -> str:
+    m = _OFFICIAL_SECTION.search(_code(LIBRARY))
+    assert m, "广场页找不到「官方」那一区的眉题（section 的 class 改名了？）"
+    return m.group(1).strip()
+
+
 def test_backend_display_string_matches_ui():
     """`api/kb.py` 收藏接口里的 `source` 是**给用户看的字符串**，不是判定值。
 
     ★ 这条是补漏：第一轮只扫了 frontend/src，源码里干净了，线上「我的资料库」
       页面上却还挂着「来源官方知识库」—— 那句话是后端拼好返回的。
       判定字段是 `official`（布尔），`source` 只负责显示，所以它可以跟着改。
+
+    ★ 2026-11-15 第 19 批改法：**不再写死"应该是哪个词"**，而是要求后端这个
+      字面量与广场眉题**逐字相等**。上一版写死「官方资料库」，于是眉题改成
+      「官方课程库」之后测试照样绿 —— 那就是"两个地方各存一份真名"的老毛病，
+      只是这次真名藏在测试里。现在真名只有一处（眉题），其余三处（后端 source、
+      详情页副标题、收藏行「来源…」）都往上对。
     """
     kb = (ROOT / "api" / "kb.py").read_text(encoding="utf-8")
-    # 按"键值对"精确匹配，不用「"官方知识库" 在整个文件里不出现」那种写法：
-    # 516 行的 docstring 里抄着用户原话（"除了用官方知识库，还可以…"），
-    # 那是历史引语，改了就是篡改记录。
-    assert '"source": "官方知识库"' not in kb, "api/kb.py 的展示串还叫「官方知识库」"
-    assert '"source": "官方资料库"' in kb, "api/kb.py 没有返回「官方资料库」"
+    m = re.search(r'"source":\s*"([^"]+)"\s*if official', kb)
+    assert m, "kb.py 里找不到 source 的官方取值（写法变了？别让这条静默失效）"
+    source = m.group(1)
+    name = _official_section_name()
+
+    assert source == name, (
+        f"后端来源串是「{source}」，广场眉题是「{name}」—— 同一件事两个名字。"
+        "收藏卡片会写成「来源{后端那个}」，而它上面那一区写着另一个词。"
+    )
+    assert "知识库" not in source, f"来源串「{source}」里还有「知识库」（全站只留「公开知识库」这一个整词）"
+
+    # 历史上用过的两个词不许以"展示串"的身份回来
+    for old in ("官方知识库", "官方资料库"):
+        assert f'"source": "{old}"' not in kb, f"api/kb.py 的展示串退回了「{old}」"
+
+    # 详情页副标题也要同词（它是在另一个文件里手写的，最容易漏）
+    detail = _code(SRC / "app" / "library" / "[kbId]" / "page.tsx")
+    assert f'"{name} · 在线预览或下载"' in detail, (
+        f"库详情页的副标题没跟着叫「{name}」（每人各自手写一遍，就会分叉）"
+    )
+
 
 
 # ==================== ③ 同步条：成功时不说话 ====================

@@ -484,7 +484,7 @@ export default function KnowledgePage() {
                     <span className="nm">
                       <b title={k.name}>{k.name}</b>
                       <span>
-                        {/* 来源与作者：官方写"官方知识库"，同学的写"某某 的库" */}
+                        {/* 来源与作者：官方库由后端拼成「官方课程库」，同学的是「某某 的库」 */}
                         来源{k.source}
                         {k.at > 0 && ` · ${fmtWhen(k.at)}上传`}
                       </span>

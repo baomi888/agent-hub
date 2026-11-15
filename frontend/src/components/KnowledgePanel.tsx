@@ -953,7 +953,7 @@ export default function KnowledgePanel({
                     <div className="min-w-0 flex-1">
                       <div className="kb-name">{k.name || k.kb_id}</div>
                       <div className="kb-meta">
-                        {/* 来源与作者：官方的写"官方知识库"，同学的写"某某 的库" */}
+                        {/* 来源与作者：官方库由后端拼成「官方课程库」，同学的是「某某 的库」 */}
                         <span className="kb-src">来源{k.source}</span>
                         <span className="tag">{k.chunks} 片段</span>
                         {k.at > 0 && <span className="tag">{fmtWhen(k.at)}</span>}
