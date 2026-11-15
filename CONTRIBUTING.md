@@ -11,8 +11,8 @@
 
 | 依赖 | 版本 | 说明 |
 | --- | --- | --- |
-| Python | 3.11+（已于 3.11 / 3.12 / 3.13 验证） | 后端运行时 |
-| Node.js | 22+ | 前端（Next.js 16） |
+| Python | 3.10+（生产 3.10，开发 3.12） | 后端运行时。**不要用 3.13**：`chroma-hnswlib` 无对应轮子 |
+| Node.js | ≥ 20.9（推荐 22 LTS） | 前端（Next.js 16 的硬性要求） |
 | DeepSeek API Key | — | 对话大模型（在 `.env` 配置） |
 | Embedding 服务 Key | — | 向量化（如阿里百炼 `text-embedding-v3`） |
 
