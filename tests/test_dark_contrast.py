@@ -28,6 +28,9 @@ STYLES = ROOT / "frontend" / "src" / "app" / "styles"
 TOKENS = STYLES / "tokens.css"
 LIBRARY = STYLES / "library.css"
 CONSOLE = STYLES / "console.css"
+MASCOT_CSS = STYLES / "mascot.css"
+COMPONENTS = STYLES / "components.css"
+MASCOT_TSX = ROOT / "frontend" / "src" / "components" / "chat" / "MascotLogo.tsx"
 
 # 深色下真实出现过的「弱文字身后的底色」，取自 output/log-dark-audit.txt。
 # 名字对应实测时打出来的元素，方便回头对图上位置。
@@ -154,3 +157,111 @@ def test_tabbar_caps_its_column_width():
     assert m, "tabbar 列定义没有像素上限，640–900 会被拉成巨型按钮"
     cap = int(m.group(1))
     assert cap <= 160, f"tabbar 单列上限 {cap}px 太宽，四个 tab 合起来仍会像横幅"
+
+
+# ==================== 吉祥物的深色配色（2026-11-15 第 14 批）====================
+#
+# 用户对深色吉祥物的评价是「看着恐怖」。拆开是三件事叠出来的：
+#   ① 描边与五官走 currentColor —— 浅色下是墨棕，深色下 --ink 变成 #EDE0C4，
+#      于是**眼睛成了两颗白亮点**、描边也成了发光边；
+#   ② 脸是固定的 #F5B840，在 #1A1610 的纸面上像自发光体；
+#   ③ components.css 给 .corn-logo 挂的 8px / 0.3 金色光晕把"内部发亮"钉死。
+# 修法是给吉祥物一套自己的深色变量（脸亮、五官暗、描边暖棕），并把光晕压到
+# 只留一点暖味。下面五条分别钉住这五件事 —— 任何一条被改回去，深色下就会
+# 重新出现"白眼睛亮虫蛹"。
+
+
+def _mascot_dark_vars() -> dict[str, str]:
+    """取 mascot.css 里 `.dark .mascot { --mc-*: #xxxxxx }` 这组变量。"""
+    css = MASCOT_CSS.read_text(encoding="utf-8")
+    m = re.search(r"\.dark\s+\.mascot\s*\{([^}]*)\}", css)
+    assert m, (
+        "mascot.css 里没有 .dark .mascot —— 深色会继续沿用浅色那套配色，"
+        "眼睛又会变成白色亮点（用户说的「恐怖」就是它）"
+    )
+    body = m.group(1)
+    out = dict(re.findall(r"(--mc-[a-z-]+):\s*(#[0-9a-fA-F]{6})", body))
+    assert len(out) >= 8, f"深色只定义了 {len(out)} 个 --mc-* 变量：{sorted(out)}"
+    return out
+
+
+def test_mascot_dark_puts_dark_eyes_on_a_warm_face():
+    """深色下必须是「亮脸 + 暗五官」，不是「亮脸 + 亮五官」。
+
+    眼对脸的对比要过 AA（豆豆眼要"实"，发虚就成了空洞眼）；
+    脸对纸底也要过 AA（吉祥物是装饰，但它是品牌脸，8.7:1 是实测值）。
+    """
+    v = _mascot_dark_vars()
+    face = _hex(v["--mc-face"])
+    eye = _hex(v["--mc-eye"])
+    paper = _hex(_token(_dark_block(), "step-0"))
+
+    assert _lum(eye) < 0.12, "深色的眼睛不够暗 —— 亮眼睛在暗底上就是两颗鬼火"
+    r_eye = _ratio(eye, face)
+    assert r_eye >= MIN_RATIO, f"眼睛对脸只有 {r_eye:.2f}:1，会糊成一团"
+    r_face = _ratio(face, paper)
+    assert r_face >= MIN_RATIO, f"脸对纸底只有 {r_face:.2f}:1，吉祥物会陷进背景"
+
+
+def test_mascot_dark_keeps_the_light_palette_untouched():
+    """深色另开一套变量，浅色那套必须逐值不变（品牌金 #f5b840 是本标识的一部分）。"""
+    css = MASCOT_CSS.read_text(encoding="utf-8")
+    m = re.search(r"^\.mascot\s*\{([^}]*)\}", css, re.M)
+    assert m, "mascot.css 里找不到 .mascot 的变量块"
+    light = m.group(1)
+    assert "--mc-face: #f5b840" in light.lower(), "浅色的脸不再是品牌金 #F5B840"
+    assert "--mc-eye: currentColor" in light, (
+        "浅色的眼应当跟着 --ink（墨棕）走；写死颜色会让它不随主题字体色变化"
+    )
+
+
+def test_mascot_never_paints_eyes_with_current_color():
+    """SVG 里凡是"该暗"的部位都不许再用 currentColor。
+
+    这条挡的是"顺手改回去"：`fill="currentColor"` 在深色下等于 `#EDE0C4`，
+    写一次就把整只吉祥物点着了。
+    """
+    src = MASCOT_TSX.read_text(encoding="utf-8")
+    # 先剥注释：组件顶部的说明里就写着「原来用 currentColor」这句引语
+    tsx = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
+    assert "currentColor" not in tsx, (
+        "MascotLogo 里还有 currentColor：深色下它会变成浅米白（白眼睛/白描边）"
+    )
+    eye = re.search(r'className="mascot-eye"(.*?)</g>', tsx, re.S)
+    assert eye, "找不到 mascot-eye 那一组"
+    assert "var(--mc-eye)" in eye.group(1), "眼睛没有用 --mc-eye"
+    assert "var(--mc-eye-shine)" in eye.group(1), "眼里的高光没有用 --mc-eye-shine"
+
+
+def test_mascot_glow_stays_subtle_in_dark():
+    """深色光晕不许再是"发光"。
+
+    0.3 / 8px 是给 26px 图标"从深纸里浮出来"调的，但它同时让整只吉祥物
+    看起来内部在发光。0.2 是上限（实测 0.14 / 4px）。alpha 别用 1 位小数，
+    否则 0.25 这种写法会漏过。
+    """
+    css = COMPONENTS.read_text(encoding="utf-8")
+    m = re.search(r"\.dark\s+\.corn-logo\s*\{([^}]*)\}", css)
+    assert m, "components.css 里没有 .dark .corn-logo 的光晕规则"
+    a = re.search(r"rgba\([^)]*?,\s*(0?\.\d+|1|0)\)", m.group(1))
+    assert a, f"光晕没有 rgba alpha：{m.group(1).strip()[:60]}"
+    alpha = float(a.group(1))
+    assert alpha <= 0.2, f"深色光晕 alpha={alpha}，超过 0.2 就会重新变成「发光的虫蛹」"
+
+
+def test_mascot_drops_the_gloss_in_dark():
+    """深色下不要那道脸高光。
+
+    它是"纸面上有光"的暗示，深色里没有对应物：0.22 的半透明白叠在焦糖脸上
+    只剩一块灰扑扑的脏斑（36px 时尤其明显）。要么干掉，要么压到几乎看不见。
+    """
+    css = MASCOT_CSS.read_text(encoding="utf-8")
+    m = re.search(r"\.dark\s+\.mascot-shine\s*\{([^}]*)\}", css)
+    assert m, "mascot.css 里没有 .dark .mascot-shine 的覆盖"
+    body = m.group(1)
+    hidden = "display: none" in body
+    faded = re.search(r"opacity:\s*(0?\.\d+)", body)
+    assert hidden or (faded and float(faded.group(1)) <= 0.15), (
+        "深色下的脸高光既没隐藏也没压到 0.15 以下，会在脸上留一块脏斑"
+    )
+

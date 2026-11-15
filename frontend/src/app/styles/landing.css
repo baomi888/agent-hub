@@ -1065,13 +1065,16 @@
     width: 122px;
     height: 16px;
   }
-  /* ★ 放大到 190px 之后，头顶那道 4px 的白色高光会变成一块灰胶布
+  /* ★ 放大到 190px 之后，头顶那道 4px 的脸高光会变成一块灰胶布
      （它在 26px 的导航里是看不见的细节）。只在落地页这只大号的身上隐掉，
-     组件本身不动 —— 别的地方还要它。 */
-  .lp-mascot-fig svg path[stroke="#FFFFFF"] {
+     组件本身不动 —— 别的地方还要它。
+     ★ 2026-11-15 第 14 批：原来按 `path[stroke="#FFFFFF"]` 选，颜色改成
+     CSS 变量（--mc-shine）之后那个选择器就选不中了 —— 大号头上会重新出现
+     那块灰胶布。改成按类名选，颜色怎么改都不影响这条。 */
+  .lp-mascot-fig .mascot-shine {
     display: none;
   }
-  /* ★ 深色下 components.css 给 .corn-logo 挂了 8px 的金色光晕，
+  /* ★ 深色下 components.css 给 .corn-logo 挂了金色光晕，
      那是为 26px 的导航图标调的；放大到 190px 就变成一圈发光的灯管。
      大号这只不需要靠光晕浮出来（它本身就亮），关掉。 */
   .dark .lp-mascot-fig.corn-logo {

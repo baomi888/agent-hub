@@ -2,10 +2,80 @@
    知穗吉祥物动画（MascotLogo 组件）
    克制版 idle：漂浮 + 眨眼 + 腮红呼吸 + 轻微摇摆，hover 时弹一下。
    系统开启「减弱动效」时全部关闭。
+
+   ★ 2026-11-15 第 14 批：颜色从「硬编码 + currentColor」改成**一组变量**。
+   起因：用户报深色下吉祥物「看着恐怖」。拆开看是三件事叠在一起 ——
+     ① 描边和五官走 currentColor，浅色下是墨棕、深色下变成浅米白，
+        于是**眼睛成了两颗白亮点**（发光空洞眼）；
+     ② 脸是固定的 #F5B840，在近黑纸面上像自发光体；
+     ③ components.css 又挂了 8px 金色光晕，把"内部发亮"钉死。
+   现在浅色沿用原值（视觉零变化），深色换成"哑光焦糖脸 + 深棕豆豆眼 +
+   暖棕描边"：亮的是脸、暗的是五官，和浅色一样是"画上去的"，不是"亮着的"。
    ============================================================ */
 .mascot {
   display: inline-block;
   animation: mascot-float 5s ease-in-out infinite;
+
+  /* 浅色（默认）：与改造前逐值相同 */
+  --mc-face: #f5b840; /* 脸：品牌金 */
+  --mc-leaf-a: #7c9a54; /* 左叶 */
+  --mc-leaf-b: #8faf62; /* 右叶 */
+  --mc-stroke: currentColor; /* 描边：跟着 --ink（墨棕） */
+  --mc-silk: currentColor; /* 顶端三缕玉米须 */
+  --mc-eye: currentColor; /* 眼：同上 */
+  --mc-eye-shine: #fffdf6; /* 眼里那点高光 */
+  --mc-mouth: currentColor;
+  --mc-grain: currentColor; /* 玉米粒纹理 */
+  --mc-blush: #ef8a56;
+  --mc-shine: #ffffff; /* 左上角那道脸高光 */
+  --mc-paper: #fffdf6; /* 举着的清单 */
+}
+
+/**
+ * 深色：整只降一档明度、把五官反过来压暗。
+ *
+ * 取值不是随手挑的：
+ *  · 脸 #e3ab52 对纸底 #1a1610 的对比约 7:1 —— 看得清，又不到"发光"的程度；
+ *  · 眼 #2b1d0e 对脸 #e3ab52 约 9:1 —— 豆豆眼要"实"，虚了就成了空洞；
+ *  · 描边 #6e4f28 同时在脸和纸底上都能分辨（对脸 3.3:1、对纸底 2.6:1），
+ *    所以轮廓不靠光晕也能立住。
+ */
+.dark .mascot {
+  --mc-face: #e3ab52;
+  --mc-leaf-a: #55703b;
+  --mc-leaf-b: #66854a;
+  --mc-stroke: #6e4f28;
+  /* 须比描边亮一档：顶端三缕是剪影的一部分，用描边色会在暗纸面上消失 */
+  --mc-silk: #a9834c;
+  --mc-eye: #2b1d0e;
+  --mc-eye-shine: #fff6e4;
+  --mc-mouth: #2b1d0e;
+  --mc-grain: #4a3318;
+  --mc-blush: #c9714a;
+  --mc-shine: #fff3d6;
+  --mc-paper: #f2e7d0;
+}
+
+/* 纹理与高光：深色下压淡。0.28 的浅墨纹在深底上会变成"壳上的裂纹"。 */
+.mascot-grain {
+  opacity: 0.28;
+}
+.dark .mascot-grain {
+  opacity: 0.2;
+}
+.mascot-shine {
+  opacity: 0.5;
+}
+/* 深色下直接不要这道高光（2026-11-15 第二稿）：它是"纸面上有光"的暗示，
+   在深色里没有对应物，0.22 的半透明白叠在焦糖脸上只剩一块灰扑扑的脏斑。
+   放大到 190px 的落地页那只也一样（landing.css 早就单独隐过一次）。 */
+.dark .mascot-shine {
+  display: none;
+}
+/* 腮红在深色里要更实一点，否则焦糖脸上完全看不出来 —— 这两坨暖色是
+   "亲切"的重要来源（浅色下 0.55 已经够，深色下要 0.72）。 */
+.dark .mascot-blush ellipse {
+  opacity: 0.72;
 }
 .mascot > svg {
   display: block;

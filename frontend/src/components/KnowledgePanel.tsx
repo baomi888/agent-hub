@@ -1007,8 +1007,8 @@ export default function KnowledgePanel({
                           title={bound ? "取消绑定" : "绑定到当前对话"}
                           aria-label={
                             bound
-                              ? `取消绑定公开资料库：${k.name || k.kb_id}`
-                              : `绑定公开资料库到当前对话：${k.name || k.kb_id}`
+                              ? `取消绑定公开知识库：${k.name || k.kb_id}`
+                              : `绑定公开知识库到当前对话：${k.name || k.kb_id}`
                           }
                           aria-pressed={bound}
                           onClick={() => onBind(bound ? null : k.kb_id)}

@@ -14,13 +14,17 @@
   font-weight: 500;
 }
 
-/* 知穗吉祥物：内联 SVG，颜色由 currentColor / --ink 驱动，不再需要 multiply。
-   深色下保留一点金色光晕，让它从深纸里浮出来 */
+/* 知穗吉祥物：内联 SVG，颜色由 mascot.css 的一组 --mc-* 变量驱动。
+   ★ 2026-11-15 第 14 批：深色光晕从 8px / 0.3 压到 4px / 0.14。
+   原来那道对比很强的暖光是给 26px 图标"从深纸里浮出来"用的，但它同时
+   把整只吉祥物变成"内部在发光"—— 用户对深色吉祥物的评价是"恐怖"，
+   光晕是三位成因之一（另外两位是白眼睛和白描边，见 mascot.css）。
+   现在靠脸与纸底的明度差就够浮起来了，光晕只留一点暖味。 */
 .corn-logo {
   display: block;
 }
 .dark .corn-logo {
-  filter: drop-shadow(0 2px 8px rgba(224, 160, 58, 0.3));
+  filter: drop-shadow(0 1px 4px rgba(224, 160, 58, 0.14));
 }
 
 .brand-sub {

@@ -184,12 +184,12 @@ export default function Sidebar({
 
       {/* 公开知识库广场：平台化入口（描边次按钮，与新建对话形成主次）。
           2026-11-13 换掉原来的「模板广场」：那套预置提示词下线，
-          同一位置改成挑别人的公开资料库。 */}
+          同一位置改成挑别人的公开知识库。 */}
       {onOpenLibrary && (
         <button onClick={onOpenLibrary} className="btn-import mt-2 w-full">
           <span className="inline-flex items-center justify-center gap-1.5">
-            <CornIcon name="store" className="h-4 w-4" title="公开资料库" />
-            公开资料库
+            <CornIcon name="store" className="h-4 w-4" title="公开知识库" />
+            公开知识库
           </span>
         </button>
       )}

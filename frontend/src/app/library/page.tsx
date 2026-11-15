@@ -1,11 +1,11 @@
 "use client";
 
 /**
- * 公开资料库广场（/library）。
+ * 公开知识库广场（/library）。
  *
  * 2026-11-13 起取代原来的「模板广场」（/templates 现在重定向到这里）。
  * 为什么换：模板广场回答的是「我不知道拿 AI 干什么」，但它给的是一套
- * 预置提示词；而用户真正缺的常常是**可以问的资料**。站内公开资料库上线后，
+ * 预置提示词；而用户真正缺的常常是**可以问的资料**。站内公开知识库上线后，
  * 别人的资料本来就能挂进自己的对话检索，缺的只是一个"能看见、能挑"的地方。
  * 所以把"挑模板"换成"挑资料库"——同一块位置、同一件事，但交付物更实。
  *
@@ -226,7 +226,7 @@ export default function LibraryPage() {
         <div className="lib-top-in">
           <MascotLogo className="lib-logo" />
           <div className="lib-head-text">
-            <h1>公开资料库</h1>
+            <h1>公开知识库</h1>
             <p>官方课程资料与同学分享的资料库，点开就能看</p>
           </div>
           <Link href="/" className="lib-back" aria-label="返回工作台">
@@ -255,7 +255,7 @@ export default function LibraryPage() {
         {official.length > 0 && (
           <section className="lib-sec lib-official">
             <div className="lib-sec-head">
-              <span className="eyebrow">官方公开资料库</span>
+              <span className="eyebrow">官方公开知识库</span>
               <span className="rule" />
               <span className="lib-count">{official.length} 门课程</span>
             </div>
@@ -441,7 +441,7 @@ export default function LibraryPage() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="搜库名、简介或作者"
-              aria-label="搜索公开资料库"
+              aria-label="搜索公开知识库"
             />
             {query && (
               <button type="button" onClick={() => setQuery("")} aria-label="清空搜索">
