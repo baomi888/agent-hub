@@ -31,6 +31,9 @@
     /* 与根同值：显式写出是为了让两档都看得见 —— 这一档才是卡片外边距
        曾经为 8px 的地方，将来若改回浮动卡片，漏改这里就是"只在手机上错" */
     --app-edge-y: 0px;
+    /* 这一档起底部导航出现（.tabbar 在 ≤900 才 display:grid），
+       所以 dock 要把它连同安全区一起从留白里扣掉。见 .chat-dock 的注释。 */
+    --chat-dock-chrome: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
   }
 }
 @media (max-width: 1023px) {
@@ -47,7 +50,10 @@
     --chat-topbar-y: 8px;
     --chat-msg-pt: 16px;
     --chat-msg-pb: 12px;
-    --chat-dock-pb: 12px;
+    /* 12 → 16（2026-11-16）：首页挂回底部导航后，输入框正上方多了导航的
+       上边线。贴着 12 走的时候，胶囊底边离那条线太近，看着像被线切了一下；
+       16 是"同一块底部区域里两件东西"的最低呼吸量。 */
+    --chat-dock-pb: 16px;
     --chat-bar-gap: 6px;
     --chat-msgs-gap: 18px;
     --ai-mark: 26px;
@@ -88,9 +94,13 @@
        · iPad（安全区 20，卡片 8）   → max(12, 12) = 12（原来 12+20=32）
      横屏时安全区为 0，max 自然落回 12，不会多出一条空白。 */
 .chat-dock {
+  /* ★ --chat-dock-chrome：底部常驻导航（首页的 tab）已经占掉的高度。
+     安全区是被导航让掉的，dock 再让一次就会在输入框和导航之间凭空多出
+     34px（iPhone home 条那一截）—— 表现是"输入框飘在导航上面一截"，
+     而且键盘弹起时更明显。默认 0，只有挂了 tab 的页面档位才置非 0。 */
   padding-bottom: max(
     var(--chat-dock-pb),
-    calc(env(safe-area-inset-bottom, 0px) - var(--app-edge-y))
+    calc(env(safe-area-inset-bottom, 0px) - var(--app-edge-y) - var(--chat-dock-chrome, 0px))
   );
 }
 .chat-bar-gap {

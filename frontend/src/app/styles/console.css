@@ -1369,6 +1369,14 @@ textarea.input {
   .dark .tabbar {
     box-shadow: 0 -2px 10px -6px rgba(0, 0, 0, 0.6);
   }
+  /* 首页专用：导航紧贴输入区，只能有一条分隔线。
+     投影去掉 —— 输入区与导航之间本来就没有间隙，-2px 偏移的阴影会在交界处
+     糊出一道深色，看着像两条边线叠在一起（就是 11-13 那次「切成两截」的观感）。
+     上边框保留：它是"这一层从这里开始"的信号，去掉后输入区和导航会糊成一片，
+     分不清哪块可点。 */
+  .tabbar--dock {
+    box-shadow: none;
+  }
   .tabbar-item {
     min-height: 44px;
     display: flex;

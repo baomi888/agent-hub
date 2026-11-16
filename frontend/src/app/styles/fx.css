@@ -134,12 +134,16 @@
   main.workbench-main {
     /* 与 base.css 同一套：只让安全区，不再留卡片外边距（第九批起纸贴边） */
     margin: env(safe-area-inset-top, 0px) 0 0;
-    /* 首页已不挂底部 tab（2026-11-13），所以这里**不扣** --tabbar-h：
-       扣了会空出一条 50px 的白边，比之前被压住还难看。
+    /* ★ 2026-11-16：首页恢复底部 tab，高度必须**减掉它**。
+       不减的表现是底部空出一条 50px 的白边（比被压住还难看），
+       这是 11-13 撤 tab 那轮踩过的同一个坑，方向反过来而已。
+       ★ 减两项：--tabbar-h（3+44+3 的条身）与 env(safe-area-inset-bottom)
+         （导航自己让出的 home 条）。只减一项的话，iPhone 上会多出 34px。
        ★ 高度写在 fx.css 而不是 base.css —— fx.css 加载在后，整条覆盖。
-       ★ --tabbar-h 仍然存在，给控制台那 8 个页面的 .console-scroll / .console-shell 用。 */
-    height: calc(100vh - env(safe-area-inset-top, 0px));
-    height: calc(100dvh - env(safe-area-inset-top, 0px));
+       ★ tests/test_console_nav.py 钉住「挂组件」与「扣高度」这一对，
+         只改一处会直接变红。 */
+    height: calc(100vh - env(safe-area-inset-top, 0px) - var(--tabbar-h) - env(safe-area-inset-bottom, 0px));
+    height: calc(100dvh - env(safe-area-inset-top, 0px) - var(--tabbar-h) - env(safe-area-inset-bottom, 0px));
     border-radius: 0;
   }
   .side-left {

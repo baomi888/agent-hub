@@ -21,6 +21,7 @@ import { useKnowledge } from "@/lib/hooks/useKnowledge";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { detailToMessage } from "@/lib/errors";
 import InstallBanner from "@/components/InstallBanner";
+import ConsoleTabBar from "@/components/console/ConsoleTabBar";
 import Landing from "@/components/landing/Landing";
 import AnnounceModal from "@/components/announce/AnnounceModal";
 import type { UiMessage } from "@/components/chat/types";
@@ -907,18 +908,29 @@ export default function Home() {
   }
 
   return (
+    <>
     <main className="workbench-main page-fade flex overflow-hidden">
-      {/* 首页**不挂**底部 tab（用户 2026-11-13 决定：「影响整体性」）。
-          工作台是一整块满屏卡片，底部压一条 50px 的导航会把它切成两截。
-          控制台那 8 个页面仍由 ConsoleLayout 统一挂 tab；从首页进它们的路径是
-          侧栏抽屉（手机左滑/左上角）与首页各个入口卡片，不依赖这条 tab。
-          ★ 撤掉 tab 后，fx.css 里 `main.workbench-main` 的窄屏高度也必须把
-            `- var(--tabbar-h)` 去掉，否则底部会空出 50px 白边。 */}
+      {/* 首页**挂**底部 tab（2026-11-16 恢复）。
+          ★ 这一条推翻了 11-13 的决定：「主页面下面的 tag 去掉吧，影响整体性」。
+            当时的形状是「满屏卡片 + 底部压一条独立的 50px 导航」—— 两条边线挨着，
+            卡片看起来被切成了"内容 + 工具栏"两截。
+            恢复的做法不是把那条导航照抄回来，而是**把它并进输入区**：
+              · 高度由 fx.css 的 main.workbench-main 让出（含安全区），
+                导航在 main 之外，卡片底边与导航顶边之间不再有第二条分割线；
+              · 导航给 .tabbar--dock 变体：去掉自己的上边框与投影，
+                由 dock 的上边线当唯一的分隔（见 fx.css 里那段注释）；
+              · chat.css 的 --chat-dock-chrome 扣掉安全区，避免 dock 和 tab
+                各让一次、底部凭空多出 34px。
+            动机：5 个一级入口里「对话」和「论坛」都没有底栏，用户在三个页面
+            之间要换三种导航模型（抽屉 / 左上角返回 / 底栏）—— 这不是审美问题。
+            论坛那边同一轮也补上了（见 app/forum/page.tsx 末尾）。 */}
       {/* 「装到桌面」的首次提示。★ 刻意挂在登录态确定之后（这里或上面的登录门分支），
           不挂根布局：根布局会在登录门出现之前就渲染，组件判定「可以弹」→
           立刻写下 60 天冷却，等用户真登录进来就再也不弹了（线上实测，探针里
           localStorage 里躺着一个比登录更早的时间戳）。
-          position:fixed 的浮层不受 main 的 flex 与 overflow:hidden 影响，不占位。 */}
+          position:fixed 的浮层不受 main 的 flex 与 overflow:hidden 影响，不占位。
+          ★ 2026-11-16：原生壳里已注入 window.__zhisuiApp，isInstalled() 会返回 true，
+            这条在 App 里不再出现（以前会在 App 里劝用户"把知穗装到桌面"）。 */}
       <InstallBanner />
       <Sidebar
         sessions={sessions}
@@ -1064,5 +1076,13 @@ export default function Home() {
       {/* 用量与反馈看板（portal 到 body，不受三栏布局裁切） */}
       {usageOpen && <UsagePanel onClose={() => setUsageOpen(false)} />}
     </main>
+    {/* 底部导航放在 main 之外：
+        · main 是 overflow:hidden 的定高容器，导航塞进去会跟着它一起被裁；
+        · 放在外面，卡片底边就是视口里"内容结束"的位置，导航单独一层 ——
+          视觉上是一张纸 + 一条压在最上面的导航，而不是卡片被削掉一条。
+        variant="dock"：这一页的导航要和上面的输入区连成一块，不要自己的上边框
+        和投影（否则同一条线上出现两条线，又变成"切成两截"）。 */}
+    <ConsoleTabBar isAdmin={auth.me?.is_admin} variant="dock" />
+    </>
   );
 }

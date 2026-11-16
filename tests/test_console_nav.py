@@ -27,6 +27,9 @@ NAV_TS = SRC / "lib" / "nav.ts"
 TABBAR_TSX = SRC / "components" / "console" / "ConsoleTabBar.tsx"
 LAYOUT_TSX = SRC / "components" / "console" / "ConsoleLayout.tsx"
 HOME_TSX = SRC / "app" / "page.tsx"
+# 论坛页（一级 tab，但不在 (console) 路由组里 —— 2026-11-16 补挂底栏）
+FORUM_TSX = SRC / "app" / "forum" / "page.tsx"
+FORUM_CSS = SRC / "app" / "styles" / "forum-tb.css"
 # 对话页左栏（桌面轨道 / 手机抽屉）。它不在 (console) 外壳里，自己拿一份导航 ——
 # 2026-11-15 之前是硬编码 4 项，手机上进得来出不去。
 SIDEBAR_TSX = SRC / "components" / "Sidebar.tsx"
@@ -496,45 +499,86 @@ def test_console_only_pages_are_kept_off_mobile():
         )
 
 
-# ==================== ④ 首页刻意不挂 ====================
+# ==================== ④ 首页挂底部 tab（2026-11-16 第二次反转）====================
 
 
-def test_home_does_not_mount_the_tabbar():
-    """首页（/）不挂底部 tab —— 用户 2026-11-13 决定：「影响整体性」。
+def test_home_mounts_the_tabbar_and_gives_it_height():
+    """首页（/）挂底部 tab，且高度必须与它成对。
 
-    这一条**方向是反的**，别急着按老习惯改回去：
-      · 11-13 下午曾为了让「对话」入口常驻而在首页单独挂过一次；
-      · 同一天晚上用户看过真页面后要求撤掉 —— 工作台是整块满屏卡片，
-        底部压一条 50px 的导航把它切成两截。
-    控制台那 8 个页面仍由 ConsoleLayout 统一挂，所以 tab 没被废弃，
-    只是不在一级页面出现。
+    ★ 这条的方向改过两次，先看清楚再动手：
+      · 2026-11-13 下午：为了让「对话」入口常驻，首页单独挂过一次 tab；
+      · 同一天晚上：用户看过真页面后要求撤掉 —— 「主页面下面的 tag 去掉吧，
+        影响整体性」。当时的形状是**满屏卡片 + 底部压一条独立的 50px 导航**，
+        两条边线挨着，卡片看起来被切成"内容 + 工具栏"两截；
+      · 2026-11-16：移动端 UI 评审认定「5 个一级入口里有 2 个没有底栏
+        （对话 / 论坛）」是导航模型分裂的根因，用户要求按 P0 修复。
+        恢复的做法不是把那条导航照抄回来，而是让导航**并进输入区**：
+        去掉自己的投影（variant="dock"）、由输入区那条线当唯一分隔。
 
-    断言查两件事，缺一都不算撤干净：
-      · 注释剥掉后没有 `<ConsoleTabBar`（只留 import 的话组件不在 DOM 里，
+    断言查三件事，缺一都不算接对：
+      · 注释剥掉后确实有 `<ConsoleTabBar`（只写 import 的话组件不在 DOM 里，
         而字符串检查照样通过 —— 反证抓到过这一条）；
-      · fx.css 里首页窄屏高度不再减 `--tabbar-h`（不然底部空出 50px 白边，
-        比原来被压住还难看）。
+      · 用的是 `variant="dock"`（否则首页会出现两条分隔线，回到"切成两截"）；
+      · fx.css 里首页窄屏高度**减掉** `--tabbar-h` 与底部安全区
+        （不减 = 底部空出 50px 白边，比被压住还难看；只减 tabbar-h 不减安全区
+        = iPhone 上多出 34px。这是 11-13 撤 tab 那轮的同一个坑，方向反过来）。
     """
     home = _strip_comments(_read(HOME_TSX))
-    assert "ConsoleTabBar" not in home, (
-        "首页又挂回底部 tab 了：用户明确要求主页面不要，工作台会被切成两截"
+    assert "<ConsoleTabBar" in home, (
+        "首页没有挂底部 tab：五个一级入口里「对话」是最常用的一个，"
+        "没有底栏就意味着用户在三个页面之间要换三种导航模型"
+    )
+    assert 'variant="dock"' in home, (
+        "首页的 tab 没用 dock 变体：它和输入区中间会多出一条投影，"
+        "又变成 11-13 那次「切成两截」的观感"
     )
 
     block = _media_block(_read(FX_CSS), "@media (max-width: 899px)", "workbench-main")
     heights = _all_decls(_css_rule(block, "main.workbench-main"), "height")
     assert heights, "首页工作台没有设高度"
     for h in heights:
-        assert "var(--tabbar-h)" not in h, (
-            f"首页已经没 tab 了，高度还在扣它（{h}）—— 底部会空出一条白边"
+        assert "var(--tabbar-h)" in h, (
+            f"首页挂了 tab 却没扣它的高度（{h}）—— 底部会空出一条 50px 的白边"
+        )
+        assert "safe-area-inset-bottom" in h, (
+            f"首页高度没扣底部安全区（{h}）—— iPhone 上会多出 34px（导航自己让过一次）"
         )
         # ★ 2026-11-14（第九批）：纸铺到视口边缘，上下各 8px 的外边距归零，
-        #   高度算式从「满屏减 16px」变成「满屏减安全区」。这里查的是
-        #   "没有多扣外边距"，而不是某个具体数字 —— 否则下次调边距又假红。
+        #   这里查的是"没有多扣外边距"，而不是某个具体数字。
         assert not re.search(r"-\s*16px", h), (
             f"首页高度还在减上下 8px 外边距（{h}）—— 纸已贴边，减了会空一条"
         )
         assert "safe-area-inset-top" in h, (
             f"首页高度没减顶部安全区（{h}）—— 刘海会把内容压住"
+        )
+
+
+def test_forum_mounts_the_tabbar_and_gives_it_height():
+    """论坛（/forum）是一级 tab，必须有自己的底栏与让位。
+
+    它是 `mobileTab: 2` 的入口，但页面不在 `(console)` 路由组里，
+    从上线起就一直没挂过底栏 —— 用户在论坛想切「打卡」「更多」，
+    只能先点左上角回工作台再绕一圈（2026-11-16 评审实测 .tabbar 为 null）。
+
+    ★ 宽度断点必须是 900：`.tabbar` 在 ≤900 才出现，写成本文件主体的 760
+      会在 761–900 这段（大屏手机横屏 / 小平板竖屏）出现"有导航、没让位"。
+    """
+    forum = _strip_comments(_read(FORUM_TSX))
+    assert "<ConsoleTabBar" in forum, "论坛页没有挂底部 tab：它是一级入口，却没有底栏"
+
+    css = _read(FORUM_CSS)
+    assert "@media (max-width: 900px)" in css, (
+        "论坛样式里没有 900 这一档：底栏在 ≤900 出现，让位断点必须与它对齐"
+    )
+    block = _media_block(css, "@media (max-width: 900px)", "tb-root")
+    heights = _all_decls(_css_rule(block, ".tb-root"), "height")
+    assert heights, "论坛的滚动容器 .tb-root 没有扣底部导航的高度"
+    for h in heights:
+        assert "var(--tabbar-h)" in h, (
+            f"论坛 .tb-root 高度没扣 --tabbar-h（{h}）—— 最后一条帖子会被压在导航底下"
+        )
+        assert "safe-area-inset-bottom" in h, (
+            f"论坛 .tb-root 高度没扣底部安全区（{h}）—— iPhone 上滚不到底"
         )
 
 

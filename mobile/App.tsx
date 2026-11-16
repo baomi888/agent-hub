@@ -143,9 +143,14 @@ function AppInner() {
           return false;
         }}
         /* 注入一段极小的样式：去掉 iOS 点击时的灰色高亮矩形。
-           不加的话点按钮会闪一块灰，很"网页"。 */
+           不加的话点按钮会闪一块灰，很"网页"。
+           ★ 同时打上 `__zhisuiApp` 标记：Web 侧的 isInstalled() 靠它判断
+             「已经在 App 里，不要再劝我装到桌面」。WKWebView 既没有
+             display-mode: standalone 也没有 navigator.standalone，
+             不注入的话首页会弹出「把知穗装到桌面」——用户就在 App 里。 */
         injectedJavaScriptBeforeContentLoaded={`
           (function(){
+            window.__zhisuiApp = true;
             var s = document.createElement('style');
             s.textContent = 'html{-webkit-tap-highlight-color:transparent;}::-webkit-scrollbar{display:none;}';
             document.head && document.head.appendChild(s);

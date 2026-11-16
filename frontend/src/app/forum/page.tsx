@@ -24,6 +24,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import CornIcon from "@/components/CornIcon";
+import ConsoleTabBar from "@/components/console/ConsoleTabBar";
 import { avatarIconName, avatarImageUrl } from "@/components/settings/UserAvatar";
 import { api, forumImgUrl } from "@/lib/api";
 import { fmtBytes, compressImage } from "@/lib/compressImage";
@@ -684,6 +685,7 @@ export default function ForumPage() {
         : (adm?.reported ?? []);
 
   return (
+    <>
     <div className="tb-root" ref={rootRef}>
       <header className="tb-top">
         <div className="tb-top-in">
@@ -1447,5 +1449,13 @@ export default function ForumPage() {
         </div>
       )}
     </div>
+    {/* 底部导航（2026-11-16 补上）。
+        「论坛」是 lib/nav 里 mobileTab=2 的一级入口，但这一页不在 (console)
+        路由组里，一直没挂过底栏 —— 用户在论坛想切到「打卡」「更多」，
+        只能先点左上角回工作台再绕。同一批的首页也一并补了。
+        ★ 高度让位写在 forum-tb.css 的 `.tb-root`（≤900 那一段）：
+          不扣 --tabbar-h 的话，最后一条帖子会永远压在导航底下点不到。 */}
+    <ConsoleTabBar isAdmin={isAdmin} />
+    </>
   );
 }

@@ -73,9 +73,23 @@ def excerpt_of(row) -> str:
 
 
 def title_of(row) -> str:
-    """话题标题。真没有就用正文前 24 字顶上。"""
+    """话题标题。真没有就用正文前 24 字顶上。
+
+    ★ 2026-11-16：24 字只用来兜底**空标题**，真标题原样返回。
+      原实现是 `t[:24] if t else 正文[:24]` —— 对真标题也做了切片，于是
+      第 40 号帖「第 3 期 · 十一月更新：AI 待办、论坛与公开知识库」在公告条上
+      显示成「…论坛与公」：切在词中间，而且**因为字符串在到达 CSS 之前就变短了，
+      `.tb-notice-t` 的 text-overflow: ellipsis 永远不触发，连省略号都没有**。
+      用户会以为标题本来就是这么写的。
+
+      截断该由前端负责：`.tb-title` 已经封 2 行、`.tb-notice-t` 已经是
+      nowrap + ellipsis，两处都会自己打省略号（见 excerpt_of 的同类注释）。
+      列表节奏因此不会变差 —— 行数由 CSS 的 line-clamp 定，不靠这里砍字。
+    """
     t = _one_line(row["title"] or "")
-    return t[:MAX_TITLE_FALLBACK] if t else _one_line(row["body"])[:MAX_TITLE_FALLBACK]
+    if t:
+        return t
+    return _one_line(row["body"])[:MAX_TITLE_FALLBACK]
 
 
 def _now() -> int:

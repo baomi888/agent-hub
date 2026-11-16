@@ -3,13 +3,20 @@
 /**
  * 手机底部 tab（≤900 才出现，CSS 控制）。
  *
- * 只由**控制台外壳**（`(console)/layout.tsx` → ConsoleLayout）挂载一次，8 个页面共用。
+ * 挂载点有四处，全部共用这一份：
+ *   · `(console)/layout.tsx` → ConsoleLayout（8 个控制台页面）
+ *   · 首页 `/`（2026-11-16 恢复，用 variant="dock" 与输入区连成一块）
+ *   · 论坛 `/forum`（2026-11-16 补上：它是一级 tab，原来却没有底栏）
+ * 内容与排序全部来自 `lib/nav`：被 `mobileTab` 标记的进 tab，其余进「更多」面板。
+ * 桌面侧栏用的是同一份清单，三处不会各自漂移。
  *
- * 首页（/）**刻意不挂**：2026-11-13 用户看过之后决定撤掉 ——
- * 「主页面下面的 tag 去掉吧，影响整体性」。工作台是整块满屏卡片，
- * 底部再压一条 50px 的导航会把它切成两截。
- * 撤掉 tab 时连带要改的是 fx.css 里 `main.workbench-main` 的窄屏高度：
- * 那里原来写了 `- var(--tabbar-h)`，不减掉会空出一条白边（见该处注释）。
+ * ★ 首页曾经撤掉过（2026-11-13「影响整体性」），2026-11-16 恢复。
+ *   当时的形状是「满屏卡片 + 底部一条独立的 50px 导航」，两条边线挨着，
+ *   卡片看着被切了两截。现在的做法是让导航**并进输入区**：
+ *   高度由 main 让出、导航去掉自己的上边框与投影（variant="dock"），
+ *   由输入区那条线当唯一分隔。撤与恢复的理由都写在 page.tsx 里。
+ *   ★ 撤掉时连带要改 fx.css 里 `main.workbench-main` 的窄屏高度 ——
+ *     不扣 --tabbar-h 会空出 50px 白边（tests/test_console_nav.py 钉住这一对）。
  *
  * 内容与排序全部来自 `lib/nav`：被 `mobileTab` 标记的进 tab，其余进「更多」面板。
  * 桌面侧栏用的是同一份清单，三处不会各自漂移。
@@ -30,9 +37,17 @@ type Props = {
   isAdmin?: boolean;
   /** 面板开合变化时通知外层（外壳用它锁住底层滚动） */
   onOpenChange?: (open: boolean) => void;
+  /**
+   * 外观变体。
+   * `dock`：和页面底部的输入区连成一块 —— 去掉自己的上边框与投影，
+   *   让输入区那条线当唯一的分隔。专给首页用：首页的输入区紧贴在导航上方，
+   *   两条边线挨在一起会把「一张纸」看成「内容 + 工具栏」两截（2026-11-16）。
+   * 不传 = 控制台那 8 个页面的独立条（自带边框与投影，压在纸面上）。
+   */
+  variant?: "dock";
 };
 
-export default function ConsoleTabBar({ isAdmin, onOpenChange }: Props) {
+export default function ConsoleTabBar({ isAdmin, onOpenChange, variant }: Props) {
   const pathname = usePathname();
   const here = pathname.replace(/\/+$/, "") || "/";
   const sheetRef = useRef<HTMLDivElement | null>(null);
@@ -67,7 +82,7 @@ export default function ConsoleTabBar({ isAdmin, onOpenChange }: Props) {
 
   return (
     <>
-      <nav className="tabbar" aria-label="主导航">
+      <nav className={variant === "dock" ? "tabbar tabbar--dock" : "tabbar"} aria-label="主导航">
         {primaryNav.map((it) => (
           <Link
             key={it.href}

@@ -553,7 +553,7 @@ export default function Sidebar({
               {onOpenUsage ? (
                 <button
                   onClick={onOpenUsage}
-                  className="block w-full truncate rounded-xs text-left text-fs-sm text-ink transition hover:text-accent-ink"
+                  className="sb-acct-name block w-full truncate rounded-xs text-left text-fs-sm text-ink transition hover:text-accent-ink"
                   title={`${displayName || username} · 查看用量与反馈`}
                 >
                   {displayName || username}
@@ -579,7 +579,7 @@ export default function Sidebar({
             {onLogout && (
               <button
                 onClick={onLogout}
-                className="shrink-0 rounded-xs border border-line px-1.5 py-0.5 text-fs-xs text-muted transition hover:bg-fill-2 hover:text-ink"
+                className="sb-quit shrink-0 rounded-xs border border-line px-1.5 py-0.5 text-fs-xs text-muted transition hover:bg-fill-2 hover:text-ink"
                 title="退出登录"
               >
                 退出

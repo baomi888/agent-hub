@@ -1,0 +1,220 @@
+/* ============================================================
+ * 触控目标：把「热区」补到 44pt，**视觉尺寸一律不动**。
+ *
+ * 为什么单独一个文件：这条规则横跨论坛 / 资料库 / 待办 / 账号四套样式，
+ * 塞进任何一套都要跟另一套抢加载顺序。放在最后导入（globals.css 末尾），
+ * 只做加法式的热区扩展，不覆盖任何视觉属性。
+ *
+ * 为什么用伪元素而不是撑大控件本体（2026-11-16 移动端评审后定）：
+ *   · 实测这一版界面里 39px 的 .btn、34px 的「发帖」、31px 的分类 chip
+ *     都是**设计过的视觉密度**，直接加到 44 会把每一行都撑高一档，
+ *     整页从"紧凑"变成"松垮"——那是另一种难看。
+ *   · 而 18×18 的「改名 / 删除」、24×24 的 ×，问题不是小，是**点不准**。
+ *     这两件事可以分开解决：视觉保持，热区补足。
+ *   · 本仓库已有这个惯例：.icon-btn::after 与 .rem-morebtn::before 都是
+ *     `inset: -9px` 的写法。这里沿用它，不另造一套。
+ *
+ * 只在本档生效（≤900）：桌面用鼠标，44 是手指的下限，不是指针的。
+ *
+ * ★ 不许出现的情况：两个相邻可点元素的扩区**互相重叠**。横向并排的
+ *   一律只扩纵向（inset 的水平分量为 0），纵向罗列的只扩横向。
+ * ============================================================ */
+@media (max-width: 900px) {
+  /* 有热区伪元素的统一前置条件。position:relative 不改变任何布局。 */
+  .btn,
+  .tb-new,
+  .kbp-new,
+  .tb-bar,
+  .tb-logo,
+  .tb-notice-x,
+  .acct-mini,
+  .acct-link,
+  .rem-pritag,
+  .session-swipe-btn,
+  .btn-import,
+  .tb-sort,
+  .cap-chip,
+  .fb-mode-cta,
+  .tools-link,
+  .attach,
+  .geo-btn,
+  .send,
+  .kb-manage,
+  .usage-chip,
+  .theme-chip,
+  .push-nudge .pn-x,
+  .turn-fab,
+  .guide-skip,
+  .sb-acct-name,
+  .sb-quit {
+    position: relative;
+  }
+
+  /* 39 → 45（横向并排，只扩纵向；行间 gap 8，不会碰到隔壁） */
+  .btn::before,
+  .session-swipe-btn::before {
+    content: "";
+    position: absolute;
+    inset: -3px 0;
+  }
+
+  /* 34 → 44 */
+  .tb-new::before {
+    content: "";
+    position: absolute;
+    inset: -5px 0;
+  }
+
+  /* 31 → 45：分类 chip 在横向滚动条里，扩纵向不影响左右相邻 */
+  .kbp-new::before,
+  .tb-bar::before {
+    content: "";
+    position: absolute;
+    inset: -7px 0;
+  }
+
+  /* 28 → 44：论坛左上角「工作台」 */
+  .tb-logo::before {
+    content: "";
+    position: absolute;
+    inset: -8px 0;
+  }
+
+  /* 24 → 44：公告条的 ×。右侧单独一格，四周都可以扩 */
+  .tb-notice-x::before {
+    content: "";
+    position: absolute;
+    inset: -10px;
+  }
+
+  /* 26 → 44：设置页昵称旁的「改」图标 */
+  .acct-mini::before {
+    content: "";
+    position: absolute;
+    inset: -9px;
+  }
+
+  /* 18×23 → 44+：「登录名 … 改」这条文字链。左右是纯文本，压上去没有副作用。
+     水平要放到 13：按钮本体只有 18 宽，-11 只到 40，不够 44。 */
+  .acct-link::before {
+    content: "";
+    position: absolute;
+    inset: -11px -13px;
+  }
+
+  /* 24 → 44：待办卡片里的优先级标签（54×24，只扩纵向） */
+  .rem-pritag::before {
+    content: "";
+    position: absolute;
+    inset: -10px 0;
+  }
+
+  /* 29 → 45：待办 / 四六级页里的导入按钮（宽度本来就够，只补纵向） */
+  .btn-import::before {
+    content: "";
+    position: absolute;
+    inset: -8px 0;
+  }
+
+  /* 39 → 45：论坛的「最新回复 / 最热」排序切换 */
+  .tb-sort::before {
+    content: "";
+    position: absolute;
+    inset: -3px 0;
+  }
+
+  /* ---- 输入区那一排（全站最高频的四个开关 + 发送）----
+     它们是 28px 高的胶囊，横向排一行、gap 8。只扩纵向：
+     扩横向会互相压住，也会盖住输入框左边的点击区。 */
+  .cap-chip::before,
+  .fb-mode-cta::before,
+  .tools-link::before {
+    content: "";
+    position: absolute;
+    inset: -8px 0;
+  }
+
+  /* 28 → 44：附件 / 定位。两颗都在胶囊左端，右侧紧挨输入框，
+     横向扩会把点击从输入框抢走 —— 只扩纵向。 */
+  .attach::before,
+  .geo-btn::before {
+    content: "";
+    position: absolute;
+    inset: -9px -3px;
+  }
+
+  /* 32 → 44：发送。圆形按钮四周都是空白，可以整圈扩。 */
+  .send::before {
+    content: "";
+    position: absolute;
+    inset: -6px;
+  }
+
+  /* 22×50：回到最新一条的浮动按钮，只补宽度 */
+  .turn-fab::before {
+    content: "";
+    position: absolute;
+    inset: 0 -11px;
+  }
+
+  /* 35 → 45：左栏的「深色模式」整行长条 */
+  .theme-chip::before {
+    content: "";
+    position: absolute;
+    inset: -5px 0;
+  }
+
+  /* 24 → 44：「查看用量与反馈」小胶囊 */
+  .usage-chip::before {
+    content: "";
+    position: absolute;
+    inset: -10px -2px;
+  }
+
+  /* 25 → 45：资料库卡片右上角的「管理」 */
+  .kb-manage::before {
+    content: "";
+    position: absolute;
+    inset: -10px -5px;
+  }
+
+  /* 26 → 44：首页「到点提醒」那一行的 × */
+  .push-nudge .pn-x::before {
+    content: "";
+    position: absolute;
+    inset: -9px;
+  }
+
+  /* 29 → 45：引导层右下角的「跳过」。它本来就是逃生口，不该难按。 */
+  .guide-skip::before {
+    content: "";
+    position: absolute;
+    inset: -8px -2px;
+  }
+
+  /* 左栏底部的账号行（23 高）与「退出」（27 高）。
+     账号行下面还有一行额度，两块都扩 44 会把这一格撑成 88 ——
+     所以只给上行补热区，额度那行保持原样（它本来就是同一件事的副信息）。 */
+  .sb-acct-name::before,
+  .sb-quit::before {
+    content: "";
+    position: absolute;
+    inset: -11px -2px;
+  }
+
+  /* ★ 字号四档（标准/大/特大/系统）**不扩宽度**，只靠 interactions.css 里
+     已有的 ::after 把高度补到 44。宽度必须按文字走：那一组四个 chip 正好
+     贴满侧栏，加 2px 内边距就会把「系统」挤到第二行（实测：加了 min-width:44
+     之后截图里第二行只剩一个「系统」，看着像控件散架）。
+     代价是最窄的「大」只有 28px 宽 —— 记录在交付说明的豁免清单里。 */
+
+  /* 设置页头像上的「换」：40 已经接近，补 2px 即可 */
+  .acct-avatar-btn {
+    position: relative;
+  }
+  .acct-avatar-btn::before {
+    content: "";
+    position: absolute;
+    inset: -2px;
+  }
+}

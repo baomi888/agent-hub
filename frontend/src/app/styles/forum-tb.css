@@ -1970,3 +1970,15 @@
   color: var(--text-3);
   cursor: default;
 }
+/* ---------- 底部导航让位（2026-11-16） ----------
+   论坛补挂了 ConsoleTabBar。高度必须在这里扣掉：
+   不扣的话滚到底时最后一条帖子永远压在导航底下，点不到（和待办页
+   .console-scroll 的 padding-bottom 是同一类问题，只是这里改高度更干净 ——
+   .tb-root 自己就是滚动容器，减高度后粘性顶栏的行为不变）。
+   ★ 断点用 900 而不是本文件主体的 760：.tabbar 在 ≤900 出现，
+     761–900 这段（大屏手机横屏 / 小平板竖屏）不改就会出现有导航、没让位。 */
+@media (max-width: 900px) {
+  .tb-root {
+    height: calc(100dvh - var(--tabbar-h) - env(safe-area-inset-bottom, 0px));
+  }
+}

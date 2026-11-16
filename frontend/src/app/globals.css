@@ -64,3 +64,7 @@
 /* 账号自助（头像选择 / 改密码 / 改登录名）：借 .btn 与 .auth-input，
    所以排在 console.css / auth.css 之后，专有类名都是 .acct-* 前缀，不会外溢 */
 @import "./styles/account.css";
+/* 触控热区（≤900 把可点元素补到 44pt，视觉不变）。必须排在最后：
+   它给 .btn / .tb-bar / .acct-* 这些**已经存在**的类加伪元素，
+   排在前面会被后加载的一方按同优先级覆盖掉。 */
+@import "./styles/touch.css";

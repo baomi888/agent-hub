@@ -14,14 +14,35 @@ export type InstallPromptEvent = Event & {
 declare global {
   interface Window {
     __baomiInstallPrompt?: InstallPromptEvent;
+    /** 原生壳（Expo WebView）注入的标记，见 mobile/App.tsx */
+    __zhisuiApp?: boolean;
   }
 }
 
 export type Platform = "ios" | "android" | "desktop" | "other";
 
+/**
+ * 是不是在原生壳（iOS/Android 的 Expo WebView）里跑。
+ *
+ * 壳在文档开始前注入 `window.__zhisuiApp = true`。为什么必须单独判这一条：
+ * WKWebView 既没有 `display-mode: standalone`，也没有 `navigator.standalone`
+ * —— 只按 PWA 那两条判断，「已经装了 App 的用户」会被当成「还没装」，
+ * 首页顶部照样弹「把知穗装到桌面」。用户明明在 App 里，却被劝再装一次；
+ * 而在壳里没有 beforeinstallprompt，点「安装」只会跳去教程页。
+ *
+ * ★ 用壳注入的全局量，不去猜 UA：往 UA 里塞后缀会把 detectPlatform 变成一堆特例，
+ *   而且要等下次发版才生效（Web 侧的判断当天就能改）。
+ */
+export function isNativeShell(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.__zhisuiApp === true;
+}
+
 /** 判断当前是不是"已经从桌面图标打开"的状态（此时不该再提示安装） */
 export function isInstalled(): boolean {
   if (typeof window === "undefined") return false;
+  // 原生壳里等于「已经装好了」，别再劝人安装
+  if (isNativeShell()) return true;
   const standalone = window.matchMedia("(display-mode: standalone)").matches;
   // iOS Safari 不实现 display-mode，用自己的私有标记
   const iosStandalone = (navigator as Navigator & { standalone?: boolean }).standalone === true;
