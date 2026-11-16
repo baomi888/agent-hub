@@ -144,7 +144,7 @@
   border: 1px solid var(--accent-line);
   background: var(--accent-soft);
   color: var(--accent-ink);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   padding: 1px 7px;
 }
 .pv-close {

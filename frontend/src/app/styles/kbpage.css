@@ -70,7 +70,7 @@
   gap: var(--space-4);
   padding: 4px 9px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--card-bg);
   font-size: var(--fs-xs);
   color: var(--text-2);
@@ -167,7 +167,7 @@
   font-style: normal;
   line-height: 16px;
   border: 1px solid var(--accent-line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   color: var(--accent-ink);
   vertical-align: 1px;
 }
@@ -175,6 +175,14 @@
 /* ---------- 右：当前库 ---------- */
 .kbp-main {
   padding: 18px 18px 16px;
+}
+/* 手机推进去的那一屏才有返回条；桌面两栏并排，列表就在左边，不需要它 */
+.kbp-back {
+  display: none;
+}
+.kbp-back .ico {
+  width: 18px;
+  height: 18px;
 }
 .kbp-main-head {
   display: flex;
@@ -232,7 +240,7 @@
 }
 .kbp-read-seg button {
   padding: 3px 10px;
-  border-radius: 3px;
+  border-radius: var(--r-ctl);
   font-size: var(--fs-sm);
   color: var(--text-2);
   transition: var(--t-color);
@@ -606,10 +614,35 @@
 }
 
 /* ---------- 响应式 ----------
-   窄屏改成上下堆叠：库列表在上（不再限高），选中库后由页面把详情滚进视野。 */
+   窄屏改成"一次一屏"（2026-11-16 P1：资料库改 push）。
+   原来是上下堆叠：库列表在上、同一个库的详情在下，库名连着出现两次，
+   要点进一个库得先滑过整张列表，返回还得自己往回滚。
+   现在列表点进库 = 整屏切换，左上角「‹ 我的资料库」退回；桌面两栏不变。 */
 @media (max-width: 900px) {
   .kbp {
     grid-template-columns: minmax(0, 1fr);
+  }
+  /* 两层互斥：没进库就只剩列表，进了库就只剩详情 */
+  .kbp:not(.kbp--detail) .kbp-main {
+    display: none;
+  }
+  .kbp--detail .kbp-side {
+    display: none;
+  }
+  .kbp-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 var(--space-10);
+    padding: 6px 10px 6px 4px;
+    border: 0;
+    background: none;
+    color: var(--text-2);
+    font-size: var(--fs-md);
+    cursor: pointer;
+  }
+  .kbp-back:hover {
+    color: var(--accent-ink);
   }
   .kbp-side {
     max-height: none;
@@ -801,7 +834,7 @@
 }
 .kbp-favs-head span {
   padding: 0 5px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--fill-3);
   font-variant-numeric: tabular-nums;
   line-height: 15px;
@@ -869,3 +902,4 @@
   width: 12px;
   height: 12px;
 }
+

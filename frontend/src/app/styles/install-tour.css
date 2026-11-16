@@ -108,14 +108,14 @@
   padding: 3px;
   background: var(--fill-3);
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
 }
 .tour-tab {
   flex: 1;
   min-height: 36px;
   padding: 0 6px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: transparent;
   font: inherit;
   font-size: var(--fs-md);
@@ -292,7 +292,7 @@
   top: 0.26em;
   bottom: 0.26em;
   width: 3px;
-  border-radius: 2px;
+  border-radius: var(--r-ctl);
   background: var(--accent);
 }
 

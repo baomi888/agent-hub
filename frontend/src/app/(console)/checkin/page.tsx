@@ -449,10 +449,10 @@ export default function CheckinPage() {
   return (
     <PageShell
       title="打卡"
-      sub={
+      sub="把今天的总结变成一张知识结构图。"
+      detail={
         <>
-          把今天的总结变成一张
-          <b>只讲知识结构、不露个人内容</b>的图。分享出去的是「学习笔记」，不是「代做产物」。
+          只讲知识结构、<b>不露个人内容</b>。分享出去的是「学习笔记」，不是「代做产物」。
         </>
       }
       actions={

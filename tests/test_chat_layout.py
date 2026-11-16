@@ -635,7 +635,10 @@ def test_entry_card_scale_climbs_in_one_direction():
 
     base = _rule(css, ".entry-card")
     mid_icon = int(re.search(r"--ec-icon:\s*(\d+)px", base).group(1))
-    mid_r = int(re.search(r"border-radius:\s*(\d+)px", base).group(1))
+    # 2026-11-16 圆角收敛成三档后，三档卡片一律是「卡片档」（--r-card / 12px），
+    # 不再随尺寸递增 —— 原来 12 → 16 那一跳正是"中间那档是拍出来的数"的证据。
+    # 现在钉的是"必须是卡片档"：写回 var(--r-ctl) 或写死别的 px 都会红。
+    assert "border-radius: var(--r-card)" in base, "中间档圆角不是卡片档（--r-card）"
     assert re.search(r"font-size:\s*var\(--fs-md\)", _rule(css, ".entry-card .ec-label")), (
         "中间档标签不是 15px（--fs-md）"
     )
@@ -647,12 +650,11 @@ def test_entry_card_scale_climbs_in_one_direction():
 
     phone = _rule(media["max-width: 639px"], ".entry-card")
     phone_icon = int(re.search(r"--ec-icon:\s*(\d+)px", phone).group(1))
-    phone_r = int(re.search(r"border-radius:\s*(\d+)px", phone).group(1))
 
     assert phone_icon < mid_icon < big_icon, (
         f"图标档位不是单调递增：{phone_icon} / {mid_icon} / {big_icon}"
     )
-    assert phone_r <= mid_r <= mid_r, f"圆角档位往回缩了：{phone_r} / {mid_r}"
+    assert "border-radius: var(--r-card)" in phone, "手机档圆角不是卡片档（--r-card）"
     # 相邻两档的差不能超过 8px，否则又变成"640 那一跳"
     assert mid_icon - phone_icon <= 8 and big_icon - mid_icon <= 8, (
         f"相邻档差太大（{phone_icon}/{mid_icon}/{big_icon}），换档会跳"

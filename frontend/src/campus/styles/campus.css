@@ -536,7 +536,7 @@
   color: var(--text-2);
   background: transparent;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease;
 }
@@ -1270,13 +1270,13 @@ body.campus-modal-open .console-scroll {
   margin-bottom: 16px;
   overflow: hidden;
   background: var(--fill-3);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
 }
 
 .campus-pomo-fill {
   height: 100%;
   background: var(--accent);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   transition: width 0.25s linear;
 }
 
@@ -1401,7 +1401,7 @@ body.campus-modal-open .console-scroll {
   white-space: nowrap;
   background: var(--fill-3);
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   cursor: pointer;
   transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
@@ -1593,7 +1593,7 @@ body.campus-modal-open .console-scroll {
   color: var(--accent-ink);
   background: var(--accent-soft);
   border: 1px solid var(--accent-line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
 }
 
 .campus-pomo-done-title {
@@ -1745,7 +1745,7 @@ body.campus-modal-open .console-scroll {
   font-size: var(--fs-xs);
   color: var(--text-2);
   background: var(--fill-3);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
 }
 
 .campus-task-act {
@@ -1864,7 +1864,7 @@ body.campus-modal-open .console-scroll {
   font-size: var(--fs-xs);
   color: var(--text-2);
   background: var(--fill-2);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
 }
 
 .campus-pomo-log-dur {
@@ -2088,7 +2088,7 @@ body.campus-modal-open .console-scroll {
   white-space: nowrap;
   background: transparent;
   border: 1px dashed var(--line-strong);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   cursor: pointer;
 }
 
@@ -2454,7 +2454,7 @@ body.campus-modal-open .console-scroll {
   font-size: 10px;
   font-weight: 600;
   line-height: 14px;
-  border-radius: 4px;
+  border-radius: var(--r-ctl);
 }
 
 .campus-week-mark.is-off {
@@ -2751,7 +2751,7 @@ body.campus-modal-open .console-scroll {
   white-space: nowrap;
   background: var(--fill-3);
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   cursor: pointer;
 }
 
@@ -2953,7 +2953,7 @@ body.campus-modal-open .console-scroll {
   /* 圆角跟参考图：8 → 12px，块内边距收窄换出每行多半个字 */
   .campus-week-block {
     padding: 4px 3px;
-    border-radius: 12px;
+    border-radius: var(--r-card);
   }
 
   /*
@@ -3161,7 +3161,7 @@ body.campus-modal-open .console-scroll {
   color: var(--accent-ink);
   vertical-align: middle;
   background: var(--accent-soft);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
 }
 
 .campus-fullscreen-body {
@@ -3224,7 +3224,7 @@ body.campus-modal-open .console-scroll {
   color: var(--text-2);
   background: var(--fill-3);
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   cursor: pointer;
 }
 
@@ -3251,13 +3251,13 @@ body.campus-modal-open .console-scroll {
   margin-bottom: 14px;
   overflow: hidden;
   background: var(--fill-3);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
 }
 
 .campus-words-fill {
   height: 100%;
   background: var(--accent);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   transition: width 0.2s ease;
 }
 
@@ -3412,7 +3412,7 @@ body.campus-modal-open .console-scroll {
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
   background: var(--fill-3);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
 }
 
 /* 级别 chip：选中态原来是「浅金底 + 金字」，跟旁边没选中的灰字只差一点明度。
@@ -3573,7 +3573,7 @@ body.campus-modal-open .console-scroll {
   width: 6px;
   height: 6px;
   background: var(--line-strong);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   transition: width 0.2s ease;
 }
 
@@ -3622,7 +3622,7 @@ body.campus-modal-open .console-scroll {
   width: 5px;
   height: 5px;
   background: var(--accent);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
 }
 
 #campus-panel-words .campus-flip-word {
@@ -3637,7 +3637,7 @@ body.campus-modal-open .console-scroll {
   width: 30px;
   height: 2px;
   background: var(--accent);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   opacity: 0.9;
 }
 
@@ -3892,7 +3892,7 @@ body.campus-modal-open .console-scroll {
   color: var(--text-3);
   background: transparent;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   cursor: pointer;
   transition: var(--t-color);
 }
@@ -4361,7 +4361,7 @@ body.campus-modal-open .console-scroll {
   font-weight: 500;
   line-height: 1.6;
   vertical-align: middle;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
 }
 
 #campus-panel-words .campus-rb-mark.is-unsure {
@@ -4441,13 +4441,13 @@ body.campus-modal-open .console-scroll {
   margin: 0 16px;
   overflow: hidden;
   background: var(--fill-2);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
 }
 
 #campus-panel-words .campus-deck-progress-fill {
   height: 100%;
   background: var(--accent);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   transition: width 0.2s ease;
 }
 
@@ -4550,7 +4550,7 @@ body.campus-modal-open .console-scroll {
   width: 5px;
   height: 5px;
   background: var(--accent);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
 }
 
 /* 词头：词 + 一道金短线。翻面时整组让到左边，短线就是「词」与「义」的分界 */
@@ -4566,7 +4566,7 @@ body.campus-modal-open .console-scroll {
   width: 36px;
   height: 2px;
   background: var(--accent);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   opacity: 0.9;
 }
 
@@ -4664,7 +4664,7 @@ body.campus-modal-open .console-scroll {
   color: var(--text-2);
   background: transparent;
   border: 1px solid var(--line-strong);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   cursor: pointer;
   transition: var(--t-color);
 }
@@ -4889,7 +4889,7 @@ body.campus-modal-open .console-scroll {
   color: var(--text-2);
   background: var(--fill-3);
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
 }
 
 .campus-draw-name.is-win {
@@ -5052,7 +5052,7 @@ body.campus-modal-open .console-scroll {
   color: var(--accent-ink);
   white-space: nowrap;
   background: var(--accent-soft);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
 }
 
 .campus-stage-meta {
@@ -5111,13 +5111,13 @@ body.campus-modal-open .console-scroll {
   margin-top: 6px;
   overflow: hidden;
   background: var(--fill-3);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
 }
 
 .campus-stage-fill {
   height: 100%;
   background: var(--accent);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   transition: width 0.25s linear;
 }
 
@@ -5510,7 +5510,7 @@ body.campus-modal-open .console-scroll {
   width: 10px;
   height: 10px;
   background: var(--pie);
-  border-radius: 3px;
+  border-radius: var(--r-pill);
 }
 
 .campus-pie-seg {
@@ -5672,14 +5672,14 @@ body.campus-modal-open .console-scroll {
   height: 6px;
   overflow: hidden;
   background: var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
 }
 
 .campus-drill-bar i {
   display: block;
   height: 100%;
   background: var(--accent);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
 }
 
 .campus-drill-value {

@@ -137,7 +137,7 @@
   width: 28px;
   height: 2px;
   margin-top: 16px;
-  border-radius: 2px;
+  border-radius: var(--r-pill);
   background: var(--accent);
 }
 
@@ -146,7 +146,7 @@
   margin: 18px 0 0;
   padding: 13px 16px;
   border-left: 2px solid var(--accent);
-  border-radius: 0 6px 6px 0;
+  border-radius: 0 var(--r-ctl) var(--r-ctl) 0;
   background: var(--accent-soft);
   /* 图标与文字并排：图标定宽，文字自己折行，不参与 flex 伸缩 */
   display: flex;
@@ -245,7 +245,7 @@
   font-weight: 600;
   color: var(--accent-ink);
   background: var(--accent-soft);
-  border-radius: 3px;
+  border-radius: var(--r-ctl);
   padding: 0 2px;
   /* 两端各收回半格，避免底色把标点也框进去显得生硬 */
   margin: 0 -1px;
@@ -350,7 +350,7 @@
   min-width: 136px;
   height: 42px;
   font-size: 0.875rem;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
 }
 /* 未读完：留形不留神。做成灰色描边而不是直接隐藏，用户才知道"这里有个按钮，
    还差一步"，也就知道公告是要读完的 */

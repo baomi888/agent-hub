@@ -5,6 +5,7 @@
 // 一个页面长什么样，取决于页头说什么、内容怎么排；侧栏是"在哪儿"，
 // 它不该随页面重建 —— 这就是把两者拆开的原因（详见 ConsoleLayout.tsx 顶部注释）。
 import type { ReactNode } from "react";
+import InfoNote from "./InfoNote";
 
 interface Props {
   /**
@@ -27,6 +28,14 @@ interface Props {
    * 不会（只是在把下面几个分区 / 几张卡念一遍）→ 它就是 R1，别写。
    */
   sub?: ReactNode;
+  /**
+   * 说明文里「首次进入该听一次」的那部分，收进 ⓘ（2026-11-16）。
+   *
+   * 传了 detail 之后，sub 被当作常驻的一句话主张（≤20 字），detail 按需展开。
+   * sub 只负责"现在就该知道的那一句"，detail 负责口径与后果的完整表述 ——
+   * 两者不要互相重复，否则展开等于白展开。
+   */
+  detail?: ReactNode;
   /** 页头右侧的操作区 */
   actions?: ReactNode;
   /** 内容区最大宽度：需要阅读栏宽度的页面（如总结）传窄一点 */
@@ -46,6 +55,7 @@ export default function PageShell({
   eyebrow,
   title,
   sub,
+  detail,
   actions,
   width,
   compact,
@@ -57,7 +67,11 @@ export default function PageShell({
         <div>
           {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
           <h2>{title}</h2>
-          {sub ? <p className="pg-sub">{sub}</p> : null}
+          {sub && detail ? (
+            <InfoNote claim={sub} detail={detail} />
+          ) : sub ? (
+            <p className="pg-sub">{sub}</p>
+          ) : null}
         </div>
         {actions ? <div className="pg-actions">{actions}</div> : null}
       </div>

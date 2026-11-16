@@ -35,7 +35,7 @@
   flex: none;
   padding: 5px 12px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--card-bg);
   font-size: var(--fs-sm);
   color: var(--text-2);
@@ -135,7 +135,7 @@
   width: 100%;
   max-width: 36px;
   justify-self: center;
-  border-radius: 2px 2px 1px 1px;
+  border-radius: var(--r-pill) var(--r-pill) 0 0;
   /* 柱子是"数据图形"，用金；全零那天会退成极淡的槽（见 .zero） */
   background: var(--accent);
   opacity: 0.85;
@@ -227,7 +227,7 @@
   margin-top: 9px;
   padding: 3px 9px 3px 7px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: transparent;
   font-size: var(--fs-xs);
   color: var(--text-2);
@@ -249,7 +249,7 @@
 .rp-src-n {
   margin-left: 1px;
   padding: 0 4px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--accent-soft);
   font-size: var(--fs-badge);
   font-style: normal;

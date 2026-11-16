@@ -192,7 +192,7 @@
   padding: 11px 14px;
   background: var(--card-bg);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: var(--r-card);
   box-shadow: 0 1px 2px rgba(80, 60, 30, 0.05);
   cursor: pointer;
   transition: var(--t-color), var(--t-move);
@@ -298,7 +298,7 @@
        只加高不加字：76 仍然一行放得下六格，390×844 完全不滚动。 */
     min-height: 76px;
     padding: 9px 4px;
-    border-radius: 12px;
+    border-radius: var(--r-card);
     text-align: center;
   }
   .entry-card .ec-icon svg { width: 20px; height: 20px; }
@@ -389,7 +389,7 @@
   flex: none;
   padding: 3px 9px;
   border: 1px solid var(--accent-line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--card-bg);
   font: inherit;
   font-size: var(--fs-xs);
@@ -533,7 +533,7 @@
   .welcome-daily { margin-top: 6px; }
   /* 档 B（1080×629 那种小窗口）：横排已经替这一档省掉一百多像素，
      图标不必再压到 24（竖排时代的极限值，横排下会小到认不出） */
-  .entry-card { --ec-icon: 34px; --ec-gap: 9px; padding: 7px 11px; border-radius: 14px; }
+  .entry-card { --ec-icon: 34px; --ec-gap: 9px; padding: 7px 11px; border-radius: var(--r-card); }
   .entry-card .ec-icon svg { width: 20px; height: 20px; }
   .entry-card .ec-label { font-size: var(--fs-md); }
 }

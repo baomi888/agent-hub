@@ -19,7 +19,7 @@
   flex: none;
   padding: 0;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: none;
   line-height: 0;
   cursor: pointer;
@@ -40,7 +40,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: rgba(46, 36, 22, 0.48);
   color: #fffdf6;
   font-size: 11px;
@@ -550,7 +550,7 @@
   flex: none;
   width: 8px;
   height: 8px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--accent);
 }
 /* 新登录名用大字摆出来：这是整个流程里唯一一次"让用户记住"的机会 */

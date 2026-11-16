@@ -228,4 +228,26 @@
     position: absolute;
     inset: -2px 0;
   }
+
+  /* 页头说明的 ⓘ：视觉只有 18px，热区补到 44。
+     用伪元素扩，不动 width/height —— 改宽高会把标题下面那句话挤窄。 */
+  .info-note-btn {
+    position: relative;
+  }
+  .info-note-btn::before {
+    content: "";
+    position: absolute;
+    inset: -13px;
+  }
+
+  /* 资料库「‹ 我的资料库」返回条：视觉 30（padding 6 + 图标 18），补到 44。
+     它上面是卡片顶边、下面是库名，纵向扩 7px 不会碰到别的可点元素。 */
+  .kbp-back {
+    position: relative;
+  }
+  .kbp-back::before {
+    content: "";
+    position: absolute;
+    inset: -7px 0;
+  }
 }

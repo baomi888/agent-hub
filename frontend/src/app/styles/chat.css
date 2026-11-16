@@ -149,7 +149,7 @@
      --fs-md 是列表项与卡片正文的档位。 */
   padding: 0 11px;
   border: 1px solid var(--input-border);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: transparent;
   color: var(--text-2);
   font-size: var(--fs-sm);
@@ -275,7 +275,7 @@
   height: 30px;
   padding: 0 11px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--fill-3);
   font-size: var(--fs-sm);
   color: var(--text-2);
@@ -501,7 +501,7 @@
   max-width: 100%;
   margin-bottom: 8px;
   padding: 3px 10px 3px 8px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--fill-2);
   color: var(--accent-ink);
   font-size: var(--fs-xs);
@@ -579,7 +579,7 @@
   flex: 1 1 120px;
   min-width: 0;
   padding: 4px 8px;
-  border-radius: var(--radius-xs, 4px);
+  border-radius: var(--radius-xs);
   border: 1px solid var(--fill-3);
   background: var(--panel);
   color: var(--ink);
@@ -591,7 +591,7 @@
 .geo-edit-cancel {
   flex: none;
   padding: 4px 10px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   font-size: var(--fs-xs);
   line-height: 1.4;
   cursor: pointer;
@@ -672,7 +672,7 @@
 @media (max-width: 560px) {
   .input-row {
     padding: 8px 10px;
-    border-radius: 14px;
+    border-radius: var(--r-card);
     gap: 8px;
   }
   .composer-input {
@@ -908,7 +908,7 @@
   font-size: var(--fs-xs);
   color: var(--text-3);
   background: var(--chip, var(--surface-2));
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   padding: 0 5px;
   line-height: 15px;
   font-variant-numeric: tabular-nums;

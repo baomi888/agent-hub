@@ -85,7 +85,7 @@
   height: 28px;
   flex: none;
   place-items: center;
-  border-radius: 8px;
+  border-radius: var(--r-ctl);
   background: var(--accent);
   /* 方块里一律用「压在金底上的墨色」(#2A2113 / #231C11)，不跟 --ink 走：
      深色主题下 --ink 是浅米，压亮金只有 2:1 —— 里面的图标会糊成一片。 */
@@ -143,7 +143,7 @@
   gap: 8px;
   padding: 0 12px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--step-2);
   transition: var(--t-color);
 }
@@ -216,7 +216,7 @@
   gap: 6px;
   padding: 0 16px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--accent);
   color: var(--on-accent);
   font-size: var(--fs-sm);
@@ -297,7 +297,7 @@
   height: 26px;
   flex: none;
   place-items: center;
-  border-radius: 7px;
+  border-radius: var(--r-ctl);
   background: var(--step-2);
   box-shadow: inset 0 0 0 1px var(--line);
   font-size: var(--fs-xs);
@@ -340,7 +340,7 @@
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: rgba(164, 64, 47, 0.12);
   color: var(--red-ink);
   font-weight: 700;
@@ -386,7 +386,7 @@
   bottom: -1px;
   left: 0;
   height: 2px;
-  border-radius: 2px;
+  border-radius: var(--r-pill);
   background: var(--accent);
   content: "";
 }
@@ -424,7 +424,7 @@
   flex: none;
   place-items: center;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--accent-tint);
   color: var(--accent-ink);
   font-size: var(--fs-xs);
@@ -662,7 +662,7 @@
   flex: none;
   border: 2px solid var(--fill-1);
   border-top-color: var(--accent);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   content: "";
   animation: tb-spin 0.75s linear infinite;
 }
@@ -766,7 +766,7 @@
   gap: 6px;
   padding: 7px 14px;
   border: 1px solid var(--line-strong);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--step-2);
   color: var(--text-2);
   font-size: var(--fs-sm);
@@ -1108,7 +1108,7 @@
   right: 8px;
   bottom: 8px;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: rgba(30, 22, 10, 0.62);
   color: #fff;
   font-size: var(--fs-badge);
@@ -1119,7 +1119,7 @@
 .tb-pill {
   padding: 4px 12px;
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--fill-3);
   color: var(--text-2);
   font-size: var(--fs-xs);
@@ -1181,7 +1181,7 @@
   flex: none;
   padding: 9px 22px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--accent);
   color: var(--on-accent);
   font-size: var(--fs-sm);
@@ -1439,7 +1439,7 @@
 .tb-reason {
   padding: 4px 9px;
   border: 1px solid var(--line-strong);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--step-2);
   color: var(--text-2);
   font-size: var(--fs-xs);
@@ -1460,7 +1460,7 @@
   margin-left: auto;
   padding: 5px 12px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--red-ink);
   color: #FDFAF2;
   font-size: var(--fs-xs);
@@ -1739,7 +1739,7 @@
     flex: none;
     padding: 4px 12px;
     border: 1px solid var(--line);
-    border-radius: 999px;
+    border-radius: var(--r-pill);
   }
 
   .tb-bar.on { border-color: rgba(200, 137, 42, 0.42); box-shadow: none; }

@@ -75,7 +75,7 @@
 .kbp-kb-name {
   min-width: 0;
   padding: 3px 9px;
-  border-radius: 6px;
+  border-radius: var(--r-ctl);
   background: var(--accent-soft);
   color: var(--accent-ink);
   font-size: var(--fs-md);
@@ -108,7 +108,7 @@
 .kbp-rename:focus-visible {
   outline: none;
   box-shadow: var(--ring-accent);
-  border-radius: 3px;
+  border-radius: var(--r-ctl);
 }
 
 /* 改名输入：移动端 16px 由 a11y.css 的全局规则兜底（iOS 聚焦放大页面那条），

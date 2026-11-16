@@ -254,7 +254,7 @@
 .lib-mine-badge {
   flex: none;
   padding: 1px 7px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--accent-tint);
   color: var(--accent-ink);
   font-size: var(--fs-badge);
@@ -291,7 +291,7 @@
   gap: var(--space-7);
   padding: 0 12px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--card-bg);
   color: var(--text-3);
   transition: border-color 0.16s, box-shadow 0.16s;
@@ -321,7 +321,7 @@
   width: 20px;
   height: 20px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--fill-2);
   color: var(--text-2);
   cursor: pointer;
@@ -332,13 +332,13 @@
   flex: none;
   padding: 2px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--card-bg);
 }
 .lib-sort button {
   padding: 5px 12px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: transparent;
   color: var(--text-3);
   font-size: var(--fs-xs);
@@ -394,7 +394,7 @@
   place-items: center;
   width: 34px;
   height: 34px;
-  border-radius: 10px;
+  border-radius: var(--r-ctl);
   background: var(--accent-tint);
   color: var(--accent-ink);
   font-family: var(--font-serif, Georgia, serif);
@@ -404,7 +404,7 @@
 .lib-mark-sm {
   width: 24px;
   height: 24px;
-  border-radius: 7px;
+  border-radius: var(--r-ctl);
   font-size: var(--fs-sm);
 }
 
@@ -871,7 +871,7 @@
   place-items: center;
   width: 38px;
   height: 38px;
-  border-radius: 11px;
+  border-radius: var(--r-ctl);
   background: var(--accent-tint);
   color: var(--accent-ink);
   font-family: var(--font-serif, Georgia, serif);
@@ -881,7 +881,7 @@
 .lib-course-mark-lg {
   width: 54px;
   height: 54px;
-  border-radius: 15px;
+  border-radius: var(--r-card);
   font-size: 26px;
 }
 
@@ -889,7 +889,7 @@
   flex: none;
   padding: 1px 8px;
   border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--accent-tint);
   color: var(--accent-ink);
   font-size: var(--fs-badge);
@@ -1050,7 +1050,7 @@
   place-items: center;
   width: 42px;
   padding: 3px 0;
-  border-radius: 6px;
+  border-radius: var(--r-pill);
   background: var(--fill-3);
   color: var(--text-3);
   font-size: var(--fs-badge);
@@ -1551,7 +1551,7 @@
 
 .kb-post-me {
   padding: 0 5px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--accent-tint);
   color: var(--accent-ink);
   font-size: var(--fs-badge);
@@ -1588,7 +1588,7 @@
   gap: 3px;
   padding: 2px 6px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--r-ctl);
   background: transparent;
   /* 比 text-3 深一档：这两个是"操作"，不是元信息。
      太淡的话用户会以为这行只有名字和时间，压根没发现能回复 */
@@ -1621,7 +1621,7 @@
   flex: none;
   align-items: center;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--r-pill);
   background: linear-gradient(135deg, #e8bc66 0%, #c8892a 58%, #b0761f 100%);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.5),
@@ -1707,7 +1707,7 @@
   margin-left: auto;
   padding: 2px 6px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--r-ctl);
   background: transparent;
   color: var(--text-3);
   font-size: var(--fs-xs);
@@ -1796,7 +1796,7 @@
 .lib-access {
   padding: 0 6px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--fill-3);
   color: var(--text-3);
   font-size: var(--fs-badge);
@@ -1893,7 +1893,7 @@
   height: 28px;
   padding: 0 5px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--r-ctl);
   background: transparent;
   color: var(--text-3);
   cursor: pointer;
@@ -2032,7 +2032,7 @@
   margin: 2px 0 4px;
   padding: 2px 7px;
   border: 1px dashed var(--accent-line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: transparent;
   color: var(--accent-ink);
   font-size: var(--fs-badge);
@@ -2111,7 +2111,7 @@
 .lib-src-tag {
   padding: 0 6px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--fill-3);
   color: var(--text-3);
   white-space: nowrap;

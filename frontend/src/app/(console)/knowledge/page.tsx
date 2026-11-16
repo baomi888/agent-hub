@@ -57,6 +57,15 @@ export default function KnowledgePage() {
   const [favKbs, setFavKbs] = useState<FavoriteKbInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
+  /**
+   * 手机上现在是"哪一屏"（2026-11-16 P1：资料库改 push）。
+   *
+   * 原来两栏在 ≤900 只是竖着堆：上面库列表、下边同一个库的详情，
+   * 库名连着出现两次，要滑过整张列表才看得见详情，也分不清"我在列表里还是在库里"。
+   * 现在列表点进库 = 整屏切换，左上角「‹ 我的资料库」退回。
+   * 桌面端这个 state 不影响布局（两栏并排本来就都在）。
+   */
+  const [mobilePane, setMobilePane] = useState<"list" | "detail">("list");
   const [defaults, setDefaults] = useState<Defaults | null>(null);
   /** 正在进行的操作：upload / rebuild / import / create / delete */
   const [busy, setBusy] = useState<string | null>(null);
@@ -97,6 +106,11 @@ export default function KnowledgePage() {
   }, []);
 
   const active = useMemo(() => kbs.find((k) => k.kb_id === activeId) ?? null, [kbs, activeId]);
+
+  // 库被删掉后详情是空的：手机上要退回列表，否则会停在一张空卡片上（什么都点不了）
+  useEffect(() => {
+    if (!active) setMobilePane("list");
+  }, [active]);
 
   /** 当前库的切法：这张表记过就用它，没记过才回落到全局默认值 */
   const fallbackParams = useMemo(
@@ -146,20 +160,19 @@ export default function KnowledgePage() {
       });
   }, [authedId, refresh]);
 
-  /** 窄屏是上下堆叠：点了左边的库，得把右边的详情滚进来，否则像"点了没反应" */
-  const focusDetail = () => {
-    if (!window.matchMedia("(max-width: 900px)").matches) return;
-    // 等 React 把新选中态画出来再滚
-    window.setTimeout(() => {
-      detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 0);
-  };
-
+  /**
+   * 窄屏从"把详情滚进视野"改成"推进去"（2026-11-16 P1：资料库改 push）。
+   *
+   * 原来两栏竖堆时，点了库只能平滑滚到下面那张卡 —— 用户要滑过一整张列表，
+   * 返回还得自己往上滚，而且库名在两处同时出现，看着像重复渲染。
+   * 现在点库 = 换一屏，返回用详情左上角那个「‹ 我的资料库」。
+   * 桌面两栏并排，本来就在眼前，不做任何切换。
+   */
   const pickKb = (id: string) => {
     setActiveId(id);
     setConfirmDelKb(null);
     setConfirmDelFile(null);
-    focusDetail();
+    if (window.matchMedia("(max-width: 900px)").matches) setMobilePane("detail");
   };
 
   const create = async () => {
@@ -340,7 +353,8 @@ export default function KnowledgePage() {
   return (
     <PageShell
       title="我的资料库"
-      sub="课件、笔记、论文都可以放进来。对话时选中它，回答就会先从这里找依据。"
+      sub="课件、笔记、论文都能放进来。"
+      detail="对话时选中一个库，回答先从这里找依据。"
       actions={
         <>
           {/* 页头只放"对当前这个库的主操作"。原来这里还有一个「+ 新建」，
@@ -413,7 +427,7 @@ export default function KnowledgePage() {
           )}
         </div>
       ) : (
-        <div className="kbp">
+        <div className={mobilePane === "detail" ? "kbp kbp--detail" : "kbp"}>
           {/* ---------- 左：库列表 ---------- */}
           <aside className="card kbp-side">
             <div className="kbp-side-head">
@@ -503,6 +517,17 @@ export default function KnowledgePage() {
           <section className="card kbp-main" ref={detailRef}>
             {active ? (
               <>
+                {/* 手机上是"推进去"的一屏，不是堆在列表下面的一段：
+                    左上角给一个返回，回到全部资料库。桌面端两栏并排，这个按钮不显示。 */}
+                <button
+                  type="button"
+                  className="kbp-back"
+                  onClick={() => setMobilePane("list")}
+                  aria-label="返回全部资料库"
+                >
+                  <CornIcon name="back" className="ico" />
+                  全部资料库
+                </button>
                 <div className="kbp-main-head">
                   <div style={{ minWidth: 0 }}>
                     <h3 className="kbp-title">{active.name}</h3>

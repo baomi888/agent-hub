@@ -129,20 +129,25 @@
   --noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.04' numOctaves='2' seed='5'/%3E%3CfeColorMatrix values='0 0 0 0 0.55 0 0 0 0 0.45 0 0 0 0 0.28 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   --grain-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' seed='9'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 0.96 0 0 0 0 0.88 0 0 0 0.055 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
 
-  /* 圆角四档：xs 角标 / sm 小控件 / md 卡片 / lg 大容器。
-     过去取值有 23 种（2/4/5/6/8/10/11/12/14/16/20px…），挨着的组件形态互相打架。
-     胶囊一律用 999px，正圆用 50%——这两个不受四档约束。
-     注意：Tailwind v4 自己也定义了 --radius-*（默认 2/4/6/8/12/16/24/32px），
-     tsx 里的 rounded-lg / rounded-xl / rounded 就解析到同名变量。
-     这里把 xl 以上一并接管过来，否则手写 CSS 与工具类会长成两套尺寸 */
-  --radius-xs: 4px;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: var(--radius-lg);
-  --radius-2xl: var(--radius-lg);
-  --radius-3xl: var(--radius-lg);
-  --radius-4xl: var(--radius-lg);
+  /* 圆角三档（2026-11-16 收敛）：卡片 12 / 控件 10 / 胶囊 999。
+     依据：评审实测量到同屏并存 8px×100、4px×68，卡片与卡内按钮只差 4px，
+     看不出「这是两档」还是「随手写的两个数」。收敛后只有三种语义：
+     装内容的（卡片、面板、弹层）= 12；手能点的（按钮、输入、标签、图标底座）= 10；
+     成条的（胶囊、进度、开关轨道、微标）= 999。
+     三档之外只留两个例外：0（贴边）与 50%（正圆，它不是圆角档位）。
+     --radius-* 是给 tailwind 工具类与旧代码用的别名，一律指向这三档 ——
+     要调档位只改这里；tests/test_radius_scale.py 会拦住散值回流。 */
+  --r-card: 12px;
+  --r-ctl: 10px;
+  --r-pill: 999px;
+  --radius-xs: var(--r-ctl);
+  --radius-sm: var(--r-ctl);
+  --radius-md: var(--r-card);
+  --radius-lg: var(--r-card);
+  --radius-xl: var(--r-card);
+  --radius-2xl: var(--r-card);
+  --radius-3xl: var(--r-card);
+  --radius-4xl: var(--r-card);
 
   --ring-accent: 0 0 0 3px rgba(200, 137, 42, 0.35);
 

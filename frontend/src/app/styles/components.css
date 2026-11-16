@@ -171,7 +171,7 @@
   width: 26px;
   height: 26px;
   flex: none;
-  border-radius: 8px;
+  border-radius: var(--r-ctl);
   background: var(--accent-soft);
   color: var(--ink);
   transition: var(--t-color);
@@ -226,7 +226,7 @@
 /* 联网建库逐条抓取进度条 */
 .import-progress-bar {
   height: 4px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--accent-line);
   overflow: hidden;
 }
@@ -234,7 +234,7 @@
   display: block;
   height: 100%;
   background: var(--accent);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -436,7 +436,7 @@
   color: var(--text-2);
   border: 1px solid var(--line-strong);
   padding: 3px 9px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   transition: var(--t-color);
 }
 .kb-chip:hover {
@@ -482,7 +482,7 @@ button.kb-chip-unbound:hover {
   max-width: 46vw;
   padding: 4px 10px;
   border: 1px solid var(--line-strong);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: transparent;
   color: var(--text-2);
   font-size: var(--fs-xs);
@@ -562,14 +562,14 @@ button.kb-chip-unbound:hover {
 /* 横向进度条（今日额度） */
 .up-bar {
   height: 7px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--fill-1);
   overflow: hidden;
 }
 .up-bar-fill {
   display: block;
   height: 100%;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--accent);
   transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -606,7 +606,7 @@ button.kb-chip-unbound:hover {
 .up-bar-v {
   width: 9px;
   min-height: 2px;
-  border-radius: 2px 2px 0 0;
+  border-radius: var(--r-pill) var(--r-pill) 0 0;
   transition: height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .up-bar-v.ask {
@@ -630,7 +630,7 @@ button.kb-chip-unbound:hover {
   display: inline-block;
   width: 8px;
   height: 8px;
-  border-radius: 2px;
+  border-radius: var(--r-pill);
 }
 .up-dot.ask {
   background: var(--accent);
@@ -987,7 +987,7 @@ button.kb-chip-unbound:hover {
 /* 渲染失败：保留 tex 原文 + 灰底，别让用户以为公式丢了 */
 .math-raw {
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--r-ctl);
   background: var(--fill-3);
   color: var(--text-2);
   font-family: var(--font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);

@@ -17,7 +17,7 @@
      这一行四颗是同一权重的开关，2px 的矮一截并排时最刺眼（比宽度不齐还明显）。 */
   height: 30px;
   padding: 0 11px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   border: 1px solid var(--accent);
   background: var(--accent-soft);
   color: var(--accent-ink);
@@ -170,7 +170,7 @@
   align-self: center;
   padding: 3px 9px;
   border: 1px solid var(--line-strong);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: transparent;
   font: inherit;
   font-size: var(--fs-xs);

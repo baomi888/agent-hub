@@ -318,13 +318,17 @@ export default function SettingsPage() {
                     </button>
                   </div>
                   {profile.categories.length > 0 && (
+                    /* 原来这里还写着「（权重 70）（权重 22）…。权重来自手选（每次 +3）
+                       与对话中自动识别的主题（每次 +1）」—— 那是把一个内部打分模型
+                       念给用户听：他既改不了它，也用不上它。留下的只有"重心是哪几个"，
+                       顺序本身已经表达了优先级（2026-11-16 说明文下沉）。 */
                     <p className="hint" style={{ marginTop: 8 }}>
                       当前重心：
                       {profile.categories
                         .slice(0, 3)
-                        .map((c) => `${c.category}（权重 ${c.weight}）`)
+                        .map((c) => c.category)
                         .join("、")}
-                      。权重来自手选（每次 +3）与对话中自动识别的主题（每次 +1）。
+                      。
                     </p>
                   )}
                 </>

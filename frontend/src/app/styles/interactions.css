@@ -8,7 +8,7 @@
   background: var(--fill-3);
   border: 1px solid var(--accent-line);
   padding: 4px 11px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   margin-bottom: 8px;
 }
 .tool-spin {
@@ -33,7 +33,7 @@
   background: var(--card-bg);
   border: 1px solid var(--line);
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
 }
 .tool-chip svg {
   width: 12px;
@@ -212,7 +212,7 @@
   color: var(--text-2);
   padding: 5px 10px;
   border: 1px solid var(--accent-line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--veil);
   cursor: pointer;
   transition: var(--t-color);
@@ -226,7 +226,7 @@
   gap: var(--space-8);
   padding: 3px 4px 3px 11px;
   border: 1px solid var(--accent-line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--veil);
 }
 .fs-picker-label {
@@ -258,7 +258,7 @@
   place-items: center;
   min-height: 36px;
   padding: 0 7px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   transition: background-color 0.18s ease, color 0.18s ease;
 }
 /* 命中区补到 44 高，水平只扩 1px —— chip 之间只有 2px 缝，

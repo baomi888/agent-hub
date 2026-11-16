@@ -3436,7 +3436,8 @@ export default function RemindersPage() {
     <PageShell
       compact
       title="待办"
-      sub="设了提醒时间，到时会通知你；课表、打卡的提醒会自动排好。"
+      sub="到点提醒你，课表与打卡自动排好。"
+      detail="设了提醒时间，到时会通知你。"
       actions={
         <div className="flex items-center gap-2">
           <div className="seg" role="group" aria-label="视图">

@@ -139,7 +139,12 @@ def test_page_shell_treats_eyebrow_and_sub_as_optional():
     assert "eyebrow?: string" in shell, "PageShell 的 eyebrow 又变回必填了"
     assert "sub?: ReactNode" in shell, "PageShell 的 sub 又变回必填了"
     assert "{eyebrow ? <p className=\"eyebrow\">" in shell, "eyebrow 缺失时仍会渲染空的小字块"
-    assert "{sub ? <p className=\"pg-sub\">" in shell, "sub 缺失时仍会渲染空段落（自带 margin）"
+    # 2026-11-16：sub 多了一条分支（有 detail 时走 InfoNote，claim 常驻 + ⓘ 展开）。
+    # 判据不变 —— 两头都得缺什么就什么都不渲染，不能出现空段落。
+    assert "sub && detail ?" in shell, "页头说明下沉那条分支丢了（sub + detail 走 InfoNote）"
+    assert '<p className="pg-sub">{sub}</p>' in shell, "sub 缺失时仍会渲染空段落（自带 margin）"
+    assert ": sub ? (" in shell, "找不到「有 sub 无 detail」那一支"
+    assert ") : null}" in shell, "两个属性都缺时没有返回 null，会渲染空壳"
 
 
 def test_sub_does_not_navigate_or_introduce_the_form():

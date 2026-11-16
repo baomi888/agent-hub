@@ -185,6 +185,48 @@
      读起来像本来就这么排的；桌面端只有一行时它不起作用。 */
   text-wrap: balance;
 }
+/* 说明文下沉：页头只留一句主张，其余收进 ⓘ（2026-11-16 P1）。
+   原来四页各摊 2–4 行（60px 上下）在讲"这页是干什么的"，而那属于首次进入该听一次的事。
+   detail 由组件按需挂载，所以收起状态下面这里没有可量的高度。 */
+.info-note {
+  margin-top: var(--space-8);
+}
+.info-note-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+}
+.info-note-row .pg-sub {
+  margin: 0;
+}
+.info-note-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  border-radius: 50%;
+  transition: color 0.15s ease;
+}
+.info-note-btn:hover,
+.info-note-btn[aria-expanded="true"] {
+  color: var(--accent-ink);
+}
+.info-note-detail {
+  margin: var(--space-8) 0 0;
+  padding-left: var(--space-8);
+  border-left: 2px solid var(--line-strong);
+  font-size: var(--fs-md);
+  color: var(--text-2);
+  max-width: 64ch;
+  text-wrap: balance;
+}
 .pg-actions {
   display: flex;
   gap: var(--space-10);
@@ -371,7 +413,7 @@
   gap: var(--space-5);
   font-size: var(--fs-xs);
   padding: var(--space-3) var(--space-8);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--fill-3);
   color: var(--text-2);
   white-space: nowrap;
@@ -461,7 +503,7 @@
   height: 40px;
   border: none;
   background: none;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   position: relative;
   flex: none;
   padding: 0;
@@ -473,7 +515,7 @@
   top: 9px;
   width: 38px;
   height: 22px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--fill-1);
   border: 1px solid var(--line);
   transition: var(--t-color);
@@ -751,7 +793,7 @@ textarea.input {
   font-style: normal;
   font-weight: 600;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--fill-2);
   color: var(--text-2);
   font-size: var(--fs-badge);
@@ -948,7 +990,7 @@ textarea.input {
   margin-left: var(--space-4);
   padding: 0 5px;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--r-ctl);
   font-size: var(--fs-badge);
   line-height: 1.5;
   color: var(--text-3);
@@ -965,7 +1007,7 @@ textarea.input {
 .hours i {
   flex: 1;
   background: var(--accent);
-  border-radius: 3px 3px 1px 1px;
+  border-radius: var(--r-ctl) var(--r-ctl) 0 0;
   min-height: 2px;
   opacity: 0.85;
 }
@@ -1031,7 +1073,7 @@ textarea.input {
   font-size: var(--fs-xs);
   min-height: 26px;
   padding: var(--space-3) var(--space-8);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   border: 1px solid var(--accent-line);
   color: var(--accent-ink);
   background: var(--accent-soft);
@@ -1181,7 +1223,7 @@ textarea.input {
 .dots i {
   width: 16px;
   height: 16px;
-  border-radius: 5px;
+  border-radius: var(--r-pill);
   background: var(--fill-2);
   border: 1px solid var(--line);
 }
@@ -1246,7 +1288,7 @@ textarea.input {
 }
 .bar {
   height: 7px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--fill-2);
   overflow: hidden;
   margin-top: var(--space-7);
@@ -1255,7 +1297,7 @@ textarea.input {
   display: block;
   height: 100%;
   background: var(--accent);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
 }
 .bar i.hot {
   background: var(--red);
@@ -1436,7 +1478,7 @@ textarea.input {
   .tab-sheet-grab {
     width: 36px;
     height: 4px;
-    border-radius: 999px;
+    border-radius: var(--r-pill);
     background: var(--fill-1);
     margin: 0 auto var(--space-10);
   }
@@ -1818,7 +1860,7 @@ textarea.input {
   padding: 12px 13px 13px;
   text-align: left;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--r-card);
   font: inherit;
   cursor: pointer;
   transition: var(--t-color);
@@ -1863,7 +1905,7 @@ textarea.input {
   align-self: end;
   display: block;
   height: 2px;
-  border-radius: 2px;
+  border-radius: var(--r-pill);
   background: var(--fill-1);
   overflow: hidden;
 }
@@ -2090,7 +2132,7 @@ textarea.input {
   height: 34px;
   padding: 7px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--r-ctl);
   background: var(--surface);
   color: var(--text-2);
   transition:
@@ -2281,7 +2323,7 @@ textarea.input {
   gap: var(--space-6);
   padding: 0 var(--space-10);
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   font-size: var(--fs-md);
   color: var(--text-2);
   transition: var(--t-color);
@@ -2337,7 +2379,7 @@ textarea.input {
   left: 0;
   height: 22px;
   overflow: hidden;
-  border-radius: 7px;
+  border-radius: var(--r-ctl);
   background-color: var(--step-0);
   background-image: linear-gradient(rgba(61, 47, 26, 0.06), rgba(61, 47, 26, 0.06));
   box-shadow:
@@ -2442,7 +2484,7 @@ textarea.input {
   width: 20px;
   height: 12px;
   border: 1px solid rgba(61, 47, 26, 0.18);
-  border-radius: 3px;
+  border-radius: var(--r-ctl);
   background-color: var(--step-0);
   background-image: repeating-linear-gradient(
     135deg,
@@ -2501,7 +2543,7 @@ textarea.input {
    同一条轴上混着两类对象，形状是唯一能一眼分清的信号；
    0.82 的缩放是为了让菱形的对角线（×1.41）和圆点直径看起来一样重。 */
 .rem-ev[data-kind="event"] i {
-  border-radius: 1px;
+  border-radius: var(--r-pill);
   transform: rotate(45deg) scale(0.82);
 }
 
@@ -2788,7 +2830,7 @@ textarea.input {
   min-height: 44px;
   padding: 0 var(--space-12);
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: transparent;
   font-size: var(--fs-md);
   color: var(--text-2);
@@ -2972,7 +3014,7 @@ textarea.input {
   min-height: 44px;
   padding: 0 var(--space-12);
   border: 1px solid var(--accent-line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   font-size: var(--fs-md);
   color: var(--ink);
   transition: var(--t-color);
@@ -3033,7 +3075,7 @@ textarea.input {
   height: 24px;
   padding: 0 7px;
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   font-size: var(--fs-xs);
   font-weight: 500;
   line-height: 1;
@@ -3283,7 +3325,7 @@ textarea.input {
   content: "";
   width: 6px;
   height: 6px;
-  border-radius: 1px;
+  border-radius: var(--r-pill);
   background: var(--accent);
 }
 .rem-sect[data-kind="rem"] .rem-sect-title::before {
@@ -4354,7 +4396,7 @@ textarea.input {
      为什么是蓝而不是别的：蓝金是互补对，跟玉米金放一起最跳又不脏；
      而且它在这张图里是有分工的 —— 冷色 = 还没整理的原话，暖色 = 已经理好的清单。 */
   border: 1px solid var(--memo-line);
-  border-radius: 16px;
+  border-radius: var(--r-card);
   background: var(--memo-bg);
   box-shadow: var(--memo-shadow);
   color: inherit;
@@ -4446,7 +4488,7 @@ textarea.input {
   gap: 10px;
   padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--r-ctl);
   background: var(--card-bg);
   box-shadow: 0 1px 1px rgba(45, 72, 104, 0.04);
 }
@@ -4463,7 +4505,7 @@ textarea.input {
   border-radius: 50%;
 }
 .rem-cap-demo-node[data-kind="reminder"] {
-  border-radius: 2px;
+  border-radius: var(--r-pill);
   transform: rotate(45deg);
 }
 
@@ -4819,7 +4861,7 @@ textarea.input {
 }
 .rem-cap-srcmark {
   padding: 1px 2px;
-  border-radius: 4px;
+  border-radius: var(--r-ctl);
   border-bottom: 1px dashed var(--accent-line);
   background: transparent;
   color: inherit;
@@ -4837,7 +4879,7 @@ textarea.input {
   min-width: 16px;
   height: 16px;
   margin-left: 2px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--accent-soft);
   font-size: var(--fs-badge);
   line-height: 1;
@@ -4959,7 +5001,7 @@ textarea.input {
   background: var(--accent);
 }
 .rem-cap-node[data-kind="reminder"] {
-  border-radius: 4px;
+  border-radius: var(--r-ctl);
   transform: rotate(45deg);
 }
 .rem-cap-node[data-kind="reminder"][data-on="1"] {
@@ -5022,7 +5064,7 @@ textarea.input {
   height: 26px;
   padding: 0 9px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   font-size: var(--fs-md);
   color: var(--text-3);
   transition:
@@ -5063,14 +5105,14 @@ textarea.input {
   margin-top: 8px;
   padding: 8px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--r-card);
   background: var(--surface);
 }
 .rem-cap-titleedit {
   width: 100%;
   padding: 6px 8px;
   border: 1px solid var(--line-strong);
-  border-radius: 8px;
+  border-radius: var(--r-ctl);
   background: var(--card-bg);
   font: inherit;
   /* 和卡片标题同一档字号：编辑时字不能突然变小，否则像是在改另一件事 */
@@ -5096,7 +5138,7 @@ textarea.input {
   margin-top: 8px;
   padding: 8px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--r-card);
   background: var(--surface);
 }
 .rem-cap-iconpick-b {
@@ -5106,7 +5148,7 @@ textarea.input {
   height: 32px;
   padding: 6px;
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: var(--r-ctl);
   color: var(--text-2);
   transition:
     border-color 120ms ease,
@@ -5137,7 +5179,7 @@ textarea.input {
   align-items: center;
   height: 18px;
   padding: 0 6px;
-  border-radius: 3px;
+  border-radius: var(--r-ctl);
   font-size: var(--fs-badge);
   font-weight: 400;
   white-space: nowrap;
@@ -5166,7 +5208,7 @@ textarea.input {
   height: 22px;
   padding: 0 6px;
   border: 1px solid var(--accent-line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: transparent;
   font: inherit;
   font-size: var(--fs-xs);
@@ -5280,7 +5322,7 @@ textarea.input {
   height: 28px;
   padding: 0 10px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: var(--r-pill);
   background: var(--fill-2);
   font: inherit;
   font-size: var(--fs-badge);
@@ -5327,7 +5369,7 @@ textarea.input {
   gap: var(--space-6);
   padding: 5px 5px 5px 6px;
   border: 1px solid var(--input-border);
-  border-radius: 22px;
+  border-radius: var(--r-card);
   background: var(--fill-1);
   transition: border-color var(--t-color), background var(--t-color);
 }
@@ -5397,7 +5439,7 @@ textarea.input {
 .rem-cap-mic-stop {
   width: 11px;
   height: 11px;
-  border-radius: 2px;
+  border-radius: var(--r-ctl);
   background: currentColor;
 }
 @keyframes rem-cap-mic-pulse {
@@ -5618,7 +5660,7 @@ textarea.input {
     left: 50%;
     width: 38px;
     height: 4px;
-    border-radius: 999px;
+    border-radius: var(--r-pill);
     background: var(--line-strong);
     transform: translateX(-50%);
   }
@@ -5756,7 +5798,7 @@ textarea.input {
   margin: 0 16px max(16px, env(safe-area-inset-bottom));
   padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--fill-2);
 }
 .rem-cap-live-x,
@@ -5813,7 +5855,7 @@ textarea.input {
 .rem-cap-live-wave i {
   flex: none;
   width: 3px;
-  border-radius: 2px;
+  border-radius: var(--r-pill);
   background: var(--accent);
   /* 只过渡高度，且要短：80ms 比采样间隔（70ms）略长，看起来是连续的；
      长了会变成"缓慢起伏"，跟声音对不上。 */

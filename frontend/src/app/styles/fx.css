@@ -223,7 +223,7 @@
 .skel-line {
   display: block;
   height: 9px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--bg-subtle);
   animation: skelPulse 1.4s ease-in-out infinite;
 }
@@ -248,7 +248,7 @@
   display: inline-block;
   margin-left: 8px;
   padding: 1px 8px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   border: 1px solid var(--line-strong);
   background: var(--bg-subtle);
   color: var(--text-3);
@@ -268,7 +268,7 @@
   align-items: center;
   gap: var(--space-6);
   padding: 6px 14px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   border: 1px solid var(--line-strong);
   background: var(--panel);
   color: var(--text-1);
