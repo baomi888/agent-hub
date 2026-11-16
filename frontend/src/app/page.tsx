@@ -264,6 +264,20 @@ export default function Home() {
 
   const boundKb = sessions.find((s) => s.id === activeSid)?.kb_id ?? null;
 
+  // 首屏「继续上次」：会话列表后端已按 updated_at DESC 排好，取第一条**有真标题**的。
+  // 占位名要一起排掉 —— 后端建会话时 title 默认就是「新对话」（api/sessions.py:26），
+  // 不是空串，所以只判 trim() 会把刚点开的新会话当成"上次聊的"，
+  // 显示成「继续上次 · 新对话 · 刚刚」，等于什么都没说。
+  // 这三个占位名与 core/sediment_store.py:369 同一套口径，别各写一份。
+  const resumeSession = (() => {
+    const PLACEHOLDER = ["新对话", "未命名会话", "untitled"];
+    const s = sessions.find((c) => {
+      const t = (c.title || "").trim();
+      return t && !PLACEHOLDER.includes(t);
+    });
+    return s ? { id: s.id, title: s.title, updated_at: s.updated_at } : null;
+  })();
+
   // 发送消息（SSE 流式）；attachments 先走 /api/chat/upload 上传，图片由视觉模型消费，
   // 非图片格式后端暂不解析。
   // display：气泡显示的文本（计划功能发送结构化提示时传原问题，提示只给 AI 看）
@@ -939,7 +953,13 @@ export default function Home() {
           selectSession(sid);
           setSidebarOpen(false); // 窄屏抽屉里点完会话就收起来
         }}
-        onCreate={createSession}
+        onCreate={() => {
+          void createSession();
+          // 与 onSelect 同理：抽屉是「选会话」的地方，点了「新建对话」就该落在
+          // 新会话上。原来只关 onSelect，手机点完「新建对话」抽屉还盖着，
+          // 看起来像没点中（2026-11-16 复现：截图里欢迎页整块被抽屉压住）。
+          setSidebarOpen(false);
+        }}
         onOpenLibrary={() => {
           // 曾经是 window.location.href —— 那是**整页刷新**：浏览器白一帧、
           // 重新下载整包 JS、再重新探活。广场本来就在同一个 Next 应用里，
@@ -983,6 +1003,8 @@ export default function Home() {
           topK={topK}
           onTopKChange={setTopK}
           sessionTitle={sessions.find((s) => s.id === activeSid)?.title ?? null}
+          resumeSession={resumeSession}
+          onResumeSession={(sid) => void selectSession(sid)}
           boundKb={boundKb}
           kbCount={kbs.length}
           kbNameMap={kbNameMap}

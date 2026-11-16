@@ -45,6 +45,33 @@ export function fmtWhen(d: Date | number, now = new Date()): string {
   return `${pad(x.getMonth() + 1)}-${pad(x.getDate())} ${fmtHM(x)}`;
 }
 
+/**
+ * 「刚刚」「2 小时前」「昨天」「5 天前」「10-11」——最近一次对话离现在多久。
+ *
+ * 只给首屏「继续上次」用。为什么不用 fmtWhen（那个给的是「昨天 21:00」）：
+ * 首页这一行右边只有约 60px，写了分钟就必然把标题挤到只剩六七个字；
+ * 而"上次是什么时候"只要粗粒度就够认出是哪一次 —— 精确时刻在会话里就有。
+ * 一周以上退回日期，因为「23 天前」比「10-24」更难换算。
+ */
+export function fmtAgo(d: Date | number, now = new Date()): string {
+  const x = typeof d === "number" ? new Date(toMs(d)) : d;
+  const ms = now.getTime() - x.getTime();
+  if (ms < 0) return fmtWhen(x, now); // 未来时间戳不当"刚刚"用（同 fmtWhen 的教训）
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return "刚刚";
+  const dayKey = (v: Date) => `${v.getFullYear()}-${v.getMonth()}-${v.getDate()}`;
+  const diffDays = Math.round(
+    (new Date(dayKey(now)).getTime() - new Date(dayKey(x)).getTime()) / 86400000,
+  );
+  // 跨零点时（00:05 看 23:58）说「昨天」比说「6 分钟前」更接近直觉吗？
+  // 不 —— 6 分钟就是 6 分钟，这里先判分钟档，再判天。
+  if (mins < 60) return `${mins} 分钟前`;
+  if (diffDays === 0) return `${Math.floor(mins / 60)} 小时前`;
+  if (diffDays === 1) return "昨天";
+  if (diffDays < 7) return `${diffDays} 天前`;
+  return `${pad(x.getMonth() + 1)}-${pad(x.getDate())}`;
+}
+
 /** 「还有 2 小时 14 分」——比给一个绝对时刻更能回答「我等不等得起」 */
 export function fmtRemaining(target: Date | number, now = new Date()): string {
   const x = typeof target === "number" ? new Date(toMs(target)) : target;

@@ -217,4 +217,15 @@
     position: absolute;
     inset: -2px;
   }
+
+  /* 首屏「继续上次」那一行：视觉 40（padding 8 + 图标 24），补 2px 到 44。
+     它上下都是 8px 以上的间距，纵向扩不会碰到邻居。 */
+  .resume-row {
+    position: relative;
+  }
+  .resume-row::before {
+    content: "";
+    position: absolute;
+    inset: -2px 0;
+  }
 }

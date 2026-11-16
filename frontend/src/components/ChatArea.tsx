@@ -14,6 +14,7 @@ import type { RefSource, QuotaInfo } from "@/lib/types";
 import { HOME_GROUPS, TOOLS_URL } from "./chat/constants";
 import TodayStrip from "./chat/TodayStrip";
 import PushNudge from "./chat/PushNudge";
+import ResumeStrip from "./chat/ResumeStrip";
 import { isPlanRequest, stripPlanHint } from "./chat/plan";
 import CapToggles, { type CapValue } from "./chat/CapToggles";
 import Bubble from "./chat/Bubble";
@@ -122,10 +123,18 @@ interface Props {
   /** 检索条数变化。资料怎么切片是「建库时」的事，在右侧资料库面板按库设置 */
   onTopKChange: (v: number) => void;
   sessionTitle?: string | null;
+  /**
+   * 首屏「继续上次」要显示的那一次对话。传 null / 不传 = 整块不渲染。
+   *
+   * 由页面层从会话列表里挑（最近的、且标题不为空的），不在本组件里取数：
+   * 本组件是纯展示，会话列表归 useSessions 管 —— 在这里再拉一次列表，
+   * 首屏就会多一个请求，而它和外壳的加载时序还不同步（闪烁的来源）。
+   */
+  resumeSession?: { id: string; title: string; updated_at: number } | null;
+  onResumeSession?: (sid: string) => void;
   boundKb?: string | null;
   /** 该用户拥有的资料库总数：>0 且当前未绑定时，顶栏给「未绑定」引导提示 */
-  kbCount?: number;
-  kbNameMap?: Record<string, string>;
+  kbCount?: number;  kbNameMap?: Record<string, string>;
   onUnbindKb?: () => void;
   kbPanelOpen?: boolean;
   onToggleKbPanel?: () => void;
@@ -209,6 +218,8 @@ export default function ChatArea({
   quota,
   onOpenUsage,
   userId = null,
+  resumeSession = null,
+  onResumeSession,
 }: Props) {
   const [input, setInput] = useState("");
   const [showParams, setShowParams] = useState(false);
@@ -958,6 +969,14 @@ export default function ChatArea({
                   </div>
                 </div>
               ))}
+
+              {/* ③ 继续上次：把「刚才做到哪儿了」放回首屏。
+                  为什么在六格之后 —— 见 ResumeStrip 顶部注释（含 118px 的实测账）。
+                  只在有历史对话时渲染，新用户看到的首屏与改动前一致。 */}
+              <ResumeStrip
+                session={resumeSession}
+                onResume={(sid) => onResumeSession?.(sid)}
+              />
 
               <p className="welcome-foot">问完的每一句，都能翻回原文。</p>
             </div>
