@@ -51,6 +51,7 @@ import ReminderAccess from "@/components/reminders/ReminderAccess";
 import MailAccess from "@/components/reminders/MailAccess";
 import CourseCalendar from "@/components/reminders/CourseCalendar";
 import { Callout, Field, Seg, SkeletonLines, Switch, ToastHost } from "@/components/console/ui";
+import { haptic } from "@/lib/haptics";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { useToast } from "@/lib/hooks/useToast";
@@ -878,7 +879,14 @@ function TaskCard({
             : `${done ? "取消完成" : "完成"}「${task.title}」`
         }
         className="rem-check"
-        onClick={() => (pick ? onPick(task) : onToggle(task))}
+        onClick={() => {
+          // 触觉：勾掉一件待办给一次轻触感（"做成了一件小事"）。
+          // **取消完成不给** —— 那是撤销，回弹一下反而像"操作成功"。
+          // 选择模式下也不给：那是在挑东西，不是完成。
+          if (!pick && !done) haptic("success");
+          if (pick) onPick(task);
+          else onToggle(task);
+        }}
       >
         <span aria-hidden="true">
           {checked ? <CornIcon name="check" className="h-3 w-3" /> : null}

@@ -145,15 +145,14 @@ export function NotReady({ what, note }: { what: string; note?: ReactNode }) {
 /* ---------------- 骨架 ---------------- */
 
 /** 加载占位。宽度按文案长度给，避免所有骨架一样长显得像装饰 */
-export function SkeletonLines({ widths = ["80%", "100%", "60%"] }: { widths?: string[] }) {
-  return (
-    <div>
-      {widths.map((w, i) => (
-        <div key={i} className="skel" style={{ width: w, marginTop: i ? 8 : 0 }} />
-      ))}
-    </div>
-  );
-}
+/**
+ * 骨架占位（2026-11-16 P2 起搬到 `components/Skeleton.tsx`）。
+ *
+ * 搬家原因：论坛 / 留言板这类**公开页**也要用骨架屏，而它们不该 import
+ * 整个 console/ui（那里拖着 Toast、Field、Seg 一堆控制台专属东西）。
+ * 这里保留同名导出，已有的四个控制台页面一行都不用改。
+ */
+export { SkeletonLines } from "../Skeleton";
 
 /* ---------------- 带标签的输入 ---------------- */
 

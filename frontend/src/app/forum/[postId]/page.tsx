@@ -22,6 +22,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 
 import CornIcon from "@/components/CornIcon";
+import { SkeletonLines } from "@/components/Skeleton";
 import UserAvatar from "@/components/settings/UserAvatar";
 import { api, forumImgUrl } from "@/lib/api";
 import { fmtWhen } from "@/lib/time";
@@ -371,9 +372,8 @@ export default function ForumTopicPage() {
 
       <main className="tb-detail">
         {loading && (
-          <p className="tb-loading" role="status">
-            正在加载话题
-          </p>
+          // 详情页是一篇文章，用 4 条线比"三张卡"更像正文；首条给 82% 当标题位
+          <SkeletonLines widths={["82%", "96%", "90%", "64%"]} label="正在加载话题" />
         )}
 
         {!loading && err && (

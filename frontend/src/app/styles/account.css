@@ -609,3 +609,58 @@
     animation: none;
   }
 }
+
+/* ---------- 「关于」折叠行（设置页账号卡底部，2026-11-16 P2）----------
+   原来账号 ID 挂在登录名后面，只露前 8 位、完整值塞在 title 里 ——
+   手机上没有 hover，想抄一串 ID 根本抄不到。收进这里以后：
+   默认收起（不占视觉），展开给完整 32 位，`user-select: all` 点一下整段选中。 */
+.acct-about {
+  /* 卡片最底部、横跨整行。桌面 .acct-card 是 flex 行（要 flex-basis 100% 才会换到下一行），
+     窄屏是 grid（由 console.css 的 ≤900 段补 grid-column: 1 / -1）。
+     ★ 两处都要写：只写一边，另一档布局就会把它挤进名字列，把名字压成一个字宽 */
+  flex: 1 1 100%;
+  min-width: 0;
+  margin-top: var(--space-10);
+  padding-top: var(--space-10);
+  border-top: 1px dashed var(--line);
+  font-size: var(--fs-sm);
+}
+.acct-about > summary {
+  /* 44 高而不是 28：这一行是唯一的可点目标，纵向是独立的一行，
+     加高不会挤到别的元素（区别于横向扩宽会换行的场景） */
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  color: var(--text-2);
+  cursor: pointer;
+  list-style: none;
+}
+/* Safari 的默认三角不走 list-style，得单独摘掉 */
+.acct-about > summary::-webkit-details-marker {
+  display: none;
+}
+/* 自己画一个小三角：收起时朝右，展开转 90 度。
+   用 border 画而不是字符 —— 字符要占字体子集，多个字形就多一份重裁风险 */
+.acct-about > summary::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-left: 4px solid currentColor;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  transition: transform 0.15s ease;
+}
+.acct-about[open] > summary::before {
+  transform: rotate(90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .acct-about > summary::before {
+    transition: none;
+  }
+}
+.acct-about .meta {
+  margin-top: var(--space-6);
+  /* 32 位 hex 在 390 宽下会顶到边：允许在任意字符处折行 */
+  word-break: break-all;
+}

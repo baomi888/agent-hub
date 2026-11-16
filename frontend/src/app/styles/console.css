@@ -260,6 +260,31 @@
     transform: none;
   }
 }
+
+/* 切一级 tab（底栏那三格之间）：**只淡入**，不要位移。
+   平级切换没有"进入"的方向，加了横移反而像进了一层。
+   160ms 比进二级页短一点：平级切换本来就应该更"无感"。 */
+.page-enter--tab {
+  animation: page-fade-in 0.16s ease-out backwards;
+}
+
+/* 进二级页：从右 8px 推入。方向感来自这 8px，不靠拉长时长。
+   ★ 幅度不许再放大：transform 在动画期间会把页面里 fixed 元素的定位基准
+     从视口改成这层 div（首页为此只动 opacity，见下面 .page-fade 的注释）。
+     8px 是"能看出方向"和"扯坏浮层"之间量出来的折中。 */
+.page-enter--push {
+  animation: page-enter-push 0.18s cubic-bezier(0.22, 0.61, 0.36, 1) backwards;
+}
+@keyframes page-enter-push {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .page-enter {
     animation: none;
@@ -705,6 +730,14 @@ textarea.input {
   50% {
     opacity: 0.55;
   }
+}
+
+/* 列表型骨架的外层：摆一列卡片。间距比真实列表略紧（8 而不是 12），
+   因为骨架没有文字、视觉重量本来就轻，用真实间距会显得中间空 */
+.skel-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
 }
 
 /* ---------- 委托卡 ---------- */
@@ -1349,6 +1382,9 @@ textarea.input {
 .acct-card {
   display: flex;
   align-items: center;
+  /* 允许换行：卡片底部那条可展开的「关于」占满整行（flex-basis: 100%），
+     不给 wrap 的话它会挤进这一行，把名字列压成一个字宽（2026-11-16 实测） */
+  flex-wrap: wrap;
   gap: var(--space-14);
 }
 .acct-actions {
@@ -1507,6 +1543,16 @@ textarea.input {
     justify-content: center;
     gap: var(--space-8);
   }
+  /* 奇数项时，最后一项跨满整行（评审 C5 的第二个选项，2026-11-16）。
+     普通用户 6 项 = 2×3 本来就填满，`nth-child(even)` 不命中，一行不动；
+     管理员 7 项（多一个「看板」）时最后一项独占一格、右下空着一角，
+     看着像没做完 —— 让它跨满两列，读作"整行入口"而不是"缺一块"。
+     判"总数是奇数"用 `:last-child:nth-child(odd)`：奇数个时末项序号必为奇数。
+     ★ 不走"改三列"那条：2026-11-15 量过，三列每格 114px，
+       「名称 + 一句用途」放不下，比空格子更难看（见上面那段注释）。 */
+  .tab-sheet-item:last-child:nth-child(odd) {
+    flex-basis: 100%;
+  }
   .tab-sheet-item {
     /* (100% - 1 个 gap) / 2 —— 两列等宽，gap 是 8，所以扣 4 */
     flex: 0 0 calc(50% - var(--space-4));
@@ -1619,6 +1665,12 @@ textarea.input {
   }
   .acct-card .acct-actions .btn {
     width: 100%;
+  }
+  /* 「关于」同上：grid 里必须显式跨满两列。
+     ★ 别指望自动排布 —— `.acct-card > div` 被钉在第 2 列，而 <details> 不是 div，
+       会被塞进 auto 列，名字列当场被压成一个字宽（2026-11-16 踩过） */
+  .acct-card .acct-about {
+    grid-column: 1 / -1;
   }
   /* 委托行：开关留在第一行右侧，动作整行落到第二行。
      390 屏上卡片内容宽只有 ~250px，名称后面再挂一个 34px 开关，

@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageShell from "@/components/console/PageShell";
 import { Seg, ToastHost } from "@/components/console/ui";
+import { SkeletonLines } from "@/components/Skeleton";
 import CornIcon from "@/components/CornIcon";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
@@ -197,11 +198,7 @@ export default function FlowPage() {
         </div>
       }
     >
-      {isLoading && (
-        <p className="flow-hint" role="status">
-          正在加载…
-        </p>
-      )}
+      {isLoading && <SkeletonLines widths={["70%", "96%", "80%"]} label="正在加载工作流" />}
 
       {isDemo && (
         <p className="flow-demo" role="status">

@@ -24,6 +24,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import CornIcon from "@/components/CornIcon";
+import { SkeletonCards } from "@/components/Skeleton";
 import ConsoleTabBar from "@/components/console/ConsoleTabBar";
 import { avatarIconName, avatarImageUrl } from "@/components/settings/UserAvatar";
 import { api, forumImgUrl } from "@/lib/api";
@@ -857,11 +858,7 @@ export default function ForumPage() {
             <span className="tb-sort-stat">今日新增 {fmtNum(stat.today)} 条</span>
           </div>
 
-          {loading && (
-            <p className="tb-loading" role="status">
-              正在加载话题
-            </p>
-          )}
+          {loading && <SkeletonCards rows={3} label="正在加载话题" />}
 
           {!loading && err && (
             <div className="tb-blank">

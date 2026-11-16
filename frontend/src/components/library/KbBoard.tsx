@@ -26,6 +26,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import CornIcon from "@/components/CornIcon";
+import { SkeletonCards } from "@/components/Skeleton";
 import UserAvatar from "@/components/settings/UserAvatar";
 import { api } from "@/lib/api";
 import { fmtWhen } from "@/lib/time";
@@ -366,7 +367,7 @@ export default function KbBoard({ kbId, compact = false, onCount }: Props) {
         {tip && <p className="kb-board-tip">{tip}</p>}
       </div>
 
-      {loading && <p className="kb-board-empty">正在加载留言…</p>}
+      {loading && <SkeletonCards rows={2} widths={["42%", "86%"]} label="正在加载留言" />}
       {!loading && err && (
         <p className="kb-board-empty">
           {err}{" "}

@@ -1,4 +1,5 @@
 import { StatusBar } from "expo-status-bar";
+import * as Haptics from "expo-haptics";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComponentType, Ref } from "react";
 import {
@@ -85,6 +86,31 @@ function AppInner() {
     return () => sub.remove();
   }, []);
 
+  /* Web → 壳：触觉反馈（2026-11-16，评审 P2-5）。
+   *
+   * 为什么是网页发消息、壳来给触感：切 tab 是 Next 的**客户端路由**，
+   * 原生侧看不到任何导航事件；而 iOS 的 WKWebView 又没有 navigator.vibrate。
+   * 所以只能反向：网页 `postMessage({t:"haptic"})` → 这里 → expo-haptics。
+   * 对应实现见 `frontend/src/lib/haptics.ts`。
+   *
+   * 只认白名单里的 `t`，其余一律丢弃 —— WebView 里跑的是线上站点，
+   * 它以后多发几种消息，不该让壳崩在这里。
+   * 失败静默：省电模式、低电量模式下系统可能直接 reject，
+   * 为一次触感弹错误框不值得。 */
+  const onMessage = useCallback((e: { nativeEvent: { data: string } }) => {
+    try {
+      const msg = JSON.parse(e.nativeEvent.data) as { t?: string; kind?: string };
+      if (msg?.t !== "haptic") return;
+      if (msg.kind === "success") {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      } else {
+        Haptics.selectionAsync().catch(() => {});
+      }
+    } catch {
+      /* 不是 JSON、或者不是我们的消息：忽略 */
+    }
+  }, []);
+
   const retry = useCallback(() => {
     setFailed(false);
     setFirstLoad(true);
@@ -131,6 +157,7 @@ function AppInner() {
         onNavigationStateChange={(s: WebViewNavigation) => {
           canGoBack.current = s.canGoBack;
         }}
+        onMessage={onMessage}
         onShouldStartLoadWithRequest={(req) => {
           const { url } = req;
           // tel: / mailto: / itms-apps: 之类，WebView 打不开，交给系统

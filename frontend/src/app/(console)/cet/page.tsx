@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PageShell from "@/components/console/PageShell";
 import { Seg } from "@/components/console/ui";
+import { SkeletonLines } from "@/components/Skeleton";
 import { useAuth } from "@/lib/hooks/useAuth";
 
 interface Plan {
@@ -687,7 +688,9 @@ export default function CetPage() {
       ) : null}
 
       {loading || !ov ? (
-        <p style={{ color: "var(--text-2)" }}>正在加载…</p>
+        // 骨架而不是「正在加载…」：这一页首屏主体就是几张卡，先摆出卡的形状，
+        // 数据到了只换内容，不会出现"一行小字 → 整页跳一下"（评审 A4）
+        <SkeletonLines widths={["62%", "88%", "74%"]} label="正在加载备考计划" />
       ) : !plan || editing ? (
         <>
           {editing ? (
