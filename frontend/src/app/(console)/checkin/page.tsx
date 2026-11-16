@@ -425,7 +425,7 @@ export default function CheckinPage() {
       const base = `知穗打卡-${todayStr || "today"}`;
       if (fmt === "svg") {
         saveBlob(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }), `${base}.svg`);
-        showToast("success", "已保存 SVG（矢量版，适合再排版；微信里发不出去）");
+        showToast("success", "已保存矢量图（适合再排版；微信里发不出去）");
       } else {
         const blob = await svgToPng(svg, 520, height, 2);
         if (!blob) throw new Error("png");
@@ -483,15 +483,20 @@ export default function CheckinPage() {
             <CornIcon name="download" />
             保存这张图
           </button>
-          {/* PNG 是主路径（微信只认 PNG）；SVG 留给要再排版的人 */}
+          {/* PNG 是主路径（微信只认 PNG）；矢量图留给要再排版的人。
+              ★ 2026-11-16：按钮文字原来是裸的「SVG」—— 那是我这边的词，
+                用户既不知道那是什么，也不知道点完微信里发不出去。
+                title 只在桌面端悬停才看得到，手机上没有 hover，所以把关键限制
+                写进 aria-label，让读屏能念出来；文字本身保持两个字，不撑破按钮组。 */}
           <button
             type="button"
             className="btn btn-ghost btn-sm"
             disabled={busy}
-            title="矢量版，适合再排版；微信里发不出去"
+            title="矢量图，适合再排版；微信里发不出去"
+            aria-label="下载矢量图（适合再排版，微信里发不出去）"
             onClick={() => void downloadCard("svg")}
           >
-            SVG
+            矢量图
           </button>
         </>
       }

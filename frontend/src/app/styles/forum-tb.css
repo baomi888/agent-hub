@@ -1775,8 +1775,40 @@
   /* 手机上操作行别再挂来源库 —— 三个按钮加一个库名在 390 宽会折成两行 */
   .tb-act.src { max-width: 100%; margin-left: 0; }
 
-  .tb-notice { flex-wrap: wrap; }
-  .tb-notice-main { flex-basis: calc(100% - 33px); }
+  /* 公告卡压成单行（2026-11-16）。
+     原来是 flex-wrap:wrap + main 撑满一行 → 三行（tag / 标题 / 时间），实测 99px；
+     390 宽首屏要到 329px 才见到第一个帖子，等于半屏是外壳。
+     ★ 不要把这三行理解成「sticky 顶栏里的三行」——.tb-top 常驻的只有 116
+       （59 刘海 + 56 那一行导航 + 1 边框），分类行与公告卡都在滚动流里，
+       滚一下就走了。能省的只有这张卡自己的高度。
+     实测：99 → 44px，首帖 329 → 274，首屏可见帖数 2 → 3。
+     取舍见 page.tsx 里那段注释：手机端藏时间、把宽度让给标题。 */
+  .tb-notice {
+    align-items: center;
+    gap: 8px;
+    padding: 9px 10px;
+  }
+
+  /* tag 保持「铃铛 + 公告」两个字。试过只留图标：12px 铃铛在金色底上糊成一个小点，
+     反而要用户猜"这是什么"。两行字换来的识别度比那 30px 值。 */
+  .tb-notice-tag { padding: 3px 7px; }
+
+  .tb-notice-main {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-basis: auto; /* 覆盖上面那条 calc(100% - 33px)，否则它仍然独占一行 */
+    align-items: baseline;
+  }
+
+  .tb-notice-t { flex: 1; min-width: 0; }
+
+  /* 时间在手机上不显示。测过两种排法：
+     · 留在标题右边 → 标题只剩 224px（约 17 字，截在「AI 待办、…」），公告要说的事说了一半；
+     · 收起 → 标题 300px（约 22 字），能读到「…AI 待办、论坛与公开…」。
+     公告的价值是"这期说了什么"，不是"几点发的"；精确时间点进详情页就有。
+     桌面端不动（.tb-notice-m 在那边的两行布局里照旧）。 */
+  .tb-notice-m { display: none; }
 
   /* 面包屑在手机上不再显示。
      上一版只留最末一级（当前板块），理由是 390 宽放不下三级。留着才发现：

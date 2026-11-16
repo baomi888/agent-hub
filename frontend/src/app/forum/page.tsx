@@ -813,6 +813,11 @@ export default function ForumPage() {
               只显示最新一条 —— 两条公告叠在一起就成了公告区，反而没人读 */}
           {notice && (
             <div className="tb-notice" ref={noticeRef}>
+              {/* ★ 2026-11-16：手机端这条压成单行（见 forum-tb.css ≤760 那一段）。
+                 原来 tag 会换到标题上面，三行共 99px，390 宽首屏要到 329px 才见到
+                 第一个帖子。现在一行 44px，首屏可见帖数 2 → 3。
+                 取舍：手机端隐藏「几点发的」，把宽度留给标题 —— 「这是公告」比
+                 「昨天 19:10」重要，精确时间点进详情页就有。桌面端两者都在。 */}
               <span className="tb-notice-tag">
                 <CornIcon name="bell" className="h-3 w-3" />
                 公告
