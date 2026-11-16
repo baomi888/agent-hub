@@ -114,25 +114,33 @@
   word-break: break-word;
 }
 
-/* ---------- 手机：右缘「书签页签」 ----------
-   原来是右下角圆形胶囊，实测和「回到最新」挤在同一行（两者恰恰总是同时出现，
-   因为都表示"你不在底部"），两个浮球并排很难看。
-   改成贴在右缘、垂直居中的一枚页签：沿的是同一套"页边"隐喻，
-   和桌面那条刻度轨指同一个位置，也彻底不跟底部按钮抢地方。 */
+/* ---------- 手机：可拖动的边缘页签 ----------
+   原来是「贴右缘、垂直居中」的固定页签。两个问题：
+   ① touch.css（globals.css 里排在 turnnav.css 之后）那组"扩触控热区"规则
+      给 .turn-fab 写了 position: relative，把这里的 absolute 直接干掉 ——
+      页签掉进文档流、right:0 失效、top:50% 又把它推下去，于是它跑到左下角
+      压在「复制 / 检索」上。热区那条 relative 已从 touch.css 删除。
+   ② 固定位置挡内容：改成可拖动，只能停在左右两条边缘带里，
+      横向永远贴边（不进入中间正文区），纵向在活动带内自由。
+   left/top 由组件算，这里只给默认态（右缘、38% 高度）。 */
 .turn-fab {
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
+  position: fixed;
+  left: auto;
+  /* 6px 出血：按钮本体 28px，其中 6px 落在视口外，屏内可见 22px ——
+     正文最右实测到 x=366（390 宽），留 2px 间隙刚好不啃字；
+     出血再少一点就会切到「悬」「关」这类字的边缘。
+     ★ 出血只裁右侧那条直角边，左侧圆头在屏内，形态仍是「书签页签」。 */
+  right: -6px;
+  top: 38%;
   z-index: 6;
   display: inline-flex;
   flex-direction: column;
   align-items: center;
   gap: 1px;
-  /* 宽度必须 ≤ 消息区左右内边距（px-6 = 24px），否则会压住正文最后一两个字。
-     实测 26px 时正好盖住「…拟合直线」的行尾，所以收到 22px、只留图标 + 问数。 */
-  width: 22px;
-  padding: 8px 3px;
+  /* 28×56 左右：比原来的 22×50 大一圈（本体 +6 宽、+6 高），
+     但屏内可见宽度由上面的出血量决定（22px），别再加宽 —— 会开始啃正文 */
+  width: 28px;
+  padding: 11px 5px;
   border-radius: var(--r-pill) 0 0 var(--r-pill);
   border: 1px solid var(--line-strong);
   border-right: 0;
@@ -140,18 +148,42 @@
   color: var(--text-3);
   font-size: var(--fs-badge);
   line-height: 1.2;
-  cursor: pointer;
+  cursor: grab;
   box-shadow: -1px 1px 4px rgba(80, 60, 30, 0.07);
+  /* 拖动时手指不能带着页面滚 */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: top 0.16s ease, box-shadow 0.16s ease;
+}
+/* 停靠左侧：圆角与投影镜像，否则会像"从左边戳出来的一截" */
+.turn-fab--left {
+  left: -6px;
+  right: auto;
+  border-radius: 0 var(--r-pill) var(--r-pill) 0;
+  border-right: 1px solid var(--line-strong);
+  border-left: 0;
+  box-shadow: 1px 1px 4px rgba(80, 60, 30, 0.07);
+}
+/* 拖拽中：关掉 top 过渡（否则跟手会滞一格），加一点浮起感 */
+.turn-fab.is-dragging {
+  cursor: grabbing;
+  transition: none;
+  box-shadow: 0 2px 10px rgba(80, 60, 30, 0.18);
 }
 .turn-fab svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   margin-bottom: 1px;
+  /* 拖拽时指针事件只落在按钮上，落在 svg/数字上会丢 capture */
+  pointer-events: none;
 }
 .turn-fab-n {
   font-variant-numeric: tabular-nums;
   color: var(--accent-ink);
   font-size: var(--fs-xs);
+  pointer-events: none;
 }
 .turn-fab:active {
   background: var(--fill-3);

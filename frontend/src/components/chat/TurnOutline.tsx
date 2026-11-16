@@ -9,7 +9,14 @@
 // 为什么不做成左侧列表：桌面左栏已经给了会话列表，再塞一列会把正文压窄；
 // 而页边轨不占任何宽度。手机没有 hover，悬停卡片那套用不了，
 // 所以换成一枚常驻胶囊（带问数，本身就是提示）+ 半屏目录。
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type RefObject,
+} from "react";
 
 export interface TurnItem {
   mid: string;
@@ -28,6 +35,32 @@ interface Props {
 /** 相邻刻度的最小间距：挤成一坨就点不准了 */
 const MIN_GAP = 7;
 
+/* ---------- 手机目录页签：可拖动，只停左右边缘 ----------
+ *
+ * 为什么位置要自己算：它原来靠 CSS 的 `right:0 + top:50%` 定位，而
+ * touch.css（globals.css 里排在 turnnav.css **之后**）为了扩触控热区给一批
+ * 元素写了 `position: relative`，`.turn-fab` 也在名单里 —— absolute 被覆盖后
+ * 这枚页签掉进文档流、`right` 失效、`top:50%` 又把它推下去，于是它贴在左下角
+ * 压住「复制 / 检索」（2026-11-16 手机截图现场）。现在 CSS 用 fixed，
+ * 横纵坐标全在这里算：
+ *   · 横向只有两个合法值（贴左 / 贴右），拖动过程中也不许进中间正文区；
+ *   · 纵向关在活动带里 —— 上沿 12px，下沿取输入区 `.chat-dock` 顶边再留 10px，
+ *     所以既不会被拖出屏幕，也不会盖住输入框与底栏；
+ *   · 位置按「活动带内的比例」存 localStorage，换屏高/横竖屏后仍然合理。
+ */
+const FAB_POS_KEY = "baomi.turnFab.pos";
+
+interface FabPos {
+  side: "left" | "right";
+  /** 0 = 活动带上沿，1 = 下沿 */
+  ratio: number;
+}
+
+const DEFAULT_FAB: FabPos = { side: "right", ratio: 0.4 };
+
+/** 判定「这是拖动还是点了一下」的位移阈值：手指点按本身就会漂 1~2px */
+const DRAG_SLOP = 6;
+
 interface Tick extends TurnItem {
   y: number;
   /** 该问在滚动内容里的绝对偏移，用来算「现在读到第几问」 */
@@ -44,6 +77,37 @@ export default function TurnOutline({ turns, scrollRef, onJump, layoutKey }: Pro
   const [canNav, setCanNav] = useState(false);
   const railRef = useRef<HTMLDivElement>(null);
   const lastAt = useRef(0);
+
+  // 手机页签的位置与拖动状态
+  const [fab, setFab] = useState<FabPos>(DEFAULT_FAB);
+  const [dragging, setDragging] = useState(false);
+  // 活动带：bottom 是先验 0，量到之前不写内联 top（退回 CSS 的 38%）
+  const [band, setBand] = useState({ top: 12, bottom: 0 });
+  const fabRef = useRef<HTMLButtonElement>(null);
+  const dragRef = useRef<{
+    id: number;
+    startY: number;
+    baseY: number;
+    moved: boolean;
+    lastY: number;
+    lastSide: FabPos["side"];
+  } | null>(null);
+  // 拖完浏览器照样会补一个 click，别让它顺手把目录弹出来
+  const skipClick = useRef(false);
+
+  const measureBand = useCallback(() => {
+    const h = fabRef.current?.offsetHeight ?? 56;
+    const dock = document.querySelector<HTMLElement>(".chat-dock");
+    const dockTop = dock ? dock.getBoundingClientRect().top : 0;
+    const vh = window.innerHeight;
+    // 只有「确实贴在页面下半截」的 dock 才可信：
+    //   · 0 = 还没挂载；
+    //   · 被公告弹层之类挤到中间（< 45% 屏高）时按当前高度算，页签会跟着往上跳。
+    // 不可信就退回"视口高 - 100"，这个值在 390×844 上落在安全区内。
+    const usable = dockTop > vh * 0.45 && dockTop < vh;
+    const limit = (usable ? dockTop : vh - 100) - 10 - h;
+    setBand({ top: 12, bottom: Math.max(12, limit) });
+  }, []);
 
   const measure = useCallback(() => {
     const el = scrollRef.current;
@@ -150,11 +214,123 @@ export default function TurnOutline({ turns, scrollRef, onJump, layoutKey }: Pro
     return () => document.removeEventListener("keydown", onKey);
   }, [sheet]);
 
+  // 恢复上次拖到的位置（按比例存，换屏高也说得通）
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(FAB_POS_KEY);
+      if (raw) {
+        const v = JSON.parse(raw) as Partial<FabPos>;
+        const sideOk = v.side === "left" || v.side === "right";
+        const ratioOk = typeof v.ratio === "number" && Number.isFinite(v.ratio);
+        if (sideOk && ratioOk) {
+          setFab({
+            side: v.side as FabPos["side"],
+            ratio: Math.min(1, Math.max(0, v.ratio as number)),
+          });
+        }
+      }
+    } catch {
+      // 隐私模式禁了 storage / 存量值是坏的：退回默认位置，功能不受影响
+    }
+    measureBand();
+  }, [measureBand]);
+
+  // 屏高变了（旋转、键盘弹出、地址栏收放）要重新划活动带，否则页签会停在带外
+  useEffect(() => {
+    const onResize = () => measureBand();
+    window.addEventListener("resize", onResize);
+    window.addEventListener("orientationchange", onResize);
+    const vv = window.visualViewport;
+    vv?.addEventListener("resize", onResize);
+    // 输入框会随多行输入长高 —— 只看 window.resize 会漏掉，页签会被它顶住
+    const dock = document.querySelector<HTMLElement>(".chat-dock");
+    const ro = dock ? new ResizeObserver(() => measureBand()) : null;
+    if (ro && dock) ro.observe(dock);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("orientationchange", onResize);
+      vv?.removeEventListener("resize", onResize);
+      ro?.disconnect();
+    };
+  }, [measureBand]);
+
   const show = canNav && turns.length >= 3;
   const tipTop = trackH ? Math.min(Math.max(hover?.y ?? 0, 34), trackH - 34) : 0;
   // ★ 不 return null：rail 元素得先存在才量得到高度（canNav 靠它算出来的）。
   //   藏起来用 is-off（opacity+pointer-events），不用 display:none —— 后者量到 0。
   const off = show ? "" : " is-off";
+
+  // 量到活动带之前不写内联 top，退回 CSS 里的默认（右缘 38%），免得闪一下
+  const ready = band.bottom > band.top;
+  const fabY = ready ? band.top + fab.ratio * (band.bottom - band.top) : 0;
+
+  const onFabDown = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    const el = fabRef.current;
+    if (!el || !ready) return;
+    dragRef.current = {
+      id: e.pointerId,
+      startY: e.clientY,
+      baseY: fabY,
+      moved: false,
+      lastY: fabY,
+      lastSide: fab.side,
+    };
+    try {
+      el.setPointerCapture(e.pointerId);
+    } catch {
+      // 少数老 WebView 没有 capture：下面每个 move 都校验 pointerId，照样能拖
+    }
+    setDragging(true);
+  };
+
+  const onFabMove = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    const d = dragRef.current;
+    if (!d || d.id !== e.pointerId) return;
+    const dy = e.clientY - d.startY;
+    if (!d.moved) {
+      if (Math.abs(dy) < DRAG_SLOP) return;
+      d.moved = true;
+    }
+    // 纵向关在带内；横向只认"手指在屏幕哪半边"——中间正文区永远不是落点
+    const y = Math.min(Math.max(d.baseY + dy, band.top), band.bottom);
+    const side: FabPos["side"] = e.clientX < window.innerWidth / 2 ? "left" : "right";
+    d.lastY = y;
+    d.lastSide = side;
+    setFab({ side, ratio: (y - band.top) / (band.bottom - band.top) });
+  };
+
+  const onFabUp = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    const d = dragRef.current;
+    if (!d || d.id !== e.pointerId) return;
+    dragRef.current = null;
+    setDragging(false);
+    if (!d.moved) return; // 只是点了一下 → 交给 onClick 打开目录
+    skipClick.current = true;
+    // 拖完浏览器通常还会补一个 click；但万一没补，也必须复位，
+    // 否则 skipClick 一直挂着，下一次正常点击会被吞掉
+    window.setTimeout(() => {
+      skipClick.current = false;
+    }, 320);
+    try {
+      const ratio = (d.lastY - band.top) / (band.bottom - band.top);
+      localStorage.setItem(FAB_POS_KEY, JSON.stringify({ side: d.lastSide, ratio }));
+    } catch {
+      // 存不下就只在本次会话里有效
+    }
+  };
+
+  const onFabCancel = () => {
+    dragRef.current = null;
+    setDragging(false);
+  };
+
+  const openSheet = () => {
+    if (skipClick.current) {
+      skipClick.current = false;
+      return;
+    }
+    setSheet(true);
+  };
 
   return (
     <>
@@ -188,15 +364,25 @@ export default function TurnOutline({ turns, scrollRef, onJump, layoutKey }: Pro
         )}
       </div>
 
-      {/* 手机：常驻胶囊。问数直接写在上面 —— 它既是入口也是一句提示：
-          数字会变，用户迟早会问"这个 12 是什么" */}
+      {/* 手机：常驻页签，可拖到左/右边缘。问数直接写在上面 —— 它既是入口
+          也是一句提示：数字会变，用户迟早会问"这个 12 是什么"。
+          位置固定贴边、只在两侧轨道里移动，正文区永远碰不到。 */}
       <button
         type="button"
-        className={`turn-fab${off}`}
-        onClick={() => setSheet(true)}
+        ref={fabRef}
+        className={`turn-fab${off}${fab.side === "left" ? " turn-fab--left" : ""}${
+          dragging ? " is-dragging" : ""
+        }`}
+        style={ready ? { top: Math.round(fabY) } : undefined}
+        onClick={openSheet}
+        onPointerDown={onFabDown}
+        onPointerMove={onFabMove}
+        onPointerUp={onFabUp}
+        onPointerCancel={onFabCancel}
+        title="拖动可换到左/右边缘，点击打开目录"
         aria-haspopup="dialog"
         aria-expanded={sheet}
-        aria-label={`打开对话目录，共 ${turns.length} 问`}
+        aria-label={`打开对话目录，共 ${turns.length} 问（可拖到左/右边缘）`}
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M8 6h13M8 12h13M8 18h13" />

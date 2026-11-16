@@ -43,7 +43,6 @@
   .usage-chip,
   .theme-chip,
   .push-nudge .pn-x,
-  .turn-fab,
   .guide-skip,
   .sb-acct-name,
   .sb-quit {
@@ -150,11 +149,13 @@
     inset: -6px;
   }
 
-  /* 22×50：回到最新一条的浮动按钮，只补宽度 */
+  /* 26×56 的对话目录页签：本身已过 44，不再横向外扩
+     （它贴在左/右边缘，外扩出去的那半截在视口外点不到，还会盖住正文）；
+     这里只做 position 兜底 —— 它自己是 fixed，::before 靠它定位 */
   .turn-fab::before {
     content: "";
     position: absolute;
-    inset: 0 -11px;
+    inset: 0;
   }
 
   /* 35 → 45：左栏的「深色模式」整行长条 */
