@@ -26,6 +26,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 TURNNAV = ROOT / "frontend" / "src" / "app" / "styles" / "turnnav.css"
 TOUCH = ROOT / "frontend" / "src" / "app" / "styles" / "touch.css"
+CHAT = ROOT / "frontend" / "src" / "app" / "styles" / "chat.css"
 COMPONENT = ROOT / "frontend" / "src" / "components" / "chat" / "TurnOutline.tsx"
 
 
@@ -83,21 +84,59 @@ def test_touch_css_no_longer_positions_turn_fab():
 
 
 def test_fab_bleeds_out_so_it_never_covers_text():
-    """血出量：屏内可见宽度必须窄于正文右边距，否则会啃掉行尾的字"""
-    css = _strip_comments(TURNNAV.read_text(encoding="utf-8"))
-    body = [b for b in _blocks(css, ".turn-fab") if "width" in b and "border-radius" in b][0]
+    """血出量与槽位：屏内可见宽度 + 2px 间隙，必须落在消息区让出的槽位里
+
+    ★ 2026-11-16 更正过一个**假绿**：上一版这条断言写的是「本体宽 ≤ 30px」，
+      依据是"390 宽下正文最右到 x=366"。但 366 量的是段落**最后一行**（多半没
+      写满）；用 Range 逐行量满载行，真实右端是 376 —— 也就是说 22px 的可见宽度
+      其实一直在啃行尾 8px，断言却是绿的。所以判据改成算式：不写死像素，
+      而是要求「可见宽度 ≤ 槽位 - 间隙」，槽位值从 chat.css 里取。
+    """
+    tcss = _strip_comments(TURNNAV.read_text(encoding="utf-8"))
+    ccss = _strip_comments(CHAT.read_text(encoding="utf-8"))
+    body = [b for b in _blocks(tcss, ".turn-fab") if "width" in b and "border-radius" in b][0]
 
     width = int(re.search(r"width:\s*(\d+)px", body).group(1))
-    # 390 宽屏上正文最右实测到 x=366（右边距 24px 中的 22px 被文字用掉）
-    assert width <= 30, f"页签本体宽 {width}px 太宽，屏内可见部分会压正文"
-    assert re.search(r"right:\s*-\d+px", body), "缺右侧出血（right: -Npx），贴边会啃字"
+    bleed_m = re.search(r"right:\s*-(\d+)px", body)
+    assert bleed_m, "缺右侧出血（right: -Npx），贴边会啃字"
+    bleed = int(bleed_m.group(1))
+    visible = width - bleed
+
+    slot_m = re.search(r"--chat-fab-slot:\s*(\d+)px", ccss)
+    assert slot_m, "chat.css 里缺 --chat-fab-slot（消息区要给页签让出的那条宽度）"
+    slot = int(slot_m.group(1))
+
+    assert visible + 2 <= slot, (
+        "页签屏内可见 {v}px 超过了消息区让出的槽位（{s}px，需留 2px 间隙）—— "
+        "正文满载行会被啃掉 {d}px".format(v=visible, s=slot, d=visible + 2 - slot)
+    )
+
+    # 停靠左侧时是同一条边，出血量必须一致，否则左边比右边宽/窄
+    lb = _blocks(tcss, ".turn-fab--left")[0]
+    left_bleed = int(re.search(r"left:\s*-(\d+)px", lb).group(1))
+    assert left_bleed == bleed, "左右两侧的出血量不一致，页签换边后会变宽/变窄"
 
     # 停靠左侧时圆角要镜像，否则像"从左边戳出来的一截"
-    left_blocks = _blocks(css, ".turn-fab--left")
-    assert left_blocks, "缺 .turn-fab--left（停靠左缘的镜像样式）"
-    lb = left_blocks[0]
-    assert "left: -" in lb and "right: auto" in lb
+    assert "right: auto" in lb
     assert "0 var(--r-pill) var(--r-pill) 0" in lb, "左缘停靠时圆角方向没镜像"
+
+
+def test_slot_only_applies_while_fab_is_shown():
+    """槽位必须挂在 data-fab-side 上：页签不出现时这 28px 不能白留着
+
+    页签是条件渲染的（问答不足 3 轮不出现，桌面换成页边刻度）。如果直接把
+    `padding-right: var(--chat-fab-slot)` 写死在 .chat-msgpad 上，短对话右侧
+    会凭空多出一道 28px 的白边，而且没有任何测试会红。
+    """
+    ccss = _strip_comments(CHAT.read_text(encoding="utf-8"))
+    assert 'html[data-fab-side="right"] .chat-msgpad' in ccss, "右侧槽位没挂 data-fab-side"
+    assert 'html[data-fab-side="left"] .chat-msgpad' in ccss, "左侧槽位没挂 data-fab-side"
+
+    src = COMPONENT.read_text(encoding="utf-8")
+    assert "dataset.fabSide" in src, "组件没把侧位同步到根元素，槽位永远不会生效"
+    assert re.search(r"dataset\.fabSide\s*=\s*show\s*\?", src), (
+        "同步侧位时必须判 show —— 页签藏着的时候要把属性清掉"
+    )
 
 
 def test_component_drags_with_pointer_and_clamps():

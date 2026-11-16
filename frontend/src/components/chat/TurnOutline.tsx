@@ -255,6 +255,23 @@ export default function TurnOutline({ turns, scrollRef, onJump, layoutKey }: Pro
   }, [measureBand]);
 
   const show = canNav && turns.length >= 3;
+
+  // 把「页签停在哪一侧」同步到根元素，让消息区把那一侧的槽位让出来
+  // （chat.css 的 --chat-fab-slot）。三件事必须一起判：
+  //   · show=false（问答不足 3 轮）时页签不出现 → 属性清空，别白留 28px；
+  //   · 桌面（≥900）页签换成页边刻度 → 同上；
+  //   · 拖动过程中不同步：一路改会让正文跟着跳，手感很乱，松手才让位。
+  // ★ 读的是同一次渲染的 show，所以只能写在它后面（提到上面的 effect 堆里会 TDZ）。
+  useEffect(() => {
+    if (dragging) return;
+    document.documentElement.dataset.fabSide = show ? fab.side : "";
+  }, [fab.side, dragging, show]);
+  useEffect(() => {
+    return () => {
+      delete document.documentElement.dataset.fabSide;
+    };
+  }, []);
+
   const tipTop = trackH ? Math.min(Math.max(hover?.y ?? 0, 34), trackH - 34) : 0;
   // ★ 不 return null：rail 元素得先存在才量得到高度（canNav 靠它算出来的）。
   //   藏起来用 is-off（opacity+pointer-events），不用 display:none —— 后者量到 0。

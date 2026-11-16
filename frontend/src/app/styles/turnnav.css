@@ -126,10 +126,13 @@
 .turn-fab {
   position: fixed;
   left: auto;
-  /* 6px 出血：按钮本体 28px，其中 6px 落在视口外，屏内可见 22px ——
-     正文最右实测到 x=366（390 宽），留 2px 间隙刚好不啃字；
-     出血再少一点就会切到「悬」「关」这类字的边缘。
-     ★ 出血只裁右侧那条直角边，左侧圆头在屏内，形态仍是「书签页签」。 */
+  /* 6px 出血：按钮本体 32px，其中 6px 落在视口外，屏内可见 26px。
+     ★ 2026-11-16 更正：上一版这里写"正文最右 366、可见 22 不啃字"是量错了 ——
+       366 是段落**最后一行**的右端（多半没写满）；用 Range 把每一行都量一遍，
+       满载行右端到 x=376，而 22px 可见宽意味着左界落在 368，其实一直在压 8px。
+       现在正文右侧让出 28px 槽位（见 chat.css 的 --chat-fab-slot），
+       正文右界 362、页签 364 起，留 2px 间隙。
+     ★ 出血只裁外侧那条直角边，圆头在屏内，形态仍是「书签页签」。 */
   right: -6px;
   top: 38%;
   z-index: 6;
@@ -137,10 +140,11 @@
   flex-direction: column;
   align-items: center;
   gap: 1px;
-  /* 28×56 左右：比原来的 22×50 大一圈（本体 +6 宽、+6 高），
-     但屏内可见宽度由上面的出血量决定（22px），别再加宽 —— 会开始啃正文 */
-  width: 28px;
-  padding: 11px 5px;
+  /* 本体 32×62：屏内可见 26（比上一版 22 宽一圈）、高 62（原 58）。
+     ★ 本体宽度 = 屏内可见宽度 + 出血 6，二者绑定；
+       改宽先改 --chat-fab-slot，否则又开始啃字 */
+  width: 32px;
+  padding: 14px 5px;
   border-radius: var(--r-pill) 0 0 var(--r-pill);
   border: 1px solid var(--line-strong);
   border-right: 0;
@@ -173,8 +177,9 @@
   box-shadow: 0 2px 10px rgba(80, 60, 30, 0.18);
 }
 .turn-fab svg {
-  width: 16px;
-  height: 16px;
+  /* 16 → 18：按钮本体加宽后，图标跟着加一档，否则看着更空 */
+  width: 18px;
+  height: 18px;
   margin-bottom: 1px;
   /* 拖拽时指针事件只落在按钮上，落在 svg/数字上会丢 capture */
   pointer-events: none;

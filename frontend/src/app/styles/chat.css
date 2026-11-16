@@ -20,6 +20,9 @@
   --chat-msgs-gap: 24px;
   --ai-mark: 44px;
   --ai-mark-top: 8px;
+  /* 右缘「目录页签」在版面里长期占住的一条宽度（页签屏内可见 26px + 2px 间隙）。
+     它不是内边距，故与 --chat-px 分开记；用法见下方 .chat-msgpad 的槽位规则。 */
+  --chat-fab-slot: 28px;
   /* 工作台卡片自身距屏幕边缘的距离。**第九批起纸张贴边 → 0**。
      它只用于「把安全区里已经被卡片外边距占掉的那一段扣掉」，见 .chat-dock：
      值为 0 时公式退化成 max(留白, 安全区)，即底部整份让给 home 指示条。
@@ -80,6 +83,30 @@
 .chat-msgpad {
   padding-top: var(--chat-msg-pt);
   padding-bottom: var(--chat-msg-pb);
+}
+/* ---------- 右缘「目录页签」的槽位 ----------
+   ★ 2026-11-16：页签是 position:fixed 常驻在屏幕边上的，它**不在流里**，
+     但它能看见的那一条宽度是从正文字宽里借的。
+     390×844 实测（改前）：手机档 --chat-px 只有 14px，正文满载行右端到 x=376，
+     而页签屏内左界落在 x=368 —— 每行最后 8px 一直被压着。短行看不出来
+     （所以只量"段落最后一行"会得到假绿），满载行才会啃字。
+     现在正文右界退到 362，页签 364 起、可见 26px，中间留 2px。
+   ★ 为什么写成"按侧位让一侧"而不是两侧常驻：左右都给槽会把正文从 328 压到
+     300（每行少近 2 字）。页签拖到另一侧时把槽换过去，正文字宽不变。
+   ★ 为什么不写死 .chat-msgpad：页签是条件渲染的（问答不足 3 轮不出现），
+     它不在时这 28px 就是凭空白边 —— 所以槽位跟着 data-fab-side 走，
+     那个属性由 TurnOutline 按 show && side 同步。
+     899 是页签的存在区间（≥900 换成页边刻度）。 */
+@media (max-width: 899px) {
+  .chat-msgpad {
+    transition: padding-left 0.2s ease, padding-right 0.2s ease;
+  }
+  html[data-fab-side="right"] .chat-msgpad {
+    padding-right: var(--chat-fab-slot);
+  }
+  html[data-fab-side="left"] .chat-msgpad {
+    padding-left: var(--chat-fab-slot);
+  }
 }
 /* 底部留白 + iOS 安全区。
    ★ 2026-11-14 第八批（用户真机反馈「底部留白有点多」）：
