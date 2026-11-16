@@ -972,11 +972,22 @@ export default function ChatArea({
 
               {/* ③ 继续上次：把「刚才做到哪儿了」放回首屏。
                   为什么在六格之后 —— 见 ResumeStrip 顶部注释（含 118px 的实测账）。
-                  只在有历史对话时渲染，新用户看到的首屏与改动前一致。 */}
-              <ResumeStrip
-                session={resumeSession}
-                onResume={(sid) => onResumeSession?.(sid)}
-              />
+                  只在有历史对话时渲染，新用户看到的首屏与改动前一致。
+
+                  ★ 有「今天」条时**不渲染**（2026-11-16 线上实测后加的闸）。
+                    原因是算错了一次空间：本地测试号没有今天条，欢迎页 529px、
+                    可用 537px，看着还有 118px 空白可以填；但真实老用户的欢迎页
+                    有「今天」条（54）+ 提醒条（40）= 577px，本来就超出 40px ——
+                    再加这 71px 会让它整块被输入区压住 34px（1388 线上实测：
+                    visible:false / gapToDock:-34），要滑 52px 才看得见。
+                    也就是说"空白"只对没今天条的人存在；对有今天条的人，
+                    这块只会让页面多滑一截。填空白就该只填真的空着的地方。 */}
+              {!todayHasAny && (
+                <ResumeStrip
+                  session={resumeSession}
+                  onResume={(sid) => onResumeSession?.(sid)}
+                />
+              )}
 
               <p className="welcome-foot">问完的每一句，都能翻回原文。</p>
             </div>

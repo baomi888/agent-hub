@@ -73,3 +73,24 @@ def test_home_passes_resume_props_into_chat_area():
     # 组件必须真的把它转给 ResumeStrip，否则只是把数据搬了个地方
     area = AREA.read_text(encoding="utf-8")
     assert "<ResumeStrip" in area and "session={resumeSession}" in area
+
+
+def test_resume_strip_only_renders_when_today_strip_is_absent():
+    """有「今天」条时整块不能挂 —— 那 118px 空白根本不存在。
+
+    线上实测（2026-11-16，393×852 有安全区）：
+      · 无今天条：欢迎页 529，可用 537 → 有空可以填
+      · 有今天条 + 提醒条：577，**本来就超出 40px**
+    加了这 71px 之后，那块被输入区压住 34px（visible:false / gapToDock:-34），
+    要滑 52px 才看得见 —— 对最活跃的那批人等于白加一屏滚动。
+
+    这个闸写在 JSX 的条件里，编译不会报错、样式也不会坏，只能源码断言。
+    """
+    area = AREA.read_text(encoding="utf-8")
+    # 找 <ResumeStrip 之前最近的 40 字，必须带 todayHasAny 条件
+    idx = area.find("<ResumeStrip")
+    assert idx > 0, "ChatArea 里找不到 <ResumeStrip"
+    before = area[max(0, idx - 200) : idx]
+    assert "todayHasAny" in before, (
+        "ResumeStrip 没有受 todayHasAny 控制 —— 有今天条的用户会多出一屏滚动"
+    )
