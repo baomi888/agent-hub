@@ -155,6 +155,11 @@
     z-index: 70;
     width: 264px;
     max-width: 84vw;
+    /* z-index 70 vs 底栏的 40：抽屉必须压住底栏（2026-11-16）。
+       注意这一条只有在**同一个层叠上下文**里才成立 —— main.workbench-main
+       自己就是上下文（z-index:1），所以底栏也得挂在 main 里面，否则 70 会被
+       整棵树一起压在底栏之下。改动前实测：抽屉底部 elementFromPoint 命中
+       .tabbar-item，抽屉最下面 73px 被切。守卫见 tests/test_console_nav.py。 */
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-lg);
     transform: translateX(calc(-100% - 24px));
@@ -168,12 +173,41 @@
   .side-left::after {
     border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
   }
+  /* ★ 放不下时不许把按钮压扁（2026-11-16）。
+     侧栏是 flex 列，子项默认 flex-shrink:1 —— 实测 320×640 时「公开知识库」
+     被压成 2px（只剩一条金边）、会话列表 0 高；360×780 也只到 29px。
+     改成：固定块保持原高，会话列表吃剩余空间（最少 96px、自己滚），
+     再不够就让整条抽屉滚 —— 这与底栏无关，是侧栏自己的 flex 账。 */
+  .side-left {
+    overflow-y: auto;
+  }
+  .side-left > * {
+    flex-shrink: 0;
+  }
+  .side-left > nav[aria-label="会话列表"] {
+    flex: 1 1 auto;
+    min-height: 96px;
+  }
   /* ★ 第九批删掉了这里原有的
        .book-spine { background-image: var(--noise); background-size: 180px 180px; }
      它是历史遗留：纸面已经由 main.workbench-main 铺满整屏，窄屏再给书脊叠一层
      噪点就成了"两层纹理"，密度翻倍、显脏，而且只在 ≤899 出现 —— 桌面永远看不出来。
      线上探针就是在这儿抓到 390/768 的 .book-spine 仍有 background-image，
      而 1440 是 none。 */
+}
+
+/* ★ 2026-11-16：底栏的断点是 ≤900（console.css 的整块手机外壳，含 tab-sheet、
+   页面留白那一整套），而窄屏布局切换是 ≤899 —— 两者差 1px。正好 900 宽时
+   （桌面窗口拖到 900，或 900 宽的 webview）底栏出现、高度却没让：
+   实测 main 底边 900 / 底栏顶边 849，输入区被压住 51px。
+   这里只补高度，**不动布局切换**：把上面那个 899 块改成 900 会让侧栏在 900
+   变成抽屉，而 JS 的 viewport 判据（page.tsx getViewport）仍算 medium、
+   不渲染汉堡键 —— 抽屉永远打不开，比压住更糟。 */
+@media (min-width: 900px) and (max-width: 900px) {
+  main.workbench-main {
+    height: calc(100vh - env(safe-area-inset-top, 0px) - var(--tabbar-h) - env(safe-area-inset-bottom, 0px));
+    height: calc(100dvh - env(safe-area-inset-top, 0px) - var(--tabbar-h) - env(safe-area-inset-bottom, 0px));
+  }
 }
 
 /* ============ 首屏骨架：别让空态先闪一下 ============ */

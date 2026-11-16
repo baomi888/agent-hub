@@ -1097,14 +1097,23 @@ export default function Home() {
 
       {/* 用量与反馈看板（portal 到 body，不受三栏布局裁切） */}
       {usageOpen && <UsagePanel onClose={() => setUsageOpen(false)} />}
+
+      {/* ★ 底部导航必须留在 <main> 里面（2026-11-16 第 32 批改回来）。
+          `<main class="workbench-main">` 带 `position:relative; z-index:1`，它本身
+          是一个**层叠上下文** —— 里面的 z-index 再大，整体也只有 1 层。导航原来挂在
+          main 外面（根层叠上下文，z-index 40），于是压在左抽屉（70）、资料库面板（70）
+          和遮罩（60）之上：抽屉/面板底部 73px 被导航切掉，连遮罩都盖不住导航。
+          实测判据是 elementFromPoint —— 抽屉底部命中 `.tabbar-item`。
+          放进 main 之后三者同处一个上下文：导航 40 < 遮罩 60 < 抽屉/面板 70，
+          抽屉打开时导航被遮罩压暗、被面板盖住（iOS 的 sheet 也是这样）。
+          ★ 原来那条注释说"塞进 main 会跟着 overflow:hidden 一起被裁"是**错的**：
+            固定定位相对视口，外层容器的 overflow 不裁它（要裁得让外层变成
+            containing block，即加 transform/filter；.page-fade 只动 opacity，
+            正是为了不产生它）。实测导航仍在 767–852，一个像素没动。
+          variant="dock"：这一页的导航要和上面的输入区连成一块，不要自己的上边框
+          和投影（否则同一条线上出现两条线，又变成"切成两截"）。 */}
+      <ConsoleTabBar isAdmin={auth.me?.is_admin} variant="dock" />
     </main>
-    {/* 底部导航放在 main 之外：
-        · main 是 overflow:hidden 的定高容器，导航塞进去会跟着它一起被裁；
-        · 放在外面，卡片底边就是视口里"内容结束"的位置，导航单独一层 ——
-          视觉上是一张纸 + 一条压在最上面的导航，而不是卡片被削掉一条。
-        variant="dock"：这一页的导航要和上面的输入区连成一块，不要自己的上边框
-        和投影（否则同一条线上出现两条线，又变成"切成两截"）。 */}
-    <ConsoleTabBar isAdmin={auth.me?.is_admin} variant="dock" />
     </>
   );
 }

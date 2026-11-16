@@ -582,6 +582,79 @@ def test_forum_mounts_the_tabbar_and_gives_it_height():
         )
 
 
+def test_home_tabbar_lives_inside_main_so_overlays_can_cover_it():
+    """首页底栏必须挂在 `<main>` **里面** —— 它决定浮层能不能盖住底栏。
+
+    `main.workbench-main` 带 `position:relative; z-index:1`，本身就是一个层叠
+    上下文：里面的 z-index 写得再大，整棵树对外也只有一层。底栏原来挂在 main
+    外面（根上下文，z-index 40），于是压在左抽屉（70）、资料库面板（70）、
+    抽屉遮罩（60）之上 —— 抽屉与面板最下面 73px 被切掉，连遮罩都盖不住底栏
+    （线上 393×852 实测：抽屉底部 elementFromPoint 命中 `.tabbar-item`）。
+
+    挪进 main 之后三者同处一个上下文：40（底栏）< 60（遮罩）< 70（抽屉/面板），
+    抽屉打开时底栏被遮罩压暗、被面板盖住，和 iOS 的 sheet 一样。
+
+    这条只能靠源码顺序断言：层级错了编译不报错、接口全 200、桌面端还看不出来
+    （底栏 ≤900 才出现），只有手机上开着抽屉的那一下才露出来。
+    """
+    home = _strip_comments(_read(HOME_TSX))
+    assert "<ConsoleTabBar" in home, "首页没有挂底部 tab"
+    i_tab = home.index("<ConsoleTabBar")
+    i_main_end = home.index("</main>")
+    assert i_tab < i_main_end, (
+        "底部 tab 又挂到 <main> 外面了：main 是层叠上下文（z-index:1），"
+        "外面的 z-index 40 会压住左抽屉（70）、资料库面板（70）与遮罩（60），"
+        "抽屉最下面 73px 会被切掉 —— 而且桌面端看不出来，只有手机上开着抽屉才露"
+    )
+
+
+def test_tabbar_z_index_sits_below_the_drawers():
+    """底栏 40 < 遮罩 60 < 抽屉/面板 70：三个数字必须保持这个顺序。
+
+    上一条钉的是"在不在同一个上下文里"，这一条钉"同上下文里的先后"。
+    两个都要：只挪位置、有人把抽屉的 70 改成 30，抽屉照样会被底栏切开；
+    只改数字、底栏还在 main 外面，70 也照样被 1 压住。改动前实测到的正是后者。
+    """
+    console = _read(CONSOLE_CSS)
+    tab_block = _media_block(console, "@media (max-width: 900px)", ".tabbar")
+    tab_rule = _css_rule(tab_block, ".tabbar")
+    assert "position: fixed" in tab_rule
+    tab_z = _all_decls(tab_rule, "z-index")
+    assert tab_z, "底栏没有 z-index：它会掉到浮层下面，抽屉打开时底栏穿在抽屉上"
+    assert tab_z[0] == "40", f"底栏 z-index 变成了 {tab_z[0]}（约定是 40）"
+
+    fx = _read(FX_CSS)
+    back_z = _all_decls(_css_rule(fx, ".drawer-backdrop"), "z-index")[0]
+    left_z = _all_decls(
+        _css_rule(_media_block(fx, "@media (max-width: 899px)", ".side-left"), ".side-left"),
+        "z-index",
+    )[0]
+    right_z = _all_decls(
+        _css_rule(_media_block(fx, "@media (max-width: 1279px)", ".side-right"), ".side-right"),
+        "z-index",
+    )[0]
+    for name, z in (("遮罩", back_z), ("左抽屉", left_z), ("资料库面板", right_z)):
+        assert int(tab_z[0]) < int(z), (
+            f"底栏（{tab_z[0]}）没有低于{name}（{z}）：{name}会被底栏切开一条"
+        )
+
+
+def test_home_lets_the_content_up_at_exactly_900():
+    """正好 900 宽时首页也要让出底栏的高度。
+
+    底栏的断点是 ≤900（console.css 的整块手机外壳，论坛测试也按 900 对齐），
+    而窄屏布局切换是 ≤899 —— 差这 1px。实测 900×900：main 底边 900、底栏顶边
+    849，输入区被压住 51px。这里只补高度：把 899 那档改成 900 会让侧栏在 900
+    变成抽屉，而 JS 的 viewport 仍算 medium、不渲染汉堡键，抽屉永远打不开。
+    """
+    fx = _read(FX_CSS)
+    block = _media_block(fx, "@media (min-width: 900px) and (max-width: 900px)", "workbench-main")
+    heights = _all_decls(_css_rule(block, "main.workbench-main"), "height")
+    assert heights, "900 这一档没有给首页设高度"
+    for h in heights:
+        assert "var(--tabbar-h)" in h, f"900 宽时首页高度没扣底栏（{h}）"
+
+
 def test_home_still_has_a_way_into_the_console():
     """撤掉 tab 之后，手机从首页进控制台不能没路。
 
