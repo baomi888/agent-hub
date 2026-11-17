@@ -13,7 +13,7 @@ name: Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, dev]
+    branches: [main, dev, feat/android-apk]
     paths:
       - "mobile/**"
       - ".github/workflows/android-apk.yml"
