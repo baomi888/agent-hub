@@ -115,6 +115,14 @@
   font-size: var(--fs-sm);
   color: var(--text-2);
 }
+/* 左侧那半截带图标，自己再起一条 flex（父级是 baseline，撑到右端的小字
+   还要靠它保持两端对齐，所以不动父级） */
+.rp-hours-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  min-width: 0;
+}
 .rp-hours-head .rp-hours-hint {
   font-size: var(--fs-xs);
   color: var(--text-3);
@@ -158,9 +166,21 @@
 }
 
 /* ---------- 小结列表 ---------- */
+/* 图标（2026-11-18）：这一页没有页头说明文了，三层结构（概览 / 小结 / 出处）
+   只剩一行 12px 的金色小字在分界。给每层标题挂一枚 15px 描边图标，
+   扫一眼就知道换了层，不用先读字。
+   ★ 尺寸写在 CSS 里而不是 className："h-4 w-4" 那套是 Tailwind 的，
+     CornIcon 自带 width/height=100% 属性，只能靠 CSS 压。 */
+.rp-ic {
+  width: 15px;
+  height: 15px;
+  flex: none;
+}
 .rp-sec {
   display: flex;
-  align-items: baseline;
+  /* center 而不是 baseline：svg 的 baseline 是它的底边，baseline 对齐会让
+     图标整体沉到文字下面半个字高。 */
+  align-items: center;
   gap: var(--space-8);
   margin: var(--space-24) 0 var(--space-10);
   font-size: var(--fs-xs);

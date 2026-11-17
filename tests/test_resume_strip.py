@@ -13,7 +13,8 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PAGE = ROOT / "frontend/src/app/page.tsx"
+# 2026-11-18 合并外壳：对话页搬进 (console) 路由组，URL 仍是 /
+PAGE = ROOT / "frontend/src/app/(console)/page.tsx"
 AREA = ROOT / "frontend/src/components/ChatArea.tsx"
 STRIP = ROOT / "frontend/src/components/chat/ResumeStrip.tsx"
 SEDIMENT = ROOT / "core/sediment_store.py"

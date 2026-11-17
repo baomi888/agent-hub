@@ -170,10 +170,25 @@
   flex-wrap: wrap;
 }
 .pg-head h2 {
+  /* flex 是为了图标与文字同一水平线：inline svg 的基线在底边，
+     用 vertical-align 对齐会沉半个字（第 40 批在 .rp-sec 上踩过一次）。 */
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
   font-family: var(--font-serif);
   font-size: var(--fs-title);
   font-weight: 600;
   line-height: var(--lh-tight);
+}
+/* 页头图标（2026-11-18）：宽度用 em，跟着标题字号自己缩放 ——
+   solo 页头（手机 28 / 桌面 32）得到 22 / 25，常规页头（20）得到 16，
+   不用为两种形态分别写死数值。颜色是强调墨，和 .sec-label 同一族。
+   图案来自 lib/nav：同一个功能在底栏、侧栏、页头必须是同一个图案。 */
+.pg-head h2 .pg-ic {
+  width: 0.78em;
+  height: 0.78em;
+  flex: none;
+  color: var(--accent-ink);
 }
 /* ---------- 页头「只有标题」形态（2026-11-17）----------
    说明文全站退场后，页头就剩一个词。20px 挂在一整条空白上像漏加载了副标题，
@@ -502,6 +517,7 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-12);
 }
+
 .grid4 {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -6121,4 +6137,91 @@ textarea.input {
 }
 .cet-submit:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 88%, black);
+}
+
+/* ---------- 设置页「提醒」小卡（2026-11-18） ---------- */
+/* 页脚是这张卡唯一的出口：左边报设备数，右边一步进详细设置。
+   整行可点（min-height 44），因为它原本是一句 12 字的灰字 ——
+   用户读完了也不知道能点。 */
+.rem-quick-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-12);
+  min-height: 44px;
+  margin-top: var(--space-12);
+  padding-top: var(--space-10);
+  border-top: 1px dashed var(--line);
+  text-decoration: none;
+  color: var(--text-3);
+}
+/* 320 宽时左边那行字会顶到右边：「2 台设备已开启提醒 详细设置 ›」两段
+   一起挤在 288px 里。允许换行，但**出口不许被压窄** —— flex:none。 */
+.rem-quick-foot .meta {
+  min-width: 0;
+}
+.rem-quick-foot .rem-quick-more {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--fs-md);
+  color: var(--accent-ink);
+}
+.rem-quick-foot:hover .rem-quick-more,
+.rem-quick-foot:focus-visible .rem-quick-more {
+  text-decoration: underline;
+  text-decoration-color: var(--accent-line);
+  text-underline-offset: 3px;
+}
+
+/* ================= 合并外壳：对话页（2026-11-18） =================
+   背景：`/`（对话）原来和 (console) 是两个路由组、两套 layout、两个滚动容器，
+   只有底栏是同一个组件。用户的原话是「从对话到功能模块整体割裂感较强」——
+   点进打卡的感觉是换了一个 App，不是翻了一页。这一批把 `/` 搬进 (console)，
+   外壳只剩一份（components/console/ConsoleLayout.tsx）。
+   下面三条是"满屏工作台"这件事必需的例外，别的页面一条都不用动。 */
+
+/* ① 外壳这一层不滚动、不铺卡片。对话自己的 .chat-scroll 管消息区，
+      外壳再滚就会把输入区一起滚走。
+      `isolation: isolate` 让「底栏 40 < 遮罩 60 < 抽屉/面板 70」在这一个
+      层叠上下文里比大小 —— 底栏现在挂在外壳层（不再在 main 里），
+      没有它就会被 main 的层级关系挡在外面（见 base.css 的 z-index 注释）。 */
+.console-scroll--chat {
+  padding: 0;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+/* ② 一张纸铺满，不要卡片边框/圆角/投影：对话是满屏工作台，不是"纸上的卡片"。
+      min-height 归零 —— 父级已经给足高度，再叠一份 min-height 会把底栏顶出去。 */
+.console-shell--chat {
+  display: block;
+  height: 100dvh;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  overflow: visible;
+}
+
+/* ③ 内容区不吃外壳的 22/26/30 内边距：对话的三栏（Sidebar / 消息 / 资料库）
+      自己带 .chat-px，外面再套一层就窄一圈。 */
+.console-page--chat {
+  height: 100%;
+  padding: 0;
+  min-width: 0;
+}
+
+/* 三列在手机上会把「还剩 1000 次」挤成两行、进度条错位（2026-11-18 实测 390）。
+   现在只有设置页的额度卡用它，所以直接在窄屏塌成一列 ——
+   三行竖着读反而更快。将来若别处也用 .grid3，记得回头看这一条。
+   ★ 必须写在文件末尾：手机外壳那一段里有一条更晚的
+     `.grid3, .grid4 { grid-template-columns: repeat(2, ...) }`，
+     同特异性下后写的赢，写在 .grid3 定义旁边等于没写（实测还是两列）。 */
+@media (max-width: 900px) {
+  .grid3 {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

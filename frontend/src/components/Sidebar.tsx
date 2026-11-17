@@ -9,7 +9,7 @@ import CornIcon from "./CornIcon";
 import NavIcon from "./NavIcon";
 import UserAvatar from "./settings/UserAvatar";
 import { chatRailNav, railLayout } from "@/lib/nav";
-import type { Conversation, QuotaInfo } from "@/lib/types";
+import type { Conversation } from "@/lib/types";
 import type { FontScale } from "@/lib/hooks/usePrefs";
 
 interface Props {
@@ -47,8 +47,9 @@ interface Props {
   displayName?: string;
   /** 头像值：""（首字母）/ "icon:<name>" / "img:<hash>" */
   avatar?: string;
-  /** 当前账号配额概览（含 unlimited 标记）；不传则不显示额度 */
-  quota?: Record<string, QuotaInfo>;
+  /** ★ 2026-11-18：额度那句（「今天还能问 N 次」）从这里撤了 ——
+      用户要求它只出现在设置页。账号名本身仍是看板入口。 */
+
   /** 打开「用量与反馈」看板（P2）。不传则账号块不可点 */
   onOpenUsage?: () => void;
   onLogout?: () => void;
@@ -56,16 +57,6 @@ interface Props {
 
 const toMs = (ts: number) => (ts < 1e12 ? ts * 1000 : ts);
 
-function quotaLine(q: Record<string, QuotaInfo>): string {
-  // 2026-11-13：与顶栏胶囊同一套说法（ChatArea.quotaLine）。原来这里是
-  // 「今日问答 0/60 · 向量化 0/1000」——半个屏上出现两次「向量化」，
-  // 而它既不是用户能改的，也不是用户需要知道的。
-  const ask = q["ask"];
-  if (!ask) return "";
-  if (ask.limit === 0) return "今天不限次数";
-  const left = Math.max(ask.limit - ask.used, 0);
-  return left > 0 ? `今天还能问 ${left} 次` : "今天的次数用完了";
-}
 
 function groupSessions(list: Conversation[]) {
   const now = new Date();
@@ -109,7 +100,6 @@ export default function Sidebar({
   username,
   displayName,
   avatar,
-  quota,
   onOpenUsage,
   onLogout,
   isAdmin = false,
@@ -562,18 +552,6 @@ export default function Sidebar({
                 <div className="truncate text-fs-sm text-ink" title={username}>
                   {displayName || username}
                 </div>
-              )}
-              {quota && (
-                <button
-                  onClick={onOpenUsage}
-                  disabled={!onOpenUsage}
-                  className="block w-full truncate rounded-xs text-left text-fs-xs text-muted transition enabled:hover:text-accent-ink disabled:cursor-default"
-                  title={onOpenUsage ? "查看用量与反馈" : undefined}
-                >
-                  {Object.values(quota).some((q) => q.unlimited)
-                    ? "无限额 · 管理员"
-                    : quotaLine(quota)}
-                </button>
               )}
             </div>
             {onLogout && (

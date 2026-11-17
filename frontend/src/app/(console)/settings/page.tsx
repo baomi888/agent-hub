@@ -20,6 +20,7 @@ import CornIcon from "@/components/CornIcon";
 import AvatarPicker from "@/components/settings/AvatarPicker";
 import InstallAppRow from "@/components/settings/InstallAppRow";
 import PasswordDialog from "@/components/settings/PasswordDialog";
+import ReminderQuick from "@/components/settings/ReminderQuick";
 import UsernameDialog from "@/components/settings/UsernameDialog";
 import UserAvatar from "@/components/settings/UserAvatar";
 import FeedbackCard from "@/components/FeedbackCard";
@@ -367,18 +368,14 @@ export default function SettingsPage() {
             <InstallAppRow />
           </section>
 
-          {/* 提醒（2026-11-11）：整组搬到「待办 → 设置」。
-              这里只留一条指路，不留第二份控件 —— 两个地方都能开关同一件事，
-              迟早出现"在这关了那边还显示开着"。
-              保留这条而不是整段删掉：老用户会先来设置页找，找不到会以为功能没了。 */}
+          {/* 提醒（2026-11-11 搬走 → 2026-11-18 放回一个开关）：
+              搬走时这里只留一行灰字指路，用户看不懂（「这个用户不知道是什么意思」）。
+              现在给一张小卡：本机开关 + 一行状态 + 整行可点的「详细设置」。
+              设备清单 / 邮件兜底 / 课程日历 / 每日回顾 / 免打扰仍只在
+              「待办 → 设置」—— 那是"响几次、响哪些"，一年改一次。 */}
           <section id="reminder">
             <p className="sec-label">提醒</p>
-            <Link href="/reminders?tab=settings" className="install-more">
-              <span>提醒权限、已开启提醒的设备，都在「待办 → 设置」里</span>
-              <span className="arrow" aria-hidden="true">
-                ›
-              </span>
-            </Link>
+            <ReminderQuick />
           </section>
 
           <section>
@@ -489,8 +486,12 @@ export default function SettingsPage() {
             </div>
           </section>
 
-          <section>
-            <p className="sec-label">用量与反馈</p>
+          {/* 额度（2026-11-18）：从对话顶栏搬到这里。
+              用户的判断是「今天还能问你多少次」不该飘在聊天界面上，
+              而额度是「我这个账号还能用多少」的事 —— 它本来就属于设置。
+              对话区那个胶囊拆了，这里改说「还剩 N 次」，口径不变。 */}
+          <section id="quota">
+            <p className="sec-label">额度</p>
             <div className="card card-pad">
               {usage.state === "loading" && <SkeletonLines widths={["100%", "72%", "52%"]} />}
               {usage.state === "error" && (
@@ -833,7 +834,13 @@ function QuotaBars({ summary }: { summary: UsageSummary }) {
               <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
                 <span style={{ fontSize: "var(--fs-md)" }}>{m.label}</span>
                 <span className="meta">
-                  {unlimited ? "无限额" : `${q.used} / ${q.limit} ${m.unit}`}
+                  {/* 说「还剩几次」而不是「已用 3 / 60」：后者要心算，
+                      而用户来这一页问的就是「我还能问几次」。 */}
+                  {unlimited
+                    ? "无限额"
+                    : Math.max(0, q.limit - q.used) > 0
+                      ? `还剩 ${Math.max(0, q.limit - q.used)} ${m.unit}`
+                      : "今天的用完了"}
                 </span>
               </div>
               {!unlimited && (
@@ -845,9 +852,11 @@ function QuotaBars({ summary }: { summary: UsageSummary }) {
           );
         })}
       </div>
-      {/* 原来这里还挂着一段「另有每分钟 N 次的上限。连着问得太快会被暂时挡住，
-          页面上会直接告诉你还差多少秒，不会只转圈。」—— 2026-11-17 删。
-          真撞上限时页面自己会报「还差 12 秒」，提前念一遍只占了半张卡。 */}
+      {/* 重置时刻是这里唯一必须写的说明：额度按自然日算，不问的人第二天
+          会以为额度用完了就一直不能用。多一个字都不用。 */}
+      <p className="hint" style={{ marginTop: 10 }}>
+        额度每天 0 点重置。
+      </p>
     </>
   );
 }

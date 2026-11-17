@@ -21,7 +21,6 @@ import { useKnowledge } from "@/lib/hooks/useKnowledge";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { detailToMessage } from "@/lib/errors";
 import InstallBanner from "@/components/InstallBanner";
-import ConsoleTabBar from "@/components/console/ConsoleTabBar";
 import Landing from "@/components/landing/Landing";
 import AnnounceModal from "@/components/announce/AnnounceModal";
 import type { UiMessage } from "@/components/chat/types";
@@ -984,21 +983,22 @@ export default function Home() {
 
   return (
     <>
-    <main className="workbench-main page-fade flex overflow-hidden">
-      {/* 首页**挂**底部 tab（2026-11-16 恢复）。
-          ★ 这一条推翻了 11-13 的决定：「主页面下面的 tag 去掉吧，影响整体性」。
-            当时的形状是「满屏卡片 + 底部压一条独立的 50px 导航」—— 两条边线挨着，
-            卡片看起来被切成了"内容 + 工具栏"两截。
-            恢复的做法不是把那条导航照抄回来，而是**把它并进输入区**：
-              · 高度由 fx.css 的 main.workbench-main 让出（含安全区），
-                导航在 main 之外，卡片底边与导航顶边之间不再有第二条分割线；
-              · 导航给 .tabbar--dock 变体：去掉自己的上边框与投影，
-                由 dock 的上边线当唯一的分隔（见 fx.css 里那段注释）；
-              · chat.css 的 --chat-dock-chrome 扣掉安全区，避免 dock 和 tab
-                各让一次、底部凭空多出 34px。
-            动机：5 个一级入口里「对话」和「论坛」都没有底栏，用户在三个页面
-            之间要换三种导航模型（抽屉 / 左上角返回 / 底栏）—— 这不是审美问题。
-            论坛那边同一轮也补上了（见 app/forum/page.tsx 末尾）。 */}
+    <main className="workbench-main flex overflow-hidden">
+      {/* ★ 2026-11-18（合并外壳）：这一页搬进了 (console) 路由组。
+         以前 `/` 和 `(console)` 是两套外壳 —— 两套 layout、两个滚动容器、
+          两套页头语法，只有底栏是同一个组件。用户的原话是「从对话到功能模块
+          整体割裂感较强」：点进打卡的感觉是"换了一个 App"，不是"翻了一页"。
+         现在 layout 只有一份（components/console/ConsoleLayout.tsx）：
+           · 底栏、登录门、上手说明、公告、切页淡入全在外壳里，本页不再自己挂
+             ConsoleTabBar（外壳按路由给 dialog 页 `variant="dock"`）；
+           · 滚动容器归外壳的 .console-scroll，对话页给它加 `--chat` 变体
+             （不滚动、不铺卡片、高度铺满），对话自己的 .chat-scroll 仍管消息区；
+           · 本页仍然是唯一的 `<main>`：外壳在对话路由下把容器渲染成 div，
+             否则会套出 <main><main>。
+         桌面左栏仍由 Sidebar 担任（它本来就带完整模块入口，见 lib/nav 的
+         chatRailNav）—— 外壳的 .console-nav 在对话页隐藏，避免两条左栏。
+          底栏与输入区"并成一块"的做法（dock 变体 / --chat-dock-chrome）没变，
+          只让位那一套仍然在 fx.css 的 main.workbench-main 里。 */}
       {/* 「装到桌面」的首次提示。★ 刻意挂在登录态确定之后（这里或上面的登录门分支），
           不挂根布局：根布局会在登录门出现之前就渲染，组件判定「可以弹」→
           立刻写下 60 天冷却，等用户真登录进来就再也不弹了（线上实测，探针里
@@ -1044,7 +1044,6 @@ export default function Home() {
         isAdmin={auth.me?.is_admin}
         displayName={auth.me?.user.nickname || auth.me?.user.username}
         avatar={auth.me?.user.avatar}
-        quota={auth.me?.quota}
         onOpenUsage={() => setUsageOpen(true)}
         onLogout={() => void auth.logout()}
       />
@@ -1086,8 +1085,6 @@ export default function Home() {
           onCityEditOpenChange={setCityEdit}
           onSaveCity={saveCity}
           sessionId={activeSid}
-          quota={auth.me?.quota}
-          onOpenUsage={() => setUsageOpen(true)}
           userId={authedId}
         />
       </div>
@@ -1160,21 +1157,11 @@ export default function Home() {
       {/* 用量与反馈看板（portal 到 body，不受三栏布局裁切） */}
       {usageOpen && <UsagePanel onClose={() => setUsageOpen(false)} />}
 
-      {/* ★ 底部导航必须留在 <main> 里面（2026-11-16 第 32 批改回来）。
-          `<main class="workbench-main">` 带 `position:relative; z-index:1`，它本身
-          是一个**层叠上下文** —— 里面的 z-index 再大，整体也只有 1 层。导航原来挂在
-          main 外面（根层叠上下文，z-index 40），于是压在左抽屉（70）、资料库面板（70）
-          和遮罩（60）之上：抽屉/面板底部 73px 被导航切掉，连遮罩都盖不住导航。
-          实测判据是 elementFromPoint —— 抽屉底部命中 `.tabbar-item`。
-          放进 main 之后三者同处一个上下文：导航 40 < 遮罩 60 < 抽屉/面板 70，
-          抽屉打开时导航被遮罩压暗、被面板盖住（iOS 的 sheet 也是这样）。
-          ★ 原来那条注释说"塞进 main 会跟着 overflow:hidden 一起被裁"是**错的**：
-            固定定位相对视口，外层容器的 overflow 不裁它（要裁得让外层变成
-            containing block，即加 transform/filter；.page-fade 只动 opacity，
-            正是为了不产生它）。实测导航仍在 767–852，一个像素没动。
-          variant="dock"：这一页的导航要和上面的输入区连成一块，不要自己的上边框
-          和投影（否则同一条线上出现两条线，又变成"切成两截"）。 */}
-      <ConsoleTabBar isAdmin={auth.me?.is_admin} variant="dock" />
+      {/* ★ 底栏在 2026-11-18 的合并外壳里由 layout 统一挂载（这里是它的内容区，
+          自己再挂一份就会出现两条导航）。层级关系随之搬进 CSS：
+          本页的 main 不再是层叠上下文，改由 .console-scroll--chat 统一决定
+          40（底栏）< 60（遮罩）< 70（抽屉 / 资料库面板）—— 见 console.css 里
+          「合并外壳」那一段。 */}
     </main>
     </>
   );

@@ -473,43 +473,6 @@ button.kb-chip-unbound:hover {
   .kb-unbind { display: none; }
 }
 
-/* 顶栏用量胶囊：常驻把「今天用了多少」摆在明面上，点开看板。
-   形态与 .kb-chip 一致（999px），金只用于图标点缀。 */
-.usage-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-6);
-  max-width: 46vw;
-  padding: 4px 10px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-pill);
-  background: transparent;
-  color: var(--text-2);
-  font-size: var(--fs-xs);
-  cursor: pointer;
-  transition: var(--t-color);
-}
-.usage-chip:hover {
-  border-color: var(--accent);
-  color: var(--accent-ink);
-}
-.usage-chip:focus-visible {
-  outline: 2px solid var(--accent-ink);
-  outline-offset: 1px;
-}
-.usage-chip .usage-chip-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-/* 窄屏只留图表图标，省出横向空间给会话标题与能力入口 */
-@media (max-width: 640px) {
-  .usage-chip .usage-chip-text { display: none; }
-  .usage-chip { padding: 4px 7px; }
-}
-
 /* 图标文字按钮 */
 .icon-btn {
   position: relative;

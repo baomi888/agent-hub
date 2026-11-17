@@ -212,7 +212,11 @@ export default function ReportPage() {
 
   return (
     <PageShell
-      title={date && date !== todayStr ? prettyDate(date) : "今天学了什么"}
+      // 标题固定「每日总结」（2026-11-18 用户要求）。以前翻到历史某天时标题变成
+      // 「11 月 14 日 周五」—— 于是同一页有两种标题，底部导航写着「更多」进来，
+      // 用户会以为换了一个页面。日期本来就在下面那张概览卡的眉题里，
+      // 而且日期胶囊自己带着选中态，不缺这一处。
+      title="每日总结"
       // 页头说明退场（2026-11-17）：「聊过的东西容易忘。每天留一份小结，带出处。」
       width={860}
       actions={
@@ -300,7 +304,10 @@ export default function ReportPage() {
 
                   <div className="rp-hours-wrap">
                     <div className="rp-hours-head">
-                      <span>什么时候在学</span>
+                      <span className="rp-hours-label">
+                        <CornIcon name="clock" className="rp-ic" />
+                        什么时候在学
+                      </span>
                       <span className="rp-hours-hint">{peakHint(stats)}</span>
                     </div>
                     <HoursChart stats={stats} />
@@ -310,7 +317,11 @@ export default function ReportPage() {
             </section>
 
             {/* ---- 小结 ---- */}
+            {/* 小节标题前挂图标（2026-11-18）：页头说明删掉以后，这一页只剩
+                「概览 / 小结 / 出处」三层，全靠一行 12px 的金色小字分层。
+                加一枚同色描边图标，眼睛不用读字也能认出换了一层。 */}
             <p className="rp-sec">
+              <CornIcon name="notes" className="rp-ic" />
               今天的小结
               {hasNotes && <span className="rp-sec-n">{notes.length} 条</span>}
             </p>
@@ -377,7 +388,10 @@ export default function ReportPage() {
 
             {/* 出处说明收进折叠 —— 它回答的是"凭什么信"，不是每天都要读的东西 */}
             <details className="rp-foot">
-              <summary>条数为什么比看起来的少？</summary>
+              <summary>
+                <CornIcon name="info" className="rp-ic" />
+                条数为什么比看起来的少？
+              </summary>
               <p>
                 每一条我都要求能指回原话：找不到出处的，宁可不写也不硬凑。
                 所以这里的条数常常少于当天实际的收获 —— 这是刻意的。

@@ -79,6 +79,41 @@
 .chat-topbar {
   padding-top: var(--chat-topbar-y);
   padding-bottom: var(--chat-topbar-y);
+  /* ★ 2026-11-18（合并外壳）：这一条带要和控制台的 .pg-head 对得上 ——
+     两个高度差在 2px 以内，从对话点进打卡时正文的起始线就不跳。
+     50 = 手机档「28px 标题 × 1.4 + 16 内边距」；62 = 桌面档 32px 那个。
+     写 min-height 而不是 padding：里面有 17px 图标和 34px 按钮，
+     内容自己撑得比这高时不该被压缩。 */
+  min-height: 50px;
+}
+@media (min-width: 900px) {
+  .chat-topbar {
+    min-height: 62px;
+  }
+}
+/* 标题：图标 + 会话名。图标与「底栏 · 对话」、功能页页头是同一个图案 ——
+   合并外壳之后，左边那一竖列不会忽有忽无，它是「在同一本书里」的锚点。 */
+.chat-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
+}
+.chat-title-ic {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  color: var(--accent-ink);
+}
+.chat-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-serif);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--text-1);
 }
 .chat-msgpad {
   padding-top: var(--chat-msg-pt);

@@ -2331,6 +2331,7 @@ class TestStreamingVoice:
 # ==================== 提醒权限搬进待办（2026-11-11）====================
 
 ACCESS = ROOT / "frontend" / "src" / "components" / "reminders" / "ReminderAccess.tsx"
+QUICK = ROOT / "frontend" / "src" / "components" / "settings" / "ReminderQuick.tsx"
 SETTINGS_PAGE = ROOT / "frontend" / "src" / "app" / "(console)" / "settings" / "page.tsx"
 
 
@@ -2396,15 +2397,57 @@ class TestReminderAccessInTodo:
         assert i > 0 and j > 0
         assert i < j, "提醒权限卡被排到免打扰后面了"
 
-    def test_settings_page_only_links_out(self):
-        """设置页不再放第二份控件，只留一条指路。
+    def test_settings_page_keeps_only_the_local_switch(self):
+        """设置页只留「本机开关」+ 一个出口，其余仍只在待办页。
+
+        2026-11-18 改的口径：原来这里是「一条指路都不许放控件」。用户看过之后
+        直说看不懂那行灰字（「提醒权限、已开启提醒的设备，都在「待办 → 设置」里」），
+        于是放回**一个**开关（本机响不响）和一步「详细设置」。
+
+        不变的那条：设备清单、邮件兜底、课程日历这些「响几次、响哪些」的控件
+        不许回到设置页 —— 它们一年改一次，且都需要看到设备/邮箱的完整上下文。
 
         反证：把 `<PushRow />` 加回去，本用例变红。
         """
         src = _strip_js_comments(SETTINGS_PAGE.read_text(encoding="utf-8"))
         for gone in ("<PushRow", "<CalendarRow", "<ReminderTimeCard"):
-            assert gone not in src, f"设置页还在渲染 {gone}，两处都能开关同一件事"
-        assert "/reminders?tab=settings" in src
+            assert gone not in src, f"设置页还在渲染 {gone}，这一项该留在待办页"
+        assert "<ReminderQuick />" in src, "设置页没有那张本机开关卡"
+        # 指路的那句灰字必须真的走了：它是用户看不懂的源头
+        assert "提醒权限、已开启提醒的设备" not in src, "那句看不懂的指路还在"
+
+    def test_quick_card_is_one_switch_plus_one_exit(self):
+        """小卡只能有一个开关、一个出口，且出口必须指向「待办 → 设置」。
+
+        用户的原话是「这里可以基本的设置提醒权限，然后点击详细设置才能进去那个
+        详细设置页」。多一个控件它就不是"基本设置"了；出口指错地方的话，
+        点进去看到的还是设置页本身（原地打转）。
+
+        反证：把 href 改成 `/settings`，本用例变红。
+        """
+        src = _strip_js_comments(QUICK.read_text(encoding="utf-8"))
+        assert src.count("<Switch") == 1, "小卡里出现了不止一个开关"
+        assert 'href="/reminders?tab=settings"' in src, "「详细设置」没指向待办的设置标签"
+        assert "详细设置" in src, "出口没有写「详细设置」这四个字"
+        # 页脚必须整行可点，不能是一段小字上叠一个链接
+        assert 'className="rem-quick-foot"' in src, "页脚不是整行可点的链接"
+        css = CONSOLE_CSS.read_text(encoding="utf-8")
+        foot = re.search(r"\.rem-quick-foot\s*\{[^}]*\}", css.replace("\r\n", "\n"))
+        assert foot, "console.css 里缺 .rem-quick-foot"
+        assert "min-height: 44px" in foot.group(0), "出口的触控高度不到 44"
+
+    def test_quick_card_judges_this_device_not_the_account(self):
+        """开关说的是「这台」，所以必须走 findMyDevice。
+
+        `/api/push/status` 的 `subscribed` 是账号级的：手机开了就是 true。
+        直接拿它渲染「已开启」，在从没开过的电脑上就是假话 —— 用户点开发现
+        开关是开的，却什么也收不到。
+
+        反证：把 `findMyDevice` 换成 `s.subscribed`，本用例变红。
+        """
+        src = _strip_js_comments(QUICK.read_text(encoding="utf-8"))
+        assert "findMyDevice(" in src
+        assert "enablePush()" in src and "disablePush()" in src, "开关没走浏览器的订阅/退订"
 
     def test_removed_components_are_really_gone(self):
         """三个组件文件删掉、摘要日历没有偷偷接回来。

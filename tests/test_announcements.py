@@ -30,7 +30,8 @@ SRC = ROOT / "frontend" / "src"
 
 ANN_TS = SRC / "lib" / "announcements.ts"
 MODAL = SRC / "components" / "announce" / "AnnounceModal.tsx"
-HOME = SRC / "app" / "page.tsx"
+# 对话页 2026-11-18 搬进 (console) 路由组（合并外壳），路由组不进 URL
+HOME = SRC / "app" / "(console)" / "page.tsx"
 CONSOLE_LAYOUT = SRC / "components" / "console" / "ConsoleLayout.tsx"
 
 # ★ 发布过的期号。新一期**必须**不在这个集合里（id 复用 = 老用户永远看不到）。

@@ -40,7 +40,6 @@
   .geo-btn,
   .send,
   .kb-manage,
-  .usage-chip,
   .theme-chip,
   .push-nudge .pn-x,
   .guide-skip,
@@ -174,12 +173,6 @@
     inset: -5px 0;
   }
 
-  /* 24 → 44：「查看用量与反馈」小胶囊 */
-  .usage-chip::before {
-    content: "";
-    position: absolute;
-    inset: -10px -2px;
-  }
 
   /* 25 → 45：资料库卡片右上角的「管理」 */
   .kb-manage::before {

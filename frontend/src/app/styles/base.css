@@ -45,7 +45,14 @@ button, input, textarea, select {
    overflow:hidden + 固定高度 → 内容被裁、滚动失灵（10-11 修复） */
 main.workbench-main {
   position: relative;
-  z-index: 1;
+  /* ★ 2026-11-18（合并外壳）：这里原来是 z-index: 1。
+     它让 main 成为一个**层叠上下文**，而合并之后底栏挂在 main 外面
+     （外壳那一层）—— 于是底栏(40)会整体压过 main 里的遮罩(60)与抽屉(70)，
+     正是第 32 批修过的那个 bug 反过来。现在层级由 `.console-scroll--chat`
+     （isolation: isolate）统一决定谁压谁：40 底栏 < 60 遮罩 < 70 抽屉/面板。
+     回退这条的人请同时看 console.css 末尾「合并外壳」和
+     tests/test_console_nav.py 里那条层级断言。 */
+  z-index: auto;
   /* ★ 2026-11-14（第九批）：纸铺到视口边缘，不再留那圈"桌面"。
      原来是四边各 14px 露出 body 的桌面渐变，观感是"一张纸放在桌上"；
      现在整屏就是那张纸，底色与纤维纹理从边到底连续。

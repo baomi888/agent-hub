@@ -5,7 +5,36 @@
 // 一个页面长什么样，取决于页头说什么、内容怎么排；侧栏是"在哪儿"，
 // 它不该随页面重建 —— 这就是把两者拆开的原因（详见 ConsoleLayout.tsx 顶部注释）。
 import type { ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import InfoNote from "./InfoNote";
+import NavIcon from "../NavIcon";
+import { NAV } from "@/lib/nav";
+
+/**
+ * 页头图标跟**导航清单**走（2026-11-18）。
+ *
+ * 用户的要求是「顶部标题左侧显示与当前页面对应的图标」。做法上只有一条讲究：
+ * 同一个功能在底栏、桌面侧栏、页头必须是**同一个图案** —— 所以这里不另建
+ * 一套"页面图标"，直接从 lib/nav 里按路径取。自己再画一份的话，"待办"在
+ * 底栏是清单、在页头是铃铛，用户会以为是两件事（导航图标那套形状是刻意
+ * 拉开距离的，正是为了这个）。
+ *
+ * 两级匹配：
+ *   · 先按 NAV 里的 href 精确匹配，再按前缀（/settings/install 落到 /settings）；
+ *   · 不在 NAV 里的页面（学习路径的入口按用户要求下线了，页面还在）走下面的补表。
+ *
+ * 返回 null = 这页不配图标（宁可没有，也不要一个不相干的图案）。
+ */
+function navIconFor(pathname: string): string | null {
+  const here = pathname.replace(/\/+$/, "") || "/";
+  const hit = NAV.find(
+    (it) => it.href !== "/" && (here === it.href || here.startsWith(it.href + "/")),
+  );
+  if (hit) return hit.icon;
+  // 导航里已经没有的页面：保留它自己的图案，别让它变成唯一没有图标的页
+  if (here === "/path" || here.startsWith("/path/")) return "path";
+  return null;
+}
 
 interface Props {
   /**
@@ -55,6 +84,11 @@ interface Props {
    * （原来它还会藏掉眉题，2026-11-14 眉题全站退场后那段规则已无对象，一并删了。）
    */
   compact?: boolean;
+  /**
+   * 页头图标（NavIcon 的名字）。**默认按当前路径从 NAV 里取**，一般不用传。
+   * 显式传空字符串 = 这一页不要图标。
+   */
+  icon?: string;
   children: ReactNode;
 }
 
@@ -66,6 +100,7 @@ export default function PageShell({
   actions,
   width,
   compact,
+  icon,
   children,
 }: Props) {
   // 页头三种形态：
@@ -77,6 +112,10 @@ export default function PageShell({
     .filter(Boolean)
     .join(" ");
 
+  // 图标：显式传了就用传的（空串 = 不要），没传就按路径取
+  const pathname = usePathname();
+  const glyph = icon === undefined ? navIconFor(pathname || "/") : icon;
+
   return (
     // 限宽页面居中：侧栏占了左边一块，内容靠左贴会留出一条大右空白
     <div
@@ -86,7 +125,10 @@ export default function PageShell({
       <div className={headClass}>
         <div>
           {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
-          <h2>{title}</h2>
+          <h2>
+            {glyph ? <NavIcon name={glyph} className="pg-ic" /> : null}
+            <span>{title}</span>
+          </h2>
           {sub && detail ? (
             <InfoNote claim={sub} detail={detail} />
           ) : sub ? (

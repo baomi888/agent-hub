@@ -9,8 +9,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import MascotLogo from "./chat/MascotLogo";
 import CornIcon from "./CornIcon";
+import NavIcon from "./NavIcon";
 import { api } from "@/lib/api";
-import type { RefSource, QuotaInfo, IssuedApproval, ToolApprovalRequest } from "@/lib/types";
+import type { RefSource, IssuedApproval, ToolApprovalRequest } from "@/lib/types";
 import { HOME_GROUPS, TOOLS_URL } from "./chat/constants";
 import TodayStrip from "./chat/TodayStrip";
 import PushNudge from "./chat/PushNudge";
@@ -21,8 +22,6 @@ import Bubble from "./chat/Bubble";
 import BubbleErrorBoundary from "./chat/BubbleErrorBoundary";
 import TurnOutline from "./chat/TurnOutline";
 import QueryEnhance from "./chat/QueryEnhance";
-import GuideModal from "./guide/GuideModal";
-import AnnounceModal from "./announce/AnnounceModal";
 import FeedbackModal from "./feedback/FeedbackModal";
 import type { ChatAttachment, UiMessage } from "./chat/types";
 import FilePreviewModal from "./FilePreviewModal";
@@ -68,6 +67,24 @@ const ANCHOR_HOLD_MS = 1400;
 const SCROLL_DURATION_MS = 280;
 
 /**
+ * 「一屏以上」的落差直接落位，不播动画（2026-11-18）。
+ *
+ * 上面的匀速追平是为**流式跟随**调的：一行 33px、0.28 秒走完，每帧 1~2px，
+ * 眼睛看到的是内容自己往上淌。可它被复用到了「进会话」那条路上 ——
+ * 从别的页面回到对话时，`messages` 从空变成整段历史，`scrollHeight` 一口气
+ * 多出几千像素，`programScroll` 照样按 280ms 匀速走完：5000px / 280ms ≈ 18px/ms，
+ * 一屏内容在一瞬间刷过去。用户的原话是「返回对话框时会出现极强的滑动效果」。
+ *
+ * 落差的语义本来就分两种：
+ *   · 小落差 = 内容长了，视野跟着走 → 该有动画（否则一顿一顿）；
+ *   · 大落差 = 换了一个视野（进会话 / 切会话 / 回到最新）→ 动画只会让人晕。
+ * 所以用一屏当界：超过 0.9 屏就 `scrollTop = target`，一帧到位、零位移感。
+ * 为什么是 0.9 而不是 1：留一点提前量，键盘收起/地址栏伸缩导致可视区变高时
+ * 那点差额不该被判成"大落差"。
+ */
+const JUMP_SCREENS = 0.9;
+
+/**
  * 检索条数也换成白话档位。
  * 「topK = 5」没人看得懂，「参考 5 段资料」一看就明白，
  * 顺带把「多参考 = 更全但更慢」的取舍讲清楚。
@@ -77,22 +94,6 @@ const TOP_K_MODES = [
   { value: 5, hint: "均衡" },
   { value: 8, hint: "更全" },
 ] as const;
-
-/** 顶栏胶囊文案：管理员显示「无限额」，否则说清今天还能问几次。
- *
- * ★ 2026-11-13：原来是「问答 0/60 · 向量化 0/1000」。
- *   两处都不对用户说话：「向量化」是把课件切块进向量库的次数，属于内部实现，
- *   用户既改不了也不需要知道；「0/60」也没说清是哪一边 —— 第一次进来的人
- *   会读成"我一次都不能问"。改成从用量倒推的剩余次数，并在快用完时才提。
- */
-function quotaLine(q: Record<string, QuotaInfo>): string {
-  if (Object.values(q).some((x) => x.unlimited)) return "无限额 · 管理员";
-  const ask = q["ask"];
-  if (!ask) return "用量";
-  if (ask.limit === 0) return "今天不限次数";
-  const left = Math.max(ask.limit - ask.used, 0);
-  return left > 0 ? `今天还能问 ${left} 次` : "今天的次数用完了";
-}
 
 interface Props {
   messages: UiMessage[];
@@ -181,10 +182,7 @@ interface Props {
   onSaveCity?: (name: string) => void;
   /** 当前会话 id：赞踩要按「会话 + 消息 id」落库，否则后端无从归档 */
   sessionId?: string | null;
-  /** 当前账号配额概览：顶栏常驻胶囊用它显示今日用量 */
-  quota?: Record<string, QuotaInfo>;
-  /** 打开「用量与反馈」看板；不传则不显示顶栏胶囊 */
-  onOpenUsage?: () => void;
+  /** ★ 2026-11-18：额度不再进对话区 —— 顶栏胶囊已拆，见设置页的「今日额度」。
   /** 当前用户 id：新手引导条的「已关闭」状态按人存，换人登录要重新看到 */
   userId?: string | null;
 }
@@ -222,8 +220,6 @@ export default function ChatArea({
   onCityEditOpenChange,
   onSaveCity,
   sessionId = null,
-  quota,
-  onOpenUsage,
   userId = null,
   resumeSession = null,
   onResumeSession,
@@ -354,6 +350,17 @@ export default function ChatArea({
     const max = Math.max(0, el.scrollHeight - el.clientHeight);
     const target = Math.max(0, Math.min(top, max));
     progTopRef.current = target;
+    // 一屏以上的落差直接落位（见 JUMP_SCREENS 的注释）。
+    // 必须先撤掉还在跑的动画：否则它下一帧读到新的 progTopRef 会从半路接着走。
+    if (Math.abs(target - el.scrollTop) > el.clientHeight * JUMP_SCREENS) {
+      if (scrollRafRef.current != null) {
+        cancelAnimationFrame(scrollRafRef.current);
+        scrollRafRef.current = null;
+      }
+      el.scrollTop = target;
+      appliedTopRef.current = el.scrollTop;
+      return;
+    }
     // 已经在追赶：让循环自己读最新的 progTopRef，不要重排（重排会把
     // 走了一半的位移丢掉，反而更抖）
     if (scrollRafRef.current != null) return;
@@ -387,6 +394,24 @@ export default function ChatArea({
       scrollRafRef.current = requestAnimationFrame(tick);
     };
     scrollRafRef.current = requestAnimationFrame(tick);
+  }, []);
+
+  // 直接落位：不播动画、不等下一帧（2026-11-18）。
+  //
+  // 和 programScroll 的分工：programScroll 回答「内容长了，视野怎么跟」，
+  // 这里回答「换了一个视野」（进会话 / 切会话 / 从别的页面回来）。
+  // 后者不能有动画 —— 落差几千像素时，任何"走完"的过程都是一次白光。
+  // 顺手把 appliedTopRef 写上，onScroll 才不会把这一下当成用户接管。
+  const settleScroll = useCallback((el: HTMLDivElement, top: number) => {
+    const max = Math.max(0, el.scrollHeight - el.clientHeight);
+    const target = Math.max(0, Math.min(top, max));
+    if (scrollRafRef.current != null) {
+      cancelAnimationFrame(scrollRafRef.current);
+      scrollRafRef.current = null;
+    }
+    progTopRef.current = target;
+    el.scrollTop = target;
+    appliedTopRef.current = el.scrollTop;
   }, []);
 
   // 尾部留白：让「回答不足一屏」时也滚得到顶部（2026-11-02 重做版）
@@ -564,8 +589,11 @@ export default function ChatArea({
     anchoredPosRef.current = null;
     setAtBottom(true);
     const el = scrollRef.current;
-    if (el) programScroll(el, el.scrollHeight);
-  }, [firstId, programScroll]);
+    // ★ 2026-11-18：这里必须直接落位，不能走 programScroll。
+    //   它是「从别的页面回到对话」时唯一会滚的一次 —— 历史从空到满，
+    //   落差常常几千像素，交给 280ms 匀速动画就是用户说的"极强的滑动效果"。
+    if (el) settleScroll(el, el.scrollHeight);
+  }, [firstId, settleScroll]);
 
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -799,8 +827,15 @@ export default function ChatArea({
             </svg>
           </button>
         )}
-        <span className="min-w-0 truncate font-serif text-sm font-medium text-ink">
-          {sessionTitle ?? "新对话"}
+        {/* 标题：图标 + 会话名（2026-11-18）。
+            图标与「底栏 · 对话」和功能页页头是同一个图案（NavIcon 的 chat），
+            合并外壳之后，从对话点到打卡再回来，左边那一竖列（图标位）
+            不会忽有忽无。会话名本身可长可短，所以用 truncate 而不是放大字号 ——
+            它替代不了功能页那种 28px 的版块标题，那是"这是哪一页"，
+            这里回答的是"这是哪一段对话"。 */}
+        <span className="chat-title min-w-0">
+          <NavIcon name="chat" className="chat-title-ic" />
+          <span className="chat-title-text">{sessionTitle ?? "新对话"}</span>
         </span>
         {boundKb ? (
           <span
@@ -841,20 +876,12 @@ export default function ChatArea({
           </button>
         ) : null}
         <div className="flex-1" />
-        {/* 顶栏用量入口：常驻显示今日额度，点开看板。
-            侧栏那个入口太折叠，用户找不到——这里给一个一眼可见的。 */}
-        {onOpenUsage && (
-          <button
-            type="button"
-            onClick={onOpenUsage}
-            className="usage-chip"
-            title="查看用量与反馈"
-            aria-label="查看用量与反馈"
-          >
-            <CornIcon name="target" className="h-3.5 w-3.5 shrink-0" title="用量" />
-            <span className="usage-chip-text">{quota ? quotaLine(quota) : "用量"}</span>
-          </button>
-        )}
+        {/* ★ 2026-11-18：「今天还能问 N 次」从对话区搬进设置页。
+            用户的原话是「不应出现在对话框内，建议移至系统设置中」，
+            而且它确实带来一处滑动干扰：额度是个会变的数字，胶囊宽度跟着变，
+            顶栏右侧那几个按钮每刷新一次就平移一次。
+            现在它住在 设置 → 今日额度（components/settings/QuotaCard.tsx），
+            要看就去看，不在聊天时飘在眼前。 */}
         {/* 顶栏「能力」快捷弹层与它的触发按钮已在 2026-10-31 批 B 删除：
             它提供的是「切模式 + 预填示例」，而模式条已下架、能力由两枚开关表达。
             留着它等于教用户点一个已经不存在的概念（还带着"算数"这种已删工具）。 */}
@@ -896,7 +923,7 @@ export default function ChatArea({
         <div
           ref={scrollRef}
           onScroll={onScroll}
-          className="h-full overflow-y-auto overflow-x-hidden [overflow-anchor:none]"
+          className="chat-scroll h-full overflow-y-auto overflow-x-hidden [overflow-anchor:none]"
         >
           <div className="chat-measure chat-px chat-msgpad mx-auto flex min-h-full flex-col">
           {messages.length === 0 ? (
@@ -1475,13 +1502,11 @@ export default function ChatArea({
         />
       )}
 
-      {/* 首次进平台的上手说明：portal 到 body，和有没有对话无关；
-          未登录（userId 为空）时它自己不渲染 */}
-      <GuideModal userId={userId} />
-
-      {/* 更新公告：同一处挂载。它自己判断「引导还没读完就先不弹」，
-          所以两者不会叠在一起；并且它比 GuideModal 高一层（z 96 / 95） */}
-      <AnnounceModal userId={userId} />
+      {/* ★ 2026-11-18（合并外壳）：上手说明与更新公告不再挂在这里。
+          对话页进了 (console) 路由组，两者由外壳统一挂载
+          （components/console/ConsoleLayout.tsx）—— 两个渲染点会让弹窗
+          有机会叠两次，而它们的"已读"标记是同一个 localStorage key，
+          将来改成"每次更新都弹"就是真的两条。 */}
 
       {/* 顶栏「反馈」打开的弹窗：内容与设置页是同一个 FeedbackCard，
           区别只是这里没有外层卡片（chrome=false） */}

@@ -22,11 +22,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "frontend" / "src"
 CONSOLE_CSS = SRC / "app" / "styles" / "console.css"
+BASE_CSS = SRC / "app" / "styles" / "base.css"
 FX_CSS = SRC / "app" / "styles" / "fx.css"
 NAV_TS = SRC / "lib" / "nav.ts"
 TABBAR_TSX = SRC / "components" / "console" / "ConsoleTabBar.tsx"
 LAYOUT_TSX = SRC / "components" / "console" / "ConsoleLayout.tsx"
-HOME_TSX = SRC / "app" / "page.tsx"
+# 对话页（`/`）2026-11-18 搬进了 (console) 路由组 —— 合并外壳之后
+# 它和其余 12 页共用一份 layout（app/(console)/layout.tsx）。路由组不参与 URL，
+# 所以 `/` 还是 `/`。这一行跟着搬，别改回 app/page.tsx（那里已经没有文件了）。
+HOME_TSX = SRC / "app" / "(console)" / "page.tsx"
 # 论坛页（一级 tab，但不在 (console) 路由组里 —— 2026-11-16 补挂底栏）
 FORUM_TSX = SRC / "app" / "forum" / "page.tsx"
 FORUM_CSS = SRC / "app" / "styles" / "forum-tb.css"
@@ -69,7 +73,11 @@ def _css_rules(css: str, selector: str) -> list[str]:
             elif css[j] == "}":
                 depth -= 1
                 if depth == 0:
-                    out.append(css[brace + 1 : j])
+                    # ★ 注释会骗测试（老坑，第二次踩）：规则体里常写着
+                    #   「原来是 z-index: 1」这种说明，直接正则取属性会命中它。
+                    #   剥掉注释再交出去，所有 _all_decls 调用一起受益。
+                    body = re.sub(r"/\*.*?\*/", "", css[brace + 1 : j], flags=re.S)
+                    out.append(body)
                     start = j
                     break
         else:
@@ -502,10 +510,10 @@ def test_console_only_pages_are_kept_off_mobile():
 # ==================== ④ 首页挂底部 tab（2026-11-16 第二次反转）====================
 
 
-def test_home_mounts_the_tabbar_and_gives_it_height():
-    """首页（/）挂底部 tab，且高度必须与它成对。
+def test_chat_route_gets_the_dock_tabbar_from_the_shell():
+    """对话页（/）的底栏由**外壳**挂，且必须是 dock 变体、并让出高度。
 
-    ★ 这条的方向改过两次，先看清楚再动手：
+    ★ 这条改过三次，先看清楚再动手：
       · 2026-11-13 下午：为了让「对话」入口常驻，首页单独挂过一次 tab；
       · 同一天晚上：用户看过真页面后要求撤掉 —— 「主页面下面的 tag 去掉吧，
         影响整体性」。当时的形状是**满屏卡片 + 底部压一条独立的 50px 导航**，
@@ -513,24 +521,28 @@ def test_home_mounts_the_tabbar_and_gives_it_height():
       · 2026-11-16：移动端 UI 评审认定「5 个一级入口里有 2 个没有底栏
         （对话 / 论坛）」是导航模型分裂的根因，用户要求按 P0 修复。
         恢复的做法不是把那条导航照抄回来，而是让导航**并进输入区**：
-        去掉自己的投影（variant="dock"）、由输入区那条线当唯一分隔。
+        去掉自己的投影（variant="dock"）、由输入区那条线当唯一分隔；
+      · 2026-11-18（合并外壳）：底栏从**页面**挪到**外壳**。用户的原话是
+        「从对话到功能模块整体割裂感较强」—— 根因是 `/` 和 (console) 是两套
+        layout、两个滚动容器、两套页头语法，只有底栏是同一个组件。
+        现在 `/` 住在 (console) 里，底栏只在外壳挂一次（按路由给 dock 变体）。
 
-    断言查三件事，缺一都不算接对：
-      · 注释剥掉后确实有 `<ConsoleTabBar`（只写 import 的话组件不在 DOM 里，
-        而字符串检查照样通过 —— 反证抓到过这一条）；
-      · 用的是 `variant="dock"`（否则首页会出现两条分隔线，回到"切成两截"）；
+    断言查四件事，缺一都不算接对：
+      · 外壳里确实有 `<ConsoleTabBar`，且按 isChat 给 `variant="dock"`；
+      · **页面自己不再挂**（再挂一份就是两条导航，手机上才看得出来）；
       · fx.css 里首页窄屏高度**减掉** `--tabbar-h` 与底部安全区
-        （不减 = 底部空出 50px 白边，比被压住还难看；只减 tabbar-h 不减安全区
-        = iPhone 上多出 34px。这是 11-13 撤 tab 那轮的同一个坑，方向反过来）。
+        （不减 = 底部空出 50px 白边；只减 tabbar-h 不减安全区 = iPhone 上多 34px）；
+      · 外壳给对话路由的滚动容器加 `--chat` 变体（不滚、不铺卡片）。
     """
-    home = _strip_comments(_read(HOME_TSX))
-    assert "<ConsoleTabBar" in home, (
-        "首页没有挂底部 tab：五个一级入口里「对话」是最常用的一个，"
-        "没有底栏就意味着用户在三个页面之间要换三种导航模型"
-    )
-    assert 'variant="dock"' in home, (
-        "首页的 tab 没用 dock 变体：它和输入区中间会多出一条投影，"
+    layout = _strip_comments(_read(LAYOUT_TSX))
+    assert "<ConsoleTabBar" in layout, "外壳没有挂底部 tab"
+    assert 'variant={isChat ? "dock" : undefined}' in layout, (
+        "对话路由没给 dock 变体：它和输入区中间会多出一条投影，"
         "又变成 11-13 那次「切成两截」的观感"
+    )
+    home = _strip_comments(_read(HOME_TSX))
+    assert "<ConsoleTabBar" not in home, (
+        "对话页自己又挂了一条底栏 —— 外壳已经挂了一份，两份会在手机上叠成两层"
     )
 
     block = _media_block(_read(FX_CSS), "@media (max-width: 899px)", "workbench-main")
@@ -551,6 +563,12 @@ def test_home_mounts_the_tabbar_and_gives_it_height():
         assert "safe-area-inset-top" in h, (
             f"首页高度没减顶部安全区（{h}）—— 刘海会把内容压住"
         )
+
+    # 外壳给对话路由的三条例外（不滚动 / 不铺卡片 / 满高）必须都存在，
+    # 否则对话页会被塞进一张 1220 宽的卡片里、还多出一个滚动条。
+    console = _read(CONSOLE_CSS)
+    for sel in (".console-scroll--chat", ".console-shell--chat", ".console-page--chat"):
+        assert sel + " {" in console, f"缺 {sel} 这一条：对话页在合并后的外壳里没有着落"
 
 
 def test_forum_mounts_the_tabbar_and_gives_it_height():
@@ -582,30 +600,37 @@ def test_forum_mounts_the_tabbar_and_gives_it_height():
         )
 
 
-def test_home_tabbar_lives_inside_main_so_overlays_can_cover_it():
-    """首页底栏必须挂在 `<main>` **里面** —— 它决定浮层能不能盖住底栏。
+def test_chat_main_is_not_a_stacking_context():
+    """对话页的 main **不能再是层叠上下文** —— 它决定浮层盖不盖得住底栏。
 
-    `main.workbench-main` 带 `position:relative; z-index:1`，本身就是一个层叠
-    上下文：里面的 z-index 写得再大，整棵树对外也只有一层。底栏原来挂在 main
-    外面（根上下文，z-index 40），于是压在左抽屉（70）、资料库面板（70）、
-    抽屉遮罩（60）之上 —— 抽屉与面板最下面 73px 被切掉，连遮罩都盖不住底栏
-    （线上 393×852 实测：抽屉底部 elementFromPoint 命中 `.tabbar-item`）。
+    第 32 批的修法是「把底栏塞进 main 里面」，因为 `main.workbench-main` 带
+    `position:relative; z-index:1`，是一个层叠上下文，外面的 z-index 再大
+    也只有 1 层。2026-11-18 合并外壳之后，底栏挂在外壳那一层（不在 main 里），
+    同一个坑就反过来了：底栏(40)会整体压过 main 里的遮罩(60)与抽屉(70)。
 
-    挪进 main 之后三者同处一个上下文：40（底栏）< 60（遮罩）< 70（抽屉/面板），
-    抽屉打开时底栏被遮罩压暗、被面板盖住，和 iOS 的 sheet 一样。
+    现在的做法是把 main 的 z-index 交还给外壳：main 用 `z-index: auto`（不再
+    建上下文），`.console-scroll--chat` 用 `isolation: isolate` 建一个统一的
+    上下文 —— 底栏、遮罩、抽屉、main 都在这一层里比大小。
 
-    这条只能靠源码顺序断言：层级错了编译不报错、接口全 200、桌面端还看不出来
+    这条只能靠源码断言：层级错了编译不报错、接口全 200、桌面端还看不出来
     （底栏 ≤900 才出现），只有手机上开着抽屉的那一下才露出来。
     """
-    home = _strip_comments(_read(HOME_TSX))
-    assert "<ConsoleTabBar" in home, "首页没有挂底部 tab"
-    i_tab = home.index("<ConsoleTabBar")
-    i_main_end = home.index("</main>")
-    assert i_tab < i_main_end, (
-        "底部 tab 又挂到 <main> 外面了：main 是层叠上下文（z-index:1），"
-        "外面的 z-index 40 会压住左抽屉（70）、资料库面板（70）与遮罩（60），"
-        "抽屉最下面 73px 会被切掉 —— 而且桌面端看不出来，只有手机上开着抽屉才露"
+    base = _read(BASE_CSS)
+    zs = _all_decls(_css_rule(base, "main.workbench-main"), "z-index")
+    assert zs, "main.workbench-main 没有显式写 z-index（写清楚才看得出这一条是被想过的）"
+    assert zs[0] == "auto", (
+        f"main.workbench-main 的 z-index 是 {zs[0]}：它一旦建了层叠上下文，"
+        "挂在 main 外面的底栏(40)就会压过遮罩(60)与抽屉(70) —— 抽屉最下面 73px 会被切"
     )
+
+    console = _read(CONSOLE_CSS)
+    iso = _css_rule(console, ".console-scroll--chat")
+    assert "isolation: isolate" in iso, (
+        "对话路由的滚动容器没有 isolation:isolate：底栏/遮罩/抽屉会散在根上下文里，"
+        "谁来压谁全看出现顺序"
+    )
+    layout = _strip_comments(_read(LAYOUT_TSX))
+    assert "console-scroll--chat" in layout, "外壳没把 --chat 变体加到滚动容器上"
 
 
 def test_tabbar_z_index_sits_below_the_drawers():
