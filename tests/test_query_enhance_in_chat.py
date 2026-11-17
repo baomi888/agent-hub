@@ -27,6 +27,7 @@ import pytest  # noqa: E402
 
 import api.chat as chat  # noqa: E402
 import core.config  # noqa: E402
+from kb import retrieval as kbret  # noqa: E402
 from service import enhance as enhance_svc  # noqa: E402
 
 VOCAB_TEXT = (
@@ -61,7 +62,7 @@ def chat_off(monkeypatch):
 
 def _no_rewrite(monkeypatch):
     """把指代改写打桩成"原样返回"，隔离出换词这一段。"""
-    monkeypatch.setattr(chat, "rewrite_query", lambda q, h: q)
+    monkeypatch.setattr(kbret, "rewrite_query", lambda q, h: q)
 
 
 # ==================== 1. 底线：展示不改 ====================
@@ -70,13 +71,13 @@ def test_returns_retrieval_text_only_and_keeps_original(monkeypatch, vocab, chat
     """★ 检索词被增强了（原话 + 术语），但传进去的原话必须原封不动。"""
     _no_rewrite(monkeypatch)
     original = "高数怎么复习"
-    query, changes, rewritten = chat._retrieval_query(original, [])
+    plan = kbret.build_query(original, [])
 
-    assert query == "高数怎么复习 高等数学", "术语没追加上，等于白接"
-    assert query.startswith(original), "原话被改写了——展示层会跟着变，这是红线"
+    assert plan.text == "高数怎么复习 高等数学", "术语没追加上，等于白接"
+    assert plan.text.startswith(original), "原话被改写了——展示层会跟着变，这是红线"
     assert original == "高数怎么复习"
-    assert changes == [{"raw": "高数", "canonical": "高等数学"}]
-    assert rewritten is False
+    assert plan.changes == [{"raw": "高数", "canonical": "高等数学"}]
+    assert plan.rewritten is False
 
 
 def test_changes_carry_no_offsets(monkeypatch, vocab, chat_on):
@@ -86,7 +87,8 @@ def test_changes_carry_no_offsets(monkeypatch, vocab, chat_on):
     带了偏移前端一定会拿去高亮，然后错位。要高亮走 /api/query/enhance。
     """
     _no_rewrite(monkeypatch)
-    _, changes, _ = chat._retrieval_query("高数和线代", [])
+    plan = kbret.build_query("高数和线代", [])
+    changes = plan.changes
     assert changes, "这一步本来就该有命中"
     for c in changes:
         assert set(c) == {"raw", "canonical"}, f"多带了字段：{c}"
@@ -97,10 +99,10 @@ def test_changes_carry_no_offsets(monkeypatch, vocab, chat_on):
 def test_switch_off_restores_old_behaviour(monkeypatch, vocab, chat_off):
     """ENHANCE_CHAT_ENABLED=0 → 只改写不换词，且不发提示。"""
     _no_rewrite(monkeypatch)
-    query, changes, rewritten = chat._retrieval_query("高数怎么复习", [])
-    assert query == "高数怎么复习"
-    assert changes == []
-    assert rewritten is False
+    plan = kbret.build_query("高数怎么复习", [])
+    assert plan.text == "高数怎么复习"
+    assert plan.changes == []
+    assert plan.rewritten is False
 
 
 # ==================== 3. 顺序：先改写，再换词 ====================
@@ -111,21 +113,21 @@ def test_rewrite_runs_before_enhance(monkeypatch, vocab, chat_on):
     这里打桩把「那它呢」补全成「高数那章怎么复习」——如果 enhance 在 rewrite
     之前跑，它看到的还是「那它呢」，一个词都换不出来。
     """
-    monkeypatch.setattr(chat, "rewrite_query", lambda q, h: "高数那章怎么复习")
-    query, changes, rewritten = chat._retrieval_query("那它呢", [{"role": "user", "content": "高数"}])
+    monkeypatch.setattr(kbret, "rewrite_query", lambda q, h: "高数那章怎么复习")
+    plan = kbret.build_query("那它呢", [{"role": "user", "content": "高数"}])
 
-    assert rewritten is True
-    assert query == "高数那章怎么复习 高等数学", "rewrite 补出来的口语词没被增强 —— 顺序反了"
-    assert changes == [{"raw": "高数", "canonical": "高等数学"}]
+    assert plan.rewritten is True
+    assert plan.text == "高数那章怎么复习 高等数学", "rewrite 补出来的口语词没被增强 —— 顺序反了"
+    assert plan.changes == [{"raw": "高数", "canonical": "高等数学"}]
 
 
 def test_rewrite_alone_still_reports(monkeypatch, vocab, chat_on):
     """只有改写、没有可换的词时，也要如实报 rewritten（前端要发提示）。"""
-    monkeypatch.setattr(chat, "rewrite_query", lambda q, h: "RRF 融合算法有什么缺点")
-    query, changes, rewritten = chat._retrieval_query("那它呢", [])
-    assert rewritten is True
-    assert changes == []
-    assert query == "RRF 融合算法有什么缺点"
+    monkeypatch.setattr(kbret, "rewrite_query", lambda q, h: "RRF 融合算法有什么缺点")
+    plan = kbret.build_query("那它呢", [])
+    assert plan.rewritten is True
+    assert plan.changes == []
+    assert plan.text == "RRF 融合算法有什么缺点"
 
 
 # ==================== 4. 降级：词表坏了不许把聊天搞挂 ====================
@@ -142,16 +144,16 @@ def test_broken_vocab_does_not_break_retrieval(monkeypatch, tmp_path, chat_on):
     enhance_svc.reset_cache()
     _no_rewrite(monkeypatch)
 
-    query, changes, rewritten = chat._retrieval_query("高数怎么复习", [])
-    assert query == "高数怎么复习", "词表坏了还硬换，说明异常没兜住"
-    assert changes == []
-    assert rewritten is False
+    plan = kbret.build_query("高数怎么复习", [])
+    assert plan.text == "高数怎么复习", "词表坏了还硬换，说明异常没兜住"
+    assert plan.changes == []
+    assert plan.rewritten is False
 
 
 def test_any_exception_in_enhance_falls_back(monkeypatch):
     """连非预期异常（不是 ValueError）也要兜住 —— 兜底写在最外层。"""
     monkeypatch.setattr(core.config, "ENHANCE_CHAT_ENABLED", True)
-    monkeypatch.setattr(chat, "rewrite_query", lambda q, h: q)
+    monkeypatch.setattr(kbret, "rewrite_query", lambda q, h: q)
 
     def boom():
         raise RuntimeError("磁盘满了 / 编码炸了 / 谁知道")
@@ -187,19 +189,25 @@ def test_note_truncates_many_changes():
     assert "词4" not in note, "只该报前两个"
 
 
-# ==================== 6. 两处调用点都接上了 ====================
+# ==================== 6. 三条路径都接到服务层 ====================
 
-def test_both_call_sites_are_wired():
-    """★ 图片理解模式与 RAG 模式各有一处检索。
+def test_all_call_sites_go_through_service():
+    """★ 图片理解 / 智能体预检索 / RAG 各有一条检索路径，必须走同一个入口。
 
     只改一处会造成"同一句话在两种模式下命中的片段不一样"——这类 bug 不会报错，
     只会让人觉得"有时候检索不准"，几乎不可能靠人工发现。
+
+    2026-11-17 起断言改成"api/chat.py 里不许再出现直接检索/改写的调用"：
+    比数 `_retrieval_query` 的出现次数更强，以后新加一条路径也挡得住。
     """
     import inspect
 
-    src = inspect.getsource(chat)
-    n = sum(1 for line in src.splitlines()
-            if "_retrieval_query" in line and not line.strip().startswith("def "))
-    assert n >= 2, f"只接了 {n} 处调用，图片模式/RAG 模式漏了一处"
-    assert "rewrite_query, req.question, history" not in src, \
-        "还有地方在直接调 rewrite_query，绕过了换词"
+    chat_src = inspect.getsource(chat)
+    n = chat_src.count("retrieval.retrieve")
+    assert n == 3, f"只接了 {n} 处，三条路径（图片 / 智能体 / RAG）漏了"
+    for direct in ("retrieve_with_score", "get_or_create", "rewrite_query"):
+        assert direct not in chat_src, f"api/chat.py 里还有 {direct} 的直接调用"
+
+    svc_src = inspect.getsource(kbret)
+    assert "retrieve_with_score" in svc_src
+    assert "_format_refs(" not in svc_src, "服务层应调公开的 format_refs，别用私有方法"

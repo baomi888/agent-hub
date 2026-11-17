@@ -4,7 +4,7 @@
   1. 客户端断开时 `_stream_llm` 立刻 aclose 上游 —— 跳出 `async for` **不会**自动
      关闭异步生成器，靠 GC 收尾会留下"幽灵请求"继续烧 token；
   2. 正常结束 / 上游异常两条出口也都会 aclose（三条出口一个不落）；
-  3. 断连中断时 `_Acc.aborted=True`，且**不把半截回答当完整答案 add_message 落库**
+  3. 断连中断时 `StreamOutcome.aborted=True`，且**不把半截回答当完整答案 add_message 落库**
      （否则用户刷新后看到一条没有任何中断痕迹的残缺回答）；
   4. `_Upstreams` 收尾幂等，且单个生成器关闭失败不影响其它生成器与名额归还；
   5. `_finish_turn` 既关上游也还名额 —— 挂在 StreamingResponse 的 background 上，
@@ -90,7 +90,7 @@ async def _drain(agen) -> list[str]:
 
 def test_disconnect_marks_aborted_and_closes_upstream():
     closed: list[bool] = []
-    acc = chat_mod._Acc()
+    acc = chat_mod.StreamOutcome()
     llm = _FakeLLM(["你", "好"], closed)
 
     async def main_() -> list[str]:
@@ -105,7 +105,7 @@ def test_disconnect_marks_aborted_and_closes_upstream():
 
 def test_normal_finish_closes_upstream():
     closed: list[bool] = []
-    acc = chat_mod._Acc()
+    acc = chat_mod.StreamOutcome()
     llm = _FakeLLM(["你", "好"], closed)
 
     async def main_() -> list[str]:
@@ -120,7 +120,7 @@ def test_normal_finish_closes_upstream():
 
 def test_upstream_error_closes_upstream_and_reports():
     closed: list[bool] = []
-    acc = chat_mod._Acc()
+    acc = chat_mod.StreamOutcome()
     llm = _FakeLLM(["半句"], closed, boom=True)
 
     async def main_() -> list[str]:

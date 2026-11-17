@@ -41,7 +41,6 @@ SSE 事件协议：
 import asyncio
 import base64
 import contextlib
-import json
 import mimetypes
 import os
 import time
@@ -54,6 +53,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
+from api import sse_protocol as sse
 from core import (
     approval_store,
     config,
@@ -62,6 +62,7 @@ from core import (
     metrics,
     prompt_security,
     quota,
+    route_stats,
     tag_taxonomy,
     tool_guard,
     tool_registry,
@@ -74,16 +75,14 @@ from core import session as store
 from core.auth import get_current_user
 from core.llm import get_llm, get_vision_llm
 from core.urltools import extract_urls
-from kb import pipelines
+from kb import pipelines, retrieval
 from kb.rag_core import (
     CAPABILITY_NOTE,
     SYSTEM_PROMPT,
-    assess_grounding,
     describe_api_error,
     grounding_note,
-    rewrite_query,
 )
-from service import enhance as enhance_svc
+from kb.retrieval import references_text as _references_text
 
 # RAG 系统提示词也登记进泄露指纹库：RAG 路径不经过 agent.builder，没人替它登记；
 # 这里 import 时登记一次即可（静态常量，不会变）。纯 LLM / 视觉的 system prompt
@@ -379,11 +378,7 @@ class ChatRequest(BaseModel):
     )
 
 
-# ==================== SSE 帧 ====================
-
-
-def _sse(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+# ==================== 路由计划 ====================
 
 
 # 兼容白名单：旧 mode 字段的取值。新前端只发 use_kb/use_web，这里是给
@@ -541,38 +536,6 @@ def _pick_hybrid_answer(shared: dict, last_key: str | None = None) -> str:
         if isinstance(val, str) and val.strip():
             return val
     return ""
-
-
-def _retrieval_query(question: str, history) -> tuple[str, list[dict], bool]:
-    """把用户原话变成「检索用文本」：先补全指代，再追加规范术语。
-
-    为什么合成一个函数
-    ------------------
-    图片理解模式（554 行）和 RAG 模式（831 行）都要这一步。分开写就是两份口径，
-    改一处忘一处，最后"同一句话在图片模式下检索命中的片段不一样"。
-
-    为什么顺序不能反
-    ----------------
-    rewrite_query 是用 LLM 补全指代（"那它呢" → "RRF 融合算法有什么缺点"），
-    补出来的文本里可能又冒出新的口语词，所以 enhance 必须排在它后面。
-    反过来先换词再交给 LLM 改写，LLM 改写完还可能把术语说回口语。
-
-    ★ 返回的是**检索用文本**，绝不回写 req.question。
-      界面展示与聊天记录永远是用户原话——这是三个原则里最不能破的一条。
-    ★ 增强是**追加**（原话 + 术语）而不是替换。替换在真实短句上每 3 条就有 1 条
-      造出病句（`查重率`→`重复率检测率`），追加式原文一字不动，不存在这个问题。
-
-    返回 (检索词, 命中列表, 是否发生过指代改写)。
-    命中列表只用于发一条"已补充哪几个术语"的提示，**不含 start/end**：
-    这里的文本可能已被 LLM 改写，偏移在原话上没有意义（要高亮走 /api/query/enhance）。
-    """
-    query = rewrite_query(question, history)
-    rewritten = query != question
-    if not config.ENHANCE_CHAT_ENABLED:
-        # 关掉开关时退回旧行为：只有改写，一个词都不换
-        return query, [], rewritten
-    text, changes = enhance_svc.enhance_for_retrieval(query)
-    return text, changes, rewritten
 
 
 def _enhance_note(changes: list[dict], rewritten: bool, query: str) -> str:
@@ -771,22 +734,43 @@ def _build_vision_user_message(question: str, attachments: list[dict]) -> HumanM
 # ==================== 流式输出 ====================
 
 
-class _Acc:
-    """流式累计器：异步生成器没法 return 值，用对象把结果带出去。"""
+@dataclass
+class StreamOutcome:
+    """一次流式调用的结果包。
 
-    def __init__(self) -> None:
-        self.text = ""
-        self.error: str | None = None
-        # 因客户端断开而中断（不是错误，但绝不能把半截回答当完整答案落库）
-        self.aborted = False
-        # 上游给的结束原因（最后一帧才是终值）。None = 上游没给，或没收到。
-        self.finish_reason: str | None = None
-        # 被长度上限截断：文本合法、结构完整、但**内容不完整**
-        self.truncated = False
-        # 输出侧提示词泄露过滤器命中：本次回答已被替换为固定拒答，
-        # 不能再判截断/把未过滤的原文写进 done.answer。
-        self.leak_blocked = False
-        self.leak_reason: str | None = None
+    为什么需要它：``_stream_llm`` 是异步生成器，帧由调用方消费，但「完整文本 /
+    结束原因 / 是否断连 / 是否截断」没法通过 return 传出来
+    （``async for`` 会丢弃 ``StopAsyncIteration.value``）。
+    所以用一个可变对象当输出参数（C 风格的 out 参数）。
+
+    ⚠️ 生命周期是「**一次流式调用**」，不是「一轮问答」：hybrid 兜底会再调一次
+    ``_stream_llm``，那时必须新建一个，否则 ``truncated`` / ``error`` 会从前一次
+    串过来——表现为「兜底成功了，前端却还挂着内容不完整」。
+    """
+
+    text: str = ""
+    # 上游报错（已归一化成可展示文案）
+    error: str | None = None
+    # 因客户端断开而中断（不是错误，但绝不能把半截回答当完整答案落库）
+    aborted: bool = False
+    # 上游给的结束原因（最后一帧才是终值）。None = 上游没给，或没收到。
+    finish_reason: str | None = None
+    # 被长度上限截断：文本合法、结构完整、但**内容不完整**
+    truncated: bool = False
+    # 输出侧提示词泄露过滤器命中：本次回答已被替换为固定拒答，
+    # 不能再判截断/把未过滤的原文写进 done.answer。
+    leak_blocked: bool = False
+    leak_reason: str | None = None
+
+    @property
+    def interrupted(self) -> bool:
+        """上游中断（断连或报错）——此时不能把半截回答落库。
+
+        刻意**不**把 ``truncated`` / ``leak_blocked`` 并进来：
+        - 截断的回答是合法内容，只是不完整，必须落库并带 truncated 标记；
+        - 命中泄露过滤的回答已被换成固定拒答，同样是合法内容，也要落库。
+        """
+        return self.aborted or self.error is not None
 
 
 # 各供应商对"被长度上限截断"的叫法。OpenAI 兼容接口用 length，
@@ -818,13 +802,7 @@ def _finish_reason_of(chunk) -> str | None:
 
 def _truncation_frame(reason: str | None) -> str:
     """截断提示帧。带一句可操作的话——只说"被截断"用户不知道该怎么办。"""
-    return _sse(
-        "truncation",
-        {
-            "reason": reason or "length",
-            "hint": "回答达到长度上限被截断，内容可能不完整。可以回复「继续」让它接着写。",
-        },
-    )
+    return sse.truncation(reason)
 
 
 def _is_truncation(reason: str | None, path: str) -> bool:
@@ -837,12 +815,12 @@ def _is_truncation(reason: str | None, path: str) -> bool:
     return True
 
 
-def _mark_truncated(acc: _Acc, reason: str | None, path: str) -> bool:
+def _mark_truncated(outcome: StreamOutcome, reason: str | None, path: str) -> bool:
     """记一次截断（标记 + 指标）。返回是否真的截断了。"""
     if not _is_truncation(reason, path):
         return False
-    acc.truncated = True
-    acc.finish_reason = reason
+    outcome.truncated = True
+    outcome.finish_reason = reason
     return True
 
 
@@ -924,11 +902,9 @@ def _security_refusal_response(ticket, rule: str) -> StreamingResponse:
     StreamingResponse 的 background 归还——与正常收尾同一条路径，不会漏还。
     """
     async def _gen():
-        yield _sse("status", {"text": "请求被安全策略拦截"})
-        yield _sse("token", {"text": prompt_security.REFUSAL_TEXT})
-        yield _sse(
-            "done",
-            {
+        yield sse.status("请求被安全策略拦截")
+        yield sse.token(prompt_security.REFUSAL_TEXT)
+        yield sse.done({
                 "answer": prompt_security.REFUSAL_TEXT,
                 "refs": "",
                 "title": "",
@@ -937,8 +913,7 @@ def _security_refusal_response(ticket, rule: str) -> StreamingResponse:
                 "run_id": "",
                 "truncated": False,
                 "plan_topic": None,
-            },
-        )
+            })
 
     return StreamingResponse(
         _gen(),
@@ -949,7 +924,7 @@ def _security_refusal_response(ticket, rule: str) -> StreamingResponse:
 
 
 async def _stream_llm(
-    llm, messages, request: Request, acc: _Acc, upstreams=None, path: str = "llm"
+    llm, messages, request: Request, outcome: StreamOutcome, upstreams=None, path: str = "llm"
 ) -> None:
     """逐 token 产出增量 SSE。
 
@@ -972,14 +947,14 @@ async def _stream_llm(
             async for chunk in stream:
                 seen += 1
                 if (seen == 1 or seen % 16 == 0) and await request.is_disconnected():
-                    acc.aborted = True
+                    outcome.aborted = True
                     metrics.inc("chat_client_disconnect")
                     return
                 # 结束原因**每帧都读**：它通常挂在最后一帧，而那一帧的 content 常常是空的
                 # （下面会因为 `not delta` 被 continue 掉）。只在有 delta 时读 = 永远读不到。
                 reason = _finish_reason_of(chunk)
                 if reason:
-                    acc.finish_reason = reason
+                    outcome.finish_reason = reason
                 delta = chunk.content or ""
                 if isinstance(delta, list):
                     # 多模态 content list，只取文本
@@ -991,33 +966,33 @@ async def _stream_llm(
                 if not isinstance(delta, str) or not delta:
                     continue
                 for part in (guard.feed(delta) if guard is not None else [delta]):
-                    acc.text += part
-                    yield _sse("token", {"text": part})
+                    outcome.text += part
+                    yield sse.token(part)
                 if guard is not None and guard.blocked:
-                    acc.leak_blocked = True
-                    acc.leak_reason = guard.reason
+                    outcome.leak_blocked = True
+                    outcome.leak_reason = guard.reason
                     metrics.inc(
                         "prompt_leak_blocked",
                         {"stage": "output", "path": path, "rule": guard.reason or "?"},
                     )
-                    acc.text, tail = _leak_blocked_reply(acc.text)
-                    yield _sse("token", {"text": tail})
+                    outcome.text, tail = _leak_blocked_reply(outcome.text)
+                    yield sse.token(tail)
                     return
         if guard is not None:
             # 流正常结束：把未下发的安全尾巴吐出去（过滤器只压着 48 字）
             # 尾巴已由 LeakFilter.flush 自己做过判定（含短指纹），这里不再二次检查。
             for part in guard.flush():
-                acc.text += part
-                yield _sse("token", {"text": part})
+                outcome.text += part
+                yield sse.token(part)
         # 正常结束才判截断：走到这里说明上游把流跑完了（不是断连、不是异常）。
         # 截断帧放在 token 之后、done 之前——前端读到时正文已经渲染完，
         # 提示条出现在最后，符合"先给内容再给限制"的顺序。
-        if _mark_truncated(acc, acc.finish_reason, path):
-            yield _truncation_frame(acc.finish_reason)
+        if _mark_truncated(outcome, outcome.finish_reason, path):
+            yield _truncation_frame(outcome.finish_reason)
     except Exception as e:
-        acc.error = describe_api_error(e)
+        outcome.error = describe_api_error(e)
         metrics.inc("llm_error", {"class": type(e).__name__})
-        yield _sse("error", {"detail": acc.error})
+        yield sse.error(outcome.error)
 
 
 # ==================== 主路由 ====================
@@ -1235,6 +1210,11 @@ async def _chat_stream_impl(
         refs_md = ""
         hybrid_run_id: str | None = None  # 仅 hybrid 模式有值，随 done 回传给前端
         metrics.inc("chat_total", {"path": mode})
+        # 路由分布落库（2026-11-17）。metrics 是**进程内**的，4 worker 下就是 4 份，
+        # 拿它算"workflow 占比"取决于这次请求落到哪个进程，必然抖；而且它没有时间维。
+        # 这里每轮一次 UPSERT，与 quota.bump_usage 同量级，SQLite 同步驱动所以要 to_thread。
+        # mode 是**执行分支**、plan.route 是**路由判定**，两者不是一回事，详见 core/route_stats.py。
+        await asyncio.to_thread(route_stats.record, mode, plan.route, plan.source)
         # ①/⑤ 本轮末尾注释（画像 + 任务），开关都关时这里直接空串、不发任何查询。
         # 只在请求开头取一次：同一轮内各分支（含 hybrid 兜底）用的是同一份，
         # 避免同一条回答里画像前后不一致。
@@ -1263,7 +1243,7 @@ async def _chat_stream_impl(
 
         # ---- 0. 图片理解模式：有图片附件时用视觉模型直接回答 ----
         if _has_image(req.attachments):
-            yield _sse("status", {"text": "图片理解模式，正在分析图片..."})
+            yield sse.status("图片理解模式，正在分析图片...")
             history = (
                 await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False)
             )[:-1]
@@ -1273,27 +1253,26 @@ async def _chat_stream_impl(
             vision_system += scenarios_mod.get_scenario_prompt(req.scenario)
             if kb_id and kb_exists:
                 try:
-                    # 同步检索会堵事件循环（embed_query 实测约 250ms），必须丢线程
-                    pipe = await asyncio.to_thread(pipelines.get_or_create, uid, kb_id)
-                    query, _, _ = await asyncio.to_thread(_retrieval_query, req.question, history)
-                    docs_scores = await asyncio.to_thread(
-                        pipe.retrieve_with_score, query, req.top_k, uid
+                    # 改词 / 增强 / 检索 / 整形全在 kb.retrieval，这里只消费结果
+                    r = await retrieval.retrieve_for_turn(
+                        uid=uid,
+                        kb_id=kb_id,
+                        question=req.question,
+                        history=history,
+                        top_k=req.top_k,
                     )
-                    if docs_scores:
-                        refs_md = pipe._format_refs(docs_scores)
-                        sources = pipe.build_sources(docs_scores)
-                        yield _sse("sources", {"items": sources})
+                    if not r.is_empty:
+                        refs_md = r.refs_md
+                        yield sse.sources(r.sources)
                         # 图片理解也走同一套依据判定，提示条口径保持一致
-                        g = assess_grounding(docs_scores)
-                        yield _sse("grounding", g)
+                        yield sse.grounding(r.grounding)
                         # L0：与 RAG / Agent 预检索共用同一份分来源标签
-                        references = _references_text(docs_scores, uid, kb_id)
                         vision_question = (
-                            f"【参考资料】\n{references}\n\n【用户问题】\n{req.question}"
+                            f"【参考资料】\n{r.references}\n\n【用户问题】\n{req.question}"
                         )
-                        vision_system += grounding_note(g)
+                        vision_system += grounding_note(r.grounding)
                 except Exception:
-                    yield _sse("status", {"text": "知识库检索失败，已仅按图片作答"})
+                    yield sse.status("知识库检索失败，已仅按图片作答")
 
             # 保密条款最后追加：检索 grounded 提示/场景预设都可能变，只有它是固定尾段。
             # L0 的资料边界规则放在它前面（保密条款必须保持在 system 最末）。
@@ -1307,22 +1286,22 @@ async def _chat_stream_impl(
                     messages.append(AIMessage(content=m["content"]))
             messages.append(_build_vision_user_message(vision_question, req.attachments))
 
-            acc = _Acc()
+            outcome = StreamOutcome()
             try:
                 async for frame in _stream_llm(
-                    get_vision_llm(max_tokens=2048), messages, request, acc, upstreams,
+                    get_vision_llm(max_tokens=2048), messages, request, outcome, upstreams,
                     path="vision",
                 ):
                     yield frame
             except Exception as e:
-                yield _sse("error", {"detail": describe_api_error(e)})
+                yield sse.error(describe_api_error(e))
                 return
             # 上游出错，或客户端已断开（aborted）：两种情况都**不能**往下走收尾，
             # 否则会把半截回答当成完整答案 add_message 落库 —— 用户刷新后看到的
             # 是一条没有任何中断痕迹的残缺回答。
-            if acc.aborted or acc.error:
+            if outcome.interrupted:
                 return
-            acc_text = acc.text
+            acc_text = outcome.text
 
             # 收尾：标题并行任务多半已完成，这里 await 基本零等待
             msg_id = await asyncio.to_thread(
@@ -1332,7 +1311,7 @@ async def _chat_stream_impl(
                 "assistant",
                 acc_text,
                 refs=refs_md,
-                truncated=acc.truncated,
+                truncated=outcome.truncated,
             )
 
             # B 块：对话级用户画像标签（fire-and-forget，不阻塞 SSE；失败静默）
@@ -1345,11 +1324,9 @@ async def _chat_stream_impl(
             gen_title = await _take_title(title_task, acc_text)
             if gen_title:
                 await asyncio.to_thread(store.rename_conversation, uid, req.sid, gen_title)
-                yield _sse("title", {"title": gen_title})
+                yield sse.title(gen_title)
             # message_id 回给前端：赞踩要按消息 id 落库，前端自己生成的 uid 后端不认
-            yield _sse(
-                "done",
-                {
+            yield sse.done({
                     "answer": acc_text,
                     "refs": refs_md,
                     "title": gen_title,
@@ -1357,13 +1334,12 @@ async def _chat_stream_impl(
                     "message_id": msg_id,
                     # 用户那条消息自己的 id（见 979 行处的说明）
                     "user_message_id": user_msg_id,
-                },
-            )
+                })
             return
 
         # ---- 1. 混合模式（工作流 × 自主 Agent 动态切换）----
         if mode == "hybrid":
-            yield _sse("status", {"text": "混合模式，正在规划执行路径..."})
+            yield sse.status("混合模式，正在规划执行路径...")
             try:
                 from hybrid import store as hstore
                 from hybrid.context import TaskContext
@@ -1382,7 +1358,7 @@ async def _chat_stream_impl(
                 if req.workflow_id:
                     row = await asyncio.to_thread(hstore.get_workflow, uid, req.workflow_id)
                     if not row:
-                        yield _sse("error", {"detail": f"工作流不存在或无权限：{req.workflow_id}"})
+                        yield sse.error(f"工作流不存在或无权限：{req.workflow_id}")
                         return
                     wf_def = validate_definition(row["definition"])
                     wf_id = req.workflow_id
@@ -1395,6 +1371,13 @@ async def _chat_stream_impl(
                         wf_def = validate_definition(row["definition"])
                         wf_id = hstore.DEFAULT_WORKFLOW_ID
                     start_mode = "workflow" if wf_def else "agent"
+                    if start_mode != "workflow":
+                        # 判了 workflow 却没有工作流定义（默认流程被删/建库时没初始化）：
+                        # 这是"路由意图落空"，单记一行，别混进分子分母——否则会被读成
+                        # "路由器倾向 agent"，而真实原因是部署缺数据。
+                        await asyncio.to_thread(
+                            route_stats.record, mode, route_stats.ROUTE_WF_NO_DEF, plan.source
+                        )
                 else:
                     start_mode = "agent"
 
@@ -1444,7 +1427,7 @@ async def _chat_stream_impl(
 
                 # run_id 先给前端：人工切换 / 执行日志查询都按它寻址
                 hybrid_run_id = ctx.run_id
-                yield _sse("hybrid_start", {"run_id": ctx.run_id, "mode": start_mode})
+                yield sse.hybrid_start({"run_id": ctx.run_id, "mode": start_mode})
 
                 full_text = ""
                 # 输出侧泄露过滤：hybrid 的 token 不走 _stream_llm，必须在这里单独接。
@@ -1464,14 +1447,14 @@ async def _chat_stream_impl(
                         if delta:
                             for part in (guard.feed(delta) if guard is not None else [delta]):
                                 full_text += part
-                                yield _sse("token", {"text": part})
+                                yield sse.token(part)
                             if guard is not None and guard.blocked:
                                 metrics.inc(
                                     "prompt_leak_blocked",
                                     {"stage": "output", "path": "hybrid", "rule": guard.reason or "?"},
                                 )
                                 full_text, tail = _leak_blocked_reply(full_text)
-                                yield _sse("token", {"text": tail})
+                                yield sse.token(tail)
                                 break
                     elif et == "tool_call":
                         p = ev.payload
@@ -1480,7 +1463,7 @@ async def _chat_stream_impl(
                             frame["input"] = str(p["input"])[:200]
                         if "output" in p:
                             frame["output"] = str(p["output"])[:300]
-                        yield _sse("tool", frame)
+                        yield sse.tool(frame)
                     elif et in ("node_enter", "node_exit"):
                         # 工作流节点进出：前端执行轨迹侧栏的时间轴事件
                         if et == "node_exit" and ev.payload.get("status") == "ok":
@@ -1489,38 +1472,28 @@ async def _chat_stream_impl(
                         # 前端的时间轴只关心 节点/状态，多塞字段等于把内部结构漏出去
                         payload = dict(ev.payload)
                         payload.pop("output_key", None)
-                        yield _sse(
-                            "workflow_node",
-                            {
+                        yield sse.workflow_node({
                                 "phase": "enter" if et == "node_enter" else "exit",
                                 "node_id": ev.node_id,
                                 **payload,
-                            },
-                        )
+                            })
                     elif et == "switch":
-                        yield _sse("mode_switch", ev.decision or {})
+                        yield sse.mode_switch(ev.decision or {})
                     elif et == "human_intervention":
-                        yield _sse(
-                            "status",
-                            {
-                                "text": (
-                                    f"人工节点 {ev.node_id}："
-                                    f"{ev.payload.get('prompt', '') or '已自动通过'}"
-                                )
-                            },
-                        )
+                        yield sse.status(f"人工节点 {ev.node_id}："
+                                    f"{ev.payload.get('prompt', '') or '已自动通过'}")
                     elif et == "status":
-                        yield _sse("status", {"text": ev.payload.get("text", "")})
+                        yield sse.status(ev.payload.get("text", ""))
                     elif et == "error":
                         # 引擎级错误事件留痕但不打断：终态由 ctx.status 统一落锤
-                        yield _sse("status", {"text": f"执行异常：{ev.payload.get('error', '')}"})
+                        yield sse.status(f"执行异常：{ev.payload.get('error', '')}")
 
                 if guard is not None and not guard.blocked:
                     # 流正常结束：吐出被过滤器压住的最后 48 字（同 _stream_llm 口径）
                     # flush 内部已含短指纹判定，这里不再二次检查。
                     for part in guard.flush():
                         full_text += part
-                        yield _sse("token", {"text": part})
+                        yield sse.token(part)
 
                 # 取答案：流式累积优先；没有流式输出（纯工作流 + 全非流式节点）时
                 # 按 _pick_hybrid_answer 的优先级回 shared 里找，**不取 plan**。
@@ -1535,8 +1508,8 @@ async def _chat_stream_impl(
                 # 做出来的活扔掉。
                 used_fallback = False
                 if not acc_text.strip() and config.HYBRID_LLM_FALLBACK:
-                    yield _sse("status", {"text": "流程未产出结果，改用直接作答..."})
-                    acc = _Acc()
+                    yield sse.status("流程未产出结果，改用直接作答...")
+                    outcome = StreamOutcome()
                     try:
                         fb_messages = await _plain_llm_messages(
                             uid, req.sid, prompt_question, req.scenario, ctx_note
@@ -1545,37 +1518,37 @@ async def _chat_stream_impl(
                             get_llm(max_tokens=2048),
                             fb_messages,
                             request,
-                            acc,
+                            outcome,
                             upstreams,
                             path="hybrid_fallback",
                         ):
                             yield frame
                     except Exception as e:  # noqa: BLE001
-                        yield _sse("error", {"detail": describe_api_error(e)})
+                        yield sse.error(describe_api_error(e))
                         return
-                    if acc.aborted or acc.error:
+                    if outcome.interrupted:
                         return
-                    acc_text = acc.text
+                    acc_text = outcome.text
                     # 兜底同样是 LLM 生成，也会撞长度上限；不带上这个标记，
                     # 前端就不会挂"内容可能不完整"，等于把截断藏起来。
-                    truncated = acc.truncated
+                    truncated = outcome.truncated
                     used_fallback = True
 
                 if ctx.status in ("failed", "timeout") and not used_fallback and not (
                     guard is not None and guard.blocked
                 ):
-                    yield _sse("error", {"detail": ctx.error or "混合执行失败"})
+                    yield sse.error(ctx.error or "混合执行失败")
                     return
             except ValueError as e:
-                yield _sse("error", {"detail": str(e)})
+                yield sse.error(str(e))
                 return
             except Exception as e:
-                yield _sse("error", {"detail": f"混合执行失败：{describe_api_error(e)}"})
+                yield sse.error(f"混合执行失败：{describe_api_error(e)}")
                 return
 
         # ---- 2. Agent 模式（统一智能体：工具由开关决定、调用由模型自主）----
         elif mode == "agent":
-            yield _sse("status", {"text": "Agent 模式，正在规划任务..."})
+            yield sse.status("Agent 模式，正在规划任务...")
             try:
                 from agent.builder import build_agent, location_note
 
@@ -1607,23 +1580,22 @@ async def _chat_stream_impl(
                 refs_block = ""
                 if plan.use_kb and kb_exists and kb_id:
                     try:
-                        pipe = await asyncio.to_thread(pipelines.get_or_create, uid, kb_id)
-                        rq, _changes, _rewritten = await asyncio.to_thread(
-                            _retrieval_query, req.question, history
-                        )
-                        docs_scores = await asyncio.to_thread(
-                            pipe.retrieve_with_score, rq, req.top_k, uid
+                        r = await retrieval.retrieve_for_turn(
+                            uid=uid,
+                            kb_id=kb_id,
+                            question=req.question,
+                            history=history,
+                            top_k=req.top_k,
                         )
                     except Exception as e:  # noqa: BLE001 —— 检索是增强项，失败不该让提问失败
-                        docs_scores = []
-                        yield _sse("status", {"text": f"知识库检索不可用：{describe_api_error(e)}"})
-                    if docs_scores:
-                        refs_md = pipe._format_refs(docs_scores)
-                        yield _sse("sources", {"items": pipe.build_sources(docs_scores)})
+                        r = retrieval.RetrievalResult()
+                        yield sse.status(f"知识库检索不可用：{describe_api_error(e)}")
+                    if not r.is_empty:
+                        refs_md = r.refs_md
+                        yield sse.sources(r.sources)
                         # grounding 帧必须赶在正文前：前端要在回答上方挂"依据较弱"提示条
-                        grounding = assess_grounding(docs_scores)
-                        yield _sse("grounding", grounding)
-                        refs_block = _references_text(docs_scores, uid, kb_id)
+                        yield sse.grounding(r.grounding)
+                        refs_block = r.references
 
                 messages = []
                 for m in ctxcompress.assemble_history(uid, req.sid, history, question=req.question):
@@ -1730,7 +1702,7 @@ async def _chat_stream_impl(
                                         guard.feed(delta) if guard is not None else [delta]
                                     ):
                                         full_text += part
-                                        yield _sse("token", {"text": part})
+                                        yield sse.token(part)
                                     if guard is not None and guard.blocked:
                                         metrics.inc(
                                             "prompt_leak_blocked",
@@ -1741,7 +1713,7 @@ async def _chat_stream_impl(
                                             },
                                         )
                                         full_text, tail = _leak_blocked_reply(full_text)
-                                        yield _sse("token", {"text": tail})
+                                        yield sse.token(tail)
                                         break
 
                         # -- updates 模式：payload={node: {"messages": [...]}}，工具调用/返回 --
@@ -1757,29 +1729,23 @@ async def _chat_stream_impl(
                                         msg, "tool_calls", None
                                     ):
                                         for tc in msg.tool_calls:
-                                            yield _sse(
-                                                "tool",
-                                                {
+                                            yield sse.tool({
                                                     "name": tc.get("name", "?"),
                                                     "input": str(tc.get("args", {}))[:200],
-                                                },
-                                            )
+                                                })
                                     # 工具返回结果：ToolMessage
                                     elif isinstance(msg, ToolMessage):
-                                        yield _sse(
-                                            "tool",
-                                            {
+                                        yield sse.tool({
                                                 "name": getattr(msg, "name", "?"),
                                                 "output": str(getattr(msg, "content", ""))[:300],
-                                            },
-                                        )
+                                            })
 
                 if guard is not None and not guard.blocked:
                     # 流正常结束：吐出被过滤器压住的最后 48 字（同 _stream_llm 口径）
                     # flush 内部已含短指纹判定，这里不再二次检查。
                     for part in guard.flush():
                         full_text += part
-                        yield _sse("token", {"text": part})
+                        yield sse.token(part)
 
                 # L4：本轮若触发了高风险工具的待确认请求，把卡片信息推给前端。
                 # 注意这里**不发 token**——token 只能由用户点击 /api/chat/approval 后
@@ -1787,7 +1753,7 @@ async def _chat_stream_impl(
                 for pend in approval_store.pending_for_turn(uid, turn_id):
                     ev = pend.as_event()
                     ev["question"] = req.question
-                    yield _sse("approval", ev)
+                    yield sse.approval(ev)
 
                 acc_text = full_text
                 # A1：Agent 路径不走 _stream_llm，截断要在这里单独判一次。
@@ -1799,53 +1765,48 @@ async def _chat_stream_impl(
 
             except ImportError as e:
                 acc_text = f"Agent 模式未初始化：{e}"
-                yield _sse("error", {"detail": acc_text})
+                yield sse.error(acc_text)
                 return
             except Exception as e:
                 acc_text = f"Agent 执行失败：{describe_api_error(e)}"
-                yield _sse("error", {"detail": acc_text})
+                yield sse.error(acc_text)
                 return
 
         # ---- 3. RAG 模式 ----
         elif mode == "rag":
-            yield _sse("status", {"text": f"RAG 模式，正在检索知识库（{kb_id}）..."})
+            yield sse.status(f"RAG 模式，正在检索知识库（{kb_id}）...")
             # 追问（"那它呢"）先结合上下文改写成独立问题再检索；不需要/失败时原样返回。
             # 用改写后的问题当检索词，检索结果缓存的键也随之正确，不会跨上下文串结果。
             # 再把口语词（"高数""线代"）换成规范术语（"高等数学""线性代数"）——只改检索词。
             history = (
                 await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False)
             )[:-1]
-            query, changes, rewritten = await asyncio.to_thread(
-                _retrieval_query, req.question, history
-            )
-            if changes or rewritten:
-                yield _sse("status", {"text": _enhance_note(changes, rewritten, query)})
+            qplan = await asyncio.to_thread(retrieval.build_query, req.question, history)
+            if qplan.changes or qplan.rewritten:
+                yield sse.status(_enhance_note(qplan.changes, qplan.rewritten, qplan.text))
             try:
-                pipe = await asyncio.to_thread(pipelines.get_or_create, uid, kb_id)
-                docs_scores = await asyncio.to_thread(
-                    pipe.retrieve_with_score, query, req.top_k, uid
-                )
+                r = await retrieval.retrieve(uid, kb_id, qplan.text, req.top_k)
             except Exception as e:
-                yield _sse("error", {"detail": describe_api_error(e)})
+                yield sse.error(describe_api_error(e))
                 return
 
             grounding: dict | None = None
-            if docs_scores:
-                refs_md = pipe._format_refs(docs_scores)
-                sources = pipe.build_sources(docs_scores)
-                yield _sse("sources", {"items": sources})
+            docs_scores = r.docs_scores
+            if not r.is_empty:
+                refs_md = r.refs_md
+                yield sse.sources(r.sources)
                 # 依据强度单独发一帧：前端要在回答上方挂"依据较弱"的提示条，
                 # 不能等 done——用户是边流边读的，提示必须赶在正文前面出现。
-                grounding = assess_grounding(docs_scores)
-                yield _sse("grounding", grounding)
+                grounding = r.grounding
+                yield sse.grounding(grounding)
                 if grounding.get("weak"):
-                    yield _sse("status", {"text": "检索相似度偏低，已提醒模型不要硬答"})
+                    yield sse.status("检索相似度偏低，已提醒模型不要硬答")
                 else:
-                    yield _sse("status", {"text": f"检索到 {len(docs_scores)} 条片段"})
+                    yield sse.status(f"检索到 {len(docs_scores)} 条片段")
             else:
-                yield _sse("status", {"text": "知识库未命中"})
+                yield sse.status("知识库未命中")
 
-            yield _sse("status", {"text": "正在生成答案..."})
+            yield sse.status("正在生成答案...")
             # 复用上面已经检索到的结果，不重复检索（早期实现在这里又检了一次，
             # 而且用的是默认 top_k，等于前端调的检索条数被悄悄忽略）
             messages = await _build_messages(
@@ -1861,47 +1822,47 @@ async def _chat_stream_impl(
                 ctx_note,
             )
 
-            acc = _Acc()
+            outcome = StreamOutcome()
             try:
                 async for frame in _stream_llm(
-                    get_llm(max_tokens=2048), messages, request, acc, upstreams, path="rag"
+                    get_llm(max_tokens=2048), messages, request, outcome, upstreams, path="rag"
                 ):
                     yield frame
             except Exception as e:
-                yield _sse("error", {"detail": describe_api_error(e)})
+                yield sse.error(describe_api_error(e))
                 return
             # 上游出错，或客户端已断开（aborted）：两种情况都**不能**往下走收尾，
             # 否则会把半截回答当成完整答案 add_message 落库 —— 用户刷新后看到的
             # 是一条没有任何中断痕迹的残缺回答。
-            if acc.aborted or acc.error:
+            if outcome.interrupted:
                 return
-            acc_text = acc.text
-            truncated = acc.truncated
+            acc_text = outcome.text
+            truncated = outcome.truncated
 
         # ---- 4. 纯 LLM 模式 ----
         else:
-            yield _sse("status", {"text": "纯 LLM 模式..."})
+            yield sse.status("纯 LLM 模式...")
             # 与 hybrid 兜底共用一份拼装口径（system + 压缩块 + 最近 K 轮原文）
             messages = await _plain_llm_messages(
                 uid, req.sid, prompt_question, req.scenario, ctx_note
             )
 
-            acc = _Acc()
+            outcome = StreamOutcome()
             try:
                 async for frame in _stream_llm(
-                    get_llm(max_tokens=2048), messages, request, acc, upstreams, path="llm"
+                    get_llm(max_tokens=2048), messages, request, outcome, upstreams, path="llm"
                 ):
                     yield frame
             except Exception as e:
-                yield _sse("error", {"detail": describe_api_error(e)})
+                yield sse.error(describe_api_error(e))
                 return
             # 上游出错，或客户端已断开（aborted）：两种情况都**不能**往下走收尾，
             # 否则会把半截回答当成完整答案 add_message 落库 —— 用户刷新后看到的
             # 是一条没有任何中断痕迹的残缺回答。
-            if acc.aborted or acc.error:
+            if outcome.interrupted:
                 return
-            acc_text = acc.text
-            truncated = acc.truncated
+            acc_text = outcome.text
+            truncated = outcome.truncated
 
         # ---- 收尾：存 assistant 消息 + 取回并行生成的标题 ----
         msg_id = await asyncio.to_thread(
@@ -1928,13 +1889,11 @@ async def _chat_stream_impl(
         gen_title = await _take_title(title_task, acc_text)
         if gen_title:
             await asyncio.to_thread(store.rename_conversation, uid, req.sid, gen_title)
-            yield _sse("title", {"title": gen_title})
+            yield sse.title(gen_title)
 
         # message_id 回给前端：赞踩要按消息 id 落库，前端自己生成的 uid 后端不认
         # run_id 仅 hybrid 模式有值：人工切换 / 执行日志查询按它寻址
-        yield _sse(
-            "done",
-            {
+        yield sse.done({
                 "answer": acc_text,
                 "refs": refs_md,
                 "title": gen_title,
@@ -1950,8 +1909,7 @@ async def _chat_stream_impl(
                 # P2：主题名回给前端，卡片抬头才能显示"PLAN · 学习计划"。
                 # 主题可能是从历史推断出来的，前端自己那份关键词匹配猜不到，必须由后端给。
                 "plan_topic": plan_topic["name"] if plan_topic else None,
-            },
-        )
+            })
 
     return StreamingResponse(
         event_generator(),
@@ -1965,35 +1923,6 @@ async def _chat_stream_impl(
 
 
 # ==================== 辅助 ====================
-
-
-def _references_text(
-    docs_scores, owner: str | None = None, kb_id: str | None = None
-) -> str:
-    """把检索到的片段拼成【参考资料】块的正文。
-
-    RAG 分支与「统一智能体的预检索」共用这一份口径：两处各写一遍的话，
-    同一份资料在两条路径里的编号顺序、来源标注迟早会对不上，用户看到的就是
-    "同一条问题，引用卡片和正文里的 [1] 指的不是同一段"。
-
-    L0：每条片段按**入库来源**分别用不同标签包住（用户上传 / 联网导入 / 知识库），
-    避免三类资料混成一个无边界的大块。标签只在【参考资料】区域内出现；
-    调用方传 owner/kb_id 才能拿到来源，取不到时按「知识库」兜底。
-    """
-    if not docs_scores:
-        return ""
-    origin_map = data_boundary.kb_origin_map(owner, kb_id)
-    blocks = []
-    for i, (d, _) in enumerate(docs_scores):
-        src = d.metadata.get("source", "?")
-        kind = data_boundary.source_for_file(src, origin_map)
-        blocks.append(
-            data_boundary.wrap(
-                kind,
-                f"[{i + 1}] （来源：{src}）\n{d.page_content}",
-            )
-        )
-    return "\n\n".join(blocks)
 
 
 async def _build_messages(

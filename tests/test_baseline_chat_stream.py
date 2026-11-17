@@ -29,6 +29,7 @@ from langchain_core.documents import Document  # noqa: E402
 import api.chat as chat  # noqa: E402
 import core.session as session  # noqa: E402
 import kb.rag_core as rc  # noqa: E402
+import kb.retrieval as kbret  # noqa: E402
 import main as m  # noqa: E402
 from core.auth import get_current_user  # noqa: E402
 
@@ -51,6 +52,9 @@ class _FakePipe:
     def retrieve_with_score(self, query, top_k, owner=None):
         return DOCS
 
+    # 检索编排层（kb/retrieval.py）只调公开的 format_refs / build_sources，
+    # 假实现也必须提供同一组名字，否则测的是 AttributeError 而不是帧序列。
+    format_refs = staticmethod(rc.RagPipeline.format_refs)
     _format_refs = staticmethod(rc.RagPipeline._format_refs)
     build_sources = staticmethod(rc.RagPipeline.build_sources)
 
@@ -197,7 +201,7 @@ def test_rag_stream_rewrite_frame_only_when_query_changes(client, monkeypatch):
     B4（2026-10-23）起这条 status 的文案把「做了什么」和「最终检索词」
     合成了一句（以前只说改写）。状态条是覆盖式的，拆成两条用户只看到最后一条。
     """
-    monkeypatch.setattr(chat, "rewrite_query", lambda q, h: "改写后的问题")
+    monkeypatch.setattr(kbret, "rewrite_query", lambda q, h: "改写后的问题")
     frames = _frames(_body(client, mode="rag"))
     texts = [__import__("json").loads(d)["text"] for n, d in frames if n == "status"]
     assert texts[1] == "已结合上下文改写，检索词：改写后的问题"
