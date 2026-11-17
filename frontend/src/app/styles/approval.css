@@ -1,0 +1,47 @@
+/* ============ 高风险工具确认卡（SSE `approval` 的落点，L4）============
+   组件：components/chat/ApprovalCard.tsx
+
+   95% 的样式直接复用 proposal.css 的 .kbp-*（同一类东西：消息流里"要你做决定"
+   的卡片）。这里只加三件事：
+
+     1. 顶线换成警示色 —— 建库是"可以顺手做"，下载文件是"会让你电脑上多一个
+        东西"，两者不该长得一模一样；
+     2. 参数原文块（.apr-args）—— 用户签的是"这个地址"，得让他看清；
+     3. 窄屏下参数块允许换行断词（长 URL 会把卡片撑破）。
+
+   为什么用 --warning 而不是 --red：这不是错误，是一个待授权的中性动作。
+   红色在暗色主题里对比度只有 2.9:1（见 tokens.css 注释），当装饰线会发飘。 */
+
+.apr-card::before {
+  background: linear-gradient(90deg, var(--warning), transparent 72%);
+}
+.apr-card .kbp-mark {
+  color: var(--warning-ink);
+}
+
+/* 参数原文：等宽 + 可换行。长 URL 是常态（下载地址往往一两百字符），
+   不换行就会把卡片横向撑开、在手机上直接把消息区推出屏幕。 */
+.apr-args {
+  margin: 9px 0 0;
+  padding: 7px 9px;
+  border-radius: var(--radius-xs);
+  background: var(--step-1);
+  color: var(--text-2);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+/* 三行封顶：完整内容在 title 里，卡片里留三行足够判断。
+   ★ 截断必须落在**内层**（无内边距的那一层）：`overflow: hidden` 裁的是
+     padding box，挂在带 7px 内边距的外层上时，第 4 行的上半截会露在 padding 里
+     —— 截图实测两轮都是"第三条下面还有半行黑字"。
+   ★ 用 `max-height: 3lh` 而不是 -webkit-line-clamp：全站 `p` 的 display 被重置成
+     block/flow-root，clamp 需要的 -webkit-box 不成立（实测 clamp 值在但完全没作用）；
+     lh 就是行高，3lh 必然落在第 3 行底边，不切字。 */
+.apr-args-in {
+  display: block;
+  max-height: 3lh;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}

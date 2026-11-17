@@ -58,6 +58,15 @@ export async function* streamChat(
      * 前端不再改写 question 文本——改写会让当前轮丢上下文、并污染历史。
      */
     plan?: boolean;
+    /**
+     * L4 一次性确认令牌：**只有**用户在确认卡片上点了「允许执行」之后才有值。
+     *
+     * 与 `turn_id` 必须成对出现：服务端把 token 绑在 (user, tool, 参数, turn) 上，
+     * 只带 token 不带 turn（或换一个 turn）一律按"令牌无效"处理，
+     * 工具会再次被拒。两个都不传 = 正常提问。
+     */
+    approval_token?: string;
+    turn_id?: string;
   },
   signal?: AbortSignal
 ): AsyncGenerator<StreamEvent> {

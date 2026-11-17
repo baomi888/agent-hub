@@ -13,7 +13,8 @@ import PlanCard, { detectPlanTopic, isPlanRequest, parsePlan } from "./plan";
 import { HybridTraceView } from "@/components/HybridTrace";
 import WebSources from "./WebSources";
 import KbProposalCard from "./KbProposalCard";
-import type { WebSource } from "@/lib/types";
+import ApprovalCard from "./ApprovalCard";
+import type { IssuedApproval, ToolApprovalRequest, WebSource } from "@/lib/types";
 import { useCopy } from "@/lib/useCopy";
 import HubMark from "./HubMark";
 
@@ -29,6 +30,7 @@ const Bubble = memo(function Bubble({
   onDeleteTurn,
   onSediment,
   onKbSaved,
+  onApproveTool,
 }: {
   m: UiMessage;
   userQuestion?: string;
@@ -62,6 +64,12 @@ const Bubble = memo(function Bubble({
   onSediment?: (msgDbId: number, text: string, role: "user" | "assistant") => void;
   /** 建库建议卡确认成功后刷新资料库列表（否则侧栏还停在"还没有资料库"） */
   onKbSaved?: () => void;
+  /**
+   * 高风险工具确认卡点了「允许执行」、且已拿到 token。
+   * 父级负责带 token 重发本轮提问——这条链路不能放在卡片里，
+   * 因为重发要复用的是页面级的发送流程（会话、播放器、中止句柄全在那儿）。
+   */
+  onApproveTool?: (issued: IssuedApproval, req: ToolApprovalRequest) => void;
 }) {
   const [feedback, setFeedback] = useState<"like" | "dislike" | null>(null);
   // 「踩」后展开的改进原因输入框：点踩即记一票，这里只收集可选的文字补充
@@ -369,6 +377,15 @@ const Bubble = memo(function Bubble({
         {!m.streaming && m.proposal && (
           <KbProposalCard proposal={m.proposal} onConfirmed={onKbSaved} />
         )}
+
+        {/* 高风险工具确认卡（L4）：模型要执行会改外部状态的动作，等用户点头。
+            同样不进 .bubble-ai：它不是回答内容，是"要不要让它动手"的决定。
+            必须等流结束才渲染 —— 卡片上的倒计时是从 expires_in 起算的，
+            流还在跑时渲染只会让用户看到它白白少掉几秒。 */}
+        {!m.streaming &&
+          (m.approvals ?? []).map((a) => (
+            <ApprovalCard key={a.request_id} approval={a} onApproved={onApproveTool ?? (() => {})} />
+          ))}
 
         {/* 联网来源：与下面的资料库引用块并列，但不合并 ——
             那边每条带页码和相似度（本地文件），这边每条是网址（网页），

@@ -4,6 +4,7 @@ import type {
   Grounding,
   KbProposal,
   RefSource,
+  ToolApprovalRequest,
   ToolEvent,
   TraceItem,
   WebSource,
@@ -31,6 +32,14 @@ export interface UiMessage {
    * （它是那一轮的交互，不是历史内容）。
    */
   proposal?: KbProposal;
+  /**
+   * 需要用户点头的高风险工具调用（SSE `approval` 帧）。
+   *
+   * 为什么是数组而不是单张：同一条回答里模型可能对不同参数调用两次同一个工具
+   * （比如两个文件），后端会为每次调用各推一帧。存单张就必须丢一个，
+   * 而"丢了的那一张"在界面上表现为工具静默不执行——最难查的那种。
+   */
+  approvals?: ToolApprovalRequest[];
   /** 用户主动中断了这次生成 */
   stopped?: boolean;
   attachments?: ChatAttachment[];

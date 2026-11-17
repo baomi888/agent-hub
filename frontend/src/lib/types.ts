@@ -416,6 +416,42 @@ export interface ToolEvent {
   output?: string;
 }
 
+/**
+ * 一次「需要你点头」的高风险工具调用（SSE `approval` 帧，2026-11-17）。
+ *
+ * 为什么要有这张卡片：`download_file` 这类工具会改外部状态。后端的人确认机制是
+ * 一次性 token —— **只有用户在界面上真的点了一下**，前端才去
+ * `POST /api/chat/approval` 换 token，再带着同一个 `turn_id` 重发本轮提问。
+ * 所以「没有这张卡片」= 这个工具在生产上永远等不到确认，功能等于不可用。
+ *
+ * ★ 这一帧里**没有 token**，也不可能有：模型就在这条流的另一端，
+ *   token 一旦下发到 SSE，模型自证的老问题就回来了。
+ */
+export interface ToolApprovalRequest {
+  request_id: string;
+  /** 要执行哪个工具（目前只有 download_file） */
+  tool_name: string;
+  /** 参数预览（后端截断到 400 字）：用户凭它判断"要不要让它动" */
+  input: string;
+  /** 重发时必须原样带回的轮次 id（token 绑在它上面） */
+  turn_id: string;
+  /** 原问题：重发用它，前端不必自己拼 */
+  question: string;
+  /** 还剩多少秒可点（相对时间，不是时间戳 —— 前端与后端时钟不一定一致） */
+  expires_in: number;
+}
+
+/** `POST /api/chat/approval` 的返回：点完确认后拿到的令牌。 */
+export interface IssuedApproval {
+  request_id: string;
+  tool_name: string;
+  args_hash: string;
+  turn_id: string;
+  approval_token: string;
+  expires_in: number;
+}
+
+
 // ---------- 登录 ----------
 export interface QuotaInfo {
   used: number;

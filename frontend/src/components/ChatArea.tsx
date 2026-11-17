@@ -10,7 +10,7 @@ import Link from "next/link";
 import MascotLogo from "./chat/MascotLogo";
 import CornIcon from "./CornIcon";
 import { api } from "@/lib/api";
-import type { RefSource, QuotaInfo } from "@/lib/types";
+import type { RefSource, QuotaInfo, IssuedApproval, ToolApprovalRequest } from "@/lib/types";
 import { HOME_GROUPS, TOOLS_URL } from "./chat/constants";
 import TodayStrip from "./chat/TodayStrip";
 import PushNudge from "./chat/PushNudge";
@@ -160,6 +160,12 @@ interface Props {
    * —— 用户会以为没成功，又点一遍。
    */
   onKbSaved?: () => void;
+  /**
+   * 高风险工具确认卡点了「允许执行」并拿到 token（L4）。
+   * 透传到 Bubble → ApprovalCard；重发这件事只有页面层能做（会话 / 播放器 /
+   * 中止句柄都在那儿），所以这一层只负责往下递，不实现任何逻辑。
+   */
+  onApproveTool?: (issued: IssuedApproval, req: ToolApprovalRequest) => void;
   /** 地理定位开关状态（开启后发送消息自动带坐标） */
   geoEnabled?: boolean;
   /** 当前定位城市（角标展示用，可能为 null） */
@@ -207,6 +213,7 @@ export default function ChatArea({
   onDeleteTurn,
   onSediment,
   onKbSaved,
+  onApproveTool,
   geoEnabled = false,
   geoCity = null,
   geoPending = false,
@@ -1019,6 +1026,7 @@ export default function ChatArea({
                         onDeleteTurn={onDeleteTurn}
                         onSediment={onSediment}
                         onKbSaved={onKbSaved}
+                        onApproveTool={onApproveTool}
                       />
                     </BubbleErrorBoundary>
                   </div>

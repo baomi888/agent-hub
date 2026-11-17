@@ -18,6 +18,7 @@ import type {
   ForumUpload,
 } from "./types";
 import type { KbProposal, KbProposalConfirmResult } from "./types";
+import type { IssuedApproval } from "./types";
 import type { DialogueCandidatesResp, ImportDialogueResult, CourseReminderState } from "./types";
 import type { CalendarLink } from "./types";
 import type {
@@ -651,6 +652,21 @@ export const api = {
     request<{ proposal: (KbProposal & { status: string; kb_id: string }) | null }>(
       `/api/kb/proposals?sid=${encodeURIComponent(sid)}`
     ),
+
+  /**
+   * L4：把「用户在卡片上点了允许」这个动作换成一次性 token。
+   *
+   * 为什么必须单独一趟请求：token 只能由**点击**触发签发。如果让前端在提问时
+   * 自己编一个，模型（它就在同一条 SSE 的另一端）照样能自证，等于回到纸糊审批。
+   *
+   * 404 = 这条待确认已经过期、已被处理，或根本不属于当前账号。三种都不要再重试
+   * —— 重试一万次也不会变。卡片上给的是「重新提问」，不是「重试」。
+   */
+  issueApproval: (requestId: string) =>
+    request<IssuedApproval>("/api/chat/approval", {
+      method: "POST",
+      body: JSON.stringify({ request_id: requestId }),
+    }),
 
   // ---------- 用户偏好（板块 D 的服务端开关）----------
   // ★ 与 usePrefs 的 localStorage 那套**不是一回事**：

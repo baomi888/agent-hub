@@ -25,7 +25,7 @@ import ConsoleTabBar from "@/components/console/ConsoleTabBar";
 import Landing from "@/components/landing/Landing";
 import AnnounceModal from "@/components/announce/AnnounceModal";
 import type { UiMessage } from "@/components/chat/types";
-import type { Grounding, RefSource, ToolEvent, WebSource } from "@/lib/types";
+import type { Grounding, RefSource, ToolEvent, WebSource, IssuedApproval, ToolApprovalRequest } from "@/lib/types";
 import { isPlanRequest } from "@/components/chat/plan";
 import { useHybridTrace } from "@/lib/useHybridTrace";
 import { createTypewriter, type Typewriter } from "@/lib/typewriter";
@@ -281,12 +281,16 @@ export default function Home() {
   // 发送消息（SSE 流式）；attachments 先走 /api/chat/upload 上传，图片由视觉模型消费，
   // 非图片格式后端暂不解析。
   // display：气泡显示的文本（计划功能发送结构化提示时传原问题，提示只给 AI 看）
+  // approval：L4 重发（用户在确认卡上点了「允许执行」）。带它时**不追加用户气泡**
+  //   —— 那句话已经在消息流里了，重发只是让后端拿到 token 再执行一次工具。
+  //   后端也认这个字段（见 api/chat.py 的 user_msg_id 分支）：重发不重复落库。
   // useCallback：保持引用稳定，配合 Bubble 的 memo，流式时不连带重渲染旧消息
   const sendMessage = useCallback(async (
     question: string,
     attachments?: ChatAttachment[],
     display?: string,
-    plan?: boolean
+    plan?: boolean,
+    approval?: { token: string; turnId: string }
   ) => {
     let sid = activeSid;
     // 无会话时自动新建
@@ -303,12 +307,19 @@ export default function Home() {
     }
 
     // 先给用户消息一个临时 id 并记下来：done 帧回来时按它回填 dbId
-    const userId = uid();
-    userMsgIdRef.current = userId;
-    setMessages((prev) => [
-      ...prev,
-      { id: userId, role: "user", content: display ?? question, attachments },
-    ]);
+    if (approval) {
+      // 重发：不新增气泡，也不动 userMsgIdRef（那条消息上一轮已经回填过 dbId）。
+      // 留着上一轮的值会让 done 里的 user_message_id=0 被当成"没给"而跳过，
+      // 这没问题；但若清空则更安全 —— 免得别的分支拿它去比 id。
+      userMsgIdRef.current = "";
+    } else {
+      const userId = uid();
+      userMsgIdRef.current = userId;
+      setMessages((prev) => [
+        ...prev,
+        { id: userId, role: "user", content: display ?? question, attachments },
+      ]);
+    }
     const asstId = uid();
     // 上一轮可能还在播（用户没等它念完就发了新消息）：丢掉剩余缓冲，
     // 并把那条消息的流式状态关掉，否则会卡在"还在写"的样子
@@ -376,6 +387,10 @@ export default function Home() {
           // 保留字段是为了不改后端契约；将来若重开，从偏好派生即可。
           workflow_id: null,
           plan: plan ?? false,
+          // L4：只有确认卡片点过才有值。两个字段必须一起发 —— 后端把 token
+          // 绑在 turn 上，少一个就按"令牌无效"处理，工具会再被拒一次。
+          approval_token: approval?.token,
+          turn_id: approval?.turnId,
         },
         controller.signal
       );
@@ -510,6 +525,30 @@ export default function Home() {
             if (!proposal.proposal_id) break;
             setMessages((prev) =>
               prev.map((m) => (m.id === asstId ? { ...m, proposal } : m))
+            );
+            break;
+          }
+          case "approval": {
+            // L4：模型要执行会改外部状态的动作（目前只有 download_file），
+            // 后端已登记一条待确认请求。这一帧里**没有 token** ——
+            // 用户点确认后由卡片去 POST /api/chat/approval 换。
+            // 追加而不是覆盖：同一条回答里模型可能对不同参数调两次，
+            // 覆盖会让前一张卡片凭空消失（表现就是工具静默不执行）。
+            const req = {
+              request_id: String(ev.data.request_id ?? ""),
+              tool_name: String(ev.data.tool_name ?? ""),
+              input: String(ev.data.input ?? ""),
+              turn_id: String(ev.data.turn_id ?? ""),
+              question: String(ev.data.question ?? ""),
+              expires_in: Number(ev.data.expires_in ?? 0) || 0,
+            };
+            if (!req.request_id) break;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === asstId
+                  ? { ...m, approvals: [...(m.approvals ?? []), req] }
+                  : m
+              )
             );
             break;
           }
@@ -660,6 +699,28 @@ export default function Home() {
       void sendMessage(question, undefined, undefined, isPlanRequest(question));
     },
     [sendMessage, sending, setMessages]
+  );
+
+  // L4：确认卡点了「允许执行」→ 带 token 重发本轮提问。
+  //
+  // 为什么是"重发"而不是"直接调用工具"：token 只能证明用户点过，
+  // 真正的工具调用发生在模型那一轮里（参数、上下文、守卫都在那条链上）。
+  // 所以这里只是把同一句话再问一遍，并让服务端知道"这一轮有人点过确认"。
+  //
+  // 正在生成时先不接：重发会顶掉当前那条流（sendMessage 会 cancel 播放器），
+  // 用户点确认的瞬间往往正是上一轮刚说完的时候，容易出现"点了没反应"。
+  const approveTool = useCallback(
+    (issued: IssuedApproval, req: ToolApprovalRequest) => {
+      if (sending) {
+        showToast("info", "还在生成，等这一轮结束再确认");
+        return;
+      }
+      void sendMessage(req.question, undefined, undefined, false, {
+        token: issued.approval_token,
+        turnId: issued.turn_id,
+      });
+    },
+    [sendMessage, sending, showToast]
   );
 
   // 停止当前流式生成（中断 SSE 请求）；上游已经结束、只剩打字机在慢放时，直接截断回放。
@@ -1016,6 +1077,7 @@ export default function Home() {
           onDeleteTurn={deleteTurn}
           onSediment={(dbId, text, role) => setSediment({ focus: dbId, text, role })}
           onKbSaved={refreshKbs}
+          onApproveTool={approveTool}
           geoEnabled={geoEnabled}
           geoCity={geoCity}
           geoPending={geoPending}

@@ -57,6 +57,7 @@ from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
 from core import (
+    approval_store,
     config,
     data_boundary,
     leak_guard,
@@ -362,6 +363,20 @@ class ChatRequest(BaseModel):
         description="是否计划类请求。true 时后端才把「结构化计划格式要求」拼到本轮提问上——"
         "拼在服务端是为了：(1) 让格式指令和历史一起进模型（前端改写会让当前轮丢上下文）；"
         "(2) 入库存原始问题，不污染历史。",
+    )
+    # ---- L4 真实人工确认（2026-11-17 接线）----
+    # 这两个字段**只在前端点击确认后**由前端从 POST /api/chat/approval 拿到并回传。
+    # 模型看不到它们，也写不进工具参数（工具 schema 里没有这两个参数）；
+    # 工具守卫只从服务端注入的 configurable 读取，所以模型无法自证。
+    approval_token: str | None = Field(
+        default=None,
+        max_length=200,
+        description="一次性确认 token（服务端签发，绑定 user/tool/args/turn）",
+    )
+    turn_id: str | None = Field(
+        default=None,
+        max_length=64,
+        description="确认绑定的轮次 id；与 approval_token 同时回传，缺一不可",
     )
 
 
@@ -988,6 +1003,29 @@ async def _stream_llm(
 # ==================== 主路由 ====================
 
 
+class ApprovalRequest(BaseModel):
+    request_id: str = Field(
+        ..., min_length=8, max_length=64, description="SSE approval 事件里的 request_id"
+    )
+
+
+@router.post("/approval")
+async def issue_tool_approval(req: ApprovalRequest, uid: str = Depends(get_current_user)):
+    """L4：前端点击「允许执行」后，服务端才签发一次性 token。
+
+    为什么必须单独一个端点：token 只能由**真实点击**这个动作触发签发。
+    如果让模型在工具调用里自己产生/回填确认串，就等于模型自证，
+    回到旧「纸糊审批」的老路。pending 只登记在服务端，模型看不到 request_id。
+
+    状态存在 SQLite（见 core/approval_store.py 顶部），所以「工具在 worker A
+    触发、用户点击落在 worker B」也能签发——D-1 修的就是这件事。
+    """
+    issued = approval_store.issue_token(req.request_id, uid)
+    if issued is None:
+        raise HTTPException(status_code=404, detail="确认请求不存在、已过期或不属于当前用户")
+    return issued
+
+
 @router.post("/stream")
 async def chat_stream(
     req: ChatRequest, request: Request, uid: str = Depends(get_current_user)
@@ -1122,10 +1160,20 @@ async def _chat_stream_impl(
     # ★ 用户这条消息的 id 必须回给前端。消息下方的「存进资料库」靠它定位，
     #   缺了它，刚发的消息要等刷新、从历史接口补 dbId 之后才点得到 ——
     #   也就是"发完当下看不见，刷新才有"，最容易让新功能看起来没上线。
-    user_msg_id = await asyncio.to_thread(
-        store.add_message, uid, req.sid, "user", req.question
-    )
-    should_gen_title = (await asyncio.to_thread(store.count_messages, uid, req.sid)) <= 2
+    #
+    # ★ L4 重发不重复落库（2026-11-17）：用户点了「允许执行」之后，前端会带
+    #   approval_token **重发同一句话**。那一句在第一次尝试时已经写进库了，
+    #   这里再写一遍，用户刷新后会看到同一句话出现两次（历史里凭空多一问）。
+    #   所以带 token 的重发只跑模型、不记账。user_msg_id 回 0，前端据此跳过回填
+    #   （它本来就拿着那条消息的 dbId）。
+    if req.approval_token and req.turn_id:
+        user_msg_id = 0
+        should_gen_title = False
+    else:
+        user_msg_id = await asyncio.to_thread(
+            store.add_message, uid, req.sid, "user", req.question
+        )
+        should_gen_title = (await asyncio.to_thread(store.count_messages, uid, req.sid)) <= 2
 
     # 本轮打开的上游异步生成器登记处：收尾统一关闭（见 _Upstreams 的说明）
     upstreams = _Upstreams()
@@ -1609,6 +1657,11 @@ async def _chat_stream_impl(
                 # 模型在参数里怎么编 kb_id 都影响不到真实检索目标。
                 # recursion_limit 兜底：工具返回"不可用"时模型反复重试是纯烧钱，
                 # 硬限制整轮的工具步数（LLM 往返 + 工具执行都占步数）
+                #
+                # L4：本轮 id。前端带确认 token 重发时必须回传同一个 turn_id，
+                # 服务端签发的 token 也绑在它上面——换了 turn_id，token 自然失效。
+                # 新建一个而不是用 sid：同一个会话里每一轮都该是独立的确认单元。
+                turn_id = req.turn_id or uuid.uuid4().hex
                 config_ = {
                     "recursion_limit": 10,
                     "configurable": {
@@ -1627,12 +1680,16 @@ async def _chat_stream_impl(
                         # 必须传**这个 list 对象本身**：工具里是 append，换成新列表
                         # 收尾就读不到东西了。
                         "web_sources": web_sources,
+                        # L4：一次性确认 token 与轮次。两者都只从服务端注入，
+                        # 模型既看不到也改不了（工具 schema 里没有这两个参数）。
+                        "turn_id": turn_id,
+                        "approval_token": req.approval_token or "",
                     },
                 }
                 full_text = ""
                 agent_reason: str | None = None
                 # 输出侧泄露过滤：Agent 路径不走 _stream_llm，token 出口在这里接
-                agent_guard = _new_leak_guard(path="agent")
+                agent_guard = _new_leak_guard(turn_id=turn_id, path="agent")
 
                 # stream_mode=["updates","messages"] 事件为 (mode字符串, payload)
                 # 必须走 astream：同步 stream() 会把整个事件循环堵住，
@@ -1729,6 +1786,19 @@ async def _chat_stream_impl(
                     for part in agent_guard.flush():
                         full_text += part
                         yield _sse("token", {"text": part})
+
+                # L4：本轮若触发了高风险工具的待确认请求，把卡片信息推给前端。
+                # 注意这里**不发 token**——token 只能由用户点击 /api/chat/approval
+                # 后由服务端签发；模型看到的是这条 SSE 的另一端，拿不到它。
+                # 只在严格模式开启时查（关掉时根本不会有人登记 pending，
+                # 白查一次库没必要——这是每轮 Agent 都会走到的热路径）。
+                if getattr(config, "TOOL_APPROVAL_REAL_CONFIRM_ENABLED", False):
+                    for pend in approval_store.pending_for_turn(uid, turn_id):
+                        ev = pend.as_event()
+                        # 前端点「允许」后要带同一句话 + 同一 turn_id 重发，
+                        # 所以这里把原问题回传（前端不必自己拼）。
+                        ev["question"] = req.question
+                        yield _sse("approval", ev)
 
                 acc_text = full_text
                 # A1：Agent 路径不走 _stream_llm，截断要在这里单独判一次。

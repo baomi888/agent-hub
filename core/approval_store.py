@@ -17,25 +17,88 @@
 6. 模型拿不到 token（token 只走服务端注入的 `configurable`，不在工具 schema 里），
    所以「同参数再调一次」仍然被拒——这是 L4 的核心断言。
 
-存储位置：进程内内存（与 `tool_guard` 的 contextvar 同层）。
-为什么不做持久化：pending 的生命周期是「一次用户点击」，跨进程/重启后
-本来就该作废（用户重新发起即可）。持久化反而会留下可被重放的 token。
+存储：**SQLite**（`data/sessions.db` 的 `tool_approvals` 表，复用
+`core/session.py` 的线程内连接）
+----------------------------------------
+2026-11-17 之前这里是三个进程内 dict，文件头还写着「刻意不持久化」。那个判断是错的：
+生产是 `uvicorn --workers N`，而审批链路天生要跨三个请求——
+
+| 步骤 | 落点 | dict 版失败表现 |
+|---|---|---|
+| 工具触发 pending | worker A | — |
+| 用户点确认 → `POST /api/chat/approval` | 任意 worker | 概率 (N−1)/N 返回 404 |
+| 重发 `/api/chat/stream` 带 token | 任意 worker | `consume` 失败 → 工具再次被拒 |
+
+N=4 时端到端成功率约 1/16，等于 L4 只有单 worker 才真能用。落库后三个请求
+落在哪个 worker 都读同一张表。
+
+**为什么落库不会变成「可重放的 token」**：能重放的前提是「用完之后还留着」。
+`consume` 是一条 `DELETE ... WHERE token=? AND expires_at>?`，
+`rowcount == 1` 才算放行——删除与判定是同一条语句，跨进程也只有一个赢家。
+落库换掉的是「状态存在谁的堆里」，不是「token 能不能重复用」。
+
+**仍然不做持久化承诺**：表行带 `expires_at`，进程重启后用户重新发起提问即可；
+这里落库只是为了让多个 worker 看见同一份状态，不是存档。过期行在每次写操作
+前顺手删（`_prune`），`pending_for_turn` 这种「每轮都会走到」的读路径只在
+SQL 里过滤、不写库，避免每轮都去抢写锁。
 """
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import secrets
-import threading
 import time
 import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from core import config
+from core import config, session as store
 
-_LOCK = threading.Lock()
+# 一条语句建全表 + 三个索引。放在模块里是为了让 `_db()` 只认这一份定义。
+#
+# 两个唯一索引各管一件事：
+#   ux_appr_dedupe —— 同 (user, tool, args, turn) 只留一行。模型用相同参数
+#                     重试时靠它复用同一条 pending，而不是每调一次刷一张卡片。
+#                     跨 worker 也成立（进程内 dict 版靠 `_DEDUPE` 字典，只在本进程有效）。
+#   ux_appr_token  —— token 全局唯一。一行只允许挂一个 token，
+#                     `UPDATE ... WHERE token IS NULL` 因此天然只有一个赢家。
+_DDL = """
+CREATE TABLE IF NOT EXISTS tool_approvals (
+    request_id   TEXT PRIMARY KEY,
+    user         TEXT NOT NULL,
+    tool_name    TEXT NOT NULL,
+    args_hash    TEXT NOT NULL,
+    args_preview TEXT NOT NULL DEFAULT '',
+    turn_id      TEXT NOT NULL,
+    created_at   REAL NOT NULL,
+    expires_at   REAL NOT NULL,
+    token        TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_appr_dedupe
+    ON tool_approvals(user, tool_name, args_hash, turn_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_appr_token
+    ON tool_approvals(token) WHERE token IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_appr_exp ON tool_approvals(expires_at);
+CREATE INDEX IF NOT EXISTS idx_appr_turn ON tool_approvals(user, turn_id, expires_at);
+"""
+
+# 本进程已经建过表的库路径。为什么按路径缓存而不是一个布尔值：
+# 测试会把 `session._db_path` 指到临时目录，布尔值会让新库里没有这张表，
+# 症状是「单跑绿、连跑红」。
+_READY: set[str] = set()
+
+
+@contextlib.contextmanager
+def _db():
+    """取 SQLite 连接（复用 `core/session.py` 的线程内连接），并保证表存在。"""
+    with store._get_conn() as conn:
+        path = store._db_path()
+        if path not in _READY:
+            conn.executescript(_DDL)
+            _READY.add(path)
+        yield conn
 
 
 def args_hash(args: dict[str, Any]) -> str:
@@ -67,79 +130,99 @@ class PendingApproval:
         }
 
 
-_PENDING: dict[str, PendingApproval] = {}
-_TOKENS: dict[str, PendingApproval] = {}
-# (user, tool_name, args_hash, turn_id) -> request_id：同一个待确认请求不重复登记
-_DEDUPE: dict[tuple[str, str, str, str], str] = {}
-
-
 def _ttl() -> int:
     return max(1, int(getattr(config, "TOOL_APPROVAL_TTL_SECONDS", 120)))
 
 
-def _prune(now: float | None = None) -> None:
-    """惰性清理过期条目。调用方必须已持有 _LOCK。"""
+def _row(r) -> PendingApproval:
+    return PendingApproval(
+        request_id=r["request_id"],
+        user=r["user"],
+        tool_name=r["tool_name"],
+        args_hash=r["args_hash"],
+        args_preview=r["args_preview"],
+        turn_id=r["turn_id"],
+        created_at=float(r["created_at"]),
+        expires_at=float(r["expires_at"]),
+        token=r["token"],
+    )
+
+
+def _prune(conn, now: float | None = None) -> None:
+    """删掉已过期的行。**只在写路径调用**（见模块头最后一段）。
+
+    调用方必须已持有连接（`_db()`）。
+    """
     now = time.time() if now is None else now
-    for rid, rec in list(_PENDING.items()):
-        if rec.expires_at <= now:
-            _PENDING.pop(rid, None)
-            _DEDUPE.pop((rec.user, rec.tool_name, rec.args_hash, rec.turn_id), None)
-            if rec.token:
-                _TOKENS.pop(rec.token, None)
-    for tok, rec in list(_TOKENS.items()):
-        if rec.expires_at <= now:
-            _TOKENS.pop(tok, None)
+    conn.execute("DELETE FROM tool_approvals WHERE expires_at <= ?", (now,))
 
 
 def create_pending(
     user: str, tool_name: str, args: dict[str, Any], turn_id: str
 ) -> PendingApproval:
-    """登记一条待确认请求。同 (user, tool, args_hash, turn) 复用同一条。"""
+    """登记一条待确认请求。同 (user, tool, args_hash, turn) 复用同一条。
+
+    用 `INSERT OR IGNORE` + 唯一索引做幂等，而不是「先 SELECT 再 INSERT」：
+    后者在两个 worker 同时被模型重试打中时会插出两行，用户界面上就是两张
+    一模一样的确认卡片。
+    """
     ah = args_hash(args)
     preview = json.dumps(args, ensure_ascii=False, default=str)[:400]
-    key = (user, tool_name, ah, turn_id)
-    with _LOCK:
-        _prune()
-        rid = _DEDUPE.get(key)
-        if rid and rid in _PENDING:
-            return _PENDING[rid]
-        rid = uuid.uuid4().hex
-        now = time.time()
-        rec = PendingApproval(
-            request_id=rid,
-            user=user,
-            tool_name=tool_name,
-            args_hash=ah,
-            args_preview=preview,
-            turn_id=turn_id,
-            created_at=now,
-            expires_at=now + _ttl(),
+    now = time.time()
+    with _db() as conn:
+        _prune(conn, now)
+        conn.execute(
+            "INSERT OR IGNORE INTO tool_approvals "
+            "(request_id, user, tool_name, args_hash, args_preview, turn_id, "
+            " created_at, expires_at, token) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+            (uuid.uuid4().hex, user, tool_name, ah, preview, turn_id, now, now + _ttl()),
         )
-        _PENDING[rid] = rec
-        _DEDUPE[key] = rid
-        return rec
+        row = conn.execute(
+            "SELECT * FROM tool_approvals WHERE user = ? AND tool_name = ? "
+            "AND args_hash = ? AND turn_id = ?",
+            (user, tool_name, ah, turn_id),
+        ).fetchone()
+    return _row(row)
 
 
 def get_pending(request_id: str, user: str | None = None) -> PendingApproval | None:
-    with _LOCK:
-        _prune()
-        rec = _PENDING.get(request_id)
-        if rec is None:
-            return None
-        if user is not None and rec.user != user:
-            return None
-        return rec
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT * FROM tool_approvals WHERE request_id = ? AND expires_at > ?",
+            (request_id, time.time()),
+        ).fetchone()
+    if row is None:
+        return None
+    rec = _row(row)
+    if user is not None and rec.user != user:
+        return None
+    return rec
 
 
 def pending_for_turn(user: str, turn_id: str) -> list[PendingApproval]:
-    """本轮产生的待确认请求（供 SSE 在流结束时推给前端）。"""
-    with _LOCK:
-        _prune()
-        return [
-            r
-            for r in _PENDING.values()
-            if r.user == user and r.turn_id == turn_id
-        ]
+    """本轮产生的待确认请求（供 SSE 在流结束时推给前端）。
+
+    每轮 Agent 结束都会调一次，所以这里**只读不写**：过期行交给
+    `WHERE expires_at > ?` 过滤，不在这里 DELETE（否则每轮都要抢一次写锁）。
+    """
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM tool_approvals WHERE user = ? AND turn_id = ? "
+            "AND expires_at > ? ORDER BY created_at ASC",
+            (user, turn_id, time.time()),
+        ).fetchall()
+    return [_row(r) for r in rows]
+
+
+def _issued(rec: PendingApproval, token: str, now: float) -> dict:
+    return {
+        "request_id": rec.request_id,
+        "tool_name": rec.tool_name,
+        "args_hash": rec.args_hash,
+        "turn_id": rec.turn_id,
+        "approval_token": token,
+        "expires_in": max(0, int(rec.expires_at - now)),
+    }
 
 
 def issue_token(request_id: str, user: str) -> dict | None:
@@ -147,68 +230,71 @@ def issue_token(request_id: str, user: str) -> dict | None:
 
     同一个 pending 若已有未过期的活跃 token，直接回同一个（避免连点两下
     产生两个都能用的 token）。pending 不存在 / 不属于该用户 / 已过期 -> None。
+
+    `UPDATE ... WHERE token IS NULL` 是并发下的仲裁点：两个 worker 同时收到
+    双击时只有一个把 token 写进去，另一个读到的是前者写的那一枚。
     """
-    with _LOCK:
-        _prune()
-        rec = _PENDING.get(request_id)
-        if rec is None or rec.user != user:
+    now = time.time()
+    with _db() as conn:
+        _prune(conn, now)
+        row = conn.execute(
+            "SELECT * FROM tool_approvals WHERE request_id = ? AND user = ? "
+            "AND expires_at > ?",
+            (request_id, user, now),
+        ).fetchone()
+        if row is None:
             return None
-        if rec.token and rec.token in _TOKENS:
-            existing = _TOKENS[rec.token]
-            return {
-                "request_id": rec.request_id,
-                "tool_name": rec.tool_name,
-                "args_hash": rec.args_hash,
-                "turn_id": rec.turn_id,
-                "approval_token": rec.token,
-                "expires_in": max(0, int(existing.expires_at - time.time())),
-            }
+        rec = _row(row)
+        if rec.token:
+            return _issued(rec, rec.token, now)
         token = "apr:" + secrets.token_urlsafe(32)
-        rec.token = token
-        _TOKENS[token] = rec
-        return {
-            "request_id": rec.request_id,
-            "tool_name": rec.tool_name,
-            "args_hash": rec.args_hash,
-            "turn_id": rec.turn_id,
-            "approval_token": token,
-            "expires_in": max(0, int(rec.expires_at - time.time())),
-        }
+        cur = conn.execute(
+            "UPDATE tool_approvals SET token = ? WHERE request_id = ? AND user = ? "
+            "AND token IS NULL AND expires_at > ?",
+            (token, request_id, user, now),
+        )
+        if cur.rowcount == 0:
+            # 被另一个 worker 抢先签发：回它那一枚，别回 404（用户看到的是"点不动"）
+            row2 = conn.execute(
+                "SELECT * FROM tool_approvals WHERE request_id = ? AND user = ?",
+                (request_id, user),
+            ).fetchone()
+            if row2 is None or not row2["token"]:
+                return None
+            rec2 = _row(row2)
+            return _issued(rec2, rec2.token or "", now)
+        return _issued(rec, token, now)
 
 
 def consume(token: str, user: str, tool_name: str, ah: str, turn_id: str) -> bool:
     """消费一次 token。绑定全部匹配且未过期才返回 True；成功后立即删除。
 
-    删除即「用后即焚」：同一条 token 第二次调用必然 False（重放被拒）。
+    **一条 DELETE 完成「判定 + 焚毁」**：先把行删掉、再按 rowcount 判真假。
+    如果写成「先 SELECT 判断、再 DELETE」，两个 worker 同时带同一 token 重发时
+    都会读到这一行、都返回 True，工具就执行了两次——这正是落库要避免的事。
     """
     if not token:
         return False
-    with _LOCK:
-        _prune()
-        rec = _TOKENS.get(token)
-        if rec is None:
-            return False
-        if rec.user != user or rec.tool_name != tool_name:
-            return False
-        if rec.args_hash != ah or rec.turn_id != turn_id:
-            return False
-        # 用后即焚：token 与 pending 一起删除，任何一方残留都可能被重放
-        _TOKENS.pop(token, None)
-        _PENDING.pop(rec.request_id, None)
-        _DEDUPE.pop((rec.user, rec.tool_name, rec.args_hash, rec.turn_id), None)
-        return True
+    with _db() as conn:
+        cur = conn.execute(
+            "DELETE FROM tool_approvals WHERE token = ? AND user = ? AND tool_name = ? "
+            "AND args_hash = ? AND turn_id = ? AND expires_at > ?",
+            (token, user, tool_name, ah, turn_id, time.time()),
+        )
+        return cur.rowcount == 1
 
 
 def has_active_token(request_id: str) -> bool:
-    with _LOCK:
-        _prune()
-        rec = _PENDING.get(request_id)
-        return bool(rec and rec.token and rec.token in _TOKENS)
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM tool_approvals WHERE request_id = ? "
+            "AND token IS NOT NULL AND expires_at > ?",
+            (request_id, time.time()),
+        ).fetchone()
+    return row is not None
 
 
 def reset() -> None:
     """清空全部状态（仅供测试）。"""
-    with _LOCK:
-        _PENDING.clear()
-        _TOKENS.clear()
-        _DEDUPE.clear()
+    with _db() as conn:
+        conn.execute("DELETE FROM tool_approvals")
