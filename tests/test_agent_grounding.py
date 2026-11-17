@@ -71,6 +71,19 @@ def _restore(saved):
     pipelines.get_or_create = saved
 
 
+# 片段现在会被包进「【资料开始·知识库】…【资料结束·知识库】」——
+# 那是提示词注入防线（区分"指令"和"资料"），不是 grounding_note 的一部分。
+# 断言要验的是"约束在不在、片段开头对不对"，所以先把边界标记剥掉再判；
+# 同时单独断言"确实包上了"，否则哪天包装被删掉，这里会安静地一直绿。
+_MARKS = ("【资料开始", "【资料结束")
+
+
+def _unwrapped(s: str) -> str:
+    """去掉来源边界标记，只留正文；用于验证片段内容本身。"""
+    keep = [ln for ln in s.splitlines() if not ln.startswith(_MARKS)]
+    return "\n".join(keep)
+
+
 def cfg(owner: str = "u_gnd", kb_id: str = "kb_gnd"):
     return {"configurable": {"thread_id": "s", "owner_id": owner, "kb_id": kb_id}}
 
@@ -126,7 +139,8 @@ try:
     r = kb_search.invoke({"query": "苞米是什么"}, config=cfg())
     check("high 档 grounding_note 为空", grounding_note(assess_grounding(HIGH)) == "", "")
     check("强检索不吐【必须遵守】", "必须遵守" not in r, r[:60])
-    check("强检索直接返回片段（[1] 角标开头）", r.lstrip().startswith("**[1]**"), r[:60])
+    check("强检索直接返回片段（[1] 角标开头）", _unwrapped(r).lstrip().startswith("**[1]**"), r[:60])
+    check("片段被包进来源边界（注入防线）", r.lstrip().startswith("【资料开始"), r[:60])
 finally:
     _restore(saved)
 
@@ -137,7 +151,7 @@ saved = _install_stub(LOW)
 try:
     r = kb_search.invoke({"query": "量子纠缠是什么"}, config=cfg())
     check("关开关后 low 档不吐【必须遵守】", "必须遵守" not in r, r[:60])
-    check("关开关后 low 档直接返回片段", r.lstrip().startswith("**[1]**"), r[:60])
+    check("关开关后 low 档直接返回片段", _unwrapped(r).lstrip().startswith("**[1]**"), r[:60])
 finally:
     _restore(saved)
     core.config.GROUNDING_NOTICE = saved_notice
@@ -147,5 +161,21 @@ print(f"\n通过 {len(PASS)} 项，失败 {len(FAIL)} 项")
 if FAIL:
     for f in FAIL:
         print("  FAILED:", f)
-    sys.exit(1)
-print("全部通过")
+else:
+    print("全部通过")
+
+
+def test_grounding_script_all_passed():
+    """给 pytest 一个能正常报错的入口。
+
+    这个文件是脚本式写法，断言在导入期就跑。原先结尾直接 `sys.exit(1)`：
+    pytest 收集到这一行会抛 SystemExit，结果是 **INTERNALERROR、整套测试
+    一条结果都不产出**（退出码 3），而不是"这一条红"。也就是说这是真
+    回归时最坏的失败姿势——看着像环境炸了，实际是某个档位错了。
+    这里把失败转成普通断言，`sys.exit` 只在直接运行脚本时用。
+    """
+    assert not FAIL, "kb_search 的 grounding 行为回归：" + "；".join(FAIL)
+
+
+if __name__ == "__main__":
+    sys.exit(1 if FAIL else 0)
