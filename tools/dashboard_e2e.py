@@ -80,6 +80,13 @@ def _seed_admin(db: str, username: str, password: str) -> None:
     try:
         from core import account, session
 
+        # 兜底：确认"换库"真的生效了。万一 AGENT_HUB_DB 没被读到，下面这行
+        # create_user 会往**真实**的 data/sessions.db 写一个固定口令的账号。
+        # 宁可整脚本失败，也不要往真实库里留测试账号。
+        actual = session._db_path()
+        if Path(actual).resolve() != Path(db).resolve():
+            raise SystemExit(f"AGENT_HUB_DB 未生效（实际库 {actual}），已中止以免污染真实库")
+
         session._init_db()
         account._ensure_tables(force=True)
         try:
