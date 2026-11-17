@@ -332,6 +332,41 @@ function mdOf(ts: number): string {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
+/**
+ * 这个时刻有没有「钟点」。
+ *
+ * 00:00 与 23:59 是**只说了哪天**时的占位（见上面 `dueStamp` 的兜底与 quickParse），
+ * 不是用户说的钟点。把它们当钟点显示，列表上每条只写了日期的待办都会多出一行
+ * 「23:59 截止」—— 用户会以为那都是自己定的时间。真正的 23:59 极少，认了这一头
+ * 的歧义，换来的是普通待办不撒谎。
+ */
+function clockOf(ts: number): string | null {
+  const d = new Date(toMs(ts));
+  const h = d.getHours();
+  const m = d.getMinutes();
+  if ((h === 0 && m === 0) || (h === 23 && m === 59)) return null;
+  return fmtHM(d);
+}
+
+/**
+ * 待办最左那一列要写的两行：**哪天 / 几点**。
+ *
+ * ★ 「明天」单独一行是不够的：用户在对话里说的是「明早 8 点起床」，列表只回一个
+ *   「明天」，他会以为时间丢了（也确实丢过 —— 2026-11-17 实机反馈）。
+ * ★ 只写两行是**排版上的硬限制**：这一列在 390 下只有 40px，「08:00 提醒」放不下，
+ *   硬塞会让它折成三行、并把最后一行挤到和副标题同一高度，读起来像"生活·提醒"。
+ *   所以「会不会响」交给副标题说（「会提醒 / 不提醒」），钟点留在这里。
+ * ★ 有提醒时间就以提醒时刻为准（那才是会响的时刻）。
+ */
+function taskWhen(task: Task, now: number | null): { main: string; small: string } {
+  const pivot = task.remind_at ?? task.due_at;
+  if (pivot === null) return { main: "—", small: "无日期" };
+  const day = shortDay(pivot, now ?? toMs(pivot));
+  const clock = clockOf(pivot);
+  // 没有钟点时才用文字说明这一列是什么时间 —— 有钟点时它自己就说明白了
+  return { main: day, small: clock ?? (task.remind_at ? "提醒" : "截止") };
+}
+
 /** 剩余天数（向上取整）。用「还有 3 天」而不是「72 小时」，倒计时才像倒计时 */
 function daysLeft(ts: number, now: number): number {
   return Math.ceil((toMs(ts) - now) / 86_400_000);
@@ -822,32 +857,42 @@ function TaskCard({
   // 选择模式下这一格表达的是「选中」，不是「完成」——所以视觉要换形状
   // （方形 vs 圆形），否则用户会把「勾选」当成「做完了」。
   const checked = pick ? picked : done;
-  // 时间列：有提醒时间就显示它（那才是「会响」的时刻），否则显示截止日
-  const when = task.remind_at
-    ? { main: fmtHM(toMs(task.remind_at)), small: "提醒" }
-    : task.due_at
-      ? { main: shortDay(task.due_at, now ?? toMs(task.due_at)), small: "截止" }
-      : { main: "—", small: "无日期" };
+  // 时间列：上排「哪天」，下排「几点 + 这是提醒还是截止」。
+  // 只写「明天」会把用户说过的 08:00 吃掉，只写「08:00」又看不出哪一天 ——
+  // 两排各管一件事，见 `taskWhen`。
+  const when = taskWhen(task, now);
 
   // 截止日期在副标题里**只在两种情况下出现**，其余交给最左边的时间列：
   //   ① 已逾期 —— 时间列显示的是「今天/截止」，说不出"晚了两天"；
-  //   ② 设了提醒 —— 时间列这时显示的是提醒时刻，截止日就没地方写了。
+  //   ② 设了提醒、且提醒与截止**不是同一个时刻** —— 时间列这时只写得出提醒，
+  //      截止日就没地方写了。两者同一时刻（「明早 8 点起床」这种）不再写，
+  //      写出来是同一个时间说两遍，挤掉的正好是下一句「会提醒」。
   // 没设提醒又没过期的不写：时间列本来就是「今天 / 截止」，再写一遍
   // 只会把「不提醒」挤成省略号（390 下量过，主内容只有 172px）。
   const overdue =
     task.due_at !== null && now !== null && toMs(task.due_at as number) < now;
+  const sameMoment =
+    task.due_at !== null && task.remind_at !== null && task.due_at === task.remind_at;
   const dueText = task.due_at
     ? overdue
       ? `逾期 ${Math.max(1, Math.ceil((now - toMs(task.due_at)) / 86_400_000))} 天`
-      : task.remind_at
+      : task.remind_at && !sameMoment
         ? `${shortDay(task.due_at, now ?? toMs(task.due_at))} 截止`
         : ""
     : "";
-  // ★ 「不提醒」只在这种情况出现：有截止日期但没设提醒 —— 这是最容易误会的
-  //   组合（用户以为"到点会响"）。设了提醒的不再重复写「提醒 22:00」，
-  //   时间列已经把它顶在最左边了，重复一遍只会把「不提醒」挤进省略号。
-  const remindText = !task.remind_at && task.due_at ? "不提醒" : "";
+  // ★ 「会提醒 / 不提醒」是这一行唯一回答「到点会不会响」的地方，而它必须一直有：
+  //   · 不提醒：有截止日期但没设提醒 —— 最容易误会的组合（用户以为"到点会响"）；
+  //   · 会提醒：设了提醒的，时间列只写得出「08:00」，不会响这件事还得有个人说。
+  //   已经响过一条（`state` 有值）就不再写：那时「已提醒 / 没提醒 · 免打扰」
+  //   本身已经把结果说了，两个词并排只会互相打架。
   const state = done ? null : remindState(task);
+  const remindText = state
+    ? ""
+    : task.remind_at
+      ? "会提醒"
+      : task.due_at
+        ? "不提醒"
+        : "";
 
   const run = (fn: () => void) => () => {
     setOpen(false);
@@ -961,8 +1006,15 @@ function TaskCard({
               这一行里唯一"不做就会误事"的信息，所以还要给警示色。
               ★ 它同时是**入口**：点一下直接打开抽屉（提醒区已在第一屏），
                 否则用户看到「不提醒」三个字也没有任何下一步可做 ——
-                那三个字就只是抱怨，不是功能。 */}
-          {remindText ? (
+                那三个字就只是抱怨，不是功能。
+              ★ 「会提醒」不给警示色、也不是按钮：它说的是"已经设好了"，
+                再做成可点会让人以为点一下才生效。 */}
+          {remindText === "会提醒" ? (
+            <span className="rem-state" data-tone="muted">
+              {" "}
+              · {remindText}
+            </span>
+          ) : remindText ? (
             <button
               type="button"
               className="rem-state rem-state-btn"
@@ -1226,6 +1278,38 @@ function freqText(item: ReminderItem): string {
   return "每天";
 }
 
+/**
+ * 提醒卡该挂什么图标。按 `source` 给，**不按标题猜**：
+ * 用户改个标题不该让卡片的身份变来变去。
+ *
+ * 与 CornIcon 现有形状对齐：课表=日历、打卡=对勾、委托=公文包、四六级=地球仪。
+ * 认不出的来源一律回落到铃铛 —— 提醒的身份本来就是"到点响一声"。
+ */
+function eventMark(source: string): CornIconName {
+  switch (source) {
+    case "timetable":
+      return "calendar";
+    case "checkin":
+      return "check";
+    case "delegate":
+      return "briefcase";
+    case "cet":
+      return "globe";
+    case "words":
+      return "book";
+    case "focus":
+      return "clock";
+    case "system":
+      return "notes";
+    case "deadline":
+      return "task";
+    case "manual":
+      return "bell";
+    default:
+      return "bell";
+  }
+}
+
 /** 流水状态 → 两个字的短标签（卡片上没地方写整句） */
 function fireShort(f: ReminderFire): string {
   if (f.status === "sent") return "已提醒";
@@ -1298,16 +1382,25 @@ function ReminderCard({
       </div>
 
       <div className="rem-main">
-        {/* 标题本身就是最高频的入口（改这条）。它比在卡片底下挂一排 11px
-            灰字可点得多，也把「每张卡 4 个可点」压到 2 个。 */}
-        <button
-          type="button"
-          className="rem-title"
-          onClick={() => onEdit(item)}
-          title="改时间或标题"
-        >
-          {item.title}
-        </button>
+        {/* 图标从「任务卡有、提醒卡没有」补齐（2026-11-17）：同一个列表里
+            两类卡片长得不一样，用户会以为下面那半屏是另一种东西。图标按来源给，
+            不再由用户挑 —— 提醒是别处派来的，它的长相该说明"谁在管这条"。
+            ★ 它是装饰，不是按钮：这一行的可点处仍然只有标题和「⋯」两个。 */}
+        <div className="rem-head">
+          <span className="rem-mark" aria-hidden="true">
+            <CornIcon name={eventMark(item.source)} className="h-full w-full" />
+          </span>
+          {/* 标题本身就是最高频的入口（改这条）。它比在卡片底下挂一排 11px
+              灰字可点得多，也把「每张卡 4 个可点」压到 2 个。 */}
+          <button
+            type="button"
+            className="rem-title"
+            onClick={() => onEdit(item)}
+            title="改时间或标题"
+          >
+            {item.title}
+          </button>
+        </div>
         <p className="rem-meta">
           <b>{sourceLabel}</b>
           <span> · {ACTION_LABEL[item.action] || item.action}</span>

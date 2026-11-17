@@ -207,6 +207,105 @@ def _to_ts(value: Any, now: int) -> int | None:
     return ts
 
 
+# ---------------------------------------------------------------- 原话里的钟点
+#
+# 「明早 8 点起床」和「明天交作业」在原话层面是两件事：
+#   · 前者给了**具体钟点**，那个时刻就是用户要被打扰的时刻；
+#   · 后者只给了哪天，八点还是十点没人知道。
+# 模型把两者都折成了 due_at，而且"只有日期"的那些常常落在 00:00 / 23:59 ——
+# 于是待办列表只剩「明天」，联动提醒压根没建，到点也不会响（2026-11-17 实机反馈）。
+#
+# 所以这里自己认一遍钟点（不依赖模型），只用来做两件事：
+#   1. 模型把时间折成 00:00/23:59 时，用原话里的钟点补回去；
+#   2. 认定"这条说了钟点"是自动补 remind_at 的前提。
+# 判据是**原话**而不是模型给的字段：模型漏说、多说都不该改变用户承诺过什么。
+_SENTINEL_HM = ((0, 0), (23, 59))  # 只表示"哪天"的两档占位时刻
+
+_CN_DIGITS = {
+    "零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3,
+    "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9,
+}
+
+# 「8 点半」「八点一刻」「9点15分」；前面是「第/这/那」时不算（"第 3 点"是条目序号）
+_CN_CLOCK_RE = re.compile(
+    r"(?<![第这那\d])([零〇一二两三四五六七八九十]{1,3}|\d{1,2})\s*点\s*(半|一刻|三刻|\d{1,2}\s*分)?"
+)
+# 「8:00」「20：30」（中文冒号也认）
+_DIGIT_CLOCK_RE = re.compile(r"(?<!\d)(\d{1,2})\s*[:：]\s*(\d{2})(?!\d)")
+
+_PERIOD_AFTERNOON = ("下午", "傍晚", "晚上", "夜里", "夜间", "今晚", "明晚", "晚")
+_PERIOD_NOON = ("中午",)
+_PERIOD_NIGHT = ("凌晨", "半夜", "深夜")
+
+
+def _cn_int(raw: str) -> int | None:
+    """「八」「十二」「二十三」→ 数字。只到 24，够用了。"""
+    if not raw:
+        return None
+    if raw.isdigit():
+        return int(raw)
+    if raw in _CN_DIGITS:
+        return _CN_DIGITS[raw]
+    if raw == "十":
+        return 10
+    if raw.startswith("十") and len(raw) == 2:
+        d = _CN_DIGITS.get(raw[1])
+        return 10 + d if d is not None else None
+    if len(raw) == 3 and raw[1] == "十":
+        a, b = _CN_DIGITS.get(raw[0]), _CN_DIGITS.get(raw[2])
+        return a * 10 + b if a is not None and b is not None else None
+    return None
+
+
+def _apply_period(text: str, pos: int, hour: int) -> int:
+    """「下午三点」的「下午」在匹配位置**之前**，所以往前看三个字。"""
+    before = text[max(0, pos - 3) : pos]
+    if any(w in before for w in _PERIOD_NOON):
+        return hour + 12 if hour < 11 else hour
+    if any(w in before for w in _PERIOD_AFTERNOON):
+        return hour + 12 if hour < 12 else hour
+    if any(w in before for w in _PERIOD_NIGHT):
+        return 0 if hour == 12 else hour
+    return hour
+
+
+def _clock_in(text: str) -> tuple[int, int] | None:
+    """原话里的具体钟点 → (时, 分)。只说了「明天/周五」这类返回 None。"""
+    if not text:
+        return None
+    m = _DIGIT_CLOCK_RE.search(text)
+    if m:
+        hour, minute = int(m.group(1)), int(m.group(2))
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            return None
+        return _apply_period(text, m.start(), hour), minute
+    m = _CN_CLOCK_RE.search(text)
+    if not m:
+        return None
+    hour = _cn_int(m.group(1))
+    if hour is None or not (0 <= hour <= 23):
+        return None
+    tail = (m.group(2) or "").strip()
+    minute = {"半": 30, "一刻": 15, "三刻": 45}.get(tail, 0)
+    if tail and tail not in ("半", "一刻", "三刻"):
+        digits = re.match(r"(\d{1,2})", tail)
+        minute = int(digits.group(1)) if digits else 0
+    if not (0 <= minute <= 59):
+        return None
+    return _apply_period(text, m.start(), hour), minute
+
+
+def _hm(ts: int) -> tuple[int, int]:
+    d = datetime.fromtimestamp(int(ts), timeutil.TZ)
+    return d.hour, d.minute
+
+
+def _with_clock(ts: int, clock: tuple[int, int]) -> int:
+    """把某天的时刻换成 clock（同一本地日期，秒归零）。"""
+    d = datetime.fromtimestamp(int(ts), timeutil.TZ)
+    return int(d.replace(hour=clock[0], minute=clock[1], second=0, microsecond=0).timestamp())
+
+
 def _now_human(now: int) -> str:
     d = datetime.fromtimestamp(now, timeutil.TZ)
     return (
@@ -222,7 +321,9 @@ SYSTEM_PROMPT = """你在把用户随口说的一段话整理成待办和提醒�
 2. 时间写成 "YYYY-MM-DD HH:MM"（本地时间）。只有确实没提时间、或没法确定时才写 null。
    绝不要自己编一个时间凑数。
 3. 用户说"明天/周五/下周/下午三点"时，按我给的出现时间和星期几推算。
-4. 只有明确说了"提醒我 / 叫我 / 记得"才填 remind_at。不要把 due_at 抄成 remind_at。
+4. 待办里**说了具体钟点**（"明早 8 点""20:30"）时，remind_at 填成和 due_at 同一个时刻 ——
+   用户说几点，就是要几点被提醒；只说了"明天/周五"这类没有钟点的日期，remind_at 一律 null，
+   不要自己编一个时刻出来。原话里有"提醒我 / 叫我 / 记得"时，即使没说钟点也要填 remind_at。
 5. "每天/每周/工作日/每小时"这类周期放进 recurrence，不要塞进 due_at。
 6. **"task" 是默认值**：凡是"做完能打勾"的事一律用它 —— 交作业、写论文、报名、取快递、
    起床、吃早饭、买菜、收拾房间、给谁回电话。
@@ -329,6 +430,27 @@ def _to_proposal(item: RawItem, text: str, now: int, cursor: int) -> tuple[dict,
         kind = "reminder"
     due_at = _to_ts(item.due_at, now)
     remind_at = _to_ts(item.remind_at, now)
+
+    # 原话里说了钟点 → 那个时刻要响（见 `_clock_in` 上方那段）。三条都只对 task 做：
+    # reminder 自己的 fire_at 已经按 freq 算好了，再改会和规则打架。
+    if kind == "task":
+        clock = _clock_in(item.source_text)
+        if clock is not None:
+            # ① 模型把时间折成 00:00 / 23:59（只当"哪天"用）→ 用原话的钟点补回去。
+            #    补出来已经过去的就不动：宁可显示原样，也别把昨天 8 点说成今天 8 点。
+            if due_at is not None and _hm(due_at) in _SENTINEL_HM:
+                fixed = _with_clock(due_at, clock)
+                if fixed > now:
+                    due_at = fixed
+            elif remind_at is not None and _hm(remind_at) in _SENTINEL_HM:
+                fixed = _with_clock(remind_at, clock)
+                if fixed > now:
+                    remind_at = fixed
+            # ② 说了钟点 = 那个点要被打扰。**只设截止不会响**（不变量 #1）说的是
+            #    "只有日期"那一种 —— 用户明说 8 点，到点静悄悄过去才是失信。
+            #    ①跑完之后 due_at 已经是用户说的那个钟点，不用再判占位。
+            if remind_at is None and due_at is not None and due_at > now:
+                remind_at = due_at
 
     recurrence: dict | None = None
     if kind == "reminder" and item.recurrence is not None:

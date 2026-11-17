@@ -97,12 +97,57 @@ _READY: set[str] = set()
 # 一旦哪边漏了一个，新旧库的列就对不上，而这种差异平时完全看不出来。
 # 写法照 `service/daily.py` 给 delegations 补 last_error 那一套（幂等）。
 _EXTRA_COLUMNS: dict[str, str] = {
-    # 开发者给这条反馈的回复。空串 = 还没回。
-    # 存在反馈行上而不是单开一张 replies 表：一个工单一次正式回复就够了，
-    # 多轮对话式的来回是"客服系统"的形态，这里不是。
+    # 【2026-11-17 起废弃】原来这里存"唯一一条、可反复改写"的回复。
+    #
+    # 加进第二个管理员之后这个模型就塌了：两个人共用同一格，后写的覆盖先写的，
+    # 谁写的看不出来，而且谁都能改对方的话。现在回复是**追加式线程**，落在
+    # `user_feedback_replies` 表里，每条带作者、发出即定稿（`add_reply`）。
+    #
+    # 这两列只为老库兼容保留：写路径不再碰它们，读取时 `reply` / `replied_at`
+    # 由最新一条回复合成（见 `_attach_replies`），老前端不改也能跑。
     "reply": "TEXT NOT NULL DEFAULT ''",
     "replied_at": "INTEGER",
 }
+
+# 一条回复 = 一次发言，不覆盖、不编辑。`admin_uid` 存下来是为了两件事：
+#   1. 后台能认出"这条是我发的"（同一个人可能有多条）
+#   2. 用户侧显示"是谁回的我"——用户明确要求看得到是哪个管理员
+# 名字另存一份（不 JOIN users）：管理员改名之后，历史回复应当保留当时的署名，
+# 而不是整串历史跟着变成新名字。
+_REPLIES_DDL = """
+    CREATE TABLE IF NOT EXISTS user_feedback_replies (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        fid        INTEGER NOT NULL,
+        admin_uid  TEXT NOT NULL DEFAULT '',
+        admin_name TEXT NOT NULL DEFAULT '',
+        content    TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ufr_fid ON user_feedback_replies(fid, id);
+"""
+
+
+def _migrate_legacy_replies(conn) -> None:
+    """把老库里那条 `reply` 搬进新表（幂等）。
+
+    用 `INSERT ... SELECT ... WHERE NOT EXISTS` 一条语句完成"查重 + 插入"：
+    分两步查再插，在多进程同时冷启动时会各插一条，同一条回复在用户侧显示两遍。
+
+    作者留空：老数据没记是谁回的，编一个名字比留空更糟 —— 前端对空作者显示
+    「管理员」，那是实话。
+    """
+    conn.execute(
+        """
+        INSERT INTO user_feedback_replies (fid, admin_uid, admin_name, content, created_at)
+        SELECT id, '', '', reply, COALESCE(replied_at, updated_at, created_at, 0)
+          FROM user_feedback
+         WHERE reply IS NOT NULL AND TRIM(reply) <> ''
+           AND NOT EXISTS (
+                 SELECT 1 FROM user_feedback_replies r
+                  WHERE r.fid = user_feedback.id AND r.content = user_feedback.reply
+               )
+        """
+    )
 
 
 def _migrate_columns(conn) -> None:
@@ -140,6 +185,8 @@ def ensure() -> None:
             CREATE INDEX IF NOT EXISTS idx_uf_created ON user_feedback(created_at DESC);
         """)
         _migrate_columns(conn)
+        conn.executescript(_REPLIES_DDL)
+        _migrate_legacy_replies(conn)
     _READY.add(path)
 
 
@@ -206,8 +253,16 @@ def set_status(fid: int, status: str) -> tuple[bool, str]:
             (status, int(time.time()), fid),
         )
         return True, ""
-def set_reply(fid: int, reply: str) -> tuple[bool, str]:
-    """给一条反馈写回复。返回 (成功, 失败原因)。
+def add_reply(
+    fid: int, admin_uid: str, admin_name: str, reply: str
+) -> tuple[bool, str]:
+    """给一条反馈**追加**一条回复。返回 (成功, 失败原因)。
+
+    ★ 为什么只能追加、不能改也不能撤（2026-11-17 用户定）：
+      加了第二个管理员之后，后台是多人共用的。原来的"一格回复、人人可改"
+      会让后一个人静默覆盖前一个人的话，也看不出是谁说的。用户的要求是
+      「自己发的回复不能被修改，别人只能在我的回复下面增加」—— 所以这里
+      只有 INSERT，没有 UPDATE：说错了就再补一条更正，历史留着。
 
     ★ 为什么回复要顺手改状态：站在提意见的人那边，"有人回我了"就是他判断
       "这条被处理了"的全部依据。回复完状态还停在「待处理」，用户下次打开
@@ -219,11 +274,13 @@ def set_reply(fid: int, reply: str) -> tuple[bool, str]:
         · open   → 顺手推到 doing（表示"已接手并答复"）
         · 其它状态 → 原样不动（done/closed 已经有结论，不该被回复改写）
 
-    清空回复（传空串）是合法的：回错了要能撤回，撤回后状态不回退
-    （状态流转本身不允许回退，见 `_TRANSITIONS` 的注释）。
+    ★ 空文本拒绝（老接口里空串 = 撤回）。不可撤回之后，"发一条空白"既不会
+      出现在用户侧、又会在后台占一行，是纯粹的数据噪声。
     """
     ensure()
     text = (reply or "").strip()
+    if not text:
+        return False, "回复不能为空"
     if len(text) > MAX_REPLY:
         return False, f"回复太长，最多 {MAX_REPLY} 个字"
 
@@ -235,16 +292,67 @@ def set_reply(fid: int, reply: str) -> tuple[bool, str]:
             return False, f"反馈不存在：{fid}"
         old = str(row["status"])
         now = int(time.time())
-        new_status = "doing" if old == "open" and text else old
         conn.execute(
-            "UPDATE user_feedback SET reply = ?, replied_at = ?, status = ?, updated_at = ? "
-            "WHERE id = ?",
-            (text, now if text else None, new_status, now, fid),
+            "INSERT INTO user_feedback_replies "
+            "(fid, admin_uid, admin_name, content, created_at) VALUES (?, ?, ?, ?, ?)",
+            (fid, (admin_uid or "")[:64], (admin_name or "")[:64], text, now),
+        )
+        # 状态与 updated_at 一起推进：列表按 updated_at 排，回完话不动它，
+        # 这条工单会沉到列表底部，"刚回过"的反而看不见
+        conn.execute(
+            "UPDATE user_feedback SET status = ?, updated_at = ? WHERE id = ?",
+            ("doing" if old == "open" else old, now, fid),
         )
         return True, ""
 
 
 # ==================== 读 ====================
+
+def _replies_of(conn, fids: list[int]) -> dict[int, list[dict]]:
+    """一次查出这一批反馈的全部回复，按 fid 分桶。
+
+    不做"每行再查一次"（N+1）：后台一页 200 条会打 200 次库，而这个函数
+    要跑在 `to_thread` 里、每次刷新都跑。`IN (...)` 的上限是 SQLite 的
+    999 个变量，`list_all` 的 limit 封顶 200，够用。
+    """
+    out: dict[int, list[dict]] = {f: [] for f in fids}
+    if not fids:
+        return out
+    holes = ",".join(["?"] * len(fids))
+    rows = conn.execute(
+        "SELECT * FROM user_feedback_replies "
+        f"WHERE fid IN ({holes}) ORDER BY id ASC",
+        fids,
+    ).fetchall()
+    for r in rows:
+        out[int(r["fid"])].append(
+            {
+                "id": int(r["id"]),
+                "admin_uid": str(r["admin_uid"] or ""),
+                "admin_name": str(r["admin_name"] or ""),
+                "content": str(r["content"] or ""),
+                "created_at": int(r["created_at"] or 0),
+            }
+        )
+    return out
+
+
+def _attach_replies(conn, items: list[dict]) -> list[dict]:
+    """给每条反馈挂上 `replies`，并把 `reply` / `replied_at` 合成成**最新一条**。
+
+    兼容别名不是历史包袱，是刻意的：用户侧「我提过的」在旧版本里只认
+    `reply` 一个字符串，线上正在跑的包还在用。让两个字段同时成立，
+    发版顺序就不用绑死（后端先上、前端后上也不会出现"回了但用户看不到"）。
+    """
+    bucket = _replies_of(conn, [it["id"] for it in items])
+    for it in items:
+        reps = bucket.get(it["id"], [])
+        it["replies"] = reps
+        last = reps[-1] if reps else None
+        it["reply"] = last["content"] if last else ""
+        it["replied_at"] = last["created_at"] if last else None
+    return items
+
 
 def get(fid: int) -> dict | None:
     """按 id 取一条（管理员回复后回读用：回复可能顺手改了状态，
@@ -254,7 +362,9 @@ def get(fid: int) -> dict | None:
 
     with store._get_conn() as conn:  # noqa: SLF001
         row = conn.execute("SELECT * FROM user_feedback WHERE id = ?", (fid,)).fetchone()
-    return _row(row) if row else None
+        if not row:
+            return None
+        return _attach_replies(conn, [_row(row)])[0]
 
 
 def list_mine(uid: str, limit: int = 20, offset: int = 0) -> tuple[list[dict], int]:
@@ -273,7 +383,8 @@ def list_mine(uid: str, limit: int = 20, offset: int = 0) -> tuple[list[dict], i
             "ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
             (uid, limit, offset),
         ).fetchall()
-    return [_row(r) for r in rows], int(total)
+        items = _attach_replies(conn, [_row(r) for r in rows])
+    return items, int(total)
 
 
 def list_all(
@@ -297,7 +408,8 @@ def list_all(
             "ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
             [*args, limit, offset],
         ).fetchall()
-    return [_row(r) for r in rows], int(total)
+        items = _attach_replies(conn, [_row(r) for r in rows])
+    return items, int(total)
 
 
 def counts() -> dict:

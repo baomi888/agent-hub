@@ -1066,6 +1066,17 @@ export interface FailuresResp {
   range: { days: number; start: number; end: number };
 }
 
+/** 一条反馈回复。发出即定稿：没有编辑接口，说错了只能再追加一条更正。 */
+export interface FeedbackReply {
+  id: number;
+  /** 发这条回复的管理员 uid；从老库迁移过来的那条为空串 */
+  admin_uid: string;
+  /** 署名（昵称优先，回退用户名）；空串表示老数据，界面上显示「管理员」 */
+  admin_name: string;
+  content: string;
+  created_at: number;
+}
+
 export interface UserFeedbackItem {
   id: number;
   uid: string;
@@ -1079,9 +1090,12 @@ export interface UserFeedbackItem {
   status_label: string;
   created_at: number;
   updated_at: number;
-  /** 开发者回复。空串 = 还没回。用户侧「我提过的」靠它显示 */
+  /** 全部回复，按时间正序（最早的在前）。多条 = 不同管理员先后追加的 */
+  replies: FeedbackReply[];
+  /** 最新一条回复的内容。空串 = 还没回过。
+   *  ★ 兼容字段：后端由 `replies` 合成，只读；旧版本前端还在用它 */
   reply: string;
-  /** 回复时间；没回过就是 null */
+  /** 最新一条回复的时间；没回过就是 null（同样是兼容字段） */
   replied_at: number | null;
 }
 

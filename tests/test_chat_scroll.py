@@ -102,3 +102,87 @@ def test_scroll_container_has_a_stable_hook():
     """
     src = _code()
     assert re.search(r'className="chat-scroll[ "]', src), "滚动容器没有稳定类名 chat-scroll"
+
+
+# ---------------- 内容自己长高之后继续贴底（2026-11-18） ----------------
+#
+# 用户报的现象：「从外部入口强制刷新进主界面，会停在中间某条历史对话上」。
+#
+# 实测（390×844，线上 164 条的会话，探针每 250ms 采一次）：
+#   t=4062ms  历史落地，settleScroll 把 scrollTop 设成 79319（= scrollHeight 79952 - 633）
+#   t=4326ms  自托管字体换上来，scrollHeight 变 82405 —— scrollTop 一动不动
+#   t=12652ms 字体全部 loaded，scrollHeight 82028/81754，scrollTop 仍是 79319
+# 离末尾 1802px。落点本身是对的，错在**只落一次**：字体 swap 引起的重排
+# 没有任何人负责，`settleScroll` 只跟着「首条消息换了」跑。
+#
+# 修法是一条 ResizeObserver：内容容器尺寸变了就再贴一次底。下面四条守的就是
+# 「什么时候可以贴」——贴得太积极会毁掉流式跟随，也会把正在翻历史的用户拽回去。
+
+BUBBLE = ROOT / "frontend" / "src" / "components" / "chat" / "Bubble.tsx"
+
+
+def _ro_body(src: str) -> str:
+    """截出那条 ResizeObserver effect 的回调体。
+
+    ★ 前面（尾部留白那条 effect）已经有一个 `new ResizeObserver(apply)`，
+      按 `new ResizeObserver` 找会命中它，截出来的是一大段无关代码 ——
+      于是"守卫在贴底之前"这种顺序断言会拿错误的下标去比（本轮实测 3 条红）。
+      用带回调签名的那个前缀定位。
+    """
+    head = "const ro = new ResizeObserver(() =>"
+    assert head in src, "没有 ResizeObserver：字体换上来之后就没人管落点了"
+    start = src.index(head)
+    end = src.index("}, [settleScroll]);", start)
+    return src[start:end]
+
+
+def test_content_growth_repins_to_bottom():
+    """内容长高之后必须重新落到底部，而且用的是「直接落位」而不是动画。"""
+    body = _ro_body(_code())
+    assert "settleScroll(el, el.scrollHeight)" in body, "内容长高了没有重新贴底"
+    assert "programScroll(" not in body, (
+        "用 programScroll 会在字体换上来那一刻播一次动画 —— 那正是用户说的『极强的滑动』"
+    )
+    assert "ro.observe(inner)" in body, (
+        "观察的不是内容容器：滚动容器的盒子尺寸不随内容变，observe(el) 等于没装"
+    )
+    assert "ro.disconnect()" in body, "没在卸载时断开：换会话会留下一个盯旧节点的 observer"
+    # 贴回底部之后「回到最新」按钮必须收掉：它只在 onScroll 里更新，
+    # 而程序滚会被 onScroll 认领后直接 return（实测截图里按钮挂在最底下）。
+    assert "setAtBottom(true)" in body, "贴回底部后没有把「回到最新」收掉"
+
+
+def test_repin_yields_to_manual_history_reading():
+    """用户自己上滚了就不许拽回来 —— 这是「不影响手动看历史」的守卫。"""
+    body = _ro_body(_code())
+    guard = body.index("stickRef.current")
+    land = body.index("settleScroll(el, el.scrollHeight)")
+    assert guard < land, "stickRef 判断写在贴底之后，等于没判"
+    assert re.search(r"if \(!stickRef\.current\) return;", body), (
+        "守卫不是早退：上滚的用户会被每一次重排拽回底部"
+    )
+
+
+def test_repin_skips_while_streaming():
+    """流式期间交给锚定/跟随，这里不许插手；并且那条 DOM 标记必须还在。"""
+    body = _ro_body(_code())
+    land = body.index("settleScroll(el, el.scrollHeight)")
+    m = body.find('data-streaming="true"')
+    assert m >= 0, "没有按 DOM 标记跳过流式"
+    assert m < land, "流式判断写在贴底之后：每来一行字都会和锚定抢 scrollTop"
+
+    # 跨文件守卫：`data-streaming` 是这条早退的唯一依据，Bubble 不再渲染它
+    # 就等于这条守卫永远不成立（测试仍绿，线上却和锚定打架）。
+    bubble = BUBBLE.read_text(encoding="utf-8")
+    assert 'data-streaming={m.streaming && !!m.content ? "true" : undefined}' in bubble, (
+        "Bubble 不再输出 data-streaming=\"true\"：流式期间贴底的守卫失效了"
+    )
+
+
+def test_repin_skips_empty_state():
+    """欢迎页比一屏高，贴底会把标题顶出视口（老注释里已经踩过）。"""
+    body = _ro_body(_code())
+    land = body.index("settleScroll(el, el.scrollHeight)")
+    m = body.find('querySelector("[data-mid]")')
+    assert m >= 0, "没有按 [data-mid] 排除空态"
+    assert m < land, "空态判断写在贴底之后：欢迎页会被拽到底部"

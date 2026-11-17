@@ -212,16 +212,20 @@ export default function FeedbackCard({
                 <span className={`ctag ${STATUS_CLASS[it.status] ?? ""}`}>{it.status_label}</span>
               </div>
               {/* 开发者回复：这是用户判断"我提的有没有人管"的唯一凭据，
-                  所以给它比"状态标签"更显眼的位置，而不是再塞进一行小字 */}
-              {it.reply ? (
-                <div className="fb-reply">
-                  <div className="fb-reply-head">
-                    开发者回复
-                    {it.replied_at ? ` · ${fmtTime(it.replied_at)}` : ""}
-                  </div>
-                  <div className="fb-reply-body">{it.reply}</div>
-                </div>
-              ) : null}
+                  所以给它比"状态标签"更显眼的位置，而不是再塞进一行小字。
+                  多条 = 不同管理员先后跟进的，按时间排，每条署上回复人的名字
+                  （用户明确要求看得到是谁回的）。 */}
+              {(it.replies ?? []).length > 0
+                ? (it.replies ?? []).map((r) => (
+                    <div className="fb-reply" key={r.id}>
+                      <div className="fb-reply-head">
+                        {r.admin_name || "管理员"} 回复
+                        {r.created_at ? ` · ${fmtTime(r.created_at)}` : ""}
+                      </div>
+                      <div className="fb-reply-body">{r.content}</div>
+                    </div>
+                  ))
+                : null}
             </div>
           ))}
         </>

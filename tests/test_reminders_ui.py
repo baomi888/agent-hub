@@ -1385,8 +1385,13 @@ class TestCopySpeaksUserLanguage:
         """
         page = _page()
         assert "设了提醒时间，到时会通知你" not in page, "副标题回来了？页头已清账"
-        assert 'small: "提醒"' in page, "时间列不再标「提醒」了 —— 哪些会响又没处说了"
+        # 2026-11-17：时间列改成「哪天 / 几点」，会不会响由副标题的
+        # 「会提醒 / 不提醒」回答 —— 钉行为，别钉写法（硬约束 53）。
+        assert 'small: clock ?? (task.remind_at ? "提醒" : "截止")' in page, (
+            "时间列不再写钟点了 —— 用户说过的 08:00 又被咽掉了"
+        )
         assert '"不提醒"' in page, "有截止日没设提醒的那条不再标「不提醒」，用户会以为会响"
+        assert '"会提醒"' in page, "设了提醒的那条没有正面说法，用户分不清会不会响"
 
     def test_context_line_counts_todos_not_pieces(self):
         """待办论「条」，不论「件」。"""

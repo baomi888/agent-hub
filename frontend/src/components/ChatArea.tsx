@@ -595,6 +595,40 @@ export default function ChatArea({
     if (el) settleScroll(el, el.scrollHeight);
   }, [firstId, settleScroll]);
 
+  // 内容**自己**长高之后继续贴底（2026-11-18）
+  //
+  // 上面那条 effect 只在「首条消息换了」那一刻落一次位，可那一刻的 scrollHeight
+  // 并不是最终的：自托管字体是 swap 的，先用回退字体排一遍版，字体到位后整段重排。
+  // 实测（390×844，线上 164 条的会话）：落位时 scrollHeight=79952、scrollTop=79319
+  // 正好贴底；260ms 后 scrollHeight 变成 82405 —— scrollTop 一动不动，
+  // 于是视野停在离末尾 1802px 的地方。用户的原话是「强制刷新后停在中间某条
+  // 历史对话上」，看到的就是这几屏。
+  //
+  // 谁来收这个尾：ResizeObserver 盯内容容器（不是滚动容器 —— 后者的盒子尺寸
+  // 不随内容变）。只在三种情况下按住不动：
+  //   ① 用户自己上滚过（stickRef=false）→ 视野归他，不许拽回来；
+  //   ② 还在流式 → 锚定/跟随那套有自己的节奏，这里插手会和它打架；
+  //   ③ 空态欢迎页（没有 [data-mid]）→ 它比一屏高，拽到底会把标题顶出视口。
+  // `data-streaming` 是 DOM 里"这一条正在流式"的唯一事实来源（见 chat/Bubble.tsx），
+  // 用它而不是 React state：Observer 回调可能赶在 effect 之前跑，读 state 会拿到旧值。
+  useEffect(() => {
+    const el = scrollRef.current;
+    const inner = el?.firstElementChild as HTMLElement | null;
+    if (!el || !inner) return;
+    const ro = new ResizeObserver(() => {
+      if (!stickRef.current) return;
+      if (!el.querySelector("[data-mid]")) return;
+      if (el.querySelector('[data-streaming="true"]')) return;
+      settleScroll(el, el.scrollHeight);
+      // 贴回去了就把「回到最新」收掉：它只在 onScroll 里更新，而这一下是程序滚的
+      // （onScroll 认领之后直接 return），不补这一句就会出现"已经在最底下，
+      // 按钮还挂着说回到最新"—— 实测截图里就是这样。
+      setAtBottom(true);
+    });
+    ro.observe(inner);
+    return () => ro.disconnect();
+  }, [settleScroll]);
+
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;

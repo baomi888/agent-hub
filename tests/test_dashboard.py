@@ -453,6 +453,63 @@ def test_status_transition_rules(env, client):
     assert admin.patch("/api/admin/feedback/999999", json={"status": "done"}).status_code == 409
 
 
+def test_two_admins_append_replies_with_author(env, client, monkeypatch):
+    """两个管理员先后回复：两条都在、各自带署名、用户侧能看到。
+
+    加了第二个管理员之后这是最容易坏的一处：老的 `reply` 字段只有一格，
+    后回的人静默覆盖前一个，页面上还写着"我的回复"。用户的要求是
+    「自己发的不能被修改，别人只能在下面增加」。
+    """
+    monkeypatch.setattr(config, "ADMIN_USERNAMES", [ADMIN_NAME, "devadmin2"])
+
+    _login(client, USER_NAME)
+    fid = client.post(
+        "/api/user-feedback/", json={"category": "bug", "content": "上传附件一直失败"}
+    ).json()["id"]
+
+    first = TestClient(__import__("main").app)
+    _login(first, ADMIN_NAME)
+    r1 = first.post(f"/api/admin/feedback/{fid}/reply", json={"reply": "第一条：已定位"})
+    assert r1.status_code == 200, r1.text
+
+    second = TestClient(__import__("main").app)
+    _login(second, "devadmin2")
+    r2 = second.post(f"/api/admin/feedback/{fid}/reply", json={"reply": "第二条：我来跟进"})
+    assert r2.status_code == 200, r2.text
+
+    # 返回体里就是完整线程（前端不用再拉一次列表）
+    assert [x["content"] for x in r2.json()["replies"]] == ["第一条：已定位", "第二条：我来跟进"]
+    assert [x["admin_name"] for x in r2.json()["replies"]] == [ADMIN_NAME, "devadmin2"]
+    assert [x["admin_uid"] for x in r2.json()["replies"]] == [
+        account.get_user_by_username(ADMIN_NAME)["id"],
+        account.get_user_by_username("devadmin2")["id"],
+    ]
+
+    # 用户侧（提意见的那个人）看到的是两条，且知道是谁回的
+    mine = client.get("/api/user-feedback/mine").json()["items"]
+    row = next(x for x in mine if x["id"] == fid)
+    assert [x["content"] for x in row["replies"]] == ["第一条：已定位", "第二条：我来跟进"]
+    assert row["reply"] == "第二条：我来跟进"  # 兼容字段指向最新一条
+
+    # 没有"改"这条路：方法都不给注册，改不动就是改不动
+    assert first.patch(f"/api/admin/feedback/{fid}/reply", json={"reply": "改一下"}).status_code == 405
+    assert first.delete(f"/api/admin/feedback/{fid}/reply").status_code == 405
+
+
+def test_empty_reply_rejected_at_api(env, client):
+    """空回复 400（老语义是"撤回"，不可撤回之后就成了噪声）。"""
+    _login(client, USER_NAME)
+    fid = client.post(
+        "/api/user-feedback/", json={"category": "ui", "content": "深色模式下看不清"}
+    ).json()["id"]
+
+    admin = TestClient(__import__("main").app)
+    _login(admin, ADMIN_NAME)
+    assert admin.post(f"/api/admin/feedback/{fid}/reply", json={"reply": "   "}).status_code == 400
+    # 不写字段也算空（default 去掉了，缺字段由 pydantic 拦成 422）
+    assert admin.post(f"/api/admin/feedback/{fid}/reply", json={}).status_code == 422
+
+
 def test_counts_always_contain_all_statuses(env, client):
     """计数必须带齐字典里全部状态（缺键会让前端少渲染一行）。"""
     _login(client, ADMIN_NAME)

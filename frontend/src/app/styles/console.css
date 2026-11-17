@@ -1875,7 +1875,8 @@ textarea.input {
 
 /* ============ 反馈的开发者回复（看板 / 用户侧共用）============
    形态上像"写在纸边的批注"：左侧一道金线 + 淡金底，不做成气泡对话框。
-   理由：这里是工单的一条结果，不是聊天气泡；做成气泡会让人以为还能你来我往。 */
+   理由：这是工单上的处理记录，不是聊天；做成气泡会让人以为能在这里回话，
+   而回复是单向的（用户只能看，不能在这个位置回复）。 */
 .fb-reply {
   margin-top: 6px;
   padding: 7px 10px 8px;
@@ -1896,6 +1897,20 @@ textarea.input {
   white-space: pre-wrap;
   /* 用户可能贴很长的 URL 或一长串英文，不换行会把卡片撑破 */
   overflow-wrap: anywhere;
+}
+
+/* 多条回复（2026-11-17 起可以追加，见 core/user_feedback.add_reply）。
+   外面包一层只用它管间距：连续两条如果各带 6px 上边距，中间会空出 12px，
+   看着像两件不相干的事；4px 是一句话换行的呼吸感。
+   刻意不加分隔线 —— 左边那道金线已经划出"这条是官方回复"的边界了。 */
+.fb-thread {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fb-thread .fb-reply {
+  margin-top: 0;
 }
 
 /* ============ 学习路径页 ·「这条路是什么」说明卡 ============
@@ -3274,6 +3289,9 @@ textarea.input {
      checkbox，只改 grid-template-columns 不够——自动排布会让主内容掉进
      44px 那一列，标题被截成「背 4…」，行高还被撑到 120px。 */
 .rem-task {
+  /* 第 2 列**保持 44 不动**：时间列现在要写「08:00 提醒」，靠在这一列里换行
+     放下，不去挤标题 —— 390 下标题本来只剩 5~6 个字，再让 20px 就变成
+     「早上…」三个字（2026-11-17 实测）。 */
   grid-template-columns: 44px 44px minmax(0, 1fr) 26px;
 }
 .rem-task .rem-check {
@@ -4055,7 +4073,8 @@ textarea.input {
     padding: var(--space-8) var(--space-10);
     gap: var(--space-8);
   }
-  /* 待办行多一格 checkbox：时间列让到 40px，390 下标题仍有 230px 左右 */
+  /* 待办行多一格 checkbox：时间列让到 40px，390 下标题仍有 230px 左右。
+     钟点写不下就在这一列里换行（不再往外挤标题）。 */
   .rem-task {
     grid-template-columns: 44px 40px minmax(0, 1fr) 26px;
   }

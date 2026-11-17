@@ -8,6 +8,7 @@
   POST  /api/admin/users/{target}/internal  标记/取消内部账号
   GET   /api/admin/feedback              反馈列表（可选按状态筛）
   PATCH /api/admin/feedback/{fid}        改反馈状态（严格按流转表，不允许回退）
+  POST  /api/admin/feedback/{fid}/reply  追加一条回复（带作者，发出即定稿）
   GET   /api/admin/dict                  分类/状态字典（前端不得硬编码）
 
 **没有导出接口**：2026-10-27 明确不做 CSV/Excel 导出。这个看板是给开发者
@@ -32,7 +33,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from core import account, dashboard, quota, user_feedback, verify_tag
@@ -137,46 +138,72 @@ async def feedback_patch(
 
 class ReplyRequest(BaseModel):
     reply: str = Field(
-        default="",
+        ...,
         description=(
-            f"给提意见的人的回复，{user_feedback.MIN_REPLY}~{user_feedback.MAX_REPLY} 字；"
-            "空串表示撤回"
+            f"追加给提意见的人的回复，{user_feedback.MIN_REPLY}~{user_feedback.MAX_REPLY} 字。"
+            "**只能追加，不能改写或撤回**"
         ),
     )
 
 
+def _reply_author(uid: str, request: Request) -> str:
+    """回复下方署的名：昵称 → 用户名 → 「管理员」。
+
+    为什么查一次库而不直接用 token 里的 username：昵称是用户自己设的、
+    也是界面上到处显示的那个名字，两个管理员同名同姓时用户只能靠它分辨。
+    token 里的 username 是登录名，偶尔和昵称不是一回事。
+    """
+    try:
+        user = account.get_user(uid) or {}
+    except Exception:  # noqa: BLE001 - 取不到名字不该挡住回复
+        user = {}
+    name = str(user.get("nickname") or "").strip()
+    if not name:
+        name = str(getattr(request.state, "username", "") or "").strip()
+    return name[:64]
+
+
 @router.post("/feedback/{fid}/reply")
 async def feedback_reply(
-    fid: int, req: ReplyRequest, uid: str = Depends(get_current_user)
+    fid: int, req: ReplyRequest, request: Request, uid: str = Depends(get_current_user)
 ) -> dict:
-    """给一条反馈回复（管理员 → 用户）。
+    """给一条反馈**追加**一条回复（管理员 → 用户）。
 
     为什么是 `POST .../reply` 而不是在 PATCH 里塞一个 reply 字段：
       PATCH `/feedback/{fid}` 的语义是"改这条反馈的属性"，它的错误契约是
       409 + 状态流转；回复是另一件事（还带着"顺手把 open 推到 doing"的副作用），
       两件事共用一个端点，将来想给回复加审计（谁回的、什么时候改过）就无处落脚。
 
-    400 / 409 分工与 PATCH 一致：长度超限是"请求写错了"（400），
+    ★ 2026-11-17 起语义变了：这是**追加**，不是改写。
+      加进第二个管理员之后，"一格回复人人可改"会让人静默覆盖别人的话。
+      用户的要求是「自己发的回复不能被修改，别人只能在我的回复下面增加」，
+      所以每条回复都带作者、发出去就定稿。说错了只能再补一条更正。
+
+    400 / 409 分工与 PATCH 一致：长度超限、内容为空是"请求写错了"（400），
     反馈不存在是"和当前数据冲突"（409）—— 前端拿到 409 会去刷新列表。
     """
     _require_admin(uid)
     text = (req.reply or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="回复不能为空")
     if len(text) > user_feedback.MAX_REPLY:
         raise HTTPException(
             status_code=400, detail=f"回复最多 {user_feedback.MAX_REPLY} 个字"
         )
-    ok, err = await asyncio.to_thread(user_feedback.set_reply, fid, text)
+    author = await asyncio.to_thread(_reply_author, uid, request)
+    ok, err = await asyncio.to_thread(user_feedback.add_reply, fid, uid, author, text)
     if not ok:
         raise HTTPException(status_code=409, detail=err)
-    # 回读一次最新状态：set_reply 可能在 open 时把它推到 doing，
+    # 回读一次最新状态：add_reply 可能在 open 时把它推到 doing，
     # 前端要按新状态重画按钮，不能让前端自己猜。
-    row = await asyncio.to_thread(user_feedback.get, fid)
+    row = await asyncio.to_thread(user_feedback.get, fid) or {}
     return {
         "ok": True,
         "reply": text,
-        "status": (row or {}).get("status", ""),
-        "status_label": (row or {}).get("status_label", ""),
-        "replied_at": (row or {}).get("replied_at"),
+        "replies": row.get("replies", []),
+        "status": row.get("status", ""),
+        "status_label": row.get("status_label", ""),
+        "replied_at": row.get("replied_at"),
     }
 
 

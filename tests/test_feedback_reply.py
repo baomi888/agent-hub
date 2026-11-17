@@ -1,16 +1,21 @@
-"""用户反馈「回复」链路（`core/user_feedback.set_reply` + `POST /api/admin/feedback/{fid}/reply`）。
+"""用户反馈「回复」链路（`core/user_feedback.add_reply` + `POST /api/admin/feedback/{fid}/reply`）。
 
 背景（2026-10-28 用户反馈）：后台看板上每条反馈只有「→ 不处理 / → 已处理」两个按钮，
 管理员没法回一句话。但**只加一个输入框是没用的** —— 得让提意见的人真能看到，
-否则回复等于写进自己的日志里。所以这条链路的验收重点是「两端都通」：
+否则回复等于写进自己的日志里。所以这条链路的验收重点是「两端都通」。
 
-  1. `set_reply` 写进去、`reply` / `replied_at` 能被读出来（含 `list_mine` 这条路，
-     用户侧就是靠它看到回复的）
-  2. **回复顺手把 open 推到 doing**，但不许把 done / closed 改写回 doing
-  3. 回复**不受状态流转表约束** —— 拿 `_TRANSITIONS` 去卡回复会得到
+**2026-11-17 改语义**（加了第二个管理员之后）：回复从"一格可改写"变成**追加式线程**。
+用户的原话是「自己发送的回复不能被修改，别人只能在我的回复下面增加」，
+并且「要能看出是哪个管理员发的」。所以这里守的是：
+
+  1. 追加不覆盖：两条回复并存、各自带作者、按时间正序
+  2. **没有改写路径**：源码里不许出现 UPDATE / DELETE `user_feedback_replies`，
+     也不许再有 `set_reply` 这个名字（它是"可编辑"的入口）
+  3. 回复顺手把 open 推到 doing，但不许把 done / closed 改写回 doing
+  4. 回复**不受状态流转表约束** —— 拿 `_TRANSITIONS` 去卡回复会得到
      「已处理 → 已处理」这种无意义 409，管理员就回不了话
-  4. 长度上限、空串撤回、不存在的 id
-  5. 老库迁移：没有 reply 列的老表能幂等补列
+  5. 长度上限、空文本拒绝、不存在的 id
+  6. 老库那条单独 `reply` 能搬进线程，且重复跑不会搬两遍
 
 不联网。每个测试 monkeypatch `core.session._db_path` 到独立临时库；
 `user_feedback._READY` 是模块级「这张库已建表」标志，切库必须清掉，
@@ -27,6 +32,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import core.session  # noqa: E402
 from core import user_feedback as uf  # noqa: E402
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _prep_db(monkeypatch, tag: str) -> str:
@@ -50,22 +57,72 @@ def test_reply_written_and_visible_to_owner(monkeypatch):
 
     before = uf.get(fid)
     assert before is not None
+    assert before["replies"] == []
     assert before["reply"] == ""
     assert before["replied_at"] is None
 
-    ok, err = uf.set_reply(fid, "  已经修好了，明天上线  ")
+    ok, err = uf.add_reply(fid, "admin-a", "苞米呀", "  已经修好了，明天上线  ")
     assert ok, err
 
     after = uf.get(fid)
     assert after is not None
     # 前后空白要去掉：否则前端展示时会多出一截，也浪费长度上限
-    assert after["reply"] == "已经修好了，明天上线"
+    assert [r["content"] for r in after["replies"]] == ["已经修好了，明天上线"]
     assert isinstance(after["replied_at"], int) and after["replied_at"] > 0
 
     # 用户侧那条路（/api/user-feedback/mine 走的就是 list_mine）
     mine, total = uf.list_mine("u1")
     assert total == 1
-    assert mine[0]["reply"] == "已经修好了，明天上线"
+    assert [r["content"] for r in mine[0]["replies"]] == ["已经修好了，明天上线"]
+
+
+def test_second_admin_appends_instead_of_overwriting(monkeypatch):
+    """两个人先后回，两条都要在，谁写的要分得清。
+
+    这是本批的核心：老实现只有一格 `reply`，第二个管理员一发就把第一句
+    静默覆盖掉了 —— 而且看库里只剩一句话，事后谁也不知道被覆盖过。
+    """
+    _prep_db(monkeypatch, "append")
+    fid = _add()
+
+    assert uf.add_reply(fid, "admin-a", "苞米呀", "已定位，是索引问题")[0]
+    assert uf.add_reply(fid, "admin-b", "小李", "我这边补一个修复时间：周四")[0]
+    assert uf.add_reply(fid, "admin-a", "苞米呀", "补一句：周四晚上线")[0]
+
+    row = uf.get(fid)
+    assert [r["content"] for r in row["replies"]] == [
+        "已定位，是索引问题",
+        "我这边补一个修复时间：周四",
+        "补一句：周四晚上线",
+    ]
+    # 作者按条记录，不是"最后一个人覆盖整条线程"
+    assert [r["admin_uid"] for r in row["replies"]] == ["admin-a", "admin-b", "admin-a"]
+    assert [r["admin_name"] for r in row["replies"]] == ["苞米呀", "小李", "苞米呀"]
+    # id 递增 = 线程顺序稳定（前端按它做 key，顺序不能每查一次就变）
+    ids = [r["id"] for r in row["replies"]]
+    assert ids == sorted(ids)
+
+    # 兼容别名指向**最新**一条，老前端（只认 it.reply）不会显示成第一句
+    assert row["reply"] == "补一句：周四晚上线"
+
+
+def test_replies_are_append_only():
+    """结构守卫：这条链路里不许存在"改"和"删"。
+
+    「不能修改」不是靠按钮藏起来实现的 —— 前端藏了，接口还在，下次有人
+    顺手写个脚本就能改。所以直接钉住源码：没有 UPDATE/DELETE，也没有
+    `set_reply` 这个曾经存在的可改写入口（留着它，早晚会有人调回去）。
+    """
+    src = open(os.path.join(ROOT, "core", "user_feedback.py"), encoding="utf-8").read()
+    assert "UPDATE user_feedback_replies" not in src, "出现了改写回复的 SQL"
+    assert "DELETE FROM user_feedback_replies" not in src, "出现了删除回复的 SQL"
+    assert "def set_reply" not in src, "set_reply 又回来了：那是可改写的老入口"
+
+    api = open(os.path.join(ROOT, "api", "admin.py"), encoding="utf-8").read()
+    # 只允许 POST 追加这一个写路径；不能有 PATCH/DELETE 指向 reply(s)
+    assert '@router.delete("/feedback' not in api
+    assert 'feedback/{fid}/replies' not in api
+    assert "user_feedback.add_reply" in api
 
 
 def test_reply_promotes_open_to_doing(monkeypatch):
@@ -74,7 +131,7 @@ def test_reply_promotes_open_to_doing(monkeypatch):
     fid = _add()
     assert uf.get(fid)["status"] == "open"
 
-    ok, _ = uf.set_reply(fid, "已定位，是复习队列的索引问题")
+    ok, _ = uf.add_reply(fid, "admin-a", "苞米呀", "已定位，是复习队列的索引问题")
     assert ok
     assert uf.get(fid)["status"] == "doing"
 
@@ -88,13 +145,13 @@ def test_reply_does_not_downgrade_done_or_closed(monkeypatch):
 
     fid_done = _add("u1", "这条已经解决了")
     assert uf.set_status(fid_done, "done")[0]
-    assert uf.set_reply(fid_done, "补充：下个版本还会优化文案")[0]
+    assert uf.add_reply(fid_done, "admin-a", "苞米呀", "补充：下个版本还会优化文案")[0]
     assert uf.get(fid_done)["status"] == "done"
     assert uf.get(fid_done)["reply"] == "补充：下个版本还会优化文案"
 
     fid_closed = _add("u1", "这个我们不做")
     assert uf.set_status(fid_closed, "closed")[0]
-    assert uf.set_reply(fid_closed, "原因：与课表 App 定位重复")[0]
+    assert uf.add_reply(fid_closed, "admin-a", "苞米呀", "原因：与课表 App 定位重复")[0]
     assert uf.get(fid_closed)["status"] == "closed"
 
 
@@ -108,7 +165,7 @@ def test_reply_not_blocked_by_transition_table(monkeypatch):
     fid = _add()
     uf.set_status(fid, "done")  # 先走完整流程到 done（done 的下一步只有 closed）
 
-    ok, err = uf.set_reply(fid, "顺手补一句")
+    ok, err = uf.add_reply(fid, "admin-a", "苞米呀", "顺手补一句")
     assert ok, f"回复不该被状态流转表拦住：{err}"
 
 
@@ -117,39 +174,40 @@ def test_reply_length_and_missing_id(monkeypatch):
     _prep_db(monkeypatch, "len")
     fid = _add()
 
-    ok, err = uf.set_reply(fid, "长" * (uf.MAX_REPLY + 1))
+    ok, err = uf.add_reply(fid, "admin-a", "苞米呀", "长" * (uf.MAX_REPLY + 1))
     assert not ok and "最多" in err
     # 失败的写入不能留下半条数据
-    assert uf.get(fid)["reply"] == ""
+    assert uf.get(fid)["replies"] == []
 
     # 极端：刚好等于上限要放行（边界不能写成 < 而不是 <=）
-    ok, err = uf.set_reply(fid, "长" * uf.MAX_REPLY)
+    ok, err = uf.add_reply(fid, "admin-a", "苞米呀", "长" * uf.MAX_REPLY)
     assert ok, err
 
-    ok, err = uf.set_reply(999999, "回复一条不存在的反馈")
+    ok, err = uf.add_reply(999999, "admin-a", "苞米呀", "回复一条不存在的反馈")
     assert not ok and "不存在" in err
 
 
-def test_empty_reply_revokes_but_keeps_status(monkeypatch):
-    """回错了要能撤回：清空回复，但状态不回退（状态本身不允许回退）。"""
-    _prep_db(monkeypatch, "revoke")
+def test_empty_reply_is_rejected(monkeypatch):
+    """空文本不许发。
+
+    老接口里空串 = 撤回；不可撤回之后，一条空白既不会显示在用户侧、
+    又会占后台一行，是纯噪声。所以从"能发"变成"400"。
+    """
+    _prep_db(monkeypatch, "empty")
     fid = _add()
-    uf.set_reply(fid, "回错了")
-    assert uf.get(fid)["status"] == "doing"
 
-    ok, _ = uf.set_reply(fid, "   ")
-    assert ok
-    row = uf.get(fid)
-    assert row["reply"] == ""
-    assert row["replied_at"] is None
-    assert row["status"] == "doing"
+    ok, err = uf.add_reply(fid, "admin-a", "苞米呀", "   ")
+    assert not ok and "不能为空" in err
+    assert uf.get(fid)["replies"] == []
+    # 被拒的空回复不该顺手把状态推到 doing
+    assert uf.get(fid)["status"] == "open"
 
 
-def test_migration_adds_reply_columns_to_old_table(monkeypatch):
-    """老库（没有 reply / replied_at 列）必须能幂等补列，且旧数据不丢。
+def test_legacy_reply_migrates_into_thread(monkeypatch):
+    """老库：没有回复表、只有单独的 `reply` 列，历史回复要搬进线程且只搬一次。
 
-    这是线上真实情况：`user_feedback` 表 10-27 就建好了，10-28 才加回复。
-    建表语句刻意不改（只走 ALTER），所以这条断言盯的是"老库还能用"。
+    线上真实情况：`user_feedback` 表 10-27 建的，`reply` 是 10-28 加的列，
+    回复线程是 11-17 才有的。不搬的话，库里回过话的工单在用户侧会突然变空白。
     """
     tmp = tempfile.mkdtemp(prefix="uf_migrate_")
     db = os.path.join(tmp, "sessions.db")
@@ -157,7 +215,7 @@ def test_migration_adds_reply_columns_to_old_table(monkeypatch):
     uf._READY.clear()
     core.session._init_db()
 
-    # 手工造一张「加列之前」的表，并写一行历史数据
+    # 手工造一张「回复线程之前」的表，并写一行带老回复的数据
     with core.session._get_conn() as conn:  # noqa: SLF001
         conn.executescript("""
             CREATE TABLE user_feedback (
@@ -170,25 +228,34 @@ def test_migration_adds_reply_columns_to_old_table(monkeypatch):
                 page       TEXT NOT NULL DEFAULT '',
                 status     TEXT NOT NULL DEFAULT 'open',
                 created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
+                updated_at INTEGER NOT NULL,
+                reply      TEXT NOT NULL DEFAULT '',
+                replied_at INTEGER
             );
         """)
         conn.execute(
-            "INSERT INTO user_feedback (uid, username, category, content, status, created_at, updated_at) "
-            "VALUES ('old', 'olduser', 'bug', '加列之前提的一条', 'open', 1, 1)"
+            "INSERT INTO user_feedback (uid, username, category, content, status, "
+            "created_at, updated_at, reply, replied_at) "
+            "VALUES ('old', 'olduser', 'bug', '线程之前回过的一条', 'doing', 1, 1, "
+            "'旧的单条回复', 1234)"
         )
 
     uf.ensure()
-    # 第二遍：幂等，不能因为列已存在而炸
+    # 第二遍：幂等，不能因为表已存在而炸，也不能把同一条回复搬成两条
     uf._READY.clear()
     uf.ensure()
 
     old = uf.get(1)
     assert old is not None
-    assert old["content"] == "加列之前提的一条"  # 旧数据还在
-    assert old["reply"] == ""  # 老行拿到合理初值
-    assert old["replied_at"] is None
+    assert old["content"] == "线程之前回过的一条"  # 旧数据还在
+    assert len(old["replies"]) == 1, "老回复没搬进来，或者被搬了两遍"
+    migrated = old["replies"][0]
+    assert migrated["content"] == "旧的单条回复"
+    # 老数据没记是谁回的，不许编一个名字
+    assert migrated["admin_uid"] == ""
+    assert migrated["admin_name"] == ""
+    assert migrated["created_at"] == 1234  # 时间保留，不能变成迁移那一刻
 
-    # 老行也能被回复
-    assert uf.set_reply(1, "历史反馈也能回")[0]
-    assert uf.get(1)["reply"] == "历史反馈也能回"
+    # 老行也能继续追加
+    assert uf.add_reply(1, "admin-a", "苞米呀", "历史反馈也能回")[0]
+    assert [r["content"] for r in uf.get(1)["replies"]] == ["旧的单条回复", "历史反馈也能回"]

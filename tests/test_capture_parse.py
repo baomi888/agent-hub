@@ -157,6 +157,119 @@ class TestTime:
         assert capture_parse._to_ts(0, _now()) is None
 
 
+# ---------------------------------------------------------------- 说了钟点就要响
+class TestClockMeansReminder:
+    """「明早 8 点起床」和「明天交作业」在原话层面不是一回事。
+
+    2026-11-17 实机：用户说「早上 8 点起床」，卡片落库只有 due_at，
+    列表只显示「明天」，到点一声不响。根因是提示词第 4 条把 remind_at 的
+    开关收在「提醒我 / 叫我 / 记得」三个词上 —— 说了钟点反而不算。
+    """
+
+    def _ts(self, *args) -> int:
+        return int(datetime(*args, tzinfo=timeutil.TZ).timestamp())
+
+    def test_clock_time_task_gets_a_reminder_at_the_same_moment(self):
+        items, _ = _tighten(
+            [_item(kind="task", title="起床", source_text="早上8点起床",
+                   due_at="2026-11-11 08:00", list_key="life")],
+            "早上8点起床",
+        )
+        it = items[0]
+        assert it["due_at"] == self._ts(2026, 11, 11, 8, 0)
+        assert it["remind_at"] == it["due_at"], "说了 8 点却不会在 8 点响"
+
+    def test_date_only_task_still_does_not_ring(self):
+        """不变量 #1 没有被推翻：只说了哪天，就不该替用户造一条提醒。"""
+        items, _ = _tighten([_item()], "明天交高数作业")
+        assert items[0]["remind_at"] is None
+
+    def test_model_collapsed_to_midnight_is_repaired_from_the_text(self):
+        """模型把「明早 8 点」折成 00:00（只当日期用）→ 用原话的钟点补回去。"""
+        items, _ = _tighten(
+            [_item(kind="task", title="起床", source_text="明早8点起床",
+                   due_at="2026-11-11 00:00", list_key="life")],
+            "明早8点起床",
+        )
+        it = items[0]
+        assert it["due_at"] == self._ts(2026, 11, 11, 8, 0)
+        assert it["remind_at"] == it["due_at"]
+
+    def test_end_of_day_sentinel_is_repaired_from_the_text(self):
+        """「明天 9 点交作业」被写成 23:59 → 修成 9 点，并按 9 点提醒。"""
+        items, _ = _tighten(
+            [_item(kind="task", title="交作业", source_text="明天9点交作业",
+                   due_at="2026-11-11 23:59")],
+            "明天9点交作业",
+        )
+        it = items[0]
+        assert it["due_at"] == self._ts(2026, 11, 11, 9, 0)
+        assert it["remind_at"] == it["due_at"]
+
+    def test_past_moment_never_gets_a_reminder(self):
+        """已经过去的不补 —— 补了会在建好的下一秒就炸一条迟到提醒。"""
+        items, _ = _tighten(
+            [_item(kind="task", title="起床", source_text="早上8点起床",
+                   due_at="2026-11-10 08:00", list_key="life")],
+            "早上8点起床",
+        )
+        assert items[0]["remind_at"] is None
+
+    def test_model_given_remind_at_wins(self):
+        """模型自己给了提醒时刻（用户说了"提前半小时叫我"）→ 不许被 due_at 顶掉。"""
+        items, _ = _tighten(
+            [_item(kind="task", title="开会", source_text="8点开会，提前半小时提醒我",
+                   due_at="2026-11-11 08:00", remind_at="2026-11-11 07:30",
+                   list_key="inbox")],
+            "8点开会，提前半小时提醒我",
+        )
+        it = items[0]
+        assert it["remind_at"] == self._ts(2026, 11, 11, 7, 30)
+        assert it["due_at"] == self._ts(2026, 11, 11, 8, 0)
+
+    def test_reminder_kind_is_not_touched(self):
+        """日程自己按 freq 算 fire_at，这一层不去改它。"""
+        items, _ = _tighten(
+            [_item(kind="reminder", title="吃药", source_text="8点吃药",
+                   due_at=None, remind_at="2026-11-11 08:00", list_key=None,
+                   recurrence={"freq": "daily", "at": "08:00"})],
+            "8点吃药",
+        )
+        it = items[0]
+        assert it["kind"] == "reminder"
+        assert it["remind_at"] == self._ts(2026, 11, 11, 8, 0)
+
+
+class TestClockInText:
+    """`_clock_in` 是"用户到底说没说钟点"的唯一判据，错一个字就多响或少响。"""
+
+    @pytest.mark.parametrize(
+        "text,expect",
+        [
+            ("早上8点起床", (8, 0)),
+            ("明早八点起床", (8, 0)),
+            ("下午三点开会", (15, 0)),
+            ("晚上8点半跑步", (20, 30)),
+            ("晚上十点回宿舍", (22, 0)),
+            ("中午12点吃饭", (12, 0)),
+            ("8:00 开会", (8, 0)),
+            ("20：30 交表", (20, 30)),
+            ("八点一刻出发", (8, 15)),
+            ("9点15分", (9, 15)),
+            # 以下都**没有**具体钟点，返回 None 才不会凭空多一条提醒
+            ("明天交作业", None),
+            ("周五社团开会", None),
+            ("明天早上交作业", None),
+            ("第3点改一下", None),
+        ],
+    )
+    def test_cases(self, text, expect):
+        assert capture_parse._clock_in(text) == expect
+
+    def test_empty_is_none(self):
+        assert capture_parse._clock_in("") is None
+
+
 # ---------------------------------------------------------------- 逐条校验
 class TestValidation:
     def test_bad_title_does_not_kill_the_batch(self):

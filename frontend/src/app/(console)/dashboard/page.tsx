@@ -103,6 +103,9 @@ function fmtPct(v: number | null | undefined): string {
 export default function DashboardPage() {
   const auth = useAuth();
   const isAdmin = Boolean(auth.me?.is_admin);
+  // 用来在回复里标出"这条是我发的"。多个管理员共用这个后台，
+  // 光看署名不够 —— 同名同姓或昵称还没设的时候，只有 uid 是确定的
+  const myUid = auth.me?.user.id ?? "";
 
   const [days, setDays] = useState(7);
   const [sort, setSort] = useState<SortKey>("calls");
@@ -203,9 +206,11 @@ export default function DashboardPage() {
   );
 
   /**
-   * 回复某条反馈。
+   * 在一条反馈下面追加回复。
    *
-   * 传空串 = 撤回（后端 set_reply 允许清空，但状态不回退）。
+   * **只有追加，没有编辑、没有撤回**：多个管理员共用这个后台，谁都能改别人的
+   * 话就没人敢说话。说错了再补一条更正，历史留着本身就是凭据。
+   *
    * 成功后重拉列表而不是本地改 state：回复可能顺手把 open 推成 doing，
    * 本地改就得把"状态也会变"这条规则复制一份到前端 —— 那正是上个月
    * 「前端能点、后端 400」的成因。让后端说完，前端照着画。
@@ -1007,6 +1012,9 @@ export default function DashboardPage() {
             <p className="sec-label" style={{ display: "flex", alignItems: "center", gap: 8 }}>
               用户反馈 {fb ? <span className="meta">共 {fb.total} 条</span> : null}
             </p>
+            <p className="hint" style={{ marginTop: 0 }}>
+              回复顺着时间往下追加，<b>发出后不能修改</b>（说错了再补一条更正）。每条会带上回复人的名字，用户在「我提过的」里也看得到。
+            </p>
             <div className="card card-pad">
               <div className="row" style={{ gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
                 <button
@@ -1062,16 +1070,23 @@ export default function DashboardPage() {
                           {it.contact ? ` · 联系 ${it.contact}` : ""}
                         </div>
                       ) : null}
-                      {/* 已回复的先把回复摆出来：管理员最常问的是"我上次回过他什么"。
-                          正在编辑这条时藏起来 —— 否则同一段话会在上面显示一遍、
-                          又在下面的输入框里出现一遍，看着像重复渲染的 bug。 */}
-                      {it.reply && replyFor !== it.id ? (
-                        <div className="fb-reply">
-                          <div className="fb-reply-head">
-                            我的回复
-                            {it.replied_at ? ` · ${fmtTime(it.replied_at)}` : ""}
-                          </div>
-                          <div className="fb-reply-body">{it.reply}</div>
+                      {/* 全部回复按时间正序摆出来（不藏在"最新一条"后面）：
+                          两个管理员之间要看得见对方说过什么，否则第二个人会
+                          把第一句已经承诺的事再承诺一遍。
+                          已经发出去的不能改、不预填输入框 —— 所以这里不需要
+                          "编辑时先藏起来"那套逻辑了。 */}
+                      {(it.replies ?? []).length > 0 ? (
+                        <div className="fb-thread">
+                          {(it.replies ?? []).map((r) => (
+                            <div className="fb-reply" key={r.id} title={r.admin_uid || undefined}>
+                              <div className="fb-reply-head">
+                                {r.admin_name || "管理员"}
+                                {r.admin_uid && r.admin_uid === myUid ? " · 我" : ""}
+                                {r.created_at ? ` · ${fmtTime(r.created_at)}` : ""}
+                              </div>
+                              <div className="fb-reply-body">{r.content}</div>
+                            </div>
+                          ))}
                         </div>
                       ) : null}
 
@@ -1098,10 +1113,12 @@ export default function DashboardPage() {
                           onClick={() => {
                             const opening = replyFor !== it.id;
                             setReplyFor(opening ? it.id : null);
-                            setReplyText(opening ? it.reply : "");
+                            // 永远从空框开始：回复不可改，预填旧内容会诱导人
+                            // 以为"改一改再发"是编辑，实际是又追加一条
+                            setReplyText("");
                           }}
                         >
-                          {replyFor === it.id ? "收起" : it.reply ? "改回复" : "回复用户"}
+                          {replyFor === it.id ? "收起" : (it.replies ?? []).length ? "追加回复" : "回复用户"}
                         </button>
                       </div>
 
@@ -1111,7 +1128,7 @@ export default function DashboardPage() {
                             className="input"
                             value={replyText}
                             rows={3}
-                            placeholder="回给提意见的人。会显示在他「设置 → 我提过的」那一列表里。"
+                            placeholder="接在这条反馈下面追加一句。会显示在他「设置 → 我提过的」里，带上你的名字。"
                             disabled={busyId === it.id}
                             onChange={(e) =>
                               setReplyText(e.target.value.slice(0, dict?.limits.max_reply ?? 1000))
@@ -1123,7 +1140,7 @@ export default function DashboardPage() {
                           >
                             <span className="meta">
                               {replyText.trim().length} / {dict?.limits.max_reply ?? 1000}
-                              {it.reply && !replyText.trim() ? " · 清空后发送 = 撤回回复" : ""}
+                              {replyText.trim() ? " · 发出后不能修改" : ""}
                             </span>
                             <div style={{ marginLeft: "auto" }} className="row">
                               <button
@@ -1140,7 +1157,7 @@ export default function DashboardPage() {
                               <button
                                 type="button"
                                 className="btn btn-primary btn-sm"
-                                disabled={busyId === it.id || replyText.trim() === it.reply}
+                                disabled={busyId === it.id || !replyText.trim()}
                                 onClick={() => void sendReply(it, replyText)}
                               >
                                 {busyId === it.id ? "发送中…" : "发送"}
