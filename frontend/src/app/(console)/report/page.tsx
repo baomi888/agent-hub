@@ -213,7 +213,7 @@ export default function ReportPage() {
   return (
     <PageShell
       title={date && date !== todayStr ? prettyDate(date) : "今天学了什么"}
-      sub="聊过的东西容易忘。每天留一份小结，带出处。"
+      // 页头说明退场（2026-11-17）：「聊过的东西容易忘。每天留一份小结，带出处。」
       width={860}
       actions={
         <button

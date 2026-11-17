@@ -15,7 +15,7 @@
 import { useEffect, useState } from "react";
 import PageShell from "@/components/console/PageShell";
 import CornIcon from "@/components/CornIcon";
-import { Callout, SkeletonLines, ToastHost } from "@/components/console/ui";
+import { SkeletonLines, ToastHost } from "@/components/console/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { DEMO_CHECKIN_HISTORY, DEMO_KNOWLEDGE_TREE } from "@/lib/consoleDemo";
@@ -449,12 +449,9 @@ export default function CheckinPage() {
   return (
     <PageShell
       title="打卡"
-      sub="把今天的总结变成一张知识结构图。"
-      detail={
-        <>
-          只讲知识结构、<b>不露个人内容</b>。分享出去的是「学习笔记」，不是「代做产物」。
-        </>
-      }
+      // 页头说明退场（2026-11-17）：标题下面那句「把今天的总结变成一张知识结构图」
+      // 与页头三个按钮（生成 / 复制 / 保存）说的是同一件事；detail 里那句隐私口径
+      // 也一并删 —— 图里本来就只有概念、章节、掌握度，一眼能看出来。
       actions={
         <>
           <button
@@ -568,19 +565,10 @@ export default function CheckinPage() {
             </div>
           </div>
 
-          <div style={{ marginTop: 12 }}>
-            <Callout>
-              <b>分享前自动脱敏</b>：这张图只保留<b>知识结构</b>（概念、章节、掌握度），
-              自动剥离姓名 / 学号 / 手机号 / 身份证，以及你自己的原话与做错的题。
-            </Callout>
-          </div>
-
-          <div style={{ marginTop: 12 }}>
-            <Callout icon="ok">
-              <b>连续天数按每天的总结自动算</b>，换设备也不会丢。
-              点「生成今日打卡」会先生成当天的总结，这里随即更新。
-            </Callout>
-          </div>
+          {/* 这里原来还挂着两张说明卡：「分享前自动脱敏」（讲剥离了哪些字段）
+              和「连续天数怎么算」。2026-11-17 双删 ——
+              前者是脱敏机制的实现细节，用户要确认的只是"图里有没有我的名字"，看一眼就知道；
+              后者在右栏「连续打卡」那张卡里已经用实况说着（天连续 + 最长 N 天）。 */}
         </div>
 
         {/* ============ 右：连续与历史 ============ */}

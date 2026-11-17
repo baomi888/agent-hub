@@ -188,7 +188,8 @@ export default function PathPage() {
   return (
     <PageShell
       title="12 关，一关一关过"
-      sub="从「把资料放进来」走到「让它每天替你跑」，走完才算配成你自己的。"
+      // 页头说明退场（2026-11-17）：这一页本身就是一条路径，12 关的关卡标题
+      // 已经把这句"从哪走到哪"说完了。
       actions={
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {p && (

@@ -355,13 +355,10 @@ export default function SettingsPage() {
                 <span style={{ fontSize: "var(--fs-lg)" }}>深色纸面</span>
                 <Switch checked={dark} onChange={onToggleDark} label="深色纸面" />
               </div>
-              <p className="hint">
-                整站文字（正文、标题、按钮）一起变，卡片和栏宽不动，所以调大不会把布局挤乱。
-                「跟随系统」用的是浏览器自己设的默认字号。
-              </p>
-              <p className="hint">
-                校园工具页（单词卡、课程表、GPA）是独立的单页，<b>不跟随</b>这个档位。
-              </p>
+              {/* 原来这里还有两段说明：「整站文字一起变…调大不会把布局挤乱」和
+                  「校园工具页不跟随这个档位」。2026-11-17 删掉：
+                  前者是自证（调一下就知道），后者在用户真去点工具页那一档时会发现。
+                  设置页的每一行都该是一个控件，不是一段产品说明书。 */}
             </div>
           </section>
 
@@ -399,10 +396,9 @@ export default function SettingsPage() {
               </div>
               <div className="divide" />
               <div style={{ fontSize: "var(--fs-md)" }}>资料怎么切</div>
-              <p className="hint" style={{ marginTop: 6 }}>
-                切片档位（精细 / 均衡 / 完整）是<b>按资料库</b>各自记的，在资料库面板里给每个库单独选 ——
-                教材和访谈实录本来就该用不同的切法，全局一套反而会互相迁就。
-              </p>
+              {/* 原来下面还有一段讲「按库各自记、教材和访谈该用不同切法」。
+                  它解释的是**为什么**这样设计，而用户这一屏只需要知道**在哪儿改**：
+                  按钮就在下面一行。2026-11-17 删。 */}
               {/* 指向独立的 /knowledge：切片档位是按库记的，得在库详情里设定；
                   以前这里跳 /?kb=1 只是把首页右栏抽屉拉开（现在那一页已经不是资料管理的主场了）。 */}
               <Link className="btn btn-ghost btn-sm" href="/knowledge" style={{ marginTop: 10 }}>
@@ -419,7 +415,12 @@ export default function SettingsPage() {
                 className="row"
                 style={{ justifyContent: "space-between", alignItems: "center" }}
               >
-                <span style={{ fontSize: "var(--fs-lg)" }}>自动沉淀</span>
+                <div>
+                  <div style={{ fontSize: "var(--fs-lg)" }}>自动沉淀</div>
+                  {/* 一行副标题，不是一段说明：开关叫「自动沉淀」，
+                      不说清沉淀的是什么，它就不是一个能判断的开关。 */}
+                  <div className="meta">长对话压成知识句，存进「对话沉淀」</div>
+                </div>
                 <Switch
                   checked={autoSediment ?? false}
                   disabled={autoSediment === null || sedimentBusy}
@@ -427,11 +428,6 @@ export default function SettingsPage() {
                   label="自动沉淀"
                 />
               </div>
-              <p className="hint">
-                长对话被压缩时，把里面的知识句自动存进「对话沉淀·主题」资料库，
-                下一轮检索就能用上。关掉只是不再自动存 —— 回答下面那个
-                「存进资料库」按钮仍然随时可用。
-              </p>
               {autoSediment === null && (
                 <p className="hint">
                   这一项现在读不到（后端版本较旧时会这样），先保持原状。
@@ -487,10 +483,9 @@ export default function SettingsPage() {
                   清空我的数据
                 </button>
               </div>
-              <p className="hint">
-                「选择性索引」（只让勾选的资料进索引）与「一键清空」还没做好，先置灰 ——
-                放了开关却不生效，比不放更糟。
-              </p>
+              {/* 置灰的按钮必须有一句解释，否则用户以为坏了 —— 但只需说结果，
+                  不用把「放了开关却不生效比不放更糟」这种设计理由写给用户看。 */}
+              <p className="hint">「清空我的数据」还没开放。</p>
             </div>
           </section>
 
@@ -850,12 +845,9 @@ function QuotaBars({ summary }: { summary: UsageSummary }) {
           );
         })}
       </div>
-      <p className="hint">
-        {summary.rate_per_minute > 0
-          ? `另有每分钟 ${summary.rate_per_minute} 次的上限。`
-          : "没有每分钟上限。"}
-        连着问得太快会被暂时挡住，页面上会直接告诉你还差多少秒，不会只转圈。
-      </p>
+      {/* 原来这里还挂着一段「另有每分钟 N 次的上限。连着问得太快会被暂时挡住，
+          页面上会直接告诉你还差多少秒，不会只转圈。」—— 2026-11-17 删。
+          真撞上限时页面自己会报「还差 12 秒」，提前念一遍只占了半张卡。 */}
     </>
   );
 }

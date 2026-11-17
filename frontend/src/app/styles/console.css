@@ -175,6 +175,21 @@
   font-weight: 600;
   line-height: var(--lh-tight);
 }
+/* ---------- 页头「只有标题」形态（2026-11-17）----------
+   说明文全站退场后，页头就剩一个词。20px 挂在一整条空白上像漏加载了副标题，
+   所以这一档把标题放大到 --fs-page（26 / 手机 22），让它自己撑住这条带。
+   ★ 选择器写成 .pg-head.pg-head--solo：
+     .pg-head--compact h2{font-size:1.125rem} 在文件末尾的媒体查询里，
+     同特异性下它后写就赢，会把放大整个吞掉（真踩过：改完手机上还是 18px）。 */
+.pg-head.pg-head--solo h2 {
+  font-size: var(--fs-page);
+  letter-spacing: var(--ls-tight);
+}
+/* 标题单独一行时，页头底边与内容之间的节奏靠 padding 控制；这里只把
+   标题的行高收到紧一档，避免 26px 字撑出 40px 的空行 */
+.pg-head--solo {
+  align-items: center;
+}
 .pg-head .pg-sub {
   margin: var(--space-8) 0 0;
   font-size: var(--fs-md);
@@ -855,6 +870,80 @@ textarea.input {
    再给「开关 + 立即执行」两个动作。原来的行内塞了 4 个按钮 + 5 行文字，
    手机上单条 210px，三条就占满一屏还不一定看得全。
    桌面：信息 | 开关 | 动作 三列一行；手机：开关留在第一行右侧，动作整行落到第二行。 */
+/* ---------- 每日委托：单列页面（2026-11-17） ----------
+
+   原来是 grid2 两栏：左「我的委托 + 执行历史」、右「新建表单常驻」。
+   问题出在手机上 —— 两栏本来就会塌成一栏，于是顺序变成
+   「我的委托 → 执行历史（最多 50 行）→ 新建表单」，表单被推到三四屏之外。
+   现在收成一条纵列：我的委托 → 新建委托 → 执行历史。 */
+.del-page {
+  min-width: 0;
+}
+
+/* 表单在宽屏走两列：这一页是单列的，一个字段横跨 980px 太浪费，
+   「名称（3–32 字）」的输入框会长得像一段正文。
+   窄屏塌回一列（760 是两列还读得清的极限）。 */
+.del-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-14) var(--space-16);
+}
+.del-form-grid > * {
+  min-width: 0;
+}
+/* .field + .field 的 14px 上边距是给文档流写的，网格里会顶破 gap */
+.del-form-grid > .field + .field {
+  margin-top: 0;
+}
+.del-form-grid > .wide {
+  grid-column: 1 / -1;
+}
+@media (max-width: 760px) {
+  .del-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-14);
+  }
+}
+
+/* 执行历史：默认只露 3 条，折叠开关 + 一行汇总（2026-11-17） */
+.del-hist-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+}
+.del-hist-sum {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.del-hist-list > .run--tight {
+  padding: 7px 0;
+  font-size: var(--fs-xs);
+  grid-template-columns: 92px minmax(0, 1fr) auto;
+  gap: var(--space-10);
+}
+.del-hist-more {
+  display: block;
+  width: 100%;
+  margin-top: var(--space-10);
+  padding: 9px 0;
+  border-top: 1px dashed var(--line);
+  font-size: var(--fs-sm);
+  color: var(--accent-ink);
+  background: none;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.del-hist-more:hover {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* 委托卡：信息 | 开关 | 动作 三列（桌面一行，手机动作落第二行） */
 .dele {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -2983,7 +3072,7 @@ textarea.input {
   padding: 0 var(--space-16);
 }
 /* 卡内的主操作：与 .btn-new 同一种实心墨底，只是小一号 ——
-   页头的「+ 新建」是整页主操作，这里是「这张卡上最该点的那一下」。 */
+   页头的新建按钮是整页主操作，这里是「这张卡上最该点的那一下」。 */
 .rem-next-main {
   min-height: 44px;
   padding: 0 var(--space-20);
@@ -2997,6 +3086,91 @@ textarea.input {
 }
 .rem-next-main:hover {
   background: var(--accent);
+}
+
+/* ---------- 页头的两个新建入口（2026-11-17） ----------
+
+   待办与提醒是同一层的两种东西：一个勾得掉、一个只是到点响一声。
+   以前只有「+ 新建」一个按钮（建待办），提醒的入口是列表最底下一行灰字
+   （「只要到时间提醒，不用勾完成？」）—— 用户既不知道那行能点，也不知道
+   这页还能建提醒。现在两个入口并排：同高、同宽节奏、同图标位，
+   只靠「＋ / 铃」和标签区分，谁也不比谁低一级。
+
+   ★ 标签两套：宽屏「新建待办 / 新建提醒」，≤900 只留「待办 / 提醒」。
+     390 下页头一行要同时放下标题、列表/设置、两个按钮，四个字会把它挤成两行。 */
+.rem-head-acts {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  /* ★ 不参与挤压：320 宽时「标题 + 列表/设置 + 两个新建」放不下，
+     默认行为是把每个 flex 子项都压一点 —— 结果 seg 被压到 46px，
+     两个按钮各占一行，「列表」和「设置」竖着叠成 90 高（真踩过）。
+     这里让整块操作区宁可换到第二行，也不许内部变形。 */
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+.rem-head-acts .seg,
+.rem-new {
+  flex: none;
+}
+/* 两颗新建按钮成对换行（320 宽时才有机会用到） */
+.rem-new-pair {
+  display: flex;
+  gap: var(--space-8);
+  flex: none;
+}
+.rem-new {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  height: 34px;
+  padding: 0 var(--space-14);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-ctl);
+  background: var(--card-bg);
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.rem-new svg {
+  width: 15px;
+  height: 15px;
+  color: var(--accent-ink);
+}
+.rem-new:hover {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.rem-new:active {
+  background: var(--fill-3);
+}
+.rem-new-short {
+  display: none;
+}
+@media (max-width: 900px) {
+  /* 36 高：贴边只剩纵向余量，横向已经排满；热区由 touch.css 的伪元素补到 44 */
+  .rem-new {
+    height: 36px;
+    padding: 0 var(--space-12);
+  }
+}
+/* ★ 短标签只留给 ≤375 的手机（2026-11-17 实测四档后定的）。
+   390 这一档放全称「新建待办 / 新建提醒」**不多占一行**（页头 104.2，
+   和短标签时一模一样）；360 会多占一行（104→148）；430 从一行变两行。
+   取舍：承认在 430 上多一行，换 390/412 这些主流宽度上「这是一颗新建按钮」
+   说得清清楚楚 —— 用户上一版的原话就是"不知道哪里能新建"。
+   375 以下（320/360）四个字会把操作区挤到第三行，且两颗按钮会拆开，才退回二字。 */
+@media (max-width: 375px) {
+  .rem-new-full {
+    display: none;
+  }
+  .rem-new-short {
+    display: inline;
+  }
 }
 
 /* ---------- 快速添加 ---------- */
@@ -3616,21 +3790,9 @@ textarea.input {
   opacity: 0.5;
 }
 
-/* 「只到点响一声、不用勾完成」的提醒次入口：它是文案级链接，不是第二个主按钮 */
-.rem-footlink {
-  margin: var(--space-16) 0 var(--space-8);
-  text-align: center;
-}
-.rem-footlink button {
-  min-height: 44px;
-  padding: 0 var(--space-8);
-  font-size: var(--fs-xs);
-  color: var(--text-3);
-}
-.rem-footlink button:hover {
-  color: var(--ink);
-  text-decoration: underline;
-}
+/* 原来这里还有一条 .rem-footlink（列表底部那行「只要到时间提醒…」的灰字链接）。
+   2026-11-17 那行整块删了，样式一并删掉 —— 留着一个没有对象的类，
+   下次有人看到会以为它还挂在某处。 */
 .rem-emptyline {
   padding: var(--space-16) 0;
   text-align: center;
@@ -3968,6 +4130,11 @@ textarea.input {
   }
   .pg-head--compact h2 {
     font-size: 1.125rem;
+  }
+  /* 独标题：手机上 28px。比桌面小一档，但仍要明显大于 20px 的面板标题 ——
+     页头是这一屏唯一的"这是哪儿"，不该比卡片标题还弱。 */
+  .pg-head.pg-head--solo h2 {
+    font-size: 1.75rem;
   }
   .pg-head--compact .pg-sub {
     margin-top: 2px;

@@ -643,7 +643,8 @@ export default function CetPage() {
   return (
     <PageShell
       title="四六级备考工作区"
-      sub="词卡按遗忘曲线复习，不用你自己排哪天该过哪一批。"
+      // 页头说明退场（2026-11-17）：原来那句在讲"复习计划是自动排的"，
+      // 而这张卡里本来就有「第 N 批 / 今天该过哪些」的实况。
       actions={
         plan && !editing ? (
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>

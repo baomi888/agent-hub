@@ -236,7 +236,6 @@ export default function FeedbackCard({
     <div className="card card-pad">
       <div className="card-head">
         <span className="card-title">告诉我们哪里不对</span>
-        <span className="meta">开发者会看到</span>
       </div>
       {inner}
     </div>

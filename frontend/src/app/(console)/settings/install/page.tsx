@@ -27,7 +27,8 @@ export default function SettingsInstallPage() {
   return (
     <PageShell
       title="装到桌面"
-      sub="一步一图，电脑、安卓、苹果分开写。装好后从桌面图标点开就是全屏工作台，没有地址栏。"
+      // 页头说明退场（2026-11-17）：下面是分平台的图步，第一个小标题就把
+      // 「分电脑/安卓/苹果」说清了。
       actions={
         <Link href="/settings" className="btn btn-ghost btn-sm">
           回到设置

@@ -32,6 +32,8 @@ import type {
 
 /** 启用中的委托上限。写在页面上，别让用户撞到 400 才知道 */
 const MAX_ACTIVE = 5;
+/** 执行历史默认露几条：再多的收进「查看全部」（2026-11-17） */
+const HIST_PEEK = 3;
 const TZ = "Asia/Shanghai";
 
 const KIND_OPTIONS: { value: DelegateKind; label: string }[] = [
@@ -152,6 +154,8 @@ export default function DelegatePage() {
   const [form, setForm] = useState<FormState>(BLANK_FORM);
   const [preview, setPreview] = useState<{ name: string; text: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  /** 执行历史是否展开成全量（默认只看最近 HIST_PEEK 条） */
+  const [histOpen, setHistOpen] = useState(false);
   const formRef = useRef<HTMLDivElement>(null);
 
   /* 「创建/保存」条：手机端表单约 1000px 高，提交按钮要一直挂在屏幕底部。
@@ -315,6 +319,11 @@ export default function DelegatePage() {
   const runItems = runs.state === "ready" ? runs.data : isDemo ? DEMO_RUNS : [];
 
   const activeCount = useMemo(() => items.filter((d) => d.enabled).length, [items]);
+
+  /* 执行历史的一行汇总。原来这块只列时间，用户得自己数有多少次失败；
+     改成「近 N 次 · 成功 X · 失败 Y」之后，那 50 行可以放心折叠。 */
+  const runOk = runItems.filter((r) => r.status === "succeeded").length;
+  const runBad = runItems.filter((r) => r.status === "failed").length;
 
   /* 执行历史只对管理员整块展开：普通用户要的不是「第 37 次执行的 tokens_out」，
      而是「它上次到底跑没跑成」—— 那一句已经并进每条委托的行内（见 .dele-last）。
@@ -514,18 +523,10 @@ export default function DelegatePage() {
   return (
     <PageShell
       title="每日委托"
-      sub={
-        <>
-          {/* ★ 这里必须手动分两行：原来是一整句「…打招呼。触发后内容会替你存下来…」，
-              浏览器把它断成了「触 / 发后内容」—— 凭空造出一个不存在的词「发后」，
-              读起来像病句（1440 和 390 宽下都断在同一个地方）。
-              中文断行位置由宽度决定，写文案无法规避，只能把断点搬到句号上。
-              两行各 21 字，360px 容器里都放得下，窄屏也不会再拆到词中间。 */}
-          让知穗在固定时间替你复盘、提醒、打招呼。
-          <br />
-          写下的内容<b>会替你存下来</b>，你随时能翻回去看。
-        </>
-      }
+      // 页头说明整句退场（2026-11-17）：「让知穗在固定时间替你复盘…」原来占两行。
+      // 说的是这一页能干什么，而列表里每条委托自己就写着"每天 21:00 · 下次 …"。
+      // 宽度：单列页面，980 是「两列表单 + 一行委托卡」都还读得下去的上限。
+      width={980}
       actions={
         <>
           <span className="ctag">
@@ -580,8 +581,9 @@ export default function DelegatePage() {
             </div>
           )}
 
-          <div className="grid2">
-            {/* ============ 左：委托列表 + 执行历史 ============ */}
+          {/* 2026-11-17：两栏收成一条纵列 —— 我的委托 → 新建委托 → 执行历史。
+              手机上原来执行历史（最多 50 行）夹在中间，把新建表单推到了三四屏之外。 */}
+          <div className="del-page">
             <div>
               <p className="sec-label">
                 我的委托{isDemo && <span className="ctag warn" style={{ marginLeft: 6 }}>演示数据</span>}
@@ -748,269 +750,296 @@ export default function DelegatePage() {
                 )}
               </div>
 
+              {/* ============ 新建 / 编辑表单 ============ */}
+              <div ref={formRef}>
+                {/* 说明：这一块 2026-11-17 从右栏挪到「我的委托」下面。
+                    手机上两栏本来就是一栏，执行历史（最多 50 行）夹在中间，
+                    新建表单被推到三四屏之外 —— 用户以为这页只能看不能建。 */}
+                <p className="sec-label" style={{ marginTop: 22 }}>
+                  {editing ? "编辑委托" : "新建委托"}
+                </p>
+                {/* del-form-grid：宽屏两列、窄屏一列。字段横跨 900px 时
+                    「名称（3–32 字）」这种输入框会长得像一段正文。 */}
+                <div className="card card-pad del-form-grid">
+                  <Field className="wide" label="名称（3–32 字，建后不可改）">
+                    <input
+                      className="input"
+                      value={form.name}
+                      maxLength={32}
+                      disabled={editing}
+                      placeholder="例如：每日学习复盘"
+                      onChange={(e) => patch({ name: e.target.value })}
+                    />
+                  </Field>
+
+                  <div className="field">
+                    <span className="f">类型</span>
+                    <Seg
+                      ariaLabel="委托类型"
+                      options={KIND_OPTIONS}
+                      value={form.kind}
+                      onChange={(v) => patch({ kind: v })}
+                    />
+                  </div>
+
+                  <div className="field">
+                    <span className="f">频率</span>
+                    <Seg
+                      ariaLabel="触发频率"
+                      options={FREQ_OPTIONS}
+                      value={form.freq}
+                      onChange={(v) => patch({ freq: v })}
+                      stretch
+                    />
+                  </div>
+
+                  {form.freq === "interval" ? (
+                    <Field label="每多少分钟一次" hint="最小 60 分钟（1 小时），最多 1440">
+                      <input
+                        className="input"
+                        type="number"
+                        min={60}
+                        max={1440}
+                        value={form.everyMinutes}
+                        onChange={(e) => patch({ everyMinutes: Number(e.target.value) || 60 })}
+                      />
+                    </Field>
+                  ) : (
+                    <div className="row field wide">
+                      <div style={{ flex: 1 }}>
+                        <Field label="触发时间">
+                          <input
+                            className="input"
+                            type="time"
+                            value={form.at}
+                            onChange={(e) => patch({ at: e.target.value })}
+                          />
+                        </Field>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <Field label="时区" hint="当前只支持一个时区">
+                          <input className="input" value={TZ} disabled />
+                        </Field>
+                      </div>
+                    </div>
+                  )}
+
+                  {form.freq === "weekly" && (
+                    <div className="field">
+                      <span className="f">星期几</span>
+                      <Seg
+                        ariaLabel="星期几"
+                        options={WEEKDAYS.map((w, i) => ({ value: String(i), label: w }))}
+                        value={String(form.weekday)}
+                        onChange={(v) => patch({ weekday: Number(v) })}
+                        stretch
+                      />
+                    </div>
+                  )}
+
+                  <Field label="结果放在哪" hint="不选就放默认位置">
+                    <select
+                      className="input"
+                      value={form.sessionId}
+                      onChange={(e) => patch({ sessionId: e.target.value })}
+                    >
+                      <option value="">默认位置（不用选）</option>
+                      {sessions.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.title}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+
+                  <Field label="绑定资料库（可选）" hint="绑了之后生成时只参考这个库">
+                    <select
+                      className="input"
+                      value={form.kbId}
+                      onChange={(e) => patch({ kbId: e.target.value })}
+                    >
+                      <option value="">不绑定</option>
+                      {kbs.map((k) => (
+                        <option key={k.kb_id} value={k.kb_id}>
+                          {k.name}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+
+                  <Field className="wide" label="生成指令" hint="知穗每次要照做的事，写得越具体结果越稳">
+                    <textarea
+                      className="input"
+                      value={form.instruction}
+                      maxLength={1000}
+                      placeholder="例如：根据我今天的学习产出给一段复盘，先说掌握了什么，再指出一个最该补的漏洞。"
+                      onChange={(e) => patch({ instruction: e.target.value })}
+                    />
+                  </Field>
+
+                  <div className="row field wide">
+                    <div style={{ flex: 1 }}>
+                      <Field label="语气">
+                        <select
+                          className="input"
+                          value={form.tone}
+                          onChange={(e) => patch({ tone: e.target.value })}
+                        >
+                          <option value="neutral">中性</option>
+                          <option value="warm">温和</option>
+                          <option value="strict">严格</option>
+                        </select>
+                      </Field>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <Field label="长度上限（字）">
+                        <input
+                          className="input"
+                          type="number"
+                          min={200}
+                          max={2000}
+                          step={50}
+                          value={form.maxChars}
+                          onChange={(e) => patch({ maxChars: Number(e.target.value) || 600 })}
+                        />
+                      </Field>
+                    </div>
+                  </div>
+
+                  <div
+                    className="field wide"
+                    style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}
+                  >
+                    <span style={{ fontSize: "var(--fs-sm)", color: "var(--text-2)" }}>
+                      {editing ? "启用这条委托" : "创建后立即启用"}
+                    </span>
+                    <Switch
+                      checked={form.enabled}
+                      label="启用"
+                      onChange={(v) => patch({ enabled: v })}
+                    />
+                  </div>
+
+                  {/* 预览与删除：从行内挪到编辑面板里。
+                      行内只留「开关 + 立即执行」两件事（任务型布局），
+                      预览是「配置时验证」的动作、删除是不可逆的破坏性动作，
+                      两者都属于「打开这一条再动手」，摆在列表上每行重复一遍只是噪音。 */}
+                  {editing && editingItem && (
+                    <div className="form-tools wide">
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        disabled={busy === `run-${editingItem.id}`}
+                        onClick={() => void doRun(editingItem, true)}
+                      >
+                        先预览一次
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-danger btn-sm"
+                        disabled={busy === `del-${editingItem.id}`}
+                        onClick={() => void doRemove(editingItem)}
+                      >
+                        <CornIcon name="trash" />
+                        删除这条
+                      </button>
+                    </div>
+                  )}
+                  {editing && (
+                    <p className="hint wide" style={{ marginTop: 8 }}>
+                      「先预览一次」只生成内容给你看一遍，不会发到会话里，也不会改下次触发时间。
+                    </p>
+                  )}
+
+                  {/* 手机上表单长约 1000px，提交按钮原来在最后一个字段之后 ——
+                      滑到中间时找不到它。is-fixed 只在窄屏固定到底部（桌面右栏常驻，
+                      一条横跨全屏的底栏反而更难用），且只在表单可见时挂上。 */}
+                  <div className={`row form-actions wide${formInView ? " is-fixed" : ""}`}>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      style={{ flex: 1 }}
+                      disabled={busy === "submit"}
+                      onClick={() => void submit()}
+                    >
+                      <CornIcon name="check" />
+                      {editing ? "保存" : "创建"}
+                    </button>
+                    <button type="button" className="btn btn-ghost" onClick={() => setForm(BLANK_FORM)}>
+                      {editing ? "取消编辑" : "清空"}
+                    </button>
+                  </div>
+                  <p className="hint wide">
+                    启用中的委托上限 {MAX_ACTIVE} 条；名字撞上已有的会自动提醒你换一个。
+                  </p>
+                </div>
+              </div>
+
               {/* ---- 执行历史：只给管理员 ----
                   普通用户要的是「它上次跑成没有」，那一句已经并进每条委托的行内；
-                  整张表的价值在排障（哪次定时、耗时多少、烧了多少 token），
-                  普通人翻到这里只会多一个「这跟我有什么关系」。
-                  「预览只生成内容」那句说明也一起搬进了编辑面板 —— 它讲的是
-                  预览按钮的行为，放在按钮旁边才有人看。 */}
+                  整张表的价值在排障（哪次定时、耗时多少、烧了多少 token）。
+
+                  ★ 2026-11-17 换了显示方式：默认只露最近 3 条 + 一行汇总，
+                    其余收进「查看全部」。原来最多 50 条平铺，一条 40px，
+                    光这一块就 2000px —— 手机上要划六屏才到底，
+                    而每天真正要看的是「最近跑成没有」这 3 条。 */}
               {isAdmin && (
                 <>
-                  <p className="sec-label" style={{ marginTop: 22 }}>
+                  <p className="sec-label del-hist-head" style={{ marginTop: 22 }}>
                     执行历史
+                    <span className="del-hist-sum">
+                      近 {runItems.length} 次 · 成功 {runOk}
+                      {runBad > 0 ? ` · 失败 ${runBad}` : ""}
+                    </span>
                   </p>
                   <div className="card card-pad">
                     {runItems.length === 0 ? (
                       <p className="hint" style={{ marginTop: 0 }}>
-                        还没有执行记录。第一次触发之后，这里会显示每次的结果、耗时和消耗。
+                        还没有执行记录。第一次触发之后，这里会显示每次的结果和耗时。
                       </p>
                     ) : (
-                      runItems.map((r) => {
-                        const [cls, label] = RUN_TAG[r.status] ?? ["warn", r.status];
-                        const dur = fmtDuration(r.started_at, r.finished_at);
-                        return (
-                          <div className="run" key={r.run_id}>
-                            <span className="when">{r.planned_at ? fmtWhen(r.planned_at) : "—"}</span>
-                            <span>
-                              <span className={`ctag ${cls}`}>{label}</span>{" "}
-                              <span className="meta">
-                                {r.trigger === "manual" ? "你点了「立即执行」" : "定时触发"}
-                                {dur ? ` · ${dur}` : ""}
-                                {r.error ? ` · ${r.error}` : ""}
-                              </span>
-                            </span>
-                            <span className="meta">
-                              {r.tokens_out ? `${fmtNum(r.tokens_out)} tok` : ""}
-                            </span>
-                          </div>
-                        );
-                      })
+                      <>
+                        <div className="del-hist-list">
+                          {(histOpen ? runItems : runItems.slice(0, HIST_PEEK)).map((r) => {
+                            const [cls, label] = RUN_TAG[r.status] ?? ["warn", r.status];
+                            const dur = fmtDuration(r.started_at, r.finished_at);
+                            return (
+                              <div className="run run--tight" key={r.run_id}>
+                                <span className="when">
+                                  {r.planned_at ? fmtWhen(r.planned_at) : "—"}
+                                </span>
+                                <span>
+                                  <span className={`ctag ${cls}`}>{label}</span>{" "}
+                                  <span className="meta">
+                                    {r.trigger === "manual" ? "手动" : "定时"}
+                                    {dur ? ` · ${dur}` : ""}
+                                    {r.error ? ` · ${r.error}` : ""}
+                                  </span>
+                                </span>
+                                <span className="meta">
+                                  {r.tokens_out ? `${fmtNum(r.tokens_out)} tok` : ""}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {runItems.length > HIST_PEEK && (
+                          <button
+                            type="button"
+                            className="del-hist-more"
+                            aria-expanded={histOpen}
+                            onClick={() => setHistOpen((v) => !v)}
+                          >
+                            {histOpen ? "收起" : `查看全部 ${runItems.length} 条`}
+                          </button>
+                        )}
+                      </>
                     )}
                   </div>
-                  <p className="hint">
-                    按「定时触发」和「你点的」分开记 —— 排查「今天为什么没收到」先看这一列。
-                  </p>
                 </>
               )}
             </div>
 
-            {/* ============ 右：新建 / 编辑表单（常驻） ============ */}
-            <div ref={formRef}>
-              <p className="sec-label">{editing ? "编辑委托" : "新建委托"}</p>
-              <div className="card card-pad">
-                <Field label="名称（3–32 字，建后不可改）">
-                  <input
-                    className="input"
-                    value={form.name}
-                    maxLength={32}
-                    disabled={editing}
-                    placeholder="例如：每日学习复盘"
-                    onChange={(e) => patch({ name: e.target.value })}
-                  />
-                </Field>
-
-                <div className="field">
-                  <span className="f">类型</span>
-                  <Seg
-                    ariaLabel="委托类型"
-                    options={KIND_OPTIONS}
-                    value={form.kind}
-                    onChange={(v) => patch({ kind: v })}
-                  />
-                </div>
-
-                <div className="field">
-                  <span className="f">频率</span>
-                  <Seg
-                    ariaLabel="触发频率"
-                    options={FREQ_OPTIONS}
-                    value={form.freq}
-                    onChange={(v) => patch({ freq: v })}
-                    stretch
-                  />
-                </div>
-
-                {form.freq === "interval" ? (
-                  <Field label="每多少分钟一次" hint="最小 60 分钟（1 小时），最多 1440">
-                    <input
-                      className="input"
-                      type="number"
-                      min={60}
-                      max={1440}
-                      value={form.everyMinutes}
-                      onChange={(e) => patch({ everyMinutes: Number(e.target.value) || 60 })}
-                    />
-                  </Field>
-                ) : (
-                  <div className="row field">
-                    <div style={{ flex: 1 }}>
-                      <Field label="触发时间">
-                        <input
-                          className="input"
-                          type="time"
-                          value={form.at}
-                          onChange={(e) => patch({ at: e.target.value })}
-                        />
-                      </Field>
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <Field label="时区" hint="当前只支持一个时区">
-                        <input className="input" value={TZ} disabled />
-                      </Field>
-                    </div>
-                  </div>
-                )}
-
-                {form.freq === "weekly" && (
-                  <div className="field">
-                    <span className="f">星期几</span>
-                    <Seg
-                      ariaLabel="星期几"
-                      options={WEEKDAYS.map((w, i) => ({ value: String(i), label: w }))}
-                      value={String(form.weekday)}
-                      onChange={(v) => patch({ weekday: Number(v) })}
-                      stretch
-                    />
-                  </div>
-                )}
-
-                <Field label="结果放在哪" hint="不选就放默认位置">
-                  <select
-                    className="input"
-                    value={form.sessionId}
-                    onChange={(e) => patch({ sessionId: e.target.value })}
-                  >
-                    <option value="">默认位置（不用选）</option>
-                    {sessions.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.title}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-
-                <Field label="绑定资料库（可选）" hint="绑了之后生成时只参考这个库">
-                  <select
-                    className="input"
-                    value={form.kbId}
-                    onChange={(e) => patch({ kbId: e.target.value })}
-                  >
-                    <option value="">不绑定</option>
-                    {kbs.map((k) => (
-                      <option key={k.kb_id} value={k.kb_id}>
-                        {k.name}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-
-                <Field label="生成指令" hint="知穗每次要照做的事，写得越具体结果越稳">
-                  <textarea
-                    className="input"
-                    value={form.instruction}
-                    maxLength={1000}
-                    placeholder="例如：根据我今天的学习产出给一段复盘，先说掌握了什么，再指出一个最该补的漏洞。"
-                    onChange={(e) => patch({ instruction: e.target.value })}
-                  />
-                </Field>
-
-                <div className="row field">
-                  <div style={{ flex: 1 }}>
-                    <Field label="语气">
-                      <select
-                        className="input"
-                        value={form.tone}
-                        onChange={(e) => patch({ tone: e.target.value })}
-                      >
-                        <option value="neutral">中性</option>
-                        <option value="warm">温和</option>
-                        <option value="strict">严格</option>
-                      </select>
-                    </Field>
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <Field label="长度上限（字）">
-                      <input
-                        className="input"
-                        type="number"
-                        min={200}
-                        max={2000}
-                        step={50}
-                        value={form.maxChars}
-                        onChange={(e) => patch({ maxChars: Number(e.target.value) || 600 })}
-                      />
-                    </Field>
-                  </div>
-                </div>
-
-                <div
-                  className="field"
-                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}
-                >
-                  <span style={{ fontSize: "var(--fs-sm)", color: "var(--text-2)" }}>
-                    {editing ? "启用这条委托" : "创建后立即启用"}
-                  </span>
-                  <Switch
-                    checked={form.enabled}
-                    label="启用"
-                    onChange={(v) => patch({ enabled: v })}
-                  />
-                </div>
-
-                {/* 预览与删除：从行内挪到编辑面板里。
-                    行内只留「开关 + 立即执行」两件事（任务型布局），
-                    预览是「配置时验证」的动作、删除是不可逆的破坏性动作，
-                    两者都属于「打开这一条再动手」，摆在列表上每行重复一遍只是噪音。 */}
-                {editing && editingItem && (
-                  <div className="form-tools">
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      disabled={busy === `run-${editingItem.id}`}
-                      onClick={() => void doRun(editingItem, true)}
-                    >
-                      先预览一次
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-danger btn-sm"
-                      disabled={busy === `del-${editingItem.id}`}
-                      onClick={() => void doRemove(editingItem)}
-                    >
-                      <CornIcon name="trash" />
-                      删除这条
-                    </button>
-                  </div>
-                )}
-                {editing && (
-                  <p className="hint" style={{ marginTop: 8 }}>
-                    「先预览一次」只生成内容给你看一遍，不会发到会话里，也不会改下次触发时间。
-                  </p>
-                )}
-
-                {/* 手机上表单长约 1000px，提交按钮原来在最后一个字段之后 ——
-                    滑到中间时找不到它。is-fixed 只在窄屏固定到底部（桌面右栏常驻，
-                    一条横跨全屏的底栏反而更难用），且只在表单可见时挂上。 */}
-                <div className={`row form-actions${formInView ? " is-fixed" : ""}`}>
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    style={{ flex: 1 }}
-                    disabled={busy === "submit"}
-                    onClick={() => void submit()}
-                  >
-                    <CornIcon name="check" />
-                    {editing ? "保存" : "创建"}
-                  </button>
-                  <button type="button" className="btn btn-ghost" onClick={() => setForm(BLANK_FORM)}>
-                    {editing ? "取消编辑" : "清空"}
-                  </button>
-                </div>
-                <p className="hint">
-                  启用中的委托上限 {MAX_ACTIVE} 条；名字撞上已有的会自动提醒你换一个。
-                </p>
-              </div>
-            </div>
           </div>
         </>
       )}

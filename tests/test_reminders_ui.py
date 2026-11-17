@@ -476,8 +476,11 @@ class TestUserFacingCopy:
     def test_key_copy_stays_in_plain_chinese(self):
         page = _page()
         capture = _capture()
-        assert "设了提醒时间，到时会通知你" in page
-        assert "只设截止时间，不会收到提醒" in page
+        # ★ 2026-11-17：原来这里还钉着页头那句「设了提醒时间，到时会通知你」，
+        #   全站清账后副标题已删 —— 「哪些会响」改由**每一行自己的标签**说
+        #   （时间列标「提醒」/行尾标「不提醒」），见 TestCopySpeaksUserLanguage
+        #   里那条 test_notification_scope_is_said_per_item。
+        assert "只设它，不会收到提醒" in page
         assert "免打扰时间" in page
         assert "提醒记录" in page
         assert "补上时间" in capture
@@ -490,7 +493,12 @@ class TestCompactHead:
     def test_shell_supports_compact(self):
         shell = SHELL.read_text(encoding="utf-8")
         assert "compact?: boolean" in shell
-        assert '"pg-head pg-head--compact"' in shell
+        # 2026-11-17：类名不再写死成一个字面量，改成 ["pg-head", solo?, compact?]
+        # 数组 filter+join 拼出来 —— 因为加上了 solo 这个第三种形态。
+        # 判据跟着改成"数组里必须还有 compact 这一项，且确实进了 className"。
+        assert '"pg-head"' in shell
+        assert '"pg-head--compact"' in shell
+        assert "className={headClass}" in shell
 
     def test_only_reminders_asks_for_it(self):
         """别的页面没量过「省下来能不能换来一条内容」，不许跟着开。"""
@@ -1363,9 +1371,22 @@ class TestCopySpeaksUserLanguage:
         assert "联动" not in page
         assert "完成语义" not in page
 
-    def test_subtitle_answers_which_items_will_notify(self):
-        """副标题必须回答「哪些会通知」—— 这正是用户分不清的那件事。"""
-        assert "设了提醒时间，到时会通知你" in _page()
+    def test_notification_scope_is_said_per_item(self):
+        """「哪些会响」不再由页头一句话回答，而是由**每一行自己**回答。
+
+        旧版这条钉的是副标题「设了提醒时间，到时会通知你」。2026-11-17 全站清账
+        把副标题删了 —— 但不能顺手把"用户分不清哪条会响"这件事也删掉。
+        责任转移到了行内：时间列在设了提醒时显示提醒时刻并标「提醒」，
+        有截止日却没设提醒时必须标「不提醒」（这是最容易误会的组合）。
+
+        所以断言改成两头：
+          · 页头不许再把这句话写回来（sub 已删，写回来就是回潮）；
+          · 行内那两种标签必须还在，且一个是"有提醒"分支、一个是"没提醒"分支。
+        """
+        page = _page()
+        assert "设了提醒时间，到时会通知你" not in page, "副标题回来了？页头已清账"
+        assert 'small: "提醒"' in page, "时间列不再标「提醒」了 —— 哪些会响又没处说了"
+        assert '"不提醒"' in page, "有截止日没设提醒的那条不再标「不提醒」，用户会以为会响"
 
     def test_context_line_counts_todos_not_pieces(self):
         """待办论「条」，不论「件」。"""
@@ -2058,8 +2079,12 @@ class TestQuickAddEntry:
         这种句子测试读不出对错，只能钉住它跟着布局一起改过。
         """
         src = PAGE.read_text(encoding="utf-8")
-        assert "在上面那行直接写" in src
+        # 2026-11-17：文案从「在上面那行直接写」改成带一个具体例子
+        # （「在上面那行写「明天 9 点交高数作业」，回车就能记一条。」）——
+        # 光说"直接写"用户还是不知道能写什么。判据仍是**方位必须是"上面"**。
+        assert "在上面那行" in src
         assert "在下面一行直接写" not in src
+        assert "在下面那行" not in src
 
 
 # ==================== 语音输入：全屏态与采集约束（2026-11-11）====================

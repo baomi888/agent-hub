@@ -26,6 +26,13 @@ interface Props {
    * 删之前先反问：去掉这句，用户会不会做一个错误的决定？
    * 会 → 它是 R2，留，但一屏只准出现一次；
    * 不会（只是在把下面几个分区 / 几张卡念一遍）→ 它就是 R1，别写。
+   *
+   * ★ 2026-11-17 全站清账：一句「这页是干什么的」都别再写。
+   *   成熟的 App 不会在标题下面解释自己 —— 侧栏高亮、标题、内容已经说完了。
+   *   现在只剩两页还传 sub，理由都是**用户会因此做错决定**：
+   *   settings/reminder（安卓在国内收不到推送）、dashboard（管理员口径）。
+   *   不传 sub 时页头走 `pg-head--solo`：标题放大到 --fs-page，独自占住这条带，
+   *   否则一个 18px 的词挂在一整条空白上，像漏加载了副标题。
    */
   sub?: ReactNode;
   /**
@@ -61,9 +68,22 @@ export default function PageShell({
   compact,
   children,
 }: Props) {
+  // 页头三种形态：
+  //   · 有 sub       → 常规：标题 20px + 一句说明（只有上面那两页还用）
+  //   · 没有 sub     → pg-head--solo：标题放大到 --fs-page 独撑页头
+  //   · compact      → 窄屏省高度（标题压到 18px 的旧规则已被 solo 覆盖）
+  const solo = !sub && !detail;
+  const headClass = ["pg-head", solo ? "pg-head--solo" : "", compact ? "pg-head--compact" : ""]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <div className="pg-wrap" style={width ? { maxWidth: width } : undefined}>
-      <div className={compact ? "pg-head pg-head--compact" : "pg-head"}>
+    // 限宽页面居中：侧栏占了左边一块，内容靠左贴会留出一条大右空白
+    <div
+      className="pg-wrap"
+      style={width ? { maxWidth: width, marginInline: "auto" } : undefined}
+    >
+      <div className={headClass}>
         <div>
           {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
           <h2>{title}</h2>

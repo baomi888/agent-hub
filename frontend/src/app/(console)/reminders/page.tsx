@@ -3145,7 +3145,7 @@ export default function RemindersPage() {
      空列表时那句引导文案指向的输入框，恰恰在屏幕外。
      现在合成一条：输入框 + 「添加」+ 「整理」。回车/添加 = 直接记一条；
      「整理」= 把一整段话拆成多条（原 AI 抽屉，能力一点没少）。
-     页头「+ 新建」保留 —— 它管的是"我要精确设字段"，和"先记下来"是两件事。 */
+     页头的两个「新建」保留 —— 它们管的是"我要精确设字段"，和"先记下来"是两件事。 */
   const quickAddBar =
     mode === "normal" && scope !== "completed" ? (
       <div className="rem-quick rem-quick--top">
@@ -3421,16 +3421,10 @@ export default function RemindersPage() {
         </section>
       ) : null}
 
-      {/* 只响一次、没有「完成」可言的重复提醒（每天 22:00 复盘）仍然是提醒，
-          不是待办 —— 给它留一个次入口，但不要做成「新建」的第二个主按钮。
-          文案不许再写「没有完成语义」：那是开发者的分类型由，不是用户的话。 */}
-      {mode === "normal" ? (
-        <p className="rem-footlink">
-          <button type="button" onClick={() => openReminderDrawer(null)}>
-            只要到时间提醒，不用勾完成？新建提醒
-          </button>
-        </p>
-      ) : null}
+      {/* 原来这里有一行灰字「只要到时间提醒，不用勾完成？新建提醒」。
+          2026-11-17 删掉：它既是"解释"，又是全页第二个新建入口，
+          而且藏在列表最底下 —— 实测用户根本不知道那行能点。
+          新建提醒改成页头和「新建待办」并排的同尺寸按钮（见下面的 actions）。 */}
     </>
   );
 
@@ -3444,10 +3438,10 @@ export default function RemindersPage() {
     <PageShell
       compact
       title="待办"
-      sub="到点提醒你，课表与打卡自动排好。"
-      detail="设了提醒时间，到时会通知你。"
+      // 页头说明整句退场（2026-11-17）：标题 + 两个新建按钮已经把这一页说完，
+      // 再挂一句「到点提醒你，课表与打卡自动排好」只是在念下面的内容。
       actions={
-        <div className="flex items-center gap-2">
+        <div className="rem-head-acts">
           <div className="seg" role="group" aria-label="视图">
             <button type="button" aria-pressed={tab === "list"} onClick={() => setTab("list")}>
               列表
@@ -3460,10 +3454,27 @@ export default function RemindersPage() {
               设置
             </button>
           </div>
+          {/* ★ 两个**同级**的新建入口（2026-11-17）。
+              以前只有一个「+ 新建」（待办），提醒的入口是列表最底下一行灰字 ——
+              用户要么找不到，要么以为那只是句说明。
+              这里同尺寸、同位置、同图标位，只有标签和图标不同：
+              待办带 ＋（要勾完成的事），提醒带铃（到点响一声）。
+              窄屏只留「待办 / 提醒」两个字，宽屏是完整标签 —— 见 console.css 的 .rem-new。 */}
           {tab === "list" ? (
-            <button type="button" className="btn-new" onClick={() => openTaskDrawer(null)}>
-              + 新建
-            </button>
+            /* 两颗包一层：320 宽时容不下「seg + 两颗」，让它们**成对**换行，
+               别一颗留在上一行、一颗掉到下一行（那样就不像一对同级入口了）。 */
+            <div className="rem-new-pair">
+              <button type="button" className="rem-new" onClick={() => openTaskDrawer(null)}>
+                <CornIcon name="plus" />
+                <span className="rem-new-full">新建待办</span>
+                <span className="rem-new-short">待办</span>
+              </button>
+              <button type="button" className="rem-new" onClick={() => openReminderDrawer(null)}>
+                <CornIcon name="bell" />
+                <span className="rem-new-full">新建提醒</span>
+                <span className="rem-new-short">提醒</span>
+              </button>
+            </div>
           ) : null}
         </div>
       }
@@ -3477,9 +3488,7 @@ export default function RemindersPage() {
             <Callout icon="bulb">
               <b>还没有待办</b>
               <br />
-              在上面那行直接写「明天 9 点交高数作业」，或者点右上角「+ 新建」。
-              <br />
-              只设截止时间，不会收到提醒。想被提醒，记得打开「提醒我」。
+              在上面那行写「明天 9 点交高数作业」，回车就能记一条。
             </Callout>
           ) : (
             listView

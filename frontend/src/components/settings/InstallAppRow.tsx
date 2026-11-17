@@ -4,11 +4,9 @@ import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  detectPlatform,
   isInstalled,
   promptInstall,
   subscribePwa,
-  type Platform,
 } from "@/lib/pwa";
 
 /* 设置页里的固定入口。
@@ -19,7 +17,6 @@ import {
  * 三个状态都住在浏览器里，一律走 useSyncExternalStore 读 —— 既避免
  * 「服务端没有 window」的 hydration 打架，也避免在 effect 里 setState。
  */
-const getPlatform = (): Platform => detectPlatform();
 const getInstalled = (): boolean => isInstalled();
 const getCanPrompt = (): boolean => !!window.__baomiInstallPrompt;
 
@@ -28,7 +25,6 @@ const getCanPrompt = (): boolean => !!window.__baomiInstallPrompt;
 const TUTORIAL = "/settings/install";
 
 export default function InstallAppRow() {
-  const platform = useSyncExternalStore(subscribePwa, getPlatform, () => "other" as Platform);
   const installed = useSyncExternalStore(subscribePwa, getInstalled, () => false);
   const canPrompt = useSyncExternalStore(subscribePwa, getCanPrompt, () => false);
 
@@ -61,18 +57,10 @@ export default function InstallAppRow() {
         )}
       </div>
 
-      <p className="hint">
-        {installed ? (
-          <>
-            你现在就是从桌面图标打开的。想重新装一次的话，先在桌面删掉旧图标，再用浏览器重新添加。
-          </>
-        ) : (
-          <>
-            装好后从桌面图标打开，全屏、没有地址栏，和装了个 App 一样；断网时会显示一个提示页，不会白屏。
-            {platform === "desktop" && " 电脑上装出来是独立窗口，开始菜单也能搜到。"}
-          </>
-        )}
-      </p>
+      {/* 原来这里是一段 hint：没装时讲「全屏、没有地址栏、断网也不白屏」，
+          装了时讲「想重装先在桌面删掉旧图标」。2026-11-17 两段都删 ——
+          前者是安装教程那一页的开场白（链接就在下面），
+          后者是一年用不到一次的操作，为它常驻一行等于天天念。 */}
 
       {/* 教程入口常显：已安装的人也会要（重装、教室友、换了新手机），
           之前这里只剩「已安装」两个字，等于把这批人挡在外面 */}

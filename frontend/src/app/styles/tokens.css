@@ -205,6 +205,10 @@
   --fs-lg: 1rem; /* 16px 正文基准、输入框（iOS 也不会为 <16px 的输入框缩放整页） */
   --fs-xl: 1.125rem; /* 18px 强调数字、空状态标题 */
   --fs-title: 1.25rem; /* 20px 面板/浮层标题（衬线） */
+  /* 32px 页头标题：只在页头**没有说明文**时使用（PageShell 的 pg-head--solo）。
+     说明文退场后标题要独自占住那条带，20px 挂在一整条空白上像没加载完。
+     手机上收到 28px（见 console.css 的媒体查询）。 */
+  --fs-page: 2rem;
   --fs-num: 1.875rem; /* 30px 大数字（连续打卡天数这类仪表读数） */
 
   /* 间距刻度：把散落的 gap 像素值收口成令牌，防止间距再度发散。
@@ -408,6 +412,7 @@ html[data-fs="xl"] {
   --text-fs-lg: var(--fs-lg);
   --text-fs-xl: var(--fs-xl);
   --text-fs-title: var(--fs-title);
+  --text-fs-page: var(--fs-page);
   /* ★ 收口 Tailwind 的 text-xs：它的默认值是 0.75rem（=12px），正好落在
      R3 的 13px 下限之下。全站有 20 多处写的是 text-xs 而不是令牌，
      不覆盖这一层，改了 tokens 也照样有 12px 的字（探针第一跑就抓到了）。

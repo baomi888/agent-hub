@@ -164,13 +164,16 @@ export function Field({
   label,
   hint,
   children,
+  className,
 }: {
   label: string;
   hint?: string;
   children: ReactNode;
+  /** 追加类名。用于网格里的 `wide`（跨满两列）这类位置性修饰，别拿它改外观。 */
+  className?: string;
 }) {
   return (
-    <label className="field">
+    <label className={className ? `field ${className}` : "field"}>
       <span className="f" title={hint}>
         {label}
       </span>

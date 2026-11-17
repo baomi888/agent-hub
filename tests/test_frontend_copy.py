@@ -52,9 +52,14 @@ ADMIN_EYEBROW_PAGES = {"dashboard", "flow"}
 # ★ 长度不是判据 —— 2026-11-14 删掉的四句都在 40 字以内，靠长度一个都拦不住。
 # 它只用来挡住"写成一整段话"，真正的判据在句形（见下方那条测试）。
 SUB_MAX_CHARS = 80
-# 字面量 sub 的页面数下限。防止有人把 sub 全改成表达式写法绕开长度检查 ——
-# 两个标签页（dashboard / checkin / delegate / settings）本来就是表达式，余量留 2。
-SUB_LITERAL_FLOOR = 6
+# 字面量 sub 的处数下限。防止有人把 sub 全改成表达式写法绕开句形检查 ——
+# 表达式写法静态读不到，把字面量清零就等于让上面那条断言空转。
+#
+# ★ 2026-11-17 从 6 降到 2：全站清账删掉了 11 页的 sub（含最后一批 checkin /
+#   knowledge / tools / delegate / report / cet / path），现在只剩 dashboard 与
+#   settings/reminder 两页还传 sub —— 理由都是"漏了这句用户会做错决定"。
+#   降到 2 不是放宽，是跟着事实走：**这两页一页失守，这里就会红**。
+SUB_LITERAL_FLOOR = 2
 
 
 def _page_files() -> list[Path]:
@@ -183,8 +188,9 @@ def test_sub_does_not_navigate_or_introduce_the_form():
 def test_sub_literals_are_still_checked():
     """字面量 sub 的数量下限 —— 防止有人把 sub 全改成表达式绕开上面那条检查。
 
-    dashboard / checkin / delegate / settings 本来就是表达式写法（值里含变量或
-    加粗片段），所以余量留 2。
+    2026-11-17 全站只剩两页传 sub（dashboard 的管理员口径、settings/reminder 的
+    推送限制），都是字面量写法，所以下限就是 2。表达式写法（eyebrow={...} /
+    sub={...}）静态解析不了值，一旦占比过高，上面那些句形断言就变成了空转。
     """
     literals = sum(len(_SUB_STR.findall(f.read_text(encoding="utf-8"))) for f in _page_files())
     assert literals >= SUB_LITERAL_FLOOR, (

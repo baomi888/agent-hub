@@ -44,6 +44,7 @@
   .theme-chip,
   .push-nudge .pn-x,
   .guide-skip,
+  .rem-new,
   .sb-acct-name,
   .sb-quit {
     position: relative;
@@ -106,6 +107,14 @@
     content: "";
     position: absolute;
     inset: -10px 0;
+  }
+
+  /* 36 → 44：页头「待办 / 提醒」两个新建按钮。它们与「列表 / 设置」同排，
+     横向已经排满，只扩纵向；上一行的页头间距 10，-4 不会碰到标题。 */
+  .rem-new::before {
+    content: "";
+    position: absolute;
+    inset: -4px 0;
   }
 
   /* 29 → 45：待办 / 四六级页里的导入按钮（宽度本来就够，只补纵向） */

@@ -187,25 +187,23 @@ def test_sub_section_heading_does_not_repeat_the_tab():
 
 # ==================== ④ 同一事实只写一处 ====================
 
-def test_tools_header_does_not_repeat_the_gpa_note():
-    """工具集页头只说价值，「本机存储 / 登录同步」留给 GPA 卡那一处。
+def test_tools_header_has_no_explanation_left():
+    """工具集页头一个字都不解释（2026-11-17）：连「不用连教务」也删了。
 
-    两处措辞几乎相同，而 GPA 卡那句多了「清理浏览器数据会一并清掉」这个后果，
-    是更完整的版本；页头重复它只会让同一件事在一屏里出现两次。
+    上一轮（11-14）的做法是"去重"：页头留短的那半句、GPA 卡留信息更全的那份。
+    评审这次划掉的正是这半句 —— 点开就发现不用连教务，写出来只是把标题挤小。
+    所以现在断言的是**没有 sub**，而不是"sub 里恰好没有某个词"。
     """
     src = _code(TOOLS)
-    sub = re.search(r'\bsub="([^"]*)"', src)
-    assert sub, "工具集页头的 sub 找不到了"
-    text = sub.group(1)
-    assert "数据先存在" not in text, f"页头又在讲本机存储/同步了：「{text}」"
-    assert "不用连教务" in text, f"页头没有留下价值主张：「{text}」"
+    assert not re.search(r'\bsub=', src), "工具集页头又有说明文了"
+    assert not re.search(r'\bdetail=', src), "工具集页头又挂 ⓘ 了"
 
-    # 反过来：GPA 卡里那句必须还在 —— 否则不是"去重"，是把唯一的说明删了。
+    # 反过来：GPA 卡里那句必须还在 —— 页头退场不等于把唯一的说明也删了。
     gpa = (ROOT / "frontend" / "src" / "campus" / "tools" / "gpa" / "GpaTool.tsx").read_text(
         encoding="utf-8"
     )
     assert "清理浏览器数据会一并清掉本地那份" in gpa, (
-        "GPA 卡底部那句被删了 —— 去重的前提是保留信息更全的那一份"
+        "GPA 卡底部那句被删了 —— 页头可以退场，但「清了浏览器数据就没了」这个后果得留着"
     )
 
 
