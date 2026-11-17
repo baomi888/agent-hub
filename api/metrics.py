@@ -18,6 +18,7 @@ METRICS_TOKEN 没配就等于这条路不存在，不会退化成"空 token 也�
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import os
 
@@ -84,3 +85,21 @@ async def metrics_json(request: Request) -> dict:
     """结构化快照：排障时比 Prometheus 文本好读。"""
     _authorized(request)
     return metrics.snapshot()
+
+
+@router.get("/routes")
+async def routes_json(request: Request, days: int = 7) -> dict:
+    """路由分布（workflow / agent 各占多少），近 N 天。
+
+    为什么单独一个端点而不是塞进 /json：`metrics` 是**进程内**计数器，
+    `--workers 4` 下就是 4 份，取到哪一份取决于请求落到哪个进程——拿它算比例
+    会随刷新抖动。这个端点的数据来自 `route_stats` 表（SQLite，跨进程汇总），
+    所以四个 worker 看到的是同一个数。
+
+    SQLite 是同步驱动，必须 to_thread（本项目一贯纪律）。
+    """
+    from core import route_stats
+
+    _authorized(request)
+    n = max(1, min(int(days), 90))
+    return await asyncio.to_thread(route_stats.summary, n)
