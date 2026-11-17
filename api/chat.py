@@ -60,7 +60,6 @@ from core import (
     approval_store,
     config,
     data_boundary,
-    leak_guard,
     llm_gate,
     metrics,
     prompt_security,

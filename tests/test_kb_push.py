@@ -38,7 +38,7 @@ def test_mutual_exclusion_lives_in_mobile_query():
         ".kbp:not(.kbp--detail) .kbp-main",
         ".kbp--detail .kbp-side",
     ):
-        assert css.count(rule) == 1, "%s 出现了 %d 次" % (rule, css.count(rule))
+        assert css.count(rule) == 1, f"{rule} 出现了 {css.count(rule)} 次"
         i = css.index("@media (max-width: 900px)")
         # 该媒体查询块的结束位置：从 i 起数平衡花括号
         depth = 0
@@ -53,7 +53,7 @@ def test_mutual_exclusion_lives_in_mobile_query():
                     break
         assert end is not None, "找不到 @media (max-width: 900px) 的结尾"
         block = css[i:end]
-        assert rule in block, "%s 不在 ≤900 媒体查询里（桌面也会被藏）" % rule
+        assert rule in block, f"{rule} 不在 ≤900 媒体查询里（桌面也会被藏）"
 
 
 def test_back_button_hidden_on_desktop():

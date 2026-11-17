@@ -42,7 +42,7 @@ DEFAULT_ADMIN_UIDS = {"963088555a424172b8c09f5ba575a74a"}
 
 def _connect(path: str) -> sqlite3.Connection:
     if not os.path.exists(path):
-        sys.exit("数据库不存在: %s" % path)
+        sys.exit(f"数据库不存在: {path}")
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     return conn
@@ -78,7 +78,7 @@ def _admin_uids(conn: sqlite3.Connection) -> set[str]:
     if names:
         marks = ",".join("?" * len(names))
         for r in conn.execute(
-            "select id from users where username in (%s)" % marks, tuple(names)
+            f"select id from users where username in ({marks})", tuple(names)
         ):
             admin.add(r[0])
     return admin

@@ -75,8 +75,7 @@ def _write_log(tmp_path, day: str, lines: list[tuple[str, str]]) -> str:
     body = []
     for i, (path, ua) in enumerate(lines):
         body.append(
-            '%s - - [%s:01:00:%02d +0800] "GET %s HTTP/1.1" 200 12 "-" "%s"'
-            % ("1.2.3.4", day, i, path, ua)
+            f'1.2.3.4 - - [{day}:01:00:{i:02d} +0800] "GET {path} HTTP/1.1" 200 12 "-" "{ua}"'
         )
     f.write_text("\n".join(body) + "\n", encoding="utf-8")
     return str(f)
@@ -169,4 +168,4 @@ def _nginx_day(iso_day: str) -> str:
     """`2026-11-15` → `15/Nov/2026`（nginx 日志的日期形态）。"""
     y, m, d = iso_day.split("-")
     months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    return "%s/%s/%s" % (d, months[int(m) - 1], y)
+    return f"{d}/{months[int(m) - 1]}/{y}"

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """手机端「对话目录」页签：贴边拖动、不越界、不压正文（2026-11-16）
 
 回归背景
@@ -107,8 +106,8 @@ def test_fab_bleeds_out_so_it_never_covers_text():
     slot = int(slot_m.group(1))
 
     assert visible + 2 <= slot, (
-        "页签屏内可见 {v}px 超过了消息区让出的槽位（{s}px，需留 2px 间隙）—— "
-        "正文满载行会被啃掉 {d}px".format(v=visible, s=slot, d=visible + 2 - slot)
+        f"页签屏内可见 {visible}px 超过了消息区让出的槽位（{slot}px，需留 2px 间隙）—— "
+        f"正文满载行会被啃掉 {visible + 2 - slot}px"
     )
 
     # 停靠左侧时是同一条边，出血量必须一致，否则左边比右边宽/窄

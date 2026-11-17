@@ -152,7 +152,12 @@ def main() -> int:
     ap.add_argument("--db", default="", help="库路径，默认取 config 里的主库")
     ap.add_argument("--apply", action="store_true", help="真的写库（默认只打印）")
     ap.add_argument("--unmark", action="store_true", help="反向：取消标记")
-    ap.add_argument("--names", default="", help="只处理这些用户名（逗号分隔）。配合 --unmark 是取消标记；不带 --unmark 时=人工点名标记，跳过名字规则")
+    ap.add_argument(
+        "--names",
+        default="",
+        help="只处理这些用户名（逗号分隔）。配合 --unmark 是取消标记；"
+             "不带 --unmark 时=人工点名标记，跳过名字规则",
+    )
     ap.add_argument("--days", type=int, default=30, help="影响面按最近多少天算，默认 30")
     args = ap.parse_args()
 
@@ -207,8 +212,8 @@ def main() -> int:
         verb = "标为内部"
 
     print("库: " + str(db_path))
-    print("窗口: 最近 %d 天，区间内总调用 %d 次" % (args.days, total_calls))
-    print("待%s: %d 个账号" % (verb, len(targets)))
+    print(f"窗口: 最近 {args.days} 天，区间内总调用 {total_calls} 次")
+    print(f"待{verb}: {len(targets)} 个账号")
     print("")
 
     if not targets:
@@ -225,15 +230,15 @@ def main() -> int:
         else:
             why = classify(str(r["username"]))
         print(
-            "  %-*s  %7d 次  %5.1f 小时前注册  %s"
-            % (width, r["username"], int(r["calls"] or 0), (time.time() - r["created_at"]) / 3600, why)
+            f"  {r['username']:<{width}}  {int(r['calls'] or 0):>7d} 次  "
+            f"{(time.time() - r['created_at']) / 3600:>5.1f} 小时前注册  {why}"
         )
 
     pct = (hit_calls / total_calls * 100) if total_calls else 0.0
     print("")
     print(
-        "这些账号在区间内共有 %d 次调用，占全量的 %.1f%% —— 标记后真实用户视图会少这么多。"
-        % (hit_calls, pct)
+        f"这些账号在区间内共有 {hit_calls} 次调用，占全量的 {pct:.1f}%"
+        " —— 标记后真实用户视图会少这么多。"
     )
 
     if not args.apply:
@@ -253,7 +258,7 @@ def main() -> int:
     finally:
         rw.close()
     print("")
-    print("已写入 %d 行（is_internal=%d）。看板刷新即可看到变化。" % (len(targets), flag))
+    print(f"已写入 {len(targets)} 行（is_internal={flag}）。看板刷新即可看到变化。")
     return 0
 
 

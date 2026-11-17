@@ -91,9 +91,9 @@ def _decls() -> list[tuple[str, str]]:
 def test_scan_is_not_empty():
     """先钉扫描量：扫不到文件时下面所有断言都会空过。"""
     files = _css_files()
-    assert len(files) >= MIN_FILES, "只扫到 %d 个样式表，glob 可能坏了" % len(files)
+    assert len(files) >= MIN_FILES, f"只扫到 {len(files)} 个样式表，glob 可能坏了"
     decls = _decls()
-    assert len(decls) >= MIN_DECLS, "只扫到 %d 条 border-radius，解析可能坏了" % len(decls)
+    assert len(decls) >= MIN_DECLS, f"只扫到 {len(decls)} 条 border-radius，解析可能坏了"
 
 
 def test_only_three_tiers():
@@ -102,7 +102,7 @@ def test_only_three_tiers():
     for rel, value in _decls():
         for atom in value.split():
             if atom not in ALLOWED_ATOMS:
-                bad.append("%s -> border-radius: %s" % (rel, value))
+                bad.append(f"{rel} -> border-radius: {value}")
                 break
     assert not bad, "圆角散值回流了：\n" + "\n".join(sorted(set(bad))[:20])
 
@@ -111,19 +111,19 @@ def test_tiers_are_defined_once():
     """三档只在 tokens.css 定义，且别名必须指回来。"""
     src = _strip_comments(TOKENS.read_text(encoding="utf-8"))
     for name, value in TIERS.items():
-        pat = re.compile(r"%s\s*:\s*([^;]+);" % re.escape(name))
+        pat = re.compile(rf"{re.escape(name)}\s*:\s*([^;]+);")
         m = pat.search(src)
-        assert m, "tokens.css 里找不到 %s" % name
-        assert m.group(1).strip() == value, "%s 应该等于 %s，实际是 %s" % (
-            name, value, m.group(1).strip()
+        assert m, f"tokens.css 里找不到 {name}"
+        assert m.group(1).strip() == value, (
+            f"{name} 应该等于 {value}，实际是 {m.group(1).strip()}"
         )
 
     # 别名一律指向三档，不许自己写新尺寸
     aliases = dict(re.findall(r"(--radius-[a-z0-9-]+)\s*:\s*([^;]+);", src))
     assert aliases, "tokens.css 里没有 --radius-* 别名"
     for name, value in aliases.items():
-        assert value.strip() in {("var(%s)" % k) for k in TIERS}, (
-            "%s 自己定义了尺寸 %s，应该指向三档之一" % (name, value.strip())
+        assert value.strip() in {f"var({k})" for k in TIERS}, (
+            f"{name} 自己定义了尺寸 {value.strip()}，应该指向三档之一"
         )
 
 
@@ -134,9 +134,9 @@ def test_campus_alias_points_to_tier():
     )
     m = re.search(r"--campus-radius\s*:\s*([^;]+);", campus)
     assert m, "campus.css 里找不到 --campus-radius"
-    assert m.group(1).strip() in {("var(%s)" % k) for k in TIERS} | {
+    assert m.group(1).strip() in {f"var({k})" for k in TIERS} | {
         "var(--radius-lg)"
-    }, "--campus-radius 变成了 %s" % m.group(1).strip()
+    }, f"--campus-radius 变成了 {m.group(1).strip()}"
 
 
 def test_px_literals_do_not_come_back():
@@ -145,8 +145,8 @@ def test_px_literals_do_not_come_back():
     for path in _css_files():
         src_all += _strip_comments(path.read_text(encoding="utf-8"))
     for legacy in ("4px", "8px", "16px", "14px", "6px", "22px"):
-        pat = re.compile(r"border-radius\s*:\s*[^;{}]*\b%s\b" % re.escape(legacy))
-        assert not pat.search(src_all), "又出现了 border-radius: %s" % legacy
+        pat = re.compile(rf"border-radius\s*:\s*[^;{{}}]*\b{re.escape(legacy)}\b")
+        assert not pat.search(src_all), f"又出现了 border-radius: {legacy}"
 
 
 def test_icon_radius_is_local():
@@ -159,7 +159,7 @@ def test_icon_radius_is_local():
     tokens = _strip_comments(TOKENS.read_text(encoding="utf-8"))
     m = re.search(r"--r-icon\s*:\s*([^;]+);", tokens)
     assert m, "tokens.css 里找不到 --r-icon"
-    assert m.group(1).strip() == "24%", "--r-icon 变成了 %s" % m.group(1).strip()
+    assert m.group(1).strip() == "24%", f"--r-icon 变成了 {m.group(1).strip()}"
     assert len(re.findall(r"--r-icon\s*:", tokens)) == 1, "--r-icon 被重复定义"
 
     users = []
@@ -167,6 +167,6 @@ def test_icon_radius_is_local():
         body = _strip_comments(path.read_text(encoding="utf-8"))
         if "var(--r-icon)" in body:
             users.append(path.name)
-    assert users == ["boot.css"], "--r-icon 只该给开机页用，现在也被这些引用了：%s" % (
-        ", ".join(users)
+    assert users == ["boot.css"], (
+        f"--r-icon 只该给开机页用，现在也被这些引用了：{', '.join(users)}"
     )

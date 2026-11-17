@@ -95,15 +95,12 @@ def test_only_two_pages_keep_a_sub():
         val = _sub_of(path)
         if val is not None:
             kept[name] = val
-    assert set(kept) == set(ALLOWED_SUB), "页头说明只允许留在 %s，实际留下的是 %s" % (
-        sorted(ALLOWED_SUB),
-        sorted(kept),
+    assert set(kept) == set(ALLOWED_SUB), (
+        f"页头说明只允许留在 {sorted(ALLOWED_SUB)}，实际留下的是 {sorted(kept)}"
     )
     for name, claim in kept.items():
-        assert len(claim) <= ALLOWED_SUB[name], "%s 的主张 %d 字，太长：%s" % (
-            name,
-            len(claim),
-            claim,
+        assert len(claim) <= ALLOWED_SUB[name], (
+            f"{name} 的主张 {len(claim)} 字，太长：{claim}"
         )
 
 
@@ -116,7 +113,7 @@ def test_banned_hints_are_gone():
         code = _read_code(f)
         for s in BANNED:
             if s in code:
-                hits.append("%s → %s" % (f.relative_to(ROOT), s))
+                hits.append(f"{f.relative_to(ROOT)} → {s}")
     assert not hits, "这些解释性文案又回来了：\n" + "\n".join(hits)
 
 

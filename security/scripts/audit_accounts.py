@@ -42,17 +42,21 @@ def main() -> None:
     ap.add_argument("--top", type=int, default=20)
     args = ap.parse_args()
 
-    conn = sqlite3.connect("file:%s?mode=ro" % args.db, uri=True)
+    conn = sqlite3.connect(f"file:{args.db}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
-    q = lambda s, *a: conn.execute(s, a).fetchall()
+
+    def q(sql: str, *a: object) -> list[sqlite3.Row]:
+        return conn.execute(sql, a).fetchall()
 
     users = {r["id"]: dict(r) for r in q("select id, username, status, created_at, last_login_at from users")}
     r = q("select count(*) n, min(ts) a, max(ts) b from api_call_logs")[0]
     print("== 概览 ==")
-    print("用户 %d（停用 %d） / 调用 %d 条 / %s ~ %s" % (
-        len(users), sum(1 for u in users.values() if u["status"] == 0), r["n"], f(r["a"]), f(r["b"])))
+    print(
+        f"用户 {len(users)}（停用 {sum(1 for u in users.values() if u['status'] == 0)}）"
+        f" / 调用 {r['n']} 条 / {f(r['a'])} ~ {f(r['b'])}"
+    )
 
-    print("\n== 1. 调用量 Top%d（429 = 撞到每分钟限流）==" % args.top)
+    print(f"\n== 1. 调用量 Top{args.top}（429 = 撞到每分钟限流）==")
     rows = q(
         """select uid, count(*) n,
                   sum(case when status=429 then 1 else 0 end) r429,
@@ -62,9 +66,10 @@ def main() -> None:
            group by uid order by n desc limit ?""", args.top)
     for x in rows:
         u = users.get(x["uid"], {})
-        print("  %-8s %-16s n=%-6d 429=%-3d days=%-3d %s ~ %s" % (
-            x["uid"][:8], (u.get("username") or "【已删】")[:16], x["n"], x["r429"], x["days"],
-            f(x["a"]), f(x["b"])))
+        print(
+            f"  {x['uid'][:8]:<8} {(u.get('username') or '【已删】')[:16]:<16} "
+            f"n={x['n']:<6d} 429={x['r429']:<3d} days={x['days']:<3d} {f(x['a'])} ~ {f(x['b'])}"
+        )
 
     print("\n== 2. 每分钟峰值 Top10（人类点击上限约 6~10 次/分钟）==")
     rows = q(
@@ -72,23 +77,26 @@ def main() -> None:
            where uid is not null and uid<>'' group by uid, m order by c desc limit 10""")
     for x in rows:
         u = users.get(x["uid"], {})
-        print("  %-8s %-16s %s  %d 次/分钟" % (
-            x["uid"][:8], (u.get("username") or "【已删】")[:16], f(x["m"] * 60)[:16], x["c"]))
+        print(
+            f"  {x['uid'][:8]:<8} {(u.get('username') or '【已删】')[:16]:<16} "
+            f"{f(x['m'] * 60)[:16]}  {x['c']} 次/分钟"
+        )
 
     print("\n== 3. 每日用量 vs 上限（只列 >= 上限 10% 的）==")
     for kind, lim in LIMITS.items():
         rows = q("select user_id, day, count from usage where kind=? and count>=? order by count desc limit 10",
                  kind, max(1, lim // 10))
         if not rows:
-            print("  %-6s 无（单日最高 %s）" % (
-                kind, q("select max(count) m from usage where kind=?", kind)[0]["m"] or 0))
+            peak = q("select max(count) m from usage where kind=?", kind)[0]["m"] or 0
+            print(f"  {kind:<6} 无（单日最高 {peak}）")
             continue
-        print("  %-6s 上限 %d" % (kind, lim))
+        print(f"  {kind:<6} 上限 {lim}")
         for x in rows:
             u = users.get(x["user_id"], {})
-            print("     %-8s %-16s %s %d (%.0f%%)" % (
-                x["user_id"][:8], (u.get("username") or "【已删】")[:16], x["day"], x["count"],
-                100.0 * x["count"] / lim))
+            print(
+                f"     {x['user_id'][:8]:<8} {(u.get('username') or '【已删】')[:16]:<16} "
+                f"{x['day']} {x['count']} ({100.0 * x['count'] / lim:.0f}%)"
+            )
 
     print("\n== 4. 孤儿身份（有调用痕迹 / 无 users 行 / 无墓碑）==")
     rows = q(
@@ -97,17 +105,17 @@ def main() -> None:
              and a.uid not in (select id from users)
              and a.uid not in (select uid from deleted_users)
            group by a.uid order by n desc""")
-    print("  共 %d 个，累计 %d 次调用" % (len(rows), sum(x["n"] for x in rows)))
+    print(f"  共 {len(rows)} 个，累计 {sum(x['n'] for x in rows)} 次调用")
     for x in rows[:10]:
-        print("     %-8s n=%-5d %s ~ %s" % (x["uid"][:8], x["n"], f(x["a"]), f(x["b"])))
+        print(f"     {x['uid'][:8]:<8} n={x['n']:<5d} {f(x['a'])} ~ {f(x['b'])}")
     if len(rows) > 10:
-        print("     ...（其余 %d 个省略）" % (len(rows) - 10))
+        print(f"     ...（其余 {len(rows) - 10} 个省略）")
 
     print("\n== 5. 注册/登录失败分布（撞库信号）==")
     for line in q(
         """select path, status, count(*) n from api_call_logs
            where path like '/api/auth/%' group by path, status order by path, status"""):
-        print("  %-24s %s %d" % (line["path"], line["status"], line["n"]))
+        print(f"  {line['path']:<24} {line['status']} {line['n']}")
 
     print("\n== 6. 同一秒的并发登录（同一秒 >5 次的时刻）==")
     rows = q(
@@ -116,7 +124,7 @@ def main() -> None:
     if not rows:
         print("  无")
     for x in rows:
-        print("  %s  %d 次/秒" % (f(x["ts"]), x["c"]))
+        print(f"  {f(x['ts'])}  {x['c']} 次/秒")
 
     conn.close()
 

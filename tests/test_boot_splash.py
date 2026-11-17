@@ -49,7 +49,7 @@ def _code(p: Path) -> str:
 def test_css_is_actually_parsed():
     """先钉扫描量：下面的断言全靠这份 CSS，解析坏了会全部空过。"""
     css = _read(BOOT_CSS)
-    assert css.count(".zs-boot-") >= 20, "boot.css 只解析到 %d 个类名" % css.count(".zs-boot-")
+    assert css.count(".zs-boot-") >= 20, f"boot.css 只解析到 {css.count('.zs-boot-')} 个类名"
     assert len(re.findall(r"@keyframes\s+zs-boot-", css)) >= 7
 
 
@@ -67,15 +67,15 @@ def test_splash_lives_in_root_layout_only():
         body = _read(p)
         if re.search(r'import\s+BootSplash\s+from', body):
             offenders.append(str(p.relative_to(SRC)))
-    assert not offenders, "这些地方也挂了整站开机层：%s" % ", ".join(offenders)
+    assert not offenders, f"这些地方也挂了整站开机层：{', '.join(offenders)}"
 
 
 def test_no_page_repeats_the_waiting_line():
     """四个入口共用一个组件，不许各自再手写一句等待文案。"""
     for p in WAITING_PAGES:
         body = _read(p)
-        assert "AuthLoading" in body, "%s 还在自己写等待层" % p.relative_to(SRC)
-        assert "正在确认登录状态" not in body, "%s 又内联了一份等待文案" % p.relative_to(SRC)
+        assert "AuthLoading" in body, f"{p.relative_to(SRC)} 还在自己写等待层"
+        assert "正在确认登录状态" not in body, f"{p.relative_to(SRC)} 又内联了一份等待文案"
 
     # 文案本体只有一处（BootSplash.tsx 里的 auth 分支）
     assert _read(BOOT_TSX).count("正在确认登录状态") == 1
@@ -101,7 +101,7 @@ def test_splash_can_never_lock_the_site():
     assert frames, "解析不到兜底关键帧的函数体"
     body = frames.group(1)
     for prop in ("opacity: 0", "visibility: hidden", "pointer-events: none"):
-        assert prop in body, "兜底放行缺了 %s" % prop
+        assert prop in body, f"兜底放行缺了 {prop}"
 
 
 def test_reduced_motion_kills_the_movement():
@@ -117,7 +117,7 @@ def test_reduced_motion_kills_the_movement():
         ".zs-boot-sprout",
         ".zs-boot-status",
     ):
-        assert sel in block, "减弱动效没覆盖 %s" % sel
+        assert sel in block, f"减弱动效没覆盖 {sel}"
     assert "animation: none !important" in block
 
 
@@ -134,7 +134,7 @@ def test_slogan_is_the_same_sentence_on_both_sides():
     chars = re.findall(r'SLOGAN = \[([^\]]*)\]', _read(BOOT_TSX))
     mchars = re.findall(r'SLOGAN = \[([^\]]*)\]', _read(MOBILE / "BootOverlay.tsx"))
     assert chars and mchars, "有一边找不到 SLOGAN"
-    assert chars[0] == mchars[0], "网页与原生壳的标语不一致：%s vs %s" % (chars[0], mchars[0])
+    assert chars[0] == mchars[0], f"网页与原生壳的标语不一致：{chars[0]} vs {mchars[0]}"
     assert len(re.findall(r'"."', chars[0])) == 5, "标语应该正好 5 个字"
 
 
@@ -152,6 +152,6 @@ def test_dark_tile_keeps_the_light_mascot():
 
     css = _code(BOOT_CSS)
     for prop in (".mascot-grain", ".mascot-shine", ".mascot-blush"):
-        assert ".dark .zs-boot-logo-tile %s" % prop in css, (
-            "深色底座里的吉祥物没还原 %s" % prop
+        assert f".dark .zs-boot-logo-tile {prop}" in css, (
+            f"深色底座里的吉祥物没还原 {prop}"
         )

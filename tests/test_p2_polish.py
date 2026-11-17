@@ -74,16 +74,16 @@ def test_text_loading_state_is_gone():
     hits = 0
     for path, comp in LOADING_SITES.items():
         code = _strip_comments(_read(path))
-        assert "Skeleton" in code, "%s 里没有骨架组件" % path.name
-        assert "<%s" % comp in code, "%s 该用 %s" % (path.name, comp)
+        assert "Skeleton" in code, f"{path.name} 里没有骨架组件"
+        assert f"<{comp}" in code, f"{path.name} 该用 {comp}"
         # 只看被标签包起来的文字（含 <p>、<span>、<div> 里的裸文字）
         for tag in re.finditer(r"<(\w+)[^>]*>([^<>]*)</\1>", code, flags=re.S):
             inner = tag.group(2)
             for phrase in phrases:
-                assert phrase not in inner, "%s 里还留着文字态「%s」" % (path.name, phrase)
+                assert phrase not in inner, f"{path.name} 里还留着文字态「{phrase}」"
         hits += 1
     # 扫描下限：五个文件都得真的被读到，防止路径写错导致"零个也通过"
-    assert hits == 5, "只检查到 %d 处加载态" % hits
+    assert hits == 5, f"只检查到 {hits} 处加载态"
 
 
 def test_skeleton_has_screen_reader_label():
@@ -194,7 +194,7 @@ def test_push_offset_is_capped_at_8px():
     body = m.group(1)
     px = [int(n) for n in re.findall(r"translateX\((\d+)px\)", body)]
     assert px, "push 关键帧里没有横向位移"
-    assert max(px) <= 8, "位移放大到了 %dpx，会扯坏 fixed 浮层" % max(px)
+    assert max(px) <= 8, f"位移放大到了 {max(px)}px，会扯坏 fixed 浮层"
 
     # tab 之间只淡入：终态关键帧不许带位移
     tab = _strip_comments(_read(CONSOLE_CSS))

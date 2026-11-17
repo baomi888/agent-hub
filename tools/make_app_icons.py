@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """生成 Expo 的 App 图标与启动图（mobile/assets/）。
 
 两个坑，都踩过：

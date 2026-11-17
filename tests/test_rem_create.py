@@ -38,9 +38,9 @@ def _code(p: Path) -> str:
 def test_two_create_buttons_with_the_same_class():
     """两个入口必须是同一个类，谁也别想偷偷升成主按钮。"""
     src = _code(REM)
-    assert src.count('className="rem-new"') == 2, (
-        "页头应该正好两个 .rem-new 按钮（待办 / 提醒），实际 %d 个"
-        % src.count('className="rem-new"')
+    n_buttons = src.count('className="rem-new"')
+    assert n_buttons == 2, (
+        f"页头应该正好两个 .rem-new 按钮（待办 / 提醒），实际 {n_buttons} 个"
     )
     # 分级修饰会让它们看起来一主一次 —— 这条就是评审要求的那句"同等级别"
     assert "rem-new--primary" not in src, "又给其中一个加了主次修饰"

@@ -169,25 +169,19 @@ def backfill(db: str, log_glob: str, days: int, apply: bool, limit_paths: int = 
     if limit_paths:
         log_paths = log_paths[:limit_paths]
     if not log_paths:
-        print("没有找到日志：%s" % log_glob)
+        print(f"没有找到日志：{log_glob}")
         return 2
 
     now = int(time.time())
     today = (now + 8 * 3600) // 86400  # 东八区的"天序号"
     wanted = {today - i for i in range(days)}
 
-    print("扫描日志 %d 个文件..." % len(log_paths))
+    print(f"扫描日志 {len(log_paths)} 个文件...")
     auto, human, stat = scan_logs(log_paths, wanted)
     print(
-        "  自动化行 %d（无头 %d / 脚本 %d）｜真人行 %d｜非 /api 跳过 %d｜无 UA 跳过 %d"
-        % (
-            stat["auto_lines"],
-            stat["auto_headless"],
-            stat["auto_script"],
-            stat["human_lines"],
-            stat["skipped_non_api"],
-            stat["skipped_no_ua"],
-        )
+        f"  自动化行 {stat['auto_lines']}（无头 {stat['auto_headless']} / 脚本 {stat['auto_script']}）"
+        f"｜真人行 {stat['human_lines']}｜非 /api 跳过 {stat['skipped_non_api']}"
+        f"｜无 UA 跳过 {stat['skipped_no_ua']}"
     )
     if not auto:
         print("日志里没有自动化流量，没什么可回填的。")
@@ -196,7 +190,7 @@ def backfill(db: str, log_glob: str, days: int, apply: bool, limit_paths: int = 
     start = (today - days + 1) * 86400 - 8 * 3600
     end_excl = (today + 1) * 86400 - 8 * 3600
 
-    uri = "file:%s?mode=%s" % (db, "rw" if apply else "ro")
+    uri = f"file:{db}?mode={'rw' if apply else 'ro'}"
     conn = sqlite3.connect(uri, uri=True, timeout=30)
     conn.row_factory = sqlite3.Row
 
@@ -205,8 +199,10 @@ def backfill(db: str, log_glob: str, days: int, apply: bool, limit_paths: int = 
         " WHERE ts >= ? AND ts < ? AND internal = 0",
         (start, end_excl),
     ).fetchall()
-    print("区间 %s ~ %s 内待检查的调用 %d 条"
-          % (datetime.fromtimestamp(start, TZ).date(), datetime.fromtimestamp(end_excl - 1, TZ).date(), len(rows)))
+    print(
+        f"区间 {datetime.fromtimestamp(start, TZ).date()} ~ "
+        f"{datetime.fromtimestamp(end_excl - 1, TZ).date()} 内待检查的调用 {len(rows)} 条"
+    )
 
     hit: list[tuple[str, int]] = []
     per_uid: Counter = Counter()
@@ -234,8 +230,10 @@ def backfill(db: str, log_glob: str, days: int, apply: bool, limit_paths: int = 
         per_uid[str(r["uid"] or "-")] += 1
         per_client[kind] += 1
 
-    print("可回填 %d 条（无头 %d / 脚本 %d）｜同秒脚本与真人并存、放弃标记 %d 条"
-          % (len(hit), per_client["headless"], per_client["script"], ambiguous))
+    print(
+        f"可回填 {len(hit)} 条（无头 {per_client['headless']} / 脚本 {per_client['script']}）"
+        f"｜同秒脚本与真人并存、放弃标记 {ambiguous} 条"
+    )
 
     # 按 uid 报明细，人眼能核对"是不是把真人误伤了"
     if per_uid:
@@ -244,7 +242,8 @@ def backfill(db: str, log_glob: str, days: int, apply: bool, limit_paths: int = 
             names[str(row["id"])] = str(row["username"])
         print("\n按账号：")
         for uid, n in per_uid.most_common(15):
-            print("  %-18s %6d 次" % (names.get(uid, "(已注销)") if uid != "-" else "(未登录)", n))
+            name = names.get(uid, "(已注销)") if uid != "-" else "(未登录)"
+            print(f"  {name:<18} {n:>6d} 次")
 
     if not apply:
         print("\n（dry-run，没有写库。加 --apply 才写）")
@@ -256,16 +255,16 @@ def backfill(db: str, log_glob: str, days: int, apply: bool, limit_paths: int = 
         return 0
 
     stamp = datetime.now(TZ).strftime("%Y%m%d-%H%M%S")
-    bak = "%s.bak-backfill-%s" % (db, stamp)
+    bak = f"{db}.bak-backfill-{stamp}"
     conn.close()
     shutil.copy2(db, bak)
-    print("\n已备份数据库 → %s" % bak)
+    print(f"\n已备份数据库 → {bak}")
 
     conn = sqlite3.connect(db, timeout=30)
     conn.execute("BEGIN")
     conn.executemany("UPDATE api_call_logs SET internal = 1, client = ? WHERE id = ?", hit)
     conn.commit()
-    print("写入完成：%d 条标为自动化" % len(hit))
+    print(f"写入完成：{len(hit)} 条标为自动化")
     conn.close()
     return 0
 

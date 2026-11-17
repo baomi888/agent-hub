@@ -54,7 +54,8 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from core import config, session as store
+from core import config
+from core import session as store
 
 # 一条语句建全表 + 三个索引。放在模块里是为了让 `_db()` 只认这一份定义。
 #

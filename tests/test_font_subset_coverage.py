@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """离线字体子集的覆盖守卫：界面上要出现的字，子集里必须有字形。
 
 2026-11-15 用户截图来问「首页『论坛』的『坛』为什么和『论』不一样」。
@@ -100,7 +99,7 @@ def test_the_word_forum_is_drawn_by_one_single_face():
     失败时的报错能直接说明症状，不用再翻上面的清单。
     """
     lxgw = None
-    for family, weight, url in _faces():
+    for family, _weight, url in _faces():
         if "LXGW" in family:
             lxgw = _cmap(url)
             break

@@ -20,7 +20,8 @@ from pathlib import Path
 
 import pytest
 
-from core import config, prompt_security as ps, tool_guard
+from core import config, tool_guard
+from core import prompt_security as ps
 from core.tool_registry import TOOL_META
 
 REPO = Path(__file__).resolve().parents[1]

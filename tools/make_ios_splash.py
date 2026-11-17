@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """生成 iOS PWA 启动屏（apple-touch-startup-image）。
 
 为什么需要：iOS 从主屏打开 PWA 时，在页面渲染出来之前会显示自己的启动画面。

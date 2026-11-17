@@ -35,8 +35,9 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from collections.abc import Iterable
 from datetime import datetime, timedelta
-from typing import Any, Iterable
+from typing import Any
 
 from core import session, timeutil
 
@@ -290,7 +291,7 @@ def _reminder_id(owner_id: str, course_id: str) -> str:
     随机 id 每次同步都新建一行，`reminder_fires` 的 (reminder_id, planned_at)
     主键就挡不住重复派发 —— 同一节课会响两次。
     """
-    raw = f"{owner_id}|{course_id}".encode("utf-8")
+    raw = f"{owner_id}|{course_id}".encode()
     return "rm_c_" + hashlib.sha1(raw).hexdigest()[:12]
 
 

@@ -50,8 +50,8 @@ def test_form_sits_between_list_and_history():
     i_form = src.index("del-form-grid")
     i_hist = src.index("执行历史")
     assert i_list < i_form < i_hist, (
-        "顺序不对（我的委托 %d / 表单 %d / 历史 %d）—— 表单必须紧跟在列表下面"
-        % (i_list, i_form, i_hist)
+        f"顺序不对（我的委托 {i_list} / 表单 {i_form} / 历史 {i_hist}）"
+        "—— 表单必须紧跟在列表下面"
     )
 
 

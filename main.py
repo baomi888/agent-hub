@@ -60,8 +60,7 @@ from api.templates import router as templates_router
 from api.today import router as today_router
 from api.usage import router as usage_router
 from api.user_feedback import router as user_feedback_router
-from core import account, apilog, config, llm_gate, quota, reminder_core
-from core import verify_tag
+from core import account, apilog, config, llm_gate, quota, reminder_core, verify_tag
 from core import router as route_engine
 from kb import pipelines
 from service import avatar as avatar_store

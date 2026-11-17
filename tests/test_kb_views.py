@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from core import session, kb_views
+from core import kb_views, session
 
 
 @pytest.fixture()

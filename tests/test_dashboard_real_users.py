@@ -448,7 +448,7 @@ def test_mark_endpoint_changes_view(client):
     before = client.get("/api/admin/real-users?days=7").json()
     assert before["calls"]["real"] == 6
 
-    r = client.post("/api/admin/users/%s/internal" % target, json={"internal": True})
+    r = client.post(f"/api/admin/users/{target}/internal", json={"internal": True})
     assert r.status_code == 200 and r.json()["internal"] is True
 
     after = client.get("/api/admin/real-users?days=7").json()
