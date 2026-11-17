@@ -166,6 +166,12 @@ class _ScriptedLLM:
         self.invokes += 1
         return _Chunk("固定标题")
 
+    def bind_tools(self, tools, *a, **k):
+        # build_agent 把本对象交给 create_react_agent，图编译阶段会调 bind_tools。
+        # 只做绑定、不调模型，所以返回自身即可 —— 这样离线跑不需要任何 API key。
+        self.bound_tools = list(tools or [])
+        return self
+
 
 class _FakeAgent:
     """Agent 分支的假运行时：只产 messages 事件，形状与 LangGraph 一致。
@@ -318,6 +324,10 @@ def runtime(monkeypatch):
     state = {"llm": _ScriptedLLM(plan="obey"), "agent": _FakeAgent(plan="obey")}
 
     monkeypatch.setattr(chat, "get_llm", lambda *a, **k: state["llm"])
+    # Agent 分支的模型是 agent/builder.py 模块级导入的 get_llm，与 chat.get_llm
+    # 不是同一个名字。不打这一处，build_agent 会去构造真 ChatOpenAI —— 没有 .env
+    # 的机器（CI）上直接 "Missing credentials"，整条 Agent 路径红。
+    monkeypatch.setattr(builder, "get_llm", lambda *a, **k: state["llm"])
 
     real_build_agent = builder.build_agent
 
