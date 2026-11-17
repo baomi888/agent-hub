@@ -64,7 +64,13 @@ def _free_port() -> int:
 
 def _opener() -> urllib.request.OpenerDirector:
     jar = http.cookiejar.CookieJar()
-    return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+    return urllib.request.build_opener(
+        # 显式空 ProxyHandler：Windows 上 urllib 会从注册表读系统代理，
+        # 而 proxy_bypass('127.0.0.1') 常常是 False —— 本机回环请求被塞给代理，
+        # 表现就是"服务明明起来了，POST 卡到超时"。
+        urllib.request.ProxyHandler({}),
+        urllib.request.HTTPCookieProcessor(jar),
+    )
 
 
 def _http(
@@ -85,10 +91,14 @@ def _http(
             return resp.status, resp.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode("utf-8", "replace")
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        # 连不上就记一项失败，别把整张表炸掉：漏网的异常只会给出
+        # 一行 traceback，反而看不出是哪条检查挂了。
+        return -1, f"{type(e).__name__}: {e}"
 
 
 def _wait_health(base: str, timeout: float = 60.0) -> bool:
-    op = urllib.request.build_opener()
+    op = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
@@ -111,10 +121,21 @@ def main() -> int:
     port = _free_port()
     base = f"http://127.0.0.1:{port}"
 
+    # 管理员账号只能"落库"，不能从网页注册：ADMIN_USERNAMES 里的名字在自助注册入口
+    # 被保留（防抢注，见 core/account.py::is_reserved_admin_name），HTTP 注册必 403。
+    # 所以先用同一个临时库直接建号，再把 uid 塞进 ADMIN_UIDS 交给服务进程。
+    os.environ["AGENT_HUB_DB"] = db
+    sys.path.insert(0, str(ROOT))
+    from core import account  # noqa: E402  （必须在 AGENT_HUB_DB 之后导入）
+
+    admin_user = account.create_user(ADMIN, PASSWORD)
+
     env = os.environ.copy()
     env.update(
         {
             "AGENT_HUB_DB": db,
+            "ADMIN_UIDS": admin_user["id"],
+            # 名字也留着：下面要断言"被配置成管理员的用户名，自助注册必须 403"
             "ADMIN_USERNAMES": ADMIN,
             "ALLOW_SIGNUP": "1",
             "RATE_LIMIT_SHARED": "0",
@@ -142,9 +163,10 @@ def main() -> int:
         normal = _opener()
 
         # ---------- 注册与登录 ----------
+        # 反过来测一条安全行为：被配置成管理员的用户名，自助注册必须被 403 挡住。
         code, body = _http(anon, "POST", f"{base}/api/auth/register/",
                            {"username": ADMIN, "password": PASSWORD})
-        rep.check("管理员账号注册", code == 200, f"{code} {body[:60]}")
+        rep.check("管理员名保留：自助注册被 403 挡住", code == 403, f"{code} {body[:60]}")
         code, body = _http(anon, "POST", f"{base}/api/auth/register/",
                            {"username": NORMAL, "password": PASSWORD})
         rep.check("普通账号注册", code == 200, f"{code} {body[:60]}")
@@ -213,28 +235,32 @@ def main() -> int:
             _http(admin, "GET", f"{base}/api/admin/overview?days=1")
         time.sleep(4.5)
         code, body = _http(admin, "GET", f"{base}/api/admin/overview?days=1")
-        total2 = json.loads(body)["calls"]["total"]
+        ov2 = json.loads(body) if code == 200 else {}
+        total2 = ov2.get("calls", {}).get("total")
         rep.check("刷新看板不产生统计（无观察者效应）", total2 == total, f"{total} -> {total2}")
 
         # ---------- 排行三档 ----------
         for sort in ("calls", "slow", "fail"):
             code, body = _http(admin, "GET", f"{base}/api/admin/apis?days=1&sort={sort}")
             js = json.loads(body) if code == 200 else {}
+            items = js.get("items") or []
             rep.check(f"排行 sort={sort} 可用", code == 200 and js.get("sort") == sort,
-                      f"{code} items={len(js.get('items') or [])}")
+                      f"{code} items={len(items)}")
             if sort == "fail":
-                bad = [x for x in js.get("items") or [] if x["failed"] > 0]
-                rep.check("failed 档每条都真的失败过", all(x["failed"] > 0 for x in js["items"]),
+                bad = [x for x in items if x["failed"] > 0]
+                rep.check("failed 档每条都真的失败过", all(x["failed"] > 0 for x in items),
                           f"{len(bad)} 条")
         code, body = _http(admin, "GET", f"{base}/api/admin/apis?days=1&sort=bogus")
-        rep.check("非法 sort 回落 calls", json.loads(body).get("sort") == "calls", "")
+        rep.check("非法 sort 回落 calls",
+                  (json.loads(body) if code == 200 else {}).get("sort") == "calls", "")
 
         # ---------- 反馈闭环 ----------
         code, body = _http(normal, "GET", f"{base}/api/user-feedback/dict")
         d = json.loads(body) if code == 200 else {}
-        rep.check("反馈字典可取", code == 200 and bool(d.get("categories")), f"{code}")
+        cats = d.get("categories") or []
+        rep.check("反馈字典可取", code == 200 and bool(cats), f"{code}")
         code, body = _http(normal, "POST", f"{base}/api/user-feedback/",
-                           {"category": d["categories"][0]["value"],
+                           {"category": (cats[0]["value"] if cats else ""),
                             "content": "e2e 提交的反馈：看板数字要能对上"})
         fid = json.loads(body).get("id") if code == 200 else None
         rep.check("普通用户可提交反馈", code == 200 and fid, f"{code} id={fid}")

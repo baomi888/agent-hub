@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import sqlite3
 import sys
 import time
 
@@ -23,10 +22,13 @@ import pytest
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
-from core import config  # noqa: E402
 import core.session as store  # noqa: E402
+from core import (  # noqa: E402
+    config,  # noqa: E402
+    metrics,
+    tool_guard,
+)
 from core import context_compress as cc  # noqa: E402
-from core import metrics, tool_guard  # noqa: E402
 
 
 @pytest.fixture
