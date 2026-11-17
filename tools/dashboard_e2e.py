@@ -62,6 +62,37 @@ def _free_port() -> int:
         return int(s.getsockname()[1])
 
 
+def _seed_admin(db: str, username: str, password: str) -> None:
+    """在临时库里直接建管理员账号，**不走注册接口**。
+
+    为什么不能走注册：`ADMIN_USERNAMES` 里的名字被注册接口刻意保留（防抢注，
+    `core/account.is_reserved_admin_name`），自己注册一定 403
+    「该登录名不可用」。这不是脚本的偶然，而是产品有意为之 ——
+    所以 e2e 只能模拟"运维先在库里开号"这条路，改名的路同样被挡，也别试。
+
+    必须在 Popen 之前、且在本进程 import core 之前设好 AGENT_HUB_DB：
+    `core/session._db_path()` 读的是环境变量，父进程建号、子进程读，用的是同一个文件。
+    """
+    prev = os.environ.get("AGENT_HUB_DB")
+    os.environ["AGENT_HUB_DB"] = db
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    try:
+        from core import account, session
+
+        session._init_db()
+        account._ensure_tables(force=True)
+        try:
+            account.create_user(username, password)
+        except sqlite3.IntegrityError:
+            pass  # 幂等：重复跑脚本不报错
+    finally:
+        if prev is None:
+            os.environ.pop("AGENT_HUB_DB", None)
+        else:
+            os.environ["AGENT_HUB_DB"] = prev
+
+
 def _opener() -> urllib.request.OpenerDirector:
     jar = http.cookiejar.CookieJar()
     return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
@@ -125,6 +156,9 @@ def main() -> int:
     env.pop("DEEPSEEK_API_KEY", None)  # 不调模型，去掉真实 key 免得误打外部接口
     env.pop("EMBEDDING_API_KEY", None)  # RAG 预热同理：本脚本不碰知识库
 
+    # 管理员只能"预置"：注册接口保留了这个名字（见 _seed_admin 的说明）
+    _seed_admin(db, ADMIN, PASSWORD)
+
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", str(port),
          "--log-level", "warning"],
@@ -142,9 +176,11 @@ def main() -> int:
         normal = _opener()
 
         # ---------- 注册与登录 ----------
+        # 管理员账号已在 _seed_admin 里预置。这里顺手把"抢注"这条安全断言验掉：
+        # 自助注册必须拒绝 ADMIN_USERNAMES 里的名字（否则谁先注册谁就是管理员）。
         code, body = _http(anon, "POST", f"{base}/api/auth/register/",
                            {"username": ADMIN, "password": PASSWORD})
-        rep.check("管理员账号注册", code == 200, f"{code} {body[:60]}")
+        rep.check("管理员名禁止自助注册（防抢注）", code == 403, f"{code} {body[:60]}")
         code, body = _http(anon, "POST", f"{base}/api/auth/register/",
                            {"username": NORMAL, "password": PASSWORD})
         rep.check("普通账号注册", code == 200, f"{code} {body[:60]}")
@@ -213,7 +249,7 @@ def main() -> int:
             _http(admin, "GET", f"{base}/api/admin/overview?days=1")
         time.sleep(4.5)
         code, body = _http(admin, "GET", f"{base}/api/admin/overview?days=1")
-        total2 = json.loads(body)["calls"]["total"]
+        total2 = (json.loads(body).get("calls") or {}).get("total")
         rep.check("刷新看板不产生统计（无观察者效应）", total2 == total, f"{total} -> {total2}")
 
         # ---------- 排行三档 ----------

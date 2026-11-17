@@ -313,4 +313,3 @@ def counts() -> dict:
         ):
             out[str(r["status"])] = int(r["n"])
     return out
-

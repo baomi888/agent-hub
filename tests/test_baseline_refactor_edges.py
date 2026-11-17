@@ -212,4 +212,3 @@ def test_resolve_deliver_sid_400_when_no_conversation(monkeypatch):
     with pytest.raises(HTTPException) as ei:
         deleg._resolve_deliver_sid("u1", None)
     assert ei.value.status_code == 400
-
