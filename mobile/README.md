@@ -1,16 +1,34 @@
 # 知穗 App（iOS / Android）
 
-> **状态：暂停（2026-11-14 决策）。不要删除本目录。**
+> **状态：iOS 暂停（2026-11-14 决策）；安卓恢复（2026-11-17），已在云端出包。**
 >
-> 决定：**暂不投入 iOS 客户端**，移动端继续用 PWA（Safari 添加到主屏幕）承载。
-> 原因是 PWA 已经能覆盖当下的核心需求，而 iOS 客户端的唯一增量价值是
-> 「给不认识的人分发」+「不依赖 Safari」，这两件事要等 Web 端成熟后再做。
+> iOS 侧决定不变：**暂不投入 iOS 客户端**，移动端继续用 PWA（Safari 添加到主屏幕）承载。
+> 因为 PWA 已经能覆盖核心需求，iOS 客户端的唯一增量是「给不认识的人分发」+
+> 「不依赖 Safari」，而这两件事要 $99 的开发者账号才谈得上。
+>
+> 安卓侧判据不同，所以单独恢复：**答辩要在评委手机上装一个图标点开就进**，
+> 而安卓包免费（不需要任何账号）、可以直装、壳和 iOS 共用同一份 `App.tsx`。
+> 出包走 GitHub Actions（见 `../.github/workflows/android-apk.yml`），不占用本地环境。
 >
 > 保留价值：工程**已验证可构建**（`tsc` 通过、`expo-doctor` 20/20、
 > iOS bundle 612 模块 977KB），Apple 账号到位后三条命令就能出包。
 > 删掉等于将来重做一遍选型、踩坑和验证。
 >
 > 恢复的判据见文末「十、什么时候重启」。
+
+## 零、安卓演示包怎么来的
+
+`../.github/workflows/android-apk.yml`：push 改到 `mobile/**` 就触发，
+runner 上 `expo prebuild` 现场生成 `android/`，再 `assembleRelease` 出**可直装的 APK**，
+产物挂在 <https://github.com/baomi888/agent-hub/releases/tag/android-demo>（固定 tag，地址不变）。
+
+选这条而不是 EAS：公开仓库的 Actions 分钟数免费、push 即触发，
+不像 EAS 那样每月 30 次还要排队，也不用本地装 JDK / Android SDK。
+本地要复现同样的包：`npx expo prebuild -p android && cd android && ./gradlew assembleRelease`。
+
+装到手机上：浏览器打开上面的 Release 链接 → 下载 APK → 按提示允许「安装未知应用」。
+APK 是**四架构合一**（arm64 / armeabi-v7a / x86 / x86_64），约 65 MB；
+要更小的包可以只打一个 ABI：`./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a`（约 23 MB）。
 
 Expo + `react-native-webview` 的外壳，里面装的是 `https://myzhisui.cn`。
 **业务代码只有一份（Web），App 是它的原生容器。**
