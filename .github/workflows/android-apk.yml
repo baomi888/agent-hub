@@ -53,9 +53,13 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      # runner 上有 SDK，但 license 需要接受；这一步顺带把 ANDROID_HOME 写进环境
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      # 不要用 android-actions/setup-android@v3：它在最新 runner 镜像上会去装已经下架的
+      # `tools` 包，sdkmanager 直接 exit 1（run #1 就是这么红的）。
+      # runner 本身就带 SDK 且 license 已接受，这里只把路径打出来，缺什么由 gradle 自己拉。
+      - name: Show Android SDK
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          ls "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/platforms" 2>/dev/null || true
 
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
