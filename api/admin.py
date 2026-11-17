@@ -182,4 +182,3 @@ async def dict_api(uid: str = Depends(get_current_user)) -> dict:
     """分类 / 状态字典 + 流转表 + 长度限制。前端按钮与校验全部从这里取。"""
     _require_admin(uid)
     return user_feedback.dict_payload()
-

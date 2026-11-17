@@ -1085,4 +1085,3 @@ def mark_segments_staged(owner: str, sid: str, ingested_refs: set[int]) -> int:
         owner, sid, block.render(), upto, expected_upto=upto, meta_json=block.meta_json()
     )
     return changed if ok else 0
-

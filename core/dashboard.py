@@ -308,4 +308,3 @@ def failures(days: int = 7, limit: int = 20) -> dict:
         "top": [item(x, False) for x in agg],
         "range": {"days": r["days"], "start": r["start"], "end": r["end"]},
     }
-

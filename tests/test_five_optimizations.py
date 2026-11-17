@@ -23,11 +23,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
 import core.session as store  # noqa: E402
-from core import (  # noqa: E402
-    config,  # noqa: E402
-    metrics,
-    tool_guard,
-)
+from core import config, metrics, tool_guard  # noqa: E402
 from core import context_compress as cc  # noqa: E402
 
 

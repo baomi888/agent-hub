@@ -62,15 +62,47 @@ def _free_port() -> int:
         return int(s.getsockname()[1])
 
 
+def _seed_admin(db: str, username: str, password: str) -> None:
+    """在临时库里直接建管理员账号，**不走注册接口**。
+
+    为什么不能走注册：`ADMIN_USERNAMES` 里的名字被注册接口刻意保留（防抢注，
+    `core/account.is_reserved_admin_name`），自己注册一定 403
+    「该登录名不可用」。这不是脚本的偶然，而是产品有意为之 ——
+    所以 e2e 只能模拟"运维先在库里开号"这条路，改名的路同样被挡，也别试。
+
+    必须在 Popen 之前、且在本进程 import core 之前设好 AGENT_HUB_DB：
+    `core/session._db_path()` 读的是环境变量，父进程建号、子进程读，用的是同一个文件。
+    """
+    prev = os.environ.get("AGENT_HUB_DB")
+    os.environ["AGENT_HUB_DB"] = db
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    try:
+        from core import account, session
+
+        # 兜底：确认"换库"真的生效了。万一 AGENT_HUB_DB 没被读到，下面这行
+        # create_user 会往**真实**的 data/sessions.db 写一个固定口令的账号。
+        # 宁可整脚本失败，也不要往真实库里留测试账号。
+        actual = session._db_path()
+        if Path(actual).resolve() != Path(db).resolve():
+            raise SystemExit(f"AGENT_HUB_DB 未生效（实际库 {actual}），已中止以免污染真实库")
+
+        session._init_db()
+        account._ensure_tables(force=True)
+        try:
+            account.create_user(username, password)
+        except sqlite3.IntegrityError:
+            pass  # 幂等：重复跑脚本不报错
+    finally:
+        if prev is None:
+            os.environ.pop("AGENT_HUB_DB", None)
+        else:
+            os.environ["AGENT_HUB_DB"] = prev
+
+
 def _opener() -> urllib.request.OpenerDirector:
     jar = http.cookiejar.CookieJar()
-    return urllib.request.build_opener(
-        # 显式空 ProxyHandler：Windows 上 urllib 会从注册表读系统代理，
-        # 而 proxy_bypass('127.0.0.1') 常常是 False —— 本机回环请求被塞给代理，
-        # 表现就是"服务明明起来了，POST 卡到超时"。
-        urllib.request.ProxyHandler({}),
-        urllib.request.HTTPCookieProcessor(jar),
-    )
+    return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
 
 
 def _http(
@@ -91,14 +123,10 @@ def _http(
             return resp.status, resp.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode("utf-8", "replace")
-    except (urllib.error.URLError, TimeoutError, OSError) as e:
-        # 连不上就记一项失败，别把整张表炸掉：漏网的异常只会给出
-        # 一行 traceback，反而看不出是哪条检查挂了。
-        return -1, f"{type(e).__name__}: {e}"
 
 
 def _wait_health(base: str, timeout: float = 60.0) -> bool:
-    op = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    op = urllib.request.build_opener()
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
@@ -121,21 +149,10 @@ def main() -> int:
     port = _free_port()
     base = f"http://127.0.0.1:{port}"
 
-    # 管理员账号只能"落库"，不能从网页注册：ADMIN_USERNAMES 里的名字在自助注册入口
-    # 被保留（防抢注，见 core/account.py::is_reserved_admin_name），HTTP 注册必 403。
-    # 所以先用同一个临时库直接建号，再把 uid 塞进 ADMIN_UIDS 交给服务进程。
-    os.environ["AGENT_HUB_DB"] = db
-    sys.path.insert(0, str(ROOT))
-    from core import account  # noqa: E402  （必须在 AGENT_HUB_DB 之后导入）
-
-    admin_user = account.create_user(ADMIN, PASSWORD)
-
     env = os.environ.copy()
     env.update(
         {
             "AGENT_HUB_DB": db,
-            "ADMIN_UIDS": admin_user["id"],
-            # 名字也留着：下面要断言"被配置成管理员的用户名，自助注册必须 403"
             "ADMIN_USERNAMES": ADMIN,
             "ALLOW_SIGNUP": "1",
             "RATE_LIMIT_SHARED": "0",
@@ -145,6 +162,9 @@ def main() -> int:
     )
     env.pop("DEEPSEEK_API_KEY", None)  # 不调模型，去掉真实 key 免得误打外部接口
     env.pop("EMBEDDING_API_KEY", None)  # RAG 预热同理：本脚本不碰知识库
+
+    # 管理员只能"预置"：注册接口保留了这个名字（见 _seed_admin 的说明）
+    _seed_admin(db, ADMIN, PASSWORD)
 
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", str(port),
@@ -163,10 +183,11 @@ def main() -> int:
         normal = _opener()
 
         # ---------- 注册与登录 ----------
-        # 反过来测一条安全行为：被配置成管理员的用户名，自助注册必须被 403 挡住。
+        # 管理员账号已在 _seed_admin 里预置。这里顺手把"抢注"这条安全断言验掉：
+        # 自助注册必须拒绝 ADMIN_USERNAMES 里的名字（否则谁先注册谁就是管理员）。
         code, body = _http(anon, "POST", f"{base}/api/auth/register/",
                            {"username": ADMIN, "password": PASSWORD})
-        rep.check("管理员名保留：自助注册被 403 挡住", code == 403, f"{code} {body[:60]}")
+        rep.check("管理员名禁止自助注册（防抢注）", code == 403, f"{code} {body[:60]}")
         code, body = _http(anon, "POST", f"{base}/api/auth/register/",
                            {"username": NORMAL, "password": PASSWORD})
         rep.check("普通账号注册", code == 200, f"{code} {body[:60]}")
@@ -235,32 +256,28 @@ def main() -> int:
             _http(admin, "GET", f"{base}/api/admin/overview?days=1")
         time.sleep(4.5)
         code, body = _http(admin, "GET", f"{base}/api/admin/overview?days=1")
-        ov2 = json.loads(body) if code == 200 else {}
-        total2 = ov2.get("calls", {}).get("total")
+        total2 = (json.loads(body).get("calls") or {}).get("total")
         rep.check("刷新看板不产生统计（无观察者效应）", total2 == total, f"{total} -> {total2}")
 
         # ---------- 排行三档 ----------
         for sort in ("calls", "slow", "fail"):
             code, body = _http(admin, "GET", f"{base}/api/admin/apis?days=1&sort={sort}")
             js = json.loads(body) if code == 200 else {}
-            items = js.get("items") or []
             rep.check(f"排行 sort={sort} 可用", code == 200 and js.get("sort") == sort,
-                      f"{code} items={len(items)}")
+                      f"{code} items={len(js.get('items') or [])}")
             if sort == "fail":
-                bad = [x for x in items if x["failed"] > 0]
-                rep.check("failed 档每条都真的失败过", all(x["failed"] > 0 for x in items),
+                bad = [x for x in js.get("items") or [] if x["failed"] > 0]
+                rep.check("failed 档每条都真的失败过", all(x["failed"] > 0 for x in js["items"]),
                           f"{len(bad)} 条")
         code, body = _http(admin, "GET", f"{base}/api/admin/apis?days=1&sort=bogus")
-        rep.check("非法 sort 回落 calls",
-                  (json.loads(body) if code == 200 else {}).get("sort") == "calls", "")
+        rep.check("非法 sort 回落 calls", json.loads(body).get("sort") == "calls", "")
 
         # ---------- 反馈闭环 ----------
         code, body = _http(normal, "GET", f"{base}/api/user-feedback/dict")
         d = json.loads(body) if code == 200 else {}
-        cats = d.get("categories") or []
-        rep.check("反馈字典可取", code == 200 and bool(cats), f"{code}")
+        rep.check("反馈字典可取", code == 200 and bool(d.get("categories")), f"{code}")
         code, body = _http(normal, "POST", f"{base}/api/user-feedback/",
-                           {"category": (cats[0]["value"] if cats else ""),
+                           {"category": d["categories"][0]["value"],
                             "content": "e2e 提交的反馈：看板数字要能对上"})
         fid = json.loads(body).get("id") if code == 200 else None
         rep.check("普通用户可提交反馈", code == 200 and fid, f"{code} id={fid}")
