@@ -169,18 +169,33 @@ def test_4_old_file_survives() -> None:
     """一直写不进去时，旧文件必须原样保留——不能变成截断的 JSON。
 
     这是原子写最关键的兜底：宁可丢一次登记，也不能让整个清单读不出来。
+
+    ★ 制造"写不进去"不能靠"开一个读句柄占住目标文件"：那只有 Windows 成立
+      （CPython 在 Windows 上不含 FILE_SHARE_DELETE，os.replace 撞见被打开的
+      目标就 PermissionError），Linux 上 replace 照样成功 —— 断言于是变成
+      "我以为它写失败了，其实写成功了"，本地绿、CI（ubuntu）红。
+      这里改成把**替换那一步**打成抛错，两边测的是同一件事：
+      `_atomic_write_json` 的后半段失败时，旧文件是否原封不动。
     """
     print("\n[4] 持续占用下旧文件完好")
     kb = _own("blocked_kb")
     p = pipelines._files_path()
     pipelines.add_file_records(OWNER, kb, [{"name": "keep.txt", "chunks": 1, "added_at": 0}])
-    good = open(p, encoding="utf-8").read()
+    with open(p, encoding="utf-8") as f:
+        good = f.read()
 
-    blocker = open(p, encoding="utf-8")
+    real_replace = pipelines._replace_with_retry
+
+    def _always_busy(tmp: str, path: str) -> None:
+        raise PermissionError("目标文件被占用（测试注入）")
+
+    # 直接改模块属性而不是 monkeypatch fixture：本文件同时是脚本式自测
+    # （main() 里无参直调），fixture 只在 pytest 下生效。
+    pipelines._replace_with_retry = _always_busy
     try:
         pipelines.add_file_records(OWNER, kb, [{"name": "lost.txt", "chunks": 1, "added_at": 0}])
     finally:
-        blocker.close()
+        pipelines._replace_with_retry = real_replace
 
     with open(p, encoding="utf-8") as f:
         after = f.read()
