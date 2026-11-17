@@ -1,0 +1,422 @@
+/* ============================================================
+   知穗开机动画 / 登录探活等待层
+   视觉稿：暖米黄纸面 + 品牌玉米 + 金穗线。动画克制：
+   字逐个浮现、logo 落位后呼吸、穗线从中间长开、嫩芽轻摆。
+   ============================================================ */
+
+.zs-boot-splash,
+.zs-boot-auth {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: var(--ink);
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(ellipse 78% 56% at 50% 18%, rgba(255, 250, 236, 0.88), transparent 68%),
+    radial-gradient(ellipse 58% 44% at 50% 42%, rgba(200, 137, 42, 0.055), transparent 70%);
+}
+
+.zs-boot-auth {
+  z-index: 9998;
+}
+
+.zs-boot-splash::after,
+.zs-boot-auth::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: var(--grain-noise);
+  opacity: 0.34;
+}
+
+.dark .zs-boot-splash,
+.dark .zs-boot-auth {
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(ellipse 72% 52% at 50% 18%, rgba(255, 238, 202, 0.09), transparent 68%),
+    radial-gradient(ellipse 54% 42% at 50% 42%, rgba(200, 137, 42, 0.10), transparent 72%);
+}
+
+.zs-boot-splash {
+  transition: opacity 0.34s ease, visibility 0.34s ease;
+  /* 兜底放行：这层是 fixed + z-index 9999 的不透明纸面，正常由 JS 在 2.08s
+     摘掉。脚本没跑起来（hydration 报错、被拦）时它会把整站永久挡住 —— 所以
+     再挂一条纯 CSS 的保险，5s 后自己让开。动画只在延迟结束后生效，不碰正常的
+     淡出过渡。 */
+  animation: zs-boot-fail-open 1ms linear 5s forwards;
+}
+
+@keyframes zs-boot-fail-open {
+  to {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+}
+
+.zs-boot-splash.is-leaving {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* 原生 WebView 壳自己已经有启动动画，不重复演。 */
+.in-app .zs-boot-splash {
+  display: none !important;
+}
+
+.zs-boot-scene {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 100%;
+  padding: 0 24px;
+  transform: translateY(-1vh);
+}
+
+/* 纸面上的 logo 底座：圆角比例与 icon-512 一致（--r-icon 随尺寸缩放）。
+   底色用 --tile-paper 而不是 --step-1：深色纸面下这块也要是浅的。 */
+.zs-boot-logo-tile {
+  width: clamp(96px, 18.5vw, 270px);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  padding: clamp(2px, 0.55vw, 8px);
+  border: 1px solid var(--line);
+  border-radius: var(--r-icon);
+  background: var(--tile-paper);
+  box-shadow: 0 14px 38px rgba(80, 60, 30, 0.16);
+  opacity: 0;
+  animation: zs-boot-logo-in 0.56s cubic-bezier(0.2, 0.8, 0.2, 1) 0.82s both;
+}
+
+.zs-boot-mascot {
+  width: 100%;
+  height: 100%;
+  animation-duration: 3.6s;
+}
+
+/* 深色纸面仍用米色底座，保持品牌图标的“贴纸”感。
+   吉祥物本身也要回到浅色配色，否则深色变量会在米色底座上发灰。 */
+.dark .zs-boot-logo-tile {
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.38);
+}
+
+.dark .zs-boot-logo-tile .mascot {
+  --mc-face: #f5b840;
+  --mc-leaf-a: #7c9a54;
+  --mc-leaf-b: #8faf62;
+  --mc-stroke: #3d2f1a;
+  --mc-silk: #3d2f1a;
+  --mc-eye: #3d2f1a;
+  --mc-eye-shine: #fffdf6;
+  --mc-mouth: #3d2f1a;
+  --mc-grain: #3d2f1a;
+  --mc-blush: #ef8a56;
+  --mc-shine: #ffffff;
+  --mc-paper: #fffdf6;
+}
+
+/* 上面那些只是换色，还差三处"暗场补偿"：mascot.css 在 .dark 下压淡纹理、
+   去掉高光、加重腮红 —— 那是给深纸面用的，贴在这块浅底座上是错的。
+   不还原的话，同一个吉祥物在深浅两套开机页上长得不一样（高光直接没了）。 */
+.dark .zs-boot-logo-tile .mascot-grain {
+  opacity: 0.28;
+}
+.dark .zs-boot-logo-tile .mascot-shine {
+  display: block;
+  opacity: 0.5;
+}
+.dark .zs-boot-logo-tile .mascot-blush ellipse {
+  opacity: 1;
+}
+
+.zs-boot-slogan {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  margin-top: clamp(28px, 4.4vh, 54px);
+  font-family: var(--font-sans);
+  font-size: clamp(28px, 6.3vw, 84px);
+  font-weight: 500;
+  line-height: 1.16;
+  letter-spacing: 0.035em;
+  white-space: nowrap;
+}
+
+.zs-boot-char {
+  display: inline-block;
+  opacity: 0;
+  animation: zs-boot-char-in 0.44s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.zs-boot-comma {
+  margin-right: -0.045em;
+  margin-left: -0.015em;
+}
+
+.zs-boot-brand {
+  position: relative;
+  display: inline-flex;
+}
+
+.zs-boot-brand::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -0.13em;
+  height: 0.105em;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 8' preserveAspectRatio='none'%3E%3Cpath d='M2 6 Q 22 1.5 46 4.5 T 74 4 T 98 3' fill='none' stroke='%23C8892A' stroke-width='2.2' stroke-linecap='round'/%3E%3C/svg%3E")
+    no-repeat center / 100% 100%;
+  opacity: 0;
+  animation: zs-boot-underline-in 0.4s ease 0.38s both;
+}
+
+.dark .zs-boot-brand::after {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 8' preserveAspectRatio='none'%3E%3Cpath d='M2 6 Q 22 1.5 46 4.5 T 74 4 T 98 3' fill='none' stroke='%23E0A03A' stroke-width='2.2' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+
+.zs-boot-brand-char {
+  background: linear-gradient(115deg, #9c6a16 0%, #c8892a 55%, #a5751f 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+.dark .zs-boot-brand-char {
+  background: linear-gradient(115deg, #e8b54e 0%, #f0c470 55%, #dfa13c 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.zs-boot-line-wrap {
+  position: relative;
+  width: clamp(132px, 31vw, 440px);
+  height: clamp(28px, 3.4vh, 38px);
+  display: flex;
+  align-items: flex-end;
+  margin-top: clamp(26px, 4.8vh, 54px);
+  margin-bottom: clamp(16px, 2.6vh, 28px);
+}
+
+.zs-boot-line {
+  position: relative;
+  width: 100%;
+  height: 3px;
+  overflow: hidden;
+  border-radius: var(--r-pill);
+  background: var(--line);
+  opacity: 0;
+  animation: zs-boot-line-in 0.2s ease 1.02s both;
+}
+
+.zs-boot-line-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: center;
+  animation: zs-boot-line-grow 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) 1.04s both;
+}
+
+.zs-boot-line-sweep {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 26%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, rgba(255, 248, 226, 0.92), transparent);
+  opacity: 0.9;
+  animation: zs-boot-sweep 2.2s linear 0.62s infinite;
+}
+
+.zs-boot-sprout {
+  position: absolute;
+  right: -2px;
+  bottom: 1px;
+  width: clamp(20px, 2.8vw, 40px);
+  aspect-ratio: 40 / 36;
+  transform-origin: 50% 100%;
+  opacity: 0;
+  animation: zs-boot-sprout-in 0.42s cubic-bezier(0.2, 0.8, 0.2, 1) 1.36s both;
+}
+
+.zs-boot-sprout-inner {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-origin: 50% 100%;
+  animation: zs-boot-sway 3.6s ease-in-out 1.82s infinite;
+}
+
+.zs-boot-status {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: clamp(13px, 2.15vw, 33px);
+  font-weight: 400;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+  color: var(--text-2);
+  opacity: 0;
+  animation: zs-boot-status-in 0.34s ease 1.2s both;
+}
+
+/* 登录探活：元素几乎同时就位，随后只留穗线扫光和嫩芽摆动 */
+.zs-boot-scene.is-auth .zs-boot-logo-tile {
+  animation-delay: 0.06s;
+}
+.zs-boot-scene.is-auth .zs-boot-brand::after {
+  animation-delay: 0.2s;
+}
+.zs-boot-scene.is-auth .zs-boot-line {
+  animation-delay: 0.1s;
+  animation-duration: 0.2s;
+}
+.zs-boot-scene.is-auth .zs-boot-line-fill {
+  animation-delay: 0.12s;
+  animation-duration: 0.42s;
+}
+.zs-boot-scene.is-auth .zs-boot-sprout {
+  animation-delay: 0.28s;
+}
+.zs-boot-scene.is-auth .zs-boot-sprout-inner {
+  animation-delay: 0.66s;
+}
+.zs-boot-scene.is-auth .zs-boot-status {
+  animation-delay: 0.24s;
+}
+
+@keyframes zs-boot-char-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.18em);
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes zs-boot-logo-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes zs-boot-underline-in {
+  from {
+    opacity: 0;
+    transform: scaleX(0.55);
+  }
+  to {
+    opacity: 0.72;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes zs-boot-line-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes zs-boot-line-grow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes zs-boot-sprout-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes zs-boot-sway {
+  0%,
+  100% {
+    transform: rotate(-2.4deg);
+  }
+  50% {
+    transform: rotate(2.4deg);
+  }
+}
+
+@keyframes zs-boot-status-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes zs-boot-sweep {
+  from {
+    transform: translateX(-130%);
+  }
+  to {
+    transform: translateX(420%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zs-boot-char,
+  .zs-boot-logo-tile,
+  .zs-boot-brand::after,
+  .zs-boot-line,
+  .zs-boot-line-fill,
+  .zs-boot-line-sweep,
+  .zs-boot-sprout,
+  .zs-boot-sprout-inner,
+  .zs-boot-status,
+  .zs-boot-mascot {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    filter: none !important;
+  }
+  .zs-boot-line-fill {
+    transform: scaleX(1) !important;
+  }
+  .zs-boot-splash {
+    transition: none;
+    /* 上面那条兜底动画不能一起关掉：它和"动画克制"无关，是页面坏掉时的逃生口 */
+    animation-duration: 1ms;
+  }
+}

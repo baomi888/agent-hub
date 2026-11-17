@@ -10,6 +10,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import AuthGate from "@/components/AuthGate";
+import { AuthLoading } from "@/components/boot/BootSplash";
 import InstallBanner from "@/components/InstallBanner";
 import { useAuth } from "@/lib/hooks/useAuth";
 
@@ -24,11 +25,7 @@ export default function LoginPage() {
   }, [auth.loading, auth.me, router]);
 
   if (auth.loading) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-canvas">
-        <p className="text-fs-sm text-faint">正在确认登录状态...</p>
-      </div>
-    );
+    return <AuthLoading />;
   }
 
   // 登录成功到路由替换之间会有一帧：不渲染卡片，免得表单闪一下再消失

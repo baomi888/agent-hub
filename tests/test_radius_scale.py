@@ -49,6 +49,10 @@ ALLOWED_ATOMS = {
     # 校园模块的二级别名，定义在 campus.css 里（:root 的 --campus-radius:
     # var(--radius-lg)），最终仍落到卡片档。test_alias_points_to_tier 会钉它。
     "var(--campus-radius)",
+    # 开机页 logo 贴纸底座：96→270px 之间要同一个比例，固定 px 必有一头不对。
+    # 它不是"第四档"，是唯一一处随尺寸缩放的圆角；test_icon_radius_is_local
+    # 钉住"只有 boot.css 能用"，不许扩散成通用档位。
+    "var(--r-icon)",
     "0",
     "50%",
     "inherit",
@@ -143,3 +147,26 @@ def test_px_literals_do_not_come_back():
     for legacy in ("4px", "8px", "16px", "14px", "6px", "22px"):
         pat = re.compile(r"border-radius\s*:\s*[^;{}]*\b%s\b" % re.escape(legacy))
         assert not pat.search(src_all), "又出现了 border-radius: %s" % legacy
+
+
+def test_icon_radius_is_local():
+    """--r-icon 是"唯一一处跟着尺寸走"的圆角，必须钉死它不扩散。
+
+    它存在的理由只有一个：开机页那块 logo 底座在 96→270px 之间要同一个比例。
+    一旦它变成通用档位（别的组件也开始引），这个例外就等于取消了圆角三档，
+    所以这里同时钉三件事：定义唯一、值仍是 24%、使用者只有 boot.css。
+    """
+    tokens = _strip_comments(TOKENS.read_text(encoding="utf-8"))
+    m = re.search(r"--r-icon\s*:\s*([^;]+);", tokens)
+    assert m, "tokens.css 里找不到 --r-icon"
+    assert m.group(1).strip() == "24%", "--r-icon 变成了 %s" % m.group(1).strip()
+    assert len(re.findall(r"--r-icon\s*:", tokens)) == 1, "--r-icon 被重复定义"
+
+    users = []
+    for path in _css_files():
+        body = _strip_comments(path.read_text(encoding="utf-8"))
+        if "var(--r-icon)" in body:
+            users.append(path.name)
+    assert users == ["boot.css"], "--r-icon 只该给开机页用，现在也被这些引用了：%s" % (
+        ", ".join(users)
+    )

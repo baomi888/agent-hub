@@ -23,6 +23,7 @@ import { detailToMessage } from "@/lib/errors";
 import InstallBanner from "@/components/InstallBanner";
 import Landing from "@/components/landing/Landing";
 import AnnounceModal from "@/components/announce/AnnounceModal";
+import { AuthLoading } from "@/components/boot/BootSplash";
 import type { UiMessage } from "@/components/chat/types";
 import type { Grounding, RefSource, ToolEvent, WebSource, IssuedApproval, ToolApprovalRequest } from "@/lib/types";
 import { isPlanRequest } from "@/components/chat/plan";
@@ -961,11 +962,7 @@ export default function Home() {
   // 必须放在所有 hooks 之后：React 不允许条件调用 hook，但允许提前 return。
   // 身份没确认完先不给工作台，免得空列表闪一下又跳回登录页。
   if (auth.loading) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-canvas">
-        <p className="text-fs-sm text-faint">正在确认登录状态...</p>
-      </div>
-    );
+    return <AuthLoading />;
   }
   if (!auth.me) {
     // 未登录看到的是落地页，不再是一张孤零零的登录卡片。

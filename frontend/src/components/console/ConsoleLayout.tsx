@@ -19,6 +19,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import AuthGate from "../AuthGate";
+import { AuthLoading } from "../boot/BootSplash";
 import CornIcon from "../CornIcon";
 import NavIcon from "../NavIcon";
 import ConsoleTabBar from "./ConsoleTabBar";
@@ -112,11 +113,7 @@ export default function ConsoleLayout({ children }: { children: ReactNode }) {
 
   // 与 / 同一套门：身份没确认完不给内容，免得空列表闪一下又跳回登录页
   if (auth.loading) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-canvas">
-        <p className="text-fs-sm text-faint">正在确认登录状态...</p>
-      </div>
-    );
+    return <AuthLoading />;
   }
   if (!auth.me) {
     // 对话页在**未登录**时是落地页（Landing），那是给人看"这是什么"的地方，

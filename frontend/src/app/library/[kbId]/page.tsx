@@ -28,6 +28,7 @@ import MascotLogo from "@/components/chat/MascotLogo";
 import CornIcon from "@/components/CornIcon";
 import KbBoard from "@/components/library/KbBoard";
 import AuthGate from "@/components/AuthGate";
+import { AuthLoading } from "@/components/boot/BootSplash";
 import { ToastHost } from "@/components/console/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
@@ -210,11 +211,7 @@ export default function CourseLibraryPage() {
   };
 
   if (auth.loading) {
-    return (
-      <div className="lib-boot">
-        <p>正在确认登录状态...</p>
-      </div>
-    );
+    return <AuthLoading />;
   }
   if (!auth.me) {
     return <AuthGate allowSignup={auth.allowSignup} onLogin={auth.login} onRegister={auth.register} />;

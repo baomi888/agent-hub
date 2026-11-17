@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
+import BootSplash from "@/components/boot/BootSplash";
 import PwaRegister from "@/components/PwaRegister";
 // KaTeX 的字体与排版样式必须在 globals.css 之前：globals 里我们对
 // .math-inline / .math-block 的微调要能盖住它的默认值。
@@ -100,7 +101,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <head>
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var s=localStorage.getItem('theme');var f=new URLSearchParams(location.search).get('theme');var d=f?f==='dark':s?s==='dark':window.matchMedia('(prefers-color-scheme: dark)').matches;if(d)document.documentElement.classList.add('dark');var p={};try{p=JSON.parse(localStorage.getItem('baomi.prefs')||'{}')}catch(e){}if(p.fontScale)document.documentElement.setAttribute('data-fs',p.fontScale);}catch(e){}})();`,
+            __html: `(function(){try{var s=localStorage.getItem('theme');var f=new URLSearchParams(location.search).get('theme');var d=f?f==='dark':s?s==='dark':window.matchMedia('(prefers-color-scheme: dark)').matches;if(d)document.documentElement.classList.add('dark');if(window.__zhisuiApp)document.documentElement.classList.add('in-app');var p={};try{p=JSON.parse(localStorage.getItem('baomi.prefs')||'{}')}catch(e){}if(p.fontScale)document.documentElement.setAttribute('data-fs',p.fontScale);}catch(e){}})();`,
           }}
         />
         {/* Safari 15 及更早只认这个传统标签：缺了它，从主屏打开会退化成带地址栏的 Safari 窗口。
@@ -125,6 +126,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       </head>
       <body className="min-h-full">
         {children}
+        <BootSplash />
         <PwaRegister />
         {/* InstallBanner 不在这里：它必须挂在"已登录的首页"里面（app/page.tsx）。
             挂在根布局会先出现在登录门上 —— 详见组件头部注释。 */}

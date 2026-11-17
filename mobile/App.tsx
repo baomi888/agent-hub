@@ -1,9 +1,9 @@
 import { StatusBar } from "expo-status-bar";
 import * as Haptics from "expo-haptics";
+import * as SplashScreen from "expo-splash-screen";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComponentType, Ref } from "react";
 import {
-  ActivityIndicator,
   BackHandler,
   Linking,
   Platform,
@@ -18,6 +18,14 @@ import {
   type WebViewNavigation,
 } from "react-native-webview";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import BootOverlay from "./BootOverlay";
+
+SplashScreen.preventAutoHideAsync().catch(() => {});
+try {
+  SplashScreen.setOptions({ fade: true, duration: 220 });
+} catch {
+  /* 老版本原生层不支持淡出时，保持默认即可 */
+}
 
 /**
  * 知穗 iOS / Android 外壳。
@@ -70,6 +78,28 @@ function AppInner() {
   const [firstLoad, setFirstLoad] = useState(true);
   const [failed, setFailed] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const [bootKey, setBootKey] = useState(0);
+  const [minBootDone, setMinBootDone] = useState(false);
+  const [bootHidden, setBootHidden] = useState(false);
+
+  /* 原生启动层至少留 1.7s，避免页面加载太快时动画被拦腰截断。
+     重试也重新走一遍，但不再要求完整时长 —— 重试时用新的 bootKey 重播。 */
+  useEffect(() => {
+    let alive = true;
+    setMinBootDone(false);
+    const t = setTimeout(() => {
+      if (alive) setMinBootDone(true);
+    }, 1700);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [bootKey]);
+
+  /* 第一帧（含 BootOverlay）已经挂上，再把 expo 的原生启动图淡出。 */
+  useEffect(() => {
+    SplashScreen.hideAsync().catch(() => {});
+  }, []);
 
   /* 安卓物理返回键：能后退就后退，退到底才交给系统退出。
      不处理的话，用户在任何页面按一下返回就直接退出 App —— 这是 WebView
@@ -114,8 +144,12 @@ function AppInner() {
   const retry = useCallback(() => {
     setFailed(false);
     setFirstLoad(true);
+    setBootHidden(false);
+    setBootKey((k) => k + 1);
     setReloadKey((k) => k + 1);
   }, []);
+
+  const showBoot = !failed && (firstLoad || !minBootDone);
 
   return (
     <View style={styles.root}>
@@ -178,6 +212,14 @@ function AppInner() {
         injectedJavaScriptBeforeContentLoaded={`
           (function(){
             window.__zhisuiApp = true;
+            if (document.documentElement) {
+              document.documentElement.classList.add('in-app');
+            }
+            document.addEventListener('DOMContentLoaded', function(){
+              if (document.documentElement) {
+                document.documentElement.classList.add('in-app');
+              }
+            }, { once: true });
             var s = document.createElement('style');
             s.textContent = 'html{-webkit-tap-highlight-color:transparent;}::-webkit-scrollbar{display:none;}';
             document.head && document.head.appendChild(s);
@@ -185,15 +227,6 @@ function AppInner() {
           true;
         `}
       />
-
-      {/* 首屏加载态。盖在 WebView 上而不是替换它：
-          替换会导致 WebView 重新挂载，加载完再"闪"一下。 */}
-      {firstLoad && !failed && (
-        <View style={styles.overlay} pointerEvents="none">
-          <ActivityIndicator size="large" color="#C8892A" />
-          <Text style={styles.overlayText}>正在打开知穗…</Text>
-        </View>
-      )}
 
       {/* 错误态：给重试，而不是让用户看到一个白屏 App。 */}
       {failed && (
@@ -207,6 +240,17 @@ function AppInner() {
             <Text style={styles.retryText}>重新加载</Text>
           </Pressable>
         </View>
+      )}
+
+      {/* 首屏启动层。盖在 WebView 上而不是替换它：替换会导致 WebView
+          重新挂载，加载完再"闪"一下。错误态先渲染在底下，启动层淡出后
+          才露出来，不会在加载途中突然跳成错误页。 */}
+      {!bootHidden && (
+        <BootOverlay
+          key={bootKey}
+          visible={showBoot}
+          onHidden={() => setBootHidden(true)}
+        />
       )}
     </View>
   );
