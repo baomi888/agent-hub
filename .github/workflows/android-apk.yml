@@ -1,0 +1,105 @@
+name: Android APK
+
+# 为什么在 Actions 里出 APK，而不是本地 / EAS：
+#   1. 本地没有 JDK 和 Android SDK，装齐要 3~5 GB；Actions 的 ubuntu-latest 自带 SDK，
+#      公开仓库的分钟数完全免费，改一行 mobile/ 就自动产出新包。
+#   2. EAS 云构建免费额度每月 30 次、要排队，从国内上传不稳定；
+#      而仓库 push 就能触发，产物挂在 Release 上，评委手机扫码即可下载。
+#   3. 出的是 **单元** 而不是 store 包：安卓侧演示用 APK 直装（允许"未知来源"），
+#      上架才是另一条路（要 ICP App 备案 + 软著，各 2~4 周）。
+#
+# 触发：push 到下面这些分支且改动落在 mobile/ 或本文件；也支持手动 workflow_dispatch。
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, dev]
+    paths:
+      - "mobile/**"
+      - ".github/workflows/android-apk.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    name: Build APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: mobile
+    env:
+      # Expo 的预构建在 CI 里遇到"要不要覆盖已有 android 目录"会等待输入，CI=1 让它直接决定
+      CI: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      # RN 0.88 / AGP 8.x 需要 JDK 17+，用 21 与 Expo SDK 58 的默认一致
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # runner 上有 SDK，但 license 需要接受；这一步顺带把 ANDROID_HOME 写进环境
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      # 用 CNG 现场生成 android/（仓库里没有、也不该有 /android 目录，见 mobile/AGENTS.md）
+      - name: Prebuild Android project
+        run: npx expo prebuild --platform android --no-install
+
+      # assembleRelease 而不是 assembleDebug：debug 包不带 JS bundle，必须连 Metro 才能跑，
+      # 装到评委手机上会是一片红屏。release 会把 JS 打进包，断网也能开首屏。
+      # 签名用的是 RN 模板默认的 debug keystore —— 演示装机和商店无关，够用。
+      - name: Build release APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon -Dorg.gradle.jvmargs=-Xmx4g
+
+      - name: Collect artifact
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp android/app/build/outputs/apk/release/app-release.apk \
+             "$GITHUB_WORKSPACE/out/zhisui-android-demo.apk"
+          ls -lh "$GITHUB_WORKSPACE/out"
+          sha256sum "$GITHUB_WORKSPACE/out/zhisui-android-demo.apk"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zhisui-android-apk
+          path: out/zhisui-android-demo.apk
+          retention-days: 30
+
+      # 固定 tag 覆盖同名 Release：每次推送都更新同一个下载地址，评委手里的二维码不用换
+      - name: Publish to Release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-demo
+          name: 知穗 Android 演示包
+          prerelease: true
+          body: |
+            知穗（myzhisui.cn）的安卓壳，WebView 加载线上站点，跟着 Web 一起更新。
+
+            安装：手机浏览器下载后，允许「安装未知应用」即可。仅用于答辩演示。
+
+            构建：`${{ github.sha }}`（run #${{ github.run_number }}）
+          files: out/zhisui-android-demo.apk
