@@ -7,8 +7,8 @@
   GET   /api/admin/real-users            真实用户使用数据（排除内部/测试账号）
   POST  /api/admin/users/{target}/internal  标记/取消内部账号
   GET   /api/admin/feedback              反馈列表（可选按状态筛）
-  PATCH /api/admin/feedback/{fid}        改反馈状态（严格按流转表，不允许回退）
-  POST  /api/admin/feedback/{fid}/reply  追加一条回复（带作者，发出即定稿）
+  PATCH /api/admin/feedback/{fid}        改**这一条**的状态（任意互转，含回退）
+  POST  /api/admin/feedback/{fid}/reply  给**这一条**追加回复（带作者，发出即定稿）
   GET   /api/admin/feedback/export       一键导出（Markdown，脱敏 + 留审计）
   GET   /api/admin/dict                  分类/状态字典（前端不得硬编码）
 
@@ -192,6 +192,10 @@ async def feedback_thread(
 
 class ThreadReply(BaseModel):
     text: str = Field(..., description="回复正文。发出即定稿，不可修改")
+    fid: int | None = Field(
+        default=None,
+        description="挂到哪条反馈下。不传则挂最新一条（老前端的行为，保留兼容）",
+    )
 
 
 @router.post("/feedback/thread/{target}/reply")
@@ -201,7 +205,11 @@ async def feedback_thread_reply(
     request: Request,
     uid: str = Depends(get_current_user),
 ) -> dict:
-    """在会话里回一句（挂到该用户最新一条反馈下，见 `reply_thread`）。"""
+    """在会话里回一句：默认挂该用户最新一条反馈，传 fid 则精确挂到那条。
+
+    返回整个 thread（分组 + 平铺两套），让前端一次拿到最新状态：
+    回复可能顺手把 open 推进到 doing，前端自己猜会显示旧状态。
+    """
     _require_admin(uid)
     text = (req.text or "").strip()
     if not text:
@@ -212,10 +220,13 @@ async def feedback_thread_reply(
         )
     author = _reply_author(uid, request)
     ok, err = await asyncio.to_thread(
-        user_feedback.reply_thread, target, uid, author, text
+        user_feedback.reply_thread, target, uid, author, text, req.fid
     )
     if not ok:
-        raise HTTPException(status_code=404, detail=err)
+        # fid 不属于这个用户时是"越权写别人那条反馈"，用 400 而不是 404：
+        # 反馈本身存在，错的是这组参数。
+        code = 404 if "没有反馈" in err else 400
+        raise HTTPException(status_code=code, detail=err)
     return await asyncio.to_thread(user_feedback.thread, target)
 
 
@@ -229,22 +240,25 @@ async def feedback_stats(
 
 
 class StatusPatch(BaseModel):
-    status: str = Field(..., description="目标状态：doing / done / closed")
+    status: str = Field(..., description="目标状态：open / doing / done / closed")
 
 
 @router.patch("/feedback/{fid}")
 async def feedback_patch(
     fid: int, req: StatusPatch, uid: str = Depends(get_current_user)
 ) -> dict:
-    """改状态。非法流转返回 **409**（不是 400）：
+    """改这一条反馈的状态。
 
-    400 是"你请求本身写得不对"，409 是"请求没写错，但和当前状态冲突"——
-    前端对这两者的处理不同（400 该改参数，409 该刷新列表看最新状态）。
+    2026-11-19 起**允许任意互转（含回退）**：原来点错「已处理」就再也改不回来，
+    而状态本来就是为了帮人记事，不是审计凭证。
+
+    错误码：状态值不合法 → 400；反馈不存在 → 404。（旧的 409 已不再产生，
+    因为不再有"流转冲突"这回事。）
     """
     _require_admin(uid)
     ok, err = await asyncio.to_thread(user_feedback.set_status, fid, req.status)
     if not ok:
-        raise HTTPException(status_code=409, detail=err)
+        raise HTTPException(status_code=404 if "不存在" in err else 400, detail=err)
     return {"ok": True, "status": req.status}
 
 

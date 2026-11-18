@@ -276,3 +276,176 @@ def test_empty_thread_reply_is_400(client):
         f"/api/admin/feedback/thread/{_uid_of(USER_A)}/reply", json={"text": "   "}
     )
     assert r.status_code == 400
+
+
+# ==================== 单条定位（2026-11-19）====================
+#
+# 用户的原话：「想把某条标记为已处理时只能按反馈时间统一操作，误点后也无法更正」。
+# 下面这组用例守的就是"精确作用到所选那一条"，以及"改错了能改回来"。
+
+
+def test_reply_lands_on_the_chosen_feedback(env):
+    """按 fid 回复只落在指定那条，另外两条一个字节都不动。"""
+    f1 = _add(USER_A, "第一条：设置页按钮点不动")
+    f2 = _add(USER_A, "第二条：想要日历视图")
+    f3 = _add(USER_A, "第三条：论坛能加 AI 总结吗")
+    uid = _uid_of(USER_A)
+
+    ok, err = user_feedback.reply_thread(uid, "admin", "冯靖豪", "第二条已排期", fid=f2)
+    assert ok, err
+
+    items = {t["fid"]: t for t in user_feedback.thread(uid)["items"]}
+    assert [r["text"] for r in items[f2]["replies"]] == ["第二条已排期"]
+    assert items[f1]["replies"] == [], "回复串到第一条了"
+    assert items[f3]["replies"] == [], "回复串到第三条了"
+
+
+def test_reply_without_fid_still_goes_to_latest(env):
+    """不传 fid 的老行为保留：挂最新一条（老前端与脚本还在用）。"""
+    early = _add(USER_A, "早一点的问题，先提的", at=int(time.time()) - 3 * DAY)
+    late = _add(USER_A, "晚一点的问题，后提的")
+    uid = _uid_of(USER_A)
+
+    ok, _ = user_feedback.reply_thread(uid, "admin", "冯靖豪", "回最新那条")
+    assert ok
+    items = {t["fid"]: t for t in user_feedback.thread(uid)["items"]}
+    assert items[late]["replies"][0]["text"] == "回最新那条"
+    assert items[early]["replies"] == []
+
+
+def test_reply_rejects_someone_elses_fid(env):
+    """传别人的 fid 必须失败：回复不可撤回，写进别人的反馈收不回来。"""
+    fid_b = _add(USER_B, "B 的问题，不该被 A 的会话污染")
+    uid_a = _uid_of(USER_A)
+
+    ok, err = user_feedback.reply_thread(uid_a, "admin", "冯靖豪", "越权写入", fid=fid_b)
+    assert not ok and "不属于" in err
+
+    items = {t["fid"]: t for t in user_feedback.thread(_uid_of(USER_B))["items"]}
+    assert items[fid_b]["replies"] == [], "失败就不能留半条数据"
+
+
+def test_user_reply_only_on_own_feedback(env):
+    """用户 A 不能往 B 的反馈里写字（改个 id 就能写，而回复不可撤回）。"""
+    fid_b = _add(USER_B, "B 的反馈")
+    uid_a = _uid_of(USER_A)
+
+    ok, err = user_feedback.reply_own(uid_a, fid_b, "我是 A，我要写进 B 那条")
+    assert not ok, err
+    assert user_feedback.thread(_uid_of(USER_B))["items"][0]["replies"] == []
+
+
+def test_user_reply_does_not_touch_status(env):
+    """用户自己补充一句不是"已接手"：状态必须原样不动。"""
+    fid = _add(USER_A, "想补充一下，是设置页那个按钮")
+    uid = _uid_of(USER_A)
+
+    before = user_feedback.get(fid)["status"]
+    ok, err = user_feedback.reply_own(uid, fid, "补充：只在 390 宽下出现")
+    assert ok, err
+    assert before == "open"
+    assert user_feedback.get(fid)["status"] == "open", "用户补充把状态推成 doing 了"
+
+
+def test_user_reply_marked_and_not_taken_as_admin_reply(env):
+    """用户补充在对话里标 user_reply，且不能冒充「开发者回复」。"""
+    fid = _add(USER_A, "原始描述在这里")
+    uid = _uid_of(USER_A)
+    user_feedback.add_reply(fid, "admin", "冯靖豪", "官方回复一句")
+    user_feedback.reply_own(uid, fid, "用户补充一句")
+
+    th = user_feedback.thread(uid)
+    kinds = [m["kind"] for m in th["items"][0]["replies"]]
+    assert kinds == ["admin", "user_reply"]
+    # 兼容字段只认管理员那条：取到用户自己那句，用户侧会显示
+    # 「开发者回复：<用户自己的话>」—— 语义直接反了
+    assert user_feedback.get(fid)["reply"] == "官方回复一句"
+
+
+def test_status_can_be_corrected_back(env):
+    """点错「已处理」能改回来（旧流转表把 done → doing 直接拒掉）。"""
+    fid = _add(USER_A, "这条被我误点了")
+    assert user_feedback.set_status(fid, "done")[0]
+
+    ok, err = user_feedback.set_status(fid, "doing")
+    assert ok, f"应该允许更正，却报：{err}"
+    assert user_feedback.get(fid)["status"] == "doing"
+    # 再从「不处理」改回「待处理」也要能走通 —— 误点不分方向
+    assert user_feedback.set_status(fid, "closed")[0]
+    assert user_feedback.set_status(fid, "open")[0]
+
+
+def test_status_change_hits_only_one_feedback(env):
+    """改一条的状态，同一用户另外两条不受影响。"""
+    f1 = _add(USER_A, "第一条，先放一放")
+    f2 = _add(USER_A, "第二条，马上办")
+    f3 = _add(USER_A, "第三条，再说")
+
+    user_feedback.set_status(f2, "done")
+    assert user_feedback.get(f1)["status"] == "open"
+    assert user_feedback.get(f2)["status"] == "done"
+    assert user_feedback.get(f3)["status"] == "open"
+
+
+def test_thread_items_group_replies_per_feedback(env):
+    """分组视图：每条反馈只带自己的回复链，不是整段会话的流水。"""
+    f1 = _add(USER_A, "第一条")
+    f2 = _add(USER_A, "第二条")
+    uid = _uid_of(USER_A)
+    user_feedback.add_reply(f1, "admin", "甲", "回第一条")
+    user_feedback.add_reply(f2, "admin", "乙", "回第二条")
+
+    items = {t["fid"]: t for t in user_feedback.thread(uid)["items"]}
+    assert len(items) == 2
+    assert [r["text"] for r in items[f1]["replies"]] == ["回第一条"]
+    assert [r["text"] for r in items[f2]["replies"]] == ["回第二条"]
+    # 每条自带状态，前端的状态控件才有东西可挂
+    for t in items.values():
+        assert t["status"] in ("open", "doing", "done", "closed")
+
+
+def test_api_thread_reply_targets_fid(client):
+    """接口层也要能指定 fid：前端传的是 body.fid，不是 URL。"""
+    _login(client, ADMIN_NAME)
+    f1 = _add(USER_A, "接口测试第一条")
+    f2 = _add(USER_A, "接口测试第二条")
+    uid = _uid_of(USER_A)
+
+    # ★ 指定**第一条**（非最新）：如果后端忽略 fid、永远挂最新，这条必红。
+    #   一开始这里写的是 f2（恰好是最新），反证时"忽略 fid"照样绿 —— 判据没力气。
+    r = client.post(
+        f"/api/admin/feedback/thread/{uid}/reply",
+        json={"text": "回第一条", "fid": f1},
+    )
+    assert r.status_code == 200, r.text
+    items = {t["fid"]: t for t in r.json()["items"]}
+    assert [x["text"] for x in items[f1]["replies"]] == ["回第一条"]
+    assert items[f2]["replies"] == [], "回复挂到最新那条去了"
+
+
+def test_api_thread_reply_rejects_foreign_fid(client):
+    """接口层同样拒绝越权 fid，且是 400（参数错，不是"这条不存在"）。"""
+    _login(client, ADMIN_NAME)
+    fid_b = _add(USER_B, "B 的反馈，接口层不该被写")
+    uid_a = _uid_of(USER_A)
+
+    r = client.post(
+        f"/api/admin/feedback/thread/{uid_a}/reply",
+        json={"text": "越权", "fid": fid_b},
+    )
+    assert r.status_code == 400, r.text
+
+
+def test_api_user_reply_endpoint(client):
+    """用户侧补一句：只影响自己那条，且不改状态。"""
+    _add(USER_B, "B 的反馈，用来验证越权被拒")
+    fid = _add(USER_A, "A 的反馈，准备补一句")
+    _login(client, USER_A)
+    before = user_feedback.get(fid)["status"]
+
+    r = client.post(f"/api/user-feedback/{fid}/reply", json={"text": "补充：是 390 宽下"})
+    assert r.status_code == 200, r.text
+
+    items = {t["fid"]: t for t in user_feedback.thread(_uid_of(USER_A))["items"]}
+    assert [x["kind"] for x in items[fid]["replies"]] == ["user_reply"]
+    assert user_feedback.get(fid)["status"] == before

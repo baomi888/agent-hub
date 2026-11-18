@@ -1069,12 +1069,15 @@ export interface FailuresResp {
 /** 一条反馈回复。发出即定稿：没有编辑接口，说错了只能再追加一条更正。 */
 export interface FeedbackReply {
   id: number;
-  /** 发这条回复的管理员 uid；从老库迁移过来的那条为空串 */
+  /** 发这条回复的管理员 uid；从老库迁移过来的那条为空串。
+   *  role = "user" 时这里是用户自己的 uid（没有署名） */
   admin_uid: string;
   /** 署名（昵称优先，回退用户名）；空串表示老数据，界面上显示「管理员」 */
   admin_name: string;
   content: string;
   created_at: number;
+  /** "admin"（默认，老数据也算）| "user"（用户自己在同一条下补充的话） */
+  role?: "admin" | "user";
 }
 
 export interface UserFeedbackItem {
@@ -1144,7 +1147,12 @@ export interface FeedbackThreadsResp {
 }
 
 export interface FeedbackMessage {
-  kind: "user" | "admin";
+  /**
+   * user      = 用户提的一条反馈（一条工单的开头）
+   * user_reply = 用户在某条反馈下补的一句话（不是新工单）
+   * admin     = 管理员对某条反馈的回复
+   */
+  kind: "user" | "user_reply" | "admin";
   /** 挂在哪条反馈下（管理员消息靠它反查是哪条反馈的回复） */
   fid: number;
   rid?: number;
@@ -1162,6 +1170,26 @@ export interface FeedbackMessage {
   author_uid?: string;
 }
 
+/**
+ * 一条反馈 = 一张工单卡：正文 + 自己的状态 + 自己的回复链。
+ *
+ * 为什么不复用 messages 让前端分组：messages 是**全局时间序**，按 fid 分组
+ * 之后每条反馈内部的先后是对的，但跨反馈的穿插关系会丢；反过来只看 messages
+ * 又没法把"状态控件"挂到正确的那条上。后端两套都给，前端按用途各取一套。
+ */
+export interface FeedbackTicket {
+  fid: number;
+  at: number;
+  text: string;
+  category: string;
+  category_label: string;
+  status: FeedbackStatus;
+  status_label: string;
+  page: string;
+  contact: string;
+  replies: FeedbackMessage[];
+}
+
 export interface FeedbackThreadResp {
   uid: string;
   name: string;
@@ -1169,6 +1197,9 @@ export interface FeedbackThreadResp {
   nickname: string;
   avatar: string;
   total: number;
+  /** 按条分组（后台的工单卡用它） */
+  items: FeedbackTicket[];
+  /** 全局时间序（"从头读这段对话"用它） */
   messages: FeedbackMessage[];
 }
 

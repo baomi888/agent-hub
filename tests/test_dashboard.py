@@ -432,7 +432,13 @@ def test_mine_is_scoped_to_owner(env, client):
 
 
 def test_status_transition_rules(env, client):
-    """流转表（字典 §4.3）：不允许回退。"""
+    """状态可以任意互转，**包括回退**（2026-11-19 起）。
+
+    原来这条断言的是"不允许回退（409）"，理由写在 `_TRANSITIONS` 上：允许回退
+    会让"处理耗时"失去意义。但那个统计没实现，而"手滑点成已处理就改不回来"
+    每天都在发生 —— 用户的原话是「误点后也无法更正」。所以规则反过来了：
+    可逆优先，错误码也退化成 400/404（不再有"状态冲突"这回事）。
+    """
     _login(client, USER_NAME)
     fid = client.post(
         "/api/user-feedback/", json={"category": "feature", "content": "希望能导出 Excel"}
@@ -442,15 +448,15 @@ def test_status_transition_rules(env, client):
     _login(admin, ADMIN_NAME)
 
     assert admin.patch(f"/api/admin/feedback/{fid}", json={"status": "done"}).status_code == 200
-    # done → doing 是回退，必须拒（409）
-    r = admin.patch(f"/api/admin/feedback/{fid}", json={"status": "doing"})
-    assert r.status_code == 409
-    # done → closed 合法（终态收口）
+    # done → doing 是回退：现在必须允许（误点的最主要场景）
+    assert admin.patch(f"/api/admin/feedback/{fid}", json={"status": "doing"}).status_code == 200
     assert admin.patch(f"/api/admin/feedback/{fid}", json={"status": "closed"}).status_code == 200
-    # closed 是终态
-    assert admin.patch(f"/api/admin/feedback/{fid}", json={"status": "open"}).status_code == 409
-    # 不存在的 id
-    assert admin.patch("/api/admin/feedback/999999", json={"status": "done"}).status_code == 409
+    # closed 不再是终态：点错了也要能捞回来
+    assert admin.patch(f"/api/admin/feedback/{fid}", json={"status": "open"}).status_code == 200
+    # 不存在的 id → 404（以前一律 409，但"这条不存在"本来就不是状态冲突）
+    assert admin.patch("/api/admin/feedback/999999", json={"status": "done"}).status_code == 404
+    # 状态值写错 → 400（请求本身不对）
+    assert admin.patch(f"/api/admin/feedback/{fid}", json={"status": "whatever"}).status_code == 400
 
 
 def test_two_admins_append_replies_with_author(env, client, monkeypatch):
@@ -521,7 +527,10 @@ def test_dict_is_single_source(env):
     """字典由后端下发，含分类/状态/流转/长度限制（字典 §4.1）。"""
     d = user_feedback.dict_payload()
     assert [c["value"] for c in d["categories"]] == ["bug", "answer", "feature", "ui", "other"]
-    assert d["transitions"]["closed"] == []
+    # 2026-11-19 起允许回退：每个状态都能转到"除自己以外"的三个状态。
+    # （原来这里断言 `closed == []`，即 closed 是终态 —— 已随"可更正"的需求作废）
+    for st in ("open", "doing", "done", "closed"):
+        assert set(d["transitions"][st]) == {"open", "doing", "done", "closed"} - {st}
     assert d["limits"]["min_content"] == 5
 
 

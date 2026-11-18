@@ -1899,6 +1899,51 @@ textarea.input {
   overflow-wrap: anywhere;
 }
 
+/* 用户自己的补充：不用金色。金色在这个产品里一直表示"官方/权威"，
+   用户自己说的话用同一块金色，会让人以为这条是开发者回的
+   （而「有官方回复了」正是用户打开这张卡要确认的事）。 */
+.fb-reply.mine {
+  border-left-color: var(--line);
+  background: var(--fill-3);
+}
+.fb-reply.mine .fb-reply-head {
+  color: var(--text-3);
+}
+
+/* 「补充说明」按钮 + 展开的输入框（2026-11-19）。
+   按钮默认低调：每条反馈都配一个高对比按钮，5 条并排会让"看回复"这件事
+   被一堆可点元素盖住。 */
+.fb-ask-btn {
+  margin-top: 6px;
+  border: 0;
+  background: transparent;
+  padding: 2px 0;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.fb-ask-btn:hover {
+  color: var(--ink);
+}
+.fb-ask {
+  margin-top: var(--space-8);
+  display: grid;
+  gap: 6px;
+}
+.fb-ask textarea {
+  width: 100%;
+  resize: none;
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+.fb-ask-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-8);
+}
+
 /* 多条回复（2026-11-17 起可以追加，见 core/user_feedback.add_reply）。
    外面包一层只用它管间距：连续两条如果各带 6px 上边距，中间会空出 12px，
    看着像两件不相干的事；4px 是一句话换行的呼吸感。
@@ -6233,18 +6278,6 @@ textarea.input {
   min-width: 0;
 }
 
-/* 三列在手机上会把「还剩 1000 次」挤成两行、进度条错位（2026-11-18 实测 390）。
-   现在只有设置页的额度卡用它，所以直接在窄屏塌成一列 ——
-   三行竖着读反而更快。将来若别处也用 .grid3，记得回头看这一条。
-   ★ 必须写在文件末尾：手机外壳那一段里有一条更晚的
-     `.grid3, .grid4 { grid-template-columns: repeat(2, ...) }`，
-     同特异性下后写的赢，写在 .grid3 定义旁边等于没写（实测还是两列）。 */
-@media (max-width: 900px) {
-  .grid3 {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
 /* ==========================================================
    数据看板图表件（2026-11-18 重构）
    ----------------------------------------------------------
@@ -7084,6 +7117,134 @@ img.fbim-face {
   color: var(--text-3);
 }
 
+/* ---------- 一条反馈一张卡（2026-11-19）----------
+   形态来自用户的原话：「想把某条标记为已处理时只能按反馈时间统一操作，
+   误点后也无法更正」。所以状态控件和回复框都长在卡里，fid 一路带到后端。
+
+   为什么不做成聊天流：聊天流的默认假设是"只有一个话题在推进"，而这里
+   一个人同时开着三四个不相干的问题，按时间平铺之后，读的人根本分不清
+   这条回复在答哪一句。 */
+.fbim-ticket {
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--tile-paper, #fff);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+/* 展开回复的那一张加一道边：一屏四五张卡，只有它在接收键盘输入 */
+.fbim-ticket.replying {
+  border-color: var(--accent, #b8863b);
+  box-shadow: 0 0 0 3px var(--accent-tint, rgba(184, 134, 59, 0.12));
+}
+.fbim-ticket-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+}
+.fbim-ticket-head .tm {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+/* 回复链：一条竖线 + 缩进 = "下面这些都还属于上面那句话"。
+   不用缩进一大截：卡本来就窄，缩多了每行只剩几个字。 */
+.fbim-chain {
+  display: grid;
+  gap: 6px;
+  margin-left: 8px;
+  padding-left: 10px;
+  border-left: 2px solid var(--line);
+}
+.fbim-reply {
+  display: grid;
+  gap: 3px;
+  justify-items: start;
+}
+.fbim-reply-meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-6);
+  font-size: var(--fs-badge);
+  color: var(--text-2);
+}
+.fbim-reply-meta .tm {
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.fbim-bubble.sm {
+  padding: 7px 10px;
+  font-size: var(--fs-xs);
+}
+/* 卡内的小气泡不再左右分人：卡片只有 300~500 宽，左右一摆就断成两行。
+   谁是管理员靠上面的署名 + 底色，够用。 */
+.fbim-reply.them .fbim-bubble.sm {
+  background: var(--fill-3);
+  border: 1px dashed var(--line);
+}
+.fbim-reply.me .fbim-bubble.sm {
+  background: var(--accent-tint, rgba(184, 134, 59, 0.12));
+  border: 1px solid transparent;
+}
+.fbim-ticket-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+  padding-top: 2px;
+}
+.fbim-st {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+/* 状态按钮是"四个可点目标 + 一个现状"，不是单选分段控件：
+   点当前那个应当是幂等的空操作，而 Seg 会把"再点一次"变成取消选择。 */
+.fbim-st-btn {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-2);
+  border-radius: var(--r-ctl);
+  padding: 3px 9px;
+  font-size: var(--fs-badge);
+  line-height: 1.5;
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+.fbim-st-btn:hover:not(:disabled) {
+  border-color: var(--accent, #b8863b);
+  color: var(--ink);
+}
+/* 四个状态只用一种强调色，不按状态分四种颜色：
+   颜色是用来指"哪个是现在"的，语义由按钮文字承担。 */
+.fbim-st-btn.on {
+  background: var(--accent-tint, rgba(184, 134, 59, 0.12));
+  border-color: var(--accent, #b8863b);
+  color: var(--ink);
+  font-weight: 600;
+}
+.fbim-st-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.fbim-reply-btn {
+  margin-left: auto;
+}
+.fbim-reply-box {
+  display: grid;
+  gap: 6px;
+  border-top: 1px dashed var(--line);
+  padding-top: var(--space-8);
+}
+.fbim-reply-box textarea {
+  width: 100%;
+  resize: none;
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+
 .fbim-composer {
   flex: 0 0 auto;
   border-top: 1px solid var(--line);
@@ -7160,5 +7321,15 @@ img.fbim-face {
   }
   .fbim-col {
     max-width: 86%;
+  }
+}
+
+/* ★ 单列规则放在整个文件最后：本轮新增的反馈页样式（约 900 行）把它挤出了末尾，
+   `test_shell_merge::test_quota_card_collapses_on_phone` 用"末尾 10% 内"当判据，
+   直接红了 —— 红得对，因为它下面确实还有更晚的 `.grid3, .grid4 { repeat(2, ...) }`。
+   以后新增样式请插在这段之前，别插在它后面。 */
+@media (max-width: 900px) {
+  .grid3 {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

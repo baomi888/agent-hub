@@ -215,8 +215,22 @@ export default function FeedbackPage() {
   const [fbStatus, setFbStatus] = useState("");
   const [active, setActive] = useState("");
   const [thread, setThread] = useState<FeedbackThreadResp | null>(null);
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
+  /**
+   * 每条反馈一个草稿（fid → 文本）。
+   *
+   * 原来只有一个全局 `text`：人在读第二条的时候写了半句，切回去就串到了
+   * 第一条的输入框里 —— 而回复是**不可撤回**的，发错地方收不回来。
+   */
+  const [drafts, setDrafts] = useState<Record<number, string>>({});
+  /**
+   * 正在提交/改状态的那一条（0 = 空闲）。
+   *
+   * 不用全局 busy：整页置灰会让别的条一起变灰，看起来像"整个后台卡住了"，
+   * 而这个页面最常见的动作就是"连着改三条的状态"。
+   */
+  const [busyFid, setBusyFid] = useState(0);
+  /** 展开着输入框的那一条（点「引用这条回复」才展开，默认收起） */
+  const [replyingFid, setReplyingFid] = useState(0);
   const [err, setErr] = useState("");
   const [exporting, setExporting] = useState(false);
   const msgsRef = useRef<HTMLDivElement | null>(null);
@@ -255,7 +269,10 @@ export default function FeedbackPage() {
   const openThread = useCallback((uid: string) => {
     setActive(uid);
     setThread(null);
-    setText("");
+    // 换人就把草稿和展开状态一起清掉：留着会让上一个人的半句话跑到新会话里
+    setDrafts({});
+    setReplyingFid(0);
+    setBusyFid(0);
     api.admin
       .feedbackThread(uid)
       .then(setThread)
@@ -268,27 +285,61 @@ export default function FeedbackPage() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [thread]);
 
-  const send = useCallback(async () => {
-    const t = text.trim();
-    if (!t || !active || busy) return;
-    setBusy(true);
-    setErr("");
-    try {
-      const th = await api.admin.replyThread(active, t);
-      setThread(th);
-      setText("");
-      // 回复会把 open 顺手推成 doing（后端 `add_reply`），所以列表与图表都得重拉
-      loadList();
-      api.admin
-        .feedbackStats(STATS_DAYS)
-        .then(setStats)
-        .catch(() => undefined);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "发送失败");
-    } finally {
-      setBusy(false);
-    }
-  }, [active, busy, loadList, text]);
+  /** 在**指定的那一条**反馈下回一句。fid 一路带到后端，不靠"最新一条"猜。 */
+  const sendTo = useCallback(
+    async (fid: number) => {
+      const t = (drafts[fid] ?? "").trim();
+      if (!t || !active || busyFid) return;
+      setBusyFid(fid);
+      setErr("");
+      try {
+        const th = await api.admin.replyThread(active, t, fid);
+        setThread(th);
+        setDrafts((d) => ({ ...d, [fid]: "" }));
+        setReplyingFid(0);
+        // 回复会把 open 顺手推成 doing（后端 `add_reply`），所以列表与图表都得重拉
+        loadList();
+        api.admin
+          .feedbackStats(STATS_DAYS)
+          .then(setStats)
+          .catch(() => undefined);
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : "发送失败");
+      } finally {
+        setBusyFid(0);
+      }
+    },
+    [active, busyFid, drafts, loadList]
+  );
+
+  /**
+   * 改**这一条**的状态（可来回改）。
+   *
+   * 不再有"顶部三个按钮 = 改最新一条"：那正是用户抱怨的"只能按反馈时间统一操作"。
+   * 改完回读整个 thread：状态影响列表排序、KPI 和横条图，三处都得跟着变。
+   */
+  const changeStatus = useCallback(
+    async (fid: number, status: string) => {
+      if (busyFid) return;
+      setBusyFid(fid);
+      setErr("");
+      try {
+        await api.admin.patchFeedback(fid, status);
+        const th = await api.admin.feedbackThread(active);
+        setThread(th);
+        loadList();
+        api.admin
+          .feedbackStats(STATS_DAYS)
+          .then(setStats)
+          .catch(() => undefined);
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : "状态更新失败");
+      } finally {
+        setBusyFid(0);
+      }
+    },
+    [active, busyFid, loadList]
+  );
 
   const exportAll = useCallback(async () => {
     setExporting(true);
@@ -320,14 +371,17 @@ export default function FeedbackPage() {
   if (auth.loading) return null;
   if (!isAdmin) notFound();
 
-  // 会话头部的状态 = 最新一条反馈的状态（回复也落在那一条上）
-  const lastUser = [...(thread?.messages ?? [])].reverse().find((m) => m.kind === "user");
-  const curStatus = lastUser?.status ?? "";
-  const nextStatuses = dict?.transitions[curStatus] ?? [];
+  // 「还有几条没处理」用它算：状态是**每条**自己的，不再有"这个人的状态"
+  const openCount = (thread?.items ?? []).filter(
+    (t) => t.status === "open" || t.status === "doing"
+  ).length;
 
   return (
     <PageShell
-      eyebrow="管理 · 内部"
+      /* 不写 eyebrow：沿用第 39 批的决定 —— 眉题只留给看板/工作流，其余页面
+         靠侧栏高亮 + 标题定位。反馈页是 adminOnly，普通用户根本进不来，
+         再标一行「管理 · 内部」等于把「你在哪」说第三遍。
+         无 eyebrow 时 PageShell 走 pg-head--solo，标题吃 --fs-page。 */
       title="用户反馈"
       actions={
         <>
@@ -511,108 +565,150 @@ export default function FeedbackPage() {
                     <b>{thread.name}</b>
                     <span className="meta">
                       共 {thread.total} 条
-                      {curStatus ? ` · 当前${statusLabel(curStatus)}` : ""}
+                      {openCount > 0 ? ` · ${openCount} 条还在办` : " · 都有结论了"}
                     </span>
-                  </div>
-                  <div className="fbim-head-acts">
-                    {nextStatuses.map((next) => (
-                      <button
-                        key={next}
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        disabled={busy}
-                        onClick={() => {
-                          if (!lastUser) return;
-                          setBusy(true);
-                          api.admin
-                            .patchFeedback(lastUser.fid, next)
-                            .then(() => {
-                              openThread(active);
-                              loadList();
-                            })
-                            .catch((e) =>
-                              setErr(e instanceof Error ? e.message : "状态更新失败")
-                            )
-                            .finally(() => setBusy(false));
-                        }}
-                      >
-                        → {statusLabel(next)}
-                      </button>
-                    ))}
                   </div>
                 </div>
 
+                {/*
+                  一条反馈一张卡，不是一段对话流水。
+                  ★ 原来的形态是"这个人说了什么"按时间平铺，状态按钮在头顶改
+                    **最新一条** —— 于是"想标记第三条已处理"根本做不到，点错也
+                    改不回来（用户 2026-11-19 的原话）。现在状态控件和回复框都
+                    长在卡里，fid 一路带到后端，不存在"改到别人那条上去"的可能。
+                */}
                 <div className="fbim-msgs" ref={msgsRef}>
-                  {thread.messages.map((m, i) =>
-                    m.kind === "user" ? (
-                      <div className="fbim-row left" key={`u${m.fid}`}>
-                        <Face name={thread.name} url={thread.avatar} size={30} />
-                        <div className="fbim-col">
-                          <div className="fbim-meta">
-                            <span className={`ctag ${STATUS_CLASS[m.status ?? ""] ?? ""}`}>
-                              {m.status_label}
-                            </span>
-                            <span className="ctag info">{m.category_label}</span>
-                            <span className="tm">{fmtTime(m.at)}</span>
+                  {thread.items.length === 0 ? (
+                    <div className="fbim-idle">
+                      <CornIcon name="feedback" />
+                      <p>这个人还没提过反馈。</p>
+                    </div>
+                  ) : (
+                    thread.items.map((tk) => {
+                      const showing = replyingFid === tk.fid;
+                      const draft = drafts[tk.fid] ?? "";
+                      const busy = busyFid === tk.fid;
+                      return (
+                        <article
+                          className={`fbim-ticket${showing ? " replying" : ""}`}
+                          key={tk.fid}
+                        >
+                          <div className="fbim-ticket-head">
+                            <span className="ctag info">{tk.category_label}</span>
+                            <span className="tm">{fmtTime(tk.at)}</span>
                           </div>
-                          <div className="fbim-bubble them">{m.text}</div>
-                          {m.page || m.contact ? (
+                          <div className="fbim-bubble them">{tk.text}</div>
+                          {tk.page || tk.contact ? (
                             <div className="fbim-sub">
-                              {m.page ? `来自 ${m.page}` : ""}
-                              {m.contact ? ` · 联系 ${m.contact}` : ""}
+                              {tk.page ? `来自 ${tk.page}` : ""}
+                              {tk.contact ? ` · 联系 ${tk.contact}` : ""}
                             </div>
                           ) : null}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="fbim-row right" key={`a${m.rid ?? i}`}>
-                        <div className="fbim-col">
-                          <div className="fbim-meta right">
-                            <span className="tm">{fmtTime(m.at)}</span>
-                            <span className="who">
-                              {m.author ?? "管理员"}
-                              {m.author_uid && m.author_uid === myUid ? "（我）" : ""}
-                            </span>
-                          </div>
-                          <div className="fbim-bubble me">{m.text}</div>
-                        </div>
-                        <span className="fbim-face me-face" aria-hidden="true">
-                          {(m.author ?? "管").slice(0, 1)}
-                        </span>
-                      </div>
-                    )
-                  )}
-                </div>
 
-                <div className="fbim-composer">
-                  <textarea
-                    className="input"
-                    rows={2}
-                    value={text}
-                    maxLength={dict?.limits.max_reply ?? 1000}
-                    placeholder="回一句话。Enter 发送，Shift+Enter 换行；发出后不能修改。"
-                    disabled={busy}
-                    onChange={(e) => setText(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                        e.preventDefault();
-                        void send();
-                      }
-                    }}
-                  />
-                  <div className="fbim-send">
-                    <span className="meta">
-                      {text.trim().length}/{dict?.limits.max_reply ?? 1000}
-                    </span>
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      disabled={busy || !text.trim()}
-                      onClick={() => void send()}
-                    >
-                      {busy ? "发送中…" : "发送"}
-                    </button>
-                  </div>
+                          {tk.replies.length > 0 ? (
+                            <div className="fbim-chain">
+                              {tk.replies.map((r) => (
+                                <div
+                                  className={`fbim-reply ${r.kind === "admin" ? "me" : "them"}`}
+                                  key={r.rid}
+                                >
+                                  <div className="fbim-reply-meta">
+                                    {r.kind === "admin" ? (
+                                      <>
+                                        {r.author || "管理员"}
+                                        {r.author_uid && r.author_uid === myUid ? "（我）" : ""}
+                                      </>
+                                    ) : (
+                                      "用户补充"
+                                    )}
+                                    <span className="tm">{fmtTime(r.at)}</span>
+                                  </div>
+                                  <div className="fbim-bubble sm">{r.text}</div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+
+                          <div className="fbim-ticket-foot">
+                            <div className="fbim-st" role="group" aria-label="这条反馈的状态">
+                              {STATUS_ORDER.map((s) => (
+                                <button
+                                  key={s}
+                                  type="button"
+                                  className={`fbim-st-btn${
+                                    tk.status === s ? ` on ${STATUS_CLASS[s] ?? ""}` : ""
+                                  }`}
+                                  disabled={busy}
+                                  aria-pressed={tk.status === s}
+                                  onClick={() => void changeStatus(tk.fid, s)}
+                                  title={
+                                    tk.status === s
+                                      ? `现在就是「${statusLabel(s)}」`
+                                      : `改到「${statusLabel(s)}」`
+                                  }
+                                >
+                                  {statusLabel(s)}
+                                </button>
+                              ))}
+                            </div>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm fbim-reply-btn"
+                              onClick={() => setReplyingFid(showing ? 0 : tk.fid)}
+                              aria-expanded={showing}
+                            >
+                              {showing ? "收起" : tk.replies.length ? "再回一条" : "引用这条回复"}
+                            </button>
+                          </div>
+
+                          {showing ? (
+                            <div className="fbim-reply-box">
+                              <textarea
+                                className="input"
+                                rows={3}
+                                autoFocus
+                                value={draft}
+                                maxLength={dict?.limits.max_reply ?? 1000}
+                                /* 提示语必须短到能在一行里放下：390 宽时
+                                   「回复「这条的第一句」。Enter 发送，Shift+Enter 换行；
+                                   发出后不能修改。」要占三行，而 textarea 只有两行高，
+                                   最后一行会被裁掉半个字（2026-11-19 手机截图）。
+                                   引用哪条由卡片本身说清楚，不用写进 placeholder。 */
+                                placeholder="回这条。Enter 发送，Shift+Enter 换行"
+                                disabled={busy}
+                                onChange={(e) =>
+                                  setDrafts((d) => ({ ...d, [tk.fid]: e.target.value }))
+                                }
+                                onKeyDown={(e) => {
+                                  if (
+                                    e.key === "Enter" &&
+                                    !e.shiftKey &&
+                                    !e.nativeEvent.isComposing
+                                  ) {
+                                    e.preventDefault();
+                                    void sendTo(tk.fid);
+                                  }
+                                }}
+                              />
+                              <div className="fbim-send">
+                                <span className="meta">
+                                  {draft.trim().length}/{dict?.limits.max_reply ?? 1000}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="btn btn-primary btn-sm"
+                                  disabled={busy || !draft.trim()}
+                                  onClick={() => void sendTo(tk.fid)}
+                                >
+                                  {busy ? "发送中…" : "发送"}
+                                </button>
+                              </div>
+                            </div>
+                          ) : null}
+                        </article>
+                      );
+                    })
+                  )}
                 </div>
               </>
             )}

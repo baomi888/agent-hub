@@ -18,6 +18,7 @@ import type {
   ForumUpload,
 } from "./types";
 import type { KbProposal, KbProposalConfirmResult } from "./types";
+import type { UserFeedbackItem } from "./types";
 import type { IssuedApproval } from "./types";
 import type { DialogueCandidatesResp, ImportDialogueResult, CourseReminderState } from "./types";
 import type { CalendarLink } from "./types";
@@ -888,6 +889,12 @@ export const api = {
     }),
   myFeedback: (limit = 20, offset = 0) =>
     request<MyFeedbackResp>(`/api/user-feedback/mine?limit=${limit}&offset=${offset}`),
+  /** 在**我这一条**反馈下面补一句话（后端校验归属，越权返回 404） */
+  replyMyFeedback: (fid: number, text: string) =>
+    request<{ ok: boolean; item: UserFeedbackItem }>(`/api/user-feedback/${fid}/reply`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
 
   // ---------- 开发者数据看板（仅管理员）----------
   admin: {
@@ -935,10 +942,16 @@ export const api = {
      * 在会话里回一句。挂在对方**最新一条**反馈下（后端 `reply_thread`），
      * 所以前端不需要传 fid —— 对话里看到的"最后一句"就是被回的那句。
      */
-    replyThread: (target: string, text: string) =>
+    /**
+     * 在某个用户的会话里回一句。
+     *
+     * `fid` 指定挂到哪一条反馈下（2026-11-19 起每条反馈独立回复）；
+     * 不传则挂最新一条 —— 老调用方仍然能跑，但后台新界面一律传 fid。
+     */
+    replyThread: (target: string, text: string, fid?: number) =>
       request<FeedbackThreadResp>(
         `/api/admin/feedback/thread/${encodeURIComponent(target)}/reply`,
-        { method: "POST", body: JSON.stringify({ text }) }
+        { method: "POST", body: JSON.stringify(fid ? { text, fid } : { text }) }
       ),
     feedbackStats: (days = 30) =>
       request<FeedbackStatsResp>(`/api/admin/feedback/stats?days=${days}`),

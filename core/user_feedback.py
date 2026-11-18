@@ -43,14 +43,17 @@ STATUSES: tuple[tuple[str, str], ...] = (
 _CATEGORY_MAP = dict(CATEGORIES)
 _STATUS_MAP = dict(STATUSES)
 
-# 允许的状态流转。刻意**不允许回退**（done → doing）：
-# 状态是给开发者看处理进度的，允许回退会让"处理耗时"这类后续统计失去意义。
-# 真处理错了，用 closed 关掉重开一条新的（历史留着反而是证据）。
+# 允许任意状态互转，**包括回退**（2026-11-19 用户明确要求）。
+#
+# 原来是不允许回退的（done → doing 被 409 拒掉），理由写的是"允许回退会让
+# 处理耗时统计失去意义"。但那个统计至今没有实现，而"手滑点成已处理、就再也
+# 改不回来"是每天都会发生的事 —— 用户的原话是「误点后也无法更正」。
+# 两条路只能选一条：留一个假设中的指标，还是让状态可逆。选了后者。
+#
+# 注意这里只影响 `set_status`（人工点按钮）；`add_reply` 的"顺手推进"
+# 仍走自己的简单判断（open → doing），不拿这张表去卡回复。
 _TRANSITIONS: dict[str, set[str]] = {
-    "open": {"doing", "done", "closed"},
-    "doing": {"done", "closed"},
-    "done": {"closed"},
-    "closed": set(),
+    s: {o for o in _STATUS_MAP if o != s} for s in _STATUS_MAP
 }
 
 # 内容长度。下限 5 而不是 1：一个字的"卡"无法处理，只会让反馈列表变成噪声。
@@ -123,7 +126,8 @@ _REPLIES_DDL = """
         admin_uid  TEXT NOT NULL DEFAULT '',
         admin_name TEXT NOT NULL DEFAULT '',
         content    TEXT NOT NULL,
-        created_at INTEGER NOT NULL
+        created_at INTEGER NOT NULL,
+        role       TEXT NOT NULL DEFAULT 'admin'
     );
     CREATE INDEX IF NOT EXISTS idx_ufr_fid ON user_feedback_replies(fid, id);
 """
@@ -158,6 +162,14 @@ def _migrate_columns(conn) -> None:
     for name, ddl in _EXTRA_COLUMNS.items():
         if name not in have:
             conn.execute(f"ALTER TABLE user_feedback ADD COLUMN {name} {ddl}")
+    # 回复表的 role：老表没有这一列，`CREATE TABLE IF NOT EXISTS` 也不会补。
+    # 不补的话，任何一次 INSERT ... role 在**已有数据的库**上直接报 no such column，
+    # 而新库一切正常 —— 只有线上会炸（2026-11-19 加用户追加功能时踩到）。
+    rep = {r["name"] for r in conn.execute("PRAGMA table_info(user_feedback_replies)")}
+    if rep and "role" not in rep:
+        conn.execute(
+            "ALTER TABLE user_feedback_replies ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'"
+        )
 
 
 def ensure() -> None:
@@ -256,7 +268,7 @@ def set_status(fid: int, status: str) -> tuple[bool, str]:
         )
         return True, ""
 def add_reply(
-    fid: int, admin_uid: str, admin_name: str, reply: str
+    fid: int, admin_uid: str, admin_name: str, reply: str, role: str = "admin"
 ) -> tuple[bool, str]:
     """给一条反馈**追加**一条回复。返回 (成功, 失败原因)。
 
@@ -275,6 +287,8 @@ def add_reply(
       「已处理 → 已处理」这类无意义的 409，让管理员回不了话。所以：
         · open   → 顺手推到 doing（表示"已接手并答复"）
         · 其它状态 → 原样不动（done/closed 已经有结论，不该被回复改写）
+      **只对管理员成立**：用户自己补充一句（role="user"）不该被当成"已接手"，
+      它只是把话说得更清楚，状态必须原样不动。
 
     ★ 空文本拒绝（老接口里空串 = 撤回）。不可撤回之后，"发一条空白"既不会
       出现在用户侧、又会在后台占一行，是纯粹的数据噪声。
@@ -285,6 +299,7 @@ def add_reply(
         return False, "回复不能为空"
     if len(text) > MAX_REPLY:
         return False, f"回复太长，最多 {MAX_REPLY} 个字"
+    kind = "user" if role == "user" else "admin"
 
     from core import session as store
 
@@ -296,14 +311,15 @@ def add_reply(
         now = int(time.time())
         conn.execute(
             "INSERT INTO user_feedback_replies "
-            "(fid, admin_uid, admin_name, content, created_at) VALUES (?, ?, ?, ?, ?)",
-            (fid, (admin_uid or "")[:64], (admin_name or "")[:64], text, now),
+            "(fid, admin_uid, admin_name, content, created_at, role)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (fid, (admin_uid or "")[:64], (admin_name or "")[:64], text, now, kind),
         )
         # 状态与 updated_at 一起推进：列表按 updated_at 排，回完话不动它，
         # 这条工单会沉到列表底部，"刚回过"的反而看不见
         conn.execute(
             "UPDATE user_feedback SET status = ?, updated_at = ? WHERE id = ?",
-            ("doing" if old == "open" else old, now, fid),
+            ("doing" if (kind == "admin" and old == "open") else old, now, fid),
         )
         return True, ""
 
@@ -334,6 +350,9 @@ def _replies_of(conn, fids: list[int]) -> dict[int, list[dict]]:
                 "admin_name": str(r["admin_name"] or ""),
                 "content": str(r["content"] or ""),
                 "created_at": int(r["created_at"] or 0),
+                # 老数据没有这一列（迁移补的是默认值 'admin'），所以这里用 getattr
+                # 式的取值：sqlite3.Row 支持 keys()，取不到就当管理员。
+                "role": str(r["role"] or "admin") if "role" in r.keys() else "admin",
             }
         )
     return out
@@ -350,7 +369,11 @@ def _attach_replies(conn, items: list[dict]) -> list[dict]:
     for it in items:
         reps = bucket.get(it["id"], [])
         it["replies"] = reps
-        last = reps[-1] if reps else None
+        # `reply` / `replied_at` 这两个别名只认**管理员**的回复：
+        # 用户自己追加的一句也在这个桶里，取到它就会在「我提过的」里
+        # 显示成「开发者回复：<用户自己的话>」—— 语义直接反了。
+        admin_reps = [r for r in reps if r.get("role") != "user"]
+        last = admin_reps[-1] if admin_reps else None
         it["reply"] = last["content"] if last else ""
         it["replied_at"] = last["created_at"] if last else None
     return items
@@ -746,51 +769,66 @@ def threads(limit: int = 60, status: str = "") -> dict:
 
 
 def thread(uid: str, limit: int = 200) -> dict:
-    """一个用户的全部消息，**按时间正序**（对话从上往下读）。
+    """一个用户的全部反馈，两种读法一起返回（2026-11-19 起）。
 
-    返回 `messages` 而不是让前端自己拼：顺序规则（同一秒内反馈先于回复、
-    回复按 id 排）是业务规则，放两处迟早不一致。
+    · `items`    —— **按条分组**：每条反馈一行，带着自己的状态和它的回复链。
+                    后台就是照着这个渲染的：一条反馈一张卡，卡里自己带状态
+                    控件和回复框。这是用户要的"点哪条回哪条"的数据基础。
+    · `messages` —— **全局按时间**平铺，给"想从头读这段对话"的场景保留。
+                    注意它不是 `items` 展开（顺序不同），两套都算出来是因为
+                    它们是两个问题，不是同一份数据的两种写法。
+
+    ★ 为什么分组不能靠前端算：`messages` 是全局时间序，按 fid 分组会丢掉
+      "这条反馈下每条回复的先后"，而回复的先后就是"我答了、他又追问、
+      我再答"的全部信息。后端手里有 fid 和 id，一次分组成本为零。
     """
     ensure()
     from core import session as store
 
-    items, total = list_mine(uid, max(1, min(200, int(limit))), 0)
-    items.reverse()  # list_mine 是倒序，对话要正序
+    rows, total = list_mine(uid, max(1, min(200, int(limit))), 0)
+    rows.reverse()  # list_mine 是倒序，读起来要从最早一条开始
 
     messages: list[dict] = []
-    for it in items:
-        messages.append(
-            {
-                "kind": "user",
-                "fid": int(it["id"]),
-                "at": int(it["created_at"] or 0),
-                "text": str(it["content"] or ""),
-                "category": it["category"],
-                "category_label": it["category_label"],
-                "status": it["status"],
-                "status_label": it["status_label"],
-                "page": it.get("page") or "",
-                "contact": it.get("contact") or "",
-            }
-        )
+    tickets: list[dict] = []
+    for it in rows:
+        fid = int(it["id"])
+        base = {
+            "fid": fid,
+            "at": int(it["created_at"] or 0),
+            "text": str(it["content"] or ""),
+            "category": it["category"],
+            "category_label": it["category_label"],
+            "status": it["status"],
+            "status_label": it["status_label"],
+            "page": it.get("page") or "",
+            "contact": it.get("contact") or "",
+        }
+        messages.append({"kind": "user", **base})
+        chain: list[dict] = []
         for r in it.get("replies") or []:
-            messages.append(
-                {
-                    "kind": "admin",
-                    "fid": int(it["id"]),
-                    "rid": int(r["id"]),
-                    "at": int(r.get("created_at") or 0),
-                    "text": str(r["content"] or ""),
-                    "author": r.get("admin_name") or "管理员",
-                    "author_uid": r.get("admin_uid") or "",
-                }
-            )
+            is_user = str(r.get("role") or "admin") == "user"
+            msg = {
+                # 用户自己追加的一句也是"左边"，但它不是一条新反馈 ——
+                # 前端要靠 user_reply 区分"这条工单里我又补了一句"和"这是另一个问题"。
+                "kind": "user_reply" if is_user else "admin",
+                "fid": fid,
+                "rid": int(r["id"]),
+                "at": int(r.get("created_at") or 0),
+                "text": str(r["content"] or ""),
+                "author": "" if is_user else (r.get("admin_name") or "管理员"),
+                "author_uid": "" if is_user else (r.get("admin_uid") or ""),
+            }
+            messages.append(msg)
+            chain.append(msg)
+        tickets.append({**base, "replies": chain})
+
     # ★ 必须**全局**按时间排，不能按"一条反馈 + 它的回复"成组输出。
     #   回复挂在那条反馈下面，但它的时间可能晚于这个人后来提的第二条反馈 ——
     #   成组输出会得到「A 的提问 → 对 A 的回复 → B 的提问」，可 B 明明早于那条回复，
     #   读起来像管理员在回答 B 的时候还没看到 B（实测过，顺序是错的）。
     #   同一秒内用户先说、管理员后答：kind 做二级键。
-    messages.sort(key=lambda m: (m["at"], 0 if m["kind"] == "user" else 1, m["fid"]))
+    order = {"user": 0, "user_reply": 0, "admin": 1}
+    messages.sort(key=lambda m: (m["at"], order.get(m["kind"], 0), m["fid"]))
     with store._get_conn() as conn:  # noqa: SLF001
         b = _brief(conn, [uid]).get(uid, {})
     return {
@@ -800,34 +838,73 @@ def thread(uid: str, limit: int = 200) -> dict:
         "nickname": b.get("nickname", ""),
         "avatar": b.get("avatar", ""),
         "total": int(total),
+        "items": tickets,
         "messages": messages,
     }
 
 
 def reply_thread(
-    uid: str, admin_uid: str, admin_name: str, text: str
+    uid: str, admin_uid: str, admin_name: str, text: str, fid: int | None = None
 ) -> tuple[bool, str]:
-    """在会话里回一句：挂到这个人**最新一条**反馈下面。
+    """在会话里回一句：默认挂到这个人**最新一条**反馈下面，也可以指定 fid。
 
     为什么不给会话单开一张消息表：现有的回复表已经带 fid、作者、时间，
     它缺的只是"这条回复属于哪段对话"—— 而那段对话就是 fid 对应的 uid。
     为此再加一张平行的表，等于让同一件事有两个写入口，迟早一边有数据
     一边没有（老库迁移还得把两边对齐）。
 
-    ★ 挂在最新一条而不是第一条：用户最后说的话才是他此刻在等回答的那句。
-      挂错地方会让他打开「我提过的」看到一条 3 天前的反馈突然多了回复。
+    ★ 为什么要能指定 fid（2026-11-19 用户要求）：一个人常常提三条互不相干
+      的意见（"某个按钮坏了" / "想加日历视图" / "论坛能加 AI 总结吗"）。
+      回复统一挂在最新一条上，另外两条永远等不到回答，而且用户看到的
+      "已回复"会出现在他没问的那条下面 —— 这正是他要的"引用并直接回复"。
+      指定 fid 时**必须校验它属于这个 uid**：不然给 A 会话发的消息会写进
+      B 的反馈里，越权且无法撤回（回复不可改）。
+
+    ★ 不指定 fid 时仍挂最新一条：老调用方（前端旧代码、导出脚本）不变，
+      而"用户最后说的话才是他此刻在等的那句"这个判断依然成立。
+    """
+    ensure()
+    from core import session as store
+
+    with store._get_conn() as conn:  # noqa: SLF001
+        if fid is None:
+            row = conn.execute(
+                "SELECT id FROM user_feedback WHERE uid = ? ORDER BY created_at DESC, id DESC LIMIT 1",
+                (uid,),
+            ).fetchone()
+            if not row:
+                return False, "这个用户没有反馈"
+            target = int(row["id"])
+        else:
+            row = conn.execute(
+                "SELECT id FROM user_feedback WHERE id = ? AND uid = ?", (int(fid), uid)
+            ).fetchone()
+            if not row:
+                return False, "这条反馈不属于该用户"
+            target = int(fid)
+    return add_reply(target, admin_uid, admin_name, text, role="admin")
+
+
+def reply_own(uid: str, fid: int, text: str) -> tuple[bool, str]:
+    """用户在自己某条反馈下**追加**一句（补充说明、补充截图地址等）。
+
+    ★ 与 `add_reply` 的区别只有 role：不动状态、不署名（署的是用户自己）。
+      复用同一张表而不是另开"用户消息表"：同一条反馈下的时间线只有一个来源，
+      读的时候按 created_at 排就行；分两张表就得在查询里做归并排序，
+      而这件事已经因为"成组输出"出过一次错（2026-11-18）。
     """
     ensure()
     from core import session as store
 
     with store._get_conn() as conn:  # noqa: SLF001
         row = conn.execute(
-            "SELECT id FROM user_feedback WHERE uid = ? ORDER BY created_at DESC, id DESC LIMIT 1",
-            (uid,),
+            "SELECT uid FROM user_feedback WHERE id = ?", (int(fid),)
         ).fetchone()
-    if not row:
-        return False, "这个用户没有反馈"
-    return add_reply(int(row["id"]), admin_uid, admin_name, text)
+        if not row:
+            return False, "反馈不存在"
+        if str(row["uid"]) != uid:
+            return False, "只能回复自己提的反馈"
+    return add_reply(int(fid), uid, "", text, role="user")
 
 
 def stats(days: int = 30) -> dict:
