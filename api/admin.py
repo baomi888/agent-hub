@@ -9,11 +9,15 @@
   GET   /api/admin/feedback              反馈列表（可选按状态筛）
   PATCH /api/admin/feedback/{fid}        改反馈状态（严格按流转表，不允许回退）
   POST  /api/admin/feedback/{fid}/reply  追加一条回复（带作者，发出即定稿）
+  GET   /api/admin/feedback/export       一键导出（Markdown，脱敏 + 留审计）
   GET   /api/admin/dict                  分类/状态字典（前端不得硬编码）
 
-**没有导出接口**：2026-10-27 明确不做 CSV/Excel 导出。这个看板是给开发者
-在浏览器里看数的，把数据搬进 Excel 是另一种工作流（要权限、要脱敏、要留痕），
-不属于本期范围。若将来要恢复，须先补"导出审计 + 字段脱敏"两件事。
+**导出接口（2026-11-18 新增）**：旧版这里写着"不做 CSV/Excel 导出，若将来
+要恢复须先补【导出审计 + 字段脱敏】两件事"。这两件事本版都补上了才开的：
+  · 脱敏：联系方式留头尾、uid 只留前 8 位（`user_feedback.mask_contact`）
+  · 审计：每次导出写一行 `event=feedback_export` 到 `${DATA_DIR}/audit.log`
+    （复用 `account.audit`，与账号安全事件同一个可 grep 的文件，不另建表）
+格式选 Markdown 而不是 CSV：需求是「已排版好的文字」，CSV 落地还得再排一次版。
 
 鉴权两层（文档 §6）：
   1. `router` 挂了 `Depends(get_current_user)` → 未登录一律 **401**
@@ -32,8 +36,9 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from core import account, dashboard, quota, user_feedback, verify_tag
@@ -114,6 +119,113 @@ async def feedback_list(
     items, total = await asyncio.to_thread(user_feedback.list_all, status, limit, offset)
     counts = await asyncio.to_thread(user_feedback.counts)
     return {"items": items, "total": total, "counts": counts}
+
+
+@router.get("/feedback/export")
+async def feedback_export(
+    status: str = Query("", description="按状态筛；空表示全部"),
+    uid: str = Depends(get_current_user),
+) -> Response:
+    """一键导出（Markdown 附件）。**这个路由必须写在不带变量的 `/feedback` 之后、
+    带变量的 `/feedback/{fid}` 之前** —— 否则 `export` 会被当成 `{fid}` 吞掉
+    （FastAPI 按声明顺序匹配，`{fid}` 声明在前时 `int` 转换失败就是 422）。
+
+    导出是**只读但留痕**的动作：先把审计写掉、再返回正文。反过来（先返回再写）
+    一旦写审计抛异常，前端已经拿到文件，这条记录就永远丢了。
+    """
+    _require_admin(uid)
+    text, meta = await asyncio.to_thread(user_feedback.export_markdown, status)
+    # 审计失败不阻断导出（account.audit 内部已经吞异常），但审计里的条数
+    # 必须是这次真正导出的条数 —— 用返回的 meta，不要在这里重新查一遍。
+    await asyncio.to_thread(
+        account.audit,
+        "feedback_export",
+        uid,
+        {"items": meta["items"], "status": meta["status"] or "all", "chars": len(text)},
+    )
+    stamp = time.strftime("%Y%m%d")
+    return Response(
+        content=text,
+        media_type="text/markdown; charset=utf-8",
+        headers={
+            # 文件名用 ASCII：中文文件名要 RFC 5987 的 filename*，各浏览器实现不一致，
+            # 反而是"下载下来叫 .bin 或者乱码"。内容里第一行已经是中文标题。
+            "Content-Disposition": f'attachment; filename="feedback-{stamp}.md"',
+            # 导出件会被反代缓存就麻烦了（含用户原话），明确禁掉
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@router.get("/feedback/threads")
+async def feedback_threads(
+    status: str = Query("", description="只列出名下含该状态反馈的用户；空表示全部"),
+    limit: int = Query(60, ge=1, le=200),
+    uid: str = Depends(get_current_user),
+) -> dict:
+    """会话列表（每个用户一条）。
+
+    与 `/feedback` 的关系：那个是**按条**的工单视图（导出用），这个是**按人**
+    的对话视图（回复用）。两个都留着，因为它们是两种真实的工作流：
+    月底要把所有条整理成一份文件，平时是要跟具体的人把话说完。
+    """
+    _require_admin(uid)
+    data = await asyncio.to_thread(user_feedback.threads, limit, status)
+    data["counts"] = await asyncio.to_thread(user_feedback.counts)
+    return data
+
+
+@router.get("/feedback/thread/{target}")
+async def feedback_thread(
+    target: str, uid: str = Depends(get_current_user)
+) -> dict:
+    """某个用户的整段对话（正文 + 回复，按时间正序）。
+
+    参数名用 `target` 而不是 `{uid}`：`uid` 已经是"当前管理员"的依赖名，
+    同名会让 FastAPI 把它绑成同一个值（那种错误的表现是"永远只能查到
+    自己的反馈"，看起来像没数据）。
+    """
+    _require_admin(uid)
+    data = await asyncio.to_thread(user_feedback.thread, target)
+    return data
+
+
+class ThreadReply(BaseModel):
+    text: str = Field(..., description="回复正文。发出即定稿，不可修改")
+
+
+@router.post("/feedback/thread/{target}/reply")
+async def feedback_thread_reply(
+    target: str,
+    req: ThreadReply,
+    request: Request,
+    uid: str = Depends(get_current_user),
+) -> dict:
+    """在会话里回一句（挂到该用户最新一条反馈下，见 `reply_thread`）。"""
+    _require_admin(uid)
+    text = (req.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="回复不能为空")
+    if len(text) > user_feedback.MAX_REPLY:
+        raise HTTPException(
+            status_code=400, detail=f"回复最多 {user_feedback.MAX_REPLY} 个字"
+        )
+    author = _reply_author(uid, request)
+    ok, err = await asyncio.to_thread(
+        user_feedback.reply_thread, target, uid, author, text
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail=err)
+    return await asyncio.to_thread(user_feedback.thread, target)
+
+
+@router.get("/feedback/stats")
+async def feedback_stats(
+    days: int = Query(30, ge=1, le=365), uid: str = Depends(get_current_user)
+) -> dict:
+    """图表数据：分类分布 / 状态积压 / 逐日新增。口径见 `user_feedback.stats`。"""
+    _require_admin(uid)
+    return await asyncio.to_thread(user_feedback.stats, days)
 
 
 class StatusPatch(BaseModel):

@@ -6244,3 +6244,915 @@ textarea.input {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* ==========================================================
+   数据看板图表件（2026-11-18 重构）
+   ----------------------------------------------------------
+   为什么不引图表库：这是内网自用的看板，只有柱状、横条、堆叠条三种形状，
+   引一个 40KB 的库换来同一屏里一套和别人不一样的坐标轴与配色，不值。
+   三种形状都能用 div + 百分比拼出来，颜色全走令牌 —— 深色模式不用另写一份。
+
+   ★ 只用 --fs-xs / --fs-sm / --fs-badge 三档字号，只用 --r-card / --r-ctl /
+     --r-pill 三档圆角（硬约束 41 / 45）。
+   ========================================================== */
+
+/* ---------- ① 逐日柱状图 ---------- */
+.dash-cols {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: end;
+  height: 128px;
+}
+/* 每根柱是一整列：上半截柱子、下半截日期。柱底统一贴齐，比较靠高度看。 */
+.dash-col {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.dash-col-track {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 0;
+  /* 给柱顶数值留出的槽位。没有这 16px，最高的那根柱的数字会顶出容器被裁掉
+     —— 而它恰好是最该被读到的那一个（峰值）。 */
+  padding-top: 20px;
+}
+/* 柱体容器：高度由数据决定，成功段在上、失败段压底。
+   ★ 宽度封顶 32px：整列宽 100% + 大圆角会渲染成一个**椭圆**
+     （2026-11-18 第一版就是这样，7 根柱子看着像 7 个鸡蛋）。 */
+.dash-col-bar {
+  position: relative;
+  width: 100%;
+  max-width: 32px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 2px;
+}
+.dash-col-track i {
+  display: block;
+  width: 100%;
+  background: var(--accent);
+  border-radius: var(--r-ctl) var(--r-ctl) 0 0;
+  min-height: 2px;
+}
+.dash-col-track i.bad {
+  background: var(--red);
+}
+/* 0 值那天也留一条底线，否则"没有数据"和"那天不存在"分不清 */
+.dash-col-track i.zero {
+  background: var(--fill-2);
+}
+/* ---------- 柱顶数值 ----------
+   三个约束一起决定了这个写法定：
+   ① **不压柱子**：放在 bar 的 100% 之上（bottom:100%），柱体本身一像素不占；
+   ② **不压邻列**：居中 + nowrap，列宽 ≥44px、4 位数 11px 约 26px，两侧各剩 9px；
+   ③ **不被裁**：溢出的是 track 的 padding-top 区（上一段的 16px），不是容器外。
+   pointer-events:none 让它不抢鼠标 —— 但父级 .dash-col 的 title 提示还在。 */
+.dash-col-val {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 2px;
+  font-size: var(--fs-badge);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+/* 0 的数值再淡一档：它和"有调用但很小"要能一眼分开 */
+.dash-col-val.zero {
+  color: var(--text-3);
+}
+.dash-col-x {
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* ---------- ② 横向排行条（功能榜 / 用户榜共用） ---------- */
+.dash-hbars {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+.dash-hbar {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) minmax(60px, 1.05fr) 72px;
+  gap: var(--space-8);
+  align-items: center;
+  font-size: var(--fs-sm);
+}
+.dash-hbar-rank {
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+/* 前三名的名次给一点金色 —— 只给数字上色，不加徽章不加粗（硬约束 41：不靠字号分层） */
+.dash-hbar.top .dash-hbar-rank {
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+.dash-hbar-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.dash-hbar-name em {
+  display: block;
+  font-style: normal;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dash-hbar-track {
+  height: 8px;
+  background: var(--fill-3);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+}
+.dash-hbar-track i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: var(--r-pill);
+  min-width: 3px;
+}
+.dash-hbar-track i.bad {
+  background: var(--red);
+}
+.dash-hbar-val {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.dash-hbar-val em {
+  display: block;
+  font-style: normal;
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+}
+
+/* ---------- ③ 口径堆叠条 + 图例 ---------- */
+.dash-split {
+  display: flex;
+  height: 14px;
+  border-radius: var(--r-pill);
+  overflow: hidden;
+  background: var(--fill-3);
+}
+.dash-split i {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+}
+/* 颜色只做一件事：把"真实用户"从其余四类里拎出来。
+   所以真实是实金，被动是半透明金（同源），内部/已注销/未登录走三级灰 ——
+   五个互不相同的色相在这里既没有语义、又会在深色下糊成一片。 */
+.dash-split i.s-real {
+  background: var(--accent);
+}
+.dash-split i.s-passive {
+  background: var(--accent);
+  opacity: 0.45;
+}
+.dash-split i.s-internal {
+  background: var(--text-3);
+  opacity: 0.5;
+}
+.dash-split i.s-orphan {
+  background: var(--text-3);
+  opacity: 0.3;
+}
+.dash-split i.s-anon {
+  background: var(--text-3);
+  opacity: 0.16;
+}
+.dash-legend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4) var(--space-14);
+  margin: var(--space-10) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.dash-legend li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  min-width: 0;
+}
+.dash-legend .swatch {
+  flex: 0 0 10px;
+  width: 10px;
+  height: 10px;
+  /* 圆形而不是 3px 圆角：圆角只有三档（12 / 10 / 999 或 50%），
+     10px 方块配 --r-ctl 会变成一个正圆，那就干脆写明 50%（硬约束 45）。 */
+  border-radius: 50%;
+}
+.dash-legend .swatch.s-real {
+  background: var(--accent);
+}
+.dash-legend .swatch.s-passive {
+  background: var(--accent);
+  opacity: 0.45;
+}
+.dash-legend .swatch.s-internal {
+  background: var(--text-3);
+  opacity: 0.5;
+}
+.dash-legend .swatch.s-orphan {
+  background: var(--text-3);
+  opacity: 0.3;
+}
+.dash-legend .swatch.s-anon {
+  background: var(--text-3);
+  opacity: 0.16;
+}
+.dash-legend .n {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+/* ---------- ④ 折叠块（内部账号清单） ---------- */
+/* 用原生 <details>：折叠是浏览器自带的能力，用 state 自己实现要多写
+   aria、键盘、动画三件事，而且一旦 JS 没 hydrate 就永远打不开。 */
+.dash-fold > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  cursor: pointer;
+  list-style: none;
+  padding: var(--space-4) 0;
+  font-size: var(--fs-sm);
+  color: var(--ink);
+}
+.dash-fold > summary::-webkit-details-marker {
+  display: none;
+}
+.dash-fold > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-ctl);
+}
+/* 三角形用边框画，不用 ▸ 字符：那个字符 LXGW 子集里没有，会逐字回退成宋体 */
+.dash-fold > summary .caret {
+  width: 0;
+  height: 0;
+  border-left: 5px solid var(--text-3);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform 0.15s ease;
+  flex: 0 0 auto;
+}
+.dash-fold[open] > summary .caret {
+  transform: rotate(90deg);
+}
+.dash-fold > summary .meta {
+  margin-left: auto;
+}
+.dash-fold-body {
+  padding-top: var(--space-6);
+}
+
+/* ---------- ⑤ 区块头：标题 + 右侧合计 ---------- */
+.dash-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-10);
+  flex-wrap: wrap;
+}
+.dash-head .meta {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 手机：名次列留 14px，条缩到 56px，数值列不换行；
+   宽度不够时把「条」换到第二行整行通栏，而不是把名字挤成省略号。 */
+@media (max-width: 640px) {
+  .dash-hbar {
+    grid-template-columns: 16px minmax(0, 1fr) 64px;
+    grid-template-areas:
+      "rank name val"
+      ".    track track";
+    row-gap: var(--space-6);
+  }
+  .dash-hbar-rank {
+    grid-area: rank;
+  }
+  .dash-hbar-name {
+    grid-area: name;
+  }
+  .dash-hbar-track {
+    grid-area: track;
+  }
+  .dash-hbar-val {
+    grid-area: val;
+  }
+  .dash-cols {
+    height: 104px;
+  }
+  .dash-legend {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 带右侧操作按钮的排行行（用户榜的「标内部」）。
+   只在用户榜用：功能榜没有动作可做，多一列等于把条压窄一圈。 */
+.dash-hbar.has-act {
+  grid-template-columns: 18px minmax(0, 1fr) minmax(48px, 0.85fr) 60px 62px;
+}
+.dash-hbar-act {
+  justify-self: end;
+}
+@media (max-width: 640px) {
+  .dash-hbar.has-act {
+    grid-template-columns: 16px minmax(0, 1fr) 56px;
+    grid-template-areas:
+      "rank name val"
+      ".    track act";
+  }
+  .dash-hbar-act {
+    grid-area: act;
+    justify-self: end;
+  }
+}
+
+/* ==========================================================
+   企业级数据面板的信息分层（2026-11-18 第二轮）
+   ----------------------------------------------------------
+   一张"像企业看板"的页面，靠的不是配色，是**每块内容都有头**：
+   卡片头（标题 + 口径/单位）、榜单列头、趋势的峰值刻度。
+   缺了这些，条形图再准，读的人也不知道自己在看哪一天的什么。
+   ========================================================== */
+
+/* ---------- ⑥ 卡片头 ---------- */
+.dash-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-10);
+  padding-bottom: var(--space-8);
+  margin-bottom: var(--space-12);
+  border-bottom: 1px solid var(--line);
+}
+.dash-card-head h3 {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: var(--ls-mid, 0);
+}
+.dash-card-head .meta {
+  margin-left: auto;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- ⑦ 榜单列头 ----------
+   复用 .dash-hbar 的栅格（这样列头和数据永远对齐），只换字色与分隔线。
+   手机上列头直接收起：那一档已经把「条」挪到第二行，列头反而对不上。 */
+.dash-hbar.dash-hbar-th {
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: var(--space-2);
+}
+.dash-hbar.dash-hbar-th .dash-hbar-rank,
+.dash-hbar.dash-hbar-th .dash-hbar-val,
+.dash-hbar.dash-hbar-th .dash-hbar-name {
+  color: var(--text-3);
+  font-weight: 400;
+}
+.dash-hbar.dash-hbar-th.top .dash-hbar-rank {
+  color: var(--text-3);
+  font-weight: 400;
+}
+@media (max-width: 640px) {
+  .dash-hbar.dash-hbar-th {
+    display: none;
+  }
+}
+
+/* ---------- ⑧ 空状态 ----------
+   真实用户为 0 是**正常状态**（刚上线、或全都还没对话过），
+   但一块纯白的卡片会让人以为加载失败。虚线框 + 一句话交代清楚。 */
+.dash-empty {
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-card);
+  padding: var(--space-14);
+  text-align: center;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+/* ---------- ⑨ 数值区的大字（面板第一眼要看的三四个数） ---------- */
+/* 只给"这一屏最重要的那个数"用，不大面积放大 —— 全站基准仍是 13px（硬约束 41）。 */
+.dash-kpi-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-6);
+}
+.dash-kpi-row .unit {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-weight: 400;
+}
+
+/* 手机上柱宽再收一档：390 宽 7 根柱时每列只有 50px，
+   44px 的柱几乎首尾相接，看着像一条色带而不是趋势（2026-11-18 实测）。 */
+@media (max-width: 640px) {
+  .dash-col-track i {
+    max-width: 22px;
+  }
+  /* 区块头在窄屏换行时，"全量（含内部…）" 不该被推到最右 —— 那会让
+     标题和口径分居两端，读起来像两件事。 */
+  .dash-head .meta {
+    margin-left: 0;
+  }
+}
+
+/* ==========================================================
+   用户反馈 · 会话视图（2026-11-18 第二次改形）
+   ----------------------------------------------------------
+   形态参照 IM（用户原话「像微信的回复」），但只取它解决实际问题的部分：
+     · 左边列表回答「谁在说话、说到哪了」
+     · 右边对话回答「我和他之间说过什么」
+     · 气泡靠**左右**分人，不靠头像大小或颜色 —— 手机上一眼就能分辨
+   不做的：已读回执、正在输入、撤回。这些在三个管理员的自用后台里没有收益，
+   而每一条都要多一个状态字段和一次轮询。
+
+   ★ 圆角只用 --r-card / --r-ctl / 50%（硬约束 45）；
+   ★ 字号只用 --fs-xs / --fs-sm / --fs-badge（硬约束 41）。
+   ========================================================== */
+
+/* ---------- 四张状态卡改成可点的筛选 ---------- */
+.fbim-kpi {
+  text-align: left;
+  width: 100%;
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.fbim-kpi:hover {
+  border-color: var(--line-strong);
+}
+.fbim-kpi.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* ---------- 三张图 ---------- */
+.fbim-charts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-10);
+}
+.fbim-donut {
+  position: relative;
+  width: 132px;
+  margin: 4px auto 10px;
+}
+.fbim-donut svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.fbim-donut-c {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  pointer-events: none;
+}
+.fbim-donut-c b {
+  font-size: var(--fs-sm);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.fbim-donut-c span {
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+}
+.fbim-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-4);
+}
+.fbim-legend li {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-6);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.fbim-legend .sw {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.fbim-legend .n {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.fbim-spark svg {
+  display: block;
+  width: 100%;
+  height: 72px;
+}
+.fbim-spark-x {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+  margin-top: 4px;
+}
+
+.fbim-bars {
+  display: grid;
+  gap: var(--space-8);
+}
+.fbim-bar {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: var(--space-6);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.fbim-bar .track {
+  height: 8px;
+  background: var(--fill-3);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+}
+.fbim-bar .track i {
+  display: block;
+  height: 100%;
+  background: var(--text-3);
+  border-radius: var(--r-pill);
+  min-width: 2px;
+}
+.fbim-bar .track i.warn {
+  background: var(--accent);
+}
+.fbim-bar .track i.info {
+  background: var(--accent);
+  opacity: 0.6;
+}
+.fbim-bar .track i.ok {
+  background: var(--text-3);
+  opacity: 0.55;
+}
+.fbim-bar .n {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* ---------- 会话主体：两栏 ---------- */
+.fbim {
+  display: grid;
+  grid-template-columns: 288px minmax(0, 1fr);
+  height: 560px;
+  padding: 0;
+  overflow: hidden;
+}
+.fbim-list {
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+  min-height: 0;
+}
+.fbim-list-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  background: var(--tile-paper, #fff);
+  z-index: 1;
+}
+.fbim-list-head .meta {
+  margin-left: auto;
+}
+.fbim-item {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-8);
+  width: 100%;
+  padding: 10px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.fbim-item:hover {
+  background: var(--fill-3);
+}
+.fbim-item.on {
+  background: var(--accent-soft);
+}
+.fbim-item-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.fbim-item-top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-6);
+}
+.fbim-item-top .nm {
+  font-size: var(--fs-sm);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fbim-item-top .tm {
+  margin-left: auto;
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.fbim-item-sub {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fbim-item-sub em {
+  font-style: normal;
+  color: var(--accent-ink);
+}
+.fbim-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--red);
+  color: #fff;
+  font-size: var(--fs-badge);
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 头像 ---------- */
+/* 默认尺寸在这里给，不靠调用方的内联 style：
+   管理员消息那一侧的 span 没有传 size，少了这条就会被 flex 压成 14×23
+   （2026-11-18 实测：右侧头像是个竖着的细条）。 */
+.fbim-face {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--accent-tint);
+  color: var(--accent-ink);
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+.fbim-face.me-face {
+  background: var(--fill-2);
+  color: var(--text-2);
+}
+img.fbim-face {
+  object-fit: cover;
+}
+
+/* ---------- 右侧对话 ---------- */
+.fbim-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.fbim-idle {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-8);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+.fbim-idle svg {
+  width: 34px;
+  height: 34px;
+  opacity: 0.35;
+}
+.fbim-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+.fbim-back {
+  display: none;
+}
+.fbim-head-main {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.fbim-head-main b {
+  font-size: var(--fs-sm);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fbim-head-acts {
+  margin-left: auto;
+  display: flex;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.fbim-msgs {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  min-height: 0;
+  /* 比卡片底再深一档（fill-2 而不是 fill-3）：用户气泡是米白纸色，
+     和 fill-3 只差 3% 的棕，屏幕上一眼分不出气泡边界（2026-11-18 截图确认）。 */
+  background: var(--fill-2);
+}
+.fbim-row {
+  display: flex;
+  gap: var(--space-8);
+  align-items: flex-start;
+}
+.fbim-row.right {
+  justify-content: flex-end;
+}
+.fbim-col {
+  display: grid;
+  gap: 4px;
+  max-width: min(78%, 560px);
+  min-width: 0;
+}
+.fbim-row.right .fbim-col {
+  justify-items: end;
+}
+.fbim-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+  flex-wrap: wrap;
+}
+/* 管理员那条的「时间 + 署名」不许折行：折了会在气泡上方多出一行，
+   而右边只有 6 个字的宽度，读起来像两条不同的消息（2026-11-18 手机实测）。 */
+.fbim-meta.right {
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+}
+.fbim-meta .tm {
+  margin-left: 2px;
+}
+.fbim-meta .who {
+  color: var(--text-2);
+}
+.fbim-bubble {
+  padding: 8px 11px;
+  border-radius: var(--r-card);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* 用户（对方）：左、浅灰底。管理员（我方）：右、金色淡底。
+   两种都是浅底 —— 深色气泡在深色模式下会变成"两块黑洞"，而这里
+   要的是"一眼看出谁说的"，左右对齐已经做到了这件事。 */
+.fbim-bubble.them {
+  background: var(--tile-paper, #fff);
+  border: 1px solid var(--line);
+  color: var(--ink);
+}
+.fbim-bubble.me {
+  background: var(--accent-tint);
+  color: var(--ink);
+}
+.fbim-sub {
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+}
+
+.fbim-composer {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--line);
+  padding: 10px 14px;
+  display: grid;
+  gap: 6px;
+  background: var(--tile-paper, #fff);
+}
+.fbim-composer textarea {
+  width: 100%;
+  resize: none;
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+.fbim-send {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-8);
+}
+
+/* ---------- 窄屏：列表与对话二选一 ---------- */
+@media (max-width: 760px) {
+  .fbim-charts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .fbim {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+  .fbim-list {
+    border-right: 0;
+    max-height: 62vh;
+  }
+  .fbim-main {
+    display: none;
+  }
+  /* has-thread = 已经点进某个人：把列表让出去 */
+  .fbim.has-thread .fbim-list {
+    display: none;
+  }
+  .fbim.has-thread .fbim-main {
+    display: flex;
+    min-height: 62vh;
+  }
+  .fbim-back {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    flex: 0 0 auto;
+  }
+  /* 头部在 390 宽放不下「返回 + 头像 + 名字 + 三个流转按钮」一行：
+     让按钮组整体落到第二行，而不是把名字挤成两个字加省略号。 */
+  .fbim-head {
+    flex-wrap: wrap;
+    row-gap: var(--space-6);
+  }
+  .fbim-head-acts {
+    flex: 1 0 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+  }
+  .fbim-msgs {
+    min-height: 320px;
+  }
+  .fbim-col {
+    max-width: 86%;
+  }
+}

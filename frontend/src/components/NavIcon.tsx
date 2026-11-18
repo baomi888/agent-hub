@@ -27,6 +27,7 @@ export type NavIconName =
   | "settings"
   | "flow"
   | "dashboard"
+  | "feedback"
   | "more";
 
 type Props = {
@@ -205,6 +206,18 @@ function ForumNav() {
   );
 }
 
+/* 反馈：收件箱（上宽下窄的托盘 + 中间开口线）。
+   为什么不用对话气泡：那和 chat 在 18px 下就是一个轮廓；
+   为什么不用信封：信封和 book 的矩形几乎重合。托盘是唯一还能一眼认出的形状。 */
+function FeedbackNav() {
+  return (
+    <g {...S}>
+      <path d="M4 6.6h16v8.6l-3.2 3.2H7.2L4 15.2z" />
+      <path d="M4 12.4h3.6l1.3 2h6.2l1.3-2H20" strokeWidth={1.6} />
+    </g>
+  );
+}
+
 const ICONS: Record<NavIconName, () => JSX.Element> = {
   chat: Chat,
   book: BookNav,
@@ -219,6 +232,7 @@ const ICONS: Record<NavIconName, () => JSX.Element> = {
   settings: SettingsNav,
   flow: FlowNav,
   dashboard: DashboardNav,
+  feedback: FeedbackNav,
   more: MoreNav,
 };
 

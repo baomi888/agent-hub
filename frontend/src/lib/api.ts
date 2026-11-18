@@ -69,6 +69,9 @@ import type {
   AdminFeedbackResp,
   MyFeedbackResp,
   FeedbackDict,
+  FeedbackStatsResp,
+  FeedbackThreadResp,
+  FeedbackThreadsResp,
 } from "./types";
 
 /**
@@ -918,6 +921,56 @@ export const api = {
         body: JSON.stringify({ reply }),
       }),
     dict: () => request<FeedbackDict>("/api/admin/dict"),
+    /**
+     * 会话列表（每个用户一条）。与 `feedback()` 并存：
+     * 那个是按条的工单视图（导出用），这个是按人的对话视图（回复用）。
+     */
+    feedbackThreads: (status = "", limit = 60) =>
+      request<FeedbackThreadsResp>(
+        `/api/admin/feedback/threads?status=${encodeURIComponent(status)}&limit=${limit}`
+      ),
+    feedbackThread: (target: string) =>
+      request<FeedbackThreadResp>(`/api/admin/feedback/thread/${encodeURIComponent(target)}`),
+    /**
+     * 在会话里回一句。挂在对方**最新一条**反馈下（后端 `reply_thread`），
+     * 所以前端不需要传 fid —— 对话里看到的"最后一句"就是被回的那句。
+     */
+    replyThread: (target: string, text: string) =>
+      request<FeedbackThreadResp>(
+        `/api/admin/feedback/thread/${encodeURIComponent(target)}/reply`,
+        { method: "POST", body: JSON.stringify({ text }) }
+      ),
+    feedbackStats: (days = 30) =>
+      request<FeedbackStatsResp>(`/api/admin/feedback/stats?days=${days}`),
+    /**
+     * 一键导出反馈汇总（Markdown 附件），返回落地的文件名。
+     *
+     * 为什么不用 `window.open(接口地址)`：未登录或非管理员时后端返回的是一段
+     * JSON，window.open 会把它渲染成一个新标签页 —— 用户看到一屏乱码，
+     * 以为下载坏了。走 fetch 才能把"没下载成功"变成一句人话。
+     */
+    exportFeedback: async (status = ""): Promise<string> => {
+      const res = await fetch(
+        `/api/admin/feedback/export?status=${encodeURIComponent(status)}`,
+        { credentials: "include" }
+      );
+      if (!res.ok) throw await httpError(res);
+      const blob = await res.blob();
+      // 文件名由后端给（Content-Disposition）；Next 的 rewrite 若不转发这个头，
+      // 就退回一个固定名 —— 不乱码即可，内容第一行才是真标题
+      const m = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "");
+      const name = m ? m[1] : "feedback.md";
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // 立刻 revoke 会让 Safari 偶尔拿到空文件，延后一拍再释放
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      return name;
+    },
     /**
      * 真实用户使用数据（排除内部/测试账号）。
      *

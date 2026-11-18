@@ -1105,6 +1105,91 @@ export interface AdminFeedbackResp {
   counts: Record<FeedbackStatus, number>;
 }
 
+// ==================== 反馈会话（2026-11-18）====================
+//
+// 后台从"按条平铺"改成"按人会话"：列表是每个人一行，点进去是整段对话。
+// 消息不新开表 —— 用户说的话就是 feedback 行，管理员说的话就是 replies 行，
+// 后端 `thread()` 按时间合流后下发，前端只管按 kind 画左右气泡。
+
+export interface FeedbackThreadItem {
+  uid: string;
+  username: string;
+  nickname: string;
+  /** 头像地址；空串时前端用昵称首字画一个字块 */
+  avatar: string;
+  /** 显示名（昵称优先，退用户名，再退「用户 xxxxxx」）—— 后端算好，前端别重算 */
+  name: string;
+  /** 名下反馈条数 */
+  n: number;
+  /** 未处理（open）条数 */
+  open_n: number;
+  /** 处理中（doing）条数 */
+  doing_n: number;
+  /** 最后活动时间（含管理员回复），秒级时间戳 */
+  last_at: number;
+  /** 最后一条消息是谁说的 */
+  last_from: "user" | "admin";
+  /** last_from = admin 时是回复人署名 */
+  last_by: string;
+  /** 最后一条消息的预览，已截断 */
+  preview: string;
+  /** 这个人提过的分类（去重，value 不是 label） */
+  categories: string[];
+}
+
+export interface FeedbackThreadsResp {
+  items: FeedbackThreadItem[];
+  total: number;
+  counts: Record<FeedbackStatus, number>;
+}
+
+export interface FeedbackMessage {
+  kind: "user" | "admin";
+  /** 挂在哪条反馈下（管理员消息靠它反查是哪条反馈的回复） */
+  fid: number;
+  rid?: number;
+  at: number;
+  text: string;
+  // ——— 仅 kind = "user" ———
+  category?: string;
+  category_label?: string;
+  status?: FeedbackStatus;
+  status_label?: string;
+  page?: string;
+  contact?: string;
+  // ——— 仅 kind = "admin" ———
+  author?: string;
+  author_uid?: string;
+}
+
+export interface FeedbackThreadResp {
+  uid: string;
+  name: string;
+  username: string;
+  nickname: string;
+  avatar: string;
+  total: number;
+  messages: FeedbackMessage[];
+}
+
+export interface FeedbackStatsItem {
+  value: string;
+  label: string;
+  n: number;
+}
+
+export interface FeedbackStatsResp {
+  days: number;
+  range: { from: string; to: string };
+  /** 全量条数（状态积压的分母） */
+  total_all: number;
+  /** 区间内新增条数 */
+  in_range: number;
+  by_category: FeedbackStatsItem[];
+  by_status: FeedbackStatsItem[];
+  series: { day: string; n: number }[];
+}
+
 export interface MyFeedbackResp {
   items: UserFeedbackItem[];
   total: number;

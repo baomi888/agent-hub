@@ -18,7 +18,9 @@
 
 from __future__ import annotations
 
+import re
 import time
+from datetime import datetime
 
 # ==================== 字典（唯一来源，前端由 /api/admin/dict 拉）====================
 
@@ -425,4 +427,466 @@ def counts() -> dict:
         ):
             out[str(r["status"])] = int(r["n"])
     return out
+
+
+# ==================== 导出（2026-11-18）====================
+#
+# 导出的两个前置条件写在 api/admin.py 的旧注里，这里逐条兑现：
+#   ① **脱敏**：联系方式打码、uid 只留前 8 位。导出的文件会被转发到群里、
+#      塞进申报材料 —— 一旦原样带走手机号，收不回来。
+#   ② **审计**：谁在什么时候导了多少条，落到 `data/feedback_export_audit.jsonl`。
+#      不用建表：导出是低频动作，JSONL 追加不会失败、也不会引入懒迁移那种
+#      "第一次跑才建表"的坑（硬约束 57）。
+#
+# 格式选 Markdown 而不是 CSV/Word：需求原话是「已排版好的文字」。CSV 打开是
+# 一堆裸列名，还得再排一次版；Markdown 粘进 Word/飞书/微信都保留结构，
+# 又是纯文本（可 diff、可在任何编辑器里改）。真需要 Word，另做一步转换即可，
+# 不该让导出这一个动作背上 docx 依赖。
+
+
+_EXPORT_ORDER = [k for k, _ in STATUSES]
+
+
+def _fmt_ts(ts) -> str:
+    """时间戳 → 业务时区的 `YYYY-MM-DD HH:MM`。没值时留空，不写 1970。"""
+    if not ts:
+        return ""
+    from core import timeutil
+
+    return datetime.fromtimestamp(int(ts), timeutil.TZ).strftime("%Y-%m-%d %H:%M")
+
+
+def mask_contact(raw: str) -> str:
+    """联系方式脱敏。手机/QQ 留头 3 尾 2，邮箱留首字母，其余一律打码。
+
+    为什么留尾巴：反馈里同一个人的两条意见要对得上号，全打空就没法对。
+    留 3+2 位既够对上号，又不足以拼出完整号码。
+    """
+    s = (raw or "").strip()
+    if not s:
+        return "（未留）"
+    if "@" in s:
+        name, _, domain = s.partition("@")
+        head = name[:1] if name else ""
+        return f"{head}***@{domain}"
+    digits = re.sub(r"\D", "", s)
+    if len(digits) >= 7:
+        return f"{digits[:3]}****{digits[-2:]}"
+    return s[:1] + "***"
+
+
+def export_items(status: str = "") -> list[dict]:
+    """导出用的全量取数（不分页）。按创建时间**正序**：导出件是拿来通读的，
+    先提的排前面才读得出"这个问题积了多久"。"""
+    ensure()
+    from core import session as store
+
+    where = ""
+    args: list = []
+    if status and status in _STATUS_MAP:
+        where = " WHERE status = ?"
+        args.append(status)
+    with store._get_conn() as conn:  # noqa: SLF001
+        rows = conn.execute(
+            f"SELECT * FROM user_feedback{where} ORDER BY created_at ASC, id ASC", args
+        ).fetchall()
+        return _attach_replies(conn, [_row(r) for r in rows])
+
+
+def _summary_matrix(items: list[dict]) -> str:
+    """分类 × 状态 的计数表。企业反馈汇总的第一屏都是这张表 ——
+    它回答的是"哪一类问题最多、还有多少没处理"，比逐条读快得多。"""
+    lines = [
+        "| 分类 | " + " | ".join(status_label(s) for s in _EXPORT_ORDER) + " | 合计 |",
+        "| --- | " + " | ".join("--:" for _ in _EXPORT_ORDER) + " | --: |",
+    ]
+    for cat, cat_label in CATEGORIES:
+        cells = []
+        total = 0
+        for st in _EXPORT_ORDER:
+            n = sum(1 for it in items if it["category"] == cat and it["status"] == st)
+            total += n
+            cells.append(str(n) if n else "-")
+        if total:
+            lines.append(f"| {cat_label} | " + " | ".join(cells) + f" | {total} |")
+    grand = len(items)
+    per_status = [sum(1 for it in items if it["status"] == st) for st in _EXPORT_ORDER]
+    lines.append(
+        "| **合计** | "
+        + " | ".join(f"**{n}**" if n else "-" for n in per_status)
+        + f" | **{grand}** |"
+    )
+    return "\n".join(lines)
+
+
+def export_markdown(status: str = "", now: int | None = None) -> tuple[str, dict]:
+    """生成可直接发出的反馈汇总（Markdown）。返回 (正文, 元信息)。
+
+    元信息给调用方写审计用：`{items, total, status}` —— 不在这里写文件，
+    因为 core 层不该知道日志目录在哪（部署目录与测试临时目录不同）。
+    """
+    items = export_items(status)
+    per_status = {st: sum(1 for it in items if it["status"] == st) for st in _EXPORT_ORDER}
+    stamp = _fmt_ts(now or int(time.time()))
+    scope = status_label(status) if status in _STATUS_MAP else "全部状态"
+
+    out: list[str] = []
+    out.append("# 知穗 · 用户反馈汇总")
+    out.append("")
+    out.append(f"- 导出时间：{stamp}")
+    out.append(f"- 数据范围：{scope} · 全部时间")
+    out.append(
+        "- 合计："
+        + f"{len(items)} 条（"
+        + " / ".join(f"{status_label(st)} {per_status[st]}" for st in _EXPORT_ORDER)
+        + "）"
+    )
+    out.append("- 联系方式已脱敏；账号只保留前 8 位。")
+    out.append("")
+
+    if not items:
+        out.append("> 该范围内没有反馈。")
+        return "\n".join(out) + "\n", {"items": 0, "total": 0, "status": status}
+
+    out.append("## 统计概览")
+    out.append("")
+    out.append(_summary_matrix(items))
+    out.append("")
+
+    seq = 0
+    for st in _EXPORT_ORDER:
+        group = [it for it in items if it["status"] == st]
+        if not group:
+            continue
+        out.append(f"## {status_label(st)}（{len(group)} 条）")
+        out.append("")
+        for it in group:
+            seq += 1
+            out.append(f"### {seq}. {it['category_label']}　#{it['id']}")
+            out.append("")
+            who = (it.get("username") or "").strip() or "（未命名）"
+            uid = str(it.get("uid") or "")
+            out.append(f"- 提交人：{who}（{uid[:8]}…）· {_fmt_ts(it.get('created_at'))}")
+            if it.get("page"):
+                out.append(f"- 来源页面：{it['page']}")
+            # 联系方式**总是写出来**（没留就写「（未留）」）：导出件是交给别人
+            # 读的表格，"这一栏空了"和"我们没导这一栏"在读者眼里是两件事
+            out.append(f"- 联系方式：{mask_contact(it.get('contact') or '')}")
+            out.append("")
+            # 正文按原样引用：用户写了几行就几行，不要压成一句
+            for line in str(it.get("content") or "").splitlines() or [""]:
+                out.append(f"> {line}" if line.strip() else ">")
+            out.append("")
+            replies = it.get("replies") or []
+            if replies:
+                out.append("**处理记录**")
+                out.append("")
+                for r in replies:
+                    author = (r.get("admin_name") or "").strip() or "管理员"
+                    out.append(f"- {_fmt_ts(r.get('created_at'))} · {author}：{r['content']}")
+                out.append("")
+    return "\n".join(out) + "\n", {"items": len(items), "total": len(items), "status": status}
+
+
+# ==================== 按人会话（2026-11-18）====================
+#
+# 为什么后台要从"按条平铺"改成"按人分会话"（用户原话：像微信的回复）：
+#
+#   旧列表里，同一个用户提了 8 条就是 8 行长得一样的文字。读的人分不清
+#   "这是一个人的连续抱怨"还是"8 个人在说同一个 bug" —— 这两种情况的处置
+#   完全不同，一个要私下聊，一个要修代码。而且对话是碎片的：每条下面各挂
+#   一段回复，用户那边看到的是 8 个不相干的片段，而不是"他们在跟我说话"。
+#
+#   IM 的形态本来就回答了这两个问题：左边列表是"谁在说话、说到哪了"，
+#   右边是"我和他"这一整段。所以这里只做一件事 —— 把 uid 当成会话键，
+#   把 feedback 当用户消息、replies 当管理员消息，按时间合流。
+#
+# ★ 不新建表：会话不是实体，它是**同 uid 的反馈**的另一种读法。
+#   建一张 threads 表就得维护"最后一条消息"这一列的一致性（回复、状态、
+#   删除三处都要同步），而它随时能从两张表算出来。
+
+PREVIEW_CHARS = 46
+
+
+def _brief(conn, uids: list[str]) -> dict[str, dict]:
+    """uid → 昵称/头像/用户名。会话列表和对话头部都要用。
+
+    一次 `IN (...)` 查完，不做 N+1。缺号（用户已注销）返回空 dict 由调用方
+    兜底 —— 注销账号的反馈仍然要能读，那是历史。
+    """
+    if not uids:
+        return {}
+    marks = ",".join("?" * len(uids))
+    out: dict[str, dict] = {}
+    for r in conn.execute(
+        f"SELECT id, username, nickname, avatar FROM users WHERE id IN ({marks})", uids
+    ):
+        out[str(r["id"])] = {
+            "username": str(r["username"] or ""),
+            "nickname": str(r["nickname"] or ""),
+            "avatar": str(r["avatar"] or ""),
+        }
+    return out
+
+
+def _who(brief: dict) -> str:
+    """显示名：昵称优先，退用户名。两者都没有就是「已注销用户」。"""
+    return brief.get("nickname") or brief.get("username") or ""
+
+
+def threads(limit: int = 60, status: str = "") -> dict:
+    """会话列表：每个 uid 一条，按最后活动时间倒序。
+
+    `status` 过滤的是"这个人名下有这个状态的反馈"，不是"只显示这条反馈" ——
+    筛「待处理」时出现的人，点进去仍然能看到他全部的话（否则读的人会以为
+    他总共就说过一句）。这也是 IM 与工单列表的区别。
+    """
+    ensure()
+    from core import session as store
+
+    limit = max(1, min(200, int(limit)))
+    with store._get_conn() as conn:  # noqa: SLF001
+        where, args = "", []
+        if status in _STATUS_MAP:
+            # EXISTS 而不是 WHERE status = ?：后者会把这个人其它状态的反馈滤掉，
+            # 聚合出来的条数和"未处理数"都会偏小
+            where = (
+                " WHERE EXISTS (SELECT 1 FROM user_feedback x"
+                " WHERE x.uid = user_feedback.uid AND x.status = ?)"
+            )
+            args = [status]
+        rows = conn.execute(
+            "SELECT uid, COUNT(*) AS n,"
+            " SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS open_n,"
+            " SUM(CASE WHEN status = 'doing' THEN 1 ELSE 0 END) AS doing_n,"
+            " GROUP_CONCAT(DISTINCT category) AS cats,"
+            " MAX(created_at) AS user_at"
+            f" FROM user_feedback{where} GROUP BY uid ORDER BY user_at DESC LIMIT ?",
+            [*args, limit],
+        ).fetchall()
+        if not rows:
+            return {"items": [], "total": 0}
+        # 总人数要单独数：上面那条 LIMIT 之后只剩一页，
+        # 拿 len(rows) 当"有多少人在反馈"会让列表头写「20 人」，实际有 47 个。
+        people = int(
+            conn.execute(
+                f"SELECT COUNT(DISTINCT uid) FROM user_feedback{where}", args
+            ).fetchone()[0]
+        )
+
+        uids = [str(r["uid"]) for r in rows]
+        marks = ",".join("?" * len(uids))
+        brief = _brief(conn, uids)
+        # 这批人的全部消息（反馈是几十条的量级，一次取完比 N 次"取最新一条"便宜）
+        feed = conn.execute(
+            "SELECT id, uid, content, created_at, category, status"
+            f" FROM user_feedback WHERE uid IN ({marks}) ORDER BY created_at DESC, id DESC",
+            uids,
+        ).fetchall()
+        rep = conn.execute(
+            "SELECT r.fid, r.content, r.created_at, r.admin_name, f.uid"
+            " FROM user_feedback_replies r JOIN user_feedback f ON f.id = r.fid"
+            f" WHERE f.uid IN ({marks}) ORDER BY r.created_at DESC, r.id DESC",
+            uids,
+        ).fetchall()
+
+    # 每个 uid 的最后一条消息（含回复），以及最后活动时间
+    #
+    # ★ 同一秒内**回复赢**：先跑回复、用 `>=`，再跑反馈、用 `>`。
+    #   反过来的话，"用户刚提交、管理员当场回一句"这两件事 time() 是同秒，
+    #   列表预览会停在用户的原话上 —— 而管理员明明已经回了
+    #   （2026-11-18 测试抓到的，肉眼很难发现：只有同一秒才会出现）。
+    last: dict[str, dict] = {}
+    for r in rep:
+        uid = str(r["uid"])
+        cur = last.get(uid)
+        if cur is None or int(r["created_at"]) >= cur["at"]:
+            last[uid] = {
+                "at": int(r["created_at"]),
+                "from": "admin",
+                "text": str(r["content"] or ""),
+                "name": str(r["admin_name"] or "") or "管理员",
+            }
+    for r in feed:
+        uid = str(r["uid"])
+        cur = last.get(uid)
+        if cur is None or int(r["created_at"]) > cur["at"]:
+            last[uid] = {
+                "at": int(r["created_at"]),
+                "from": "user",
+                "text": str(r["content"] or ""),
+                "name": "",
+            }
+
+    items = []
+    for r in rows:
+        uid = str(r["uid"])
+        b = brief.get(uid, {})
+        lm = last.get(uid) or {"at": int(r["user_at"] or 0), "from": "user", "text": "", "name": ""}
+        text = " ".join(lm["text"].split())
+        items.append(
+            {
+                "uid": uid,
+                "username": b.get("username", ""),
+                "nickname": b.get("nickname", ""),
+                "avatar": b.get("avatar", ""),
+                "name": _who(b) or f"用户 {uid[:6]}",
+                "n": int(r["n"]),
+                "open_n": int(r["open_n"] or 0),
+                "doing_n": int(r["doing_n"] or 0),
+                "last_at": lm["at"],
+                "last_from": lm["from"],
+                "last_by": lm["name"],
+                "preview": text[:PREVIEW_CHARS] + ("…" if len(text) > PREVIEW_CHARS else ""),
+                "categories": [c for c in str(r["cats"] or "").split(",") if c],
+            }
+        )
+    items.sort(key=lambda x: x["last_at"], reverse=True)
+    return {"items": items, "total": people}
+
+
+def thread(uid: str, limit: int = 200) -> dict:
+    """一个用户的全部消息，**按时间正序**（对话从上往下读）。
+
+    返回 `messages` 而不是让前端自己拼：顺序规则（同一秒内反馈先于回复、
+    回复按 id 排）是业务规则，放两处迟早不一致。
+    """
+    ensure()
+    from core import session as store
+
+    items, total = list_mine(uid, max(1, min(200, int(limit))), 0)
+    items.reverse()  # list_mine 是倒序，对话要正序
+
+    messages: list[dict] = []
+    for it in items:
+        messages.append(
+            {
+                "kind": "user",
+                "fid": int(it["id"]),
+                "at": int(it["created_at"] or 0),
+                "text": str(it["content"] or ""),
+                "category": it["category"],
+                "category_label": it["category_label"],
+                "status": it["status"],
+                "status_label": it["status_label"],
+                "page": it.get("page") or "",
+                "contact": it.get("contact") or "",
+            }
+        )
+        for r in it.get("replies") or []:
+            messages.append(
+                {
+                    "kind": "admin",
+                    "fid": int(it["id"]),
+                    "rid": int(r["id"]),
+                    "at": int(r.get("created_at") or 0),
+                    "text": str(r["content"] or ""),
+                    "author": r.get("admin_name") or "管理员",
+                    "author_uid": r.get("admin_uid") or "",
+                }
+            )
+    # ★ 必须**全局**按时间排，不能按"一条反馈 + 它的回复"成组输出。
+    #   回复挂在那条反馈下面，但它的时间可能晚于这个人后来提的第二条反馈 ——
+    #   成组输出会得到「A 的提问 → 对 A 的回复 → B 的提问」，可 B 明明早于那条回复，
+    #   读起来像管理员在回答 B 的时候还没看到 B（实测过，顺序是错的）。
+    #   同一秒内用户先说、管理员后答：kind 做二级键。
+    messages.sort(key=lambda m: (m["at"], 0 if m["kind"] == "user" else 1, m["fid"]))
+    with store._get_conn() as conn:  # noqa: SLF001
+        b = _brief(conn, [uid]).get(uid, {})
+    return {
+        "uid": uid,
+        "name": _who(b) or f"用户 {uid[:6]}",
+        "username": b.get("username", ""),
+        "nickname": b.get("nickname", ""),
+        "avatar": b.get("avatar", ""),
+        "total": int(total),
+        "messages": messages,
+    }
+
+
+def reply_thread(
+    uid: str, admin_uid: str, admin_name: str, text: str
+) -> tuple[bool, str]:
+    """在会话里回一句：挂到这个人**最新一条**反馈下面。
+
+    为什么不给会话单开一张消息表：现有的回复表已经带 fid、作者、时间，
+    它缺的只是"这条回复属于哪段对话"—— 而那段对话就是 fid 对应的 uid。
+    为此再加一张平行的表，等于让同一件事有两个写入口，迟早一边有数据
+    一边没有（老库迁移还得把两边对齐）。
+
+    ★ 挂在最新一条而不是第一条：用户最后说的话才是他此刻在等回答的那句。
+      挂错地方会让他打开「我提过的」看到一条 3 天前的反馈突然多了回复。
+    """
+    ensure()
+    from core import session as store
+
+    with store._get_conn() as conn:  # noqa: SLF001
+        row = conn.execute(
+            "SELECT id FROM user_feedback WHERE uid = ? ORDER BY created_at DESC, id DESC LIMIT 1",
+            (uid,),
+        ).fetchone()
+    if not row:
+        return False, "这个用户没有反馈"
+    return add_reply(int(row["id"]), admin_uid, admin_name, text)
+
+
+def stats(days: int = 30) -> dict:
+    """图表数据：分类分布（区间内新增）、状态积压（全量）、逐日新增（区间）。
+
+    三个口径刻意不同，因为它们回答三个不同的问题：
+      · 分类 —— "最近大家在抱怨什么"（只看区间，否则会被半年前的数据淹没）
+      · 状态 —— "现在手上有多少没处理"（必须是全量，区间内的积压没有意义）
+      · 趋势 —— "量在涨还是在落"（区间内的每日新增）
+    前端在每张图上标出口径，不靠读者猜。
+    """
+    ensure()
+    from core import session as store
+    from core import timeutil
+
+    days = max(1, min(365, int(days)))
+    window = timeutil.recent_days(days)
+    start = timeutil.day_bounds(window[0])[0]
+    end = timeutil.day_bounds(window[-1])[1]
+
+    by_cat = {k: 0 for k, _ in CATEGORIES}
+    by_status = {k: 0 for k, _ in STATUSES}
+    series = {d: 0 for d in window}
+    total_all = 0
+    with store._get_conn() as conn:  # noqa: SLF001
+        for r in conn.execute(
+            "SELECT category, COUNT(*) AS n FROM user_feedback"
+            " WHERE created_at >= ? AND created_at < ? GROUP BY category",
+            (start, end),
+        ):
+            by_cat[str(r["category"])] = int(r["n"])
+        for r in conn.execute(
+            "SELECT status, COUNT(*) AS n FROM user_feedback GROUP BY status"
+        ):
+            by_status[str(r["status"])] = int(r["n"])
+        total_all = int(
+            conn.execute("SELECT COUNT(*) FROM user_feedback").fetchone()[0]
+        )
+        for r in conn.execute(
+            "SELECT created_at FROM user_feedback WHERE created_at >= ? AND created_at < ?",
+            (start, end),
+        ):
+            d = timeutil.day_str(int(r["created_at"]))
+            if d in series:
+                series[d] += 1
+
+    return {
+        "days": days,
+        "range": {"from": window[0], "to": window[-1]},
+        "total_all": total_all,
+        "in_range": sum(series.values()),
+        "by_category": [
+            {"value": k, "label": category_label(k), "n": by_cat.get(k, 0)}
+            for k, _ in CATEGORIES
+        ],
+        "by_status": [
+            {"value": k, "label": status_label(k), "n": by_status.get(k, 0)}
+            for k, _ in STATUSES
+        ],
+        "series": [{"day": d, "n": series[d]} for d in window],
+    }
 

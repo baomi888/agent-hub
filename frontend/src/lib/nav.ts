@@ -144,6 +144,19 @@ export const NAV: NavItem[] = [
     adminOnly: true,
     hint: "用户、调用、失败",
   },
+  // 用户反馈（2026-11-18 从看板独立成页）。
+  // 独立的原因不是"内容多"，是**工作节奏不同**：看板每天瞄一眼数字，
+  // 反馈要读、要回、要流转、月底要导一份汇总交差。挤在看板第 6 屏的结果是
+  // 13 条反馈一个月没人动。两个管理员都能进（同一套 adminOnly 判定）。
+  // ★ 标签只能两个字：3 列模块格里 3 个字会挤成两行（和「校园工具集」同一个坑）。
+  // ★ 移动端可见、不进 tab：手机上回一句是常见动作，虽然读长文还是电脑舒服。
+  {
+    href: "/feedback",
+    icon: "feedback",
+    label: "反馈",
+    adminOnly: true,
+    hint: "用户提的意见",
+  },
   // 设置：移动端落「更多」。手机上改设置是低频但必要（头像、昵称、主题）。
   { href: "/settings", icon: "settings", label: "设置", hint: "头像、主题、密码" },
 ];
@@ -195,9 +208,10 @@ export function mobileMoreNav(isAdmin: boolean | undefined): NavItem[] {
  * 所以对话页也改从这里派生：排除「对话」自己（当前页），
  * 手机（narrow）按 `desktopOnly` 语义过滤，桌面保留全部。
  *
- * 桌面 11 项；手机管理员 9 项（去掉四六级与工作流）、普通用户 8 项
- * （管理员那 9 项再去掉看板）。9 项 = 3×3、8 项 = 3+3+2 各半行，
- * 两种都不留空格子（见 `railLayout`）。渲染在 3 列紧凑格里，见 `.side-entry`。
+ * 桌面 12 项；手机管理员 10 项（去掉四六级与工作流）、普通用户 9 项
+ * （管理员那 10 项再去掉看板与反馈）。10 项 = 3+3+3+1、9 项 = 3×3，
+ * 余 1 时末项通栏、余 0 时正好满行（见 `railLayout`），两种都不留空格子。
+ * 渲染在 3 列紧凑格里，见 `.side-entry`。
  */
 export function chatRailNav(isAdmin: boolean | undefined, narrow: boolean): NavItem[] {
   return visibleNav(isAdmin).filter((it) => it.href !== "/" && !(narrow && it.desktopOnly));

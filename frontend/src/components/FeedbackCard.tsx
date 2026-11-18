@@ -25,6 +25,17 @@ const STATUS_CLASS: Record<string, string> = {
   closed: "",
 };
 
+/**
+ * 用户侧的状态说法。
+ *
+ * 「待处理」是**管理员**的词（我还没处理它），对提意见的人是反的 ——
+ * 他刚点完提交，最想知道的是"你们收到了吗"。所以这一个状态在用户侧
+ * 显示为「已收到」，其余照旧。字典仍随后端（不硬编码选项，只换措辞）。
+ */
+const USER_STATUS_TEXT: Record<string, string> = {
+  open: "已收到",
+};
+
 function fmtTime(ts: number): string {
   if (!ts) return "";
   const d = new Date(ts * 1000);
@@ -209,7 +220,9 @@ export default function FeedbackCard({
                   {it.content}
                 </span>
                 <span className="meta">{fmtTime(it.created_at)}</span>
-                <span className={`ctag ${STATUS_CLASS[it.status] ?? ""}`}>{it.status_label}</span>
+                <span className={`ctag ${STATUS_CLASS[it.status] ?? ""}`}>
+                  {USER_STATUS_TEXT[it.status] ?? it.status_label}
+                </span>
               </div>
               {/* 开发者回复：这是用户判断"我提的有没有人管"的唯一凭据，
                   所以给它比"状态标签"更显眼的位置，而不是再塞进一行小字。
