@@ -746,9 +746,9 @@ function AccountCard({ onLogout }: { onLogout: () => Promise<void> }) {
         )}
 
         {/* 登录名**常驻显示**，不折叠：这是"改完忘了自己叫什么"的唯一兜底。
-            账号 ID 挪到卡片底部的「关于」（2026-11-16 P2 / 评审 D2）：
-            报障时要靠它认账号，所以不能删；但它挂在登录名旁边既占位、
-            又像把内部标识摊在明面上。默认折叠，展开才看完整值。 */}
+            账号 ID 见卡片底部（2026-11-18 用户要求改为直接显示）：
+            报障时要靠它认账号，所以不能删；与其藏进「关于」要点一下才看得到，
+            不如直接摊在卡片底部一行，一眼就能抄走。 */}
         <div className="meta acct-sub">
           <span>
             登录名 <b className="acct-username">{me?.user.username ?? "—"}</b>
@@ -779,19 +779,18 @@ function AccountCard({ onLogout }: { onLogout: () => Promise<void> }) {
         </button>
       </div>
 
-      {/* 「关于」：只放报障时对方会要的那串 ID。
-          不做成弹窗 —— 这一页已经到底了，折叠行比再开一层更轻。
+      {/* 账号 ID 直接常驻显示（2026-11-18 用户要求：不用点「关于」才能展开）。
+          报障时对方要的就是这串，摊开摆在卡片底部一眼可见。
           完整 32 位 + `user-select: all`：点一下就能整段选中复制，
-          不用像原来那样只给前 8 位、剩下靠 title 悬停（手机上没有 hover）。 */}
-      <details className="acct-about">
-        <summary>关于</summary>
+          不截前 8 位、也不靠 title 悬停（手机上没有 hover）。 */}
+      <div className="acct-about">
         <p className="meta">
           账号 ID{" "}
           <span className="mono" style={{ userSelect: "all" }}>
             {me?.user.id ?? "—"}
           </span>
         </p>
-      </details>
+      </div>
 
       <AvatarPicker
         open={pickerOpen}

@@ -8,7 +8,7 @@ import MascotLogo from "./chat/MascotLogo";
 import CornIcon from "./CornIcon";
 import NavIcon from "./NavIcon";
 import UserAvatar from "./settings/UserAvatar";
-import { chatRailNav, railLayout } from "@/lib/nav";
+import { chatRailNav, railLayout, NAV } from "@/lib/nav";
 import type { Conversation } from "@/lib/types";
 import type { FontScale } from "@/lib/hooks/usePrefs";
 
@@ -56,6 +56,10 @@ interface Props {
 }
 
 const toMs = (ts: number) => (ts < 1e12 ? ts * 1000 : ts);
+
+/** 设置页路径从共享清单派生，不在这里硬编码第二份（test_console_nav 钉死）。
+ *  找不到就退回 "/"——Navi 里设置项一定存在，这是理论兜底。 */
+const SETTINGS_HREF = NAV.find((it) => it.icon === "settings")?.href ?? "/";
 
 
 function groupSessions(list: Conversation[]) {
@@ -479,7 +483,7 @@ export default function Sidebar({
         ))}
       </nav>
 
-      {/* 底部：字号调节 + 深色模式开关 + 在线状态 */}
+      {/* 底部：字号调节 + 深色模式开关（在线状态行 2026-11-18 应用户要求删除） */}
       <div className="mt-3 border-t border-line pt-3">
         {onFontScaleChange && (
           <div className="fs-picker mb-2" role="group" aria-label="聊天字号">
@@ -527,17 +531,21 @@ export default function Sidebar({
             <span>{dark ? "浅色" : "深色"}</span>
           </button>
         )}
-        <div className="status">
-          <span className="dot" />
-          <span className="truncate">在线 · deepseek-chat</span>
-        </div>
-
         {/* 当前账号 + 退出：多用户之后，知道自己"现在是誰"能省掉很多困惑 */}
         {username && (
           <div className="mt-2 flex items-center gap-2 rounded-sm bg-fill-3 px-2.5 py-2">
             {/* 头像统一走 UserAvatar：这里只传值，不判断"图片还是图标还是首字母" ——
-                三处各写一遍必然会漂移（换了头像侧栏没变，就是那么来的） */}
-            <UserAvatar avatar={avatar} name={displayName || username} className="h-6 w-6" />
+                三处各写一遍必然会漂移（换了头像侧栏没变，就是那么来的）。
+                2026-11-18：头像本身点开设置页；账号名仍是看板入口，两者互不覆盖。
+                UserAvatar 内部是 aria-hidden 的 span，可读名由这层 Link 提供。 */}
+            <Link
+              href={SETTINGS_HREF}
+              className="sb-avatar-link shrink-0"
+              title="打开设置"
+              aria-label="打开设置"
+            >
+              <UserAvatar avatar={avatar} name={displayName || username} className="h-6 w-6" />
+            </Link>
             <div className="min-w-0 flex-1">
               {/* 账号块可点开看板：额度不该只在超限时才被看见 */}
               {onOpenUsage ? (

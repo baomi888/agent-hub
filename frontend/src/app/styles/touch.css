@@ -45,7 +45,8 @@
   .guide-skip,
   .rem-new,
   .sb-acct-name,
-  .sb-quit {
+  .sb-quit,
+  .sb-avatar-link {
     position: relative;
   }
 
@@ -203,6 +204,14 @@
     content: "";
     position: absolute;
     inset: -11px -2px;
+  }
+
+  /* 24 → 44：左栏底部头像（点开设置）。右边紧挨账号名按钮的热区（-2px），
+     横向再扩会和它重叠，所以只扩纵向；左右本就有 10px 卡片内边距兜着。 */
+  .sb-avatar-link::before {
+    content: "";
+    position: absolute;
+    inset: -10px 0;
   }
 
   /* ★ 字号四档（标准/大/特大/系统）**不扩宽度**，只靠 interactions.css 里

@@ -8,7 +8,7 @@
   3. 返回键：打开面板压一条历史、popstate 关面板；换页时**不许**再退一次；
   4. 转场：一级 tab 只淡入、二级页 8px 推入；位移上限 8px（放大就会扯坏 fixed 浮层）；
   5. 触觉：网页发消息 + 壳按白名单处理；失败要静默；
-  6. 关于：账号 ID 默认折叠、完整值可选可复制、不再挂在登录名旁边。
+  6. 账号 ID：常驻直接显示（2026-11-18 去掉折叠）、完整值可选可复制、卡片底部跨满整行。
 """
 
 from __future__ import annotations
@@ -232,26 +232,28 @@ def test_shell_only_trusts_haptic_messages():
 # ---------------------------------------------------------------- 6. 关于
 
 
-def test_account_id_moved_into_collapsed_about():
+def test_account_id_shown_directly_without_collapse():
     src = _strip_comments(_read(SETTINGS))
-    # 旧写法：登录名旁边露前 8 位
-    assert ".slice(0, 8)" not in src, "还在登录名旁边露前 8 位"
-    assert "<details className=\"acct-about\">" in src, "没有「关于」折叠块"
-    # 默认必须是收起的：写成 <details open> 就等于没收
-    assert "<details className=\"acct-about\" open" not in src, "「关于」默认是展开的"
-    # 完整值要能复制（原来只给 8 位、剩下塞 title，手机上没有 hover）
+    # 旧写法：登录名旁边只露前 8 位，完整值塞 title（手机上 hover 不到）
+    assert ".slice(0, 8)" not in src, "还在 login 名旁边露前 8 位"
+    # 2026-11-18 用户要求：账号 ID 直接显示，不许再藏进「关于」折叠
+    assert "<details" not in src, "账号 ID 又被塞回 <details> 折叠了"
+    assert "<summary" not in src, "账号 ID 又出现「关于」折叠标题了"
+    assert "<div className=\"acct-about\">" in src, "账号 ID 没有常驻显示的容器"
+    # 完整值要能复制（点一下整段选中，而不是靠悬停 title）
     assert "userSelect: \"all\"" in src, "完整 ID 不能一键选中复制"
     # ID 不许被彻底删掉 —— 报障时要靠它对账号
     assert "me?.user.id" in src, "账号 ID 被删了，报障时对不上账号"
 
 
 def test_about_block_spans_full_row_in_both_layouts():
-    """「关于」在桌面（flex 行）与窄屏（grid）都必须跨满整行。
+    """账号 ID 行在桌面（flex 行）与窄屏（grid）都必须跨满整行。
 
     ★ 这条是补的：第一版只写了 margin/padding，没管它作为 flex/grid 子项怎么排。
-      结果是 `<details>` 被塞进「头像 + 名字」那一行的第二列，名字当场被压成
+      结果是这一块被塞进「头像 + 名字」那一行的第二列，名字当场被压成
       一个字宽、`baomi` 竖排成「b / a / o / m / i」—— 截图一眼就能看出坏了，
       但**没有任何测试会红**（tsc 也不报）。所以两档布局各钉一条。
+      2026-11-18 由 `<details>` 换成 `<div>`，跨行规则不变，守卫继续有效。
     """
     acct_css = _strip_comments(_read(STYLES / "account.css"))
     m = re.search(r"\.acct-about\s*\{([^}]*)\}", acct_css, flags=re.S)

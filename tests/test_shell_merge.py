@@ -226,3 +226,59 @@ def test_quota_card_collapses_on_phone():
     assert re.search(r"@media \(max-width: 900px\) \{\s*\.grid3 \{\s*grid-template-columns: minmax\(0, 1fr\);", tail), (
         "窄屏的单列规则不在文件末尾，压不过后面的两列规则"
     )
+
+
+# ==================== ⑥ 账号卡三处微调（2026-11-18 用户验收）====================
+
+
+def test_sidebar_online_status_removed():
+    """侧栏底部的「在线 · deepseek-chat」整行删掉（用户验收要求）。
+
+    ★ 这是删除型断言，最容易"绿着守空气"：光写 not in 的话，把整份 Sidebar
+      删空也过。所以同时钉住「紧挨着的深色开关与账号块还在」—— 删过头会红。
+    """
+    code = _code(SIDEBAR)
+    assert "deepseek-chat" not in code, "侧栏又出现了 deepseek-chat 在线状态"
+    assert "在线 ·" not in code, "侧栏又出现了「在线 ·」状态文案"
+    assert 'className="status"' not in code, "侧栏的 .status 状态行样式钩子还在"
+    # 反证配套：相邻结构仍完整（深色开关、账号看板入口、退出按钮）
+    assert "onToggleDark" in code, "连深色模式开关一起删了 —— 删过头"
+    assert "onOpenUsage" in code, "连账号名看板入口一起删了 —— 看板没入口了"
+    assert "onLogout" in code, "连退出按钮一起删了 —— 用户没法登出"
+    # .status 样式是这一行独占的，删干净；但顶栏 kb-chip 的绿点不能误伤
+    comp = _code(SRC / "app" / "styles" / "components.css")
+    assert not re.search(r"\.status\s*\{", comp), "components.css 里还留着 .status 样式"
+    assert ".kb-chip .dot" in comp, "误删了顶栏知识库 chip 的绿点样式"
+
+
+def test_sidebar_avatar_links_to_settings():
+    """侧栏头像点开设置页（用户验收要求）。
+
+    UserAvatar 内部是 aria-hidden 的 span，自己不可点、也没有可读名，
+    所以必须由外层 Link 提供 href 与 aria-label —— 两样都钉。
+    """
+    code = _code(SIDEBAR)
+    # 头像必须包在指向 /settings 的 Link 里；路径从 NAV 派生，不许在组件里硬编码
+    m = re.search(
+        r'<Link[^>]*href=\{SETTINGS_HREF\}[^>]*className="sb-avatar-link[^"]*"[^>]*>',
+        code,
+        flags=re.S,
+    )
+    assert m, "侧栏头像没有包成指向 SETTINGS_HREF 的 Link"
+    assert re.search(r"SETTINGS_HREF\s*=\s*NAV\.find", code), (
+        "设置路径没从 NAV 共享清单派生（Sidebar 里不许有第二份路径清单）"
+    )
+    assert '"/settings"' not in code, "Sidebar 里又硬编码了 /settings 字面量"
+    block = m.group(0)
+    assert 'aria-label="打开设置"' in block, "Link 没有可读名（头像本身 aria-hidden，读屏读不到）"
+    # 头像本体仍在链接里，没被换成别的图标
+    assert re.search(r"<UserAvatar\s", code[m.end() : m.end() + 300]), (
+        "Link 里没有 UserAvatar —— 头像被换掉了"
+    )
+    # 账号名仍是看板入口，没被头像跳转覆盖（否则一处点击两件事打架）
+    assert "onOpenUsage" in code, "账号名的看板入口被覆盖了"
+    # 触控热区：只扩纵向，不与相邻账号名按钮的横向热区重叠
+    touch = _read(SRC / "app" / "styles" / "touch.css")
+    rb = re.search(r"\.sb-avatar-link::before\s*\{([^}]*)\}", touch)
+    assert rb, "头像链接没有补触控热区"
+    assert "inset: -10px 0" in rb.group(1), "头像热区横向扩张了，会和账号名按钮热区重叠"

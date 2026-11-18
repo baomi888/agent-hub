@@ -400,31 +400,8 @@
   }
 }
 
-/* 在线状态 */
-.status {
-  display: flex;
-  align-items: center;
-  gap: var(--space-7);
-  font-size: var(--fs-sm);
-  color: var(--text-2);
-  border: 1px solid var(--line);
-  padding: 5px 9px;
-  border-radius: var(--radius-sm);
-  transition: var(--t-color);
-}
-.status:hover {
-  border-color: var(--accent);
-  background: var(--fill-2);
-}
-/* 状态点改为静默常亮：原来 2s 一轮的 opacity 脉冲，和页面上另外三处装饰动画
-   一起让侧栏永远在呼吸。"在线"是状态不是进度，不需要一直在动 */
-/* 在线/就绪是成功语义，用 --success；过去跟金色强调点同色，看不出「正常」与「强调」的区别 */
-.status .dot {
-  width: 6px;
-  height: 6px;
-  background: var(--success);
-  border-radius: 50%;
-}
+/* 在线状态行（.status）2026-11-18 应用户要求删除，样式随之移除。
+   下面 .kb-chip .dot 是顶栏「已绑定知识库」的绿点，与它无关，保留。 */
 
 /* 顶栏知识库 chip：胶囊形 —— 原来没写 border-radius，渲染成直角矩形，
    跟紧挨着的 .theme-chip（也是 999px）形态打架 */
