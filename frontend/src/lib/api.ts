@@ -542,15 +542,34 @@ export const api = {
   uploadFiles: (kbId: string, files: FileList | File[], chunkSize = 500, chunkOverlap = 50) => {
     const fd = new FormData();
     Array.from(files).forEach((f) => fd.append("files", f));
+    // 上传走裸 fetch（FormData 不能设 Content-Type），因此绕过了 request() 的超时。
+    // 后端在请求内同步做「解析→切分→远程 embed→写库」，大文件几十秒很常见，
+    // 但也不能无上限——后端真卡死时前端会永久转圈。给 180s：既容得下正常大文件，
+    // 又不会让用户对着一个再也不动的按钮干等。（普通接口仍是 DEFAULT_TIMEOUT_MS=60s）
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 180_000);
     return fetch(
       `/api/kb/${kbId}/upload?chunk_size=${chunkSize}&chunk_overlap=${chunkOverlap}`,
       // FormData 请求不能手动设 Content-Type（boundary 会被覆盖），
       // 但 credentials 必须带上，否则上传会被当成未登录
-      { method: "POST", body: fd, credentials: "include" }
-    ).then(async (res) => {
-      if (!res.ok) throw await httpError(res);
-      return res.json() as Promise<{ kb_id: string; chunks: number; files: string[] }>;
-    });
+      { method: "POST", body: fd, credentials: "include", signal: controller.signal }
+    )
+      .then(async (res) => {
+        if (!res.ok) throw await httpError(res);
+        return res.json() as Promise<{ kb_id: string; chunks: number; files: string[] }>;
+      })
+      .catch((e) => {
+        // 断网 / 连接被重置时 fetch 抛 TypeError("Failed to fetch")，原样弹出用户只会
+        // 看到一串英文。超时（AbortError）也要说清是「等太久」而不是「坏了」。
+        if ((e as Error)?.name === "AbortError") {
+          throw new Error("上传超时：文件较大时请耐心等待，或检查网络后重试");
+        }
+        if (e instanceof TypeError) {
+          throw new Error("网络连接失败，请检查网络后重试");
+        }
+        throw e;
+      })
+      .finally(() => clearTimeout(timer));
   },
   // ---------- 知识库文件级管理 ----------
   listKbFiles: (kbId: string) =>

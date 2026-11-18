@@ -164,7 +164,10 @@ export function useKnowledge(showToast: ShowToast, chunkSize: number, chunkOverl
       }
       const msg = e instanceof Error ? e.message : "上传失败，请稍后重试";
       showToast("error", msg);
-      return null;
+      // 必须 rethrow：调用方 KnowledgePanel.doUpload 靠异常判断成败，
+      // 之前吞成 return null 会让它在失败后照样清空文件、弹「已就绪」——
+      // 用户同时看到「上传失败」和「已就绪」两条矛盾提示（2026-11-18 用户反馈根因之一）。
+      throw e;
     } finally {
       refreshKbs();
     }

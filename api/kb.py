@@ -195,6 +195,12 @@ async def upload_and_build(
 
     try:
         total, names = await asyncio.to_thread(_build)
+    except ValueError as e:
+        # 解析类失败（扫描件无文字层 / PDF 损坏 / 切片为空 / 格式不支持）是用户输入
+        # 的问题，不是服务故障。对齐正文预览接口（本文件 /text 那条）的 400 + 明细，
+        # 让用户当场知道"扫描件要先 OCR"，而不是收到一句骗人的「服务暂时不可用」。
+        # ValueError 的消息由 load_document / build_index 写成可读中文，直接透出。
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=describe_api_error(e)) from e
     # 按真实切片数记账：入口那道 ensure 只知道"还没超"，不知道这一次切了多少

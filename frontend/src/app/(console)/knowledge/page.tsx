@@ -22,6 +22,7 @@ import { useToast } from "@/lib/hooks/useToast";
 import { fmtNum, fmtWhen } from "@/lib/time";
 import { CHUNK_PROFILES, nearestProfileId, profileParams, type ChunkProfileId } from "@/lib/chunkProfiles";
 import { loadKbChunks, saveKbChunks, type KbChunkMap } from "@/lib/kbChunkPrefs";
+import { validateUpload } from "@/lib/uploadLimits";
 import type { AccessMode, Defaults, FavoriteKbInfo, FilePreview, KbFile, KbInfo } from "@/lib/types";
 
 /** 文件类型标：只区分"读得出来的三类 + 其它"，不追求完整 MIME */
@@ -196,6 +197,14 @@ export default function KnowledgePage() {
     if (!active || !files) return;
     const arr = Array.from(files);
     if (arr.length === 0) return;
+    // 选完当场挡掉格式/单文件大小/总量超限，别等传完 + 建完库才被后端拒绝。
+    // 校验失败时保留文件选择框的清空，让用户能立刻重选合规文件。
+    const invalid = validateUpload(arr);
+    if (invalid) {
+      showToast("error", invalid);
+      if (fileInput.current) fileInput.current.value = "";
+      return;
+    }
     setBusy("upload");
     try {
       const r = await api.uploadFiles(active.kb_id, arr, size, overlap);
@@ -711,10 +720,11 @@ export default function KnowledgePage() {
                 >
                   <CornIcon name="upload" />
                   <span>
-                    {busy === "upload" ? "正在收进来…" : "上传文件，或把文件拖到这里"}
+                    {busy === "upload" ? "正在上传并整理…" : "上传文件，或把文件拖到这里"}
                     <small>
-                      支持 {exts.join(" / ")}；Word、PPT 和图片里的字读不出来 ——
-                      先把它们另存为 PDF 再放进来。
+                      {busy === "upload"
+                        ? "正在解析文档、生成向量，这一步较慢，请勿重复点击或关闭页面"
+                        : `支持 ${exts.join(" / ")}；Word、PPT 和图片里的字读不出来 —— 先把它们另存为 PDF 再放进来。`}
                     </small>
                   </span>
                   <input

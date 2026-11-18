@@ -17,8 +17,7 @@ import {
 import FilePreviewModal, { shortName } from "./FilePreviewModal";
 import CornIcon from "./CornIcon";
 import { fmtWhen } from "@/lib/time";
-
-const MAX_UPLOAD_MB = 100;
+import { validateUpload } from "@/lib/uploadLimits";
 
 /** 面板里「处理方式」的选择结果：三档之一，或用户改过数字后的自定义 */
 type ReadMode = ChunkProfileId | "custom";
@@ -331,11 +330,12 @@ export default function KnowledgePanel({
     if (!files || files.length === 0) return;
     setUploadError(null);
     const arr = Array.from(files);
-    const oversized = arr.find((f) => f.size > MAX_UPLOAD_MB * 1024 * 1024);
-    if (oversized) {
-      setUploadError(
-        `「${oversized.name}」超过 ${MAX_UPLOAD_MB}MB 限制（${fmtSize(oversized.size)}）`
-      );
+    // 用共享规则：单文件 100MB / 总量 200MB / 格式白名单，选完当场挡掉，
+    // 不再等传完 + 建完库才被后端拒绝（2026-11-18 用户反馈）。
+    const invalid = validateUpload(arr);
+    if (invalid) {
+      setUploadError(invalid);
+      if (fileRef.current) fileRef.current.value = "";
       return;
     }
     setSelectedFiles(arr);
@@ -500,9 +500,13 @@ export default function KnowledgePanel({
                   <line x1="12" y1="3" x2="12" y2="15" />
                 </svg>
                 <span className="text-sm font-medium text-ink">
-                  {busy ? "上传中…" : "点击选择文件"}
+                  {busy ? "正在上传并整理…" : "点击选择文件"}
                 </span>
-                <span className="text-fs-xs text-faint">支持 TXT / Markdown / PDF，可多选</span>
+                <span className="text-fs-xs text-faint">
+                  {busy
+                    ? "正在解析文档、生成向量，这一步较慢，请勿重复点击或关闭页面"
+                    : "支持 TXT / Markdown / PDF，可多选"}
+                </span>
               </button>
 
               {selectedFiles.length > 0 && (

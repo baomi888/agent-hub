@@ -18,6 +18,16 @@ function lanAddresses(): string[] {
 }
 
 const nextConfig: NextConfig = {
+  experimental: {
+    // 资料库上传走 /api/:path* 这条 rewrite 代理到 uvicorn:8000。
+    // Next 的代理会 clone 请求体到内存、默认只 buffer 前 10MB，超出的部分静默丢弃
+    // （只在服务端打一行 warning，客户端完全无感）。后端收到被截断的 multipart
+    // 直接 ECONNRESET，nginx 记成 500 —— 用户只看到「服务暂时连不上」，反复重试都失败。
+    // 2026-11-17 有用户连传两个 PDF（5.47+3.53MB，multipart 编码后 >10MB）连续 5 次 500。
+    // 提到 100mb 与后端单文件上限（api/kb.py MAX_UPLOAD_MB=100）和 nginx（100m）对齐。
+    proxyClientMaxBodySize: "100mb",
+  },
+
   // 独立输出：build 后在 .next/standalone 生成自带精简 node_modules 的服务包，
   // 部署到 2 核 2G 这种小内存机器时无需再 npm install 449MB 全套依赖，
   // 直接 `node .next/standalone/server.js` 即可（详见 DEPLOY 流程）。
