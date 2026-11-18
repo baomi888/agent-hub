@@ -7125,6 +7125,12 @@ img.fbim-face {
   .fbim.has-thread .fbim-list {
     display: none;
   }
+  /* 统计区也一起让：四张卡 + 三张图在 390 上将近四屏高，
+     不收起的话点进会话要先滚四屏才看到第一句话（整页截图才量得到）。 */
+  .fbim-page.has-thread > .grid4,
+  .fbim-page.has-thread > .fbim-charts {
+    display: none;
+  }
   .fbim.has-thread .fbim-main {
     display: flex;
     min-height: 62vh;

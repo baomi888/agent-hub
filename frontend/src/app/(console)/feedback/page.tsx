@@ -346,7 +346,10 @@ export default function FeedbackPage() {
         </>
       }
     >
-      <div className="stack-20">
+      {/* fbim-page + has-thread：只为了让窄屏在"已点进某个人"时收起统计区。
+          手机上一进对话，四张卡 + 三张图占了将近四屏，要滚很久才看到第一句 ——
+          1440 的视口截图看不出来，只有 390 的整页截图才暴露（2026-11-19 上线后量到）。 */}
+      <div className={`stack-20 fbim-page${active ? " has-thread" : ""}`}>
         {err ? <Callout icon="warn">{err}</Callout> : null}
 
         {/* ---- 四张状态卡：这是"手上还欠多少"的第一眼答案 ---- */}
