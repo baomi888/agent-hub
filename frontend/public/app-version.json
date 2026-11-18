@@ -1,6 +1,6 @@
 {
-  "version": "0.2.0",
-  "versionCode": 2,
+  "version": "0.2.1",
+  "versionCode": 3,
   "url": "https://github.com/baomi888/agent-hub/releases/download/android-demo/zhisui-android-demo.apk",
-  "notes": "启动画面完整播放、图标不再被裁切，并加入版本检查。"
+  "notes": "开场动画改为 App 内自绘，安卓启动不再一闪而过；图标完整不被裁切。"
 }

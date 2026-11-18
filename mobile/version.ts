@@ -15,7 +15,7 @@ import { Platform } from "react-native";
  */
 
 /** 与 app.json 的 version 保持一致；versionCode 读不到时用它显示。 */
-const VERSION_FALLBACK = "0.2.0";
+const VERSION_FALLBACK = "0.2.1";
 
 /**
  * 显示用的版本号。

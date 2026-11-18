@@ -3,14 +3,14 @@
     "name": "知穗",
     "slug": "zhisui",
     "scheme": "zhisui",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
       "bundleIdentifier": "cn.myzhisui.zhisui",
       "supportsTablet": false,
-      "buildNumber": "2",
+      "buildNumber": "3",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "选择照片发到论坛、或设置头像。不上传时不会读取你的相册。",
         "NSCameraUsageDescription": "拍一张照片直接发到论坛。不拍照时不会使用相机。",
@@ -20,7 +20,7 @@
     },
     "android": {
       "package": "cn.myzhisui.zhisui",
-      "versionCode": 2,
+      "versionCode": 3,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#EDE4C8"
