@@ -151,10 +151,16 @@ export function useKnowledge(showToast: ShowToast, chunkSize: number, chunkOverl
         kb_id = (await api.createKb(kbName)).kb_id;
         createdId = kb_id;
       }
-      const r = await api.uploadFiles(kb_id, files, params.size, params.overlap);
+      // P2：提交即返回 job_id，建库在 worker 后台做；这里轮询到终态。
+      // 失败信息由 job.error 带回（worker 侧记录真实异常），不再是一句泛化文案。
+      const submitted = await api.startUpload(kb_id, files, params.size, params.overlap);
+      const result = await api.pollUploadJob(submitted.job_id);
+      if (result.error) {
+        throw new Error(result.error);
+      }
       // 建库/追加成功才记档位：失败回滚的库不该留下记录
       rememberChunk(kb_id, params);
-      showToast("success", `已导入 ${r.chunks} 个片段到「${kbName}」`);
+      showToast("success", `已导入 ${result.chunks} 个片段到「${kbName}」`);
       return kb_id;
     } catch (e) {
       // 回滚空壳库（复用已有库时不删，那里面可能有别的文件）

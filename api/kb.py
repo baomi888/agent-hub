@@ -46,7 +46,7 @@ from core.netsafe import assert_safe_url
 from kb import dialogue_import, pipelines
 from kb.importer import import_url, import_urls_batch, search_preview
 from kb.rag_core import describe_api_error, load_document
-from service import sediment
+from service import kb_upload, sediment
 
 # 默认要登录：知识库是用户资产，列举/下载/删除都必须先验身份
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -78,6 +78,63 @@ def _must_own_or_public(uid: str, kb_id: str) -> None:
     raise HTTPException(status_code=404, detail=f"知识库不存在：{kb_id}")
 
 
+async def _validate_and_save(
+    uid: str, kb_id: str, files: list[UploadFile], mode: str
+) -> tuple[list[tuple[str, str]], int]:
+    """上传的校验 + 落盘 + 流量记账，同步端点与异步端点共用。
+
+    返回 (saved=[(落盘路径, 文件名)], now)。任何失败都会在动磁盘前或清理后抛出，
+    调用方只管拿 saved 去建库。这段从原 upload_and_build 原样抽出，行为不变。
+    """
+    await asyncio.to_thread(quota.guard, uid, "embed")
+    if not files:
+        raise HTTPException(status_code=400, detail="未上传任何文件")
+    if mode not in ("append", "rebuild"):
+        raise HTTPException(status_code=400, detail="mode 只能是 append 或 rebuild")
+
+    declared = sum(f.size for f in files if isinstance(getattr(f, "size", None), int))
+    if config.UPLOAD_TOTAL_MB and declared > config.UPLOAD_TOTAL_MB * 1024 * 1024:
+        raise HTTPException(
+            status_code=400,
+            detail=f"本次上传总大小超过 {config.UPLOAD_TOTAL_MB}MB，请分批上传",
+        )
+
+    now = int(time.time())
+    limit = MAX_UPLOAD_MB * 1024 * 1024
+    saved: list[tuple[str, str]] = []
+    pipelines.ensure_source_dir(kb_id)
+
+    for f in files:
+        ext = os.path.splitext(f.filename or "")[1].lower()
+        if ext not in (".txt", ".md", ".pdf"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"不支持的文件格式：{ext}（当前支持 TXT / Markdown / PDF）",
+            )
+        upload.check_declared_size(f, limit)
+
+    try:
+        for f in files:
+            ext = os.path.splitext(f.filename or "")[1].lower()
+            name = pipelines.safe_source_name(f.filename or "", fallback_ext=ext)
+            dest = pipelines.source_path(kb_id, name)
+            await upload.save_stream(f, dest, limit)
+            saved.append((dest, name))
+    except Exception:
+        upload.cleanup(p for p, _ in saved)
+        raise
+
+    upload_bytes = sum(os.path.getsize(p) for p, _ in saved)
+    if upload_bytes:
+        upload_mb = max(1, (upload_bytes + 1024 * 1024 - 1) // (1024 * 1024))
+        try:
+            await asyncio.to_thread(quota.consume, uid, "upload", upload_mb)
+        except quota.QuotaExceeded:
+            upload.cleanup(p for p, _ in saved)
+            raise
+    return saved, now
+
+
 # ==================== 上传 + 建库 ====================
 
 
@@ -98,63 +155,7 @@ async def upload_and_build(
     原始文件会留档到 data/kb_sources/{kb_id}/，否则换切片参数时无法重建。
     """
     _must_own(uid, kb_id)
-    # 先卡限流与当日额度，再动磁盘：超限时一个字节都不该落盘
-    await asyncio.to_thread(quota.guard, uid, "embed")
-    if not files:
-        raise HTTPException(status_code=400, detail="未上传任何文件")
-    if mode not in ("append", "rebuild"):
-        raise HTTPException(status_code=400, detail="mode 只能是 append 或 rebuild")
-
-    # 单次请求的声明总大小（S-07）：N 个文件各 100MB 时，单文件闸挡不住整体。
-    declared = sum(f.size for f in files if isinstance(getattr(f, "size", None), int))
-    if config.UPLOAD_TOTAL_MB and declared > config.UPLOAD_TOTAL_MB * 1024 * 1024:
-        raise HTTPException(
-            status_code=400,
-            detail=f"本次上传总大小超过 {config.UPLOAD_TOTAL_MB}MB，请分批上传",
-        )
-
-    now = int(time.time())
-    limit = MAX_UPLOAD_MB * 1024 * 1024
-    saved: list[tuple[str, str]] = []  # (落盘路径, 原始文件名)
-    pipelines.ensure_source_dir(kb_id)
-
-    # 第一趟只校验：扩展名 / 大小。
-    # 以前校验和写盘混在一个循环里——第 3 个文件格式不合法时，前两个已经躺在磁盘上了，
-    # 而它们既没登记进 kb_files.json 也没进 Chroma，只有删整个库才清得掉。
-    for f in files:
-        ext = os.path.splitext(f.filename or "")[1].lower()
-        if ext not in (".txt", ".md", ".pdf"):
-            raise HTTPException(
-                status_code=400,
-                detail=f"不支持的文件格式：{ext}（当前支持 TXT / Markdown / PDF）",
-            )
-        upload.check_declared_size(f, limit)
-
-    # 第二趟才落盘：分块读，超限立刻停手
-    try:
-        for f in files:
-            ext = os.path.splitext(f.filename or "")[1].lower()
-            # 原始文件名只用来登记和展示，落盘位置由 source_path 重算；
-            # 这里先收一次，避免超长名/带路径的名把后续流程搞乱
-            name = pipelines.safe_source_name(f.filename or "", fallback_ext=ext)
-            dest = pipelines.source_path(kb_id, name)
-            await upload.save_stream(f, dest, limit)
-            saved.append((dest, name))
-    except Exception:
-        # 一个都还没入库，已落盘的必须清掉，否则它们成了没人认领的孤儿文件
-        upload.cleanup(p for p, _ in saved)
-        raise
-
-    # 每日上传流量配额（S-07）：按实际落盘字节记账，与聊天附件同一张账。
-    # 超限时先清掉刚落的文件再抛错（前面已入库的片段不受影响）。
-    upload_bytes = sum(os.path.getsize(p) for p, _ in saved)
-    if upload_bytes:
-        upload_mb = max(1, (upload_bytes + 1024 * 1024 - 1) // (1024 * 1024))
-        try:
-            await asyncio.to_thread(quota.consume, uid, "upload", upload_mb)
-        except quota.QuotaExceeded:
-            upload.cleanup(p for p, _ in saved)
-            raise
+    saved, now = await _validate_and_save(uid, kb_id, files, mode)
 
     def _build() -> tuple[int, list[str]]:
         """切片 + embedding + 写 Chroma，全程可能几十秒。
@@ -171,13 +172,17 @@ async def upload_and_build(
             pending: list[dict] = []
             try:
                 for idx, (path, name) in enumerate(saved):
-                    # 只有第一个文件在 rebuild 模式下清库，其余一律追加
+                    # 只有第一个文件在 rebuild 模式下清库，其余一律追加。
+                    # defer_topics=True：主题抽取不再串在请求里（P1-1），返回后由
+                    # 下面的 backfill_after_upload 后台补抽——这里不传的话会和
+                    # backfill 各抽一次，白烧一次 DeepSeek 调用。
                     n = pipe.build_index(
                         chunk_size,
                         chunk_overlap,
                         [path],
                         mode=(mode if idx == 0 else "append"),
                         source_names=[name],
+                        defer_topics=True,
                     )
                     total += n
                     pending.append({"name": name, "chunks": n, "added_at": now, "origin": "upload"})
@@ -206,7 +211,44 @@ async def upload_and_build(
     # 按真实切片数记账：入口那道 ensure 只知道"还没超"，不知道这一次切了多少
     if total:
         await asyncio.to_thread(quota.bump_usage, uid, "embed", total)
+    # P1-1：同步路径也走后台补抽主题——用户不再等 DeepSeek 那几十秒。
+    # fire-and-forget，失败静默（backfill_after_upload 内部已吞异常）。
+    asyncio.create_task(asyncio.to_thread(kb_upload.backfill_after_upload, uid, kb_id, names))
     return {"kb_id": kb_id, "chunks": total, "files": names}
+
+
+@router.post("/{kb_id}/upload-async", status_code=202)
+async def upload_and_build_async(
+    kb_id: str,
+    files: list[UploadFile],
+    chunk_size: int = 500,
+    chunk_overlap: int = 50,
+    mode: str = "append",
+    uid: str = Depends(get_current_user),
+) -> dict:
+    """异步上传：校验 + 落盘后立即返回 job_id，建库交给 worker 后台做。
+
+    与同步 /upload 的区别只在"建库"这一段：校验、格式/大小闸、流量记账完全共用
+    （_validate_and_save），所以用户当场就能知道"格式不支持/超限"，不会等到后台
+    才失败。建库进度用 GET /api/kb/upload-jobs/{job_id} 查。
+
+    P2（2026-11-18）：解开"解析→embedding→写库几十秒"的同步等待，前端可轮询进度。
+    """
+    _must_own(uid, kb_id)
+    saved, _now = await _validate_and_save(uid, kb_id, files, mode)
+    job_id, run_id = await asyncio.to_thread(
+        kb_upload.submit_upload, uid, kb_id, saved, mode, chunk_size, chunk_overlap
+    )
+    return {"job_id": job_id, "run_id": run_id, "kb_id": kb_id, "status": "queued"}
+
+
+@router.get("/upload-jobs/{job_id}")
+async def get_upload_job(job_id: str, uid: str = Depends(get_current_user)) -> dict:
+    """查异步上传任务状态。按 uid 归属过滤，别人的任务一律 404。"""
+    job = await asyncio.to_thread(kb_upload.get_job, job_id, uid)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"上传任务不存在：{job_id}")
+    return job
 
 
 # ==================== 查询 ====================

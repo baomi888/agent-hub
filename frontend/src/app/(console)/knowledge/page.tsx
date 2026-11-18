@@ -207,9 +207,13 @@ export default function KnowledgePage() {
     }
     setBusy("upload");
     try {
-      const r = await api.uploadFiles(active.kb_id, arr, size, overlap);
+      // P2 异步上传：提交即返回，建库在 worker 后台做；这里轮询到终态。
+      // 失败原因由 job.error 带回，用户能看到具体原因而不是泛化文案。
+      const submitted = await api.startUpload(active.kb_id, arr, size, overlap);
+      const result = await api.pollUploadJob(submitted.job_id);
+      if (result.error) throw new Error(result.error);
       await refresh(active.kb_id);
-      showToast("success", `收进 ${fmtNum(r.chunks)} 段`);
+      showToast("success", `收进 ${fmtNum(result.chunks)} 段`);
     } catch (e) {
       showToast("error", errMsg(e, "上传失败，请稍后重试"));
     } finally {

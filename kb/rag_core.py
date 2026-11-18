@@ -1233,7 +1233,7 @@ def _embed_pool() -> ThreadPoolExecutor:
         return _EMBED_POOL
 
 
-def _embed_and_store(vs, chunks) -> int | None:
+def _embed_and_store(vs, chunks, *, defer_topics: bool = False) -> int | None:
     """并发 embedding + 串行 upsert（分窗，峰值内存受限）。返回向量维度（拿不到为 None）。
 
     返回值是给 core/embed_guard.py 用的：向量空间指纹里记的 dim 要来自
@@ -1256,8 +1256,12 @@ def _embed_and_store(vs, chunks) -> int | None:
     """
     if not chunks:
         return None
-    # A 块：入库级主题标签（失败静默降级，不影响入库）
-    _inject_topics(chunks)
+    # A 块：入库级主题标签（失败静默降级，不影响入库）。
+    # defer_topics=True 时跳过同步抽取——上传链路改由后台任务在返回后补抽并
+    # 回写 metadata，避免每来源一次 DeepSeek 调用（最长 60s×2 重试）阻塞用户请求。
+    # 默认 False：其余调用方（rebuild / 复制 / import）行为不变。
+    if not defer_topics:
+        _inject_topics(chunks)
     bs = max(1, config.EMBED_BATCH_SIZE)
     # 每批打包成 (文本, 元数据, id)，窗口内并发 embedding、窗口内按序写出
     batches = []
@@ -1338,19 +1342,16 @@ class RagPipeline:
         _cache_invalidate(self.collection_name)
         return len(chunks)
 
-    def build_index(
-        self,
-        chunk_size: int,
-        chunk_overlap: int,
-        paths,
-        mode: str = "rebuild",
-        source_names: list[str] | None = None,
-    ) -> int:
-        """切片并入库，返回本次新增的片段数。
+    def prepare_chunks(self, chunk_size: int, chunk_overlap: int, paths, source_names=None):
+        """只做「加载文档 → 切分 → 编号」，不碰 Chroma。返回 (chunks, counter)。
 
-        mode:
-          rebuild —— 先删掉整个 collection 再重建（换切片参数时用，会重新付费 embedding）
-          append  —— 追加到已有库，不动旧数据（日常上传走这条）
+        从 build_index 拆出来的准备步，专门给"多文件合批"用：api 层可以逐文件调用
+        它（保留"某个文件解析失败不影响已成功文件"的失败隔离），把成功的 chunks
+        攒到一起，最后只调一次 store_chunks —— 这样 N 个不满 10 片的小文件不再
+        各发一次半空的 embedding 请求（10 个各 3 片的文件：10 次 → 1~3 次）。
+
+        counter 是按来源统计的片段数，用来回填每个文件的 chunks 记录（build_index
+        原本只返回总数，合批后逐文件明细只能从这里拿）。
         """
         all_docs = []
         for i, p in enumerate(paths):
@@ -1361,33 +1362,57 @@ class RagPipeline:
         chunks = split_documents(all_docs, chunk_size, chunk_overlap)
         if not chunks:
             raise ValueError("切片结果为空，请检查文档内容与切片参数")
-
-        # 记录片段在其来源文件内的顺序：预览时按它还原正文
         counter: dict[str, int] = {}
         for c in chunks:
             src = c.metadata.get("source") or ""
             c.metadata["chunk_index"] = counter.get(src, 0)
             counter[src] = counter.get(src, 0) + 1
+        return chunks, counter
 
+    def store_chunks(self, chunks, mode: str, chunk_size: int, chunk_overlap: int,
+                     *, defer_topics: bool = False) -> int:
+        """只做「必要时清库 → 合批 embedding → 串行写 Chroma → 盖指纹」。返回片段数。
+
+        与 prepare_chunks 配套：prepare 可以逐文件跑（失败隔离），store 一次性把
+        所有成功文件的 chunks 写入（合批 embedding）。单独调它时调用方须自己持
+        kb_lock（build_index 内部路径由调用方的锁覆盖；P2 worker 路径同样持锁）。
+        """
         if mode == "rebuild":
-            # 只有换切片参数才需要全量重建：删旧 collection，保证参数变更后完全重建
             client = chroma_client()
             try:
                 client.delete_collection(self.collection_name)
             except Exception:
                 pass  # 首次不存在时忽略
             self._vs = None
-
         vs = self._ensure_vs()
-        # 并发 embedding、串行写入，避免超出单次批量限制（百炼为 10）
-        dim = _embed_and_store(vs, chunks)
-        # rebuild 会删掉 collection 重建，metadata 指纹也一起没了 → 这里重新盖一个
+        dim = _embed_and_store(vs, chunks, defer_topics=defer_topics)
         embed_guard.invalidate(self.collection_name)
         embed_guard.stamp(self.collection_name, dim)
-
         self._params = (chunk_size, chunk_overlap)
         _cache_invalidate(self.collection_name)
         return len(chunks)
+
+    def build_index(
+        self,
+        chunk_size: int,
+        chunk_overlap: int,
+        paths,
+        mode: str = "rebuild",
+        source_names: list[str] | None = None,
+        *,
+        defer_topics: bool = False,
+    ) -> int:
+        """切片并入库，返回本次新增的片段数。
+
+        mode:
+          rebuild —— 先删掉整个 collection 再重建（换切片参数时用，会重新付费 embedding）
+          append  —— 追加到已有库，不动旧数据（日常上传走这条）
+        """
+        # 组合两步：prepare 做加载/切分/编号，store 做清库/合批 embed/写库。
+        # 拆开是为了让上传路径能"逐文件 prepare（失败隔离）+ 一次 store（合批 embed）"，
+        # 而其余调用方仍可用这一整个方法，行为与拆分前完全一致。
+        chunks, _counter = self.prepare_chunks(chunk_size, chunk_overlap, paths, source_names)
+        return self.store_chunks(chunks, mode, chunk_size, chunk_overlap, defer_topics=defer_topics)
 
     def delete_by_source(self, source: str) -> int:
         """按来源文件名删除该文件的全部片段，返回删除条数。"""
@@ -1405,6 +1430,47 @@ class RagPipeline:
         self._vs._collection.delete(ids=ids)
         _cache_invalidate(self.collection_name)
         return len(ids)
+
+    def preview_and_ids(self, source: str, limit_chars: int = 4000) -> tuple[list[str], str]:
+        """取该来源的全部 ids + 供抽取主题用的正文预览（拼够 limit_chars 就停）。
+
+        给「上传返回后异步补抽主题」用：拿到 ids 才能把标签回写到正确的片段，
+        拿到正文预览才能调 `_extract_topics_one`。只查元数据与文档，不拉向量
+        （include 不含 embeddings，避免把整份向量读回内存）。
+        """
+        if self._vs is None:
+            self.get_or_open()
+        if self._vs is None:
+            return [], ""
+        try:
+            got = self._vs._collection.get(
+                where={"source": source}, include=["documents"]
+            )
+        except Exception:
+            return [], ""
+        ids = list(got.get("ids") or [])
+        docs = got.get("documents") or []
+        head = ""
+        for d in docs:
+            head += ("\n" if head else "") + (d or "")
+            if len(head) >= limit_chars:
+                break
+        return ids, head[:limit_chars]
+
+    def update_source_topics(self, ids: list[str], topic_str: str) -> int:
+        """把主题标签串写进指定片段的 metadata["topics"]，只改元数据不动向量/正文。
+
+        异步补抽任务拿到 ids 后回写用；单独成方法便于测试与幂等（重复写同一串无害）。
+        返回实际更新的片段数。
+        """
+        if not ids or self._vs is None:
+            return 0
+        try:
+            metas = [{"topics": topic_str} for _ in ids]
+            self._vs._collection.update(ids=ids, metadatas=metas)
+            return len(ids)
+        except Exception:
+            return 0
 
     def has_source(self, source: str) -> bool:
         """该来源文件是否已有片段入库（只取一条 id 判断，不拉回任何片段内容）。

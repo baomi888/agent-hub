@@ -147,6 +147,14 @@ def job_defs() -> dict[str, dict]:
             "cron": "* * * * *",
             "description": "对话沉淀（事件驱动，每分钟排空待办）",
         },
+        # 资料库上传异步建库（2026-11-18，P2）。上传请求落盘即返回 job_id，
+        # 这里每分钟 tick 一次，run_pending() 顺手把 pending 排空；建库本身
+        # （合批 embedding + 去重 + 后台补抽主题）在 service/kb_upload.py。
+        # 与 sediment 一样是事件驱动，本 job 自己的 run_job 空转。
+        "kb.upload": {
+            "cron": "* * * * *",
+            "description": "资料库上传异步建库（事件驱动，每分钟排空待办）",
+        },
     }
 
 

@@ -116,6 +116,16 @@ function notifyAuthorized() {
  */
 export type ApiStatusError = Error & { status?: number };
 
+/** GET /api/kb/upload-jobs/{job_id} 的异步上传任务状态。 */
+export interface UploadJob {
+  job_id: string;
+  kb_id: string;
+  status: "processing" | "done" | "error";
+  chunks: number;
+  error: string | null;
+  attempts: number;
+}
+
 function httpErr(res: Response, message: string): ApiStatusError {
   return Object.assign(new Error(message), { status: res.status });
 }
@@ -571,6 +581,69 @@ export const api = {
       })
       .finally(() => clearTimeout(timer));
   },
+  // ---------- 异步上传（P2）：提交即返回 job_id，建库在 worker 后台做 ----------
+  startUpload: (kbId: string, files: FileList | File[], chunkSize = 500, chunkOverlap = 50) => {
+    const fd = new FormData();
+    Array.from(files).forEach((f) => fd.append("files", f));
+    // 提交很快（只落盘 + 写队列），但保留 180s 超时兜住"卡在落盘"的极端情况；
+    // 错误中文化与 uploadFiles 一致（走 httpError + 网络错误转换）。
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 180_000);
+    return fetch(
+      `/api/kb/${kbId}/upload-async?chunk_size=${chunkSize}&chunk_overlap=${chunkOverlap}`,
+      { method: "POST", body: fd, credentials: "include", signal: controller.signal }
+    )
+      .then(async (res) => {
+        if (!res.ok) throw await httpError(res);
+        return res.json() as Promise<{ job_id: string; run_id: string; kb_id: string; status: string }>;
+      })
+      .catch((e) => {
+        if ((e as Error)?.name === "AbortError") {
+          throw new Error("上传超时，请检查网络后重试");
+        }
+        if (e instanceof TypeError) {
+          throw new Error("网络连接失败，请检查网络后重试");
+        }
+        throw e;
+      })
+      .finally(() => clearTimeout(timer));
+  },
+  /** 轮询异步上传任务状态；走 request 自动获得 401 广播 + detail 中文化。 */
+  uploadJob: (jobId: string) =>
+    request<UploadJob>(`/api/kb/upload-jobs/${encodeURIComponent(jobId)}`),
+  /**
+   * 轮询异步上传任务到终态。worker 每分钟 tick，间隔 1.5s 足够跟得上又不刷屏。
+   * 10 分钟总上限兜住"worker 挂了导致永远 processing"——到点抛可读错误。
+   */
+  pollUploadJob: (jobId: string): Promise<{ chunks: number; error: string | null }> =>
+    new Promise((resolve, reject) => {
+      const started = Date.now();
+      const INTERVAL = 1500;
+      const MAX_WAIT = 10 * 60 * 1000;
+      let timer: ReturnType<typeof setTimeout>;
+      const tick = async () => {
+        try {
+          const job = await request<UploadJob>(`/api/kb/upload-jobs/${encodeURIComponent(jobId)}`);
+          if (job.status === "done") {
+            resolve({ chunks: job.chunks, error: null });
+            return;
+          }
+          if (job.status === "error") {
+            resolve({ chunks: 0, error: job.error || "建库失败，请重试" });
+            return;
+          }
+        } catch (e) {
+          reject(e);
+          return;
+        }
+        if (Date.now() - started >= MAX_WAIT) {
+          reject(new Error("建库耗时过长，请稍后到资料库页查看结果或重试"));
+          return;
+        }
+        timer = setTimeout(tick, INTERVAL);
+      };
+      timer = setTimeout(tick, INTERVAL);
+    }),
   // ---------- 知识库文件级管理 ----------
   listKbFiles: (kbId: string) =>
     request<{ kb_id: string; chunks: number; files: KbFile[] }>(`/api/kb/${kbId}/files`),

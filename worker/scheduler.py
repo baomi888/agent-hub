@@ -121,7 +121,9 @@ def _load_handlers(force: bool = False) -> tuple[bool, str]:
         # push.daily 的业务在 service/push.py，不归 daily 管（下面单独挂）。
         # 不排除的话它会被挂上 daily，而 daily 没有 due_subjects，这一轮静默空转。
         # reminder.tick 同理，业务在 service/reminder_tick.py（2026-11-09）。
-        if job_key in ("push.daily", "reminder.tick"):
+        # kb.upload 的业务在 service/kb_upload.py（2026-11-18 P2 异步上传），
+        # 单独挂；挂到 daily 上会因 daily 没有对应实现而静默空转。
+        if job_key in ("push.daily", "reminder.tick", "kb.upload"):
             continue
         register_handler(job_key, daily)
     # prompt.evolve 的业务在 service/prompt_evo.py，不属于 daily：
@@ -155,6 +157,14 @@ def _load_handlers(force: bool = False) -> tuple[bool, str]:
         register_handler(reminder_tick.JOB_KEY, reminder_tick)
     except Exception as e:  # noqa: BLE001
         _log_json("handler_missing", job_key="reminder.tick", reason=f"{e}"[:200])
+    # 资料库上传异步建库（2026-11-18 P2）：事件驱动，pending 行由每次 tick 的
+    # run_pending() 排空；单独兜异常，挂不上不该让其他 job 停摆。
+    try:
+        from service import kb_upload  # type: ignore
+
+        register_handler(kb_upload.JOB_KEY, kb_upload)
+    except Exception as e:  # noqa: BLE001
+        _log_json("handler_missing", job_key="kb.upload", reason=f"{e}"[:200])
     return True, ""
 
 

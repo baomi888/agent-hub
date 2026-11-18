@@ -40,7 +40,7 @@ import threading
 import time
 
 from core import config
-from kb.rag_core import RagPipeline, chroma_client
+from kb.rag_core import RagPipeline, _extract_topics_one, chroma_client
 
 # ---------- 全局注册表 ----------
 # { kb_id: RagPipeline }
@@ -981,6 +981,45 @@ def get_file_names(owner: str, kb_id: str) -> list[str]:
         return []
     with _REGISTRY_LOCK:
         return [x.get("name", "") for x in _KB_FILES.get(kb_id, [])]
+
+
+def backfill_topics(owner: str, kb_id: str, sources: list[str]) -> int:
+    """后台补抽主题标签并回写 metadata（上传返回后调用，失败静默）。
+
+    2026-11-18：主题抽取原本串在上传主链路里（每来源一次 DeepSeek 调用，
+    最长 60s×2 重试），是"上传慢"的一大来源。改为入库时跳过（build_index 的
+    defer_topics），返回后再由后台任务调本函数补抽——用户不再等这段 LLM 时间。
+
+    **最终一致性**：补抽完成前，新片段的 metadata 没有 topics，检索时个性化
+    偏置（_bias_rerank）对这些片段不生效；补抽后自动生效。这是静默降级，
+    与主题抽取本来的"失败不影响入库"设计一致。
+
+    每个来源用一次 kb_lock，与同库的上传/rebuild/删文件互斥，避免并发写同一
+    collection。返回实际补抽的来源数（只统计成功写入标签的）。
+    """
+    if not getattr(config, "TOPIC_EXTRACT_ENABLED", True) or not sources:
+        return 0
+    done = 0
+    for src in sources:
+        if not src:
+            continue
+        try:
+            pipe = get_or_create(owner, kb_id)
+            with kb_lock(kb_id):
+                ids, head = pipe.preview_and_ids(src)
+                if not ids or not head.strip():
+                    continue
+                tags = _extract_topics_one(head)
+                if not tags:
+                    continue
+                tstr = "|" + "|".join(tags) + "|"
+                if pipe.update_source_topics(ids, tstr):
+                    done += 1
+        except Exception as e:  # noqa: BLE001 —— 补抽是锦上添花，绝不影响主流程
+            logging.getLogger(__name__).warning(
+                "backfill_topics failed kb=%s src=%s: %s", kb_id, src, e
+            )
+    return done
 
 
 def list_files_view(owner: str, kb_id: str, pipe: "RagPipeline") -> list[dict]:
