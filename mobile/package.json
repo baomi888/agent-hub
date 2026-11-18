@@ -4,6 +4,7 @@
   "main": "index.ts",
   "dependencies": {
     "expo": "~58.0.25",
+    "expo-constants": "~58.0.16",
     "expo-haptics": "~58.0.8",
     "expo-splash-screen": "~58.0.14",
     "expo-status-bar": "~58.0.5",

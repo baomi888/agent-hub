@@ -35,6 +35,44 @@ Expo + `react-native-webview` 的外壳，里面装的是 `https://myzhisui.cn`�
 
 ---
 
+## 零之二、版本管理（发新包只改一处）
+
+壳会自己发现新版：首屏加载完后拉一次 `https://myzhisui.cn/app-version.json`，
+把里面的 `versionCode` 和当前包的原生构建号比一下，大就弹「发现新版本」。
+「去更新」交给系统浏览器打开 APK 地址，「以后再说」本次运行不再提示。
+断网、404、清单写坏全部静默 —— 更新检查是锦上添花，不能挡住首屏，
+更不能因为它弹错误框。
+
+版本号只有三处，**不要手改**（三处对不上，要么老包永远查不到新版，
+要么明明已经最新还天天弹窗）：
+
+| 文件 | 字段 | 作用 |
+|---|---|---|
+| `mobile/app.json` | `version` / `android.versionCode` / `ios.buildNumber` | 构建时写进安装包；安卓靠 versionCode 判断新旧 |
+| `mobile/version.ts` | `VERSION_FALLBACK` | 读不到嵌入配置时，界面上显示的兜底版本 |
+| `frontend/public/app-version.json` | `version` / `versionCode` / `url` / `notes` | 线上清单，旧包靠它发现新版 |
+
+发版（在仓库根目录）：
+
+```bash
+python tools/bump_app_version.py 0.2.1 --notes "修了启动屏时长"
+git add mobile frontend/public/app-version.json
+git commit -m "release: 0.2.1"
+git push
+```
+
+脚本会把三处一起改掉，`versionCode` 默认 +1。CI 第一步就校验
+`app.json` 与清单是否一致（不一致直接红），然后出 APK，并把
+`v0.2.1（versionCode 3）` 写进 Release 说明。
+
+⚠️ 清单是前端静态文件，**推完代码还要部署一次前端**老包才查得到新版。
+APK 本身可以晚一点下载，两者互不阻塞。
+
+⚠️ `versionCode` 必须递增。安卓覆盖安装时新包小于等于已装版本会直接失败，
+而且只提示「应用未安装」，不告诉你原因。
+
+---
+
 ## 一、为什么是壳，不是重写
 
 团队 5 个人，Web 上已经有 14 个控制台页面 + 论坛（发图 / 举报 / 楼中楼 / 单皮肤）。
@@ -52,8 +90,9 @@ Expo + `react-native-webview` 的外壳，里面装的是 `https://myzhisui.cn`�
 
 | 文件 | 作用 |
 |---|---|
-| `App.tsx` | 唯一一屏：WebView + 加载态 + 错误重试 + 返回键 + 外链拦截 |
-| `app.json` | 包名、图标、权限描述、启动图 |
+| `App.tsx` | 唯一一屏：WebView + 启动屏控制 + 加载态 + 错误重试 + 返回键 + 外链拦截 + 更新提示 |
+| `version.ts` | 版本号读取与「检查更新」（对照线上 `app-version.json`） |
+| `app.json` | 包名、版本、图标、权限描述、启动图 |
 | `eas.json` | 云构建配置（`preview` 出内测包） |
 | `assets/` | 图标与启动图，由 `tools/make_app_icons.py` 生成 |
 
@@ -69,6 +108,7 @@ Expo + `react-native-webview` 的外壳，里面装的是 `https://myzhisui.cn`�
 | `userInterfaceStyle` | `automatic` | 写成 `light` 的话，系统开深色时 App 里永远浅色，和浏览器不一致 |
 | `ios.infoPlist.NSPhotoLibraryUsageDescription` | 有 | **没有就闪退**（论坛发图点「选图片」那一刻进程被 kill，不报错） |
 | `ios.buildNumber` | 每次上传 +1 | 重复会被 App Store Connect 拒收（EAS 生产 profile 已开 `autoIncrement`） |
+| `android.versionCode` | 每次 +1 | 不递增的话新包盖不了旧包，安装失败且只说「应用未安装」 |
 | `ios.supportsTablet` | `false` | 开真的话审核会要 iPad 截图，而布局没在 iPad 上验过 |
 
 ---

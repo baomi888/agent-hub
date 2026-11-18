@@ -1,17 +1,24 @@
 import { StatusBar } from "expo-status-bar";
 import * as Haptics from "expo-haptics";
+import * as SplashScreen from "expo-splash-screen";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComponentType, Ref } from "react";
 import {
   ActivityIndicator,
   BackHandler,
   Linking,
+  Modal,
   Platform,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import {
+  APP_VERSION_LABEL,
+  checkForUpdate,
+  type AppUpdate,
+} from "./version";
 import {
   WebView as RawWebView,
   type WebViewProps,
@@ -63,6 +70,33 @@ function hostOf(url: string): string {
   return m ? m[1].toLowerCase() : "";
 }
 
+/** 版本清单的位置。跟着前台站点走，和 Web 一起部署（frontend/public/app-version.json）。 */
+const VERSION_MANIFEST = `${SITE}/app-version.json`;
+
+/* ── 启动屏：自己接管，不让系统一准备好就掀盖头 ─────────────────────
+ *
+ * iOS 的启动屏默认会淡出（setOptions 的 duration / fade），观感是「放完了再走」；
+ * Android 12+ 的系统启动屏则是把 app 图标当 animated icon 播一段入场动画，
+ * 只要 JS 首帧一画好就立刻退场 —— 在快机器上这段动画还没播完，看起来就是
+ * 「闪一下进去了」。两边观感不一致，用户第一句话就是「安卓启动动画太短」。
+ *
+ * 做法：模块加载时先 preventAutoHide，等根视图真的排完版、并且至少过了
+ * SPLASH_MIN_MS，才调 hide() 把控制权交回系统。此时底下已经画好了加载态
+ * （同一张纸色），Android 12 是交叉淡出，iOS 走 450ms 淡出，都不跳帧。
+ *
+ * STARTED_AT 从模块求值算起，包含 JS 引擎初始化 + 取 bundle 的时间，
+ * 所以「至少停留 1.6s」里已经含了真实冷启动耗时，不会额外拖慢。
+ */
+const SPLASH_MIN_MS = 1600;
+/** 兜底：万一根视图迟迟不出 layout，也不能永远停在启动屏上。 */
+const SPLASH_MAX_MS = 3200;
+const STARTED_AT = Date.now();
+
+/* 必须在首个渲染前调用。失败（例如热重载时已经隐藏过）不致命，吞掉即可。 */
+SplashScreen.preventAutoHideAsync().catch(() => {});
+/* 450ms 与系统默认的退场节奏接近；fade 目前只对 iOS 生效，安卓交给系统做交叉淡出。 */
+SplashScreen.setOptions({ duration: 450, fade: true });
+
 function AppInner() {
   const webRef = useRef<RawWebView>(null);
   const canGoBack = useRef(false);
@@ -70,6 +104,34 @@ function AppInner() {
   const [firstLoad, setFirstLoad] = useState(true);
   const [failed, setFailed] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+
+  /* 根视图是否已经排完版：只有排完版，底下才真正画好了加载态，
+     这时掀启动屏才不会露出白底。 */
+  const [laidOut, setLaidOut] = useState(false);
+  const [update, setUpdate] = useState<AppUpdate | null>(null);
+  const splashHidden = useRef(false);
+  const updateChecked = useRef(false);
+
+  const hideSplash = useCallback(() => {
+    if (splashHidden.current) return;
+    splashHidden.current = true;
+    SplashScreen.hide();
+  }, []);
+
+  /* 至少停留 SPLASH_MIN_MS 再交出启动屏。减去已经过去的冷启动时间，
+     所以慢机器上等的是「还差多少」，不是再等满 1.6s。 */
+  useEffect(() => {
+    if (!laidOut) return;
+    const wait = Math.max(0, SPLASH_MIN_MS - (Date.now() - STARTED_AT));
+    const timer = setTimeout(hideSplash, wait);
+    return () => clearTimeout(timer);
+  }, [laidOut, hideSplash]);
+
+  /* 兜底：layout 一直不来也不能卡死。 */
+  useEffect(() => {
+    const timer = setTimeout(hideSplash, SPLASH_MAX_MS);
+    return () => clearTimeout(timer);
+  }, [hideSplash]);
 
   /* 安卓物理返回键：能后退就后退，退到底才交给系统退出。
      不处理的话，用户在任何页面按一下返回就直接退出 App —— 这是 WebView
@@ -117,8 +179,29 @@ function AppInner() {
     setReloadKey((k) => k + 1);
   }, []);
 
+  /* 首屏进来后再查版本：不跟启动抢网络和 JS 线程，也避免在加载页上盖弹窗。
+     只在真的更新时 setUpdate —— 断网、404、清单写坏都静默。
+     目前清单里指向的是安卓 APK，所以只在安卓上查。 */
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    if (firstLoad || failed || updateChecked.current) return;
+    const timer = setTimeout(() => {
+      updateChecked.current = true;
+      checkForUpdate(VERSION_MANIFEST).then((info) => {
+        if (info) setUpdate(info);
+      });
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [firstLoad, failed]);
+
+  const openUpdate = useCallback(() => {
+    if (!update) return;
+    setUpdate(null);
+    Linking.openURL(update.url).catch(() => {});
+  }, [update]);
+
   return (
-    <View style={styles.root}>
+    <View style={styles.root} onLayout={() => setLaidOut(true)}>
       {/* auto：跟随系统深浅色。配合 app.json 的 userInterfaceStyle: "automatic"，
           深色模式下状态栏自动转白字 —— 与 Web 侧的黑透状态栏是同一套观感。
           注意 expo-status-bar 没有 translucent（那是 RN 内置 StatusBar 的属性），
@@ -192,6 +275,7 @@ function AppInner() {
         <View style={styles.overlay} pointerEvents="none">
           <ActivityIndicator size="large" color="#C8892A" />
           <Text style={styles.overlayText}>正在打开知穗…</Text>
+          <Text style={styles.versionTag}>{APP_VERSION_LABEL}</Text>
         </View>
       )}
 
@@ -206,8 +290,37 @@ function AppInner() {
           <Pressable style={styles.retry} onPress={retry}>
             <Text style={styles.retryText}>重新加载</Text>
           </Pressable>
+          <Text style={styles.versionTag}>{APP_VERSION_LABEL}</Text>
         </View>
       )}
+
+      {/* 版本提示。只在线上清单比当前包新时出现，所以正常使用永远看不到；
+          用原生 Modal 是为了盖在 WebView 之上（安卓的 WebView 是独立 surface）。 */}
+      <Modal
+        visible={update !== null}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setUpdate(null)}
+      >
+        <View style={styles.updateBackdrop}>
+          <View style={styles.updateCard}>
+            <Text style={styles.updateKicker}>发现新版本</Text>
+            <Text style={styles.updateTitle}>知穗 {update ? `v${update.version}` : ""}</Text>
+            {update?.notes ? <Text style={styles.updateNotes}>{update.notes}</Text> : null}
+            <Text style={styles.updateMeta}>
+              {update?.versionCode ? `新包版本号 ${update.versionCode} · ` : ""}
+              当前 {APP_VERSION_LABEL}
+            </Text>
+            <Pressable style={styles.updatePrimary} onPress={openUpdate}>
+              <Text style={styles.updatePrimaryText}>去更新</Text>
+            </Pressable>
+            <Pressable style={styles.updateGhost} onPress={() => setUpdate(null)}>
+              <Text style={styles.updateGhostText}>以后再说</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -238,6 +351,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
   },
   overlayText: { fontSize: 15, color: "#6B5B3E" },
+  /* 版本小字压在最下面，不参与居中排布：加载页的视觉重心还是 spinner。 */
+  versionTag: {
+    position: "absolute",
+    bottom: 44,
+    fontSize: 12,
+    letterSpacing: 0.3,
+    color: "#8A7A5C",
+  },
 
   errTitle: { fontSize: 20, fontWeight: "600", color: "#2A2418" },
   errBody: { fontSize: 15, lineHeight: 23, color: "#6B5B3E", textAlign: "center" },
@@ -249,4 +370,36 @@ const styles = StyleSheet.create({
     backgroundColor: "#2A2418",
   },
   retryText: { fontSize: 15, fontWeight: "600", color: "#F6EED8" },
+
+  updateBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(26, 22, 16, 0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 28,
+  },
+  updateCard: {
+    width: "100%",
+    maxWidth: 360,
+    backgroundColor: "#F6EED8",
+    borderRadius: 22,
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    paddingBottom: 18,
+    gap: 8,
+  },
+  updateKicker: { fontSize: 12, letterSpacing: 1, color: "#C8892A" },
+  updateTitle: { fontSize: 22, fontWeight: "700", color: "#2A2418" },
+  updateNotes: { fontSize: 14, lineHeight: 21, color: "#6B5B3E" },
+  updateMeta: { fontSize: 12, color: "#8A7A5C", marginBottom: 6 },
+  updatePrimary: {
+    marginTop: 6,
+    paddingVertical: 13,
+    borderRadius: 999,
+    backgroundColor: "#2A2418",
+    alignItems: "center",
+  },
+  updatePrimaryText: { fontSize: 15, fontWeight: "600", color: "#F6EED8" },
+  updateGhost: { paddingVertical: 10, alignItems: "center" },
+  updateGhostText: { fontSize: 14, color: "#6B5B3E" },
 });

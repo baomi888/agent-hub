@@ -64,6 +64,37 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
+      # 版本真值在 app.json，线上清单在 frontend/public/app-version.json。
+      # 两处不一致的后果：要么老包永远查不到更新，要么明明已经是最新还天天弹窗。
+      # 用 tools/bump_app_version.py 改版本就不会走到这里。
+      - name: Check version consistency
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const app = JSON.parse(fs.readFileSync('app.json', 'utf8')).expo;
+          const manifestPath = '../frontend/public/app-version.json';
+          const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+          const code = app.android.versionCode;
+          if (manifest.version !== app.version || manifest.versionCode !== code) {
+            console.error(
+              `版本不一致：app.json = ${app.version} (${code})，` +
+              `${manifestPath} = ${manifest.version} (${manifest.versionCode})。` +
+              '请用 python tools/bump_app_version.py 改版本。'
+            );
+            process.exit(1);
+          }
+          console.log(`版本 ${app.version} (${code})，清单一致`);
+          NODE
+
+      # 同时把版本号带给 Release 说明，评委/download 页能一眼看出装的是哪个包
+      - name: Read app version
+        id: appver
+        run: |
+          {
+            echo "version=$(node -p "require('./app.json').expo.version")"
+            echo "code=$(node -p "require('./app.json').expo.android.versionCode")"
+          } >> "$GITHUB_OUTPUT"
+
       # 用 CNG 现场生成 android/（仓库里没有、也不该有 /android 目录，见 mobile/AGENTS.md）
       - name: Prebuild Android project
         run: npx expo prebuild --platform android --no-install
@@ -105,5 +136,6 @@ jobs:
 
             安装：手机浏览器下载后，允许「安装未知应用」即可。仅用于答辩演示。
 
+            版本：v${{ steps.appver.outputs.version }}（versionCode ${{ steps.appver.outputs.code }}）
             构建：`${{ github.sha }}`（run #${{ github.run_number }}）
           files: out/zhisui-android-demo.apk
