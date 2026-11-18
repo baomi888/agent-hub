@@ -94,6 +94,10 @@ const STARTED_AT = Date.now();
 
 /* 必须在首个渲染前调用。失败（例如热重载时已经隐藏过）不致命，吞掉即可。 */
 SplashScreen.preventAutoHideAsync().catch(() => {});
+/* 最后一道保险：万一根组件都没挂起来（渲染期抛错），AppInner 里的定时器不会执行，
+ * 这里在 React 之外再兜一层，最迟 SPLASH_MAX_MS + 800ms 一定掀盖头，
+ * 绝不把用户留在启动屏上。hide() 只是把一个 flag 置 false，重复调用无害。 */
+setTimeout(() => SplashScreen.hide(), SPLASH_MAX_MS + 800);
 /* 450ms 与系统默认的退场节奏接近；fade 目前只对 iOS 生效，安卓交给系统做交叉淡出。 */
 SplashScreen.setOptions({ duration: 450, fade: true });
 
