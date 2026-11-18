@@ -1,11 +1,12 @@
 import { StatusBar } from "expo-status-bar";
 import * as Haptics from "expo-haptics";
-import * as SplashScreen from "expo-splash-screen";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComponentType, Ref } from "react";
 import {
   ActivityIndicator,
+  Animated,
   BackHandler,
+  Easing,
   Linking,
   Modal,
   Platform,
@@ -70,36 +71,73 @@ function hostOf(url: string): string {
   return m ? m[1].toLowerCase() : "";
 }
 
-/** 版本清单的位置。跟着前台站点走，和 Web 一起部署（frontend/public/app-version.json）。 */
+/* ── 开场动画：不跟系统启动屏较劲，自己在 React 里画 ─────────────────
+ *
+ * 上一版试过在模块加载时 preventAutoHideAsync、等 1.6s 再 hide()，想让系统
+ * 启动屏多停一会儿。但 expo-splash-screen 的安卓实现根本没调
+ * setKeepOnScreenCondition（见 SplashScreenManager.kt 注释），系统启动屏
+ * 该怎么退场还是怎么退场；我们只是把「内容不许画」的 OnPreDrawListener
+ * 按住了。结果图标先没了，只剩一张纸干等着，看起来就是「动画没了」。
+ *
+ * 现在：系统启动屏就干它本来的活（第一帧之前挡一下），真正的开场动画
+ * 放在 React 里画。所以这里**不做淡入** —— 第一帧的玉米就已经是满不透明、
+ * 原尺寸，和系统启动屏留下的那一帧一模一样（同为纸色底、同为 180dp，
+ * 见 app.json 的 imageWidth），接手时不会闪一下再出现。
+ * 之后是「静静地呼吸 + 完整淡出」，两个平台同一套时长与缓动。
+ */
+const INTRO_HOLD_MS = 1000; // 玉米停住的时间，长到能看清，又不至于让人等
+const INTRO_OUT_MS = 380; // 淡出；iOS 默认淡出约 450ms，取接近值
+const INTRO_ZOOM = 1.06; // 停留期间极缓慢地放大一点，不然静止太久像卡住
+const SPLASH_ART = require("./assets/splash-icon.png");
+
 const VERSION_MANIFEST = `${SITE}/app-version.json`;
 
-/* ── 启动屏：自己接管，不让系统一准备好就掀盖头 ─────────────────────
- *
- * iOS 的启动屏默认会淡出（setOptions 的 duration / fade），观感是「放完了再走」；
- * Android 12+ 的系统启动屏则是把 app 图标当 animated icon 播一段入场动画，
- * 只要 JS 首帧一画好就立刻退场 —— 在快机器上这段动画还没播完，看起来就是
- * 「闪一下进去了」。两边观感不一致，用户第一句话就是「安卓启动动画太短」。
- *
- * 做法：模块加载时先 preventAutoHide，等根视图真的排完版、并且至少过了
- * SPLASH_MIN_MS，才调 hide() 把控制权交回系统。此时底下已经画好了加载态
- * （同一张纸色），Android 12 是交叉淡出，iOS 走 450ms 淡出，都不跳帧。
- *
- * STARTED_AT 从模块求值算起，包含 JS 引擎初始化 + 取 bundle 的时间，
- * 所以「至少停留 1.6s」里已经含了真实冷启动耗时，不会额外拖慢。
- */
-const SPLASH_MIN_MS = 1600;
-/** 兜底：万一根视图迟迟不出 layout，也不能永远停在启动屏上。 */
-const SPLASH_MAX_MS = 3200;
-const STARTED_AT = Date.now();
+function IntroSplash({ onDone }: { onDone: () => void }) {
+  /* 0 → 1 停留（带缓放），1 → 2 整层淡出。 */
+  const progress = useRef(new Animated.Value(0)).current;
 
-/* 必须在首个渲染前调用。失败（例如热重载时已经隐藏过）不致命，吞掉即可。 */
-SplashScreen.preventAutoHideAsync().catch(() => {});
-/* 最后一道保险：万一根组件都没挂起来（渲染期抛错），AppInner 里的定时器不会执行，
- * 这里在 React 之外再兜一层，最迟 SPLASH_MAX_MS + 800ms 一定掀盖头，
- * 绝不把用户留在启动屏上。hide() 只是把一个 flag 置 false，重复调用无害。 */
-setTimeout(() => SplashScreen.hide(), SPLASH_MAX_MS + 800);
-/* 450ms 与系统默认的退场节奏接近；fade 目前只对 iOS 生效，安卓交给系统做交叉淡出。 */
-SplashScreen.setOptions({ duration: 450, fade: true });
+  useEffect(() => {
+    const anim = Animated.sequence([
+      Animated.timing(progress, {
+        toValue: 1,
+        duration: INTRO_HOLD_MS,
+        easing: Easing.out(Easing.sin),
+        useNativeDriver: true,
+      }),
+      Animated.timing(progress, {
+        toValue: 2,
+        duration: INTRO_OUT_MS,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }),
+    ]);
+    anim.start(({ finished }) => {
+      if (finished) onDone();
+    });
+    return () => anim.stop();
+  }, [onDone, progress]);
+
+  const artScale = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, INTRO_ZOOM],
+    extrapolate: "clamp",
+  });
+  const coverOpacity = progress.interpolate({
+    inputRange: [1, 2],
+    outputRange: [1, 0],
+    extrapolate: "clamp",
+  });
+
+  return (
+    <Animated.View style={[styles.intro, { opacity: coverOpacity }]}>
+      <Animated.Image
+        source={SPLASH_ART}
+        resizeMode="contain"
+        style={[styles.introArt, { transform: [{ scale: artScale }] }]}
+      />
+    </Animated.View>
+  );
+}
 
 function AppInner() {
   const webRef = useRef<RawWebView>(null);
@@ -109,33 +147,12 @@ function AppInner() {
   const [failed, setFailed] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
-  /* 根视图是否已经排完版：只有排完版，底下才真正画好了加载态，
-     这时掀启动屏才不会露出白底。 */
-  const [laidOut, setLaidOut] = useState(false);
+  /* 开场动画只放一次：重试加载、切换页面都不该重播。 */
+  const [introDone, setIntroDone] = useState(false);
   const [update, setUpdate] = useState<AppUpdate | null>(null);
-  const splashHidden = useRef(false);
   const updateChecked = useRef(false);
 
-  const hideSplash = useCallback(() => {
-    if (splashHidden.current) return;
-    splashHidden.current = true;
-    SplashScreen.hide();
-  }, []);
-
-  /* 至少停留 SPLASH_MIN_MS 再交出启动屏。减去已经过去的冷启动时间，
-     所以慢机器上等的是「还差多少」，不是再等满 1.6s。 */
-  useEffect(() => {
-    if (!laidOut) return;
-    const wait = Math.max(0, SPLASH_MIN_MS - (Date.now() - STARTED_AT));
-    const timer = setTimeout(hideSplash, wait);
-    return () => clearTimeout(timer);
-  }, [laidOut, hideSplash]);
-
-  /* 兜底：layout 一直不来也不能卡死。 */
-  useEffect(() => {
-    const timer = setTimeout(hideSplash, SPLASH_MAX_MS);
-    return () => clearTimeout(timer);
-  }, [hideSplash]);
+  const finishIntro = useCallback(() => setIntroDone(true), []);
 
   /* 安卓物理返回键：能后退就后退，退到底才交给系统退出。
      不处理的话，用户在任何页面按一下返回就直接退出 App —— 这是 WebView
@@ -205,7 +222,7 @@ function AppInner() {
   }, [update]);
 
   return (
-    <View style={styles.root} onLayout={() => setLaidOut(true)}>
+    <View style={styles.root}>
       {/* auto：跟随系统深浅色。配合 app.json 的 userInterfaceStyle: "automatic"，
           深色模式下状态栏自动转白字 —— 与 Web 侧的黑透状态栏是同一套观感。
           注意 expo-status-bar 没有 translucent（那是 RN 内置 StatusBar 的属性），
@@ -298,6 +315,9 @@ function AppInner() {
         </View>
       )}
 
+      {/* 开场动画盖在最上面（但在 Modal 之下）：一次播放，播完就卸载。 */}
+      {!introDone && <IntroSplash onDone={finishIntro} />}
+
       {/* 版本提示。只在线上清单比当前包新时出现，所以正常使用永远看不到；
           用原生 Modal 是为了盖在 WebView 之上（安卓的 WebView 是独立 surface）。 */}
       <Modal
@@ -363,6 +383,20 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
     color: "#8A7A5C",
   },
+
+  /* 开场动画：底色和系统启动屏同为纸色，玉米按 app.json 的 imageWidth: 180 摆，
+     所以从启动屏切过来时位置、大小都对得上，看不出接缝。 */
+  intro: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "#EDE4C8",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  introArt: { width: 180, height: 180 },
 
   errTitle: { fontSize: 20, fontWeight: "600", color: "#2A2418" },
   errBody: { fontSize: 15, lineHeight: 23, color: "#6B5B3E", textAlign: "center" },
