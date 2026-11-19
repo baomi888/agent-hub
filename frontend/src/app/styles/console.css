@@ -6358,6 +6358,13 @@ textarea.input {
 .dash-col.peak .dash-col-track i:not(.bad):not(.zero) {
   background: var(--accent-ink);
 }
+/* 深色主题里 --accent-ink 被故意抬到与 --accent 同值（都是文字可读色，
+   见 tokens.css 深色段）—— 峰值柱会和普通柱完全同色，高亮整个失效
+   （2026-11-19 线上实测 peak == norm == rgb(224,160,58)）。深色下改用
+   奶油亮色 --ink，让峰值从一片金里跳出来；浅色不动（深金在纸底足够跳）。 */
+html.dark .dash-col.peak .dash-col-track i:not(.bad):not(.zero) {
+  background: var(--ink);
+}
 /* 0 值那天也留一条底线，否则"没有数据"和"那天不存在"分不清 */
 .dash-col-track i.zero {
   background: var(--fill-2);
