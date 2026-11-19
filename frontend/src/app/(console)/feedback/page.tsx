@@ -20,6 +20,11 @@ import { notFound } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageShell from "@/components/console/PageShell";
 import CornIcon from "@/components/CornIcon";
+import {
+  avatarIconName,
+  avatarImageUrl,
+  avatarLetter,
+} from "@/components/settings/UserAvatar";
 import { Callout, Seg, SkeletonLines } from "@/components/console/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
@@ -74,23 +79,37 @@ function fmtWhen(ts: number): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-/** 头像：有图用图，没图用首字。不引组件库 —— 这里只有一种尺寸。 */
+/**
+ * 头像：和标准头像组件同一套解析（img:/icon:/首字母），但保留反馈页自己的
+ * .fbim-face 外观与尺寸。
+ *
+ * ★ 2026-11-19 修复裂图：库里存的是 `img:<hash>` / `icon:<name>` 内部值，
+ *   旧版把 `img:xxx` 直接塞进 <img src> —— 那不是合法 URL，浏览器一律裂图。
+ *   现在经 avatarImageUrl 翻成 /api/auth/avatar/<hash>；认 icon:；图片加载
+ *   失败（文件被清理等）自动退回首字母，不再留一个破图图标。
+ */
 function Face({ name, url, size = 36 }: { name: string; url?: string; size?: number }) {
-  const ch = (name || "?").trim().slice(0, 1);
-  if (url) {
+  const img = avatarImageUrl(url);
+  const icon = avatarIconName(url);
+  // 记失败的 hash 而不是布尔值：url 换成新头像时能自动重试（同 UserAvatar）
+  const [failed, setFailed] = useState<string | null>(null);
+  const showImg = Boolean(img && failed !== img);
+  const box = { width: size, height: size };
+
+  if (showImg && img) {
     return (
       <img
         className="fbim-face"
-        src={url}
+        src={img}
         alt=""
-        style={{ width: size, height: size }}
-        loading="lazy"
+        style={box}
+        onError={() => setFailed(img)}
       />
     );
   }
   return (
-    <span className="fbim-face" style={{ width: size, height: size }} aria-hidden="true">
-      {ch}
+    <span className="fbim-face" style={box} aria-hidden="true">
+      {icon ? <CornIcon name={icon} className="h-full w-full p-[12%]" /> : avatarLetter(name)}
     </span>
   );
 }

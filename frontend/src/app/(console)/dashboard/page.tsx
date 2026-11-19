@@ -28,9 +28,10 @@ import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import PageShell from "@/components/console/PageShell";
 import CornIcon from "@/components/CornIcon";
-import { Callout, Seg, SkeletonLines } from "@/components/console/ui";
+import { Callout, Seg, SkeletonLines, ToastHost } from "@/components/console/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
+import { useToast } from "@/lib/hooks/useToast";
 import { fmtNum } from "@/lib/time";
 import type {
   ApiRankResp,
@@ -163,6 +164,17 @@ function BarRow({
  * 失败量叠在柱子**底部**（红色）而不是另画一条线：这两件事共用同一个计数量纲，
  * 叠起来才看得出"那天 1748 次里有多少是坏的"。
  */
+/**
+ * 逐日柱状图（企业级读法）。
+ *
+ * 相比原始版多三样企业看板该有的东西：
+ *   ① **水平网格线**：量级可读，不用拿尺子比柱高；
+ *   ② **峰值柱深色**：哪天最高一眼可见（不额外写数字，卡片头已有「峰值 N」，
+ *      30 天时每列才十几 px，再叠一个数字会和刻度撞 —— 2026-11-18 实测 clash）；
+ *   ③ **日期轴不截断**：只标两位「日」，完整日期在 title 里。
+ *
+ * 失败量仍叠在柱子底部（红色），与成功段共用同一量纲。
+ */
 function ColumnChart({
   series,
   withUsers,
@@ -171,56 +183,67 @@ function ColumnChart({
   withUsers?: boolean;
 }) {
   const peak = Math.max(1, ...series.map((s) => s.calls));
+  // 峰值下标：并列时取最近的一天（reduce 用 > 而不是 >=）—— 标一根就够
+  const peakIdx = series.reduce((best, s, i) => (s.calls > series[best].calls ? i : best), 0);
   // 30 天时每根柱只有十几像素宽，日期全写会糊成一团 —— 每 N 天标一个
   const every = Math.max(1, Math.ceil(series.length / 7));
   // 柱顶数值：7/14 天每根都标；更长的区间只在日期刻度处标，否则 30 根柱的
   // 30 个数字会连成一条黑带，比不标还难读。
-  // ★ 不额外给峰值补一个标记：30 天时每列只有 12px 宽，峰值柱若正好挨着
-  //   刻度列，两个数字会叠在一起（2026-11-18 实测 clash=1）。峰值本来就写在
-  //   卡片头右侧的「峰值 810」里，不需要它再出现一遍。
   const showAll = series.length <= 14;
   const label = (n: number) => (n >= 10000 ? `${Math.round(n / 1000)}k` : fmtNum(n));
   return (
-    <div className="dash-cols">
-      {series.map((s, i) => {
-        const bad = s.failed ?? 0;
-        const mark = showAll || i % every === 0;
-        const tip = [
-          s.day,
-          `${fmtNum(s.calls)} 次`,
-          bad ? `失败 ${fmtNum(bad)}` : "",
-          withUsers && typeof s.users === "number" ? `${s.users} 人` : "",
-        ]
-          .filter(Boolean)
-          .join(" · ");
-        return (
-          <div className="dash-col" key={s.day} title={tip}>
-            <div className="dash-col-track">
-              <div
-                className="dash-col-bar"
-                style={{ height: s.calls === 0 ? "2px" : `${(s.calls / peak) * 100}%` }}
-              >
-                {mark ? (
-                  <span className={`dash-col-val${s.calls === 0 ? " zero" : ""}`}>
-                    {label(s.calls)}
-                  </span>
-                ) : null}
-                {s.calls === 0 ? (
-                  <i className="zero" />
-                ) : (
-                  <>
-                    {/* 段高按**本柱自身**的比例算（除以 calls，不是 peak）：
-                        失败段要贴着这根柱的底部，而不是所有柱子共用一个比例尺 */}
-                    <i style={{ height: `${((s.calls - bad) / s.calls) * 100}%` }} />
-                    {bad ? <i className="bad" style={{ height: `${(bad / s.calls) * 100}%` }} /> : null}
-                  </>
-                )}
+    <div className="dash-chart">
+      {/* 网格只做背景参照，不抢鼠标；4 条线 = 顶 / 2/3 / 1/3 / 基线。 */}
+      <div className="dash-grid" aria-hidden="true">
+        <i /><i /><i /><i />
+      </div>
+      <div className="dash-cols">
+        {series.map((s, i) => {
+          const bad = s.failed ?? 0;
+          const mark = showAll || i % every === 0;
+          const isPeak = i === peakIdx && s.calls > 0;
+          const tip = [
+            s.day,
+            `${fmtNum(s.calls)} 次`,
+            bad ? `失败 ${fmtNum(bad)}` : "",
+            withUsers && typeof s.users === "number" ? `${s.users} 人` : "",
+          ]
+            .filter(Boolean)
+            .join(" · ");
+          return (
+            <div className={`dash-col${isPeak ? " peak" : ""}`} key={s.day} title={tip}>
+              <div className="dash-col-track">
+                <div
+                  className="dash-col-bar"
+                  style={{ height: s.calls === 0 ? "2px" : `${(s.calls / peak) * 100}%` }}
+                >
+                  {mark ? (
+                    <span
+                      className={`dash-col-val${s.calls === 0 ? " zero" : ""}${isPeak ? " peak" : ""}`}
+                    >
+                      {label(s.calls)}
+                    </span>
+                  ) : null}
+                  {s.calls === 0 ? (
+                    <i className="zero" />
+                  ) : (
+                    <>
+                      {/* 段高按**本柱自身**的比例算（除以 calls，不是 peak）：
+                          失败段要贴着这根柱的底部，而不是所有柱子共用一个比例尺 */}
+                      <i style={{ height: `${((s.calls - bad) / s.calls) * 100}%` }} />
+                      {bad ? <i className="bad" style={{ height: `${(bad / s.calls) * 100}%` }} /> : null}
+                    </>
+                  )}
+                </div>
               </div>
+              {/* ★ slice(8) 只取「日」两位：30 天窄卡里 MM-DD 五位会被裁成
+                  「1( 」「1-」（2026-11-19 图2实测），两位日稳放得下。
+                  完整日期仍在父级 title 里，悬停能看。 */}
+              <span className="dash-col-x">{i % every === 0 ? s.day.slice(8) : ""}</span>
             </div>
-            <span className="dash-col-x">{i % every === 0 ? s.day.slice(5) : ""}</span>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -245,6 +268,7 @@ export default function DashboardPage() {
   // 正在提交标记的 uid（防连点；标记后端只有一条 UPDATE，不需要全局 busy）
   const [markingUid, setMarkingUid] = useState<string | null>(null);
   const [fetchedAt, setFetchedAt] = useState<Date | null>(null);
+  const { toasts, showToast } = useToast();
 
   const load = useCallback(() => {
     if (!isAdmin) return;
@@ -306,14 +330,20 @@ export default function DashboardPage() {
       setMarkingUid(target);
       try {
         await api.admin.setUserInternal(target, internal);
+        // 成功后这一行会随 load() 重拉从榜上消失（或回到已标记清单）。
+        // 没有 toast 的话，管理员看到的是"按钮闪了一下、人没了"，分不清
+        // 是标记生效还是列表刷新抽风 —— 2026-11-19 用户的原话反馈。
+        showToast("success", internal ? "已标为内部账号" : "已取消内部标记");
         load();
       } catch (e) {
-        setOvErr(e instanceof Error ? e.message : "标记失败");
+        const msg = e instanceof Error ? e.message : "标记失败";
+        setOvErr(msg);
+        showToast("error", msg);
       } finally {
         setMarkingUid(null);
       }
     },
-    [load]
+    [load, showToast]
   );
 
   // 登录态还没确定：先什么都不渲染。
@@ -888,6 +918,7 @@ export default function DashboardPage() {
           )}
         </section>
       </div>
+      <ToastHost toasts={toasts} />
     </PageShell>
   );
 }

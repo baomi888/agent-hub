@@ -6276,8 +6276,35 @@ textarea.input {
      --r-pill 三档圆角（硬约束 41 / 45）。
    ========================================================== */
 
-/* ---------- ① 逐日柱状图 ---------- */
+/* ---------- ① 逐日柱状图 ----------
+   .dash-chart 是新的外层：网格线铺在柱区背后（顶部对齐到柱顶数值槽以下），
+   .dash-cols 仍只管柱子本身，改柱子不用动网格。 */
+.dash-chart {
+  position: relative;
+}
+.dash-grid {
+  position: absolute;
+  /* 顶部让开 20px 柱顶数值槽（和 .dash-col-track 的 padding-top 一致），
+     底部让开日期行（--fs-badge + gap），网格只覆盖真正的柱区。 */
+  top: 20px;
+  bottom: calc(var(--fs-badge) + var(--space-4));
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.dash-grid i {
+  display: block;
+  border-top: 1px dashed var(--line);
+}
+/* 基线实线，比上面三条虚线重一档：它是 0 的参照，不是刻度 */
+.dash-grid i:last-child {
+  border-top: 1px solid var(--line-strong);
+}
 .dash-cols {
+  position: relative; /* 让柱子盖在网格线之上，而不是被线穿过 */
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: minmax(0, 1fr);
@@ -6326,6 +6353,11 @@ textarea.input {
 .dash-col-track i.bad {
   background: var(--red);
 }
+/* 峰值柱：成功段压深一档（金 → 深金），一眼看出哪天最高。
+   失败段不动，红色不能被主题色盖掉。零值柱也不算峰值。 */
+.dash-col.peak .dash-col-track i:not(.bad):not(.zero) {
+  background: var(--accent-ink);
+}
 /* 0 值那天也留一条底线，否则"没有数据"和"那天不存在"分不清 */
 .dash-col-track i.zero {
   background: var(--fill-2);
@@ -6352,12 +6384,18 @@ textarea.input {
 .dash-col-val.zero {
   color: var(--text-3);
 }
+/* 峰值数字和峰值柱同为深金、加粗，但仍只用现成字号令牌（不放大字） */
+.dash-col-val.peak {
+  color: var(--accent-ink);
+  font-weight: 700;
+}
 .dash-col-x {
   font-size: var(--fs-badge);
   color: var(--text-3);
   text-align: center;
   white-space: nowrap;
-  overflow: hidden;
+  /* ★ 去掉 overflow:hidden：30 天窄卡里它会把 MM-DD 裁成「1( 」这种半字
+     （2026-11-19 图2实测）。日期现在只标两位「日」，不会溢出邻列。 */
 }
 
 /* ---------- ② 横向排行条（功能榜 / 用户榜共用） ---------- */
