@@ -49,6 +49,44 @@ const STATUS_ORDER: FeedbackStatus[] = ["open", "doing", "done", "closed"];
 /** 图表统计窗口。反馈量小，30 天比 7 天更能看出趋势。 */
 const STATS_DAYS = 30;
 
+/**
+ * 分类配色（2026-11-20）。
+ *
+ * 原图五个扇区全是一支金、只靠透明度分层，用户原话是"整体颜色太相近，
+ * 不要以金色为主，可以有不同色系"。现在一个分类一条独立色带，**同一套色
+ * 在三个地方必须一致**：环图扇区、图例、每条反馈卡头上的斜杠色块 ——
+ * 换了地方认不出是同一个分类，这套颜色就白用了。
+ *
+ * 值取 tokens.css 的 --cat-*，不在这里写死色值：深色主题要跟着换。
+ */
+const CAT_CLASS: Record<string, string> = {
+  bug: "bug",
+  answer: "answer",
+  feature: "feature",
+  ui: "ui",
+  other: "other",
+};
+
+const catClass = (value: string): string => CAT_CLASS[value] ?? "other";
+
+/**
+ * 会话里多条反馈的排序档位（2026-11-20，用户明确要求）：
+ * 待处理 → 处理中 → 已处理 → 不处理，同档内按反馈时间**先后**排。
+ *
+ * 为什么"先后"是正序而不是倒序：这一屏是清单，不是消息流。清单要从最早那条
+ * 顺着往下办，和他在 IM 里看消息时的"最新在上面"是两回事 —— 同一份数据在
+ * 两个场景里该有两个顺序，这正是原来那版按时间倒序排得不对的地方。
+ */
+const TICKET_RANK: Record<string, number> = { open: 0, doing: 1, done: 2, closed: 3 };
+
+const byPriorityThenTime = <T extends { status: string; at: number; fid: number }>(
+  a: T,
+  b: T
+): number =>
+  (TICKET_RANK[a.status] ?? 9) - (TICKET_RANK[b.status] ?? 9) ||
+  a.at - b.at ||
+  a.fid - b.fid;
+
 function fmtTime(ts: number): string {
   if (!ts) return "";
   const d = new Date(ts * 1000);
@@ -124,8 +162,12 @@ function Face({ name, url, size = 36 }: { name: string; url?: string; size?: num
  * 要在段数为 1 时仍然像个环，conic 配 mask 在 iOS 上偶发锯齿。这里段数最多 5，
  * 五个 circle 叠着画最稳。
  *
- * 颜色只用一个色相、靠透明度分层：五个不同色相在这个看板里既没有语义，
- * 深色模式下还会糊成一片（与「调用量构成」的堆叠条同一套理由）。
+ * ★ 2026-11-20 改色：原注释写的是"五个不同色相在这个看板里既没有语义"，
+ *   但分类本身就是语义（出错了 / 回答不满意 / 功能建议 / 界面与体验 / 其他），
+ *   而一支金 + 透明度分五层，在这个看板里读者根本分不出哪段是哪类。
+ *   彩色地图市场库（Datawrapper / Carbon / Material）的通例也是：
+ *   类别型数据用**定性色板**，同一色相的不同明度只用于有序型数据。
+ *   现在一段一色，图例与每条反馈卡头上的斜杠同色（见 CAT_CLASS）。
  */
 function Donut({ items }: { items: FeedbackStatsItem[] }) {
   const R = 44;
@@ -135,16 +177,16 @@ function Donut({ items }: { items: FeedbackStatsItem[] }) {
   // 环形段先折算成纯数据（起点角度 / 弧长），再渲染。
   // 不在渲染期用外部变量累加 —— 那是「渲染后改渲染前声明的值」，
   // React 19 的编译器 lint 会直接拦（reassign after render completes）。
-  // idx 沿用 items 的下标（含 n<=0 的），透明度分层口径与原来一致。
-  const segs = items.reduce<{ idx: number; draw: number; offset: number }[]>(
-    (list, it, idx) => {
+  const segs = items.reduce<{ value: string; draw: number; offset: number }[]>(
+    (list, it) => {
       if (it.n <= 0) return list;
       const len = (it.n / total) * C;
-      // 段与段之间留 1.5px 的缝，否则相邻两段同色系会黏成一体
+      // 段与段之间留 1.5px 的缝：相邻两段颜色已经不同，但太小的 1 条（回答不满意）
+      // 全靠这条缝才不至于被邻居吞掉
       const draw = Math.max(0, len - 1.5);
       const prev = list[list.length - 1];
       const offset = prev ? prev.offset + prev.draw + 1.5 : 0;
-      list.push({ idx, draw, offset });
+      list.push({ value: it.value, draw, offset });
       return list;
     },
     []
@@ -153,15 +195,15 @@ function Donut({ items }: { items: FeedbackStatsItem[] }) {
     <div className="fbim-donut">
       <svg viewBox="0 0 110 110" role="img" aria-label="反馈分类分布">
         <circle cx="55" cy="55" r={R} fill="none" stroke="var(--fill-3)" strokeWidth="12" />
-        {segs.map(({ idx, draw, offset }) => (
+        {segs.map(({ value, draw, offset }) => (
           <circle
-            key={items[idx].value}
+            key={value}
+            className={`cat-${catClass(value)}`}
             cx="55"
             cy="55"
             r={R}
             fill="none"
-            stroke="var(--accent)"
-            strokeOpacity={Math.max(0.45, 1 - idx * 0.14)}
+            stroke="currentColor"
             strokeWidth="12"
             strokeDasharray={`${draw} ${C - draw}`}
             strokeDashoffset={-offset}
@@ -173,52 +215,120 @@ function Donut({ items }: { items: FeedbackStatsItem[] }) {
         <b>{sum}</b>
         <span>区间内</span>
       </div>
+      {/*
+        ★ 2026-11-20 第三版（定稿）：色块 + 文字的网格，排在环图**正下方**。
+
+        前两版都想把文字甩到环的外圈，都没站住：
+          · 按角度撒在环外 → 五个分类中段角度挨得近，文字互相压；
+          · 左侧一列、右侧一列 → 卡片本身只有约 312px 宽，
+            左右列一撑，文字就溢出到侧栏和隔壁"每日新增"身上。
+        根因是这一栏太窄，环外根本没地方放中文标签。
+
+        现在：环居中、文字在下，**每个标签自带一个它那段环的颜色块**
+        （用户在环上看到红色 → 下面红色块旁边就是"出错了 6"）。
+        这跟"先在图例里逐个说明颜色是什么"不是一回事：色块和文字是
+        同一个标签的两半，紧挨着，不需要读者做二次对照。
+      */}
+      <ul className="fbim-cat-grid">
+        {items.map((it) => (
+          <li key={it.value} className={`cat-${catClass(it.value)}${it.n ? "" : " is-zero"}`}>
+            <span className="sw" aria-hidden="true" />
+            <span className="lb">{it.label}</span>
+            <span className="n">{it.n}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
-
 /**
- * 逐日折线（近 30 天新增）。
+ * 逐日新增（近 30 天）。
  *
- * 反馈量以"个位数"计，折线比柱状更能表达"哪天冒了一条"。面积用同一色的
- * 极淡填充，让 0 基线看得出来 —— 全是 0 时它就是一条贴着底部的直线。
+ * ★ 2026-11-20 换掉 sparkline：原版只有左右两个日期端点、没有纵轴，
+ *   用户原话是"横坐标显示不到具体天数，纵坐标也不显示有多少条"。
+ *   现在是一张**带坐标轴**的小图表：
+ *     · 纵轴：0 与最大值两档刻度 + 三档网格线，刻度取"好看的数"（1/2/5×10ⁿ）
+ *     · 横轴：每隔 7 天一个日期刻度，末端固定是今天，折线上每个非零点带数值
+ *   仍用手写 SVG 而不引入图表库：这站的图表全是静态读数、没有交互需求，
+ *   为一个 300×160 的图多拉 30KB 依赖不划算（与看板里其它图同一口径）。
  */
-function Spark({ series }: { series: { day: string; n: number }[] }) {
-  const W = 300;
-  const H = 66;
-  const max = Math.max(1, ...series.map((s) => s.n));
+function DailyTrend({ series }: { series: { day: string; n: number }[] }) {
+  // 两块画布分开算：格子区（绘图区）用 preserveAspectRatio="none" 拉伸也行，
+  // 但文字会被一起压扁 —— 所以坐标标签单独用 HTML 摆，SVG 只画线和网格。
+  const rawMax = Math.max(1, ...series.map((s) => s.n));
+  // 刻度取整：个位数数据的图最怕出现 "7.3 条"。
+  const step = rawMax <= 4 ? 1 : rawMax <= 10 ? 2 : rawMax <= 25 ? 5 : 10;
+  const top = Math.ceil(rawMax / step) * step;
+  const ticks: number[] = [];
+  for (let v = 0; v <= top; v += step) ticks.push(v);
+
   const n = series.length;
-  const pts = series.map((s, i) => {
-    const x = n <= 1 ? W / 2 : (i / (n - 1)) * W;
-    const y = H - 4 - (s.n / max) * (H - 12);
-    return [x, y] as const;
-  });
-  const line = pts
-    .map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)},${p[1].toFixed(1)}`)
-    .join(" ");
-  const area = `${line} L${W},${H} L0,${H} Z`;
+  // 0..1 的归一位置，交给 HTML 百分比布局，不依赖 SVG 的坐标系
+  const pos = series.map((s, i) => ({
+    x: n <= 1 ? 50 : (i / (n - 1)) * 100,
+    y: 100 - (s.n / top) * 100,
+    s,
+  }));
+  const line = pos.map((p, i) => `${i ? "L" : "M"}${p.x},${p.y}`).join(" ");
+  const area = `${line} L100,100 L0,100 Z`;
+  // 横轴刻度：最多 5 个，避免 390 宽时日期挤成一片
+  const xCount = n <= 1 ? 1 : Math.min(5, Math.max(2, n));
+  const xIdx = Array.from({ length: xCount }, (_, k) =>
+    Math.round((k / (xCount - 1)) * (n - 1))
+  ).filter((v, i, arr) => arr.indexOf(v) === i);
+
   return (
-    <div className="fbim-spark">
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label="每日新增反馈">
-        <path d={area} fill="var(--accent)" fillOpacity="0.10" stroke="none" />
-        <path
-          d={line}
-          fill="none"
-          stroke="var(--accent)"
-          strokeWidth="2"
-          strokeLinejoin="round"
-          strokeLinecap="round"
-          vectorEffect="non-scaling-stroke"
-        />
-        {pts.map((p, i) =>
-          series[i].n > 0 ? (
-            <circle key={series[i].day} cx={p[0]} cy={p[1]} r="2.4" fill="var(--accent)" />
-          ) : null
-        )}
-      </svg>
-      <div className="fbim-spark-x">
-        <span>{series[0]?.day.slice(5) ?? ""}</span>
-        <span>{series[series.length - 1]?.day.slice(5) ?? ""}</span>
+    <div className="fbim-trend">
+      <div className="fbim-trend-plot">
+        <div className="fbim-trend-y" aria-hidden="true">
+          {ticks
+            .slice()
+            .reverse()
+            .map((v) => (
+              <span key={v} style={{ bottom: `${(v / top) * 100}%` }}>
+                {v}
+              </span>
+            ))}
+        </div>
+        <div className="fbim-trend-canvas">
+          {ticks.slice(1).map((v) => (
+            <i key={v} className="gl" style={{ bottom: `${(v / top) * 100}%` }} />
+          ))}
+          {/* 视图框固定 0 0 100 100 + preserveAspectRatio none，等于拿百分比当坐标；
+              stroke 用 non-scaling-stroke 保证不被拉伸成粗细不一 */}
+          <svg
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            role="img"
+            aria-label={`近 ${n} 天每日新增反馈，最高 ${rawMax} 条`}
+          >
+            <path d={area} fill="var(--accent)" fillOpacity="0.10" stroke="none" />
+            <path
+              d={line}
+              fill="none"
+              stroke="var(--accent)"
+              strokeWidth="2"
+              strokeLinejoin="round"
+              strokeLinecap="round"
+              vectorEffect="non-scaling-stroke"
+            />
+          </svg>
+          {/* 圆点与数值单独一层：SVG 被横向拉伸后圆会变椭圆，用 HTML 摆才圆 */}
+          {pos.map((p) =>
+            p.s.n > 0 ? (
+              <span key={p.s.day} className="pt" style={{ left: `${p.x}%`, top: `${p.y}%` }}>
+                <b>{p.s.n}</b>
+              </span>
+            ) : null
+          )}
+        </div>
+      </div>
+      <div className="fbim-trend-x" aria-hidden="true">
+        {xIdx.map((i) => (
+          <span key={series[i].day} style={{ left: `${n <= 1 ? 50 : (i / (n - 1)) * 100}%` }}>
+            {series[i].day.slice(5)}
+          </span>
+        ))}
       </div>
     </div>
   );
@@ -398,6 +508,11 @@ export default function FeedbackPage() {
   }, [fbStatus, exportFrom, exportTo]);
 
   const statusLabel = (s: string) => dict?.statuses.find((x) => x.value === s)?.label ?? s;
+  // 环图下面那句话只用得到"最大的那一类"，在这里算一次，别在 JSX 里再排一遍
+  const topCategory =
+    stats && stats.in_range > 0
+      ? stats.by_category.reduce((a, b) => (b.n > a.n ? b : a), stats.by_category[0])
+      : null;
   const filterOptions = useMemo(
     () => [
       { value: "", label: "全部", hint: "不限状态" },
@@ -516,21 +631,18 @@ export default function FeedbackPage() {
             ) : (
               <>
                 <Donut items={stats.by_category} />
-                <ul className="fbim-legend">
-                  {stats.by_category.map((it, idx) => (
-                    <li key={it.value}>
-                      <span
-                        className="sw"
-                        style={{
-                          background: "var(--accent)",
-                          opacity: Math.max(0.45, 1 - idx * 0.14),
-                        }}
-                      />
-                      <span className="lb">{it.label}</span>
-                      <span className="n">{it.n}</span>
-                    </li>
-                  ))}
-                </ul>
+                {/* ★ 2026-11-20：图例**去掉**了。
+                    用户原话："不要先说什么颜色是什么，直接在颜色旁边有一个文字说明"。
+                    环图上每段颜色旁边已经贴了"出错了 6"（含引导线），
+                    再在下面列一遍五个色点等于让读者把同一件事读两遍。
+                    占比挪到环心下面那一行，一眼看总量 + 最大类。 */}
+                <p className="meta fbim-donut-sum">
+                  最大的「{topCategory?.label ?? "—"}」占{" "}
+                  {stats.in_range && topCategory
+                    ? Math.round((topCategory.n / stats.in_range) * 100)
+                    : 0}
+                  %
+                </p>
               </>
             )}
           </div>
@@ -546,8 +658,8 @@ export default function FeedbackPage() {
               <div className="dash-empty">这段时间没有新反馈。</div>
             ) : (
               <>
-                <Spark series={stats.series} />
-                <p className="meta" style={{ marginTop: 8 }}>
+                <DailyTrend series={stats.series} />
+                <p className="meta fbim-trend-sum">
                   区间内 <b>{stats.in_range}</b> 条 · 累计 {stats.total_all} 条
                 </p>
               </>
@@ -605,6 +717,22 @@ export default function FeedbackPage() {
                       {it.last_from === "admin" ? <em>我：</em> : null}
                       {it.preview || "（无内容）"}
                     </span>
+                    {/* 状态点：待处理=朱红实心、处理中=靛蓝描边、都办完了=灰。
+                        列表里最该一眼看到的是"这个人还有事没办"，不是时间。 */}
+                    <span className="fbim-item-st">
+                      {it.open_n > 0 ? (
+                        <i className="d open" />
+                      ) : it.doing_n > 0 ? (
+                        <i className="d doing" />
+                      ) : (
+                        <i className="d idle" />
+                      )}
+                      {it.open_n > 0
+                        ? `${it.open_n} 条待处理`
+                        : it.doing_n > 0
+                          ? `${it.doing_n} 条处理中`
+                          : "都办完了"}
+                    </span>
                   </span>
                   {it.open_n > 0 ? (
                     <span className="fbim-badge" title={`${it.open_n} 条待处理`}>
@@ -650,31 +778,26 @@ export default function FeedbackPage() {
                   </div>
                 </div>
 
-                {/*
-                  一条反馈一张卡，不是一段对话流水。
-                  ★ 原来的形态是"这个人说了什么"按时间平铺，状态按钮在头顶改
-                    **最新一条** —— 于是"想标记第三条已处理"根本做不到，点错也
-                    改不回来（用户 2026-11-19 的原话）。现在状态控件和回复框都
-                    长在卡里，fid 一路带到后端，不存在"改到别人那条上去"的可能。
-                */}
-                <div className="fbim-msgs" ref={msgsRef}>
+                            <div className="fbim-msgs" ref={msgsRef}>
                   {thread.items.length === 0 ? (
                     <div className="fbim-idle">
                       <CornIcon name="feedback" />
                       <p>这个人还没提过反馈。</p>
                     </div>
                   ) : (
-                    thread.items.map((tk) => {
-                      const showing = replyingFid === tk.fid;
-                      const draft = drafts[tk.fid] ?? "";
-                      const busy = busyFid === tk.fid;
-                      return (
+                    thread.items
+                      .slice()
+                      .sort(byPriorityThenTime)
+                      .map((tk) => (
                         <article
-                          className={`fbim-ticket${showing ? " replying" : ""}`}
+                          className="fbim-ticket"
                           key={tk.fid}
                         >
                           <div className="fbim-ticket-head">
-                            <span className="ctag info">{tk.category_label}</span>
+                            <span className={`fbim-cat cat-${catClass(tk.category)}`}>
+                              <i aria-hidden="true" />
+                              {tk.category_label}
+                            </span>
                             <span className="tm">{fmtTime(tk.at)}</span>
                           </div>
                           <div className="fbim-bubble them">{tk.text}</div>
@@ -718,7 +841,7 @@ export default function FeedbackPage() {
                                   className={`fbim-st-btn${
                                     tk.status === s ? ` on ${STATUS_CLASS[s] ?? ""}` : ""
                                   }`}
-                                  disabled={busy}
+                                  disabled={busyFid === tk.fid}
                                   aria-pressed={tk.status === s}
                                   onClick={() => void changeStatus(tk.fid, s)}
                                   title={
@@ -734,28 +857,27 @@ export default function FeedbackPage() {
                             <button
                               type="button"
                               className="btn btn-ghost btn-sm fbim-reply-btn"
-                              onClick={() => setReplyingFid(showing ? 0 : tk.fid)}
-                              aria-expanded={showing}
+                              onClick={() => setReplyingFid(replyingFid === tk.fid ? 0 : tk.fid)}
+                              aria-expanded={replyingFid === tk.fid}
                             >
-                              {showing ? "收起" : tk.replies.length ? "再回一条" : "引用这条回复"}
+                              {replyingFid === tk.fid
+                                ? "收起"
+                                : tk.replies.length
+                                  ? "再回一条"
+                                  : "引用这条回复"}
                             </button>
                           </div>
 
-                          {showing ? (
+                          {replyingFid === tk.fid ? (
                             <div className="fbim-reply-box">
                               <textarea
                                 className="input"
                                 rows={3}
                                 autoFocus
-                                value={draft}
+                                value={drafts[tk.fid] ?? ""}
                                 maxLength={dict?.limits.max_reply ?? 1000}
-                                /* 提示语必须短到能在一行里放下：390 宽时
-                                   「回复「这条的第一句」。Enter 发送，Shift+Enter 换行；
-                                   发出后不能修改。」要占三行，而 textarea 只有两行高，
-                                   最后一行会被裁掉半个字（2026-11-19 手机截图）。
-                                   引用哪条由卡片本身说清楚，不用写进 placeholder。 */
                                 placeholder="回这条。Enter 发送，Shift+Enter 换行"
-                                disabled={busy}
+                                disabled={busyFid === tk.fid}
                                 onChange={(e) =>
                                   setDrafts((d) => ({ ...d, [tk.fid]: e.target.value }))
                                 }
@@ -772,22 +894,22 @@ export default function FeedbackPage() {
                               />
                               <div className="fbim-send">
                                 <span className="meta">
-                                  {draft.trim().length}/{dict?.limits.max_reply ?? 1000}
+                                  {(drafts[tk.fid] ?? "").trim().length}/
+                                  {dict?.limits.max_reply ?? 1000}
                                 </span>
                                 <button
                                   type="button"
                                   className="btn btn-primary btn-sm"
-                                  disabled={busy || !draft.trim()}
+                                  disabled={busyFid === tk.fid || !(drafts[tk.fid] ?? "").trim()}
                                   onClick={() => void sendTo(tk.fid)}
                                 >
-                                  {busy ? "发送中…" : "发送"}
+                                  {busyFid === tk.fid ? "发送中…" : "发送"}
                                 </button>
                               </div>
                             </div>
                           ) : null}
                         </article>
-                      );
-                    })
+                      ))
                   )}
                 </div>
               </>

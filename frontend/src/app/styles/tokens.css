@@ -106,6 +106,27 @@
   --veil-strong: rgba(255, 253, 246, 0.88);
   --accent-line: rgba(200, 137, 42, 0.15);
   --accent-line-soft: rgba(200, 137, 42, 0.12);
+  /* ★ 2026-11-20 反馈面板的分类五色。
+     原来「分类分布」五个扇区只用一支金 + 透明度分层，用户原话是"整体颜色太相近，
+     不要以金色为主，可以有不同色系"。这里给每个分类一条独立色带：
+       bug    出错了     朱红 —— 报错与失败，最需要先看的那一档
+       answer 回答不满意 靛蓝 —— 质量类，和"系统坏了"是两件事
+       feature 功能建议  玉米金 —— 保留品牌色，落在"想要新东西"上
+       ui     界面与体验 青绿 —— 看得见摸得着的那一层
+       other  其他       灰褐 —— 不争抢注意力的兜底
+     本名只做图形（环图扇区、斜杠色条），-ink 才是纸底上的**文字**色：
+     五个 -ink 在 #FDFAF2 卡片上都在 4.9:1 以上、在 #EDE4C8 侧栏纸上也都过 AA。
+     深色主题在下面的 html[data-theme="dark"] 块里各配一版提亮值。 */
+  --cat-bug: #C0523F;
+  --cat-bug-ink: #A03E28;
+  --cat-answer: #4A6FA5;
+  --cat-answer-ink: #3A5C8E;
+  --cat-feature: #C8892A;
+  --cat-feature-ink: #7A510D;
+  --cat-ui: #4E8B79;
+  --cat-ui-ink: #35705E;
+  --cat-other: #8A7B63;
+  --cat-other-ink: #5E5340;
   /* 阴影只留两级：一是贴在纸上的薄卡，二是抬起/浮层。
      过去散落着 0 4px 12px rgba(30,26,18,.2)、0 8px 20px var(--glow) 这类重值，
      纸会被压成塑料片；规范 2.6 要的是 0 2px 8px rgba(61,47,26,.06) 那一档 */
@@ -359,6 +380,19 @@ html[data-fs="xl"] {
   --veil-strong: rgba(60, 49, 35, 0.88);
   --accent-line: rgba(220, 190, 130, 0.15);
   --accent-line-soft: rgba(220, 190, 130, 0.12);
+  /* 分类五色的深色版：同色相提两档明度、降一点饱和，深底上才"贴"得住。
+     五个 -ink 压在最亮的卡片 #362E1D 上分别是 6.9 / 6.4 / 7.0 / 7.3 / 5.9，
+     都过 AA；-fill 只做图形，不承载文字。 */
+  --cat-bug: #E2795F;
+  --cat-bug-ink: #E8907A;
+  --cat-answer: #7C9EC8;
+  --cat-answer-ink: #9AB8DC;
+  --cat-feature: #E0A03A;
+  --cat-feature-ink: #EBB55E;
+  --cat-ui: #6FB39A;
+  --cat-ui-ink: #8BC9B2;
+  --cat-other: #B09C7E;
+  --cat-other-ink: #C8B79C;
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.30);
   --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.40);
   /* 深色里滑块比轨道亮，本来就分得开，影子只负责压住边缘光 */

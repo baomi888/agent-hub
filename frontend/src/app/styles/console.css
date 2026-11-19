@@ -6806,17 +6806,30 @@ html.dark .dash-col.peak .dash-col-track i:not(.bad):not(.zero) {
 }
 .fbim-donut {
   position: relative;
-  width: 132px;
-  margin: 4px auto 10px;
+  /* 2026-11-20 定稿：环 + 下方色块网格两段式。
+     环本身固定 150，整块吃满卡片宽度，不再为"环外放文字"留边 ——
+     那一栏太窄（约 312px），环外放中文标签必然溢出。 */
+  width: 100%;
+  margin: 0;
 }
 .fbim-donut svg {
   display: block;
-  width: 100%;
-  height: auto;
+  width: 150px;
+  height: 150px;
+  margin: 2px auto 8px;
 }
 .fbim-donut-c {
+  /* ★ 2026-11-20 修正：原来是 inset:0 —— 铺满整个 .fbim-donut（含下方标签区，
+     高度 230），于是"13 / 区间内"被垂直居中到了**环的下半段**上，
+     正好压在蓝色那一小段（回答不满意，只有 1 条）上面。
+     现在锚定到环本体的方框（顶部居中 150×150，和 svg 尺寸一），
+     文字只落在环心里。尺寸与 .fbim-donut svg 的 150 保持一致。 */
   position: absolute;
-  inset: 0;
+  top: 2px;
+  left: 50%;
+  width: 150px;
+  height: 150px;
+  transform: translateX(-50%);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -6832,6 +6845,61 @@ html.dark .dash-col.peak .dash-col-track i:not(.bad):not(.zero) {
 .fbim-donut-c span {
   font-size: var(--fs-badge);
   color: var(--text-3);
+}
+
+/* ---------- 分类色块 + 名称（2026-11-20 定稿） ----------
+   环图上那一段是什么颜色，下面对应的那条就挂一个同色小块，紧挨着名称。
+   两列网格：五类刚好两列，标签短的不会把行撑歪。 */
+.fbim-cat-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 12px;
+}
+.fbim-cat-grid li {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.fbim-cat-grid .sw {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  /* ★ 必须用 --cat-ink，不能用 currentColor：
+     上面 .fbim-cat-grid li 把 color 设成了 --text-2（行文字色），
+     而 cat-* 类只提供了 --cat-ink 变量 —— 用 currentColor 会取到
+     行文字色，五个色块全变成同一个深灰（截图自查抓到的）。 */
+  background: var(--cat-ink);
+}
+.fbim-cat-grid .lb {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fbim-cat-grid .n {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  font-weight: 600;
+}
+/* 0 条的类别压暗：不是"不存在"，只是这次没有 */
+.fbim-cat-grid li.is-zero {
+  opacity: 0.55;
+}
+.fbim-cat-grid li.is-zero .n {
+  font-weight: 400;
+  color: var(--text-3);
+}
+.fbim-donut-sum {
+  margin-top: 2px;
+  text-align: center;
+}
+.fbim-donut-sum {
+  font-variant-numeric: tabular-nums;
 }
 .fbim-legend {
   list-style: none;
@@ -6869,6 +6937,213 @@ html.dark .dash-col.peak .dash-col-track i:not(.bad):not(.zero) {
   font-size: var(--fs-badge);
   color: var(--text-3);
   margin-top: 4px;
+}
+
+/* ---------- 分类五色（2026-11-20） ----------
+   一个类名同时定义 -fill（图形）与 -ink（文字），组件里只写 cat-bug / cat-ui…
+   两件事在这里一次说清：环图扇区用 currentColor 取 fill，图例与斜杠取各自变量。
+   颜色值全部来自 tokens.css 的 --cat-*，深色主题自动跟着换。 */
+.cat-bug {
+  color: var(--cat-bug);
+  --cat-ink: var(--cat-bug-ink);
+}
+.cat-answer {
+  color: var(--cat-answer);
+  --cat-ink: var(--cat-answer-ink);
+}
+.cat-feature {
+  color: var(--cat-feature);
+  --cat-ink: var(--cat-feature-ink);
+}
+.cat-ui {
+  color: var(--cat-ui);
+  --cat-ink: var(--cat-ui-ink);
+}
+.cat-other {
+  color: var(--cat-other);
+  --cat-ink: var(--cat-other-ink);
+}
+
+/* 图例：色块用 fill，文字仍用中性墨 —— 五色只做"认出是哪一类"，
+   不把整行字染成彩色（那会变成五个彩条，读起来更累）。 */
+.fbim-legend .sw {
+  background: currentColor;
+}
+.fbim-legend .n i {
+  display: inline-block;
+  margin-left: 5px;
+  font-style: normal;
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+  min-width: 26px;
+  text-align: right;
+}
+
+/* ---------- 反馈卡头上的分类：斜杠色块 + 分类名（2026-11-20） ----------
+   替换原来那个蓝底胶囊（`.ctag info`）：胶囊五类同色，看不出区别；
+   用户要的是"一条斜杠，旁边写是出错了还是功能建议"。
+   斜杠用 i 画、宽 3px、高 1em 上下各收 1px，圆角取自 --r-pill ——
+   不做成纯矩形是因为 1 条只有 3px 宽，直角在深色底上会糊成一道脏线。 */
+.fbim-cat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--cat-ink);
+  white-space: nowrap;
+}
+.fbim-cat i {
+  display: inline-block;
+  width: 3px;
+  height: 13px;
+  border-radius: var(--r-pill);
+  background: currentColor;
+  flex: none;
+}
+
+/* ---------- 每日新增：带坐标轴的折线 ----------
+   左边一列是纵轴刻度，右边是绘图区；横轴刻度压在绘图区下方。
+   绘图区高度固定，宽度吃满卡片 —— 所以刻度标签用 HTML 绝对定位，
+   不画进被 `preserveAspectRatio="none"` 拉伸的 SVG 里（会被压扁）。 */
+.fbim-trend {
+  margin-top: 6px;
+}
+.fbim-trend-plot {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  /* 显式行高而不是 height：height 会让两个 grid 项按内容撑高
+     （.fbim-trend-canvas 里全是绝对定位 + 100% 高度，量不出内容高） */
+  grid-template-rows: 132px;
+  gap: 6px;
+}
+.fbim-trend-y {
+  position: relative;
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.fbim-trend-y span {
+  position: absolute;
+  right: 0;
+  transform: translateY(50%);
+  line-height: 1;
+}
+.fbim-trend-canvas {
+  position: relative;
+  /* ★ 必须显式给高度（2026-11-20 截图自查）：
+     网格线是绝对定位的 <i>，SVG 是 height:100%（相对本元素），
+     所以本元素**没有任何内容撑高**；只靠 grid 行高 132px 时，grid 项
+     默认 stretch 会把它拉到行高，可它自己再算出 100% 又变成循环 ——
+     Chromium 实测直接塌成 svg 的天然尺寸 250×250，把横轴刻度和小结
+     压在了图形里。写死高度就是切断这条循环。 */
+  height: 100%;
+  min-height: 132px;
+  border-bottom: 1px solid var(--line-strong);
+  border-left: 1px solid var(--line-strong);
+}
+.fbim-trend-canvas svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.fbim-trend-canvas .gl {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px dashed var(--line);
+}
+/* 数值点：非零日期才标，避免 30 个 0 把图糊满。
+   b 是数字，外面这层只负责定位与那个小圆点。 */
+.fbim-trend-canvas .pt {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--card-bg);
+}
+.fbim-trend-canvas .pt b {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  transform: translate(-50%, -3px);
+  font-size: var(--fs-badge);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-ink);
+  line-height: 1;
+}
+.fbim-trend-x {
+  position: relative;
+  height: 18px;
+  margin: 6px 0 0 24px;
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.fbim-trend-x span {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+/* 首尾两个刻度不越出绘图区：端点靠两端对齐而不是居中 */
+.fbim-trend-x span:first-child {
+  transform: translateX(0);
+}
+.fbim-trend-x span:last-child {
+  transform: translateX(-100%);
+}
+/* 只有一个点时首尾都是它，上一条 translateX(0) 会盖掉居中 —— 这种情况直接居中 */
+.fbim-trend-x span:only-child {
+  transform: translateX(-50%);
+}
+/* 小结行：跟在折线下面。
+   ★ 2026-11-20 截图自查抓到的真问题：原来写 inline style marginTop:8，
+     而图本身在 .fbim-trend 里是 132px 高的绝对定位绘图区，横轴刻度压在
+     绘图区外 18px，小结行就跟刻度叠在了一起（第一张图里"区间内 13 条"
+     正好压在 10-22 上）。现在显式给足顶部间距，并让刻度行垫在下面。 */
+.fbim-trend-sum {
+  margin-top: 10px;
+  line-height: 1.5;
+}
+.fbim-trend-sum b {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 会话列表里的状态点（2026-11-20） ----------
+   列表第一眼要回答"这人还有事没办吗"，所以除数字角标外加一个状态点：
+   待处理=朱红实心（最急）、处理中=靛蓝描边空心中（在做）、都办完了=灰点。
+   颜色借用分类五色里语义最接近的两支（红=故障待修、蓝=进行中），
+   不新增令牌 —— 这两个色本来就为"需要动作"和"正在处理"准备着。 */
+.fbim-item-st {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+}
+.fbim-item-st .d {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+}
+.fbim-item-st .d.open {
+  background: var(--cat-bug);
+}
+.fbim-item-st .d.doing {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--cat-answer);
+}
+.fbim-item-st .d.idle {
+  background: var(--line-strong);
 }
 
 .fbim-bars {
