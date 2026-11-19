@@ -210,6 +210,11 @@
     transform: none;
   }
 }
+/* 字段多的表单弹窗（每日委托）：720px 才放得下两列字段，账号类短表单仍用 460。
+   窄屏由 width 的 min(...,100%) 自动收满，不需要另外写媒体查询。 */
+.acct-dlg--wide {
+  width: min(720px, 100%);
+}
 
 .acct-dlg-head {
   padding: var(--space-20) var(--space-20) var(--space-12);

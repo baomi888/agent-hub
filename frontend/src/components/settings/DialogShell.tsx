@@ -35,6 +35,9 @@ interface Props {
   children: ReactNode;
   /** 底部按钮区 */
   footer: ReactNode;
+  /** 宽版：字段多的表单（如每日委托，9 个字段 + 大段指令）用，桌面 720px 走两列。
+   *  默认 460px 是账号类短表单的尺寸，两者不要混用。 */
+  wide?: boolean;
 }
 
 export default function DialogShell({
@@ -45,6 +48,7 @@ export default function DialogShell({
   busy = false,
   children,
   footer,
+  wide = false,
 }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
   /** 触发本次弹窗的元素。关闭后把焦点还给它，键盘用户不会被扔回页面顶部 */
@@ -119,7 +123,7 @@ export default function DialogShell({
     // 误触空白就清空的代价比"必须点取消"大。关闭走 Esc 或底部按钮，都是显式动作。
     <div className="acct-mask">
       <div
-        className="acct-dlg"
+        className={`acct-dlg${wide ? " acct-dlg--wide" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}

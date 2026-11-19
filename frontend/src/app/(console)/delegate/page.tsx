@@ -3,7 +3,10 @@
 // P4 · 每日委托
 //
 // 页面任务：让「知穗主动来找你」这件事**可配置、可预期、可追溯**。
-//   · 可配置 —— 右侧表单常驻（不弹窗、不遮挡列表），左宽右窄
+//   · 可配置 —— 点「新建委托」弹窗出表单（2026-11-19 改：原来表单常驻页面，
+//     手机上一进视口就在屏幕底钉一条 fixed 动作条，深色+阴影看着像坏了的黑条；
+//     表单约 1000px 高，常驻还把「我的委托」挤到一屏之外）。弹窗用 DialogShell，
+//     关掉后页面只剩列表，干净。
 //   · 可预期 —— 每条都写清「什么时候触发」和「下次什么时候」
 //   · 可追溯 —— 执行历史按 trigger 区分定时 / 手动，排查「今天为什么没收到」看这一列
 //
@@ -13,6 +16,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageShell from "@/components/console/PageShell";
 import CornIcon from "@/components/CornIcon";
+import DialogShell from "@/components/settings/DialogShell";
 import { Callout, Field, NotReady, Seg, SkeletonLines, Switch, ToastHost } from "@/components/console/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
@@ -152,33 +156,21 @@ export default function DelegatePage() {
   const [sessions, setSessions] = useState<Conversation[]>([]);
   const [kbs, setKbs] = useState<KbInfo[]>([]);
   const [form, setForm] = useState<FormState>(BLANK_FORM);
+  /** 表单弹窗是否打开。form 本身不能当开关：编辑和新建都用同一个 form 对象，
+   *  关掉弹窗后 form 里还留着上次的值（下次新建会 setForm(BLANK_FORM) 覆盖），
+   *  但「是否显示」必须是独立的一位状态。 */
+  const [formOpen, setFormOpen] = useState(false);
   const [preview, setPreview] = useState<{ name: string; text: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   /** 执行历史是否展开成全量（默认只看最近 HIST_PEEK 条） */
   const [histOpen, setHistOpen] = useState(false);
-  const formRef = useRef<HTMLDivElement>(null);
 
-  /* 「创建/保存」条：手机端表单约 1000px 高，提交按钮要一直挂在屏幕底部。
-     但只在**表单进入视口时**挂 —— 否则用户在看委托列表，屏幕底下永远压着一个
-     「创建」按钮，既突兀又挡住列表最后一条。
-
-     ★ 这里不能用 position: sticky 代替。sticky 只对「已经滚过视口底边」的元素生效，
-       元素还在视口下方时不会被提前拉上来（10-30 实测：滚到「生成指令」那一屏，
-       动作条 bottom 仍停在 736，视口 844）。 */
-  const [formInView, setFormInView] = useState(false);
-  useEffect(() => {
-    const el = formRef.current;
-    const root = document.querySelector(".console-scroll");
-    if (!el || !root || typeof IntersectionObserver === "undefined") return;
-    const io = new IntersectionObserver(
-      ([entry]) => setFormInView(entry.isIntersecting),
-      // root 必须是真正的滚动容器（.console-scroll），默认 viewport 在这里永远为真
-      { root, threshold: 0.05 }
-    );
-    io.observe(el);
-    return () => io.disconnect();
-    // list.state：表单要等列表加载完才渲染，首帧 formRef 还是 null
-  }, [list.state]);
+  /** 打开表单：新建传 BLANK_FORM、编辑传 toForm(d)、示例预填传算好的对象。
+   *  统一走这里，避免某处只 setForm 忘了 setFormOpen（点了没反应的老毛病）。 */
+  const openForm = useCallback((next: FormState) => {
+    setForm(next);
+    setFormOpen(true);
+  }, []);
 
   /* ---- 首次进委托页的一次性提示 ----
      用户 B 的原话：「创建委托需要先创建一个对话，我找了一分钟左右才知道这个创建对话
@@ -279,14 +271,13 @@ export default function DelegatePage() {
     const from = preset.from ?? "模板";
     const instruction = preset.instruction;
     window.setTimeout(() => {
-      setForm((f) => ({ ...f, name: from.slice(0, 32), instruction }));
+      openForm({ ...BLANK_FORM, name: from.slice(0, 32), instruction });
       // URL 上的 ?new=1 用完就清：刷新页面不该再预填一次
       window.history.replaceState(null, "", "/delegate");
-      // 表单在右侧常驻但位置靠下，不滚过去用户会以为"点了没反应"
-      formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      // 表单改弹窗后不用滚页面 —— openForm 已经把弹窗打开了
       showToast("info", `已按「${from}」填好指令，确认频率后保存`);
     }, 0);
-  }, [showToast]);
+  }, [openForm, showToast]);
 
   // 预览浮层的 Esc 关闭 + 焦点归还。
   //
@@ -449,6 +440,7 @@ export default function DelegatePage() {
         showToast("success", `已创建「${form.name.trim()}」`);
       }
       setForm(BLANK_FORM);
+      setFormOpen(false);
       // 能成功建成一条，说明他早就过了"要不要先建对话"这道坎，这条提示不用再出现
       dismissTip();
       loadList();
@@ -483,7 +475,10 @@ export default function DelegatePage() {
     try {
       await api.delegate.remove(d.id);
       showToast("info", "已删除");
-      if (form.id === d.id) setForm(BLANK_FORM);
+      if (form.id === d.id) {
+        setForm(BLANK_FORM);
+        setFormOpen(false);
+      }
       loadList();
     } catch (e) {
       showToast("error", e instanceof Error ? e.message : "删除失败");
@@ -494,6 +489,11 @@ export default function DelegatePage() {
 
   /** dryRun=true 只生成不投递；false 才是真的发到会话里 */
   const doRun = async (d: Delegate, dryRun: boolean) => {
+    if (dryRun) {
+      // 预览浮层 z60，DialogShell 的遮罩 portal 到 body、z97 —— 两个同时开会把
+      // 预览压在弹窗底下。预览时先关表单弹窗，看完再点编辑继续改。
+      setFormOpen(false);
+    }
     if (demoGuard(dryRun ? "预览" : "立即执行")) {
       setPreview({
         name: d.name,
@@ -532,7 +532,7 @@ export default function DelegatePage() {
           <span className="ctag">
             启用中 <b style={{ fontWeight: 700, marginLeft: 3 }}>{activeCount}</b> / {MAX_ACTIVE}
           </span>
-          <button type="button" className="btn btn-primary" onClick={() => setForm(BLANK_FORM)}>
+          <button type="button" className="btn btn-primary" onClick={() => openForm(BLANK_FORM)}>
             <CornIcon name="plus" />
             新建委托
           </button>
@@ -606,7 +606,7 @@ export default function DelegatePage() {
                       className="btn btn-ghost btn-sm"
                       style={{ marginTop: 12 }}
                       onClick={() =>
-                        setForm({
+                        openForm({
                           ...BLANK_FORM,
                           name: "每日学习复盘",
                           kind: "review",
@@ -738,7 +738,7 @@ export default function DelegatePage() {
                             className="icon-btn"
                             title="编辑"
                             aria-label={`编辑 ${d.name}`}
-                            onClick={() => setForm(toForm(d))}
+                            onClick={() => openForm(toForm(d))}
                           >
                             <CornIcon name="pencil" />
                           </button>
@@ -750,17 +750,41 @@ export default function DelegatePage() {
                 )}
               </div>
 
-              {/* ============ 新建 / 编辑表单 ============ */}
-              <div ref={formRef}>
-                {/* 说明：这一块 2026-11-17 从右栏挪到「我的委托」下面。
-                    手机上两栏本来就是一栏，执行历史（最多 50 行）夹在中间，
-                    新建表单被推到三四屏之外 —— 用户以为这页只能看不能建。 */}
-                <p className="sec-label" style={{ marginTop: 22 }}>
-                  {editing ? "编辑委托" : "新建委托"}
-                </p>
-                {/* del-form-grid：宽屏两列、窄屏一列。字段横跨 900px 时
-                    「名称（3–32 字）」这种输入框会长得像一段正文。 */}
-                <div className="card card-pad del-form-grid">
+              {/* ============ 新建 / 编辑表单：弹窗（2026-11-19）============
+                  表单不再常驻页面：原来 1000px 的字段把列表挤出首屏，还在手机底部
+                  钉一条 fixed 动作条（就是用户看到的"黑条+按钮"）。现在点「新建委托」
+                  或列表里的「编辑」才弹出来，关掉后页面只剩列表和历史。 */}
+              {formOpen && (
+                <DialogShell
+                  open={formOpen}
+                  wide
+                  title={editing ? "编辑委托" : "新建委托"}
+                  desc="写清楚知穗每次要做什么、什么时候做。名字建好后不能改。"
+                  busy={busy === "submit"}
+                  onClose={() => setFormOpen(false)}
+                  footer={
+                    <div className="del-dlg-foot">
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        disabled={busy === "submit"}
+                        onClick={() => setFormOpen(false)}
+                      >
+                        取消
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        disabled={busy === "submit"}
+                        onClick={() => void submit()}
+                      >
+                        <CornIcon name="check" />
+                        {editing ? "保存" : "创建"}
+                      </button>
+                    </div>
+                  }
+                >
+                <div className="del-form-grid">
                   <Field className="wide" label="名称（3–32 字，建后不可改）">
                     <input
                       className="input"
@@ -951,29 +975,14 @@ export default function DelegatePage() {
                     </p>
                   )}
 
-                  {/* 手机上表单长约 1000px，提交按钮原来在最后一个字段之后 ——
-                      滑到中间时找不到它。is-fixed 只在窄屏固定到底部（桌面右栏常驻，
-                      一条横跨全屏的底栏反而更难用），且只在表单可见时挂上。 */}
-                  <div className={`row form-actions wide${formInView ? " is-fixed" : ""}`}>
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      style={{ flex: 1 }}
-                      disabled={busy === "submit"}
-                      onClick={() => void submit()}
-                    >
-                      <CornIcon name="check" />
-                      {editing ? "保存" : "创建"}
-                    </button>
-                    <button type="button" className="btn btn-ghost" onClick={() => setForm(BLANK_FORM)}>
-                      {editing ? "取消编辑" : "清空"}
-                    </button>
-                  </div>
                   <p className="hint wide">
                     启用中的委托上限 {MAX_ACTIVE} 条；名字撞上已有的会自动提醒你换一个。
                   </p>
+                
+                
                 </div>
-              </div>
+                </DialogShell>
+              )}
 
               {/* ---- 执行历史：只给管理员 ----
                   普通用户要的是「它上次跑成没有」，那一句已经并进每条委托的行内；

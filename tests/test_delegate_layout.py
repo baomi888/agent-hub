@@ -43,16 +43,30 @@ def test_page_is_single_column():
     assert 'className="del-page"' in src, "缺单列容器 .del-page"
 
 
-def test_form_sits_between_list_and_history():
-    """顺序必须是 我的委托 → 新建委托 → 执行历史。"""
+def test_form_is_a_modal_not_embedded_in_page():
+    """2026-11-19：表单从页面常驻改成点按钮才弹出的弹窗。
+
+    原来表单 1000px 高常驻在「我的委托」和历史之间，手机上还在屏幕底部钉一条
+    position:fixed 的动作条（用户看到的"黑条+按钮"）。现在：
+      · 表单渲染只在 formOpen 为真时发生（{formOpen && <DialogShell ...>}）；
+      · 走 DialogShell（portal / 焦点陷阱 / Esc / 焦点归还都现成）；
+      · 旧的 form-actions / is-fixed / IntersectionObserver 探测全部删除。
+
+    ★ 不能只看 "del-form-grid" 在不在 —— 弹窗里这个类名还在。要钉「表单被
+      formOpen 门控」且「页面流里没有固定动作条」。
+    """
     src = _code(PAGE)
-    i_list = src.index("我的委托")
-    i_form = src.index("del-form-grid")
-    i_hist = src.index("执行历史")
-    assert i_list < i_form < i_hist, (
-        f"顺序不对（我的委托 {i_list} / 表单 {i_form} / 历史 {i_hist}）"
-        "—— 表单必须紧跟在列表下面"
+    assert "DialogShell" in src, "表单没走 DialogShell（焦点/Esc/portal 会漏）"
+    assert re.search(r"\{formOpen\s*&&\s*\(\s*<DialogShell", src), (
+        "表单没有 formOpen 门控 —— 又变成常驻页面了"
     )
+    assert "wide" in src, "委托表单字段多，必须用宽版弹窗（默认 460 放不下两列）"
+    # 黑条三件套必须彻底消失
+    for gone in ("form-actions", "is-fixed", "formInView", "IntersectionObserver", "formRef"):
+        assert gone not in src, f"旧的固定动作条残留：{gone}"
+    css = _code(CONSOLE_CSS)
+    assert ".form-actions.is-fixed" not in css, "CSS 里固定动作条规则没删"
+    assert ":has(.form-actions.is-fixed)" not in css, "CSS 里给固定条补的留白没删"
 
 
 def test_history_is_collapsed_by_default():
@@ -94,4 +108,34 @@ def test_form_is_two_columns_on_desktop_one_on_mobile():
     tail = css[css.index(".del-form-grid") :]
     assert re.search(r"@media\s*\(max-width:\s*760px\)\s*\{[^}]*\.del-form-grid", tail, re.S), (
         "≤760 没有塌回一列 —— 手机上两列会把字压成两三个一行"
+    )
+
+
+def test_all_form_entry_points_open_the_modal():
+    """三条入口（新建按钮 / 示例预填 / 编辑 / 模板预填）都必须同时 setFormOpen。
+
+    ★ 不能只测"button 存在"：改成弹窗后最常见的回归是某个入口只 setForm、
+      忘了 setFormOpen —— 用户点了没反应，而按钮好端端在页面上。
+    """
+    src = _code(PAGE)
+    # openForm 是唯一开关：setForm + setFormOpen(true) 打包在一个 callback 里
+    assert re.search(r"const\s+openForm\s*=\s*useCallback", src), "缺 openForm 统一入口"
+    assert re.search(r"setForm\(next\);\s*setFormOpen\(true\)", src), (
+        "openForm 没同时打开弹窗"
+    )
+    # 新建按钮、示例、编辑三处都调 openForm，且页面里已无裸 setForm(...) 打开表单
+    assert src.count("openForm(") >= 4, (
+        "openForm 调用点不足 4（新建 / 示例 / 编辑 / 模板预填各一处）"
+    )
+    # 预览浮层 z60，弹窗遮罩 z97：预览时先关弹窗，否则预览被压在底下
+    assert re.search(
+        r"if\s*\(dryRun\)\s*\{[^}]*setFormOpen\(false\)", src, re.S
+    ), "预览时没先关弹窗 —— 会被 portal 的遮罩盖住"
+
+
+def test_wide_dialog_css_exists():
+    """宽版弹窗样式必须在（否则 720px 的 class 没有对应规则，仍是 460）。"""
+    css = _code(ROOT / "frontend" / "src" / "app" / "styles" / "account.css")
+    assert re.search(r"\.acct-dlg--wide\s*\{[^}]*width:\s*min\(720px", css), (
+        "缺 .acct-dlg--wide 宽度规则"
     )
