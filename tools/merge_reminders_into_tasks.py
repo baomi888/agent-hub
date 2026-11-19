@@ -109,7 +109,7 @@ def _plan_row(row: dict, now: int) -> dict | None:
 def backup() -> str:
     """备份 reminders / reminder_fires 到独立库文件，返回文件路径。"""
     stamp = datetime.now(timeutil.TZ).strftime("%Y%m%d-%H%M%S")
-    path = store._db_path().parent / f"backup-reminders-{stamp}.db"  # noqa: SLF001
+    path = Path(store._db_path()).with_name(f"backup-reminders-{stamp}.db")  # noqa: SLF001
     with task_core._conn() as conn:  # noqa: SLF001
         conn.execute("ATTACH DATABASE ? AS bak", (str(path),))
         conn.execute("CREATE TABLE bak.reminders AS SELECT * FROM reminders")
