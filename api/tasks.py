@@ -47,13 +47,20 @@ class TaskIn(BaseModel):
     priority: int = Field(default=0, ge=0, le=task_core.PRIORITY_MAX)
     due_at: int | None = None
     remind_at: int | None = None
-    # Phase 1 只接受 none；给非空值是 400 而不是静默忽略
+    # 循环规则：none / daily / weekdays / weekly（提醒并入待办后打开）。
+    # 循环待办必须带 remind_at，完成后自动排下一轮（task_core.complete）。
     recurrence: str = Field(default="none")
+    # weekly 专用：0=周一 … 6=周日；其他规则传了也会被忽略
+    recurrence_weekday: int | None = Field(default=None, ge=0, le=6)
     parent_id: str | None = None
 
 
 class TaskPatch(BaseModel):
-    """局部更新。全部可选；**显式 null 表示清空**（端点用 exclude_unset）。"""
+    """局部更新。全部可选；**显式 null 表示清空**（端点用 exclude_unset）。
+
+    ★ 例外：`due_at` 的显式 null 会被拒（400）——「所有待办都要设置时间」，
+    截止时间不再允许清空；`remind_at` 仍可显式 null（取消提醒）。
+    """
 
     title: str | None = Field(default=None, min_length=1, max_length=120)
     note: str | None = Field(default=None, max_length=1000)
@@ -63,6 +70,8 @@ class TaskPatch(BaseModel):
     due_at: int | None = None
     remind_at: int | None = None
     sort_order: int | None = Field(default=None, ge=0)
+    recurrence: str | None = None
+    recurrence_weekday: int | None = Field(default=None, ge=0, le=6)
 
 
 class ReorderIn(BaseModel):

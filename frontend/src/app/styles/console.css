@@ -3809,6 +3809,16 @@ textarea.input {
   color: var(--red-ink);
   text-decoration: underline;
 }
+/* 循环待办（提醒并入待办）：截止块底部的「重复」选择 */
+.rem-recurrence {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin-top: var(--space-10);
+}
+.rem-recurrence .f {
+  display: block;
+}
 
 /* ---------- 删除确认 ---------- */
 .rem-confirm {
@@ -7460,6 +7470,252 @@ img.fbim-face {
   .fbim-export-btn {
     width: 100%;
     margin-left: 0;
+  }
+}
+
+/* ==================== 待办日历视图（2026-11-19） ====================
+   按 outputs/待办日历视图设计稿_v1.html 实现。颜色全部 var() 引令牌，
+   圆角只用三档（卡片 12 / 控件 10 / 胶囊 999），字号不放大（13 基准）。 */
+
+/* 视图切换：与页头「列表 / 设置」同族，但独占一行 */
+.rem-viewseg {
+  display: flex;
+  gap: 3px;
+  background: var(--step-0);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+  margin-bottom: var(--space-12);
+}
+.rem-viewseg button {
+  flex: 1;
+  min-height: 38px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  background: transparent;
+  border: none;
+  border-radius: var(--r-ctl);
+  cursor: pointer;
+  transition: 0.14s;
+}
+.rem-viewseg button[aria-pressed="true"] {
+  background: var(--step-2);
+  color: var(--accent-ink);
+  font-weight: 500;
+  box-shadow: 0 1px 2px rgba(61, 47, 26, 0.08);
+}
+
+.rem-cal-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+/* ----- 月历 ----- */
+.rem-cal-card {
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: var(--space-12);
+}
+.rem-cal-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-8);
+}
+.rem-cal-nav b {
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--text-1);
+}
+.rem-cal-nav-r {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+.rem-cal-step {
+  min-width: 32px;
+  min-height: 32px;
+  font-size: var(--fs-lg);
+  color: var(--accent-ink);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.rem-cal-todaybtn {
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: var(--fs-xs);
+  color: var(--text-1);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  cursor: pointer;
+}
+.rem-cal-week {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+  margin-bottom: 4px;
+}
+.rem-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px 0;
+}
+.rem-cal-cell {
+  position: relative;
+  height: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-xs);
+  color: var(--text-1);
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  transition: 0.14s;
+}
+.rem-cal-cell:hover {
+  background: var(--fill-2, rgba(61, 47, 26, 0.07));
+}
+.rem-cal-cell.mut {
+  cursor: default;
+}
+.rem-cal-cell.mut:hover {
+  background: transparent;
+}
+/* 今天：只描边不填色，与「选中」区分 */
+.rem-cal-cell .rem-cal-num {
+  position: relative;
+  z-index: 2;
+  line-height: 1.2;
+}
+.rem-cal-cell.today .rem-cal-num {
+  border: 1px solid var(--accent);
+  border-radius: var(--r-pill);
+  padding: 1px 6px;
+  color: var(--accent-ink);
+  font-weight: 500;
+}
+/* 选中：实底金，今天与选中叠加时描边让位 */
+.rem-cal-cell.sel {
+  background: var(--accent);
+}
+.rem-cal-cell.sel .rem-cal-num {
+  color: var(--on-accent);
+  font-weight: 500;
+}
+.rem-cal-cell.sel.today .rem-cal-num {
+  border-color: transparent;
+  color: var(--on-accent);
+}
+/* 短横条：压在数字下方 7px，16×3 玉米金；含重要/紧急转红 */
+.rem-cal-bar {
+  position: absolute;
+  bottom: 7px;
+  width: 16px;
+  height: 3px;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+  z-index: 2;
+}
+.rem-cal-bar.hi {
+  background: var(--red);
+}
+.rem-cal-cell.sel .rem-cal-bar {
+  background: var(--on-accent);
+}
+.rem-cal-cell.sel .rem-cal-bar.hi {
+  background: #7a2010;
+}
+
+/* ----- 当日清单 ----- */
+.rem-cal-agenda {
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: var(--space-12);
+}
+.rem-cal-ag-hd {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: var(--space-8);
+}
+.rem-cal-ag-hd b {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text-1);
+}
+.rem-cal-ag-hd span {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.rem-cal-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+.rem-cal-empty {
+  text-align: center;
+  padding: var(--space-20) var(--space-10) var(--space-24);
+}
+.rem-cal-empty p {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.rem-cal-empty-sub {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  margin-top: var(--space-4);
+}
+.rem-cal-undated {
+  margin-top: var(--space-12);
+  padding-top: var(--space-8);
+  border-top: 1px dashed var(--line);
+}
+.rem-cal-undated > button {
+  min-height: 44px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+/* 桌面端格子里压的那条标题：手机上窄格不显示 */
+.rem-cal-title {
+  display: none;
+}
+
+/* 桌面端：左月历 + 右当日并排（设计稿 §03），小屏单列折叠 */
+@media (min-width: 901px) {
+  .rem-cal-wrap {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+    align-items: start;
+  }
+  .rem-cal-cell {
+    height: 58px;
+  }
+  .rem-cal-cell .rem-cal-title {
+    display: block;
+    font-size: var(--fs-badge);
+    color: var(--text-3);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .rem-cal-cell.sel .rem-cal-title {
+    color: var(--on-accent);
   }
 }
 

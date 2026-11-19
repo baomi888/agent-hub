@@ -11,23 +11,26 @@
 //  2. 每日委托的正文留在 /delegate —— 提醒只管"什么时候提醒你去看"，不管"写什么"；
 //  3. 番茄钟、课表等工具的编辑留在工具集 —— 这里只提供「关闭该来源」这一个开关。
 //
-// ============ 两类对象，不要第三类（docs/提醒中心UI对标与优化方案 §13）============
+// ============ 只有一类对象：待办（2026-11-19 提醒并入待办）============
 //
-//   待办 Task      用户创建、有 checkbox、可选 remind_at
+//   待办 Task      用户创建、有 checkbox、必填时间；可带提醒时间、可带循环规则
 //   联动提醒       课表/番茄钟/委托/打卡/四六级/单词/DDL/系统算出的事件，没有完成态
 //
-// ★ 联动提醒**不能完成**，只能推迟 / 暂停 / 关来源。给它一个 checkbox 是错的：
-//   勾掉之后来源那边还在，第二天照样来，用户会认为「这个勾是假的」。
-// ★ 倒计时不是第三类对象：它是 `task.due_at != null && status='open'` 的一个视图。
-//   这里没有任何「新建倒计时」的入口，也没有第二套 DDL 数据。
+// ★ 原「新建提醒」入口已删：「到点响一声」的提醒就是一条待办（带循环规则），
+//   统一从任务抽屉建。自己建的提醒对象不再存在（存量已由
+//   tools/merge_reminders_into_tasks.py 迁成待办）。
+// ★ 联动提醒仍**不能完成**，只能推迟 / 关来源（在设置页）——
+//   给它一个 checkbox 依然是错的：勾掉之后来源那边还在，第二天照样来。
+// ★ 循环待办的「完成」= 进入下一轮：后端把 due_at/remind_at 推到下一次触发
+//   时刻并重排联动提醒，卡片回到 open。想彻底停掉只能删除。
 //
-// ============ due_at 与 remind_at 必须分开 ============
+// ============ due_at 必填 ============
 //
-//   due_at    = 最晚什么时候交（「周五 23:59」）
-//   remind_at = 什么时候提醒我（「周五 20:00」）
+//   due_at    = 什么时候要做（必填；钟点可不填，落当天 23:59:59）
+//   remind_at = 什么时候提醒我（可选；循环待办必须设，且随循环推进）
 //
-// **只设 due_at 不会响**（后端不建 linked reminder）。这句话必须在界面上写出来，
-// 否则用户设完截止日期等一夜，第二天说「这个提醒坏了」。
+// 「所有待办都要设置时间」是产品决策：抽屉里日期不填不能保存，
+// 后端 create 同样 400 兜底；PATCH 显式把 due_at 置 null 也会被拒。
 //
 // ============ 时间口径 ============
 //
@@ -43,13 +46,14 @@ import type { CornIconName } from "@/components/CornIcon";
 import AiCaptureDrawer, {
   Spark,
   commitFailMessage,
-  reminderDraftOf,
+  reminderProposalToTask,
   taskDraftOf,
 } from "@/components/reminders/AiCaptureDrawer";
 import type { CommitOutcome } from "@/components/reminders/AiCaptureDrawer";
 import ReminderAccess from "@/components/reminders/ReminderAccess";
 import MailAccess from "@/components/reminders/MailAccess";
 import CourseCalendar from "@/components/reminders/CourseCalendar";
+import CalendarView from "@/components/reminders/CalendarView";
 import { Callout, Field, Seg, SkeletonLines, Switch, ToastHost } from "@/components/console/ui";
 import { haptic } from "@/lib/haptics";
 import { api } from "@/lib/api";
@@ -60,10 +64,7 @@ import { fmtHM, fmtRemaining, toMs } from "@/lib/time";
 import type {
   CaptureProposal,
   PushStatus,
-  ReminderAction,
-  ReminderDraft,
   ReminderFire,
-  ReminderFreq,
   ReminderItem,
   ReminderPrefs,
   ReminderSource,
@@ -75,21 +76,26 @@ import type {
   TaskListKey,
   TaskPatch,
   TaskPriority,
+  TaskRecurrence,
   TaskSummary,
 } from "@/lib/types";
 
-const ACTION_LABEL: Record<string, string> = {
-  notify: "只提醒",
-  agent_deliver: "让助手帮我写",
-  suggest_focus: "开始专注",
-  open_tool: "打开工具",
+/** 循环待办（提醒并入待办）的规则选项。weekly 用 WEEKDAY_OPTIONS 选「每周几」 */
+const RECURRENCE_LABEL: Record<TaskRecurrence, string> = {
+  none: "不重复",
+  daily: "每天",
+  weekdays: "工作日",
+  weekly: "每周",
 };
 
-const FREQ_OPTIONS: { value: ReminderFreq; label: string }[] = [
-  { value: "daily", label: "每天" },
-  { value: "weekdays", label: "工作日" },
-  { value: "weekly", label: "每周" },
-  { value: "once", label: "仅一次" },
+const WEEKDAY_OPTIONS = [
+  { value: "0", label: "周一" },
+  { value: "1", label: "周二" },
+  { value: "2", label: "周三" },
+  { value: "3", label: "周四" },
+  { value: "4", label: "周五" },
+  { value: "5", label: "周六" },
+  { value: "6", label: "周日" },
 ];
 
 /**
@@ -124,44 +130,6 @@ function dailyHint(daily: RemindPref): string {
   if (!daily.enabled) return `已关闭 · 改时间会重新开启`;
   return `已开启 · 每天 ${daily.time}`;
 }
-
-/**
- * 每一档「提醒时做什么」到点之后**到底会发生什么**。
- *
- * 三个词原本全是行话：用户看得见「让助手帮我写」，但不知道谁会写、写什么；
- * 「开始专注」更猜不出来。下拉里塞不下解释，就紧跟在控件下面写一行 ——
- * 这是**选择依据**，不是补充说明，放在 hover 提示里等于没有（手机上根本没有 hover）。
- */
-const ACTION_HINT: Record<string, string> = {
-  notify: "到点发一条通知，在通知栏里显示这件事，点开回到这个页面。",
-  agent_deliver: "到点把内容准备好，点通知直接看（今天的简报 / 委托）。",
-  suggest_focus: "到点直接打开专注计时，不用自己再去工具集里找。",
-  open_tool: "到点打开对应的工具页面。",
-};
-
-/**
- * 「让助手帮我写」只在**手里真有内容**的来源上成立：每日回顾、四六级、打卡、
- * 每日委托。自己建的提醒上没有东西可写，选它只会得到一条和「只提醒」一模一样的
- * 通知 —— 那不如不列出来，免得用户以为助手会替他写作业。
- *
- * 老数据（在那个过滤之前建的）里可能有这个组合，界面上仍要能显示与保存，
- * 见 `actionList` 的兜底那一段。
- */
-const AGENT_SOURCES = new Set(["system", "cet", "checkin", "delegate"]);
-
-const ACTION_OPTIONS: { value: ReminderAction; label: string }[] = [
-  { value: "notify", label: "只提醒" },
-  { value: "agent_deliver", label: "让助手帮我写" },
-  { value: "suggest_focus", label: "开始专注" },
-];
-
-function actionOptionsFor(source: string): { value: ReminderAction; label: string }[] {
-  return AGENT_SOURCES.has(source)
-    ? ACTION_OPTIONS
-    : ACTION_OPTIONS.filter((o) => o.value !== "agent_deliver");
-}
-
-const WEEK_LABELS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 
 /** 六个清单。中文只活在前端，落库是英文键（改文案不该迁数据） */
 const LIST_OPTIONS: { value: TaskListKey; label: string }[] = [
@@ -380,6 +348,13 @@ function daysLeft(ts: number, now: number): number {
  * 还会被 `react-hooks/purity` 判红（同一个组件两次渲染结果不同）。
  * 拿不到就先把倒计时和游标藏起来，一秒后它们自己出现。
  */
+/**
+ * 上次停在哪个视图（列表 / 日历）。模块级变量而不是 localStorage：
+ * SPA 内切走再回来要恢复，但强制刷新必须回「列表」—— 刷新落点的
+ * 口径与 tab 恢复一致，不把中间态写进持久存储。
+ */
+let lastView: "list" | "calendar" = "list";
+
 function useNowMinute(): number | null {
   const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
@@ -735,7 +710,6 @@ function NextCard({
   onComplete,
   onSnooze,
   onEditTask,
-  onEditEvent,
 }: {
   next: UpNext;
   now: number | null;
@@ -744,7 +718,6 @@ function NextCard({
   onComplete: (task: Task) => void;
   onSnooze: (item: ReminderItem) => void;
   onEditTask: (task: Task) => void;
-  onEditEvent: (item: ReminderItem) => void;
 }) {
   const isTask = next.kind === "task";
   const title = isTask ? next.task.title : next.item.title;
@@ -784,21 +757,21 @@ function NextCard({
       </p>
       <div className="rem-next-acts">
         {isTask ? (
-          <button type="button" className="rem-next-main" onClick={() => onComplete(next.task)}>
-            完成
-          </button>
+          <>
+            <button type="button" className="rem-next-main" onClick={() => onComplete(next.task)}>
+              完成
+            </button>
+            <button type="button" className="btn-import" onClick={() => onEditTask(next.task)}>
+              改时间
+            </button>
+          </>
         ) : (
+          /* 联动提醒只剩「推迟」：它由来源（课表/委托/每日回顾）安排，
+             合并后不再有手动改时间的入口 —— 要关去设置页的来源开关。 */
           <button type="button" className="rem-next-main" onClick={() => onSnooze(next.item)}>
             推迟 10 分钟
           </button>
         )}
-        <button
-          type="button"
-          className="btn-import"
-          onClick={() => (isTask ? onEditTask(next.task) : onEditEvent(next.item))}
-        >
-          改时间
-        </button>
       </div>
     </section>
   );
@@ -1252,231 +1225,6 @@ function SortRow({
   );
 }
 
-// ==================== 联动提醒卡片 ====================
-
-/**
- * 卡片左上角那个时刻；没有下一次就说清楚为什么。
- *
- * 「接下来」分组**不再**把星期塞进这一行（原来写 `周三 08:00`）：150px 的列里
- * 那串字会被卡片挤成两行，而且每周三的提醒本来应该一直说「每周三」，
- * 不是到了本周才提一次。星期改由下面的频率行承担（`每周三`）。
- */
-function whenMain(item: ReminderItem): string {
-  if (!item.enabled) return "已暂停";
-  if (!item.next_fire_at) return item.freq === "once" ? "已提醒过" : "还没设时间";
-  return fmtHM(toMs(item.next_fire_at));
-}
-
-/** 时刻下面那行频率：它同时承担"这条会不会重复"和"是周几" */
-function freqText(item: ReminderItem): string {
-  if (item.freq === "weekly" && item.weekday !== null) {
-    return `每周${(WEEK_LABELS[item.weekday] ?? "每周").slice(1)}`;
-  }
-  if (item.freq === "weekdays") return "工作日";
-  if (item.freq === "interval") return `每 ${item.every_minutes || 0} 分钟`;
-  if (item.freq === "once") return "仅一次";
-  return "每天";
-}
-
-/**
- * 提醒卡该挂什么图标。按 `source` 给，**不按标题猜**：
- * 用户改个标题不该让卡片的身份变来变去。
- *
- * 与 CornIcon 现有形状对齐：课表=日历、打卡=对勾、委托=公文包、四六级=地球仪。
- * 认不出的来源一律回落到铃铛 —— 提醒的身份本来就是"到点响一声"。
- */
-function eventMark(source: string): CornIconName {
-  switch (source) {
-    case "timetable":
-      return "calendar";
-    case "checkin":
-      return "check";
-    case "delegate":
-      return "briefcase";
-    case "cet":
-      return "globe";
-    case "words":
-      return "book";
-    case "focus":
-      return "clock";
-    case "system":
-      return "notes";
-    case "deadline":
-      return "task";
-    case "manual":
-      return "bell";
-    default:
-      return "bell";
-  }
-}
-
-/** 流水状态 → 两个字的短标签（卡片上没地方写整句） */
-function fireShort(f: ReminderFire): string {
-  if (f.status === "sent") return "已提醒";
-  if (f.status === "skipped_quiet") return "没提醒 · 免打扰";
-  if (f.status === "skipped_cap") return "没提醒 · 次数已满";
-  if (f.status === "skipped_empty") return "没提醒 · 没有内容";
-  if (f.status === "failed") {
-    return (f.detail || "").startsWith("missed:") ? "没提醒" : "没发出去";
-  }
-  return f.status;
-}
-
-function ReminderCard({
-  item,
-  sourceLabel,
-  onEdit,
-  onToggle,
-  onDelete,
-  onCloseSource,
-  onSnooze,
-  onOpenSources,
-  sourceOff,
-  flash,
-  nowNumber,
-  fire,
-}: {
-  item: ReminderItem;
-  sourceLabel: string;
-  onEdit: (item: ReminderItem) => void;
-  onToggle: (item: ReminderItem) => void;
-  onDelete: (item: ReminderItem) => void;
-  onCloseSource: (item: ReminderItem) => void;
-  onSnooze: (item: ReminderItem) => void;
-  onOpenSources: () => void;
-  sourceOff: boolean;
-  flash: boolean;
-  /** 「现在」的毫秒数；null = 还没拿到（首帧），这时不显示倒计时 */
-  nowNumber: number | null;
-  /** 今天的那条送达流水（有就说明「已经响过 / 被跳过」） */
-  fire: ReminderFire | null;
-}) {
-  const [open, setOpen] = useState(false);
-  const canCloseSource = item.source !== "manual" && item.source !== "system";
-  const dim = !item.enabled || sourceOff;
-
-  // 宽屏右侧那句「还有 3 小时」：970px 的卡如果只看左边 300px，
-  // 右边三分之二永远是空的 —— 与其留白，不如回答"我还能歇多久"。
-  const rest = useMemo(() => {
-    if (nowNumber === null || !item.enabled || !item.next_fire_at || sourceOff) return null;
-    return fmtRemaining(toMs(item.next_fire_at), new Date(nowNumber));
-  }, [nowNumber, item.enabled, item.next_fire_at, sourceOff]);
-
-  // 每个动作点完都先收起菜单：留着它，用户下一次点卡片会以为没响应
-  const run = (fn: () => void) => () => {
-    setOpen(false);
-    fn();
-  };
-
-  return (
-    <article
-      className="rem-card rem-event"
-      id={`rem-card-${item.id}`}
-      data-off={dim ? "1" : undefined}
-      data-flash={flash ? "1" : undefined}
-      data-shape="event"
-    >
-      <div className="rem-when">
-        {whenMain(item)}
-        <small>{freqText(item)}</small>
-      </div>
-
-      <div className="rem-main">
-        {/* 图标从「任务卡有、提醒卡没有」补齐（2026-11-17）：同一个列表里
-            两类卡片长得不一样，用户会以为下面那半屏是另一种东西。图标按来源给，
-            不再由用户挑 —— 提醒是别处派来的，它的长相该说明"谁在管这条"。
-            ★ 它是装饰，不是按钮：这一行的可点处仍然只有标题和「⋯」两个。 */}
-        <div className="rem-head">
-          <span className="rem-mark" aria-hidden="true">
-            <CornIcon name={eventMark(item.source)} className="h-full w-full" />
-          </span>
-          {/* 标题本身就是最高频的入口（改这条）。它比在卡片底下挂一排 11px
-              灰字可点得多，也把「每张卡 4 个可点」压到 2 个。 */}
-          <button
-            type="button"
-            className="rem-title"
-            onClick={() => onEdit(item)}
-            title="改时间或标题"
-          >
-            {item.title}
-          </button>
-        </div>
-        <p className="rem-meta">
-          <b>{sourceLabel}</b>
-          <span> · {ACTION_LABEL[item.action] || item.action}</span>
-          {item.source_note ? <span> · {item.source_note}</span> : null}
-          {sourceOff ? <span> · 这个功能已关闭</span> : null}
-          {fire ? (
-            <span className="rem-state" data-tone={fire.status === "sent" ? "muted" : "warn"}>
-              {" "}
-              · {fireShort(fire)}
-            </span>
-          ) : null}
-        </p>
-      </div>
-
-      <span className="rem-rest" aria-hidden={rest ? undefined : true}>
-        {rest}
-      </span>
-
-      <button
-        type="button"
-        className="rem-morebtn"
-        aria-expanded={open}
-        aria-haspopup="menu"
-        aria-label={`「${item.title}」的更多动作`}
-        onClick={() => setOpen((v) => !v)}
-      >
-        ⋯
-      </button>
-
-      {open ? (
-        <>
-          <div className="rem-scrim" onClick={() => setOpen(false)} aria-hidden="true" />
-          <div className="rem-menu" role="menu">
-            <button type="button" role="menuitem" onClick={run(() => onEdit(item))}>
-              改时间 / 标题
-            </button>
-            {item.enabled && !sourceOff ? (
-              <button type="button" role="menuitem" onClick={run(() => onSnooze(item))}>
-                推迟 10 分钟
-              </button>
-            ) : null}
-            {sourceOff ? (
-              // 来源关着时「暂停这条」会把单条也关掉，和用户想要的相反 ——
-              // 直接把他送到能做决定的地方。
-              <button type="button" role="menuitem" onClick={run(onOpenSources)}>
-                去打开「{sourceLabel}」的提醒
-              </button>
-            ) : (
-              <button type="button" role="menuitem" onClick={run(() => onToggle(item))}>
-                {item.enabled ? "暂停这条" : "恢复这条"}
-              </button>
-            )}
-            <hr />
-            {canCloseSource ? (
-              <button type="button" role="menuitem" onClick={run(() => onCloseSource(item))}>
-                不再接收「{sourceLabel}」的提醒
-              </button>
-            ) : (
-              <p>这条是你自己建的，不跟着其他功能走</p>
-            )}
-            <button
-              type="button"
-              role="menuitem"
-              data-danger="1"
-              onClick={run(() => onDelete(item))}
-            >
-              删除
-            </button>
-          </div>
-        </>
-      ) : null}
-    </article>
-  );
-}
-
-// ==================== 送达记录 ====================
 
 /**
  * 「提醒记录」。
@@ -1592,13 +1340,22 @@ function TaskDrawer({
   const [remindOn, setRemindOn] = useState(Boolean(editing?.remind_at));
   const [remindDate, setRemindDate] = useState(dateValue(editing?.remind_at ?? null));
   const [remindTime, setRemindTime] = useState(timeValue(editing?.remind_at ?? null));
+  // 循环待办（提醒并入待办）：迁移来的循环提醒在这里以「重复」出现。
+  // 循环时提醒强制开启且与截止同一时刻 —— 循环的本质就是「到点重新出现」。
+  const [recurrence, setRecurrence] = useState<TaskRecurrence>(
+    editing?.recurrence ?? "none",
+  );
+  const [recWeekday, setRecWeekday] = useState(editing?.recurrence_weekday ?? 0);
 
   const dialogRef = useDialog(open, onClose);
   if (!open) return null;
 
   const dueStamp = stampOf(dueDate, dueTime);
+  const isRecurring = recurrence !== "none";
   const remindStamp = remindOn ? stampOf(remindDate, remindTime) : null;
-  const canSubmit = title.trim().length > 0 && !busy;
+  // ★ 时间必填：「所有待办都要设置时间」。没有日期不能保存——
+  //   这个规则的入口在这里第一次出现（后端同样 400 兜底）。
+  const canSubmit = title.trim().length > 0 && Boolean(dueStamp) && !busy;
 
   /** 打开「提醒我」时给一个合理默认：截止前 1 小时，否则今晚 20:00，都过了就顺延到下一个整点 */
   const defaultRemind = (): { date: string; time: string } => {
@@ -1737,8 +1494,9 @@ function TaskDrawer({
                 提醒我 <i>到设定时间发通知；可以和截止时间不同</i>
               </div>
               <Switch
-                checked={remindOn}
+                checked={remindOn || isRecurring}
                 label="提醒我"
+                disabled={isRecurring}
                 onChange={(next) => {
                   setRemindOn(next);
                   if (next && !remindDate) {
@@ -1749,7 +1507,11 @@ function TaskDrawer({
                 }}
               />
             </div>
-            {remindOn ? (
+            {isRecurring ? (
+              <p className="rem-noSound">
+                循环待办到点会自动提醒（与截止同一时刻），完成一轮后自动排下一轮。
+              </p>
+            ) : remindOn ? (
               <div className="grid grid-cols-2 gap-2">
                 <Field label="日期">
                   <input
@@ -1775,10 +1537,10 @@ function TaskDrawer({
             )}
           </div>
 
-          {/* 截止：只到这里不会响。这句话必须写在控件旁边，而不是折叠在帮助里 */}
+          {/* 截止：必填。这句话必须写在控件旁边，而不是折叠在帮助里 */}
           <div className="rem-timeblock">
             <div className="rem-step">
-              最晚什么时候完成 <i>这是截止时间；只设它，不会收到提醒</i>
+              什么时候要做 <i>日期必填；几点可不填，默认算当天最后</i>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <Field label="日期">
@@ -1798,18 +1560,32 @@ function TaskDrawer({
                 />
               </Field>
             </div>
-            {dueDate ? (
-              <button
-                type="button"
-                className="rem-clear"
-                onClick={() => {
-                  setDueDate("");
-                  setDueTime("");
-                }}
-              >
-                清掉截止时间
-              </button>
-            ) : null}
+            {/* 循环：把迁移来的「每天/每周提醒」在同一张表单里续上。
+                选了循环，提醒随截止走（上面的提醒开关自动锁开）。 */}
+            <div className="rem-recurrence">
+              <span className="f">重复</span>
+              <Seg
+                options={[
+                  { value: "none", label: "不重复" },
+                  { value: "daily", label: "每天" },
+                  { value: "weekdays", label: "工作日" },
+                  { value: "weekly", label: "每周" },
+                ]}
+                value={recurrence}
+                onChange={(v) => setRecurrence(v as TaskRecurrence)}
+                ariaLabel="重复规则"
+                stretch
+              />
+              {recurrence === "weekly" ? (
+                <Seg
+                  options={WEEKDAY_OPTIONS}
+                  value={String(recWeekday)}
+                  onChange={(v) => setRecWeekday(Number(v))}
+                  ariaLabel="每周几"
+                  stretch
+                />
+              ) : null}
+            </div>
           </div>
 
           <Field label="备注（可选）">
@@ -1829,14 +1605,25 @@ function TaskDrawer({
         {/* 底部预览：把上面几个字段的结论合成一句，省得用户回头再核一遍 */}
         <footer className="rem-preview">
           <p
-            title={`${dueStamp ? `${mdOf(dueStamp)} 截止` : "无截止"} · ${
-              remindStamp ? `${mdOf(remindStamp)} ${fmtHM(toMs(remindStamp))} 提醒` : "不提醒"
+            title={`${dueStamp ? `${mdOf(dueStamp)} ${isRecurring ? "开始" : "截止"}` : "无截止"} · ${
+              isRecurring
+                ? `${RECURRENCE_LABEL[recurrence]}循环提醒`
+                : remindStamp
+                  ? `${mdOf(remindStamp)} ${fmtHM(toMs(remindStamp))} 提醒`
+                  : "不提醒"
             }`}
           >
-            <b>{dueStamp ? `${mdOf(dueStamp)} 截止` : "无截止时间"}</b>
+            <b>{dueStamp ? `${mdOf(dueStamp)} ${isRecurring ? "开始" : "截止"}` : "要设置时间"}</b>
             <span>
               {" "}
-              · {remindStamp ? `${mdOf(remindStamp)} ${fmtHM(toMs(remindStamp))} 提醒` : "不提醒"}
+              ·{" "}
+              {isRecurring
+                ? `${RECURRENCE_LABEL[recurrence]}${
+                    recurrence === "weekly" ? WEEKDAY_OPTIONS[recWeekday]?.label ?? "" : ""
+                  }，到点提醒`
+                : remindStamp
+                  ? `${mdOf(remindStamp)} ${fmtHM(toMs(remindStamp))} 提醒`
+                  : "不提醒"}
             </span>
           </p>
           <div className="rem-preview-acts">
@@ -1855,250 +1642,9 @@ function TaskDrawer({
                   priority,
                   note: note.trim() || null,
                   due_at: dueStamp,
-                  remind_at: remindStamp,
-                })
-              }
-            >
-              {busy ? "保存中…" : "保存"}
-            </button>
-          </div>
-        </footer>
-      </div>
-    </div>
-  );
-}
-
-// ==================== 提醒抽屉（新建 / 修改） ====================
-
-function ReminderDrawer({
-  open,
-  editing,
-  sourceName,
-  sources,
-  busy,
-  onClose,
-  onSubmit,
-}: {
-  open: boolean;
-  editing: ReminderItem | null;
-  /** 编辑时这条的来源叫法（来源只读，所以要单独传进来） */
-  sourceName: string;
-  sources: ReminderSource[];
-  busy: boolean;
-  onClose: () => void;
-  onSubmit: (draft: ReminderDraft) => void;
-}) {
-  const [title, setTitle] = useState(editing?.title ?? "");
-  const [at, setAt] = useState((editing?.override?.at || editing?.at || "20:00").slice(0, 5));
-  const [freq, setFreq] = useState<ReminderFreq>((editing?.freq as ReminderFreq) || "daily");
-  const [weekday, setWeekday] = useState(editing?.weekday ?? 0);
-  const [action, setAction] = useState<ReminderAction>(
-    (editing?.action as ReminderAction) || "notify"
-  );
-  const [source, setSource] = useState(editing?.source ?? "manual");
-
-  const dialogRef = useDialog(open, onClose);
-  if (!open) return null;
-
-  const canSubmit = title.trim().length > 0 && !busy;
-  // 来源提醒的频率由来源决定（课表每周三就是每周三），界面上不给改。
-  // 自己定的 / 每日回顾可以改，且改了要真的提交 —— 否则就是一个能点不生效的控件。
-  const isOwn = !editing || editing.source === "manual" || editing.source === "system";
-
-  const pickSource = editing ? sourceName : (sources.find((s) => s.key === source)?.label ?? "自己定的");
-  // 选项按来源给。老数据里可能存着「自己定的 + 让助手帮我写」（过滤之前建的），
-  // 这时要把它补回列表 —— 否则 select 找不到对应 option 会显示第一项，
-  // 用户一保存就被静默改成了「只提醒」，他自己完全不知道。
-  const sourceKey = editing ? editing.source : source;
-  const baseActions = actionOptionsFor(sourceKey);
-  const actionList = baseActions.some((o) => o.value === action)
-    ? baseActions
-    : [...baseActions, { value: action, label: ACTION_LABEL[action] ?? action }];
-  const freqLine =
-    freq === "weekly"
-      ? `每周${(WEEK_LABELS[weekday] ?? "周一").slice(1)} ${at}`
-      : freq === "once"
-        ? `一次 · ${at}`
-        : `${FREQ_OPTIONS.find((o) => o.value === freq)?.label ?? "每天"} ${at}`;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 sm:items-center sm:p-4">
-      <div
-        className="card rem-drawer-card w-full max-w-md"
-        style={{ maxHeight: "88dvh" }}
-        role="dialog"
-        aria-modal="true"
-        aria-label={editing ? "修改提醒" : "新建提醒"}
-        ref={dialogRef}
-      >
-        <div className="card-head px-4 pb-2 pt-4">
-          <h3 className="card-title">{editing ? "修改这条提醒" : "新建提醒"}</h3>
-          <button
-            type="button"
-            className="text-[var(--text-3)]"
-            onClick={onClose}
-            aria-label="关闭"
-          >
-            <CornIcon name="close" className="h-5 w-5" />
-          </button>
-        </div>
-
-        <div className="rem-dbody space-y-4 px-4 pb-4">
-          {/* ① 说什么 */}
-          <Field label="提醒你什么">
-            <input
-              className="input"
-              value={title}
-              maxLength={60}
-              placeholder="例如：复盘今天"
-              onChange={(e) => setTitle(e.target.value)}
-            />
-          </Field>
-
-          {/* ② 来源（规格顺序的第一位）：它决定「关掉这个来源时，这条跟不跟着停」 */}
-          {editing ? (
-            <div>
-              <span className="f">由哪个功能安排</span>
-              <p className="rem-ro">
-                这条提醒属于「{sourceName}」。建好后不能改，要换只能删掉重新建。
-              </p>
-            </div>
-          ) : (
-            <Field label="由哪个功能安排" hint="关闭这个功能后，它安排的提醒也会一起停">
-              <select
-                className="input"
-                value={source}
-                onChange={(e) => setSource(e.target.value)}
-              >
-                <option value="manual">我自己定的</option>
-                {sources.map((s) => (
-                  <option key={s.key} value={s.key}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          )}
-
-          {/* ③ 什么时候 */}
-          <div>
-            <div className="rem-step">
-              什么时候提醒你 <i>到时间就提醒；课表、打卡这类当天没有内容时不发</i>
-            </div>
-            {isOwn ? (
-              <>
-                <Seg
-                  options={FREQ_OPTIONS}
-                  value={freq}
-                  onChange={setFreq}
-                  ariaLabel="重复方式"
-                  stretch
-                />
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  <Field label="几点">
-                    <input
-                      type="time"
-                      className="input"
-                      value={at}
-                      onChange={(e) => setAt(e.target.value)}
-                    />
-                  </Field>
-                  {freq === "weekly" ? (
-                    <Field label="周几">
-                      <select
-                        className="input"
-                        value={weekday}
-                        onChange={(e) => setWeekday(Number(e.target.value))}
-                      >
-                        {WEEK_LABELS.map((label, index) => (
-                          <option key={label} value={index}>
-                            {label}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                  ) : null}
-                </div>
-              </>
-            ) : (
-              // 来源提醒：频率跟着来源走，能改的只有「几点」（落 override）
-              <>
-                <p className="rem-ro">
-                  由「{sourceName}」安排：{editing ? freqText(editing) : ""}
-                </p>
-                <div className="mt-2">
-                  <Field label="改到几点" hint="只改这一条，不影响这个功能里的其他提醒">
-                    <input
-                      type="time"
-                      className="input"
-                      value={at}
-                      onChange={(e) => setAt(e.target.value)}
-                    />
-                  </Field>
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* ④ 做什么 */}
-          <Field label="提醒时做什么">
-            <select
-              className="input"
-              value={action}
-              onChange={(e) => setAction(e.target.value as ReminderAction)}
-            >
-              {actionList.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-          {/* 选择依据，不是补充说明：三个词都是行话，不解释等于让用户盲选 */}
-          <p className="rem-actionhint">{ACTION_HINT[action] ?? ""}</p>
-
-          {/*
-           * 「怎么送达」：`service/reminder_tick.py` 只认 channels 里的 push，
-           * 写别的（inapp / telegram）会被拦下并记进流水。所以这里**不放选择器** ——
-           * 一个能点、点了却不生效的选项，比没有这个选项更让人以为"设置过了"。
-           * 也不用输入框的外形，否则看着还是像能选。
-           */}
-          <div className="rem-deliver">
-            <b>提醒方式 · 通知</b>
-            <span>
-              到时间后，提醒会出现在设备的通知栏。前提是「设置」页里已经开启通知。
-            </span>
-          </div>
-
-          {editing ? <FireDiary reminderId={editing.id} /> : null}
-        </div>
-
-        {/* 底部预览：把上面四个字段的结论合成一句，省得用户回头再核一遍 */}
-        <footer className="rem-preview">
-          <p title={`${freqLine} · ${ACTION_LABEL[action]} · ${pickSource}`}>
-            <b>{freqLine}</b>
-            <span>
-              {" "}
-              · {ACTION_LABEL[action]} · {pickSource}
-            </span>
-          </p>
-          <div className="rem-preview-acts">
-            <button type="button" className="btn-import" onClick={onClose}>
-              取消
-            </button>
-            <button
-              type="button"
-              className="btn-new"
-              disabled={!canSubmit}
-              onClick={() =>
-                onSubmit({
-                  title: title.trim(),
-                  source,
-                  freq,
-                  at,
-                  weekday: freq === "weekly" ? weekday : null,
-                  action,
-                  channels: "push",
+                  remind_at: isRecurring ? dueStamp : remindStamp,
+                  recurrence,
+                  recurrence_weekday: recurrence === "weekly" ? recWeekday : null,
                 })
               }
             >
@@ -2187,12 +1733,19 @@ export default function RemindersPage() {
   const authedId = me?.user?.id ?? null;
 
   const [tab, setTab] = useState<"list" | "settings">("list");
+  // 视图（列表 / 日历）：与主 tab 平行的第二层开关。上次停在哪个视图要记住，
+  // 但只记在**内存**里 —— 刷新回「列表」，避免把中间态落进 localStorage
+  // （设计稿 v1 的口径，与上面刷新落点的那条一致）。
+  const [view, setView] = useState<"list" | "calendar">(lastView);
   // `?tab=settings` 直接落到设置：提醒权限从「设置」搬进来之后，首页那条
   // 「打开提醒」的提示卡、教程页的「回到设置」都要能一步到位。用
   // window.location 而不是 useSearchParams：后者在 App Router 里会把整页
   // 拉进 Suspense，为了读一个参数不值得。
   useEffect(() => {
+    // 从 URL 恢复初始 tab：渲染期读 window 在 SSR 下必炸，「effect 里读完
+    // 同步 setState」是外部状态恢复的标准姿势（React 认可的例外场景）。
     const want = new URLSearchParams(window.location.search).get("tab");
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (want === "settings") setTab("settings");
   }, []);
   const [scope, setScope] = useState<Scope>("today");
@@ -2202,11 +1755,8 @@ export default function RemindersPage() {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   // AI 整理（v12 · Phase A）：只是一个壳，拆句在本地 fixture 里，一条都不入库
   const [captureOpen, setCaptureOpen] = useState(false);
-  const [reminderDrawer, setReminderDrawer] = useState(false);
-  const [editingReminder, setEditingReminder] = useState<ReminderItem | null>(null);
   const [pending, setPending] = useState<
     | { kind: "task"; task: Task }
-    | { kind: "reminder"; item: ReminderItem }
     | { kind: "bulk"; ids: string[] }
     | null
   >(null);
@@ -2321,12 +1871,6 @@ export default function RemindersPage() {
       words: "背单词",
     };
     for (const s of sources) map[s.key] = s.label;
-    return map;
-  }, [sources]);
-
-  const sourceOn = useMemo(() => {
-    const map: Record<string, boolean> = { manual: true, system: true };
-    for (const s of sources) map[s.key] = s.enabled;
     return map;
   }, [sources]);
 
@@ -2510,11 +2054,6 @@ export default function RemindersPage() {
     setTaskDrawer(true);
   }, []);
 
-  const openReminderDrawer = useCallback((item: ReminderItem | null) => {
-    setEditingReminder(item);
-    setReminderDrawer(true);
-  }, []);
-
   const submitTask = useCallback(
     async (draft: TaskDraft) => {
       setBusy(true);
@@ -2530,6 +2069,8 @@ export default function RemindersPage() {
             note: draft.note,
             due_at: draft.due_at,
             remind_at: draft.remind_at,
+            recurrence: draft.recurrence,
+            recurrence_weekday: draft.recurrence_weekday,
           };
           await api.tasks.patch(editingTask.id, patch);
           showToast("success", "已更新");
@@ -2549,49 +2090,6 @@ export default function RemindersPage() {
     [editingTask, reload, showToast]
   );
 
-  const submitReminder = useCallback(
-    async (draft: ReminderDraft) => {
-      setBusy(true);
-      try {
-        if (editingReminder) {
-          // 改时间落 override 还是 at：来源提醒（课表/委托/DDL）不该被写回来源，
-          // 手工提醒没有来源，直接改自己的 at 更直白。
-          //
-          // ⚠️ 这里以前对 weekly 传的是空值，后端 `_validate` 会直接 400
-          //    （「时间要写成 HH:MM」）—— 表现为「每周」提醒连改标题都保存不了。
-          //    现在一律传真实时刻；频率只在「自己定的 / 每日回顾」上提交，
-          //    来源提醒的频率跟着来源走，传上去反而会把来源的规则改掉。
-          const isOwn =
-            editingReminder.source === "manual" || editingReminder.source === "system";
-          // 时刻一定要是字符串：`time` 输入框永远有值（默认 20:00），
-          // 而 `override.at` 的类型不接受 null —— 以前 weekly 传 null 正是这里出的错。
-          const at = (
-            draft.at ??
-            editingReminder.override?.at ??
-            editingReminder.at ??
-            "20:00"
-          ).slice(0, 5);
-          const body = isOwn
-            ? { title: draft.title, at, freq: draft.freq, weekday: draft.weekday }
-            : { title: draft.title, override: { title: draft.title, at } };
-          await api.reminders.patch(editingReminder.id, body);
-          showToast("success", "已更新");
-        } else {
-          await api.reminders.create(draft);
-          showToast("success", "已建好，到时间会提醒你");
-        }
-        setReminderDrawer(false);
-        setEditingReminder(null);
-        await reload();
-      } catch (e) {
-        showToast("error", e instanceof Error ? e.message : "保存失败");
-      } finally {
-        setBusy(false);
-      }
-    },
-    [editingReminder, reload, showToast]
-  );
-
   /**
    * 一句话整理 → 真正写库。**逐条写，不假装原子**。
    *
@@ -2605,11 +2103,15 @@ export default function RemindersPage() {
     async (picked: CaptureProposal[]): Promise<CommitOutcome> => {
       const results = await Promise.allSettled(
         picked.map((item) => {
+          // 提醒也是待办（2026-11-19 合并）：「每天 8:30 背单词」这类产出
+          // 一律转成循环待办写进 /api/tasks，不再单独建提醒对象。
           if (item.kind === "task") return api.tasks.create(taskDraftOf(item));
-          const draft = reminderDraftOf(item);
-          // 抽屉已经拦过一轮，这里再挡一次：宁可少写一条，也不要把提醒写成哑弹
-          if (!draft) return Promise.reject(new Error("这条还没有提醒时间"));
-          return api.reminders.create(draft);
+          // now 还没走到第一格（useNowMinute 的首帧是 null）时同样拦下：
+          // 算不出「下一次」就一条都不发，宁可少写也不要写成哑弹。
+          const draft = now === null ? null : reminderProposalToTask(item, now);
+          // 抽屉已经拦过一轮，这里再挡一次：宁可少写一条，也不要把待办写成没有时间的哑弹
+          if (!draft) return Promise.reject(new Error("这条算不出时间，先补个日期"));
+          return api.tasks.create(draft);
         })
       );
 
@@ -2644,7 +2146,7 @@ export default function RemindersPage() {
       if (okIds.length > 0) await reload();
       return { okIds, issues };
     },
-    [reload, showToast]
+    [now, reload, showToast]
   );
 
   /**
@@ -2691,7 +2193,12 @@ export default function RemindersPage() {
         const res = willDone
           ? await api.tasks.complete(task.id)
           : await api.tasks.reopen(task.id);
-        if (!willDone && res?.remind_at && !res.reminder?.enabled) {
+        if (willDone && res && res.status === "open" && res.recurrence !== "none") {
+          // 循环待办：完成一轮 = 自动排下一轮（后端已推到下一次时刻并重排提醒）
+          const next = res.remind_at ? shortDay(res.remind_at, Date.now()) : "";
+          const clock = res.remind_at ? clockOf(res.remind_at) : null;
+          showToast("success", `这一轮完成${next ? `，下一轮已排到 ${next}${clock ? ` ${clock}` : ""}` : "，下一轮已排好"}`);
+        } else if (!willDone && res?.remind_at && !res.reminder?.enabled) {
           showToast("info", "提醒时间已过，请重新设置");
         } else {
           showToast("success", willDone ? "完成了" : "已恢复");
@@ -2745,10 +2252,8 @@ export default function RemindersPage() {
         await api.tasks.bulk(pending.ids, "delete");
         setPicked([]);
         setMode("normal");
-      } else if (pending.kind === "task") {
-        await api.tasks.remove(pending.task.id);
       } else {
-        await api.reminders.remove(pending.item.id);
+        await api.tasks.remove(pending.task.id);
       }
       showToast("success", "已删除");
       setPending(null);
@@ -2903,18 +2408,6 @@ export default function RemindersPage() {
     [bulkList, picked, reload, showToast]
   );
 
-  const toggleReminder = useCallback(
-    async (item: ReminderItem) => {
-      try {
-        await api.reminders.patch(item.id, { enabled: !item.enabled });
-        await reload();
-      } catch {
-        showToast("error", "改不动，稍后再试");
-      }
-    },
-    [reload, showToast]
-  );
-
   const snoozeReminder = useCallback(
     async (item: ReminderItem) => {
       try {
@@ -2923,22 +2416,6 @@ export default function RemindersPage() {
         await reload();
       } catch {
         showToast("error", "推迟失败，稍后再试");
-      }
-    },
-    [reload, showToast]
-  );
-
-  const closeSource = useCallback(
-    async (item: ReminderItem) => {
-      try {
-        const res = await api.reminders.setSource(item.source, false);
-        await reload();
-        showToast(
-          "success",
-          `已关闭「${res?.sources.find((s) => s.key === item.source)?.label ?? item.source}」的提醒`
-        );
-      } catch {
-        showToast("error", "没关掉，稍后再试");
       }
     },
     [reload, showToast]
@@ -3078,24 +2555,6 @@ export default function RemindersPage() {
     all: tasks.all.length,
     completed: tasks.completed.length,
   };
-
-  const card = (item: ReminderItem) => (
-    <ReminderCard
-      key={item.id}
-      item={item}
-      sourceLabel={sourceLabel[item.source] || item.source}
-      onEdit={openReminderDrawer}
-      onToggle={toggleReminder}
-      onDelete={(it) => setPending({ kind: "reminder", item: it })}
-      onCloseSource={closeSource}
-      onSnooze={snoozeReminder}
-      onOpenSources={() => setTab("settings")}
-      sourceOff={sourceOn[item.source] === false}
-      flash={flash === item.id}
-      nowNumber={now}
-      fire={firesToday.get(item.id) ?? null}
-    />
-  );
 
   const taskCard = (task: Task) => (
     <TaskCard
@@ -3262,7 +2721,7 @@ export default function RemindersPage() {
             type="button"
             className="btn-import rem-quick-ai"
             onClick={() => setCaptureOpen(true)}
-            aria-label="自动整理：把一整段话拆成几条待办和提醒"
+            aria-label="自动整理：把一整段话拆成几条待办"
             title="把一整段话拆成几条"
           >
             <Spark className="rem-quick-spark" />
@@ -3286,7 +2745,7 @@ export default function RemindersPage() {
       </div>
     ) : null;
 
-  // ===== 当前 tab 的两个区（待办 / 提醒）=====
+  // ===== 当前 tab 的待办区 =====
   //
   // 每一段是一个小标题 + 若干条。段的顺序就是阅读顺序：
   // 近的在前、远的在后、刚做完的垫底。
@@ -3311,29 +2770,7 @@ export default function RemindersPage() {
   const openIds = new Set(taskBlocks.flatMap((b) => b.items.map((t) => t.id)));
   const doneTail = scope === "completed" ? NO_TASKS : doneToday.filter((t) => !openIds.has(t.id));
 
-  const remBlocks: { title: string; items: ReminderItem[] }[] = (() => {
-    switch (scope) {
-      case "today":
-        return [{ title: "今天", items: groups.today }];
-      case "upcoming":
-        return [
-          { title: "接下来 7 天", items: groups.soon },
-          { title: "更远", items: groups.later },
-        ];
-      case "completed":
-        return [];
-      default:
-        return [
-          { title: "定时提醒", items: groups.today.concat(groups.soon, groups.later) },
-          { title: "已结束", items: groups.ended },
-          { title: "已暂停", items: groups.paused },
-        ];
-    }
-  })();
-
   const taskTotal = taskBlocks.reduce((n, b) => n + b.items.length, 0) + doneTail.length;
-  const remTotal = remBlocks.reduce((n, b) => n + b.items.length, 0);
-  const showRemSub = remBlocks.length > 1;
   /**
    * 主区要不要出小标题：只在主区**自己**分成两段以上时才出（「接下来 7 天 / 更远」）。
    *
@@ -3351,21 +2788,45 @@ export default function RemindersPage() {
         : scope === "completed"
           ? "还没有完成的待办。"
           : "还没有待办。";
-  const remEmpty =
-    scope === "today"
-      ? "今天没有定时提醒。"
-      : scope === "upcoming"
-        ? "接下来没有定时提醒。"
-        : "还没有定时提醒。";
+  /** 今天全空时兜底：把最近要做的几条挪上来，别让首屏一片空白 */
+  const fallbackTasks = scope === "today" && taskTotal === 0 ? tasks.upcoming.slice(0, 3) : NO_TASKS;
 
-  /** 今天两区全空时兜底：把最近要做的几条挪上来，别让首屏一片空白 */
-  const fallbackTasks =
-    scope === "today" && taskTotal === 0 && remTotal === 0 ? tasks.upcoming.slice(0, 3) : NO_TASKS;
+  // 换视图就退出多选/排序：选中的 id 属于上一个列表的行，
+  // 留着它们会在另一视图里执行到看不见的卡片上。
+  const changeView = useCallback(
+    (next: "list" | "calendar") => {
+      setView(next);
+      lastView = next;
+      exitMode();
+    },
+    [exitMode]
+  );
 
   const listView = (
     <>
       <PushHealth status={data?.push ?? null} onOpen={() => setTab("settings")} />
 
+      {/* 视图切换：列表 / 日历。与页头「列表 / 设置」主 tab 平行 ——
+          日历不是替换列表，是并列的另一种看法（设计稿 v1）。
+          切到日历时 scope 行、时间轴、多选工具条一起收起。 */}
+      <div className="rem-viewseg" role="group" aria-label="显示方式">
+        <button type="button" aria-pressed={view === "list"} onClick={() => changeView("list")}>
+          列表
+        </button>
+        <button
+          type="button"
+          aria-pressed={view === "calendar"}
+          onClick={() => changeView("calendar")}
+        >
+          日历
+        </button>
+      </div>
+
+      {view === "calendar" ? (
+        /* 数据同源：tasks.all 已经一次拉全，日历不发新请求 */
+        <CalendarView tasks={tasks.all} now={now} renderCard={taskCard} />
+      ) : (
+        <>
       {/* 范围 tab：四个视图的语义见实施单 §5.3。逾期不会消失，它留在「今天」 */}
       <div className="rem-tabs" role="group" aria-label="待办范围">
         {SCOPE_OPTIONS.map((o) => (
@@ -3399,7 +2860,6 @@ export default function RemindersPage() {
           onComplete={toggleTask}
           onSnooze={snoozeReminder}
           onEditTask={openTaskDrawer}
-          onEditEvent={openReminderDrawer}
         />
       ) : null}
 
@@ -3466,25 +2926,10 @@ export default function RemindersPage() {
         </section>
       ) : null}
 
-      {/* ===== 提醒区 =====
-          「已完成」没有提醒：联动提醒没有完成态（勾掉它，来源那边照样来）。 */}
-      {mode !== "sort" && scope !== "completed" ? (
-        <section className="rem-sect" data-kind="rem" aria-label="定时提醒">
-          <div className="rem-sect-hd">
-            <h2 className="rem-sect-title">提醒</h2>
-            <span className="rem-sect-n">{remTotal} 条</span>
-          </div>
-          {remTotal === 0 ? (
-            <div className="rem-sect-empty">
-              <p>{remEmpty}</p>
-            </div>
-          ) : showRemSub ? (
-            remBlocks.map((b) => subBlock(b.title, b.items.map(card)))
-          ) : (
-            <div className="space-y-2">{remBlocks[0]?.items.map(card)}</div>
-          )}
-        </section>
-      ) : null}
+      {/* ===== 2026-11-19 提醒区已并入待办 =====
+          自建提醒迁成了循环待办（tools/merge_reminders_into_tasks.py），
+          课表/打卡/委托等来源联动提醒不再单列：今天的仍出现在上面的
+          时间轴里，来源开关在「设置」页里管理。 */}
 
       {mode !== "sort" && scope === "today" && countdown.length > 0 ? (
         <section className="mt-4">
@@ -3518,6 +2963,8 @@ export default function RemindersPage() {
           2026-11-17 删掉：它既是"解释"，又是全页第二个新建入口，
           而且藏在列表最底下 —— 实测用户根本不知道那行能点。
           新建提醒改成页头和「新建待办」并排的同尺寸按钮（见下面的 actions）。 */}
+        </>
+      )}
     </>
   );
 
@@ -3547,28 +2994,16 @@ export default function RemindersPage() {
               设置
             </button>
           </div>
-          {/* ★ 两个**同级**的新建入口（2026-11-17）。
-              以前只有一个「+ 新建」（待办），提醒的入口是列表最底下一行灰字 ——
-              用户要么找不到，要么以为那只是句说明。
-              这里同尺寸、同位置、同图标位，只有标签和图标不同：
-              待办带 ＋（要勾完成的事），提醒带铃（到点响一声）。
-              窄屏只留「待办 / 提醒」两个字，宽屏是完整标签 —— 见 console.css 的 .rem-new。 */}
-          {tab === "list" ? (
-            /* 两颗包一层：320 宽时容不下「seg + 两颗」，让它们**成对**换行，
-               别一颗留在上一行、一颗掉到下一行（那样就不像一对同级入口了）。 */
-            <div className="rem-new-pair">
-              <button type="button" className="rem-new" onClick={() => openTaskDrawer(null)}>
-                <CornIcon name="plus" />
-                <span className="rem-new-full">新建待办</span>
-                <span className="rem-new-short">待办</span>
-              </button>
-              <button type="button" className="rem-new" onClick={() => openReminderDrawer(null)}>
-                <CornIcon name="bell" />
-                <span className="rem-new-full">新建提醒</span>
-                <span className="rem-new-short">提醒</span>
-              </button>
-            </div>
-          ) : null}
+      {/* ★ 2026-11-19 提醒并入待办：页头只剩「新建待办」。
+          「到点响一声」的提醒也是一条待办（带循环规则的那种），
+          新建入口统一走任务抽屉 —— 原来的「新建提醒」双入口消失了。 */}
+      {tab === "list" ? (
+        <button type="button" className="rem-new" onClick={() => openTaskDrawer(null)}>
+          <CornIcon name="plus" />
+          <span className="rem-new-full">新建待办</span>
+          <span className="rem-new-short">待办</span>
+        </button>
+      ) : null}
         </div>
       }
     >
@@ -3722,7 +3157,7 @@ export default function RemindersPage() {
           <section className="card card-pad">
             <h3 className="card-title">哪些功能会提醒你</h3>
             <p className="mt-1 text-[var(--fs-sm)] text-[var(--text-3)]">
-              关掉一个功能，它安排的提醒都会停。你自己建的待办和提醒不受影响。
+              关掉一个功能，它安排的提醒都会停。你自己建的待办不受影响。
             </p>
             {/* 两列：7 个来源原来竖排 7 行、每行只有「名字 + 开关」，
                 右半边全是空的；分两列后行数减半，也不用滚动就看全。
@@ -3837,37 +3272,19 @@ export default function RemindersPage() {
         onSubmit={submitTask}
       />
 
-      <ReminderDrawer
-        key={editingReminder ? `edit-${editingReminder.id}` : "new-reminder"}
-        open={reminderDrawer}
-        editing={editingReminder}
-        sourceName={editingReminder ? sourceLabel[editingReminder.source] || editingReminder.source : ""}
-        sources={sources.filter((s) => s.enabled)}
-        busy={busy}
-        onClose={() => {
-          setReminderDrawer(false);
-          setEditingReminder(null);
-        }}
-        onSubmit={submitReminder}
-      />
-
       <ConfirmDelete
         open={pending !== null}
         title={
           pending?.kind === "task"
             ? `删除「${pending.task.title}」？`
-            : pending?.kind === "reminder"
-              ? `删除「${pending.item.title}」？`
-              : pending?.kind === "bulk"
-                ? `删除选中的 ${pending.ids.length} 条？`
-                : ""
+            : pending?.kind === "bulk"
+              ? `删除选中的 ${pending.ids.length} 条？`
+              : ""
         }
         note={
           pending?.kind === "bulk"
             ? "删除后不能恢复，这些待办关联的提醒也会一起取消。"
-            : pending?.kind === "task"
-              ? "删除后不能恢复，关联的提醒也会一起取消。"
-              : "删除后不能恢复，这条的提醒记录也不会再显示。"
+            : "删除后不能恢复，关联的提醒也会一起取消。"
         }
         busy={busy}
         onCancel={() => setPending(null)}

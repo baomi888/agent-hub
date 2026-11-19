@@ -21,12 +21,12 @@ CORN = ROOT / "frontend" / "src" / "components" / "CornIcon.tsx"
 # page.tsx 用 `// ==================== 段落 ====================` 划分，按段落取源码，
 # 免得断言「卡片里没有暂停按钮」时连抽屉里的字段一起算进来。
 #
-# 2026-11-10 Phase 0/1 之后段落变细了：待办卡片与联动提醒卡片各占一段、
-# 两个抽屉也各占一段。这里取的是**断言真正关心的那段**，不是最靠前的那段。
+# 2026-11-19 提醒并入待办：提醒卡片与提醒抽屉整段删除，剩下的
+# 「卡片 / 抽屉」都指待办自己的那一段。
 SECTIONS = {
     "axis": ("// ==================== 今天的时间轴", "// ==================== 推送健康条"),
-    "card": ("// ==================== 联动提醒卡片", "// ==================== 送达记录"),
-    "drawer": ("// ==================== 提醒抽屉（新建 / 修改）", "// ==================== 删除确认"),
+    "card": ("// ==================== 待办卡片", "// ==================== 排序行"),
+    "drawer": ("// ==================== 待办抽屉", "// ==================== 删除确认"),
 }
 
 
@@ -80,25 +80,44 @@ def _css_block(css: str, selector: str) -> str:
 
 
 class TestCardDensity:
-    """卡片 93px → 67px 靠的是「四个动作收进一个菜单」，不是把字压小。"""
+    """动作收进「⋯」菜单，不把卡片底平铺成一排按钮。"""
 
-    def test_card_body_has_exactly_two_click_targets(self):
-        """卡片体（菜单弹出之前的部分）只能有两个 button：标题 + ⋯。
+    def test_card_body_has_exactly_four_click_targets(self):
+        """卡片体（菜单弹出之前）的按钮是**点名制**，不是数总数。
 
-        标题＝改这条（最高频），⋯＝其余全部。多一个就说明动作又平铺回来了。
+        名单（源码里三个分支互斥，共 7 处 button）：
+          · rem-check       完成勾选 / 选中（常驻）
+          · rem-markbtn     图标与等级（常驻）
+          · rem-title       标题＝改这条（常驻，最高频）
+          · rem-pritag      等级标记，未设也显示「普通」（常驻）
+          · rem-state-btn   「不提醒」警示 → 点它去设提醒（条件：没设提醒才渲染）
+          · rem-donebtn     已完成那张的明确删除（与 morebtn 互斥）
+          · rem-morebtn     ⋯（与 donebtn 互斥）
+        名单之外多任何一个 class，就说明动作又平铺回卡片底了。
         """
         card = _section("card")
         body = card[: card.index('className="rem-menu"')]
-        assert body.count("<button") == 2, "卡片体上出现了第三个可点"
-        assert 'className="rem-title"' in body
-        assert 'className="rem-morebtn"' in body
+        assert body.count("<button") == 7, "卡片体按钮数变了，先核对名单再更新本条"
+        for cls in (
+            "rem-check",
+            "rem-markbtn",
+            "rem-title",
+            "rem-pritag",
+            "rem-state-btn",
+            "rem-donebtn",
+            "rem-morebtn",
+        ):
+            # rem-state-btn 与 rem-state 组合出现，不能按 className=" 前缀钉
+            assert cls in body, f"卡片体上缺 {cls}"
 
     def test_actions_only_exist_inside_the_menu(self):
-        """暂停 / 推迟 / 删除 都不许出现在卡片体上。"""
+        """改内容 / 推迟 / 标记未完成 都不许出现在卡片体上。"""
         card = _section("card")
         body = card[: card.index('className="rem-menu"')]
-        for word in ("暂停这条", "恢复这条", "推迟 10 分钟", "删除", "改时间 / 标题"):
+        for word in ("改内容或时间", "改提醒时间", "设一个提醒", "推迟提醒", "标记为未完成"):
             assert word not in body, f"「{word}」又跑到卡片体上了，应该只在 ⋯ 菜单里"
+        # 「删除」在卡片体上只允许出现在已完成那张的明确删除按钮（aria-label）里
+        assert body.count("删除") == 1, "「删除」又以别的形态出现在卡片体上"
 
     def test_time_column_is_first_grid_column(self):
         """时间固定在左侧第 1 列、⋯ 固定在第 4 列。
@@ -137,7 +156,7 @@ class TestAxis:
         """点齿孔必须能跳到对应卡片 —— 否则那枚齿孔只是个装饰。"""
         page = _page()
         assert "scrollIntoView" in page
-        assert "rem-card-${item.id}" in page
+        assert "rem-card-${task.id}" in page
         assert "onJump" in _section("axis")
 
     def test_no_date_call_during_render(self):
@@ -381,35 +400,42 @@ class TestAxis:
 
 
 class TestDrawerOrder:
-    """抽屉按用户能理解的顺序：谁的提醒 → 什么时候 → 提醒时做什么。"""
+    """抽屉按用户能理解的顺序：要做什么 → 长什么样 → 归哪类 → 提醒 → 截止+重复 → 备注。"""
 
     def test_fields_follow_spec_order(self):
         drawer = _section("drawer")
         order = [
-            drawer.index("提醒你什么"),
-            drawer.index("由哪个功能安排"),
-            drawer.index("什么时候提醒你"),
-            drawer.index("提醒时做什么"),
-            drawer.index("提醒方式"),
+            drawer.index('label="要做什么"'),
+            drawer.index('label="图标"'),
+            drawer.index('label="清单"'),
+            drawer.index("提醒我 <i>"),
+            drawer.index("什么时候要做"),
+            drawer.index('label="备注（可选）"'),
         ]
         assert order == sorted(order), "抽屉字段顺序又和规格不一致了"
+        # 「重复」属于截止块（循环=到点重新出现），必须落在截止与备注之间
+        assert drawer.index("什么时候要做") < drawer.index(">重复</span>") < drawer.index(
+            'label="备注（可选）"'
+        )
 
     def test_delivery_block_is_not_a_control(self):
-        """「提醒方式」是说明块，不是下拉框 —— 否则看着又能选又不会生效。
+        """抽屉里唯一的下拉是「清单」；其余选择都是分段控件（Seg）。
 
-        断言数整个抽屉的 select：只数「提醒方式」之后的那 500 字抓不到
-        「把控件插在标题前面」这种写法（反证时试出来的）。
+        旧提醒抽屉的「提醒方式」下拉随自定义提醒一起退场了 —— 那一排
+        （功能 / 周几 / 提醒动作）曾经是三棵 select。谁往回加 select，
+        这里必须红。
         """
         drawer = _section("drawer")
-        assert 'className="rem-deliver"' in drawer
-        assert drawer.count("<select") == 3, "抽屉里多了一个 select（只允许 功能/周几/提醒动作）"
-        block = drawer[drawer.index('className="rem-deliver"') :]
-        assert "<select" not in block[:400]
+        assert drawer.count("<select") == 1, "抽屉里多了一个 select（只允许 清单）"
+        # 重复规则与每周几用分段控件，不引入新的下拉
+        assert 'ariaLabel="重复规则"' in drawer
+        assert 'ariaLabel="每周几"' in drawer
 
     def test_bottom_preview_reflects_the_form(self):
         drawer = _section("drawer")
         assert 'className="rem-preview"' in drawer
-        assert "freqLine" in drawer and "ACTION_LABEL[action]" in drawer
+        assert "RECURRENCE_LABEL[recurrence]" in drawer
+        assert "remindStamp" in drawer
 
 
 class TestWeeklyEditRegression:
@@ -425,8 +451,15 @@ class TestWeeklyEditRegression:
         assert "at: null" not in page
 
     def test_override_at_is_a_string(self):
+        """旧提醒的 weekly 补丁语义钉进了待办抽屉的提交体。
+
+        提交体里 recurrence 是状态变量本身（一定是字符串，不是 null）；
+        weekly 必须带 weekday，非 weekly 必须把 weekday 发成 null
+        （从每周改回不重复时，旧行的 weekday 列要被清掉）。
+        """
         page = _page()
-        assert "override: { title: draft.title, at }" in page
+        assert "recurrence," in page
+        assert 'recurrence_weekday: recurrence === "weekly" ? recWeekday : null' in page
 
 
 class TestGroupTitles:
@@ -480,7 +513,9 @@ class TestUserFacingCopy:
         #   全站清账后副标题已删 —— 「哪些会响」改由**每一行自己的标签**说
         #   （时间列标「提醒」/行尾标「不提醒」），见 TestCopySpeaksUserLanguage
         #   里那条 test_notification_scope_is_said_per_item。
-        assert "只设它，不会收到提醒" in page
+        assert "只设它，不会收到提醒" not in page  # 旧文案已并入下面这句更完整的
+        assert "不打开就不会收到任何通知" in page
+        assert "截止日期只用来排期和排序" in page
         assert "免打扰时间" in page
         assert "提醒记录" in page
         assert "补上时间" in capture
@@ -1418,14 +1453,30 @@ class TestCaptureWritesForReal:
     """
 
     def test_commit_calls_the_two_existing_apis(self):
-        """复用现有端点，不自建批量接口 —— 批量接口会把"部分失败"吞成整批回滚。"""
+        """提醒并入待办（2026-11-19）：所有产出只写 /api/tasks 一个端点。
+
+        旧结构是 task 走 tasks、提醒走 reminders 两个 API；现在提醒产出
+        统一转成循环待办草稿（reminderProposalToTask）后走同一个端点。
+        仍然不自建批量接口 —— allSettled 保证一条失败不拖累另外两条。
+        """
         page = _page()
         assert "api.tasks.create(taskDraftOf(item))" in page
-        assert "api.reminders.create(draft)" in page
+        assert "api.tasks.create(draft)" in page
         fn = page[page.index("const commitCapture = useCallback(") :]
         fn = fn[: fn.index("\n  );")]
+        assert "api.reminders.create" not in fn, "提醒产出又直接写提醒端点了"
         assert "Promise.allSettled(" in fn, "一条失败不能拖累另外两条"
         assert "Promise.all(" not in fn
+
+    def test_commit_uses_the_page_clock_not_the_wall(self):
+        """循环产出算「下一次」用的钟是页面推下来的 now。
+
+        `reminderProposalToTask` 必填 now（useNowMinute 每分钟推一次）；
+        渲染路径里自己读 Date.now() 会造成 hydration 不一致，谁改回去这里红。
+        """
+        page = _page()
+        assert "reminderProposalToTask(item, now)" in page
+        assert "reminderProposalToTask(item)" not in page
 
     def test_task_draft_omits_remind_at_instead_of_sending_null(self):
         """只说「明天交作业」的任务，请求里不许出现 `remind_at`。
@@ -2559,20 +2610,23 @@ class TestTwoAreasAndTimeline:
     def test_both_areas_always_render(self):
         """空的时候给一行字，而不是整段不渲染。
 
-        反证：把 `remTotal === 0` 那个分支删掉（让空数组直接 map）→ 变红。
+        2026-11-19 提醒区并入待办（联动提醒今天的仍在时间轴里、来源开关
+        搬去设置页），主区只剩一个待办 section —— 空态契约随之收拢到它身上。
+        反证：把 `taskTotal === 0` 那个分支删掉（让空数组直接 map）→ 变红。
         """
         page = _page()
         assert 'className="rem-sect" data-kind="task"' in page
-        assert 'className="rem-sect" data-kind="rem"' in page
+        assert 'data-kind="rem"' not in page, "提醒区又单列回来了"
         # 空的分支要真的挂在「0 条」上，不能只是字符串还在文件里
-        assert "{remTotal === 0 ? (" in page
+        assert "{taskTotal === 0 && doneTail.length === 0 ? (" in page
         # 0 条时的那句话必须存在，否则空区就是一整片什么都没
-        assert "{taskEmpty}" in page and "{remEmpty}" in page
+        assert "{taskEmpty}" in page
         # 只有一段时走的是「不画分段标题」的分支 —— 那个分支**必须也渲染条目**，
         # 否则「今天有 2 条、没有刚完成的」这种最常见的状态会整块空白。
         # （本轮就踩了：只写了 showTaskSub 的三元，else 写了 null。）
         assert "{taskBlocks[0]?.items.map(taskCard)}" in page
-        assert "{remBlocks[0]?.items.map(card)}" in page
+        # 今天全空时的兜底：把最近要做的几条挪上来，别让首屏一片空白
+        assert "{fallbackTasks.map(taskCard)}" in page
 
     def test_checked_task_is_not_pulled_out_of_the_list(self):
         """勾选不能把卡片从列表里删掉 —— 这是本次改动最核心的一条。
@@ -2647,33 +2701,21 @@ class TestPriorityLevels:
 
 
 class TestActionCopyIsHonest:
-    """「提醒时做什么」这三档全是行话，用户猜不出来。
+    """「提醒时做什么」三档的诚实性问题，最终解法是**整个选项退场**。
 
     2026-11-12 用户原话：「用户可能不知道『让助手帮我写』『开始专注』是什么意思」。
-    查下来不只是看不懂，其中一档还是**假的** —— `suggest_focus` 在后端走的
-    和「只提醒」完全同一个分支，选了等于没选。所以这里锁两件事：
-    每档都要有一句人话解释；「让助手帮我写」不许在没内容可写的来源上出现。
+    查下来不只看不懂，其中一档（suggest_focus）在后端走的和「只提醒」完全
+    同一个分支 —— 选了等于没选。2026-11-19 自定义提醒并入待办：用户建不了
+    带 action 的提醒了，三档选项从界面上消失，假话连着出口一起没了。
+    这里钉两件事：界面上不许再有那套选项；后端的 focus 分流还在（课表等
+    联动来源仍可能带 action，落点必须真的换）。
     """
 
-    def test_every_action_has_a_plain_hint(self):
+    def test_action_options_are_gone_from_the_ui(self):
+        """抽屉没了，那一套行话（提醒方式 / 让助手帮我写）也不许残留。"""
         page = _page()
-        block = page[page.index("const ACTION_HINT") : page.index("const AGENT_SOURCES")]
-        for key, word in (
-            ("notify", "通知"),
-            ("agent_deliver", "简报"),
-            ("suggest_focus", "专注"),
-        ):
-            assert key in block, f"{key} 没有解释文案"
-            assert word in block, f"{key} 的解释没说到点会发生什么（缺「{word}」）"
-
-    def test_agent_deliver_only_where_there_is_content(self):
-        """自己建的提醒上没有东西可写，列出来只会让人以为助手会替他写作业。"""
-        page = _page()
-        assert "AGENT_SOURCES" in page
-        assert "actionOptionsFor" in page
-        # 抽屉必须按来源取选项；直接渲染全量 ACTION_OPTIONS 等于过滤被绕过
-        assert "ACTION_OPTIONS.map" not in page, "抽屉又直接渲染全量选项了"
-        assert "actionList.map" in page
+        for gone in ("ACTION_HINT", "AGENT_SOURCES", "ACTION_OPTIONS", "actionOptionsFor"):
+            assert gone not in page, f"「提醒时做什么」的选项又回到界面了：{gone}"
 
     def test_focus_action_really_changes_destination(self):
         """「开始专注」必须真的换落点，不然它和「只提醒」没有区别。"""
@@ -2743,3 +2785,114 @@ class TestDailyTimeEntry:
         i = page.index("每天几点给你做回顾")
         block = page[i : i + 2000]
         assert "<Switch" not in block, "设置卡里又长出一个开关，会和列表里那条打架"
+
+
+# ==================== 日历视图（2026-11-19，按设计稿 v1 实现） ====================
+
+CAL = ROOT / "frontend" / "src" / "components" / "reminders" / "CalendarView.tsx"
+
+
+def _cal() -> str:
+    return _strip_comments(CAL.read_text(encoding="utf-8"))
+
+
+class TestCalendarView:
+    """月历 + 当日清单（设计稿 v1）。这组钉的是**别走回头路**的几条：
+    标记不许变回圆点（用户原话「原点不好看」）、今天≠选中、列表一条不少、
+    日历不建自己的第二套任务操作。
+    """
+
+    def test_view_segment_switches_between_list_and_calendar(self):
+        """页头下第一行是「列表 / 日历」切换，与主 tab（列表/设置）平行。"""
+        page = _page()
+        assert 'aria-label="显示方式"' in page
+        assert "changeView" in page
+        seg = page[page.index('aria-label="显示方式"') :]
+        seg = seg[: seg.index('aria-label="待办范围"')]
+        for v in ("list", "calendar"):
+            assert f'changeView("{v}")' in seg, f"视图切换里缺 {v} 分支"
+
+    def test_calendar_is_a_branch_not_a_replacement(self):
+        """日历是并列分支：切回列表时原结构（scope 行、时间轴）都在。"""
+        page = _page()
+        assert 'view === "calendar" ? (' in page
+        # 分支只在 listView 里换内容，列表分支的 scope tab 还在
+        assert 'aria-label="待办范围"' in page
+        # 同一套卡片渲染器：日历不新建第二套任务操作
+        assert "renderCard={taskCard}" in page
+
+    def test_marks_are_bars_not_dots(self):
+        """日期标记是短横条。圆点是设计评审时被用户否掉的（「原点不好看」）。"""
+        cal = _cal()
+        assert 'className={`rem-cal-bar' in cal
+        assert "rem-cal-dot" not in cal
+        assert "border-radius: 50%" not in CAL.read_text(encoding="utf-8")
+
+    def test_bar_turns_red_on_high_priority(self):
+        """当天只要有一条重要/紧急（priority ≥ 2），整条横线转红。"""
+        cal = _cal()
+        assert "const HI_PRIORITY = 2;" in cal
+        assert 'rem-cal-bar${hi ? " hi" : ""}' in cal
+        assert "(t.priority ?? 0) >= HI_PRIORITY" in cal
+
+    def test_today_is_outline_and_selected_is_solid(self):
+        """今天=描边胶囊，选中=实底金；叠加时描边让位（设计稿 §01/§04）。"""
+        css = CONSOLE_CSS.read_text(encoding="utf-8").replace("\r\n", "\n")
+        today = _css_block(css, ".rem-cal-cell.today .rem-cal-num {")
+        assert "border: 1px solid var(--accent);" in today
+        sel = _css_block(css, ".rem-cal-cell.sel {")
+        assert "background: var(--accent);" in sel
+        both = _css_block(css, ".rem-cal-cell.sel.today .rem-cal-num {")
+        assert "border-color: transparent;" in both
+
+    def test_week_starts_on_monday(self):
+        """周一开头，与课程表、倒计时口径一致（设计稿 §04）。"""
+        cal = _cal()
+        assert 'WEEKDAY_HEADS = ["一", "二", "三", "四", "五", "六", "日"]' in cal
+        # 周一开头的偏移必须走 (getDay()+6)%7，不是裸 getDay()（那是周日开头）
+        assert "(new Date(year, month, 1).getDay() + 6) % 7" in cal
+
+    def test_no_clock_read_and_no_effect_in_the_component(self):
+        """渲染期不读钟、不用 effect 落位：默认选中日是派生值（now 推下来）。"""
+        cal = _cal()
+        assert "useEffect" not in cal
+        assert "Date.now()" not in cal
+        assert "const selected = anchor ?? today;" in cal
+
+    def test_same_data_source_no_new_request(self):
+        """数据同源：组件不发请求（tasks.all 已经一次拉全）。"""
+        cal = _cal()
+        assert "api." not in cal, "日历组件自己发请求就绕过了同源约定"
+
+    def test_view_memory_stays_in_memory(self):
+        """上次视图记在模块变量里：SPA 内切走再回来恢复，刷新回「列表」。
+
+        不落 localStorage —— 刷新落点必须回列表，和 tab 恢复同一口径
+        （设计稿 §02）。谁把它写进持久存储这里红。
+        """
+        page = _page()
+        assert "let lastView" in page
+        assert "lastView = next;" in page
+        assert "baomi.reminders.view" not in page
+
+    def test_undated_fallback_is_not_silent(self):
+        """没排期的存量待办给「未排期 N 项」折叠条，不能静默丢（设计稿 §06）。"""
+        cal = _cal()
+        assert "未排期" in cal
+        assert 'due_at === null' in cal
+
+    def test_desktop_pairs_calendar_and_agenda(self):
+        """桌面端左月历右当日并排；小屏单列（设计稿 §03，≥901 断点）。"""
+        css = CONSOLE_CSS.read_text(encoding="utf-8").replace("\r\n", "\n")
+        i = css.index(".rem-cal-wrap {")
+        assert css.index("grid-template-columns: repeat(7, 1fr);", i) > 0
+        m = re.search(r"@media \(min-width: 901px\) \{[^@]*?\.rem-cal-wrap \{", css, re.S)
+        assert m, "桌面并排的规则不在 (min-width: 901px) 块里"
+        block = css[css.index(".rem-cal-wrap {", m.end() - 20) :]
+        block = block[: block.index("}")]
+        assert "grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);" in block
+
+    def test_cell_touch_target_is_44(self):
+        """月历格本身就是触控目标：44px 高（a11y 底线，§04 的 390 量过）。"""
+        css = CONSOLE_CSS.read_text(encoding="utf-8").replace("\r\n", "\n")
+        assert "height: 44px;" in _css_block(css, ".rem-cal-cell {")

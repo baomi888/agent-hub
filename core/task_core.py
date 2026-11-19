@@ -32,6 +32,7 @@ from __future__ import annotations
 import re
 import sqlite3
 import uuid
+from datetime import datetime
 from typing import Any
 
 from core import reminder_core, timeutil
@@ -93,6 +94,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     remind_at     INTEGER,
     completed_at  INTEGER,
     recurrence    TEXT NOT NULL DEFAULT 'none',
+    recurrence_weekday INTEGER,
     parent_id     TEXT,
     sort_order    INTEGER NOT NULL DEFAULT 0,
     created_at    INTEGER NOT NULL,
@@ -150,6 +152,11 @@ def ensure() -> None:
         cols = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)")}
         if "icon" not in cols:
             conn.execute("ALTER TABLE tasks ADD COLUMN icon TEXT")
+        # 循环待办（提醒并入待办）：weekly 要知道「每周几」。
+        # 同 icon 的教训：CREATE TABLE IF NOT EXISTS 对老库什么都不做，
+        # 不单独 ALTER 的话线上库永远少这一列，weekly 一写就 no such column。
+        if "recurrence_weekday" not in cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN recurrence_weekday INTEGER")
         _widen_priority(conn)
     _READY.add(path)
 
@@ -284,18 +291,57 @@ def _ts(value: Any, field: str) -> int | None:
     return ts
 
 
+# 循环规则。2026-11-19 提醒并入待办后打开：manual 提醒迁移成的待办
+# 靠这套规则在「完成一轮」时自动排下一轮（interval 每 N 分钟不收——
+# 它是投递节奏不是待办节律，迁移时降级成一次性待办并在备注里注明）。
+RECURRENCES = ("none", "daily", "weekdays", "weekly")
+
+
 def _recurrence(value: Any) -> str:
-    # Phase 1 只允许 none：重复待办要么靠 linked reminder 的 freq，
-    # 要么等 Phase 2 把 recurrence 做成「完成后自动生成下一条」。
     raw = str(value or "none")
-    if raw != "none":
-        raise TaskInvalid("重复待办将在下一阶段开放")
-    return "none"
+    if raw not in RECURRENCES:
+        raise TaskInvalid("重复规则只能是 不重复 / 每天 / 工作日 / 每周")
+    return raw
+
+
+def _recurrence_weekday(value: Any, recurrence: str) -> int | None:
+    """weekly 的「每周几」（0=周一 … 6=周日，与 reminder_core 同口径）。"""
+    if value is None or value == "":
+        if recurrence == "weekly":
+            raise TaskInvalid("每周重复要选星期几")
+        return None
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        raise TaskInvalid("星期几必须是 0-6 的整数") from None
+    if not 0 <= n <= 6:
+        raise TaskInvalid("星期几必须是 0-6 的整数")
+    return n
 
 
 def _check_remind(remind_at: int | None, now: int) -> None:
     if remind_at is not None and remind_at <= now:
         raise TaskInvalid("提醒时间要晚于现在")
+
+
+def _next_occurrence(
+    recurrence: str, weekday: int | None, remind_at: int, now: int
+) -> int | None:
+    """循环待办的下一轮时刻。
+
+    不重写日历逻辑：把当前 `remind_at` 的本地时分抽出来，拼成
+    reminder_core.next_fire 认的形状（freq + at + weekday）直接复用 ——
+    「每天 08:30」「工作日」「每周三」的推算口径与提醒系统**保证同源**，
+    否则迁移过来的循环提醒会出现「列表写 08:30，实际 08:31 响」这种
+    两套算法打架的事故。
+    """
+    local = datetime.fromtimestamp(int(remind_at), timeutil.TZ)
+    pseudo = {
+        "freq": recurrence,
+        "at": f"{local.hour:02d}:{local.minute:02d}",
+        "weekday": weekday,
+    }
+    return reminder_core.next_fire(pseudo, now=now)
 
 
 # ---------- 行 → 视图 ----------
@@ -504,7 +550,13 @@ def _count_open(conn: sqlite3.Connection, owner_id: str) -> int:
 
 
 def create(owner_id: str, data: dict[str, Any]) -> dict[str, Any]:
-    """建一条待办；`remind_at` 有值就顺手建 linked reminder（同一事务）。"""
+    """建一条待办；`remind_at` 有值就顺手建 linked reminder（同一事务）。
+
+    ★ 2026-11-19 起两条硬规则（「提醒并入待办」产品决策）：
+    1. `due_at` 必填 —— 「所有待办都要设置时间」，钟点可不填（前端落 23:59:59）；
+    2. 循环待办（recurrence != none）必须带 `remind_at`：循环的本质就是
+       「到点重新出现」，没有提醒时刻的循环无从推起。
+    """
     ensure()
     now = timeutil.now_ts()
     title = _title(data.get("title"))
@@ -513,8 +565,13 @@ def create(owner_id: str, data: dict[str, Any]) -> dict[str, Any]:
     icon = _icon(data.get("icon"))
     priority = _priority(data.get("priority"))
     recurrence = _recurrence(data.get("recurrence"))
+    recurrence_weekday = _recurrence_weekday(data.get("recurrence_weekday"), recurrence)
     due_at = _ts(data.get("due_at"), "截止时间")
     remind_at = _ts(data.get("remind_at"), "提醒时间")
+    if due_at is None:
+        raise TaskInvalid("待办要设置时间")
+    if recurrence != "none" and remind_at is None:
+        raise TaskInvalid("重复待办要设置提醒时间")
     _check_remind(remind_at, now)
     if data.get("parent_id"):
         raise TaskInvalid("子任务将在下一阶段开放")
@@ -527,11 +584,11 @@ def create(owner_id: str, data: dict[str, Any]) -> dict[str, Any]:
         conn.execute(
             """INSERT INTO tasks
                   (id, owner_id, title, note, list_key, icon, priority, status,
-                   due_at, remind_at, completed_at, recurrence, parent_id, sort_order,
-                   created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,'open',?,?,NULL,?,NULL,0,?,?)""",
+                   due_at, remind_at, completed_at, recurrence, recurrence_weekday,
+                   parent_id, sort_order, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,'open',?,?,NULL,?,?,NULL,0,?,?)""",
             (tid, owner_id, title, note, list_key, icon, priority, due_at, remind_at,
-             recurrence, now, now),
+             recurrence, recurrence_weekday, now, now),
         )
         if remind_at is not None:
             reminder_core.upsert_task_reminder(
@@ -552,6 +609,11 @@ def update(owner_id: str, task_id: str, patch: dict[str, Any]) -> dict[str, Any]
         return None
     now = timeutil.now_ts()
 
+    # 「所有待办都要设置时间」：显式 null 不再是「清空截止时间」，而是直接拒绝。
+    # 仍然用 exclude_unset 判「有没有传」，只拦 null，不影响其他字段的清空语义。
+    if "due_at" in patch and patch["due_at"] is None:
+        raise TaskInvalid("待办要设置时间，不能清空")
+
     merged = {
         "title": current["title"],
         "note": current["note"],
@@ -561,6 +623,8 @@ def update(owner_id: str, task_id: str, patch: dict[str, Any]) -> dict[str, Any]
         "due_at": current["due_at"],
         "remind_at": current["remind_at"],
         "sort_order": current["sort_order"],
+        "recurrence": current.get("recurrence") or "none",
+        "recurrence_weekday": current.get("recurrence_weekday"),
     }
     for key in (
         "title",
@@ -571,6 +635,8 @@ def update(owner_id: str, task_id: str, patch: dict[str, Any]) -> dict[str, Any]
         "due_at",
         "remind_at",
         "sort_order",
+        "recurrence",
+        "recurrence_weekday",
     ):
         if key in patch:
             merged[key] = patch[key]
@@ -580,16 +646,26 @@ def update(owner_id: str, task_id: str, patch: dict[str, Any]) -> dict[str, Any]
     list_key = _list_key(merged["list_key"])
     icon = _icon(merged["icon"])
     priority = _priority(merged["priority"])
+    recurrence = _recurrence(merged["recurrence"])
+    recurrence_weekday = _recurrence_weekday(merged["recurrence_weekday"], recurrence)
     due_at = _ts(merged["due_at"], "截止时间")
     remind_at = _ts(merged["remind_at"], "提醒时间")
     sort_order = _sort_order(merged["sort_order"])
+    # ★ 必填只拦两处：create 必须给时间、patch 显式 null 不能清空。
+    #   存量漏网的 null 不在这里拦 —— 否则迁移没跑到的一条老任务
+    #   连「只改个标题」都会 400，用户被整条 PATCH 路径堵死。时间由迁移脚本补齐。
+    if "due_at" in patch and patch["due_at"] is None:
+        raise TaskInvalid("待办要设置时间，不能清空")
+    if recurrence != "none" and remind_at is None:
+        raise TaskInvalid("重复待办要设置提醒时间")
     _check_remind(remind_at, now)
 
     status = current["status"]
     with _conn() as conn:
         conn.execute(
             """UPDATE tasks SET title=?, note=?, list_key=?, icon=?, priority=?,
-                   due_at=?, remind_at=?, sort_order=?, updated_at=?
+                   due_at=?, remind_at=?, sort_order=?, recurrence=?,
+                   recurrence_weekday=?, updated_at=?
                WHERE id=? AND owner_id=?""",
             (
                 title,
@@ -600,6 +676,8 @@ def update(owner_id: str, task_id: str, patch: dict[str, Any]) -> dict[str, Any]
                 due_at,
                 remind_at,
                 sort_order,
+                recurrence,
+                recurrence_weekday,
                 now,
                 task_id,
                 owner_id,
@@ -622,13 +700,25 @@ def update(owner_id: str, task_id: str, patch: dict[str, Any]) -> dict[str, Any]
 
 
 def complete(owner_id: str, task_id: str) -> dict[str, Any] | None:
-    """完成。幂等：已经 done 就原样返回（重复点不该报错）。"""
+    """完成。幂等：已经 done 就原样返回（重复点不该报错）。
+
+    ★ 循环待办（recurrence != none）完成一轮后**自动排下一轮**：
+    先按普通待办走完 done + 停提醒，紧接着把同一条拉回 open、
+    due_at/remind_at 推到下一次触发时刻并重排联动提醒。
+    返回的是推进后的最新状态（status=open）——前端据此提示
+    「这一轮完成，下一轮已排到 X」。想彻底停掉只能删除，
+    「完成」对循环待办永远意味着「进入下一轮」，这是刻意的语义。
+    本轮完成的痕迹不留 completed_at（status=open 时它必须是 NULL），
+    勾选瞬间由 toast 给出反馈 —— 这是合并方案里明说的取舍。
+    """
     current = get(owner_id, task_id)
     if current is None:
         return None
     if current["status"] == "done":
         return current
     now = timeutil.now_ts()
+    recurrence = current.get("recurrence") or "none"
+    remind_at = current.get("remind_at")
     with _conn() as conn:
         conn.execute(
             "UPDATE tasks SET status='done', completed_at=?, updated_at=? "
@@ -637,6 +727,20 @@ def complete(owner_id: str, task_id: str) -> dict[str, Any] | None:
         )
         # 不变量 #6：完成后联动提醒立刻停用，worker 的 due_for_owner 不再返回它
         reminder_core.disable_task_reminder(conn, owner_id, task_id, now=now)
+        if recurrence != "none" and remind_at:
+            next_at = _next_occurrence(
+                recurrence, current.get("recurrence_weekday"), int(remind_at), now
+            )
+            if next_at is not None:
+                conn.execute(
+                    "UPDATE tasks SET status='open', due_at=?, remind_at=?, "
+                    "completed_at=NULL, updated_at=? WHERE id=? AND owner_id=?",
+                    (next_at, next_at, now, task_id, owner_id),
+                )
+                reminder_core.upsert_task_reminder(
+                    conn, owner_id, task_id, current["title"], current["note"],
+                    next_at, now=now,
+                )
     return get(owner_id, task_id)
 
 

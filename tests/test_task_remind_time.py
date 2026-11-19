@@ -116,30 +116,21 @@ class TestTaskCardShowsTheClock:
 
 
 class TestReminderCardsHaveIcons:
-    def test_event_card_renders_a_mark(self):
-        """提醒卡以前没有图标，和任务卡并排在同一个列表里像两种东西。"""
-        src = _page()
-        assert '<CornIcon name={eventMark(item.source)} className="h-full w-full" />' in src
+    """提醒卡已并入待办（2026-11-19）：页面上只剩一种卡片。
 
-    def test_mark_is_decorative_not_a_button(self):
-        """图标是装饰：这一行的可点处仍然只有标题和「⋯」，
-        多一颗可点的图标就是多一个"点了不知道会怎样"的地方。"""
-        src = _page()
-        seg = src[src.index('<div className="rem-head">', src.index("function ReminderCard")) :]
-        seg = seg[: seg.index('<p className="rem-meta">')]
-        assert 'aria-hidden="true"' in seg
-        assert "<button" in seg and seg.count("<button") == 1, "图标不该是按钮"
+    旧契约（ReminderCard / eventMark 的装饰性图标）随提醒卡整段退场 ——
+    当年钉它是为了让提醒卡和任务卡看起来像同一种东西；合并之后这件事
+    由结构本身保证了。这里反过来钉：半个提醒卡都不许回流。
+    卡片自己的图标契约在 tests/test_reminders_ui.py 的 TestTaskMarks。
+    """
 
-    def test_source_mapping_covers_every_source_the_page_knows(self):
-        """`eventMark` 的分支要覆盖页面认识的全部来源，认不出的回落到铃铛。"""
+    def test_merged_cards_are_gone(self):
         src = _page()
-        fn = src[src.index("function eventMark(") :]
-        fn = fn[: fn.index("\n}")]
-        labels = src[src.index("const map: Record<string, string> = {") :]
-        labels = labels[: labels.index("};")]
-        for key in re.findall(r'^\s*(\w+): "', labels, flags=re.M):
-            assert f'case "{key}":' in fn, f"来源 {key} 没有图标，会掉到铃铛上"
-        assert "default:" in fn and 'return "bell";' in fn
+        assert "function ReminderCard" not in src, "提醒卡又回流了"
+        assert "eventMark" not in src, "提醒卡的图标映射又回流了"
+        # 唯一的卡片渲染函数是待办卡
+        assert "function TaskCard" in src
+        assert src.count("function TaskCard") == 1
 
 
 # ---------------------------------------------------------------- 回填
@@ -206,8 +197,12 @@ class TestBackfill:
         mod = _load_backfill()
         assert mod.candidates(now) == []
 
-    def test_past_and_done_and_already_set_rows_are_skipped(self, db):
+    def test_past_and_done_and_already_set_rows_are_skipped(self, db, monkeypatch):
         now = int(datetime(2026, 11, 17, 21, 0, tzinfo=timeutil.TZ).timestamp())
+        # task_core.create 内部读真实钟：本用例的「未来」写的是 11-19，
+        # 真实时钟走过它之后 create 就会 400（曾因此假红）。
+        # 把钟冻结到测试自己的 now，用例不再随日期过期。
+        monkeypatch.setattr(timeutil, "now_ts", lambda: now)
         past = int(datetime(2026, 11, 17, 8, 0, tzinfo=timeutil.TZ).timestamp())
         future = int(datetime(2026, 11, 19, 8, 0, tzinfo=timeutil.TZ).timestamp())
 

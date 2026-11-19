@@ -221,27 +221,29 @@ class TestToolRefresh:
 
 
 class TestChannelHonesty:
-    """「提醒方式」只有通知时，界面不许摆一个能选却不生效的选择器。"""
+    """提醒并入待办（2026-11-19）后，通道只有推送一条：
+    界面不许摆一个能选却不生效的渠道选择器。"""
 
     def _page(self) -> str:
         return (ROOT / "frontend" / "src" / "app" / "(console)" / "reminders" / "page.tsx").read_text(
             encoding="utf-8"
         )
 
-    def test_drawer_says_push_only(self):
-        assert "提醒会出现在设备的通知栏" in self._page()
+    def _drawer(self) -> str:
+        page = self._page()
+        return page[page.index("// ==================== 待办抽屉") : page.index("// ==================== 删除确认")]
 
-    def test_still_submits_push(self):
-        assert 'channels: "push"' in self._page()
+    def test_drawer_says_push_only(self):
+        """待办抽屉里提醒的说明只有一句：到点发通知。"""
+        assert "到设定时间发通知" in self._drawer()
 
     def test_no_channel_picker(self):
-        """抽屉里只允许三个 select：功能 / 周几 / 提醒动作。多一个就是假选项。
+        """抽屉里唯一的下拉是「清单」；渠道/动作选择器不许回流。
 
-        2026-11-10 重排后频率改成 `.seg` 分段按钮，select 从 4 个变 3 个；
-        「提醒方式」是静态说明块（`.rem-deliver`），不是控件。
+        旧提醒抽屉曾有 功能/周几/提醒动作 三棵 select 和一个「提醒方式」
+        说明块 —— 自定义提醒并入待办后全部退场，谁往回加这里必须红。
         """
-        page = self._page()
-        drawer = page[page.index("function ReminderDrawer") : page.index("// ==================== 页面")]
-        assert drawer.count("<select") == 3
-        deliver = drawer[drawer.index("提醒方式") : drawer.index("提醒方式") + 500]
-        assert "<select" not in deliver, "「提醒方式」又变回下拉框了"
+        drawer = self._drawer()
+        assert drawer.count("<select") == 1
+        for gone in ("channels", "提醒方式", "rem-deliver"):
+            assert gone not in drawer, f"「{gone}」又回到抽屉里了"

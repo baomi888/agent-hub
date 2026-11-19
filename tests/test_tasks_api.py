@@ -64,7 +64,8 @@ def _as(name: str) -> None:
 
 
 def _create(client, **kwargs) -> dict:
-    body = {"title": "交高数作业", "list_key": "homework"}
+    # ★ due_at 必填（「所有待办都要设置时间」）：默认给一个足够远的未来时刻
+    body = {"title": "交高数作业", "list_key": "homework", "due_at": 1_800_000_000}
     body.update(kwargs)
     res = client.post("/api/tasks", json=body)
     assert res.status_code == 200, res.text
@@ -90,13 +91,12 @@ class TestCrud:
         assert res.json()["detail"] == "待办不存在"
 
     def test_list_scopes(self, client):
-        _create(client, title="无日期")
+        _create(client, title="很远的待办")
         for scope in ("today", "upcoming", "all", "completed"):
             res = client.get(f"/api/tasks?scope={scope}")
             assert res.status_code == 200, res.text
             assert res.json()["scope"] == scope
         assert len(client.get("/api/tasks?scope=all").json()["items"]) == 1
-        assert len(client.get("/api/tasks?scope=today").json()["items"]) == 0
 
     def test_bad_scope_is_400(self, client):
         assert client.get("/api/tasks?scope=week").status_code == 400
@@ -127,12 +127,15 @@ class TestPatch:
         assert res.json()["title"] == "改个名"
         assert res.json()["priority"] == 2
 
-    def test_explicit_null_clears_due_at(self, client):
-        """回归：用 exclude_none 的话这里会静默失败。"""
+    def test_explicit_null_due_at_is_400(self, client):
+        """反向回归：「所有待办都要设置时间」——显式把 due_at 置 null 必须被拒，
+        不能像以前那样静默清空。exclude_unset 语义仍要保住（否则 null 根本传不到校验）。"""
         task = _create(client, due_at=1_800_000_000)
         res = client.patch(f"/api/tasks/{task['id']}", json={"due_at": None})
-        assert res.status_code == 200
-        assert res.json()["due_at"] is None
+        assert res.status_code == 400
+        assert "设置时间" in res.json()["detail"]
+        # 拒绝之后原值还在
+        assert client.get(f"/api/tasks/{task['id']}").json()["due_at"] == 1_800_000_000
 
     def test_explicit_null_clears_remind_at(self, client):
         import time

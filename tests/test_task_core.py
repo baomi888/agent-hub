@@ -47,7 +47,9 @@ def db(tmp_path, monkeypatch):
 
 
 def _mk(**kwargs) -> dict:
-    data = {"title": "交高数作业", "list_key": "homework"}
+    # ★ due_at 现在必填（「所有待办都要设置时间」）——默认给一条未来的日期，
+    #   老测试里凡是没显式传时间的，都自动带上。
+    data = {"title": "交高数作业", "list_key": "homework", "due_at": _ts(20, 23, 59)}
     data.update(kwargs)
     return data
 
@@ -149,9 +151,23 @@ class TestCreate:
         with pytest.raises(task_core.TaskInvalid):
             task_core.create(OWNER, _mk(list_key="作业"))
 
-    def test_recurrence_closed_in_phase1(self, db):
+    def test_recurrence_open_but_needs_remind_at(self, db):
+        """提醒并入待办（2026-11-19）后循环规则开放了，但缺提醒时间照样 400。
+
+        注意别写成假绿：这里两条都要有 —— 只断言 raise 的话，
+        换个原因（比如将来误删了 remind_at 校验之外的路径）也照样绿。
+        """
         with pytest.raises(task_core.TaskInvalid):
             task_core.create(OWNER, _mk(recurrence="daily"))
+        created = task_core.create(
+            OWNER, _mk(recurrence="daily", remind_at=_ts(20, 8, 30), due_at=_ts(20, 23, 59))
+        )
+        assert created["recurrence"] == "daily"
+        assert _linked(created["id"])["enabled"] is True
+
+    def test_weekly_needs_weekday(self, db):
+        with pytest.raises(task_core.TaskInvalid):
+            task_core.create(OWNER, _mk(recurrence="weekly", remind_at=_ts(20, 8, 30)))
 
     def test_parent_closed_in_phase1(self, db):
         with pytest.raises(task_core.TaskInvalid):
@@ -329,12 +345,25 @@ class TestScopes:
         titles = [i["title"] for i in task_core.list_tasks(OWNER, "upcoming", now=now)]
         assert titles == ["下周"]
 
-    def test_undated_only_in_all(self, db):
+    def test_undated_rejected(self, db):
+        """「所有待办都要设置时间」：create 不带 due_at 直接拒。"""
+        with pytest.raises(task_core.TaskInvalid, match="设置时间"):
+            task_core.create(OWNER, _mk(title="买教材", due_at=None))
+
+    def test_undated_row_sorts_last_in_all(self, db):
+        """排序层仍容忍历史 null（迁移漏网的行不该把列表炸掉）：垫底而不是报错。"""
         now = _ts(10, 12, 0)
-        task_core.create(OWNER, _mk(title="买教材"))
-        assert task_core.list_tasks(OWNER, "today", now=now) == []
-        assert task_core.list_tasks(OWNER, "upcoming", now=now) == []
-        assert [i["title"] for i in task_core.list_tasks(OWNER, "all", now=now)] == ["买教材"]
+        dated = task_core.create(OWNER, _mk(title="有日期的"))
+        with session._conn() as conn:
+            conn.execute(
+                "INSERT INTO tasks (id, owner_id, title, status, due_at, remind_at,"
+                " recurrence, sort_order, created_at, updated_at)"
+                " VALUES ('t_null', ?, '历史无日期', 'open', NULL, NULL, 'none', 0, ?, ?)",
+                (OWNER, now, now),
+            )
+        titles = [i["title"] for i in task_core.list_tasks(OWNER, "all", now=now)]
+        assert titles[-1] == "历史无日期"
+        assert titles[0] == dated["title"]
 
     def test_completed_scope(self, db):
         task = task_core.create(OWNER, _mk())
@@ -526,14 +555,14 @@ class TestSummary:
         task_core.create(OWNER, _mk(title="今天早点", due_at=_ts(10, 13, 0)))
         task_core.create(OWNER, _mk(title="逾期", due_at=_ts(2, 9, 0)))
         task_core.create(OWNER, _mk(title="下周", due_at=_ts(17, 9, 0)))
-        task_core.create(OWNER, _mk(title="没日期"))
+        task_core.create(OWNER, _mk(title="临近的", due_at=_ts(19, 9, 0)))
         done = task_core.create(OWNER, _mk(title="做完了"))
         task_core.complete(OWNER, done["id"])
 
         s = task_core.summary(OWNER, now=now)
         assert s["today"] == 2
         assert s["overdue"] == 1
-        assert s["upcoming"] == 1
+        assert s["upcoming"] == 2
         assert s["all_open"] == 5
         assert s["completed"] == 1
         assert s["by_list"]["homework"] == 5
@@ -596,7 +625,9 @@ class TestReminderBoundary:
         )
         stats = reminder_tick.run_one(reminder_tick.JOB_KEY, OWNER, remind)
         assert stats["fired"] == 1
-        assert calls[0]["payload"]["title"] == "交高数作业"
+        # due_at 现在必填，worker 文案会带上「· 还有 X 小时」这类截止信息；
+        # 这里只守卫"标题以待办名开头 + 真的发了"，文案细节不归它管。
+        assert calls[0]["payload"]["title"].startswith("交高数作业")
         fires = reminder_core.fires(OWNER, _linked(task["id"])["id"])
         assert fires and fires[0]["status"] == "sent"
 
@@ -616,6 +647,98 @@ class TestReminderBoundary:
         linked = _linked(task["id"])
         assert linked["enabled"] is False
         assert linked["next_fire_at"] is None
+
+
+class TestRecurrenceAdvance:
+    """循环待办「完成即排下一轮」（2026-11-19 提醒并入待办）。
+
+    迁移来的「每天 8:30 背单词」以 recurrence=daily 落进 tasks 表：
+    完成不把它送进历史，而是把 due_at/remind_at 推到下一次、
+    联动提醒重排、status 拉回 open。反证：把 complete 里第二轮
+    UPDATE 删掉 → 任务停在 done、提醒停用，这一组全红。
+    """
+
+    def _daily(self, **kwargs):
+        return task_core.create(
+            OWNER,
+            _mk(
+                title="背单词",
+                recurrence="daily",
+                remind_at=_ts(20, 8, 30),
+                due_at=_ts(20, 8, 30),
+                **kwargs,
+            ),
+        )
+
+    def test_complete_advances_daily(self, db, monkeypatch):
+        task = self._daily()
+        first = int(task["remind_at"])
+        # 模拟「第二天上午」勾掉（正好等于 21 日的 08:30）：
+        # next_fire 只取**严格大于 now** 的时刻 → 下一次是 22 日同一时刻
+        monkeypatch.setattr(task_core.timeutil, "now_ts", lambda: first + 86_400)
+        done = task_core.complete(OWNER, task["id"])
+        assert done["status"] == "open"
+        assert done["completed_at"] is None
+        assert done["due_at"] == done["remind_at"] == first + 2 * 86_400
+        linked = _linked(task["id"])
+        assert linked["enabled"] is True
+        assert linked["fire_at"] == first + 2 * 86_400
+
+    def test_complete_advances_weekdays_skips_weekend(self, db, monkeypatch):
+        # 2026-11-20 是周五：周五勾掉，下一次必须跳过周末落到周一（11-23）
+        friday = int(_ts(20, 8, 30))
+        monday = int(_ts(23, 8, 30))
+        task = task_core.create(
+            OWNER,
+            _mk(
+                title="交日报",
+                recurrence="weekdays",
+                remind_at=friday,
+                due_at=friday,
+            ),
+        )
+        monkeypatch.setattr(task_core.timeutil, "now_ts", lambda: friday + 600)
+        done = task_core.complete(OWNER, task["id"])
+        assert done["status"] == "open"
+        assert done["remind_at"] == monday
+
+    def test_complete_advances_weekly_to_same_weekday(self, db, monkeypatch):
+        # 2026-11-20 周五（weekday=4，0=周一）：勾掉后排到下一个周五（11-27）
+        friday = int(_ts(20, 8, 30))
+        next_friday = int(_ts(27, 8, 30))
+        task = task_core.create(
+            OWNER,
+            _mk(
+                title="周会前整理",
+                recurrence="weekly",
+                recurrence_weekday=4,
+                remind_at=friday,
+                due_at=friday,
+            ),
+        )
+        monkeypatch.setattr(task_core.timeutil, "now_ts", lambda: friday + 600)
+        done = task_core.complete(OWNER, task["id"])
+        assert done["status"] == "open"
+        assert done["remind_at"] == next_friday
+        assert _linked(task["id"])["enabled"] is True
+
+    def test_non_recurring_complete_stays_done(self, db):
+        """一次性待办完成就该进历史 —— 推进只属于循环那一条。"""
+        task = task_core.create(OWNER, _mk(remind_at=_ts(20, 9, 0)))
+        done = task_core.complete(OWNER, task["id"])
+        assert done["status"] == "done"
+        assert done["completed_at"] is not None
+        assert _linked(task["id"])["enabled"] is False
+
+    def test_complete_is_idempotent_for_recurring(self, db, monkeypatch):
+        """循环待办重复点「完成」不能再推一轮：已经 open 就原样返回。"""
+        task = self._daily()
+        first = int(task["remind_at"])
+        monkeypatch.setattr(task_core.timeutil, "now_ts", lambda: first + 86_400)
+        task_core.complete(OWNER, task["id"])
+        second = task_core.complete(OWNER, task["id"])
+        assert second["status"] == "open"
+        assert second["remind_at"] == first + 2 * 86_400
 
 
 class TestPriorityWidening:

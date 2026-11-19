@@ -189,6 +189,9 @@ export function taskDraftOf(item: CaptureProposal): TaskDraft {
  * 为什么宁可拦下也不给个默认时间：提醒的全部价值就是那个时刻。
  * 编一个 20:00 出来，用户第二天会被一条自己没定过的提醒叫醒，
  * 而他昨天说的话里根本没有 20:00 —— 这种"贴心的默认值"是灾难。
+ *
+ * ★ 2026-11-19 提醒并入待办：这个函数不再被提交路径使用
+ * （提交统一走 `reminderProposalToTask`），保留它只为老测试与类型兼容。
  */
 export function reminderDraftOf(item: CaptureProposal): ReminderDraft | null {
   const rec = item.recurrence;
@@ -221,6 +224,61 @@ export function reminderDraftOf(item: CaptureProposal): ReminderDraft | null {
   if (freq === "interval") {
     if (!rec.every_minutes) return null;
     draft.every_minutes = rec.every_minutes;
+  }
+  return draft;
+}
+
+/**
+ * 「每天 8:30 背单词」这类提醒产出 → **循环待办草稿**（提醒并入待办）。
+ *
+ * 返回 null = 算不出第一次时刻，不能写（与 `reminderDraftOf` 拦哑弹同一立场）。
+ * 时间口径：once 用规则里的绝对时刻；daily/weekdays/weekly 用 `at`
+ * 算出**下一次**严格未来的时刻（与后端 reminder_core.next_fire 同一副语义）。
+ * interval（每 N 分钟）是投递节奏不是待办节律，转不成循环待办，直接拦下。
+ *
+ * `now` 必填（页面每分钟推下来的毫秒时刻）：渲染路径不许自己读钟，
+ * 否则纯函数组件每次渲染结果都可能不同（hydration 不一致的根源）。
+ */
+export function reminderProposalToTask(item: CaptureProposal, now: number): TaskDraft | null {
+  const rec = item.recurrence;
+  const freq = rec?.freq ?? "once";
+  const draft: TaskDraft = {
+    title: item.title.slice(0, 60),
+    list_key: (item.list_key ?? "life") as TaskListKey,
+    priority: item.priority,
+  };
+  if (item.note) draft.note = item.note;
+  if (item.icon) draft.icon = item.icon;
+
+  const first = ((): number | null => {
+    if (freq === "once") return rec?.fire_at ?? item.remind_at ?? null;
+    if (!rec?.at) return null;
+    const [h, m] = rec.at.split(":").map((n) => Number(n));
+    if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+    const nowSec = Math.floor(now / 1000);
+    const base = new Date();
+    base.setSeconds(0, 0);
+    for (let offset = 0; offset < 8; offset++) {
+      const d = new Date(base.getTime() + offset * 86_400_000);
+      d.setHours(h, m);
+      if (freq === "weekdays" && (d.getDay() === 0 || d.getDay() === 6)) continue;
+      if (freq === "weekly") {
+        // 后端 weekday 0=周一…6=周日；Date.getDay() 0=周日…6=周六 → (wd+1)%7
+        const want = rec.weekday ?? 0;
+        if (d.getDay() !== (want + 1) % 7) continue;
+      }
+      const ts = Math.floor(d.getTime() / 1000);
+      if (ts > nowSec) return ts;
+    }
+    return null;
+  })();
+
+  if (first === null) return null;
+  draft.due_at = first;
+  draft.remind_at = first;
+  if (freq === "daily" || freq === "weekdays" || freq === "weekly") {
+    draft.recurrence = freq;
+    draft.recurrence_weekday = freq === "weekly" ? rec?.weekday ?? 0 : null;
   }
   return draft;
 }
@@ -767,16 +825,23 @@ export default function AiCaptureDrawer({
 
   // Esc 要分两层：全屏语音态开着时，Esc 只取消录音，不关整个抽屉
   // （用户按 Esc 的意思是"这句不算"，不是"退出整理"）。
+  // 渲染期把「当前生效的 Esc 处理器」写进 ref：这是 useEvent 提案落地前的
+  // 标准镜像写法 —— 录音会话是长时对象，不能持渲染时的旧回调（点了停止没反应）。
+  // eslint-disable-next-line react-hooks/refs
   liveEscRef.current = liveOpen ? cancelLive : null;
 
   // 波形电平走 ref：level 每 70ms 变一次，直接进依赖数组会让 interval
   // 每 70ms 重建一次，柱子会跳帧。
   const levelRef = useRef(0);
+  // 同上：70ms 一次的电平走 ref 镜像，进 state 依赖会让 interval 每帧重建、柱子跳帧。
+  // eslint-disable-next-line react-hooks/refs
   levelRef.current = voice.level;
 
   useEffect(() => {
     if (voice.phase !== "recording") {
       // 停录后把柱子放平。不清的话它会停在最后一帧的高度上，像还在收音。
+      // 条件回退：已经全 0 时返回原数组，React 对同值 setState bail out，不级联。
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setWave((prev) => (prev.some((v) => v > 0.01) ? new Array(WAVE_BARS).fill(0) : prev));
       return;
     }
@@ -1095,6 +1160,8 @@ export default function AiCaptureDrawer({
   // 点编号 → 展开原话并滚到引用卡。原话在轴上方，不滚上去用户会以为点了没反应。
   useEffect(() => {
     if (!focusId) return;
+    // 联动展开：一次性的条件回退（展开后 showSource 为 true，不会再进这个分支）。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!showSource) setShowSource(true);
     sourceRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [focusId, showSource]);
@@ -1125,7 +1192,7 @@ export default function AiCaptureDrawer({
   const title = (() => {
     if (status === "ready") return items.length === 0 ? "没整理出待办或提醒" : `确认这 ${items.length} 条`;
     if (status === "failed") return "这次没整理出来";
-    return "整理成待办和提醒";
+    return "整理成待办";
   })();
 
   /**

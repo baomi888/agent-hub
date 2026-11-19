@@ -55,6 +55,15 @@
 .btn-new:active {
   background: var(--accent-ink);
 }
+/* 禁用态必须一眼看出来：due_at 必填之后抽屉的保存会长期停在这里，
+   看起来能点的禁用按钮会让用户反复点（2026-11-19 日历批次补） */
+.btn-new:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.btn-new:disabled:hover {
+  background: var(--solid);
+}
 
 /* 描边按钮 */
 .btn-import {

@@ -1752,6 +1752,9 @@ export interface TaskReminderState {
  *   为什么显示今天是截止」。只设 `due_at` 不会响（后端不建联动提醒）。
  * ★ 时间一律 **Unix 秒**，不是毫秒。
  */
+/** 循环规则。提醒并入待办后打开；循环待办完成后由后端自动排下一轮 */
+export type TaskRecurrence = "none" | "daily" | "weekdays" | "weekly";
+
 export interface Task {
   id: string;
   owner_id: string;
@@ -1768,7 +1771,9 @@ export interface Task {
   due_at: number | null;
   remind_at: number | null;
   completed_at: number | null;
-  recurrence: "none";
+  recurrence: TaskRecurrence;
+  /** weekly 专用：0=周一 … 6=周日；其他规则为 null */
+  recurrence_weekday: number | null;
   parent_id: string | null;
   sort_order: number;
   created_at: number;
@@ -1783,8 +1788,11 @@ export interface TaskDraft {
   list_key?: TaskListKey;
   icon?: string | null;
   priority?: TaskPriority;
+  /** 必填：所有待办都要设置时间（后端 400 兜底） */
   due_at?: number | null;
   remind_at?: number | null;
+  recurrence?: TaskRecurrence;
+  recurrence_weekday?: number | null;
 }
 
 /** 局部更新。显式 `null` = 清空（端点用 exclude_unset，能把 null 传下去） */
@@ -1794,15 +1802,12 @@ export interface TaskPatch {
   list_key?: TaskListKey;
   icon?: string | null;
   priority?: TaskPriority;
+  /** 显式 null 会被后端拒（400）：所有待办都要设置时间 */
   due_at?: number | null;
   remind_at?: number | null;
-  /**
-   * 手排序号。**0 = 没排过**（落回自动规则），正数才是用户排的位置。
-   *
-   * ★ 批量排序走 `POST /api/tasks/reorder`，不要逐条 PATCH —— 拖一次发 N 个
-   *   请求，中途失败会留下半新半旧的顺序。
-   */
   sort_order?: number;
+  recurrence?: TaskRecurrence;
+  recurrence_weekday?: number | null;
 }
 
 /**
