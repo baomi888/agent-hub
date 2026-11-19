@@ -2896,3 +2896,14 @@ class TestCalendarView:
         """月历格本身就是触控目标：44px 高（a11y 底线，§04 的 390 量过）。"""
         css = CONSOLE_CSS.read_text(encoding="utf-8").replace("\r\n", "\n")
         assert "height: 44px;" in _css_block(css, ".rem-cal-cell {")
+
+    def test_cell_title_shows_two_lines_not_one(self):
+        """格子标题至少能看 10 个字再省略：单行 nowrap 只能放 ~8 字（2026-11-19 用户反馈），
+        改两行 line-clamp（≈18 字），格子 58px 装得下数字+两行，不撑破排版。"""
+        css = CONSOLE_CSS.read_text(encoding="utf-8").replace("\r\n", "\n")
+        block = _css_block(css, ".rem-cal-cell .rem-cal-title {")
+        assert "-webkit-line-clamp: 2" in block
+        assert "white-space: nowrap" not in block
+        assert "text-overflow" not in block
+        # 桌面格子高不能跟着涨：58px 里放得下 数字(~15px)+两行标题(~29px)
+        assert "height: 58px;" in css, "桌面格子高度被改动了"
