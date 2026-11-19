@@ -182,6 +182,11 @@ export default function DelegatePage() {
   useEffect(() => {
     if (!tipKey) return;
     try {
+      // 从 localStorage 恢复状态：渲染期读浏览器存储在 SSR 下必炸，
+      // 「effect 里读完同步 setState」是 React 认可的恢复姿势（见 React 文档
+      // You Might Not Need an Effect · 初值来自外部存储的例外）。规则这条拦的是
+      // 误用，这里不是。
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (!localStorage.getItem(tipKey)) setTip(true);
     } catch {
       /* 隐私模式：读不到就当没看过，提示多出现几次不算问题 */
@@ -306,8 +311,18 @@ export default function DelegatePage() {
 
   // 后端没上线时用演示数据顶住版面，但界面上会挂「演示数据」标记
   const isDemo = list.state === "absent";
-  const items = list.state === "ready" ? list.data : isDemo ? DEMO_DELEGATES : [];
-  const runItems = runs.state === "ready" ? runs.data : isDemo ? DEMO_RUNS : [];
+  // useMemo 包住：条件分支会换数组引用，不包的话下面四个 useMemo 的依赖
+  // 每次渲染都在变，缓存等于没有（lint: exhaustive-deps「conditional」警告）。
+  const items = useMemo(
+    () => (list.state === "ready" ? list.data : isDemo ? DEMO_DELEGATES : []),
+    // 依赖整个 state 对象（useState 持有、引用稳定）：ProbeState 是判别联合，
+    // 在 deps 里无条件取 .data 过不了类型检查（data 只在 ready 分支存在）。
+    [list, isDemo]
+  );
+  const runItems = useMemo(
+    () => (runs.state === "ready" ? runs.data : isDemo ? DEMO_RUNS : []),
+    [runs, isDemo]
+  );
 
   const activeCount = useMemo(() => items.filter((d) => d.enabled).length, [items]);
 

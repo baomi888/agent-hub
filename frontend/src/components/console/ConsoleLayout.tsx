@@ -17,7 +17,7 @@
 //     知识库页一起消失了）。
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import AuthGate from "../AuthGate";
 import { AuthLoading } from "../boot/BootSplash";
 import CornIcon from "../CornIcon";
@@ -73,11 +73,9 @@ export default function ConsoleLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   /* 「更多」面板开着时锁住底层滚动。开合状态归 ConsoleTabBar 自己管 ——
-     外壳只关心"要不要锁滚动"，所以它只收一个布尔值。
-     useCallback 不是过度优化：这个函数作为 prop 传进组件，
-     每次渲染新建一个的话，组件里那个 [onOpenChange] 的 effect 会每帧都跑一遍。 */
+     外壳只关心"要不要锁滚动"，所以它只收一个布尔值（setTabOpen 引用稳定，
+     传给子组件不会引发多余 effect）。 */
   const [tabOpen, setTabOpen] = useState(false);
-  const onTabOpenChange = useCallback((open: boolean) => setTabOpen(open), []);
 
   // 必须 useMemo：Provider 的 value 每次渲染新建对象的话，所有消费者都会
   // 跟着重渲染，而这个外壳的子组件是整棵页面树。

@@ -25,6 +25,7 @@
  *   时间轴是先画线再落点。
  */
 
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef } from "react";
 import MascotLogo from "@/components/chat/MascotLogo";
@@ -238,13 +239,15 @@ export default function Landing() {
         {/* 贴在右下角的实拍：真机截图，不是画的。
             斜着放是因为它像"夹在本子里的一张"，摆正了就变成产品截图陈列。 */}
         <figure className="lp-paste" ref={shotRef}>
-          <img
+          {/* next/image：本地静态图走内置优化管线（按 DPR 出 1x/2x，首屏 preload）。
+              尺寸写死在属性里 + CSS width:100%，不会布局跳动。 */}
+          <Image
             src="/landing/checkin.webp"
             alt="知穗Agent 的今日打卡卡片：数据结构·树与二叉树，遍历与平衡标为已掌握，线索化标为待加强"
             width={430}
             height={443}
-            loading="eager"
-            decoding="async"
+            sizes="(max-width: 900px) 88vw, 430px"
+            priority
           />
           <figcaption>今天的打卡卡片 · 只讲知识结构，不带姓名学号</figcaption>
         </figure>
@@ -298,13 +301,12 @@ export default function Landing() {
 
           <figure className="lp-shot lp-reveal">
             <div className="lp-shot-frame">
-              <img
+              <Image
                 src="/landing/cite.webp"
                 alt="回答下方的参考资料卡片：sample.txt，相似度 0.766，强度标为「强」，可展开原文"
                 width={1243}
                 height={586}
-                loading="lazy"
-                decoding="async"
+                sizes="(max-width: 900px) 92vw, 640px"
               />
             </div>
             <figcaption>

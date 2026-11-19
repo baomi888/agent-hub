@@ -61,6 +61,9 @@ export default function ConsoleTabBar({ isAdmin, onOpenChange, variant }: Props)
   // 换页就把面板收起来：从面板里点「设置」跳过去后，面板还盖在新页面上，
   // 用户会以为没跳成功。
   useEffect(() => {
+    // 换页收起面板：已是 false 时 React 对同值 setState 直接 bail out，
+    // 不会级联渲染；这是一次性防御动作，不是派生状态。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMoreOpen(false);
   }, [pathname]);
 

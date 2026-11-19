@@ -112,6 +112,8 @@ const Bubble = memo(function Bubble({
             <div className="msg-attachments">
               {m.attachments.map((a) =>
                 a.type.startsWith("image/") ? (
+                  // 同 ChatArea：用户上传图动态 URL，next/image 收益为负。
+                  // eslint-disable-next-line @next/next/no-img-element
                   <img key={a.id} src={a.url} alt={a.name} className="msg-img" />
                 ) : (
                   <div key={a.id} className="msg-file">

@@ -368,7 +368,7 @@ function PlanEditor({
             : "考试日不能早于今天"}
         </p>
         <p style={{ fontSize: "var(--fs-xs)", color: "var(--text-3)", margin: "4px 0 0" }}>
-          上面三个日期按"6 月 / 12 月第二个周六"的惯例推算，请以官方通知为准；也可以直接选一个日期。
+          上面三个日期按「6 月 / 12 月第二个周六」的惯例推算，请以官方通知为准；也可以直接选一个日期。
         </p>
       </Row>
 
@@ -506,6 +506,10 @@ export default function CetPage() {
   // 登录态守卫：身份确认前不发请求（与 /checkin 同一套写法）
   useEffect(() => {
     if (!authedId) return;
+    // 进页面拉数据的标准模式：load 首行同步置 loading（骨架屏立刻出现）。
+    // 新版 react-hooks 规则把它当「effect 内同步 setState」拦——这里是有意的，
+    // 异步部分（真正拉接口）本来就在 await 之后。全套控制台页同一写法。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [authedId, load]);
 

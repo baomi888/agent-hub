@@ -180,6 +180,9 @@ export default function PathPage() {
   // 登录态守卫：身份确认前不发请求（与 /checkin 同一套写法）
   useEffect(() => {
     if (!authedId) return;
+    // 同 /cet：load 首行同步置 loading 是有意的（骨架屏立刻出现），
+    // 拉接口本体在 await 之后。见该页 load 的注释。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [authedId, load]);
 

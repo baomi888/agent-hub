@@ -223,6 +223,9 @@ export default function TurnOutline({ turns, scrollRef, onJump, layoutKey }: Pro
         const sideOk = v.side === "left" || v.side === "right";
         const ratioOk = typeof v.ratio === "number" && Number.isFinite(v.ratio);
         if (sideOk && ratioOk) {
+          // 从 localStorage 恢复位置：渲染期读浏览器存储在 SSR 下必炸，
+          // 「effect 里读完同步 setState」是恢复外部状态的认可姿势。
+          // eslint-disable-next-line react-hooks/set-state-in-effect
           setFab({
             side: v.side as FabPos["side"],
             ratio: Math.min(1, Math.max(0, v.ratio as number)),

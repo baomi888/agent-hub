@@ -132,7 +132,7 @@ export function useSessions(showToast: ShowToast) {
       setSessions((prev) => [conv, ...prev]);
       setActiveSid(conv.id);
       setMessages([]);
-    } catch (e) {
+    } catch {
       showToast("error", "新建会话失败，请稍后重试");
     }
   };
@@ -163,7 +163,7 @@ export function useSessions(showToast: ShowToast) {
     try {
       await api.renameSession(sid, title);
       setSessions((prev) => prev.map((c) => (c.id === sid ? { ...c, title } : c)));
-    } catch (e) {
+    } catch {
       showToast("error", "重命名失败，请稍后重试");
     }
   };
@@ -176,7 +176,7 @@ export function useSessions(showToast: ShowToast) {
         setActiveSid(null);
         setMessages([]);
       }
-    } catch (e) {
+    } catch {
       showToast("error", "删除失败，请稍后重试");
     }
   };
@@ -191,7 +191,7 @@ export function useSessions(showToast: ShowToast) {
         const detail = await api.getSession(activeSid);
         setMessages(toUiList(detail.messages));
       }
-    } catch (e) {
+    } catch {
       showToast("error", "删除失败，请稍后重试");
     }
   };

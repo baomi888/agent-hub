@@ -97,7 +97,10 @@ function Face({ name, url, size = 36 }: { name: string; url?: string; size?: num
   const box = { width: size, height: size };
 
   if (showImg && img) {
+    // 反馈头像 = 用户上传图的动态 URL：next/image 要配 remotePatterns + 固定宽高，
+    // 头像这种小图收益为负（同聊天附件 <img> 的口径）。
     return (
+      // eslint-disable-next-line @next/next/no-img-element
       <img
         className="fbim-face"
         src={img}
@@ -129,34 +132,42 @@ function Donut({ items }: { items: FeedbackStatsItem[] }) {
   const C = 2 * Math.PI * R;
   const sum = items.reduce((a, b) => a + b.n, 0);
   const total = sum || 1;
-  let acc = 0;
+  // 环形段先折算成纯数据（起点角度 / 弧长），再渲染。
+  // 不在渲染期用外部变量累加 —— 那是「渲染后改渲染前声明的值」，
+  // React 19 的编译器 lint 会直接拦（reassign after render completes）。
+  // idx 沿用 items 的下标（含 n<=0 的），透明度分层口径与原来一致。
+  const segs = items.reduce<{ idx: number; draw: number; offset: number }[]>(
+    (list, it, idx) => {
+      if (it.n <= 0) return list;
+      const len = (it.n / total) * C;
+      // 段与段之间留 1.5px 的缝，否则相邻两段同色系会黏成一体
+      const draw = Math.max(0, len - 1.5);
+      const prev = list[list.length - 1];
+      const offset = prev ? prev.offset + prev.draw + 1.5 : 0;
+      list.push({ idx, draw, offset });
+      return list;
+    },
+    []
+  );
   return (
     <div className="fbim-donut">
       <svg viewBox="0 0 110 110" role="img" aria-label="反馈分类分布">
         <circle cx="55" cy="55" r={R} fill="none" stroke="var(--fill-3)" strokeWidth="12" />
-        {items.map((it, idx) => {
-          if (it.n <= 0) return null;
-          const len = (it.n / total) * C;
-          // 段与段之间留 1.5px 的缝，否则相邻两段同色系会黏成一体
-          const draw = Math.max(0, len - 1.5);
-          const el = (
-            <circle
-              key={it.value}
-              cx="55"
-              cy="55"
-              r={R}
-              fill="none"
-              stroke="var(--accent)"
-              strokeOpacity={Math.max(0.45, 1 - idx * 0.14)}
-              strokeWidth="12"
-              strokeDasharray={`${draw} ${C - draw}`}
-              strokeDashoffset={-acc}
-              transform="rotate(-90 55 55)"
-            />
-          );
-          acc += len;
-          return el;
-        })}
+        {segs.map(({ idx, draw, offset }) => (
+          <circle
+            key={items[idx].value}
+            cx="55"
+            cy="55"
+            r={R}
+            fill="none"
+            stroke="var(--accent)"
+            strokeOpacity={Math.max(0.45, 1 - idx * 0.14)}
+            strokeWidth="12"
+            strokeDasharray={`${draw} ${C - draw}`}
+            strokeDashoffset={-offset}
+            transform="rotate(-90 55 55)"
+          />
+        ))}
       </svg>
       <div className="fbim-donut-c">
         <b>{sum}</b>

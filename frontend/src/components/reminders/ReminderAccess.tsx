@@ -114,6 +114,8 @@ export default function ReminderAccess() {
   }, []);
 
   useEffect(() => {
+    // 同 /cet：refresh 首行同步置 loading，拉接口在 await 之后。有意为之。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh();
   }, [refresh]);
 

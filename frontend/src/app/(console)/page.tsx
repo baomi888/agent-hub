@@ -120,6 +120,13 @@ export default function Home() {
   // done 时收尾。刻意不做成全局 state —— 轨迹属于**某一条消息**，
   // 放全局就会出现「A 轮的节点状态串到 B 轮」。
   const hybrid = useHybridTrace();
+  // 回调里只用这几个稳定引用（hook 内部全是 useCallback([])）；hook 返回对象
+  // 每渲染都是新的，整体进 deps 会让 sendMessage 在流式期间每帧重建（连累下游 memo）。
+  const hybridReset = hybrid.reset;
+  const hybridOnStart = hybrid.onStart;
+  const hybridOnNode = hybrid.onNode;
+  const hybridOnSwitch = hybrid.onSwitch;
+  const hybridOnDone = hybrid.onDone;
   // 轨迹是 hook 内部 state，但它要落到消息上（才能随消息持久化 / 刷新后重建），
   // 所以订阅它变化，把 items 同步进当前那条助手消息。
   const hybridItems = hybrid.trace.items;
@@ -185,7 +192,6 @@ export default function Home() {
     const sid = sp.get("sid");
     if (sid) applyRef.current = { sid, q: sp.get("q") };
     // 只跑一次：读 query 是幂等的，无需进 deps
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
     const a = applyRef.current;
@@ -300,7 +306,7 @@ export default function Home() {
         sid = conv.id;
         setSessions((prev) => [conv, ...prev]);
         setActiveSid(conv.id);
-      } catch (e) {
+      } catch {
         showToast("error", "新建会话失败，请稍后重试");
         return;
       }
@@ -344,7 +350,7 @@ export default function Home() {
     });
     playerRef.current = player;
     // 新一轮开始：先把上一轮的轨迹归零，否则新旧两轮的节点会串在一条时间轴上
-    hybrid.reset();
+    hybridReset();
     setMessages((prev) => [
       ...prev,
       { id: asstId, role: "assistant", content: "", streaming: true, toolCalls: [] },
@@ -404,20 +410,20 @@ export default function Home() {
         switch (ev.event) {
           // ---------- 混合架构三事件（仅 mode=hybrid 才有）----------
           case "hybrid_start": {
-            hybrid.onStart(String(ev.data.run_id ?? ""), ev.data.mode === "workflow" ? "workflow" : "agent");
+            hybridOnStart(String(ev.data.run_id ?? ""), ev.data.mode === "workflow" ? "workflow" : "agent");
             break;
           }
           case "workflow_node": {
             const phase = ev.data.phase === "exit" ? "exit" : "enter";
             if (phase === "enter") {
-              hybrid.onNode({
+              hybridOnNode({
                 phase: "enter",
                 node_id: String(ev.data.node_id ?? ""),
                 type: (ev.data.type ?? "llm") as never,
                 name: String(ev.data.name ?? ""),
               });
             } else {
-              hybrid.onNode({
+              hybridOnNode({
                 phase: "exit",
                 node_id: String(ev.data.node_id ?? ""),
                 status: ev.data.status === "failed" ? "failed" : "ok",
@@ -428,7 +434,7 @@ export default function Home() {
             break;
           }
           case "mode_switch": {
-            hybrid.onSwitch({
+            hybridOnSwitch({
               rule: String(ev.data.rule ?? ""),
               reason: String(ev.data.reason ?? ""),
               from: ev.data.from === "workflow" ? "workflow" : "agent",
@@ -561,7 +567,7 @@ export default function Home() {
             // done.mode 才是**最终**模式（静默回退时这里是 agent）
             const doneMode = String(ev.data.mode ?? "");
             const doneRunId = String(ev.data.run_id ?? "");
-            hybrid.onDone(doneMode || null);
+            hybridOnDone(doneMode || null);
             // 只有**本轮真的请求了 hybrid** 时，done.mode=agent 才代表"混合模式回落"。
             // 模式入口收敛成 自动/检索/纯对话 之后，auto 常由后端路由到 agent，
             // 那是正常执行，不是回落 —— 以前这里不看请求模式，于是每条 auto 回答
@@ -676,7 +682,7 @@ export default function Home() {
       // 注意：这里不再无条件 setSending(false)。上游结束后打字机还要慢慢放十几秒，
       // 这期间按钮必须仍是「停止」，用户才能随时截断回放；收尾交给 onDone / 上面的 abort 分支。
     }
-  }, [activeSid, mode, useKb, useWeb, topK, setSessions, setActiveSid, setMessages, showToast, refreshSessions]);
+  }, [activeSid, mode, useKb, useWeb, topK, hybridReset, hybridOnStart, hybridOnNode, hybridOnSwitch, hybridOnDone, setSessions, setActiveSid, setMessages, showToast, refreshSessions]);
 
   // 消息镜像：重试需要读当前列表，但不能让回调依赖 messages，否则每个 token
   // 都会生成新的 onRetry，把 Bubble 的 memo 全部打穿
@@ -854,7 +860,7 @@ export default function Home() {
       const conv = await api.bindKb(sid, kbId);
       setSessions((prev) => prev.map((c) => (c.id === sid ? conv : c)));
       showToast(kbId ? "success" : "info", kbId ? "已绑定资料库" : "已解绑资料库");
-    } catch (e) {
+    } catch {
       showToast("error", "绑定失败，请稍后重试");
     }
   };
@@ -936,7 +942,7 @@ export default function Home() {
   const closeOverlays = useCallback(() => {
     setSidebarOpen(false);
     if (viewport !== "wide") setKbPanelOpen(false);
-  }, [viewport, setKbPanelOpen]);
+  }, [viewport, setKbPanelOpen, setSidebarOpen]);
 
   // 抽屉：Esc 关闭，打开时焦点移入面板，关闭后归还给触发它的按钮
   useEffect(() => {

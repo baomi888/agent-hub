@@ -33,11 +33,15 @@ const TAB_HREFS = new Set(
 );
 
 let lastPath: string | null = null;
+/* PageTransition 挂在 template.tsx：路由切换时整个组件重挂载，useRef 存不住
+   上一页路径 —— 模块级变量是唯一能跨挂载存活的位置（React Router 的过渡库
+   同款做法）。最坏后果是切页动画方向偶尔判反，无功能损害，故豁免。 */
 
 export default function PageTransition({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const here = (pathname || "/").replace(/\/+$/, "") || "/";
   const prev = lastPath;
+  // eslint-disable-next-line react-hooks/globals
   lastPath = here;
 
   // 首帧不判方向，保持原来的基础进场

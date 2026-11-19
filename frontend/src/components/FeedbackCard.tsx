@@ -159,7 +159,7 @@ export default function FeedbackCard({
     } finally {
       setBusy(false);
     }
-  }, [category, contact, content, loadMine, max, min, page]);
+  }, [category, contact, content, loadMine, min, page]);
 
   const options = (dict?.categories ?? []).map((c) => ({ value: c.value, label: c.label }));
 

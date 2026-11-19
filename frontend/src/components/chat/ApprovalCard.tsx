@@ -51,15 +51,13 @@ export default function ApprovalCard({
   const [phase, setPhase] = useState<Phase>({ kind: "waiting" });
   const [left, setLeft] = useState(Math.max(0, Math.round(approval.expires_in)));
 
-  // 倒计时：每秒减一，到 0 就把卡片切成"已过期"。
+  // 倒计时：每秒减一。到 0 的"过期"不再 setState —— 它是渲染期就能算出来的
+  // 派生值（left<=0 且还停在 waiting），effect 里同步 setState 反而多一次
+  // 级联渲染（react-hooks/set-state-in-effect）。
   // 只在 waiting 时跑 —— 已经点过/已拒绝的卡片不需要再跳秒（跳了反而像还在等）。
   useEffect(() => {
-    if (phase.kind !== "waiting") return;
-    if (left <= 0) {
-      setPhase({ kind: "expired" });
-      return;
-    }
-    const t = window.setTimeout(() => setLeft((n) => n - 1), 1000);
+    if (phase.kind !== "waiting" || left <= 0) return;
+    const t = window.setTimeout(() => setLeft((n) => Math.max(0, n - 1)), 1000);
     return () => window.clearTimeout(t);
   }, [phase.kind, left]);
 
@@ -85,6 +83,17 @@ export default function ApprovalCard({
 
   const label = TOOL_LABEL[approval.tool_name] ?? approval.tool_name;
 
+  // 过期 = 渲染期派生：waiting 且倒计时走完（点过允许/忽略的卡不再判过期，
+  // 它们已经有自己的终态文案）。404 兜底的 setPhase({kind:"expired"}) 保留 ——
+  // 那是事件回调里的状态迁移，不归这条规则管。
+  const expired = left <= 0;
+  if (phase.kind === "waiting" && expired) {
+    return (
+      <p className="kbp-done-line" role="status">
+        这次确认已经过期（等太久了）。重新问一次就好。
+      </p>
+    );
+  }
   if (phase.kind === "approved") {
     return (
       <p className="kbp-done-line" role="status">

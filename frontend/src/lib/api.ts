@@ -624,7 +624,6 @@ export const api = {
       const started = Date.now();
       const INTERVAL = 1500;
       const MAX_WAIT = 10 * 60 * 1000;
-      let timer: ReturnType<typeof setTimeout>;
       const tick = async () => {
         try {
           const job = await request<UploadJob>(`/api/kb/upload-jobs/${encodeURIComponent(jobId)}`);
@@ -644,9 +643,9 @@ export const api = {
           reject(new Error("建库耗时过长，请稍后到资料库页查看结果或重试"));
           return;
         }
-        timer = setTimeout(tick, INTERVAL);
+        setTimeout(tick, INTERVAL);
       };
-      timer = setTimeout(tick, INTERVAL);
+      setTimeout(tick, INTERVAL);
     }),
   // ---------- 知识库文件级管理 ----------
   listKbFiles: (kbId: string) =>

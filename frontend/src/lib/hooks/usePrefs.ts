@@ -103,6 +103,11 @@ export function usePrefs() {
   // 挂载时读到的本地偏好：供初始化流程做 defaults 兜底判断（本地存过的项不用后端默认值）
   const savedRef = useRef<Prefs>({});
 
+  /* eslint-disable react-hooks/set-state-in-effect -- 本 effect 整体是
+     「从 localStorage 恢复用户偏好」：渲染期读浏览器存储在 SSR 下必炸，
+     effect 里读完同步 setState 是恢复外部状态的认可姿势（十来项偏好
+     逐行豁免没有信息量，块级豁免 + 这条理由说明为什么这里不是误用）。
+     ⚠️ prefsReady 必须在最后置 true：它挡住下面的写 effect，早了会用默认值反向覆盖。 */
   useEffect(() => {
     const saved = readPrefs() as Prefs;
     savedRef.current = saved;
@@ -123,6 +128,7 @@ export function usePrefs() {
     if (saved.fontScale) setFontScale(normalizeFontScale(saved.fontScale));
     setPrefsReady(true);
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // 偏好变化后落盘（prefsReady 之前不写，避免默认值反向覆盖）
   // 走 patchPrefs 而**不是**整对象覆盖：设置页可能刚在这个键里写了检索参数，

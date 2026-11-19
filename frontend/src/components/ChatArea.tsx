@@ -11,12 +11,12 @@ import MascotLogo from "./chat/MascotLogo";
 import CornIcon from "./CornIcon";
 import NavIcon from "./NavIcon";
 import { api } from "@/lib/api";
-import type { RefSource, IssuedApproval, ToolApprovalRequest } from "@/lib/types";
+import type { IssuedApproval, ToolApprovalRequest } from "@/lib/types";
 import { HOME_GROUPS, TOOLS_URL } from "./chat/constants";
 import TodayStrip from "./chat/TodayStrip";
 import PushNudge from "./chat/PushNudge";
 import ResumeStrip from "./chat/ResumeStrip";
-import { isPlanRequest, stripPlanHint } from "./chat/plan";
+import { isPlanRequest } from "./chat/plan";
 import CapToggles, { type CapValue } from "./chat/CapToggles";
 import Bubble from "./chat/Bubble";
 import BubbleErrorBoundary from "./chat/BubbleErrorBoundary";
@@ -304,7 +304,10 @@ export default function ChatArea({
   // 按时段问候：SSR 与水合各算一次可能跨过整点，首帧用安全默认值，挂载后再校准
   const [greeting, setGreeting] = useState("你好呀");
   useEffect(() => {
+    // 挂载后校准问候语：SSR 与水合各算一次时间可能跨过整点，首帧用安全默认值。
+    // 这是「客户端才知道的外部状态」的一次性同步，不是派生状态（React 认可的场景）。
     const h = new Date().getHours();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setGreeting(
       h < 6 ? "夜深了" : h < 11 ? "早上好" : h < 13 ? "中午好" : h < 18 ? "下午好" : "晚上好"
     );
@@ -1265,6 +1268,9 @@ export default function ChatArea({
             {pending.map((a) => (
               <div key={a.id} className="attach-item">
                 {a.type.startsWith("image/") ? (
+                  // 用户上传图的动态 URL（blob / 上传地址）：next/image 要配
+                  // remotePatterns + 已知宽高，聊天缩略图场景改了反而布局跳动。
+                  // eslint-disable-next-line @next/next/no-img-element
                   <img src={a.url} alt={a.name} />
                 ) : (
                   <span className="attach-file-badge">

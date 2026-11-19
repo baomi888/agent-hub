@@ -434,7 +434,7 @@ export default function ForumTopicPage() {
                   <p>具体原因只对作者本人显示。</p>
                 )}
                 <p className="tb-gone-hint">
-                  原链接保留这个说明，不会变成"页面不存在"。
+                  原链接保留这个说明，不会变成「页面不存在」。
                   {data?.reason ? "确认是误判可以申请复核。" : ""}
                 </p>
                 {data?.can_appeal &&

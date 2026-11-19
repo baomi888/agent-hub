@@ -112,6 +112,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             jsdelivr / 飞书字体在国内网络下时通时断，线上实测字体曾被重置两次，
             汇报演示时一旦外链挂掉设计感会直接塌成系统默认字体。
             重新生成见 tools/subset_fonts_project.py。 */}
+        {/* 字体子集必须原样 <link>：Next 的样式导入会把 fonts.css 拉进构建管线，
+            而子集是离线地雷（缺字逐字回退、构建全绿看不出问题），不碰。 */}
+        {/* eslint-disable-next-line @next/next/no-css-tags -- 字体子集走 public 静态文件 */}
         <link rel="stylesheet" href="/fonts/fonts.css" />
         {/* iOS 主屏启动画面。必须是 9 个独立 link —— 这个 rel 不支持 srcset，
             每种机型靠 media 精确命中，命中不了就退回系统默认的白屏。 */}

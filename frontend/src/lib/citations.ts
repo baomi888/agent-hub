@@ -21,9 +21,6 @@ export interface CiteLookup {
   webIds: Set<number>;
 }
 
-const WEB_TOKEN = /\[W(\d{1,3})\]/gi;
-/** 排除 `[1](url)`：那是 markdown 链接的文案，不是引用 */
-const REF_TOKEN = /\[(\d{1,3})\](?!\()/g;
 /** 删干净之后只剩前缀的行：依据 / 参考资料 / 参考来源 / 引用来源 / Sources */
 const BARE_TAIL =
   /^\s*(?:\*\*)?\s*(依据|参考资料|参考来源|引用来源|来源|sources?)\s*[:：]\s*(?:\*\*)?\s*[\[\]\d\s,，、;；&]*$/i;

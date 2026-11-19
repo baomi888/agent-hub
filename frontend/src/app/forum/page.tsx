@@ -28,7 +28,7 @@ import { SkeletonCards } from "@/components/Skeleton";
 import ConsoleTabBar from "@/components/console/ConsoleTabBar";
 import { avatarIconName, avatarImageUrl } from "@/components/settings/UserAvatar";
 import { api, forumImgUrl } from "@/lib/api";
-import { fmtBytes, compressImage } from "@/lib/compressImage";
+import { compressImage } from "@/lib/compressImage";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { fmtNum, fmtWhen } from "@/lib/time";
 import type {

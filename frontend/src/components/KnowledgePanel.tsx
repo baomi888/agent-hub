@@ -209,11 +209,9 @@ export default function KnowledgePanel({
   chunkSize,
   chunkOverlap,
   onCollapse,
-  overlay = false,
   open = false,
   containerRef,
   loading = false,
-  sid = null,
   onOpenSediment,
 }: Props) {
   const [feed, setFeed] = useState<"upload" | "web" | null>(null);

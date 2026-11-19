@@ -46,7 +46,10 @@ export default function PushNudge({ enabled }: { enabled: boolean }) {
     // 浏览器侧先拦：微信内置浏览器 / 未装到主屏的 iOS 都不用问接口。
     // 后者尤其重要——问接口会拿到 supported=true，然后在 requestPermission 处失败，
     // 用户只会看到"打开提醒"点了没反应。
+    // 能力探测要读 navigator / Notification，渲染期（SSR 与水合前）拿不到，
+    // 所以初始视图只能在 effect 里定 —— 这是外部系统状态的一次性同步。
     if (pushSupport() !== "ready") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setView("hidden");
       return;
     }

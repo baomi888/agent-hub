@@ -295,6 +295,8 @@ export default function DashboardPage() {
   }, [days, sort, isAdmin]);
 
   useEffect(() => {
+    // 同 /cet：load 首行同步置 loading（骨架屏），拉接口在 await 之后，有意为之。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
 

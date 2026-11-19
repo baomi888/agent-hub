@@ -275,6 +275,9 @@ export function useVoiceInput({ onText, onError, onFrame, streaming = false }: C
   // 回调存 ref：调用方通常写成内联函数，直接进依赖数组会让 start/stop 每帧重建，
   // 而 stop 被重建时正在录音的 session 还是老的 —— 表现为"点了停止没反应"。
   const cbs = useRef({ onText, onError, onFrame });
+  // 渲染期镜像最新回调：useEvent 提案落地前的标准写法。录音会话（WebSocket /
+  // AudioWorklet）是长时对象，持有渲染时的旧回调会表现为「点了停止没反应」。
+  // eslint-disable-next-line react-hooks/refs
   cbs.current = { onText, onError, onFrame };
   /** 实际走的哪条路。调用方据此决定界面画"边说边出字"还是"转写中" */
   const [activeStream, setActiveStream] = useState(false);
@@ -394,7 +397,7 @@ export function useVoiceInput({ onText, onError, onFrame, streaming = false }: C
     } finally {
       setPhase("idle");
     }
-  }, [stopAudio, teardown]);
+  }, [stopAudio, teardown, flush]);
 
   const start = useCallback(async () => {
     if (session.current || typeof navigator === "undefined") return;

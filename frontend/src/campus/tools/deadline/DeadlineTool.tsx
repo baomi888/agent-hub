@@ -91,7 +91,6 @@ export default function DeadlineTool() {
 function DeadlinePanel({
   rows,
   now,
-  mode,
   busy,
   message,
   api: actions,

@@ -27,6 +27,9 @@ export function useKnowledge(showToast: ShowToast, chunkSize: number, chunkOverl
   const [kbChunks, setKbChunks] = useState<KbChunkMap>({});
 
   useEffect(() => {
+    // 从 localStorage 恢复「每库处理方式」：渲染期读浏览器存储在 SSR 下必炸，
+    // effect 里读完同步 setState 是恢复外部状态的认可姿势（hook 头部注释同）。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setKbChunks(loadKbChunks());
   }, []);
 
@@ -220,7 +223,7 @@ export function useKnowledge(showToast: ShowToast, chunkSize: number, chunkOverl
       });
       showToast("info", "资料库已删除");
       refreshKbs();
-    } catch (e) {
+    } catch {
       showToast("error", "删除失败，请稍后重试");
     }
   };

@@ -110,6 +110,9 @@ export default function KnowledgePage() {
 
   // 库被删掉后详情是空的：手机上要退回列表，否则会停在一张空卡片上（什么都点不了）
   useEffect(() => {
+    // 条件回退：库没了就退回列表。状态已是 "list" 时 React 对同值 setState
+    // 直接 bail out，不会级联渲染；这是一次性的防御动作，不是派生状态。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!active) setMobilePane("list");
   }, [active]);
 
@@ -146,6 +149,8 @@ export default function KnowledgePage() {
   // 未登录不发请求：登录前必然是 401，且登录成功后不会自动重来
   useEffect(() => {
     if (!authedId) return;
+    // 同 /cet：refresh 首行同步置 loading（骨架屏），拉接口在 await 之后。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh();
     // 收藏库：辅助列表，读不到就当空（不该因为广场接口抽风把整页拖垮）
     api

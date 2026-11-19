@@ -14,7 +14,7 @@
 // ⇒ 字符打不进去 ⇒ 用户连一个括号都删不掉。
 // 所以：编辑期间不解析，只在**失焦/点保存**时解析并标红。
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import PageShell from "@/components/console/PageShell";
 import { Seg, ToastHost } from "@/components/console/ui";
 import { SkeletonLines } from "@/components/Skeleton";
@@ -142,7 +142,7 @@ export default function FlowPage() {
         setBusy(false);
       }
     },
-    [demoGuard, isDemo, load, showToast]
+    [demoGuard, load, showToast]
   );
 
   const onSaveWf = useCallback(async () => {
