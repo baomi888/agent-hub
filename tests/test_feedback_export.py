@@ -1,34 +1,44 @@
-"""反馈一键导出的回归（2026-11-18）。
+"""反馈一键导出的回归（2026-11-18 建，2026-11-19 改 Word + 日期范围）。
 
-导出是**把内部数据搬出系统**的动作，所以它坏起来比页面坏更贵：
-多带一个手机号出去收不回来，少带一条回复会让老师以为我们没回。
+导出是**把内部数据搬出系统**的动作，坏起来比页面坏更贵：
+多带一个手机号出去收不回来，少导一条会让老师以为我们没收到。
 
-这个文件锁六件事：
+这个文件锁七件事：
 
-  1. **脱敏真的发生**：手机号只留 3+2 位、邮箱只留首字母、uid 只留前 8 位。
-     用"原串不得出现在正文里"来断言，而不是"打码过的串出现了" ——
-     后者只要打码函数改成原样返回也照样绿。
-  2. **分组与编号**：按状态分组、组内按时间正序、全局连续编号。
-  3. **统计矩阵能加总**：每个分类每行相加 = 该状态条数，总计 = 全部条数。
-  4. **处理记录跟着走**：回复内容与作者都要在导出件里。
+  1. **隐私根本不进导出件**：uid、姓名、联系方式、来源页、管理员回复、
+     用户补充，一个都不出现。用"原串不得出现"来断言，而不是"打码串出现"
+     —— 后者只要打码函数改成原样返回也照样绿。现在连打码函数都没有了：
+     白名单字段在 `export_docx()` 入口就筛掉，从源头不给隐私留出口。
+  2. **只导该导的**：反馈问题、提交日期、分类、解决状态四栏。
+  3. **日期范围含端点、只填一端合法、都不填 = 全部**；日期格式错 400。
+  4. **按状态分组、全局连续编号**。
   5. **筛选生效**：`?status=done` 只导已处理。
-  6. **审计留痕**：每次导出往 `${DATA_DIR}/audit.log` 追加一行 `feedback_export`，
-     带条数。文档里写的是"要开导出，先补审计与脱敏"，这条就是那句话的守卫。
+  6. **空导出仍是合法 Word**（不能返回 0 字节）。
+  7. **审计留痕**：每次导出往 `${DATA_DIR}/audit.log` 追加一行
+     `feedback_export`，带条数与日期范围。
+
+读 docx 用 zipfile + ElementTree，**不依赖 python-docx**（CI 的 venv 没装）。
 """
 
 from __future__ import annotations
 
+import io
 import json
+import zipfile
+import xml.etree.ElementTree as ET
 
 import pytest
 from fastapi.testclient import TestClient
 
-from core import account, config, quota, session, user_feedback
+from core import account, config, quota, session, timeutil, user_feedback
 from core.auth import create_token
 
 ADMIN_NAME = "devadmin"
 USER_NAME = "normaluser"
 PASSWORD = "secret123"
+W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+STATUS_CN = {"open": "待处理", "doing": "处理中", "done": "已处理", "closed": "不处理"}
 
 
 @pytest.fixture()
@@ -65,131 +75,222 @@ def _login(client: TestClient, username: str) -> str:
     return uid
 
 
-def _mk(uid: str, name: str, cat: str = "bug", contact: str = "", page: str = "/") -> int:
-    return user_feedback.add(uid, name, cat, "这是一条用来测试导出的反馈正文。", contact, page)
+def _mk(
+    uid: str,
+    name: str,
+    cat: str = "bug",
+    contact: str = "",
+    page: str = "",
+    content: str = "这是一条用来测试导出的反馈正文。",
+    at: int | None = None,
+) -> int:
+    fid = user_feedback.add(uid, name, cat, content, contact, page)
+    if at is not None:
+        # add() 固定用当前时间；测试要造"哪天提的"就直接改库，不 monkeypatch
+        # 全局 time.time（那会影响审计时间戳，牵一发动全身）。
+        with session._get_conn() as conn:  # noqa: SLF001
+            conn.execute(
+                "UPDATE user_feedback SET created_at = ?, updated_at = ? WHERE id = ?",
+                (at, at, fid),
+            )
+    return fid
 
 
-# ==================== 1. 脱敏 ====================
+def _at(day: str, hour: int = 10) -> int:
+    return timeutil.day_bounds(day)[0] + hour * 3600
 
 
-def test_contact_and_uid_are_masked(client):
+def _docx(blob: bytes) -> str:
+    """把 docx 里的全部文字抽出来。只取 <w:t>，不把 XML 标签也算进来。"""
+    assert blob[:2] == b"PK", "不是合法 docx（zip 头都不对）"
+    with zipfile.ZipFile(io.BytesIO(blob)) as z:
+        assert z.testzip() is None
+        root = ET.fromstring(z.read("word/document.xml"))
+    return "\n".join((t.text or "") for t in root.iter(W + "t"))
+
+
+def _rows(blob: bytes) -> list[list[str]]:
+    with zipfile.ZipFile(io.BytesIO(blob)) as z:
+        root = ET.fromstring(z.read("word/document.xml"))
+    out = []
+    for tr in root.iter(W + "tr"):
+        out.append(
+            ["".join((t.text or "") for t in tc.iter(W + "t")) for tc in tr.findall(W + "tc")]
+        )
+    return out
+
+
+# ==================== 1. 隐私根本不进导出件 ====================
+
+
+def test_pii_and_dialogue_never_exported(client):
     uid = _login(client, ADMIN_NAME)
-    _mk(uid, "张三", contact="13812345678", page="/settings")
-    _mk(uid, "李四", contact="zhang@example.com")
-    _mk(uid, "王五", contact="")
+    fid = _mk(
+        uid, "张Visible三", contact="13812345678", page="/settings-secret",
+        content="反馈原文：设置页按钮点不动。",
+    )
+    user_feedback.add_reply(fid, uid, "管理Visible员", "这条回复绝不能被导出去")
+    user_feedback.reply_own(uid, fid, "用户自己的补充也不能导出去")
 
-    body = client.get("/api/admin/feedback/export").text
+    r = client.get("/api/admin/feedback/export")
+    assert r.status_code == 200
+    text = _docx(r.content)
 
-    # 原串一个都不许留在导出件里
-    assert "13812345678" not in body
-    assert "zhang@example.com" not in body
-    # 打码后的形态在（留头尾才够对上号）
-    assert "138****78" in body
-    assert "z***@example.com" in body
-    assert "（未留）" in body
-    # uid 只留前 8 位
-    assert uid not in body
-    assert f"{uid[:8]}…" in body
-
-
-def test_mask_contact_pure_function():
-    assert user_feedback.mask_contact("13812345678") == "138****78"
-    assert user_feedback.mask_contact("138-1234-5678") == "138****78"
-    assert user_feedback.mask_contact("a@b.com") == "a***@b.com"
-    assert user_feedback.mask_contact("  ") == "（未留）"
-    # 太短的非号码串：不留全貌（1 个字 + ***）
-    assert user_feedback.mask_contact("微信abc") == "微***"
+    # 原串一个都不许在（不是"打码串在"——那个判据挡不住打码函数退化）。
+    # ★ 不断言"联系方式/对话"这些词本身：生成器末尾那行说明「已隐去
+    #   联系方式、不含对话记录」本来就该出现，断言词会误红。要断言的是
+    #   **值**和**字段名栏**都没混进表格。
+    for secret in (
+        uid, "张Visible三", "13812345678", "/settings-secret",
+        "这条回复绝不能被导出去", "用户自己的补充也不能导出去",
+        "管理Visible员", "提交人", "来源页面", "处理记录",
+    ):
+        assert secret not in text, f"隐私/对话出现在导出件里：{secret}"
+    assert "反馈原文：设置页按钮点不动。" in text
 
 
-# ==================== 2/3. 分组、编号、矩阵 ====================
+def test_only_whitelisted_columns(client):
+    """表头恰好五栏，顺序与示例一致；日期列真的在。"""
+    uid = _login(client, ADMIN_NAME)
+    _mk(uid, "甲", at=_at("2026-11-10"))
+
+    rows = _rows(client.get("/api/admin/feedback/export").content)
+    assert rows[0] == ["序号", "提交日期", "分类", "反馈问题", "解决状态"]
+    assert len(rows) == 2
+    assert rows[1][1] == "2026-11-10"
+    assert rows[1][2] == "出错了"
+    assert rows[1][3] == "这是一条用来测试导出的反馈正文。"
+    assert rows[1][4] == "待处理"
+
+
+# ==================== 3. 日期范围 ====================
+
+
+def test_date_range_includes_both_ends(client):
+    uid = _login(client, ADMIN_NAME)
+    _mk(uid, "早", content="10号的问题", at=_at("2026-11-10"))
+    _mk(uid, "中", content="11号的问题", at=_at("2026-11-11"))
+    _mk(uid, "晚", content="12号的问题", at=_at("2026-11-12"))
+
+    r = client.get(
+        "/api/admin/feedback/export?start_date=2026-11-10&end_date=2026-11-11"
+    )
+    assert r.status_code == 200
+    text = _docx(r.content)
+    assert "10号的问题" in text and "11号的问题" in text, "端点那天被排除了"
+    assert "12号的问题" not in text
+    assert "2026-11-10 ~ 2026-11-11" in text
+
+
+def test_fixed_single_day(client):
+    uid = _login(client, ADMIN_NAME)
+    _mk(uid, "早", content="10号的问题", at=_at("2026-11-10"))
+    _mk(uid, "中", content="11号的问题", at=_at("2026-11-11"))
+
+    r = client.get(
+        "/api/admin/feedback/export?start_date=2026-11-11&end_date=2026-11-11"
+    )
+    text = _docx(r.content)
+    assert "11号的问题" in text
+    assert "10号的问题" not in text
+
+
+def test_open_ended_ranges(client):
+    uid = _login(client, ADMIN_NAME)
+    _mk(uid, "早", content="10号的问题", at=_at("2026-11-10"))
+    _mk(uid, "中", content="11号的问题", at=_at("2026-11-11"))
+    _mk(uid, "晚", content="12号的问题", at=_at("2026-11-12"))
+
+    only_from = _docx(
+        client.get("/api/admin/feedback/export?start_date=2026-11-12").content
+    )
+    assert "12号的问题" in only_from and "11号的问题" not in only_from
+    assert "~ 至今" in only_from
+
+    only_to = _docx(
+        client.get("/api/admin/feedback/export?end_date=2026-11-10").content
+    )
+    assert "10号的问题" in only_to and "11号的问题" not in only_to
+    assert "最早 ~" in only_to
+
+
+def test_all_when_dates_blank(client):
+    uid = _login(client, ADMIN_NAME)
+    _mk(uid, "甲", at=_at("2026-11-10"))
+    _mk(uid, "乙", at=_at("2026-11-11"))
+    r = client.get("/api/admin/feedback/export")
+    assert "全部时间" in _docx(r.content)
+    assert len(_rows(r.content)) == 3  # 表头 + 2 条
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "start_date=2026-11-32",
+        "end_date=11/11/2026",
+        "start_date=2026-11-11&end_date=2026-11-10",
+    ],
+)
+def test_bad_date_range_returns_400(client, query):
+    _login(client, ADMIN_NAME)
+    assert client.get("/api/admin/feedback/export?" + query).status_code == 400
+
+
+# ==================== 4. 分组与编号 ====================
 
 
 def test_grouped_by_status_with_continuous_numbering(client):
     uid = _login(client, ADMIN_NAME)
-    id1 = _mk(uid, "甲", cat="ui")
-    id2 = _mk(uid, "乙", cat="feature")
-    id3 = _mk(uid, "丙", cat="other")
-    user_feedback.set_status(id3, "done")
+    a = _mk(uid, "甲", cat="ui", content="待处理的那条")
+    b = _mk(uid, "乙", cat="feature", content="已处理的那条")
+    user_feedback.set_status(b, "done")
 
-    body = client.get("/api/admin/feedback/export").text
-
-    # 分组标题：待处理 2 条、已处理 1 条，空的组不出现
-    assert "## 待处理（2 条）" in body
-    assert "## 已处理（1 条）" in body
-    assert "## 处理中（" not in body
-    # 全局连续编号：待处理占 1、2，已处理是 3
-    assert f"### 1. 界面与体验　#{id1}" in body
-    assert f"### 2. 功能建议　#{id2}" in body
-    assert f"### 3. 其他　#{id3}" in body
+    rows = _rows(client.get("/api/admin/feedback/export").content)[1:]
+    nums = [r[0] for r in rows]
+    assert nums == ["1", "2"], "编号必须全局连续"
+    assert rows[0][3] == "待处理的那条" and rows[0][4] == "待处理"
+    assert rows[1][3] == "已处理的那条" and rows[1][4] == "已处理", "待处理必须排在已处理前面"
 
 
-def test_summary_matrix_adds_up(client):
-    uid = _login(client, ADMIN_NAME)
-    _mk(uid, "甲", cat="bug")
-    _mk(uid, "乙", cat="bug")
-    _mk(uid, "丙", cat="ui")
-    done = _mk(uid, "丁", cat="ui")
-    user_feedback.set_status(done, "done")
-
-    text, meta = user_feedback.export_markdown()
-    assert meta["items"] == 4
-    # 矩阵里「合计」行的待处理 = 3、已处理 = 1、总计 4
-    tail = [ln for ln in text.splitlines() if ln.startswith("| **合计**")]
-    assert tail, "统计矩阵缺合计行"
-    cells = [c.strip() for c in tail[0].strip("|").split("|")]
-    # 首列是「合计」，末列是总计
-    assert cells[-1] == "**4**"
-    assert cells[1] == "**3**"
-    assert cells[3] == "**1**"
-
-
-# ==================== 4. 处理记录 ====================
-
-
-def test_replies_are_exported_with_author(client):
-    uid = _login(client, ADMIN_NAME)
-    fid = _mk(uid, "甲")
-    user_feedback.add_reply(fid, uid, "苞米呀", "已记录，下个版本修。")
-
-    body = client.get("/api/admin/feedback/export").text
-    assert "**处理记录**" in body
-    assert "苞米呀：已记录，下个版本修。" in body
-
-
-# ==================== 5. 筛选 ====================
+# ==================== 5. 状态筛选 ====================
 
 
 def test_status_filter(client):
     uid = _login(client, ADMIN_NAME)
-    _mk(uid, "留在待处理")
-    done = _mk(uid, "已经处理了")
+    _mk(uid, "甲", content="留在待处理")
+    done = _mk(uid, "乙", content="已经处理了")
     user_feedback.set_status(done, "done")
 
-    body = client.get("/api/admin/feedback/export?status=done").text
-    assert "已经处理了" in body
-    assert "留在待处理" not in body
-    assert "数据范围：已处理" in body
+    r = client.get("/api/admin/feedback/export?status=done")
+    text = _docx(r.content)
+    assert "已经处理了" in text
+    assert "留在待处理" not in text
+    assert "数据范围：已处理" in text
+
+
+# ==================== 6. 空导出 ====================
 
 
 def test_empty_export_is_still_a_document(client):
     _login(client, ADMIN_NAME)
     r = client.get("/api/admin/feedback/export")
     assert r.status_code == 200
-    assert "# 知穗 · 用户反馈汇总" in r.text
-    assert "该范围内没有反馈" in r.text
-    # 空的时候不该画一张全是 0 的矩阵（读者会以为数据丢了）
-    assert "统计概览" not in r.text
+    text = _docx(r.content)
+    assert "知穗 · 用户反馈汇总" in text
+    assert "该范围内没有反馈。" in text
 
 
-# ==================== 6. 审计 + 权限 ====================
+# ==================== 7. 审计 + 权限 + 下载头 ====================
 
 
 def test_audit_line_is_written(client, tmp_path):
     uid = _login(client, ADMIN_NAME)
-    _mk(uid, "甲")
-    _mk(uid, "乙")
+    # 必须落在查询范围里：造"今天"再按 11-10~11 筛，导出 0 条是对的，
+    # 审计记 0 也是对的 —— 红的是测试数据，不是功能
+    _mk(uid, "甲", at=_at("2026-11-10"))
+    _mk(uid, "乙", at=_at("2026-11-11"))
 
-    client.get("/api/admin/feedback/export")
+    client.get("/api/admin/feedback/export?start_date=2026-11-10&end_date=2026-11-11")
 
     log = tmp_path / "audit.log"
     assert log.exists(), "导出没有留审计"
@@ -198,7 +299,8 @@ def test_audit_line_is_written(client, tmp_path):
     assert len(hits) == 1
     assert hits[0]["uid"] == uid
     assert hits[0]["items"] == 2
-    assert hits[0]["status"] == "all"
+    assert hits[0]["start"] == "2026-11-10"
+    assert hits[0]["end"] == "2026-11-11"
 
 
 def test_export_needs_login_and_admin(client):
@@ -209,12 +311,12 @@ def test_export_needs_login_and_admin(client):
 
 
 def test_download_headers(client):
-    uid = _login(client, ADMIN_NAME)
-    _mk(uid, "甲")
-    r = client.get("/api/admin/feedback/export")
+    _login(client, ADMIN_NAME)
+    _mk("dummy", "甲")  # 不造数据也要能给下载头（空导出同样是合法文件）
+    r = client.get("/api/admin/feedback/export?start_date=2026-11-10&end_date=2026-11-11")
     assert r.status_code == 200
-    assert "attachment" in r.headers["content-disposition"]
-    assert r.headers["content-disposition"].endswith('.md"')
+    cd = r.headers["content-disposition"]
+    assert "attachment" in cd and cd.endswith('.docx"')
+    assert "20261110" in cd and "20261111" in cd
     assert r.headers["cache-control"] == "no-store"
-    # 中文正文必须是 UTF-8 而不是转义后的 \uXXXX
-    assert "用户反馈汇总" in r.text
+    assert "wordprocessingml" in r.headers["content-type"]

@@ -213,6 +213,9 @@ export default function FeedbackPage() {
   const [threads, setThreads] = useState<FeedbackThreadsResp | null>(null);
   const [stats, setStats] = useState<FeedbackStatsResp | null>(null);
   const [fbStatus, setFbStatus] = useState("");
+  /** 导出的日期范围：YYYY-MM-DD。空串 = 不限；两端都含当天。 */
+  const [exportFrom, setExportFrom] = useState("");
+  const [exportTo, setExportTo] = useState("");
   const [active, setActive] = useState("");
   const [thread, setThread] = useState<FeedbackThreadResp | null>(null);
   /**
@@ -342,16 +345,19 @@ export default function FeedbackPage() {
   );
 
   const exportAll = useCallback(async () => {
+    // 只填了一端也是合法的：后端解释为"从那天起至今"或"最早到那天"。
+    // 反向范围（起 > 止）交给后端返回 400，前端不替它猜 —— 两处各写一份
+    // 校验规则，改一处就会不一致。
     setExporting(true);
     setErr("");
     try {
-      await api.admin.exportFeedback(fbStatus);
+      await api.admin.exportFeedback(fbStatus, exportFrom, exportTo);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "导出失败");
     } finally {
       setExporting(false);
     }
-  }, [fbStatus]);
+  }, [fbStatus, exportFrom, exportTo]);
 
   const statusLabel = (s: string) => dict?.statuses.find((x) => x.value === s)?.label ?? s;
   const filterOptions = useMemo(
@@ -386,13 +392,38 @@ export default function FeedbackPage() {
       actions={
         <>
           <Seg ariaLabel="按状态筛选" options={filterOptions} value={fbStatus} onChange={setFbStatus} />
+          <div className="fbim-export" role="group" aria-label="导出日期范围">
+            <label className="fbim-export-field">
+              <span>起始</span>
+              <input
+                type="date"
+                className="input"
+                aria-label="导出起始日期，留空表示不限"
+                value={exportFrom}
+                max={exportTo || undefined}
+                onChange={(e) => setExportFrom(e.target.value)}
+              />
+            </label>
+            <span className="fbim-export-sep" aria-hidden="true">—</span>
+            <label className="fbim-export-field">
+              <span>结束</span>
+              <input
+                type="date"
+                className="input"
+                aria-label="导出结束日期，留空表示不限"
+                value={exportTo}
+                min={exportFrom || undefined}
+                onChange={(e) => setExportTo(e.target.value)}
+              />
+            </label>
+          </div>
           <button
             type="button"
             className="btn btn-primary btn-sm"
             style={{ marginLeft: "auto" }}
             disabled={exporting}
             onClick={() => void exportAll()}
-            title="导出当前筛选下的全部反馈（Markdown，含处理记录，联系方式已脱敏）"
+            title="导出 Word：日期都留空=全部汇总；填起止=只导该日期范围（含当天）。仅含反馈问题、提交日期、分类与解决状态，不含个人信息与对话"
           >
             <CornIcon name="download" />
             {exporting ? "导出中…" : "一键导出"}

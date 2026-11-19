@@ -7324,6 +7324,59 @@ img.fbim-face {
   }
 }
 
+/* 反馈页导出日期范围：状态 Seg 右边的一组 date 输入。
+   窄屏让整组独占一行（.pg-actions 本身 flex-wrap），两个输入框平分宽度。
+   ★ 不写 font-size：移动端 a11y.css 用 !important 把输入框压到 ≥16px，
+     这里一旦写死就会在 iOS 上触发聚焦缩放（AGENTS.md §3）。 */
+.fbim-export {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+}
+.fbim-export-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.fbim-export-field .input {
+  width: 138px;
+  padding: 5px 8px;
+}
+.fbim-export-sep {
+  color: var(--text-3);
+}
+@media (max-width: 760px) {
+  /* flex item 默认 min-width:auto = min-content：一组固定宽控件能把整条
+     actions 撑到比视口还宽，而外层 overflow 会把它藏起来（探针量到 418>390）。
+     收紧到容器宽，让内部那组控件按下面的 min-width:0 规则自己缩。 */
+  .pg-actions {
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+  /* ★ 只写 width:100% 会继承 .pg-actions 被 flex 撑开的 418px（视口才 390），
+     第二个输入框和导出按钮被裁掉 59px —— 而 docElement.scrollWidth 仍是 390，
+     因为外层 overflow 把它藏了，常规"溢出检测"抓不到。
+     解法：显式限到父容器内容宽，并把输入框设为可收缩（min-width:0）。 */
+  .fbim-export {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+  .fbim-export-field {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .fbim-export-field .input {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+}
+
 /* ★ 单列规则放在整个文件最后：本轮新增的反馈页样式（约 900 行）把它挤出了末尾，
    `test_shell_merge::test_quota_card_collapses_on_phone` 用"末尾 10% 内"当判据，
    直接红了 —— 红得对，因为它下面确实还有更晚的 `.grid3, .grid4 { repeat(2, ...) }`。

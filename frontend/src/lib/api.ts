@@ -956,23 +956,33 @@ export const api = {
     feedbackStats: (days = 30) =>
       request<FeedbackStatsResp>(`/api/admin/feedback/stats?days=${days}`),
     /**
-     * 一键导出反馈汇总（Markdown 附件），返回落地的文件名。
+     * 一键导出反馈汇总（Word 附件），返回落地的文件名。
+     *
+     * `startDate`/`endDate` 都是 YYYY-MM-DD、含当天；都留空 = 全部。
+     * 后端用业务时区解释日期，前端只负责把字符串带过去，不在浏览器里换算
+     * （浏览器时区 ≠ 服务器业务时区，各算一次迟早对不上）。
      *
      * 为什么不用 `window.open(接口地址)`：未登录或非管理员时后端返回的是一段
      * JSON，window.open 会把它渲染成一个新标签页 —— 用户看到一屏乱码，
      * 以为下载坏了。走 fetch 才能把"没下载成功"变成一句人话。
      */
-    exportFeedback: async (status = ""): Promise<string> => {
-      const res = await fetch(
-        `/api/admin/feedback/export?status=${encodeURIComponent(status)}`,
-        { credentials: "include" }
-      );
+    exportFeedback: async (
+      status = "",
+      startDate = "",
+      endDate = ""
+    ): Promise<string> => {
+      const qs = new URLSearchParams({ status });
+      if (startDate) qs.set("start_date", startDate);
+      if (endDate) qs.set("end_date", endDate);
+      const res = await fetch(`/api/admin/feedback/export?${qs.toString()}`, {
+        credentials: "include",
+      });
       if (!res.ok) throw await httpError(res);
       const blob = await res.blob();
       // 文件名由后端给（Content-Disposition）；Next 的 rewrite 若不转发这个头，
-      // 就退回一个固定名 —— 不乱码即可，内容第一行才是真标题
+      // 就退回一个固定名 —— 不乱码即可，文档里的标题才是真的中文名
       const m = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "");
-      const name = m ? m[1] : "feedback.md";
+      const name = m ? m[1] : "feedback.docx";
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;

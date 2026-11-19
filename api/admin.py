@@ -9,15 +9,18 @@
   GET   /api/admin/feedback              反馈列表（可选按状态筛）
   PATCH /api/admin/feedback/{fid}        改**这一条**的状态（任意互转，含回退）
   POST  /api/admin/feedback/{fid}/reply  给**这一条**追加回复（带作者，发出即定稿）
-  GET   /api/admin/feedback/export       一键导出（Markdown，脱敏 + 留审计）
+  GET   /api/admin/feedback/export       一键导出 Word（日期范围 + 脱敏 + 留审计）
   GET   /api/admin/dict                  分类/状态字典（前端不得硬编码）
 
-**导出接口（2026-11-18 新增）**：旧版这里写着"不做 CSV/Excel 导出，若将来
-要恢复须先补【导出审计 + 字段脱敏】两件事"。这两件事本版都补上了才开的：
-  · 脱敏：联系方式留头尾、uid 只留前 8 位（`user_feedback.mask_contact`）
-  · 审计：每次导出写一行 `event=feedback_export` 到 `${DATA_DIR}/audit.log`
-    （复用 `account.audit`，与账号安全事件同一个可 grep 的文件，不另建表）
-格式选 Markdown 而不是 CSV：需求是「已排版好的文字」，CSV 落地还得再排一次版。
+**导出接口（2026-11-18 建，2026-11-19 改 Word + 日期范围）**：
+  · 脱敏：不再"打码后带出去"，而是 uid / 姓名 / 联系方式 / 回复 / 对话
+    **根本不进导出件**；只有反馈问题、提交日期、分类、解决状态。
+  · 审计：每次导出写一行 `event=feedback_export` 到 `${DATA_DIR}/audit.log`，
+    带条数和日期范围（复用 `account.audit`，与账号安全事件同一个文件）。
+  · 日期：`start_date` / `end_date` 都是 YYYY-MM-DD、含当天；都不传 = 全部。
+    用业务时区（core.timeutil.day_bounds），不拿字符串比大小。
+格式是 Word（.docx）：用户明确"想导出的是 word"。生成器在
+`core/feedback_docx.py`，纯标准库 zipfile + OOXML，线上不需要装 python-docx。
 
 鉴权两层（文档 §6）：
   1. `router` 挂了 `Depends(get_current_user)` → 未登录一律 **401**
@@ -124,9 +127,11 @@ async def feedback_list(
 @router.get("/feedback/export")
 async def feedback_export(
     status: str = Query("", description="按状态筛；空表示全部"),
+    start_date: str = Query("", description="起始日期 YYYY-MM-DD（含当天）；空表示不限"),
+    end_date: str = Query("", description="结束日期 YYYY-MM-DD（含当天）；空表示不限"),
     uid: str = Depends(get_current_user),
 ) -> Response:
-    """一键导出（Markdown 附件）。**这个路由必须写在不带变量的 `/feedback` 之后、
+    """一键导出 Word（附件）。**这个路由必须写在不带变量的 `/feedback` 之后、
     带变量的 `/feedback/{fid}` 之前** —— 否则 `export` 会被当成 `{fid}` 吞掉
     （FastAPI 按声明顺序匹配，`{fid}` 声明在前时 `int` 转换失败就是 422）。
 
@@ -134,24 +139,52 @@ async def feedback_export(
     一旦写审计抛异常，前端已经拿到文件，这条记录就永远丢了。
     """
     _require_admin(uid)
-    text, meta = await asyncio.to_thread(user_feedback.export_markdown, status)
+    # 日期先在这里校验成 400（请求写错），不要让坏日期钻到 core 里抛
+    # ValueError 变成 500 —— 那是"服务器坏了"，与用户填错无关。
+    from core import timeutil
+
+    for label, day in (("start_date", start_date), ("end_date", end_date)):
+        if day:
+            try:
+                timeutil.parse_day(day)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400, detail=f"{label} 必须是 YYYY-MM-DD"
+                ) from None
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(status_code=400, detail="起始日期不能晚于结束日期")
+
+    blob, meta = await asyncio.to_thread(
+        user_feedback.export_docx, status, start_date, end_date
+    )
     # 审计失败不阻断导出（account.audit 内部已经吞异常），但审计里的条数
     # 必须是这次真正导出的条数 —— 用返回的 meta，不要在这里重新查一遍。
     await asyncio.to_thread(
         account.audit,
         "feedback_export",
         uid,
-        {"items": meta["items"], "status": meta["status"] or "all", "chars": len(text)},
+        {
+            "items": meta["items"],
+            "status": meta["status"] or "all",
+            "start": start_date or "all",
+            "end": end_date or "all",
+            "bytes": len(blob),
+        },
     )
+    # 文件名用 ASCII + 日期：中文文件名要 RFC 5987 的 filename*，各浏览器实现
+    # 不一致，反而是"下载下来叫 .bin 或者乱码"。文档里的标题才是中文。
+    span = ""
+    if start_date or end_date:
+        span = "-" + (start_date or "all").replace("-", "")
+        if end_date:
+            span += "-" + end_date.replace("-", "")
     stamp = time.strftime("%Y%m%d")
     return Response(
-        content=text,
-        media_type="text/markdown; charset=utf-8",
+        content=blob,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={
-            # 文件名用 ASCII：中文文件名要 RFC 5987 的 filename*，各浏览器实现不一致，
-            # 反而是"下载下来叫 .bin 或者乱码"。内容里第一行已经是中文标题。
-            "Content-Disposition": f'attachment; filename="feedback-{stamp}.md"',
-            # 导出件会被反代缓存就麻烦了（含用户原话），明确禁掉
+            "Content-Disposition": f'attachment; filename="feedback-{stamp}{span}.docx"',
+            # 导出件会被反代缓存就麻烦了，明确禁掉
             "Cache-Control": "no-store",
         },
     )

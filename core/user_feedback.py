@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import re
 import time
 from datetime import datetime
 
@@ -452,20 +451,18 @@ def counts() -> dict:
     return out
 
 
-# ==================== 导出（2026-11-18）====================
+# ==================== 导出（2026-11-18 建，2026-11-19 改 Word）====================
 #
-# 导出的两个前置条件写在 api/admin.py 的旧注里，这里逐条兑现：
-#   ① **脱敏**：联系方式打码、uid 只留前 8 位。导出的文件会被转发到群里、
-#      塞进申报材料 —— 一旦原样带走手机号，收不回来。
-#   ② **审计**：谁在什么时候导了多少条，落到 `data/feedback_export_audit.jsonl`。
-#      不用建表：导出是低频动作，JSONL 追加不会失败、也不会引入懒迁移那种
-#      "第一次跑才建表"的坑（硬约束 57）。
+# 两个前置条件（写在 api/admin.py 旧注里）逐条兑现：
+#   ① **脱敏**：2026-11-19 起从"打码后带出去"改成"字段根本不进导出件"——
+#      uid、姓名、联系方式、来源页、回复、对话一个都不导出。打码串仍可能被
+#      拼回原号，而汇总只是给老师看问题和状态，不需要这些人。
+#   ② **审计**：谁在什么时候导了多少条、什么日期范围，落到 `${DATA_DIR}/audit.log`
+#      （复用 account.audit，不另建表、不另开 JSONL）。
 #
-# 格式选 Markdown 而不是 CSV/Word：需求原话是「已排版好的文字」。CSV 打开是
-# 一堆裸列名，还得再排一次版；Markdown 粘进 Word/飞书/微信都保留结构，
-# 又是纯文本（可 diff、可在任何编辑器里改）。真需要 Word，另做一步转换即可，
-# 不该让导出这一个动作背上 docx 依赖。
-
+# 格式 2026-11-19 起是 Word：需求原话是"我想可以导出的是 word"。
+# 生成器在 core/feedback_docx.py，纯标准库 zipfile + OOXML，线上不装包。
+# 字段白名单写在那个模块的 build() docstring 里 —— 从函数签名上不给隐私留出口。
 
 _EXPORT_ORDER = [k for k, _ in STATUSES]
 
@@ -479,136 +476,91 @@ def _fmt_ts(ts) -> str:
     return datetime.fromtimestamp(int(ts), timeutil.TZ).strftime("%Y-%m-%d %H:%M")
 
 
-def mask_contact(raw: str) -> str:
-    """联系方式脱敏。手机/QQ 留头 3 尾 2，邮箱留首字母，其余一律打码。
+def export_items(status: str = "", start: str = "", end: str = "") -> list[dict]:
+    """导出取数（不分页），按创建时间**正序**。
 
-    为什么留尾巴：反馈里同一个人的两条意见要对得上号，全打空就没法对。
-    留 3+2 位既够对上号，又不足以拼出完整号码。
+    `start`/`end` 是业务时区的 YYYY-MM-DD，**都含当天**；空串 = 不限。
+    用 [当日起点, 次日起点) 的数字区间，而不是拿 created_at 和日期字符串比：
+    created_at 是 Unix 秒，字符串比较在格式不同时会静默出错。
+    ★ 不再 `_attach_replies`：回复是内部对话，不进导出件。
     """
-    s = (raw or "").strip()
-    if not s:
-        return "（未留）"
-    if "@" in s:
-        name, _, domain = s.partition("@")
-        head = name[:1] if name else ""
-        return f"{head}***@{domain}"
-    digits = re.sub(r"\D", "", s)
-    if len(digits) >= 7:
-        return f"{digits[:3]}****{digits[-2:]}"
-    return s[:1] + "***"
-
-
-def export_items(status: str = "") -> list[dict]:
-    """导出用的全量取数（不分页）。按创建时间**正序**：导出件是拿来通读的，
-    先提的排前面才读得出"这个问题积了多久"。"""
     ensure()
     from core import session as store
+    from core import timeutil
 
-    where = ""
+    clauses: list[str] = []
     args: list = []
     if status and status in _STATUS_MAP:
-        where = " WHERE status = ?"
+        clauses.append("status = ?")
         args.append(status)
+    if start:
+        clauses.append("created_at >= ?")
+        args.append(timeutil.day_bounds(start)[0])
+    if end:
+        clauses.append("created_at < ?")
+        args.append(timeutil.day_bounds(end)[1])
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     with store._get_conn() as conn:  # noqa: SLF001
         rows = conn.execute(
             f"SELECT * FROM user_feedback{where} ORDER BY created_at ASC, id ASC", args
         ).fetchall()
-        return _attach_replies(conn, [_row(r) for r in rows])
+        return [_row(r) for r in rows]
 
 
-def _summary_matrix(items: list[dict]) -> str:
-    """分类 × 状态 的计数表。企业反馈汇总的第一屏都是这张表 ——
-    它回答的是"哪一类问题最多、还有多少没处理"，比逐条读快得多。"""
-    lines = [
-        "| 分类 | " + " | ".join(status_label(s) for s in _EXPORT_ORDER) + " | 合计 |",
-        "| --- | " + " | ".join("--:" for _ in _EXPORT_ORDER) + " | --: |",
-    ]
-    for cat, cat_label in CATEGORIES:
-        cells = []
-        total = 0
-        for st in _EXPORT_ORDER:
-            n = sum(1 for it in items if it["category"] == cat and it["status"] == st)
-            total += n
-            cells.append(str(n) if n else "-")
-        if total:
-            lines.append(f"| {cat_label} | " + " | ".join(cells) + f" | {total} |")
-    grand = len(items)
-    per_status = [sum(1 for it in items if it["status"] == st) for st in _EXPORT_ORDER]
-    lines.append(
-        "| **合计** | "
-        + " | ".join(f"**{n}**" if n else "-" for n in per_status)
-        + f" | **{grand}** |"
-    )
-    return "\n".join(lines)
+def export_docx(
+    status: str = "", start: str = "", end: str = "", now: int | None = None
+) -> tuple[bytes, dict]:
+    """生成 Word 汇总，返回 (docx 字节, 审计元信息)。
 
-
-def export_markdown(status: str = "", now: int | None = None) -> tuple[str, dict]:
-    """生成可直接发出的反馈汇总（Markdown）。返回 (正文, 元信息)。
-
-    元信息给调用方写审计用：`{items, total, status}` —— 不在这里写文件，
-    因为 core 层不该知道日志目录在哪（部署目录与测试临时目录不同）。
+    ★ 只把白名单字段交给生成器：date / category_label / content /
+    status / status_label。uid、username、contact、page、replies 在**这里**
+    就被丢掉 —— 与其在排版层逐字段"记得不要写"，不如在入口只传该传的。
+    这样以后有人在生成器里加一栏，也拿不到隐私数据。
     """
-    items = export_items(status)
-    per_status = {st: sum(1 for it in items if it["status"] == st) for st in _EXPORT_ORDER}
-    stamp = _fmt_ts(now or int(time.time()))
+    from core import feedback_docx, timeutil
+
+    items = export_items(status, start, end)
+    per_status = {
+        st: sum(1 for it in items if it["status"] == st) for st in _EXPORT_ORDER
+    }
+
+    doc_items: list[dict] = []
+    for it in items:
+        st = str(it.get("status") or "")
+        doc_items.append(
+            {
+                "date": timeutil.day_str(it.get("created_at")),
+                "category_label": category_label(str(it.get("category") or "")),
+                "content": str(it.get("content") or ""),
+                "status": st,
+                "status_label": status_label(st),
+            }
+        )
+    # 按状态分组，组内保持传入的时间正序（Python sort 是 stable 的）。
+    rank = {st: i for i, st in enumerate(_EXPORT_ORDER)}
+    doc_items.sort(key=lambda x: rank.get(x["status"], len(rank)))
+
     scope = status_label(status) if status in _STATUS_MAP else "全部状态"
-
-    out: list[str] = []
-    out.append("# 知穗 · 用户反馈汇总")
-    out.append("")
-    out.append(f"- 导出时间：{stamp}")
-    out.append(f"- 数据范围：{scope} · 全部时间")
-    out.append(
-        "- 合计："
-        + f"{len(items)} 条（"
-        + " / ".join(f"{status_label(st)} {per_status[st]}" for st in _EXPORT_ORDER)
-        + "）"
+    scope += (
+        " · " + (start or "最早") + " ~ " + (end or "至今")
+        if (start or end)
+        else " · 全部时间"
     )
-    out.append("- 联系方式已脱敏；账号只保留前 8 位。")
-    out.append("")
 
-    if not items:
-        out.append("> 该范围内没有反馈。")
-        return "\n".join(out) + "\n", {"items": 0, "total": 0, "status": status}
-
-    out.append("## 统计概览")
-    out.append("")
-    out.append(_summary_matrix(items))
-    out.append("")
-
-    seq = 0
-    for st in _EXPORT_ORDER:
-        group = [it for it in items if it["status"] == st]
-        if not group:
-            continue
-        out.append(f"## {status_label(st)}（{len(group)} 条）")
-        out.append("")
-        for it in group:
-            seq += 1
-            out.append(f"### {seq}. {it['category_label']}　#{it['id']}")
-            out.append("")
-            who = (it.get("username") or "").strip() or "（未命名）"
-            uid = str(it.get("uid") or "")
-            out.append(f"- 提交人：{who}（{uid[:8]}…）· {_fmt_ts(it.get('created_at'))}")
-            if it.get("page"):
-                out.append(f"- 来源页面：{it['page']}")
-            # 联系方式**总是写出来**（没留就写「（未留）」）：导出件是交给别人
-            # 读的表格，"这一栏空了"和"我们没导这一栏"在读者眼里是两件事
-            out.append(f"- 联系方式：{mask_contact(it.get('contact') or '')}")
-            out.append("")
-            # 正文按原样引用：用户写了几行就几行，不要压成一句
-            for line in str(it.get("content") or "").splitlines() or [""]:
-                out.append(f"> {line}" if line.strip() else ">")
-            out.append("")
-            replies = it.get("replies") or []
-            if replies:
-                out.append("**处理记录**")
-                out.append("")
-                for r in replies:
-                    author = (r.get("admin_name") or "").strip() or "管理员"
-                    out.append(f"- {_fmt_ts(r.get('created_at'))} · {author}：{r['content']}")
-                out.append("")
-    return "\n".join(out) + "\n", {"items": len(items), "total": len(items), "status": status}
+    blob = feedback_docx.build(
+        doc_items,
+        stamp=_fmt_ts(now if now is not None else int(time.time())),
+        scope=scope,
+        counts=[(status_label(st), per_status[st]) for st in _EXPORT_ORDER],
+        total=len(items),
+    )
+    return blob, {
+        "items": len(items),
+        "total": len(items),
+        "status": status,
+        "start": start,
+        "end": end,
+    }
 
 
 # ==================== 按人会话（2026-11-18）====================
