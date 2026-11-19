@@ -36,6 +36,11 @@ from core import config, tag_taxonomy
 
 MAX_HISTORY_TURNS = 30  # 每个会话最多保留的对话轮数（1 轮 = user + assistant 两条）
 
+# messages.status 的三个取值（见 _init_db 里 status 列的迁移注释）
+MSG_STATUS_DONE = "done"
+MSG_STATUS_STREAMING = "streaming"
+MSG_STATUS_INTERRUPTED = "interrupted"
+
 
 # ---------- 数据库路径 ----------
 def _db_path() -> str:
@@ -280,6 +285,36 @@ def _init_db() -> None:
         except Exception:
             pass
 
+        # 迁移（2026-11-19 回答被吞修复）：老库补 status 列。
+        #   done        正常结束（老数据全是 done）
+        #   streaming   流式进行中：正文还在写，历史组装必须跳过它（半截话不是上下文）
+        #   interrupted 生成到一半断了（断连 / 用户停止 / 进程重启），正文是半截
+        # 为什么需要它：assistant 消息原来是**流结束后才 INSERT**，客户端一断开
+        # event_generator 就被取消，那句 add_message 永远走不到——回答凭空消失，
+        # 刷新也没有。改成"流开始就 INSERT 空壳、边流边 UPDATE"之后，必须有一列
+        # 告诉下游"这条不全"，否则半截回答会被当成完整答案喂给下一轮。
+        try:
+            conn.execute("ALTER TABLE messages ADD COLUMN status TEXT NOT NULL DEFAULT 'done'")
+        except Exception:
+            pass
+
+        # 进程重启会把内存里的流式连接一起带走，那些 status='streaming' 的行
+        # 再也不会有人来 UPDATE，会永远卡在"生成中"。启动时统一改判为 interrupted。
+        #
+        # 为什么不加"只动足够老的行"的时间窗（我第一版就是这么写的，是个洞）：
+        # 前端会**整条跳过** streaming 行（另一台设备正在写的那条不能拿来渲染）。
+        # 于是"进程 5 分钟前死了 → 重启 → created_at 不够老 → 没收割 → 前端永远跳过"
+        # 这一串下来，那条回答就是永久消失——正是这次要消灭的现象，只是换了条路。
+        # 现在启动即收割：本进程刚起来，还没写任何一行，库里所有 streaming 都是死行。
+        #
+        # 代价（仅多 worker 滚动重启时）：另一个 worker 正在写的行会被提前标成
+        # interrupted，直到它下一次 flush（≤4 秒）覆盖回 streaming。单进程部署无此问题；
+        # 真要多 worker，判据应改成"行上记 pid + 检查该 pid 是否还活着"，而不是时间窗。
+        try:
+            conn.execute("UPDATE messages SET status='interrupted' WHERE status='streaming'")
+        except Exception:
+            pass
+
         # 迁移：老库补 owner_id 列。旧行留 NULL = 谁都不属于，默认不可见
         try:
             conn.execute("ALTER TABLE conversations ADD COLUMN owner_id TEXT")
@@ -427,20 +462,26 @@ def add_message(
     content: str,
     refs: str = "",
     truncated: bool = False,
+    status: str = MSG_STATUS_DONE,
 ) -> int:
     """追加一条消息，返回 message id。同时更新会话的 updated_at。
 
     truncated=True 表示这条回答被长度上限截断了（见 core/session.py 的迁移注释与
     审计报告 A1）。默认 False，所有既有调用方不需要改。
+
+    status: 流式回答的"空壳先行"用它。开始时 `status="streaming"` + 空内容 INSERT，
+    边流边用 `update_message_content` 填充；断连时把状态改成 interrupted，
+    半截回答留在库里（以前是整条丢弃，用户以为回答被吞了）。
+    默认 "done" = 这一行从落库起就是终态，老的调用方语义完全不变。
     """
     if not _owned(owner, sid):
         raise NotOwned(sid)
     now = int(time.time())
     with _get_conn() as conn:
         conn.execute(
-            "INSERT INTO messages (conversation_id, role, content, refs, truncated, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (sid, role, content, refs, 1 if truncated else 0, now),
+            "INSERT INTO messages (conversation_id, role, content, refs, truncated, status, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (sid, role, content, refs, 1 if truncated else 0, status, now),
         )
         conn.execute(
             "UPDATE conversations SET updated_at = ? WHERE id = ?",
@@ -449,6 +490,51 @@ def add_message(
         # 取自增 id
         row = conn.execute("SELECT last_insert_rowid() AS id").fetchone()
         return row["id"]
+
+
+def update_message_content(
+    owner: str,
+    sid: str,
+    msg_id: int,
+    content: str,
+    status: str = MSG_STATUS_DONE,
+    refs: str | None = None,
+    truncated: bool = False,
+) -> bool:
+    """改写一条已有消息的正文与状态，返回是否命中（流式回答的边流边存）。
+
+    为什么要这条 UPDATE 而不是"流结束后再 INSERT"：SSE 断开（锁屏 / 切网 /
+    标签页被丢 / 服务重启）时 event_generator 直接被取消，收尾那句 add_message
+    永远走不到，已经生成的一大段回答连带消失。改成先插空壳、再反复 UPDATE，
+    断在任何位置都留得住，最多丢最后一次 flush 之后的几个字。
+
+    refs=None 表示"来源引用不变"——refs 只在流结束时才有值，中途 flush 不该清掉它。
+
+    为什么不在一个事务里包住整轮：流式生成几十秒，SQLite 的写锁会堵死其他所有
+    写入（包括另一台设备的 user 消息），得不偿失。每次 flush 是独立短事务，
+    busy_timeout=5000 足够覆盖冲突窗口。
+    """
+    if status not in (MSG_STATUS_DONE, MSG_STATUS_STREAMING, MSG_STATUS_INTERRUPTED):
+        raise ValueError(f"非法消息状态：{status!r}")
+    if not _owned(owner, sid):
+        return False
+    now = int(time.time())
+    with _get_conn() as conn:
+        if refs is None:
+            cur = conn.execute(
+                "UPDATE messages SET content=?, status=?, truncated=? "
+                "WHERE conversation_id=? AND id=?",
+                (content, status, 1 if truncated else 0, sid, int(msg_id)),
+            )
+        else:
+            cur = conn.execute(
+                "UPDATE messages SET content=?, status=?, truncated=?, refs=? "
+                "WHERE conversation_id=? AND id=?",
+                (content, status, 1 if truncated else 0, refs, sid, int(msg_id)),
+            )
+        if cur.rowcount > 0:
+            conn.execute("UPDATE conversations SET updated_at=? WHERE id=?", (now, sid))
+        return cur.rowcount > 0
 
 
 # ==================== 用户画像标签（方案 C · B 块）====================
@@ -746,6 +832,7 @@ def get_messages(
     sid: str,
     limit_turns: int = MAX_HISTORY_TURNS,
     include_system: bool = True,
+    before_id: int | None = None,
 ) -> list[dict]:
     """取会话消息历史（按时间正序）。不是自己的会话直接返回空列表。
 
@@ -757,15 +844,28 @@ def get_messages(
         sid: 会话 id
         limit_turns: 最多保留的对话轮数（每轮 = user + assistant），None 表示不限
         include_system: 是否包含 system 消息
+        before_id: 只读 `id < before_id` 的消息（不含该条）。用来把"本轮提问
+            之后才落库的消息"挡在历史之外 —— 调用方拿本轮 user 消息的 id
+            当硬边界，比 `get_messages()[:-1]` 可靠：并发时最后一条可能是
+            另一台设备刚发的问题，`[:-1]` 猜不准（见 api/chat.py `_history_before`）
 
     Returns:
-        [{role, content, created_at}, ...]
+        [{id, role, content, refs, status, created_at}, ...]
+
+        status: done / streaming / interrupted。调用方（历史组装）必须区分：
+        streaming 是另一台设备正在生成的行，内容还不完整，不能进上下文；
+        interrupted 是断连留下的半截回答，进上下文时要标注，不能装作完整答案。
     """
-    cols = "m.id, m.role, m.content, m.refs, m.created_at"
+    cols = "m.id, m.role, m.content, m.refs, m.status, m.created_at"
     join = (
         "FROM messages m JOIN conversations c ON m.conversation_id = c.id "
         "WHERE m.conversation_id = ? AND c.owner_id = ?"
     )
+    if before_id is not None:
+        join += " AND m.id < ?"
+        params_tail: tuple = (int(before_id),)
+    else:
+        params_tail = ()
     with _get_conn() as conn:
         if limit_turns and limit_turns > 0:
             # 只取尾部：长会话全量载入既慢又占内存，而窗口截断只要最近
@@ -774,12 +874,12 @@ def get_messages(
             cap = limit_turns * 2 + 10
             rows = conn.execute(
                 f"SELECT * FROM (SELECT {cols} {join} ORDER BY m.id DESC LIMIT ?) ORDER BY id ASC",
-                (sid, owner, cap),
+                (sid, owner, *params_tail, cap),
             ).fetchall()
         else:
             rows = conn.execute(
                 f"SELECT {cols} {join} ORDER BY m.id ASC",
-                (sid, owner),
+                (sid, owner, *params_tail),
             ).fetchall()
 
     msgs = [dict(r) for r in rows]
@@ -822,7 +922,7 @@ def get_message(owner: str, sid: str, msg_id: int) -> dict | None:
         return None
     with _get_conn() as conn:
         row = conn.execute(
-            "SELECT id, role, content, refs, created_at FROM messages "
+            "SELECT id, role, content, refs, status, created_at FROM messages "
             "WHERE conversation_id = ? AND id = ?",
             (sid, msg_id),
         ).fetchone()
@@ -852,7 +952,7 @@ def get_messages_by_ids(owner: str, sid: str, ids: list[int]) -> list[dict]:
     placeholders = ",".join("?" * len(clean))
     with _get_conn() as conn:
         rows = conn.execute(
-            "SELECT m.id, m.role, m.content, m.created_at "
+            "SELECT m.id, m.role, m.content, m.status, m.created_at "
             "FROM messages m JOIN conversations c ON m.conversation_id = c.id "
             f"WHERE m.conversation_id = ? AND c.owner_id = ? AND m.id IN ({placeholders}) "
             "ORDER BY m.id ASC",

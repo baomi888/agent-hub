@@ -860,12 +860,27 @@ def build_recall_text(
 
 
 def _clean(msgs: list[dict]) -> list[dict]:
-    """只留 user / assistant 且内容非空，转成 {role, content}。"""
-    return [
-        {"role": m["role"], "content": m["content"]}
-        for m in msgs
-        if m.get("role") in ("user", "assistant") and m.get("content")
-    ]
+    """只留 user / assistant 且内容非空，转成 {role, content}。
+
+    两处按 messages.status 特殊处理（2026-11-19 回答被吞修复后新增的列）：
+      - streaming：另一台设备正在生成，正文只有前半段且还在变，进上下文等于
+        把"说了一半的话"当历史，直接跳过；
+      - interrupted：断连/停止留下的半截回答。留着有用（模型知道当时答到哪了），
+        但必须标注，否则它会把半截当完整答案，顺着断掉的地方继续编。
+    """
+    out: list[dict] = []
+    for m in msgs:
+        role = m.get("role")
+        content = m.get("content")
+        if role not in ("user", "assistant") or not content:
+            continue
+        status = m.get("status")
+        if status == "streaming":
+            continue
+        if status == "interrupted":
+            content = f"{content}（这条回答在生成过程中被中断，只有前半段）"
+        out.append({"role": role, "content": content})
+    return out
 
 
 def assemble_history(
@@ -948,7 +963,13 @@ def maybe_compress(
     if not force and not should_compress(total_chars, max_context_chars):
         return {"ok": False, "reason": "below_threshold", "upto": upto}
 
-    pending = [m for m in raw if int(m.get("id") or 0) > upto]
+    # 跳过 status='streaming'：那是另一台设备正在生成的行，正文还在变，
+    # 压进摘要等于把"说到一半的话"固化下来（2026-11-19 流式中断修复后新增）。
+    pending = [
+        m
+        for m in raw
+        if int(m.get("id") or 0) > upto and m.get("status") != "streaming"
+    ]
     old = pending[: -kt * 2] if kt > 0 else pending
     if not old:
         return {"ok": False, "reason": "nothing_to_compress", "upto": upto}
