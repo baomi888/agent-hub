@@ -16,6 +16,8 @@
   6. **空导出仍是合法 Word**（不能返回 0 字节）。
   7. **审计留痕**：每次导出往 `${DATA_DIR}/audit.log` 追加一行
      `feedback_export`，带条数与日期范围。
+  8. **纯文字排版 + 文件名**：导出件里不许有 `<w:tbl>`，正文 12pt、标题 18pt；
+     文件名由日期自动生成（11-18~11-19 → 11-18-11-19用户反馈.docx）。
 
 读 docx 用 zipfile + ElementTree，**不依赖 python-docx**（CI 的 venv 没装）。
 """
@@ -24,8 +26,10 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import zipfile
 import xml.etree.ElementTree as ET
+from urllib.parse import unquote
 
 import pytest
 from fastapi.testclient import TestClient
@@ -101,23 +105,26 @@ def _at(day: str, hour: int = 10) -> int:
 
 
 def _docx(blob: bytes) -> str:
-    """把 docx 里的全部文字抽出来。只取 <w:t>，不把 XML 标签也算进来。"""
+    """把 docx 里的全部文字抽出来：只取 <w:t>，同一段的多个 run 拼成一行。"""
     assert blob[:2] == b"PK", "不是合法 docx（zip 头都不对）"
     with zipfile.ZipFile(io.BytesIO(blob)) as z:
         assert z.testzip() is None
         root = ET.fromstring(z.read("word/document.xml"))
-    return "\n".join((t.text or "") for t in root.iter(W + "t"))
+    return "\n".join(
+        "".join((t.text or "") for t in p.iter(W + "t"))
+        for p in root.iter(W + "p")
+    )
 
 
-def _rows(blob: bytes) -> list[list[str]]:
-    with zipfile.ZipFile(io.BytesIO(blob)) as z:
-        root = ET.fromstring(z.read("word/document.xml"))
-    out = []
-    for tr in root.iter(W + "tr"):
-        out.append(
-            ["".join((t.text or "") for t in tc.iter(W + "t")) for tc in tr.findall(W + "tc")]
-        )
-    return out
+def _heads(text: str) -> list[str]:
+    """每条反馈的小标题：1. 2026-11-10 · 出错了 · 待处理"""
+    return [line for line in text.splitlines() if re.match(r"^\d+\. ", line)]
+
+
+def _filename(cd: str) -> str:
+    """从 Content-Disposition 里取出 filename* 的中文名（后面可能还有 ASCII 兜底）。"""
+    raw = cd.split("filename*=UTF-8''", 1)[1].split(";", 1)[0].strip()
+    return unquote(raw)
 
 
 # ==================== 1. 隐私根本不进导出件 ====================
@@ -149,18 +156,30 @@ def test_pii_and_dialogue_never_exported(client):
     assert "反馈原文：设置页按钮点不动。" in text
 
 
-def test_only_whitelisted_columns(client):
-    """表头恰好五栏，顺序与示例一致；日期列真的在。"""
+def test_only_whitelisted_fields(client):
+    """每条只是一行小标题（日期·分类·状态）+ 一段正文，没有别的栏。"""
     uid = _login(client, ADMIN_NAME)
     _mk(uid, "甲", at=_at("2026-11-10"))
 
-    rows = _rows(client.get("/api/admin/feedback/export").content)
-    assert rows[0] == ["序号", "提交日期", "分类", "反馈问题", "解决状态"]
-    assert len(rows) == 2
-    assert rows[1][1] == "2026-11-10"
-    assert rows[1][2] == "出错了"
-    assert rows[1][3] == "这是一条用来测试导出的反馈正文。"
-    assert rows[1][4] == "待处理"
+    text = _docx(client.get("/api/admin/feedback/export").content)
+    heads = _heads(text)
+    assert len(heads) == 1
+    assert "2026-11-10" in heads[0]
+    assert "出错了" in heads[0]
+    assert "待处理" in heads[0]
+    assert "这是一条用来测试导出的反馈正文。" in text
+
+
+def test_pure_text_no_table_and_readable_font(client):
+    """用户明确要纯文字、不要表格、字要大：锁死无 tbl 且正文 ≥12pt。"""
+    uid = _login(client, ADMIN_NAME)
+    _mk(uid, "甲")
+    blob = client.get("/api/admin/feedback/export").content
+    with zipfile.ZipFile(io.BytesIO(blob)) as z:
+        xml = z.read("word/document.xml").decode("utf-8")
+    assert "<w:tbl>" not in xml, "导出又变回表格了"
+    assert '<w:sz w:val="24"/>' in xml, "正文没有放大到 12pt"
+    assert '<w:sz w:val="36"/>' in xml, "标题没有放大到 18pt"
 
 
 # ==================== 3. 日期范围 ====================
@@ -219,8 +238,9 @@ def test_all_when_dates_blank(client):
     _mk(uid, "甲", at=_at("2026-11-10"))
     _mk(uid, "乙", at=_at("2026-11-11"))
     r = client.get("/api/admin/feedback/export")
-    assert "全部时间" in _docx(r.content)
-    assert len(_rows(r.content)) == 3  # 表头 + 2 条
+    text = _docx(r.content)
+    assert "全部时间" in text
+    assert len(_heads(text)) == 2
 
 
 @pytest.mark.parametrize(
@@ -245,11 +265,12 @@ def test_grouped_by_status_with_continuous_numbering(client):
     b = _mk(uid, "乙", cat="feature", content="已处理的那条")
     user_feedback.set_status(b, "done")
 
-    rows = _rows(client.get("/api/admin/feedback/export").content)[1:]
-    nums = [r[0] for r in rows]
+    text = _docx(client.get("/api/admin/feedback/export").content)
+    heads = _heads(text)
+    nums = [h.split(".", 1)[0] for h in heads]
     assert nums == ["1", "2"], "编号必须全局连续"
-    assert rows[0][3] == "待处理的那条" and rows[0][4] == "待处理"
-    assert rows[1][3] == "已处理的那条" and rows[1][4] == "已处理", "待处理必须排在已处理前面"
+    assert "待处理的那条" in text and "待处理" in heads[0]
+    assert "已处理的那条" in text and "已处理" in heads[1], "待处理必须排在已处理前面"
 
 
 # ==================== 5. 状态筛选 ====================
@@ -316,7 +337,27 @@ def test_download_headers(client):
     r = client.get("/api/admin/feedback/export?start_date=2026-11-10&end_date=2026-11-11")
     assert r.status_code == 200
     cd = r.headers["content-disposition"]
-    assert "attachment" in cd and cd.endswith('.docx"')
-    assert "20261110" in cd and "20261111" in cd
+    assert "attachment" in cd
+    # 中文名走 filename*；ASCII filename 只是直接打开接口时的兜底。
+    assert "filename*=UTF-8''" in cd
+    assert 'filename="feedback.docx"' in cd, "缺 ASCII 兜底名"
+    assert _filename(cd) == "11-10-11-11用户反馈.docx"
     assert r.headers["cache-control"] == "no-store"
     assert "wordprocessingml" in r.headers["content-type"]
+
+
+@pytest.mark.parametrize(
+    "query,expected",
+    [
+        ("", "全部用户反馈.docx"),
+        ("start_date=2026-11-18", "11-18用户反馈.docx"),
+        ("end_date=2026-11-19", "11-19用户反馈.docx"),
+        ("start_date=2026-11-18&end_date=2026-11-19", "11-18-11-19用户反馈.docx"),
+    ],
+)
+def test_filename_generated_from_dates(client, query, expected):
+    """用户点名要的文件名规则：选 11-18~11-19 就叫 11-18-11-19用户反馈。"""
+    _login(client, ADMIN_NAME)
+    url = "/api/admin/feedback/export" + ("?" + query if query else "")
+    cd = client.get(url).headers["content-disposition"]
+    assert _filename(cd) == expected

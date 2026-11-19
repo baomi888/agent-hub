@@ -979,10 +979,23 @@ export const api = {
       });
       if (!res.ok) throw await httpError(res);
       const blob = await res.blob();
-      // 文件名由后端给（Content-Disposition）；Next 的 rewrite 若不转发这个头，
-      // 就退回一个固定名 —— 不乱码即可，文档里的标题才是真的中文名
-      const m = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "");
-      const name = m ? m[1] : "feedback.docx";
+      // 文件名由后端给：中文名在 filename*（RFC 5987），ASCII 的 filename 是兜底。
+      // ★ 走 fetch 时浏览器**不会**替我们应用 Content-Disposition，a.download
+      //   叫什么全看这里。旧版只解析 filename，实测下载下来永远是 feedback.docx，
+      //   跟界面上承诺的「11-18-11-19用户反馈」对不上（2026-11-19 修）。
+      const cd = res.headers.get("Content-Disposition") || "";
+      const ext = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+      let name = "feedback.docx";
+      if (ext) {
+        try {
+          name = decodeURIComponent(ext[1].trim());
+        } catch {
+          // 编码损坏就留兜底名，不把 %E5... 这种原样扔给管理员
+        }
+      } else {
+        const m = /filename="([^"]+)"/.exec(cd);
+        if (m) name = m[1];
+      }
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;

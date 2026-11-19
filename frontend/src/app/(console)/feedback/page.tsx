@@ -51,6 +51,14 @@ function fmtTime(ts: number): string {
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+/** 日期控件里显示的短日期：2026-11-18 → 11月18日。
+ *  原生 date 在中文 Safari 里渲染成「2026年11月18日」，11 个全角字塞不进窄屏
+ *  的半个操作栏（实测溢出）。这里只显示短文本，真正的选择器仍由透明 input 唤起。 */
+function shortDate(value: string): string {
+  const m = /^\d{4}-(\d{2})-(\d{2})$/.exec(value);
+  return m ? `${Number(m[1])}月${Number(m[2])}日` : value;
+}
+
 /** 列表里的时间：今天只写时分，今年只写月日，跨年才带年 —— 省宽度。 */
 function fmtWhen(ts: number): string {
   if (!ts) return "";
@@ -393,34 +401,45 @@ export default function FeedbackPage() {
         <>
           <Seg ariaLabel="按状态筛选" options={filterOptions} value={fbStatus} onChange={setFbStatus} />
           <div className="fbim-export" role="group" aria-label="导出日期范围">
-            <label className="fbim-export-field">
-              <span>起始</span>
-              <input
-                type="date"
-                className="input"
-                aria-label="导出起始日期，留空表示不限"
-                value={exportFrom}
-                max={exportTo || undefined}
-                onChange={(e) => setExportFrom(e.target.value)}
-              />
-            </label>
-            <span className="fbim-export-sep" aria-hidden="true">—</span>
-            <label className="fbim-export-field">
-              <span>结束</span>
-              <input
-                type="date"
-                className="input"
-                aria-label="导出结束日期，留空表示不限"
-                value={exportTo}
-                min={exportFrom || undefined}
-                onChange={(e) => setExportTo(e.target.value)}
-              />
-            </label>
+            <div className="fbim-export-range">
+              <label className="fbim-date">
+                <span className="fbim-date-cap">起始</span>
+                <span className="fbim-date-val">
+                  <span className={`fbim-date-text${exportFrom ? "" : " is-empty"}`}>
+                    {exportFrom ? shortDate(exportFrom) : "不限"}
+                  </span>
+                  <input
+                    type="date"
+                    className="fbim-date-input"
+                    aria-label="导出起始日期，留空表示不限"
+                    value={exportFrom}
+                    max={exportTo || undefined}
+                    onChange={(e) => setExportFrom(e.target.value)}
+                  />
+                </span>
+              </label>
+              <span className="fbim-export-sep" aria-hidden="true">—</span>
+              <label className="fbim-date">
+                <span className="fbim-date-cap">结束</span>
+                <span className="fbim-date-val">
+                  <span className={`fbim-date-text${exportTo ? "" : " is-empty"}`}>
+                    {exportTo ? shortDate(exportTo) : "不限"}
+                  </span>
+                  <input
+                    type="date"
+                    className="fbim-date-input"
+                    aria-label="导出结束日期，留空表示不限"
+                    value={exportTo}
+                    min={exportFrom || undefined}
+                    onChange={(e) => setExportTo(e.target.value)}
+                  />
+                </span>
+              </label>
+            </div>
           </div>
           <button
             type="button"
-            className="btn btn-primary btn-sm"
-            style={{ marginLeft: "auto" }}
+            className="btn btn-primary btn-sm fbim-export-btn"
             disabled={exporting}
             onClick={() => void exportAll()}
             title="导出 Word：日期都留空=全部汇总；填起止=只导该日期范围（含当天）。仅含反馈问题、提交日期、分类与解决状态，不含个人信息与对话"

@@ -920,6 +920,23 @@ textarea.input {
     gap: var(--space-14);
   }
 }
+/* 弹窗底部的「取消 / 创建」：取消靠左、主按钮靠右，窄屏各占一半。
+   弹窗体已经在滚，这里不 fixed —— footer 由 DialogShell 固定在弹窗底部。 */
+.del-dlg-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-10);
+  width: 100%;
+}
+.del-dlg-foot .btn {
+  min-width: 104px;
+}
+@media (max-width: 480px) {
+  .del-dlg-foot .btn {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}
 
 /* 执行历史：默认只露 3 条，折叠开关 + 一行汇总（2026-11-17） */
 .del-hist-head {
@@ -1048,19 +1065,9 @@ textarea.input {
   font-weight: 600;
 }
 
-/* 表单底部动作条。桌面就是卡片自带的一条底栏（右栏常驻表单，够用）。 */
-.form-actions {
-  position: sticky;
-  bottom: 0;
-  z-index: 3;
-  /* 18px 与 .card-pad 的水平内边距一致（那里是字面量，没有对应的 space 令牌）；
-     垂直用 -space-16 抵消卡片的上内边距，底部贴齐卡片圆角 */
-  margin: var(--space-16) -18px calc(-1 * var(--space-16));
-  padding: var(--space-12) 18px;
-  background: var(--card-bg);
-  border-top: 1px solid var(--line);
-  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
-}
+/* 表单底部工具区（预览 / 删除），仍在弹窗里用。
+   .form-actions 固定动作条 2026-11-19 随表单改弹窗一并删除：它曾是手机上那条
+   position:fixed 钉在屏幕底的"黑条+按钮"。弹窗自带 footer，不再需要。 */
 .form-tools {
   display: flex;
   flex-wrap: wrap;
@@ -1805,26 +1812,6 @@ textarea.input {
      挤成两行，而它只是绝对时刻的另一种说法。窄屏让位给绝对时刻。 */
   .dele-remain {
     display: none;
-  }
-  /* 窄屏：表单可见时把动作条钉在视口底部（fixed）。
-     桌面不钉 —— 右栏常驻表单，一条横跨 1280px 的底栏比按钮本身更碍事。 */
-  .form-actions.is-fixed {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    margin: 0;
-    padding: var(--space-10) var(--space-14) calc(var(--space-10) + env(safe-area-inset-bottom, 0px));
-    background: var(--card-bg);
-    border-top: 1px solid var(--line);
-    border-radius: 0;
-    box-shadow: 0 -8px 18px rgba(80, 60, 30, 0.07);
-    z-index: 40;
-  }
-  /* 钉住后底部会盖住表单末尾那句提示 —— 用 :has 给页面补出等高留白。
-     不支持 :has 的浏览器只是少一点留白，不挡功能。 */
-  .console-page:has(.form-actions.is-fixed) {
-    padding-bottom: 96px;
   }
   /* 反馈分类胶囊：5 个按钮都是 white-space:nowrap，总宽 348 > 可视 290，
      外层 .seg 又是 overflow:hidden —— 第 5 个「其他」直接被裁掉一半（实测右溢 59px），
@@ -7324,56 +7311,110 @@ img.fbim-face {
   }
 }
 
-/* 反馈页导出日期范围：状态 Seg 右边的一组 date 输入。
-   窄屏让整组独占一行（.pg-actions 本身 flex-wrap），两个输入框平分宽度。
-   ★ 不写 font-size：移动端 a11y.css 用 !important 把输入框压到 ≥16px，
-     这里一旦写死就会在 iOS 上触发聚焦缩放（AGENTS.md §3）。 */
+/* 反馈页导出日期范围（2026-11-19 重做成苹果式分组控件）。
+   ★ 原来是两个带框的原生 date input：中文 Safari 把值渲染成「2026年11月18日」，
+     138px 的框里明显溢出；没选日期时又只剩两个空白框，看不出默认其实是「不限」。
+     现在是一张浅底分组卡，小标题 + 短日期文本，空值直接写「不限」；
+     原生 input 透明铺满整格，只负责唤起系统日期选择器（键盘/读屏仍落在它身上）。
+   ★ 不给 input 写 font-size：移动端 a11y.css 用 !important 把输入框压到 ≥16px，
+     但这里是透明层，视觉字号由 .fbim-date-text 决定。 */
 .fbim-export {
   display: flex;
   align-items: center;
-  gap: var(--space-6);
+  min-width: 0;
 }
-.fbim-export-field {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-6);
-  color: var(--text-2);
+.fbim-export-range {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-8);
+  padding: 7px 12px;
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  min-width: 0;
+}
+.fbim-date {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-width: 92px;
+  min-height: 44px;
+  cursor: pointer;
+}
+.fbim-date-cap {
+  color: var(--text-3);
+  font-size: 11px;
+  line-height: 1.2;
+}
+.fbim-date-val {
+  position: relative;
+  display: block;
+  min-height: 20px;
+}
+.fbim-date-text {
+  display: block;
+  color: var(--text-1);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
   white-space: nowrap;
 }
-.fbim-export-field .input {
-  width: 138px;
-  padding: 5px 8px;
+.fbim-date-text.is-empty {
+  color: var(--text-3);
+  font-weight: 400;
+}
+/* 透明覆盖层：视觉全交给上面的短文本，点/敲/读屏都落在原生 date 上。 */
+.fbim-date-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.fbim-date:focus-within .fbim-date-val {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 .fbim-export-sep {
+  align-self: center;
   color: var(--text-3);
 }
+.fbim-export-btn {
+  margin-left: auto;
+}
 @media (max-width: 760px) {
-  /* flex item 默认 min-width:auto = min-content：一组固定宽控件能把整条
-     actions 撑到比视口还宽，而外层 overflow 会把它藏起来（探针量到 418>390）。
-     收紧到容器宽，让内部那组控件按下面的 min-width:0 规则自己缩。 */
+  /* 窄屏：分组卡与导出按钮各占整行，按钮变成主操作。
+     ★ min-width:0 必须留：flex item 默认 min-content，一组固定宽控件能把
+       .pg-actions 撑到比视口还宽，而外层 overflow 让 scrollWidth 仍报 390 ——
+       常规溢出检测抓不到，只能逐元素量 right。 */
   .pg-actions {
     max-width: 100%;
     min-width: 0;
     box-sizing: border-box;
   }
-  /* ★ 只写 width:100% 会继承 .pg-actions 被 flex 撑开的 418px（视口才 390），
-     第二个输入框和导出按钮被裁掉 59px —— 而 docElement.scrollWidth 仍是 390，
-     因为外层 overflow 把它藏了，常规"溢出检测"抓不到。
-     解法：显式限到父容器内容宽，并把输入框设为可收缩（min-width:0）。 */
   .fbim-export {
     width: 100%;
     max-width: 100%;
-    min-width: 0;
+  }
+  .fbim-export-range {
+    width: 100%;
+    max-width: 100%;
     box-sizing: border-box;
   }
-  .fbim-export-field {
+  .fbim-date {
     flex: 1 1 0;
     min-width: 0;
   }
-  .fbim-export-field .input {
+  .fbim-export-btn {
     width: 100%;
-    min-width: 0;
-    box-sizing: border-box;
+    margin-left: 0;
   }
 }
 

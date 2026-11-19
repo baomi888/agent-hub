@@ -39,7 +39,7 @@
 from __future__ import annotations
 
 import asyncio
-import time
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
@@ -171,19 +171,33 @@ async def feedback_export(
             "bytes": len(blob),
         },
     )
-    # 文件名用 ASCII + 日期：中文文件名要 RFC 5987 的 filename*，各浏览器实现
-    # 不一致，反而是"下载下来叫 .bin 或者乱码"。文档里的标题才是中文。
-    span = ""
-    if start_date or end_date:
-        span = "-" + (start_date or "all").replace("-", "")
-        if end_date:
-            span += "-" + end_date.replace("-", "")
-    stamp = time.strftime("%Y%m%d")
+    # 文件名按用户选的日期自动生成：11-18 → 11-18用户反馈.docx，
+    # 11-18~11-19 → 11-18-11-19用户反馈.docx，没选 → 全部用户反馈.docx。
+    # 中文名走 RFC 5987 的 filename*，同时留一个 ASCII filename 兜底 ——
+    # 只写中文 filename 时，部分代理/老浏览器会把它截成 .bin 或乱码。
+    def _md(day: str) -> str:
+        return day[5:7] + "-" + day[8:10]
+
+    if start_date and end_date:
+        span = _md(start_date) + "-" + _md(end_date)
+    elif start_date or end_date:
+        span = _md(start_date or end_date)
+    else:
+        span = "全部"
+    name = span + "用户反馈.docx"
+    # 优先 filename*（RFC 5987，中文名）；ASCII 的 filename 只是给"直接打开
+    # 接口地址"的浏览器兜底。★ 前端走 fetch + a.download，必须自己解析
+    # filename*（见 lib/api.ts），否则它只读 filename 会把中文名丢掉。
+    disposition = (
+        "attachment; filename*=UTF-8''"
+        + quote(name, safe="")
+        + "; filename=\"feedback.docx\""
+    )
     return Response(
         content=blob,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={
-            "Content-Disposition": f'attachment; filename="feedback-{stamp}{span}.docx"',
+            "Content-Disposition": disposition,
             # 导出件会被反代缓存就麻烦了，明确禁掉
             "Cache-Control": "no-store",
         },
