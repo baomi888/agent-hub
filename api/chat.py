@@ -799,6 +799,134 @@ class _Acc:
         self.leak_reason: str | None = None
 
 
+class _StreamDraft:
+    """assistant 消息的"半成品行"：流开始就 INSERT，边流边 UPDATE。
+
+    为什么要有它（2026-11-19 回答被吞修复）：原来 assistant 消息只在流**结束**时
+    INSERT 一次。客户端一断开（手机锁屏 / WiFi↔4G / 标签页被系统丢掉），
+    event_generator 立刻被取消，那句 add_message 永远执行不到——已经生成的一大段
+    回答凭空消失，刷新也看不到。两设备同时用时用户最常做的动作恰好是
+    "手机上看在生成，切到电脑继续"，正好踩在这条路上。
+
+    现在的生命周期：
+        INSERT(content='', status='streaming')          ← 流开始前
+          → 每 400 字 / 4 秒 UPDATE(content, 'streaming') ← 边流边存
+          → 正常结束 UPDATE('done', refs=…, truncated=…)
+          → 断连/出错/取消 UPDATE('interrupted')，正文保留到最后一次 flush
+
+    顺带修掉一个更隐蔽的问题：空壳的 id 就是最终 message id，于是
+    **消息顺序 = 提问时刻顺序**。以前 A 的回答晚落地会排到 B 的提问之后
+    （历史里长成 U1,U2,A1），模型读起来就是"两个问题一个答案"。
+    """
+
+    # 400 字 ≈ 一次 flush 写 1KB 左右；4 秒是"内容稀疏但时间在跑"的兜底
+    # （模型在思考时也会吐极慢的 token）。两条任一满足就写一次。
+    _EVERY_CHARS = 400
+    _EVERY_SECONDS = 4.0
+
+    def __init__(self, uid: str, sid: str, msg_id: int) -> None:
+        self.uid = uid
+        self.sid = sid
+        self.msg_id = msg_id
+        # 当前全文。由 _stream_llm / agent 循环在每次追加 token 后赋值；
+        # 只在内存里改一个引用，不做拷贝。
+        self.text = ""
+        # 联网来源：中途 flush 不碰它（None=不变），收尾 seal 时才有值。
+        # （cherry-pick 适配 2026-11-19：main 在分支基点后新增了这一列）
+        self.web_sources: list[dict] | None = None
+        self.sealed = False
+        self._written = 0
+        self._written_at = time.monotonic()
+
+    def wants_flush(self) -> bool:
+        """是否该写一次库了。纯内存判断，可以逐 token 调用。"""
+        if self.sealed:
+            return False
+        grew = len(self.text) > self._written
+        if not grew:
+            return False
+        return (
+            len(self.text) - self._written >= self._EVERY_CHARS
+            or time.monotonic() - self._written_at >= self._EVERY_SECONDS
+        )
+
+    async def flush(self) -> None:
+        """把当前全文写进去（状态仍是 streaming）。失败只记指标，不中断回答。"""
+        text = self.text
+        self._written = len(text)
+        self._written_at = time.monotonic()
+        try:
+            await asyncio.to_thread(
+                store.update_message_content,
+                self.uid,
+                self.sid,
+                self.msg_id,
+                text,
+                store.MSG_STATUS_STREAMING,
+            )
+        except Exception:
+            # 写不进去（磁盘满 / 库被锁死）不该让整轮问答失败：正文还在内存里，
+            # 收尾那次 seal 会再试一次。
+            metrics.inc("chat_draft_flush_error")
+
+    async def seal(
+        self,
+        status: str = store.MSG_STATUS_DONE,
+        refs: str | None = None,
+        truncated: bool = False,
+    ) -> int:
+        """收尾：写最后一段正文并定状态，返回 message id（给 done 帧）。
+
+        一个字都没生成时把空壳删掉——否则前端会渲染一个空气泡，
+        比"什么都没有"更让人困惑。
+        """
+        if self.sealed:
+            return self.msg_id
+        self.sealed = True
+        if not self.text.strip():
+            await asyncio.to_thread(store.delete_messages, self.uid, self.sid, [self.msg_id])
+            return self.msg_id
+        try:
+            await asyncio.to_thread(
+                store.update_message_content,
+                self.uid,
+                self.sid,
+                self.msg_id,
+                self.text,
+                status,
+                refs,
+                truncated,
+                self.web_sources,
+            )
+        except Exception:
+            metrics.inc("chat_draft_seal_error")
+        return self.msg_id
+
+    def seal_sync(self, status: str = store.MSG_STATUS_INTERRUPTED) -> None:
+        """同步收尾：给 finally / 取消路径用。
+
+        断连时任务已被取消，任何一个 await 都会立刻抛 CancelledError，
+        所以这里只能走**同步** SQLite 调用（阻塞几毫秒，换"回答不丢"，值）。
+        """
+        if self.sealed:
+            return
+        self.sealed = True
+        try:
+            if not self.text.strip():
+                store.delete_messages(self.uid, self.sid, [self.msg_id])
+            else:
+                store.update_message_content(
+                    self.uid,
+                    self.sid,
+                    self.msg_id,
+                    self.text,
+                    status,
+                    web_sources=self.web_sources,
+                )
+        except Exception:
+            metrics.inc("chat_draft_seal_error")
+
+
 # 各供应商对"被长度上限截断"的叫法。OpenAI 兼容接口用 length，
 # Anthropic 叫 max_tokens，Gemini 类似 max_output_tokens——写成集合而不是单值比较，
 # 是为了换供应商时不用回来改判断。
@@ -928,7 +1056,13 @@ def _leak_blocked_reply(text: str) -> tuple[str, str]:
 
 
 async def _stream_llm(
-    llm, messages, request: Request, acc: _Acc, upstreams=None, path: str = "llm"
+    llm,
+    messages,
+    request: Request,
+    acc: _Acc,
+    upstreams=None,
+    path: str = "llm",
+    draft: _StreamDraft | None = None,
 ) -> None:
     """逐 token 产出增量 SSE。
 
@@ -972,6 +1106,12 @@ async def _stream_llm(
                 for part in (guard.feed(delta) if guard is not None else [delta]):
                     acc.text += part
                     yield _sse("token", {"text": part})
+                    # 边流边存：断连时这几百字就是"有没有留下东西"的差别
+                    # （见 _StreamDraft 的说明）。判断是纯内存比较，逐 token 调无成本。
+                    if draft is not None:
+                        draft.text = acc.text
+                        if draft.wants_flush():
+                            await draft.flush()
                 if guard is not None and guard.blocked:
                     acc.leak_blocked = True
                     acc.leak_reason = guard.reason
@@ -1053,15 +1193,44 @@ async def chat_stream(
         raise
 
 
+async def _history_before(uid: str, sid: str, user_msg_id: int) -> list[dict]:
+    """读"本轮提问之前"的历史：以本轮 user 消息的 id 作硬边界。
+
+    不要再用 `get_messages(...)[:-1]`。那个写法赌"最后一条一定是我刚插入的
+    user 消息"，同一账号在两台设备上同时发问时必然赌输（2026-11-19 复盘）：
+
+        A: add_message(UA) = 100   DB: [..., UA(100)]
+        B: add_message(UB) = 101   DB: [..., UA(100), UB(101)]
+        A 读 [..., UA, UB][:-1] → 含自己的 UA（同一问题被喂两遍）
+        B 读 [..., UA, UB][:-1] → 把 A 的 UA 当历史（答的是 A 的问题）
+
+    改用 `id < user_msg_id`：边界就是本请求那一行，前后插进什么都不影响它。
+    这个 id 是 add_message 的返回值，不额外查库、也没有"快照 vs 插入"的竞态。
+    """
+
+    return await asyncio.to_thread(
+        store.get_messages, uid, sid, include_system=False, before_id=user_msg_id
+    )
+
+
 async def _plain_llm_messages(
-    uid: str, sid: str, question: str, scenario: str | None
+    uid: str,
+    sid: str,
+    question: str,
+    scenario: str | None,
+    before_id: int | None = None,
 ) -> list:
     """纯对话口径的 messages：system + 压缩后的历史 + 本轮问题。
 
     llm 模式与 hybrid 的兜底共用这一份，不各写一套：兜底自己拼的话最容易
     漏掉压缩块，长会话兜底时会"忘了前面聊过什么"，答得比不兜底还离谱。
     """
-    history = (await asyncio.to_thread(store.get_messages, uid, sid, include_system=False))[:-1]
+    if before_id is None:
+        history = await asyncio.to_thread(
+            store.get_messages, uid, sid, include_system=False
+        )
+    else:
+        history = await _history_before(uid, sid, before_id)
     messages: list = [
         SystemMessage(
             # ★ 能力说明必须在这里也拼上：纯对话（llm 模式）与 hybrid 兜底
@@ -1174,10 +1343,26 @@ async def _chat_stream_impl(
         )
         should_gen_title = (await asyncio.to_thread(store.count_messages, uid, req.sid)) <= 2
 
+    # ★ 空壳先落（2026-11-19）：assistant 行在**流开始前**就 INSERT，正文靠 UPDATE 填。
+    # 这样客户端断连把 event_generator 取消掉时，已生成的部分还在库里。
+    # 必须在 count_messages 之后插入：标题判定口径是"≤2 条"，空壳会把它变成 3。
+    draft = _StreamDraft(
+        uid,
+        req.sid,
+        await asyncio.to_thread(
+            store.add_message,
+            uid,
+            req.sid,
+            "assistant",
+            "",
+            status=store.MSG_STATUS_STREAMING,
+        ),
+    )
+
     # 本轮打开的上游异步生成器登记处：收尾统一关闭（见 _Upstreams 的说明）
     upstreams = _Upstreams()
 
-    async def event_generator() -> None:
+    async def _body() -> None:
         refs_md = ""
         hybrid_run_id: str | None = None  # 仅 hybrid 模式有值，随 done 回传给前端
         # 本轮联网来源：web_search 执行时往里 append（服务端注入，模型改不了），
@@ -1230,9 +1415,7 @@ async def _chat_stream_impl(
         # ---- 0. 图片理解模式：有图片附件时用视觉模型直接回答 ----
         if _has_image(req.attachments):
             yield _sse("status", {"text": "图片理解模式，正在分析图片..."})
-            history = (
-                await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False)
-            )[:-1]
+            history = await _history_before(uid, req.sid, user_msg_id)
             # RAG 模式下顺带检索知识库，拼入文本
             vision_question = req.question
             vision_system = "你是一个能理解图片的 AI 助手。请结合图片内容用中文简洁作答。"
@@ -1282,28 +1465,25 @@ async def _chat_stream_impl(
             try:
                 async for frame in _stream_llm(
                     get_vision_llm(max_tokens=2048), messages, request, acc, upstreams,
-                    path="vision",
+                    path="vision", draft=draft,
                 ):
                     yield frame
             except Exception as e:
                 yield _sse("error", {"detail": describe_api_error(e)})
                 return
-            # 上游出错，或客户端已断开（aborted）：两种情况都**不能**往下走收尾，
-            # 否则会把半截回答当成完整答案 add_message 落库 —— 用户刷新后看到的
-            # 是一条没有任何中断痕迹的残缺回答。
+            # 上游出错，或客户端已断开（aborted）：不能往下走正常收尾（done 帧的
+            # answer 必须是完整回答），但**已生成的部分要留库**——以前这里直接
+            # return，用户刷新后什么都看不到，就是"回答被吞"。
             if acc.aborted or acc.error:
+                draft.text = acc.text
+                await draft.seal(store.MSG_STATUS_INTERRUPTED)
                 return
             acc_text = acc.text
 
             # 收尾：标题并行任务多半已完成，这里 await 基本零等待
-            msg_id = await asyncio.to_thread(
-                store.add_message,
-                uid,
-                req.sid,
-                "assistant",
-                acc_text,
-                refs=refs_md,
-                truncated=acc.truncated,
+            draft.text = acc_text
+            msg_id = await draft.seal(
+                store.MSG_STATUS_DONE, refs=refs_md, truncated=acc.truncated
             )
 
             # B 块：对话级用户画像标签（fire-and-forget，不阻塞 SSE；失败静默）
@@ -1427,9 +1607,9 @@ async def _chat_stream_impl(
                 # 对话历史注入：修复"混合模式每轮失忆"（2026-10-16 线上复现）。
                 # 其它三种模式都读历史，唯独 hybrid 过去只拿当前一句 → 模型看不到上下文。
                 # 历史放 shared（跨模式数据通道），Agent/Workflow 引擎拼 prompt 时前置。
-                hist_raw = (
-                    await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False)
-                )[:-1]
+                # ★ 历史边界用本轮 user 消息 id（2026-11-19 两设备同会话修复）：
+                #   不能用 `[:-1]`——并发时最后一条可能是另一台设备刚发的问题。
+                hist_raw = await _history_before(uid, req.sid, user_msg_id)
                 ctx.shared["history"] = ctxcompress.assemble_history(uid, req.sid, hist_raw)
 
                 rules = await asyncio.to_thread(hstore.list_rules, uid)
@@ -1468,6 +1648,13 @@ async def _chat_stream_impl(
                         if delta:
                             full_text += delta
                             yield _sse("token", {"text": delta})
+                            # 边流边存（2026-11-19 两设备同会话修复）：hybrid 的
+                            # 正文不走 _stream_llm，断连时这几百字就是
+                            # "有没有留下东西"的差别，必须在这里自己 flush。
+                            if draft is not None:
+                                draft.text = full_text
+                                if draft.wants_flush():
+                                    await draft.flush()
                     elif et == "tool_call":
                         p = ev.payload
                         frame = {"name": p.get("name", "?")}
@@ -1527,7 +1714,11 @@ async def _chat_stream_impl(
                     acc = _Acc()
                     try:
                         fb_messages = await _plain_llm_messages(
-                            uid, req.sid, prompt_question, req.scenario
+                            uid,
+                            req.sid,
+                            prompt_question,
+                            req.scenario,
+                            before_id=user_msg_id,
                         )
                         async for frame in _stream_llm(
                             get_llm(max_tokens=2048),
@@ -1536,12 +1727,15 @@ async def _chat_stream_impl(
                             acc,
                             upstreams,
                             path="hybrid_fallback",
+                            draft=draft,
                         ):
                             yield frame
                     except Exception as e:  # noqa: BLE001
                         yield _sse("error", {"detail": describe_api_error(e)})
                         return
                     if acc.aborted or acc.error:
+                        draft.text = acc.text
+                        await draft.seal(store.MSG_STATUS_INTERRUPTED)
                         return
                     acc_text = acc.text
                     # 兜底同样是 LLM 生成，也会撞长度上限；不带上这个标记，
@@ -1584,9 +1778,7 @@ async def _chat_stream_impl(
                 )
 
                 # 组装历史 + 当前问题（P0-2：压缩块前置 + 最近 K 轮原文）
-                history = (
-                    await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False)
-                )[:-1]
+                history = await _history_before(uid, req.sid, user_msg_id)
 
                 # 勾了检索且有库：**结构上先检索一轮**，把片段直接交给模型。
                 # 为什么不把这件事也交给模型自己调 kb_search：
@@ -1740,6 +1932,11 @@ async def _chat_stream_impl(
                                     ):
                                         full_text += part
                                         yield _sse("token", {"text": part})
+                                        # agent 不走 _stream_llm，落库钩子得在这里也接一次
+                                        # （2026-11-19 两设备同会话修复：边流边存）
+                                        draft.text = full_text
+                                        if draft.wants_flush():
+                                            await draft.flush()
                                     if agent_guard is not None and agent_guard.blocked:
                                         metrics.inc(
                                             "prompt_leak_blocked",
@@ -1824,9 +2021,7 @@ async def _chat_stream_impl(
             # 追问（"那它呢"）先结合上下文改写成独立问题再检索；不需要/失败时原样返回。
             # 用改写后的问题当检索词，检索结果缓存的键也随之正确，不会跨上下文串结果。
             # 再把口语词（"高数""线代"）换成规范术语（"高等数学""线性代数"）——只改检索词。
-            history = (
-                await asyncio.to_thread(store.get_messages, uid, req.sid, include_system=False)
-            )[:-1]
+            history = await _history_before(uid, req.sid, user_msg_id)
             query, changes, rewritten = await asyncio.to_thread(
                 _retrieval_query, req.question, history
             )
@@ -1878,16 +2073,22 @@ async def _chat_stream_impl(
             acc = _Acc()
             try:
                 async for frame in _stream_llm(
-                    get_llm(max_tokens=2048), messages, request, acc, upstreams, path="rag"
+                    get_llm(max_tokens=2048),
+                    messages,
+                    request,
+                    acc,
+                    upstreams,
+                    path="rag",
+                    draft=draft,
                 ):
                     yield frame
             except Exception as e:
                 yield _sse("error", {"detail": describe_api_error(e)})
                 return
-            # 上游出错，或客户端已断开（aborted）：两种情况都**不能**往下走收尾，
-            # 否则会把半截回答当成完整答案 add_message 落库 —— 用户刷新后看到的
-            # 是一条没有任何中断痕迹的残缺回答。
+            # 上游出错 / 断连：半截回答留库（status=interrupted），不伪造 done 帧
             if acc.aborted or acc.error:
+                draft.text = acc.text
+                await draft.seal(store.MSG_STATUS_INTERRUPTED)
                 return
             acc_text = acc.text
             truncated = acc.truncated
@@ -1896,44 +2097,49 @@ async def _chat_stream_impl(
         else:
             yield _sse("status", {"text": "纯 LLM 模式..."})
             # 与 hybrid 兜底共用一份拼装口径（system + 压缩块 + 最近 K 轮原文）
-            messages = await _plain_llm_messages(uid, req.sid, prompt_question, req.scenario)
+            messages = await _plain_llm_messages(
+                uid, req.sid, prompt_question, req.scenario, before_id=user_msg_id
+            )
 
             acc = _Acc()
             try:
                 async for frame in _stream_llm(
-                    get_llm(max_tokens=2048), messages, request, acc, upstreams, path="llm"
+                    get_llm(max_tokens=2048),
+                    messages,
+                    request,
+                    acc,
+                    upstreams,
+                    path="llm",
+                    draft=draft,
                 ):
                     yield frame
             except Exception as e:
                 yield _sse("error", {"detail": describe_api_error(e)})
                 return
-            # 上游出错，或客户端已断开（aborted）：两种情况都**不能**往下走收尾，
-            # 否则会把半截回答当成完整答案 add_message 落库 —— 用户刷新后看到的
-            # 是一条没有任何中断痕迹的残缺回答。
+            # 上游出错 / 断连：半截回答留库（status=interrupted），不伪造 done 帧
             if acc.aborted or acc.error:
+                draft.text = acc.text
+                await draft.seal(store.MSG_STATUS_INTERRUPTED)
                 return
             acc_text = acc.text
             truncated = acc.truncated
 
-        # ---- 收尾：存 assistant 消息 + 取回并行生成的标题 ----
-        # 落库前把「指不到来源」的引用编号删掉。模型会跟着历史回答继续写 [1][2]
-        # 和末尾的「依据：[1][2]」，哪怕这一轮根本没检索 —— 前端点了没反应，
-        # 用户只会觉得角标是坏的。来源有多少服务端最清楚，所以由这里兜底。
+        # ---- 收尾：把空壳定稿 + 取回并行生成的标题 ----
+        # 注意这里不再 INSERT：这条 assistant 行的 id 在流开始前就分配好了（draft），
+        # 所以它的位置 = 用户的提问顺序，不会被后落地的另一台设备的回答挤到后面。
+        # 落库前把「指不到来源」的引用编号删掉（main 的幽灵角标兜底，cherry-pick 保留）。
+        # 模型会跟着历史回答继续写 [1][2] 和末尾的「依据：[1][2]」，哪怕这一轮根本
+        # 没检索 —— 前端点了没反应，用户只会觉得角标是坏的。
         # （前端 lib/citations.ts 有一份等价实现，负责显示层与历史消息。）
         acc_text = strip_phantom_citations(
             acc_text,
             has_kb=bool(refs_md),
             web_ids={s["id"] for s in web_sources if isinstance(s, dict) and "id" in s},
         )
-        msg_id = await asyncio.to_thread(
-            store.add_message,
-            uid,
-            req.sid,
-            "assistant",
-            acc_text,
-            refs=refs_md,
-            truncated=truncated,
-            web_sources=web_sources,
+        draft.text = acc_text
+        draft.web_sources = web_sources
+        msg_id = await draft.seal(
+            store.MSG_STATUS_DONE, refs=refs_md, truncated=truncated
         )
         # 先落库再下发：客户端收到来源卡后若立刻关页/断连，刷新会话仍能从消息行
         # 恢复同一批 [Wn]，不会出现“正文有角标、来源永远丢失”。搜索发生在正文
@@ -2004,6 +2210,22 @@ async def _chat_stream_impl(
             },
         )
 
+    async def event_generator() -> None:
+        """包住 _body()，保证任何出口都把半成品行收尾。
+
+        为什么不让 _body 自己 try/finally：它里面五个分支各自 return，
+        漏一处就会留下一条永远 streaming 的空壳；包在外面只有一处需要维护。
+        正常结束时 _body 内部已经 seal 过，这里的 seal_sync 是空操作。
+        """
+        try:
+            async with contextlib.aclosing(_body()) as gen:
+                async for frame in gen:
+                    yield frame
+        finally:
+            # 断连被取消 / 抛异常 / 用户停止：任务可能已处于取消状态，
+            # 任何 await 都会立刻再抛 CancelledError，所以用同步版。
+            draft.seal_sync()
+
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
@@ -2042,6 +2264,7 @@ async def _build_messages(
     grounding: dict | None = None,
     scenario: str | None = None,
     history=None,
+    before_id: int | None = None,
 ) -> list:
     """组装 LLM 输入：历史 + 已检索到的参考资料。
 
@@ -2057,9 +2280,14 @@ async def _build_messages(
         # 调用方传入的已是 assemble_history 的结果（含压缩块前置）
         history_raw = history
     else:
-        raw = (
-            await asyncio.to_thread(store.get_messages, owner, sid, include_system=False)
-        )[:-1]
+        # 调用方没给历史时的兜底读法：同样按本轮 user 消息 id 划线，
+        # 不用 `[:-1]`（理由见 _history_before）
+        if before_id is None:
+            raw = await asyncio.to_thread(
+                store.get_messages, owner, sid, include_system=False
+            )
+        else:
+            raw = await _history_before(owner, sid, before_id)
         history_raw = ctxcompress.assemble_history(owner, sid, raw)
     # 输入侧字符预算：窗口放宽到 30 轮（最多 70 条）后，超长会话会把 prompt 推过
     # 模型上下文（实测最重会话 76k tok > 64K，会让 DeepSeek 直接 500）。

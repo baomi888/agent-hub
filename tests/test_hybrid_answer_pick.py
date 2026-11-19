@@ -198,6 +198,14 @@ def test_plan_only_falls_back_to_llm(monkeypatch):
     monkeypatch.setattr(
         chat_mod.store, "add_message", lambda *a, **kw: saved.append((a, kw)) or 1
     )
+    # 2026-11-19：assistant 改成"先落空壳、流式里 UPDATE 填充"，所以正文
+    # 不在 INSERT 里，而在最后一次 update_message_content 里。
+    updated: list[tuple] = []
+    monkeypatch.setattr(
+        chat_mod.store,
+        "update_message_content",
+        lambda *a, **kw: updated.append((a, kw)) or True,
+    )
     monkeypatch.setattr(chat_mod.store, "rename_conversation", lambda *a, **kw: None)
     monkeypatch.setattr(chat_mod.ctxcompress, "assemble_history", lambda *a, **kw: [])
     monkeypatch.setattr(chat_mod, "get_llm", lambda **kw: _FakeLLM(["直接", "回答"]))
@@ -240,8 +248,12 @@ def test_plan_only_falls_back_to_llm(monkeypatch):
     assert "打开文档" not in body, "规划稿不能出现在回给用户的内容里"
     assert "混合执行失败" not in body, "兜底成功就不该再报失败"
 
-    answers = [a[3] for a, _kw in saved if len(a) >= 4 and a[2] == "assistant"]
-    assert answers and "直接回答" in answers[-1], f"落库的应是兜底答案，实际：{answers}"
+    asst_inserts = [(a, kw) for a, kw in saved if len(a) >= 3 and a[2] == "assistant"]
+    assert len(asst_inserts) == 1, f"回答只该有一条空壳，实际：{asst_inserts}"
+    assert asst_inserts[0][1].get("status") == "streaming", "空壳要先标 streaming"
+    assert updated, "兜底答案要写回那条空壳"
+    text, status = updated[-1][0][3], updated[-1][0][4]
+    assert "直接回答" in text and status == "done", f"落库的应是兜底答案，实际：{text!r}/{status}"
 
 
 # ==================== 4. 两段真连起来 ====================

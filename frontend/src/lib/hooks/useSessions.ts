@@ -9,14 +9,25 @@ import type { Conversation, WebSource } from "@/lib/types";
 import type { UiMessage } from "@/components/chat/types";
 import type { ShowToast } from "./useToast";
 
+/**
+ * 后端 messages.status（2026-11 新增，配合"空壳先行"的流式落库）：
+ *   done        正常结束，普通消息
+ *   interrupted 生成到一半断了（断连 / 用户停止 / 进程重启），正文只有前半截
+ *               → 复用现有的 `stopped` 标记，气泡上挂"已停止生成"
+ *   streaming   另一台设备正在生成这一条。**整条跳过**：自己这一路已经有
+ *               本地占位气泡，而对方那条正文还在变，渲染出来会是一个
+ *               不断跳动的半截回答，看着像"回答坏了"
+ */
 function toUi(
   role: string,
   content: string,
   refs?: string,
   dbId?: number,
-  webSources?: WebSource[]
+  webSources?: WebSource[],
+  status?: string,
 ): UiMessage | null {
   if (role === "system") return null;
+  if (status === "streaming") return null;
   return {
     id: uid(),
     role: role === "user" ? "user" : "assistant",
@@ -24,6 +35,7 @@ function toUi(
     refs,
     dbId,
     webSources: webSources?.length ? webSources : undefined,
+    ...(status === "interrupted" ? { stopped: true } : {}),
   };
 }
 
@@ -34,10 +46,11 @@ function toUiList(
     refs?: string;
     id?: number;
     web_sources?: WebSource[];
-  }[]
+    status?: string;
+  }[],
 ) {
   return messages
-    .map((m) => toUi(m.role, m.content, m.refs, m.id, m.web_sources))
+    .map((m) => toUi(m.role, m.content, m.refs, m.id, m.web_sources, m.status))
     .filter(Boolean) as UiMessage[];
 }
 
