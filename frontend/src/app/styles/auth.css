@@ -92,6 +92,28 @@
   box-shadow: 0 1px 3px rgba(80, 60, 30, 0.12);
 }
 
+/* ---------- 登录方式文字链 ---------- */
+/* 2026-11-21 用户反馈"看不出能点"：文字链必须有可点击标记。实线下划线是
+   "跳转/切换"的通用语义（点线在惯例里是悬浮注释）；1px + 半透明做细做淡，
+   既保住可点语义又不抢暖色圆角的柔和感。 */
+.auth-tlink {
+  font-size: var(--fs-sm);
+  color: var(--accent-ink);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: rgba(135, 91, 16, 0.55);
+  text-underline-offset: 3px;
+  transition: var(--t-color);
+}
+.auth-tlink:hover {
+  text-decoration-color: var(--accent-ink);
+}
+
 /* ---------- 表单 ---------- */
 .auth-form {
   display: flex;

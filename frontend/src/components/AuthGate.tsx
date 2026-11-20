@@ -94,8 +94,6 @@ export default function AuthGate({ allowSignup, checking, backHref, onLogin, onR
           <h1 className="auth-name">知穗 Agent</h1>
         </div>
 
-        <p className="hint">注册需验证邮箱；登录可用密码或邮箱验证码。</p>
-
         {allowSignup && (
           <div className="auth-seg" role="tablist" aria-label="登录或注册">
             {(
@@ -125,7 +123,7 @@ export default function AuthGate({ allowSignup, checking, backHref, onLogin, onR
           <>
             <EmailCodeLoginFields />
             <div style={{ textAlign: "right", marginTop: -8 }}>
-              <button type="button" className="hint" style={{ background: "none", border: 0, cursor: "pointer" }}
+              <button type="button" className="auth-tlink"
                 onClick={() => { setVia("password"); setError(null); }}>
                 使用密码登录
               </button>
@@ -160,12 +158,12 @@ export default function AuthGate({ allowSignup, checking, backHref, onLogin, onR
           <div style={{textAlign:"right",marginTop:-8}}>
             {/* 验证码登录走文字链而不是再加一排切换块：登录方式是低频切换，
                 顶两排大按钮反而让页面像设置页（2026-11-20 用户拍板）。 */}
-            <button type="button" className="hint" style={{ background: "none", border: 0, cursor: "pointer" }}
+            <button type="button" className="auth-tlink"
               onClick={() => { setVia("email"); setError(null); }}>
               验证码登录
             </button>
             <span className="hint"> · </span>
-            <Link href="/reset-password" className="hint">找回密码</Link>
+            <Link href="/reset-password" className="auth-tlink">找回密码</Link>
           </div>
         )}
           {currentMode === "register" && <RegistrationEmailFields onProof={setEmailProof} />}
