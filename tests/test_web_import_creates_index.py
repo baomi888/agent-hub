@@ -23,6 +23,7 @@ import http.server
 import os
 import socketserver
 import sys
+import tempfile
 import threading
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -80,8 +81,7 @@ def main() -> int:
     print("=" * 62)
 
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    tmp = os.path.join(root, "data", "_test_web_import_tmp")
-    os.makedirs(tmp, exist_ok=True)
+    tmp = tempfile.mkdtemp(prefix="zhisui-web-import-fixture-")
     with open(os.path.join(tmp, "long.txt"), "w", encoding="utf-8") as f:
         f.write(DOC)
 

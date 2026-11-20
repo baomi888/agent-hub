@@ -1,0 +1,1638 @@
+{
+  "date": "2026-11-20",
+  "branch": "HZL",
+  "main_ref": "00e7389f0d331cdb12c4c386587aaee9b38b00c7",
+  "hzl_ref": "00e7389f0d331cdb12c4c386587aaee9b38b00c7",
+  "acceptance": "全量验收未通过；本功能相关回归通过",
+  "pytest_summary": {
+    "passed": 2307,
+    "failed": 29,
+    "skipped": 1,
+    "subtests_passed": 23,
+    "warnings": 143,
+    "seconds": 147.51,
+    "exit": 1
+  },
+  "account_regression": {
+    "passed": 221,
+    "failed": 0,
+    "skipped": 0,
+    "warnings": 2,
+    "seconds": 60.78,
+    "exit": 0
+  },
+  "baseline_summary": {
+    "passed": 2184,
+    "failed": 30,
+    "skipped": 1,
+    "subtests_passed": 23,
+    "exit": 1,
+    "commit": "00e7389f0d331cdb12c4c386587aaee9b38b00c7"
+  },
+  "failures": [
+    {
+      "case": "tests.test_asr_stream.TestDegradation::test_capabilities_reports_both",
+      "file": "tests/test_asr_stream.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_query_api::test_shipped_vocab_still_loads",
+      "file": "tests/test_query_api.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_query_enhance::test_golden_regression_does_not_degrate",
+      "file": "tests/test_query_enhance.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_query_enhance::test_adjudication_loads_all_words",
+      "file": "tests/test_query_enhance.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_query_enhance::test_block_words_excludes_conditional",
+      "file": "tests/test_query_enhance.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_query_enhance::test_conditional_word_depends_on_collocation",
+      "file": "tests/test_query_enhance.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_query_enhance::test_clarify_only_fires_when_word_present",
+      "file": "tests/test_query_enhance.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_query_enhance::test_conditional_adjudication_keeps_golden_row_working",
+      "file": "tests/test_query_enhance.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_query_enhance::test_x2_broken_sentences_are_fixed",
+      "file": "tests/test_query_enhance.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_sediment.TestStreamWiring::test_kb_proposal_frame_before_done",
+      "file": "tests/test_sediment.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_task_core.TestCreate::test_remind_creates_linked_reminder",
+      "file": "tests/test_task_core.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_task_core.TestUpdate::test_change_due_does_not_touch_fire_at",
+      "file": "tests/test_task_core.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_task_core.TestUpdate::test_change_remind_moves_fire_at_only",
+      "file": "tests/test_task_core.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_task_core.TestUpdate::test_clear_remind_disables_but_keeps_row",
+      "file": "tests/test_task_core.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_task_core.TestUpdate::test_title_syncs_to_reminder",
+      "file": "tests/test_task_core.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_task_core.TestUpdate::test_setting_remind_later_creates_it",
+      "file": "tests/test_task_core.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_task_core.TestLifecycle::test_complete_stops_the_reminder",
+      "file": "tests/test_task_core.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_task_core.TestLifecycle::test_delete_removes_linked_reminder",
+      "file": "tests/test_task_core.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_task_core.TestIsolation::test_cross_user_is_none_everywhere",
+      "file": "tests/test_task_core.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_task_core.TestBulk::test_complete_marks_all_and_stops_reminders",
+      "file": "tests/test_task_core.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_task_core.TestBulk::test_reopen_does_not_resurrect_past_reminder",
+      "file": "tests/test_task_core.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_task_core.TestBulk::test_delete_removes_linked_reminder",
+      "file": "tests/test_task_core.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_task_core.TestReminderBoundary::test_reminder_list_excludes_task",
+      "file": "tests/test_task_core.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_task_core.TestReminderBoundary::test_reminder_summary_excludes_task",
+      "file": "tests/test_task_core.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_task_core.TestReminderBoundary::test_closing_a_source_does_not_touch_task_reminders",
+      "file": "tests/test_task_core.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_task_core.TestReminderBoundary::test_linked_reminder_does_not_eat_quota",
+      "file": "tests/test_task_core.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_task_core.TestReminderBoundary::test_worker_sends_and_records_sent",
+      "file": "tests/test_task_core.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_task_core.TestReminderBoundary::test_once_advance_disables",
+      "file": "tests/test_task_core.py",
+      "baseline_same_case_failed": true
+    },
+    {
+      "case": "tests.test_task_remind_time.TestBackfill::test_past_and_done_and_already_set_rows_are_skipped",
+      "file": "tests/test_task_remind_time.py",
+      "baseline_same_case_failed": true
+    }
+  ],
+  "skipped": [
+    {
+      "case": "tests.test_query_enhance::test_x2_no_query_ever_gets_rewritten",
+      "reason": "缺 X2 真实问法（docs/组员交付_2026-10-24 未归档）"
+    }
+  ],
+  "files": [
+    {
+      "file": "tests/test_account_journey.py",
+      "sha256": "7d168ad02c124ea98463f335292dd7565fe3f466660d4360abaa3ee95b7acd13",
+      "pytest": {
+        "passed": 6
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_account_profile.py",
+      "sha256": "0df8d439ff604c4c9987df3f77d8eda1eeec586d02f35c307ab9087faae0826b",
+      "pytest": {
+        "passed": 36
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_agent_checkpointer.py",
+      "sha256": "9c517278115b8e78383b593cd9a7ab4c6bc7cabe232fad5e851318c3dbc5f880",
+      "pytest": {
+        "passed": 3
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_agent_grounding.py",
+      "sha256": "d730ea90a7fa98bf7766148e56bfb8593f337263f6b31c044cf953eb901b1df5",
+      "pytest": {
+        "passed": 1
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_agent_guard.py",
+      "sha256": "10ed89c63aaf24365a995a26add5c18083554806acb9f77a6bfadbc1f0cd8728",
+      "pytest": {},
+      "script": {
+        "file": "tests/test_agent_guard.py",
+        "exit": 0,
+        "log": ".venv\\step8-script-agent_guard.log"
+      }
+    },
+    {
+      "file": "tests/test_agent_tool_binding.py",
+      "sha256": "df2c92da1d97aead5b74ad18b56caf40caf8539e4b858b9c277d4ddfb4d33e5f",
+      "pytest": {
+        "passed": 15
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_announcements.py",
+      "sha256": "238b6dabbfd78257d57369261fb5a0cc531f759463e9f8e6aa31ce13ed851c12",
+      "pytest": {
+        "passed": 17
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_asr.py",
+      "sha256": "c04efcdbe476c4a6f32da77d901c7a350c9f9990897b6cbd4cbdc99aa489d58a",
+      "pytest": {
+        "passed": 24
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_asr_stream.py",
+      "sha256": "da1a2b008fe4bdda2daad4f570ae17a3f8038d196ed74239d40a4d8fe7ebdab6",
+      "pytest": {
+        "passed": 29,
+        "failure": 1
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_auth_cookie_secure.py",
+      "sha256": "d0d2638b40807e3fb3a794c886e5c1ba07034f82c78202568a897184617c0d1c",
+      "pytest": {
+        "passed": 8
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_auth_gate.py",
+      "sha256": "afd85a2ea142420cb9340246ab492ce2d0eb33438dce62765fca5326ca2972bc",
+      "pytest": {},
+      "script": {
+        "file": "tests/test_auth_gate.py",
+        "exit": 0,
+        "log": ".venv\\step8-script-auth_gate.log"
+      }
+    },
+    {
+      "file": "tests/test_backfill_auto_calls.py",
+      "sha256": "30df3691bc26feee24e7d8738537df51e140c4b25ccedca866840e0fb6b2dfe7",
+      "pytest": {
+        "passed": 8
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_baseline_agent_tools.py",
+      "sha256": "0f772bab1f2489d84d95174d01664d4d4c23ccaac25f68b1b7644e6743dadbda",
+      "pytest": {
+        "passed": 10
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_baseline_chat_stream.py",
+      "sha256": "0c08e3db6c49fe5ca20328b0c2a390db322120658122244ab4dfa52db9759b58",
+      "pytest": {
+        "passed": 5
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_baseline_environment.py",
+      "sha256": "e68a7666c867f62de44c0e27428592efac1000ee7f51c9ec3a72029792731332",
+      "pytest": {
+        "passed": 4
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_baseline_kb_api.py",
+      "sha256": "89767ef7f6c99c9d95e26ad6d88a25d2c82681e59b5c00c927d523feb36d052d",
+      "pytest": {
+        "passed": 7
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_baseline_rag_core.py",
+      "sha256": "ab998a4c0154980b72c672b5649615ad36068344616cd50e9f10c86b9a1cb186",
+      "pytest": {
+        "passed": 14
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_baseline_refactor_edges.py",
+      "sha256": "67753e21e94868dd3e41207b852a8471ffd81401147a0090afa0d1999ef3d34e",
+      "pytest": {
+        "passed": 20
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_boot_splash.py",
+      "sha256": "4ad4eac3e4e25ee8dbd386f1545338ebb3698cca3caca7e7267e5a3f657d7168",
+      "pytest": {
+        "passed": 9
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_calendar_courses.py",
+      "sha256": "ca641bc501106591f12e5d00c46887c9bf5d245737500ea7de5ad658089a1788",
+      "pytest": {
+        "passed": 41
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_campus_state.py",
+      "sha256": "365c4fb0326af0f1f724639eeb8662b989703519d38da409cffcbc520748cdbf",
+      "pytest": {
+        "passed": 18
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_campus_sync_wiring.py",
+      "sha256": "6a68b8affa14dba94897d43873ed7b86609a5950256b0c3d4de60724a7f65d61",
+      "pytest": {
+        "passed": 28
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_capture_api.py",
+      "sha256": "5fe38b54ed987cabaa77c32a5de5f14f93cef13e2d946924625ba4dccb5584ca",
+      "pytest": {
+        "passed": 11
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_capture_parse.py",
+      "sha256": "0926cda6942f4e517efcac7889b7c60349096a230fbdfaf50ba751ea4fedfbc5",
+      "pytest": {
+        "passed": 54
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_cet.py",
+      "sha256": "4245969ea6b4167bdbff65462aacd44a9d6f7d0c8cce8a1a5cc7a6ee5fd7ad36",
+      "pytest": {
+        "passed": 15
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_chat_layout.py",
+      "sha256": "ae11bd6b0ccef6663b48bc6a6bf3e215f8218c7c6afc91aff434d0b7a7868c1a",
+      "pytest": {
+        "passed": 28
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_chat_scroll.py",
+      "sha256": "1bb69633c12050fb65e32c62f1672156cbc283311e7bbe54ddb5b34c051a4b8e",
+      "pytest": {
+        "passed": 9
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_checkin.py",
+      "sha256": "40e753a80244019e2a7a758188b43e6aeafe881e1962c68cd837551c1ea8be24",
+      "pytest": {
+        "passed": 9
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_chroma_singleton.py",
+      "sha256": "41c37c66e28fd57425aa086deb515bef63d6ab4dc5b7a61722546df05bded781",
+      "pytest": {
+        "passed": 4
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_citations.py",
+      "sha256": "2701a577183aecbe36f1d1590105560141c3f846864b37d5e1313dec83332794",
+      "pytest": {
+        "passed": 11
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_compress_v2.py",
+      "sha256": "824f8f128bf6e1f822be538a8e72ce4dd74f8b182066c483e3e86a2c0cdfb845",
+      "pytest": {
+        "passed": 40
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_compress_wiring.py",
+      "sha256": "941369cc302e711448773eecf39f8d3b908cedf1a44ff1d1da840eef31c42d33",
+      "pytest": {},
+      "script": {
+        "file": "tests/test_compress_wiring.py",
+        "exit": 0,
+        "log": ".venv\\step8-script-compress_wiring.log"
+      }
+    },
+    {
+      "file": "tests/test_console_nav.py",
+      "sha256": "74b66b763cf7fabb7586c6a3be99d2f72edea12a5f1b562eacaec2e36075406e",
+      "pytest": {
+        "passed": 29
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_context_compress.py",
+      "sha256": "60f23bfe404565d741e9b002589cc8cc3f77a5b3a23af1726cb26dda9ae73fd7",
+      "pytest": {},
+      "script": {
+        "file": "tests/test_context_compress.py",
+        "exit": 0,
+        "log": ".venv\\step8-script-context_compress.log"
+      }
+    },
+    {
+      "file": "tests/test_cost_guards.py",
+      "sha256": "a5f1e624dfe829bcc845788a8c4702baf44f54998f40f143cdf2b0a6ae39f616",
+      "pytest": {
+        "passed": 3
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_course_reminder.py",
+      "sha256": "b72719fcafd6f10c95a0c5a19a12e1a23a8945e238b8fbc118b99c17162d066d",
+      "pytest": {
+        "passed": 31
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_daily.py",
+      "sha256": "255f88e373e8f7f5073235620dbcfb8f74f3f08ea4cbd2233650dc2524b9f973",
+      "pytest": {
+        "passed": 5
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_dark_contrast.py",
+      "sha256": "2c52984677439bd0708dc9b0711d17d40f6b9ce261d83ab11fed3d6a3d555776",
+      "pytest": {
+        "passed": 10
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_dashboard.py",
+      "sha256": "22017bdd75779991be3ed741459c8fb28f44cceabc91da31f53d9892fa4c9aa6",
+      "pytest": {
+        "passed": 36
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_dashboard_real_users.py",
+      "sha256": "0d80ec2c1989c024220bc2f61019a84ae8d9732997352daa1c51859bdf3911ad",
+      "pytest": {
+        "passed": 26
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_deadline_cloud.py",
+      "sha256": "cc4b9cc7519fa08553698cb369e6979d28e3365730d7d9acf5317bc1f71dc639",
+      "pytest": {
+        "passed": 15
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_delegate_flow.py",
+      "sha256": "2fc13d1c358511efd38cdbabea695b8b7f730e46f51642eb99acb603483d403e",
+      "pytest": {
+        "passed": 15
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_delegate_layout.py",
+      "sha256": "a441200014f1ec86ea6c5060fde7b0c8fd0aecc492b7835aa6f3e2f829a4aa07",
+      "pytest": {
+        "passed": 5
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_deleted_user.py",
+      "sha256": "9fe23fabf3e0de51b71901ac7144cf260d260bba4948324745c1ef7a0d22b07d",
+      "pytest": {
+        "passed": 4
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_dialogue_import.py",
+      "sha256": "4cc25c3ab06fb3752fb42dcd9d7742b94898313b1ddca6ce89766863ddd5e32f",
+      "pytest": {
+        "passed": 26
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_email_registration.py",
+      "sha256": "b0b471eaddba9995d823afd02ee71162c4a0f429dada79ca8fd72ba432450d83",
+      "pytest": {
+        "passed": 13
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_embed_guard.py",
+      "sha256": "bad39aa00118e9c43b2879e9b42c618dacc372f5934c02165944a961f3da7c79",
+      "pytest": {
+        "passed": 8
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_fab_drag.py",
+      "sha256": "4e794a896ba252b5a14bbd050c906363159c26b5345829144c738c144d967cb3",
+      "pytest": {
+        "passed": 7
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_feedback_rate.py",
+      "sha256": "31670b6f1bb6b390b63344e79136011c5e3cc2ca1dc6246e1292394ac9fe175a",
+      "pytest": {
+        "passed": 5
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_feedback_reply.py",
+      "sha256": "91d6563470791f1be366ef264617fefebcd43ee7dc1715393748cf957e054527",
+      "pytest": {
+        "passed": 9
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_focus_sync.py",
+      "sha256": "ba27f34734eb57b0002981fa01c720dde815fb03c1903a2c41305bbd180c0530",
+      "pytest": {
+        "passed": 12
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_font_subset_coverage.py",
+      "sha256": "5e34f3da902a281fb910e4be75d2e15eb13722ba395eda6e0d3f5ab2d2bd35ac",
+      "pytest": {
+        "passed": 3
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_forum.py",
+      "sha256": "be79df9d830fd4db798d1036d614084f2a110412e1fa66f08bda2cf505af944e",
+      "pytest": {
+        "passed": 24
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_forum_image.py",
+      "sha256": "e65a0e11ff7dfd765a227292957d901231ccf5e2c27a90915362d002a24d719c",
+      "pytest": {
+        "passed": 14
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_forum_mod.py",
+      "sha256": "19d27ea09fa497d483e8a95cf78acb368274a05cd590967dce814891e9320685",
+      "pytest": {
+        "passed": 21
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_forum_report.py",
+      "sha256": "32f1dcb5f7006bde201aee507c8b6e26ed25958405aaf718a4897387691f5b09",
+      "pytest": {
+        "passed": 14
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_forum_ui.py",
+      "sha256": "6965b79bf7824de0e85f2065c8e8f45d16a7b541b3d5cf15a6b87c6938bbe554",
+      "pytest": {
+        "passed": 43
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_forum_upload_api.py",
+      "sha256": "4bd8681265927e178d1aef99ae3b4143bdf632a00ca5aa5e0c0393d1ae461c76",
+      "pytest": {
+        "passed": 13
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_frontend_copy.py",
+      "sha256": "d56c0fd5c1c8907a21b824460334e4d573aca3a0c197ac36be0cea91d5193efd",
+      "pytest": {
+        "passed": 6
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_geo_cache.py",
+      "sha256": "05ee4b5cdcdfc1e3ab29455db2ab6ed6e33a2938732c5a93af57455233764158",
+      "pytest": {
+        "passed": 1
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_geo_locate.py",
+      "sha256": "6048ab619dd4860fd203c4f5cf2c022209b166d80b8d4132fd482fbdca3566b1",
+      "pytest": {},
+      "script": {
+        "file": "tests/test_geo_locate.py",
+        "exit": 0,
+        "log": ".venv\\step8-script-geo_locate.log"
+      }
+    },
+    {
+      "file": "tests/test_grounding.py",
+      "sha256": "422bc26376e61161543b4a4a5da514e0829c53544493a7fc34b24c2fc7066464",
+      "pytest": {},
+      "script": {
+        "file": "tests/test_grounding.py",
+        "exit": 0,
+        "log": ".venv\\step8-script-grounding.log"
+      }
+    },
+    {
+      "file": "tests/test_hybrid_answer_pick.py",
+      "sha256": "9fb26dec9edf09b5a58d4067f7906636b5cb98f9af2c2baa2b05f4a11a8f735f",
+      "pytest": {
+        "passed": 9
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_hybrid_context.py",
+      "sha256": "02bce976cee15d53143705c5074bb0af4b34076059eb8c43799bf75e1bad24cd",
+      "pytest": {
+        "passed": 3
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_hybrid_expr.py",
+      "sha256": "40b7459deaece3a3a11dab510395241766bfbffa0c99da3bb05c86db4cdd50ae",
+      "pytest": {
+        "passed": 3
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_hybrid_history.py",
+      "sha256": "239fdf8d53d3cc227b033060712ff55e2643757b52271f14de01080d34c8edf7",
+      "pytest": {
+        "passed": 8
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_hybrid_human_suspend.py",
+      "sha256": "1464add8748170c2515867a1c2e8e57bc5c9f4ba5158592fc1f25952a480bf18",
+      "pytest": {},
+      "script": {
+        "file": "tests/test_hybrid_human_suspend.py",
+        "exit": 0,
+        "log": ".venv\\step8-script-hybrid_human_suspend.log"
+      }
+    },
+    {
+      "file": "tests/test_hybrid_orchestrator.py",
+      "sha256": "dda38458cad0ca1d5540c7bc681ea21909f5d8927b5d1cde897ce637bd750454",
+      "pytest": {
+        "passed": 6
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_hybrid_switcher.py",
+      "sha256": "0e0b01f78643158716aecfaa0be262ff81cec3c634135dafee0e73956e43a165",
+      "pytest": {
+        "passed": 5
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_hybrid_workflow.py",
+      "sha256": "4c1e7284bd2893713127fa2fcd95929b66f36a55858693f740d42aebac96593f",
+      "pytest": {
+        "passed": 7
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_injection_guardrails.py",
+      "sha256": "c0c4c459310387cac77cb7c9f437363cf34319acc8579dce242c3ec78ae16ce9",
+      "pytest": {
+        "passed": 11
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_ios_pwa.py",
+      "sha256": "bb1f93a8580f46766dd64798de21fbbc8e4a20942cfa65c2949c0917ea86bb9a",
+      "pytest": {
+        "passed": 9
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_isolation_tools.py",
+      "sha256": "012c7951655532ca9a415257ac75cc2e987bf9b203a127c771fb8fe07114f334",
+      "pytest": {
+        "passed": 8
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_jwt_header_check.py",
+      "sha256": "baba25ededdbe2ef790dfdb3275e73bd940352a3623218349cd7633c9354765b",
+      "pytest": {
+        "passed": 9
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_jwt_login_flow.py",
+      "sha256": "57f8031bc7293e3ab91791ee48ffee5e36c7db4a461a2e5b9c3152ec4aaec3b3",
+      "pytest": {
+        "passed": 15
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_kb_board.py",
+      "sha256": "4b0fef86f44f1387e0e6593aae059c3ed901e734caaf14cda2018430adc8f303",
+      "pytest": {
+        "passed": 18
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_kb_favorites.py",
+      "sha256": "c402ac46f6d4c859b27f7ca8c787d5e34e24f7ce1f597a1d4cde67600d1bae99",
+      "pytest": {
+        "passed": 6
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_kb_fork.py",
+      "sha256": "29745c5935e19fa62e266c03024a07fb7b418349d8bd0058ebfa9545d528f74b",
+      "pytest": {
+        "passed": 12
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_kb_isolation.py",
+      "sha256": "9dd89a6cd803966b3e81ed04a261465003604207d5a80ae46851120ed81ce497",
+      "pytest": {},
+      "script": {
+        "file": "tests/test_kb_isolation.py",
+        "exit": 0,
+        "log": ".venv\\step8-script-kb_isolation.log"
+      }
+    },
+    {
+      "file": "tests/test_kb_public.py",
+      "sha256": "a925cfcbc67abccb33b71271d672c850d2d148f2af95d8230bf52863d9e6e7c6",
+      "pytest": {
+        "passed": 27
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_kb_push.py",
+      "sha256": "a0c20676379258ba705893a44454b0e73180c46877c82138b5caed8597f1a6d6",
+      "pytest": {
+        "passed": 5
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_kb_registry_reload.py",
+      "sha256": "1c8847ef6b1440184e13cb08e2f40192cb8847bed555890e2bcfa1e5d8d29b74",
+      "pytest": {
+        "passed": 4
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_kb_views.py",
+      "sha256": "3cee560fe58a89def6749a170b6cdafd4839a91cf1f651cae108e2a376b4543e",
+      "pytest": {
+        "passed": 6
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_layout_explains.py",
+      "sha256": "bde7b5951b44e48180a640cf80ebcd98c490fc54e69939b5f6f387225c43e6da",
+      "pytest": {
+        "passed": 11
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_leak_guard.py",
+      "sha256": "96232454bab3d72e6f3323c91dcac724682bcea9fdfe11ca71cc624e91e9750d",
+      "pytest": {
+        "passed": 27
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_library_favorites_ui.py",
+      "sha256": "6af0e53e245a2e77511474770e74858a55023e11d27ba8ca0b288b83b5840622",
+      "pytest": {
+        "passed": 12
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_llm_gate.py",
+      "sha256": "43b4328582ed23ebfbfec94ee4d78b9226508a889b4a79ffcafd0b02d3a90fa8",
+      "pytest": {
+        "passed": 12
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_location_note.py",
+      "sha256": "565d349cae9ff0fc631613ac2758f0da5995b5ad5f218484690954a3592542a3",
+      "pytest": {
+        "passed": 8
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_mail.py",
+      "sha256": "1597f72cf9725e72d895686b6d03ffd19b773d9f892687f1e9e5055149b295c4",
+      "pytest": {
+        "passed": 40
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_metrics.py",
+      "sha256": "3326d244b06a7d13b050eb3265c0869237135aa100b2be3fab9b04f23db827d0",
+      "pytest": {
+        "passed": 13
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_naming_consistency.py",
+      "sha256": "fb0a18c45f96d69a44d89c0af3f94780cd93170378eabd4f40d70837536f90e5",
+      "pytest": {
+        "passed": 9
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_no_param_shadowing.py",
+      "sha256": "6338fe946aa1d409ccdb277673f10d5459060539c0f22d2f7d0e24b5a86a4269",
+      "pytest": {
+        "passed": 1
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_owner_isolation.py",
+      "sha256": "05f4a008c88e68eee195f4af46d4a38d8d4453ecc35d356bda9f2d4c062a510d",
+      "pytest": {},
+      "script": {
+        "file": "tests/test_owner_isolation.py",
+        "exit": 0,
+        "log": ".venv\\step8-script-owner_isolation.log"
+      }
+    },
+    {
+      "file": "tests/test_p0_grounding_e2e.py",
+      "sha256": "6cd1cab1a42692f595a56e5199f573200dc903f96fcdf2d2cbd6ad4cfb1ffbde",
+      "pytest": {},
+      "script": {
+        "file": "tests/test_p0_grounding_e2e.py",
+        "exit": 0,
+        "log": ".venv\\step8-script-p0_grounding_e2e.log"
+      }
+    },
+    {
+      "file": "tests/test_p2_polish.py",
+      "sha256": "14f0d604d7c03b286001d16f0108b19a51434dc26ea3c66e6537623ad656280f",
+      "pytest": {
+        "passed": 14
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_page_notes.py",
+      "sha256": "a203721c75576a97fb82e4b297ed553cb525c66c69ce170a9ca31971e6a2837e",
+      "pytest": {
+        "passed": 8
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_password_reset.py",
+      "sha256": "6869c86f032279cb73d3efebac9ba51907354b41caf781c8b9dd674bf0b36df2",
+      "pytest": {
+        "passed": 17
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_path.py",
+      "sha256": "447172d05a875fc3b8c5e453e2c2e30f36aa4e2324090210ffefe9b195033449",
+      "pytest": {
+        "passed": 6
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_pipelines_concurrency.py",
+      "sha256": "aace8ab2efd6ae2d232fc4df159eb5451434fc69d134aa6d8103c7f706f6c405",
+      "pytest": {
+        "passed": 6
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_plan_and_bind.py",
+      "sha256": "63c5cafb62d13000369eb73a036ab4ac793d0cef014076eee98647fce7784acf",
+      "pytest": {
+        "passed": 21
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_profile_bias.py",
+      "sha256": "241b9143c80fc73102409142d1e7e7a1899829929cc00455d05333e78b2795f9",
+      "pytest": {
+        "passed": 11
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_prompt_evo.py",
+      "sha256": "6ddabf4aefbd08af148e651f694ce9f9e189675427a2809f5b76250eb8768367",
+      "pytest": {
+        "passed": 32
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_prompt_security_hardening_2026_11_14.py",
+      "sha256": "f03d894f80f11ce630f7b0804829a4f8ac753b1de6ed663e4b39ff982f1e3803",
+      "pytest": {
+        "passed": 22
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_push_devices.py",
+      "sha256": "7ca9d3f83a6bc6cf5d5a5d57d74793620e3749a9a84a5326d5b56b5601548fc9",
+      "pytest": {
+        "passed": 23
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_push_schedule.py",
+      "sha256": "ceeab73716abe3bbc16235dd8bb8d30c9ffd30a4e0afa6105ecfd461cf0be8dd",
+      "pytest": {
+        "passed": 18
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_query_api.py",
+      "sha256": "29629b2028d21813d22780ac50eb41a79a50dcdb51dd2888097bd4177b9ce367",
+      "pytest": {
+        "passed": 13,
+        "failure": 1
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_query_enhance.py",
+      "sha256": "f59659a9234ac7c7d5b8a4e7d34137f080705426cb7d5bd25afbaefc0a716303",
+      "pytest": {
+        "passed": 23,
+        "failure": 7,
+        "skipped": 1
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_query_enhance_in_chat.py",
+      "sha256": "22ba66c9c26ea0ae7f461ab45a088c99d55804e20f462d600d719dea943cdf96",
+      "pytest": {
+        "passed": 11
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_query_rewrite.py",
+      "sha256": "3f4124b466c5131b2506b8586c1afd0c04d65e3ded7fd28fa056b14950ebc3cb",
+      "pytest": {
+        "passed": 9
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_radius_scale.py",
+      "sha256": "6dc471e340ed5b6142353e4ff048952431cb7616fc6d944b4efff5516e6e8461",
+      "pytest": {
+        "passed": 6
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_rate_limit_shared.py",
+      "sha256": "1200c63c1ab051e1897d4b4bf5272a370b5e6f013be0d98eb6b5ad9016ed02df",
+      "pytest": {
+        "passed": 7
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_rem_create.py",
+      "sha256": "dc5746820c7fc45f0930755b61c4801286d7fdbc06a27967889991b5832a97a9",
+      "pytest": {
+        "passed": 5
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_reminder_core.py",
+      "sha256": "109aefa3c8d21309c7e7040ba583cb42af17fecc1fd6154144896923ab6f8600",
+      "pytest": {
+        "passed": 63
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_reminder_tick.py",
+      "sha256": "7fa32370492eb743cef108a9f6f4d8365d6ac3aa44bb739ab3675ad33e5eb228",
+      "pytest": {
+        "passed": 45
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_reminders_api.py",
+      "sha256": "68a09584f63be10325b3d0e5d6eb00040b3009efc419257f1b52d75db05e6cbf",
+      "pytest": {
+        "passed": 37
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_reminders_ui.py",
+      "sha256": "087a743d8b55a348f6c7db2136b3cd5746f08397fd6b5c0c103daba8db271b5a",
+      "pytest": {
+        "passed": 205
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_report_ui.py",
+      "sha256": "0212398d448c4a77d67ef287dffd77c5bc357ad915e72b85e7df6dcff889bde0",
+      "pytest": {
+        "passed": 6
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_resume_strip.py",
+      "sha256": "01e7ea474c739bdbe04f38e0550d1457518170992b83b05ce8409363664b7a2d",
+      "pytest": {
+        "passed": 4
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_retrieve_select.py",
+      "sha256": "08bfd2f5ec9f7a706e36e9e1debe33f2b6e2e786d79c4e4462d551a44808483b",
+      "pytest": {},
+      "script": {
+        "file": "tests/test_retrieve_select.py",
+        "exit": 0,
+        "log": ".venv\\step8-script-retrieve_select.log"
+      }
+    },
+    {
+      "file": "tests/test_router.py",
+      "sha256": "a03bb34ec4304da7212e93e1a02de81f9a281806b011ee0633d52d3f928a6020",
+      "pytest": {
+        "passed": 29
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_scenarios.py",
+      "sha256": "b01ca0116fe3d7a022c19517e529a71410d18feb4ea578c405abf9de8dccd6af",
+      "pytest": {
+        "passed": 6
+      },
+      "script": {
+        "file": "tests/test_scenarios.py",
+        "exit": 0,
+        "log": ".venv\\step8-script-scenarios.log"
+      }
+    },
+    {
+      "file": "tests/test_scheduler.py",
+      "sha256": "f8efe14ffe85d21dbf1e9797fcf0432749207b71638deff1f245ff99fcac6bdf",
+      "pytest": {
+        "passed": 23
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_security_email_settings.py",
+      "sha256": "e1f65b861d51924dfdd976b5b692758b0912481796dff16e2b1735320acc4f19",
+      "pytest": {
+        "passed": 18
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_security_hardening_2026_10_29.py",
+      "sha256": "ad4c76d6485f8b3c0e62a27a0123f10cbb79fc6252c67e4e7100ffa38c59985e",
+      "pytest": {
+        "passed": 18
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_security_mail.py",
+      "sha256": "8bae01e50ad36871da640dba1daefea313f2a4e88d2930e2e4bbb94f40cd9fc9",
+      "pytest": {
+        "passed": 25
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_sediment.py",
+      "sha256": "ae659c261013da20ac120f8f7ecf804bb005a81e94bbb9a28b125a535b0fb5c2",
+      "pytest": {
+        "passed": 35,
+        "failure": 1
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_shell_merge.py",
+      "sha256": "4ee03868b4b4553e6544d984d320fbcc42f2f13e0a1224eab50fda88e8956cc4",
+      "pytest": {
+        "passed": 12
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_slash_no_redirect.py",
+      "sha256": "78f7d8460636cdafd7ff5f712ea5e46f8e440bce2eb6c1b73453f434991c0404",
+      "pytest": {},
+      "script": {
+        "file": "tests/test_slash_no_redirect.py",
+        "exit": 0,
+        "log": ".venv\\step8-script-slash_no_redirect.log"
+      }
+    },
+    {
+      "file": "tests/test_sse_disconnect.py",
+      "sha256": "b0ee79bfc1b50951bcfc54fa15dcc17c39c65d96ce5f7a44ad4cfb7e73829919",
+      "pytest": {
+        "passed": 9
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_startup_migration.py",
+      "sha256": "e7d8c6276abd2c4cf64af366b3708f4a3e031514fd0551dc5b8f12bf4bc7306c",
+      "pytest": {
+        "passed": 2
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_tag_hooks.py",
+      "sha256": "b31342ce008d9e4c6505c51e8f82cf1d912377831f9a7a03d5e3dc9cf59a03f8",
+      "pytest": {
+        "passed": 22
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_tag_taxonomy.py",
+      "sha256": "792ae7a6d1dc5fe5a7a964e654df5f2beb4c6da1fe79ddfa6cf327d4377768b9",
+      "pytest": {
+        "passed": 22
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_task_core.py",
+      "sha256": "641897bbedc4351009edaa7d0796c65ce3f56590915c52543c2c3138daa0db34",
+      "pytest": {
+        "passed": 45,
+        "failure": 18
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_task_remind_time.py",
+      "sha256": "274971565f9499f415403795181e4c3a5b0b1dd80ff6f6b0a3b6b53d7896767e",
+      "pytest": {
+        "passed": 14,
+        "failure": 1
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_tasks_api.py",
+      "sha256": "03e9c258abba77d62b12f74d71b2aae6ccffff62c27abea7973e5c765621cc35",
+      "pytest": {
+        "passed": 41
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_tier2_singleflight.py",
+      "sha256": "480a9bd2e42a076019321107acc16113ae9d84e54a282a4be9c07cf3db500da9",
+      "pytest": {
+        "passed": 4
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_tier3_content.py",
+      "sha256": "c566c5dab6baee25d10986ce277be5af725b0a1ef1d7c8993c2e96330d695651",
+      "pytest": {
+        "passed": 6
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_timeutil_consistency.py",
+      "sha256": "79cf002ac666fb77127e2781d298672d48d269b9422e50fc9b1768429d92a88a",
+      "pytest": {
+        "passed": 12
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_tool_approval.py",
+      "sha256": "ed8e1f4fe44de93715455af66a9a4bc9f38210b8a92c859e122b38f43ff3ab55",
+      "pytest": {
+        "passed": 17
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_tool_guard.py",
+      "sha256": "2ddc9023266c05036bf4d3a621b35f8cd0e943fcac810bc3d6e7782462213580",
+      "pytest": {},
+      "script": {
+        "file": "tests/test_tool_guard.py",
+        "exit": 0,
+        "log": ".venv\\step8-script-tool_guard.log"
+      }
+    },
+    {
+      "file": "tests/test_tool_playbook.py",
+      "sha256": "7d0d11f94b9eb17d0ad947e49053927d7c01dc09b0e3b3d007d4305322c5633d",
+      "pytest": {
+        "passed": 11
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_tool_registry.py",
+      "sha256": "5394b0a6d63826d2dd039dee9d42a5848b213c8d552c7d4ea7ea275dcd795da1",
+      "pytest": {},
+      "script": {
+        "file": "tests/test_tool_registry.py",
+        "exit": 1,
+        "log": ".venv\\step8-script-tool_registry.log"
+      }
+    },
+    {
+      "file": "tests/test_truncation_detect.py",
+      "sha256": "a4669657d41c14c3cc0f0d24b2ad6e1896685d08e0b1bf326b21c8f35e9a2cd1",
+      "pytest": {
+        "passed": 17
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_upload_stream.py",
+      "sha256": "94fac2b7478af53670e1d3541ed065e2d24e17f886076c31cf21d0eec80add3c",
+      "pytest": {
+        "passed": 4
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_usage_stats.py",
+      "sha256": "3ce04f0b57747933dfbe1ba42e7bcc6873f8bfd50090e68fa0b3253903b248a0",
+      "pytest": {
+        "passed": 5
+      },
+      "script": {
+        "file": "tests/test_usage_stats.py",
+        "exit": 0,
+        "log": ".venv\\step8-script-usage_stats.log"
+      }
+    },
+    {
+      "file": "tests/test_user_prefs.py",
+      "sha256": "ccf645d87c28588b2544d1f73f9ddfb3d42ea1dc0ed2d43857876b18bf06b1d7",
+      "pytest": {
+        "passed": 23
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_verification.py",
+      "sha256": "5e322d81fb816af90d62c7a98cb705573fd1615a6fbb658df4d55078a2e02903",
+      "pytest": {
+        "passed": 31
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_verify_tag.py",
+      "sha256": "c4be6fd54ec0f3c7d3509b20de80a34a4d5219edb4651fc4774a1562aa01667d",
+      "pytest": {
+        "passed": 26
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_w1.py",
+      "sha256": "110abf232feb9f5a3c0fa12c2fce36cfc54b51f4dfdabc819bea7763bafb104d",
+      "pytest": {},
+      "script": {
+        "file": "tests/test_w1.py",
+        "exit": 1,
+        "log": ".venv\\step8-script-w1.log"
+      }
+    },
+    {
+      "file": "tests/test_w2.py",
+      "sha256": "b76bcbe2595dfbc6c30cd4927d4d91ef79357cf8e8f06c300cf9ec588f9da7f4",
+      "pytest": {},
+      "script": {
+        "file": "tests/test_w2.py",
+        "exit": 1,
+        "log": ".venv\\step8-script-w2.log"
+      }
+    },
+    {
+      "file": "tests/test_w3.py",
+      "sha256": "684f629f381d7a00a6eb041f4f183bba1c950164d6869a08420b8ea5a9e0a8f2",
+      "pytest": {},
+      "script": {
+        "file": "tests/test_w3.py",
+        "exit": 1,
+        "log": ".venv\\step8-script-w3.log"
+      }
+    },
+    {
+      "file": "tests/test_web_import_creates_index.py",
+      "sha256": "d560b2c6d64bc94ada10eb406caedd8049158209507d0fa14a709a4be2c6620b",
+      "pytest": {},
+      "script": {
+        "file": "tests/test_web_import_creates_index.py",
+        "exit": 0,
+        "log": ".venv\\step8-script-web_import_creates_index.log"
+      }
+    },
+    {
+      "file": "tests/test_web_prefetch.py",
+      "sha256": "f80cb8443590ceaa9874d5e34c58dc2294b1314a13429e473d745b1107b9aba4",
+      "pytest": {
+        "passed": 11
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_web_search_config.py",
+      "sha256": "bd9288f68e6f3ebafc0026f1788162aee02ed0b980f65ce61d1ab193c5ab15d7",
+      "pytest": {
+        "passed": 4
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_web_search_tool.py",
+      "sha256": "4756dc22790ca646c12a1253089a50b20e5156f3f74f78a4eaf41fb7e3cb4500",
+      "pytest": {
+        "passed": 4
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_web_sources.py",
+      "sha256": "a019a9033d6dcc3e6c98a3332fab75deff426210bb927dcb7d425d916a34cb9d",
+      "pytest": {
+        "passed": 4
+      },
+      "script": null
+    },
+    {
+      "file": "tests/test_wordbank.py",
+      "sha256": "f27c3810cb61fa3cf603dba52113163c2ef6aa245e45c7d0139d889569b547d3",
+      "pytest": {
+        "passed": 9
+      },
+      "script": null
+    }
+  ],
+  "browser_checks": [
+    {
+      "name": "test_account_journey_ui",
+      "exit": 0
+    },
+    {
+      "name": "test_security_email_ui",
+      "exit": 0
+    },
+    {
+      "name": "test_email_registration_ui",
+      "exit": 0
+    },
+    {
+      "name": "test_password_reset_ui",
+      "exit": 0
+    },
+    {
+      "name": "frontend_baseline",
+      "exit": 0
+    }
+  ],
+  "logs": [
+    {
+      "file": ".venv/step8-pytest-initial.log",
+      "sha256": "dafe02983a7546be684a154daef665ef2fa04673096da8eb8edd1af80b407d3b"
+    },
+    {
+      "file": ".venv/step8-targeted.log",
+      "sha256": "5ea89925c239f2d2f53196bc1557f57aff8d284125230849a34240f146860a3f"
+    },
+    {
+      "file": ".venv/step8-pytest-final.log",
+      "sha256": "d946a8c75d18e53871efaf744b97ef7b461333b2423d4d5510d50bc7c366d8b2"
+    },
+    {
+      "file": ".venv/step8-account-regression.log",
+      "sha256": "8d24a8139e01f9c14ac6f717e550b4daeebaefe83bb37a075a1c7a83fcf6ee32"
+    },
+    {
+      "file": ".venv/step8-baseline.log",
+      "sha256": "a8a9aa1810397bd22e974fccd6c17063f1cd4163a26a8716655aeaea4c85ccae"
+    },
+    {
+      "file": ".venv/step8-build.log",
+      "sha256": "1a656e9dd18c97a04d09e0d96689d1522037fe6f18cc84ceb6e3e4b490105eb2"
+    },
+    {
+      "file": ".venv/step8-eslint.json",
+      "sha256": "fa5c0fe4a436659323569b9c8af510751128d30532555f08701ca29d9b02dac9"
+    },
+    {
+      "file": ".venv/step8-ruff.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "file": ".venv/step8-script-auth_gate.log",
+      "sha256": "2b92f3f3e5f12b42dd8af24e437644b19997b53a6dc1fdcf124c29a910ab2f2f"
+    },
+    {
+      "file": ".venv/step8-script-geo_locate.log",
+      "sha256": "c9a4374a07bb2358c355c259206e9068412fb4482208f74e753212e824ff11a1"
+    },
+    {
+      "file": ".venv/step8-script-kb_isolation.log",
+      "sha256": "c8355c4e0d947d7d8e36684764d3057a38ad6e92b8ac8189bb4a48ff8ed7baf6"
+    },
+    {
+      "file": ".venv/step8-script-owner_isolation.log",
+      "sha256": "57d925c1209a9d8a34b53b1eeba65ed1ca252c673e55a4483f9be713a4d72135"
+    },
+    {
+      "file": ".venv/step8-script-retrieve_select.log",
+      "sha256": "c31d20c54f7157dd4261b01a04aa46e100365a304b526c2db9ca8e794c8abeda"
+    },
+    {
+      "file": ".venv/step8-script-slash_no_redirect.log",
+      "sha256": "62a433a7ee0cb4fc51f7c9571b76dc2641e30140b36c2583ba74365b715e5809"
+    },
+    {
+      "file": ".venv/step8-script-w1.log",
+      "sha256": "691abe072b0b66fe6aa08a0414eccbf447a4dd856e7023c0bcd0b3a147c715ca"
+    },
+    {
+      "file": ".venv/step8-script-w2.log",
+      "sha256": "112fa2843920b1760f53ed750ed59e2b89dab22453ec3e5638ad1d48adc0f620"
+    },
+    {
+      "file": ".venv/step8-script-w3.log",
+      "sha256": "423a7cb40ad41b9ac506cea62bb4cbf87ff3da7383667d9318091647975fa0b2"
+    },
+    {
+      "file": ".venv/step8-script-tool_registry.log",
+      "sha256": "5a1725fe3ae9cd864d2a30d8157e080ec116f72209b6c23cc4a7f85da893bc79"
+    },
+    {
+      "file": ".venv/step8-script-tool_guard.log",
+      "sha256": "2a638b975ada9b836922e548853a961d594393b48ab241e2b697845994759bc4"
+    },
+    {
+      "file": ".venv/step8-script-context_compress.log",
+      "sha256": "d8ecb7146f0d2406f1c653d6c143d1397bec794a1663a0fff230a43cff8c5aec"
+    },
+    {
+      "file": ".venv/step8-script-compress_wiring.log",
+      "sha256": "86a258d87cc6125edc63bf3be7181876e515807e3cc2513e35365e89ea2e79ab"
+    },
+    {
+      "file": ".venv/step8-script-agent_guard.log",
+      "sha256": "08735c525dbd30c9713e82eb8afe5af84c533602bb366295eb52d7f3035a0a5e"
+    },
+    {
+      "file": ".venv/step8-script-grounding.log",
+      "sha256": "1b64f64c578ce672b7df90b40324e6e8def1f2e829f2902015212e43c4573ebd"
+    },
+    {
+      "file": ".venv/step8-script-scenarios.log",
+      "sha256": "1bac03780c12778602faea1d223ee5a8ca7570fec7729a3681f148684ba5d9bd"
+    },
+    {
+      "file": ".venv/step8-script-usage_stats.log",
+      "sha256": "e619744e99ae47f6140c90ab46aa40c485d7cc5157831b5319f9bb83992e32fb"
+    },
+    {
+      "file": ".venv/step8-script-hybrid_human_suspend.log",
+      "sha256": "3ed4c6a1176cf42a698427e9a1a7a4b76143076b3c8a83de262d61ffbb1dbc80"
+    },
+    {
+      "file": ".venv/step8-script-p0_grounding_e2e.log",
+      "sha256": "129991a7714c37cb8292f021365f42f277a4d52f8a8b7f9fb60713543be0fbb4"
+    },
+    {
+      "file": ".venv/step8-script-web_import_creates_index.log",
+      "sha256": "585ec48662fd5335138713e5a2ba1483a6cfde20ee6a55c94033570282825fe2"
+    }
+  ],
+  "frontend_lint": {
+    "errors": 36,
+    "warnings": 32,
+    "added_issues": 0,
+    "removed_issues": 0,
+    "exit": 1
+  },
+  "note": "JUnit 总 tests=2360 包含 23 个 subtest，不与 pytest 主用例数量相加重复统计。脚本 20 个中 2 个也有 pytest 用例。"
+}

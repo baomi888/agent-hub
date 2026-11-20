@@ -1,0 +1,21 @@
+{
+  "source_commit": "00e7389f0d331cdb12c4c386587aaee9b38b00c7",
+  "note": "从 Git 对象直接导出；未读取工作区 data。X2 原始资料不在 Git 历史中，未伪造。",
+  "files": [
+    {
+      "file": "golden_v1.csv",
+      "source": "data/golden/golden_v1.csv",
+      "sha256": "39fa7b456b9df2a27c235999171b16f6077e8c26a701d270016bf1860540aafd"
+    },
+    {
+      "file": "temp_from_golden.csv",
+      "source": "data/vocab/temp_from_golden.csv",
+      "sha256": "8a0d35d4784f2b938a6bbbd9dbecee3ce54c6ad00d94b9946f858059e32a1957"
+    },
+    {
+      "file": "adjudication.csv",
+      "source": "data/vocab/adjudication.csv",
+      "sha256": "7551f62753f0037b52f7c75baa17c24b0e669ca547c46dde083ee43cd7b6a825"
+    }
+  ]
+}

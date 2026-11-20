@@ -36,6 +36,8 @@ def _ts(day: int, hour: int = 0, minute: int = 0, month: int = 11) -> int:
 
 @pytest.fixture()
 def db(tmp_path, monkeypatch):
+    # 本文件的过去/未来样本以 11 月 17 日为参照，不依赖执行当天。
+    monkeypatch.setattr(timeutil, "now_ts", lambda: _ts(17, 12, 0))
     path = tmp_path / "sessions.db"
     monkeypatch.setattr(session, "_db_path", lambda: path)
     reminder_core.reset_cache()

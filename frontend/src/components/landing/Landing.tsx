@@ -220,7 +220,7 @@ export default function Landing() {
               先看看怎么装
             </a>
           </div>
-          <p className="lp-hero-note">一个登录名、一个密码就能开始，不用邮箱验证。</p>
+          <p className="lp-hero-note">注册时需要验证邮箱；登录仍使用登录名和密码。</p>
         </div>
 
         {/* 吉祥物站在文字和目录之间那块空白里 —— 用户说"这片白有点空"，

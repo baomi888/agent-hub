@@ -29,6 +29,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.testclient import TestClient  # noqa: E402
+from registration_support import register_verified
 
 import core.account  # noqa: E402
 import core.config  # noqa: E402
@@ -84,7 +85,7 @@ def _prep(monkeypatch, tag: str):
 def _client(username: str) -> TestClient:
     """登录态 client。不用 with：跳过 lifespan，省掉 Chroma 预热。"""
     c = TestClient(main.app)
-    c.post("/api/auth/register/", json={"username": username, "password": "pw123456"})
+    register_verified(c, username, "pw123456")
     r = c.post("/api/auth/login/", json={"username": username, "password": "pw123456"})
     assert r.status_code == 200, (r.status_code, r.text)
     return c
@@ -266,14 +267,17 @@ def test_no_trailing_slash_redirect(monkeypatch):
 def test_shipped_vocab_still_loads():
     """仓库里随包发布的词表必须能被解析器读（临时词表测不出格式漂移）。
 
-    路径从**仓库根**直接算，不走 `enhance.resolve_vocab_path()`：
+    词表从 Git 原始对象归档到独立测试目录，不读用户 data，不走 `enhance.resolve_vocab_path()`：
     那个函数依赖 config.DATA_DIR，而别的测试模块会把 DATA_DIR 改到临时目录，
     全量跑时这条就变成"读一个不存在的文件"（第一次跑全量就是这么红的）。
     不断言词条数：词表是组员每天在改的，写死数字只会让人学会无视红灯。
     """
     from core.query_enhance import load_vocab
 
-    cands = [os.path.join(ROOT, "data", "vocab", n) for n in ("vocab_v1.csv", "temp_from_golden.csv")]
+    cands = [
+        os.path.join(ROOT, "tests", "fixtures", "query_enhance", n)
+        for n in ("vocab_v1.csv", "temp_from_golden.csv")
+    ]
     path = next((p for p in cands if os.path.exists(p)), None)
     assert path, "data/vocab 下既没有 vocab_v1.csv 也没有 temp_from_golden.csv，B4 会静默不生效"
     vocab, warns = load_vocab(path)

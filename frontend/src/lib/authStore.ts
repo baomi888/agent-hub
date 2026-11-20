@@ -1,4 +1,5 @@
 "use client";
+import type { RegistrationEmail } from "./types";
 
 // 登录态的**单例**。所有 useAuth() 读的是同一份结论。
 //
@@ -132,8 +133,8 @@ export async function login(username: string, password: string): Promise<void> {
   await refreshAuth();
 }
 
-export async function register(username: string, password: string): Promise<void> {
-  await api.register(username, password);
+export async function register(username: string, password: string, emailProof: RegistrationEmail): Promise<void> {
+  await api.register(username, password, emailProof);
   await refreshAuth();
 }
 

@@ -35,6 +35,8 @@ def wired(monkeypatch):
     """把三个密钥项当已配置。`wired` 比 `ready` 准确：这里要的是"三项都齐"。"""
     monkeypatch.setattr(config, "ASR_SECRET_ID", "AKIDtestsecretid")
     monkeypatch.setattr(config, "ASR_SECRET_KEY", "testsecretkey")
+    # ASR_ENABLED 在配置导入时计算，夹具需同时提供完整的已配置状态。
+    monkeypatch.setattr(config, "ASR_ENABLED", True)
     monkeypatch.setattr(config, "ASR_APPID", "1250000000")
     monkeypatch.setattr(config, "ASR_STREAM_ENABLED", True)
     monkeypatch.setattr(config, "ASR_HOTWORDS", "")

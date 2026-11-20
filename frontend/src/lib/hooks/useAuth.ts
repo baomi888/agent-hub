@@ -21,7 +21,7 @@ import {
   register as storeRegister,
   subscribeAuth,
 } from "@/lib/authStore";
-import type { MeOut } from "@/lib/types";
+import type { MeOut, RegistrationEmail } from "@/lib/types";
 
 export interface AuthState {
   /** null = 未登录；undefined 的语义不存在，未登录就是 null */
@@ -31,7 +31,7 @@ export interface AuthState {
   allowSignup: boolean;
   refresh: () => Promise<void>;
   login: (username: string, password: string) => Promise<void>;
-  register: (username: string, password: string) => Promise<void>;
+  register: (username: string, password: string, emailProof: RegistrationEmail) => Promise<void>;
   logout: () => Promise<void>;
 }
 

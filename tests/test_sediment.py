@@ -579,6 +579,17 @@ class _FakeLLM:
             yield _Chunk(t)
 
 
+class _FakeAgent:
+    """无库的 rag 请求实际降级到 Agent；只替代外部模型，保留真实 SSE 收尾。"""
+
+    def __init__(self):
+        self.calls = []
+
+    async def astream(self, inputs, config=None, stream_mode=None):
+        self.calls.append((inputs, config, stream_mode))
+        yield ("messages", (_Chunk("好的"), {}))
+
+
 class _RetrievePipe:
     """检索返回空：这个用例关心的是"发不发建议帧"，不是检索质量。"""
 
@@ -601,9 +612,12 @@ class TestStreamWiring:
         import json
 
         import api.chat as chat
+        from agent import builder
         from core.auth import get_current_user
         from main import app
 
+        fake_agent = _FakeAgent()
+        monkeypatch.setattr(builder, "build_agent", lambda *a, **k: fake_agent)
         sid = store.create_conversation(UID, "建库建议接线")["id"]
         store.add_message(
             UID,
@@ -644,8 +658,13 @@ class TestStreamWiring:
         finally:
             app.dependency_overrides.clear()
 
+        errors = [data for name, data in frames if name == "error"]
+        assert not errors, f"SSE 出错，未完成建议流程：{errors}"
         names = [n for n, _ in frames]
         assert "kb_proposal" in names, f"没发建议帧：{names}"
+        assert len(fake_agent.calls) == 1, "没有绑定库时应实际执行 Agent 降级分支"
+        assert fake_agent.calls[0][1]["configurable"]["kb_id"] is None
+        assert "token" in names and "done" in names
         # 顺序：必须在 done 之前（前端要在回答结束的同时把卡片挂上去）
         assert names.index("kb_proposal") < names.index("done")
         data = json.loads([d for n, d in frames if n == "kb_proposal"][0])
@@ -691,4 +710,8 @@ class TestStreamWiring:
         finally:
             app.dependency_overrides.clear()
 
-        assert "kb_proposal" not in [n for n, _ in frames]
+        assert r.status_code == 200, (r.status_code, r.text)
+        names = [name for name, _ in frames]
+        assert "error" not in names, frames
+        assert "done" in names, frames
+        assert "kb_proposal" not in names

@@ -20,6 +20,7 @@ import CornIcon from "@/components/CornIcon";
 import AvatarPicker from "@/components/settings/AvatarPicker";
 import InstallAppRow from "@/components/settings/InstallAppRow";
 import PasswordDialog from "@/components/settings/PasswordDialog";
+import SecurityEmailSettings from "@/components/settings/SecurityEmailSettings";
 import ReminderQuick from "@/components/settings/ReminderQuick";
 import UsernameDialog from "@/components/settings/UsernameDialog";
 import UserAvatar from "@/components/settings/UserAvatar";
@@ -246,6 +247,8 @@ export default function SettingsPage() {
               再看一次上手说明
             </button>
           </section>
+
+          <SecurityEmailSettings key={authedId ?? "none"} />
 
           {/* 兴趣方向：30 条定稿词表（core/tag_taxonomy.py）。
               放在账号下面、外观上面 —— 它是"我是谁"的一部分，不是外观偏好。

@@ -27,6 +27,7 @@ core.config._AUTH_SECRET_FILE = os.path.join(_TMP, ".auth_secret")
 core.config.ALLOW_SIGNUP = True
 
 from fastapi.testclient import TestClient  # noqa: E402
+from registration_support import register_verified
 
 import main  # noqa: E402
 from core import account  # noqa: E402
@@ -58,23 +59,23 @@ check("/health -> 200", client.get("/health").status_code == 200)
 check("/api/config/defaults -> 200", client.get("/api/config/defaults").status_code == 200)
 
 print("\n[3] 注册 + 登录")
-r = client.post("/api/auth/register/", json={"username": "alice", "password": "secret123"})
+r = register_verified(client, "alice", "secret123")
 check("注册成功 200", r.status_code == 200, r.text[:120])
 sc = r.headers.get("set-cookie", "")
 check("下发了 Cookie", "baomi_session=" in sc, sc[:80])
 check("Cookie 带 HttpOnly", "httponly" in sc.lower(), sc[:120])
 check("Cookie 带 SameSite", "samesite" in sc.lower(), sc[:120])
 
-r2 = client.post("/api/auth/register/", json={"username": "alice", "password": "secret123"})
+r2 = register_verified(client, "alice", "secret123")
 check("重名注册 -> 409", r2.status_code == 409, f"实际 {r2.status_code}")
 
-r3 = client.post("/api/auth/register/", json={"username": "ALICE", "password": "secret123"})
+r3 = register_verified(client, "ALICE", "secret123")
 check("大小写重名 -> 409（COLLATE NOCASE）", r3.status_code == 409, f"实际 {r3.status_code}")
 
-r4 = client.post("/api/auth/register/", json={"username": "ab", "password": "secret123"})
+r4 = register_verified(client, "ab", "secret123")
 check("用户名过短 -> 400", r4.status_code == 400, f"实际 {r4.status_code}")
 
-r5 = client.post("/api/auth/register/", json={"username": "bob", "password": "123"})
+r5 = register_verified(client, "bob", "123")
 check("密码过短 -> 400", r5.status_code == 400, f"实际 {r5.status_code}")
 
 r6 = client.post("/api/auth/login/", json={"username": "alice", "password": "wrongpass"})

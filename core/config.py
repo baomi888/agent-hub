@@ -677,6 +677,9 @@ SMTP_TIMEOUT = int(os.getenv("SMTP_TIMEOUT", "12"))
 
 MAIL_ENABLED = os.getenv("MAIL_ENABLED", "1").strip().lower() not in ("0", "false", "no")
 
+# 安全验证码邮件独立开关；默认关闭，不改变原有提醒邮件行为。
+SECURITY_EMAIL_ENABLED = os.getenv("SECURITY_EMAIL_ENABLED", "0").strip().lower() in ("1", "true", "yes")
+
 # 邮件正文里要带一个能点开的链接，所以需要一个不带尾斜杠的站点地址。
 # 不从请求头推：worker 里没有请求上下文，而且 Host 头是客户端给的，不能信。
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "https://myzhisui.cn").strip().rstrip("/")

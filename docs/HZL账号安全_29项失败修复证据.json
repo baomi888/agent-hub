@@ -1,0 +1,442 @@
+{
+  "date": "2026-11-20",
+  "branch": "HZL",
+  "main_ref": "00e7389f0d331cdb12c4c386587aaee9b38b00c7",
+  "hzl_ref": "00e7389f0d331cdb12c4c386587aaee9b38b00c7",
+  "scope": "修复原29项失败，保留测试和验收标准，禁止用户数据及真实服务操作",
+  "original_29": [
+    {
+      "case": "tests.test_task_core.TestCreate::test_remind_creates_linked_reminder",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_task_core.TestUpdate::test_change_due_does_not_touch_fire_at",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_task_core.TestUpdate::test_change_remind_moves_fire_at_only",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_task_core.TestUpdate::test_clear_remind_disables_but_keeps_row",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_task_core.TestUpdate::test_title_syncs_to_reminder",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_task_core.TestUpdate::test_setting_remind_later_creates_it",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_task_core.TestLifecycle::test_complete_stops_the_reminder",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_task_core.TestLifecycle::test_delete_removes_linked_reminder",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_task_core.TestIsolation::test_cross_user_is_none_everywhere",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_task_core.TestBulk::test_complete_marks_all_and_stops_reminders",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_task_core.TestBulk::test_reopen_does_not_resurrect_past_reminder",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_task_core.TestBulk::test_delete_removes_linked_reminder",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_task_core.TestReminderBoundary::test_reminder_list_excludes_task",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_task_core.TestReminderBoundary::test_reminder_summary_excludes_task",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_task_core.TestReminderBoundary::test_closing_a_source_does_not_touch_task_reminders",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_task_core.TestReminderBoundary::test_linked_reminder_does_not_eat_quota",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_task_core.TestReminderBoundary::test_worker_sends_and_records_sent",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_task_core.TestReminderBoundary::test_once_advance_disables",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_task_remind_time.TestBackfill::test_past_and_done_and_already_set_rows_are_skipped",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_asr_stream.TestDegradation::test_capabilities_reports_both",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_sediment.TestStreamWiring::test_kb_proposal_frame_before_done",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_query_enhance::test_golden_regression_does_not_degrate",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_query_enhance::test_adjudication_loads_all_words",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_query_enhance::test_block_words_excludes_conditional",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_query_enhance::test_conditional_word_depends_on_collocation",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_query_enhance::test_clarify_only_fires_when_word_present",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_query_enhance::test_conditional_adjudication_keeps_golden_row_working",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_query_enhance::test_x2_broken_sentences_are_fixed",
+      "focused": "passed",
+      "full_suite": "passed"
+    },
+    {
+      "case": "tests.test_query_api::test_shipped_vocab_still_loads",
+      "focused": "passed",
+      "full_suite": "passed"
+    }
+  ],
+  "focused_29": {
+    "passed": 29,
+    "failed": 0,
+    "skipped": 0,
+    "exit": 0,
+    "seconds": 5.71
+  },
+  "affected_modules": {
+    "passed": 188,
+    "failed": 1,
+    "skipped": 0,
+    "exit": 1,
+    "seconds": 12.95
+  },
+  "full_suite": {
+    "passed": 2336,
+    "failed": 1,
+    "skipped": 0,
+    "subtests_passed": 23,
+    "warnings": 143,
+    "seconds": 150.17,
+    "exit": 1
+  },
+  "remaining_failures": [
+    {
+      "case": "tests.test_query_enhance::test_x2_no_query_ever_gets_rewritten",
+      "reason": "原始142条真实问法资料缺失，用户明确表示找不到且禁止动用用户数据。原skip已移除，不造样本、不降低至少100条的要求。"
+    }
+  ],
+  "script_results": [
+    {
+      "file": "tests/test_auth_gate.py",
+      "exit": 0,
+      "log": ".venv\\repair29-script-test_auth_gate.log"
+    },
+    {
+      "file": "tests/test_geo_locate.py",
+      "exit": 0,
+      "log": ".venv\\repair29-script-test_geo_locate.log"
+    },
+    {
+      "file": "tests/test_kb_isolation.py",
+      "exit": 0,
+      "log": ".venv\\repair29-script-test_kb_isolation.log"
+    },
+    {
+      "file": "tests/test_owner_isolation.py",
+      "exit": 0,
+      "log": ".venv\\repair29-script-test_owner_isolation.log"
+    },
+    {
+      "file": "tests/test_retrieve_select.py",
+      "exit": 0,
+      "log": ".venv\\repair29-script-test_retrieve_select.log"
+    },
+    {
+      "file": "tests/test_slash_no_redirect.py",
+      "exit": 0,
+      "log": ".venv\\repair29-script-test_slash_no_redirect.log"
+    },
+    {
+      "file": "tests/test_w1.py",
+      "exit": 1,
+      "log": ".venv\\repair29-script-test_w1.log"
+    },
+    {
+      "file": "tests/test_w2.py",
+      "exit": 1,
+      "log": ".venv\\repair29-script-test_w2.log"
+    },
+    {
+      "file": "tests/test_w3.py",
+      "exit": 1,
+      "log": ".venv\\repair29-script-test_w3.log"
+    },
+    {
+      "file": "tests/test_tool_registry.py",
+      "exit": 1,
+      "log": ".venv\\repair29-script-test_tool_registry.log"
+    },
+    {
+      "file": "tests/test_tool_guard.py",
+      "exit": 0,
+      "log": ".venv\\repair29-script-test_tool_guard.log"
+    },
+    {
+      "file": "tests/test_context_compress.py",
+      "exit": 0,
+      "log": ".venv\\repair29-script-test_context_compress.log"
+    },
+    {
+      "file": "tests/test_compress_wiring.py",
+      "exit": 0,
+      "log": ".venv\\repair29-script-test_compress_wiring.log"
+    },
+    {
+      "file": "tests/test_agent_guard.py",
+      "exit": 0,
+      "log": ".venv\\repair29-script-test_agent_guard.log"
+    },
+    {
+      "file": "tests/test_grounding.py",
+      "exit": 0,
+      "log": ".venv\\repair29-script-test_grounding.log"
+    },
+    {
+      "file": "tests/test_scenarios.py",
+      "exit": 0,
+      "log": ".venv\\repair29-script-test_scenarios.log"
+    },
+    {
+      "file": "tests/test_usage_stats.py",
+      "exit": 0,
+      "log": ".venv\\repair29-script-test_usage_stats.log"
+    },
+    {
+      "file": "tests/test_hybrid_human_suspend.py",
+      "exit": 0,
+      "log": ".venv\\repair29-script-test_hybrid_human_suspend.log"
+    },
+    {
+      "file": "tests/test_p0_grounding_e2e.py",
+      "exit": 0,
+      "log": ".venv\\repair29-script-test_p0_grounding_e2e.log"
+    },
+    {
+      "file": "tests/test_web_import_creates_index.py",
+      "exit": 0,
+      "log": ".venv\\repair29-script-test_web_import_creates_index.log"
+    }
+  ],
+  "fixture_provenance": {
+    "source_commit": "00e7389f0d331cdb12c4c386587aaee9b38b00c7",
+    "note": "从 Git 对象直接导出；未读取工作区 data。X2 原始资料不在 Git 历史中，未伪造。",
+    "files": [
+      {
+        "file": "golden_v1.csv",
+        "source": "data/golden/golden_v1.csv",
+        "sha256": "39fa7b456b9df2a27c235999171b16f6077e8c26a701d270016bf1860540aafd"
+      },
+      {
+        "file": "temp_from_golden.csv",
+        "source": "data/vocab/temp_from_golden.csv",
+        "sha256": "8a0d35d4784f2b938a6bbbd9dbecee3ce54c6ad00d94b9946f858059e32a1957"
+      },
+      {
+        "file": "adjudication.csv",
+        "source": "data/vocab/adjudication.csv",
+        "sha256": "7551f62753f0037b52f7c75baa17c24b0e669ca547c46dde083ee43cd7b6a825"
+      }
+    ]
+  },
+  "source_hashes": [
+    {
+      "file": "tests/test_task_core.py",
+      "sha256": "255c28ccd235cc6738d1c4df5bfb942c8b3702092a0f548d734d11f03862e133"
+    },
+    {
+      "file": "tests/test_task_remind_time.py",
+      "sha256": "5c7c09220a86d30761888e5beb72770957d808274f37d04eb84d33cc4cf44d60"
+    },
+    {
+      "file": "tests/test_asr_stream.py",
+      "sha256": "06ef041489ee87244d1450c65ba36898aec3b14f5eecbe636569dfa56036f09e"
+    },
+    {
+      "file": "tests/test_sediment.py",
+      "sha256": "7d2a74285210ef65e23e0884c2d2847e944424987a05dced819b761d05cebe84"
+    },
+    {
+      "file": "tests/test_query_enhance.py",
+      "sha256": "4b384226a7bfa603754c60a1b0abcdecd6a8b30adbfcac01d3f540f7dae22a8f"
+    },
+    {
+      "file": "tests/test_query_api.py",
+      "sha256": "e8b63fee31d0e489d18226f1bee28572b3c0583f03b0312e8bf879d672e7d623"
+    }
+  ],
+  "logs": [
+    {
+      "file": ".venv/repair29-before.log",
+      "sha256": "522055faa71b4d655c2daa21b02759b36d26f59d1b79385139d600088b6d2b43"
+    },
+    {
+      "file": ".venv/repair29-before.xml",
+      "sha256": "930a903cc147d9adb2e0a3f91b213c902dac8c62cfb8ce20ac752485c6de0c67"
+    },
+    {
+      "file": ".venv/repair29-focused.log",
+      "sha256": "637b6851277b4ec90401661c3a81a61cb3e604e46175804235809ccdbbaf9e15"
+    },
+    {
+      "file": ".venv/repair29-original-cases.log",
+      "sha256": "3fc38529e31764255b5590cbfd5a8d0d127b5c669f555177aa71070b04ecfa6f"
+    },
+    {
+      "file": ".venv/repair29-original-cases.xml",
+      "sha256": "87666f171462ac0296f767a6d9ad407b1c1dbde2aff05a22d24618abbdcff0d1"
+    },
+    {
+      "file": ".venv/repair29-full.log",
+      "sha256": "9627c6e0e585e98cd764fe43b354fdbc18fe969a23f68d53dcdf1a63656c422e"
+    },
+    {
+      "file": ".venv/repair29-full.xml",
+      "sha256": "0c2d2fe9c9cfb97f8b570a22041535d085ee4d2ac16520662bfc110dba59fb6d"
+    },
+    {
+      "file": ".venv/repair29-script-test_auth_gate.log",
+      "sha256": "f6caa34881b5d0b568246b3bbfac7613270725d35100b72f6dd0538a1e70ecc7"
+    },
+    {
+      "file": ".venv/repair29-script-test_geo_locate.log",
+      "sha256": "29aa5ef77d32e93dec29ee9a355cfc7703683ef719f67bf94d5b5ef7a7dc5fbd"
+    },
+    {
+      "file": ".venv/repair29-script-test_kb_isolation.log",
+      "sha256": "dcd3ae76a20aa085fc9e300f8f7065676cf077a9e9deabd70cbbe452bf1091a5"
+    },
+    {
+      "file": ".venv/repair29-script-test_owner_isolation.log",
+      "sha256": "8b288eff20f11f0f90d8a7d745b2d9a6b8fe2d63855eef26b036a2ff6d792039"
+    },
+    {
+      "file": ".venv/repair29-script-test_retrieve_select.log",
+      "sha256": "361bdbf8a7f83028acac5f48b6ac48d666deeeeda7fd37d7c7661ba0d3dc5932"
+    },
+    {
+      "file": ".venv/repair29-script-test_slash_no_redirect.log",
+      "sha256": "71e2a78a8763fecc7df885f3ee11cfcc091a7f7ada8bceff42c0be5da7d121a2"
+    },
+    {
+      "file": ".venv/repair29-script-test_w1.log",
+      "sha256": "b3c40428dd7a860a0725bcd26966d2a5ba1fde3f6efbfde16a629d59e41a023c"
+    },
+    {
+      "file": ".venv/repair29-script-test_w2.log",
+      "sha256": "9fefdae206f08c2c071e96d6c49bcfab40bc7fe3e82076bc6f7cf6524288e938"
+    },
+    {
+      "file": ".venv/repair29-script-test_w3.log",
+      "sha256": "d88bc3bf1482319f8b5b6d387199b2e91dc0a60bb4cdd53deb3c235e1dcf2933"
+    },
+    {
+      "file": ".venv/repair29-script-test_tool_registry.log",
+      "sha256": "5c40dab3c3ae3f9fa2ef58cd343fe6385a9a9b0a3e9d53dc7c211d7a28a26136"
+    },
+    {
+      "file": ".venv/repair29-script-test_tool_guard.log",
+      "sha256": "4c79c18b2f4f8e8fe1201c9ca7e1047c3ec0dc3d4048de56f14d74046bd58483"
+    },
+    {
+      "file": ".venv/repair29-script-test_context_compress.log",
+      "sha256": "d81ea824e7163a63de5a237a2793daac43eb8eef17972b8fdca127b9d666eb25"
+    },
+    {
+      "file": ".venv/repair29-script-test_compress_wiring.log",
+      "sha256": "56d0252a67bed760dd5a11123d65f8c0cc0f48e8f496a05f902450e28e9952c8"
+    },
+    {
+      "file": ".venv/repair29-script-test_agent_guard.log",
+      "sha256": "32923d88744b1e4d6f7d4ee726430f49825225ddf3cdbc69147316e2e44c6e9f"
+    },
+    {
+      "file": ".venv/repair29-script-test_grounding.log",
+      "sha256": "cd6c91231d88dada042d25ec487220e866c7dbb74727fa2c2eb5962c5ed539f7"
+    },
+    {
+      "file": ".venv/repair29-script-test_scenarios.log",
+      "sha256": "de6583f20a49c1f55114c169800aed6ab775fbe9c4d6db608ed50eb7c07ac3aa"
+    },
+    {
+      "file": ".venv/repair29-script-test_usage_stats.log",
+      "sha256": "dee3884f23b58a2a8788aba0d423733faecd4c0f2c3e1f191c8d5c2af02d2876"
+    },
+    {
+      "file": ".venv/repair29-script-test_hybrid_human_suspend.log",
+      "sha256": "a2919a5a15edd2e71856a78d590417f886790e44998d4726cc7744cbd3fd0231"
+    },
+    {
+      "file": ".venv/repair29-script-test_p0_grounding_e2e.log",
+      "sha256": "e5f31f193e57ebfe7c4d5b7439661b32a0e3243134a00afc880c5764aad5715f"
+    },
+    {
+      "file": ".venv/repair29-script-test_web_import_creates_index.log",
+      "sha256": "9de20720bb726d3c79d51e1d10407af9d6c6ac2b658332e04b150b52434634e4"
+    }
+  ]
+}

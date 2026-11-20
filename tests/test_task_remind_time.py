@@ -156,6 +156,8 @@ def _load_backfill():
 
 @pytest.fixture()
 def db(tmp_path, monkeypatch):
+    now = int(datetime(2026, 11, 17, 21, 0, tzinfo=timeutil.TZ).timestamp())
+    monkeypatch.setattr(timeutil, "now_ts", lambda: now)
     path = tmp_path / "sessions.db"
     monkeypatch.setattr(session, "_db_path", lambda: path)
     reminder_core.reset_cache()

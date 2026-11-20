@@ -29,8 +29,9 @@ import pytest  # noqa: E402
 from core.query_enhance import Term, Vocab, load_vocab, match  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-GOLDEN = os.path.join(ROOT, "data/golden/golden_v1.csv")
-TEMP_VOCAB = os.path.join(ROOT, "data/vocab/temp_from_golden.csv")
+FIXTURES = os.path.join(ROOT, "tests", "fixtures", "query_enhance")
+GOLDEN = os.path.join(FIXTURES, "golden_v1.csv")
+TEMP_VOCAB = os.path.join(FIXTURES, "temp_from_golden.csv")
 
 
 def build(*terms) -> Vocab:
@@ -274,8 +275,6 @@ def test_loader_skips_row_without_aliases(tmp_path):
 
 # ==================== 9. 金标集冒烟（防退化）====================
 
-@pytest.mark.skipif(not (os.path.exists(GOLDEN) and os.path.exists(TEMP_VOCAB)),
-                    reason="缺金标集或临时词表")
 def test_golden_regression_does_not_degrate():
     """★ 指标护栏：任何改动都不许让金标表现明显退步。
 
@@ -313,10 +312,9 @@ def test_golden_regression_does_not_degrate():
 
 # ==================== 10. 歧义裁决表 ====================
 
-ADJ = os.path.join(ROOT, "data/vocab/adjudication.csv")
+ADJ = os.path.join(FIXTURES, "adjudication.csv")
 
 
-@pytest.mark.skipif(not os.path.exists(ADJ), reason="缺裁决表")
 def test_adjudication_loads_all_words():
     from core.query_enhance import load_adjudication
 
@@ -329,7 +327,6 @@ def test_adjudication_loads_all_words():
     assert kinds == {"禁止入表", "禁止入表·需澄清", "可入表·有条件"}, kinds
 
 
-@pytest.mark.skipif(not os.path.exists(ADJ), reason="缺裁决表")
 def test_block_words_excludes_conditional():
     from core.query_enhance import block_words, load_adjudication
 
@@ -339,7 +336,6 @@ def test_block_words_excludes_conditional():
     assert "综述" not in blocked and "模型" not in blocked, "有条件入表的词不该被无条件禁掉"
 
 
-@pytest.mark.skipif(not os.path.exists(ADJ), reason="缺裁决表")
 def test_conditional_word_depends_on_collocation():
     """★ 触发条件用「搭配短语」，不是学科标签。
 
@@ -355,7 +351,6 @@ def test_conditional_word_depends_on_collocation():
     assert "模型" in blocked_for_query(rows, "模型怎么选")
 
 
-@pytest.mark.skipif(not os.path.exists(ADJ), reason="缺裁决表")
 def test_clarify_only_fires_when_word_present():
     from core.query_enhance import clarify_questions, load_adjudication
 
@@ -374,7 +369,6 @@ def test_missing_adjudication_degrades_gracefully(tmp_path):
     assert block_words(rows) == set()
 
 
-@pytest.mark.skipif(not os.path.exists(ADJ), reason="缺裁决表")
 def test_conditional_adjudication_keeps_golden_row_working():
     """裁决表接入后，「跑模型」这条金标必须仍然能换出来（A→D 不许掉召回）。"""
     from core.query_enhance import blocked_for_query, load_adjudication
@@ -391,7 +385,7 @@ def test_conditional_adjudication_keeps_golden_row_working():
 # 这一节是本次改动的"案发现场"。替换时代下面这几句都被改坏了，
 # 而金标 94 条（更书面、更长）一条都没测出来 —— 说明真实短句是另一类样本。
 
-X2 = os.path.join(ROOT, "docs/组员交付_2026-10-24/queries_刘立轩.csv")
+X2 = os.path.join(FIXTURES, "queries_刘立轩.csv")
 
 # 验收记录里逐条点名的 3 条，各代表一类错法：
 #   叠字 / 替换点吞掉原字 / 术语自带原字造成重复
@@ -402,7 +396,6 @@ BROKEN_IN_REPLACE_ERA = [
 ]
 
 
-@pytest.mark.skipif(not os.path.exists(TEMP_VOCAB), reason="缺临时词表")
 def test_x2_broken_sentences_are_fixed():
     """★★ 这三句曾经被改成病句，现在原话必须原封不动。"""
     vocab, _ = load_vocab(TEMP_VOCAB)
@@ -412,7 +405,6 @@ def test_x2_broken_sentences_are_fixed():
         assert r.retrieval_text.startswith(q), f"原话被改坏了：{q!r} → {r.retrieval_text!r}"
 
 
-@pytest.mark.skipif(not os.path.exists(X2), reason="缺 X2 真实问法（docs/组员交付_2026-10-24 未归档）")
 def test_x2_no_query_ever_gets_rewritten():
     """★★ 全量 142 条真实问法：检索文本必须以原话为前缀。
 
@@ -422,6 +414,7 @@ def test_x2_no_query_ever_gets_rewritten():
     import csv
 
     vocab, _ = load_vocab(TEMP_VOCAB)
+    # 原始真实问法缺失时必须失败；不造样本、不降低至少 100 条的验收断言。
     rows = list(csv.DictReader(open(X2, encoding="utf-8-sig")))
     assert len(rows) >= 100, f"X2 样本只有 {len(rows)} 条，护栏太薄"
 

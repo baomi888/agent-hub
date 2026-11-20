@@ -1,0 +1,1444 @@
+{
+  "passed": true,
+  "scenarioResults": [
+    {
+      "width": 1440,
+      "theme": "light",
+      "standalone_emulated": false,
+      "passed": true
+    },
+    {
+      "width": 390,
+      "theme": "dark",
+      "standalone_emulated": true,
+      "passed": true
+    }
+  ],
+  "apiResults": [
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 401
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "POST",
+      "path": "/api/auth/register/email/send",
+      "status": 400
+    },
+    {
+      "width": 1440,
+      "method": "POST",
+      "path": "/api/auth/register/email/send",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "POST",
+      "path": "/api/auth/register/email/verify",
+      "status": 400
+    },
+    {
+      "width": 1440,
+      "method": "POST",
+      "path": "/api/auth/register/email/verify",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "POST",
+      "path": "/api/auth/register",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/sessions",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/sessions",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/today",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/config/defaults",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/kb/favorites",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/kb/public",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/user-feedback/dict",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/push/status",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/user-feedback/mine",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/security-email",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/usage/summary",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/prefs",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/profile",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/kb",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "POST",
+      "path": "/api/auth/email/code/send",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "POST",
+      "path": "/api/auth/email/code/verify",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "POST",
+      "path": "/api/auth/email/code/send",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "POST",
+      "path": "/api/auth/email/code/verify",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "POST",
+      "path": "/api/auth/security-email/change",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "POST",
+      "path": "/api/auth/logout",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/sessions",
+      "status": 401
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/kb",
+      "status": 401
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/kb/public",
+      "status": 401
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/config/defaults",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/kb/favorites",
+      "status": 401
+    },
+    {
+      "width": 1440,
+      "method": "POST",
+      "path": "/api/auth/password/reset/email/send",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "POST",
+      "path": "/api/auth/password/reset/email/verify",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "POST",
+      "path": "/api/auth/password/reset",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 401
+    },
+    {
+      "width": 1440,
+      "method": "POST",
+      "path": "/api/auth/login",
+      "status": 401
+    },
+    {
+      "width": 1440,
+      "method": "POST",
+      "path": "/api/auth/login",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/push/status",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/security-email",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/user-feedback/dict",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/user-feedback/mine",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/prefs",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/usage/summary",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/kb",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/profile",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/user-feedback/dict",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/user-feedback/mine",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/push/status",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/kb",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/profile",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/prefs",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/security-email",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/usage/summary",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "POST",
+      "path": "/api/auth/logout",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/kb/public",
+      "status": 401
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/kb",
+      "status": 401
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/sessions",
+      "status": 401
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/config/defaults",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/kb/favorites",
+      "status": 401
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 401
+    },
+    {
+      "width": 1440,
+      "method": "POST",
+      "path": "/api/auth/login",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/user-feedback/dict",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/push/status",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/user-feedback/mine",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/usage/summary",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/kb",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/profile",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/prefs",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "GET",
+      "path": "/api/auth/security-email",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "POST",
+      "path": "/api/auth/email/code/send",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "POST",
+      "path": "/api/auth/email/code/verify",
+      "status": 200
+    },
+    {
+      "width": 1440,
+      "method": "POST",
+      "path": "/api/auth/security-email/bind",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 401
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "POST",
+      "path": "/api/auth/register/email/send",
+      "status": 400
+    },
+    {
+      "width": 390,
+      "method": "POST",
+      "path": "/api/auth/register/email/send",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "POST",
+      "path": "/api/auth/register/email/verify",
+      "status": 400
+    },
+    {
+      "width": 390,
+      "method": "POST",
+      "path": "/api/auth/register/email/verify",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "POST",
+      "path": "/api/auth/register",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/push/status",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/user-feedback/dict",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/kb",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/security-email",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/user-feedback/mine",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/usage/summary",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/prefs",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/profile",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "POST",
+      "path": "/api/auth/email/code/send",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "POST",
+      "path": "/api/auth/email/code/verify",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "POST",
+      "path": "/api/auth/email/code/send",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "POST",
+      "path": "/api/auth/email/code/verify",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "POST",
+      "path": "/api/auth/security-email/change",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "POST",
+      "path": "/api/auth/logout",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/sessions",
+      "status": 401
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/kb",
+      "status": 401
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/kb/public",
+      "status": 401
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/config/defaults",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/kb/favorites",
+      "status": 401
+    },
+    {
+      "width": 390,
+      "method": "POST",
+      "path": "/api/auth/password/reset/email/send",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "POST",
+      "path": "/api/auth/password/reset/email/verify",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "POST",
+      "path": "/api/auth/password/reset",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 401
+    },
+    {
+      "width": 390,
+      "method": "POST",
+      "path": "/api/auth/login",
+      "status": 401
+    },
+    {
+      "width": 390,
+      "method": "POST",
+      "path": "/api/auth/login",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/push/status",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/user-feedback/dict",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/security-email",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/user-feedback/mine",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/usage/summary",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/kb",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/prefs",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/profile",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/user-feedback/dict",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/push/status",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/user-feedback/mine",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/kb",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/prefs",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/profile",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/security-email",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/usage/summary",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "POST",
+      "path": "/api/auth/logout",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/sessions",
+      "status": 401
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/kb",
+      "status": 401
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/kb/public",
+      "status": 401
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/config/defaults",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/kb/favorites",
+      "status": 401
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 401
+    },
+    {
+      "width": 390,
+      "method": "POST",
+      "path": "/api/auth/login",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/user-feedback/dict",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/push/status",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/user-feedback/mine",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/usage/summary",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/kb",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/profile",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/prefs",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "GET",
+      "path": "/api/auth/security-email",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "POST",
+      "path": "/api/auth/email/code/send",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "POST",
+      "path": "/api/auth/email/code/verify",
+      "status": 200
+    },
+    {
+      "width": 390,
+      "method": "POST",
+      "path": "/api/auth/security-email/bind",
+      "status": 200
+    }
+  ],
+  "probeResults": [
+    {
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/config/",
+      "status": 308
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 401
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/security-email",
+      "status": 401
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/email/code/send",
+      "status": 401
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/email/code/verify",
+      "status": 401
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/security-email/bind",
+      "status": 401
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/security-email/change",
+      "status": 401
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/register",
+      "status": 422
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/register",
+      "status": 400
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/register/email/send",
+      "status": 400
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/password/reset/email/send",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/password/reset/email/verify",
+      "status": 400
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/password/reset",
+      "status": 400
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/login",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/security-email",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/email/code/send",
+      "status": 422
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/email/code/send",
+      "status": 409
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/email/code/verify",
+      "status": 400
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/security-email/bind",
+      "status": 400
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/security-email/change",
+      "status": 400
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/auth/security-email",
+      "status": 405
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/config",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/register/email/send",
+      "status": 503
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/password/reset/email/send",
+      "status": 503
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/security-email",
+      "status": 503
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/login",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/register/email/send",
+      "status": 403
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/register",
+      "status": 403
+    }
+  ],
+  "runtime": {
+    "sandbox": "C:\\Users\\asus\\AppData\\Local\\Temp\\zhisui-auth-tests-a7iwrs0v",
+    "smtp_port": 49289,
+    "dependency_override_count": 0,
+    "clock": "real time; no offset",
+    "mail_count": 10
+  },
+  "ports": {
+    "frontend": 43132,
+    "backend": 43131,
+    "smtp": 49289
+  },
+  "real_cooldown": true,
+  "next_proxy_exercised": true,
+  "port_mapping_count": 39,
+  "cleanup": {
+    "method": "Windows TCP listener table after child-process exit",
+    "ports": [
+      43132,
+      43131,
+      49289
+    ],
+    "listener_count": 0,
+    "closed": true,
+    "note": "The earlier 1-second TCP probe timed out; it was not used as proof of closure."
+  },
+  "smtp465_handshake": {
+    "host": "smtp.qq.com",
+    "port": 465,
+    "authenticated": false,
+    "mail_sent": false,
+    "tls_version": "TLSv1.3",
+    "certificate_verified": true,
+    "greeting_code": "220",
+    "ehlo_code": "250",
+    "quit_code": "221",
+    "passed": true,
+    "elapsed_seconds": 1.86
+  },
+  "ui_regressions": [
+    {
+      "name": "test_security_email_ui",
+      "exit": 0
+    },
+    {
+      "name": "test_email_registration_ui",
+      "exit": 0
+    },
+    {
+      "name": "test_password_reset_ui",
+      "exit": 0
+    }
+  ],
+  "api_contract_tests": {
+    "passed": 54,
+    "failed": 0,
+    "skipped": 0,
+    "exit": 0
+  },
+  "main_ref": "00e7389f0d331cdb12c4c386587aaee9b38b00c7",
+  "hzl_ref": "00e7389f0d331cdb12c4c386587aaee9b38b00c7",
+  "source_hashes": [
+    {
+      "file": "main.py",
+      "sha256": "9b884cccdf26b2d56d28922ff33ed3319afd7085dd4ee4c74c7c0f9f92e8edb1"
+    },
+    {
+      "file": "api/auth.py",
+      "sha256": "122f24436f3004839aa822d327055840a3ad0a6d662f6f844af2432042a3ab74"
+    },
+    {
+      "file": "api/security_email.py",
+      "sha256": "d839f36b7b40d8f13972144c157dc59413e9464f00a549238f02abb640f264b9"
+    },
+    {
+      "file": "api/registration.py",
+      "sha256": "592070118868f2afd2486fe2fb1c1b4e82777ca5e7ef79479a921a85a85f5f00"
+    },
+    {
+      "file": "api/password_reset.py",
+      "sha256": "3b1bec4d103febe144ae3c5f0b3c1bac6020822d15fb21c43d73ff115e118b77"
+    },
+    {
+      "file": "core/config.py",
+      "sha256": "a30355295b115628a43c38cb8406dc0cc637dc0604714f669bdb2dd5f1c864bc"
+    },
+    {
+      "file": "core/auth.py",
+      "sha256": "cae9a36ce42253e740a18b9dff6e7bf6fa8f5500bb2f55703efca87310171249"
+    },
+    {
+      "file": "core/account.py",
+      "sha256": "69ffa1020a4c258f3e46332faf4659fda4523cfa33924e4be2f6bbfaee89c627"
+    },
+    {
+      "file": "core/mailer.py",
+      "sha256": "08b8ae683e52a6a207822c500667f80b08c02916735c3503af82a62bbb54aa41"
+    },
+    {
+      "file": "core/security_mail.py",
+      "sha256": "ecc220b092db447749a653fc8ebc12c40ccb601b67dce2da054d8fccfcada7c4"
+    },
+    {
+      "file": "core/security_email.py",
+      "sha256": "472fb3c0e74ec42b041ed4f64d91c0ca6e26c1e75b8900742a5a63ac53f65acd"
+    },
+    {
+      "file": "core/verification.py",
+      "sha256": "34c2ef75b092e5eb266ccf9966059ee1e587f355412aeb6a8e4127a8a72796ae"
+    },
+    {
+      "file": "frontend/next.config.ts",
+      "sha256": "e44d62f9db29b8185fddb5f23eba948d57c27a6c776ebb5228798f21c9059d88"
+    },
+    {
+      "file": "frontend/src/components/AuthGate.tsx",
+      "sha256": "c92a7a28d894975f5b584f29ddf313c01b6acd6c3e01bb7a75cf5ff7b7ba740c"
+    },
+    {
+      "file": "frontend/src/components/PasswordInput.tsx",
+      "sha256": "4bb7d883270317ae08543ee8982ea91b1aa04681449aec07bed5d9cbe1cb54ad"
+    },
+    {
+      "file": "frontend/src/components/RegistrationEmailFields.tsx",
+      "sha256": "bae2a3bc895ded46ed42fcdd50adeed91d62fdf924bffc5fa057dfdd1d36fae8"
+    },
+    {
+      "file": "frontend/src/components/settings/SecurityEmailSettings.tsx",
+      "sha256": "f7a81997e4ea25ef9c8c5ae36602c0b12d536079accac6b370bd445adf7669d0"
+    },
+    {
+      "file": "frontend/src/app/reset-password/page.tsx",
+      "sha256": "43483de0245c2f56a22ee3cd3ca0808083b7cf3973f77aa641ec0eee7bda4533"
+    },
+    {
+      "file": "frontend/src/lib/api.ts",
+      "sha256": "4462d7f7d0cb6c7360f212e3fc93d150c16e067365b42292e782c50095350a8d"
+    }
+  ],
+  "log_hashes": [
+    {
+      "path": "D:\\zhisui_agent\\.venv\\e2e-userflow\\run-verified.log",
+      "sha256": "ec4163a5114d8510934f29a395954a2fe0b32412ca4a8cc4b14fd0c6e67fa0a9"
+    },
+    {
+      "path": "D:\\zhisui_agent\\.venv\\e2e-existing-journey.log",
+      "sha256": "dd8a59c1808054fedaf56b9a95b226ae168c3c398f19a24b573b8e44f02d3a4e"
+    },
+    {
+      "path": "D:\\zhisui_agent\\.venv\\e2e-contract.log",
+      "sha256": "8ab05898ffe02b9332ed81923e94da832822c56de351b7c90e41acf649428c65"
+    },
+    {
+      "path": "D:\\zhisui_agent\\.venv\\e2e-current-build.log",
+      "sha256": "566d99dce609f1df77b4b6a79c32ee39c705e9dcbee319a268dcba844b3450e6"
+    }
+  ]
+}

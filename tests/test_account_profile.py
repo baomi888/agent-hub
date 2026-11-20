@@ -38,6 +38,7 @@ session._db_path = lambda: os.path.join(_TMP, "boot.db")
 session._init_db()
 
 from fastapi.testclient import TestClient  # noqa: E402
+from registration_support import register_verified
 
 import main  # noqa: E402
 from core import account, quota  # noqa: E402
@@ -96,7 +97,7 @@ def _fresh(monkeypatch, tag: str) -> TestClient:
 def _register(cli: TestClient, name="alice", pwd="Alice_pass_9") -> tuple[str, str]:
     """注册并返回 (uid, token)。显式拿 token 而不是依赖 cookie 罐子 ——
     后面注册第二个账号时，罐子会被换成别人的。"""
-    r = cli.post("/api/auth/register/", json={"username": name, "password": pwd})
+    r = register_verified(cli, name, pwd)
     assert r.status_code == 200, r.text
     return r.json()["id"], cli.cookies.get("baomi_session")
 
@@ -432,7 +433,7 @@ def test_username_duplicate_and_reserved(monkeypatch):
     cli = _fresh(monkeypatch, "name_dup")
     _, tok = _register(cli, "alice")
     # 注册 bob 会把 Cookie 罐子换成 bob 的，所以后面一律显式带 token
-    cli.post("/api/auth/register/", json={"username": "bob", "password": "bob12345"})
+    register_verified(cli, "bob", "bob12345")
 
     r = cli.post(
         "/api/auth/username", json={"password": "Alice_pass_9", "new_username": "bob"}, headers=_h(tok)
@@ -851,7 +852,7 @@ def test_avatar_shared_hash_not_deleted(monkeypatch):
     """两个人用同一张图（同一个内容 hash），其中一个人换掉不能把另一个人的图删了。"""
     cli = _fresh(monkeypatch, "av_share")
     _, tok_a = _register(cli, "alice")
-    cli.post("/api/auth/register/", json={"username": "bob", "password": "bob12345"})
+    register_verified(cli, "bob", "bob12345")
     tok_b = cli.cookies.get("baomi_session")
 
     data = _jpeg(color=(0, 90, 200))
