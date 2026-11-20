@@ -1465,6 +1465,15 @@ class RagPipeline:
             lines.append(f"{head} ｜ {preview}...")
         return "\n\n".join(lines) if lines else "（无检索结果）"
 
+    @staticmethod
+    def format_refs(docs_scores) -> str:
+        """``_format_refs`` 的公开名字。
+
+        检索编排层（``kb/retrieval.py``）只应该依赖公开接口；保留下划线版本
+        是因为历史调用点与测试还在用，两者是同一个实现，不会漂移。
+        """
+        return RagPipeline._format_refs(docs_scores)
+
     def answer(self, question: str, top_k: int) -> tuple[str, str]:
         """同步问答：返回 (答案正文, 参考片段 Markdown)。
 

@@ -21,7 +21,7 @@ import asyncio
 
 import pytest
 
-from api.chat import _TRUNCATED_REASONS, _Acc, _is_truncation, _stream_llm
+from api.chat import _TRUNCATED_REASONS, StreamOutcome, _is_truncation, _stream_llm
 from core import config
 
 
@@ -54,7 +54,7 @@ class _Req:
 
 
 def _drain(chunks):
-    acc = _Acc()
+    acc = StreamOutcome()
 
     async def go():
         out = []
