@@ -5,6 +5,8 @@
   GET  /api/user-feedback/mine          我提交过的（含处理状态、回复链）
   POST /api/user-feedback/{fid}/reply   在**我这一条**下面补一句话
   GET  /api/user-feedback/dict          分类/状态字典（前端按钮从这里取，不硬编码）
+  GET  /api/user-feedback/unread        有没有新回音（首页提示条 + 入口红点）
+  POST /api/user-feedback/read          标记已读（fid=0 表示全部）
 
 **为什么和 `/api/feedback` 分开**：那个是"某条回答的赞/踩"，是提示词自进化
 （`service/prompt_evo.py`）的差样本来源。把产品建议写进同一张表，会被当成
@@ -119,7 +121,46 @@ async def reply(
     return {"ok": True, "item": row or {}}
 
 
+@router.get("/unread")
+async def unread(uid: str = Depends(get_current_user)) -> dict:
+    """我有没有"新回音"。
+
+    ★ 2026-11-20：用户侧真正的痛点不是"看不到回复"，是**不知道有回复**。
+      这个端点就是给首页提示条和入口红点用的 —— 它必须**极轻**：
+      只回条数和一条摘要，不带回复正文。首页每次加载都会调它，
+      要是在这里把回复线程全拉出来，等于给首页加了个不必要的负担。
+
+    判定不看别的表：每条反馈比较"最后一次管理员回复 / 状态变更时间"
+    与 user_read_at，谁更新就算有未读（细节见 core.unread_summary）。
+    """
+    return await asyncio.to_thread(user_feedback.unread_summary, uid)
+
+
+class ReadRequest(BaseModel):
+    # 0 = 全部标记已读（打开"我的反馈"列表时用）；
+    # 传具体 fid = 只读这一条（在卡片上点开某一条时用）
+    fid: int = Field(default=0, description="0 表示全部")
+
+
+@router.post("/read")
+async def mark_read(req: ReadRequest, uid: str = Depends(get_current_user)) -> dict:
+    """标记已读。
+
+    刻意不做限流：这是纯读侧动作（只写自己的 user_read_at），
+    限流反而会让"连续点开两条"被误伤；归属由 uid 参数天然限定，
+    改 fid 也只能标记自己名下的行（SQL 里带 uid 条件）。
+    """
+    n = await asyncio.to_thread(user_feedback.mark_read, uid, req.fid or 0)
+    return {"ok": True, "updated": n}
+
+
 @router.get("/dict")
 async def dict_api() -> dict:
     """分类/状态字典。挂在用户侧（登录即可），因为提交表单要用它渲染按钮。"""
-    return user_feedback.dict_payload()
+    payload = user_feedback.dict_payload()
+    # 用户侧状态词单独一份（已收到/正在处理/已解决/已关闭）：
+    # 管理员那套「待处理」在用户眼里等于"没人理"，不能直接复用。
+    payload["user_statuses"] = [
+        {"value": v, "label": n} for v, n in user_feedback.USER_STATUSES
+    ]
+    return payload

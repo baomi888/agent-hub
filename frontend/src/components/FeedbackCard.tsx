@@ -152,7 +152,7 @@ export default function FeedbackCard({
       });
       setContent("");
       setContact("");
-      setMsg({ kind: "ok", text: "已收到，谢谢你。处理进度和开发者回复会显示在下面。" });
+      setMsg({ kind: "ok", text: "已收到，谢谢你。处理进度和回复会出现在「我的反馈」里，也会在首页提醒你。" });
       loadMine();
     } catch (e) {
       setMsg({ kind: "err", text: e instanceof Error ? e.message : "提交失败，请稍后再试" });
@@ -216,6 +216,19 @@ export default function FeedbackCard({
           style={{ marginTop: 10, color: msg.kind === "err" ? "var(--red-ink)" : "var(--success-ink)" }}
         >
           {msg.text}
+          {/* 提交成功后立刻给一个"去看处理进度"的口子（2026-11-20）：
+              用户刚说完一件事，此刻正是他心里最想知道"有人管吗"的时候，
+              错过这一下，他下次想起来就是"这站不理我"。
+              用原生 <a> 而不是 next/link：这里可能出现在浮层里，
+              整页跳转比在浮层内导航更符合"我现在要离开去看另一页"的意图。 */}
+          {msg.kind === "ok" ? (
+            <>
+              {" "}
+              <a href="/my-feedback" className="fb-goto">
+                去看处理进度 →
+              </a>
+            </>
+          ) : null}
         </p>
       ) : null}
 

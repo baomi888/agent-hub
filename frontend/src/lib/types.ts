@@ -1091,8 +1091,18 @@ export interface UserFeedbackItem {
   page: string;
   status: FeedbackStatus;
   status_label: string;
+  /** ★ 2026-11-20 用户侧的状态词（已收到/正在处理/已解决/已关闭）。
+   *  和 status_label 是两套话术：管理员的「待处理」在用户眼里等于"没人理"，
+   *  同一个状态两边必须说不同的话。缺省时前端回退到自己那张映射表。 */
+  user_status_label?: string;
   created_at: number;
   updated_at: number;
+  /** 用户最后一次看过这条的时间；0 = 从没看过。
+   *  与 user_notice_at 比大小算出"有没有新动静" */
+  user_read_at?: number;
+  /** 管理员回复 / 状态变更的时刻。提交时**不写**（用户自己知道），
+   *  所以它才是判断"该不该请用户回来看"的正确依据 */
+  user_notice_at?: number;
   /** 全部回复，按时间正序（最早的在前）。多条 = 不同管理员先后追加的 */
   replies: FeedbackReply[];
   /** 最新一条回复的内容。空串 = 还没回过。
@@ -1100,6 +1110,29 @@ export interface UserFeedbackItem {
   reply: string;
   /** 最新一条回复的时间；没回过就是 null（同样是兼容字段） */
   replied_at: number | null;
+}
+
+/** GET /api/user-feedback/unread 的返回（2026-11-20）。
+ *  ★ 刻意只带摘要不带回复正文：首页每次加载都会调它，
+ *    在这里把线程全拉出来等于给首页加负担。正文进 /my-feedback 再取。 */
+export interface FeedbackUnreadItem {
+  fid: number;
+  category: string;
+  category_label: string;
+  status: FeedbackStatus;
+  user_status_label: string;
+  excerpt: string;
+  changed_at: number;
+  /** 这条有没有过管理员回复（false = 只是状态变了） */
+  replied: boolean;
+  created_at: number;
+}
+
+export interface FeedbackUnreadResp {
+  unread: number;
+  /** 最近一次"有新动静"的时间戳；0 = 没有 */
+  latest: number;
+  items: FeedbackUnreadItem[];
 }
 
 export interface AdminFeedbackResp {

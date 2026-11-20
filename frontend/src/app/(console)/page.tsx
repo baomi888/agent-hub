@@ -21,6 +21,9 @@ import { useKnowledge } from "@/lib/hooks/useKnowledge";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { detailToMessage } from "@/lib/errors";
 import InstallBanner from "@/components/InstallBanner";
+// 「你的反馈有回音了」提示条（2026-11-20）。挂在这里而不是根布局：
+// 根布局拿不到稳定登录态，会在登录前后各渲染一次。
+import FeedbackNotice from "@/components/FeedbackNotice";
 import Landing from "@/components/landing/Landing";
 import AnnounceModal from "@/components/announce/AnnounceModal";
 import { AuthLoading } from "@/components/boot/BootSplash";
@@ -1052,6 +1055,10 @@ export default function Home() {
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
+        {/* 反馈回音提示条：有新回复/状态变更才出现，可关闭。
+            ★ 放在 ChatArea **上方**而不是浮层：它是"顺便告知"，
+              不能打断正在进行的对话（浮层要人点掉才能继续，代价太大）。 */}
+        <FeedbackNotice authedId={auth.me?.user.id ?? null} />
         <ChatArea
           messages={messages}
           sending={sending}

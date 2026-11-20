@@ -1,0 +1,115 @@
+/* ==================== 首页"反馈有回音"提示条（2026-11-20）====================
+   刻意做成一条可关闭的横条，不是弹窗：
+   弹窗会打断"我正在问问题"，而且要必须点掉才能继续 ——
+   一个一年提两次意见的用户被弹窗拦下来，观感是"这站在烦我"。
+   ---------------------------------------------------------------------- */
+.fbn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  margin: 0 0 12px;
+  border-radius: var(--r-card);
+  border: 1px solid var(--accent-line-soft, var(--line));
+  background: var(--accent-tint);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+/* 小圆点：只表示"有新东西"，不承担状态语义（状态靠文字说） */
+.fbn-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.fbn-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--ink);
+  /* 摘要可能很长（用户原文），两行截断比撑爆版面好 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.fbn-meta {
+  color: var(--text-3);
+}
+
+.fbn-go {
+  flex: 0 0 auto;
+  color: var(--accent-ink);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.fbn-go:hover {
+  text-decoration: underline;
+}
+
+.fbn-x {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: none;
+  color: var(--text-3);
+  font-size: var(--fs-md);
+  line-height: 1;
+  cursor: pointer;
+  border-radius: var(--r-pill);
+}
+.fbn-x:hover {
+  background: var(--fill-2);
+  color: var(--ink);
+}
+
+/* ---------- 侧栏「我的反馈」入口 + 未读红点 ---------- */
+.sb-myfb {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 8px;
+  border-radius: var(--r-card);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  transition: background-color 0.15s, color 0.15s;
+}
+.sb-myfb:hover {
+  background: var(--fill-2);
+  color: var(--ink);
+}
+.sb-myfb .sb-badge {
+  margin-left: auto;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 640px) {
+  .fbn {
+    margin-bottom: 8px;
+    padding: 8px 10px;
+  }
+}
+/* 提交成功后那个「去看处理进度 →」的直达链接 */
+.fb-goto {
+  color: var(--accent-ink);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.fb-goto:hover {
+  text-decoration: underline;
+}

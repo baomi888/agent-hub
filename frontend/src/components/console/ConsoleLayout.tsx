@@ -22,6 +22,7 @@ import AuthGate from "../AuthGate";
 import { AuthLoading } from "../boot/BootSplash";
 import CornIcon from "../CornIcon";
 import NavIcon from "../NavIcon";
+import MyFeedbackLink from "../MyFeedbackLink";
 import ConsoleTabBar from "./ConsoleTabBar";
 import GuideModal from "../guide/GuideModal";
 import AnnounceModal from "../announce/AnnounceModal";
@@ -166,6 +167,10 @@ export default function ConsoleLayout({ children }: { children: ReactNode }) {
                   {it.label}
                 </Link>
               ))}
+              {/* 用户自己的「我的反馈」（2026-11-20）。不放进 lib/nav 的共享导航表：
+                  那张表同时喂手机 tab 栏和「更多」面板，加进去会多出一个
+                  低频入口挤占移动端 tab —— 用户一年提 1–3 条意见。 */}
+              <MyFeedbackLink authed={!!auth.me} variant="nav" />
             </nav>
           </aside>
           )}

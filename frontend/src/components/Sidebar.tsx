@@ -9,6 +9,7 @@ import CornIcon from "./CornIcon";
 import NavIcon from "./NavIcon";
 import UserAvatar from "./settings/UserAvatar";
 import { chatRailNav, railLayout, NAV } from "@/lib/nav";
+import MyFeedbackLink from "./MyFeedbackLink";
 import type { Conversation } from "@/lib/types";
 import type { FontScale } from "@/lib/hooks/usePrefs";
 
@@ -119,6 +120,7 @@ export default function Sidebar({
   /** 最近一次横滑结束的时间：用来吞掉浏览器跟着补发的那一下 click */
   const lastSwipeAt = useRef(0);
   const SWIPE_W = 128; // 与 .session-swipe-acts 宽度一致（改名 64 + 删除 64）
+
 
   const startEdit = (c: Conversation) => {
     setEditingId(c.id);
@@ -531,6 +533,14 @@ export default function Sidebar({
             <span>{dark ? "浅色" : "深色"}</span>
           </button>
         )}
+        {/* 「我的反馈」入口（2026-11-20）
+            原来用户只能到**设置页最底部**看自己反馈的处理进度，等于埋起来了；
+            提了意见没回音，他不会再提第二次。
+            放在侧栏底部而不是主导航：管理员一天看几十次反馈，普通用户
+            一年提 1–3 条，为一个低频功能在导航栏占一格不划算。
+            组件化是因为站内有两个侧栏（对话页 / 控制台），红点逻辑只能有一份。 */}
+        <MyFeedbackLink authed={!!username} variant="row" />
+
         {/* 当前账号 + 退出：多用户之后，知道自己"现在是誰"能省掉很多困惑 */}
         {username && (
           <div className="mt-2 flex items-center gap-2 rounded-sm bg-fill-3 px-2.5 py-2">

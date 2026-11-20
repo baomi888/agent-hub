@@ -71,8 +71,30 @@ def category_label(value: str) -> str:
     return _CATEGORY_MAP.get(value, value)
 
 
+# 用户侧的状态措辞（2026-11-20）。
+#
+# 同一格状态，两边看到的话术必须不同：
+#   · 管理员要知道的是"这单还没办" → 待处理 / 处理中 / 已处理 / 不处理
+#   · 用户要知道的是"有人管我吗"   → 已收到 / 正在处理 / 已解决 / 已关闭
+# 原来的「待处理」在用户眼里等于"没人理"，而实际上我们只是还没排上，
+# 这一句话的差别直接决定他会不会再提第二次。
+# 两套分开存，前端按调用方身份取，任何一边改措辞都不会串到另一边。
+USER_STATUSES: tuple[tuple[str, str], ...] = (
+    ("open", "已收到"),
+    ("doing", "正在处理"),
+    ("done", "已解决"),
+    ("closed", "已关闭"),
+)
+_USER_STATUS_MAP = dict(USER_STATUSES)
+
+
 def status_label(value: str) -> str:
     return _STATUS_MAP.get(value, value)
+
+
+def user_status_label(value: str) -> str:
+    """用户在"我的反馈"里看到的状态词。"""
+    return _USER_STATUS_MAP.get(value, value)
 
 
 def dict_payload() -> dict:
@@ -111,6 +133,19 @@ _EXTRA_COLUMNS: dict[str, str] = {
     # 由最新一条回复合成（见 `_attach_replies`），老前端不改也能跑。
     "reply": "TEXT NOT NULL DEFAULT ''",
     "replied_at": "INTEGER",
+    # ★ 2026-11-20 用户端未读：用户最后一次点开/看过这条的时间。
+    # 读表 vs 字段：用户侧只需要"这个人最后一次看这条是什么时候"这一个量级，
+    # 一条字段就够，不必为它多建一张表（管理员那侧根本不看这个值）。
+    # 语义：0/NULL = 从没看过；与"最后一条回复/最后一次状态变更"的时间比大小
+    # 就能算出有没有新东西（见 unread_summary）。
+    "user_read_at": "INTEGER NOT NULL DEFAULT 0",
+    # ★ 2026-11-20 用户端"有新动静"的时钟：只在**管理员回复**和**状态变更**时写。
+    #
+    # 为什么不复用 updated_at：updated_at 在 add() 插入那一刻就写了 now，
+    # 拿它当"有新动静"的依据，结果是用户刚提交的每一条都在喊"未读"
+    # （自测里 unread=2 就是这条）。updated_at 是"这条记录被改过"的通用时钟，
+    # 而这里要的是"有东西值得请用户回来看"，两者语义不同，必须分开。
+    "user_notice_at": "INTEGER NOT NULL DEFAULT 0",
 }
 
 # 一条回复 = 一次发言，不覆盖、不编辑。`admin_uid` 存下来是为了两件事：
@@ -209,7 +244,10 @@ def ensure() -> None:
 def _row(row) -> dict:
     d = dict(row)
     d["category_label"] = category_label(d["category"])
+    # status_label 是管理员口径；user_status_label 是给用户看的，
+    # 两个都带上，哪个接口对外用哪个由 API 层决定（同一份数据两种读法）。
     d["status_label"] = status_label(d["status"])
+    d["user_status_label"] = user_status_label(d["status"])
     return d
 
 
@@ -261,9 +299,13 @@ def set_status(fid: int, status: str) -> tuple[bool, str]:
             return True, ""  # 幂等：重复点同状态不算错
         if status not in _TRANSITIONS.get(old, set()):
             return False, f"不允许从 {status_label(old)} 改为 {status_label(status)}"
+        now = int(time.time())
+        # user_notice_at 一起写：状态变了是用户该知道的事（"已解决"尤其），
+        # 而 updated_at 只是记录被改过的通用时钟，两者一起维护、语义分开。
         conn.execute(
-            "UPDATE user_feedback SET status = ?, updated_at = ? WHERE id = ?",
-            (status, int(time.time()), fid),
+            "UPDATE user_feedback SET status = ?, updated_at = ?, user_notice_at = ? "
+            "WHERE id = ?",
+            (status, now, now, fid),
         )
         return True, ""
 def add_reply(
@@ -409,6 +451,101 @@ def list_mine(uid: str, limit: int = 20, offset: int = 0) -> tuple[list[dict], i
         ).fetchall()
         items = _attach_replies(conn, [_row(r) for r in rows])
     return items, int(total)
+
+
+def unread_summary(uid: str) -> dict:
+    """用户有没有"新东西"要看。返回 {unread, latest, items}。
+
+    ★ 2026-11-20：用户侧最强的痛点不是"看不到回复"，而是**不知道有回复**。
+      入口埋得再深都不是根本问题，没有提醒才是 —— 用户不会天天去翻设置页。
+
+    "有没有新东西"的判定不需要额外的已读表，两个时间比大小就够：
+      · 最后一条**管理员**回复的时间（用户自己补充的话不算"我们有回音"）
+      · 最后一次状态变更的时间（updated_at 在状态流转/回复时会写）
+      只要任一个 > user_read_at，这条就有未读。
+
+    为什么用它自己的 user 消息过滤：用户补一句话之后 if 也算未读，
+    红点会自己冒出来 —— 那等于"我说话也算我们回了我"，很荒谬。
+
+    返回 items 只带最轻的信息（fid/分类/摘要/时间），首页提示条用；
+    真正的对话内容进 /my-feedback 再拉。
+    """
+    ensure()
+    from core import session as store
+
+    with store._get_conn() as conn:  # noqa: SLF001
+        rows = conn.execute(
+            "SELECT id, category, content, status, created_at, updated_at, user_read_at, user_notice_at "
+            "FROM user_feedback WHERE uid = ? ORDER BY created_at DESC, id DESC LIMIT 50",
+            (uid,),
+        ).fetchall()
+        fids = [int(r["id"]) for r in rows]
+        last_admin: dict[int, int] = {}
+        if fids:
+            # 一条 SQL 取每条的"最后一条管理员回复时间"：
+            # 用 MAX(created_at) 分组，比逐条查省掉 N 次往返（用户最多几条，但没必要）。
+            qmarks = ",".join("?" * len(fids))
+            for r in conn.execute(
+                "SELECT fid, MAX(created_at) AS last_at FROM user_feedback_replies "
+                f"WHERE role = 'admin' AND fid IN ({qmarks}) GROUP BY fid",
+                fids,
+            ).fetchall():
+                last_admin[int(r["fid"])] = int(r["last_at"] or 0)
+
+    items: list[dict] = []
+    latest = 0
+    for r in rows:
+        fid = int(r["id"])
+        read_at = int(r["user_read_at"] or 0)
+        # "有新东西"的时刻只看 user_notice_at（管理员回复 / 状态变更时写），
+        # 不看 updated_at —— 后者在提交那一刻就是 now，会把新提交也算成未读。
+        # 老的 last_admin 保留作兜底：迁移前的老数据没有 user_notice_at，
+        # 但有回复记录，靠它也能算出该不该提醒。
+        changed_at = max(int(r["user_notice_at"] or 0), last_admin.get(fid, 0))
+        if changed_at <= read_at:
+            continue
+        if changed_at <= 0:
+            continue
+        latest = max(latest, changed_at)
+        items.append(
+            {
+                "fid": fid,
+                "category": r["category"],
+                "category_label": category_label(r["category"]),
+                "status": r["status"],
+                "user_status_label": user_status_label(r["status"]),
+                "excerpt": (r["content"] or "").replace("\n", " ")[:40],
+                "changed_at": changed_at,
+                "replied": last_admin.get(fid, 0) > 0,
+                "created_at": int(r["created_at"] or 0),
+            }
+        )
+    return {"unread": len(items), "latest": latest, "items": items}
+
+
+def mark_read(uid: str, fid: int = 0) -> int:
+    """把"我"的反馈标记为已读。fid=0 表示全部。
+
+    返回改动的行数：调用方据此判断"是不是本来就已经读过了"。
+    只写 user_read_at，不碰 updated_at —— updated_at 是管理员的时钟，
+    用户看一眼不能让这条看起来像"刚被改过"。
+    """
+    ensure()
+    from core import session as store
+
+    now = int(time.time())
+    with store._get_conn() as conn:  # noqa: SLF001
+        if fid:
+            cur = conn.execute(
+                "UPDATE user_feedback SET user_read_at = ? WHERE id = ? AND uid = ?",
+                (now, int(fid), uid),
+            )
+        else:
+            cur = conn.execute(
+                "UPDATE user_feedback SET user_read_at = ? WHERE uid = ?",
+                (now, uid),
+            )
+        return int(cur.rowcount or 0)
 
 
 def list_all(

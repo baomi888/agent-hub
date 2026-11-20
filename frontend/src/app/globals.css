@@ -29,6 +29,11 @@
 /* 反馈弹窗：内嵌 FeedbackCard，同样借 .btn / .seg 系列，排在 console.css 之后 */
 @import "./styles/feedback.css";
 @import "./styles/hybrid.css";
+/* 「我的反馈」用户页（/my-feedback）：借 .card / .btn / cat-* 系列，
+   必须排在 console.css 之后（cat-* 与 --r-card 都在那边定义） */
+@import "./styles/my-feedback.css";
+/* 首页"反馈有回音"提示条 + 侧栏入口红点：同样借 .card/.btn 系列，排在后面 */
+@import "./styles/feedback-notice.css";
 @import "./styles/refs.css";
 /* 联网来源（胶囊 + 卡片浮层）：与 refs.css 同属"引用"域，但形态不同
    （一个看原文、一个开网页），单独一份便于整块调；必须排在 refs.css 之后。 */

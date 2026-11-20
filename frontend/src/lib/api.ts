@@ -19,6 +19,7 @@ import type {
 } from "./types";
 import type { KbProposal, KbProposalConfirmResult } from "./types";
 import type { UserFeedbackItem } from "./types";
+import type { FeedbackUnreadResp } from "./types";
 import type { IssuedApproval } from "./types";
 import type { DialogueCandidatesResp, ImportDialogueResult, CourseReminderState } from "./types";
 import type { CalendarLink } from "./types";
@@ -893,6 +894,17 @@ export const api = {
     request<{ ok: boolean; item: UserFeedbackItem }>(`/api/user-feedback/${fid}/reply`, {
       method: "POST",
       body: JSON.stringify({ text }),
+    }),
+
+  /** 我有没有"新回音"（首页提示条 + 入口红点用的轻接口，2026-11-20）。
+   *  ★ 刻意只回摘要：首页每次加载都调它，不该顺带拉回复正文。 */
+  feedbackUnread: () => request<FeedbackUnreadResp>("/api/user-feedback/unread"),
+
+  /** 标记已读。fid=0 表示全部（打开"我的反馈"列表时用）。 */
+  markFeedbackRead: (fid = 0) =>
+    request<{ ok: boolean; updated: number }>("/api/user-feedback/read", {
+      method: "POST",
+      body: JSON.stringify({ fid }),
     }),
 
   // ---------- 开发者数据看板（仅管理员）----------
