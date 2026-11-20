@@ -681,6 +681,10 @@ MAIL_ENABLED = os.getenv("MAIL_ENABLED", "1").strip().lower() not in ("0", "fals
 # 不从请求头推：worker 里没有请求上下文，而且 Host 头是客户端给的，不能信。
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "https://myzhisui.cn").strip().rstrip("/")
 
+# 账号安全验证码邮件（注册验证 / 安全邮箱绑定 / 密码找回），复用上面的 SMTP 配置。
+# 默认关闭；发布时需显式迁移验证码表（见 docs/email-verification-feature.md）并配置环境后再启用。
+SECURITY_EMAIL_ENABLED = os.getenv("SECURITY_EMAIL_ENABLED", "0").strip().lower() in ("1", "true", "yes")
+
 
 def mail_ready() -> bool:
     """邮件通道是否具备发送条件。缺一项就当没配，界面上直说而不是让人白填地址。"""
@@ -697,22 +701,3 @@ def validate() -> list[str]:
     if not EMBEDDING_BASE_URL:
         missing.append("缺少 EMBEDDING_BASE_URL（向量化服务地址）")
     return missing
-
-
-# ---------- 账号安全验证码邮件（凭证只从环境加载）----------
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.qq.com").strip()
-SMTP_PORT = _env_int("SMTP_PORT", 465)
-SMTP_USER = os.getenv("SMTP_USER", "").strip()
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "").strip()
-SMTP_FROM = os.getenv("SMTP_FROM", "").strip() or SMTP_USER
-SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "知穗 Agent").strip()
-SMTP_SECURITY = os.getenv("SMTP_SECURITY", "ssl").strip().lower()
-SMTP_TIMEOUT = _env_int("SMTP_TIMEOUT", 12)
-MAIL_ENABLED = os.getenv("MAIL_ENABLED", "1").strip().lower() not in ("0", "false", "no")
-# 默认关闭；发布时需显式迁移验证码表并配置环境后再启用。
-SECURITY_EMAIL_ENABLED = os.getenv("SECURITY_EMAIL_ENABLED", "0").strip().lower() in ("1", "true", "yes")
-
-
-def mail_ready() -> bool:
-    """邮件传输所需配置齐备才允许发送。"""
-    return bool(MAIL_ENABLED and SMTP_HOST and SMTP_USER and SMTP_PASSWORD and SMTP_FROM)

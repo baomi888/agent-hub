@@ -48,9 +48,9 @@ from api.profile import router as profile_router
 from api.prompt_evo import router as prompt_evo_router
 from api.push import router as push_router
 from api.query import router as query_router
+from api.registration import router as registration_router
 from api.remind import router as remind_router
 from api.reminders import router as reminders_router
-from api.registration import router as registration_router
 from api.report import router as report_router
 from api.schedule import router as schedule_router
 from api.security_email import router as security_email_router
