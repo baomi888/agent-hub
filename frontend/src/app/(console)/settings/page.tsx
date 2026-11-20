@@ -23,7 +23,6 @@ import PasswordDialog from "@/components/settings/PasswordDialog";
 import ReminderQuick from "@/components/settings/ReminderQuick";
 import UsernameDialog from "@/components/settings/UsernameDialog";
 import UserAvatar from "@/components/settings/UserAvatar";
-import FeedbackCard from "@/components/FeedbackCard";
 import TagPicker from "@/components/profile/TagPicker";
 import { Callout, NotReady, Seg, SkeletonLines, Switch } from "@/components/console/ui";
 import { api } from "@/lib/api";
@@ -504,12 +503,28 @@ export default function SettingsPage() {
             </div>
           </section>
 
-          {/* 反馈入口：产品建议要有落点。和上面的"用量"分开一节 ——
-              前者是"我用了多少"（只读），后者是"我要说什么"（可写），
-              混在一张卡片里用户会以为反馈是只读展示。 */}
+          {/* 反馈：设置页**只留入口**，不再内嵌提交框（2026-11-20 用户定）。
+              ★ 原来这里嵌着完整的 FeedbackCard —— 有分类按钮、有提交框、
+                有"我提过的"一长串。结果是同一个反馈功能长着三张脸：
+                主页弹窗一个样、设置页一个样、反馈中心又一个样，
+                用户根本不知道哪个才是"正式的"。
+              ★ 现在分工：提交在主页弹窗，看对话去 /my-feedback，
+                设置页只负责"让你找得到"。 */}
           <section>
             <p className="sec-label">反馈</p>
-            <FeedbackCard page="/settings" />
+            <div className="card card-pad">
+              <div className="fb-entry">
+                <div className="fb-entry-main">
+                  <b>我的反馈</b>
+                  <p className="meta">
+                    看看你提过的问题、我们的回复，以及处理到哪一步了。
+                  </p>
+                </div>
+                <Link href="/my-feedback" className="btn btn-primary btn-sm">
+                  打开
+                </Link>
+              </div>
+            </div>
           </section>
         </div>
 

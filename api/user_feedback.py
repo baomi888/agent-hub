@@ -5,6 +5,7 @@
   GET  /api/user-feedback/mine          我提交过的（含处理状态、回复链）
   POST /api/user-feedback/{fid}/reply   在**我这一条**下面补一句话
   GET  /api/user-feedback/dict          分类/状态字典（前端按钮从这里取，不硬编码）
+  GET  /api/user-feedback/thread        我的反馈会话流（微信式左右对话用）
   GET  /api/user-feedback/unread        有没有新回音（首页提示条 + 入口红点）
   POST /api/user-feedback/read          标记已读（fid=0 表示全部）
 
@@ -119,6 +120,29 @@ async def reply(
     # 回读这一条：前端拿到的是"补完之后"的样子（含状态），不用自己拼
     row = await asyncio.to_thread(user_feedback.get, fid)
     return {"ok": True, "item": row or {}}
+
+
+@router.get("/thread")
+async def thread(limit: int = Query(200, ge=1, le=500), uid: str = Depends(get_current_user)) -> dict:
+    """我的全部反馈，两套读法一起返回（2026-11-20 会话形态用）。
+
+    ★ 直接复用 `core.user_feedback.thread(uid)` —— 那个函数本来就是为了
+      "一个用户的全部反馈"写的，管理员后台也用它。用户端要的正是同一份东西：
+        · `items[]`    —— 按条分组（每条带自己的状态和回复链）
+        · `messages[]` —— 全局时间序（kind: user / user_reply / admin）
+
+      不另写一个"用户版"查询：同一套数据两份实现必然漂移，
+      改了后台忘了前台，就会出现"管理员看得到、用户看不到"。
+
+    ★ 归属天然由 uid 参数限定：这个接口只会查**当前登录用户自己**的数据，
+      没有 fid 之类的入参可以越权。
+
+    ★ messages 的排序在后端做（全局时间序），前端照抄即可。
+      千万不要在前端按 fid 分组后再排 —— 那会得到
+      「A 的提问 → 对 A 的回复 → B 的提问」，而 B 明明早于那条回复
+      （core.thread 的注释里记了这次实测事故）。
+    """
+    return await asyncio.to_thread(user_feedback.thread, uid, limit)
 
 
 @router.get("/unread")

@@ -36,13 +36,6 @@ const USER_STATUS_TEXT: Record<string, string> = {
   open: "已收到",
 };
 
-function fmtTime(ts: number): string {
-  if (!ts) return "";
-  const d = new Date(ts * 1000);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
 export default function FeedbackCard({
   page,
   chrome = true,
@@ -60,16 +53,10 @@ export default function FeedbackCard({
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [mine, setMine] = useState<UserFeedbackItem[]>([]);
-  /**
-   * 正在「追问」的那一条（0 = 全部收起）。
-   *
-   * 为什么需要它：一个人提三条互不相干的意见时，管理员的回复是分别落在
-   * 各条下面的，用户想补一句"我指的是设置页那个按钮"却没有地方可说 ——
-   * 只有一个全局输入框的话，补的话会被当成第四条新反馈。
-   */
-  const [askFid, setAskFid] = useState(0);
-  const [askText, setAskText] = useState("");
-  const [asking, setAsking] = useState(false);
+  // ★ 2026-11-20：追问（在某条下面补一句）搬去 /my-feedback 了。
+  //   弹窗只负责"提交一条"，追问需要看到上下文（他回了什么、我补什么），
+  //   那是会话页该做的事。原来这里的 askFid / askText / asking / ask()
+  //   一并删掉 —— 留着不用会被 lint 拦，也会让下个人以为这里还能追问。
 
   const loadMine = useCallback(() => {
     // 取 5 条而不是 3 条：开发者回复可能落在稍早的那一条上，
@@ -82,25 +69,6 @@ export default function FeedbackCard({
       });
   }, []);
 
-  /** 在**我这一条**下面补一句话（补完回读列表，不自己拼状态）。 */
-  const ask = useCallback(
-    async (fid: number) => {
-      const t = askText.trim();
-      if (!t || asking) return;
-      setAsking(true);
-      try {
-        await api.replyMyFeedback(fid, t);
-        setAskText("");
-        setAskFid(0);
-        loadMine();
-      } catch (e) {
-        setMsg({ kind: "err", text: e instanceof Error ? e.message : "补充失败" });
-      } finally {
-        setAsking(false);
-      }
-    },
-    [askText, asking, loadMine]
-  );
 
   useEffect(() => {
     // 字典拿不到就退回一个最小可用集合：至少不能让用户连按钮都看不到。
@@ -243,107 +211,35 @@ export default function FeedbackCard({
         </button>
       </div>
 
+      {/* 「我提过的」只留摘要 + 去会话中心看（2026-11-20 第三次改版）。
+          ★ 原来这里是一长串列表，每条带状态、回复链、补充框。
+            用户反馈"这三个地方各长一张脸"（主页弹窗 / 设置页 / 反馈中心），
+            同一个东西三种样子，观感是站不完整。
+            现在分工明确：**提交**在这个弹窗，**看对话**去 /my-feedback
+            （那边是左会话 + 右对话的微信形态，能看不同管理员的回复）。
+          ★ 弹窗里不做左右两栏：560 宽塞两栏会把每栏压到 250 以下，
+            中文断行到没法读。它的任务是"快速提一条"。 */}
       {mine.length > 0 ? (
         <>
           <div className="divide" />
-          <p className="sec-label" style={{ marginBottom: 6 }}>
-            我提过的
-          </p>
-          {mine.map((it) => (
-            <div key={it.id} style={{ padding: "5px 0" }}>
-              <div className="run" style={{ gridTemplateColumns: "1fr auto auto" }}>
-                <span
-                  style={{
-                    minWidth: 0,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {it.content}
-                </span>
-                <span className="meta">{fmtTime(it.created_at)}</span>
-                <span className={`ctag ${STATUS_CLASS[it.status] ?? ""}`}>
-                  {USER_STATUS_TEXT[it.status] ?? it.status_label}
-                </span>
-              </div>
-              {/* 回复链：开发者回复是"我提的有没有人管"的唯一凭据，
-                  所以给它比"状态标签"更显眼的位置，而不是再塞进一行小字。
-                  多条 = 不同管理员先后跟进的，按时间排，每条署上回复人的名字
-                  （用户明确要求看得到是谁回的）。
-                  ★ role="user" 的是**用户自己**补充的话，必须标「我补充」：
-                    不然会显示成「管理员 回复：<自己的话>」，语义直接反了。 */}
-              {(it.replies ?? []).length > 0
-                ? (it.replies ?? []).map((r) => {
-                    const mineMsg = r.role === "user";
-                    return (
-                      <div className={`fb-reply${mineMsg ? " mine" : ""}`} key={r.id}>
-                        <div className="fb-reply-head">
-                          {mineMsg ? "我补充" : `${r.admin_name || "管理员"} 回复`}
-                          {r.created_at ? ` · ${fmtTime(r.created_at)}` : ""}
-                        </div>
-                        <div className="fb-reply-body">{r.content}</div>
-                      </div>
-                    );
-                  })
-                : null}
-
-              {/* 在这条下面追问。收起的形态是一个小按钮：列表有 5 条，
-                  每条都摊开一个输入框会让「我提过的」变成一张表单。 */}
-              {askFid === it.id ? (
-                <div className="fb-ask">
-                  <textarea
-                    className="input"
-                    rows={2}
-                    autoFocus
-                    value={askText}
-                    maxLength={dict?.limits.max_reply ?? 1000}
-                    placeholder="补充一句（只跟在这条下面，不会变成新的反馈）。"
-                    disabled={asking}
-                    onChange={(e) => setAskText(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                        e.preventDefault();
-                        void ask(it.id);
-                      }
-                    }}
-                  />
-                  <div className="fb-ask-foot">
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      disabled={asking}
-                      onClick={() => {
-                        setAskFid(0);
-                        setAskText("");
-                      }}
-                    >
-                      取消
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      disabled={asking || !askText.trim()}
-                      onClick={() => void ask(it.id)}
-                    >
-                      {asking ? "发送中…" : "发送"}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  className="fb-ask-btn"
-                  onClick={() => {
-                    setAskFid(it.id);
-                    setAskText("");
-                  }}
-                >
-                  补充说明
-                </button>
-              )}
-            </div>
-          ))}
+          <div className="fb-mine-head">
+            <p className="sec-label" style={{ margin: 0 }}>
+              我提过的 · {mine.length} 条
+            </p>
+            <a href="/my-feedback" className="fb-mine-all">
+              打开我的反馈 →
+            </a>
+          </div>
+          {/* 只显示最近一条的摘要，让用户确认"我刚才那句在不在" */}
+          <div className="fb-mine-last">
+            <span className="fb-mine-text">{mine[0].content}</span>
+            <span className={`ctag ${STATUS_CLASS[mine[0].status] ?? ""}`}>
+              {USER_STATUS_TEXT[mine[0].status] ?? mine[0].status_label}
+            </span>
+          </div>
+          {mine.length > 1 ? (
+            <p className="meta fb-mine-more">另有 {mine.length - 1} 条，在「我的反馈」里</p>
+          ) : null}
         </>
       ) : null}
     </>

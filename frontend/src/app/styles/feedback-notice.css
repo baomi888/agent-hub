@@ -113,3 +113,67 @@
 .fb-goto:hover {
   text-decoration: underline;
 }
+
+/* 设置页的反馈入口卡（2026-11-20）：只做"让你找得到"，不再内嵌提交框 */
+.fb-entry {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.fb-entry-main {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.fb-entry-main b {
+  display: block;
+  font-size: var(--fs-sm);
+  color: var(--ink);
+  margin-bottom: 3px;
+}
+.fb-entry-main .meta {
+  margin: 0;
+  line-height: 1.6;
+}
+
+/* 弹窗里「我提过的」摘要行 */
+.fb-mine-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.fb-mine-all {
+  font-size: var(--fs-badge);
+  color: var(--accent-ink);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.fb-mine-all:hover {
+  text-decoration: underline;
+}
+.fb-mine-last {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+.fb-mine-text {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+  font-size: var(--fs-xs);
+}
+.fb-mine-more {
+  margin: 2px 0 0;
+}
+
+@media (max-width: 640px) {
+  .fb-entry {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

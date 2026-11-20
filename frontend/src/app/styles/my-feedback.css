@@ -1,285 +1,385 @@
-/* ==================== 我的反馈（用户端，2026-11-20）====================
-   和后台上那个 fbim-* 是两套东西：
-     · 管理员的 /feedback 是"分诊台"：三张图 + 按人会话 + 逐条回复
-     · 用户的 /my-feedback 是"查询台"：状态条 + 我提的那几条 + 卡内时间线
-   刻意没有图表 —— 用户不关心全站出错了 6 条，只关心自己这条怎么样了。
-   ---------------------------------------------------------------------- */
+/* ==================== 我的反馈 · 用户端会话中心（2026-11-20 第三版）====================
+   微信式：左会话列表 + 右对话气泡。
+   刻意和后台上那个 fbim-* 是两套：
+     · 管理员的 /feedback 是"分诊台"——很多人的很多条，一条一张卡 + 三张图
+     · 用户的 /my-feedback 是"我和知穗的对话"——只有他自己，会话流
+   两边形态不同，因为两边要回答的问题不同（见 page.tsx 头注释）。
+   ------------------------------------------------------------------------- */
 
-.mf-wrap {
-  max-width: 780px;
-  margin: 0 auto;
-  padding: 24px 20px 64px;
+.mfc {
+  display: grid;
+  grid-template-columns: 264px minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  overflow: hidden;
+  background: var(--card-bg);
+}
+
+/* ---------------- 左侧会话列表 ---------------- */
+.mfc-list {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  min-height: 0;
+  border-right: 1px solid var(--line);
+  background: var(--fill-1, var(--card-bg));
 }
 
-.mf-head {
+.mfc-list-head {
   display: flex;
-  align-items: flex-start;
+  align-items: baseline;
   justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--line);
 }
-.mf-head h1 {
-  font-size: var(--fs-lg);
+.mfc-list-head b {
+  font-size: var(--fs-sm);
   color: var(--ink);
-  margin: 0 0 4px;
 }
-.mf-head .meta {
-  margin: 0;
+.mfc-back {
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.mfc-back:hover {
+  color: var(--accent-ink);
 }
 
-/* ---------- 状态条：三个数，没有图 ---------- */
-.mf-stats {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  text-align: center;
-}
-.mf-stat {
+.mfc-items {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
-.mf-stat b {
-  font-size: var(--fs-lg);
-  color: var(--ink);
-  font-variant-numeric: tabular-nums;
-  line-height: 1.2;
-}
-.mf-stat span {
-  font-size: var(--fs-xs);
-  color: var(--text-3);
-}
-/* 分隔线用相邻兄弟选择器画，避免多套一层容器 */
-.mf-stat + .mf-stat {
-  border-left: 1px solid var(--line);
-}
 
-/* ---------- 卡片 ---------- */
-.mf-list {
+.mfc-item {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 5px;
+  width: 100%;
+  text-align: left;
+  padding: 9px 10px;
+  border-radius: var(--r-card);
+  border: 1px solid transparent;
+  background: none;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
 }
-.mf-card {
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+.mfc-item:hover {
+  background: var(--fill-2);
 }
-.mf-card-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+/* 选中态：浅金底 + 左边一道金色竖条（微信的"当前会话"感） */
+.mfc-item.on {
+  background: var(--accent-tint);
+  border-color: var(--accent-line-soft, var(--line));
 }
 
-/* 分类：斜杠色块 + 名称（和管理员面板同一个视觉语言，
-   颜色由 cat-* 给 --cat-ink，不在这里写死色值） */
-.mf-cat {
-  display: inline-flex;
+.mfc-item-top {
+  display: flex;
   align-items: center;
   gap: 6px;
-  font-size: var(--fs-xs);
+}
+
+/* 分类：斜杠色块 + 名字（与后台、与卡片头同一套视觉语言） */
+.mfc-cat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-badge);
   font-weight: 600;
   color: var(--cat-ink);
+  white-space: nowrap;
 }
-.mf-cat i {
+.mfc-cat i {
   width: 3px;
-  height: 12px;
+  height: 11px;
   border-radius: var(--r-pill);
   background: var(--cat-ink);
   transform: skewX(-12deg);
 }
 
-/* 状态：药丸，四档色。用户侧的四档词见 page.tsx 的 ST_LABEL */
-.mf-st {
-  font-size: var(--fs-badge);
-  padding: 2px 8px;
+/* 状态药丸：用户侧四档（已收到 / 正在处理 / 已解决 / 已关闭） */
+.mfc-st {
+  font-size: 10px;
+  padding: 1px 6px;
   border-radius: var(--r-pill);
   border: 1px solid transparent;
   white-space: nowrap;
+  line-height: 1.5;
 }
-.mf-st.st-open {
+.mfc-st.st-open {
   color: var(--text-2);
   background: var(--fill-2);
   border-color: var(--line);
 }
-.mf-st.st-doing {
+.mfc-st.st-doing {
   color: var(--accent-ink);
   background: var(--accent-tint);
-  border-color: transparent;
 }
-.mf-st.st-done {
-  color: var(--ok-ink, #35705e);
-  background: var(--ok-tint, rgba(78, 139, 121, 0.14));
+.mfc-st.st-done {
+  /* ★ 原来写的 --ok-tint / --ok-ink 这两个变量**项目里根本不存在**，
+     回退值里的 0.14 透明度在深色底上等于透明 —— 截图里两个"已解决"
+     药丸几乎看不见。改用项目真有的 --success / --success-ink，
+     并用 color-mix 配底色（深浅两套自动跟随，不用再写第二条 dark 规则）。 */
+  color: var(--success-ink);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
 }
-.mf-st.st-closed {
+.mfc-st.st-closed {
   color: var(--text-3);
   background: transparent;
   border-color: var(--line);
   border-style: dashed;
 }
 
-.mf-time {
-  margin-left: auto;
+/* 标题 = 用户原话，一行截断（列表里不需要读全文） */
+.mfc-item-title {
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.mf-body {
-  margin: 0;
+.mfc-item-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.mfc-item-foot .meta {
+  font-size: var(--fs-badge);
+}
+/* 回复数徽标：让"哪条有人回了"在列表层面就看得出来 */
+.mfc-count {
+  margin-left: auto;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------- 右侧对话 ---------------- */
+.mfc-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.mfc-main-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+.mfc-main-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.mfc-main-time {
+  margin-left: auto;
+  white-space: nowrap;
+}
+/* 返回列表的箭头只在窄屏出现 */
+.mfc-backbtn {
+  display: none;
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: none;
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: var(--r-pill);
+}
+.mfc-backbtn:hover {
+  background: var(--fill-2);
+}
+
+.mfc-msgs {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 16px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* 一行消息：管理员在左（含署名），我在右 */
+.mfc-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  max-width: 78%;
+}
+.mfc-row.me {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.mfc-who {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--fs-badge);
+  color: var(--text-3);
+}
+.mfc-who i {
+  font-style: normal;
+  opacity: 0.8;
+}
+
+/* 气泡：我 = 纸底描边；管理员 = 金色淡底（一眼看出"这是他们的回音"） */
+.mfc-bubble {
+  padding: 9px 12px;
+  border-radius: var(--r-card);
   font-size: var(--fs-sm);
   line-height: 1.65;
   color: var(--ink);
   white-space: pre-wrap;
   word-break: break-word;
-}
-.mf-page {
-  margin: -6px 0 0;
-}
-
-/* ---------- 卡内时间线（多条回复 / 多次补充） ---------- */
-.mf-thread {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-left: 10px;
-  /* 左侧一条竖线 = "这些是来回"，让多条回复读起来是一串而不是散块 */
-  border-left: 2px solid var(--line);
-}
-.mf-more {
-  align-self: flex-start;
-  font-size: var(--fs-badge);
-  color: var(--accent-ink);
-  background: none;
-  border: none;
-  padding: 2px 0;
-  cursor: pointer;
-}
-.mf-more:hover {
-  text-decoration: underline;
-}
-
-.mf-reply {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 8px 10px;
-  border-radius: var(--r-card);
-  background: var(--fill-2);
-}
-/* 管理员回复用金色淡底 —— 用户一眼看出"这是他们的回音"，
-   而不是自己又说了什么 */
-.mf-reply:not(.mine) {
   background: var(--accent-tint);
 }
-.mf-reply.mine {
+.mfc-row.me .mfc-bubble {
   background: var(--fill-2);
+  border: 1px solid var(--line);
 }
-.mf-reply-who {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
+
+.mfc-time {
   font-size: var(--fs-badge);
-}
-.mf-reply-who b {
-  color: var(--ink);
-  font-weight: 600;
-}
-.mf-reply-who time {
   color: var(--text-3);
 }
-.mf-reply p {
-  margin: 0;
-  font-size: var(--fs-xs);
-  line-height: 1.6;
-  color: var(--ink);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
 
-.mf-wait {
-  margin: 0;
-  padding: 8px 10px;
-  border-radius: var(--r-card);
+/* "还没回复"的提示：不占气泡位，当一行系统提示 */
+.mfc-wait {
+  align-self: center;
+  margin: 4px 0 0;
+  padding: 5px 10px;
+  border-radius: var(--r-pill);
   background: var(--fill-2);
+  color: var(--text-3);
+  font-size: var(--fs-badge);
+  text-align: center;
 }
 
-/* ---------- 补充说明 ---------- */
-.mf-compose {
+/* ---------------- 输入区 ---------------- */
+.mfc-compose {
+  flex: 0 0 auto;
   display: flex;
   align-items: flex-end;
   gap: 8px;
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--line);
 }
-.mf-compose textarea {
+.mfc-compose textarea {
   flex: 1 1 auto;
-  min-height: 34px;
+  min-height: 36px;
   max-height: 120px;
-  resize: vertical;
-  padding: 7px 10px;
+  resize: none;
+  padding: 8px 11px;
   border-radius: var(--r-card);
   border: 1px solid var(--line);
   background: var(--card-bg);
   color: var(--ink);
   font: inherit;
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
   line-height: 1.5;
 }
-.mf-compose textarea:focus {
+.mfc-compose textarea:focus {
   outline: none;
   border-color: var(--accent);
 }
-.mf-send {
-  flex: 0 0 auto;
-  white-space: nowrap;
-}
 
-/* ---------- 空态 / 错误 ---------- */
-.mf-empty {
+/* ---------------- 空态 / 骨架 / 错误 ---------------- */
+.mfc-empty,
+.mfc-placeholder {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 10px;
+  padding: 20px 16px;
 }
-.mf-empty b {
+.mfc-placeholder {
+  margin: auto;
+  align-items: center;
+  text-align: center;
+}
+.mfc-empty b {
   color: var(--ink);
   font-size: var(--fs-sm);
 }
-.mf-empty .meta {
+.mfc-empty .meta {
   margin: 0;
   line-height: 1.7;
 }
-.mf-err {
-  padding: 10px 12px;
+.mfc-skel {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.mfc-skel-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 10px;
+  border-radius: var(--r-card);
+}
+.mfc-err {
+  margin: 10px 12px 0;
+  padding: 8px 10px;
   border-radius: var(--r-card);
   background: var(--danger-tint, rgba(192, 82, 63, 0.1));
   color: var(--danger-ink, #a03e28);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-badge);
 }
 
-/* ---------- 窄屏 ---------- */
-@media (max-width: 640px) {
-  .mf-wrap {
-    padding: 16px 12px 48px;
+/* ---------------- 窄屏：列表 / 对话 二选一 ----------------
+   微信手机端就是这样的：先看列表，点进去是整屏对话，左上角返回。
+   两栏并排在 390 宽下每边只剩 130px，说什么都塞不下。 */
+@media (max-width: 900px) {
+  .mfc {
+    grid-template-columns: minmax(0, 1fr);
   }
-  .mf-head {
-    flex-direction: column;
+  .mfc-list {
+    border-right: none;
   }
-  /* 手机上卡头会挤：时间换到下一行，不和分类/状态抢 */
-  .mf-time {
-    margin-left: 0;
-    width: 100%;
+  /* 没进对话：只显示列表 */
+  .mfc:not(.has-thread) .mfc-main {
+    display: none;
   }
-  .mf-compose {
-    flex-direction: column;
-    align-items: stretch;
+  /* 进了对话：隐藏列表，让对话吃满整屏 */
+  .mfc.has-thread .mfc-list {
+    display: none;
   }
-  .mf-send {
-    align-self: flex-end;
+  .mfc-backbtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
-  /* iOS Safari 聚焦 <16px 的输入框会放大整页且不还原（见 a11y.css 同款规则） */
-  .mf-compose textarea {
+  .mfc-row {
+    max-width: 86%;
+  }
+  /* iOS Safari 聚焦 <16px 的输入框会放大整页且不还原（同 a11y.css 的规矩） */
+  .mfc-compose textarea {
     font-size: 16px;
   }
 }

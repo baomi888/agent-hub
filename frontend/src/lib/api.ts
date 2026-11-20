@@ -20,6 +20,7 @@ import type {
 import type { KbProposal, KbProposalConfirmResult } from "./types";
 import type { UserFeedbackItem } from "./types";
 import type { FeedbackUnreadResp } from "./types";
+import type { MyFeedbackThreadResp } from "./types";
 import type { IssuedApproval } from "./types";
 import type { DialogueCandidatesResp, ImportDialogueResult, CourseReminderState } from "./types";
 import type { CalendarLink } from "./types";
@@ -895,6 +896,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ text }),
     }),
+
+  /** 我的反馈全会话流（左列表 + 右对话，2026-11-20）。
+   *  items = 每条一行；messages = 全局时间序（顺序由后端给，前端别重排）。 */
+  myFeedbackThread: () => request<MyFeedbackThreadResp>("/api/user-feedback/thread"),
 
   /** 我有没有"新回音"（首页提示条 + 入口红点用的轻接口，2026-11-20）。
    *  ★ 刻意只回摘要：首页每次加载都调它，不该顺带拉回复正文。 */

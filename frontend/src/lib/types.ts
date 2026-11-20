@@ -1128,6 +1128,58 @@ export interface FeedbackUnreadItem {
   created_at: number;
 }
 
+/** 会话形态的一条消息（2026-11-20）。来自 GET /api/user-feedback/thread 的 messages[]。
+ *
+ *  ★ 顺序由**后端**给（全局时间序），前端不要按 fid 分组后重排：
+ *    那会得到「A 的提问 → 对 A 的回复 → B 的提问」，而 B 明明早于那条回复。
+ *    这个坑 core/user_feedback.py 的 thread() 注释里记着实测事故。 */
+export interface MyFeedbackMessage {
+  /** "user"（提问）| "user_reply"（我在某条下面补充）| "admin"（管理员回复） */
+  kind: "user" | "user_reply" | "admin";
+  fid: number;
+  /** 回复行的 id；提问那条没有 */
+  rid?: number;
+  /** unix 秒 */
+  at: number;
+  text: string;
+  /** 管理员署名；提问/补充为空串 */
+  author?: string;
+  author_uid?: string;
+  category: string;
+  category_label: string;
+  status: FeedbackStatus;
+  status_label: string;
+  /** 用户侧状态词（已收到/正在处理/已解决/已关闭） */
+  user_status_label?: string;
+  page?: string;
+}
+
+/** 会话列表的一行（一条反馈）。来自 thread 的 items[]。 */
+export interface MyFeedbackItem {
+  fid: number;
+  /** 提问时间 */
+  at: number;
+  /** 这条会话最后一次动静（有回复就是最后回复时间）；后端不给时前端回退 at */
+  last_at?: number;
+  text: string;
+  category: string;
+  category_label: string;
+  status: FeedbackStatus;
+  status_label: string;
+  user_status_label?: string;
+  page?: string;
+  /** 回复条数 */
+  replies: number;
+}
+
+export interface MyFeedbackThreadResp {
+  uid: string;
+  name: string;
+  total: number;
+  items: MyFeedbackItem[];
+  messages: MyFeedbackMessage[];
+}
+
 export interface FeedbackUnreadResp {
   unread: number;
   /** 最近一次"有新动静"的时间戳；0 = 没有 */
