@@ -13,10 +13,27 @@ from core.security_email import SecurityEmailService
 from core.verification import VerificationStore
 
 
-def register_verified(client, username, password):
+def _assert_isolated_db() -> None:
+    """只允许对临时库做注册准备。
+
+    两种测试入口都放行，语义一致（生产库在 <仓库>/data/ 下，绝不放行）：
+    · tools/run_isolated_tests.py：ZHISUI_TEST_SANDBOX 指向本次临时目录，严格前缀校验；
+    · 传统 pytest：各测试自己 monkeypatch _db_path 到 tempfile 目录 —— 只要求
+      库路径不在仓库目录内（Windows 下 gettempdir() 与 mkdtemp 的盘符/大小写
+      形态可能不一致，前缀比较不可靠，用「排除仓库根」这个不变式代替）。
+    """
+    path = Path(session._db_path()).resolve()
     sandbox = os.environ.get("ZHISUI_TEST_SANDBOX")
-    if not sandbox or not Path(session._db_path()).resolve().is_relative_to(Path(sandbox).resolve()):
+    if sandbox:
+        ok = path.is_relative_to(Path(sandbox).resolve())
+    else:
+        ok = not path.is_relative_to(Path(__file__).resolve().parents[1])
+    if not ok:
         raise RuntimeError("测试账号准备只允许独立临时数据库")
+
+
+def register_verified(client, username, password):
+    _assert_isolated_db()
     account._ensure_tables()
     email = secrets.token_hex(12) + "@example.com"
     store = VerificationStore(session._db_path(), hashlib.sha256(b"security-email-verification:" + _secret()).digest())

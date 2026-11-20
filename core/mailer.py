@@ -217,12 +217,17 @@ def send(
             client.send_message(msg)
     except Exception as exc:  # noqa: BLE001 — 这里是唯一的错误收口，必须全接住
         code, retryable = _classify(exc)
-        # 只记错误码与第一行，**不记完整异常体**：smtplib 的 str(exc) 里带
-        # 服务器原始响应，某些服务器会回显账号，日志会被 grep 到。
-        detail = str(exc).splitlines()[0][:200] if str(exc) else code
-        # ★ 补一刀：SMTPRecipientsRefused 的 str() 是 `{'收件人': (550, ...)}`，
-        #   地址会绕过上面的 to= 打码原样进日志。日志是要被分享出去排障的。
-        detail = detail.replace(recipients[0], _mask(recipients[0]))
+        # SMTP 原始响应可能回显凭证、验证码或地址，**一律不进日志和接口**。
+        # 用固定说明替代外部响应；分类码（code）与重试判断保留，排障先看它。
+        # 提醒兜底与安全邮箱验证码共用这条通道，泄露面必须按最严格的那边算。
+        detail = {
+            "auth_failed": "发信账号认证失败（多为授权码填错或被收回）",
+            "recipient_refused": "收件地址被对方邮件服务拒绝",
+            "sender_refused": "发件地址被对方邮件服务拒绝",
+            "network": "邮件服务暂时不可用，稍后重试",
+            "smtp_unsupported": "邮件服务认证方式不受支持",
+        }.get(code, "邮件服务暂时不可用")
+        detail = f"{detail} ({_mask(recipients[0])})"
         logger.warning("mail send failed to=%s code=%s detail=%s", _mask(recipients[0]), code, detail)
         return {"ok": False, "error": code, "retryable": retryable, "detail": detail}
 

@@ -141,9 +141,13 @@ def test_concurrent_unique_email_bind_has_one_winner(env):
 
 
 def test_reminder_email_and_safety_are_independent(env):
+    """main 已有提醒邮件模块（/api/mail，提醒兜底投递的管理端点）。
+
+    独立性在这里的含义是：两条业务各自存储、互不清除 —— 安全邮箱
+    不提供「解除绑定」入口，绑定后地址固定。
+    """
     s, (cli, _), messages, _ = env
     bind(cli, messages)
-    assert cli.delete("/api/mail").status_code == 404  # 目标分支不包含提醒邮件模块
     assert cli.delete("/api/auth/security-email").status_code == 405
     assert cli.get("/api/auth/security-email").json()["bound"] is True
     with sqlite3.connect(s.store.path) as db:
