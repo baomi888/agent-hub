@@ -162,7 +162,7 @@ export default function MyFeedbackPage() {
           <h1>我的反馈</h1>
           <p className="meta">你提的问题、我们的回复，都在这。</p>
         </div>
-        <Link className="btn btn-ghost" href="/chat">
+        <Link className="btn btn-ghost" href="/">
           回到对话
         </Link>
       </header>
@@ -198,7 +198,7 @@ export default function MyFeedbackPage() {
             遇到出错、答得不好、想要的功能，都可以在对话页右下角的「反馈」里告诉我们。
             提过的每一条都会出现在这里，包括我们的回复。
           </p>
-          <Link className="btn btn-primary" href="/chat">
+          <Link className="btn btn-primary" href="/">
             去提第一条
           </Link>
         </div>
