@@ -19,6 +19,7 @@ import { useConsoleAccount } from "@/components/console/ConsoleLayout";
 import CornIcon from "@/components/CornIcon";
 import AvatarPicker from "@/components/settings/AvatarPicker";
 import PasswordDialog from "@/components/settings/PasswordDialog";
+import SecurityEmailSettings from "@/components/settings/SecurityEmailSettings";
 import UsernameDialog from "@/components/settings/UsernameDialog";
 import UserAvatar from "@/components/settings/UserAvatar";
 import FeedbackCard from "@/components/FeedbackCard";
@@ -196,6 +197,8 @@ export default function SettingsPage() {
                 现在改成一句真实的、用户可能真会问的话。 */}
             <p className="hint">密码、昵称、头像都能在这里改。改登录名要验证一次密码。</p>
           </section>
+
+          <SecurityEmailSettings key={authedId ?? "none"} />
 
           {/* 兴趣方向：30 条定稿词表（core/tag_taxonomy.py）。
               放在账号下面、外观上面 —— 它是"我是谁"的一部分，不是外观偏好。

@@ -572,3 +572,22 @@ def validate() -> list[str]:
     if not EMBEDDING_BASE_URL:
         missing.append("缺少 EMBEDDING_BASE_URL（向量化服务地址）")
     return missing
+
+
+# ---------- 账号安全验证码邮件（凭证只从环境加载）----------
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.qq.com").strip()
+SMTP_PORT = _env_int("SMTP_PORT", 465)
+SMTP_USER = os.getenv("SMTP_USER", "").strip()
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "").strip()
+SMTP_FROM = os.getenv("SMTP_FROM", "").strip() or SMTP_USER
+SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "知穗 Agent").strip()
+SMTP_SECURITY = os.getenv("SMTP_SECURITY", "ssl").strip().lower()
+SMTP_TIMEOUT = _env_int("SMTP_TIMEOUT", 12)
+MAIL_ENABLED = os.getenv("MAIL_ENABLED", "1").strip().lower() not in ("0", "false", "no")
+# 默认关闭；发布时需显式迁移验证码表并配置环境后再启用。
+SECURITY_EMAIL_ENABLED = os.getenv("SECURITY_EMAIL_ENABLED", "0").strip().lower() in ("1", "true", "yes")
+
+
+def mail_ready() -> bool:
+    """邮件传输所需配置齐备才允许发送。"""
+    return bool(MAIL_ENABLED and SMTP_HOST and SMTP_USER and SMTP_PASSWORD and SMTP_FROM)

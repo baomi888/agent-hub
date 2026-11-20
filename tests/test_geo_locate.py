@@ -14,6 +14,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.testclient import TestClient  # noqa: E402
+from registration_support import register_verified
 
 from api.geo import _client_ip, _is_public_ip
 from core import config
@@ -68,7 +69,7 @@ from main import app  # noqa: E402
 
 client = TestClient(app)
 # 定位接口现在也要登录（多用户隔离后所有业务路由默认鉴权），先注册再拿 Cookie
-client.post("/api/auth/register/", json={"username": "geotester", "password": "test12345"})
+register_verified(client, "geotester", "test12345")
 _lg = client.post("/api/auth/login/", json={"username": "geotester", "password": "test12345"})
 assert _lg.status_code == 200, (_lg.status_code, _lg.text)
 

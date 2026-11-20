@@ -901,3 +901,9 @@ export interface EnhanceResult {
   vocab: { file: string; terms: number };
   warnings: string[];
 }
+
+/** 注册邮箱的短期证明，仅保存在当前表单内存中。 */
+export interface RegistrationEmail {
+  email: string;
+  email_grant: string;
+}

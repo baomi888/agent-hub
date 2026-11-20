@@ -421,7 +421,8 @@ class TestScheduleApi(unittest.TestCase):
 
     @staticmethod
     def _register(client, name):
-        r = client.post("/api/auth/register/", json={"username": name, "password": "secret123"})
+        from registration_support import register_verified
+        r = register_verified(client, name, "secret123")
         assert r.status_code == 200, r.text
         return r.json()
 

@@ -33,12 +33,15 @@ from api.geo import router as geo_router
 from api.hybrid import router as hybrid_router
 from api.kb import router as kb_router
 from api.metrics import router as metrics_router
+from api.password_reset import router as password_reset_router
 from api.path import router as path_router
 from api.profile import router as profile_router
 from api.prompt_evo import router as prompt_evo_router
 from api.query import router as query_router
+from api.registration import router as registration_router
 from api.report import router as report_router
 from api.schedule import router as schedule_router
+from api.security_email import router as security_email_router
 from api.sessions import router as sessions_router
 from api.templates import router as templates_router
 from api.usage import router as usage_router
@@ -166,6 +169,9 @@ if config.CORS_ALLOW_LOCALHOST:
 # 其余四个业务 router 都在各自文件里挂了 dependencies=[Depends(get_current_user)]，
 # 做成"默认要登录"——新增端点时忘了写鉴权，默认也是安全的那一侧。
 app.include_router(auth_router, prefix="/api/auth", tags=["认证"])
+app.include_router(registration_router, prefix="/api/auth", tags=["注册邮箱验证"])
+app.include_router(password_reset_router, prefix="/api/auth", tags=["邮箱找回密码"])
+app.include_router(security_email_router, prefix="/api/auth", tags=["账号安全"])
 # Agent 编排的元数据端点（工具清单 / 延迟发现）：只读代码里的 TOOL_META，不执行工具
 app.include_router(agent_router, prefix="/api/agent", tags=["Agent 编排"])
 app.include_router(kb_router, prefix="/api/kb", tags=["知识库"])

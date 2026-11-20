@@ -39,6 +39,7 @@ core.session._init_db()
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from registration_support import register_verified
 
 import main as m  # noqa: E402
 from api.sessions import router as sessions_router  # noqa: E402
@@ -99,7 +100,7 @@ for b in bad[:10]:
 
 def _login(c):
     """注册 + 登录，把 Cookie 挂到 client 上，之后请求就是"已登录用户"。"""
-    c.post("/api/auth/register/", json={"username": "slashtester", "password": "test12345"})
+    register_verified(c, "slashtester", "test12345")
     r = c.post("/api/auth/login/", json={"username": "slashtester", "password": "test12345"})
     assert r.status_code == 200, (r.status_code, r.text)
     return r

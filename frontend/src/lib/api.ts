@@ -1,3 +1,4 @@
+import type { RegistrationEmail } from "./types";
 // 后端 API 封装：统一错误处理 + 类型化（相对路径走 rewrites 代理）
 import type { Conversation, KbInfo, KbFile, FilePreview, SearchResult, Defaults, Message } from "./types";
 import type { KbProposalConfirmResult } from "./types";
@@ -445,7 +446,7 @@ export const api = {
   },
 
   // ---------- 登录 ----------
-  authConfig: () => request<{ allow_signup: boolean }>("/api/auth/config/"),
+  authConfig: () => request<{ allow_signup: boolean; require_email: boolean; email_ready: boolean }>("/api/auth/config/"),
   login: async (username: string, password: string) => {
     const u = await request<UserOut>("/api/auth/login/", {
       method: "POST",
@@ -455,10 +456,10 @@ export const api = {
     notifyAuthorized();
     return u;
   },
-  register: async (username: string, password: string) => {
+  register: async (username: string, password: string, emailProof: RegistrationEmail) => {
     const u = await request<UserOut>("/api/auth/register/", {
       method: "POST",
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, ...emailProof }),
     });
     notifyAuthorized();
     return u;
@@ -466,6 +467,47 @@ export const api = {
   logout: () => request<{ ok: boolean }>("/api/auth/logout/", { method: "POST" }),
   me: () => request<MeOut>("/api/auth/me/"),
 
+  passwordReset: {
+    send: (address: string) => request<{request_id:string; message:string; resend_after:number}>("/api/auth/password/reset/email/send", {
+      method:"POST", body:JSON.stringify({address}),
+    }),
+    verify: (requestId: string, code: string) => request<{grant:string}>("/api/auth/password/reset/email/verify", {
+      method:"POST", body:JSON.stringify({request_id:requestId,code}),
+    }),
+    finish: async (grant:string,newPassword:string,confirmPassword:string) => {
+      const result=await request<{ok:boolean}>("/api/auth/password/reset", {
+        method:"POST",body:JSON.stringify({grant,new_password:newPassword,confirm_password:confirmPassword}),
+      });
+      notifyUnauthorized();
+      return result;
+    },
+  },
+  registrationEmail: {
+    send: (address: string) => request<{ request_id: string; expires_in: number; resend_after: number }>("/api/auth/register/email/send", {
+      method: "POST", body: JSON.stringify({ address }),
+    }),
+    verify: (requestId: string, code: string) => request<{ grant: string }>("/api/auth/register/email/verify", {
+      method: "POST", body: JSON.stringify({ request_id: requestId, code }),
+    }),
+  },
+  securityEmail: {
+    state: () => request<{ ready: boolean; bound: boolean; masked_email: string | null }>("/api/auth/security-email"),
+    send: (purpose: "bind_email" | "change_email_old" | "change_email_new", flow: string, address?: string) =>
+      request<{ request_id: string; flow: string; expires_in: number; resend_after: number }>("/api/auth/email/code/send", {
+        method: "POST", body: JSON.stringify({ purpose, flow, address }),
+      }),
+    verify: (requestId: string, code: string) =>
+      request<{ grant: string }>("/api/auth/email/code/verify", {
+        method: "POST", body: JSON.stringify({ request_id: requestId, code }),
+      }),
+    bind: (grant: string) => request<{ ready: boolean; bound: boolean; masked_email: string | null }>("/api/auth/security-email/bind", {
+      method: "POST", body: JSON.stringify({ grant }),
+    }),
+    change: (oldGrant: string, newGrant: string) =>
+      request<{ ready: boolean; bound: boolean; masked_email: string | null }>("/api/auth/security-email/change", {
+        method: "POST", body: JSON.stringify({ old_grant: oldGrant, new_grant: newGrant }),
+      }),
+  },
   // ---------- 账号自助 ----------
   // 三个都返回新的 MeOut，调用方拿到直接 set 进登录态即可，不用再拉一次 /me。
   // 注意**不带尾斜杠**：新端点统一规矩（见后端 main.py 的 normalize_api_slash）。

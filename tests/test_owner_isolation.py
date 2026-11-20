@@ -22,6 +22,7 @@ core.session._init_db()
 core.config._AUTH_SECRET_FILE = os.path.join(_TMP, ".auth_secret")
 
 from fastapi.testclient import TestClient  # noqa: E402
+from registration_support import register_verified
 
 import main  # noqa: E402
 from core import session as store  # noqa: E402
@@ -42,7 +43,7 @@ def check(name: str, cond: bool, extra: str = ""):
 
 def _login(username: str, password: str = "pw123456") -> TestClient:
     c = TestClient(main.app)
-    r = c.post("/api/auth/register/", json={"username": username, "password": password})
+    r = register_verified(c, username, password)
     assert r.status_code == 200, r.text
     return c
 

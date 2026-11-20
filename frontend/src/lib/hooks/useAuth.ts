@@ -9,7 +9,7 @@
 //      只是失败被埋在某个 hook 的 catch 里。
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AUTHORIZED_EVENT, UNAUTHORIZED_EVENT, api } from "@/lib/api";
-import type { MeOut } from "@/lib/types";
+import type { MeOut, RegistrationEmail } from "@/lib/types";
 
 export interface AuthState {
   /** null = 未登录；undefined 的语义不存在，未登录就是 null */
@@ -19,7 +19,7 @@ export interface AuthState {
   allowSignup: boolean;
   refresh: () => Promise<void>;
   login: (username: string, password: string) => Promise<void>;
-  register: (username: string, password: string) => Promise<void>;
+  register: (username: string, password: string, emailProof: RegistrationEmail) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -86,8 +86,8 @@ export function useAuth(): AuthState {
     await refresh();
   }, [refresh]);
 
-  const register = useCallback(async (username: string, password: string) => {
-    await api.register(username, password);
+  const register = useCallback(async (username: string, password: string, emailProof: RegistrationEmail) => {
+    await api.register(username, password, emailProof);
     await refresh();
   }, [refresh]);
 

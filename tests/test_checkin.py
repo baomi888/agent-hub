@@ -23,6 +23,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.testclient import TestClient  # noqa: E402
+from registration_support import register_verified
 
 import core.account  # noqa: E402
 import core.config  # noqa: E402
@@ -119,7 +120,7 @@ def test_service_owner_isolation(monkeypatch):
 
 
 def _login(c: TestClient, username: str, password: str = "pw123456") -> str:
-    c.post("/api/auth/register/", json={"username": username, "password": password})
+    register_verified(c, username, password)
     r = c.post("/api/auth/login/", json={"username": username, "password": password})
     assert r.status_code == 200, (r.status_code, r.text)
     return r.json()["id"]  # owner_id 是注册后生成的用户 id，不是用户名

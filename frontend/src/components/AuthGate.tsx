@@ -6,14 +6,18 @@
 // 按用户隔离的，弹一个"请登录"的小框、背后还留着别人的会话列表，等于把
 // 隔离做了一半。整页挡住最干净，也顺带避免了首屏先渲染空列表再跳走的闪烁。
 import { useState } from "react";
+import Link from "next/link";
 import MascotLogo from "./chat/MascotLogo";
+import RegistrationEmailFields from "./RegistrationEmailFields";
+import PasswordInput from "./PasswordInput";
+import type { RegistrationEmail } from "@/lib/types";
 
 interface Props {
   allowSignup: boolean;
   /** 首屏探活中：这段先不渲染表单，免得用户填一半被告知"其实你已登录" */
   checking?: boolean;
   onLogin: (username: string, password: string) => Promise<void>;
-  onRegister: (username: string, password: string) => Promise<void>;
+  onRegister: (username: string, password: string, emailProof: RegistrationEmail) => Promise<void>;
 }
 
 export default function AuthGate({ allowSignup, checking, onLogin, onRegister }: Props) {
@@ -22,6 +26,7 @@ export default function AuthGate({ allowSignup, checking, onLogin, onRegister }:
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [emailProof, setEmailProof] = useState<RegistrationEmail | null>(null);
 
   // 注册被关闭时（ALLOW_SIGNUP=0）强制退回登录态。
   // 用派生值而不是 useEffect + setState：后者是"在 effect 里同步改状态"，
@@ -53,11 +58,14 @@ export default function AuthGate({ allowSignup, checking, onLogin, onRegister }:
         return;
       }
     }
+    if (currentMode === "register" && !emailProof) {
+      setError("请先验证注册邮箱"); return;
+    }
     setBusy(true);
     setError(null);
     try {
       if (currentMode === "login") await onLogin(u, password);
-      else await onRegister(u, password);
+      else if (emailProof) await onRegister(u, password, emailProof);
     } catch (e) {
       setError(e instanceof Error ? e.message : "操作失败，请重试");
     } finally {
@@ -77,6 +85,8 @@ export default function AuthGate({ allowSignup, checking, onLogin, onRegister }:
           <h1 className="auth-name">知穗 Agent</h1>
         </div>
 
+        <p className="hint">注册时需要验证邮箱；登录仍使用登录名和密码。</p>
+
         {allowSignup && (
           <div className="auth-seg" role="tablist" aria-label="登录或注册">
             {(
@@ -92,6 +102,7 @@ export default function AuthGate({ allowSignup, checking, onLogin, onRegister }:
                 aria-selected={currentMode === t.v}
                 onClick={() => {
                   setMode(t.v);
+                  setEmailProof(null);
                   setError(null);
                 }}
               >
@@ -121,17 +132,16 @@ export default function AuthGate({ allowSignup, checking, onLogin, onRegister }:
             />
           </label>
 
-          <label className="auth-label">
-            <span>密码</span>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete={currentMode === "register" ? "new-password" : "current-password"}
-              placeholder={currentMode === "register" ? "至少 8 位" : ""}
-              className="auth-input"
-            />
-          </label>
+          <PasswordInput key={currentMode} label="密码" value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete={currentMode === "register" ? "new-password" : "current-password"}
+            placeholder={currentMode === "register" ? "至少 8 位" : ""} />
+          {currentMode === "login" && (
+            <div style={{textAlign:"right",marginTop:-8}}>
+              <Link href="/reset-password" className="hint">找回密码</Link>
+            </div>
+          )}
+          {currentMode === "register" && <RegistrationEmailFields onProof={setEmailProof} />}
 
           {error && (
             <p className="text-fs-sm text-red-ink" role="alert">
