@@ -122,7 +122,8 @@ export default function AuthGate({ allowSignup, checking, backHref, onLogin, onR
         {currentMode === "login" && via === "email" ? (
           <>
             <EmailCodeLoginFields />
-            <div style={{ textAlign: "right", marginTop: -8 }}>
+            {/* 链接在提交按钮之后，不能用负边距上提（会叠到按钮上，2026-11-21 用户截图） */}
+            <div style={{ textAlign: "right", marginTop: 4 }}>
               <button type="button" className="auth-tlink"
                 onClick={() => { setVia("password"); setError(null); }}>
                 使用密码登录
