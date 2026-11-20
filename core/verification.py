@@ -95,7 +95,14 @@ def normalize_address(address: str) -> str:
 def canonical(context: Context) -> Context:
     if (
         context.purpose
-        not in ("register_email", "bind_email", "change_email_old", "change_email_new", "reset_password")
+        not in (
+            "register_email",
+            "bind_email",
+            "change_email_old",
+            "change_email_new",
+            "reset_password",
+            "login_email",
+        )
         or not isinstance(context.subject, str)
         or not 0 < len(context.subject) <= 256
         or not isinstance(context.flow, str)

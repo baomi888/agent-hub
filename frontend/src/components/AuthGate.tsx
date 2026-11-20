@@ -8,6 +8,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import MascotLogo from "./chat/MascotLogo";
+import EmailCodeLoginFields from "./EmailCodeLoginFields";
 import RegistrationEmailFields from "./RegistrationEmailFields";
 import PasswordInput from "./PasswordInput";
 import type { RegistrationEmail } from "@/lib/types";
@@ -28,6 +29,8 @@ interface Props {
 
 export default function AuthGate({ allowSignup, checking, backHref, onLogin, onRegister }: Props) {
   const [mode, setMode] = useState<"login" | "register">("login");
+  // 登录方式的二级切换：密码 或 邮箱验证码。注册页不受影响。
+  const [via, setVia] = useState<"password" | "email">("password");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -91,7 +94,7 @@ export default function AuthGate({ allowSignup, checking, backHref, onLogin, onR
           <h1 className="auth-name">知穗 Agent</h1>
         </div>
 
-        <p className="hint">注册时需要验证邮箱；登录仍使用登录名和密码。</p>
+        <p className="hint">注册需验证邮箱；登录可用密码或邮箱验证码。</p>
 
         {allowSignup && (
           <div className="auth-seg" role="tablist" aria-label="登录或注册">
@@ -118,6 +121,17 @@ export default function AuthGate({ allowSignup, checking, backHref, onLogin, onR
           </div>
         )}
 
+        {currentMode === "login" && via === "email" ? (
+          <>
+            <EmailCodeLoginFields />
+            <div style={{ textAlign: "right", marginTop: -8 }}>
+              <button type="button" className="hint" style={{ background: "none", border: 0, cursor: "pointer" }}
+                onClick={() => { setVia("password"); setError(null); }}>
+                使用密码登录
+              </button>
+            </div>
+          </>
+        ) : (
         <form
           className="auth-form"
           onSubmit={(e) => {
@@ -142,11 +156,18 @@ export default function AuthGate({ allowSignup, checking, backHref, onLogin, onR
             onChange={(e) => setPassword(e.target.value)}
             autoComplete={currentMode === "register" ? "new-password" : "current-password"}
             placeholder={currentMode === "register" ? "至少 8 位" : ""} />
-          {currentMode === "login" && (
-            <div style={{textAlign:"right",marginTop:-8}}>
-              <Link href="/reset-password" className="hint">找回密码</Link>
-            </div>
-          )}
+        {currentMode === "login" && via === "password" && (
+          <div style={{textAlign:"right",marginTop:-8}}>
+            {/* 验证码登录走文字链而不是再加一排切换块：登录方式是低频切换，
+                顶两排大按钮反而让页面像设置页（2026-11-20 用户拍板）。 */}
+            <button type="button" className="hint" style={{ background: "none", border: 0, cursor: "pointer" }}
+              onClick={() => { setVia("email"); setError(null); }}>
+              验证码登录
+            </button>
+            <span className="hint"> · </span>
+            <Link href="/reset-password" className="hint">找回密码</Link>
+          </div>
+        )}
           {currentMode === "register" && <RegistrationEmailFields onProof={setEmailProof} />}
 
           {error && (
@@ -159,6 +180,7 @@ export default function AuthGate({ allowSignup, checking, backHref, onLogin, onR
             {busy ? "请稍候..." : currentMode === "login" ? "登录" : "注册并登录"}
           </button>
         </form>
+        )}
 
         {/* 注册前的安装入口。
             为什么放在这一屏：大多数人第一次是从别人发的链接或搜索结果进来，

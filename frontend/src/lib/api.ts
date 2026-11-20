@@ -822,6 +822,22 @@ export const api = {
     notifyAuthorized();
     return u;
   },
+  /** 邮箱验证码登录：send 拿 request_id，login 用验证码换会话（cookie 由后端种）。 */
+  loginEmail: {
+    send: (address: string) =>
+      request<{ request_id: string; expires_in: number; resend_after: number; message: string }>(
+        "/api/auth/login/email/send",
+        { method: "POST", body: JSON.stringify({ address }) },
+      ),
+    login: async (requestId: string, code: string) => {
+      const u = await request<UserOut>("/api/auth/login/email", {
+        method: "POST",
+        body: JSON.stringify({ request_id: requestId, code }),
+      });
+      notifyAuthorized();
+      return u;
+    },
+  },
   register: async (username: string, password: string, emailProof: RegistrationEmail) => {
     const u = await request<UserOut>("/api/auth/register/", {
       method: "POST",

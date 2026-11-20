@@ -205,6 +205,89 @@ class SecurityEmailService:
             current = self._reset_context(db, expected.subject, nonce)
         return {"grant": self.store.verify(request_id, code, current)}
 
+    # ---------- 邮箱验证码登录 ----------
+
+    def _login_context(self, db, uid, flow):
+        """登录用途的上下文：只认"已绑定且账号可用"，其余一律按不存在处理。
+
+        与 _reset_context 同构，但 purpose 不同 —— 证明互不通用，找回的验证码
+        拿来登录会被 purpose 比对拦下，反之亦然。
+        """
+        user = db.execute(
+            "SELECT * FROM users WHERE id=? AND status=1",
+            (uid,),
+        ).fetchone()
+        email = db.execute("SELECT * FROM security_emails WHERE user_id=?", (uid,)).fetchone()
+        if not user or not email:
+            raise SecurityEmailError("验证请求不存在或已失效")
+        return Context(
+            "login_email", email["address"], uid, flow, user["token_valid_after"], email["binding_version"]
+        )
+
+    def send_login(self, nonce, address, ip):
+        """匿名发码：只看"这个地址有没有绑在可用账号上"，不看调用者是谁。
+
+        与 send_reset 相同的防枚举口径：已绑定、未绑定、账号停用、发送故障
+        返回相同字段和文案，请求方无法从响应分辨邮箱是否注册过。
+        """
+        if not self.ready():
+            raise SecurityEmailError("邮件服务暂不可用，请稍后重试", 503)
+        address = normalize_address(address)
+        with self.store.transaction() as db:
+            row = db.execute("SELECT user_id FROM security_emails WHERE address=?", (address,)).fetchone()
+            try:
+                context = self._login_context(db, row["user_id"], nonce) if row else None
+            except SecurityEmailError:
+                context = None
+        exists = context is not None
+        if not exists:
+            context = Context("login_email", address, "unknown:" + self.store._hash("unknown", address), nonce)
+        reservation = self.store.reserve(context, ip)
+        accepted = False
+        if exists:
+            try:
+                accepted = self.sender(address, reservation.code, "login_email").get("ok") is True
+            except Exception:
+                accepted = False
+        self.store.finish(reservation.request_id, accepted)
+        return {
+            "request_id": reservation.request_id,
+            "expires_in": 600,
+            "resend_after": self.store.limits.cooldown,
+            "message": "如果该邮箱已绑定可用账号，验证码将发送到该邮箱，请检查收件箱或稍后重试。",
+        }
+
+    def login_by_email(self, nonce, request_id, code):
+        """验证码换会话：验证通过即代表持有邮箱，等价于密码登录的一次成功。
+
+        consume 的 current_context 会在消费瞬间重查绑定与账号状态 —— 邮箱
+        刚被换绑或账号刚被停用时，旧的验证码不能再登录。
+        """
+        from core import account
+
+        with self.store.transaction() as db:
+            row = db.execute("SELECT context FROM verification_requests WHERE id=?", (request_id,)).fetchone()
+            if not row:
+                raise SecurityEmailError("验证请求不存在或已失效")
+            expected = Context(**json.loads(row["context"]))
+            if expected.purpose != "login_email" or expected.flow != nonce:
+                raise SecurityEmailError("验证请求不存在或已失效")
+            current = self._login_context(db, expected.subject, nonce)
+        # verify 在事务外调：它内部自己开事务，嵌套会把 sqlite 锁死
+        grant = self.store.verify(request_id, code, current)
+
+        def current_context(db, context):
+            return self._login_context(db, context.subject, context.flow)
+
+        def effect(db):
+            db.execute("UPDATE users SET last_login_at=? WHERE id=?", (int(self.store.clock()), expected.subject))
+
+        self.store.consume(grant, current, effect, current_context=current_context)
+        user = account.get_user(expected.subject)
+        if not user or user.get("status") != 1:
+            raise SecurityEmailError("验证请求不存在或已失效")
+        return user
+
     def reset_password(self, nonce, grant, password, confirm):
         from core import account
         from core.auth import hash_password

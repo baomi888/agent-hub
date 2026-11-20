@@ -32,6 +32,7 @@ from api.chat import router as chat_router
 from api.checkin import router as checkin_router
 from api.course_reminder import router as course_reminder_router
 from api.delegate import router as delegate_router
+from api.email_login import router as email_login_router
 from api.feedback import router as feedback_router
 from api.focus import router as focus_router
 from api.forum import router as forum_router
@@ -222,6 +223,7 @@ if config.CORS_ALLOW_LOCALHOST:
 app.include_router(auth_router, prefix="/api/auth", tags=["认证"])
 app.include_router(registration_router, prefix="/api/auth", tags=["注册邮箱验证"])
 app.include_router(password_reset_router, prefix="/api/auth", tags=["邮箱找回密码"])
+app.include_router(email_login_router, prefix="/api/auth", tags=["邮箱验证码登录"])
 app.include_router(security_email_router, prefix="/api/auth", tags=["账号安全"])
 # Agent 编排的元数据端点（工具清单 / 延迟发现）：只读代码里的 TOOL_META，不执行工具
 app.include_router(agent_router, prefix="/api/agent", tags=["Agent 编排"])

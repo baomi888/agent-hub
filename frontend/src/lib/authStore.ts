@@ -132,6 +132,12 @@ export async function login(username: string, password: string): Promise<void> {
   await refreshAuth();
 }
 
+export async function loginByEmail(requestId: string, code: string): Promise<void> {
+  await api.loginEmail.login(requestId, code);
+  // 与 login 同款：api 层已广播 AUTHORIZED_EVENT，这里等身份真正就位再返回。
+  await refreshAuth();
+}
+
 export async function register(username: string, password: string, emailProof: RegistrationEmail): Promise<void> {
   await api.register(username, password, emailProof);
   await refreshAuth();

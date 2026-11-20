@@ -13,6 +13,7 @@ _PURPOSES = {
     "change_email_old": "验证原安全邮箱",
     "change_email_new": "验证新安全邮箱",
     "reset_password": "找回密码",
+    "login_email": "邮箱验证码登录",
 }
 _ADDRESS = re.compile(r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,24}", re.ASCII)
 CODE_TTL_SECONDS = 600
