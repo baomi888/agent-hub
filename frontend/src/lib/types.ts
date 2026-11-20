@@ -2139,3 +2139,9 @@ export interface ForumDetail {
   /** 还能不能点申诉（作者且没申诉过） */
   can_appeal: boolean;
 }
+
+/** 注册邮箱的短期证明，仅保存在当前表单内存中。 */
+export interface RegistrationEmail {
+  email: string;
+  email_grant: string;
+}

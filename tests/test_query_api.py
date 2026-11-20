@@ -29,6 +29,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.testclient import TestClient  # noqa: E402
+from registration_support import register_verified
 
 import core.account  # noqa: E402
 import core.config  # noqa: E402
@@ -84,7 +85,7 @@ def _prep(monkeypatch, tag: str):
 def _client(username: str) -> TestClient:
     """登录态 client。不用 with：跳过 lifespan，省掉 Chroma 预热。"""
     c = TestClient(main.app)
-    c.post("/api/auth/register/", json={"username": username, "password": "pw123456"})
+    register_verified(c, username, "pw123456")
     r = c.post("/api/auth/login/", json={"username": username, "password": "pw123456"})
     assert r.status_code == 200, (r.status_code, r.text)
     return c

@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -29,6 +30,11 @@ from service import reminder_tick
 TZ = ZoneInfo("Asia/Shanghai")
 OWNER = "u1"
 
+# ★ 时间锚点：所有 `_ts(...)` 都围绕「2026-11-20 早上 7 点」设计——
+#   19 号及以前是过去，20 号当天 08:30/09:00 起是未来。
+#   绝不硬编码 `time.time()` 的相对判断：把 now 冻在锚点上，测试永不腐烂。
+_ANCHOR = int(datetime(2026, 11, 20, 7, 0, 0, tzinfo=TZ).timestamp())
+
 
 def _ts(day: int, hour: int = 0, minute: int = 0, month: int = 11) -> int:
     return int(datetime(2026, month, day, hour, minute, tzinfo=TZ).timestamp())
@@ -38,6 +44,12 @@ def _ts(day: int, hour: int = 0, minute: int = 0, month: int = 11) -> int:
 def db(tmp_path, monkeypatch):
     path = tmp_path / "sessions.db"
     monkeypatch.setattr(session, "_db_path", lambda: path)
+    # 冻结当前时刻（timeutil.now_ts / now_local / 裸 time.time 三个口子全堵上）
+    monkeypatch.setattr(timeutil, "now_ts", lambda: _ANCHOR)
+    monkeypatch.setattr(
+        timeutil, "now_local", lambda: datetime.fromtimestamp(_ANCHOR, TZ)
+    )
+    monkeypatch.setattr(time, "time", lambda: _ANCHOR)
     reminder_core.reset_cache()
     task_core.reset_cache()
     session._init_db()

@@ -21,7 +21,7 @@
 //   · 主动退出 → 置空并作废在飞的探活（否则慢回来的那次会把身份写回去）
 import { AUTHORIZED_EVENT, UNAUTHORIZED_EVENT, api } from "@/lib/api";
 import { resetCampusLocal } from "@/campus/sync";
-import type { MeOut } from "@/lib/types";
+import type { MeOut, RegistrationEmail } from "@/lib/types";
 
 export interface AuthSnapshot {
   me: MeOut | null;
@@ -132,8 +132,8 @@ export async function login(username: string, password: string): Promise<void> {
   await refreshAuth();
 }
 
-export async function register(username: string, password: string): Promise<void> {
-  await api.register(username, password);
+export async function register(username: string, password: string, emailProof: RegistrationEmail): Promise<void> {
+  await api.register(username, password, emailProof);
   await refreshAuth();
 }
 

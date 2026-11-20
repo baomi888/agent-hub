@@ -21,10 +21,11 @@ from __future__ import annotations
 """
 
 import asyncio
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from core import account, config, quota, token_store
 from core.auth import (
@@ -36,6 +37,7 @@ from core.auth import (
     get_current_user,
     set_session_cookie,
 )
+from core.security_email import SecurityEmailService
 from service import avatar as avatar_store
 
 router = APIRouter()
@@ -44,6 +46,23 @@ router = APIRouter()
 class Credentials(BaseModel):
     username: str = Field(..., description="登录名")
     password: str = Field(..., description="密码")
+
+
+def signup_service():
+    if not config.ALLOW_SIGNUP:
+        raise HTTPException(403, "本站已关闭自助注册，请联系管理员开通账号")
+    from api.security_email import get_service
+
+    return get_service()
+
+
+SignupService = Annotated[SecurityEmailService, Depends(signup_service)]
+
+
+class RegisterCredentials(Credentials):
+    model_config = ConfigDict(extra="forbid")
+    email: str = Field(min_length=3, max_length=254)
+    email_grant: str = Field(min_length=16, max_length=128)
 
 
 class UserOut(BaseModel):
@@ -156,9 +175,7 @@ def _name_changes_left(row: dict) -> int:
     left = row.get("name_changes_left")
     if left is not None:
         return max(0, int(left))
-    return max(
-        0, account.MAX_NAME_CHANGES - int(row.get("name_change_count") or 0)
-    )
+    return max(0, account.MAX_NAME_CHANGES - int(row.get("name_change_count") or 0))
 
 
 def _user_out(row: dict, token: str | None = None) -> UserOut:
@@ -222,17 +239,17 @@ def _issue_session(user: dict, request: Request, response: Response) -> UserOut:
 @router.get("/config/")
 def auth_config() -> dict:
     """前端登录页要用的开关：这站还开不开自助注册。"""
-    return {"allow_signup": config.ALLOW_SIGNUP}
+    from core import security_mail
+
+    return {"allow_signup": config.ALLOW_SIGNUP, "require_email": True, "email_ready": security_mail.status()["ready"]}
 
 
 @router.post("/register/", response_model=UserOut)
-def register(body: Credentials, request: Request, response: Response):
+def register(body: RegisterCredentials, request: Request, response: Response, service: SignupService):
     if not config.ALLOW_SIGNUP:
         _reject("本站已关闭自助注册，请联系管理员开通账号", 403)
 
-    err = account.check_name(body.username) or account.check_password(
-        body.password, body.username
-    )
+    err = account.check_name(body.username) or account.check_password(body.password, body.username)
     if err:
         _reject(err)
 
@@ -253,13 +270,12 @@ def register(body: Credentials, request: Request, response: Response):
     except (quota.RateLimited, quota.QuotaExceeded) as e:
         _reject(str(e), 429)
 
-    try:
-        user = account.create_user(body.username, body.password)
-    except Exception:
-        # 唯一索引冲突 = 重名。这里吞掉 sqlite 的具体类型，
-        # 免得数据库的错误信息一路漏到前端
-        _reject("该登录名已被占用", 409)
+    from api.registration import nonce_from_request
+    from api.security_email import call
 
+    nonce = nonce_from_request(request)
+    user = call(service.register_signup, nonce, body.username, body.password, body.email, body.email_grant)
+    response.delete_cookie("zhisui_signup", path="/api/auth")
     return _issue_session(user, request, response)
 
 
@@ -453,9 +469,7 @@ async def change_password(
     except quota.RateLimited as e:
         _reject(str(e), 429)
 
-    err = await asyncio.to_thread(
-        account.change_password, uid, body.old_password, body.new_password
-    )
+    err = await asyncio.to_thread(account.change_password, uid, body.old_password, body.new_password)
     if err:
         # 已登录状态下不涉及"账号是否存在"的枚举，直接给具体原因更有用
         _reject(err)
@@ -493,9 +507,7 @@ async def change_username(
     except quota.RateLimited as e:
         _reject(str(e), 429)
 
-    row, err, status = await asyncio.to_thread(
-        account.change_username, uid, body.password, body.new_username
-    )
+    row, err, status = await asyncio.to_thread(account.change_username, uid, body.password, body.new_username)
     if err or not row:
         _reject(err or "改名失败", status)
 

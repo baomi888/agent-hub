@@ -33,6 +33,7 @@ core.session._init_db()
 core.config._AUTH_SECRET_FILE = os.path.join(_TMP, ".auth_secret")
 
 from fastapi.testclient import TestClient  # noqa: E402
+from registration_support import register_verified
 
 import main  # noqa: E402
 from kb import pipelines  # noqa: E402
@@ -111,8 +112,8 @@ check("认领后 B 依然看不到", pipelines.get_status(BOB, legacy) is None)
 print("\n[5] HTTP 层：跨用户访问知识库接口")
 c_a = TestClient(main.app)
 c_b = TestClient(main.app)
-c_a.post("/api/auth/register/", json={"username": "kbowner_a", "password": "pw123456"})
-c_b.post("/api/auth/register/", json={"username": "kbowner_b", "password": "pw123456"})
+register_verified(c_a, "kbowner_a", "pw123456")
+register_verified(c_b, "kbowner_b", "pw123456")
 # 让两个 client 拿到的分别是各自账号的 token
 c_a.post("/api/auth/login/", json={"username": "kbowner_a", "password": "pw123456"})
 c_b.post("/api/auth/login/", json={"username": "kbowner_b", "password": "pw123456"})

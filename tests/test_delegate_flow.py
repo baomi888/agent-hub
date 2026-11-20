@@ -86,9 +86,8 @@ class TestDelegateFlow(unittest.TestCase):
         core.config.RATE_PER_MINUTE = 0  # 端点测试不受每分钟限流干扰
 
         self.client = self.TestClient(self.main.app)
-        r = self.client.post(
-            "/api/auth/register/", json={"username": "deleg_user", "password": "secret123"}
-        )
+        from registration_support import register_verified
+        r = register_verified(self.client, "deleg_user", "secret123")
         assert r.status_code == 200, r.text
         # 建一个会话，作为正常投递目标
         c = self.client.post("/api/sessions/", json={"title": "用户询问建议"})
