@@ -23,7 +23,7 @@ _CLIENT_LOCK = threading.Lock()
 
 # 大模型（DeepSeek Chat）：键 = (temperature, max_tokens)
 _LLM_CACHE: dict[tuple[float, int | None], ChatOpenAI] = {}
-# 视觉模型（qwen-vl-plus）：键同上，单独一份，别和纯文本模型混用
+# 视觉模型（qwen3-vl-plus）：键同上，单独一份，别和纯文本模型混用
 _VISION_CACHE: dict[tuple[float, int | None], ChatOpenAI] = {}
 # 向量化客户端：无参数，单例
 _EMBEDDINGS: OpenAIEmbeddings | None = None
@@ -87,18 +87,30 @@ def get_embeddings() -> OpenAIEmbeddings:
     return _EMBEDDINGS
 
 
-# ---------- 视觉多模态模型（阿里百炼 qwen-vl-plus）----------
+# ---------- 视觉多模态模型（默认 DeepSeek deepseek-flash）----------
 
 
 def get_vision_llm(temperature: float = 0.1, max_tokens: int | None = None) -> ChatOpenAI:
     """返回视觉多模态模型客户端，用于图片理解。按参数缓存复用。
 
-    使用阿里百炼 qwen-vl-plus（OpenAI 兼容接口），支持传入图片 content。
+    默认走 DeepSeek `deepseek-flash`（OpenAI 兼容，图片走 `image_url` + data URL），
+    base_url / key / model 都从 `config.VISION_*` 读，想换回百炼只改 .env。
+
+    **必须关思考模式**：DeepSeek 默认 `thinking=high`，实测一张题图配
+    `max_tokens=800` 时 800 个 token 全被算成 reasoning_tokens，`content` 返回空串，
+    前端表现是"AI 没说话"。`VISION_THINKING=disabled` 下发 `{"thinking":{"type":"disabled"}}`。
+    留空则不传这个字段，兼容不认它的后端（如百炼）。
     """
     key = (temperature, max_tokens)
     with _CLIENT_LOCK:
         llm = _VISION_CACHE.get(key)
         if llm is None:
+            extra_body = None
+            mode = (config.VISION_THINKING or "").strip().lower()
+            if mode in ("disabled", "off", "false"):
+                extra_body = {"thinking": {"type": "disabled"}}
+            elif mode in ("enabled", "on", "true"):
+                extra_body = {"thinking": {"type": "enabled"}}
             llm = ChatOpenAI(
                 api_key=config.VISION_API_KEY,
                 base_url=config.VISION_BASE_URL,
@@ -107,6 +119,7 @@ def get_vision_llm(temperature: float = 0.1, max_tokens: int | None = None) -> C
                 max_tokens=max_tokens,
                 request_timeout=config.LLM_TIMEOUT,
                 max_retries=config.LLM_MAX_RETRIES,
+                extra_body=extra_body,
             )
             _VISION_CACHE[key] = llm
     return llm

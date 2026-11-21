@@ -301,6 +301,7 @@ cp .env.example .env
 | `AMAP_API_KEY` | 天气工具 + 逆地理定位 |
 | `SERPER_API_KEY` | 联网搜索（缺省时用内置通道） |
 | `VISION_API_KEY` | 图片理解（不填时回落 `EMBEDDING_API_KEY`） |
+| `VISION_MODEL` | 视觉模型名，默认 `qwen3-vl-plus`；`qwen-vl-plus` 已下线，写它必报 `Model not exist` |
 | `TENCENT_ASR_*` | 语音输入；`SECRET_ID` / `SECRET_KEY` 都填才出现麦克风，`APPID` 只影响「边说边出字」 |
 | `SMTP_*` | 邮件兜底送达 |
 | `VAPID_*` | Web Push 订阅 |

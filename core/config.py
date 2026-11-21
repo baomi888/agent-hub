@@ -46,11 +46,24 @@ EMBEDDING_API_KEY = os.getenv("EMBEDDING_API_KEY", "")
 EMBEDDING_BASE_URL = os.getenv("EMBEDDING_BASE_URL", "")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-v3")
 
-# ---------- 视觉模型（图片理解，复用阿里百炼 DashScope）----------
-# DashScope 兼容 OpenAI 接口，qwen-vl-plus 支持图片理解
-VISION_API_KEY = os.getenv("VISION_API_KEY", EMBEDDING_API_KEY)
-VISION_BASE_URL = os.getenv("VISION_BASE_URL", EMBEDDING_BASE_URL)
-VISION_MODEL = os.getenv("VISION_MODEL", "qwen-vl-plus")
+# ---------- 视觉模型（图片理解 / 讲题 / 描述图片）----------
+# 2026-11-21 起统一走 DeepSeek：你只想在 DeepSeek 一家充 token，所以视觉也接这里。
+#   DeepSeek 官方文档：`deepseek-flash` 支持图片（guides/vision），格式是标准 OpenAI
+#   `image_url` + base64 data URL，和原来的视觉调用方式完全兼容，代码不用改结构。
+# 三个环境变量全部留空时，自动回落到 DEEPSEEK_* 这三个（下面的默认值就是这条回落）。
+# 想切回百炼 qwen3-vl-plus，只要在 .env 里补上 VISION_API_KEY / VISION_BASE_URL /
+# VISION_MODEL 三行即可，代码不用动。
+#
+# ⚠️ 两个实测出来的坑（2026-11-21，用真图在服务器上跑过）：
+#   1. DeepSeek 默认开思考模式，`max_tokens=800` 会被全部烧成 reasoning_tokens，
+#      content 回来是空字符串。视觉调用必须显式关掉思考（见 llm.get_vision_llm）。
+#   2. 只换模型名不改数据来源的话，百炼的 key 填在 VISION_API_KEY 里会带着
+#      dashscope 的 base_url 打到 DeepSeek 上，报 401 —— 所以键和地址必须成对改。
+VISION_API_KEY = os.getenv("VISION_API_KEY", DEEPSEEK_API_KEY)
+VISION_BASE_URL = os.getenv("VISION_BASE_URL", DEEPSEEK_BASE_URL)
+VISION_MODEL = os.getenv("VISION_MODEL", "deepseek-flash")
+# DeepSeek 视觉关思考：留空 = 不传该参数（用回百炼等不认这个字段的后端时保持原样）
+VISION_THINKING = os.getenv("VISION_THINKING", "disabled").strip().lower()
 
 # ---------- 语音转写（腾讯云）----------
 # 两个都填了才算接上。只填一个的症状是调用 401 —— 界面上看起来像"语音坏了"，

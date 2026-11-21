@@ -1419,6 +1419,13 @@ async def _chat_stream_impl(
             # RAG 模式下顺带检索知识库，拼入文本
             vision_question = req.question
             vision_system = "你是一个能理解图片的 AI 助手。请结合图片内容用中文简洁作答。"
+            # 公式格式提示（2026-11-21）：讲题时模型默认爱写 \(...\) 或 \[...\]，
+            # 前端两种写法都认，但统一成 $...$ 排版更稳（嵌套、下标、分式都更少出错）。
+            # 只做"偏好"不做"禁令"——实测同一个 prompt 连跑三次仍会漂回 \(...\)，
+            # 所以真正的兜底在 frontend/src/lib/math.tsx 的 splitMath，不靠这里。
+            vision_system += (
+                "涉及数学公式时请使用 LaTeX，行内用 $...$，独立成行用 $$...$$。"
+            )
             vision_system += scenarios_mod.get_scenario_prompt(req.scenario)
             if kb_id and kb_exists:
                 try:
