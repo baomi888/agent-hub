@@ -395,3 +395,50 @@ def test_follow_keeps_top_within_viewport_for_long_answers():
     assert "bottomInView" in body, (
         "短回答整条可见时没有收手，滚动条会空转"
     )
+
+
+# ---------------- 2026-11-21 第八次修正：来源块等回答写完再显示 ----------------
+#
+# 用户反馈：「不要一下子就给出参考资料，或者联网搜索来源」。
+# 根因：参考资料块 (ref-block) 在 sources 帧一到就插入，而联网来源 (WebSources)
+# 早已用 !m.streaming 门控。流式中途这块大卡片突然插入 → 气泡高度突变 →
+# 顶边锚定刚钉好的开头被往下顶，用户看到"开头一闪 + 上下跳"。
+# 修法：参考资料块和兜底块都加 !m.streaming，与联网来源统一到"回答写完再显示"。
+
+BUBBLE = ROOT / "frontend" / "src" / "components" / "chat" / "Bubble.tsx"
+
+
+def _bubble_code() -> str:
+    s = BUBBLE.read_text(encoding="utf-8")
+    assert s, "Bubble.tsx 是空的？"
+    # 剥注释：这次新加的注释里也写了 `!m.streaming`，不剥会假绿。
+    s = re.sub(r"/\*.*?\*/", "", s, flags=re.S)
+    s = re.sub(r"(?<![:\w])//[^\n]*", "", s)
+    return s
+
+
+def test_ref_block_waits_until_stream_ends():
+    """参考资料主块必须等 stream 结束，不能 sources 一到就插入。"""
+    src = _bubble_code()
+    m = re.search(
+        r"\{(!m\.streaming &&)?\s*\(?\(m\.refs && refItems\.length > 0\)",
+        src,
+    )
+    assert m and m.group(1), (
+        "参考资料块没有 !m.streaming 门控：sources 帧一到就插入，流式中途跳一大下"
+    )
+
+
+def test_ref_fallback_waits_until_stream_ends():
+    """refs 格式不认识的兜底块同样要等 stream 结束。"""
+    src = _bubble_code()
+    assert "{!m.streaming && m.refs && refItems.length === 0" in src, (
+        "兜底参考块没有 !m.streaming 门控"
+    )
+
+
+def test_web_sources_already_gated():
+    """联网来源原本就有门控 —— 守住别被这次改动反向破坏。"""
+    src = _bubble_code()
+    m = re.search(r"\{(!m\.streaming) && \(m\.webSources\?\.length", src)
+    assert m, "联网来源的 !m.streaming 门控丢了"

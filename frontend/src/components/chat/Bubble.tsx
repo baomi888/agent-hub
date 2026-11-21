@@ -405,7 +405,12 @@ const Bubble = memo(function Bubble({
           />
         )}
 
-        {(m.refs && refItems.length > 0) || (m.sources?.length ?? 0) > 0 ? (
+        {/* ★ 2026-11-21：参考资料和联网来源一样，等回答写完再显示。
+            流式期间 sources 帧一到就插入这一大块，气泡高度突变 —— 顶边锚定
+            刚把开头钉在视口，紧接着这块把内容往下顶，用户看到的就是"回答开头
+            一闪 + 上下跳"。统一到 !m.streaming 后，流式中只有正文在长，来源在
+            结束后一次性出现，配合顶边锚定，开头始终稳定可见。 */}
+        {!m.streaming && ((m.refs && refItems.length > 0) || (m.sources?.length ?? 0) > 0) ? (
           <div className="ref-block">
             <div className="ref-head">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden="true">
@@ -514,8 +519,8 @@ const Bubble = memo(function Bubble({
           </div>
         ) : null}
 
-        {/* 兜底：refs 存在但格式不认识时按原文展示 */}
-        {m.refs && refItems.length === 0 && (m.sources?.length ?? 0) === 0 && (
+        {/* 兜底：refs 存在但格式不认识时按原文展示（同样等回答写完） */}
+        {!m.streaming && m.refs && refItems.length === 0 && (m.sources?.length ?? 0) === 0 && (
           <div className="ref-block">
             <div className="message-body text-xs leading-relaxed text-muted">{renderContent(m.refs)}</div>
           </div>
