@@ -602,20 +602,42 @@ export default function ChatArea({
     // 还没到跟随时间：让开头留在视口里
     if (performance.now() < anchorUntilRef.current) return;
 
-    // 跟随：目标是让这条回答的**底边**贴住视口底部，而不是无脑滚到 scrollHeight。
+    // ★★ 11-21 第六次修正：跟随目标从「底边贴视口底」改成「顶边钉在 ANCHOR_GAP」。
     //
-    // ★ 为什么不能用 scrollHeight：内容末尾还有父容器 padding，滚到 scrollHeight 等于
-    //   比锚定位还往下多走十几像素 —— 实测锚定刚落地的 y=14，两个采样点后就变成
-    //   -40，看着还是"从半截开始读"。改用"气泡底边对齐视口底"后，回答不足一屏时
-    //   这个值小于锚定位，被 Math.max 挡住，开头就钉在视口顶部不动。
+    //   为什么必须改：全程探针实测（390×633，回答从 6 字涨到 499 字）——
+    //     顶边 lastTop: 14 →(7s)45 →(16s)-26 →(25s)-544
+    //   旧目标 want = 气泡底边 - 视口高 + TAIL_PAD。气泡一旦长过一屏，底边贴底
+    //   就意味着顶边必然被顶出视口。用户看到的正是「开头一闪而过、视野钉在回答
+    //   末尾、文字还在往上跑」——和"只在完成后才跳 / 定位到错误位置"是同一个病。
+    //   锚定 effect 把顶边钉到 14，跟随 effect 又按底边把它拽走：两个目标打架。
+    //
+    //   新做法：每帧量当前气泡顶边的绝对文档坐标，滚动到让它停在 ANCHOR_GAP。
+    //   顶边坐标 = 视口内相对位置 + scrollTop，和 el.scrollTop 无关，稳定可复现。
+    //   tail 撑出的余量保证短回答也滚得到这个位置（见上方 tail effect）。
+    //   气泡已经整条装进视口（底边 < 视口底 - TAIL_PAD）时不再滚，避免空转。
     const node = last ? el.querySelector<HTMLElement>(`[data-mid="${last.id}"]`) : null;
     if (node) {
       const box = node.getBoundingClientRect();
       const elBox = el.getBoundingClientRect();
-      const bottom = box.bottom - elBox.top + el.scrollTop;
-      const want = bottom - el.clientHeight + TAIL_PAD;
-      const floor = anchoredPosRef.current ?? 0;
-      programScroll(el, Math.max(floor, want));
+      // ★ 顶边锚定只用于「本会话流过的那条」。历史消息进入 / 切会话时本会话没流过，
+      //   anchorAbsRef 是 null —— 这时必须沿用底边贴底，否则历史最后一条被锚到视口
+      //   顶部 14px，长会话一进来就停在半截（实测 70 条会话 top=0、离底部 68632px）。
+      if (anchorAbsRef.current != null && streamIdRef.current === last.id) {
+        const topAbs = box.top - elBox.top + el.scrollTop; // 气泡顶边的绝对文档坐标
+        const want = topAbs - ANCHOR_GAP;
+        const floor = anchoredPosRef.current ?? 0;
+        // 气泡底边还在视口内、留白够：说明整条已可见，不必再动滚动条。
+        const bottomInView = box.bottom - elBox.top <= el.clientHeight - TAIL_PAD;
+        if (bottomInView) {
+          programScroll(el, Math.max(0, Math.min(want, floor)));
+        } else {
+          programScroll(el, Math.max(floor, want));
+        }
+      } else {
+        // 历史消息 / 无锚点：底边贴视口底，和切会话贴底 effect 一致。
+        const bottom = box.bottom - elBox.top + el.scrollTop;
+        programScroll(el, Math.max(0, bottom - el.clientHeight + TAIL_PAD));
+      }
       return;
     }
     programScroll(el, el.scrollHeight);

@@ -352,3 +352,46 @@ def test_repin_only_for_history_load():
     assert m >= 0 and m < land, (
         "本会话流过一次后仍在贴底：来源卡/操作按钮落地时会把视野反复拽到底"
     )
+
+
+# ---------------- 2026-11-21 第七次修正：跟随目标必须是顶边锚定 ----------------
+#
+# 视频（12:18 手机录屏）+ 全程 CDP 探针（390×633，回答 6→499 字）共同定位：
+# 旧跟随目标 want = 气泡底边 - 视口高，气泡长过一屏后顶边被顶出视口
+# （lastTop 14 → -544），视野钉在回答末尾、开头一闪而过、还在持续上下跳。
+# 上次只修了「思考阶段锚定」，没覆盖「回答持续增长」这一段，探针里回答卡在
+# 54 字没涨，所以假绿。这次把跟随和锚定统一到同一个绝对顶边坐标。
+
+
+def _follow_body(src: str) -> str:
+    """取「跟随阶段」那段：从 bottomInView 注释锚点到 effect 结束。"""
+    start = src.index("const node = last ? el.querySelector")
+    return src[start: src.index("}, [messages, programScroll]);", start)]
+
+
+def test_follow_targets_anchor_top_not_viewport_bottom():
+    """流式跟随必须把气泡顶边钉在锚点，不许按底边贴视口底。"""
+    body = _follow_body(_code())
+    assert "topAbs" in body and "ANCHOR_GAP" in body, (
+        "跟随没有用顶边绝对坐标：长回答时开头会被顶出视口"
+    )
+    # 顶边锚定分支必须由「本会话流过 + 有绝对锚点」门控；历史消息进入时
+    # anchorAbsRef 为 null，走底边贴底（切会话落点）。老版本无条件用底边贴底，
+    # 气泡长过一屏后顶边被顶出视口 —— 守卫确认流式分支优先用顶边。
+    guard = body.index("anchorAbsRef.current != null")
+    top_branch = body.index("topAbs", guard)
+    bottom_branch = body.index("bottom - el.clientHeight")
+    assert guard < top_branch < bottom_branch, (
+        "流式分支没有优先用顶边锚定：长回答时开头会被顶出视口"
+    )
+
+
+def test_follow_keeps_top_within_viewport_for_long_answers():
+    """气泡长过一屏时，跟随目标就是顶边锚定位本身（不再多滚）。"""
+    body = _follow_body(_code())
+    assert "Math.max(floor, want)" in body, (
+        "长回答没锁住顶边锚定位：want 会随内容增长把顶边顶走"
+    )
+    assert "bottomInView" in body, (
+        "短回答整条可见时没有收手，滚动条会空转"
+    )
