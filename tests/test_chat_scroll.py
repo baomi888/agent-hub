@@ -173,9 +173,15 @@ def test_repin_skips_while_streaming():
 
     # 跨文件守卫：`data-streaming` 是这条早退的唯一依据，Bubble 不再渲染它
     # 就等于这条守卫永远不成立（测试仍绿，线上却和锚定打架）。
+    # ★ 2026-11-21：必须覆盖**整个**流式期（含 content 为空的「思考中」阶段）。
+    #   旧写法 `m.streaming && !!m.content` 在空回答那几秒不输出标记 →
+    #   贴底守卫失效 → 刚锚到顶部的视野被 ResizeObserver 拽回底部。
     bubble = BUBBLE.read_text(encoding="utf-8")
-    assert 'data-streaming={m.streaming && !!m.content ? "true" : undefined}' in bubble, (
-        "Bubble 不再输出 data-streaming=\"true\"：流式期间贴底的守卫失效了"
+    assert 'data-streaming={m.streaming ? "true" : undefined}' in bubble, (
+        "Bubble 的 data-streaming 没覆盖思考阶段：空回答那几秒贴底守卫会失效"
+    )
+    assert "m.streaming && !!m.content" not in bubble, (
+        "Bubble 又在等 content 有字才标记流式：思考中会被贴底 effect 抢走视野"
     )
 
 
@@ -186,3 +192,81 @@ def test_repin_skips_empty_state():
     m = body.find('querySelector("[data-mid]")')
     assert m >= 0, "没有按 [data-mid] 排除空态"
     assert m < land, "空态判断写在贴底之后：欢迎页会被拽到底部"
+
+
+# ---------------- 新一轮提问：回答一出现就锚到顶部（2026-11-21） ----------------
+#
+# 用户报的现象：「主页输入框再次提问后，第一眼看到的是底部，无法从前往后看，
+# 只有等流式结束后才跳转到对应位置」。
+#
+# 实测（CDP 每 100ms 采样，上滚到顶后提问）：
+#   t=111ms   top=4768/4768  ← 发送瞬间被拽到底部，屏幕只剩「思考中」+留白
+#   t=3081ms  第一个字出现
+#   t=3268ms  才锚定到 lastTop=65（回答顶部）
+# 中间约 3 秒用户盯着的都是留白。
+#
+# 根因两处叠加：
+#   ① 锚定判定 hasText 要求 content.length>0 —— 空回答（思考中）那几秒不锚定；
+#      跟随分支却拿 anchoredPosRef（上一轮锚点）当 floor，把视野钉在上一轮底部。
+#   ② Bubble 的 data-streaming 要求 !!m.content —— 思考阶段没有标记，
+#      内容长高贴底 effect 的守卫失效，settleScroll 又把视野贴回底部。
+#
+# 修法：锚定只看「本轮正在流式」(isNewStream)，与有没有字无关；
+#       标记覆盖整个流式期。下面四条守的就是这套语义不被改回去。
+
+
+def _anchor_effect_body(src: str) -> str:
+    """截出「新消息 / 新一段文字进来时的视野策略」那条 effect 的回调体。"""
+    marker = "const hasText ="
+    # 兼容旧名与新名：定位到 isNewStream/hasText 判定，向后取到锚定落地
+    head_candidates = ["const isNewStream =", marker]
+    start = -1
+    for h in head_candidates:
+        if h in src:
+            start = src.index(h)
+            break
+    assert start >= 0, "锚定判定（isNewStream / hasText）没了"
+    return src[start : src.index("if (performance.now() < anchorUntilRef.current) return;", start)]
+
+
+def test_anchor_does_not_wait_for_text():
+    """★ 核心：锚定不能等 content 有字 —— 思考阶段就该把新气泡顶到视口。"""
+    src = _code()
+    assert "const isNewStream =" in src, "锚定判定还是老名字 hasText：新语义没落地"
+    # isNewStream 只看 streaming 与 role，不许再带 content.length / !!m.content
+    decl = src[src.index("const isNewStream =") : src.index("const isNewStream =") + 160]
+    assert "last.streaming" in decl and 'last?.role === "assistant"' in decl
+    assert "content" not in decl, "锚定判定又依赖 content 了：思考阶段会被漏掉"
+    # 触发点用的也必须是它，不能是另一个带 content 的旧变量
+    assert "if (isNewStream) {" in src, "锚定触发没用 isNewStream"
+
+
+def test_new_stream_reclaims_stick_for_all_entry_points():
+    """重新生成 / L4 重发绕过 submit()，要靠锚定 effect 自己复位 stickRef。"""
+    src = _code()
+    body = _anchor_effect_body(src)
+    m = re.search(r"if \(isNewStream && !stickRef\.current\) \{(.{0,200}?)\}", body, re.S)
+    assert m, "没有「新一轮强制接管视野」的兜底：上滚后重试不锚定"
+    seg = m.group(1)
+    assert "stickRef.current = true" in seg, "兜底没把 stick 设回 true"
+    assert "setAtBottom(true)" in seg, "兜底没同步收掉「回到最新」按钮"
+    # 复位必须发生在 stickRef 门控**之前**，否则自己把自己挡了
+    assert seg.index("stickRef.current = true") < body.index("if (!stickRef.current) return;")
+
+
+def test_stream_marker_covers_thinking_phase():
+    """思考阶段必须有 data-streaming：否则贴底守卫会抢走刚锚好的视野。"""
+    bubble = BUBBLE.read_text(encoding="utf-8")
+    assert 'data-streaming={m.streaming ? "true" : undefined}' in bubble
+    # 且 thinking-loader 分支要渲染在带标记的那个 div 里（跨组件结构守卫）
+    assert "thinking-loader" in bubble and "m.streaming && !m.content" in bubble
+
+
+def test_scroll_to_bottom_anchor_uses_relative_delta():
+    """锚定仍用「相对当前位置的增量」，不受 tail 异步写入影响（老契约不回退）。"""
+    src = _code()
+    body = _anchor_effect_body(src)
+    assert "const delta = rect.top - elRect.top - ANCHOR_GAP;" in body, (
+        "锚定改回绝对 scrollTop 了：tail 异步会让它偏几百像素"
+    )
+    assert "el.scrollTop = target;" in body, "锚定没有同步落地（排 rAF 会被下个 token 取消）"

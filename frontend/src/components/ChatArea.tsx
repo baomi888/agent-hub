@@ -488,16 +488,26 @@ export default function ChatArea({
       programScroll(el, 0);
       return;
     }
+    const last = messages[messages.length - 1];
+    // ★ 只有「本轮正在流式」的那条才锚定（2026-11-02 第四次修正，11-21 第五次补强）。
+    //   历史消息落库后 streaming=false，切会话的落点由下面那条 effect 负责 ——
+    //   所以只看 streaming 就能把历史排除掉，不必再额外要求 content 有字。
+    //   ★ 关键（11-21）：去掉 content.length>0。
+    //   空回答刚插入时是 thinking-loader（content 还是 ""），此刻就该锚到顶部；
+    //   原来的判定要等第一个字才锚，实测那几秒视野停在上一轮底部，
+    //   用户第一眼看到的是「思考中 + 大片留白」，正是"流式结束后才跳转"的真身。
+    const isNewStream =
+      last?.role === "assistant" && last.streaming && anchoredRef.current !== last.id;
+    // 新一轮开始就重新接管视野：正常提问的 submit() 已经设了 stickRef，
+    // 但「重新生成」「L4 允许重发」直接走页面层 sendMessage，绕过 submit ——
+    // 这里兜住它们，否则用户上滚看历史后重试，锚定会被 stickRef 门控挡掉。
+    if (isNewStream && !stickRef.current) {
+      stickRef.current = true;
+      setAtBottom(true);
+    }
     if (!stickRef.current) return;
 
-    const last = messages[messages.length - 1];
-    // ★ 只有「正在流式」的那条才锚定（2026-11-02 第四次修正）。
-    //   之前只看"有文字"，打开会话时会对**最后一条历史回答**也锚一次，
-    //   scrollTop 从 0 直接甩到 25231 —— 用户看到的就是"一打开就跳到底部"。
-    //   历史消息的落点由下面的"切会话回到底部"逻辑负责，不该走锚定。
-    const hasText =
-      last?.role === "assistant" && last.streaming && (last.content ?? "").length > 0;
-    if (hasText && anchoredRef.current !== last.id) {
+    if (isNewStream) {
       const node = el.querySelector<HTMLElement>(`[data-mid="${last.id}"]`);
       if (node) {
         // ★ 标记必须放在"确认拿到节点"之后（2026-11-02）：

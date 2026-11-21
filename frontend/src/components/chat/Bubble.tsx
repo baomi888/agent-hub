@@ -257,7 +257,12 @@ const Bubble = memo(function Bubble({
 
         <div
           className="bubble-ai whitespace-pre-wrap text-text"
-          data-streaming={m.streaming && !!m.content ? "true" : undefined}
+          // 覆盖**整个**流式期（含 content 为空的「思考中」阶段）。
+          // 两个消费者：① 光标 ▍（kb.css）；② ChatArea 内容长高贴底 effect 的
+          // 早退守卫（见那边的注释）。11-21 前这里要求 !!m.content，
+          // 于是思考那几秒守卫失效，ResizeObserver 把刚锚到顶部的视野又拽回底部 ——
+          // 用户第一眼看到的就成了「底部 + 留白」。思考阶段挂光标也正好表示在忙。
+          data-streaming={m.streaming ? "true" : undefined}
         >
           {/* 混合架构执行轨迹（仅 mode=hybrid 的消息有）。
               放在正文之前 —— 与下面的依据提示条同一个道理：用户边流边读，
