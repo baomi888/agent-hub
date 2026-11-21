@@ -70,7 +70,7 @@ def test_switching_conversations_lands_instantly():
     """切会话 / 回到对话那一下必须直接落位，而不是"滚过去"。"""
     src = _code()
     m = re.search(
-        r"if \(firstId === prevFirstRef\.current\) return;(.{0,600}?)\}, \[firstId, settleScroll\]\)",
+        r"const sessionChanged = sessionId !== prevSessionRef\.current;(.{0,1400}?)\}, \[sessionId, firstId, messages, settleScroll\]\)",
         src,
         re.S,
     )
@@ -270,3 +270,85 @@ def test_scroll_to_bottom_anchor_uses_relative_delta():
         "锚定改回绝对 scrollTop 了：tail 异步会让它偏几百像素"
     )
     assert "el.scrollTop = target;" in body, "锚定没有同步落地（排 rAF 会被下个 token 取消）"
+
+
+# ---------------- 2026-11-21 第六次修正：高度变化不能当成用户接管 ----------------
+#
+# 线上 CDP 实测（六级复习会话，390×844，每 100ms 采样）：
+#   t=113ms  top=82389 / max=82432，锚定成功，lastTop=14
+#   t=1364ms top=82332 / max=82332，气泡从「思考中」换成第一个字，高度少 100px，
+#            scrollHeight 跟着缩，浏览器把贴底的 scrollTop 夹回新 max
+#   t=1508ms 之后 top 一直是 82332，max 却涨到 83402 —— 跟随彻底停摆
+#
+# 根因：onScroll 靠「当前 scrollTop ≠ 上次写入值」推断用户接管。
+# tail / 字体 / 状态条改高度时浏览器自己 clamp 的那一下，在位置层面和用户上滚
+# 长得一模一样，于是 stick 被关掉，后面十几秒的流式内容再也不跟。
+#
+# 修法：用户接管改由输入事件（滚轮 / 指针 / 翻页键）显式判定；scroll 事件只读
+# 来更新按钮。tail 改变高度时当场把视野放回锚点并认领这一下。
+
+
+def test_scroll_event_no_longer_infers_user_takeover():
+    """scroll 事件只能更新按钮，不能靠位置猜「用户在滚」。"""
+    src = _code()
+    body = src[src.index("const onScroll"): src.index("const takeOver")]
+    assert "stickRef.current = near" not in body, (
+        "又用位置推断接管了：浏览器 clamp 一下就会关掉 stick，整轮不再跟随"
+    )
+    assert "cancelAnimationFrame(scrollRafRef.current)" not in body, (
+        "scroll 事件还在掐动画帧：clamp 会被当成用户上滚"
+    )
+    assert "setAtBottom((prev)" in body, "按钮状态不再随滚动更新"
+
+
+def test_user_takeover_comes_from_input_events():
+    """真实输入才冻结跟随，并且挂在滚动容器上。"""
+    src = _code()
+    body = src[src.index("const takeOver"): src.index("const scrollToBottom")]
+    assert "stickRef.current = false" in body, "takeOver 没有关掉跟随"
+    assert "addEventListener(\"keydown\"" in body, "翻页键不算接管"
+    container = src[src.index('className="chat-scroll'):]
+    assert "onWheel={takeOver}" in src, "滚轮没接到 takeOver"
+    assert "onPointerDown=" in src, "触摸 / 拖拽没接到 takeOver"
+
+
+def test_tail_resize_reclaims_clamped_scroll():
+    """tail 改高度后必须把视野放回锚点，并认领这一下 scrollTop。"""
+    src = _code()
+    start = src.index("const apply = () =>")
+    body = src[start: src.index("const ro = new ResizeObserver(apply)", start)]
+    assert "streamIdRef.current === lastId" in body, "只处理当前流式消息"
+    assert "anchorAbsRef.current" in body, "没有绝对锚点：高度一变顶边就丢"
+    assert "appliedTopRef.current = el.scrollTop" in body, (
+        "clamp 后没认领：onScroll 会把它当成用户接管"
+    )
+
+
+def test_anchor_records_absolute_top():
+    """锚定时要留下绝对坐标，供后续重排复用。"""
+    body = _anchor_effect_body(_code())
+    assert "anchorAbsRef.current = rect.top - elRect.top + el.scrollTop;" in body, (
+        "只算了相对增量，没留下绝对顶边：tail 变化后无法把开头放回去"
+    )
+
+
+def test_session_switch_keyed_on_session_id():
+    """换会话的主键是 sessionId，不能只靠首条消息 id。"""
+    src = _code()
+    start = src.index("const prevSessionRef")
+    body = src[start: src.index("}, [sessionId, firstId, messages, settleScroll]);", start)]
+    assert "sessionId !== prevSessionRef.current" in body, "换会话没按 sessionId 判定"
+    assert "const streamActive =" in body, "没识别同一帧到来的新流：贴底会冲掉锚点"
+    land = body.index("settleScroll(el, el.scrollHeight)")
+    guard = body.index("if (streamActive)")
+    assert guard < land, "贴底写在流式守卫之前：新会话第一条提问会被按到底部"
+
+
+def test_repin_only_for_history_load():
+    """贴底 RO 只负责历史加载，流过后不许再抢视野。"""
+    body = _ro_body(_code())
+    land = body.index("settleScroll(el, el.scrollHeight)")
+    m = body.find("everStreamedRef.current")
+    assert m >= 0 and m < land, (
+        "本会话流过一次后仍在贴底：来源卡/操作按钮落地时会把视野反复拽到底"
+    )

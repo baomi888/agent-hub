@@ -263,6 +263,12 @@ export default function ChatArea({
   /** 我们最后一次把 scrollTop 设成的值。onScroll 用它认领"这是我们自己滚的" ——
    *  比时间窗可靠：手机上 rAF 慢、scroll 事件有延迟，时间窗经常开错。 */
   const appliedTopRef = useRef<number | null>(null);
+  /** 本轮正在流式的消息 id。留下它才能分辨"内容自己长高"和"历史加载完" */
+  const streamIdRef = useRef<string | null>(null);
+  /** 本会话里出现过流式消息。之后的内容长高不许再被"贴底 RO"接管 */
+  const everStreamedRef = useRef(false);
+  /** 回答顶边的绝对文档坐标：留白/字体/状态条变化时用它把顶边放回原处 */
+  const anchorAbsRef = useRef<number | null>(null);
   /** 消息末尾的留白元素：让"回答不足一屏"时也滚得到顶部（详见下方 effect） */
   const tailRef = useRef<HTMLDivElement | null>(null);
   // 从引用角标打开的全文预览（文件名来自 RefSource，kb 用当前会话绑定的）
@@ -454,6 +460,24 @@ export default function ChatArea({
       if (Math.abs((parseFloat(tail.style.height) || 0) - h) > 1) {
         tail.style.height = `${h}px`;
       }
+      // ★ 11-21 第五次修正：tail 一改，scrollHeight 立刻变，浏览器会把贴着底的
+      // scrollTop 夹回去。线上探针实测：气泡从「思考中」换成第一个字时高度少 100px，
+      // top 82389 → 82332（新 max），onScroll 拿它和上一次写入值一比就判成"用户接管"，
+      // stick 关掉，后面 12 秒的流式内容再也不跟 —— 这正是"只在拆解任务时跳一下，
+      // 之后停在原处 + 一直上下跳"的真身。留白是我们改的，这一下必须当场认领：
+      // 把视野放回锚点（保护期内）或至少把当前值登记成"我们设的"。
+      if (stickRef.current && streamIdRef.current === lastId) {
+        const target =
+          performance.now() < anchorUntilRef.current && anchorAbsRef.current != null
+            ? Math.max(
+                0,
+                Math.min(anchorAbsRef.current - ANCHOR_GAP, el.scrollHeight - el.clientHeight)
+              )
+            : null;
+        if (target != null) el.scrollTop = target;
+        appliedTopRef.current = el.scrollTop;
+        progTopRef.current = el.scrollTop;
+      }
     };
     apply();
     const ro = new ResizeObserver(apply);
@@ -498,6 +522,10 @@ export default function ChatArea({
     //   用户第一眼看到的是「思考中 + 大片留白」，正是"流式结束后才跳转"的真身。
     const isNewStream =
       last?.role === "assistant" && last.streaming && anchoredRef.current !== last.id;
+    if (isNewStream) {
+      streamIdRef.current = last.id;
+      everStreamedRef.current = true;
+    }
     // 新一轮开始就重新接管视野：正常提问的 submit() 已经设了 stickRef，
     // 但「重新生成」「L4 允许重发」直接走页面层 sendMessage，绕过 submit ——
     // 这里兜住它们，否则用户上滚看历史后重试，锚定会被 stickRef 门控挡掉。
@@ -530,6 +558,8 @@ export default function ChatArea({
         }
         const rect = node.getBoundingClientRect();
         const elRect = el.getBoundingClientRect();
+        // 绝对坐标先记下来：后面 tail / 字体 / 状态条改高度时，靠它把顶边放回来。
+        anchorAbsRef.current = rect.top - elRect.top + el.scrollTop;
         const max = Math.max(0, el.scrollHeight - el.clientHeight);
         // ★ 用「相对当前位置的增量」而不是「绝对 scrollTop」（2026-11-02 第三次修正）。
         //   绝对值的算法依赖 rel 与 max 的精确对齐，tail 是异步写入的，
@@ -591,22 +621,45 @@ export default function ChatArea({
     programScroll(el, el.scrollHeight);
   }, [messages, programScroll]);
 
-  // 切换会话（首条消息换了）时强制回到底部，否则会停在上一会话的滚动位置
+  // 切换会话 / 再次进入对话时强制回到底部，否则会停在上一会话的滚动位置。
+  // ★ 11-21：主键改用页面层传进来的 sessionId，而不是只认首条消息 id ——
+  //   「新建会话 → 第一条消息 + 回答占位同一帧到达」时，锚定 effect（在前面）刚
+  //   把视野放到回答顶部，首条消息 id 的变化又让这里贴回底部；两条 effect 抢同一个
+  //   scrollTop，表现就是"只在思考阶段跳一下，后面钉在底部"。sessionId 是换会话的
+  //   事实来源，firstId 只作为「同一会话历史从空回填」的兜底。
   const firstId = messages[0]?.id ?? "";
   const prevFirstRef = useRef(firstId);
+  const prevSessionRef = useRef(sessionId);
   useEffect(() => {
-    if (firstId === prevFirstRef.current) return;
+    const sessionChanged = sessionId !== prevSessionRef.current;
+    const firstChanged = firstId !== prevFirstRef.current;
+    if (!sessionChanged && !firstChanged) return;
+    prevSessionRef.current = sessionId;
     prevFirstRef.current = firstId;
+    const tailMsg = messages[messages.length - 1];
+    const streamActive = tailMsg?.role === "assistant" && tailMsg.streaming;
     stickRef.current = true;
     anchoredRef.current = null;
     anchoredPosRef.current = null;
+    everStreamedRef.current = !!streamActive;
+    if (streamActive) {
+      // 新一轮已经由上面的 effect 锚好了；这里再贴底会把锚点冲掉。
+      // 锚定坐标也留着 —— 下一帧 tail 改高度时靠它把回答顶边放回去。
+      streamIdRef.current = tailMsg.id;
+      return;
+    }
+    anchorAbsRef.current = null;
+    streamIdRef.current = null;
+    anchorUntilRef.current = 0;
+    // 换视野是外部事件（会话 id 变了），不是派生状态；这里同步收起按钮不会级联。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setAtBottom(true);
     const el = scrollRef.current;
     // ★ 2026-11-18：这里必须直接落位，不能走 programScroll。
     //   它是「从别的页面回到对话」时唯一会滚的一次 —— 历史从空到满，
     //   落差常常几千像素，交给 280ms 匀速动画就是用户说的"极强的滑动效果"。
     if (el) settleScroll(el, el.scrollHeight);
-  }, [firstId, settleScroll]);
+  }, [sessionId, firstId, messages, settleScroll]);
 
   // 内容**自己**长高之后继续贴底（2026-11-18）
   //
@@ -632,6 +685,10 @@ export default function ChatArea({
       if (!stickRef.current) return;
       if (!el.querySelector("[data-mid]")) return;
       if (el.querySelector('[data-streaming="true"]')) return;
+      // ★ 11-21：本会话流过一次之后，回答末尾的工具条 / 操作按钮 / 来源卡还会
+      // 陆续落地，RO 每一下都贴 scrollHeight 就会把刚锚好的视野反复拽到底 ——
+      // 用户说的"输出时一直上下跳"。这个 RO 只负责「进入会话时历史加载完」那一截。
+      if (everStreamedRef.current) return;
       settleScroll(el, el.scrollHeight);
       // 贴回去了就把「回到最新」收掉：它只在 onScroll 里更新，而这一下是程序滚的
       // （onScroll 认领之后直接 return），不补这一句就会出现"已经在最底下，
@@ -665,18 +722,40 @@ export default function ChatArea({
       return;
     }
 
-    // ② 落点和我们设的对不上 = 用户真的动了。把还排着的程序滚动撤掉，
-    //    否则它会在 16ms 后把人按回原处（上滚 300px 被拽回去就是这么来的）。
+    // ★ 11-21：这里**不再**用位置去猜"用户在滚"。
+    //   流式时 tail / 气泡 / 字体每帧都在改 scrollHeight，浏览器夹一次 scrollTop
+    //   就会和 appliedTopRef 差几十像素；在位置层面无从分辨"用户上滚"和"被夹了一下"。
+    //   线上实测就是后者把 stick 关掉，导致整轮回答不再跟随。用户接管改由滚轮 /
+    //   触摸 / 方向键这些**输入事件**显式判定（见 takeOver），scroll 事件只更新按钮。
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    setAtBottom((prev) => (prev === near ? prev : near));
+  }, []);
+
+  // 用户主动接管视野：只有真实输入才走到这里，程序改高度导致的 clamp 不会误伤。
+  const takeOver = useCallback(() => {
+    if (!stickRef.current) return;
+    stickRef.current = false;
+    anchorUntilRef.current = 0;
     appliedTopRef.current = null;
     progTopRef.current = null;
     if (scrollRafRef.current != null) {
       cancelAnimationFrame(scrollRafRef.current);
       scrollRafRef.current = null;
     }
-    const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    stickRef.current = near;
-    setAtBottom((prev) => (prev === near ? prev : near));
   }, []);
+
+  // 键盘翻页也算用户接管（输入框里打字不算 —— 那是发问题，不是看历史）。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest("input,textarea,[contenteditable='true']")) return;
+      if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(e.key)) {
+        takeOver();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [takeOver]);
 
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
@@ -970,6 +1049,11 @@ export default function ChatArea({
         <div
           ref={scrollRef}
           onScroll={onScroll}
+          onWheel={takeOver}
+          onPointerDown={(e) => {
+            // 点气泡里的按钮不是"接管视野"：复制 / 重试 / 赞踩都会发 pointerdown。
+            if (!(e.target as HTMLElement).closest("button,a,input,textarea,summary")) takeOver();
+          }}
           className="chat-scroll h-full overflow-y-auto overflow-x-hidden [overflow-anchor:none]"
         >
           <div className="chat-measure chat-px chat-msgpad mx-auto flex min-h-full flex-col">
