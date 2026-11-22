@@ -235,16 +235,28 @@ def test_sidebar_online_status_removed():
     """侧栏底部的「在线 · deepseek-chat」整行删掉（用户验收要求）。
 
     ★ 这是删除型断言，最容易"绿着守空气"：光写 not in 的话，把整份 Sidebar
-      删空也过。所以同时钉住「紧挨着的深色开关与账号块还在」—— 删过头会红。
+      删空也过。所以同时钉住「紧挨着的反馈入口与账号块还在」—— 删过头会红。
+    ★ 2026-11-22 更新：原反证锚点之一是深色开关，但用户这一轮明确要求把
+      「字号档位 + 深色开关」两块 UI 从侧栏撤走（高度让给会话列表），
+      所以锚点换成「我的反馈」，并追加两条反向断言 + 设置页正断言：
+      删掉的是**侧栏入口**，不是字号/主题这两项能力本身。
     """
     code = _code(SIDEBAR)
     assert "deepseek-chat" not in code, "侧栏又出现了 deepseek-chat 在线状态"
     assert "在线 ·" not in code, "侧栏又出现了「在线 ·」状态文案"
     assert 'className="status"' not in code, "侧栏的 .status 状态行样式钩子还在"
-    # 反证配套：相邻结构仍完整（深色开关、账号看板入口、退出按钮）
-    assert "onToggleDark" in code, "连深色模式开关一起删了 —— 删过头"
+    # 反证配套：相邻结构仍完整（我的反馈、账号看板入口、退出按钮）
+    assert "MyFeedbackLink" in code, "连「我的反馈」入口一起删了 —— 删过头"
     assert "onOpenUsage" in code, "连账号名看板入口一起删了 —— 看板没入口了"
     assert "onLogout" in code, "连退出按钮一起删了 —— 用户没法登出"
+    # 侧栏底部不再有字号档位 / 深色开关（2026-11-22 用户要求）
+    assert "fs-picker" not in code, "侧栏又出现了字号档位控件"
+    assert "theme-chip" not in code, "侧栏又出现了深色模式开关"
+    # 但两项偏好的入口必须在设置页 —— 只在侧栏删 UI，不能把能力一起删没
+    page = _code(SETTINGS)
+    assert "字号" in page and "深色纸面" in page, (
+        "设置页「本地偏好」里的字号/主题开关没了 —— 两项偏好彻底没有入口了"
+    )
     # .status 样式是这一行独占的，删干净；但顶栏 kb-chip 的绿点不能误伤
     comp = _code(SRC / "app" / "styles" / "components.css")
     assert not re.search(r"\.status\s*\{", comp), "components.css 里还留着 .status 样式"

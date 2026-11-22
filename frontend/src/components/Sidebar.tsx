@@ -1,7 +1,12 @@
 "use client";
 
-// 左侧会话列表栏：品牌区 + 新建对话 + 搜索框 + 按时间分组的会话 + 深色模式开关
+// 左侧会话列表栏：品牌区 + 新建对话 + 模块入口 + 搜索框 + 按时间分组的会话
 // 视觉：暖米黄书本风格 · 大圆角 · 柔阴影 · 金色点缀
+//
+// ★ 2026-11-22：底部的「字号」档位与「深色」开关从这里撤掉了（用户要求：
+//   底部只留「我的反馈」与账号块，把高度让给会话列表）。
+//   两项偏好本身没有下线 —— 设置页「本地偏好」里仍有同一个字号选择器与
+//   「深色纸面」开关，prefs / applyFontScale / data-fs / html.dark 全部照旧。
 import { useMemo, useRef, useState, type RefObject } from "react";
 import Link from "next/link";
 import MascotLogo from "./chat/MascotLogo";
@@ -22,6 +27,9 @@ interface Props {
   onRename: (sid: string, title: string) => void;
   onDelete: (sid: string) => void;
   kbNameMap?: Record<string, string>;
+  /** ★ 2026-11-22：下面这四个入参仍然接收（调用方 page.tsx 不用改），
+   *  但侧栏底部不再渲染字号档位与深色开关 —— 那是用户明确要求删掉的两块 UI。
+   *  字号 / 主题的入口统一在设置页「本地偏好」，底层 prefs 逻辑一行没动。 */
   dark?: boolean;
   onToggleDark?: () => void;
   /** 聊天正文字号档位（小/标准/大），持久化在 prefs 里 */
@@ -92,10 +100,8 @@ export default function Sidebar({
   onRename,
   onDelete,
   kbNameMap,
-  dark = false,
-  onToggleDark,
-  fontScale = "m",
-  onFontScaleChange,
+  // dark / onToggleDark / fontScale / onFontScaleChange 不再解构 —— 底部不渲染了。
+  // Props 里仍然保留这四个字段，调用方 page.tsx 一行都不用改（见上方注释）。
   overlay = false,
   open = false,
   containerRef,
@@ -485,54 +491,9 @@ export default function Sidebar({
         ))}
       </nav>
 
-      {/* 底部：字号调节 + 深色模式开关（在线状态行 2026-11-18 应用户要求删除） */}
+      {/* 底部：我的反馈 + 当前账号（在线状态行 2026-11-18 删除；
+          字号档位与深色开关 2026-11-22 删除，见文件头注释） */}
       <div className="mt-3 border-t border-line pt-3">
-        {onFontScaleChange && (
-          <div className="fs-picker mb-2" role="group" aria-label="聊天字号">
-            <span className="fs-picker-label">字号</span>
-            <div className="fs-picker-opts">
-              {(
-                [
-                  { v: "m", label: "标准", title: "" },
-                  { v: "l", label: "大", title: "" },
-                  { v: "xl", label: "特大", title: "" },
-                  { v: "auto", label: "系统", title: "跟随浏览器默认字号设置" },
-                ] as const
-              ).map((o) => (
-                <button
-                  key={o.v}
-                  onClick={() => onFontScaleChange(o.v)}
-                  aria-pressed={fontScale === o.v}
-                  title={o.title || undefined}
-                  className={fontScale === o.v ? "active" : ""}
-                >
-                  {o.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        {onToggleDark && (
-          <button
-            onClick={onToggleDark}
-            title={dark ? "切换到浅色模式" : "切换到深色模式"}
-            aria-label={dark ? "切换到浅色模式" : "切换到深色模式"}
-            aria-pressed={dark}
-            className="theme-chip mb-2 w-full justify-center"
-          >
-            {dark ? (
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <circle cx="12" cy="12" r="4" />
-                <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
-              </svg>
-            ) : (
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z" />
-              </svg>
-            )}
-            <span>{dark ? "浅色" : "深色"}</span>
-          </button>
-        )}
         {/* 「我的反馈」入口（2026-11-20）
             原来用户只能到**设置页最底部**看自己反馈的处理进度，等于埋起来了；
             提了意见没回音，他不会再提第二次。
