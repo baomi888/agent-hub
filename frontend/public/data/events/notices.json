@@ -1,0 +1,110 @@
+{
+  "generatedAt": "2026-11-22T08:59:01.123Z",
+  "noticeCount": 12,
+  "notices": {
+    "cet4": [
+      {
+        "title": "2026年下半年全国大学英语四、六级考试报名工作启动",
+        "url": "https://cet.neea.edu.cn/html1/report/2609/1-1.htm"
+      },
+      {
+        "title": "2026年上半年全国大学英语四、六级考试报名工作启动",
+        "url": "https://cet.neea.edu.cn/html1/report/2603/2-1.htm"
+      }
+    ],
+    "cet6": [
+      {
+        "title": "2026年下半年全国大学英语四、六级考试报名工作启动",
+        "url": "https://cet.neea.edu.cn/html1/report/2609/1-1.htm"
+      },
+      {
+        "title": "2026年上半年全国大学英语四、六级考试报名工作启动",
+        "url": "https://cet.neea.edu.cn/html1/report/2603/2-1.htm"
+      }
+    ],
+    "ncre2": [
+      {
+        "title": "2026年9月全国计算机等级考试报名工作启动",
+        "url": "https://ncre.neea.edu.cn/html1/report/2606/16-1.htm"
+      }
+    ],
+    "ntce-written": [
+      {
+        "title": "关于开展2026年下半年中小学教师资格考试（面试）报名工作的通知",
+        "url": "https://ntce.neea.edu.cn/html1/report/2610/14-1.htm"
+      },
+      {
+        "title": "关于开展2026年下半年中小学教师资格考试（笔试）报名工作的通知",
+        "url": "https://ntce.neea.edu.cn/html1/report/2606/25-1.htm"
+      }
+    ],
+    "ntce-interview": [
+      {
+        "title": "关于开展2026年下半年中小学教师资格考试（面试）报名工作的通知",
+        "url": "https://ntce.neea.edu.cn/html1/report/2610/14-1.htm"
+      },
+      {
+        "title": "关于开展2026年下半年中小学教师资格考试（笔试）报名工作的通知",
+        "url": "https://ntce.neea.edu.cn/html1/report/2606/25-1.htm"
+      }
+    ],
+    "mcm": [
+      {
+        "title": "2027年全国大学生数学建模竞赛征题通知暨命题研讨会预通知",
+        "url": "https://www.mcm.edu.cn/html_cn/node/8c1df8f7f3e75798296cde217f490db5.html"
+      },
+      {
+        "title": "2026年全国大学生数学建模竞赛赛题讲评与经验交流会通知",
+        "url": "https://www.mcm.edu.cn/html_cn/node/74ca2bd675a8399782a41dffa15f0910.html"
+      }
+    ],
+    "kaoyan": [
+      {
+        "title": "教育部关于印发《2026年全国硕士研究生招生工作管理规定》的通知",
+        "url": "https://yz.chsi.com.cn/kyzx/jybzc/202509/20250924/2293432108.html"
+      }
+    ]
+  },
+  "sources": [
+    {
+      "name": "四六级",
+      "ok": true,
+      "found": 2
+    },
+    {
+      "name": "计算机等级",
+      "ok": true,
+      "found": 1
+    },
+    {
+      "name": "教师资格",
+      "ok": true,
+      "found": 2
+    },
+    {
+      "name": "研招网",
+      "ok": true,
+      "found": 1
+    },
+    {
+      "name": "数学建模",
+      "ok": true,
+      "found": 2
+    },
+    {
+      "name": "挑战杯",
+      "ok": true,
+      "found": 0
+    },
+    {
+      "name": "互联网+",
+      "ok": true,
+      "found": 0
+    },
+    {
+      "name": "蓝桥杯",
+      "ok": true,
+      "found": 0
+    }
+  ]
+}

@@ -196,3 +196,8 @@ docs/评审意见_受控词表报告修改方向建议_*
 
 # ================= Playwright MCP 浏览器控制台日志（本地调试产物） =================
 .playwright-mcp/
+
+# ================= 审核报告 PDF（本批新增）=================
+# md 是源文件；PDF 由 campus/scripts/md2pdf.mjs 每次生成（图片 base64 内嵌，5MB+）。
+# 不入库：否则每改一次报告就多一份二进制 diff。对外转发用生成的 PDF。
+campus/reviews/*.pdf

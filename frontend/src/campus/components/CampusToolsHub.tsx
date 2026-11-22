@@ -23,6 +23,7 @@ import ScheduleTool from "../tools/schedule/ScheduleTool";
 import WordsTool from "../tools/words/WordsTool";
 import DeadlineTool from "../tools/deadline/DeadlineTool";
 import DrawTool from "../tools/draw/DrawTool";
+import EventsTool from "../tools/events/EventsTool";
 import ToolNav, { TOOL_LIST } from "./ToolNav";
 import { subscribeExternalWrite } from "../storage";
 import { CAMPUS_KEYS } from "../storage/keys";
@@ -36,6 +37,7 @@ const PANELS: Record<ToolId, ComponentType> = {
   words: WordsTool,
   deadline: DeadlineTool,
   draw: DrawTool,
+  events: EventsTool,
 };
 
 /**

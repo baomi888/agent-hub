@@ -47,6 +47,13 @@ export const CAMPUS_KEYS = {
   focusSessions: "campus.pomodoro.sessions.v1",
   /** 提示音偏好：音色、音量（0.3.3 起不再有自定义音频链接字段） */
   focusSound: "campus.pomodoro.sound.v1",
+  /**
+   * 大学年历表的用户状态：已处置标记、置顶提醒、年级、视图偏好。
+   *
+   * 赛事数据本身是静态文件（tools/events/data.ts），不进 localStorage ——
+   * 数据每年更新，存进浏览器反而会让老用户看不到新赛季。
+   */
+  events: "campus.events.state.v1",
 } as const;
 
 /** 旧键：线上 tools.html 实际使用的键名（已核对源码） */
