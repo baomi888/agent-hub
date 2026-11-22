@@ -116,6 +116,21 @@ jobs:
                  tests/test_jwt_header_check.py \
                  tests/test_tool_playbook.py -q
 
+      # 账号安全：邮箱注册 / 验证码登录 / 找回 / 枚举。
+      # 必须走隔离器 —— 它把 DATA_DIR 与 AGENT_HUB_DB 指向临时库、禁外网、禁读 .env，
+      # 直接 pytest 会碰到真实用户数据。这组用例以前只在本地脚本里跑，
+      # 安全代码改动在 CI 上一直是绿的。
+      - name: Account security (isolated email tests)
+        run: |
+          python tools/run_isolated_tests.py \
+            tests/test_verification.py \
+            tests/test_email_registration.py \
+            tests/test_password_reset.py \
+            tests/test_security_email_settings.py \
+            tests/test_security_mail.py \
+            tests/test_account_journey.py \
+            tests/test_email_enumeration.py -q
+
       # 数据看板对账：看板数字 vs 裸 SQL、路径归一化、采集范围、不重复计数。
       # 空库也应该全过（0 == 0），所以不需要预置数据。
       - name: Dashboard reconciliation (对账)

@@ -4,7 +4,7 @@ import json
 import secrets
 
 from core import mailer, security_mail
-from core.verification import Context, VerificationError, normalize_address
+from core.verification import INVALID_PROOF, Context, VerificationError, normalize_address
 
 
 class SecurityEmailError(VerificationError):
@@ -198,11 +198,17 @@ class SecurityEmailService:
         with self.store.transaction() as db:
             row = db.execute("SELECT context FROM verification_requests WHERE id=?", (request_id,)).fetchone()
             if not row:
-                raise SecurityEmailError("验证请求不存在或已失效")
+                raise SecurityEmailError(INVALID_PROOF)
             expected = Context(**json.loads(row["context"]))
             if expected.purpose != "reset_password" or expected.flow != nonce:
-                raise SecurityEmailError("验证请求不存在或已失效")
-            current = self._reset_context(db, expected.subject, nonce)
+                raise SecurityEmailError(INVALID_PROOF)
+            try:
+                # 未注册/停用的地址在 send 阶段被记成 state='failed'，其 subject
+                # 在 _reset_context 里查不到。这里若照原样抛"请求不存在"，
+                # 就和已注册地址的"验证码不正确"分成了两句 —— 账号枚举。
+                current = self._reset_context(db, expected.subject, nonce)
+            except SecurityEmailError:
+                raise SecurityEmailError(INVALID_PROOF) from None
         return {"grant": self.store.verify(request_id, code, current)}
 
     # ---------- 邮箱验证码登录 ----------
@@ -268,11 +274,14 @@ class SecurityEmailService:
         with self.store.transaction() as db:
             row = db.execute("SELECT context FROM verification_requests WHERE id=?", (request_id,)).fetchone()
             if not row:
-                raise SecurityEmailError("验证请求不存在或已失效")
+                raise SecurityEmailError(INVALID_PROOF)
             expected = Context(**json.loads(row["context"]))
             if expected.purpose != "login_email" or expected.flow != nonce:
-                raise SecurityEmailError("验证请求不存在或已失效")
-            current = self._login_context(db, expected.subject, nonce)
+                raise SecurityEmailError(INVALID_PROOF)
+            try:
+                current = self._login_context(db, expected.subject, nonce)
+            except SecurityEmailError:
+                raise SecurityEmailError(INVALID_PROOF) from None
         # verify 在事务外调：它内部自己开事务，嵌套会把 sqlite 锁死
         grant = self.store.verify(request_id, code, current)
 

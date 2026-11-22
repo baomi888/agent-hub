@@ -22,6 +22,11 @@ from typing import Any
 
 from core import security_mail
 
+# 验证码相关的失败对外只说这一句。send 阶段已经把"地址是否存在"抹平，
+# verify 阶段若还按"请求不存在"/"账号不存在"/"验证码不对"分几句回答，
+# 不登录的攻击者就能拿 request_id 反推邮箱有没有注册过。
+INVALID_PROOF = "验证码不正确或尝试次数已达上限"
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS security_emails(
  user_id TEXT PRIMARY KEY, address TEXT NOT NULL UNIQUE,
@@ -253,7 +258,7 @@ class VerificationStore:
                 (request_id,),
             ).fetchone()
             if not row or row["context"] != payload or row["expires"] <= now:
-                raise VerificationError("验证请求不存在或已失效")
+                raise VerificationError(INVALID_PROOF)
             matches = isinstance(code, str) and bool(re.fullmatch(r"[0-9]{6}", code))
             matches = matches and hmac.compare_digest(row["code_hash"], self._hash("code", request_id + payload + code))
             if not matches:
@@ -271,7 +276,7 @@ class VerificationStore:
                 )
         # 必须在事务提交后抛错，否则错误次数会被回滚。
         if error:
-            raise VerificationError("验证码不正确或尝试次数已达上限")
+            raise VerificationError(INVALID_PROOF)
         return grant
 
     def consume(self, grant: str, context: Context, effect, *, current_context=None) -> Any:
