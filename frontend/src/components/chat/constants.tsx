@@ -15,6 +15,11 @@ export const EXAMPLES: { hint: string; q: string }[] = [
   { hint: "出题目", q: "根据课程笔记，给我出 3 道自测题" },
 ];
 
+// 单次对话附件上限，与后端 api/chat.py 的 MAX_CHAT_FILES 对齐。
+// 管理员不受这个数约束：页面层按 me.is_admin 传 undefined 表示不限。
+// 前端只管"别让人选完了才被后端拒"，真正的闸还在后端。
+export const MAX_ATTACHMENTS = 9;
+
 // 校园工具集入口（新版 React 实现，路由 /tools，免登录）。
 //
 // 2026-11-02 修正：原先写死 "/tools.html"，那是 frontend/public/ 下的旧静态原型页

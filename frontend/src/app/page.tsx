@@ -24,6 +24,7 @@ import AnnounceModal from "@/components/announce/AnnounceModal";
 import type { UiMessage } from "@/components/chat/types";
 import type { ChatMode, Grounding, RefSource, ToolEvent } from "@/lib/types";
 import { isPlanRequest } from "@/components/chat/plan";
+import { MAX_ATTACHMENTS } from "@/components/chat/constants";
 import { useHybridTrace } from "@/lib/useHybridTrace";
 import { createTypewriter, type Typewriter } from "@/lib/typewriter";
 import { humanizeStatus } from "@/lib/chatStatus";
@@ -934,6 +935,9 @@ export default function Home() {
           quota={auth.me?.quota}
           onOpenUsage={() => setUsageOpen(true)}
           userId={authedId}
+          // 管理员（ADMIN_UIDS / ADMIN_USERNAMES）单次份数不限，普通用户 9 个。
+          // 传 undefined = 不限；真正的闸在后端 upload_attachments 里。
+          maxAttachments={auth.me?.is_admin ? undefined : MAX_ATTACHMENTS}
         />
       </div>
 

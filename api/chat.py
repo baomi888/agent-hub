@@ -95,7 +95,8 @@ router = APIRouter(dependencies=[Depends(get_current_user)])
 
 # 聊天附件上传目录（图片理解用）
 CHAT_UPLOAD_DIR = os.path.join(config.DATA_DIR, "chat_uploads")
-# 附件限制：视觉模型只吃图片，单张 20MB / 单次 9 张足够，超了直接拒
+# 附件限制：视觉模型只吃图片，单张 20MB；单次份数普通用户 9 个，
+# 管理员（ADMIN_UIDS / ADMIN_USERNAMES）不限 —— 判定在 upload_attachments 里
 MAX_CHAT_UPLOAD_MB = 20
 MAX_CHAT_FILES = 9
 # 只收这些扩展名的图片：视觉模型只消费图片，别的格式传进来也是白传（还占磁盘）
@@ -621,9 +622,14 @@ async def upload_attachments(
     """上传聊天附件（图片），返回服务端路径供图片理解使用。
 
     只收图片；其他格式即使上传成功也不会参与回答，直接拒绝省磁盘省流量。
+
+    单次份数：普通用户最多 MAX_CHAT_FILES 个，管理员不限（`quota._is_admin`）。
+    大小闸（单张 20MB / 本次总量 UPLOAD_TOTAL_MB）不跟着放宽——那两条挡的是
+    内存和磁盘，跟"谁能多传几个"是两回事。
     """
-    if len(files) > MAX_CHAT_FILES:
-        raise HTTPException(status_code=400, detail=f"一次最多上传 {MAX_CHAT_FILES} 个附件")
+    limit = 0 if quota._is_admin(uid) else MAX_CHAT_FILES
+    if limit and len(files) > limit:
+        raise HTTPException(status_code=400, detail=f"一次最多上传 {limit} 个附件")
 
     # 单次请求的声明总大小（S-06）：必须在第一个字节落盘前挡住。
     # 单张上限 20MB × 9 张仍可能一次传 180MB，对 2G 内存的部署机是压力。
