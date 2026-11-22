@@ -53,12 +53,41 @@
      取「本列所有网格项的 min-content」——移动端导航那六个不可断的中文条目会
      把列撑到 453px（视口只有 390），.console-page 跟着变宽、右边被裁。
      手机截图里表现为「修改密码」按钮少一截、检索档位最右一个看不见。 */
-  grid-template-columns: 196px minmax(0, 1fr);
+  grid-template-columns: 240px minmax(0, 1fr);
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-1);
   overflow: hidden;
+}
+
+/* 宽屏侧栏一起放宽（与 layout.css 的 .side-left 272px 对齐）。
+   只放宽网格列而不放宽 .side-left 会露出 32px 的空条；
+   反过来则会压住内容区 —— 两处必须同值。 */
+@media (min-width: 1600px) {
+  .console-shell {
+    grid-template-columns: 272px minmax(0, 1fr);
+  }
+}
+
+/* 侧栏在壳里的高度（2026-11-22）
+   ---------------------------------
+   左栏从页面搬进外壳之后，它成了网格/弹性容器的一个子项：
+   `height:100%` 在"行高由内容决定"的网格里会退化成 auto —— 实测 /knowledge
+   时侧栏被内容撑到 1281px（视口 860），整页跟着出现一条多余的纵向滚动，
+   会话列表也不再自己滚（655px 全摊开）。
+   这里把桌面端钉成视口高：底部账号块留在底部，历史列表在自己的 655px 里滚。
+   ≤899 不适用 —— 那时它本来就是 fixed 抽屉（上下 12px），高度另有规则。 */
+@media (min-width: 900px) {
+  .console-shell > .side-left {
+    height: calc(100dvh - 48px - env(safe-area-inset-top, 0px));
+    max-height: calc(100dvh - 48px - env(safe-area-inset-top, 0px));
+    overflow: hidden;
+  }
+  .console-shell--chat > .side-left {
+    height: 100dvh;
+    max-height: 100dvh;
+  }
 }
 .console-nav {
   background: var(--bg-sidebar);
@@ -6257,7 +6286,7 @@ textarea.input {
 /* ② 一张纸铺满，不要卡片边框/圆角/投影：对话是满屏工作台，不是"纸上的卡片"。
       min-height 归零 —— 父级已经给足高度，再叠一份 min-height 会把底栏顶出去。 */
 .console-shell--chat {
-  display: block;
+  display: flex;
   height: 100dvh;
   min-height: 0;
   border: 0;
@@ -6273,6 +6302,10 @@ textarea.input {
   height: 100%;
   padding: 0;
   min-width: 0;
+  /* 2026-11-22：左栏由外壳渲染（见 ConsoleLayout），内容区是它的 flex 兄弟。
+     不加这一条的话，内容区宽度由内容决定，长回答会把整页顶出横向滚动。 */
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 /* ==========================================================

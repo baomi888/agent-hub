@@ -81,7 +81,11 @@ def test_chat_page_does_not_build_its_own_shell():
     现在看不出重叠只是因为两个实例读到同一个值）。
     """
     page = _code(CHAT_PAGE)
-    assert "<Sidebar" in page, "对话页连会话侧栏都不挂了 —— 桌面左栏会空掉"
+    # ★ 2026-11-22（方案 B）：侧栏搬进外壳了 —— 全局只准有一份。
+    #   这条断言反过来钉：页面里再挂一份，桌面就会出现两条左栏。
+    assert "<Sidebar" not in page, "对话页又自己挂了一份侧栏 —— 会和外壳那份叠成两条左栏"
+    layout = _code(LAYOUT)
+    assert "<Sidebar" in layout, "侧栏没有挂到外壳：所有页面都会失去左栏"
     for gone, why in (
         ("<ConsoleTabBar", "底栏"),
         ("page-fade", "入场动画（改由 (console)/template.tsx 统一播）"),
@@ -118,7 +122,9 @@ def test_logged_out_home_still_shows_the_landing_page():
     """
     layout = _code(LAYOUT)
     block = layout[layout.index("if (!auth.me)") :]
-    block = block[: block.index("const navItems")]
+    # 2026-11-22：原来切片到 `const navItems`，那份清单随 .console-nav 一起撤了，
+    # 现在门后面紧跟的是侧栏插槽（const rail）。
+    block = block[: block.index("const rail")]
     assert "if (isChat) return <>{children}</>" in block, (
         "未登录时对话页没有直出 children：落地页会被 AuthGate 顶掉"
     )
