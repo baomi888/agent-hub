@@ -31,7 +31,14 @@ export interface LegacyGpaRow {
 }
 
 /** 工具标识 */
-export type ToolId = "gpa" | "pomodoro" | "schedule" | "words" | "deadline" | "draw";
+export type ToolId =
+  | "gpa"
+  | "pomodoro"
+  | "schedule"
+  | "words"
+  | "deadline"
+  | "draw"
+  | "events";
 
 /**
  * 课表课程（新结构）。
@@ -343,6 +350,132 @@ export interface CategoryDrilldown {
   /** 该大类下的任务，已按秒数降序 */
   tasks: DrilldownTask[];
 }
+
+/* ==================== 大学年历表（0.8.0） ==================== */
+
+/**
+ * 年历表分类。
+ *
+ * 归的是**参赛作品形态**，不是主办单位 —— 学生按「我手上有什么」找比赛，
+ * 比按「谁办的」找快得多。8 个学科类之外单开一个 `career`（升学就业），
+ * 因为考研、国考、省考不属于「比赛」，混进证书组会让人以为它们也要交作品。
+ */
+export type EventCategoryId =
+  | "startup"
+  | "csai"
+  | "ee"
+  | "science"
+  | "language"
+  | "business"
+  | "design"
+  | "general"
+  | "career";
+
+/**
+ * 举办周期。
+ *
+ * 不存「哪一年办」而存规则，是因为年历表要能看任意年份：
+ * 大挑奇数年、小挑偶数年，写死年份到 2027 年就整张表作废。
+ */
+export type EventCycle = "annual" | "odd" | "even" | "biennial-odd" | "biennial-even";
+
+/** 条目种类：赛事 / 证书考试 / 升学就业考试 */
+export type EventKind = "contest" | "cert" | "exam";
+
+/**
+ * 月份窗口。
+ *
+ * `from > to` 表示跨年（如 10 月报到次年 3 月）。**不存具体日期** ——
+ * 各校院赛、校赛时间年年不同，存了也是一条会过期的假精确。
+ * 只有 `exact` 放已核实的当年确切日期（如数学建模 2026-09-10）。
+ */
+export interface EventWindow {
+  /** 起始月 1–12 */
+  from: number;
+  /** 结束月 1–12；小于 from 表示跨年 */
+  to: number;
+  /** 窗口内的一句补充，如「校赛 4–5 月」 */
+  note?: string;
+  /** 已核实的确切日期 YYYY-MM-DD，仅比赛窗口有 */
+  exact?: string;
+}
+
+/** 一条赛事 / 考试 */
+export interface EventItem {
+  id: string;
+  name: string;
+  /** 日历格与色条上用的短名，2–6 字 */
+  short: string;
+  kind: EventKind;
+  category: EventCategoryId;
+  /** 副标签，如 ["AI"]、["英语"]、["广东"] */
+  tags?: string[];
+  cycle: EventCycle;
+  /**
+   * 报名窗口，可多段。
+   * 四六级上半年 3 月、下半年 9–10 月各报一次，用单值装不下，
+   * 装不下就只能丢掉一次 —— 而「错过报名」恰恰是信息差最贵的地方。
+   */
+  signup?: EventWindow[];
+  /**
+   * 发生窗口，至少一段。
+   * 考证的一年两考（6 月 / 12 月）、赛事的校赛—省赛—国赛，
+   * 都是同一件事在不同月份发生多次，用数组表达，日历上就都能看到。
+   */
+  runs: EventWindow[];
+  /** 一句话性质：这是什么、含金量在哪 */
+  intro: string;
+  /** 适合哪类学生 */
+  fitFor: string;
+  /** 组队与门槛 */
+  require?: string;
+  officialUrl?: string;
+  /** 广东赛区的补充说明（不单列成条目，挂在国赛下） */
+  gdNote?: string;
+  /**
+   * 适合的年级（1–4）。**不填 = 全年级适合**。
+   *
+   * 只给「明显有年级门槛」的标：教资要大三才能报、考研是大四的事、专四在大二。
+   * 其余赛事大一就能打，硬编一个范围反而是假精确 —— 大二拿 ACM 金牌的人不需要被劝退。
+   */
+  grades?: number[];
+  /** 已核实的当年确切时间，标来源年份 */
+  verified?: { year: number; text: string };
+}
+
+/**
+ * 用户对某条目的处置。
+ *
+ * 三态而不是一个「已完成」：赛事只有「参加过」，证书才有「已通过」，
+ * 合成一个词会让清单分不清「我比过」和「我考过」。
+ */
+export type EventMark = "attended" | "passed" | "skip";
+
+/** 年历表存储快照 */
+export interface EventsState {
+  v: 1;
+  /** 已处置条目：id → 状态 */
+  marks: Record<string, EventMark>;
+  /** 用户自己加的置顶提醒；note 为空时显示条目名 */
+  pins: { id: string; note?: string }[];
+  /** 年级；null 表示未设置（不猜、不标「适合你」） */
+  grade: 1 | 2 | 3 | 4 | null;
+  /** 大四的「只看升学就业」开关，默认关 */
+  careerOnly: boolean;
+  view: EventView;
+  /** 上次看的月份，YYYY-MM */
+  month: string;
+  /**
+   * 是否已看过使用说明。
+   *
+   * 不另存一个 storage 键：这份状态本来就是「这个人在这个工具里的处境」，
+   * 拆成两个键会多出一处「清了一个没清另一个」的隐患。
+   */
+  introSeen: boolean;
+}
+
+/** 年历表三种看法 */
+export type EventView = "calendar" | "timeline" | "mine";
 
 /** 工具元信息（导航与状态展示用） */
 export interface ToolMeta {

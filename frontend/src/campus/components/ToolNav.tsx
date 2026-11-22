@@ -156,6 +156,36 @@ export const TOOL_LIST: readonly ToolMeta[] = [
     ),
     migrated: true,
   },
+  {
+    /*
+     * 第 7 格叫「年历表」：三字，比「大事年表」短、比「时间表」具体 ——
+     * 「年历」自带「一年一张表」的意思，不用解释。
+     * 图标是月历 + 三个分类色点 —— 一眼能看出「事情排在日历上」。
+     */
+    id: "events",
+    label: "年历表",
+    hint: "比赛与考证，一整年都在这里",
+    icon: (
+      <svg
+        className="campus-tab-ico"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.9}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <rect x="3.5" y="5" width="17" height="15" rx="3" fill="#FDFAF2" />
+        <path d="M3.5 10h17" />
+        <path d="M8 3v3M16 3v3" />
+        <circle cx="8.2" cy="14.4" r="1.4" fill="#C8892A" stroke="none" />
+        <circle cx="12" cy="14.4" r="1.4" fill="#4E7EA8" stroke="none" />
+        <circle cx="15.8" cy="14.4" r="1.4" fill="#7A6BA8" stroke="none" />
+      </svg>
+    ),
+    migrated: true,
+  },
 ];
 
 interface ToolNavProps {

@@ -34,7 +34,7 @@
 | 资产 | 位置 | 状态 |
 | --- | --- | --- |
 | 线上实现 | `frontend/public/tools.html`（132 KB 单文件） | **在跑，是用户此刻看到的版本** |
-| 板块新实现 | `frontend/src/campus/` + 路由 `/tools` | 6 个工具已全部迁移完成，**尚未接线上入口**（切换属 S2） |
+| 板块新实现 | `frontend/src/campus/` + 路由 `/tools` | 7 个工具已全部迁移完成（第 7 个是 0.8.0 的大学年历表），**尚未接线上入口**（切换属 S2） |
 | 早期原型 | `prototypes/校园工具集.html`（59 KB） | 历史留档，已被线上版覆盖 |
 | 板块原型快照 | `campus/prototypes/校园工具集_v1_原型_20261029.html` | 本分区内的基线，不再改动 |
 | 词库数据 | `frontend/public/data/words/cet4.json`、`cet6.json` | 已从 40 词扩到 6661 词，可用 |

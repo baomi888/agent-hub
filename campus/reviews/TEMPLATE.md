@@ -58,24 +58,47 @@
 不要只留一串路径让他自己去翻目录。至少 2 张：浅色 + 深色，或手机 + 桌面。
 
 截图统一放 `campus/previews/shots/<批次名>/`，报告里用相对路径引用（不复制进 `reviews/`，避免重复占体积）。
+
+**用 Markdown 原生图片语法，不要用内联 HTML `<table>` / `<img>`** —— 预览器会过滤原始标签，
+结果就是整段截图在报告里一片空白（2026-11-20 那批踩过，负责人反馈「看不到图片」）。
+
 推荐写法（路径相对本文件所在的 `campus/reviews/`）：
 
-```html
-<table>
-  <tr>
-    <td align="center"><b>手机 390 · 浅色</b><br>
-      <img src="../previews/shots/<批次>/phone-390.png" width="300" alt="说明"><br>
-      <a href="../previews/shots/<批次>/phone-390.png">点开原图</a></td>
-    <td align="center"><b>桌面 1440 · 深色</b><br>
-      <img src="../previews/shots/<批次>/desk-1440-dark.png" width="420" alt="说明"><br>
-      <a href="../previews/shots/<批次>/desk-1440-dark.png">点开原图</a></td>
-  </tr>
-</table>
+```markdown
+### 手机 390 · 浅色
+
+![手机 390 浅色](../previews/shots/<批次>/phone-390.png)
+
+[打开原图](../previews/shots/<批次>/phone-390.png)
+
+### 桌面 1440 · 深色
+
+![桌面 1440 深色](../previews/shots/<批次>/desk-1440-dark.png)
+
+[打开原图](../previews/shots/<批次>/desk-1440-dark.png)
 ```
 
-要求：① `width` 限宽（手机 300 / 桌面 420），别让 1440 的图撑破版面；
-② 每张给「点开原图」链接，方便审核员放大看字；③ 速览块下面保留完整截图清单表格；
-④ 截图时间必须晚于最后一次代码改动（`docs/05` 闸门 4 的「截图时效」）。
+要求：
+① 一张图一段，前面用粗体或小标题写清「这张看什么」，不要只丢一串路径；
+② 每张给「打开原图」链接，方便审核员放大看字（Markdown 图片本身不可点）；
+③ 图片下面保留完整截图清单表格；
+④ 截图时间必须晚于最后一次代码改动（`docs/05` 闸门 4 的「截图时效」）；
+⑤ **别用 `width` 限宽**——原生语法没有宽度属性，靠渲染器自适应，撑不破版面的；
+⑥ **截图里不能有开发工具残留**：Next.js dev 模式左下角那个黑色「N」徽标会被拍进去，
+   截图脚本里先把 `nextjs-portal` 隐藏掉再拍（`events-check.mjs` 的 `hideDevBadge` 可抄）。
+
+### 要发微信的话：导出 PDF
+
+`.md` 发到微信只能看到文字，图片路径全失效。交付前跑一条命令，生成**图片内嵌的单文件 PDF**：
+
+```bash
+node campus/scripts/md2pdf.mjs campus/reviews/YYYY-MM-DD_<主题>.md
+```
+
+- 输出同名的 `.pdf`，15 张图会 base64 内嵌，转发后不丢图
+- 依赖系统 Edge 或 Chrome（不需要装别的）
+- 改了报告要重跑一次，否则 PDF 是旧的
+- 报告开头记得写一句「转发微信用同名 PDF」
 
 ---
 

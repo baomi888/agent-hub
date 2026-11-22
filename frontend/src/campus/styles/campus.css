@@ -72,6 +72,18 @@
   --t-deadline-ink: #8B443B;
   --t-draw: #7A6BA8;
   --t-draw-ink: #5E5189;
+  /* 第 7 支：青。与「设计与建筑」的分类色同源，但一在导航/按钮、一在年历表内部色条，不打架 */
+  --t-events: #4E8A84;
+  --t-events-ink: #3D6E69;
+
+  /*
+   * 日历格子的底。
+   * 一开始用 --fill-3（0.035）想让它"若有若无"，实测整张月历还是一张白纸 ——
+   * 卡片底 #FDFAF2 与 0.035 的棕只差 2 个明度，屏幕上看不出来。
+   * 单独给一个 0.075 的暖灰，比 hover 浅、比卡片明显，格子才立得起来。
+   */
+  --ev-cell-bg: rgba(61, 47, 26, 0.075);
+  --ev-cell-line: rgba(61, 47, 26, 0.14);
 
   width: 100%;
   max-width: var(--campus-max);
@@ -104,6 +116,11 @@
   --t-deadline-ink: #E5A79A;
   --t-draw: #A292CE;
   --t-draw-ink: #C6B9E6;
+  --t-events: #6FAFA8;
+  --t-events-ink: #8FC9C2;
+  /* 深色下的格子底：亮米色叠 0.09，比卡片 #292217 亮一档就够，再亮会像开了背光 */
+  --ev-cell-bg: rgba(237, 224, 196, 0.09);
+  --ev-cell-line: rgba(237, 224, 196, 0.2);
 }
 
 /* ---------- 工具身份色：一个工具一支 ---------- */
@@ -149,6 +166,12 @@
   --tool-accent-ink: var(--t-draw-ink);
 }
 
+.campus-tab[data-tool="events"],
+#campus-panel-events {
+  --tool-accent: var(--t-events);
+  --tool-accent-ink: var(--t-events-ink);
+}
+
 /*
  * 导航那格的满色底。写成通用规则而不逐个点名工具 —— 标签身上有 data-tool，
  * 新的第七个工具只要在 shell 里给两支色、上面加一条映射，标签就自动跟上。
@@ -180,7 +203,8 @@
 #campus-panel-schedule,
 #campus-panel-words,
 #campus-panel-deadline,
-#campus-panel-draw {
+#campus-panel-draw,
+#campus-panel-events {
   --accent: var(--tool-accent);
   --accent-ink: var(--tool-accent-ink);
   --accent-soft: color-mix(in srgb, var(--tool-accent) 10%, transparent);
@@ -197,7 +221,8 @@
 .dark #campus-panel-schedule,
 .dark #campus-panel-words,
 .dark #campus-panel-deadline,
-.dark #campus-panel-draw {
+.dark #campus-panel-draw,
+.dark #campus-panel-events {
   --campus-btn-solid: var(--tool-accent);
   --campus-btn-solid-text: var(--solid);
   --campus-btn-solid-hover: color-mix(in srgb, var(--tool-accent) 88%, black);
@@ -213,7 +238,8 @@
  */
 #campus-panel-schedule > .campus-card:first-child,
 #campus-panel-deadline > .campus-card:first-child,
-#campus-panel-draw > .campus-card:first-child {
+#campus-panel-draw > .campus-card:first-child,
+#campus-panel-events > .campus-card:first-child {
   border-top: 3px solid var(--tool-accent);
 }
 
@@ -362,17 +388,28 @@
 /*
  * 6 个标签带图标，横排的自然宽度约 640px。窗口比它窄时，横滑列表会把最后两个
  * （组队刷题、群抽签）切掉一半，而且没有任何"右边还有"的提示 —— 用户会以为
- * 这页只有四个工具。所以窄于 720px 就换成 2×3 网格：一个都不藏。
+ * 这页只有四个工具。所以窄于 720px 时原本换成 3×2 网格：一个都不藏。
+ * 七个工具之后网格变成 3×3、末格孤立，改为横滑 + 右缘渐隐（见下方规则）。
  * 断点取 720 而不是常见的 560，是因为 561–720 之间同样会切。
  */
 @media (max-width: 720px) {
+  /*
+   * 六个工具时这里是 3×2 网格，理由写在上面：横滑会把工具藏掉。
+   * 加到第七个（大学年历表）之后，3 列会排成 3×3 —— 最后一格孤零零占一行，
+   * 既不像网格也不像列表。负责人 2026-11-20 定：「允许滑动」。
+   * 于是改回横滑，并在右缘做一层渐隐，提示「右边还有」，不至于让人以为只有这几个。
+   */
   .campus-tabs {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    display: flex;
+    flex-wrap: nowrap;
     gap: 4px;
+    padding-right: 22px;
+    mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
   }
 
   .campus-tab {
+    flex: 0 0 auto;
     justify-content: center;
   }
 }
@@ -2916,8 +2953,8 @@ body.campus-modal-open .campus-scroll {
   }
 
   /*
-   * 工具标签仍保持 2×3 一格不藏（见上面 720px 那条注释的理由），只把密度压下来：
-   * 两行从 104px 收到 72px。不改成单行横滑，是因为横滑会把最后两个工具藏掉。
+   * 工具标签在窄屏是横向滑动（见上面 720px 那条注释），这里只把密度压下来：
+   * 七格横滑一行 44px 高，比原来两行 72px 省一截。
    */
   .campus-tabs {
     gap: 3px;
@@ -5837,4 +5874,1656 @@ body.campus-modal-open .campus-scroll {
   .campus-shell {
     padding-bottom: calc(72px + env(safe-area-inset-bottom));
   }
+}
+
+
+/* ==================== 大学年历表（0.8.0） ==================== */
+
+/*
+ * 第七个工具跟其余六个不同：它是一张年历表，不是一块操作面板。
+ * 版心按内容放宽到 1000 —— 日历七列 + 当月清单要并排读，
+ * 880 会把每格压到 80px，赛事短名全被截断成两三个字。
+ * 用 :has() 限定，切到别的工具自动回 880，不会把其余六页一起撑宽。
+ */
+.campus-shell:has(#campus-panel-events) {
+  --campus-max: 1000px;
+}
+
+#campus-panel-events {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.campus-ev-lead {
+  margin: 10px 0 0;
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  color: var(--text-2);
+}
+
+.campus-ev-lead strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* ---------- 控制条 ---------- */
+
+.campus-ev-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin-top: 14px;
+}
+
+.campus-ev-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.campus-ev-seg-btn {
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-family: inherit;
+  padding: 5px 14px;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.campus-ev-seg-btn:hover {
+  color: var(--ink);
+}
+
+.campus-ev-seg-btn.is-active {
+  background: var(--accent-ink);
+  /*
+   * 浅色下工具色是深青，压 --solid（深墨）只有 2.4:1 —— 选中项的字会糊进底里。
+   * 跟导航 tab 用同一套：工具色块上的字浅色纸白、深色深墨。
+   */
+  color: #FDFAF2;
+}
+
+.campus-ev-year {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+.campus-ev-year-label {
+  min-width: 108px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.campus-ev-nav {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  background: var(--card-bg);
+  color: var(--text-2);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.campus-ev-nav:hover {
+  border-color: var(--accent-line);
+  color: var(--accent-ink);
+}
+
+.campus-ev-grade {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+.campus-ev-grade-label {
+  white-space: nowrap;
+}
+
+.campus-ev-select {
+  padding: 4px 8px;
+  font-size: var(--fs-sm);
+  min-width: 84px;
+}
+
+.campus-ev-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 9px 11px;
+  border: 1px solid var(--accent-line-soft, var(--accent-line));
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.campus-ev-toggle input {
+  margin-top: 2px;
+  accent-color: var(--accent-ink);
+}
+
+.campus-ev-toggle em {
+  display: block;
+  margin-top: 2px;
+  font-style: normal;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+/* ---------- 置顶（控制卡里的紧凑一排） ---------- */
+
+.campus-ev-pins {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+
+.campus-ev-pins-title {
+  margin: 0 0 8px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  letter-spacing: 0.04em;
+}
+
+.campus-ev-pins-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.campus-ev-pin-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.campus-ev-pin-chip-label {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.campus-ev-pin-chip-when {
+  font-size: var(--fs-xs);
+  color: var(--accent-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 分类筛选 ---------- */
+
+.campus-ev-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.campus-ev-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.campus-ev-chip.is-on {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--accent-ink);
+}
+
+.campus-ev-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+/* ---------- 日历 ---------- */
+
+/*
+ * 桌面双栏：左边日历负责「哪一天」，右边清单负责「什么事」。
+ *
+ * 单栏时日历 7×6 格会吃掉整整一屏，而 11 月这种没有任何确切日期的月份
+ * 就是一张白纸 —— 用户得往下滚两屏才看到「本月 29 件」。
+ * 并排之后左边一眼看清分布，右边直接读内容，谁都不用等谁。
+ */
+.campus-ev-cal {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+}
+
+@media (min-width: 860px) {
+  .campus-ev-cal {
+    grid-template-columns: minmax(0, 1fr) 348px;
+    align-items: start;
+  }
+
+  .campus-ev-month-list {
+    margin-top: 0;
+    padding-top: 0;
+    padding-left: 18px;
+    border-top: 0;
+    border-left: 1px solid var(--line);
+    max-height: 620px;
+    overflow-y: auto;
+  }
+
+  /*
+   * 右栏只有 348px，原来「日期 / 名称 / 分类」挤在一行，
+   * 名称只剩一百五十来像素，「挑战杯」中国大学生… 全被截断 —— 列表里全是省略号就没法认。
+   * 改成两行：名称独占第一行（放得下全名），日期与分类退到第二行做注释。
+   * 不改 DOM 顺序，用 grid-area 重排，弹层里同一条 row 仍是单行。
+   */
+  .campus-ev-month-list .campus-ev-row {
+    grid-template-columns: 3px minmax(0, 1fr) auto;
+    grid-template-areas:
+      "mark name cat"
+      "mark when cat";
+    gap: 3px 10px;
+    padding: 9px 6px;
+    align-items: start;
+  }
+
+  .campus-ev-month-list .campus-ev-row-mark {
+    grid-area: mark;
+    height: 100%;
+    min-height: 30px;
+  }
+
+  .campus-ev-month-list .campus-ev-row-name {
+    grid-area: name;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    line-height: 1.45;
+  }
+
+  .campus-ev-month-list .campus-ev-row-when {
+    grid-area: when;
+    line-height: 1.5;
+  }
+
+  .campus-ev-month-list .campus-ev-row-cat {
+    grid-area: cat;
+    padding-top: 2px;
+  }
+
+  /*
+   * 宽屏把十个筛选项压成一行。
+   * 原来 10 个按默认尺寸排会折成 8+2，第二行孤零零挂两个，像没排完。
+   * 12px 字 + 窄内边距刚好一行放得下（实测 930px 内容宽，十项合计约 830）。
+   */
+  .campus-ev-filters .campus-chip {
+    padding: 4px 9px;
+    font-size: var(--fs-xs);
+    gap: 5px;
+  }
+}
+
+.campus-ev-cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.campus-ev-cal-title {
+  font-family: var(--font-serif);
+  font-size: var(--fs-lg);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.campus-ev-week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 3px;
+  margin-bottom: 5px;
+}
+
+.campus-ev-week span {
+  text-align: center;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.campus-ev-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 3px;
+}
+
+/*
+ * 每个日期格都有底色，空的也有。
+ * 原来空白格是 transparent，遇到 11 月这种没几个确切日期的月份，
+ * 整张月历就白成一片，看着像组件没加载出来。
+ */
+.campus-ev-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /*
+   * 桌面格子实测 82×62，比例 1.32 —— 一格塞一个日期加两行小字，纵向却只用了
+   * 五十来像素，整张月历看着像七列的表格而不像日历。
+   * 抬到 74 后是 82×74，接近方形；同时给格子里的小字留出了呼吸位。
+   */
+  min-height: 74px;
+  padding: 5px 6px;
+  border: 1px solid var(--ev-cell-line);
+  border-radius: var(--radius-xs);
+  background: var(--ev-cell-bg);
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.campus-ev-cell:hover {
+  border-color: var(--accent-line);
+  background: var(--fill-2);
+}
+
+.campus-ev-cell.is-blank {
+  border-color: transparent;
+  background: transparent;
+  cursor: default;
+}
+
+/*
+ * 单色染底：这一天只有一类事。
+ *
+ * 12% 试过，在 #FDFAF2 的卡片上只剩一层若隐若现的雾气 —— 三个染色格和旁边二十多个
+ * 灰格子的差别要盯着看才分得出。提到 22% 才有「这块被标出来了」的感觉；
+ * 再加一条 3px 顶边（沿用主场卡的语言），色相一眼可辨，不必依赖整块的浓淡。
+ */
+.campus-ev-cell.is-tinted {
+  background: color-mix(in srgb, var(--ev-c1) 22%, var(--card-bg));
+  border-color: color-mix(in srgb, var(--ev-c1) 46%, transparent);
+}
+
+.campus-ev-cell.is-tinted::before,
+.campus-ev-cell.is-multi::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  right: -1px;
+  height: 3px;
+  border-radius: var(--radius-xs) var(--radius-xs) 0 0;
+  background: var(--ev-c1);
+}
+
+.campus-ev-cell.is-tinted:hover {
+  background: color-mix(in srgb, var(--ev-c1) 30%, var(--card-bg));
+}
+
+/*
+ * 双色斜切：同一天撞了两类事。
+ * 不叠第三色（那会变成调色盘），只取前两类 —— 剩余的在 +N 和弹层里说。
+ */
+.campus-ev-cell.is-multi {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ev-c1) 26%, var(--card-bg)) 0 46%,
+    color-mix(in srgb, var(--ev-c2) 26%, var(--card-bg)) 54% 100%
+  );
+  border-color: color-mix(in srgb, var(--ev-c1) 46%, transparent);
+}
+
+/* 挤了三条以上：+N 做成实心胶囊，比在有限格子里硬塞第三条清楚 */
+.campus-ev-cell-more {
+  align-self: flex-start;
+  margin-top: auto;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--fill-1);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 今天：日期做成实心圆底，比只描一圈边框更像日历的通用语言 */
+.campus-ev-cell.is-today {
+  box-shadow: inset 0 0 0 2px var(--accent-ink);
+}
+
+.campus-ev-cell-day {
+  font-size: 13px;
+  /* 底色抬起来之后 text-3 在格子里发灰，改用 text-2 —— 日期是格子的主信息 */
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.campus-ev-cell.is-today .campus-ev-cell-day {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent-ink);
+  /* 跟导航 tab 同一套规矩：工具色块上的字浅色用纸白、深色用深墨 */
+  color: #FDFAF2;
+  font-weight: 600;
+}
+
+.campus-ev-cell-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.campus-ev-cell-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-2);
+}
+
+.campus-ev-cell-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  /* 浅色用分类原色；深色换成提亮版，见文件末尾 .dark 覆盖 */
+  background: var(--dot-l);
+}
+
+.campus-ev-cell-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 窗口条：一条浅底信息带。原来的虚线框像系统警告，改成无框平底更安静 */
+
+/*
+ * 「本月窗口」条：月份精度的事整月都在窗口期内，
+ * 画进格子就是三十格同一条线，重复三十次不叫信息。集中到标题下面说一次。
+ */
+.campus-ev-windowband {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 10px;
+  margin: 0 0 12px;
+  padding: 8px 11px;
+  border-radius: var(--radius-xs);
+  background: var(--fill-3);
+}
+
+.campus-ev-windowband-label {
+  /* 标题独占一行，分类胶囊另起一行 —— 混排时是一团，分开才看得出「这是本月统计」 */
+  flex: 1 0 100%;
+  margin-bottom: 1px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  letter-spacing: 0.01em;
+}
+
+.campus-ev-windowband-label b {
+  margin: 0 1px 0 3px;
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.campus-ev-windowband-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 7px 1px 6px;
+  border-radius: 999px;
+  background: var(--card-bg);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.campus-ev-windowband-item b {
+  margin-left: 1px;
+  color: var(--text-2);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.campus-ev-windowband-item i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+/* 桌面有分类明细，不需要再报一遍「几个方向」；窄屏明细收掉后靠它补位 */
+.campus-ev-windowband-dirs {
+  display: none;
+}
+
+/* 全年可报那项用一个灰点：它不属于任何分类，不该蹭到分类色 */
+.campus-ev-windowband-item.is-muted i {
+  background: var(--text-3);
+  opacity: 0.5;
+}
+
+.campus-ev-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+}
+
+.campus-ev-legend-text {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  line-height: 1.6;
+}
+
+.campus-ev-legend-text b {
+  color: var(--text-2);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * 窄屏只留色点。
+ * 390 宽除 7 列，一格约 48px，四个汉字要折两行、把整张月历撑成砖墙；
+ * 色点 + 下方的「本月」清单已经把信息给全了，格子里再塞字是负收益。
+ */
+@media (max-width: 559px) {
+  /*
+   * 手机上的筛选改成一行横滑。
+   * 10 个 chip 在 390 宽下折成 4 行、吃掉 145px，把日历挤出首屏 ——
+   * 手机上日历才是主角，筛选是次要控件，藏进一次滑动里更划算。
+   */
+  .campus-ev-filters {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin-bottom: 12px;
+    padding-bottom: 2px;
+  }
+
+  .campus-ev-filters::-webkit-scrollbar {
+    display: none;
+  }
+
+  .campus-ev-filters .campus-chip {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .campus-ev-cell {
+    min-height: 46px;
+    padding: 3px;
+    align-items: center;
+  }
+
+  .campus-ev-cell-list {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 2px;
+  }
+
+  .campus-ev-cell-name {
+    display: none;
+  }
+
+  .campus-ev-cell-dot {
+    width: 6px;
+    height: 6px;
+  }
+
+  .campus-ev-cell-more {
+    align-self: center;
+  }
+
+  /*
+   * 窄屏窗口条只留「26 件 · 8 个方向」，分类明细收掉。
+   * 不收的话 8 个分类折成 6 行，把日历挤到屏幕外 —— 手机上日历才是主角。
+   */
+  .campus-ev-windowband {
+    justify-content: center;
+    padding: 6px 8px;
+  }
+
+  .campus-ev-windowband-item {
+    display: none;
+  }
+
+  .campus-ev-windowband-dirs {
+    display: inline;
+  }
+}
+
+.campus-ev-month-list {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.campus-ev-month-title {
+  margin: 0 0 8px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+/* ---------- 条目行（三个视图共用） ---------- */
+
+.campus-ev-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.campus-ev-row {
+  display: grid;
+  grid-template-columns: 3px 62px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 4px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.campus-ev-rows li:last-child .campus-ev-row {
+  border-bottom: 0;
+}
+
+.campus-ev-row:hover {
+  background: var(--fill-2);
+}
+
+.campus-ev-row.is-static {
+  cursor: default;
+}
+
+.campus-ev-row.is-static:hover {
+  background: transparent;
+}
+
+.campus-ev-row-mark {
+  width: 3px;
+  height: 20px;
+  border-radius: 2px;
+}
+
+.campus-ev-row-when {
+  font-size: var(--fs-xs);
+  /* 日期是「这一条什么时候」的唯一线索，不该比分类名还淡 */
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.campus-ev-row-phase {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--fill-3);
+  color: var(--text-2);
+}
+
+.campus-ev-row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.campus-ev-row-cat {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/*
+ * 行 + 「不感兴趣」。
+ *
+ * 行本身是 <button>（整行可点进详情），按钮不能嵌按钮，所以收走动作只能做兄弟节点，
+ * 由 li 用 flex 承担布局。不改成「行内塞一个 span 当按钮」：那样键盘和读屏都摸不到它。
+ */
+.campus-ev-row-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.campus-ev-row-item > .campus-ev-row {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 悬停底色挂到整条 li 上：只给行按钮上色，右边会留一块「没被选中」的缺口 */
+.campus-ev-row-item:hover {
+  background: var(--fill-2);
+}
+
+.campus-ev-row-item > .campus-ev-row:hover {
+  background: transparent;
+}
+
+/*
+ * 常驻但不抢眼：藏到 hover 才出现的功能，等于没有这个功能。
+ * 用 opacity 而不是 display，键盘 Tab 到它时仍然能出现（:focus-visible）。
+ */
+.campus-ev-row-skip {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-3);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.campus-ev-row-item:hover .campus-ev-row-skip,
+.campus-ev-row-skip:focus-visible {
+  opacity: 1;
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+/*
+ * 右栏清单里的紧凑版。
+ *
+ * 那一栏只有 348 宽，且名称刻意独占一整行（见下面的 grid-area 重排）。
+ * 挂一个 66px 的文字按钮，名称行只剩 176px，「国家级大学生创新创业训练计划（大创）」
+ * 会被折成两行、整张清单拔高到 75px 一行。改用 26px 圆形按钮，名称保住 224px。
+ * 文案退到 aria-label 与 title：这里密度优先，说明由点下去的回执补上。
+ */
+.campus-ev-row-skip.is-compact {
+  display: grid;
+  place-items: center;
+  align-self: flex-start;
+  width: 26px;
+  height: 26px;
+  margin-top: 4px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0.7;
+}
+
+.campus-ev-row-skip.is-compact:hover {
+  color: var(--ink);
+  background: var(--fill-3);
+}
+
+/* 弹层里一行只有一两件、宽度富余：给个实底，不然它看着像个标签而不是按钮 */
+.campus-ev-daysheet .campus-ev-row-skip {
+  border-color: var(--line);
+  background: var(--fill-2);
+  opacity: 1;
+}
+
+.campus-ev-fit {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: var(--fs-xs);
+  vertical-align: 1px;
+}
+
+@media (max-width: 559px) {
+  .campus-ev-row {
+    grid-template-columns: 3px 54px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  /* 窄屏先砍分类名：名称比分类重要，分类还能靠色条认 */
+  .campus-ev-row-cat {
+    display: none;
+  }
+
+  /*
+   * 390 宽下名称列只剩 ~230px，按钮再宽一点就会被压回两个字的省略号。
+   * 所以只收内边距、不收文案：这里不是鼠标端，用户没有 hover 可以发现它。
+   */
+  .campus-ev-row-item {
+    gap: 2px;
+  }
+
+  .campus-ev-row-skip {
+    padding: 3px 5px;
+    opacity: 0.55;
+  }
+}
+
+/* ---------- 时间轴 ---------- */
+
+.campus-ev-soon {
+  margin-bottom: 20px;
+  padding: 12px 14px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+}
+
+.campus-ev-soon-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: var(--fs-sm);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.campus-ev-soon-count {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-weight: 400;
+}
+
+.campus-ev-soon-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.campus-ev-soon-row {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 4px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.campus-ev-soon-row:hover {
+  background: var(--card-bg);
+}
+
+.campus-ev-soon-days {
+  font-size: var(--fs-xs);
+  color: var(--accent-ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.campus-ev-soon-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.campus-ev-soon-phase {
+  margin-left: 5px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.campus-ev-soon-date {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.campus-ev-soon-more {
+  margin: 8px 0 0;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.campus-ev-month {
+  padding: 10px 0 6px;
+  border-top: 1px solid var(--line);
+}
+
+.campus-ev-month:first-of-type {
+  border-top: 0;
+}
+
+/* 本月：左侧一条竖线，比整块底色安静 */
+.campus-ev-month.is-now {
+  padding-left: 10px;
+  border-left: 3px solid var(--accent);
+}
+
+.campus-ev-month-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.campus-ev-month-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  padding: 2px 6px;
+  margin-left: -6px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--ink);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.campus-ev-month-label:hover {
+  background: var(--fill-2);
+}
+
+.campus-ev-month-num {
+  font-family: var(--font-serif);
+  font-size: 24px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.campus-ev-month-unit {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.campus-ev-month-now {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: var(--fs-xs);
+}
+
+.campus-ev-month-count {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.campus-ev-month-empty {
+  margin: 0 0 6px;
+  padding-left: 4px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.campus-ev-allyear {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+/* ---------- 我的 ---------- */
+
+.campus-ev-mine-block {
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.campus-ev-mine-block:last-of-type {
+  border-bottom: 0;
+}
+
+.campus-ev-mine-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: var(--fs-sm);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.campus-ev-mine-count {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-weight: 400;
+}
+
+.campus-ev-pins-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.campus-ev-pin {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--card-bg);
+}
+
+.campus-ev-pin-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.campus-ev-pin-label {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.campus-ev-pin-label:disabled {
+  cursor: default;
+  color: var(--text-2);
+}
+
+.campus-ev-pin-sub {
+  margin-left: 6px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.campus-ev-pin-when {
+  font-size: var(--fs-xs);
+  color: var(--accent-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.campus-ev-pin-ops,
+.campus-ev-pin-edit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.campus-ev-pin-edit {
+  flex: 1 1 auto;
+}
+
+.campus-ev-pin-edit .campus-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.campus-ev-foot-note {
+  margin: 10px 0 0;
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+  color: var(--text-3);
+}
+
+/* ---------- 详情弹层 ---------- */
+
+.campus-ev-detail {
+  max-width: 620px;
+}
+
+.campus-ev-daysheet {
+  max-width: 520px;
+}
+
+/*
+ * 弹层只列当天的事，正常也就三五件；仍然封个高度 —— 小屏横屏时
+ * 标题 + 三行就可能把卡片顶出屏幕，关都关不掉。
+ */
+.campus-ev-daysheet-body {
+  max-height: min(62vh, 520px);
+  overflow-y: auto;
+  margin-top: 4px;
+  /* 右侧留够滚动条的位置：不留的话最后一行的「不感兴趣」会被压掉半个 */
+  padding-right: 12px;
+}
+
+.campus-ev-daysheet-count {
+  margin-left: 8px;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * 空日子是常态：一个月里大多数格子都没有事。所以空文案必须说明
+ * 「空 = 没有核实到日的安排」，而不是让用户以为点错或者加载失败。
+ */
+.campus-ev-daysheet-empty {
+  padding: 12px 10px 8px;
+  text-align: center;
+}
+
+.campus-ev-daysheet-empty-title {
+  margin: 0 0 6px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+.campus-ev-daysheet-empty-note {
+  max-width: 32em;
+  margin: 0 auto;
+  font-size: var(--fs-xs);
+  line-height: 1.75;
+  color: var(--text-3);
+}
+
+/* ---------- 使用说明 ---------- */
+
+.campus-ev-head-ops {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.campus-ev-help {
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+
+.campus-ev-help:hover {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.campus-ev-intro {
+  max-width: 540px;
+}
+
+.campus-ev-intro-kicker {
+  margin: 0 0 4px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  letter-spacing: 0.04em;
+}
+
+.campus-ev-intro-lead {
+  margin: 0 0 16px;
+  font-size: var(--fs-sm);
+  line-height: 1.8;
+  color: var(--text-2);
+}
+
+.campus-ev-intro-list {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+  counter-reset: ev-intro;
+}
+
+.campus-ev-intro-list li {
+  position: relative;
+  padding-left: 28px;
+  counter-increment: ev-intro;
+}
+
+/*
+ * 序号用圆圈而不是「1.」：句点会和正文挤在同一条视觉线上，
+ * 圆圈把「这是第几步」和「这一步讲什么」分成两层。
+ */
+.campus-ev-intro-list li::before {
+  content: counter(ev-intro);
+  position: absolute;
+  left: 0;
+  top: 2px;
+  display: grid;
+  place-items: center;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.campus-ev-intro-list b {
+  display: block;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.campus-ev-intro-list span {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--fs-xs);
+  line-height: 1.75;
+  color: var(--text-2);
+}
+
+.campus-ev-intro-caution {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+  background: var(--accent-soft);
+  font-size: var(--fs-xs);
+  line-height: 1.8;
+  color: var(--text-2);
+}
+
+.campus-ev-intro-caution strong {
+  color: var(--accent-ink);
+}
+
+.campus-ev-intro-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.campus-ev-intro-foot {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+/* ---------- 一次性回执 ---------- */
+
+/*
+ * 快捷「不感兴趣」之后必须回一句：条目当场消失，没有回执的话
+ * 用户第一反应是「我是不是点错了 / 数据被我删了？」。
+ */
+.campus-ev-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  z-index: 80;
+  max-width: min(92vw, 460px);
+  margin: 0;
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--card-bg);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  text-align: center;
+  box-shadow: var(--shadow-2);
+  transform: translateX(-50%);
+  animation: campus-ev-toast-in 0.16s ease-out;
+}
+
+@keyframes campus-ev-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.campus-ev-detail-cat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.campus-ev-detail-kind {
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: var(--fill-3);
+  color: var(--text-2);
+}
+
+.campus-ev-detail-title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.campus-ev-detail-body {
+  margin-top: 14px;
+}
+
+.campus-ev-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--fill-2);
+  font-size: var(--fs-sm);
+}
+
+.campus-ev-facts > div {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.campus-ev-facts dt {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: 1.9;
+}
+
+.campus-ev-facts dd {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.7;
+}
+
+.campus-ev-fact-row {
+  display: block;
+}
+
+.campus-ev-fact-note {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  line-height: 1.6;
+}
+
+.campus-ev-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.campus-ev-section {
+  margin-bottom: 14px;
+}
+
+.campus-ev-section h3 {
+  margin: 0 0 4px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.campus-ev-section p {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.8;
+  color: var(--text-2);
+}
+
+.campus-ev-link {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.campus-ev-link:hover {
+  color: var(--ink);
+}
+
+/*
+ * 官网最新公告（构建前自动抓的标题与链接）。
+ *
+ * 用左侧一道青线跟「官网链接」区分开：上面是固定入口，这里是会随时间变的快照。
+ * 「自动同步 · 日期」必须留着 —— 一条两周前抓的公告和昨天抓的，可信度不一样。
+ */
+.campus-ev-notices {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--accent);
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+  background: var(--fill-4);
+}
+
+.campus-ev-notices-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 0 0 6px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.campus-ev-notices-sync {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--fill-2);
+  font-weight: 400;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.campus-ev-notices-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.campus-ev-notices-list li {
+  position: relative;
+  padding-left: 10px;
+  margin: 3px 0;
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}
+
+.campus-ev-notices-list li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.campus-ev-notices-list a {
+  color: var(--text-2);
+  text-decoration: none;
+}
+
+.campus-ev-notices-list a:hover {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.campus-ev-disclaimer {
+  margin: 16px 0 0;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+  color: var(--text-3);
+}
+
+.campus-ev-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.campus-ev-detail-actions .campus-btn {
+  flex: 1 1 auto;
+}
+
+.campus-ev-foot {
+  margin: 0;
+  padding: 0 4px;
+  font-size: var(--fs-xs);
+  line-height: 1.8;
+  color: var(--text-3);
+  text-align: center;
+}
+
+/* 深色下分类色条提一档：原色压在深棕纸面上会糊成褐色 */
+.dark .campus-ev-dot,
+.dark .campus-ev-row-mark {
+  filter: brightness(1.28) saturate(1.1);
+}
+
+/*
+ * 格内色点在深色下必须换色。
+ * 深色格底本身就是这一类颜色，再压一个同色相的浅色版点上去等于没有 ——
+ * 手机上格子里只剩色点，认不出点等于认不出分类。
+ */
+.dark .campus-ev-cell-dot {
+  background: var(--dot-d);
+}
+
+/*
+ * 深色格底不用 mix 凑。
+ *
+ * 24% 的 dark 色混进 #292217，九个分类算出来是 RGB(58,70,65)–(92,78,39) 这一团，
+ * 色差 10–30，屏幕上就是「九块差不多暗的褐色」。而 mix 提浓又会把格里的浅字压掉。
+ * 改用 CategoryMeta.cellDark 单独配的一组底：色相明确、明度比卡片高一档，
+ * 蓝/靛/紫三兄弟再靠明度拉开，白字压上去也够读。
+ */
+.dark .campus-ev-cell.is-tinted {
+  background: var(--ev-cell-c1);
+  border-color: color-mix(in srgb, var(--ev-c1-dark) 52%, transparent);
+}
+
+.dark .campus-ev-cell.is-tinted:hover {
+  filter: brightness(1.12);
+}
+
+.dark .campus-ev-cell.is-multi {
+  background: linear-gradient(
+    135deg,
+    var(--ev-cell-c1) 0 46%,
+    var(--ev-cell-c2) 54% 100%
+  );
+  border-color: color-mix(in srgb, var(--ev-c1-dark) 52%, transparent);
+}
+
+.dark .campus-ev-cell.is-multi:hover {
+  filter: brightness(1.12);
+}
+
+/* 深色下彩色格里的字要用最亮的一档，11px 小字在彩色底上很容易糊 */
+.dark .campus-ev-cell.is-tinted .campus-ev-cell-day,
+.dark .campus-ev-cell.is-multi .campus-ev-cell-day,
+.dark .campus-ev-cell.is-tinted .campus-ev-cell-item,
+.dark .campus-ev-cell.is-multi .campus-ev-cell-item {
+  color: var(--ink);
+}
+
+/* 深色下顶边加粗到 4px：3px 在暗底上细得看不出是「分类色条」 */
+.dark .campus-ev-cell.is-tinted::before,
+.dark .campus-ev-cell.is-multi::before {
+  height: 4px;
+  background: var(--ev-c1-dark);
+}
+
+/* 今天那颗实心圆：深色下工具色变亮，字要反过来压深墨 */
+.dark .campus-ev-cell.is-today .campus-ev-cell-day,
+.dark .campus-ev-seg-btn.is-active {
+  color: var(--solid);
+}
+
+/* 窗口条在深色下没有虚线框兜底，胶囊和底带各自要能立住 */
+.dark .campus-ev-windowband {
+  background: rgba(237, 224, 196, 0.05);
+}
+
+.dark .campus-ev-windowband-item {
+  background: rgba(237, 224, 196, 0.1);
+}
+
+/* 窗口条的色点太小时，原色在深底上几乎看不出来 */
+.dark .campus-ev-windowband-item i {
+  filter: brightness(1.28) saturate(1.1);
 }

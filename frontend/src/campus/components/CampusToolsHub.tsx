@@ -18,6 +18,7 @@ import ScheduleTool from "../tools/schedule/ScheduleTool";
 import WordsTool from "../tools/words/WordsTool";
 import DeadlineTool from "../tools/deadline/DeadlineTool";
 import DrawTool from "../tools/draw/DrawTool";
+import EventsTool from "../tools/events/EventsTool";
 import ToolNav from "./ToolNav";
 import type { ToolId } from "../types";
 
@@ -28,6 +29,7 @@ const PANELS: Record<ToolId, ComponentType> = {
   words: WordsTool,
   deadline: DeadlineTool,
   draw: DrawTool,
+  events: EventsTool,
 };
 
 export default function CampusToolsHub() {
