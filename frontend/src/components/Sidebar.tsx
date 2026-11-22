@@ -9,11 +9,12 @@
 //   「深色纸面」开关，prefs / applyFontScale / data-fs / html.dark 全部照旧。
 import { useMemo, useRef, useState, type RefObject } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import MascotLogo from "./chat/MascotLogo";
 import CornIcon from "./CornIcon";
 import NavIcon from "./NavIcon";
 import UserAvatar from "./settings/UserAvatar";
-import { chatRailNav, railLayout, NAV } from "@/lib/nav";
+import { chatRailNav, railLayout, NAV, isCurrentNav } from "@/lib/nav";
 import MyFeedbackLink from "./MyFeedbackLink";
 import type { Conversation } from "@/lib/types";
 import type { FontScale } from "@/lib/hooks/usePrefs";
@@ -122,6 +123,9 @@ export default function Sidebar({
   const [confirmDelId, setConfirmDelId] = useState<string | null>(null);
   // 手机左滑出操作区：swipedId = 当前左滑的会话；touch 存进行中的手势（不进 state，避免逐帧重渲染）
   const [swipedId, setSwipedId] = useState<string | null>(null);
+  // 当前路由：模块格要能标出"我在哪一页"（2026-11-22）。
+  // 之前 .side-entry[aria-current="page"] 的样式早就写好了，但没人设过这个属性。
+  const here = usePathname() ?? "/";
   const swipeTouch = useRef<{ id: string; x0: number; y0: number; el: HTMLElement | null; horizontal: boolean | null } | null>(null);
   /** 最近一次横滑结束的时间：用来吞掉浏览器跟着补发的那一下 click */
   const lastSwipeAt = useRef(0);
@@ -214,7 +218,13 @@ export default function Sidebar({
         }`}
       >
         {railNav.map((it) => (
-          <Link key={it.href} href={it.href} className="side-entry" title={it.label}>
+          <Link
+            key={it.href}
+            href={it.href}
+            className="side-entry"
+            title={it.label}
+            aria-current={isCurrentNav(it.href, here) ? "page" : undefined}
+          >
             <span className="side-ico">
               <NavIcon name={it.icon} className="side-entry-ico" />
             </span>

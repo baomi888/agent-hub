@@ -4,19 +4,17 @@
 // 2026-09 重构：toast/偏好/会话/知识库各域逻辑拆到 lib/hooks/*，
 // 本文件只保留：断点与主题、抽屉管理、聊天流（SSE）、联网建库编排、布局
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { useRouter } from "next/navigation";
-import Sidebar from "@/components/Sidebar";
 import ChatArea, { type ChatAttachment } from "@/components/ChatArea";
 import KnowledgePanel from "@/components/KnowledgePanel";
 import SedimentModal from "@/components/chat/SedimentModal";
-import UsagePanel from "@/components/UsagePanel";
+import { useChatStore } from "@/components/shell/ChatProvider";
+import { useShell } from "@/components/console/ConsoleLayout";
 import { api } from "@/lib/api";
 import { streamChat } from "@/lib/sse";
 import { uid } from "@/lib/id";
 import { useToast } from "@/lib/hooks/useToast";
 import { getSendGeo, getCachedGeo, isGeoEnabled, acquireGeo, reverseGeocodePlace, setGeoEnabled, updateCachedPlace, formatPlace, getManualCity, setManualCity } from "@/lib/geo";
 import { usePrefs } from "@/lib/hooks/usePrefs";
-import { useSessions } from "@/lib/hooks/useSessions";
 import { useKnowledge } from "@/lib/hooks/useKnowledge";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { detailToMessage } from "@/lib/errors";
@@ -55,33 +53,13 @@ function subscribeViewport(onChange: () => void) {
   };
 }
 
-// ---- 主题：以 documentElement 上的 dark class 为唯一事实来源 ----
-const themeListeners = new Set<() => void>();
-
-function readTheme(): boolean {
-  return document.documentElement.classList.contains("dark");
-}
-
-function writeTheme(next: boolean) {
-  document.documentElement.classList.toggle("dark", next);
-  try {
-    localStorage.setItem("theme", next ? "dark" : "light");
-  } catch {
-    /* 隐私模式下写入失败可忽略 */
-  }
-  themeListeners.forEach((cb) => cb());
-}
-
-function subscribeTheme(cb: () => void) {
-  themeListeners.add(cb);
-  return () => {
-    themeListeners.delete(cb);
-  };
-}
+// ---- 主题 ----
+// 2026-11-22：这里的 readTheme / writeTheme / subscribeTheme 随侧栏一起撤了。
+// 深色模式的唯一入口在设置页（「深色纸面」），写的是 <html class="dark">，
+// 本页不需要再自己订阅一份 —— 少一个消费者就少一处漂移。
 
 export default function Home() {
   // ---- 各域 hooks ----
-  const router = useRouter();
   const { toasts, showToast } = useToast();
   const auth = useAuth();
   const prefs = usePrefs();
@@ -90,7 +68,7 @@ export default function Home() {
     // 以及老偏好迁移的输入。2026-10-31 批 B 起界面上已没有改它的入口。
     mode, topK, setTopK, chunkSize, setChunkSize,
     chunkOverlap, setChunkOverlap, kbPanelPref, setKbPanelPref, savedRef,
-    fontScale, setFontScale,
+    fontScale,
     useKb, setUseKb, useWeb, setUseWeb,
   } = prefs;
   // 两枚能力开关的当前值（2026-10-31 批 B 起常驻，不再是 ?caps=1 的预览）。
@@ -104,18 +82,27 @@ export default function Home() {
     },
     [setUseKb, setUseWeb]
   );
-  const sessions_ = useSessions(showToast);
+  // ★ 2026-11-22：会话域来自外壳（ChatProvider），不再由本页创建。
+  //   这样切到别的页面时列表/消息/正在生成的流都不会被卸载。
+  const sessions_ = useChatStore();
   const {
     sessions, setSessions, activeSid, setActiveSid, messages, setMessages,
-    loading: sessionsLoading, loadError: bootError,
-    refreshSessions, createSession, selectSession, renameSession,
-    deleteSession, deleteTurn, reloadSessions,
+    loading: sessionsLoading,
+    refreshSessions, selectSession,
+    deleteTurn, reloadSessions,
   } = sessions_;
   const {
     kbs, publicKbs, favKbs, toggleFavorite, kbNameMap, loading: kbsLoading,
     refreshKbs, uploadFiles, deleteKbFile, rebuildKb, searchPreview, deleteKb,
     rememberChunk, chunkParamsOf,
   } = useKnowledge(showToast, chunkSize, chunkOverlap);
+
+  // 把「库 id → 名字」上浮给外壳：侧栏的会话卡片要显示「资料库 · 名字」，
+  // 而侧栏在别的路由也要显示对。数据源仍是上面这份 useKnowledge，不另拉一次。
+  const { setKbNames } = sessions_;
+  useEffect(() => {
+    setKbNames(kbNameMap);
+  }, [kbNameMap, setKbNames]);
 
   // ---------- 混合架构（mode=hybrid）----------
   //
@@ -209,15 +196,13 @@ export default function Home() {
     window.history.replaceState({}, "", "/");
   }, [sessions, activeSid, selectSession, refreshKbs, setPrefill]);
   // 抽屉容器：打开时把焦点送进去，关闭后还给触发按钮
-  const sidebarRef = useRef<HTMLElement | null>(null);
+  // ★ 2026-11-22：左栏（Sidebar）连同它的抽屉状态搬到了外壳，见 ConsoleLayout / useShell()。
   const kbRef = useRef<HTMLElement | null>(null);
 
   // 响应式三档：≥1280 三栏 / 1024–1279 右栏抽屉 / <900 左栏也抽屉
   // 用 useSyncExternalStore 订阅 matchMedia，避免 effect 里 setState 造成的二次渲染
   const viewport = useSyncExternalStore(subscribeViewport, getViewport, () => "wide" as const);
-  const [sidebarPref, setSidebarPref] = useState(false);
-  // 用量与反馈看板（P2）：侧栏账号块点开
-  const [usageOpen, setUsageOpen] = useState(false);
+  const shell = useShell();
   /**
    * 「存进资料库」弹层。
    *
@@ -231,14 +216,8 @@ export default function Home() {
     role: "user" | "assistant";
   } | null>(null);
   const kbPanelOpen = kbPanelPref ?? viewport === "wide";
-  const sidebarOpen = sidebarPref && viewport === "narrow";
 
   const setKbPanelOpen = useCallback((v: boolean) => setKbPanelPref(v), [setKbPanelPref]);
-  const setSidebarOpen = useCallback((v: boolean) => setSidebarPref(v), []);
-
-  // 深色模式：直接以 <html class="dark"> 为准（layout 内联脚本已写入），避免首帧闪白
-  const dark = useSyncExternalStore(subscribeTheme, readTheme, () => false);
-  const toggleDark = useCallback(() => writeTheme(!readTheme()), []);
 
   // 字号档位：与 layout 内联脚本同源（html[data-fs]），变化时同步到文档根
   useEffect(() => {
@@ -938,20 +917,19 @@ export default function Home() {
   // 首屏三件套都完成才算 boot 完成（骨架屏统一消失）
   const booting = sessionsLoading || kbsLoading;
 
-  // 抽屉遮罩：窄屏开了左栏，或中/窄屏开了右栏时显示
-  const overlayOpen =
-    (viewport === "narrow" && sidebarOpen) || (viewport !== "wide" && kbPanelOpen);
+  // 抽屉遮罩：窄屏开了左栏（状态在外壳，见 useShell），或中/窄屏开了右栏时显示
+  const overlayOpen = shell.sidebarOpen || (viewport !== "wide" && kbPanelOpen);
 
   const closeOverlays = useCallback(() => {
-    setSidebarOpen(false);
+    shell.closeSidebar();
     if (viewport !== "wide") setKbPanelOpen(false);
-  }, [viewport, setKbPanelOpen, setSidebarOpen]);
+  }, [viewport, setKbPanelOpen, shell]);
 
   // 抽屉：Esc 关闭，打开时焦点移入面板，关闭后归还给触发它的按钮
   useEffect(() => {
     if (!overlayOpen) return;
     const opener = document.activeElement as HTMLElement | null;
-    const panel = sidebarOpen ? sidebarRef.current : kbRef.current;
+    const panel = shell.sidebarOpen ? shell.sidebarRef.current : kbRef.current;
     // 等浮层开始滑入再抢焦点，否则会被 transform 过渡打断
     const t = window.setTimeout(() => panel?.focus(), 60);
     const onKey = (e: KeyboardEvent) => {
@@ -965,7 +943,7 @@ export default function Home() {
       document.removeEventListener("keydown", onKey);
       opener?.focus?.();
     };
-  }, [overlayOpen, sidebarOpen, closeOverlays]);
+  }, [overlayOpen, shell.sidebarOpen, shell.sidebarRef, closeOverlays]);
 
   // ---- 登录门 ----
   // 必须放在所有 hooks 之后：React 不允许条件调用 hook，但允许提前 return。
@@ -1013,46 +991,6 @@ export default function Home() {
           ★ 2026-11-16：原生壳里已注入 window.__zhisuiApp，isInstalled() 会返回 true，
             这条在 App 里不再出现（以前会在 App 里劝用户"把知穗装到桌面"）。 */}
       <InstallBanner />
-      <Sidebar
-        sessions={sessions}
-        activeSid={activeSid}
-        onSelect={(sid) => {
-          selectSession(sid);
-          setSidebarOpen(false); // 窄屏抽屉里点完会话就收起来
-        }}
-        onCreate={() => {
-          void createSession();
-          // 与 onSelect 同理：抽屉是「选会话」的地方，点了「新建对话」就该落在
-          // 新会话上。原来只关 onSelect，手机点完「新建对话」抽屉还盖着，
-          // 看起来像没点中（2026-11-16 复现：截图里欢迎页整块被抽屉压住）。
-          setSidebarOpen(false);
-        }}
-        onOpenLibrary={() => {
-          // 曾经是 window.location.href —— 那是**整页刷新**：浏览器白一帧、
-          // 重新下载整包 JS、再重新探活。广场本来就在同一个 Next 应用里，
-          // 走路由跳转才有"页面被换掉"而不是"应用被重启"的观感。
-          router.push("/library");
-        }}
-        onRename={renameSession}
-        onDelete={deleteSession}
-        kbNameMap={kbNameMap}
-        containerRef={sidebarRef}
-        loading={booting}
-        loadError={bootError}
-        onRetryLoad={reloadSessions}
-        dark={dark}
-        fontScale={fontScale}
-        onFontScaleChange={setFontScale}
-        onToggleDark={toggleDark}
-        overlay={viewport === "narrow"}
-        open={sidebarOpen}
-        username={auth.me?.user.username}
-        isAdmin={auth.me?.is_admin}
-        displayName={auth.me?.user.nickname || auth.me?.user.username}
-        avatar={auth.me?.user.avatar}
-        onOpenUsage={() => setUsageOpen(true)}
-        onLogout={() => void auth.logout()}
-      />
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* 反馈回音提示条：有新回复/状态变更才出现，可关闭。
@@ -1081,7 +1019,7 @@ export default function Home() {
           onUnbindKb={() => bindKb(null)}
           onToggleKbPanel={() => setKbPanelOpen(!kbPanelOpen)}
           kbPanelOpen={kbPanelOpen}
-          onOpenSidebar={viewport === "narrow" ? () => setSidebarOpen(true) : undefined}
+          onOpenSidebar={shell.narrow ? shell.openSidebar : undefined}
           prefill={prefill ?? undefined}
           onDeleteTurn={deleteTurn}
           onSediment={(dbId, text, role) => setSediment({ focus: dbId, text, role })}
@@ -1163,9 +1101,6 @@ export default function Home() {
           </div>
         ))}
       </div>
-
-      {/* 用量与反馈看板（portal 到 body，不受三栏布局裁切） */}
-      {usageOpen && <UsagePanel onClose={() => setUsageOpen(false)} />}
 
       {/* ★ 底栏在 2026-11-18 的合并外壳里由 layout 统一挂载（这里是它的内容区，
           自己再挂一份就会出现两条导航）。层级关系随之搬进 CSS：

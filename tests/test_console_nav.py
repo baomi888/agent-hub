@@ -366,7 +366,9 @@ def test_tabbar_reuses_the_shared_nav_list():
     assert "export const NAV" in nav
     assert "export function visibleNav" in nav
 
-    for path in (LAYOUT_TSX, TABBAR_TSX):
+    # 2026-11-22：桌面那条 `.console-nav` 并进了全局 Sidebar（外壳里只留一份左栏），
+    # 所以"引用共享清单"的判据从 LAYOUT_TSX 换成侧栏组件本身。
+    for path in (SIDEBAR_TSX, TABBAR_TSX):
         src = _read(path)
         assert '@/lib/nav' in src, f"{path.name} 自己写了份导航清单"
 
@@ -686,8 +688,12 @@ def test_home_still_has_a_way_into_the_console():
     用户接受撤 tab，是因为还能进得去 —— 侧栏（手机是抽屉）和首页的入口卡片。
     这条钉住侧栏还在渲染：真把 Sidebar 也删了，手机上就只剩「更多」那条死路。
     """
-    home = _strip_comments(_read(HOME_TSX))
-    assert "<Sidebar" in home, "首页连侧栏都不挂了：手机上没有任何进控制台的入口"
+    # ★ 2026-11-22（方案 B）：侧栏从首页搬进外壳，判据跟着搬。
+    #   真把侧栏删了，手机上就只剩「更多」那条死路 —— 这条守的仍是"进得去"。
+    layout = _read(LAYOUT_TSX)
+    assert 'from "../Sidebar"' in layout and "<Sidebar" in layout, (
+        "外壳里没有挂侧栏：所有页面（含首页）都会失去左栏入口"
+    )
     nav = _read(NAV_TS)
     assert '"/reminders"' in nav or "/reminders" in nav, (
         "共享导航清单里没有待办 —— 侧栏和 tab 都靠它，删了等于两个入口一起断"
