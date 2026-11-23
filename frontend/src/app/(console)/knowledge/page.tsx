@@ -15,6 +15,7 @@ import Link from "next/link";
 import PageShell from "@/components/console/PageShell";
 import CornIcon from "@/components/CornIcon";
 import SedimentModal from "@/components/chat/SedimentModal";
+import PlazaPane from "@/components/library/PlazaPane";
 import { SkeletonLines, ToastHost } from "@/components/console/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
@@ -45,6 +46,14 @@ export default function KnowledgePage() {
   const auth = useAuth();
   const authedId = auth.me?.user.id ?? null;
   const { toasts, showToast } = useToast();
+  /**
+   * 当前 tab：我的资料库 / 公开资料库（2026-11-23）。
+   *
+   * 两者是同一个页面的平级分类，**数据不合并** —— 左边是自己的库（能上传/删/分享），
+   * 右边是别人的只读库。切换只换内容区，路由不变，所以不存在"点 tab 像跳页"。
+   * 公开那一栏直接复用 components/library/PlazaPane（/library 也是它）。
+   */
+  const [tab, setTab] = useState<"mine" | "public">("mine");
 
   const [kbs, setKbs] = useState<KbInfo[]>([]);
   /**
@@ -373,27 +382,57 @@ export default function KnowledgePage() {
 
   return (
     <PageShell
-      title="我的资料库"
+      title="资料库"
       // 页头说明退场（2026-11-17）：「课件、笔记、论文都能放进来。」
       // 与「上传文件」按钮说的是同一件事；detail 那句（选中一个库、回答先从这里找依据）
       // 也一并删掉 —— 它讲的是选库之后发生什么，而选库这个动作本身就在左栏。
+      // ★ 2026-11-23：上传按钮只在「我的资料库」这一栏出现 —— 公开库是别人的，
+      //   这里没有"上传给它"这回事。
       actions={
-        <>
-          {/* 页头只放"对当前这个库的主操作"。原来这里还有一个「+ 新建」，
-              和左栏标题栏那个「新建」是同一件事 —— 同屏两个同级按钮，用户
-              第一反应是"这俩有什么区别"，所以库管理统一收进左栏。 */}
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={!active || busy !== null}
-            onClick={() => fileInput.current?.click()}
-          >
-            <CornIcon name="upload" />
-            {busy === "upload" ? "收集中…" : "上传文件"}
-          </button>
-        </>
+        tab === "mine" ? (
+          <>
+            {/* 页头只放"对当前这个库的主操作"。原来这里还有一个「+ 新建」，
+                和左栏标题栏那个「新建」是同一件事 —— 同屏两个同级按钮，用户
+                第一反应是"这俩有什么区别"，所以库管理统一收进左栏。 */}
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={!active || busy !== null}
+              onClick={() => fileInput.current?.click()}
+            >
+              <CornIcon name="upload" />
+              {busy === "upload" ? "收集中…" : "上传文件"}
+            </button>
+          </>
+        ) : undefined
       }
     >
+      {/* 两个 tab 是同一个页面的平级分类（2026-11-23）。
+          数据不合并：一边是自己的库（可上传、可删、可分享），一边是别人的只读库。
+          切换只换内容区，不换路由 —— 所以不存在"点 tab 像跳了页"。 */}
+      <div className="lib-tabs" role="tablist" aria-label="资料库分类">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "mine"}
+          className={tab === "mine" ? "is-on" : ""}
+          onClick={() => setTab("mine")}
+        >
+          我的资料库
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "public"}
+          className={tab === "public" ? "is-on" : ""}
+          onClick={() => setTab("public")}
+        >
+          公开资料库
+        </button>
+      </div>
+
+      {tab === "mine" ? (
+        <>
       <input
         ref={fileInput}
         type="file"
@@ -926,6 +965,10 @@ export default function KnowledgePage() {
             <div className="kbp-prev-body">{preview.content}</div>
           </div>
         </div>
+      )}
+        </>
+      ) : (
+        <PlazaPane embedded />
       )}
 
       <ToastHost toasts={toasts} />

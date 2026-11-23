@@ -18,7 +18,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "frontend" / "src"
 PANEL = SRC / "components" / "KnowledgePanel.tsx"
-LIBRARY = SRC / "app" / "library" / "page.tsx"
+# ★ 2026-11-23：广场主体搬进 components/library/PlazaPane（/library 与
+#   资料库页的「公开资料库」tab 共用），页面文件只剩薄壳。
+LIBRARY = SRC / "components" / "library" / "PlazaPane.tsx"
 DETAIL = SRC / "app" / "library" / "[kbId]" / "page.tsx"
 LIB_CSS = SRC / "app" / "styles" / "library.css"
 BOARD = SRC / "components" / "library" / "KbBoard.tsx"

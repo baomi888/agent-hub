@@ -2138,3 +2138,52 @@
     height: 40px;
   }
 }
+
+/* ==========================================================
+   资料库页的两个 tab + 嵌入模式（2026-11-23）
+   ----------------------------------------------------------
+   左边是自己的库（可上传/删/分享），右边是别人的只读库 ——
+   数据不合并，只是放在同一个页面里平级切换。
+   ========================================================== */
+.lib-tabs {
+  display: inline-flex;
+  gap: 3px;
+  margin: 0 0 18px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--fill-2);
+}
+.lib-tabs button {
+  border: 0;
+  border-radius: var(--r-pill);
+  background: none;
+  padding: 6px 18px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.lib-tabs button:hover {
+  color: var(--ink);
+}
+.lib-tabs button.is-on {
+  background: var(--panel);
+  color: var(--accent-ink);
+  font-weight: 600;
+  box-shadow: var(--shadow-1);
+}
+
+/* 嵌入模式：这一栏住在资料库页里，外层已经是 <main> + 滚动容器。
+   不能再要 100dvh 与自己的滚动，否则会出现"页中页"的双滚动条；
+   背景也要让出来，跟着控制台的纸面走。 */
+.lib-root--embedded {
+  min-height: 0;
+  overflow: visible;
+  background: transparent;
+}
+.lib-root--embedded .lib-main {
+  max-width: none;
+  padding: 0 0 12px;
+}

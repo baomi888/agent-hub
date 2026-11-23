@@ -36,7 +36,10 @@ SRC = ROOT / "frontend" / "src"
 
 NAV = SRC / "lib" / "nav.ts"
 KNOWLEDGE = SRC / "app" / "(console)" / "knowledge" / "page.tsx"
-LIBRARY = SRC / "app" / "library" / "page.tsx"
+# ★ 2026-11-23：广场主体搬进 components/library/PlazaPane（资料库页的
+#   「公开资料库」tab 与 /library 共用一份），页面文件只剩一个薄壳。
+#   断言要读真正含文案的那份。
+LIBRARY = SRC / "components" / "library" / "PlazaPane.tsx"
 SYNC_BAR = SRC / "campus" / "tools" / "pomodoro" / "SyncBar.tsx"
 POMODORO = SRC / "campus" / "tools" / "pomodoro" / "PomodoroTool.tsx"
 FOCUS_SYNC = SRC / "campus" / "logic" / "focusSync.ts"
@@ -146,11 +149,15 @@ def test_public_library_uses_the_name_the_user_chose():
     lib = _code(LIBRARY)
     assert "<h1>公开知识库</h1>" in lib, "公开广场的 h1 没跟着改名（应为「公开知识库」）"
 
-    # 三处同源：左栏按钮、首屏卡片、广场 h1
+    # ★ 2026-11-23：左栏那颗独立的「公开知识库」按钮已经撤掉 ——
+    #   入口统一成「资料库」，公开广场变成资料库页里的一个 tab。
+    #   所以同源判据改成：左栏不再单独出现这个词，资料库页有「公开资料库」tab。
     sidebar = _code(SRC / "components" / "Sidebar.tsx")
-    assert ">公开知识库<" in sidebar.replace("\n", "").replace(" ", ""), (
-        "左栏那颗按钮的文字还不是「公开知识库」"
+    assert "公开知识库" not in sidebar, (
+        "左栏又长出了一颗独立的「公开知识库」按钮 —— 入口应当统一到「资料库」"
     )
+    kpage = _code(SRC / "app" / "(console)" / "knowledge" / "page.tsx")
+    assert "公开资料库" in kpage, "资料库页没有「公开资料库」tab，广场就没入口了"
     cards = _code(SRC / "components" / "chat" / "constants.tsx")
     assert re.search(r'href:\s*"/library",\s*label:\s*"公开知识库"', cards), (
         "首屏那格「公开知识库」的标签没跟着改 —— 同一屏两个名字"

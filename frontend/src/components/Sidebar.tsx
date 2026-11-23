@@ -25,7 +25,6 @@ interface Props {
   activeSid: string | null;
   onSelect: (sid: string) => void;
   onCreate: () => void;
-  onOpenLibrary?: () => void;
   onRename: (sid: string, title: string) => void;
   onDelete: (sid: string) => void;
   kbNameMap?: Record<string, string>;
@@ -101,7 +100,6 @@ export default function Sidebar({
   activeSid,
   onSelect,
   onCreate,
-  onOpenLibrary,
   onRename,
   onDelete,
   kbNameMap,
@@ -266,20 +264,6 @@ export default function Sidebar({
         </span>
       </button>
 
-      {/* 公开知识库广场：平台化入口（描边次按钮，与新建对话形成主次）。
-          2026-11-13 换掉原来的「模板广场」：那套预置提示词下线，
-          同一位置改成挑别人的公开知识库。
-          ★ 2026-11-22：等「资料库」页面长出「我的 / 公开」双 tab 之后，
-            这颗按钮就可以撤掉（入口统一到资料库）。在那之前保留 ——
-            否则公开广场就没有任何导航入口了。 */}
-      {onOpenLibrary && (
-        <button onClick={onOpenLibrary} className="btn-import mt-2 w-full" title="公开知识库">
-          <span className="inline-flex items-center justify-center gap-1.5">
-            <CornIcon name="store" className="h-4 w-4" />
-            <span className="rail-label">公开知识库</span>
-          </span>
-        </button>
-      )}
       {/* 纵向主导航：4 个高频入口 + 「更多」。
           宫格版（2026-11-15～11-21）把 12 个入口平均铺开，光导航就吃掉 246px，
           会话列表被挤到 96px —— 用户的原话是"历史对话占比要加大"。
