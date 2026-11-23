@@ -1,7 +1,7 @@
 // 消息正文渲染：URL 自动 linkify + **粗体** + 换行；引用 refs 文本解析
 // 从 ChatArea.tsx 拆出（2026-09 重构），全部是纯函数，适合单测
 import type { ReactNode } from "react";
-import { MathTex, splitMath } from "@/lib/math";
+import { looksLikeMath, MathTex, splitMath } from "@/lib/math";
 import type { WebSource } from "@/lib/types";
 import LinkCluster, { type LinkItem } from "./LinkCluster";
 import CodeBlock from "./CodeBlock";
@@ -119,8 +119,45 @@ function renderContentPlain(text: string): ReactNode {
 // - 流式渲染时未闭合的 ** 或 ` 走正则匹配不到 → 原样显示，不会崩
 // - 小输入（引用预览/用户消息）仍走旧 renderContent，不强行 markdown 化
 
-const MD_INLINE_RE =
+const MD_INLINE_BASE =
   /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[[^\]\n]+\]\([^)\s]+\))|(~~[^~\n]+~~)|(\[W\d{1,3}\])|(\[\d{1,2}\])|(https?:\/\/[^\s<>"{}|\\^`\[\]。，、；：！？（）【】《》「」『』]+)/gi;
+
+// ★ 行内公式必须作为**同一层 token**参与解析，不能像旧版那样先用 splitMath
+// 把整段切开、再对各碎片跑 **/[]/链接正则。真实反例（线上消息 1705）：
+//   → 所以 **$ f'(x) < 0 $ 是 $ f $ 单调减的充分条件**。
+// splitMath 先把 `**` 和结尾 `**` 分到两个碎片里，两边都配不上对，
+// 用户看到的就是截图里那两个孤零零的星号。
+// 这三个 token 的边界与 lib/math.tsx 保持一致（不吞 $$ 的左半、不吞 $5）。
+const INLINE_MATH_TOKEN = String.raw`\$(?![\\$])([^$\n]{1,300}?)\$(?![\d$])`;
+const BLOCK_MATH_TOKEN = String.raw`\$\$([\s\S]+?)\$\$`;
+const PAREN_MATH_TOKEN = String.raw`\\\(([\s\S]+?)\\\)`;
+const BRACKET_MATH_TOKEN = String.raw`\\\[([\s\S]+?)\\\]`;
+const MD_INLINE_RE = new RegExp(
+  `${MD_INLINE_BASE.source}|(${BLOCK_MATH_TOKEN})|(${BRACKET_MATH_TOKEN})|(${PAREN_MATH_TOKEN})|(${INLINE_MATH_TOKEN})`,
+  "gi"
+);
+
+/** token 是公式吗？是则交给 MathTex；$5 / $VAR 这类仍按普通文本 */
+function asMathToken(tok: string): { value: string; display: boolean } | null {
+  // 用切片而不是正则取内容：连续反斜杠在正则字面量里极易少写一个，
+  // 这里直接按分隔符切，边界就是 token 自身的首尾。
+  if (tok.startsWith("\\(") && tok.endsWith("\\)")) {
+    return { value: tok.slice(2, -2), display: false };
+  }
+  if (tok.startsWith("\\[") && tok.endsWith("\\]") && tok.length > 4) {
+    const value = tok.slice(2, -2).trim();
+    return value ? { value, display: true } : null;
+  }
+  if (tok.startsWith("$$") && tok.endsWith("$$") && tok.length > 4) {
+    const value = tok.slice(2, -2).trim();
+    return value ? { value, display: true } : null;
+  }
+  if (tok.startsWith("$") && tok.endsWith("$") && tok.length > 2) {
+    const value = tok.slice(1, -1);
+    return looksLikeMath(value) ? { value, display: false } : null;
+  }
+  return null;
+}
 
 /** 行内元素：行内代码 / 粗体 / 链接 / 删除线 / 引用角标 / 裸 URL */
 export function renderInline(
@@ -129,19 +166,10 @@ export function renderInline(
   cites?: Map<number, WebSource>,
   refAnchor?: (n: number) => string | null
 ): ReactNode[] {
-  // 公式先切出去：`$x^2$` 里可能夹着 `_` `^` `\`，混在下面的标记正则里
-  // 会被拆得七零八落，必须先整段摘走再交给 KaTeX。
-  const segs = splitMath(text);
-  if (segs.every((s) => s.type === "text")) return renderInlinePlain(text, keyPrefix, cites, refAnchor);
-  const out: ReactNode[] = [];
-  segs.forEach((s, i) => {
-    if (s.type === "text") {
-      out.push(...renderInlinePlain(s.value, `${keyPrefix}-s${i}`, cites, refAnchor));
-    } else {
-      out.push(<MathTex key={`${keyPrefix}-math${i}`} tex={s.value} display={s.type === "block"} />);
-    }
-  });
-  return out;
+  // 整段一次过正则：公式、粗体、链接在同一层切，粗体里的 $...$ 才能保住 ** 配对。
+  // 递归时（**...** / ~~...~~ / [文案](url) 的内部）回到这里，数学片段在
+  // renderInlinePlain 的 token 分支里交给 MathTex。
+  return renderInlinePlain(text, keyPrefix, cites, refAnchor);
 }
 
 function renderInlinePlain(
@@ -157,6 +185,13 @@ function renderInlinePlain(
     if (m.index! > last) out.push(<span key={`${keyPrefix}-t${k++}`}>{text.slice(last, m.index)}</span>);
     const tok = m[0];
     const key = `${keyPrefix}-m${k++}`;
+    // 公式优先：整段 token 交给 KaTeX，不再被 splitMath 从中间切断
+    const math = asMathToken(tok);
+    if (math) {
+      out.push(<MathTex key={key} tex={math.value} display={math.display} />);
+      last = m.index! + tok.length;
+      continue;
+    }
     if (tok.startsWith("`")) {
       out.push(<code key={key} className="md-code">{tok.slice(1, -1)}</code>);
     } else if (tok.startsWith("**")) {
@@ -626,6 +661,13 @@ export function renderMarkdown(
       i < lines.length &&
       lines[i].trim() &&
       !/^\s*```/.test(lines[i]) &&
+      // ★ 块级公式必须能打断段落。真实反例（线上消息 1705）：
+      //   "...使得  \n$$\nf(x)=...\n$$\n若 f'... "
+      // 旧版段落循环只排除了代码/标题/列表/引用/分隔线，`$$` 会被并进
+      // 这个 <p>，于是上面那个专门的块公式分支永远走不到——用户看到
+      // 的就是截图里原样的 `$$` + 反斜杠公式。
+      !/^\s*\$\$/.test(lines[i]) &&
+      !/^\s*\\\[/.test(lines[i]) &&
       !/^(#{1,4})\s+/.test(lines[i]) &&
       !/^\s*[-*•]\s+/.test(lines[i]) &&
       !/^\s*\d+[.、)]\s*/.test(lines[i]) &&
