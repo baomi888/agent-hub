@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { MathTex, splitMath } from "@/lib/math";
 import type { WebSource } from "@/lib/types";
 import LinkCluster, { type LinkItem } from "./LinkCluster";
+import CodeBlock from "./CodeBlock";
 
 // 排除空白与常见分隔符；中文标点也要排除，否则「https://xxx。」会把句号吞进链接
 const URL_RE = /https?:\/\/[^\s<>"{}|\\^`\[\]。，、；：！？（）【】《》「」『』]+/gi;
@@ -497,9 +498,7 @@ export function renderMarkdown(
       while (i < lines.length && !/^\s*```/.test(lines[i])) buf.push(lines[i++]);
       i++; // 跳过闭合 ```（不存在则已到底）
       out.push(
-        <pre key={nk()} className="md-pre" data-lang={lang || undefined}>
-          <code>{buf.join("\n")}</code>
-        </pre>
+        <CodeBlock key={nk()} code={buf.join("\n")} lang={lang} />
       );
       continue;
     }

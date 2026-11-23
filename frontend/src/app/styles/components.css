@@ -736,6 +736,94 @@ button.kb-chip-unbound:hover {
   color: inherit;
   white-space: pre;
 }
+
+/* ===== 豆包式代码块卡片（提示词）：自动换行 + 复制/下载/展开 =====
+   2026-11-23：旧 .md-pre 用 white-space:pre + overflow-x:auto，长提示词
+   横向截断只能看半截。这里新卡片走 pre-wrap + 任意处断行，内容完整可见。 */
+.md-code-card {
+  margin: 10px 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--fill-3);
+  overflow: hidden;
+}
+.md-code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 8px 5px 12px;
+  min-height: 34px;
+  background: var(--fill-2);
+  border-bottom: 1px solid var(--line);
+}
+.md-code-lang {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-2);
+  opacity: 0.72;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.md-code-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.md-code-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.md-code-btn svg { width: 16px; height: 16px; }
+.md-code-btn:hover { color: var(--ink); background: var(--fill-1); }
+/* 触控热区撑到 44px（视觉不变），手机端好点 */
+.md-code-btn::after {
+  content: "";
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+}
+.md-code-body {
+  margin: 0;
+  padding: 12px;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 0.9em;
+  line-height: 1.6;
+  color: var(--ink);
+  background: transparent;
+  /* 核心：保留换行、任意处折行（长英文/URL/中文都不再溢出被截） */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.md-code-body code {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  white-space: inherit;
+}
+.md-code-full { width: min(860px, 100%); max-height: min(86vh, 900px); }
+.md-code-full-bar { border-bottom: 1px solid var(--line); background: var(--panel); }
+.md-code-body-full { max-height: none; height: min(64vh, 680px); padding: 16px; }
+
 .md-table-wrap {
   overflow-x: auto;
   border: 1px solid var(--line-strong);
