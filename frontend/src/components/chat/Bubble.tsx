@@ -17,6 +17,8 @@ import ApprovalCard from "./ApprovalCard";
 import type { IssuedApproval, ToolApprovalRequest, WebSource } from "@/lib/types";
 import { useCopy } from "@/lib/useCopy";
 import HubMark from "./HubMark";
+import { BlocksTrace } from "./BlocksTrace";
+import { stripLegacyBlocks } from "./legacyBlocks";
 
 const Bubble = memo(function Bubble({
   m,
@@ -198,9 +200,14 @@ const Bubble = memo(function Bubble({
   // 老会话里模型会跟着历史回答继续写 [1][2]，哪怕这轮根本没检索 —— 用户点了
   // 没反应，比不显示更糟。流式期间不清理：联网来源是收尾才下发的，中途清理会把
   // 真角标一起删掉、等来源到了又长回来，看着像在闪。
+  // ★ 2026-11-23 历史兜底：本轮修复**之前**落库的老回答还带着
+//   「【资料开始·用户上传】…score=0.721…【资料结束·用户上传】」整段。
+//   用户选的口径是不刷线上库，所以在渲染这一层剥掉（只影响显示，绝不回写）。
+//   新回答后端已经剥干净，这里对它们是 no-op（hasBlocks 提前返回原串）。
+  // 流式期间不动：半截标签发出去再被吃掉，句子会接不上。
   const shownContent = m.streaming
     ? m.content
-    : stripPhantomCitations(m.content, {
+    : stripPhantomCitations(stripLegacyBlocks(m.content), {
         refIds: refIdxs,
         webIds: new Set(cites.keys()),
       });
@@ -270,6 +277,13 @@ const Bubble = memo(function Bubble({
               中途换了执行者，就来不及判断这段结果可不可信了。
               fallback = auto 判成「工作流起跑」但后端引擎开关关闭，静默退回智能体，
               必须明说，否则用户以为看到的就是混合轨迹。 */}
+          {/* 资料检索痕迹（2026-11-23）：后端把模型复述进正文的资料块剥出来了，
+              这里默认收起成一行「已参考的资料 · 2 份你上传的文件」。
+              放在正文之前、和工具调用记录同一套位置逻辑：先告诉用户
+              "这次参考了什么"，再给答案；但它默认收起，不占正文的地方。
+              流式期间不渲染 —— 剥离只在 done 时定稿，中途还没有干净正文。 */}
+          {!m.streaming && <BlocksTrace blocks={m.blocks} />}
+
           {(m.hybridTrace?.length || m.hybridMode || m.hybridRunId) && (
             <HybridTraceView
               items={m.hybridTrace ?? []}

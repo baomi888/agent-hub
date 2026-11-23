@@ -52,52 +52,78 @@ export function HybridTraceView({
 }) {
   if (items.length === 0 && !running && !fallback) return null;
 
+  // ★ 2026-11-23：改成和 DeepSeek / 豆包一样的「一行摘要 + 可展开」。
+  //   原来这条轨迹常驻展开，一次多节点回答能把正文挤到几屏之外，
+  //   用户的原话是「用户只是想看到结果」。
+  //   现在默认收起，标题行直接给出「几步 / 成没成功」；想看细节再点开。
+  //   流式执行期间默认展开（用户这时确实想知道在干什么），收尾后自动收起。
+  const nodes = items.filter((it) => it.kind !== "switch");
+  const nodeCount = nodes.length;
+  const failCount = nodes.filter((it) => it.status === "failed").length;
+
+  let summary: string;
+  if (running) summary = "正在执行…";
+  else if (nodeCount === 0) summary = "已完成";
+  else if (failCount > 0) summary = `${nodeCount} 步 · ${failCount} 步失败`;
+  else summary = `${nodeCount} 步已完成`;
+
   return (
-    <div className="hybrid-trace" aria-live="polite">
-      <div className="hybrid-trace-head">
+    <details className="hybrid-trace" open={running || undefined}>
+      <summary className="hybrid-trace-head">
         <CornIcon name="bolt" />
-        <span>执行轨迹</span>
+        <span className="hybrid-trace-title">执行轨迹</span>
+        <em className="hybrid-trace-summary">{summary}</em>
+        {/* 失败必须在不展开时也看得见 —— 藏起来的失败等于没失败 */}
+        {failCount > 0 && !running && <em className="hybrid-trace-bad">{failCount} 步失败</em>}
+        <span className="hybrid-caret" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+        </span>
+      </summary>
+
+      <div className="hybrid-trace-body">
         {mode && <em className="hybrid-mode">{mode === "workflow" ? "工作流" : "智能体"}</em>}
         {running && <em className="hybrid-running">进行中</em>}
+
+        {fallback && (
+          <p className="hybrid-fallback">
+            混合模式当前不可用，本轮已按「智能体」执行。
+          </p>
+        )}
+
+        {items.length === 0 ? (
+          <p className="hybrid-empty">本轮没有节点轨迹（任务较短时后端不会拆节点）。</p>
+        ) : (
+          <ol className="hybrid-steps">
+            {items.map((it, i) =>
+              it.kind === "switch" ? (
+                <li key={`sw-${i}`} className="hybrid-switch">
+                  <CornIcon name="refresh" />
+                  <span className="hybrid-switch-text">
+                    {it.from === "workflow" ? "工作流" : "智能体"} → {it.to === "workflow" ? "工作流" : "智能体"}
+                  </span>
+                  <span className="hybrid-switch-reason">{it.reason || ruleLabel(it.rule)}</span>
+                </li>
+              ) : (
+                <li key={`nd-${i}`} className={`hybrid-node is-${it.status}`}>
+                  <span className="hybrid-dot" aria-hidden="true">
+                    {it.status === "ok" ? (
+                      <CornIcon name="check" />
+                    ) : it.status === "failed" ? (
+                      <CornIcon name="warn" />
+                    ) : null}
+                  </span>
+                  <span className="hybrid-node-name">{it.name}</span>
+                  <span className="hybrid-node-type">{NODE_LABEL[it.type] ?? it.type}</span>
+                  {it.error && <span className="hybrid-node-error">{it.error}</span>}
+                </li>
+              )
+            )}
+          </ol>
+        )}
       </div>
-
-      {fallback && (
-        <p className="hybrid-fallback">
-          混合模式当前不可用，本轮已按「智能体」执行。
-        </p>
-      )}
-
-      {items.length === 0 ? (
-        <p className="hybrid-empty">本轮没有节点轨迹（任务较短时后端不会拆节点）。</p>
-      ) : (
-        <ol className="hybrid-steps">
-          {items.map((it, i) =>
-            it.kind === "switch" ? (
-              <li key={`sw-${i}`} className="hybrid-switch">
-                <CornIcon name="refresh" />
-                <span className="hybrid-switch-text">
-                  {it.from === "workflow" ? "工作流" : "智能体"} → {it.to === "workflow" ? "工作流" : "智能体"}
-                </span>
-                <span className="hybrid-switch-reason">{it.reason || ruleLabel(it.rule)}</span>
-              </li>
-            ) : (
-              <li key={`nd-${i}`} className={`hybrid-node is-${it.status}`}>
-                <span className="hybrid-dot" aria-hidden="true">
-                  {it.status === "ok" ? (
-                    <CornIcon name="check" />
-                  ) : it.status === "failed" ? (
-                    <CornIcon name="warn" />
-                  ) : null}
-                </span>
-                <span className="hybrid-node-name">{it.name}</span>
-                <span className="hybrid-node-type">{NODE_LABEL[it.type] ?? it.type}</span>
-                {it.error && <span className="hybrid-node-error">{it.error}</span>}
-              </li>
-            )
-          )}
-        </ol>
-      )}
-    </div>
+    </details>
   );
 }
 

@@ -873,6 +873,11 @@ class _StreamDraft:
         self.sealed = False
         self._written = 0
         self._written_at = time.monotonic()
+        # 2026-11-23：落库前剥掉资料块后的正文 / 被剥出来的块（给前端折叠区用）。
+        # 晚到懒算——绝大多数回答里根本没有资料块，没必要每轮跑一次正则。
+        self._clean = ""
+        self._blocks_stripped = False
+        self.trailing_blocks: list[dict] = []
 
     def wants_flush(self) -> bool:
         """是否该写一次库了。纯内存判断，可以逐 token 调用。"""
@@ -886,10 +891,39 @@ class _StreamDraft:
             or time.monotonic() - self._written_at >= self._EVERY_SECONDS
         )
 
+    def _clean_text(self) -> str:
+        """落库前把资料块从正文里剥出来（2026-11-23）。
+
+        为什么放在 _StreamDraft 而不是逐处调用：这个类的 flush / seal /
+        seal_sync 是**所有**写库路径，正文只在这三处离开内存。
+        在这里统一清洗一次，正常收尾、断连中断、出错收尾三条路都不会漏。
+
+        剥出来的块不丢：挂到 self.trailing_blocks，随 done 帧发给前端，
+        前端放进「思考过程」折叠区 —— 用户仍能展开看检索到了什么，
+        只是它不再把正文挤到几屏之外，也不再暴露 score 这类内部细节。
+
+        只在写入时清洗，不改 self.text 本身：流式给前端的增量是
+        一条条 token，边发边剥会让句子接不上（半截标签发出去、后半截被吃掉）。
+        前端按整段渲染，自己在最后一次 done 时拿剥好的正文替换。
+        """
+        if not self._blocks_stripped:
+            clean, blocks = data_boundary.strip_blocks(self.text)
+            self._clean = clean
+            self.trailing_blocks = blocks
+            self._blocks_stripped = True
+        return self._clean
+
+    def clean_text_for_ui(self, fallback: str) -> str:
+        """给 done 帧用的干净正文。还没清洗过就现算一次（幂等，不重复跑）。"""
+        try:
+            return self._clean_text() if self.text else fallback
+        except Exception:  # noqa: BLE001 —— 剥离失败绝不能拖垮收尾
+            return fallback
+
     async def flush(self) -> None:
         """把当前全文写进去（状态仍是 streaming）。失败只记指标，不中断回答。"""
-        text = self.text
-        self._written = len(text)
+        text = self._clean_text()
+        self._written = len(self.text)
         self._written_at = time.monotonic()
         try:
             await asyncio.to_thread(
@@ -919,7 +953,8 @@ class _StreamDraft:
         if self.sealed:
             return self.msg_id
         self.sealed = True
-        if not self.text.strip():
+        clean = self._clean_text()
+        if not clean.strip():
             await asyncio.to_thread(store.delete_messages, self.uid, self.sid, [self.msg_id])
             return self.msg_id
         try:
@@ -928,7 +963,7 @@ class _StreamDraft:
                 self.uid,
                 self.sid,
                 self.msg_id,
-                self.text,
+                clean,
                 status,
                 refs,
                 truncated,
@@ -948,14 +983,15 @@ class _StreamDraft:
             return
         self.sealed = True
         try:
-            if not self.text.strip():
+            clean = self._clean_text()
+            if not clean.strip():
                 store.delete_messages(self.uid, self.sid, [self.msg_id])
             else:
                 store.update_message_content(
                     self.uid,
                     self.sid,
                     self.msg_id,
-                    self.text,
+                    clean,
                     status,
                     web_sources=self.web_sources,
                 )
@@ -1554,14 +1590,17 @@ async def _chat_stream_impl(
                 await asyncio.to_thread(store.rename_conversation, uid, req.sid, gen_title)
                 yield _sse("title", {"title": gen_title})
             # message_id 回给前端：赞踩要按消息 id 落库，前端自己生成的 uid 后端不认
+            # ★ 2026-11-23：answer 用 draft 剥干净的正文，前端展开的那段资料
+            #   放进 blocks —— 否则用户看到的还是带标签那一坨（虽然库里已经干净）。
             yield _sse(
                 "done",
                 {
-                    "answer": acc_text,
+                    "answer": draft.clean_text_for_ui(acc_text),
                     "refs": refs_md,
                     "title": gen_title,
                     "mode": "vision",
                     "message_id": msg_id,
+                    "blocks": draft.trailing_blocks,
                     # 用户那条消息自己的 id（见 979 行处的说明）
                     "user_message_id": user_msg_id,
                 },
@@ -2248,11 +2287,14 @@ async def _chat_stream_impl(
         yield _sse(
             "done",
             {
-                "answer": acc_text,
+                "answer": draft.clean_text_for_ui(acc_text),
                 "refs": refs_md,
                 "title": gen_title,
                 "mode": mode,
                 "message_id": msg_id,
+                # ★ 2026-11-23：被剥出来的资料块。前端放进「思考过程」折叠区，
+                #   用户仍能展开看检索到了什么，但它不再把正文挤到几屏之外。
+                "blocks": draft.trailing_blocks,
                 # 用户那条消息自己的 id：前端据此回填 dbId，
                 # 让「存进资料库」在**刚发完、还没刷新**的时候就点得到
                 "user_message_id": user_msg_id,

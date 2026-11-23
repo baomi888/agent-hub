@@ -10,6 +10,19 @@ import type {
   WebSource,
 } from "@/lib/types";
 
+/**
+ * 从回答正文里剥出来的资料块（对应 core/data_boundary.strip_blocks 的返回值）。
+ *
+ * `source` 是后端 SOURCE_KB / SOURCE_WEB / SOURCE_UPLOAD；
+ * `text` 已被后端截到 4000 字（`truncated` 标出是否截断）——
+ * 折叠区里放几万字没有意义，还会把页面拖慢。
+ */
+export interface RetrievedBlock {
+  source: "kb" | "web" | "upload" | string;
+  text: string;
+  truncated?: boolean;
+}
+
 export interface UiMessage {
   id: string;
   role: "user" | "assistant";
@@ -58,6 +71,16 @@ export interface UiMessage {
   grounding?: Grounding;
   /** 后端 messages 表自增 id，用于删除整轮对话 */
   dbId?: number;
+  /**
+   * 从回答正文里剥出来的资料块（SSE done 帧的 `blocks`，2026-11-23）。
+   *
+   * 后端 `core/data_boundary.strip_blocks` 把模型复述进正文的
+   * 「【资料开始·用户上传】…【资料结束·用户上传】」整段摘出来，
+   * 正文不再携带这些内部资料（含 score 这类实现细节）。
+   * 摘出来的内容挂在这里，由 `BlocksTrace` 渲染成默认收起的折叠区 ——
+   * 用户仍能展开看"这一轮到底检索到了什么"，但它不再把答案挤到几屏之外。
+   */
+  blocks?: RetrievedBlock[];
   /**
    * 本轮计划卡片的主题名（如「学习计划」），来自 SSE done 帧（仅 plan 请求有值）。
    *

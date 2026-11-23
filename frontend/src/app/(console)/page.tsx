@@ -577,6 +577,19 @@ export default function Home() {
             const planTopic = String(ev.data.plan_topic ?? "");
             // 用户那条消息的 id：回填后「存进资料库」不用刷新就能点
             const userDbId = Number(ev.data.user_message_id ?? 0) || undefined;
+            // ★ 2026-11-23：后端把模型复述进正文的资料块剥出来了，
+            //   这里接住两样东西：干净的正文 + 被剥出的块（给折叠区）。
+            //   不接的话，库里干净了、界面还是旧那一坨（用户看到的是这条流）。
+            const cleanAnswer = typeof ev.data.answer === "string" ? ev.data.answer : "";
+            const rawBlocks = Array.isArray(ev.data.blocks) ? ev.data.blocks : [];
+            const blocks = rawBlocks
+              .filter((b): b is Record<string, unknown> => !!b && typeof b === "object")
+              .map((b) => ({
+                source: String(b.source ?? "kb"),
+                text: String(b.text ?? ""),
+                truncated: Boolean(b.truncated),
+              }))
+              .filter((b) => b.text.trim().length > 0);
             const userMsgId = userMsgIdRef.current;
             setMessages((prev) =>
               prev.map((m) => {
@@ -588,6 +601,11 @@ export default function Home() {
                     refs: refs || finalRefs || m.refs,
                     dbId: dbId ?? m.dbId,
                     planTopic: planTopic || m.planTopic,
+                    // 后端剥干净的正文（无【资料开始…】标签）。它比流式累积的那份短，
+                    // 用 final 覆盖 — 但只在真的剥掉了东西时才覆盖，避免把
+                    // 正常回答换成一份不该有的"干净版"。
+                    ...(cleanAnswer && blocks.length > 0 ? { content: cleanAnswer } : {}),
+                    blocks: blocks.length > 0 ? blocks : m.blocks,
                   };
                 }
                 // 后端没给（旧版本 / 异常分支）就保持原样，不要拿 undefined 覆盖

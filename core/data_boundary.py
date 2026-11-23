@@ -205,3 +205,116 @@ def source_for_file(name: str | None, origin_map: dict[str, str] | None = None) 
     if origin == SOURCE_UPLOAD:
         return SOURCE_UPLOAD
     return SOURCE_KB
+
+
+# ==================== 回答正文剥离（2026-11-23） ====================
+#
+# 为什么要有这一步：wrap() 把资料包好交给模型，是**给模型看的**。
+# 但模型有时会把这些标签连同原文一起复述进回答正文 —— 用户在自己的
+# 回答里看到「【资料开始·用户上传】Flume_2611101458114844.docx | score=0.721 |
+# 日志采集系统Flume总共25题…」这样一整屏内部资料，既是布局灾难（把真正的
+# 答案挤到几屏之外），也把检索打分这类实现细节漏给了用户。
+#
+# 处理口径（用户 2026-11-23 选 A：只剥离资料块，其余历史一律不动）：
+#   · 命中的整段标签+内容从正文里摘掉
+#   · 摘掉的放在返回值里，前端可以放进「思考过程」折叠区，**不是丢弃**
+#   · 没命中就逐字符原样返回，普通回答零改动
+#   · 开关与 wrap() 共用 INSTRUCTION_DATA_SEPARATION_ENABLED：
+#     关掉这一层时 wrap 不加标签，也就没有东西可剥，两边始终一致
+
+# 一段资料块的上限。超过这个长度多半是模型整篇照抄，截断标记即可 ——
+# 折叠区里放几万字没有意义，反而会把页面拖慢。
+_BLOCK_KEEP_MAX = 4000
+
+# 开标签 → 来源。用来判断"这段是被包起来的哪类资料"。
+_OPEN_BY_TEXT: dict[str, str] = {}
+for _src, (_b, _e) in _MARKERS.items():
+    _OPEN_BY_TEXT[_b] = _src
+
+# ★ 剥离用的容错正则（2026-11-23）。
+# 为什么不能直接 re.escape 字面量：模型复述这些标签时**不会逐字节照抄** ——
+# 用户截图里的就是「【资料开始·用户上传】」，间隔点可能是 ·
+# 也可能是 ．/·／全角括号，甚至括号被写成 [ 。写成字面量会漏剥一大半。
+# 这里按「括号 + 资料开始 + 任意分隔 + 来源名 + 括号」放宽容错，
+# 但**来源名必须精确**，避免把「资料开始·用户上传了xxx」这种正常句子误剥。
+_SEP_ANY = r"[·・．.\-_—–/／|｜:：,，、~～•\s]*"
+_OPEN_CH = r"[【\[〔〖]"
+_CLOSE_CH = r"[】\]〕〗]"
+_SRC_NAMES = {"kb": "知识库", "web": "联网", "upload": "用户上传"}
+
+
+def _block_re(kind: str, source: str) -> re.Pattern[str]:
+    """拼一段资料块的匹配正则。kind="开始" 匹配开标签，"结束" 匹配闭标签。
+
+    ★ 全用原始字符串：第一版写成普通字符串，反斜杠被 Python 当转义吃掉，
+    字符类里塞进一个真实空格，正则从此匹配不上任何标签（实测 15 条全红）。
+    """
+    name = _SRC_NAMES.get(source, "知识库")
+    head = f"{_OPEN_CH}资料{kind}{_SEP_ANY}{name}{_CLOSE_CH}"
+    return re.compile(f"({head})")
+
+
+_OPEN_RES: dict[str, re.Pattern[str]] = {
+    src: _block_re("开始", src) for src in _SRC_NAMES
+}
+_CLOSE_RES: dict[str, re.Pattern[str]] = {
+    src: _block_re("结束", src) for src in _SRC_NAMES
+}
+
+
+def strip_blocks(text: str) -> tuple[str, list[dict]]:
+    """把回答正文里的资料块摘出来。
+
+    返回 (干净正文, 资料块列表)。资料块形如
+    ``{"source": "upload", "text": "…", "truncated": False}``，
+    前端用它渲染折叠的「思考过程」，而不是把原文摊在回答里。
+
+    匹配**按括号 + 来源名容错**（见 _SEP_ANY 注释），不追求和 wrap() 逐字节一致：
+    这里剥的是模型自己复述回来的标签，宽容一点才能抓住。但来源名必须精确，
+    且**只剥到对应的闭标签为止**——宁可少剥一段，也不能把用户真正的回答吃掉。
+    """
+    if not text or not enabled():
+        return text, []
+    # 快速否定：绝大多数回答一个标签都没有，别为它们跑正则
+    if "资料开始" not in text:
+        return text, []
+
+    blocks: list[dict] = []
+
+    def _take(source: str, body: str) -> None:
+        body = body.strip()
+        if not body:
+            return
+        blocks.append(
+            {
+                "source": source,
+                "text": body[:_BLOCK_KEEP_MAX],
+                "truncated": len(body) > _BLOCK_KEEP_MAX,
+            }
+        )
+
+    for source, open_re in _OPEN_RES.items():
+        close_re = _CLOSE_RES[source]
+        # 成对出现的：开标签 → 最近的同源闭标签
+        pattern = re.compile(
+            open_re.pattern + r"(.*?)" + close_re.pattern, re.DOTALL
+        )
+        for m in list(pattern.finditer(text)):
+            _take(source, m.group(2))
+        text = pattern.sub("\n", text)
+
+    # 只剩开标签没闭标签（模型被截断）：从开标签一路剥到文末
+    for source, open_re in _OPEN_RES.items():
+        m = open_re.search(text)
+        if not m:
+            continue
+        _take(source, text[m.end():])
+        text = text[: m.start()]
+
+    if not blocks:
+        return text, []
+
+    # 收尾：剥完会留下连续空行和行尾空白，收拾干净但不动行内字符
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text, blocks

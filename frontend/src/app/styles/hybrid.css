@@ -9,7 +9,7 @@
 
 .hybrid-trace {
   margin: var(--space-8) 0 var(--space-6);
-  padding: var(--space-10) var(--space-12, 12px);
+  padding: var(--space-8) var(--space-12, 12px);
   background: var(--fill-4);
   border: 1px solid var(--line);
   border-radius: var(--r-ctl);
@@ -17,19 +17,82 @@
   color: var(--ink);
 }
 
+/* ★ 2026-11-23：改成 <details> 折叠条，学 DeepSeek / 豆包。
+ *   收起时只占一行「▸ 执行轨迹  3 步已完成」，答案正文直接顶上来 ——
+ *   用户的原话是「用户只是想看到结果」。原来这条轨迹常驻展开，
+ *   一次多节点回答里能把正文挤到几屏之外。
+ *   展开后内容是**半透明**的：它是过程，不该和答案抢视线。 */
+.hybrid-trace > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  cursor: pointer;
+  list-style: none;
+  /* 触控热区撑到 36px，手机上好点 */
+  min-height: 36px;
+  user-select: none;
+}
+.hybrid-trace > summary::-webkit-details-marker {
+  display: none;
+}
+
 .hybrid-trace-head {
   display: flex;
   align-items: center;
   gap: var(--space-6);
-  margin-bottom: var(--space-8);
   color: var(--accent-ink);
   font-size: var(--fs-sm);
 }
 
 /* 眉题用衬线（--font-serif 首选 LXGW WenKai Screen，已本地化，不再依赖外链） */
-.hybrid-trace-head > span {
+.hybrid-trace-head > span,
+.hybrid-trace-title {
   font-family: var(--font-serif);
   font-size: var(--fs-md);
+}
+
+/* 收起时那行摘要：「3 步已完成」—— 不展开也能知道发生了什么 */
+.hybrid-trace-summary {
+  font-size: var(--fs-xs);
+  font-style: normal;
+  color: var(--text-2);
+  opacity: 0.85;
+}
+
+/* 失败即使收起也必须看得见（藏起来的失败等于没失败） */
+.hybrid-trace-bad {
+  font-size: var(--fs-xs);
+  font-style: normal;
+  color: var(--warning-ink);
+  padding: 0 var(--space-6);
+  border-radius: var(--r-pill);
+  background: var(--accent-soft);
+}
+
+/* 右侧箭头：展开时转 90° */
+.hybrid-caret {
+  margin-left: auto;
+  display: inline-flex;
+  transition: transform 0.18s ease;
+  color: var(--text-2);
+}
+.hybrid-caret svg {
+  width: 14px;
+  height: 14px;
+}
+.hybrid-trace[open] .hybrid-caret {
+  transform: rotate(90deg);
+}
+
+/* 展开区：半透明 + 限高，长轨迹内部滚动，不把页面撑长 */
+.hybrid-trace-body {
+  margin-top: var(--space-6);
+  padding-top: var(--space-6);
+  border-top: 1px dashed var(--line);
+  opacity: 0.72;
+  max-height: 280px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .hybrid-mode,
@@ -466,4 +529,121 @@
   justify-content: flex-end;
   gap: var(--space-8);
   margin-top: var(--space-10);
+}
+
+/* ============ 资料检索痕迹（2026-11-23） ============
+ *
+ * 模型有时把注入的资料连【资料开始·X】标签一起复述进回答正文，用户看到的
+ * 是一整屏内部原文 + score=0.721 这种实现细节，答案被挤到几屏之外。
+ * 后端 core/data_boundary.strip_blocks 已经把这段从正文摘干净，
+ * 这里把它渲染成**默认收起的一行**，学 DeepSeek / 豆包的思考条：
+ *   · 收起：只占一行「已参考的资料  2 份你上传的文件  ▸」
+ *   · 展开：半透明小字 + 限高内部滚动，不把页面撑长
+ * 视觉禁忌同全站：不用 emoji、不用粗描边、不用大圆角。
+ */
+.blocks-trace {
+  margin: var(--space-6) 0 var(--space-8);
+  padding: var(--space-6) var(--space-10);
+  background: var(--fill-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  font-size: var(--fs-sm);
+}
+
+.blocks-trace > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  cursor: pointer;
+  list-style: none;
+  min-height: 32px;
+  user-select: none;
+  color: var(--text-2);
+}
+.blocks-trace > summary::-webkit-details-marker {
+  display: none;
+}
+
+.blocks-trace-title {
+  font-family: var(--font-serif);
+  font-size: var(--fs-md);
+  color: var(--ink);
+}
+
+.blocks-trace-summary {
+  font-size: var(--fs-xs);
+  font-style: normal;
+  opacity: 0.8;
+}
+
+.blocks-trace[open] .hybrid-caret {
+  transform: rotate(90deg);
+}
+
+/* 展开区：过程内容，半透明 —— 它是"参考了什么"，不该和答案抢视线 */
+.blocks-trace-body {
+  margin-top: var(--space-6);
+  padding-top: var(--space-6);
+  border-top: 1px dashed var(--line);
+  opacity: 0.72;
+  max-height: 260px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.blocks-item + .blocks-item {
+  margin-top: var(--space-8);
+  padding-top: var(--space-8);
+  border-top: 1px dotted var(--line);
+}
+
+.blocks-item-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-6);
+  min-width: 0;
+}
+
+.blocks-item-src {
+  flex: none;
+  padding: 0 var(--space-6);
+  border-radius: var(--r-pill);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: var(--fs-xs);
+}
+
+.blocks-item-preview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+
+/* 正文默认只露 3 行 —— 资料动辄几千字，全摊开就等于没改进。
+ * 用 line-clamp 而不是截字符串：展开后仍是全文，可选中复制。 */
+.blocks-item-text {
+  margin-top: var(--space-4);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.blocks-trace-body:has(.blocks-item:only-child) .blocks-item-text,
+.blocks-item:hover .blocks-item-text {
+  -webkit-line-clamp: 8;
+}
+
+.blocks-item-more {
+  margin-top: var(--space-4);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  opacity: 0.75;
 }
