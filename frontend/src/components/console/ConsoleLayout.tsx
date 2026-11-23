@@ -124,6 +124,8 @@ function useNarrow(): boolean {
 const Rail = memo(function Rail({
   overlay,
   open,
+  collapsed,
+  onToggleCollapsed,
   containerRef,
   username,
   displayName,
@@ -135,6 +137,8 @@ const Rail = memo(function Rail({
 }: {
   overlay: boolean;
   open: boolean;
+  collapsed: boolean;
+  onToggleCollapsed?: () => void;
   containerRef: RefObject<HTMLElement | null>;
   username?: string;
   displayName?: string;
@@ -185,6 +189,8 @@ const Rail = memo(function Rail({
       onLogout={onLogout}
       overlay={overlay}
       open={open}
+      collapsed={collapsed}
+      onToggleCollapsed={onToggleCollapsed}
       containerRef={containerRef}
     />
   );
@@ -200,6 +206,33 @@ export default function ConsoleLayout({ children }: { children: ReactNode }) {
   const [tabOpen, setTabOpen] = useState(false);
   const [sidebarPref, setSidebarPref] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
+  /**
+   * 侧栏收起成 64px 图标轨（2026-11-22）。
+   *
+   * 状态放在外壳而不是 Sidebar 里：宽度变化要同步到 CSS 网格列
+   * （非对话页的 .console-shell 是 240px + 1fr 的网格），
+   * 两处各存一份必然漂移 —— 收起后内容区还留着 176px 空条。
+   * 持久化用 localStorage；读它放在 effect 里，避免 SSR 首帧对不上。
+   */
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    try {
+      setCollapsed(localStorage.getItem("zhisui.rail.collapsed") === "1");
+    } catch {
+      /* 隐私模式读不到 → 保持展开 */
+    }
+  }, []);
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem("zhisui.rail.collapsed", next ? "1" : "0");
+      } catch {
+        /* 写不进去只影响下次刷新 */
+      }
+      return next;
+    });
+  }, []);
 
   const narrow = useNarrow();
   const sidebarOpen = narrow && sidebarPref;
@@ -268,6 +301,8 @@ export default function ConsoleLayout({ children }: { children: ReactNode }) {
     <Rail
       overlay={narrow}
       open={sidebarOpen}
+      collapsed={collapsed && !narrow}
+      onToggleCollapsed={narrow ? undefined : toggleCollapsed}
       containerRef={sidebarRef}
       username={auth.me.user.username}
       displayName={auth.me.user.nickname || auth.me.user.username}
@@ -294,7 +329,11 @@ export default function ConsoleLayout({ children }: { children: ReactNode }) {
           ref={scrollRef}
         >
           <div
-            className={"console-shell mx-auto" + (isChat ? " console-shell--chat" : "")}
+            className={
+              "console-shell mx-auto" +
+              (isChat ? " console-shell--chat" : "") +
+              (collapsed && !narrow ? " is-rail-collapsed" : "")
+            }
             style={{ maxWidth: isChat ? undefined : 1220 }}
           >
             {/* 全局唯一的左栏。窄屏下它自己变成抽屉（CSS 控制），

@@ -7,14 +7,15 @@
 //   底部只留「我的反馈」与账号块，把高度让给会话列表）。
 //   两项偏好本身没有下线 —— 设置页「本地偏好」里仍有同一个字号选择器与
 //   「深色纸面」开关，prefs / applyFontScale / data-fs / html.dark 全部照旧。
-import { useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import MascotLogo from "./chat/MascotLogo";
 import CornIcon from "./CornIcon";
 import NavIcon from "./NavIcon";
 import UserAvatar from "./settings/UserAvatar";
-import { chatRailNav, railLayout, NAV, isCurrentNav } from "@/lib/nav";
+import { railPrimary, railMore, NAV, isCurrentNav } from "@/lib/nav";
 import MyFeedbackLink from "./MyFeedbackLink";
 import type { Conversation } from "@/lib/types";
 import type { FontScale } from "@/lib/hooks/usePrefs";
@@ -50,9 +51,12 @@ interface Props {
   onRetryLoad?: () => void;
   /** 当前登录用户名（登录门放进来之后才有值）。用于 title 与首字母兜底 */
   username?: string;
-  /** 是否管理员：只有它决定「看板 / 工作流」这两项要不要出现在模块格里。
+  /** 是否管理员：只有它决定「看板 / 工作流」这两项要不要出现在「更多」里。
    *  后端仍会二次校验，这里只是不给入口（与 nav.ts 的 adminOnly 同一语义）。 */
   isAdmin?: boolean;
+  /** 侧栏收起成 64px 图标轨（桌面端）。窄屏下是抽屉，恒为展开 */
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
   /** 显示名：昵称优先，没设过就是 username。不传则直接用 username */
   displayName?: string;
   /** 头像值：""（首字母）/ "icon:<name>" / "img:<hash>" */
@@ -115,6 +119,8 @@ export default function Sidebar({
   onOpenUsage,
   onLogout,
   isAdmin = false,
+  collapsed = false,
+  onToggleCollapsed,
 }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -150,24 +156,74 @@ export default function Sidebar({
     return groupSessions(filtered);
   }, [sessions, query]);
 
-  /** 模块入口：桌面 11 项 / 手机 7 项（管理员），全部来自 lib/nav.ts。
-   *  手机上的判据是 overlay（这一栏此时就是抽屉、也是唯一的模块入口）。 */
-  const railNav = useMemo(() => chatRailNav(isAdmin, overlay), [isAdmin, overlay]);
-  /** 3 列排版；余 1 末项通栏、余 2 末两项各占半行，末行不留空格子
-   *  （见 nav.ts 的 railLayout —— 用户 2026-11-15 报的"缺两个入口后有空缺"）。 */
-  const rail = useMemo(() => railLayout(railNav.length), [railNav.length]);
+  /**
+   * 纵向主导航（2026-11-22）：对话 / 资料库 / 论坛 / 待办 + 「更多」。
+   *
+   * 为什么不再用 12 格宫格：宫格把入口平均铺开，没有主次，还要吃掉 246px 高度 ——
+   * 会话列表被挤到只剩 96px。现在只留 4 个高频入口，其余 9 项进「更多」浮层。
+   * ★ 两份清单都来自 lib/nav.ts：adminOnly / desktopOnly 的语义在那边，
+   *   组件里再筛一遍，迟早会漂成"手机上怎么找不到 X"。
+   */
+  const primary = useMemo(() => railPrimary(), []);
+  const more = useMemo(() => railMore(isAdmin, overlay), [isAdmin, overlay]);
+
+  // 「更多」浮层：portal 到 body。
+  // 不能直接 absolute 挂在侧栏里 —— 桌面端 .side-left 为了"列表自己滚"设了
+  // overflow:hidden，浮层会被裁掉；窄屏抽屉更是整块 fixed。
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [morePos, setMorePos] = useState({ top: 0, left: 0, max: 420 });
+  /** 浮层的纵向锚点是「更多」按钮，横向锚点是整条侧栏（避免压住边框） */
+  const moreBtnRef = useRef<HTMLButtonElement | null>(null);
+
+  const toggleMore = useCallback(() => {
+    if (moreOpen) {
+      setMoreOpen(false);
+      return;
+    }
+    // 横向贴着**整条侧栏**的右缘（按钮有内边距，用它算会压住边框）；
+    // 纵向对齐「更多」那颗按钮。
+    const rail = containerRef?.current;
+    const btn = moreBtnRef.current;
+    if (rail && btn) {
+      const rr = rail.getBoundingClientRect();
+      const br = btn.getBoundingClientRect();
+      const margin = 12;
+      // 高度自适应：默认按内容，超出视口就在浮层内部滚，别让最后一项被截掉
+      const max = Math.max(200, window.innerHeight - margin * 2);
+      const estH = Math.min(max, more.length * 36 + 16);
+      const top = Math.min(Math.max(margin, br.top), window.innerHeight - estH - margin);
+      setMorePos({ top: Math.round(top), left: Math.round(rr.right + 8), max });
+    }
+    setMoreOpen(true);
+  }, [moreOpen, more.length, containerRef]);
+
+  // 切页自动收起交给「入口点击」：浮层开着时整屏有一层透明遮罩，
+  // 点不到底下的导航；菜单项自己也 onClick 关闭。所以这里不再用
+  // effect 监听 pathname —— 在 effect 里同步 setState 会多一轮渲染，
+  // React 的 lint 也会拦（而且浏览器后退时遮罩本来就在，点一下就收）。
+
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMoreOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [moreOpen]);
 
   return (
     <aside
       ref={containerRef}
       tabIndex={-1}
-      className={`side-left flex h-full shrink-0 flex-col px-4 py-5 ${open ? "open" : ""}`}
+      className={`side-left flex h-full shrink-0 flex-col px-4 py-5 ${
+        collapsed ? "is-collapsed" : ""
+      } ${open ? "open" : ""}`}
       inert={overlay && !open}
     >
-      {/* 品牌区：玉米穗 + 衬线标题 */}
-      <div className="flex items-center gap-2.5 px-1">
-        <MascotLogo className="h-9 w-9 shrink-0 object-contain" />
-        <div className="min-w-0">
+      {/* 品牌区：玉米穗 + 衬线标题 + 收起按钮 */}
+      <div className="rail-brand flex items-center gap-2.5 px-1">
+        <MascotLogo className="rail-logo h-9 w-9 shrink-0 object-contain" />
+        <div className="rail-brand-text min-w-0 flex-1">
           <h1 className="truncate font-serif text-fs-xl font-bold leading-tight text-ink">
             知穗Agent
           </h1>
@@ -178,60 +234,128 @@ export default function Sidebar({
               `.truncate` 切掉尾巴（上一版写 12 个字，照样断）。 */}
           <p className="brand-sub truncate">课件笔记，一问就答</p>
         </div>
+        {onToggleCollapsed && (
+          <button
+            type="button"
+            className="rail-collapse"
+            onClick={onToggleCollapsed}
+            title={collapsed ? "展开侧栏" : "收起侧栏"}
+            aria-label={collapsed ? "展开侧栏" : "收起侧栏"}
+            aria-pressed={collapsed}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d={collapsed ? "M9 6l6 6-6 6" : "M15 6l-6 6 6 6"} />
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* 新建对话：深色圆角按钮（加号走手绘图标，替代全角「+」字符） */}
-      <button onClick={onCreate} className="btn-new mt-5 w-full">
+      <button onClick={onCreate} className="btn-new mt-5 w-full" title="新建对话">
         <span className="inline-flex items-center justify-center gap-1.5">
           <CornIcon name="plus" className="h-4 w-4" />
-          新建对话
+          <span className="rail-label">新建对话</span>
         </span>
       </button>
 
       {/* 公开知识库广场：平台化入口（描边次按钮，与新建对话形成主次）。
           2026-11-13 换掉原来的「模板广场」：那套预置提示词下线，
-          同一位置改成挑别人的公开知识库。 */}
+          同一位置改成挑别人的公开知识库。
+          ★ 2026-11-22：等「资料库」页面长出「我的 / 公开」双 tab 之后，
+            这颗按钮就可以撤掉（入口统一到资料库）。在那之前保留 ——
+            否则公开广场就没有任何导航入口了。 */}
       {onOpenLibrary && (
-        <button onClick={onOpenLibrary} className="btn-import mt-2 w-full">
+        <button onClick={onOpenLibrary} className="btn-import mt-2 w-full" title="公开知识库">
           <span className="inline-flex items-center justify-center gap-1.5">
-            <CornIcon name="store" className="h-4 w-4" title="公开知识库" />
-            公开知识库
+            <CornIcon name="store" className="h-4 w-4" />
+            <span className="rail-label">公开知识库</span>
           </span>
         </button>
       )}
-      {/* 模块入口：来自 lib/nav.ts（和桌面侧栏、手机底部 tab、「更多」面板同一份清单）。
-          2026-11-15 之前这里是硬编码的 4 个金描边按钮，手机上进得来出不去 ——
-          手机没有底部 tab，抽屉就是唯一的模块入口，缺项等于断头路。
-          3 列紧凑格而不是 2 列大按钮：11 个金框会变成一堵"按钮墙"，
-          导航应该像列表。图标走 NavIcon（不是 CornIcon）—— 同一个功能在
-          底部 tab 和这里必须是同一个图案，否则会像两件事。
-          ★ 图标外面套一层 .side-ico：纯线性图标在米色纸上只有 1.85 描边，
-            11 个排在一起会糊成一片浅灰；给每个图标一块浅金底衬，
-            形状才有"块"的重量感（用户 2026-11-15 反馈"给图标补充填充色"）。 */}
-      <div
-        className={`side-nav mt-3${
-          rail.fill === "wide"
-            ? " side-nav--wide-last"
-            : rail.fill === "pair"
-              ? " side-nav--pair-last"
-              : ""
-        }`}
-      >
-        {railNav.map((it) => (
+      {/* 纵向主导航：4 个高频入口 + 「更多」。
+          宫格版（2026-11-15～11-21）把 12 个入口平均铺开，光导航就吃掉 246px，
+          会话列表被挤到 96px —— 用户的原话是"历史对话占比要加大"。
+          现在一行一个，图标左、文字右，点击区铺满整行。 */}
+      <nav className="rail-nav mt-3" aria-label="主要导航">
+        {primary.map((it) => (
           <Link
             key={it.href}
             href={it.href}
-            className="side-entry"
+            className="rail-item"
             title={it.label}
             aria-current={isCurrentNav(it.href, here) ? "page" : undefined}
           >
             <span className="side-ico">
               <NavIcon name={it.icon} className="side-entry-ico" />
             </span>
-            <span>{it.label}</span>
+            <span className="rail-label">{it.label}</span>
           </Link>
         ))}
-      </div>
+        <button
+          type="button"
+          ref={moreBtnRef}
+          className={`rail-item${moreOpen ? " is-open" : ""}`}
+          onClick={toggleMore}
+          aria-haspopup="menu"
+          aria-expanded={moreOpen}
+          title="更多"
+        >
+          <span className="side-ico">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+              <circle cx="5" cy="12" r="1.4" />
+              <circle cx="12" cy="12" r="1.4" />
+              <circle cx="19" cy="12" r="1.4" />
+            </svg>
+          </span>
+          <span className="rail-label">更多</span>
+          <svg className="rail-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+        </button>
+      </nav>
+
+      {/* 「更多」浮层：portal 到 body。
+          为什么不用 absolute：桌面端 .side-left 为了"会话列表自己滚"设了
+          overflow:hidden，挂在里面的浮层会被裁掉；窄屏抽屉整块是 fixed，更没法挂。
+          位置按触发按钮的 rect 算，并夹在视口内；内容超出时浮层内部滚。 */}
+      {moreOpen &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <>
+            <div className="rail-more-mask" onClick={() => setMoreOpen(false)} />
+            <div
+              className="rail-more"
+              role="menu"
+              aria-label="更多功能"
+              style={{ top: morePos.top, left: morePos.left, maxHeight: morePos.max }}
+            >
+              {more.map((it) => (
+                <Link
+                  key={it.href}
+                  href={it.href}
+                  role="menuitem"
+                  className="rail-more-item"
+                  aria-current={isCurrentNav(it.href, here) ? "page" : undefined}
+                  onClick={() => setMoreOpen(false)}
+                >
+                  <span className="side-ico">
+                    <NavIcon name={it.icon} className="side-entry-ico" />
+                  </span>
+                  <span>{it.label}</span>
+                </Link>
+              ))}
+            </div>
+          </>,
+          document.body,
+        )}
 
       {/* 搜索框：大圆角 */}
       <div className="search mt-4">
@@ -503,7 +627,7 @@ export default function Sidebar({
 
       {/* 底部：我的反馈 + 当前账号（在线状态行 2026-11-18 删除；
           字号档位与深色开关 2026-11-22 删除，见文件头注释） */}
-      <div className="mt-3 border-t border-line pt-3">
+      <div className="rail-foot mt-3 border-t border-line pt-3">
         {/* 「我的反馈」入口（2026-11-20）
             原来用户只能到**设置页最底部**看自己反馈的处理进度，等于埋起来了；
             提了意见没回音，他不会再提第二次。
@@ -514,7 +638,7 @@ export default function Sidebar({
 
         {/* 当前账号 + 退出：多用户之后，知道自己"现在是誰"能省掉很多困惑 */}
         {username && (
-          <div className="mt-2 flex items-center gap-2 rounded-sm bg-fill-3 px-2.5 py-2">
+          <div className="sb-acct mt-2 flex items-center gap-2 rounded-sm bg-fill-3 px-2.5 py-2">
             {/* 头像统一走 UserAvatar：这里只传值，不判断"图片还是图标还是首字母" ——
                 三处各写一遍必然会漂移（换了头像侧栏没变，就是那么来的）。
                 2026-11-18：头像本身点开设置页；账号名仍是看板入口，两者互不覆盖。

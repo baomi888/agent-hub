@@ -70,6 +70,17 @@
   }
 }
 
+/* 收起侧栏（2026-11-22）：网格列跟着变窄。
+   状态在外壳（ConsoleLayout），类名也挂在壳上 —— 只在 Sidebar 上收窄的话，
+   非对话页会留下 176px 的空列，看着像"内容没对齐"。
+   时长与 .side-left 的 width 过渡一致（0.22s），两边同时到位。 */
+.console-shell {
+  transition: grid-template-columns 0.22s ease;
+}
+.console-shell.is-rail-collapsed {
+  grid-template-columns: 64px minmax(0, 1fr);
+}
+
 /* 侧栏在壳里的高度（2026-11-22）
    ---------------------------------
    左栏从页面搬进外壳之后，它成了网格/弹性容器的一个子项：
