@@ -40,10 +40,8 @@ SSE 事件协议：
 """
 
 import asyncio
-import base64
 import contextlib
 import json
-import mimetypes
 import os
 import re
 import time
@@ -60,6 +58,7 @@ from core import (
     approval_store,
     config,
     data_boundary,
+    doc_extract,
     llm_gate,
     metrics,
     prompt_security,
@@ -91,13 +90,20 @@ from service import enhance as enhance_svc
 # 默认要登录：整组路由统一挂鉴权，新增端点时不会漏
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
-# 聊天附件上传目录（图片理解用）
+# 聊天附件上传目录（多模态理解用）
 CHAT_UPLOAD_DIR = os.path.join(config.DATA_DIR, "chat_uploads")
-# 附件限制：视觉模型只吃图片，单张 20MB / 单次 9 张足够，超了直接拒
+# 单文件 20MB 闸不变；份数只对普通用户生效，管理员不受限。
 MAX_CHAT_UPLOAD_MB = 20
 MAX_CHAT_FILES = 9
-# 只收这些扩展名的图片：视觉模型只消费图片，别的格式传进来也是白传（还占磁盘）
+# 图片直接进视觉模型；文档由 core.doc_extract 抽文字/内嵌图后再送模型。
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+_DOC_EXTS = {
+    ".pdf", ".doc", ".docx", ".md", ".txt", ".csv", ".json", ".jsonl",
+    ".xls", ".xlsx", ".ppt", ".pptx", ".rtf",
+}
+_SUPPORTED_ATTACHMENT_LABEL = (
+    "jpg/jpeg/png/gif/webp/bmp/pdf/doc/docx/md/txt/csv/json/jsonl/xls/xlsx/ppt/pptx/rtf"
+)
 
 # 纯对话（llm 模式 + hybrid 兜底）的系统提示词。与 RAG / Agent 口径保持一致：
 # 目标都是"首轮就给可用结果"，避免用户反复补充要求。
@@ -629,15 +635,24 @@ async def upload_attachments(
     files: list[UploadFile] = File(...),  # noqa: B008 -- FastAPI 依赖注入惯例
     uid: str = Depends(get_current_user),
 ) -> dict:
-    """上传聊天附件（图片），返回服务端路径供图片理解使用。
+    """上传聊天附件（图片 + 常见文档），返回服务端路径供多模态理解使用。
 
-    只收图片；其他格式即使上传成功也不会参与回答，直接拒绝省磁盘省流量。
+    普通用户一次最多 9 个；管理员不受份数限制（但仍受单文件 20MB 与总量闸约束）。
+    整批先校验再落盘，有一份不合格就全部拒绝，不留孤儿文件。
     """
-    if len(files) > MAX_CHAT_FILES:
-        raise HTTPException(status_code=400, detail=f"一次最多上传 {MAX_CHAT_FILES} 个附件")
+    # 份数闸只对普通用户生效：管理员按 quota._is_admin 判定，与配额/限流口径一致。
+    # _is_admin 可能查 users 表（同步 IO），按项目惯例丢线程；普通上传不触发。
+    if len(files) > MAX_CHAT_FILES and not await asyncio.to_thread(quota._is_admin, uid):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"一次最多上传 {MAX_CHAT_FILES} 个附件"
+                f"（本次 {len(files)} 个；管理员不受此限制）"
+            ),
+        )
 
     # 单次请求的声明总大小（S-06）：必须在第一个字节落盘前挡住。
-    # 单张上限 20MB × 9 张仍可能一次传 180MB，对 2G 内存的部署机是压力。
+    # 单份上限 20MB × 9 份仍可能一次传 180MB，对 2G 内存的部署机是压力。
     declared = sum(
         f.size for f in files if isinstance(getattr(f, "size", None), int)
     )
@@ -647,13 +662,19 @@ async def upload_attachments(
             detail=f"本次上传总大小超过 {config.UPLOAD_TOTAL_MB}MB，请分批上传",
         )
 
-    # 整批先校验再落盘：有一张不合格就整个拒绝，
-    # 否则前面几张写好了、后面报错，会留下一半的孤儿文件
-    rejected = [f.filename for f in files if not _is_supported_image(f.filename, f.content_type)]
+    # 整批先校验再落盘：有一份不合格就整个拒绝，
+    # 否则前面几份写好了、后面报错，会留下一半的孤儿文件
+    rejected = [
+        f.filename for f in files
+        if not _is_supported_attachment(f.filename, f.content_type)
+    ]
     if rejected:
         raise HTTPException(
             status_code=400,
-            detail=f"仅支持图片附件（jpg/jpeg/png/gif/webp/bmp），已拒绝：{rejected[0]}",
+            detail=(
+                f"不支持的附件格式，已拒绝：{rejected[0]}。"
+                f"当前支持：{_SUPPORTED_ATTACHMENT_LABEL}"
+            ),
         )
 
     os.makedirs(CHAT_UPLOAD_DIR, exist_ok=True)
@@ -699,7 +720,20 @@ def _is_supported_image(filename: str | None, content_type: str | None) -> bool:
     return True
 
 
-# ==================== 图片理解辅助 ====================
+def _is_supported_attachment(filename: str | None, content_type: str | None) -> bool:
+    """图片走双保险，文档只按扩展名白名单放行。
+
+    文档的 content-type 由浏览器/客户端随意填（application/octet-stream、
+    text/plain 甚至空值都常见），拿它当闸会误杀；真正的安全边界是扩展名白名单
+    + 落盘时的随机文件名 + 读取时的目录穿越防护。
+    """
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext in _DOC_EXTS:
+        return True
+    return _is_supported_image(filename, content_type)
+
+
+# ==================== 多模态理解辅助 ====================
 
 
 def _has_image(attachments: list[dict]) -> bool:
@@ -709,6 +743,11 @@ def _has_image(attachments: list[dict]) -> bool:
         if t.startswith("image/"):
             return True
     return False
+
+
+def _has_attachments(attachments: list[dict]) -> bool:
+    """是否带任意附件。文档附件也要走视觉模型（抽出的文字/图片一起送）。"""
+    return bool(attachments)
 
 
 def _resolve_upload_path(path: str) -> str | None:
@@ -734,48 +773,45 @@ def _image_to_data_url(path: str) -> str:
     大图先压到长边 1024 再编码：20MB 原图直接 base64 发 qwen-vl-plus
     既慢又易被拒收。Pillow 不可用时退回原图，不引入硬依赖。
     """
-    data, mime = _load_image_bytes(path)
-    return f"data:{mime};base64,{base64.b64encode(data).decode()}"
+    return doc_extract.image_to_data_url(path)
 
 
 def _load_image_bytes(path: str) -> tuple[bytes, str]:
     """读取图片字节；Pillow 可用时压缩（长边 ≤1024，JPEG q85）。"""
-    try:
-        import io
-
-        from PIL import Image
-
-        with Image.open(path) as im:
-            if im.mode in ("RGBA", "P", "LA"):
-                im = im.convert("RGB")
-            im.thumbnail((1024, 1024))
-            buf = io.BytesIO()
-            im.save(buf, format="JPEG", quality=85)
-            return buf.getvalue(), "image/jpeg"
-    except Exception:
-        pass
-    mime, _ = mimetypes.guess_type(path)
-    with open(path, "rb") as f:
-        return f.read(), mime or "image/png"
+    return doc_extract.load_image_bytes(path)
 
 
-def _build_vision_user_message(question: str, attachments: list[dict]) -> HumanMessage:
-    """组装多模态用户消息：文本 + 图片。"""
+def _build_vision_user_message(
+    question: str,
+    attachments: list[dict],
+    extracted: doc_extract.ExtractResult | None = None,
+) -> HumanMessage:
+    """组装多模态用户消息：文本（含文档抽取文字）+ 图片。
+
+    `extracted` 由调用方提前算好并复用到 question 里，避免重复读盘/抽文字。
+    不传时仍按纯图片链路工作（兼容旧调用）。
+    """
     content: list[dict] = [{"type": "text", "text": question or "请描述这张图片"}]
-    for a in attachments:
-        t = (a.get("type") or "").lower()
-        if not t.startswith("image/"):
-            continue
-        path = a.get("path")
-        resolved = _resolve_upload_path(path) if isinstance(path, str) else None
-        if not resolved or not os.path.exists(resolved):
-            continue
-        content.append(
-            {
-                "type": "image_url",
-                "image_url": {"url": _image_to_data_url(resolved)},
-            }
-        )
+
+    if extracted is None:
+        for a in attachments:
+            t = (a.get("type") or "").lower()
+            if not t.startswith("image/"):
+                continue
+            path = a.get("path")
+            resolved = _resolve_upload_path(path) if isinstance(path, str) else None
+            if not resolved or not os.path.exists(resolved):
+                continue
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": _image_to_data_url(resolved)},
+                }
+            )
+    else:
+        # 文档内嵌图（docx media / PDF 含图页）与直接上传的图片一起送模型
+        for url in doc_extract.extract_images(extracted):
+            content.append({"type": "image_url", "image_url": {"url": url}})
     return HumanMessage(content=content)
 
 
@@ -1412,9 +1448,16 @@ async def _chat_stream_impl(
                     yield _sse("token", {"text": prompt_security.REFUSAL_TEXT})
                     return
 
-        # ---- 0. 图片理解模式：有图片附件时用视觉模型直接回答 ----
-        if _has_image(req.attachments):
-            yield _sse("status", {"text": "图片理解模式，正在分析图片..."})
+        # ---- 0. 多模态理解模式：有任意附件（图片/文档）时用视觉模型直接回答 ----
+        if _has_attachments(req.attachments):
+            # 文档内容抽成文字 + 内嵌图片；路径穿越防护由 _resolve_upload_path 负责。
+            # 抽失败/文件不存在会被静默跳过，不阻断纯图片链路。
+            extracted = doc_extract.extract_attachments(
+                req.attachments, resolver=_resolve_upload_path
+            )
+            attachment_text = doc_extract.format_text_for_prompt(extracted)
+            label = "图片" if _has_image(req.attachments) else "附件"
+            yield _sse("status", {"text": f"{label}理解模式，正在分析{label}..."})
             history = await _history_before(uid, req.sid, user_msg_id)
             # RAG 模式下顺带检索知识库，拼入文本
             vision_question = req.question
@@ -1466,7 +1509,13 @@ async def _chat_stream_impl(
                     messages.append(HumanMessage(content=m["content"]))
                 elif m["role"] == "assistant":
                     messages.append(AIMessage(content=m["content"]))
-            messages.append(_build_vision_user_message(vision_question, req.attachments))
+            # 附件抽取文字带文件名拼到用户问题前面，模型才真的"读"到了文档；
+            # 抽出的图片（内嵌图/PDF 含图页）作为 image_url 一起发。
+            if attachment_text:
+                vision_question = f"{attachment_text}\n\n{vision_question}"
+            messages.append(
+                _build_vision_user_message(vision_question, req.attachments, extracted=extracted)
+            )
 
             acc = _Acc()
             try:

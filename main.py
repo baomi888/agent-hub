@@ -67,6 +67,7 @@ from api.user_feedback import router as user_feedback_router
 from core import account, apilog, config, llm_gate, quota, reminder_core, verify_tag
 from core import router as route_engine
 from kb import pipelines
+from kb.rag_core import SUPPORTED_EXT as KB_SUPPORTED_EXT
 from service import avatar as avatar_store
 from service import daily, forum_image
 
@@ -561,7 +562,9 @@ async def get_defaults() -> dict:
         "chunk_size": config.CHUNK_SIZE_DEFAULT,
         "chunk_overlap": config.CHUNK_OVERLAP_DEFAULT,
         "top_k": config.TOP_K_DEFAULT,
-        "supported_extensions": [".txt", ".md", ".pdf"],
+        # 前端上传框的 accept 直接读这里；与知识库白名单共用同一份声明，
+        # 免得"接口说支持、上传又被拒"（rag_core.SUPPORTED_EXT）。
+        "supported_extensions": list(KB_SUPPORTED_EXT),
     }
 
 

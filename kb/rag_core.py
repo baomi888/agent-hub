@@ -820,10 +820,13 @@ def rewrite_query(question: str, history) -> str:
 # ==================== 文档加载 ====================
 
 # 2026-11-13 起多了 docx / csv / jsonl：官方公开知识库的课程资料就是这些格式
-# （教材笔记是 Word、题库与语料是结构化文本）。三种都**只用标准库**解析：
-#   服务器是 3.10 的净环境，为「读个 Word」去装 python-docx（还要 lxml）
+# （教材笔记是 Word、题库与语料是结构化文本）。全部**只用标准库**解析：
+#   服务器是 3.10 的净环境，为「读个 Word / Excel」去装 python-docx / openpyxl
 #   会让"加个课程库"变成"改依赖"，而依赖一改就要重装整套环境。
-SUPPORTED_EXT = (".txt", ".md", ".pdf", ".docx", ".csv", ".jsonl", ".json")
+# 2026-11-23 再加 xlsx / pptx：聊天附件与知识库共用同一套 zip+xml 抽取口径。
+SUPPORTED_EXT = (
+    ".txt", ".md", ".pdf", ".docx", ".csv", ".jsonl", ".json", ".xlsx", ".pptx",
+)
 
 # docx 的正文在 word/document.xml 里，WordprocessingML 命名空间
 _DOCX_W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
@@ -1013,12 +1016,97 @@ def _csv_text(file_path: str) -> str:
     return "\n".join(out)
 
 
+# xlsx / pptx 都是 zip 包着的 XML，用标准库就能抽文字，不引入 openpyxl / python-pptx。
+_S = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+_A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+_MAX_SHEET_ROWS = 2000
+_MAX_SHEET_CHARS = 60000
+
+
+def _xlsx_text(file_path: str) -> str:
+    """Excel → 「【工作表：名字】A1: 值 | B1: 值」的可读文本。
+
+    只取单元格的值，不还原公式/样式/合并单元格；sharedStrings 与 inlineStr
+    两种存法都接住。公式缓存（<v>）有就用，没有就留空，不假装算出来。
+    """
+    with zipfile.ZipFile(file_path) as z:
+        names = set(z.namelist())
+
+        shared: list[str] = []
+        if "xl/sharedStrings.xml" in names:
+            root = ET.fromstring(z.read("xl/sharedStrings.xml"))
+            for si in root.findall(f"{_S}si"):
+                shared.append("".join(t.text or "" for t in si.iter(f"{_S}t")))
+
+        sheet_names: dict[int, str] = {}
+        if "xl/workbook.xml" in names:
+            root = ET.fromstring(z.read("xl/workbook.xml"))
+            for i, sh in enumerate(root.iter(f"{_S}sheet"), 1):
+                sheet_names[i] = sh.get("name") or f"Sheet{i}"
+
+        sheets = sorted(
+            (n for n in names if re.fullmatch(r"xl/worksheets/sheet\d+\.xml", n)),
+            key=lambda n: int(re.search(r"sheet(\d+)", n).group(1)),
+        )
+        out: list[str] = []
+        for idx, name in enumerate(sheets, 1):
+            order = int(re.search(r"sheet(\d+)", name).group(1))
+            out.append(f"【工作表：{sheet_names.get(order, sheet_names.get(idx, f'Sheet{order}'))}】")
+            root = ET.fromstring(z.read(name))
+            used = 0
+            for row in list(root.iter(f"{_S}row"))[:_MAX_SHEET_ROWS]:
+                cells: list[str] = []
+                for c in row.findall(f"{_S}c"):
+                    ref = c.get("r") or ""
+                    typ = c.get("t") or ""
+                    if typ == "inlineStr":
+                        node = c.find(f"{_S}is")
+                        value = "".join(t.text or "" for t in node.iter(f"{_S}t")) if node is not None else ""
+                    else:
+                        v = c.find(f"{_S}v")
+                        value = v.text or "" if v is not None else ""
+                        if typ == "s" and value.isdigit():
+                            i = int(value)
+                            value = shared[i] if 0 <= i < len(shared) else ""
+                    if value.strip():
+                        cells.append(f"{ref}: {value.strip()}" if ref else value.strip())
+                if cells:
+                    line = " | ".join(cells)
+                    out.append(line)
+                    used += len(line)
+                    if used > _MAX_SHEET_CHARS:
+                        out.append("（工作表内容过长，已截断）")
+                        break
+    return "\n".join(out)
+
+
+def _pptx_text(file_path: str) -> str:
+    """PPT → 「【幻灯片 N】文字」的可读文本；按段落分行，保留阅读顺序。"""
+    with zipfile.ZipFile(file_path) as z:
+        slides = sorted(
+            (n for n in z.namelist() if re.fullmatch(r"ppt/slides/slide\d+\.xml", n)),
+            key=lambda n: int(re.search(r"slide(\d+)", n).group(1)),
+        )
+        out: list[str] = []
+        for idx, name in enumerate(slides, 1):
+            root = ET.fromstring(z.read(name))
+            paras: list[str] = []
+            for p in root.iter(f"{_A}p"):
+                text = "".join(t.text or "" for t in p.iter(f"{_A}t")).strip()
+                if text:
+                    paras.append(text)
+            if paras:
+                out.append(f"【幻灯片 {idx}】")
+                out.extend(paras)
+    return "\n".join(out)
+
+
 def load_document(file_path: str, source_name: str | None = None):
     """加载单个文档，返回 Document 列表。
 
-    支持格式：txt / md / pdf / docx / csv / jsonl / json。
+    支持格式：txt / md / pdf / docx / csv / jsonl / json / xlsx / pptx。
     纯文本与 csv/jsonl/json 自动尝试 utf-8 和 gbk（Windows 记事本兜底）；
-    docx 与 pdf 分别走标准库 zip+xml 与 PyPDFLoader。
+    docx/xlsx/pptx 走标准库 zip+xml，pdf 走 PyPDFLoader。
 
     Args:
         source_name: 写入 metadata["source"] 的展示名（一般用原始文件名）。
@@ -1028,17 +1116,18 @@ def load_document(file_path: str, source_name: str | None = None):
         raise FileNotFoundError(f"文件不存在：{file_path}")
     ext = os.path.splitext(file_path)[1].lower()
     if ext not in SUPPORTED_EXT:
-        raise ValueError(
-            f"不支持的文档格式：'{ext}'（支持 txt / md / pdf / docx / csv / jsonl / json）"
-        )
+        supported = " / ".join(e.lstrip(".") for e in SUPPORTED_EXT)
+        raise ValueError(f"不支持的文档格式：'{ext}'（支持 {supported}）")
 
-    if ext in (".csv", ".jsonl", ".json", ".docx"):
-        # 这三种自己抽成纯文本，不走 TextLoader（它只认文本文件）
+    if ext in (".csv", ".jsonl", ".json", ".docx", ".xlsx", ".pptx"):
+        # 这些自己抽成纯文本，不走 TextLoader（它只认文本文件）
         text = {
             ".csv": _csv_text,
             ".jsonl": _jsonl_text,
             ".json": _json_text,
             ".docx": _docx_text,
+            ".xlsx": _xlsx_text,
+            ".pptx": _pptx_text,
         }[ext](file_path)
         docs = [Document(page_content=text, metadata={})] if text.strip() else []
     elif ext in (".txt", ".md"):

@@ -119,10 +119,11 @@ def test_upload_validation_errors(monkeypatch):
         _upload(kb_id, [_uf("a.txt", "内容")], mode="replace")
     assert (e2.value.status_code, e2.value.detail) == (400, "mode 只能是 append 或 rebuild")
 
+    # docx/xlsx/pptx 已在白名单里（走 zip+xml 抽取），这里用一个真不支持的格式
     with pytest.raises(HTTPException) as e3:
-        _upload(kb_id, [_uf("a.docx", "内容")])
+        _upload(kb_id, [_uf("a.exe", "内容")])
     assert e3.value.status_code == 400
-    assert e3.value.detail.startswith("不支持的文件格式：.docx")
+    assert e3.value.detail.startswith("不支持的文件格式：.exe")
 
     # 校验失败一个字节都不该落盘
     assert os.listdir(pipelines.ensure_source_dir(kb_id)) == []

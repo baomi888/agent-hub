@@ -45,7 +45,7 @@ from core.auth import get_current_user
 from core.netsafe import assert_safe_url
 from kb import dialogue_import, pipelines
 from kb.importer import import_url, import_urls_batch, search_preview
-from kb.rag_core import describe_api_error, load_document
+from kb.rag_core import SUPPORTED_EXT, describe_api_error, load_document
 from service import kb_upload, sediment
 
 # 默认要登录：知识库是用户资产，列举/下载/删除都必须先验身份
@@ -106,10 +106,11 @@ async def _validate_and_save(
 
     for f in files:
         ext = os.path.splitext(f.filename or "")[1].lower()
-        if ext not in (".txt", ".md", ".pdf"):
+        if ext not in SUPPORTED_EXT:
+            supported = " / ".join(e.lstrip(".").upper() for e in SUPPORTED_EXT)
             raise HTTPException(
                 status_code=400,
-                detail=f"不支持的文件格式：{ext}（当前支持 TXT / Markdown / PDF）",
+                detail=f"不支持的文件格式：{ext}（当前支持 {supported}）",
             )
         upload.check_declared_size(f, limit)
 
