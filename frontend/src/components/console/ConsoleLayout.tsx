@@ -17,7 +17,6 @@
 //     · 生成中的回答不会因为"点去论坛"而断——接收方在外壳，不在页面；
 //     · 历史列表的滚动位置、搜索词、选中态天然保留（组件没卸载）。
 import { usePathname } from "next/navigation";
-import { useRouter } from "next/navigation";
 import {
   createContext,
   memo,
@@ -40,6 +39,7 @@ import GuideModal from "../guide/GuideModal";
 import AnnounceModal from "../announce/AnnounceModal";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { useRailStore } from "@/components/shell/ChatProvider";
+import { getRailCollapsed, getRailCollapsedServer, subscribeRail, toggleRailCollapsed } from "@/lib/railPref";
 import type { MeOut } from "@/lib/types";
 
 /**
@@ -150,15 +150,11 @@ const Rail = memo(function Rail({
   onCloseRail: () => void;
 }) {
   const rail = useRailStore();
-  const router = useRouter();
 
   const onCreate = useCallback(() => {
     void rail.createSession();
     onCloseRail();
   }, [rail, onCloseRail]);
-  const onOpenLibrary = useCallback(() => {
-    router.push("/library");
-  }, [router]);
   const onSelect = useCallback(
     (sid: string) => {
       rail.selectSession(sid);
@@ -174,7 +170,6 @@ const Rail = memo(function Rail({
       activeSid={rail.activeSid}
       onSelect={onSelect}
       onCreate={onCreate}
-      onOpenLibrary={onOpenLibrary}
       onRename={rail.renameSession}
       onDelete={rail.deleteSession}
       kbNameMap={rail.kbNames}
@@ -212,27 +207,14 @@ export default function ConsoleLayout({ children }: { children: ReactNode }) {
    * 状态放在外壳而不是 Sidebar 里：宽度变化要同步到 CSS 网格列
    * （非对话页的 .console-shell 是 240px + 1fr 的网格），
    * 两处各存一份必然漂移 —— 收起后内容区还留着 176px 空条。
-   * 持久化用 localStorage；读它放在 effect 里，避免 SSR 首帧对不上。
+   * 持久化走 lib/railPref 的模块级 store：useSyncExternalStore 让
+   * SSR 首帧（false）与水合后的真实值自动对齐，不用在 effect 里 setState。
    */
-  const [collapsed, setCollapsed] = useState(false);
-  useEffect(() => {
-    try {
-      setCollapsed(localStorage.getItem("zhisui.rail.collapsed") === "1");
-    } catch {
-      /* 隐私模式读不到 → 保持展开 */
-    }
-  }, []);
-  const toggleCollapsed = useCallback(() => {
-    setCollapsed((v) => {
-      const next = !v;
-      try {
-        localStorage.setItem("zhisui.rail.collapsed", next ? "1" : "0");
-      } catch {
-        /* 写不进去只影响下次刷新 */
-      }
-      return next;
-    });
-  }, []);
+  const collapsed = useSyncExternalStore(
+    subscribeRail,
+    getRailCollapsed,
+    getRailCollapsedServer,
+  );
 
   const narrow = useNarrow();
   const sidebarOpen = narrow && sidebarPref;
@@ -302,7 +284,7 @@ export default function ConsoleLayout({ children }: { children: ReactNode }) {
       overlay={narrow}
       open={sidebarOpen}
       collapsed={collapsed && !narrow}
-      onToggleCollapsed={narrow ? undefined : toggleCollapsed}
+      onToggleCollapsed={narrow ? undefined : toggleRailCollapsed}
       containerRef={sidebarRef}
       username={auth.me.user.username}
       displayName={auth.me.user.nickname || auth.me.user.username}
