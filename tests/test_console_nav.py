@@ -714,16 +714,16 @@ def test_home_rail_is_derived_from_the_shared_nav_list():
     """
     sb = _strip_comments(_read(SIDEBAR_TSX))
     assert "@/lib/nav" in sb, "对话页左栏没有引用共享导航清单"
-    assert "chatRailNav(" in sb, (
-        "对话页左栏没有走 chatRailNav()：自己筛一遍必然漏掉 adminOnly / desktopOnly 的语义"
+    # ★ 2026-11-22：宫格拆成「4 个主入口 + 更多浮层」，两个函数仍然来自 lib/nav
+    assert "railPrimary(" in sb and "railMore(" in sb, (
+        "左栏没有走 railPrimary()/railMore()：自己筛一遍必然漏掉 adminOnly / desktopOnly 的语义"
     )
-    # 筛选逻辑本身也要验：只验 nav.ts 的数据，把 visibleNav(isAdmin) 改成
-    # visibleNav(true) 这种"对所有人展示开发者页面"的错误一个都拦不住（反证第 ④ 条）。
-    body = _ts_func(_strip_comments(_read(NAV_TS)), "chatRailNav")
-    assert "visibleNav(isAdmin)" in body, "chatRailNav 没有按 isAdmin 过滤，管理员入口会漏给别人"
-    assert 'it.href !== "/"' in body, "chatRailNav 把「对话」自己也列进去了（当前页不该出现在导航里）"
+    # 筛选逻辑本身也要验：把 visibleNav(isAdmin) 改成 visibleNav(true)，
+    # 就会把开发者页面展示给所有人 —— 这种错误只验数据是拦不住的。
+    body = _ts_func(_strip_comments(_read(NAV_TS)), "railMore")
+    assert "visibleNav(isAdmin)" in body, "railMore 没有按 isAdmin 过滤，管理员入口会漏给别人"
     assert re.search(r"!\s*\(\s*narrow\s*&&\s*it\.desktopOnly\s*\)", body), (
-        "chatRailNav 没有在窄屏排除 desktopOnly —— 手机上会冒出 /flow 这种窄屏做不了的页面"
+        "railMore 没有在窄屏排除 desktopOnly —— 手机上会冒出 /flow 这种窄屏做不了的页面"
     )
     # 组件里再出现任何一条站内路径字面量，就是"第二份清单"重新长出来的信号
     stray = re.findall(r"\"(/[a-z][a-z0-9/_-]*)\"", sb)
@@ -775,62 +775,39 @@ def test_home_rail_covers_every_mobile_destination():
     assert "/flow" not in desk_user and "/dashboard" not in desk_user
 
 
-def test_home_rail_is_a_full_three_column_grid():
-    """模块格是 3 列紧凑格，且**末行不许留空格子**。
+def test_home_rail_is_a_vertical_list_with_more_menu():
+    """左栏是纵向列表 + 「更多」浮层（2026-11-22 改版）。
 
-    旧版是 flex-wrap + 末行居中，项数余 1 时（管理员手机 7 项 = 3+3+1）会剩下
-    孤零零一格，读起来像页面没做完。用户 2026-11-15 的原话是「普通用户缺两个
-    入口之后仍要整齐、间距一致、不出现空缺」—— 普通用户那边去掉「学习路径」
-    正好 6 项 = 3×2，管理员那边余 1，所以要一个能同时照顾两种数的排法。
-    现在换成 grid：余 1 时最后一项 `grid-column: 1 / -1` 通栏；余 2 时那一对居中。
-    为什么不用 4 列把它填满：侧栏固定 240px，4 列每格 48px，「每日委托」四个字
-    52px 就开始省略号 —— 为一个空格子换来两处截断不值。
+    为什么改：3 列宫格把 12 个入口平均铺开、没有主次，光导航就吃掉 246px，
+    会话列表被挤到 96px。现在只留 4 个高频入口（对话 / 资料库 / 论坛 / 待办）
+    + 「更多」，其余 9 项进浮层。
 
-    这条同时钉四件事，缺一件"整齐"就只剩一半：
-      · 列数是 3（不是 2 / 4）
-      · 余 1 的判据在 nav.ts 里算（不用 :nth-child 在 CSS 里猜）
-      · 组件真的把那个类挂上去了
-      · 图标有底衬（用户要的「填充色」就是这一块）
+    钉四件事：
+      · 主导航是纵向列表、每项铺满整行；
+      · 「更多」浮层必须 portal 到 body —— 侧栏桌面端 overflow:hidden，
+        absolute 挂里面会被裁掉；
+      · 两份清单都来自 lib/nav（railPrimary / railMore）；
+      · 收起态 64px，且外壳网格列同步变窄（否则内容区留一条空白）。
     """
     css = _strip_comments(_read(COMPONENTS_CSS))
-    grid = _css_rule(css, ".side-nav")
-    assert "display: grid" in grid, "模块格不是网格 —— 末行补位只能靠 grid-column 表达"
-    cols = re.search(r"grid-template-columns:\s*repeat\((\d+)", grid)
-    assert cols, f"模块格没有列定义：{grid[:90]}"
-    tracks = int(cols.group(1))
-    entry = _css_rule(css, ".side-entry")
-    span = " ".join(_all_decls(entry, "grid-column"))
-    m = re.search(r"span\s+(\d+)", span)
-    assert m, f"模块格没有声明跨几条轨道（{span!r}）"
-    assert tracks / int(m.group(1)) == 3, (
-        f"{tracks} 条轨道 / 每格跨 {m.group(1)} 条 = {tracks / int(m.group(1))} 列，不是 3 列"
-    )
+    nav = _css_rule(css, ".rail-nav")
+    assert "flex-direction: column" in nav, "主导航不是纵向列表"
+    item = _css_rule(css, ".rail-item")
+    assert "width: 100%" in item, "导航项没有铺满整行（点击区应当横向铺满）"
+    assert "align-items: center" in item, "图标与文字没有垂直居中对齐"
 
-    wide = _css_rule(css, ".side-nav--wide-last > .side-entry:last-child")
-    assert "grid-column: 1 / -1" in wide, "余 1 时末项没有通栏，7 项会剩下孤零零一格"
-    pair = _css_rule(css, ".side-nav--pair-last > .side-entry:nth-last-child(-n + 2)")
-    assert "span 3" in pair, "余 2 时末两项没有各占半行，11 项右侧会空一格"
-
-    assert "var(--fs-xs)" in " ".join(_all_decls(entry, "font-size")), (
-        "模块格字号不是 --fs-xs（14px 会把「每日委托」截成「每日委…」）"
-    )
-    assert "nowrap" in entry, "标签允许换行的话，四个字的项会把整行撑高"
-
-    # 图标底衬：NavIcon 是 1.85 描边的空心线，一排十一块排下来只有一层浅灰
-    ico = _css_rule(css, ".side-ico")
-    assert "var(--accent-soft)" in ico and "26px" in ico, (
-        "图标没有浅金底衬 —— 用户要的「填充色」就是这一块，去掉等于把需求撤回"
-    )
-
-    body = _ts_func(_strip_comments(_read(NAV_TS)), "railLayout")
-    assert re.search(r"count\s*%\s*3", body), "railLayout 没有按 3 列取余"
-    assert '"wide"' in body and '"pair"' in body, (
-        "railLayout 没同时处理余 1（通栏）和余 2（末两项各半行）"
-    )
     sb = _strip_comments(_read(SIDEBAR_TSX))
-    assert "railLayout(" in sb, "侧栏没有按 railLayout 算出的列数排"
-    assert "side-nav--wide-last" in sb and "side-nav--pair-last" in sb, (
-        "侧栏没有把两种补位类都挂到容器上"
+    assert "createPortal" in sb, "「更多」浮层没有 portal 到 body：会被侧栏 overflow 裁掉"
+    assert 'role="menu"' in sb, "「更多」浮层没有 menu 语义"
+    assert "railPrimary(" in sb and "railMore(" in sb, (
+        "纵向导航 / 更多浮层没有走共享清单 —— 自己筛一遍必然漏掉 adminOnly / desktopOnly"
+    )
+
+    collapsed = _css_rule(css, ".side-left.is-collapsed")
+    assert "64px" in collapsed, "收起态侧栏宽度不是 64px"
+    shell = _css_rule(_strip_comments(_read(CONSOLE_CSS)), ".console-shell.is-rail-collapsed")
+    assert "64px" in shell, (
+        "收起后外壳网格列没跟着变窄：非对话页会留下一条空白列"
     )
 
 

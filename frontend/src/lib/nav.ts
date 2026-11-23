@@ -241,3 +241,31 @@ export function railLayout(count: number): RailLayout {
 export function isCurrentNav(href: string, here: string): boolean {
   return href === "/" ? here === "/" : here === href || here.startsWith(href + "/");
 }
+
+/**
+ * 左栏的纵向主导航：对话 / 资料库 / 论坛 / 待办（2026-11-22）。
+ *
+ * 为什么从 12 格宫格改成 5 行：宫格把 12 个入口平均铺开，视觉上没有主次，
+ * 而且占掉 246px 高度 —— 会话列表被挤到只剩 96px。
+ * 现在只留 4 个高频入口 + 「更多」，其余进浮层。
+ */
+export const RAIL_PRIMARY_HREFS = ["/", "/knowledge", "/forum", "/reminders"] as const;
+
+export function railPrimary(): NavItem[] {
+  const set = new Set<string>(RAIL_PRIMARY_HREFS);
+  return NAV.filter((it) => set.has(it.href));
+}
+
+/**
+ * 「更多」浮层里的项：NAV 里除主入口之外的全部（顺序沿用 NAV）。
+ *
+ * 沿用 `adminOnly` / `desktopOnly` 语义 —— 普通用户不该看到 /dashboard、/flow，
+ * 窄屏（手机抽屉）也不该出现只能在电脑上编辑 JSON 的工作流。
+ * 这两个标记是共享清单的既有契约，不要在这里另写一份过滤规则。
+ */
+export function railMore(isAdmin: boolean | undefined, narrow: boolean): NavItem[] {
+  const primary = new Set<string>(RAIL_PRIMARY_HREFS);
+  return visibleNav(isAdmin).filter(
+    (it) => !primary.has(it.href) && !(narrow && it.desktopOnly),
+  );
+}
