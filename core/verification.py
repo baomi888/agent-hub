@@ -147,8 +147,10 @@ class VerificationStore:
     def _slot(self, ctx: Context) -> str:
         return self._hash("slot", json.dumps([ctx.purpose, ctx.subject, ctx.flow]))
 
-    def reserve(self, context: Context, ip: str) -> Reservation:
+    def reserve(self, context: Context, ip: str, *, anonymous_reset: bool = False) -> Reservation:
         ctx = canonical(context)
+        if anonymous_reset and (ctx.purpose != "reset_password" or not ctx.subject.startswith("unknown:")):
+            raise VerificationError("匿名限流仅限未知账号找回请求")
         try:
             ip = str(ipaddress.ip_address(ip))
         except ValueError as exc:
@@ -157,15 +159,24 @@ class VerificationStore:
         day = datetime.fromtimestamp(now, timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
         target = self._hash("address", ctx.address)
         buckets = [
-            (target, day, self.limits.daily),
             (self._hash("ip", ip), str(now // 600), self.limits.ip_short),
-            (self._hash("actor", ctx.subject), str(now // 600), self.limits.actor_short),
             (self._hash("global", "mail"), day, self.limits.global_daily),
         ]
+        if not anonymous_reset:
+            buckets.extend(
+                [
+                    (target, day, self.limits.daily),
+                    (self._hash("actor", ctx.subject), str(now // 600), self.limits.actor_short),
+                ]
+            )
         request_id, code = secrets.token_urlsafe(24), f"{secrets.randbelow(1000000):06d}"
         slot, payload = self._slot(ctx), serialize(ctx)
         with self.transaction() as db:
-            last = db.execute("SELECT sent_at FROM verification_cooldowns WHERE bucket=?", (target,)).fetchone()
+            last = (
+                None
+                if anonymous_reset
+                else db.execute("SELECT sent_at FROM verification_cooldowns WHERE bucket=?", (target,)).fetchone()
+            )
             if last and now - last[0] < self.limits.cooldown:
                 raise VerificationError("发送过于频繁，请稍后再试")
             for bucket, window, maximum in buckets:
@@ -180,11 +191,12 @@ class VerificationStore:
                     "ON CONFLICT(bucket,window) DO UPDATE SET count=count+1",
                     (bucket, window),
                 )
-            db.execute(
-                "INSERT INTO verification_cooldowns VALUES (?,?) "
-                "ON CONFLICT(bucket) DO UPDATE SET sent_at=excluded.sent_at",
-                (target, now),
-            )
+            if not anonymous_reset:
+                db.execute(
+                    "INSERT INTO verification_cooldowns VALUES (?,?) "
+                    "ON CONFLICT(bucket) DO UPDATE SET sent_at=excluded.sent_at",
+                    (target, now),
+                )
             db.execute(
                 "INSERT INTO verification_requests(id,slot,context,code_hash,expires,state) "
                 "VALUES (?,?,?,?,?,'sending')",

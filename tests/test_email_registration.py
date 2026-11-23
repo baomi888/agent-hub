@@ -108,9 +108,11 @@ def test_expired_proof_creates_no_partial_account(env):
 
 def test_duplicate_username_rolls_back_and_proof_is_reusable(env):
     s, cli, messages, _ = env
-    account.create_user("new_user", "Existing_pass_9")
+    account.create_user("NEW_USER", "Existing_pass_9")
     data = verified(cli, messages)
-    assert cli.post("/api/auth/register/", json=data).status_code == 409
+    response = cli.post("/api/auth/register/", json=data)
+    assert response.status_code == 409
+    assert "登录名" in response.text
     with sqlite3.connect(s.store.path) as db:
         assert db.execute("SELECT count(*) FROM security_emails").fetchone()[0] == 0
     assert cli.post("/api/auth/register/", json={**data, "username": "renamed_user"}).status_code == 200
@@ -236,3 +238,47 @@ def test_default_dependency_uses_real_fake_smtp(env, monkeypatch):
         )
         assert result.status_code == 200, result.text
         assert cli.get("/api/auth/me/").status_code == 200
+
+
+def test_email_conflict_keeps_email_message_and_rolls_back(env):
+    s, cli, messages, clock = env
+    first = verified(cli, messages)
+    other = TestClient(main.app, client=("127.0.0.2", 60000))
+    clock[0] += 60
+    second = verified(other, messages)
+    second["username"] = "another_user"
+    assert cli.post("/api/auth/register/", json=first).status_code == 200
+    response = other.post("/api/auth/register/", json=second)
+    assert response.status_code == 409
+    assert "邮箱" in response.text
+    with sqlite3.connect(s.store.path) as db:
+        assert db.execute("SELECT count(*) FROM users").fetchone()[0] == 1
+        assert db.execute("SELECT count(*) FROM security_emails").fetchone()[0] == 1
+
+
+def test_default_email_disabled_closes_registration_but_preserves_password_login(env, monkeypatch):
+    _, cli, _, _ = env
+    account.create_user("existing_user", "Existing_pass_9")
+    main.app.dependency_overrides.pop(signup_service)
+    monkeypatch.setattr(config, "ALLOW_SIGNUP", True)
+    monkeypatch.setattr(config, "SECURITY_EMAIL_ENABLED", False)
+    response = cli.post(
+        "/api/auth/register/",
+        json={
+            "username": "new_user",
+            "password": "New_user_pass_9",
+            "email": "signup@example.com",
+            "email_grant": "unused-proof-value-24chars",
+        },
+    )
+    assert response.status_code == 503
+    assert (
+        cli.post(
+            "/api/auth/login/",
+            json={
+                "username": "existing_user",
+                "password": "Existing_pass_9",
+            },
+        ).status_code
+        == 200
+    )

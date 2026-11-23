@@ -344,3 +344,13 @@ def test_current_version_is_loaded_under_same_transaction(env):
 
     with pytest.raises(VerificationError, match="已变化"):
         s.consume(grant, ctx, lambda db: pytest.fail("旧代数不允许写入"), current_context=resolve)
+
+
+@pytest.mark.parametrize("change", [{}, {"purpose": "reset_password"}, {"subject": "unknown:visitor"}])
+def test_anonymous_reset_policy_rejects_other_contexts(env, change):
+    store, context, _ = env
+    with pytest.raises(VerificationError):
+        store.reserve(replace(context, **change), "127.0.0.1", anonymous_reset=True)
+    with sqlite3.connect(store.path) as db:
+        assert db.execute("SELECT count(*) FROM verification_requests").fetchone()[0] == 0
+        assert db.execute("SELECT count(*) FROM verification_rate_limits").fetchone()[0] == 0

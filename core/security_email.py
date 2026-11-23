@@ -2,6 +2,7 @@
 
 import json
 import secrets
+import time
 
 from core import mailer, security_mail
 from core.verification import Context, VerificationError, normalize_address
@@ -143,10 +144,14 @@ class SecurityEmailService:
             raise SecurityEmailError("邮箱验证信息已变化，请重新验证")
         uid, now, password_hash = uuid.uuid4().hex, int(self.store.clock()), hash_password(password)
 
+        normalized_username = account.normalize_name(username)
+
         def effect(db):
+            if db.execute("SELECT 1 FROM users WHERE username=?", (normalized_username,)).fetchone():
+                raise SecurityEmailError("该登录名已被占用", 409)
             db.execute(
                 "INSERT INTO users(id,username,password_hash,created_at,last_login_at) VALUES (?,?,?,?,?)",
-                (uid, account.normalize_name(username), password_hash, now, now),
+                (uid, normalized_username, password_hash, now, now),
             )
             db.execute("INSERT INTO security_emails VALUES (?,?,?,1)", (uid, context.address, now))
 
@@ -167,6 +172,16 @@ class SecurityEmailService:
         )
 
     def send_reset(self, nonce, address, ip):
+        started = time.monotonic()
+        try:
+            return self._send_reset(nonce, address, ip)
+        finally:
+            # 两条分支共用最低响应耗时；不持有数据库事务等待。
+            remaining = 0.15 - (time.monotonic() - started)
+            if remaining > 0:
+                time.sleep(remaining)
+
+    def _send_reset(self, nonce, address, ip):
         if not self.ready():
             raise SecurityEmailError("邮件服务暂不可用，请稍后重试", 503)
         address = normalize_address(address)
@@ -179,7 +194,7 @@ class SecurityEmailService:
         exists = context is not None
         if not exists:
             context = Context("reset_password", address, "unknown:" + self.store._hash("unknown", address), nonce)
-        reservation = self.store.reserve(context, ip)
+        reservation = self.store.reserve(context, ip, anonymous_reset=not exists)
         accepted = False
         if exists:
             try:

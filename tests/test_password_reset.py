@@ -240,3 +240,69 @@ def test_default_dependency_smtp_recovery_pipeline(reset_env, monkeypatch):
         )
         assert verified.status_code == 200, verified.text
         assert cli.post("/api/auth/password/reset", json=body(verified.json()["grant"])).status_code == 200
+
+
+def test_unknown_address_cannot_exhaust_future_account_quota(reset_env):
+    s, cli, messages, clock, uid = reset_env
+    address = "future@example.com"
+    for _ in range(s.store.limits.daily + 1):
+        response = cli.post("/api/auth/password/reset/email/send", json={"address": address})
+        assert response.status_code == 200, response.text
+        clock[0] += 60
+    assert messages == []
+    target = s.store._hash("address", address)
+    actor = s.store._hash("actor", "unknown:" + s.store._hash("unknown", address))
+    with sqlite3.connect(s.store.path) as db:
+        assert (
+            db.execute(
+                "SELECT count(*) FROM verification_rate_limits WHERE bucket IN (?,?)", (target, actor)
+            ).fetchone()[0]
+            == 0
+        )
+        assert db.execute("SELECT count(*) FROM verification_cooldowns WHERE bucket=?", (target,)).fetchone()[0] == 0
+        db.execute("UPDATE security_emails SET address=? WHERE user_id=?", (address, uid))
+    other = TestClient(main.app, client=("127.0.0.2", 60000))
+    response = other.post("/api/auth/password/reset/email/send", json={"address": address})
+    assert response.status_code == 200, response.text
+    assert len(messages) == 1 and messages[0][0] == address
+    assert other.post("/api/auth/password/reset/email/send", json={"address": address}).status_code == 429
+
+
+@pytest.mark.parametrize("bucket", ["ip", "global"])
+def test_unknown_reset_still_enforces_shared_limits(reset_env, bucket):
+    from dataclasses import replace
+
+    s, cli, messages, _, _ = reset_env
+    s.store.limits = replace(
+        s.store.limits, ip_short=2 if bucket == "ip" else 20, global_daily=2 if bucket == "global" else 1000
+    )
+    for index in range(3):
+        response = cli.post("/api/auth/password/reset/email/send", json={"address": f"unknown{index}@example.com"})
+        assert response.status_code == (200 if index < 2 else 429), response.text
+    assert messages == []
+
+
+def test_reset_send_timing_has_common_floor(reset_env):
+    import statistics
+    import time
+
+    s, cli, messages, clock, _ = reset_env
+    sender = s.sender
+
+    def slow_sender(*args):
+        time.sleep(0.03)
+        return sender(*args)
+
+    s.sender = slow_sender
+    durations = {"recover@example.com": [], "unknown@example.com": []}
+    for _ in range(3):
+        for address, samples in durations.items():
+            start = time.monotonic()
+            response = cli.post("/api/auth/password/reset/email/send", json={"address": address})
+            samples.append(time.monotonic() - start)
+            assert response.status_code == 200, response.text
+        clock[0] += 60
+    known, unknown = [statistics.median(samples) for samples in durations.values()]
+    assert min(known, unknown) >= 0.14
+    assert max(known, unknown) / min(known, unknown) < 10
+    assert len(messages) == 3
