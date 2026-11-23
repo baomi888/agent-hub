@@ -1169,13 +1169,7 @@
   border-top: 1px solid var(--line);
 }
 
-.tb-comp-note {
-  flex: 1;
-  margin: 0;
-  color: var(--text-3);
-  font-size: var(--fs-badge);
-  line-height: 1.65;
-}
+/* .tb-comp-note（发布按钮左边那段署名/公开说明）已随文案一起移除，2026-11-23 */
 
 .tb-comp-tip {
   margin: 10px 0 0;
@@ -1760,7 +1754,6 @@
   .tb-sort-stat { font-size: var(--fs-badge); }
 
   .tb-comp-f { flex-wrap: wrap; }
-  .tb-comp-note { flex-basis: 100%; order: 2; }
   .tb-pub { width: 100%; order: 1; }
 
   /* 弹层在手机上要贴着屏幕走：24px 的内边距会白白吃掉 48px 宽 */

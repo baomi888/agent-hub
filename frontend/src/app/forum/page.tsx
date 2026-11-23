@@ -1167,10 +1167,9 @@ export default function ForumPage() {
             </div>
 
             <div className="tb-comp-f">
-              <p className="tb-comp-note">
-                发布后以「{auth.me?.user.nickname || auth.me?.user.username || "玉米NNNN"}」署名。
-                发出去就是公开的，管理员事后看到违规会下架并写原因。
-              </p>
+              {/* 「发布后以 X 署名 / 发出去就是公开的 / 违规会下架」这段说明已按
+                  用户要求移除（2026-11-23）：署名在帖子头部自然看得到，
+                  公开与监管是平台常识，不必在每次发帖前都讲一遍。 */}
               <button
                 type="button"
                 className="tb-pub"
