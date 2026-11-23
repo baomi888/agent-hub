@@ -2,6 +2,7 @@
 
 import json
 import secrets
+import time
 
 from core import mailer, security_mail
 from core.verification import Context, VerificationError, normalize_address
@@ -142,11 +143,25 @@ class SecurityEmailService:
         if context.flow != nonce or context.address != normalize_address(address):
             raise SecurityEmailError("邮箱验证信息已变化，请重新验证")
         uid, now, password_hash = uuid.uuid4().hex, int(self.store.clock()), hash_password(password)
+        # 归一化只做一次：下面查重和 INSERT 必须用同一个值，
+        # 否则「苞米」和「 苞米 」会查重漏过、INSERT 撞唯一约束
+        normalized_username = account.normalize_name(username)
 
         def effect(db):
+            # ★ 2026-11-23 修「用已存在的用户名注册，却报邮箱已被绑定」：
+            #   users.username 有唯一约束，撞了抛 IntegrityError，
+            #   而 api/security_email.py 把所有 IntegrityError 都翻译成邮箱冲突，
+            #   用户看到的是一句和实际原因无关的话。
+            #   这里在写库之前显式查一次，给一句说得通的。
+            #   放在 effect 内（而非更外层）是关键：异常会让 consume() 的事务整体回滚，
+            #   验证码不会被白白吃掉 —— 用户换个名字还能用同一张凭证重试。
+            if db.execute(
+                "SELECT 1 FROM users WHERE username=?", (normalized_username,)
+            ).fetchone():
+                raise SecurityEmailError("该登录名已被占用", 409)
             db.execute(
                 "INSERT INTO users(id,username,password_hash,created_at,last_login_at) VALUES (?,?,?,?,?)",
-                (uid, account.normalize_name(username), password_hash, now, now),
+                (uid, normalized_username, password_hash, now, now),
             )
             db.execute("INSERT INTO security_emails VALUES (?,?,?,1)", (uid, context.address, now))
 
@@ -165,7 +180,27 @@ class SecurityEmailService:
             "reset_password", email["address"], uid, flow, user["token_valid_after"], email["binding_version"]
         )
 
+    # 找回密码「已注册 / 未注册」两条路径的最小响应耗时。
+    # 已注册会真的发信（慢），未注册直接返回（快）—— 响应时间本身就是
+    # 一个「这个邮箱有没有账号」的探针，文案归一了也没用（2026-11-23）。
+    RESET_MIN_SECONDS = 0.15
+
     def send_reset(self, nonce, address, ip):
+        """找回密码验证码。★ 两条分支共用同一个最低耗时。
+
+        包一层而不是把 sleep 写进某支里：写进「已注册」那支等于没加，
+        写进「未注册」那支也一样 —— 必须罩住整个函数的所有出口，
+        包括 ready() 抛 503 的那条。用 try/finally 保证异常路径也补时。
+        """
+        started = time.monotonic()
+        try:
+            return self._send_reset(nonce, address, ip)
+        finally:
+            remaining = self.RESET_MIN_SECONDS - (time.monotonic() - started)
+            if remaining > 0:
+                time.sleep(remaining)
+
+    def _send_reset(self, nonce, address, ip):
         if not self.ready():
             raise SecurityEmailError("邮件服务暂不可用，请稍后重试", 503)
         address = normalize_address(address)
@@ -178,7 +213,11 @@ class SecurityEmailService:
         exists = context is not None
         if not exists:
             context = Context("reset_password", address, "unknown:" + self.store._hash("unknown", address), nonce)
-        reservation = self.store.reserve(context, ip)
+        # ★ charge_address=exists —— 见 core/verification.py reserve 的注释：
+        #   未注册地址不占地址维度的日限额与冷却，否则任何人拿一个不存在的地址
+        #   连发 10 次，就能把这个地址的真实主人当天彻底锁死（2026-11-23）。
+        #   已注册地址照旧全额计费，找回密码的限流强度不变。
+        reservation = self.store.reserve(context, ip, charge_address=exists)
         accepted = False
         if exists:
             try:

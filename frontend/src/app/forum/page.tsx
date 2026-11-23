@@ -1014,7 +1014,7 @@ export default function ForumPage() {
             <div className="tb-compose">
               <div className="tb-field">
                 <label className="tb-label" htmlFor="tb-title">
-                  标题 <span>必填，最多 {TITLE_MAX} 字</span>
+                  标题
                 </label>
                 <input
                   id="tb-title"
@@ -1032,7 +1032,7 @@ export default function ForumPage() {
 
               <div className="tb-field">
                 <label className="tb-label" htmlFor="tb-body">
-                  正文 <span>选填，最多 {BODY_MAX} 字</span>
+                  正文
                 </label>
                 <textarea
                   id="tb-body"
@@ -1054,7 +1054,7 @@ export default function ForumPage() {
                   写完正文才想"要不要配张图"。放最上面会让人先去翻相册再想话题。 */}
               <div className="tb-field">
                 <p className="tb-label">
-                  配图 <span>选填，最多 {IMG_MAX} 张</span>
+                  配图
                 </p>
                 <div className="tb-picks">
                   {imgs.map((im, i) => (
@@ -1112,10 +1112,9 @@ export default function ForumPage() {
                     });
                   }}
                 />
-                <p className={imgTip ? "tb-tip warn" : "tb-tip"}>
-                  {imgTip ||
-                    "图片在你的手机上就压好再传，原图不保留 —— 照片里的位置信息也不会跟着上传。"}
-                </p>
+                {/* 常规说明（"压好再传、不保留原图"）已按用户要求移除；
+                    imgTip 是**出错提示**，必须留着 —— 传图失败没反馈等于没反馈。 */}
+                {imgTip && <p className="tb-tip warn">{imgTip}</p>}
               </div>
 
               <div className="tb-field">
@@ -1144,7 +1143,7 @@ export default function ForumPage() {
               {kbs.length > 0 && (
                 <div className="tb-field">
                   <label className="tb-label" htmlFor="tb-kb">
-                    关联资料库 <span>选填</span>
+                    关联资料库
                   </label>
                   <select
                     id="tb-kb"
@@ -1159,7 +1158,8 @@ export default function ForumPage() {
                       </option>
                     ))}
                   </select>
-                  <p className="tb-tip">选上之后，这条话题也会出现在那个库的留言板里。</p>
+                  {/* 底部这句说明（"也会出现在那个库的留言板里"）已按用户要求移除：
+                      选了哪个库，发出来自然就看得到，不需要预先解释一遍。 */}
                 </div>
               )}
 

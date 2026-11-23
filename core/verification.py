@@ -154,7 +154,19 @@ class VerificationStore:
     def _slot(self, ctx: Context) -> str:
         return self._hash("slot", json.dumps([ctx.purpose, ctx.subject, ctx.flow]))
 
-    def reserve(self, context: Context, ip: str) -> Reservation:
+    def reserve(self, context: Context, ip: str, charge_address: bool = True) -> Reservation:
+        """占额度并登记一次验证码请求。
+
+        `charge_address=False`（2026-11-23 新增）：不为这个地址计「地址维度」的
+        日限额与冷却，但仍然计 IP 桶、账号桶和全局桶。
+
+        为什么需要：找回密码时，攻击者可以对一个**根本不存在的**地址连发，
+        今天这会把这个地址的日额度（Limits.daily=10）和冷却全部消耗掉；
+        等这个地址的真实主人后来注册了账号、想找回密码，就再也发不出信 ——
+        一个匿名请求能把某个具体用户锁死，这比枚举本身更糟。
+        地址维度本来就挡不住枚举（枚举一次发一封就够），所以未注册地址不占它；
+        IP 桶 + 全局桶仍在兜底。已注册地址照旧全额计费，行为不变。
+        """
         ctx = canonical(context)
         try:
             ip = str(ipaddress.ip_address(ip))
@@ -164,17 +176,23 @@ class VerificationStore:
         day = datetime.fromtimestamp(now, timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
         target = self._hash("address", ctx.address)
         buckets = [
-            (target, day, self.limits.daily),
             (self._hash("ip", ip), str(now // 600), self.limits.ip_short),
             (self._hash("actor", ctx.subject), str(now // 600), self.limits.actor_short),
             (self._hash("global", "mail"), day, self.limits.global_daily),
         ]
+        # 地址维度（日限额 + 冷却）只在 charge_address 时生效。
+        # 放在最前面是为了保持原有的检查顺序，行为对已注册地址零变化。
+        if charge_address:
+            buckets.insert(0, (target, day, self.limits.daily))
         request_id, code = secrets.token_urlsafe(24), f"{secrets.randbelow(1000000):06d}"
         slot, payload = self._slot(ctx), serialize(ctx)
         with self.transaction() as db:
-            last = db.execute("SELECT sent_at FROM verification_cooldowns WHERE bucket=?", (target,)).fetchone()
-            if last and now - last[0] < self.limits.cooldown:
-                raise VerificationError("发送过于频繁，请稍后再试")
+            if charge_address:
+                last = db.execute(
+                    "SELECT sent_at FROM verification_cooldowns WHERE bucket=?", (target,)
+                ).fetchone()
+                if last and now - last[0] < self.limits.cooldown:
+                    raise VerificationError("发送过于频繁，请稍后再试")
             for bucket, window, maximum in buckets:
                 row = db.execute(
                     "SELECT count FROM verification_rate_limits WHERE bucket=? AND window=?", (bucket, window)
@@ -187,11 +205,12 @@ class VerificationStore:
                     "ON CONFLICT(bucket,window) DO UPDATE SET count=count+1",
                     (bucket, window),
                 )
-            db.execute(
-                "INSERT INTO verification_cooldowns VALUES (?,?) "
-                "ON CONFLICT(bucket) DO UPDATE SET sent_at=excluded.sent_at",
-                (target, now),
-            )
+            if charge_address:
+                db.execute(
+                    "INSERT INTO verification_cooldowns VALUES (?,?) "
+                    "ON CONFLICT(bucket) DO UPDATE SET sent_at=excluded.sent_at",
+                    (target, now),
+                )
             db.execute(
                 "INSERT INTO verification_requests(id,slot,context,code_hash,expires,state) "
                 "VALUES (?,?,?,?,?,'sending')",

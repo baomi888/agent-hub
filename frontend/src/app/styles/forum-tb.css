@@ -905,8 +905,15 @@
 
 .tb-comp {
   width: min(760px, 100%);
+  /* ★ 2026-11-23：100vh 在手机浏览器里是"地址栏收起时"的高度，
+   *   地址栏在的时候弹窗底部会被顶出屏幕（用户反馈"手机端弹窗不能完整显示"）。
+   *   dvh 跟着地址栏收放走，两者都写、dvh 在后，老浏览器自动回落到 vh。 */
   max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
   overflow: auto;
+  /* iOS 惯性滚动 + 不被页面滚动链带动 */
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   padding: 18px 20px 20px;
   border-radius: var(--radius-lg);
   background: var(--step-2);
@@ -2012,5 +2019,30 @@
 @media (max-width: 900px) {
   .tb-root {
     height: calc(100dvh - var(--tabbar-h) - env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* ============ 发帖弹窗：窄屏铺满（2026-11-23） ============
+ *
+ * 用户反馈：「手机端的这个弹窗不能完整显示」。
+ * 根因有二：
+ *   ① .tb-comp 的 max-height 用的是 100vh —— 手机上 100vh 是"地址栏收起时"
+ *      的高度，地址栏在的时候弹窗底部会被顶出屏幕；
+ *   ② 遮罩 24px 内边距 + 48px 余量，在 390 宽的屏上白扔了 72px 高度，
+ *      配图区一撑就顶出可视区。
+ * 这里在窄屏把弹窗撑到近满屏、内部自己滚，并避开 iPhone 底部横条。
+ * 只动 .tb-mask / .tb-comp，不影响论坛其它弹层。
+ */
+@media (max-width: 760px) {
+  .tb-mask {
+    padding: 12px;
+    align-items: stretch;
+  }
+  .tb-comp {
+    width: 100%;
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
+    padding: 14px 14px max(14px, env(safe-area-inset-bottom, 0px));
+    border-radius: var(--radius-md);
   }
 }
