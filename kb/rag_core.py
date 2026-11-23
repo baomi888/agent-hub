@@ -826,7 +826,15 @@ def rewrite_query(question: str, history) -> str:
 # 2026-11-23 再加 xlsx / pptx：聊天附件与知识库共用同一套 zip+xml 抽取口径。
 SUPPORTED_EXT = (
     ".txt", ".md", ".pdf", ".docx", ".csv", ".jsonl", ".json", ".xlsx", ".pptx",
+    # 2026-11-23 用户反馈「图片文件上传资料库」不兼容：课件截图、板书照片、
+    # 试卷图片是大学生最常往库里放的东西，纯文本白名单把它们全挡在门外。
+    # 图片没有可抽的文字，走 _image_text 落一条**可检索的图片卡片**
+    # （文件名 + 尺寸 + 原图路径），原文件保留在 source 目录里可点开看。
+    ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp",
 )
+
+# 这些扩展名是图片：不抽文字，生成图片卡片
+IMAGE_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
 
 # docx 的正文在 word/document.xml 里，WordprocessingML 命名空间
 _DOCX_W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
@@ -1101,12 +1109,52 @@ def _pptx_text(file_path: str) -> str:
     return "\n".join(out)
 
 
+def _image_text(file_path: str) -> str:
+    """图片 → 可检索的图片卡片文本（2026-11-23 新增）。
+
+    为什么不是"抽文字"：服务器没有 OCR（pytesseract / fitz 都没装），
+    现场装一套等于给"传张图"加依赖。但**图片必须能被检索到**——
+    用户传完课件截图后在对话里问"我传的那张图讲的是什么"，
+    连一条记录都搜不到就等于没传。
+
+    所以落一张卡片：文件名、尺寸、色彩模式、大小，外加一句明确的说明
+    「这是一张图片，正文需在对话里直接发给 AI 识别」。原文件留在
+    source 目录（api/kb.py 的 /{kb_id}/file 与 /file-content 能点到），
+    图片本身不丢。
+
+    Pillow 读不动（损坏 / 非图片）时退化成只记文件名与大小，
+    **不抛异常**：传图失败一半比"卡在解析"更让人困惑。
+    """
+    name = os.path.basename(file_path)
+    size_kb = max(1, (os.path.getsize(file_path) + 1023) // 1024)
+    head = f"【图片】{name}（{size_kb} KB）"
+    try:
+        from PIL import Image
+
+        with Image.open(file_path) as im:
+            w, h = im.size
+            fmt = (im.format or "").upper()
+            mode = im.mode
+        lines = [
+            head,
+            f"格式 {fmt or '未知'}，尺寸 {w}×{h} 像素，色彩模式 {mode}。",
+            "这是一张图片资料：此处只记录图片本身的信息，图片中的文字与画面内容"
+            "需要把原图直接发给 AI 才能识别。可以在资料库里点开原图查看或下载。",
+        ]
+        # 竖图/横图给一句人话，检索时"横版海报""竖版截图"能命中
+        if w and h:
+            lines.append("方向：竖图" if h > w else ("方向：横图" if w > h else "方向：方图"))
+        return "\n".join(lines)
+    except Exception:
+        return head + "\n这是一张图片资料，可以在资料库里点开原图查看或下载。"
+
+
 def load_document(file_path: str, source_name: str | None = None):
     """加载单个文档，返回 Document 列表。
 
-    支持格式：txt / md / pdf / docx / csv / jsonl / json / xlsx / pptx。
+    支持格式：txt / md / pdf / docx / csv / jsonl / json / xlsx / pptx / 常见图片。
     纯文本与 csv/jsonl/json 自动尝试 utf-8 和 gbk（Windows 记事本兜底）；
-    docx/xlsx/pptx 走标准库 zip+xml，pdf 走 PyPDFLoader。
+    docx/xlsx/pptx 走标准库 zip+xml，pdf 走 PyPDFLoader，图片走 _image_text 卡片。
 
     Args:
         source_name: 写入 metadata["source"] 的展示名（一般用原始文件名）。
@@ -1129,6 +1177,10 @@ def load_document(file_path: str, source_name: str | None = None):
             ".xlsx": _xlsx_text,
             ".pptx": _pptx_text,
         }[ext](file_path)
+        docs = [Document(page_content=text, metadata={})] if text.strip() else []
+    elif ext in IMAGE_EXT:
+        # 图片落图片卡片（_image_text 永不抛异常，读不动也留一条记录）
+        text = _image_text(file_path)
         docs = [Document(page_content=text, metadata={})] if text.strip() else []
     elif ext in (".txt", ".md"):
         try:

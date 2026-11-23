@@ -407,10 +407,14 @@ export default function Sidebar({
           title="更多"
         >
           <span className="side-ico">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
-              <circle cx="5" cy="12" r="1.4" />
-              <circle cx="12" cy="12" r="1.4" />
-              <circle cx="19" cy="12" r="1.4" />
+            {/* ★ 2026-11-23 用户反馈「更多左边没有图标」：这个 svg 少了
+                side-entry-ico 尺寸类，其余入口都有。没有它 svg 没有宽高约束，
+                三个 r=1.4 的点在 26px 底衬里根本看不出形状 —— 视觉上就是一块空底衬。
+                补上和其他入口同一套尺寸，三个点才真的看得见。 */}
+            <svg className="side-entry-ico" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
+              <circle cx="5" cy="12" r="2" />
+              <circle cx="12" cy="12" r="2" />
+              <circle cx="19" cy="12" r="2" />
             </svg>
           </span>
           <span className="rail-label">更多</span>

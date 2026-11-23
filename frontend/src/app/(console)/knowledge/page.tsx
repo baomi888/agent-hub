@@ -23,7 +23,7 @@ import { useToast } from "@/lib/hooks/useToast";
 import { fmtNum, fmtWhen } from "@/lib/time";
 import { CHUNK_PROFILES, nearestProfileId, profileParams, type ChunkProfileId } from "@/lib/chunkProfiles";
 import { loadKbChunks, saveKbChunks, type KbChunkMap } from "@/lib/kbChunkPrefs";
-import { validateUpload } from "@/lib/uploadLimits";
+import { UPLOAD_ACCEPT, validateUpload } from "@/lib/uploadLimits";
 import type { AccessMode, Defaults, FavoriteKbInfo, FilePreview, KbFile, KbInfo } from "@/lib/types";
 
 /** 文件类型标：只区分"读得出来的三类 + 其它"，不追求完整 MIME */
@@ -375,10 +375,11 @@ export default function KnowledgePage() {
   }, [preview]);
 
   const files: KbFile[] = active?.files ?? [];
-  // 后端接口给出权威白名单；接口暂不可用时也别退化成只让传三种格式
-  const exts = defaults?.supported_extensions ?? [
-    ".pdf", ".md", ".txt", ".docx", ".doc", ".csv", ".json", ".jsonl", ".xlsx", ".pptx",
-  ];
+  // 后端接口给出权威白名单；接口暂不可用时用 UPLOAD_ACCEPT 兜底。
+  // ★ 2026-11-23：这里原来手写了一份 ['pdf','md','txt','docx',...] 的副本，没有图片，
+  //   而且和后端白名单脱钩。改成复用 lib/uploadLimits 的同一份常量 ——
+  //   「后端权威 / 接口挂了用本地兜底」仍然是两层，但两层不再各写一份会漂移的清单。
+  const exts = defaults?.supported_extensions ?? [...UPLOAD_ACCEPT];
 
   return (
     <PageShell

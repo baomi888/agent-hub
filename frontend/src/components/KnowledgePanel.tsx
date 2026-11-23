@@ -482,7 +482,7 @@ export default function KnowledgePanel({
                 ref={fileRef}
                 type="file"
                 multiple
-                accept=".txt,.md,.pdf,.doc,.docx,.csv,.json,.jsonl,.xlsx,.pptx"
+                accept=".txt,.md,.pdf,.doc,.docx,.csv,.json,.jsonl,.xlsx,.pptx,image/*,.png,.jpg,.jpeg,.webp,.gif,.bmp"
                 onChange={(e) => onFileChange(e.target.files)}
                 className="hidden"
               />
@@ -503,7 +503,7 @@ export default function KnowledgePanel({
                 <span className="text-fs-xs text-faint">
                   {busy
                     ? "正在解析文档、生成向量，这一步较慢，请勿重复点击或关闭页面"
-                    : "支持 PDF / Word / Markdown / TXT / CSV / Excel / PPT，可多选"}
+                    : "支持 PDF / Word / Markdown / TXT / CSV / Excel / PPT / 图片，可多选"}
                 </span>
               </button>
 
