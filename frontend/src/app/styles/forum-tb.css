@@ -804,34 +804,6 @@
 
 .tb-card-t svg { flex: none; color: var(--accent); }
 
-.tb-rules {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-/* 这里不能用 flex —— li 里混着文字和 <b>，一 flex 就把它们拆成
-   三个并排的格子，句子被撕成"主 / 必须带图 / ，一句话说明可以不写"。
-   小圆点用绝对定位，不参与排版 */
-.tb-rules li {
-  position: relative;
-  padding: 5px 0 5px 12px;
-  color: var(--text-2);
-  font-size: var(--fs-xs);
-  line-height: 1.65;
-}
-
-.tb-rules li::before {
-  position: absolute;
-  top: 5px;
-  left: 1px;
-  color: var(--accent);
-  content: "·";
-  font-weight: 700;
-}
-
-.tb-rules b { color: var(--ink); font-weight: 600; }
-
 .tb-hot {
   margin: 0;
   padding: 0;

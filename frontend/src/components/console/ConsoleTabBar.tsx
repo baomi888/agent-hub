@@ -137,6 +137,8 @@ export default function ConsoleTabBar({ isAdmin, onOpenChange, variant }: Props)
             key={it.href}
             href={it.href}
             className="tabbar-item"
+            target={it.newTab ? "_blank" : undefined}
+            rel={it.newTab ? "noopener noreferrer" : undefined}
             aria-current={isCurrentNav(it.href, here) ? "page" : undefined}
             scroll={false}
             // 触觉：只在**真的换页**时给一次。点当前这一格不给 ——
@@ -191,6 +193,8 @@ export default function ConsoleTabBar({ isAdmin, onOpenChange, variant }: Props)
                   key={it.href}
                   href={it.href}
                   className="tab-sheet-item"
+                  target={it.newTab ? "_blank" : undefined}
+                  rel={it.newTab ? "noopener noreferrer" : undefined}
                   aria-current={isCurrentNav(it.href, here) ? "page" : undefined}
                   scroll={false}
                   onClick={() => haptic("select")}

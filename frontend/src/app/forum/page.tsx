@@ -935,22 +935,8 @@ export default function ForumPage() {
 
         {/* ---------- 右：侧卡 ---------- */}
         <aside className="tb-side" aria-label="说明与热帖">
-          <section className="tb-card">
-            <h4 className="tb-card-t">
-              <CornIcon name="bulb" className="h-4 w-4" />
-              第一次来？
-            </h4>
-            <ul className="tb-rules">
-              <li>
-                <b>昵称自动起</b>，不用自己想名字。
-              </li>
-              <li>
-                写个标题就能发，<b>正文可以不写</b>。
-              </li>
-              <li>帖子长期留着；被判违规会下架，<b>原因写「我发的帖」里</b>。</li>
-              <li>别发人像正脸、宿舍门牌、身份证。</li>
-            </ul>
-          </section>
+          {/* 「第一次来？」新手卡已删（2026-11-23）：论坛要独立成新标签页，
+              不再是控制台里附带的一个栏目，新手说明留到那边一起重做。 */}
 
           {/* 只有"有人在接话"的话题攒到 3 条以上，这一栏才单独成列。
               热榜在 0 回复时退化成最新、在只有 1 条时等于把列表第三行再抄一遍 ——

@@ -273,6 +273,8 @@ export default function Sidebar({
             href={it.href}
             className="rail-item"
             title={it.label}
+            target={it.newTab ? "_blank" : undefined}
+            rel={it.newTab ? "noopener noreferrer" : undefined}
             aria-current={isCurrentNav(it.href, here) ? "page" : undefined}
           >
             <span className="side-ico">
@@ -325,6 +327,8 @@ export default function Sidebar({
                   href={it.href}
                   role="menuitem"
                   className="rail-more-item"
+                  target={it.newTab ? "_blank" : undefined}
+                  rel={it.newTab ? "noopener noreferrer" : undefined}
                   aria-current={isCurrentNav(it.href, here) ? "page" : undefined}
                   onClick={() => setMoreOpen(false)}
                 >
