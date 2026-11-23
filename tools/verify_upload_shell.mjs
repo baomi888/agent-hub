@@ -48,6 +48,7 @@ await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, devi
 console.log("METRICS_OK");
 await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "light" }] });
 console.log("MEDIA_OK");
+await send("Network.setCacheDisabled", { cacheDisabled: true });
 await send("Network.setCookie", { name: "baomi_session", value: TOKEN, url: BASE, secure: false, sameSite: "Lax" });
 console.log("COOKIE_OK");
 await send("Page.navigate", { url: BASE + "/" });
@@ -92,7 +93,8 @@ const state = await ev(`(() => {
   const items = document.querySelectorAll('.attach-item').length;
   const btn = document.querySelector('.input-row button.send');
   const r = btn && btn.getBoundingClientRect();
-  return { items, notice: document.body.innerText.includes('多出来的'),
+  return { items, hasItemsWrap: !!document.querySelector('.attach-items'),
+           notice: document.body.innerText.includes('多出来的'),
            sendVisible: !!(r && r.width>0 && r.bottom <= window.innerHeight && r.top >= 0),
            sendBottom: r ? Math.round(r.bottom) : null, vh: window.innerHeight };
 })()`);

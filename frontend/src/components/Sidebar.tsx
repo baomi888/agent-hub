@@ -7,7 +7,7 @@
 //   底部只留「我的反馈」与账号块，把高度让给会话列表）。
 //   两项偏好本身没有下线 —— 设置页「本地偏好」里仍有同一个字号选择器与
 //   「深色纸面」开关，prefs / applyFontScale / data-fs / html.dark 全部照旧。
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject, type TouchEvent as ReactTouchEvent } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -66,6 +66,10 @@ interface Props {
   /** 打开「用量与反馈」看板（P2）。不传则账号块不可点 */
   onOpenUsage?: () => void;
   onLogout?: () => void;
+  /** ★ 2026-11-23：窄屏抽屉里任何"会离开这一页"的动作都要调它收起抽屉。
+   *  用户反馈：抽屉开着点「更多」浮层里的模块，能跳转，但抽屉还盖在新页面上，
+   *  非对话页连遮罩都没有 —— 整页像被对话列表固定死。宽屏下传空操作即可。 */
+  onNavigate?: () => void;
 }
 
 const toMs = (ts: number) => (ts < 1e12 ? ts * 1000 : ts);
@@ -116,6 +120,7 @@ export default function Sidebar({
   avatar,
   onOpenUsage,
   onLogout,
+  onNavigate,
   isAdmin = false,
   collapsed = false,
   onToggleCollapsed,
@@ -215,6 +220,103 @@ export default function Sidebar({
     return () => window.removeEventListener("keydown", onKey);
   }, [moreOpen]);
 
+  // ★ 窄屏抽屉左滑关闭（2026-11-23 用户反馈「不可以左滑消除」）。
+  //   抽屉是 translateX 出场的浮层，浏览器不会替它做边缘滑动，只能自己接管手势。
+  //   三条边界（每一条都踩过真实的坑）：
+  //   · 会话行有自己的左滑（改名/删除），手势起点落在行上必须让给行，
+  //     否则行滑不开、抽屉也在动 —— 一个手势两个主；
+  //   · 纵向滑动（滚会话列表）原样放行：斜着比一下就取消横滑判定；
+  //   · 拖完松手要吞掉浏览器补发的 click（同会话行 lastSwipeAt 那套），
+  //     否则松手那一下会误点抽屉里的链接直接跳页。
+  //   操作的元素从 e.currentTarget 取（handlers 就挂在 <aside> 上）存进 ref，
+  //   不经由 props 的 containerRef —— 新 react-hooks 规则禁止改 props 里的对象，
+  //   而且会话行的手势本来就是同一套写法。
+  const drawerTouch = useRef<{ x0: number; y0: number; dx: number; dragging: boolean; el: HTMLElement | null } | null>(null);
+  const drawerSwipeAt = useRef(0);
+  // 264px 宽的抽屉拖过 72px（约 1/4）就算"用户想走"，吸附关闭
+  const DRAG_CLOSE_PX = 72;
+
+  const onDrawerTouchStart = useCallback(
+    (e: ReactTouchEvent<HTMLElement>) => {
+      if (!overlay || !open) return;
+      if ((e.target as HTMLElement | null)?.closest?.(".session-swipe-wrap")) {
+        drawerTouch.current = null;
+        return;
+      }
+      const t = e.touches[0];
+      drawerTouch.current = {
+        x0: t.clientX,
+        y0: t.clientY,
+        dx: 0,
+        dragging: false,
+        el: e.currentTarget,
+      };
+    },
+    [overlay, open],
+  );
+
+  const onDrawerTouchMove = useCallback((e: ReactTouchEvent<HTMLElement>) => {
+    const st = drawerTouch.current;
+    if (!st || !st.el) return;
+    const t = e.touches[0];
+    const dx = t.clientX - st.x0;
+    const dy = t.clientY - st.y0;
+    if (!st.dragging) {
+      if (Math.abs(dx) < 10) return;
+      if (Math.abs(dx) <= Math.abs(dy)) {
+        drawerTouch.current = null;
+        return;
+      }
+      st.dragging = true;
+    }
+    // 只跟左滑（dx<=0）；右滑不把抽屉推出屏外
+    st.dx = Math.min(0, dx);
+    st.el.style.transition = "none";
+    st.el.style.transform = `translateX(${st.dx}px)`;
+  }, []);
+
+  const onDrawerTouchEnd = useCallback(() => {
+    const st = drawerTouch.current;
+    drawerTouch.current = null;
+    if (!st || !st.dragging) return;
+    if (st.el) {
+      // 先复位内联样式，让 CSS 的 transform/transition 接管回弹或出场
+      st.el.style.transition = "";
+      st.el.style.transform = "";
+    }
+    drawerSwipeAt.current = Date.now();
+    if (st.dx < -DRAG_CLOSE_PX) {
+      setMoreOpen(false);
+      onNavigate?.();
+    }
+  }, [onNavigate]);
+
+  const onDrawerTouchCancel = useCallback(() => {
+    // 手势被系统中断（来电/通知）时不会触发 touchend，内联 transform
+    // 会把抽屉留在半滑状态 —— 强制复位（同会话行的处理）。
+    const st = drawerTouch.current;
+    drawerTouch.current = null;
+    if (!st) return;
+    if (st.el) {
+      st.el.style.transition = "";
+      st.el.style.transform = "";
+    }
+  }, []);
+
+  // 左滑落幕后的 350ms 内，浏览器可能给松手位置补发一个 click ——
+  // 在捕获层吞掉，避免误触抽屉里的链接或底下的页面。
+  useEffect(() => {
+    if (!(overlay && open)) return;
+    const swallow = (e: MouseEvent) => {
+      if (Date.now() - drawerSwipeAt.current < 350) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    document.addEventListener("click", swallow, true);
+    return () => document.removeEventListener("click", swallow, true);
+  }, [overlay, open]);
+
   return (
     <aside
       ref={containerRef}
@@ -223,6 +325,10 @@ export default function Sidebar({
         collapsed ? "is-collapsed" : ""
       } ${open ? "open" : ""}`}
       inert={overlay && !open}
+      onTouchStart={onDrawerTouchStart}
+      onTouchMove={onDrawerTouchMove}
+      onTouchEnd={onDrawerTouchEnd}
+      onTouchCancel={onDrawerTouchCancel}
     >
       {/* 品牌区：玉米穗 + 衬线标题 + 收起按钮 */}
       <div className="rail-brand flex items-center gap-2.5 px-1">
@@ -282,6 +388,8 @@ export default function Sidebar({
             className="rail-item"
             title={it.label}
             aria-current={isCurrentNav(it.href, here) ? "page" : undefined}
+            // 窄屏抽屉里点模块入口，跳转后抽屉要让位（宽屏下是空操作）
+            onClick={() => onNavigate?.()}
           >
             <span className="side-ico">
               <NavIcon name={it.icon} className="side-entry-ico" />
@@ -334,7 +442,11 @@ export default function Sidebar({
                   role="menuitem"
                   className="rail-more-item"
                   aria-current={isCurrentNav(it.href, here) ? "page" : undefined}
-                  onClick={() => setMoreOpen(false)}
+                  onClick={() => {
+                    setMoreOpen(false);
+                    // 抽屉也要让位：用户点「更多」里的模块就是要离开这一页
+                    onNavigate?.();
+                  }}
                 >
                   <span className="side-ico">
                     <NavIcon name={it.icon} className="side-entry-ico" />
@@ -638,6 +750,7 @@ export default function Sidebar({
               className="sb-avatar-link shrink-0"
               title="打开设置"
               aria-label="打开设置"
+              onClick={() => onNavigate?.()}
             >
               <UserAvatar avatar={avatar} name={displayName || username} className="h-6 w-6" />
             </Link>

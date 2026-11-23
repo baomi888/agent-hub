@@ -166,6 +166,9 @@
     transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
     box-shadow: 12px 0 32px rgba(0, 0, 0, 0.3);
     overscroll-behavior: contain;
+    /* ★ 左滑关抽屉（2026-11-23）：把横向手势留给 JS。
+       不写这条，浏览器可能把斜向拖动当滚动消费掉，抽屉拖不动。 */
+    touch-action: pan-y;
   }
   .side-left.open {
     transform: translateX(0);

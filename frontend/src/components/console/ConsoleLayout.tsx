@@ -187,6 +187,9 @@ const Rail = memo(function Rail({
       collapsed={collapsed}
       onToggleCollapsed={onToggleCollapsed}
       containerRef={containerRef}
+      // ★ 2026-11-23：抽屉里任何"跳去别的页面"的链接（模块入口/更多浮层/头像）
+      //   都要顺带收起抽屉 —— 与选会话、新建对话同一条出路。
+      onNavigate={onCloseRail}
     />
   );
 });
@@ -231,6 +234,18 @@ export default function ConsoleLayout({ children }: { children: ReactNode }) {
   // 会停在半空，看起来像"页面没加载完"。
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [pathname]);
+
+  // ★ 换页收起抽屉（2026-11-23 用户反馈）。窄屏抽屉开着时从「更多」浮层、
+  //   模块入口、头像等任意链接跳走，路由换了抽屉还盖在新页面上 ——
+  //   非对话页连遮罩都没有，看起来就是"跳是跳了，但整页被对话列表固定死"。
+  //   开合状态（sidebarPref）归外壳，收起也归外壳 —— 与 ConsoleTabBar
+  //   「更多」面板的「换页收起」同一套逻辑（那次还留过教训：换页导致的
+  //   关闭绝不能 history.back()，这里只是 setState，没有历史副作用）。
+  //   已是 false 时 React 对同值 setState 直接 bail out，不会级联渲染。
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSidebarPref(false);
   }, [pathname]);
 
   const closeSidebar = useCallback(() => setSidebarPref(false), []);
@@ -321,6 +336,18 @@ export default function ConsoleLayout({ children }: { children: ReactNode }) {
             {/* 全局唯一的左栏。窄屏下它自己变成抽屉（CSS 控制），
                 所以这里不再有"对话页渲染 / 其它页隐藏"的分支。 */}
             {rail}
+
+            {/* 窄屏抽屉遮罩（2026-11-23）：非对话页也必须有一点击关闭的出路。
+                对话页的遮罩由页面自己渲染（它的 overlayOpen 还要管右栏资料库面板），
+                这里只补其余页面 —— 之前没有它，抽屉开着时点不到底下任何东西，
+                页面像被固定死。z-index 60 在抽屉(70)之下、内容之上，样式复用。 */}
+            {!isChat && (
+              <div
+                className={"drawer-backdrop" + (sidebarOpen ? " show" : "")}
+                onClick={closeSidebar}
+                aria-hidden="true"
+              />
+            )}
 
             {/* 对话页的内容区不能是 <main>：那一页自己就是 <main class="workbench-main">
                 （它承担满屏工作台的布局与层级），套起来会变成 <main><main>。 */}

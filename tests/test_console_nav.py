@@ -958,3 +958,81 @@ def test_rail_more_popover_clamps_horizontal_position():
     assert "min-width: 184px" in rule, (
         "浮层宽度变了：Sidebar.tsx 里的 popW=200 估算需要同步重算"
     )
+
+
+# ==================== ⑥ 抽屉收起与左滑（2026-11-23 用户反馈） ====================
+
+
+def test_rail_drawer_closes_on_navigation():
+    """窄屏抽屉换页必须收起；非对话页必须有遮罩。
+
+    用户原话：「能跳转，但是左边这个对话框对话列表把这整个给遮住了，固定死了」。
+    根因：抽屉开合状态（sidebarPref）归外壳，而导航链接四散在 Sidebar 里
+    （模块入口 / 「更多」浮层 / 头像 / 反馈），哪一处都没收抽屉；
+    且非对话页连 drawer-backdrop 都没有，点外面也关不掉。
+    收口做法与 ConsoleTabBar「更多」面板同一套：换页由外壳统一收
+    （pathname 依赖的 effect），另外给 Sidebar 传 onNavigate 让显式跳转也收。
+    """
+    layout = _strip_comments(_read(LAYOUT_TSX))
+    assert "setSidebarPref(false)" in layout, "外壳没有收抽屉的动作"
+    assert re.search(
+        r"useEffect\(\(\) => \{[^}]*?setSidebarPref\(false\)[^}]*?\}, \[pathname\]\)",
+        layout,
+        re.S,
+    ), "抽屉的收起没有挂在路由变化上：点链接跳页抽屉会留在原地"
+    assert "drawer-backdrop" in layout, "非对话页没有抽屉遮罩：抽屉开着点不到外面"
+    side = _strip_comments(_read(SIDEBAR_TSX))
+    # 显式跳转的收起回调必须存在，且接到「更多」浮层的菜单项上
+    assert "onNavigate" in side, "Sidebar 没有接收 onNavigate 回调"
+    assert re.search(
+        r"rail-more-item[\s\S]{0,600}?onNavigate\?\.\(\)",
+        _read(SIDEBAR_TSX),
+    ), "「更多」浮层的菜单项没有接 onNavigate：从浮层跳模块抽屉不收"
+
+
+def test_rail_drawer_supports_swipe_to_dismiss():
+    """窄屏抽屉要能左滑关闭。
+
+    用户原话：「也不可以左滑消除」。抽屉是 translateX 浮层，浏览器不会替它做
+    边缘滑动。三件事必须同时在：
+      · 手势挂在外壳那份 <aside> 上（onTouchStart/Move/End/Cancel）；
+      · 松手越过阈值调 onNavigate 收起 —— 且不能经由 props 的 containerRef
+        改样式（react-hooks/immutability 红线），要从 e.currentTarget 拿元素；
+      · 手势起点落在会话行上必须让位（行有自己的左滑改名/删除）。
+    横向手势还得防浏览器当滚动吞掉 —— fx.css 窄屏 .side-left 要有 touch-action: pan-y。
+    """
+    side = _read(SIDEBAR_TSX)
+    assert "onDrawerTouchStart" in side and "onDrawerTouchEnd" in side, (
+        "抽屉没有左滑手势"
+    )
+    assert ".session-swipe-wrap" in side, "抽屉手势没有让位会话行的左滑：一个手势两个主"
+    assert "translateX(" in side and "onNavigate?.()" in side, (
+        "左滑松手没有接关闭回调"
+    )
+    assert "e.currentTarget" in side, (
+        "手势元素必须从 e.currentTarget 取：改 props 里的 containerRef 会撞 react-hooks/immutability"
+    )
+    fx = _css_rules(_strip_comments(_read(FX_CSS)), ".side-left")
+    assert any("touch-action: pan-y" in body for body in fx), (
+        "窄屏 .side-left 缺 touch-action: pan-y：斜向拖动会被浏览器当滚动消费掉"
+    )
+
+
+def test_nav_has_public_library_entry():
+    """「公开知识库」必须有导航条目（2026-11-23 用户反馈「入口不知道去哪儿了」）。
+
+    33c4077 把独立入口收口成资料库页第二个 tab，次日用户就找不到了。
+    恢复：/library 进 NAV（不占 mobileTab，落「更多」浮层/底部面板），
+    资料库页两个 tab 保持不变 —— 两条路都通向同一份 PlazaPane。
+    命名用「公开知识库」（2026-11-15 第 14 批用户定名，test_naming_consistency 豁免）。
+    """
+    nav = _strip_comments(_read(NAV_TS))
+    m = re.search(r'\{ href: "/library".*?\}', nav)
+    assert m, "NAV 里没有 /library 条目"
+    entry = m.group(0)
+    assert 'label: "公开知识库"' in entry, "/library 的 label 不是「公开知识库」"
+    assert "mobileTab" not in entry, "/library 不该占底部 tab 格位：落「更多」"
+    assert 'icon: "store"' in entry, "/library 缺 store 图标"
+    icon = _strip_comments(_read(SRC / "components" / "NavIcon.tsx"))
+    assert '"store"' in icon, "NavIcon 没有 store 这个名字"
+    assert "StoreNav" in icon, "NavIcon 没有挂 store 的实现"

@@ -28,6 +28,7 @@ export type NavIconName =
   | "flow"
   | "dashboard"
   | "feedback"
+  | "store"
   | "more";
 
 type Props = {
@@ -218,6 +219,21 @@ function FeedbackNav() {
   );
 }
 
+/* 公开知识库：店面（斜顶棚 + 店身 + 门）。
+   为什么不用 book：资料库已经占了 book，同一图标指两个入口等于没画。
+   店面 = "逛一挑"的地方，和 /library 广场的语义对得上；轮廓（三角顶+门洞）
+   与 12 个既有形状都不重。 */
+function StoreNav() {
+  return (
+    <g {...S}>
+      <path d="M4.6 10 5.8 4h12.4L19.4 10" />
+      <path d="M4 10h16" strokeWidth={1.6} />
+      <path d="M5 10v9.6h14V10" />
+      <path d="M9.4 19.6v-5.4h5.2v5.4" strokeWidth={1.6} />
+    </g>
+  );
+}
+
 const ICONS: Record<NavIconName, () => JSX.Element> = {
   chat: Chat,
   book: BookNav,
@@ -233,6 +249,7 @@ const ICONS: Record<NavIconName, () => JSX.Element> = {
   flow: FlowNav,
   dashboard: DashboardNav,
   feedback: FeedbackNav,
+  store: StoreNav,
   more: MoreNav,
 };
 
