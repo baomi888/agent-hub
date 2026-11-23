@@ -1,0 +1,57 @@
+%% RAG 检索：双通道召回、精排与依据判定
+flowchart TB
+  subgraph s1["① 查询入口"]
+    direction TB
+    s1__0["kb_search / 预检索<br/><small>owner 与 kb_id 由服务端注入</small>"]
+    s1__1["embed_guard<br/><small>指纹校验 · 不一致即拒绝</small>"]
+    s1__2["结果缓存<br/><small>key 含 owner · 防串结果</small>"]
+  end
+  subgraph s2["② 双通道召回"]
+    direction TB
+    s2__0["向量扩召回<br/><small>fetch = 3×k · 下限 12</small>"]
+    s2__1["BM25<br/><small>k1=1.5 · b=0.75</small>"]
+    s2__2["RRF 融合<br/><small>k=60 · 免分数对齐</small>"]
+  end
+  subgraph s3["③ 精排与去冗"]
+    direction TB
+    s3__0["相似度阈值<br/><small>余弦 < 0.25 丢弃</small>"]
+    s3__1["MMR 去重<br/><small>λ=0.65 · 字符 2-gram</small>"]
+    s3__2["截断 top-k<br/><small>默认 3 · 上限 20</small>"]
+  end
+  subgraph s4["④ 依据判定"]
+    direction TB
+    s4__0["相似度换算<br/><small>1 - distance / 2</small>"]
+    s4__1["assess_grounding<br/><small>0.45 阈值分档</small>"]
+    s4__2["三档结论<br/><small>strong / medium / weak</small>"]
+  end
+  subgraph s5["⑤ 注入与作答"]
+    direction TB
+    s5__0["sources 帧<br/><small>来源 · 页码 · 预览</small>"]
+    s5__1["grounding 提示<br/><small>弱依据强制声明</small>"]
+    s5__2["模型作答<br/><small>（1）（2） 角标可回原文</small>"]
+  end
+  s1__0 --> s1__1
+  s1__1 --> s1__2
+  s2__0 --> s2__1
+  s2__1 --> s2__2
+  s3__0 --> s3__1
+  s3__1 --> s3__2
+  s4__0 --> s4__1
+  s4__1 --> s4__2
+  s5__0 --> s5__1
+  s5__1 --> s5__2
+  sa_s1_s2 --> sb_s1_s2
+  sa_s2_s3 --> sb_s2_s3
+  sa_s3_s4 -->|按最高分| sb_s3_s4
+  sa_s4_s5 --> sb_s4_s5
+  classDef default fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px,color:#0F172A
+  classDef amber fill:#FFFBEB,stroke:#FDE68A,stroke-width:1px,color:#92400E
+  classDef blue fill:#EFF6FF,stroke:#BFDBFE,stroke-width:1px,color:#1E40AF
+  classDef green fill:#F0FDF4,stroke:#86EFAC,stroke-width:1px,color:#166534
+  classDef slate fill:#F1F5F9,stroke:#CBD5E1,stroke-width:1px,color:#1E293B
+  classDef violet fill:#F5F3FF,stroke:#DDD6FE,stroke-width:1px,color:#5B21B6
+  class s1__0,s1__1,s1__2 green
+  class s2__0,s2__1,s2__2 blue
+  class s3__0,s3__1,s3__2 violet
+  class s4__0,s4__1,s4__2 amber
+  class s5__0,s5__1,s5__2,sa_s1_s2,sb_s1_s2,sa_s2_s3,sb_s2_s3,sa_s3_s4,sb_s3_s4,sa_s4_s5,sb_s4_s5 slate

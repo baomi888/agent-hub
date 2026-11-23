@@ -1,0 +1,59 @@
+%% 知识库入库：从上传到可检索的五段流水线
+flowchart TB
+  subgraph s1["① 上传校验"]
+    direction TB
+    s1__0["POST /api/kb/{id}/upload<br/><small>multipart · owner 校验</small>"]
+    s1__1["大小与类型<br/><small>≤100MB · txt / md / pdf</small>"]
+    s1__2["流式落盘<br/><small>分块写 · 失败清理</small>"]
+  end
+  subgraph s2["② 解析与切片"]
+    direction TB
+    s2__0["文本抽取<br/><small>PDF → 纯文本</small>"]
+    s2__1["噪声清洗<br/><small>页眉页脚 / 空行</small>"]
+    s2__2["切片<br/><small>500 字 · 重叠 50</small>"]
+    s2__3["元数据<br/><small>topic / 文件名 / 序号</small>"]
+  end
+  subgraph s3["③ 向量化"]
+    direction TB
+    s3__0["批量 embedding<br/><small>batch 10 · 并发 4</small>"]
+    s3__1["指纹守卫<br/><small>模型 / 维度 / host 一致</small>"]
+    s3__2["日配额<br/><small>1000 片段 / 日</small>"]
+  end
+  subgraph s4["④ 写入向量库"]
+    direction TB
+    s4__0["collection<br/><small>kb_{kb_id}</small>"]
+    s4__1["upsert<br/><small>id = 文件 + 序号</small>"]
+    s4__2["文件清单<br/><small>原子写 · 支持单删</small>"]
+    s4__3["重建<br/><small>删旧片段后重写</small>"]
+  end
+  subgraph s5["⑤ 对外可见"]
+    direction TB
+    s5__0["状态流转<br/><small>processing → ready / failed</small>"]
+    s5__1["检索可达<br/><small>kb_search 立即可查</small>"]
+    s5__2["引用溯源<br/><small>来源文件 + 片段序号</small>"]
+  end
+  s1__0 --> s1__1
+  s1__1 --> s1__2
+  s2__0 --> s2__1
+  s2__1 --> s2__2
+  s2__2 --> s2__3
+  s3__0 --> s3__1
+  s3__1 --> s3__2
+  s4__0 --> s4__1
+  s4__1 --> s4__2
+  s4__2 --> s4__3
+  s5__0 --> s5__1
+  s5__1 --> s5__2
+  sa_s1_s2 --> sb_s1_s2
+  sa_s2_s3 --> sb_s2_s3
+  sa_s3_s4 --> sb_s3_s4
+  sa_s4_s5 --> sb_s4_s5
+  classDef default fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px,color:#0F172A
+  classDef amber fill:#FFFBEB,stroke:#FDE68A,stroke-width:1px,color:#92400E
+  classDef cyan fill:#ECFEFF,stroke:#A5F3FC,stroke-width:1px,color:#155E75
+  classDef slate fill:#F1F5F9,stroke:#CBD5E1,stroke-width:1px,color:#1E293B
+  classDef violet fill:#F5F3FF,stroke:#DDD6FE,stroke-width:1px,color:#5B21B6
+  class s1__0,s1__1,s1__2,s2__0,s2__1,s2__2,s2__3 cyan
+  class s3__0,s3__1,s3__2 amber
+  class s4__0,s4__1,s4__2,s4__3 violet
+  class s5__0,s5__1,s5__2,sa_s1_s2,sb_s1_s2,sa_s2_s3,sb_s2_s3,sa_s3_s4,sb_s3_s4,sa_s4_s5,sb_s4_s5 slate

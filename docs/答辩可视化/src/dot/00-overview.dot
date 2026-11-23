@@ -1,0 +1,79 @@
+digraph "00-overview" {
+  graph [rankdir=TB, fontname="Microsoft YaHei", bgcolor="#F7F8FA", nodesep=0.28, ranksep=0.38, compound=true];
+  node [shape=box, style="rounded,filled", fontname="Microsoft YaHei", fontsize=11, margin="0.12,0.08", penwidth=1.0];
+  edge [fontname="Microsoft YaHei", fontsize=9, color="#64748B", arrowsize=0.7];
+  subgraph cluster_L1 {
+    label="用户与前端"; fontsize=13; fontcolor="#166534"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#86EFAC";
+    L1__0 [label="对话工作台\nChatArea · SSE 增量渲染", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    L1__1 [label="四屏控制台\n委托 / 总结 / 打卡 / 设置", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    L1__2 [label="知识与模板\n上传 · 引用 · 模板广场", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    L1__3 [label="学习专项\n四六级 · 关卡式路径", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    L1__4 [label="登录与会话\nAuthGate · HttpOnly Cookie", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    L1__5 [label="开发者看板\n用量 · 反馈 · 调度健康", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    L1__6 [label="H5 与移动端\n100dvh · 明暗双主题", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+  }
+  subgraph cluster_L2 {
+    label="接入与网关"; fontsize=13; fontcolor="#1E40AF"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#BFDBFE";
+    L2__0 [label="Nginx 反向代理\n80/443 · SSE 关闭缓冲", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    L2__1 [label="Next 服务\n3000 · /api/* rewrite", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    L2__2 [label="FastAPI 入口\n127.0.0.1:8000 · 尾斜杠归一", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    L2__3 [label="鉴权\nJWT HS256 · 三处取 token", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    L2__4 [label="限流与每日配额\n10 次/分 · ask 60/日", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    L2__5 [label="LLM 并发闸\n16 并发 · 排队 20s", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    L2__6 [label="采集与指标\napilog 3s 落库 · Prometheus", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+  }
+  subgraph cluster_L3 {
+    label="应用与编排"; fontsize=13; fontcolor="#5B21B6"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#DDD6FE";
+    L3__0 [label="对话主链路\n/api/chat/stream · 四分支", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    L3__1 [label="会话与知识库\n/api/sessions · /api/kb", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    L3__2 [label="混合执行\n/api/hybrid · 工作流×Agent", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    L3__3 [label="调度与日常\ndelegate · report · schedule", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    L3__4 [label="学习专项\ncet · path · checkin · profile", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    L3__5 [label="进化与看板\nprompt-evo · admin · metrics", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    L3__6 [label="SSE 事件协议\nstatus/token/sources/done", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+  }
+  subgraph cluster_L4 {
+    label="智能能力"; fontsize=13; fontcolor="#92400E"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#FDE68A";
+    L4__0 [label="执行前路由\n一次轻量 LLM 判 workflow/agent", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    L4__1 [label="混合编排\n节点引擎 · 规则切换 · 人工介入", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    L4__2 [label="Agent 构建\ncreate_agent · 编译图缓存", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    L4__3 [label="四个工具\n检索 / 联网 / 天气 / 下载", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    L4__4 [label="检索流水线\n扩召回→BM25+RRF→MMR→top-k", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    L4__5 [label="依据判定\n相似度 0.45 以下示弱", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    L4__6 [label="上下文工程\n摘要块 + 最近 K 轮原文", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    L4__7 [label="Prompt 版本库\nactive / promote / rollback", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+  }
+  subgraph cluster_L5 {
+    label="数据与存储"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    L5__0 [label="会话库\nWAL · conversations/messages", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    L5__1 [label="调度库\njobs / job_runs / 心跳", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    L5__2 [label="账号与配额\naccounts · usage · token 吊销", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    L5__3 [label="Chroma 向量库\n每库一个 collection", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    L5__4 [label="文档留档\nuploads · 文件清单", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    L5__5 [label="画像与提示词\nuser_tags · prompt_variants", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+  subgraph cluster_L6 {
+    label="外部服务与工具"; fontsize=13; fontcolor="#9F1239"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#FECDD3";
+    L6__0 [label="DeepSeek\ndeepseek-chat 对话", fillcolor="#FFF1F2", color="#FECDD3", fontcolor="#9F1239"];
+    L6__1 [label="百炼 Embedding\ntext-embedding-v3", fillcolor="#FFF1F2", color="#FECDD3", fontcolor="#9F1239"];
+    L6__2 [label="百炼视觉\nqwen-vl-plus 看图", fillcolor="#FFF1F2", color="#FECDD3", fontcolor="#9F1239"];
+    L6__3 [label="Serper\n联网搜索 + 候选预览", fillcolor="#FFF1F2", color="#FECDD3", fontcolor="#9F1239"];
+    L6__4 [label="高德 / Open-Meteo\n天气双源 + 逆地理", fillcolor="#FFF1F2", color="#FECDD3", fontcolor="#9F1239"];
+    L6__5 [label="网页抓取\nSSRF 白名单 · 下载许可", fillcolor="#FFF1F2", color="#FECDD3", fontcolor="#9F1239"];
+  }
+  subgraph cluster_L7 {
+    label="部署与运维"; fontsize=13; fontcolor="#155E75"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#A5F3FC";
+    L7__0 [label="systemd 三进程\nbackend / frontend / worker", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    L7__1 [label="APScheduler worker\nAsia/Shanghai · 7 个任务", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    L7__2 [label="发布脚本\ndeploy.sh · standalone 产物", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    L7__3 [label="监控告警\nPrometheus + node-exporter", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    L7__4 [label="健康探针\n/health · probe-health.sh", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    L7__5 [label="备份与恢复\nSQLite + Chroma + 上传件", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    L7__6 [label="HTTPS 与加固\ncertbot · harden-server.sh", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+  }
+  L1__0 -> L2__0 [label="HTTPS / SSE" style=solid color="#64748B"];
+  L2__2 -> L3__0 [label="HTTP / JSON" style=solid color="#64748B"];
+  L3__0 -> L4__0 [label="选路" style=solid color="#64748B"];
+  L4__4 -> anchor_l5 [label="向量 + 元数据" style=dashed color="#64748B"];
+  L4__3 -> anchor_l6 [label="HTTPS 调用" style=dashed color="#64748B"];
+}

@@ -117,6 +117,9 @@ async def _apilog_flush_loop() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """启动事件：预热 + 配置检查 + 数据表迁移。"""
+    from core.chat_runs import get_registry
+
+    get_registry()
     pipelines.warmup()
     # 路由的 LLM 客户端也预热：`import core.llm` 首次 2.56s + 构造 1.73s（实测），
     # 这两笔原本全落在第一个发起 auto 请求的用户身上。放线程里跑，别堵启动。
@@ -173,6 +176,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await get_registry().shutdown()
         flush_task.cancel()
         sweep_task.cancel()
         for t in (flush_task, sweep_task):

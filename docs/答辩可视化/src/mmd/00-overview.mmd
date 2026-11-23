@@ -1,0 +1,91 @@
+%% 知穗 Agent 总架构：七层分层与主调用链
+flowchart TB
+  subgraph L1["用户与前端"]
+    direction TB
+    L1__0["对话工作台<br/><small>ChatArea · SSE 增量渲染</small>"]
+    L1__1["四屏控制台<br/><small>委托 / 总结 / 打卡 / 设置</small>"]
+    L1__2["知识与模板<br/><small>上传 · 引用 · 模板广场</small>"]
+    L1__3["学习专项<br/><small>四六级 · 关卡式路径</small>"]
+    L1__4["登录与会话<br/><small>AuthGate · HttpOnly Cookie</small>"]
+    L1__5["开发者看板<br/><small>用量 · 反馈 · 调度健康</small>"]
+    L1__6["H5 与移动端<br/><small>100dvh · 明暗双主题</small>"]
+  end
+  subgraph L2["接入与网关"]
+    direction TB
+    L2__0["Nginx 反向代理<br/><small>80/443 · SSE 关闭缓冲</small>"]
+    L2__1["Next 服务<br/><small>3000 · /api/* rewrite</small>"]
+    L2__2["FastAPI 入口<br/><small>127.0.0.1:8000 · 尾斜杠归一</small>"]
+    L2__3["鉴权<br/><small>JWT HS256 · 三处取 token</small>"]
+    L2__4["限流与每日配额<br/><small>10 次/分 · ask 60/日</small>"]
+    L2__5["LLM 并发闸<br/><small>16 并发 · 排队 20s</small>"]
+    L2__6["采集与指标<br/><small>apilog 3s 落库 · Prometheus</small>"]
+  end
+  subgraph L3["应用与编排"]
+    direction TB
+    L3__0["对话主链路<br/><small>/api/chat/stream · 四分支</small>"]
+    L3__1["会话与知识库<br/><small>/api/sessions · /api/kb</small>"]
+    L3__2["混合执行<br/><small>/api/hybrid · 工作流×Agent</small>"]
+    L3__3["调度与日常<br/><small>delegate · report · schedule</small>"]
+    L3__4["学习专项<br/><small>cet · path · checkin · profile</small>"]
+    L3__5["进化与看板<br/><small>prompt-evo · admin · metrics</small>"]
+    L3__6["SSE 事件协议<br/><small>status/token/sources/done</small>"]
+  end
+  subgraph L4["智能能力"]
+    direction TB
+    L4__0["执行前路由<br/><small>一次轻量 LLM 判 workflow/agent</small>"]
+    L4__1["混合编排<br/><small>节点引擎 · 规则切换 · 人工介入</small>"]
+    L4__2["Agent 构建<br/><small>create_agent · 编译图缓存</small>"]
+    L4__3["四个工具<br/><small>检索 / 联网 / 天气 / 下载</small>"]
+    L4__4["检索流水线<br/><small>扩召回→BM25+RRF→MMR→top-k</small>"]
+    L4__5["依据判定<br/><small>相似度 0.45 以下示弱</small>"]
+    L4__6["上下文工程<br/><small>摘要块 + 最近 K 轮原文</small>"]
+    L4__7["Prompt 版本库<br/><small>active / promote / rollback</small>"]
+  end
+  subgraph L5["数据与存储"]
+    direction TB
+    L5__0["会话库<br/><small>WAL · conversations/messages</small>"]
+    L5__1["调度库<br/><small>jobs / job_runs / 心跳</small>"]
+    L5__2["账号与配额<br/><small>accounts · usage · token 吊销</small>"]
+    L5__3["Chroma 向量库<br/><small>每库一个 collection</small>"]
+    L5__4["文档留档<br/><small>uploads · 文件清单</small>"]
+    L5__5["画像与提示词<br/><small>user_tags · prompt_variants</small>"]
+  end
+  subgraph L6["外部服务与工具"]
+    direction TB
+    L6__0["DeepSeek<br/><small>deepseek-chat 对话</small>"]
+    L6__1["百炼 Embedding<br/><small>text-embedding-v3</small>"]
+    L6__2["百炼视觉<br/><small>qwen-vl-plus 看图</small>"]
+    L6__3["Serper<br/><small>联网搜索 + 候选预览</small>"]
+    L6__4["高德 / Open-Meteo<br/><small>天气双源 + 逆地理</small>"]
+    L6__5["网页抓取<br/><small>SSRF 白名单 · 下载许可</small>"]
+  end
+  subgraph L7["部署与运维"]
+    direction TB
+    L7__0["systemd 三进程<br/><small>backend / frontend / worker</small>"]
+    L7__1["APScheduler worker<br/><small>Asia/Shanghai · 7 个任务</small>"]
+    L7__2["发布脚本<br/><small>deploy.sh · standalone 产物</small>"]
+    L7__3["监控告警<br/><small>Prometheus + node-exporter</small>"]
+    L7__4["健康探针<br/><small>/health · probe-health.sh</small>"]
+    L7__5["备份与恢复<br/><small>SQLite + Chroma + 上传件</small>"]
+    L7__6["HTTPS 与加固<br/><small>certbot · harden-server.sh</small>"]
+  end
+  L1__0 -->|HTTPS / SSE| L2__0
+  L2__2 -->|HTTP / JSON| L3__0
+  L3__0 -->|选路| L4__0
+  L4__4 -.->|向量 + 元数据| anchor_l5
+  L4__3 -.->|HTTPS 调用| anchor_l6
+  classDef default fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px,color:#0F172A
+  classDef amber fill:#FFFBEB,stroke:#FDE68A,stroke-width:1px,color:#92400E
+  classDef blue fill:#EFF6FF,stroke:#BFDBFE,stroke-width:1px,color:#1E40AF
+  classDef cyan fill:#ECFEFF,stroke:#A5F3FC,stroke-width:1px,color:#155E75
+  classDef green fill:#F0FDF4,stroke:#86EFAC,stroke-width:1px,color:#166534
+  classDef rose fill:#FFF1F2,stroke:#FECDD3,stroke-width:1px,color:#9F1239
+  classDef slate fill:#F1F5F9,stroke:#CBD5E1,stroke-width:1px,color:#1E293B
+  classDef violet fill:#F5F3FF,stroke:#DDD6FE,stroke-width:1px,color:#5B21B6
+  class L1__0,L1__1,L1__2,L1__3,L1__4,L1__5,L1__6 green
+  class L2__0,L2__1,L2__2,L2__3,L2__4,L2__5,L2__6 blue
+  class L3__0,L3__1,L3__2,L3__3,L3__4,L3__5,L3__6 violet
+  class L4__0,L4__1,L4__2,L4__3,L4__4,L4__5,L4__6,L4__7 amber
+  class L5__0,L5__1,L5__2,L5__3,L5__4,L5__5,anchor_l5,anchor_l6 slate
+  class L6__0,L6__1,L6__2,L6__3,L6__4,L6__5 rose
+  class L7__0,L7__1,L7__2,L7__3,L7__4,L7__5,L7__6 cyan

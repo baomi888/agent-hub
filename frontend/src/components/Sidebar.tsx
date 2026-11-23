@@ -533,7 +533,7 @@ export default function Sidebar({
                   ) : (
                     <>
                       <div className="flex items-center justify-between gap-2">
-                        <span className="session-name">{c.title}</span>
+                        <span className="session-name">{c.title}{c.generating && <span className="ml-2 text-xs text-muted" role="status">生成中</span>}</span>
                         {/* hover 才出现的小图标：桌面用。手机没有 hover —— 这里必须
                             pointer-events-none，否则按钮虽然看不见却仍然可点，
                             手指盲点在标题右侧会莫名进入编辑态。手机的入口走左滑。 */}

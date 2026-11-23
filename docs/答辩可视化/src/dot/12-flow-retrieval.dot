@@ -1,0 +1,49 @@
+digraph "12-flow-retrieval" {
+  graph [rankdir=TB, fontname="Microsoft YaHei", bgcolor="#F7F8FA", nodesep=0.28, ranksep=0.38, compound=true];
+  node [shape=box, style="rounded,filled", fontname="Microsoft YaHei", fontsize=11, margin="0.12,0.08", penwidth=1.0];
+  edge [fontname="Microsoft YaHei", fontsize=9, color="#64748B", arrowsize=0.7];
+  subgraph cluster_s1 {
+    label="① 查询入口"; fontsize=13; fontcolor="#166534"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#86EFAC";
+    s1__0 [label="kb_search / 预检索\nowner 与 kb_id 由服务端注入", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    s1__1 [label="embed_guard\n指纹校验 · 不一致即拒绝", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    s1__2 [label="结果缓存\nkey 含 owner · 防串结果", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+  }
+  subgraph cluster_s2 {
+    label="② 双通道召回"; fontsize=13; fontcolor="#1E40AF"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#BFDBFE";
+    s2__0 [label="向量扩召回\nfetch = 3×k · 下限 12", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    s2__1 [label="BM25\nk1=1.5 · b=0.75", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    s2__2 [label="RRF 融合\nk=60 · 免分数对齐", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+  }
+  subgraph cluster_s3 {
+    label="③ 精排与去冗"; fontsize=13; fontcolor="#5B21B6"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#DDD6FE";
+    s3__0 [label="相似度阈值\n余弦 < 0.25 丢弃", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    s3__1 [label="MMR 去重\nλ=0.65 · 字符 2-gram", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    s3__2 [label="截断 top-k\n默认 3 · 上限 20", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+  }
+  subgraph cluster_s4 {
+    label="④ 依据判定"; fontsize=13; fontcolor="#92400E"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#FDE68A";
+    s4__0 [label="相似度换算\n1 - distance / 2", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    s4__1 [label="assess_grounding\n0.45 阈值分档", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    s4__2 [label="三档结论\nstrong / medium / weak", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+  }
+  subgraph cluster_s5 {
+    label="⑤ 注入与作答"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    s5__0 [label="sources 帧\n来源 · 页码 · 预览", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    s5__1 [label="grounding 提示\n弱依据强制声明", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    s5__2 [label="模型作答\n[1][2] 角标可回原文", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+  s1__0 -> s1__1 [ style=solid color="#64748B"];
+  s1__1 -> s1__2 [ style=solid color="#64748B"];
+  s2__0 -> s2__1 [ style=solid color="#64748B"];
+  s2__1 -> s2__2 [ style=solid color="#64748B"];
+  s3__0 -> s3__1 [ style=solid color="#64748B"];
+  s3__1 -> s3__2 [ style=solid color="#64748B"];
+  s4__0 -> s4__1 [ style=solid color="#64748B"];
+  s4__1 -> s4__2 [ style=solid color="#64748B"];
+  s5__0 -> s5__1 [ style=solid color="#64748B"];
+  s5__1 -> s5__2 [ style=solid color="#64748B"];
+  sa_s1_s2 -> sb_s1_s2 [ style=solid color="#64748B"];
+  sa_s2_s3 -> sb_s2_s3 [ style=solid color="#64748B"];
+  sa_s3_s4 -> sb_s3_s4 [label="按最高分" style=solid color="#64748B"];
+  sa_s4_s5 -> sb_s4_s5 [ style=solid color="#64748B"];
+}

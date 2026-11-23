@@ -1,6 +1,7 @@
 // 与后端 api/schemas.py 对齐的前端类型定义
 
 export interface Conversation {
+  generating?: boolean;
   id: string;
   title: string;
   kb_id: string | null;

@@ -83,12 +83,12 @@ export default function Home() {
     [setUseKb, setUseWeb]
   );
   // ★ 2026-11-22：会话域来自外壳（ChatProvider），不再由本页创建。
-  //   这样切到别的页面时列表/消息/正在生成的流都不会被卸载。
+  //   列表与消息保留在外壳；生成任务在服务端继续，回到本页时恢复订阅。
   const sessions_ = useChatStore();
   const {
     sessions, setSessions, activeSid, setActiveSid, messages, setMessages,
-    loading: sessionsLoading,
-    refreshSessions, selectSession,
+    loading: sessionsLoading, activeRun,
+    refreshSessions, selectSession, reconcileSession,
     deleteTurn, reloadSessions,
   } = sessions_;
   const {
@@ -153,6 +153,7 @@ export default function Home() {
   }, [authedId]);
 
   const [sending, setSending] = useState(false);
+  const [sendingSid, setSendingSid] = useState<string | null>(null);
   // 地理定位开关：开启后发送消息自动附带坐标，天气/本地问答免手输城市
   const [geoEnabled, setGeoEnabledState] = useState(isGeoEnabled());
   // 当前定位地名（角标展示用）；从缓存里读出，避免刷新后角标丢失。两级：「茂名 · 茂南区」
@@ -168,6 +169,10 @@ export default function Home() {
   // 联网建库后把建议问题预填进输入框（不自动发送），让用户确认/补充
   const [prefill, setPrefill] = useState<{ text: string; ts: number } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const runSidRef = useRef<string | null>(null);
+  const stopRequestedRef = useRef(false);
+  const runReadyRef = useRef(false);
+  const recoveredRunRef = useRef<number | null>(null);
   /** 当前回答的播放器（把 token 按阅读速度往外放，见 lib/typewriter.ts） */
   const playerRef = useRef<Typewriter | null>(null);
 
@@ -278,9 +283,13 @@ export default function Home() {
     attachments?: ChatAttachment[],
     display?: string,
     plan?: boolean,
-    approval?: { token: string; turnId: string }
+    approval?: { token: string; turnId: string },
+    recovery?: { sid: string; message: UiMessage }
   ) => {
-    let sid = activeSid;
+    if (abortRef.current) return;
+    let sid = recovery?.sid ?? activeSid;
+    stopRequestedRef.current = false;
+    runReadyRef.current = !!recovery;
     // 无会话时自动新建
     if (!sid) {
       try {
@@ -295,7 +304,9 @@ export default function Home() {
     }
 
     // 先给用户消息一个临时 id 并记下来：done 帧回来时按它回填 dbId
-    if (approval) {
+    if (recovery) {
+      userMsgIdRef.current = "";
+    } else if (approval) {
       // 重发：不新增气泡，也不动 userMsgIdRef（那条消息上一轮已经回填过 dbId）。
       // 留着上一轮的值会让 done 里的 user_message_id=0 被当成"没给"而跳过，
       // 这没问题；但若清空则更安全 —— 免得别的分支拿它去比 id。
@@ -308,7 +319,7 @@ export default function Home() {
         { id: userId, role: "user", content: display ?? question, attachments },
       ]);
     }
-    const asstId = uid();
+    const asstId = recovery?.message.id ?? uid();
     // 上一轮可能还在播（用户没等它念完就发了新消息）：丢掉剩余缓冲，
     // 并把那条消息的流式状态关掉，否则会卡在"还在写"的样子
     if (playerRef.current) {
@@ -320,9 +331,10 @@ export default function Home() {
     // 控速后滚动才可能连续，落点（ChatArea 的锚定）也才有意义。
     const player = createTypewriter({
       onText: (full) =>
-        setMessages((prev) => prev.map((m) => (m.id === asstId ? { ...m, content: full } : m))),
+        full.length >= (recovery?.message.content.length ?? 0) && setMessages((prev) => prev.map((m) => (m.id === asstId ? { ...m, content: full } : m))),
       onDone: () => {
         // 播放器放完（正常收尾 / 出错 flush）：到这一刻这一轮才算真正结束
+        if (runSidRef.current !== sid) return;
         playerRef.current = null;
         setMessages((prev) =>
           prev.map((m) => (m.id === asstId ? { ...m, streaming: false, status: undefined } : m))
@@ -333,7 +345,7 @@ export default function Home() {
     playerRef.current = player;
     // 新一轮开始：先把上一轮的轨迹归零，否则新旧两轮的节点会串在一条时间轴上
     hybridReset();
-    setMessages((prev) => [
+    if (!recovery) setMessages((prev) => [
       ...prev,
       { id: asstId, role: "assistant", content: "", streaming: true, toolCalls: [] },
     ]);
@@ -341,6 +353,9 @@ export default function Home() {
     asstIdRef.current = asstId;
     const controller = new AbortController();
     abortRef.current = controller;
+    runSidRef.current = sid;
+    setSessions((prev) => prev.map((c) => c.id === sid ? { ...c, generating: true } : c));
+    setSendingSid(sid);
     setSending(true);
 
     try {
@@ -380,9 +395,12 @@ export default function Home() {
           approval_token: approval?.token,
           turn_id: approval?.turnId,
         },
-        controller.signal
+        controller.signal,
+        !!recovery,
+        recovery?.message.dbId
       );
       let finalRefs = "";
+      let receivedDone = false;
       for await (const ev of gen) {
         // 用户点了「停止生成」就立刻踩刹车。
         // 正常情况 abort 会让 reader.read() 抛 AbortError；但如果中间层（代理 / CDN）
@@ -390,6 +408,23 @@ export default function Home() {
         // 于是文字继续往外蹦、看起来「停不掉」。这里主动丢掉剩余帧。
         if (controller.signal.aborted) break;
         switch (ev.event) {
+          case "meta": {
+            runReadyRef.current = true;
+            const dbId = Number(ev.data.message_id) || undefined;
+            setMessages((prev) => prev.map((m) => m.id === asstId ? { ...m, dbId: dbId ?? m.dbId } : m));
+            if (stopRequestedRef.current) {
+              try {
+                await api.stopChat(sid);
+                player.flush();
+                if (abortRef.current === controller) abortRef.current = null;
+                controller.abort();
+                await reconcileSession(sid);
+              } catch {
+                showToast("error", "停止失败，请稍后重试");
+              }
+            }
+            break;
+          }
           // ---------- 混合架构三事件（仅 mode=hybrid 才有）----------
           case "hybrid_start": {
             hybridOnStart(String(ev.data.run_id ?? ""), ev.data.mode === "workflow" ? "workflow" : "agent");
@@ -431,6 +466,7 @@ export default function Home() {
             // 不直接塞进消息：交给播放器按阅读速度放。180 字/秒的吐字速度
             // 会让页面变成"刷屏到底"，用户只看得见最后一行。
             player.push(delta);
+            if (ev.data.recovered) player.reveal();
             break;
           }
           case "status": {
@@ -541,6 +577,7 @@ export default function Home() {
             break;
           }
           case "done": {
+            receivedDone = true;
             const refs = String(ev.data.refs ?? "");
             // 后端回传的 messages 表 id：赞踩要按它落库，
             // 前端自己生成的 uid 后端不认，只能在这里补挂
@@ -587,6 +624,7 @@ export default function Home() {
                     refs: refs || finalRefs || m.refs,
                     dbId: dbId ?? m.dbId,
                     planTopic: planTopic || m.planTopic,
+                    stopped: ev.data.status === "interrupted",
                   };
                 }
                 // 后端没给（旧版本 / 异常分支）就保持原样，不要拿 undefined 覆盖
@@ -597,7 +635,8 @@ export default function Home() {
               })
             );
             // 上游结束：把手里的字按节奏放完再收尾（"稳稳放完"）
-            player.finish();
+            if (ev.data.recovered || ev.data.status === "interrupted") player.flush();
+            else player.finish();
             break;
           }
           case "error": {
@@ -612,6 +651,15 @@ export default function Home() {
             break;
           }
         }
+      }
+      if (abortRef.current !== controller) return;
+      if (!receivedDone && !controller.signal.aborted) {
+        // Expired replay or a newer run: database history is authoritative.
+        player.cancel();
+        playerRef.current = null;
+        await reconcileSession(sid);
+        setSending(false);
+        return;
       }
       // 兜底：结束流式状态（如果是用户中途停止，气泡要显示"已停止生成"）
       const aborted = controller.signal.aborted;
@@ -635,8 +683,10 @@ export default function Home() {
         player.finish();
       }
     } catch (e) {
+      if (abortRef.current !== controller) return;
       // 用户主动停止（AbortError）不视为错误
       if ((e as Error)?.name !== "AbortError") {
+        setSending(false);
         const detail = e instanceof Error ? e.message : String(e);
         player.flush();
         setMessages((prev) =>
@@ -659,12 +709,67 @@ export default function Home() {
         setSending(false);
       }
     } finally {
-      abortRef.current = null;
-      refreshSessions();
+      if (abortRef.current === controller) abortRef.current = null;
+      void refreshSessions();
       // 注意：这里不再无条件 setSending(false)。上游结束后打字机还要慢慢放十几秒，
       // 这期间按钮必须仍是「停止」，用户才能随时截断回放；收尾交给 onDone / 上面的 abort 分支。
     }
-  }, [activeSid, mode, useKb, useWeb, topK, hybridReset, hybridOnStart, hybridOnNode, hybridOnSwitch, hybridOnDone, setSessions, setActiveSid, setMessages, showToast, refreshSessions]);
+  }, [activeSid, mode, useKb, useWeb, topK, hybridReset, hybridOnStart, hybridOnNode, hybridOnSwitch, hybridOnDone, setSessions, setActiveSid, setMessages, showToast, refreshSessions, reconcileSession]);
+
+  // Returning from another console route must re-read the task created on this page.
+  useEffect(() => {
+    if (activeSid) void selectSession(activeSid);
+    // Only on mount: ordinary session selection already loads its own history.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    // Creating the first session changes activeSid after this run already starts.
+    // Only detach when the displayed session differs from the stream's owner.
+    if (runSidRef.current === activeSid) return;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    playerRef.current?.cancel();
+    playerRef.current = null;
+    runSidRef.current = null;
+    recoveredRunRef.current = null;
+  }, [activeSid]);
+
+  useEffect(() => () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    playerRef.current?.cancel();
+    playerRef.current = null;
+    runSidRef.current = null;
+    recoveredRunRef.current = null;
+  }, []);
+
+  const pendingPreparation = !!activeRun && (activeRun.message_id === null ||
+    !messages.some((m) => m.dbId === activeRun.message_id));
+
+  useEffect(() => {
+    if (!activeSid || !pendingPreparation) return;
+    let busy = false;
+    const timer = window.setInterval(() => {
+      if (busy) return;
+      busy = true;
+      void reconcileSession(activeSid).catch(() => {
+        // A temporary connection failure is retried on the next tick.
+      }).finally(() => { busy = false; });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [activeSid, pendingPreparation, reconcileSession]);
+
+  useEffect(() => {
+    if (!activeSid || !activeRun || activeRun.message_id === null || abortRef.current || recoveredRunRef.current === activeRun.message_id) return;
+    const message = messages.find((m) => m.dbId === activeRun.message_id);
+    if (!message) return;
+    const timer = window.setTimeout(() => {
+      recoveredRunRef.current = activeRun.message_id;
+      void sendMessage("", undefined, undefined, undefined, undefined, { sid: activeSid, message });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [activeSid, activeRun, messages, sendMessage]);
 
   // 消息镜像：重试需要读当前列表，但不能让回调依赖 messages，否则每个 token
   // 都会生成新的 onRetry，把 Bubble 的 memo 全部打穿
@@ -677,7 +782,7 @@ export default function Home() {
   // 否则每次重试都会在历史里追加一条新问答，点几次就翻几倍
   const retryMessage = useCallback(
     (assistantId: string, question: string) => {
-      if (!question || sending) return;
+      if (!question || sending || pendingPreparation) return;
       const list = messagesRef.current;
       const i = list.findIndex((m) => m.id === assistantId);
       if (i < 0) return;
@@ -686,7 +791,7 @@ export default function Home() {
       // 重试沿用同一问题：计划类请求要重新带上 plan 标志，否则卡片不会再生成
       void sendMessage(question, undefined, undefined, isPlanRequest(question));
     },
-    [sendMessage, sending, setMessages]
+    [sendMessage, sending, pendingPreparation, setMessages]
   );
 
   // L4：确认卡点了「允许执行」→ 带 token 重发本轮提问。
@@ -699,7 +804,7 @@ export default function Home() {
   // 用户点确认的瞬间往往正是上一轮刚说完的时候，容易出现"点了没反应"。
   const approveTool = useCallback(
     (issued: IssuedApproval, req: ToolApprovalRequest) => {
-      if (sending) {
+      if (sending || pendingPreparation) {
         showToast("info", "还在生成，等这一轮结束再确认");
         return;
       }
@@ -708,7 +813,7 @@ export default function Home() {
         turnId: issued.turn_id,
       });
     },
-    [sendMessage, sending, showToast]
+    [sendMessage, sending, pendingPreparation, showToast]
   );
 
   // 停止当前流式生成（中断 SSE 请求）；上游已经结束、只剩打字机在慢放时，直接截断回放。
@@ -718,22 +823,27 @@ export default function Home() {
   //   ② 请求早就结束了，只是**打字机还在吐字** —— abortRef 已是 null，
   //      老代码直接 ?.abort() 等于什么都没做；1300 字的回答模型 2 秒推完，
   //      播放器按 18~50 字/秒还要放 30 秒，这期间用户随时可能想停。
-  const stopSending = () => {
-    if (abortRef.current) {
-      abortRef.current.abort();
-      return;
+  const stopSending = async () => {
+    const sid = runSidRef.current ?? (activeRun ? activeSid : null);
+    if (!sid) return;
+    // A stop during attachment upload must wait until POST has created the run.
+    stopRequestedRef.current = true;
+    if (abortRef.current && !runReadyRef.current) return;
+    try {
+      await api.stopChat(sid);
+      if (runSidRef.current === sid) {
+        playerRef.current?.flush();
+        const controller = abortRef.current;
+        abortRef.current = null;
+        controller?.abort();
+        setSending(false);
+      }
+      // Stop can race a completed answer; persisted status decides the label.
+      await reconcileSession(sid);
+      void refreshSessions();
+    } catch {
+      showToast("error", "停止失败，请稍后重试");
     }
-    // 没有在收流，但文字还在慢慢放：把没放出来的缓冲丢掉，停在当前画面
-    const player = playerRef.current;
-    if (!player) return;
-    player.cancel();
-    playerRef.current = null;
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.streaming ? { ...m, streaming: false, stopped: true, status: undefined } : m
-      )
-    );
-    setSending(false);
   };
 
   // 定位开关：开 → 先试浏览器定位，公网 http 下自动退到服务端 IP 定位；关 → 仅关闭开关（保留缓存）
@@ -999,7 +1109,7 @@ export default function Home() {
         <FeedbackNotice authedId={auth.me?.user.id ?? null} />
         <ChatArea
           messages={messages}
-          sending={sending}
+          sending={(sending && sendingSid === activeSid) || pendingPreparation}
           // 播放器还在放字（网络可能早就结束了）：让停止键在这段时间也留着
           playing={messages.some((m) => m.streaming)}
           capValue={capValue}

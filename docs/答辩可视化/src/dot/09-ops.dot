@@ -1,0 +1,59 @@
+digraph "09-ops" {
+  graph [rankdir=TB, fontname="Microsoft YaHei", bgcolor="#F7F8FA", nodesep=0.28, ranksep=0.38, compound=true];
+  node [shape=box, style="rounded,filled", fontname="Microsoft YaHei", fontsize=11, margin="0.12,0.08", penwidth=1.0];
+  edge [fontname="Microsoft YaHei", fontsize=9, color="#64748B", arrowsize=0.7];
+  subgraph cluster_p1 {
+    label="入口链路"; fontsize=13; fontcolor="#1E40AF"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#BFDBFE";
+    p1__0 [label="Nginx\n80 / 443 · server_name", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p1__1 [label="SSE 专用 location\nproxy_buffering off", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p1__2 [label="上传上限\nclient_max_body_size 100m", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p1__3 [label="长任务超时\nread / send 600s", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p1__4 [label="Next 3000\nstandalone server", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p1__5 [label="uvicorn 8000\n127.0.0.1 · 不对外", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+  }
+  subgraph cluster_p2 {
+    label="进程编排 · systemd"; fontsize=13; fontcolor="#1E40AF"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#BFDBFE";
+    p2__0 [label="backend.service\n--workers N · 127.0.0.1", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p2__1 [label="frontend.service\nnpm start · -H 127.0.0.1", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p2__2 [label="worker.service\npython -m worker.scheduler", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p2__3 [label="重启策略\nRestart=always · 5s", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p2__4 [label="环境变量\nconfig 自己 load_dotenv", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p2__5 [label="日志\njournald · 轮转", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+  }
+  subgraph cluster_p3 {
+    label="发布与回滚"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    p3__0 [label="start\n首次安装 + 建库", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p3__1 [label="deploy\n拉码 · 装依赖 · 构建前端", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p3__2 [label="restart\n只改 Python 时跳过构建", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p3__3 [label="status / logs\n进程与日志", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p3__4 [label="standalone\n免 npm install 449MB", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p3__5 [label="回滚\n保留上一版构建产物", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+  subgraph cluster_p4 {
+    label="安全加固"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    p4__0 [label="harden-server.sh\nSSH / 防火墙 / 权限", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__1 [label="fix-s01-ssh.sh\n专项修复脚本", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__2 [label="HTTPS\nsetup-https.sh + certbot", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__3 [label="管理员\nADMIN_UIDS 优先", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__4 [label="密钥\n.env 仅服务账号可读", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__5 [label="回环监听\n8000 不对公网", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+  subgraph cluster_p5 {
+    label="监控与告警"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    p5__0 [label="/api/metrics\nPrometheus 文本 / 快照", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__1 [label="业务指标\n问答量 · 配额拒绝 · 缓存", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__2 [label="主机指标\nCPU / 内存 / 磁盘", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__3 [label="alerts.yml\n阈值规则", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__4 [label="probe-health.sh\n外部探活", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__5 [label="资源上限\nPrometheus 256MB", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+  subgraph cluster_p6 {
+    label="备份与恢复"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    p6__0 [label="SQLite 热备\nWAL checkpoint 后拷贝", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__1 [label="Chroma 目录\n整目录快照", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__2 [label="上传留档\n按日增量", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__3 [label="保留策略\n本地 + 远端各一份", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__4 [label="恢复演练\nrestore 脚本", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__5 [label="容量预估\n2C2G 磁盘水位告警", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+}

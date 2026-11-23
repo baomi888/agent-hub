@@ -1,0 +1,61 @@
+%% 会话与记忆：SQLite 落原文，摘要块管长期，标签喂检索
+flowchart TB
+  subgraph p1["会话存储 · core/session.py"]
+    direction TB
+    p1__0["conversations<br/><small>owner / title / kb_id / 更新时间</small>"]
+    p1__1["messages<br/><small>role / content / refs / truncated</small>"]
+    p1__2["feedbacks<br/><small>赞踩 · 按 message_id</small>"]
+    p1__3["owner 隔离<br/><small>查询即带 owner 条件</small>"]
+    p1__4["窗口读取<br/><small>详情默认最近 10 轮</small>"]
+    p1__5["整轮删除<br/><small>user + 后续 assistant</small>"]
+  end
+  subgraph p2["上下文装配"]
+    direction TB
+    p2__0["摘要块<br/><small>长期记忆 · 置于历史前部</small>"]
+    p2__1["最近 K 轮<br/><small>默认 6 · 扩展 12</small>"]
+    p2__2["触发阈值<br/><small>字符占比达阈值才压</small>"]
+    p2__3["全量判定<br/><small>按未截断历史算占用</small>"]
+    p2__4["角色规范<br/><small>user / assistant 成对</small>"]
+    p2__5["降级<br/><small>摘要损坏回退原文</small>"]
+  end
+  subgraph p3["压缩与摘要 · context_compress"]
+    direction TB
+    p3__0["salience 打分<br/><small>信息密度 / 离群 / 实体</small>"]
+    p3__1["抽取式压缩<br/><small>保留关键句 · 非生成式</small>"]
+    p3__2["实体校验<br/><small>摘要必须覆盖原文实体</small>"]
+    p3__3["安全阀<br/><small>压缩失败改用截断</small>"]
+    p3__4["commit_summary<br/><small>版本号 · 幂等写入</small>"]
+    p3__5["可追溯<br/><small>摘要与原文双存</small>"]
+  end
+  subgraph p4["画像与标签"]
+    direction TB
+    p4__0["user_tags<br/><small>对话后抽标签 · 权重累加</small>"]
+    p4__1["user_tag_picks<br/><small>手选标签优先级更高</small>"]
+    p4__2["profile 快照<br/><small>每日 02:30 聚合</small>"]
+    p4__3["检索偏置<br/><small>命中标签的片段上浮</small>"]
+    p4__4["词表约束<br/><small>30 条定稿标签</small>"]
+    p4__5["失败静默<br/><small>画像不影响主回答</small>"]
+  end
+  subgraph p5["账号与配额存储"]
+    direction TB
+    p5__0["accounts<br/><small>用户名 / 密码散列 / 状态</small>"]
+    p5__1["usage<br/><small>按 uid × day × kind 累加</small>"]
+    p5__2["revoked_tokens<br/><small>登出即吊销</small>"]
+    p5__3["每日快照<br/><small>前端用量面板</small>"]
+    p5__4["管理员判定<br/><small>UID 优先 · 用户名兼容</small>"]
+    p5__5["参数化查询<br/><small>无字符串拼接 SQL</small>"]
+  end
+  subgraph p6["会话生命周期"]
+    direction TB
+    p6__0["首轮标题<br/><small>并行生成 · 失败保默认</small>"]
+    p6__1["重命名<br/><small>PATCH / 会话</small>"]
+    p6__2["绑定 / 解绑库<br/><small>kb_id 可置空</small>"]
+    p6__3["切换会话<br/><small>独立历史与上下文</small>"]
+    p6__4["赞踩<br/><small>落到 feedbacks</small>"]
+    p6__5["删除会话<br/><small>级联清消息</small>"]
+  end
+  classDef default fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px,color:#0F172A
+  classDef green fill:#F0FDF4,stroke:#86EFAC,stroke-width:1px,color:#166534
+  classDef slate fill:#F1F5F9,stroke:#CBD5E1,stroke-width:1px,color:#1E293B
+  class p1__0,p1__1,p1__2,p1__3,p1__4,p1__5,p5__0,p5__1,p5__2,p5__3,p5__4,p5__5,p6__0,p6__1,p6__2,p6__3,p6__4,p6__5 slate
+  class p2__0,p2__1,p2__2,p2__3,p2__4,p2__5,p3__0,p3__1,p3__2,p3__3,p3__4,p3__5,p4__0,p4__1,p4__2,p4__3,p4__4,p4__5 green

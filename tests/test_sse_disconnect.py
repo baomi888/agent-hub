@@ -1,15 +1,4 @@
-"""回归：SSE 断连要能回收上游 + 中断的回答不落库（2026-10-20 P0-3，issue #15）。
-
-锁死这些行为：
-  1. 客户端断开时 `_stream_llm` 立刻 aclose 上游 —— 跳出 `async for` **不会**自动
-     关闭异步生成器，靠 GC 收尾会留下"幽灵请求"继续烧 token；
-  2. 正常结束 / 上游异常两条出口也都会 aclose（三条出口一个不落）；
-  3. 断连中断时 `_Acc.aborted=True`，且**不把半截回答当完整答案 add_message 落库**
-     （否则用户刷新后看到一条没有任何中断痕迹的残缺回答）；
-  4. `_Upstreams` 收尾幂等，且单个生成器关闭失败不影响其它生成器与名额归还；
-  5. `_finish_turn` 既关上游也还名额 —— 挂在 StreamingResponse 的 background 上，
-     是整条链路里唯一 100% 会跑到的收尾点。
-"""
+"""Background generation survives transport disconnect; explicit stop owns cancellation."""
 
 from __future__ import annotations
 
@@ -23,12 +12,17 @@ import core.session as session_mod
 
 
 @pytest.fixture(autouse=True)
-def _ensure_tables():
+def _ensure_tables(monkeypatch):
     """同 test_jwt_login_flow：别的测试会把 _db_path 改到临时库，
     而建表只在 import 时跑过一次，这里补齐（幂等）。"""
+    from core.chat_runs import RunRegistry
+    monkeypatch.setattr(chat_mod, "get_registry", lambda: registry)
+    registry = RunRegistry(ttl=60)
     session_mod._init_db()
     account_mod._ensure_tables()
     yield
+    for run in list(registry._runs.values()):
+        registry.expire(run)
 
 
 # ---------- 替身 ----------
@@ -88,7 +82,7 @@ async def _drain(agen) -> list[str]:
 # ---------- 1. 三条出口都要 aclose ----------
 
 
-def test_disconnect_marks_aborted_and_closes_upstream():
+def test_disconnect_continues_and_closes_upstream():
     closed: list[bool] = []
     acc = chat_mod._Acc()
     llm = _FakeLLM(["你", "好"], closed)
@@ -97,10 +91,11 @@ def test_disconnect_marks_aborted_and_closes_upstream():
         return await _drain(chat_mod._stream_llm(llm, [], _Req(disconnect=True), acc))
 
     frames = asyncio.run(main_())
-    assert acc.aborted is True
+    assert acc.aborted is False
     assert acc.error is None
     assert closed == [True], "断连后上游必须被 aclose"
-    assert frames == [], "断连时不应再往下吐 token"
+    assert acc.text == "你好"
+    assert len(frames) == 2
 
 
 def test_normal_finish_closes_upstream():
@@ -185,13 +180,7 @@ def test_finish_turn_releases_ticket_even_if_close_raises():
     assert ticket.released == 1, "关上游失败也必须把名额还回去"
 
 
-# ---------- 3. 中断的回答：留半截 + 标 interrupted，不许伪装成完整答案 ----------
-#
-# 2026-11-19 改了这里的契约。原来锁的是"断连就整条不落库"，代价是回答直接消失
-# （手机锁屏 / 切网 / 两设备切换时 SSE 一断，用户以为被吞了）。
-# 现在 assistant 行在流开始前就 INSERT 空壳（status='streaming'），断连时
-# 把已生成的部分 UPDATE 成 status='interrupted'：内容留得住，且**永远不是 done**，
-# 前端据此挂"已停止生成"，历史组装时也会标注"只有前半段"。
+# ---------- 3. Transport disconnect preserves background generation ----------
 
 
 class _ReqAfter(_Req):
@@ -239,8 +228,8 @@ def _llm_path_env(monkeypatch) -> tuple[list[tuple], list[tuple], list[tuple]]:
     return inserts, updates, deletes
 
 
-def test_aborted_answer_keeps_partial_text_as_interrupted(monkeypatch):
-    """断连时已生成的部分必须留库，状态 interrupted（不是 done）。"""
+def test_disconnected_answer_finishes_in_background(monkeypatch):
+    """Transport disconnect still saves the complete answer as done."""
     import api.chat as cm
 
     inserts, updates, deletes = _llm_path_env(monkeypatch)
@@ -259,7 +248,7 @@ def test_aborted_answer_keeps_partial_text_as_interrupted(monkeypatch):
             ticket,
         )
         await _drain(resp.body_iterator)
-        await resp.background()
+        assert resp.background is None
 
     asyncio.run(main_())
 
@@ -268,20 +257,21 @@ def test_aborted_answer_keeps_partial_text_as_interrupted(monkeypatch):
     asst_kw = [kw for a, kw in inserts if len(a) >= 3 and a[2] == "assistant"][0]
     assert asst_kw.get("status") == "streaming"
 
-    # 收尾：正文是前 15 段，状态 interrupted，且没有一条 done
+    # The background producer seals the complete response.
     assert updates, "断连后必须把半截回答写回库里"
     final = updates[-1]
     text, status = final[0][3], final[0][4]
-    assert status == "interrupted", f"中断的回答不能标成 {status}"
-    assert "第0段" in text and "第39段" not in text, text
-    assert all(u[0][4] != "done" for u in updates if len(u[0]) >= 5)
+    assert status == "done"
+    assert "第0段" in text and "第39段" in text, text
 
 
-def test_aborted_before_any_token_removes_empty_shell(monkeypatch):
-    """一个字都没生成就断了：空壳删掉，不能留一个空气泡。"""
+
+def test_disconnected_before_first_token_still_saves_answer(monkeypatch):
+    """Disconnect before the first token still produces a complete answer."""
     import api.chat as cm
 
     inserts, updates, deletes = _llm_path_env(monkeypatch)
+    monkeypatch.setattr(cm, "_new_leak_guard", lambda **kw: None)
     monkeypatch.setattr(cm, "get_llm", lambda **kw: _FakeLLM(["答"], []))
 
     async def main_() -> None:
@@ -293,12 +283,12 @@ def test_aborted_before_any_token_removes_empty_shell(monkeypatch):
             ticket,
         )
         await _drain(resp.body_iterator)
-        await resp.background()
+        assert resp.background is None
 
     asyncio.run(main_())
 
-    assert any(d[0][2] == [7] for d in deletes), f"空壳应当被删：{deletes}"
-    assert not any(len(a) >= 5 and a[4] == "done" for a, _ in updates)
+    assert not deletes
+    assert updates[-1][0][3:5] == ("答", "done")
 
 
 def test_normal_answer_seals_the_same_row(monkeypatch):
@@ -321,7 +311,7 @@ def test_normal_answer_seals_the_same_row(monkeypatch):
             ticket,
         )
         await _drain(resp.body_iterator)
-        await resp.background()
+        assert resp.background is None
 
     asyncio.run(main_())
 
@@ -341,3 +331,66 @@ def test_sse_headers_forbid_buffering() -> None:
     """
     assert "no-transform" in chat_mod.SSE_HEADERS["Cache-Control"]
     assert chat_mod.SSE_HEADERS["X-Accel-Buffering"] == "no"
+
+
+def test_subscriber_close_does_not_cancel_producer_and_resume_replays(monkeypatch):
+    cm = chat_mod
+    _llm_path_env(monkeypatch)
+    monkeypatch.setattr(cm, "_new_leak_guard", lambda **kw: None)
+    async def main():
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        closed = []
+        class SlowLLM:
+            async def astream(self, messages):
+                try:
+                    yield _Chunk("first")
+                    entered.set()
+                    await release.wait()
+                    yield _Chunk("last")
+                finally:
+                    closed.append(True)
+        monkeypatch.setattr(cm, "get_llm", lambda **kw: SlowLLM())
+        ticket = _Ticket()
+        response = await cm._chat_stream_impl(
+            cm.ChatRequest(sid="detach", question="q", mode="llm"), _Req(), "u", ticket)
+        iterator = response.body_iterator
+        await anext(iterator)
+        await entered.wait()
+        await iterator.aclose()
+        run = cm.get_registry().get("u", "detach")
+        assert not run.task.done()
+        assert ticket.released == 0
+        release.set()
+        await run.task
+        resumed = await _drain(run.subscribe())
+        assert any('firstlast' in frame and 'done' in frame for frame in resumed)
+        assert closed == [True]
+        assert ticket.released == 1
+    asyncio.run(main())
+
+
+def test_explicit_stop_seals_partial_and_releases_slot(monkeypatch):
+    cm = chat_mod
+    _, updates, _ = _llm_path_env(monkeypatch)
+    monkeypatch.setattr(cm, "_new_leak_guard", lambda **kw: None)
+    async def main():
+        entered = asyncio.Event()
+        class SlowLLM:
+            async def astream(self, messages):
+                yield _Chunk("partial")
+                entered.set()
+                await asyncio.Event().wait()
+        monkeypatch.setattr(cm, "get_llm", lambda **kw: SlowLLM())
+        ticket = _Ticket()
+        await cm._chat_stream_impl(
+            cm.ChatRequest(sid="stop", question="q", mode="llm"), _Req(), "u", ticket)
+        await entered.wait()
+        await cm.get_registry().stop("u", "stop")
+        run = cm.get_registry().get("u", "stop")
+        frames = await _drain(run.subscribe())
+        assert run.state == "interrupted"
+        assert any('stopped' in frame for frame in frames)
+        assert ticket.released == 1
+    asyncio.run(main())
+    assert updates[-1][0][3:5] == ("partial", "interrupted")

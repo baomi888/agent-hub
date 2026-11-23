@@ -1,0 +1,61 @@
+%% 知识与检索：四段流水线 + 双通道召回 + 依据判定
+flowchart TB
+  subgraph p1["入库链路 · api/kb + kb/rag_core"]
+    direction TB
+    p1__0["流式落盘<br/><small>大小预检 · 分块写 · 失败清理</small>"]
+    p1__1["文档解析<br/><small>txt / md / pdf</small>"]
+    p1__2["切片<br/><small>500 字 · 重叠 50</small>"]
+    p1__3["主题标签<br/><small>入库时注入 topic 元数据</small>"]
+    p1__4["批量向量化<br/><small>batch 10 · 并发 4</small>"]
+    p1__5["重建 / 删文件<br/><small>删 collection 片段后重写</small>"]
+  end
+  subgraph p2["存储与隔离 · kb/pipelines"]
+    direction TB
+    p2__0["Chroma 客户端<br/><small>进程级单例 · 持久化目录</small>"]
+    p2__1["collection 命名<br/><small>kb_{kb_id}</small>"]
+    p2__2["多库隔离<br/><small>每库独立 collection</small>"]
+    p2__3["原始留档<br/><small>data/uploads 保原文</small>"]
+    p2__4["文件清单<br/><small>原子写 · 支持单文件删</small>"]
+    p2__5["归属校验<br/><small>owner_of · 跨用户拒绝</small>"]
+  end
+  subgraph p3["混合检索 · retrieve_with_score"]
+    direction TB
+    p3__0["向量扩召回<br/><small>3 倍 · 下限 12 条</small>"]
+    p3__1["BM25 通道<br/><small>k1=1.5 · b=0.75</small>"]
+    p3__2["RRF 融合<br/><small>k=60 · 无需分数对齐</small>"]
+    p3__3["阈值过滤<br/><small>余弦 < 0.25 丢弃</small>"]
+    p3__4["MMR 去重<br/><small>λ=0.65 · 字符 2-gram</small>"]
+    p3__5["截断 top-k<br/><small>前端可调 · 上限 20</small>"]
+  end
+  subgraph p4["缓存与守卫"]
+    direction TB
+    p4__0["embed 指纹<br/><small>模型 / 维度 / host 不一致即拒绝</small>"]
+    p4__1["查询向量缓存<br/><small>省一次外部 embedding</small>"]
+    p4__2["检索结果缓存<br/><small>key 含 owner · 防串结果</small>"]
+    p4__3["画像偏置<br/><small>标签命中重排 · 不改距离</small>"]
+    p4__4["相似度换算<br/><small>1 - distance/2</small>"]
+    p4__5["空库 / 异常<br/><small>明确报错 · 不静默</small>"]
+  end
+  subgraph p5["依据判定与输出"]
+    direction TB
+    p5__0["assess_grounding<br/><small>最高相似度分档</small>"]
+    p5__1["0.45 阈值<br/><small>低于即判弱依据</small>"]
+    p5__2["strong / medium / weak<br/><small>三档 · 前端提示条</small>"]
+    p5__3["grounding_note<br/><small>拼进提示词约束</small>"]
+    p5__4["sources 帧<br/><small>来源 · 页码 · 预览</small>"]
+    p5__5["refs 文本<br/><small>（1）（2） 角标可回原文</small>"]
+  end
+  subgraph p6["联网导入 · kb/importer"]
+    direction TB
+    p6__0["Serper 预览<br/><small>候选 URL 供勾选</small>"]
+    p6__1["URL 抓取<br/><small>超时 / 大小 / 类型限制</small>"]
+    p6__2["正文清洗<br/><small>去导航 · 保留主体</small>"]
+    p6__3["批量导入<br/><small>逐条失败不拖垮整批</small>"]
+    p6__4["下载代理<br/><small>/api/kb/download</small>"]
+    p6__5["SSRF 白名单<br/><small>私网地址直接拒</small>"]
+  end
+  classDef default fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px,color:#0F172A
+  classDef cyan fill:#ECFEFF,stroke:#A5F3FC,stroke-width:1px,color:#155E75
+  classDef slate fill:#F1F5F9,stroke:#CBD5E1,stroke-width:1px,color:#1E293B
+  class p1__0,p1__1,p1__2,p1__3,p1__4,p1__5,p2__0,p2__1,p2__2,p2__3,p2__4,p2__5,p3__0,p3__1,p3__2,p3__3,p3__4,p3__5 cyan
+  class p4__0,p4__1,p4__2,p4__3,p4__4,p4__5,p5__0,p5__1,p5__2,p5__3,p5__4,p5__5,p6__0,p6__1,p6__2,p6__3,p6__4,p6__5 slate

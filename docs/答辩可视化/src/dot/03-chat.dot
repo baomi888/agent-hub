@@ -1,0 +1,60 @@
+digraph "03-chat" {
+  graph [rankdir=TB, fontname="Microsoft YaHei", bgcolor="#F7F8FA", nodesep=0.28, ranksep=0.38, compound=true];
+  node [shape=box, style="rounded,filled", fontname="Microsoft YaHei", fontsize=11, margin="0.12,0.08", penwidth=1.0];
+  edge [fontname="Microsoft YaHei", fontsize=9, color="#64748B", arrowsize=0.7];
+  subgraph cluster_p1 {
+    label="请求前置"; fontsize=13; fontcolor="#5B21B6"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#DDD6FE";
+    p1__0 [label="ChatRequest\nuse_kb / use_web / plan / location", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p1__1 [label="会话校验\nsid 归属 · 不存在 404", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p1__2 [label="扣问答额度\nconsume(ask)", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p1__3 [label="知识库归属\n非本人库按未绑定", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p1__4 [label="图片分支\n有图直接进 vision", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p1__5 [label="计划主题\n追问时从历史续主题", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+  }
+  subgraph cluster_p2 {
+    label="执行计划 · _plan_route"; fontsize=13; fontcolor="#5B21B6"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#DDD6FE";
+    p2__0 [label="旧 mode 映射\nrag / llm / agent / hybrid", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p2__1 [label="router.decide\n轻量 LLM · 2s 超时", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p2__2 [label="workflow 判定\n命中且开关开启 → hybrid", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p2__3 [label="无工具退化\nuse_kb/use_web 都关 → llm", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p2__4 [label="库不存在\nrag → agent", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p2__5 [label="失败兜底\n超时 / 坏格式 → agent", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+  }
+  subgraph cluster_p3 {
+    label="四个执行分支"; fontsize=13; fontcolor="#5B21B6"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#DDD6FE";
+    p3__0 [label="hybrid\n工作流 × Agent · 可人工切换", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p3__1 [label="agent\nReAct 循环 · 四工具", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p3__2 [label="rag\n改写 → 检索 → 拼参考资料", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p3__3 [label="llm\n纯对话 · 压缩历史", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p3__4 [label="vision\nqwen-vl 看图 · 可叠加检索", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p3__5 [label="兜底\n混合零产出 → 纯 LLM 再答", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+  }
+  subgraph cluster_p4 {
+    label="上下文组装 · 请求路径"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    p4__0 [label="系统提示词\nprompt_store active 版本", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__1 [label="摘要块\n历史压缩后的长期记忆", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__2 [label="最近 K 轮\n原文保留 · 细节不失真", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__3 [label="预检索片段\n拼进本轮用户消息", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__4 [label="定位\n追加末尾 · 不进 system", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__5 [label="缓存友好\n动态内容不破坏前缀", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+  subgraph cluster_p5 {
+    label="SSE 帧协议"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    p5__0 [label="status\n进度提示 · 中文", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__1 [label="token\n增量文本", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__2 [label="tool\n工具发起 / 返回", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__3 [label="sources\n引用卡片 + 相似度", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__4 [label="grounding\n依据强弱 · 正文前", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__5 [label="title / done\n标题 · message_id · truncated", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__6 [label="error\n翻译后错误 · 不吐栈", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+  subgraph cluster_p6 {
+    label="收尾与副作用"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    p6__0 [label="落库 assistant\nrefs / truncated 一并记", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__1 [label="标题并行\n首轮即算 · 收尾零等待", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__2 [label="画像标签\nfire-and-forget", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__3 [label="压缩调度\n两轮之间判定", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__4 [label="释放并发名额\nBackgroundTask 兜底", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__5 [label="断连保护\n半截答案不落库", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+}

@@ -1,0 +1,59 @@
+digraph "07-memory" {
+  graph [rankdir=TB, fontname="Microsoft YaHei", bgcolor="#F7F8FA", nodesep=0.28, ranksep=0.38, compound=true];
+  node [shape=box, style="rounded,filled", fontname="Microsoft YaHei", fontsize=11, margin="0.12,0.08", penwidth=1.0];
+  edge [fontname="Microsoft YaHei", fontsize=9, color="#64748B", arrowsize=0.7];
+  subgraph cluster_p1 {
+    label="会话存储 · core/session.py"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    p1__0 [label="conversations\nowner / title / kb_id / 更新时间", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p1__1 [label="messages\nrole / content / refs / truncated", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p1__2 [label="feedbacks\n赞踩 · 按 message_id", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p1__3 [label="owner 隔离\n查询即带 owner 条件", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p1__4 [label="窗口读取\n详情默认最近 10 轮", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p1__5 [label="整轮删除\nuser + 后续 assistant", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+  subgraph cluster_p2 {
+    label="上下文装配"; fontsize=13; fontcolor="#166534"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#86EFAC";
+    p2__0 [label="摘要块\n长期记忆 · 置于历史前部", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p2__1 [label="最近 K 轮\n默认 6 · 扩展 12", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p2__2 [label="触发阈值\n字符占比达阈值才压", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p2__3 [label="全量判定\n按未截断历史算占用", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p2__4 [label="角色规范\nuser / assistant 成对", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p2__5 [label="降级\n摘要损坏回退原文", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+  }
+  subgraph cluster_p3 {
+    label="压缩与摘要 · context_compress"; fontsize=13; fontcolor="#166534"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#86EFAC";
+    p3__0 [label="salience 打分\n信息密度 / 离群 / 实体", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p3__1 [label="抽取式压缩\n保留关键句 · 非生成式", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p3__2 [label="实体校验\n摘要必须覆盖原文实体", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p3__3 [label="安全阀\n压缩失败改用截断", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p3__4 [label="commit_summary\n版本号 · 幂等写入", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p3__5 [label="可追溯\n摘要与原文双存", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+  }
+  subgraph cluster_p4 {
+    label="画像与标签"; fontsize=13; fontcolor="#166534"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#86EFAC";
+    p4__0 [label="user_tags\n对话后抽标签 · 权重累加", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p4__1 [label="user_tag_picks\n手选标签优先级更高", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p4__2 [label="profile 快照\n每日 02:30 聚合", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p4__3 [label="检索偏置\n命中标签的片段上浮", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p4__4 [label="词表约束\n30 条定稿标签", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p4__5 [label="失败静默\n画像不影响主回答", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+  }
+  subgraph cluster_p5 {
+    label="账号与配额存储"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    p5__0 [label="accounts\n用户名 / 密码散列 / 状态", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__1 [label="usage\n按 uid × day × kind 累加", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__2 [label="revoked_tokens\n登出即吊销", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__3 [label="每日快照\n前端用量面板", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__4 [label="管理员判定\nUID 优先 · 用户名兼容", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__5 [label="参数化查询\n无字符串拼接 SQL", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+  subgraph cluster_p6 {
+    label="会话生命周期"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    p6__0 [label="首轮标题\n并行生成 · 失败保默认", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__1 [label="重命名\nPATCH / 会话", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__2 [label="绑定 / 解绑库\nkb_id 可置空", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__3 [label="切换会话\n独立历史与上下文", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__4 [label="赞踩\n落到 feedbacks", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__5 [label="删除会话\n级联清消息", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+}

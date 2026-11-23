@@ -1,0 +1,903 @@
+// 与后端 api/schemas.py 对齐的前端类型定义
+
+export interface Conversation {
+  id: string;
+  title: string;
+  kb_id: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+// 知识库内的单个文件（后端 kb_files.json 落盘，重启不丢）
+export interface KbFile {
+  name: string;
+  chunks: number | null;
+  added_at: number | null;
+  /**
+   * 这条资料怎么进库的：upload=用户上传，web=联网抓的，dialogue=从对话里沉淀的。
+   * dialogue 的 name 形如 `对话·<会话标题>`，没有原始文件，正文只能从向量片段拼回。
+   */
+  origin?: "upload" | "web" | "dialogue";
+}
+
+export interface KbInfo {
+  kb_id: string;
+  name: string;
+  chunks: number;
+  files: KbFile[];
+}
+
+/**
+ * 建库建议的来源。两种场景共用一张卡片，但说法不一样：
+ *   web_search        —— 本轮联网答完了，把收集到的外部信息存下来
+ *   no_kb_retrieval   —— 勾了「检索」但会话没绑库，把这轮对话存成一个库
+ */
+export type KbProposalSource = "web_search" | "no_kb_retrieval";
+
+/**
+ * 服务端通过 SSE `kb_proposal` 下发的一条「要不要建个库」建议。
+ *
+ * ★ `expires_at` 是 **Unix 秒**（后端全站用秒），不是毫秒。
+ *   直接跟 `Date.now()` 比会晚 1000 倍 —— 卡片永远显示"还能点"，
+ *   点了才吃一个 410。组件里用 `expiresAtSec()` 归一，别在下游各写一遍。
+ */
+export interface KbProposal {
+  proposal_id: string;
+  /** 这轮聊的主题，给用户一个"它凭什么建议我建库"的锚点 */
+  topic: string;
+  source: KbProposalSource;
+  /** 可沉淀的知识句条数（web 场景可能含来源条数） */
+  candidates: number;
+  /** 后端建议的库名，用户可以在卡片里改掉 */
+  kb_hint: string;
+  /** Unix 秒 */
+  expires_at: number;
+  /** 后端生成的一句话说明（≤40 字），前端不拼接、不加工 */
+  reason: string;
+}
+
+/** confirm 的返回值：字段都是可选的 —— 建库成功但嵌入失败时 imported 可能是 0。 */
+export interface KbProposalConfirmResult {
+  proposal_id: string;
+  status: string;
+  kb_id?: string;
+  name?: string;
+  imported?: number;
+  chunks?: number;
+  staged_segments?: number;
+  bound?: boolean;
+  batch_id?: string;
+}
+
+export interface Message {
+  id?: number;
+  role: "user" | "assistant" | "system";
+  content: string;
+  refs?: string;
+  created_at?: number;
+}
+
+/**
+ * 对话里能存进资料库的一句话（`GET /api/kb/dialogue-candidates/{sid}`）。
+ *
+ * `text` 是**原句，不改写也不摘要** —— 后端注释写明理由：抽象会不可逆损失原文，
+ * 资料库的价值恰恰在可溯源。所以界面上只能原样显示，不要在前端做二次加工。
+ *
+ * `kind` 是后端正则判出来的类型（事实 / 约束 / 待办 / 偏好 / 目标 / 纠正）。
+ * 它是**零 LLM** 的规则判定，不是语义理解，所以只能当弱提示用：
+ * 界面上不要写「AI 识别为…」，那是在替一个正则吹牛。
+ */
+export interface DialogueCandidate {
+  text: string;
+  kind: string;
+  /**
+   * 这句出自哪条消息 —— 后端 `kb/dialogue_import.py` 写的是 `refs: [message_id]`，
+   * 是**数字**，和界面上 `UiMessage.dbId` 同一套 id。
+   *
+   * 有了它，「在消息下面点存」才能只勾这一句对应的候选，而不是让用户在
+   * 整段对话的候选里自己找。之前这里写成 `string[]`，是因为没人用过它。
+   */
+  refs?: number[];
+  role?: string;
+  ts?: number;
+  salience?: number;
+}
+
+export interface DialogueCandidatesResp {
+  sid: string;
+  /** 会话标题，后端用它当建库的主题名（`topic_of()` 优先取它），所以界面直接展示 */
+  conv_title?: string;
+  total: number;
+  candidates: DialogueCandidate[];
+}
+
+/**
+ * 手工入库的结果。
+ *
+ * ★ `skipped` 是这次被跳过的条数：同一段对话里已经存过的原句不会写第二遍。
+ *   这个去重是 `GET/import-dialogue` 入库前做的（`kb/rag_core.py::get_dialogue_texts`），
+ *   因为向量库每条用 uuid4 当 id，不去重就是真重复 —— 重复片段会占掉检索
+ *   的 top-k 名额。
+ *
+ *   所以界面上必须把 `imported` 和 `skipped` 分开说：只说 imported 会让
+ *   "勾了 3 条只进 2 条"看起来像丢数据；只说 skipped 又像是失败了。
+ */
+export interface ImportDialogueResult {
+  imported: number;
+  skipped?: number;
+  staged_segments?: number;
+  kb_id: string;
+  batch_id?: string;
+}
+
+// 聊天模式：auto 自动 / rag 强制检索 / agent 强制工具 / llm 纯对话 / hybrid 混合编排
+//
+// hybrid（10-14 加）：工作流与自主 Agent 在**一次任务内**动态换手。
+// 它是唯一需要额外 SSE 事件（hybrid_start / workflow_node / mode_switch）才能正确
+// 渲染的模式 —— 其余四种只靠 token + done 就够了。
+//
+// ⚠️ 后端开关 HYBRID_MODE_ENABLED=0 时它会**静默回退 agent**（不报错）：
+// 表现为「收不到 hybrid_start」且「done.mode === 'agent'」。
+// 所以前端不能假设选了 hybrid 就一定走混合，得看事件有没有来（见 useHybridTrace）。
+export type ChatMode = "auto" | "rag" | "agent" | "llm" | "hybrid";
+
+// 场景预设类型（ScenarioId）已随「场景选择撤出主界面」一并删除（10-14 晚）：
+// 场景化入口统一走模板广场（/templates，完整启动包：建库 + 会话 + 提示词）。
+// 后端 /api/chat 的 scenario 字段与 core/scenarios.py 机制保留（旧前端兼容 + 未来
+// 模板联动可复用），前端不再传。
+
+export interface SearchResult {
+  title: string;
+  body: string;
+  href: string;
+}
+
+export interface Defaults {
+  chunk_size: number;
+  chunk_overlap: number;
+  top_k: number;
+  supported_extensions: string[];
+}
+
+// 引用溯源条目（SSE sources 事件）：点角标可展开原文
+export interface RefSource {
+  id: number;
+  source: string;
+  page: number | null;
+  // 余弦相似度（越大越相关）。后端换算不了时给 null，此时前端不显示这一项
+  score: number | null;
+  // 依据强度分级，由后端按 RETRIEVE_LOW_SIM 判定。
+  // 只给数字的话用户看不出 0.31 算不算数，所以要和百分比一起显示。
+  strength?: "high" | "medium" | "low" | null;
+  preview: string;
+  text: string;
+}
+
+// 依据强度（SSE grounding 事件）：weak=true 时回答上方挂「依据较弱」提示条
+export interface Grounding {
+  strength: "high" | "medium" | "low" | "none";
+  /** top1 余弦相似度，换算不出来时为 null */
+  best: number | null;
+  count: number;
+  /** 检索到了，但全部不够格当依据 */
+  weak: boolean;
+}
+
+// 库内文件正文预览：origin=archive 读原始留档，chunks 表示老库从向量片段拼回
+export interface FilePreview {
+  name: string;
+  origin: "archive" | "chunks";
+  truncated: boolean;
+  content: string;
+}
+
+// 工具调用（SSE tool 事件）
+export interface ToolEvent {
+  name: string;
+  input?: string;
+  output?: string;
+}
+
+// ---------- 登录 ----------
+export interface QuotaInfo {
+  used: number;
+  /** 0 表示不限 */
+  limit: number;
+  /** 管理员标记：为 true 时该维度无配额约束 */
+  unlimited?: boolean;
+}
+
+// 与后端 api/auth.py 的 UserOut / MeOut 对齐
+export interface UserOut {
+  id: string;
+  username: string;
+  /**
+   * 显示名。空串 = 没设过 → 全站显示 username。
+   * 与 username 分开是因为两者代价差太远：昵称随便改，登录名要验密码还限次。
+   */
+  nickname?: string;
+  /**
+   * 头像。三种形态，用前缀区分（后端 account.normalize_avatar 校验）：
+   *   ""              没设过 → 昵称首字母
+   *   "icon:<name>"   内置图标（CornIcon 的 name）
+   *   "img:<hash>"    上传的图片（第 2 批）
+   */
+  avatar?: string;
+  /**
+   * 登录名还能改几次（后端 MAX_NAME_CHANGES=3）。
+   * 老后端不返回时按"还能改"处理 —— 缺字段就把按钮变灰是最糟的降级方向。
+   */
+  name_changes_left?: number;
+}
+
+export interface MeOut {
+  user: UserOut;
+  quota: Record<string, QuotaInfo>;
+  /** 是否开发者（后端 ADMIN_USERNAMES）。老后端不返回这个字段 → undefined → 按 false 处理 */
+  is_admin?: boolean;
+}
+
+// ---------- 用量与反馈看板（P2）----------
+export interface UsageDay {
+  /** YYYY-MM-DD */
+  day: string;
+  ask: number;
+  embed: number;
+}
+
+export interface FeedbackItem {
+  rating: "up" | "down";
+  comment: string;
+  title: string;
+  sid: string;
+  created_at: number;
+}
+
+export interface FeedbackStats {
+  up: number;
+  down: number;
+  total: number;
+  recent: FeedbackItem[];
+}
+
+export interface UsageSummary {
+  quota: Record<string, QuotaInfo>;
+  history: UsageDay[];
+  /** 0 表示未启用每分钟限流 */
+  rate_per_minute: number;
+  feedback: FeedbackStats;
+}
+
+// ---------- 模板广场 ----------
+export interface Template {
+  id: string;
+  name: string;
+  category: string;
+  /** 卡片图标语义 key（CornIcon 组件按知穗吉祥物风格渲染；历史 emoji 值回退 mini 知穗） */
+  icon: string;
+  tagline: string;
+  description: string;
+  tags: string[];
+  suggested_kb_name?: string | null;
+  session_title?: string;
+  starter_prompt?: string | null;
+  /** 点「设为每日委托」时预填的委托指令（持续型表述、不带频率词——频率由用户在表单里选）。
+   *  目录里没有这个字段时前端回退到 tagline，所以后端没升级也不会空着。 */
+  delegate_instruction?: string | null;
+  recommended_mode?: string;
+  philosophy?: string;
+}
+
+export interface ApplyTemplateResult {
+  session_id: string;
+  kb_id: string | null;
+  title: string;
+  starter_prompt?: string | null;
+  recommended_mode?: string;
+}
+
+/* ============================================================
+   用户兴趣标签（/api/profile）
+   ────────────────────────────────────────────────────────────
+   词表权威在 core/tag_taxonomy.py（30 条定稿，4 位组员清单合并）。
+   前端**不硬编码任何标签名**：大类、可选项、说明全部由 /api/profile/tags 下发，
+   加标签只改后端一处。这里的类型只描述形状。
+   ============================================================ */
+
+/** 单个标签的定义。type 是"目标/身份/任务/学科/方向/考试/场景/能力/状态"之一 */
+export interface TagDef {
+  name: string;
+  category: string;
+  type: string;
+  /** 父标签名（如"考研数学"的父级是"考研备考"）；顶层为 null */
+  parent: string | null;
+  desc: string;
+}
+
+export interface TagGroup {
+  category: string;
+  tags: TagDef[];
+}
+
+export interface TagTaxonomy {
+  categories: string[];
+  types: string[];
+  groups: TagGroup[];
+  /** 首屏可选标签（已排除"能力/状态"两类） */
+  pickable: string[];
+  total: number;
+}
+
+/** 画像里的一条标签（带权重与元数据；词表外的自由主题 category/type 为 null） */
+export interface ProfileTag {
+  tag: string;
+  weight: number;
+  category: string | null;
+  type: string | null;
+  desc: string | null;
+}
+
+export interface ProfileSnapshot {
+  /** 用户亲手勾选过的标签（覆盖式保存，前端据此回显已选状态） */
+  picks: string[];
+  /** 按权重降序的全部标签（含对话自动抽的） */
+  tags: ProfileTag[];
+  /** 按大类聚合的权重，权重降序 */
+  categories: { category: string; weight: number }[];
+  has_tags: boolean;
+}
+
+/** 「为你推荐」的一条：模板 id + 得分 + 命中的标签（前端拿来显示"因为你在准备英语四六级"） */
+export interface TemplateRecommend {
+  id: string;
+  score: number;
+  matched: string[];
+}
+
+/* ============================================================
+   以下四组类型对应「队友分支 feat/ai-module-20261013」新增的端点。
+   ────────────────────────────────────────────────────────────
+   ⚠️ 契约来源是 `docs/前端页面与接口映射_v0.2.md`（按分支代码反推的字段清单），
+   不是联调结果。用 tryRequest 拉取，端点不存在时页面走「接口待上线」态，
+   所以字段对不上也不会让页面崩掉；联调时逐项核对即可。
+   ============================================================ */
+
+// ---------- P4 每日委托 /api/delegate ----------
+
+export type DelegateFreq = "daily" | "weekdays" | "weekly" | "interval";
+export type DelegateKind = "study_plan" | "review" | "encourage" | "custom";
+
+/**
+ * 触发计划。注意**不是 cron**：后端用的是结构化字段，
+ * 前端把它渲染成「每天 21:00」这种人话，而不是把 crontab 摊给用户看。
+ */
+export interface DelegateSchedule {
+  freq: DelegateFreq;
+  /** 触发时刻 HH:MM；interval 频率下可为空 */
+  at?: string | null;
+  /** weekly 用：0=周一 … 6=周日（与后端 ScheduleIn.weekday 对齐） */
+  weekday?: number | null;
+  /** interval 用：每多少分钟 */
+  every_minutes?: number | null;
+  tz: string;
+}
+
+export interface Delegate {
+  id: string;
+  /** 3–32 字，建后不可改 */
+  name: string;
+  kind: DelegateKind;
+  schedule: DelegateSchedule;
+  /** 投递目标会话；null = 默认会话 */
+  session_id: string | null;
+  session_title?: string | null;
+  kb_id: string | null;
+  kb_name?: string | null;
+  /** 给模型看的生成指令 */
+  instruction: string;
+  tone: string;
+  max_chars: number;
+  /** 后端没有 status，只有这个布尔 */
+  enabled: boolean;
+  /** 暂停时为 null —— 页面上要能看出「它不会再来了」 */
+  next_run_at: number | null;
+  /** 被 worker 自动停用时记录的原因（如投递目标会话失效）；手动暂停时为 null */
+  last_error?: string | null;
+  created_at?: number | null;
+}
+
+export type DelegateRunStatus =
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "skipped";
+
+export interface DelegateRun {
+  run_id: string;
+  job_key: string;
+  subject_id?: string | null;
+  status: DelegateRunStatus;
+  planned_at: number | null;
+  started_at?: number | null;
+  finished_at?: number | null;
+  error?: string | null;
+  tokens_out?: number | null;
+  /** 排查「今天为什么没收到」先看这一列 */
+  trigger: "schedule" | "manual";
+}
+
+// ---------- P5 每日总结 /api/report ----------
+
+export interface ReportStats {
+  date: string;
+  conversation_count: number;
+  message_count: number;
+  user_msg_count: number;
+  assistant_msg_count: number;
+  /** { 小时: 条数 }，确定性统计，不走模型 */
+  active_hours: Record<string, number>;
+  tool_call_count: number;
+}
+
+/** 一条结论 + 它必须指得回的真实消息 id（后端强制溯源，指不到的直接丢） */
+export interface ReportConclusion {
+  text: string;
+  source_refs: number[];
+}
+
+export type ReportStatus = "pending" | "generating" | "ready" | "empty";
+
+export interface DailyReport {
+  report_id: string;
+  date: string;
+  status: ReportStatus;
+  stats: ReportStats;
+  content: ReportConclusion[];
+  model?: string | null;
+  generated_at?: number | null;
+  read_at?: number | null;
+}
+
+// ---------- P6 打卡 /api/checkin ----------
+//
+// ⚠️ 后端打卡语义 = 「那天有没有生成每日总结（status='ready'）」，所以打卡数据
+// 全部从 daily_reports 派生，不另造数据。下面两个类型对应 api/checkin.py。
+
+/** GET /api/checkin/streak：连续天数 / 最长连续 / 已打卡日期集合 */
+export interface CheckinStreak {
+  /** 所有打卡日（升序） */
+  dates: string[];
+  /** 当前连续天数 */
+  streak: number;
+  /** 近 30 天内最长连续 */
+  longest: number;
+}
+
+/** GET /api/checkin/history 单条：{date, points, shared} */
+export interface CheckinHistoryItem {
+  /** YYYY-MM-DD */
+  date: string;
+  /** 当天总结的结论条数 */
+  points: number;
+  /** 是否已分享（POST /api/checkin/share 标记） */
+  shared: boolean;
+}
+
+// ---------- P7 设置：Agent 工具元数据 /api/agent/tools ----------
+
+export interface AgentTool {
+  name: string;
+  /** read = 只读；write = 会改状态，页面上要用暖色区分 */
+  category: "read" | "write" | string;
+  /** 延迟下发（false = 每轮全量带给模型） */
+  defer: boolean;
+  retryable: boolean;
+  needs_approval: boolean;
+  max_output_chars: number;
+  cost_hint: string;
+}
+
+// ---------- P7 设置：调度进程 /api/schedule/* ----------
+
+/** 只看心跳年龄：>300s stalled、>600s down */
+export type WorkerHealth = "up" | "stalled" | "down";
+
+export interface ScheduleHealth {
+  status: WorkerHealth;
+  last_heartbeat: number | null;
+  pid?: number | null;
+  age_seconds?: number | null;
+}
+
+export interface ScheduleJob {
+  job_key: string;
+  cron?: string | null;
+  enabled: boolean;
+  last_run_at?: number | null;
+  last_status?: string | null;
+}
+// ============ P6 混合架构（工作流 × 自主 Agent）============
+// 契约来源：docs/前端对接接口文档_混合架构_2026-10-14.md（林宏亮 v1）
+// ⚠️ 后端代码截至 10-14 尚未推到任何远端分支（hybrid/ 与 api/hybrid.py 均为 0 文件），
+//    所以这一段是**照文档实现**，等后端上线后要按真实响应回归一次。
+
+// ---------- SSE 事件 ----------
+
+/** hybrid_start：起跑即发，mode 是**初始**模式（workflow / agent），不是最终模式 */
+export interface HybridStartEvent {
+  run_id: string;
+  mode: HybridRuntimeMode;
+}
+
+/** 工作流节点类型（NodeDef.type） */
+export type HybridNodeType = "llm" | "tool" | "agent" | "condition" | "human";
+
+export interface WorkflowNodeEnter {
+  phase: "enter";
+  node_id: string;
+  type: HybridNodeType;
+  /** 展示名；后端保证空则回填为 node_id */
+  name: string;
+}
+
+export interface WorkflowNodeExit {
+  phase: "exit";
+  node_id: string;
+  status: "ok" | "failed";
+  /** 失败跳转目标；null 才会进入切换规则判定 */
+  on_fail?: string | null;
+  error?: string | null;
+}
+
+export type WorkflowNodeEvent = WorkflowNodeEnter | WorkflowNodeExit;
+
+/** 模式切换；rule="manual" 是人工干预，"__max_switches__" 是切换次数达上限被强制收工 */
+export interface ModeSwitchEvent {
+  rule: string;
+  /** 人类可读决策依据，可直接展示在轨迹里 */
+  reason: string;
+  from: HybridRuntimeMode;
+  to: HybridRuntimeMode;
+}
+
+export type HybridRuntimeMode = "workflow" | "agent";
+
+// ---------- 执行轨迹（消息上持久化，刷新后靠 /logs 重建）----------
+
+/** 轨迹里的一段：要么是某个节点的一次进出，要么是一次模式切换 */
+export type TraceItem =
+  | {
+      kind: "node";
+      node_id: string;
+      type: HybridNodeType;
+      name: string;
+      /** 进行中 / 已完成 / 失败 */
+      status: "running" | "ok" | "failed";
+      on_fail?: string | null;
+      error?: string | null;
+    }
+  | { kind: "switch"; rule: string; reason: string; from: HybridRuntimeMode; to: HybridRuntimeMode };
+
+// ---------- 工作流定义（管理面 CRUD）----------
+
+export interface WorkflowNodeDef {
+  id: string;
+  type: HybridNodeType;
+  name?: string;
+  config?: Record<string, unknown>;
+  timeout_seconds?: number | null;
+  /** 节点内重试次数（先重试，再谈失败跳转/切换） */
+  retry?: number;
+  /** 失败跳转目标；null 才进入切换规则判定 */
+  on_fail?: string | null;
+  /** 执行到本节点主动让出给 Agent 模式 */
+  requires_agent?: boolean;
+}
+
+export interface WorkflowEdgeDef {
+  source: string;
+  target: string;
+  /** 受限表达式，仅 shared.<key> 作用域；null = 默认兜底边 */
+  condition?: string | null;
+}
+
+export interface WorkflowDef {
+  /** ⚠️ 不参与落库主键，后端会自己生成 12 位 hex 作为行 id；建议留空 */
+  id?: string;
+  name?: string;
+  version?: number;
+  entry?: string | null;
+  nodes: WorkflowNodeDef[];
+  edges?: WorkflowEdgeDef[];
+  /** 0 = 用服务端默认 */
+  timeout_seconds?: number;
+}
+
+export interface WorkflowIn {
+  name: string;
+  description?: string;
+  definition: WorkflowDef;
+}
+
+export interface WorkflowRow {
+  id: string;
+  owner_id: string;
+  name: string;
+  description: string;
+  definition: WorkflowDef;
+  version: number;
+  created_at: number;
+  updated_at: number;
+  /** 内置只读：改/删一律 404 */
+  builtin: boolean;
+}
+
+// ---------- 切换规则 ----------
+
+export type RuleAction = "to_agent" | "to_workflow" | "terminate";
+
+export interface RuleIn {
+  /** ≤ 40 字符。⚠️ 引擎实际只会上报 4 个 signal，自定义的存得下但不会触发 */
+  signal: string;
+  /** ≤ 500 字符；空 = 命中信号即触发。仅做语法校验，语义运行期才判 */
+  condition?: string;
+  action: RuleAction;
+  reason?: string;
+  /** 0–9999，数字小者先求值 */
+  priority?: number;
+  enabled?: boolean;
+  /** 0–86400，显式 0 = 结构型规则豁免防抖 */
+  cooldown_seconds?: number;
+}
+
+export interface RuleRow {
+  id: string;
+  owner_id: string;
+  name: string;
+  signal: string;
+  condition?: string | null;
+  action: RuleAction;
+  reason?: string | null;
+  priority: number;
+  enabled: boolean;
+  cooldown_seconds: number;
+  builtin: boolean;
+}
+
+/** 引擎只会上报这 4 个 signal；界面上自定义 signal 要提示「不会触发」 */
+export const KNOWN_SIGNALS = [
+  "requires_agent",
+  "node_failed",
+  "budget_exhausted",
+  "goal_satisfied",
+] as const;
+
+// ---------- 执行记录与日志 ----------
+
+export type HybridRunStatus = "running" | "completed" | "failed" | "timeout" | "stopped";
+
+export interface HybridRunRow {
+  run_id: string;
+  task_id: string;
+  workflow_id?: string | null;
+  status: HybridRunStatus;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface HybridRunDetail extends HybridRunRow {
+  owner_id: string;
+  /** TaskContext 快照：goal / current_mode / workflow_state / agent_state / shared / mode_trace */
+  context: Record<string, unknown>;
+}
+
+export type HybridLogEventType =
+  | "node_enter"
+  | "node_exit"
+  | "tool_call"
+  | "token"
+  | "switch"
+  | "error"
+  | "status"
+  | "human_intervention";
+
+export interface HybridLogRow {
+  id: number;
+  event_type: HybridLogEventType;
+  mode?: HybridRuntimeMode | null;
+  node_id?: string | null;
+  /** 仅 switch 事件 */
+  decision?: { rule: string; reason: string; from: HybridRuntimeMode; to: HybridRuntimeMode } | null;
+  /** 摘要级数据，后端序列化后截断 2000 字符 */
+  payload?: Record<string, unknown>;
+  ts: number;
+}
+
+// ---------- 开发者数据看板（/dashboard）----------
+// 口径定义见 docs/数据看板_2026-10-27/口径与数据字典.md，
+// 这里的字段名与后端 api/admin.py 的响应一一对应，改名要两边一起改。
+
+export interface DashboardRange {
+  days: number;
+  /** Unix 秒 */
+  start: number;
+  end: number;
+  tz: string;
+}
+
+export interface DashboardUsers {
+  /** 注册总数。**当前快照，不随 days 变化** */
+  total: number;
+  /** 区间内新增 */
+  new: number;
+}
+
+export interface DashboardCalls {
+  total: number;
+  ok: number;
+  /** 预期行为（401 未登录探测 + 报告空态 404）：不算失败，也不进成功率分母 */
+  expected: number;
+  failed: number;
+  /** 分母为 0 时为 null —— 不是 0，也不是 100 */
+  success_rate: number | null;
+  avg_ms: number;
+  max_ms: number;
+}
+
+export interface DashboardSeriesItem {
+  /** YYYY-MM-DD（业务时区） */
+  day: string;
+  calls: number;
+  failed: number;
+}
+
+export type FeedbackStatus = "open" | "doing" | "done" | "closed";
+
+export interface DashboardOverview {
+  range: DashboardRange;
+  users: DashboardUsers;
+  calls: DashboardCalls;
+  feedback: Record<FeedbackStatus, number>;
+  series: DashboardSeriesItem[];
+}
+
+export interface ApiRankItem {
+  path: string;
+  method: string;
+  /** 中文业务名（后端 core/api_labels.py 是唯一来源，前端不许自己拼） */
+  label: string;
+  calls: number;
+  failed: number;
+  avg_ms: number;
+  max_ms: number;
+}
+
+export interface ApiRankResp {
+  items: ApiRankItem[];
+  total_paths: number;
+  sort: "calls" | "slow" | "fail";
+  range: { days: number; start: number; end: number };
+}
+
+/** 一条失败调用 + 人话原因（后端 core/dashboard.explain_status 是唯一来源） */
+export interface FailureItem {
+  path: string;
+  method: string;
+  status: number;
+  /** 中文业务名 */
+  label: string;
+  /** 为什么失败 */
+  hint: string;
+  /** 是否为预期行为（未登录探测 / 报告空态）—— 不算系统报错 */
+  expected: boolean;
+  /** 仅 recent 里有 */
+  ts?: number;
+  day?: string;
+  dur_ms?: number;
+  /** 仅 top 聚合里有 */
+  calls?: number;
+}
+
+export interface FailuresResp {
+  days: number;
+  recent: FailureItem[];
+  need_attention: FailureItem[];
+  ignorable: FailureItem[];
+  top: FailureItem[];
+  range: { days: number; start: number; end: number };
+}
+
+export interface UserFeedbackItem {
+  id: number;
+  uid: string;
+  username: string;
+  category: string;
+  category_label: string;
+  content: string;
+  contact: string;
+  page: string;
+  status: FeedbackStatus;
+  status_label: string;
+  created_at: number;
+  updated_at: number;
+  /** 开发者回复。空串 = 还没回。用户侧「我提过的」靠它显示 */
+  reply: string;
+  /** 回复时间；没回过就是 null */
+  replied_at: number | null;
+}
+
+export interface AdminFeedbackResp {
+  items: UserFeedbackItem[];
+  total: number;
+  counts: Record<FeedbackStatus, number>;
+}
+
+export interface MyFeedbackResp {
+  items: UserFeedbackItem[];
+  total: number;
+}
+
+export interface FeedbackDict {
+  categories: { value: string; label: string }[];
+  statuses: { value: string; label: string }[];
+  transitions: Record<string, string[]>;
+  limits: {
+    min_content: number;
+    max_content: number;
+    max_contact: number;
+    max_page: number;
+    /** 回复长度（管理员 → 用户）。后端下发的，前端不硬编码 */
+    min_reply: number;
+    max_reply: number;
+  };
+}
+
+// ---------- 检索词校准（B3 预览接口 / B5 输入框提示条）----------
+
+/**
+ * 一次命中：raw 是用户原话里的口语词，canonical 是它对应的规范术语。
+ *
+ * ★ 增强是**追加**不是替换：原话里的 raw 一个字母都不会被改掉，
+ *   只是检索时额外带上 canonical（口语词和术语都能被命中）。
+ *
+ * `start` / `end` 是**在 `original` 上的下标**，前端直接切片做高亮。
+ * 千万不要拿 `raw` 去 `indexOf` —— 同一个词在一句话里出现两次时，
+ * 两次都会定位到第一个位置，高亮就会错位。
+ */
+export interface EnhanceHit {
+  raw: string;
+  canonical: string;
+  start: number;
+  end: number;
+}
+
+/** 命中但故意没换的词（反例 / 歧义词），只给排障看，界面上不展示。 */
+export interface EnhanceSkipped {
+  raw: string;
+  canonical: string;
+  reason: string;
+}
+
+export interface EnhanceResult {
+  /** 用户原话（可能与输入有前后空白差异，后端会 strip） */
+  original: string;
+  /**
+   * 检索用文本 = **原话 + 空格 + `added` 里的术语**。
+   *
+   * 原话恒为前缀，后端只追加不改写（替换会造病句：`查重率`→`重复率检测率`）。
+   * 界面上不要整行渲染它 —— 那等于把用户原话再念一遍。
+   * 要展示"多加了什么"，渲染 `added`。
+   */
+  retrieval: string;
+  /** 追加给检索的规范术语（已去重、保持出现顺序）。空数组 = 无需增强。 */
+  added: string[];
+  changed: boolean;
+  hits: EnhanceHit[];
+  skipped: EnhanceSkipped[];
+  /** 歧义词的追问句，可直接渲染 */
+  clarify: string[];
+  /** 当前生效的词表（截图报 bug 时看这个就知道是哪版） */
+  vocab: { file: string; terms: number };
+  warnings: string[];
+}

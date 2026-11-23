@@ -1,0 +1,50 @@
+digraph "06-hybrid" {
+  graph [rankdir=TB, fontname="Microsoft YaHei", bgcolor="#F7F8FA", nodesep=0.28, ranksep=0.38, compound=true];
+  node [shape=box, style="rounded,filled", fontname="Microsoft YaHei", fontsize=11, margin="0.12,0.08", penwidth=1.0];
+  edge [fontname="Microsoft YaHei", fontsize=9, color="#64748B", arrowsize=0.7];
+  subgraph cluster_p1 {
+    label="工作流定义 · hybrid/workflow.py"; fontsize=13; fontcolor="#5B21B6"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#DDD6FE";
+    p1__0 [label="节点五类\nllm / tool / agent / condition / human", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p1__1 [label="条件边\n表达式求值后选边", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p1__2 [label="validate_definition\n唯一 id · 入口 · 失败跳转", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p1__3 [label="内置流程\nbuiltin_plan_execute", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p1__4 [label="节点超时\n默认 120s", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p1__5 [label="失败收敛\n跳到 fallback 或终止", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+  }
+  subgraph cluster_p2 {
+    label="编排器 · orchestrator.py"; fontsize=13; fontcolor="#5B21B6"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#DDD6FE";
+    p2__0 [label="HybridOrchestrator\nstream 产出统一事件", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p2__1 [label="段执行\nworkflow 段 / agent 段", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p2__2 [label="SwitchEngine\nsignal → 条件 → 动作", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p2__3 [label="切换上限\n5 次 · 防抖动", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p2__4 [label="awaiting_human\n挂起等人工", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p2__5 [label="run_id\n前端轨迹 / 切换寻址", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+  }
+  subgraph cluster_p3 {
+    label="执行引擎"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    p3__0 [label="WorkflowEngine\n节点调度 · 上下文传递", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p3__1 [label="AgentEngine\n10 步 / 300s / 8000 token", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p3__2 [label="LLM 兜底\n零产出才触发", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p3__3 [label="答案选取\n末个成功节点 output_key", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p3__4 [label="exec_logs\n每节点进出留痕", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p3__5 [label="状态机\nfailed / timeout / done", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+  subgraph cluster_p4 {
+    label="切换规则 · switcher.py"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    p4__0 [label="switch_rules\nsignal / condition / action", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__1 [label="优先级\n高优先规则先命中", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__2 [label="方向冷却\n默认 30s", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__3 [label="表达式求值\n白名单 AST · 非 eval", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__4 [label="默认规则\n内置种子规则", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__5 [label="越权拦截\n规则按 owner 隔离", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+  subgraph cluster_p5 {
+    label="人工介入与恢复"; fontsize=13; fontcolor="#5B21B6"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#DDD6FE";
+    p5__0 [label="/runs/{id}/switch\n人工指定下一段", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p5__1 [label="/resume\n恢复 human 节点", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p5__2 [label="快照落库\n跨进程可恢复", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p5__3 [label="前端时间轴\n节点 / 状态 / 切换", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p5__4 [label="权限校验\nrun 归属 owner", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    p5__5 [label="审计\n谁在何时改了什么", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+  }
+}

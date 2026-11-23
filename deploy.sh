@@ -25,8 +25,7 @@ cd "$ROOT"
 
 BACK_PORT=8000
 FRONT_PORT=3000
-# 后端 uvicorn worker 数。留空 = 自动探测（见 detect_workers）；
-# 显式指定（如 WORKERS=4 bash deploy.sh start）会跳过探测。WORKERS=1 即回退单进程。
+# 后台回答由 API 进程持有，第一阶段统一使用单 worker。
 WORKERS="${WORKERS:-}"
 NODE_WANT_VER="v20.19.0"          # 国内走 npmmirror，比 NodeSource 快且稳
 PIP_MIRROR="https://pypi.tuna.tsinghua.edu.cn/simple"
@@ -38,22 +37,6 @@ warn() { printf '  %s[!]%s %s\n' "$YELLOW" "$NC" "$*"; }
 die()  { printf '\n%s[中止]%s %s\n\n' "$RED" "$NC" "$*"; exit 1; }
 
 if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi
-
-# 后端 worker 数自动探测。
-# 为什么要多进程：单进程只能吃一个核，200 并发实测鉴权吞吐 693 → 1050 RPS、p99 -43%。
-# 为什么不能无脑开 4：每个 worker 都要把 langchain + chromadb 全量 import 一遍，
-# 常驻约 300MB；这台 2 核 2G 上还跑着 Next.js 和 2G swap，开 4 个会被 OOM Killer 随机杀一个。
-detect_workers() {
-  local cpu mem_kb mem_gb w
-  cpu=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
-  mem_kb=$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null || echo 2097152)
-  mem_gb=$(( mem_kb / 1024 / 1024 ))
-  w=$cpu
-  if [ "$w" -gt 4 ]; then w=4; fi          # 再多收益递减，先封 4
-  if [ "$mem_gb" -lt 3 ] && [ "$w" -gt 2 ]; then w=2; fi   # 小内存机器保命
-  if [ "$w" -lt 1 ]; then w=1; fi
-  printf '%s' "$w"
-}
 
 # ------------------------------------------------------------
 # 子命令：stop / status / logs
@@ -354,22 +337,20 @@ else
   # 非托管模式（默认）：nohup 后台常驻，pid 落 /tmp。
   cd "$ROOT"
   # WORKERS 可以直接 export 给脚本，也可以写进 .env（.env 里的值由这里读，
-  # 因为 deploy.sh 不像后端那样 load_dotenv）。优先级：环境变量 > .env > 自动探测。
+  # 因为 deploy.sh 不像后端那样 load_dotenv）。优先级：环境变量 > .env > 默认单进程。
   if [ -z "$WORKERS" ] && [ -f "$ROOT/.env" ]; then
     WORKERS="$(awk -F= '/^WORKERS=/{print $2}' "$ROOT/.env" | tail -1 | tr -d '[:space:]')"
   fi
-  if [ -z "$WORKERS" ]; then WORKERS="$(detect_workers)"; fi
+  if [ -z "$WORKERS" ]; then WORKERS=1; fi
   case "$WORKERS" in
     ''|*[!0-9]*) die "WORKERS 必须是正整数，当前是：$WORKERS" ;;
   esac
-  if [ "$WORKERS" -lt 1 ]; then die "WORKERS 至少为 1，当前是：$WORKERS"; fi
+  if [ "$WORKERS" -ne 1 ]; then die "后台回答当前需要 WORKERS=1，跨进程版本尚未实现"; fi
 
   # --host 127.0.0.1：后端只监听回环，不对外暴露（鉴权在应用层，但少一层暴露面更稳）。
   # 前端靠 next.config.ts 的 /api/* rewrite 从本机访问它，功能不受影响；
   # 需要临时对外调试时用 `venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000` 手动起。
-  # --workers N：多进程吃多核。注意 N 个进程各自有独立的进程内状态：
-  #   · 每分钟限流已改双层（进程内滑窗 + DB 秒桶），不再随 worker 数放大
-  #   · LLM 并发闸仍是每进程一份，全局上限 = N × LLM_MAX_CONCURRENCY
+  # 单 worker 确保重连、停止请求能访问同一份运行任务。
   PYTHONUTF8=1 PYTHONDONTWRITEBYTECODE=1 \
     nohup venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port "$BACK_PORT" \
     --workers "$WORKERS" \

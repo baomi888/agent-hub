@@ -153,6 +153,12 @@ LLM_QUEUE_TIMEOUT = float(os.getenv("LLM_QUEUE_TIMEOUT", "20"))
 # 一键关闸（排障用）：0 时 /health 的 llm_gate.enabled 变 false，行为回到改造前。
 LLM_GATE_ENABLED = os.getenv("LLM_GATE_ENABLED", "1").strip().lower() not in ("0", "false", "no")
 
+# 进程内后台回答。部署必须使用单个 API worker，跨进程执行属于下一阶段。
+CHAT_RUN_BUFFER_BYTES = max(1, _env_int("CHAT_RUN_BUFFER_BYTES", 512 * 1024))
+CHAT_RUN_HEARTBEAT_SECONDS = max(1, _env_int("CHAT_RUN_HEARTBEAT_SECONDS", 15))
+CHAT_RUN_TIMEOUT_SECONDS = max(1, _env_int("CHAT_RUN_TIMEOUT_SECONDS", 600))
+CHAT_RUN_TERMINAL_TTL_SECONDS = max(1, _env_int("CHAT_RUN_TERMINAL_TTL_SECONDS", 60))
+
 # 向量化请求超时：embedding 是批量小请求，短超时即可。
 EMBED_TIMEOUT = float(os.getenv("EMBED_TIMEOUT", "30"))
 EMBED_MAX_RETRIES = int(os.getenv("EMBED_MAX_RETRIES", "2"))

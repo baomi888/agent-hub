@@ -1,0 +1,1 @@
+{"audience":"agent-hub 团队开发与产品成员","reader_task":"判断这篇 Anthropic 记忆文章哪些结论能用在我们项目上、先做哪几条","genre_contract":"router.knowledge","adapter":null,"presentation_mode":"normal","visual_plan":{"reason":"记忆四层是层级关系、dreaming 是跨层回写的闭环，用一张关系图比文字更快建立心智模型","blocks":[{"type":"whiteboard","min_count":1,"purpose":"展示四层记忆与 dreaming 的回写关系"}]}}

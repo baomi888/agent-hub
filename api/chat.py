@@ -50,11 +50,10 @@ import time
 import uuid
 from dataclasses import dataclass
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from pydantic import BaseModel, Field
-from starlette.background import BackgroundTask
 
 from core import (
     approval_store,
@@ -74,6 +73,7 @@ from core import router as route_engine
 from core import scenarios as scenarios_mod
 from core import session as store
 from core.auth import get_current_user
+from core.chat_runs import ChatRun, get_registry
 from core.citations import strip_phantom_citations
 from core.llm import get_llm, get_vision_llm
 from core.urltools import extract_urls
@@ -812,7 +812,7 @@ class _StreamDraft:
         INSERT(content='', status='streaming')          ← 流开始前
           → 每 400 字 / 4 秒 UPDATE(content, 'streaming') ← 边流边存
           → 正常结束 UPDATE('done', refs=…, truncated=…)
-          → 断连/出错/取消 UPDATE('interrupted')，正文保留到最后一次 flush
+          → 出错/取消 UPDATE('interrupted')，连接断开时后台继续生成
 
     顺带修掉一个更隐蔽的问题：空壳的 id 就是最终 message id，于是
     **消息顺序 = 提问时刻顺序**。以前 A 的回答晚落地会排到 B 的提问之后
@@ -835,6 +835,10 @@ class _StreamDraft:
         # （cherry-pick 适配 2026-11-19：main 在分支基点后新增了这一列）
         self.web_sources: list[dict] | None = None
         self.sealed = False
+        self.status = store.MSG_STATUS_STREAMING
+        self._terminal_status: str | None = None
+        self._terminal_refs: str | None = None
+        self._terminal_truncated = False
         self._written = 0
         self._written_at = time.monotonic()
 
@@ -853,10 +857,8 @@ class _StreamDraft:
     async def flush(self) -> None:
         """把当前全文写进去（状态仍是 streaming）。失败只记指标，不中断回答。"""
         text = self.text
-        self._written = len(text)
-        self._written_at = time.monotonic()
         try:
-            await asyncio.to_thread(
+            saved = await self._write(
                 store.update_message_content,
                 self.uid,
                 self.sid,
@@ -864,6 +866,10 @@ class _StreamDraft:
                 text,
                 store.MSG_STATUS_STREAMING,
             )
+            if saved is False:
+                raise RuntimeError("消息已不存在")
+            self._written = len(text)
+            self._written_at = time.monotonic()
         except Exception:
             # 写不进去（磁盘满 / 库被锁死）不该让整轮问答失败：正文还在内存里，
             # 收尾那次 seal 会再试一次。
@@ -882,12 +888,19 @@ class _StreamDraft:
         """
         if self.sealed:
             return self.msg_id
-        self.sealed = True
+        self._terminal_status = status
+        self._terminal_refs = refs
+        self._terminal_truncated = truncated
         if not self.text.strip():
-            await asyncio.to_thread(store.delete_messages, self.uid, self.sid, [self.msg_id])
+            await self._write(
+                store.delete_messages, self.uid, self.sid, [self.msg_id],
+                on_commit=lambda: self._mark_sealed(status),
+            )
+            self.sealed = True
+            self.status = status
             return self.msg_id
         try:
-            await asyncio.to_thread(
+            saved = await self._write(
                 store.update_message_content,
                 self.uid,
                 self.sid,
@@ -897,32 +910,57 @@ class _StreamDraft:
                 refs,
                 truncated,
                 self.web_sources,
+                on_commit=lambda: self._mark_sealed(status),
             )
+            if saved is False:
+                raise RuntimeError("消息已不存在")
+            self.sealed = True
+            self.status = status
         except Exception:
             metrics.inc("chat_draft_seal_error")
         return self.msg_id
 
+    def _mark_sealed(self, status: str) -> None:
+        self.sealed = True
+        self.status = status
+
+    async def _write(self, fn, *args, on_commit=None):
+        """取消时等待已提交的线程写入结束，防止旧 flush 覆盖最终状态。"""
+        task = asyncio.create_task(asyncio.to_thread(fn, *args))
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            result = await task
+            if result is not False and on_commit is not None:
+                on_commit()
+            raise
+
     def seal_sync(self, status: str = store.MSG_STATUS_INTERRUPTED) -> None:
         """同步收尾：给 finally / 取消路径用。
 
-        断连时任务已被取消，任何一个 await 都会立刻抛 CancelledError，
-        所以这里只能走**同步** SQLite 调用（阻塞几毫秒，换"回答不丢"，值）。
+        生成器关闭时同步落下最后的正文，取消中的线程写入由 _write 等待完成。
         """
         if self.sealed:
             return
-        self.sealed = True
+        status = self._terminal_status or status
         try:
             if not self.text.strip():
                 store.delete_messages(self.uid, self.sid, [self.msg_id])
             else:
-                store.update_message_content(
+                saved = store.update_message_content(
                     self.uid,
                     self.sid,
                     self.msg_id,
                     self.text,
                     status,
+                    self._terminal_refs,
+                    self._terminal_truncated,
                     web_sources=self.web_sources,
                 )
+                if saved is False:
+                    raise RuntimeError("消息已不存在")
+            self.sealed = True
+            self.status = status
         except Exception:
             metrics.inc("chat_draft_seal_error")
 
@@ -991,9 +1029,8 @@ class _Upstreams:
     （要等 GC 触发 asyncgen 终结器），这期间上游 HTTP 流还在跑、还在烧 token。
     「200 人同时点开又关掉」会留下 200 个幽灵请求，所以关闭必须**确定发生**。
 
-    关闭点挂在 `StreamingResponse(background=...)` 上：Starlette 无论正常结束、
-    抛异常还是被取消，都会在 body 迭代结束后执行 background —— 这是唯一
-    100% 会跑到的位置（`finally` 在生成器被遗弃时都可能不执行）。
+    后台任务的 cleanup 统一关闭所有上游并释放并发名额。
+    HTTP 连接结束只释放订阅，用户停止或任务超时才结束生成。
     """
 
     __slots__ = ("_items",)
@@ -1069,9 +1106,8 @@ async def _stream_llm(
     早期实现每帧回传"累计全文"，千 token 的回答会产生 O(n²) 的传输量；
     这里只发 delta，由前端自己累加。
 
-    断连检测改成每 16 帧查一次（首帧仍然查）：is_disconnected() 要读 asgi 状态，
-    逐帧调用等于千 token 回答白付上千次开销。**确定性由关闭动作保证，不靠检测频率**：
-    无论走哪条出口（正常结束 / 断连 return / 上游异常），`aclosing` 都会 aclose 上游。
+    由后台任务消费，生命周期独立于 HTTP 连接。停止通过取消任务关闭上游。
+    保留 request 参数以兼容现有内部调用。
 
     2026-11-08：token 出口统一过 ``LeakFilter``（提示词/工具定义泄露）。过滤命中
     时立刻停止上游、把已下发的安全前缀 + 固定拒答作为最终答案，绝不能让后面的
@@ -1080,14 +1116,8 @@ async def _stream_llm(
     agen = upstreams.track(llm.astream(messages)) if upstreams is not None else llm.astream(messages)
     guard = _new_leak_guard(path=path)
     try:
-        seen = 0
         async with contextlib.aclosing(agen) as stream:
             async for chunk in stream:
-                seen += 1
-                if (seen == 1 or seen % 16 == 0) and await request.is_disconnected():
-                    acc.aborted = True
-                    metrics.inc("chat_client_disconnect")
-                    return
                 # 结束原因**每帧都读**：它通常挂在最后一帧，而那一帧的 content 常常是空的
                 # （下面会因为 `not delta` 被 continue 掉）。只在有 delta 时读 = 永远读不到。
                 reason = _finish_reason_of(chunk)
@@ -1175,22 +1205,70 @@ async def chat_stream(
     （与下面「限流放在 event_generator 外面」是同一个理由）。且必须抢在
     `quota.consume` 之前 —— 排队失败的人不该被白扣一次每日额度。
     """
+    registry = get_registry()
+    try:
+        run = registry.reserve(uid, req.sid)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     try:
         ticket = await llm_gate.acquire()
     except llm_gate.Busy as e:
+        registry.abandon(run)
         raise HTTPException(
             status_code=429,
             detail=str(e),
             headers={"Retry-After": str(e.retry_after)},
         ) from e
-
-    try:
-        return await _chat_stream_impl(req, request, uid, ticket)
     except BaseException:
-        # 没走到 StreamingResponse（会话不存在 / 配额超限 / 参数错）：名额当场还掉。
-        # 漏还一次就永久少一个位置，攒一夜闸就废了，所以这里必须兜住。
-        ticket.release()
+        registry.abandon(run)
         raise
+
+    async def prepare():
+        try:
+            return await _chat_stream_impl(req, request, uid, ticket, run)
+        except BaseException:
+            ticket.release()
+            registry.abandon(run)
+            raise
+
+    # Preparation may already have inserted a row when the connection disappears.
+    # Keep its ownership until it either starts the producer or releases the slot.
+    preparation = asyncio.create_task(prepare())
+    run.preparation = preparation
+    _BG_TASKS.add(preparation)
+
+    def prepared(task):
+        _BG_TASKS.discard(task)
+        if not task.cancelled():
+            task.exception()
+
+    preparation.add_done_callback(prepared)
+    return await asyncio.shield(preparation)
+
+
+@router.get("/stream/{sid}")
+async def resume_stream(
+    sid: str, after: int = Query(default=0, ge=0),
+    message_id: int | None = Query(default=None, ge=1), uid: str = Depends(get_current_user),
+):
+    if not await asyncio.to_thread(store.get_conversation, uid, sid):
+        raise HTTPException(status_code=404, detail="会话不存在")
+    run = get_registry().get(uid, sid)
+    if run is None:
+        return Response(status_code=204)
+    if message_id is not None and run.message_id != message_id:
+        raise HTTPException(status_code=409, detail="该轮回答已结束，请刷新会话")
+    if after > run.cursor:
+        raise HTTPException(status_code=400, detail="回放位置超出当前回答范围")
+    return StreamingResponse(run.subscribe(after), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+@router.post("/{sid}/stop")
+async def stop_stream(sid: str, uid: str = Depends(get_current_user)):
+    if not await asyncio.to_thread(store.get_conversation, uid, sid):
+        raise HTTPException(status_code=404, detail="会话不存在")
+    await get_registry().stop(uid, sid)
+    return {"ok": True}
 
 
 async def _history_before(uid: str, sid: str, user_msg_id: int) -> list[dict]:
@@ -1253,7 +1331,7 @@ async def _plain_llm_messages(
 
 
 async def _chat_stream_impl(
-    req: ChatRequest, request: Request, uid: str, ticket
+    req: ChatRequest, request: Request, uid: str, ticket, run: ChatRun | None = None
 ) -> StreamingResponse:
     # 限流 + 每日问答额度。放在 event_generator 外面是对的：
     # 流一旦开始，响应头（200）就发出去了，那时候再想回 429 已经来不及，
@@ -1647,8 +1725,6 @@ async def _chat_stream_impl(
                 # 上游生成器登记到本轮，收尾统一 aclose（跳出循环不会自己关闭）
                 orch_events = upstreams.track(orch.stream())
                 async for ev in orch_events:
-                    if await request.is_disconnected():
-                        return
                     et = ev.event_type
                     if et == "token":
                         delta = ev.payload.get("text", "")
@@ -1907,8 +1983,6 @@ async def _chat_stream_impl(
                 # retryable=False 的封禁与「同一调用第 3 次拦下」看门狗全部失效。
                 with tool_guard.guard_scope():
                     async for event in agent_events:
-                        if await request.is_disconnected():
-                            return
 
                         if not isinstance(event, tuple) or len(event) != 2:
                             continue
@@ -2229,18 +2303,28 @@ async def _chat_stream_impl(
                 async for frame in gen:
                     yield frame
         finally:
-            # 断连被取消 / 抛异常 / 用户停止：任务可能已处于取消状态，
-            # 任何 await 都会立刻再抛 CancelledError，所以用同步版。
+            # 出错、超时、停止或正常结束都经过这里，连接断开不触发此收尾。
             draft.seal_sync()
 
+    async def cleanup():
+        try:
+            draft.seal_sync()
+            if not draft.sealed:
+                raise RuntimeError("回答最终保存失败")
+        finally:
+            await _finish_turn(upstreams, ticket)
+
+    if run is None:
+        run = get_registry().reserve(uid, req.sid)
+    run.start(
+        event_generator(), cleanup,
+        lambda: {"answer": draft.text, "status": draft.status},
+        message_id=draft.msg_id,
+    )
     return StreamingResponse(
-        event_generator(),
+        run.subscribe(),
         media_type="text/event-stream",
         headers=SSE_HEADERS,
-        # 收尾兜底：关上游 + 还并发名额。Starlette 在 body 迭代结束后**一定**执行
-        # background —— 正常结束、抛异常、客户端断连被取消都一样。
-        # 这是全链路里唯一 100% 会跑到的收尾点，所以两件事都挂在它上面。
-        background=BackgroundTask(_finish_turn, upstreams, ticket),
     )
 
 

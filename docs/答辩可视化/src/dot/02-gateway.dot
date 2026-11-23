@@ -1,0 +1,59 @@
+digraph "02-gateway" {
+  graph [rankdir=TB, fontname="Microsoft YaHei", bgcolor="#F7F8FA", nodesep=0.28, ranksep=0.38, compound=true];
+  node [shape=box, style="rounded,filled", fontname="Microsoft YaHei", fontsize=11, margin="0.12,0.08", penwidth=1.0];
+  edge [fontname="Microsoft YaHei", fontsize=9, color="#64748B", arrowsize=0.7];
+  subgraph cluster_p1 {
+    label="进程入口 · main.py"; fontsize=13; fontcolor="#1E40AF"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#BFDBFE";
+    p1__0 [label="FastAPI 实例\nredirect_slashes=False", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p1__1 [label="尾斜杠归一\n进路由前校正 /api/*", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p1__2 [label="CORS\n仅本地开发可开", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p1__3 [label="启动预热\nChroma / 路由 LLM / 建表", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p1__4 [label="健康检查\n/health · 默认不回版本", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p1__5 [label="默认参数\n/api/config/defaults", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+  }
+  subgraph cluster_p2 {
+    label="身份与鉴权 · core/auth.py"; fontsize=13; fontcolor="#1E40AF"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#BFDBFE";
+    p2__0 [label="注册 / 登录\n用户名密码 · 管理员名保留", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p2__1 [label="JWT 签发\nHS256 · uid / jti / exp", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p2__2 [label="Cookie 写入\nbaomi_session · SameSite=Lax", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p2__3 [label="token 三取一\nHeader → Bearer → Cookie", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p2__4 [label="get_current_user\n校验签名与过期 · 401", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p2__5 [label="令牌吊销\nrevoked_tokens 表", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+  }
+  subgraph cluster_p3 {
+    label="限流与配额 · core/quota.py"; fontsize=13; fontcolor="#1E40AF"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#BFDBFE";
+    p3__0 [label="每分钟限流\n滑动窗口 10 次 / 分", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p3__1 [label="全局兜底桶\nrate_buckets 防单机打爆", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p3__2 [label="ask 配额\n60 次 / 日", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p3__3 [label="embed 配额\n1000 片段 / 日", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p3__4 [label="auto 配额\n120 次 / 日（定时任务）", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p3__5 [label="upload 配额\n2000 MB / 日", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+  }
+  subgraph cluster_p4 {
+    label="并发闸 · core/llm_gate.py"; fontsize=13; fontcolor="#1E40AF"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#BFDBFE";
+    p4__0 [label="前台信号量\n16 并发 · 可配", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p4__1 [label="排队超时\n20s 拿不到名额即 429", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p4__2 [label="Busy 映射\nRetry-After 头", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p4__3 [label="后台任务槽\n定时任务独立额度", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p4__4 [label="管理员豁免\n配额与限流均跳过", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    p4__5 [label="快照\n当前占用 / 等待数", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+  }
+  subgraph cluster_p5 {
+    label="内容护栏"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    p5__0 [label="prompt_guard\n注入 / 越权指令识别", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__1 [label="tool_guard\n审批 · 截断 · 封禁", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__2 [label="netsafe\n私网 / 回环 SSRF 拦截", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__3 [label="urltools\n下载许可清单", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__4 [label="输出上限\n超长落盘只回预览", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__5 [label="归属校验\n非本人资源按 404", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+  subgraph cluster_p6 {
+    label="采集与可观测"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    p6__0 [label="apilog 中间件\n路由模板归一 · 流式计时", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__1 [label="3 秒落库\n后台 flush 循环", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__2 [label="Prometheus\n计数 / 配额拒绝 / 缓存", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__3 [label="开发者看板\n用量 · 慢接口 · 反馈", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__4 [label="审计字段\nuid · 状态码 · 耗时", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__5 [label="异常兜底\n采集失败不影响请求", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+}

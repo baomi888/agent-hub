@@ -1,0 +1,63 @@
+%% 工具调用：模型只决定「用不用」，用谁的库由服务端决定
+flowchart TB
+  subgraph s1["① 模型决策"]
+    direction TB
+    s1__0["判断是否用工具<br/><small>由问题与提示词决定</small>"]
+    s1__1["工具可见性<br/><small>按 use_kb / use_web 绑定</small>"]
+    s1__2["生成参数<br/><small>StructuredTool schema</small>"]
+  end
+  subgraph s2["② 元数据校验"]
+    direction TB
+    s2__0["ToolMeta<br/><small>category / retryable / cost</small>"]
+    s2__1["激活状态<br/><small>未激活工具直接拒绝</small>"]
+    s2__2["needs_approval<br/><small>写操作挂起等确认</small>"]
+    s2__3["prompt_guard<br/><small>注入 / 越权指令识别</small>"]
+  end
+  subgraph s3["③ 安全守卫"]
+    direction TB
+    s3__0["netsafe<br/><small>私网 / 回环地址拦截</small>"]
+    s3__1["urltools<br/><small>下载许可清单</small>"]
+    s3__2["参数校验<br/><small>类型 · 范围 · 长度</small>"]
+  end
+  subgraph s4["④ 执行工具"]
+    direction TB
+    s4__0["kb_search<br/><small>只读 · 归属库</small>"]
+    s4__1["web_search<br/><small>只读 · 写下载白名单</small>"]
+    s4__2["get_weather<br/><small>高德 + Open-Meteo</small>"]
+    s4__3["download_file<br/><small>唯一写操作 · 需审批</small>"]
+  end
+  subgraph s5["⑤ 回流与终止"]
+    direction TB
+    s5__0["输出截断<br/><small>4000 字 · 超限落盘</small>"]
+    s5__1["tool 帧<br/><small>发起 / 返回都上屏</small>"]
+    s5__2["模型继续<br/><small>ReAct ≤10 步</small>"]
+    s5__3["终止<br/><small>给出答案或说明截断</small>"]
+  end
+  s1__0 --> s1__1
+  s1__1 --> s1__2
+  s2__0 --> s2__1
+  s2__1 --> s2__2
+  s2__2 --> s2__3
+  s3__0 --> s3__1
+  s3__1 --> s3__2
+  s4__0 --> s4__1
+  s4__1 --> s4__2
+  s4__2 --> s4__3
+  s5__0 --> s5__1
+  s5__1 --> s5__2
+  s5__2 --> s5__3
+  sa_s1_s2 --> sb_s1_s2
+  sa_s2_s3 --> sb_s2_s3
+  sa_s3_s4 --> sb_s3_s4
+  sa_s4_s5 --> sb_s4_s5
+  classDef default fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px,color:#0F172A
+  classDef amber fill:#FFFBEB,stroke:#FDE68A,stroke-width:1px,color:#92400E
+  classDef blue fill:#EFF6FF,stroke:#BFDBFE,stroke-width:1px,color:#1E40AF
+  classDef green fill:#F0FDF4,stroke:#86EFAC,stroke-width:1px,color:#166534
+  classDef slate fill:#F1F5F9,stroke:#CBD5E1,stroke-width:1px,color:#1E293B
+  classDef violet fill:#F5F3FF,stroke:#DDD6FE,stroke-width:1px,color:#5B21B6
+  class s1__0,s1__1,s1__2 amber
+  class s2__0,s2__1,s2__2,s2__3 blue
+  class s3__0,s3__1,s3__2 violet
+  class s4__0,s4__1,s4__2,s4__3 green
+  class s5__0,s5__1,s5__2,s5__3,sa_s1_s2,sb_s1_s2,sa_s2_s3,sb_s2_s3,sa_s3_s4,sb_s3_s4,sa_s4_s5,sb_s4_s5 slate

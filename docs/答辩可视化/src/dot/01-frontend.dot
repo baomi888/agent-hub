@@ -1,0 +1,47 @@
+digraph "01-frontend" {
+  graph [rankdir=TB, fontname="Microsoft YaHei", bgcolor="#F7F8FA", nodesep=0.28, ranksep=0.38, compound=true];
+  node [shape=box, style="rounded,filled", fontname="Microsoft YaHei", fontsize=11, margin="0.12,0.08", penwidth=1.0];
+  edge [fontname="Microsoft YaHei", fontsize=9, color="#64748B", arrowsize=0.7];
+  subgraph cluster_p1 {
+    label="页面路由 · app/"; fontsize=13; fontcolor="#166534"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#86EFAC";
+    p1__0 [label="对话工作台\n首页 · ChatArea · 侧栏", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p1__1 [label="四屏控制台\n委托 / 总结 / 打卡 / 设置", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p1__2 [label="知识库页\n上传 · 文件 · 重建", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p1__3 [label="委托与总结\ndelegate · report", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p1__4 [label="学习专项\ncet · path 关卡", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p1__5 [label="执行轨迹\nflow · 混合执行回放", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p1__6 [label="开发者看板\ndashboard · 用量排行", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p1__7 [label="模板广场\ntemplates · 场景模板", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+  }
+  subgraph cluster_p2 {
+    label="组件层 · components/"; fontsize=13; fontcolor="#166534"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#86EFAC";
+    p2__0 [label="ChatArea\n消息流 · 输入 · 引用角标", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p2__1 [label="Sidebar\n会话列表 · 新建 / 切换", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p2__2 [label="KnowledgePanel\n文件清单 · 入库状态", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p2__3 [label="HybridTrace\n节点时间轴 · 切换提示", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p2__4 [label="FeedbackCard\n赞踩 · 一键反馈", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p2__5 [label="UsagePanel\n配额与用量", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p2__6 [label="AuthGate\n未登录拦截 · 登录态", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    p2__7 [label="FilePreviewModal\n原文片段预览", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+  }
+  subgraph cluster_p3 {
+    label="客户端库 · lib/"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    p3__0 [label="api.ts\n统一请求 · 错误中文化", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p3__1 [label="sse.ts\n逐帧解析 · 增量累加", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p3__2 [label="types.ts\n前后端契约单一来源", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p3__3 [label="useHybridTrace\n轨迹状态机", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p3__4 [label="geo.ts\n定位三级降级", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p3__5 [label="errors.ts\n网络 / 429 / 401 文案", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p3__6 [label="consolePrefs\n偏好本地存储", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p3__7 [label="chunkProfiles\n切片参数预设", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+  subgraph cluster_p4 {
+    label="交互与数据流"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    p4__0 [label="增量渲染\ntoken 拼接 · 不整段替换", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__1 [label="引用溯源\n[1] 点击回原文", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__2 [label="能力开关\nuse_kb / use_web", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__3 [label="图片理解\n附件上传 → vision", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__4 [label="会话隔离\nsid 级历史与知识库", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__5 [label="依据提示\n弱依据横幅前置", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+}

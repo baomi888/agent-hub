@@ -1,7 +1,7 @@
 "use client";
 
 // 会话域：会话列表 CRUD、当前会话消息加载、整轮删除、首屏加载/重试
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { api } from "@/lib/api";
 import { uid } from "@/lib/id";
 import { stripPlanHint } from "@/components/ChatArea";
@@ -14,9 +14,7 @@ import type { ShowToast } from "./useToast";
  *   done        正常结束，普通消息
  *   interrupted 生成到一半断了（断连 / 用户停止 / 进程重启），正文只有前半截
  *               → 复用现有的 `stopped` 标记，气泡上挂"已停止生成"
- *   streaming   另一台设备正在生成这一条。**整条跳过**：自己这一路已经有
- *               本地占位气泡，而对方那条正文还在变，渲染出来会是一个
- *               不断跳动的半截回答，看着像"回答坏了"
+ *   streaming   立即展示已落库正文，页面通过 active_run 恢复事件订阅。
  */
 function toUi(
   role: string,
@@ -27,7 +25,7 @@ function toUi(
   status?: string,
 ): UiMessage | null {
   if (role === "system") return null;
-  if (status === "streaming") return null;
+
   return {
     id: uid(),
     role: role === "user" ? "user" : "assistant",
@@ -35,6 +33,7 @@ function toUi(
     refs,
     dbId,
     webSources: webSources?.length ? webSources : undefined,
+    ...(status === "streaming" ? { streaming: true } : {}),
     ...(status === "interrupted" ? { stopped: true } : {}),
   };
 }
@@ -86,10 +85,31 @@ async function attachProposal(sid: string, list: UiMessage[]): Promise<UiMessage
 export function useSessions(showToast: ShowToast) {
   const [sessions, setSessions] = useState<Conversation[]>([]);
   const [activeSid, setActiveSid] = useState<string | null>(null);
+  const selectedRef = useRef<string | null>(null);
+  const [activeRun, setActiveRun] = useState<{ message_id: number | null; started_at: number } | null>(null);
   const [messages, setMessages] = useState<UiMessage[]>([]);
   // 首屏会话列表还没回来：侧栏渲染骨架，避免先闪一下"还没有会话"
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  const updateActiveSid = useCallback((sid: string | null) => {
+    selectedRef.current = sid;
+    setActiveRun(null);
+    setActiveSid(sid);
+  }, []);
+
+  const reconcileSession = useCallback(async (sid: string) => {
+    const detail = await api.getSession(sid);
+    if (selectedRef.current !== sid) return;
+    setActiveRun(detail.active_run ?? null);
+    const canonical = toUiList(detail.messages);
+    setMessages((prev) => canonical.map((message) => {
+      const existing = prev.find((m) => m.dbId === message.dbId);
+      return existing ? { ...existing, ...message, id: existing.id,
+        streaming: message.streaming ?? false, stopped: message.stopped ?? false,
+        status: undefined } : message;
+    }));
+  }, []);
 
   const refreshSessions = useCallback(async () => {
     try {
@@ -102,6 +122,26 @@ export function useSessions(showToast: ShowToast) {
       showToast("error", "会话列表刷新失败，请稍后重试");
     }
   }, [showToast]);
+
+  const hasGeneratingSession = sessions.some((session) => session.generating);
+  useEffect(() => {
+    if (!hasGeneratingSession) return;
+    let alive = true;
+    let busy = false;
+    const timer = window.setInterval(() => {
+      if (busy) return;
+      busy = true;
+      void api.listSessions().then(({ sessions: list }) => {
+        if (alive) setSessions(list);
+      }).catch(() => {
+        // Sidebar status retries quietly while a background task remains active.
+      }).finally(() => { busy = false; });
+    }, 5000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [hasGeneratingSession]);
 
   // 初始化：拉会话列表（与知识库/defaults 的请求由各自 hook 并发发起）
   useEffect(() => {
@@ -117,10 +157,12 @@ export function useSessions(showToast: ShowToast) {
       // 用户只会以为那个勾选框是坏的（10-04 实测：不点会话直接勾，一个请求都不发）。
       const recent = s?.sessions?.[0];
       if (!recent) return;
+      selectedRef.current = recent.id;
       setActiveSid(recent.id);
       try {
         const detail = await api.getSession(recent.id);
-        if (!alive) return;
+        if (!alive || selectedRef.current !== recent.id) return;
+        setActiveRun(detail.active_run ?? null);
         const base = toUiList(detail.messages);
         setMessages(base);
         // 建议卡要等消息落地之后才知道挂哪条，所以先显示消息、再补挂
@@ -143,6 +185,8 @@ export function useSessions(showToast: ShowToast) {
     try {
       const conv = await api.createSession();
       setSessions((prev) => [conv, ...prev]);
+      selectedRef.current = conv.id;
+      setActiveRun(null);
       setActiveSid(conv.id);
       setMessages([]);
     } catch {
@@ -152,10 +196,14 @@ export function useSessions(showToast: ShowToast) {
 
   // 选择会话并加载历史
   const selectSession = async (sid: string) => {
+    selectedRef.current = sid;
+    setActiveRun(null);
     setActiveSid(sid);
     setMessages([]);
     try {
       const detail = await api.getSession(sid);
+      if (selectedRef.current !== sid) return;
+      setActiveRun(detail.active_run ?? null);
       const base = toUiList(detail.messages);
       setMessages(base);
       // 切回一个还有待确认建议的会话时，卡片要跟着回来（见 attachProposal 的注释）。
@@ -185,8 +233,8 @@ export function useSessions(showToast: ShowToast) {
     try {
       await api.deleteSession(sid);
       setSessions((prev) => prev.filter((c) => c.id !== sid));
-      if (activeSid === sid) {
-        setActiveSid(null);
+      if (selectedRef.current === sid) {
+        updateActiveSid(null);
         setMessages([]);
       }
     } catch {
@@ -202,7 +250,7 @@ export function useSessions(showToast: ShowToast) {
       if (r.ok) {
         // 重新拉取最新消息列表，保证前端与后端一致
         const detail = await api.getSession(activeSid);
-        setMessages(toUiList(detail.messages));
+        if (selectedRef.current === activeSid) setMessages(toUiList(detail.messages));
       }
     } catch {
       showToast("error", "删除失败，请稍后重试");
@@ -237,7 +285,8 @@ export function useSessions(showToast: ShowToast) {
     sessions,
     setSessions,
     activeSid,
-    setActiveSid,
+    activeRun,
+    setActiveSid: updateActiveSid,
     messages,
     setMessages,
     loading,
@@ -249,5 +298,6 @@ export function useSessions(showToast: ShowToast) {
     deleteSession,
     deleteTurn,
     reloadSessions,
+    reconcileSession,
   };
 }

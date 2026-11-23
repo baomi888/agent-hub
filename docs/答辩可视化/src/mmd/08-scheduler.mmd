@@ -1,0 +1,62 @@
+%% 调度与业务域：独立 worker、七个定时任务、幂等与心跳
+flowchart TB
+  subgraph p1["独立 worker · worker/scheduler.py"]
+    direction TB
+    p1__0["APScheduler<br/><small>BlockingScheduler · 3.x</small>"]
+    p1__1["时区<br/><small>Asia/Shanghai</small>"]
+    p1__2["与 web 解耦<br/><small>web 只写「待执行」行</small>"]
+    p1__3["心跳<br/><small>worker_heartbeat 周期写</small>"]
+    p1__4["优雅退出<br/><small>停止调度 · 收尾当前任务</small>"]
+    p1__5["单实例假设<br/><small>多 worker 会重复触发</small>"]
+  end
+  subgraph p2["调度底座 · core/scheduler.py"]
+    direction TB
+    p2__0["schedule_jobs<br/><small>job_key / cron / enabled</small>"]
+    p2__1["job_runs<br/><small>planned_at / status / attempts</small>"]
+    p2__2["幂等键<br/><small>job_key|subject|planned_at</small>"]
+    p2__3["ON CONFLICT<br/><small>重复登记直接跳过</small>"]
+    p2__4["心跳三态<br/><small>up / stalled / down</small>"]
+    p2__5["重试<br/><small>失败按 attempts 再投</small>"]
+  end
+  subgraph p3["七个任务"]
+    direction TB
+    p3__0["delegate.dispatch<br/><small>每 5 分钟扫描到点委托</small>"]
+    p3__1["delegate.retry<br/><small>错峰 7/22/37/52 分</small>"]
+    p3__2["report.daily<br/><small>默认 23:30 生成总结</small>"]
+    p3__3["report.backfill<br/><small>04:00 补 7 天内失败</small>"]
+    p3__4["housekeeping<br/><small>04:15 清 90 天记录</small>"]
+    p3__5["profile.aggregate<br/><small>02:30 聚合画像</small>"]
+    p3__6["prompt.evolve<br/><small>每 6 小时一轮候选</small>"]
+  end
+  subgraph p4["业务服务 · service/"]
+    direction TB
+    p4__0["daily<br/><small>每日委托 + 每日总结</small>"]
+    p4__1["cet<br/><small>四六级计划 / 词汇 / 模考</small>"]
+    p4__2["path<br/><small>关卡式学习路径</small>"]
+    p4__3["checkin<br/><small>打卡记录与连续天数</small>"]
+    p4__4["prompt_evo<br/><small>GEPA 候选 · 评估 · 回滚</small>"]
+    p4__5["templates<br/><small>模板目录 · 一次起点</small>"]
+  end
+  subgraph p5["对外接口"]
+    direction TB
+    p5__0["/api/delegate<br/><small>7 条 · 委托 CRUD / runs</small>"]
+    p5__1["/api/report<br/><small>5 条 · 总结生成 / 查询</small>"]
+    p5__2["/api/schedule<br/><small>5 条 · health / run-now</small>"]
+    p5__3["/api/cet<br/><small>计划 · 任务 · 词汇</small>"]
+    p5__4["/api/path<br/><small>节点进度 · 解锁</small>"]
+    p5__5["/api/checkin<br/><small>打卡 · 统计</small>"]
+  end
+  subgraph p6["配额与可观测"]
+    direction TB
+    p6__0["auto 配额<br/><small>120 次 / 日 · 独立账本</small>"]
+    p6__1["tokens_out<br/><small>每次运行记 token</small>"]
+    p6__2["失败告警<br/><small>心跳 + 连续失败</small>"]
+    p6__3["run-now<br/><small>管理员手动补跑</small>"]
+    p6__4["运行历史<br/><small>按 job_key 分页</small>"]
+    p6__5["跳过原因<br/><small>幂等 / 额度 / 禁用</small>"]
+  end
+  classDef default fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px,color:#0F172A
+  classDef cyan fill:#ECFEFF,stroke:#A5F3FC,stroke-width:1px,color:#155E75
+  classDef slate fill:#F1F5F9,stroke:#CBD5E1,stroke-width:1px,color:#1E293B
+  class p1__0,p1__1,p1__2,p1__3,p1__4,p1__5,p2__0,p2__1,p2__2,p2__3,p2__4,p2__5,p3__0,p3__1,p3__2,p3__3,p3__4,p3__5,p3__6 cyan
+  class p4__0,p4__1,p4__2,p4__3,p4__4,p4__5,p5__0,p5__1,p5__2,p5__3,p5__4,p5__5,p6__0,p6__1,p6__2,p6__3,p6__4,p6__5 slate

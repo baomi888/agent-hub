@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from core import config
 from core import session as store
 from core.auth import get_current_user
+from core.chat_runs import get_registry
 from kb import pipelines
 
 # 默认要登录：会话列表是最直接的隐私面，绝不能让访客互相看到
@@ -60,7 +61,11 @@ def create(body: SessionCreate, uid: str = Depends(get_current_user)):
 
 @router.get("/")
 def list_all(uid: str = Depends(get_current_user)) -> dict:
-    return {"sessions": store.list_conversations(uid)}
+    sessions = store.list_conversations(uid)
+    for conv in sessions:
+        run = get_registry().get(uid, conv["id"])
+        conv["generating"] = bool(run and run.state == "running")
+    return {"sessions": sessions}
 
 
 @router.get("/{sid}/")
@@ -70,6 +75,19 @@ def get_detail(sid: str, uid: str = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail=f"会话不存在：{sid}")
     conv["messages"] = store.get_messages(uid, sid)
     conv["message_count"] = store.count_messages(uid, sid)
+    run = get_registry().get(uid, sid)
+    # Completion may commit after the message snapshot was read. Keep replay
+    # available for that snapshot, including a retained terminal run.
+    needs_replay = run and any(
+        message.get("id") == run.message_id and message.get("status") == "streaming"
+        for message in conv["messages"]
+    )
+    conv["active_run"] = (
+        {"message_id": run.message_id, "started_at": run.started_at}
+        if run and (run.state == "running" or needs_replay) else None
+    )
+    if not conv["active_run"] and any(m.get("status") == "streaming" for m in conv["messages"]):
+        conv["messages"] = store.get_messages(uid, sid)
     return conv
 
 
@@ -89,14 +107,15 @@ def update(sid: str, body: SessionUpdate, uid: str = Depends(get_current_user)):
 
 
 @router.delete("/{sid}/")
-def delete(sid: str, uid: str = Depends(get_current_user)) -> dict:
+async def delete(sid: str, uid: str = Depends(get_current_user)) -> dict:
+    await get_registry().stop(uid, sid)
     if not store.delete_conversation(uid, sid):
         raise HTTPException(status_code=404, detail=f"会话不存在：{sid}")
     return {"ok": True}
 
 
 @router.delete("/{sid}/messages/{msg_id}/", response_model=MessageDeleteResponse)
-def delete_message_turn(sid: str, msg_id: int, uid: str = Depends(get_current_user)) -> dict:
+async def delete_message_turn(sid: str, msg_id: int, uid: str = Depends(get_current_user)) -> dict:
     """删除某条消息及其所在的完整一轮对话（user + 后续连续 assistant）。"""
     conv = store.get_conversation(uid, sid)
     if not conv:
@@ -105,5 +124,8 @@ def delete_message_turn(sid: str, msg_id: int, uid: str = Depends(get_current_us
         raise HTTPException(status_code=404, detail=f"消息不存在：{msg_id}")
 
     ids = store.find_turn_ids(uid, sid, msg_id)
+    run = get_registry().get(uid, sid)
+    if run and run.message_id in ids:
+        await get_registry().stop(uid, sid)
     store.delete_messages(uid, sid, ids)
     return {"ok": True, "deleted": len(ids)}

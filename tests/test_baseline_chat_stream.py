@@ -82,8 +82,24 @@ def _frames(body: str):
                 name = line[len("event:") :].strip()
             elif line.startswith("data:"):
                 data += line[len("data:") :].strip()
-        out.append((name, data))
+        if name or data:  # Ignore comment-only heartbeat frames.
+            out.append((name, data))
     return out
+
+
+def _assert_controls(frames):
+    import json
+    assert frames[0][0] == "meta"
+    meta = json.loads(frames[0][1])
+    assert meta["message_id"] == 1001
+    assert meta["started_at"] > 0
+    assert "cursor" not in meta
+    controls = [json.loads(data) for name, data in frames if name == "replay_end"]
+    assert controls == [{}]
+
+
+def test_sse_parser_ignores_comment_heartbeats():
+    assert _frames(": ping\n\nevent: replay_end\ndata: {}\n\n") == [("replay_end", "{}")]
 
 
 @pytest.fixture
@@ -102,6 +118,7 @@ def client(monkeypatch, tmp_path):
         return 1000 if role == "user" else 1001
 
     monkeypatch.setattr(chat.store, "add_message", _fake_add)
+    monkeypatch.setattr(chat.store, "update_message_content", lambda *a, **k: True)
     monkeypatch.setattr(chat.store, "rename_conversation", lambda *a, **k: None)
 
     monkeypatch.setattr(chat.pipelines, "exists", lambda owner, kid, **k: True)
@@ -135,7 +152,8 @@ def _body(client, **payload):
 
 def test_rag_stream_event_sequence(client):
     frames = _frames(_body(client, mode="rag"))
-    names = [n for n, _ in frames]
+    _assert_controls(frames)
+    names = [n for n, _ in frames if n not in {"meta", "replay_end"}]
 
     assert names == [
         "status",  # RAG 模式，正在检索知识库
@@ -169,7 +187,13 @@ def test_rag_stream_event_sequence(client):
         "run_id",
         "plan_topic",
         "truncated",
+        "status",
+        "finish_reason",
+        "cursor",
     }
+    assert done["status"] == "done"
+    assert done["finish_reason"] == "completed"
+    assert done["cursor"] > 0
     assert done["truncated"] is False  # 这个假 LLM 不带 finish_reason=length
     assert done["answer"] == "你好呀"
     assert done["mode"] == "rag"
@@ -228,7 +252,8 @@ def test_rag_stream_enhance_frame_reports_swapped_terms(client, monkeypatch, tmp
 
 def test_llm_stream_event_sequence(client):
     frames = _frames(_body(client, mode="llm", kb_id_override=None))
-    assert [n for n, _ in frames] == [
+    _assert_controls(frames)
+    assert [n for n, _ in frames if n not in {"meta", "replay_end"}] == [
         "status",
         "token",
         "token",

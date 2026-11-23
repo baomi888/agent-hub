@@ -1,0 +1,74 @@
+%% 核心主链路：一次提问从 HTTP 到 SSE 收尾
+flowchart TB
+  subgraph s1["① 接入"]
+    direction TB
+    s1__0["POST /api/chat/stream<br/><small>Nginx → Next rewrite → FastAPI</small>"]
+    s1__1["ChatRequest 解析<br/><small>sid · question · use_kb / use_web</small>"]
+  end
+  subgraph s2["② 前置校验"]
+    direction TB
+    s2__0["JWT 鉴权<br/><small>三处取 token · 失败 401</small>"]
+    s2__1["会话归属<br/><small>sid 非本人 / 不存在 → 404</small>"]
+    s2__2["每日 ask 配额<br/><small>60 次 / 日 · 超限 429</small>"]
+    s2__3["LLM 并发闸<br/><small>16 并发 · 排队 20s</small>"]
+    s2__4["返回 StreamingResponse<br/><small>200 之后不能再改状态码</small>"]
+  end
+  subgraph s3["③ 组装与选路"]
+    direction TB
+    s3__0["assemble_history<br/><small>摘要块 + 最近 K 轮原文</small>"]
+    s3__1["router.decide<br/><small>workflow / agent · 2s 超时</small>"]
+    s3__2["执行计划<br/><small>mode 兼容 · 能力开关</small>"]
+  end
+  subgraph s4["④ 四分支执行"]
+    direction TB
+    s4__0["vision<br/><small>有图优先 · qwen-vl</small>"]
+    s4__1["hybrid<br/><small>工作流 × Agent</small>"]
+    s4__2["agent<br/><small>ReAct · 四工具</small>"]
+    s4__3["rag<br/><small>检索增强</small>"]
+    s4__4["llm<br/><small>纯对话</small>"]
+  end
+  subgraph s5["⑤ 生成与工具"]
+    direction TB
+    s5__0["模型流式输出<br/><small>token 帧逐段下发</small>"]
+    s5__1["工具调用循环<br/><small>≤10 步 · 结果截断</small>"]
+    s5__2["引用与依据<br/><small>sources / grounding 帧</small>"]
+  end
+  subgraph s6["⑥ 收尾"]
+    direction TB
+    s6__0["落库 assistant<br/><small>content + refs + truncated</small>"]
+    s6__1["标题 / 画像<br/><small>异步 · 失败不阻塞</small>"]
+    s6__2["压缩调度<br/><small>两轮之间判定</small>"]
+    s6__3["释放并发名额<br/><small>BackgroundTask 兜底</small>"]
+  end
+  s1__0 --> s1__1
+  s2__0 --> s2__1
+  s2__1 --> s2__2
+  s2__2 --> s2__3
+  s2__3 --> s2__4
+  s3__0 --> s3__1
+  s3__1 --> s3__2
+  s4__0 --> s4__1
+  s4__1 --> s4__2
+  s4__2 --> s4__3
+  s4__3 --> s4__4
+  s5__0 --> s5__1
+  s5__1 --> s5__2
+  s6__0 --> s6__1
+  s6__1 --> s6__2
+  s6__2 --> s6__3
+  sa_s1_s2 --> sb_s1_s2
+  sa_s2_s3 --> sb_s2_s3
+  sa_s3_s4 -->|按计划| sb_s3_s4
+  sa_s4_s5 -->|分支输出| sb_s4_s5
+  sa_s5_s6 --> sb_s5_s6
+  classDef default fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px,color:#0F172A
+  classDef amber fill:#FFFBEB,stroke:#FDE68A,stroke-width:1px,color:#92400E
+  classDef blue fill:#EFF6FF,stroke:#BFDBFE,stroke-width:1px,color:#1E40AF
+  classDef green fill:#F0FDF4,stroke:#86EFAC,stroke-width:1px,color:#166534
+  classDef slate fill:#F1F5F9,stroke:#CBD5E1,stroke-width:1px,color:#1E293B
+  classDef violet fill:#F5F3FF,stroke:#DDD6FE,stroke-width:1px,color:#5B21B6
+  class s1__0,s1__1 green
+  class s2__0,s2__1,s2__2,s2__3,s2__4 blue
+  class s3__0,s3__1,s3__2 violet
+  class s4__0,s4__1,s4__2,s4__3,s4__4,s5__0,s5__1,s5__2 amber
+  class s6__0,s6__1,s6__2,s6__3,sa_s1_s2,sb_s1_s2,sa_s2_s3,sb_s2_s3,sa_s3_s4,sb_s3_s4,sa_s4_s5,sb_s4_s5,sa_s5_s6,sb_s5_s6 slate

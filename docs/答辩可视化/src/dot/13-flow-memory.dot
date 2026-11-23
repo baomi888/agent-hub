@@ -1,0 +1,53 @@
+digraph "13-flow-memory" {
+  graph [rankdir=TB, fontname="Microsoft YaHei", bgcolor="#F7F8FA", nodesep=0.28, ranksep=0.38, compound=true];
+  node [shape=box, style="rounded,filled", fontname="Microsoft YaHei", fontsize=11, margin="0.12,0.08", penwidth=1.0];
+  edge [fontname="Microsoft YaHei", fontsize=9, color="#64748B", arrowsize=0.7];
+  subgraph cluster_s1 {
+    label="① 会话定位"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    s1__0 [label="sid\n首轮为空则新建会话", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    s1__1 [label="归属校验\n非本人 / 已删除 → 404", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    s1__2 [label="窗口读取\n详情默认最近 10 轮", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+  subgraph cluster_s2 {
+    label="② 上下文装配"; fontsize=13; fontcolor="#166534"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#86EFAC";
+    s2__0 [label="摘要块\n长期记忆 · 置历史前部", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    s2__1 [label="最近 K 轮\n默认 6 · 扩展 12", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    s2__2 [label="占用判定\n按全量历史算阈值", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    s2__3 [label="角色成对\nuser / assistant 交替", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+  }
+  subgraph cluster_s3 {
+    label="③ 模型调用"; fontsize=13; fontcolor="#1E40AF"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#BFDBFE";
+    s3__0 [label="system prompt\nprompt_store active 版本", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    s3__1 [label="动态定位\n末尾追加 · 不进 system", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    s3__2 [label="历史消息\n原文 + 摘要一起送入", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+  }
+  subgraph cluster_s4 {
+    label="④ 落库与副作用"; fontsize=13; fontcolor="#5B21B6"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#DDD6FE";
+    s4__0 [label="add_message\nassistant + refs + truncated", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    s4__1 [label="标题\n首轮并行生成", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    s4__2 [label="画像标签\nfire-and-forget", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+  }
+  subgraph cluster_s5 {
+    label="⑤ 压缩与长期记忆"; fontsize=13; fontcolor="#92400E"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#FDE68A";
+    s5__0 [label="salience 打分\n信息密度 / 实体 / 离群", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    s5__1 [label="抽取式摘要\n保留关键句 · 非生成", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    s5__2 [label="安全阀\n失败改用截断", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    s5__3 [label="commit_summary\n版本号 · 幂等写入", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+  }
+  s1__0 -> s1__1 [ style=solid color="#64748B"];
+  s1__1 -> s1__2 [ style=solid color="#64748B"];
+  s2__0 -> s2__1 [ style=solid color="#64748B"];
+  s2__1 -> s2__2 [ style=solid color="#64748B"];
+  s2__2 -> s2__3 [ style=solid color="#64748B"];
+  s3__0 -> s3__1 [ style=solid color="#64748B"];
+  s3__1 -> s3__2 [ style=solid color="#64748B"];
+  s4__0 -> s4__1 [ style=solid color="#64748B"];
+  s4__1 -> s4__2 [ style=solid color="#64748B"];
+  s5__0 -> s5__1 [ style=solid color="#64748B"];
+  s5__1 -> s5__2 [ style=solid color="#64748B"];
+  s5__2 -> s5__3 [ style=solid color="#64748B"];
+  sa_s1_s2 -> sb_s1_s2 [ style=solid color="#64748B"];
+  sa_s2_s3 -> sb_s2_s3 [ style=solid color="#64748B"];
+  sa_s3_s4 -> sb_s3_s4 [ style=solid color="#64748B"];
+  sa_s4_s5 -> sb_s4_s5 [label="两轮之间" style=dashed color="#64748B"];
+}

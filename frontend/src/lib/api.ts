@@ -340,7 +340,9 @@ export const api = {
       body: JSON.stringify(kbId ? { title, kb_id: kbId } : { title }),
     }),
   getSession: (sid: string) =>
-    request<Conversation & { messages: Message[] }>(`/api/sessions/${sid}/`),
+    request<Conversation & { messages: Message[]; active_run?: { message_id: number | null; started_at: number } | null }>(`/api/sessions/${sid}/`),
+  stopChat: (sid: string) =>
+    request<{ ok: boolean }>(`/api/chat/${sid}/stop`, { method: "POST" }),
   renameSession: (sid: string, title: string) =>
     request<Conversation>(`/api/sessions/${sid}/`, {
       method: "PATCH",

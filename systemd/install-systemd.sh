@@ -54,23 +54,9 @@ fi
 
 APP_DIR="${1:-/root}"
 
-# 后端 worker 数：WORKERS=4 bash systemd/install-systemd.sh 可显式指定；
-# 不指定就按 CPU / 内存探测（与 deploy.sh 的 detect_workers 同一套规则）。
-detect_workers() {
-  local cpu mem_kb mem_gb w
-  cpu=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
-  mem_kb=$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null || echo 2097152)
-  mem_gb=$(( mem_kb / 1024 / 1024 ))
-  w=$cpu
-  if [ "$w" -gt 4 ]; then w=4; fi
-  if [ "$mem_gb" -lt 3 ] && [ "$w" -gt 2 ]; then w=2; fi
-  if [ "$w" -lt 1 ]; then w=1; fi
-  printf '%s' "$w"
-}
-WORKERS="${WORKERS:-$(detect_workers)}"
-case "$WORKERS" in
-  ''|*[!0-9]*) die "WORKERS 必须是正整数，当前是：$WORKERS" ;;
-esac
+# 进程内后台回答需要单 worker。
+WORKERS="${WORKERS:-1}"
+[ "$WORKERS" = "1" ] || die "后台回答当前需要 WORKERS=1"
 
 log "0. 校验 APP_DIR"
 [ -f "$APP_DIR/main.py" ] || die "找不到 $APP_DIR/main.py —— APP_DIR 传错了？"

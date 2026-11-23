@@ -1,0 +1,46 @@
+[
+  {
+    "event": "status",
+    "data": {
+      "text": "纯 LLM 模式..."
+    }
+  },
+  {
+    "event": "token",
+    "data": {
+      "text": "你"
+    }
+  },
+  {
+    "event": "token",
+    "data": {
+      "text": "好"
+    }
+  },
+  {
+    "event": "token",
+    "data": {
+      "text": "呀"
+    }
+  },
+  {
+    "event": "title",
+    "data": {
+      "title": "固定标题"
+    }
+  },
+  {
+    "event": "done",
+    "data": {
+      "answer": "你好呀",
+      "refs": "",
+      "title": "固定标题",
+      "mode": "llm",
+      "message_id": 1001,
+      "user_message_id": 1000,
+      "run_id": null,
+      "truncated": false,
+      "plan_topic": null
+    }
+  }
+]

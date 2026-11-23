@@ -1,0 +1,62 @@
+%% 对话主链路：一次请求的四个分支与一条 SSE 流
+flowchart TB
+  subgraph p1["请求前置"]
+    direction TB
+    p1__0["ChatRequest<br/><small>use_kb / use_web / plan / location</small>"]
+    p1__1["会话校验<br/><small>sid 归属 · 不存在 404</small>"]
+    p1__2["扣问答额度<br/><small>consume(ask)</small>"]
+    p1__3["知识库归属<br/><small>非本人库按未绑定</small>"]
+    p1__4["图片分支<br/><small>有图直接进 vision</small>"]
+    p1__5["计划主题<br/><small>追问时从历史续主题</small>"]
+  end
+  subgraph p2["执行计划 · _plan_route"]
+    direction TB
+    p2__0["旧 mode 映射<br/><small>rag / llm / agent / hybrid</small>"]
+    p2__1["router.decide<br/><small>轻量 LLM · 2s 超时</small>"]
+    p2__2["workflow 判定<br/><small>命中且开关开启 → hybrid</small>"]
+    p2__3["无工具退化<br/><small>use_kb/use_web 都关 → llm</small>"]
+    p2__4["库不存在<br/><small>rag → agent</small>"]
+    p2__5["失败兜底<br/><small>超时 / 坏格式 → agent</small>"]
+  end
+  subgraph p3["四个执行分支"]
+    direction TB
+    p3__0["hybrid<br/><small>工作流 × Agent · 可人工切换</small>"]
+    p3__1["agent<br/><small>ReAct 循环 · 四工具</small>"]
+    p3__2["rag<br/><small>改写 → 检索 → 拼参考资料</small>"]
+    p3__3["llm<br/><small>纯对话 · 压缩历史</small>"]
+    p3__4["vision<br/><small>qwen-vl 看图 · 可叠加检索</small>"]
+    p3__5["兜底<br/><small>混合零产出 → 纯 LLM 再答</small>"]
+  end
+  subgraph p4["上下文组装 · 请求路径"]
+    direction TB
+    p4__0["系统提示词<br/><small>prompt_store active 版本</small>"]
+    p4__1["摘要块<br/><small>历史压缩后的长期记忆</small>"]
+    p4__2["最近 K 轮<br/><small>原文保留 · 细节不失真</small>"]
+    p4__3["预检索片段<br/><small>拼进本轮用户消息</small>"]
+    p4__4["定位<br/><small>追加末尾 · 不进 system</small>"]
+    p4__5["缓存友好<br/><small>动态内容不破坏前缀</small>"]
+  end
+  subgraph p5["SSE 帧协议"]
+    direction TB
+    p5__0["status<br/><small>进度提示 · 中文</small>"]
+    p5__1["token<br/><small>增量文本</small>"]
+    p5__2["tool<br/><small>工具发起 / 返回</small>"]
+    p5__3["sources<br/><small>引用卡片 + 相似度</small>"]
+    p5__4["grounding<br/><small>依据强弱 · 正文前</small>"]
+    p5__5["title / done<br/><small>标题 · message_id · truncated</small>"]
+    p5__6["error<br/><small>翻译后错误 · 不吐栈</small>"]
+  end
+  subgraph p6["收尾与副作用"]
+    direction TB
+    p6__0["落库 assistant<br/><small>refs / truncated 一并记</small>"]
+    p6__1["标题并行<br/><small>首轮即算 · 收尾零等待</small>"]
+    p6__2["画像标签<br/><small>fire-and-forget</small>"]
+    p6__3["压缩调度<br/><small>两轮之间判定</small>"]
+    p6__4["释放并发名额<br/><small>BackgroundTask 兜底</small>"]
+    p6__5["断连保护<br/><small>半截答案不落库</small>"]
+  end
+  classDef default fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px,color:#0F172A
+  classDef slate fill:#F1F5F9,stroke:#CBD5E1,stroke-width:1px,color:#1E293B
+  classDef violet fill:#F5F3FF,stroke:#DDD6FE,stroke-width:1px,color:#5B21B6
+  class p1__0,p1__1,p1__2,p1__3,p1__4,p1__5,p2__0,p2__1,p2__2,p2__3,p2__4,p2__5,p3__0,p3__1,p3__2,p3__3,p3__4,p3__5 violet
+  class p4__0,p4__1,p4__2,p4__3,p4__4,p4__5,p5__0,p5__1,p5__2,p5__3,p5__4,p5__5,p5__6,p6__0,p6__1,p6__2,p6__3,p6__4,p6__5 slate

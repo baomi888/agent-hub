@@ -1,0 +1,61 @@
+%% 会话与记忆：原文永不丢，摘要负责长期，窗口负责细节
+flowchart TB
+  subgraph s1["① 会话定位"]
+    direction TB
+    s1__0["sid<br/><small>首轮为空则新建会话</small>"]
+    s1__1["归属校验<br/><small>非本人 / 已删除 → 404</small>"]
+    s1__2["窗口读取<br/><small>详情默认最近 10 轮</small>"]
+  end
+  subgraph s2["② 上下文装配"]
+    direction TB
+    s2__0["摘要块<br/><small>长期记忆 · 置历史前部</small>"]
+    s2__1["最近 K 轮<br/><small>默认 6 · 扩展 12</small>"]
+    s2__2["占用判定<br/><small>按全量历史算阈值</small>"]
+    s2__3["角色成对<br/><small>user / assistant 交替</small>"]
+  end
+  subgraph s3["③ 模型调用"]
+    direction TB
+    s3__0["system prompt<br/><small>prompt_store active 版本</small>"]
+    s3__1["动态定位<br/><small>末尾追加 · 不进 system</small>"]
+    s3__2["历史消息<br/><small>原文 + 摘要一起送入</small>"]
+  end
+  subgraph s4["④ 落库与副作用"]
+    direction TB
+    s4__0["add_message<br/><small>assistant + refs + truncated</small>"]
+    s4__1["标题<br/><small>首轮并行生成</small>"]
+    s4__2["画像标签<br/><small>fire-and-forget</small>"]
+  end
+  subgraph s5["⑤ 压缩与长期记忆"]
+    direction TB
+    s5__0["salience 打分<br/><small>信息密度 / 实体 / 离群</small>"]
+    s5__1["抽取式摘要<br/><small>保留关键句 · 非生成</small>"]
+    s5__2["安全阀<br/><small>失败改用截断</small>"]
+    s5__3["commit_summary<br/><small>版本号 · 幂等写入</small>"]
+  end
+  s1__0 --> s1__1
+  s1__1 --> s1__2
+  s2__0 --> s2__1
+  s2__1 --> s2__2
+  s2__2 --> s2__3
+  s3__0 --> s3__1
+  s3__1 --> s3__2
+  s4__0 --> s4__1
+  s4__1 --> s4__2
+  s5__0 --> s5__1
+  s5__1 --> s5__2
+  s5__2 --> s5__3
+  sa_s1_s2 --> sb_s1_s2
+  sa_s2_s3 --> sb_s2_s3
+  sa_s3_s4 --> sb_s3_s4
+  sa_s4_s5 -.->|两轮之间| sb_s4_s5
+  classDef default fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px,color:#0F172A
+  classDef amber fill:#FFFBEB,stroke:#FDE68A,stroke-width:1px,color:#92400E
+  classDef blue fill:#EFF6FF,stroke:#BFDBFE,stroke-width:1px,color:#1E40AF
+  classDef green fill:#F0FDF4,stroke:#86EFAC,stroke-width:1px,color:#166534
+  classDef slate fill:#F1F5F9,stroke:#CBD5E1,stroke-width:1px,color:#1E293B
+  classDef violet fill:#F5F3FF,stroke:#DDD6FE,stroke-width:1px,color:#5B21B6
+  class s1__0,s1__1,s1__2,sa_s1_s2,sb_s1_s2,sa_s2_s3,sb_s2_s3,sa_s3_s4,sb_s3_s4,sa_s4_s5,sb_s4_s5 slate
+  class s2__0,s2__1,s2__2,s2__3 green
+  class s3__0,s3__1,s3__2 blue
+  class s4__0,s4__1,s4__2 violet
+  class s5__0,s5__1,s5__2,s5__3 amber

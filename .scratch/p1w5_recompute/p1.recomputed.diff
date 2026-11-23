@@ -1,0 +1,119 @@
+diff --git a/core/data_boundary.py b/core/data_boundary.py
+--- a/core/data_boundary.py
++++ b/core/data_boundary.py
+@@ -27,6 +27,9 @@ L1-L3 防的是「模型把系统提示词、工具 schema 当答案说出来」
+ 
+ from __future__ import annotations
+ 
++import re
++import unicodedata
++
+ from core import config
+ 
+ SOURCE_KB = "kb"
+@@ -41,9 +44,66 @@ _MARKERS: dict[str, tuple[str, str]] = {
+     SOURCE_UPLOAD: ("【资料开始·用户上传】", "【资料结束·用户上传】"),
+ }
+ 
+-_ALL_MARKERS = tuple(m for pair in _MARKERS.values() for m in pair)
+-_NEUTRALIZED = ""
++_NEUTRALIZED = "［资料边界标记已移除］"
+ 
++# ---- 容错匹配：正文里的标记可能被"改造"过 ----
++# 空格 / 零宽字符 / 全角括号 / 繁体同形字 / 字间插分隔符，都要能还原成同一条标记。
++# 匹配在"折叠视图"上做，替换回填到原串：未命中的字符一个都不动，
++# 长度、偏移、原文回显都不受影响（见 _folding_view）。
++_SEP = r"[·・．.\-_—–/／|｜:：,，、~～•]*"
++_OPEN = r"[【\[〔〖]"
++_CLOSE = r"[】\]〕〗]"
++# 繁体同形字折叠：NFKC 不会把「資」变成「资」，这属于跨字形而不是兼容分解。
++_TRAD_TO_SIMP = str.maketrans(
++    {
++        "資": "资",
++        "結": "结",
++        "識": "识",
++        "庫": "库",
++        "聯": "联",
++        "網": "网",
++        "戶": "户",
++        "傳": "传",
++        "開": "开",
++    }
++)
++
++
++def _spell(word: str) -> str:
++    """允许每个字之间夹若干分隔符：'知识库' 也能匹配 '知·识·库'。"""
++    return _SEP.join(word)
++
++
++# 只认「括号 + 资料 + 开始/结束 + 来源词 + 括号」这一条完整结构：
++# 单独出现"资料""知识库"不匹配，正常讨论历史文件不会被误判成伪造标记。
++_MARKER_FUZZY_RE = re.compile(
++    rf"{_OPEN}{_spell('资料')}{_SEP}(?:{_spell('开始')}|{_spell('结束')})"
++    rf"{_SEP}(?:{_spell('知识库')}|{_spell('联网')}|{_spell('用户上传')}){_CLOSE}"
++)
++
++
++def _folding_view(text: str) -> tuple[str, list[int]]:
++    """逐码点折叠出匹配视图，并记录每个视图字符对应的原串下标。
++
++    为什么不整串 NFKC 后直接替换：
++      1. NFKC 会改变长度（兼容字符分解/组合），替换结果与原文对不上，
++         回显、引用区间、按字符数算的预算都会错位；
++      2. 归一化不可逆，未命中的正文也会被改写（全角标点变半角等）。
++    这里只把归一化结果当"索引侧缓冲"，命中区间映射回原串后再切片替换。
++    """
++    buf: list[str] = []
++    origin: list[int] = []
++    for i, ch in enumerate(text):
++        # Cf=零宽/软连字符/BOM，Mn=组合记号；isspace 覆盖 NBSP、全角空格、换行
++        if unicodedata.category(ch) in ("Cf", "Mn") or ch.isspace():
++            continue
++        for c in unicodedata.normalize("NFKC", ch).translate(_TRAD_TO_SIMP):
++            if unicodedata.category(c) in ("Cf", "Mn") or c.isspace():
++                continue
++            buf.append(c)
++            origin.append(i)
++    return "".join(buf), origin
++
+ 
+ def enabled() -> bool:
+     """这一层是否开启。默认 True，可单独置 0 做对照。"""
+@@ -56,13 +116,32 @@ def sanitize_markers(text: str) -> str:
+     为什么必须做：如果资料正文自带「【资料结束·知识库】」，模型会以为
+     资料到此结束、后面的文字是指令——等于给了外部内容一次「提前闭合」的机会。
+     画像 / 任务摘要同样走这里，避免它们伪造资料区。
++
++    匹配用容错正则：全角/半角括号、任意空白、零宽字符、繁体同形字、
++    字间插入分隔符都能认出来；替换只落在命中的原串区间上，其余字符逐字节不变。
+     """
+     if not text or not enabled():
+         return text
+-    out = text
+-    for m in _ALL_MARKERS:
+-        out = out.replace(m, _NEUTRALIZED)
+-    return out
++    view, origin = _folding_view(text)
++    if not view:
++        return text
++    spans = [
++        (origin[m.start()], origin[m.end() - 1] + 1) for m in _MARKER_FUZZY_RE.finditer(view)
++    ]
++    if not spans:
++        return text
++    out: list[str] = []
++    last = 0
++    for start, end in spans:
++        # finditer 已保证有序；紧邻/重叠的标记并成一次中和，避免重复插入
++        if start < last:
++            last = max(last, end)
++            continue
++        out.append(text[last:start])
++        out.append(_NEUTRALIZED)
++        last = end
++    out.append(text[last:])
++    return "".join(out)
+ 
+ 
+ def wrap(source: str, text: str) -> str:

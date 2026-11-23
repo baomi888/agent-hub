@@ -30,6 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from core import account, config, quota, token_store
 from core.auth import (
     CLAIM_JTI,
+    CLAIM_UID,
     clear_session_cookie,
     create_token,
     decode_claims,
@@ -312,7 +313,7 @@ def login(body: Credentials, request: Request, response: Response):
 
 
 @router.post("/logout/")
-def logout(request: Request, response: Response) -> dict:
+async def logout(request: Request, response: Response) -> dict:
     """退出登录：吊销当前令牌 + 清 Cookie。
 
     JWT 是无状态的，光删 Cookie 收不回已签出去的令牌（sky-take-out 的
@@ -321,6 +322,11 @@ def logout(request: Request, response: Response) -> dict:
     换个客户端照样能进。
     """
     claims = decode_claims(extract_token(request)) or {}
+    uid = claims.get(CLAIM_UID) or claims.get("sub")
+    if uid:
+        from core.chat_runs import get_registry
+
+        await get_registry().stop_user(str(uid))
     jti = str(claims.get(CLAIM_JTI) or "")
     if jti:
         token_store.revoke(jti, int(claims.get("exp", 0)))

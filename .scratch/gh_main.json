@@ -1,0 +1,248 @@
+[
+  {
+    "sha": "69bfa408b3ca5e53d86a1d24f8c7c3e63e926487",
+    "node_id": "C_kwDOUf7gKNoAKDY5YmZhNDA4YjNjYTVlNTNkODZhMWQyNGY4YzdjM2U2M2U5MjY0ODc",
+    "commit": {
+      "author": {
+        "name": "baomi888",
+        "email": "3059591171@qq.com",
+        "date": "2026-11-21T11:13:29Z"
+      },
+      "committer": {
+        "name": "baomi888",
+        "email": "3059591171@qq.com",
+        "date": "2026-11-21T11:13:29Z"
+      },
+      "message": "fix(vision): 视觉链路统一走 DeepSeek，修复公式不渲染\n\n1) 图片理解报「模型不存在」的根因：默认 VISION_MODEL=qwen-vl-plus\n   在百炼已下线（404 Model not exist，qwen-vl-max 同）。按需求把视觉\n   链路统一到 DeepSeek，VISION_KEY/BASE/MODEL 默认回落 DEEPSEEK_*，\n   模型用 deepseek-flash（官方 guides/vision 支持 image_url + base64）。\n\n2) DeepSeek 默认开思考模式，max_tokens 会被全烧成 reasoning_tokens、\n   content 返回空串。get_vision_llm 显式下发 thinking=disabled，\n   由 VISION_THINKING 控制，留空则不传以兼容百炼。\n\n3) 数学符号显示不出来的根因在前端正则：INLINE_MATH_RE 写成\n   (?![s$])（JS 里是反斜杠或字母 s 而不是空白），把模型惯写的\n   带空格内边距的行内公式整批挡掉；looksLikeMath 还有一条\n   「首尾带空格即非公式」的守卫在二次拦截。现在：\n   - 正则改为 (?![\\$])...(?![d$])，兼容块级公式不被吃掉\n   - 去掉空格守卫，数字与单字母公式单独放行（讲题表格里的 0 与 x）\n   - 价格与 Shell 变量仍不误伤（用真实回答做正负双向断言）\n\n验证：21 项正负断言全过；前端 tsc --noEmit 干净；用真实账号跑\n登录→上传→SSE 全链路，391 token 帧、0 错误帧，KaTeX 33/33 渲染成功。",
+      "tree": {
+        "sha": "56da5eff21aa81c761e04f50c52dba2750fa3e4e",
+        "url": "https://api.github.com/repos/baomi888/agent-hub/git/trees/56da5eff21aa81c761e04f50c52dba2750fa3e4e"
+      },
+      "url": "https://api.github.com/repos/baomi888/agent-hub/git/commits/69bfa408b3ca5e53d86a1d24f8c7c3e63e926487",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/baomi888/agent-hub/commits/69bfa408b3ca5e53d86a1d24f8c7c3e63e926487",
+    "html_url": "https://github.com/baomi888/agent-hub/commit/69bfa408b3ca5e53d86a1d24f8c7c3e63e926487",
+    "comments_url": "https://api.github.com/repos/baomi888/agent-hub/commits/69bfa408b3ca5e53d86a1d24f8c7c3e63e926487/comments",
+    "author": {
+      "login": "baomi888",
+      "id": 320182261,
+      "node_id": "U_kgDOExWX9Q",
+      "avatar_url": "https://avatars.githubusercontent.com/u/320182261?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/baomi888",
+      "html_url": "https://github.com/baomi888",
+      "followers_url": "https://api.github.com/users/baomi888/followers",
+      "following_url": "https://api.github.com/users/baomi888/following{/other_user}",
+      "gists_url": "https://api.github.com/users/baomi888/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/baomi888/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/baomi888/subscriptions",
+      "organizations_url": "https://api.github.com/users/baomi888/orgs",
+      "repos_url": "https://api.github.com/users/baomi888/repos",
+      "events_url": "https://api.github.com/users/baomi888/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/baomi888/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "baomi888",
+      "id": 320182261,
+      "node_id": "U_kgDOExWX9Q",
+      "avatar_url": "https://avatars.githubusercontent.com/u/320182261?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/baomi888",
+      "html_url": "https://github.com/baomi888",
+      "followers_url": "https://api.github.com/users/baomi888/followers",
+      "following_url": "https://api.github.com/users/baomi888/following{/other_user}",
+      "gists_url": "https://api.github.com/users/baomi888/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/baomi888/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/baomi888/subscriptions",
+      "organizations_url": "https://api.github.com/users/baomi888/orgs",
+      "repos_url": "https://api.github.com/users/baomi888/repos",
+      "events_url": "https://api.github.com/users/baomi888/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/baomi888/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "366afbbb4b97879a086060c4f2fbc15aaffa7030",
+        "url": "https://api.github.com/repos/baomi888/agent-hub/commits/366afbbb4b97879a086060c4f2fbc15aaffa7030",
+        "html_url": "https://github.com/baomi888/agent-hub/commit/366afbbb4b97879a086060c4f2fbc15aaffa7030"
+      }
+    ]
+  },
+  {
+    "sha": "366afbbb4b97879a086060c4f2fbc15aaffa7030",
+    "node_id": "C_kwDOUf7gKNoAKDM2NmFmYmJiNGI5Nzg3OWEwODYwNjBjNGYyZmJjMTVhYWZmYTcwMzA",
+    "commit": {
+      "author": {
+        "name": "baomi888",
+        "email": "3059591171@qq.com",
+        "date": "2026-11-21T05:21:29Z"
+      },
+      "committer": {
+        "name": "baomi888",
+        "email": "3059591171@qq.com",
+        "date": "2026-11-21T05:21:29Z"
+      },
+      "message": "fix(chat): 参考资料块等回答写完再显示，流式中途不再插入来源\n\n用户反馈「不要一下子就给出参考资料，或联网搜索来源」：refs/sources 帧一到\n参考资料块就插入气泡，流式中途高度突变，顶边锚定刚钉好的开头被往下顶。\n给参考资料主块和兜底块加 !m.streaming 门控，与联网来源 (WebSources) 统一\n到「回答写完再显示」。实测流式全程 (159帧) 气泡内 ref-block 恒为 0。补 3 条守卫。",
+      "tree": {
+        "sha": "fba2cbd92da36f2f7658f40fbd060c7f3ebab4ad",
+        "url": "https://api.github.com/repos/baomi888/agent-hub/git/trees/fba2cbd92da36f2f7658f40fbd060c7f3ebab4ad"
+      },
+      "url": "https://api.github.com/repos/baomi888/agent-hub/git/commits/366afbbb4b97879a086060c4f2fbc15aaffa7030",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/baomi888/agent-hub/commits/366afbbb4b97879a086060c4f2fbc15aaffa7030",
+    "html_url": "https://github.com/baomi888/agent-hub/commit/366afbbb4b97879a086060c4f2fbc15aaffa7030",
+    "comments_url": "https://api.github.com/repos/baomi888/agent-hub/commits/366afbbb4b97879a086060c4f2fbc15aaffa7030/comments",
+    "author": {
+      "login": "baomi888",
+      "id": 320182261,
+      "node_id": "U_kgDOExWX9Q",
+      "avatar_url": "https://avatars.githubusercontent.com/u/320182261?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/baomi888",
+      "html_url": "https://github.com/baomi888",
+      "followers_url": "https://api.github.com/users/baomi888/followers",
+      "following_url": "https://api.github.com/users/baomi888/following{/other_user}",
+      "gists_url": "https://api.github.com/users/baomi888/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/baomi888/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/baomi888/subscriptions",
+      "organizations_url": "https://api.github.com/users/baomi888/orgs",
+      "repos_url": "https://api.github.com/users/baomi888/repos",
+      "events_url": "https://api.github.com/users/baomi888/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/baomi888/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "baomi888",
+      "id": 320182261,
+      "node_id": "U_kgDOExWX9Q",
+      "avatar_url": "https://avatars.githubusercontent.com/u/320182261?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/baomi888",
+      "html_url": "https://github.com/baomi888",
+      "followers_url": "https://api.github.com/users/baomi888/followers",
+      "following_url": "https://api.github.com/users/baomi888/following{/other_user}",
+      "gists_url": "https://api.github.com/users/baomi888/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/baomi888/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/baomi888/subscriptions",
+      "organizations_url": "https://api.github.com/users/baomi888/orgs",
+      "repos_url": "https://api.github.com/users/baomi888/repos",
+      "events_url": "https://api.github.com/users/baomi888/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/baomi888/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "c51950e156cf9702ed53624fefea6cd762e9d73d",
+        "url": "https://api.github.com/repos/baomi888/agent-hub/commits/c51950e156cf9702ed53624fefea6cd762e9d73d",
+        "html_url": "https://github.com/baomi888/agent-hub/commit/c51950e156cf9702ed53624fefea6cd762e9d73d"
+      }
+    ]
+  },
+  {
+    "sha": "c51950e156cf9702ed53624fefea6cd762e9d73d",
+    "node_id": "C_kwDOUf7gKNoAKGM1MTk1MGUxNTZjZjk3MDJlZDUzNjI0ZmVmZWE2Y2Q3NjJlOWQ3M2Q",
+    "commit": {
+      "author": {
+        "name": "baomi888",
+        "email": "3059591171@qq.com",
+        "date": "2026-11-21T04:46:25Z"
+      },
+      "committer": {
+        "name": "baomi888",
+        "email": "3059591171@qq.com",
+        "date": "2026-11-21T04:46:25Z"
+      },
+      "message": "fix(chat): 跟随阶段顶边锚定替代底边贴底，长回答不再顶出视口\n\n全程 CDP 探针（390×633，回答 6→601 字）定位：旧跟随目标 bottom-clientHeight\n在气泡长过一屏后把顶边顶出视口（lastTop 14→-544），即视频里『开头一闪而过、\n视野钉底部、持续上下跳』。改为每帧按绝对顶边坐标锚定到 ANCHOR_GAP，历史消息\n（无 anchorAbsRef）沿用底边贴底以保证切会话落底。补 2 条守卫测试。",
+      "tree": {
+        "sha": "942a0d340c6a7164ba3f64a1f7e1879dc9032420",
+        "url": "https://api.github.com/repos/baomi888/agent-hub/git/trees/942a0d340c6a7164ba3f64a1f7e1879dc9032420"
+      },
+      "url": "https://api.github.com/repos/baomi888/agent-hub/git/commits/c51950e156cf9702ed53624fefea6cd762e9d73d",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/baomi888/agent-hub/commits/c51950e156cf9702ed53624fefea6cd762e9d73d",
+    "html_url": "https://github.com/baomi888/agent-hub/commit/c51950e156cf9702ed53624fefea6cd762e9d73d",
+    "comments_url": "https://api.github.com/repos/baomi888/agent-hub/commits/c51950e156cf9702ed53624fefea6cd762e9d73d/comments",
+    "author": {
+      "login": "baomi888",
+      "id": 320182261,
+      "node_id": "U_kgDOExWX9Q",
+      "avatar_url": "https://avatars.githubusercontent.com/u/320182261?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/baomi888",
+      "html_url": "https://github.com/baomi888",
+      "followers_url": "https://api.github.com/users/baomi888/followers",
+      "following_url": "https://api.github.com/users/baomi888/following{/other_user}",
+      "gists_url": "https://api.github.com/users/baomi888/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/baomi888/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/baomi888/subscriptions",
+      "organizations_url": "https://api.github.com/users/baomi888/orgs",
+      "repos_url": "https://api.github.com/users/baomi888/repos",
+      "events_url": "https://api.github.com/users/baomi888/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/baomi888/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "baomi888",
+      "id": 320182261,
+      "node_id": "U_kgDOExWX9Q",
+      "avatar_url": "https://avatars.githubusercontent.com/u/320182261?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/baomi888",
+      "html_url": "https://github.com/baomi888",
+      "followers_url": "https://api.github.com/users/baomi888/followers",
+      "following_url": "https://api.github.com/users/baomi888/following{/other_user}",
+      "gists_url": "https://api.github.com/users/baomi888/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/baomi888/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/baomi888/subscriptions",
+      "organizations_url": "https://api.github.com/users/baomi888/orgs",
+      "repos_url": "https://api.github.com/users/baomi888/repos",
+      "events_url": "https://api.github.com/users/baomi888/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/baomi888/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "52bb9406709281f22318b32788e70565435a1551",
+        "url": "https://api.github.com/repos/baomi888/agent-hub/commits/52bb9406709281f22318b32788e70565435a1551",
+        "html_url": "https://github.com/baomi888/agent-hub/commit/52bb9406709281f22318b32788e70565435a1551"
+      }
+    ]
+  }
+]

@@ -68,59 +68,88 @@ export async function* streamChat(
     approval_token?: string;
     turn_id?: string;
   },
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  resume = false,
+  resumeMessageId?: number
 ): AsyncGenerator<StreamEvent> {
-  const res = await fetch("/api/chat/stream", {
-    method: "POST",
-    // 流式请求同样要带 Cookie，否则第一帧就被后端的鉴权拦下
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal,
-  });
-
-  if (!res.ok || !res.body) {
-    let detail = `HTTP ${res.status}`;
-    if (res.status === 401) {
-      window.dispatchEvent(new Event("baomi:unauthorized"));
-      throw new Error("未登录或登录已过期，请重新登录");
-    }
+  let cursor = 0;
+  let reconnect = resume;
+  let messageId = resumeMessageId;
+  while (!signal?.aborted) {
     try {
-      const j = await res.json();
-      // 同 api.ts：detail 可能是字符串，也可能是 FastAPI 422 的数组。
-      // 直接 `new Error(j.detail)` 会把它变成 "[object Object]"。
-      detail = detailToMessage(j.detail, detail);
-    } catch {
-      /* ignore */
-    }
-    throw new Error(detail);
-  }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-
-      let idx: number;
-      while ((idx = buffer.indexOf("\n\n")) !== -1) {
-        const frame = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 2);
-        const ev = parseFrame(frame);
-        if (ev) yield ev;
+      const res = await fetch(reconnect
+        ? `/api/chat/stream/${encodeURIComponent(body.sid)}?after=${cursor}${messageId ? `&message_id=${messageId}` : ""}`
+        : "/api/chat/stream", {
+        method: reconnect ? "GET" : "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        ...(reconnect ? {} : { body: JSON.stringify(body) }),
+        signal,
+      });
+      if (res.status === 204 || (reconnect && res.status === 409)) return;
+      if (!res.ok || !res.body) {
+        let detail = `HTTP ${res.status}`;
+        if (res.status === 401) {
+          window.dispatchEvent(new Event("baomi:unauthorized"));
+        }
+        try {
+          const j = await res.json();
+          detail = detailToMessage(j.detail, detail);
+        } catch { /* no JSON body */ }
+        if (res.status >= 400 && res.status < 500) {
+          yield { event: "error", data: { detail } };
+          return;
+        }
+        throw new Error(detail);
       }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let replaying = reconnect;
+
+      try {
+        while (!signal?.aborted) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer = (buffer + decoder.decode(value, { stream: true })).replace(/\r\n/g, "\n");
+          let idx: number;
+          while ((idx = buffer.indexOf("\n\n")) !== -1) {
+            const ev = parseFrame(buffer.slice(0, idx));
+            buffer = buffer.slice(idx + 2);
+            if (!ev) continue;
+            if (ev.event === "meta") {
+              const receivedId = Number(ev.data.message_id) || undefined;
+              if (messageId && receivedId && messageId !== receivedId) return;
+              messageId = receivedId ?? messageId;
+            }
+            if (ev.event === "replay_end") replaying = false;
+            const next = Number(ev.data.cursor ?? 0);
+            if (next && next <= cursor) continue;
+            if (next) cursor = next;
+            if (replaying) ev.data.recovered = true;
+            yield ev;
+            if (ev.event === "done") return;
+          }
+        }
+      } finally {
+        try { await reader.cancel(); } catch { /* closed */ }
+        reader.releaseLock();
+      }
+
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      // A failed POST may already have started a task. Never submit it again.
     }
-  } finally {
-    // 中途 abort / 抛错都要归还 reader：以前漏了这一步，取消回答会泄漏连接
-    try {
-      await reader.cancel();
-    } catch {
-      /* 已关闭时忽略 */
-    }
-    reader.releaseLock();
+    reconnect = true;
+    await new Promise<void>((resolve) => {
+      if (signal?.aborted) return resolve();
+      const finish = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", finish);
+        resolve();
+      };
+      const timer = setTimeout(finish, 1500);
+      signal?.addEventListener("abort", finish, { once: true });
+    });
   }
 }

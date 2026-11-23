@@ -1,0 +1,60 @@
+digraph "08-scheduler" {
+  graph [rankdir=TB, fontname="Microsoft YaHei", bgcolor="#F7F8FA", nodesep=0.28, ranksep=0.38, compound=true];
+  node [shape=box, style="rounded,filled", fontname="Microsoft YaHei", fontsize=11, margin="0.12,0.08", penwidth=1.0];
+  edge [fontname="Microsoft YaHei", fontsize=9, color="#64748B", arrowsize=0.7];
+  subgraph cluster_p1 {
+    label="独立 worker · worker/scheduler.py"; fontsize=13; fontcolor="#155E75"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#A5F3FC";
+    p1__0 [label="APScheduler\nBlockingScheduler · 3.x", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p1__1 [label="时区\nAsia/Shanghai", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p1__2 [label="与 web 解耦\nweb 只写「待执行」行", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p1__3 [label="心跳\nworker_heartbeat 周期写", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p1__4 [label="优雅退出\n停止调度 · 收尾当前任务", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p1__5 [label="单实例假设\n多 worker 会重复触发", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+  }
+  subgraph cluster_p2 {
+    label="调度底座 · core/scheduler.py"; fontsize=13; fontcolor="#155E75"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#A5F3FC";
+    p2__0 [label="schedule_jobs\njob_key / cron / enabled", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p2__1 [label="job_runs\nplanned_at / status / attempts", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p2__2 [label="幂等键\njob_key|subject|planned_at", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p2__3 [label="ON CONFLICT\n重复登记直接跳过", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p2__4 [label="心跳三态\nup / stalled / down", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p2__5 [label="重试\n失败按 attempts 再投", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+  }
+  subgraph cluster_p3 {
+    label="七个任务"; fontsize=13; fontcolor="#155E75"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#A5F3FC";
+    p3__0 [label="delegate.dispatch\n每 5 分钟扫描到点委托", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p3__1 [label="delegate.retry\n错峰 7/22/37/52 分", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p3__2 [label="report.daily\n默认 23:30 生成总结", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p3__3 [label="report.backfill\n04:00 补 7 天内失败", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p3__4 [label="housekeeping\n04:15 清 90 天记录", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p3__5 [label="profile.aggregate\n02:30 聚合画像", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p3__6 [label="prompt.evolve\n每 6 小时一轮候选", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+  }
+  subgraph cluster_p4 {
+    label="业务服务 · service/"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    p4__0 [label="daily\n每日委托 + 每日总结", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__1 [label="cet\n四六级计划 / 词汇 / 模考", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__2 [label="path\n关卡式学习路径", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__3 [label="checkin\n打卡记录与连续天数", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__4 [label="prompt_evo\nGEPA 候选 · 评估 · 回滚", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__5 [label="templates\n模板目录 · 一次起点", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+  subgraph cluster_p5 {
+    label="对外接口"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    p5__0 [label="/api/delegate\n7 条 · 委托 CRUD / runs", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__1 [label="/api/report\n5 条 · 总结生成 / 查询", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__2 [label="/api/schedule\n5 条 · health / run-now", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__3 [label="/api/cet\n计划 · 任务 · 词汇", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__4 [label="/api/path\n节点进度 · 解锁", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__5 [label="/api/checkin\n打卡 · 统计", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+  subgraph cluster_p6 {
+    label="配额与可观测"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    p6__0 [label="auto 配额\n120 次 / 日 · 独立账本", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__1 [label="tokens_out\n每次运行记 token", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__2 [label="失败告警\n心跳 + 连续失败", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__3 [label="run-now\n管理员手动补跑", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__4 [label="运行历史\n按 job_key 分页", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__5 [label="跳过原因\n幂等 / 额度 / 禁用", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+}

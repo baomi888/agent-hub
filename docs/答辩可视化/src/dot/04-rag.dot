@@ -1,0 +1,59 @@
+digraph "04-rag" {
+  graph [rankdir=TB, fontname="Microsoft YaHei", bgcolor="#F7F8FA", nodesep=0.28, ranksep=0.38, compound=true];
+  node [shape=box, style="rounded,filled", fontname="Microsoft YaHei", fontsize=11, margin="0.12,0.08", penwidth=1.0];
+  edge [fontname="Microsoft YaHei", fontsize=9, color="#64748B", arrowsize=0.7];
+  subgraph cluster_p1 {
+    label="入库链路 · api/kb + kb/rag_core"; fontsize=13; fontcolor="#155E75"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#A5F3FC";
+    p1__0 [label="流式落盘\n大小预检 · 分块写 · 失败清理", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p1__1 [label="文档解析\ntxt / md / pdf", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p1__2 [label="切片\n500 字 · 重叠 50", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p1__3 [label="主题标签\n入库时注入 topic 元数据", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p1__4 [label="批量向量化\nbatch 10 · 并发 4", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p1__5 [label="重建 / 删文件\n删 collection 片段后重写", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+  }
+  subgraph cluster_p2 {
+    label="存储与隔离 · kb/pipelines"; fontsize=13; fontcolor="#155E75"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#A5F3FC";
+    p2__0 [label="Chroma 客户端\n进程级单例 · 持久化目录", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p2__1 [label="collection 命名\nkb_{kb_id}", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p2__2 [label="多库隔离\n每库独立 collection", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p2__3 [label="原始留档\ndata/uploads 保原文", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p2__4 [label="文件清单\n原子写 · 支持单文件删", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p2__5 [label="归属校验\nowner_of · 跨用户拒绝", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+  }
+  subgraph cluster_p3 {
+    label="混合检索 · retrieve_with_score"; fontsize=13; fontcolor="#155E75"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#A5F3FC";
+    p3__0 [label="向量扩召回\n3 倍 · 下限 12 条", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p3__1 [label="BM25 通道\nk1=1.5 · b=0.75", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p3__2 [label="RRF 融合\nk=60 · 无需分数对齐", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p3__3 [label="阈值过滤\n余弦 < 0.25 丢弃", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p3__4 [label="MMR 去重\nλ=0.65 · 字符 2-gram", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    p3__5 [label="截断 top-k\n前端可调 · 上限 20", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+  }
+  subgraph cluster_p4 {
+    label="缓存与守卫"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    p4__0 [label="embed 指纹\n模型 / 维度 / host 不一致即拒绝", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__1 [label="查询向量缓存\n省一次外部 embedding", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__2 [label="检索结果缓存\nkey 含 owner · 防串结果", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__3 [label="画像偏置\n标签命中重排 · 不改距离", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__4 [label="相似度换算\n1 - distance/2", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__5 [label="空库 / 异常\n明确报错 · 不静默", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+  subgraph cluster_p5 {
+    label="依据判定与输出"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    p5__0 [label="assess_grounding\n最高相似度分档", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__1 [label="0.45 阈值\n低于即判弱依据", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__2 [label="strong / medium / weak\n三档 · 前端提示条", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__3 [label="grounding_note\n拼进提示词约束", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__4 [label="sources 帧\n来源 · 页码 · 预览", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p5__5 [label="refs 文本\n[1][2] 角标可回原文", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+  subgraph cluster_p6 {
+    label="联网导入 · kb/importer"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    p6__0 [label="Serper 预览\n候选 URL 供勾选", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__1 [label="URL 抓取\n超时 / 大小 / 类型限制", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__2 [label="正文清洗\n去导航 · 保留主体", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__3 [label="批量导入\n逐条失败不拖垮整批", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__4 [label="下载代理\n/api/kb/download", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p6__5 [label="SSRF 白名单\n私网地址直接拒", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+}

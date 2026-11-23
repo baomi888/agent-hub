@@ -1,0 +1,66 @@
+digraph "10-flow-main" {
+  graph [rankdir=TB, fontname="Microsoft YaHei", bgcolor="#F7F8FA", nodesep=0.28, ranksep=0.38, compound=true];
+  node [shape=box, style="rounded,filled", fontname="Microsoft YaHei", fontsize=11, margin="0.12,0.08", penwidth=1.0];
+  edge [fontname="Microsoft YaHei", fontsize=9, color="#64748B", arrowsize=0.7];
+  subgraph cluster_s1 {
+    label="① 接入"; fontsize=13; fontcolor="#166534"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#86EFAC";
+    s1__0 [label="POST /api/chat/stream\nNginx → Next rewrite → FastAPI", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+    s1__1 [label="ChatRequest 解析\nsid · question · use_kb / use_web", fillcolor="#F0FDF4", color="#86EFAC", fontcolor="#166534"];
+  }
+  subgraph cluster_s2 {
+    label="② 前置校验"; fontsize=13; fontcolor="#1E40AF"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#BFDBFE";
+    s2__0 [label="JWT 鉴权\n三处取 token · 失败 401", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    s2__1 [label="会话归属\nsid 非本人 / 不存在 → 404", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    s2__2 [label="每日 ask 配额\n60 次 / 日 · 超限 429", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    s2__3 [label="LLM 并发闸\n16 并发 · 排队 20s", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+    s2__4 [label="返回 StreamingResponse\n200 之后不能再改状态码", fillcolor="#EFF6FF", color="#BFDBFE", fontcolor="#1E40AF"];
+  }
+  subgraph cluster_s3 {
+    label="③ 组装与选路"; fontsize=13; fontcolor="#5B21B6"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#DDD6FE";
+    s3__0 [label="assemble_history\n摘要块 + 最近 K 轮原文", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    s3__1 [label="router.decide\nworkflow / agent · 2s 超时", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    s3__2 [label="执行计划\nmode 兼容 · 能力开关", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+  }
+  subgraph cluster_s4 {
+    label="④ 四分支执行"; fontsize=13; fontcolor="#92400E"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#FDE68A";
+    s4__0 [label="vision\n有图优先 · qwen-vl", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    s4__1 [label="hybrid\n工作流 × Agent", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    s4__2 [label="agent\nReAct · 四工具", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    s4__3 [label="rag\n检索增强", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    s4__4 [label="llm\n纯对话", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+  }
+  subgraph cluster_s5 {
+    label="⑤ 生成与工具"; fontsize=13; fontcolor="#92400E"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#FDE68A";
+    s5__0 [label="模型流式输出\ntoken 帧逐段下发", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    s5__1 [label="工具调用循环\n≤10 步 · 结果截断", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    s5__2 [label="引用与依据\nsources / grounding 帧", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+  }
+  subgraph cluster_s6 {
+    label="⑥ 收尾"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    s6__0 [label="落库 assistant\ncontent + refs + truncated", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    s6__1 [label="标题 / 画像\n异步 · 失败不阻塞", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    s6__2 [label="压缩调度\n两轮之间判定", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    s6__3 [label="释放并发名额\nBackgroundTask 兜底", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+  s1__0 -> s1__1 [ style=solid color="#64748B"];
+  s2__0 -> s2__1 [ style=solid color="#64748B"];
+  s2__1 -> s2__2 [ style=solid color="#64748B"];
+  s2__2 -> s2__3 [ style=solid color="#64748B"];
+  s2__3 -> s2__4 [ style=solid color="#64748B"];
+  s3__0 -> s3__1 [ style=solid color="#64748B"];
+  s3__1 -> s3__2 [ style=solid color="#64748B"];
+  s4__0 -> s4__1 [ style=solid color="#64748B"];
+  s4__1 -> s4__2 [ style=solid color="#64748B"];
+  s4__2 -> s4__3 [ style=solid color="#64748B"];
+  s4__3 -> s4__4 [ style=solid color="#64748B"];
+  s5__0 -> s5__1 [ style=solid color="#64748B"];
+  s5__1 -> s5__2 [ style=solid color="#64748B"];
+  s6__0 -> s6__1 [ style=solid color="#64748B"];
+  s6__1 -> s6__2 [ style=solid color="#64748B"];
+  s6__2 -> s6__3 [ style=solid color="#64748B"];
+  sa_s1_s2 -> sb_s1_s2 [ style=solid color="#64748B"];
+  sa_s2_s3 -> sb_s2_s3 [ style=solid color="#64748B"];
+  sa_s3_s4 -> sb_s3_s4 [label="按计划" style=solid color="#64748B"];
+  sa_s4_s5 -> sb_s4_s5 [label="分支输出" style=solid color="#64748B"];
+  sa_s5_s6 -> sb_s5_s6 [ style=solid color="#64748B"];
+}

@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 880" width="1000" height="880">
+  <defs>
+    <linearGradient id="gInj" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFF6EA"/>
+      <stop offset="1" stop-color="#FFE4C4"/>
+    </linearGradient>
+    <linearGradient id="gRep" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#EEFAF2"/>
+      <stop offset="1" stop-color="#D3EEDD"/>
+    </linearGradient>
+    <linearGradient id="gNote" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#EFF5FF"/>
+      <stop offset="1" stop-color="#D5E5FF"/>
+    </linearGradient>
+    <linearGradient id="gLog" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F5F6F8"/>
+      <stop offset="1" stop-color="#E2E4E9"/>
+    </linearGradient>
+    <linearGradient id="gDream" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F8F1FF"/>
+      <stop offset="1" stop-color="#E5D3FF"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="1000" height="880" fill="#FFFFFF"/>
+
+  <text x="80" y="46" font-family="Noto Sans SC" font-size="15" fill="#8A8F98">一次会话开始时，从上往下被读到</text>
+  <line x1="80" y1="60" x2="960" y2="60" stroke="#E5E6EB" stroke-width="1"/>
+
+  <rect x="80" y="84" width="580" height="110" rx="16" fill="url(#gInj)" stroke="#EA580C" stroke-width="1.5"/>
+  <rect x="80" y="84" width="8" height="110" rx="4" fill="#EA580C"/>
+  <text x="108" y="128" font-family="Noto Sans SC" font-size="21" font-weight="600" fill="#1F2329">注入上下文 · injected context</text>
+  <text x="108" y="160" font-family="Noto Sans SC" font-size="14" fill="#4E5969">开局就装进窗口的那一小段：短索引 + 少数几条一定会用到的笔记</text>
+
+  <rect x="80" y="216" width="580" height="110" rx="16" fill="url(#gRep)" stroke="#16A34A" stroke-width="1.5"/>
+  <rect x="80" y="216" width="8" height="110" rx="4" fill="#16A34A"/>
+  <text x="108" y="260" font-family="Noto Sans SC" font-size="21" font-weight="600" fill="#1F2329">记忆表征 · representation</text>
+  <text x="108" y="292" font-family="Noto Sans SC" font-size="14" fill="#4E5969">由记录和笔记算出来的结构，典型是互相链接的 wiki 页</text>
+
+  <rect x="80" y="348" width="580" height="110" rx="16" fill="url(#gNote)" stroke="#3B82F6" stroke-width="1.5"/>
+  <rect x="80" y="348" width="8" height="110" rx="4" fill="#3B82F6"/>
+  <text x="108" y="392" font-family="Noto Sans SC" font-size="21" font-weight="600" fill="#1F2329">记忆笔记 · memory notes</text>
+  <text x="108" y="424" font-family="Noto Sans SC" font-size="14" fill="#4E5969">模型自己写的显著观察：验证过的规则、陷阱、用户的纠正</text>
+
+  <rect x="80" y="480" width="580" height="110" rx="16" fill="url(#gLog)" stroke="#8A8F98" stroke-width="1.5"/>
+  <rect x="80" y="480" width="8" height="110" rx="4" fill="#8A8F98"/>
+  <text x="108" y="524" font-family="Noto Sans SC" font-size="21" font-weight="600" fill="#1F2329">会话日志 · transcripts</text>
+  <text x="108" y="556" font-family="Noto Sans SC" font-size="14" fill="#4E5969">可搜索的事件日志，是整套记忆的事实底座（原文，不是摘要）</text>
+
+  <path d="M52 154 L52 520" stroke="#C9CDD4" stroke-width="1.6" fill="none"/>
+  <path d="M46 161 L52 150 L58 161" stroke="#C9CDD4" stroke-width="1.6" fill="none"/>
+  <path d="M46 513 L52 524 L58 513" stroke="#C9CDD4" stroke-width="1.6" fill="none"/>
+
+  <rect x="730" y="290" width="230" height="232" rx="20" fill="url(#gDream)" stroke="#7C3AED" stroke-width="1.6"/>
+  <text x="845" y="330" font-family="Noto Sans SC" font-size="22" font-weight="700" fill="#5B21B6" text-anchor="middle">dreaming</text>
+  <text x="845" y="358" font-family="Noto Sans SC" font-size="13" fill="#4E5969" text-anchor="middle">会话之间的离线整理</text>
+  <line x1="768" y1="374" x2="922" y2="374" stroke="#D3BBFF" stroke-width="1"/>
+  <text x="752" y="402" font-family="Noto Sans SC" font-size="13.5" fill="#1F2329">· 拿日志核对笔记，改错</text>
+  <text x="752" y="430" font-family="Noto Sans SC" font-size="13.5" fill="#1F2329">· 写新笔记 / 建 wiki</text>
+  <text x="752" y="458" font-family="Noto Sans SC" font-size="13.5" fill="#1F2329">· 决定哪几条升到注入层</text>
+  <text x="752" y="492" font-family="Noto Sans SC" font-size="12" fill="#7C3AED">会话不会读到它刚产出的东西</text>
+
+  <path d="M845 290 L845 139 L672 139" stroke="#7C3AED" stroke-width="1.8" fill="none" stroke-dasharray="7 6"/>
+  <path d="M679 133 L668 139 L679 145" stroke="#7C3AED" stroke-width="1.8" fill="none"/>
+
+  <path d="M730 340 L700 340 L700 271 L672 271" stroke="#7C3AED" stroke-width="1.8" fill="none" stroke-dasharray="7 6"/>
+  <path d="M679 265 L668 271 L679 277" stroke="#7C3AED" stroke-width="1.8" fill="none"/>
+
+  <path d="M730 403 L672 403" stroke="#7C3AED" stroke-width="1.8" fill="none" stroke-dasharray="7 6"/>
+  <path d="M679 397 L668 403 L679 409" stroke="#7C3AED" stroke-width="1.8" fill="none"/>
+
+  <path d="M730 476 L700 476 L700 535 L672 535" stroke="#7C3AED" stroke-width="1.8" fill="none" stroke-dasharray="7 6"/>
+  <path d="M679 529 L668 535 L679 541" stroke="#7C3AED" stroke-width="1.8" fill="none"/>
+  <text x="420" y="648" font-family="Noto Sans SC" font-size="13" fill="#7C3AED">日志是唯一的事实来源，笔记错了只能拿它改</text>
+
+  <text x="80" y="712" font-family="Noto Sans SC" font-size="14" fill="#86909C">相邻层之间是双向的：笔记能回查日志，索引能从笔记里提升；但越靠上的层，每开一次会话都要重付一次 token。</text>
+  <text x="80" y="742" font-family="Noto Sans SC" font-size="14" fill="#86909C">所以 Claude Code 的自动记忆只把 MEMORY.md 的前 200 行 / 25 KB 装进注入层，其余留在磁盘上按需读。</text>
+  <text x="80" y="812" font-family="Noto Sans SC" font-size="12.5" fill="#C9CDD4">来源：Anthropic, The components of agent memory（2026-11-06）</text>
+</svg>

@@ -1,0 +1,53 @@
+digraph "11-flow-ingest" {
+  graph [rankdir=TB, fontname="Microsoft YaHei", bgcolor="#F7F8FA", nodesep=0.28, ranksep=0.38, compound=true];
+  node [shape=box, style="rounded,filled", fontname="Microsoft YaHei", fontsize=11, margin="0.12,0.08", penwidth=1.0];
+  edge [fontname="Microsoft YaHei", fontsize=9, color="#64748B", arrowsize=0.7];
+  subgraph cluster_s1 {
+    label="① 上传校验"; fontsize=13; fontcolor="#155E75"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#A5F3FC";
+    s1__0 [label="POST /api/kb/{id}/upload\nmultipart · owner 校验", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    s1__1 [label="大小与类型\n≤100MB · txt / md / pdf", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    s1__2 [label="流式落盘\n分块写 · 失败清理", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+  }
+  subgraph cluster_s2 {
+    label="② 解析与切片"; fontsize=13; fontcolor="#155E75"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#A5F3FC";
+    s2__0 [label="文本抽取\nPDF → 纯文本", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    s2__1 [label="噪声清洗\n页眉页脚 / 空行", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    s2__2 [label="切片\n500 字 · 重叠 50", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+    s2__3 [label="元数据\ntopic / 文件名 / 序号", fillcolor="#ECFEFF", color="#A5F3FC", fontcolor="#155E75"];
+  }
+  subgraph cluster_s3 {
+    label="③ 向量化"; fontsize=13; fontcolor="#92400E"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#FDE68A";
+    s3__0 [label="批量 embedding\nbatch 10 · 并发 4", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    s3__1 [label="指纹守卫\n模型 / 维度 / host 一致", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    s3__2 [label="日配额\n1000 片段 / 日", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+  }
+  subgraph cluster_s4 {
+    label="④ 写入向量库"; fontsize=13; fontcolor="#5B21B6"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#DDD6FE";
+    s4__0 [label="collection\nkb_{kb_id}", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    s4__1 [label="upsert\nid = 文件 + 序号", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    s4__2 [label="文件清单\n原子写 · 支持单删", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+    s4__3 [label="重建\n删旧片段后重写", fillcolor="#F5F3FF", color="#DDD6FE", fontcolor="#5B21B6"];
+  }
+  subgraph cluster_s5 {
+    label="⑤ 对外可见"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    s5__0 [label="状态流转\nprocessing → ready / failed", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    s5__1 [label="检索可达\nkb_search 立即可查", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    s5__2 [label="引用溯源\n来源文件 + 片段序号", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+  s1__0 -> s1__1 [ style=solid color="#64748B"];
+  s1__1 -> s1__2 [ style=solid color="#64748B"];
+  s2__0 -> s2__1 [ style=solid color="#64748B"];
+  s2__1 -> s2__2 [ style=solid color="#64748B"];
+  s2__2 -> s2__3 [ style=solid color="#64748B"];
+  s3__0 -> s3__1 [ style=solid color="#64748B"];
+  s3__1 -> s3__2 [ style=solid color="#64748B"];
+  s4__0 -> s4__1 [ style=solid color="#64748B"];
+  s4__1 -> s4__2 [ style=solid color="#64748B"];
+  s4__2 -> s4__3 [ style=solid color="#64748B"];
+  s5__0 -> s5__1 [ style=solid color="#64748B"];
+  s5__1 -> s5__2 [ style=solid color="#64748B"];
+  sa_s1_s2 -> sb_s1_s2 [ style=solid color="#64748B"];
+  sa_s2_s3 -> sb_s2_s3 [ style=solid color="#64748B"];
+  sa_s3_s4 -> sb_s3_s4 [ style=solid color="#64748B"];
+  sa_s4_s5 -> sb_s4_s5 [ style=solid color="#64748B"];
+}

@@ -47,6 +47,7 @@ export interface Typewriter {
   finish: () => void;
   /** 立刻全显：出错 / 用户点停止时用，不留半截 */
   flush: () => void;
+  reveal: () => void;
   /** 丢弃还没放的部分（切会话、重试时用） */
   cancel: () => void;
   /** 已经放出来的全文 */
@@ -132,6 +133,13 @@ export function createTypewriter(opts: {
         return;
       }
       kick();
+    },
+    reveal() {
+      if (pending) {
+        shownText += pending;
+        pending = "";
+        opts.onText(shownText);
+      }
     },
     flush() {
       if (raf != null) {

@@ -1,0 +1,52 @@
+%% 混合编排：工作流可预期，Agent 可应变，规则决定何时切换
+flowchart TB
+  subgraph p1["工作流定义 · hybrid/workflow.py"]
+    direction TB
+    p1__0["节点五类<br/><small>llm / tool / agent / condition / human</small>"]
+    p1__1["条件边<br/><small>表达式求值后选边</small>"]
+    p1__2["validate_definition<br/><small>唯一 id · 入口 · 失败跳转</small>"]
+    p1__3["内置流程<br/><small>builtin_plan_execute</small>"]
+    p1__4["节点超时<br/><small>默认 120s</small>"]
+    p1__5["失败收敛<br/><small>跳到 fallback 或终止</small>"]
+  end
+  subgraph p2["编排器 · orchestrator.py"]
+    direction TB
+    p2__0["HybridOrchestrator<br/><small>stream 产出统一事件</small>"]
+    p2__1["段执行<br/><small>workflow 段 / agent 段</small>"]
+    p2__2["SwitchEngine<br/><small>signal → 条件 → 动作</small>"]
+    p2__3["切换上限<br/><small>5 次 · 防抖动</small>"]
+    p2__4["awaiting_human<br/><small>挂起等人工</small>"]
+    p2__5["run_id<br/><small>前端轨迹 / 切换寻址</small>"]
+  end
+  subgraph p3["执行引擎"]
+    direction TB
+    p3__0["WorkflowEngine<br/><small>节点调度 · 上下文传递</small>"]
+    p3__1["AgentEngine<br/><small>10 步 / 300s / 8000 token</small>"]
+    p3__2["LLM 兜底<br/><small>零产出才触发</small>"]
+    p3__3["答案选取<br/><small>末个成功节点 output_key</small>"]
+    p3__4["exec_logs<br/><small>每节点进出留痕</small>"]
+    p3__5["状态机<br/><small>failed / timeout / done</small>"]
+  end
+  subgraph p4["切换规则 · switcher.py"]
+    direction TB
+    p4__0["switch_rules<br/><small>signal / condition / action</small>"]
+    p4__1["优先级<br/><small>高优先规则先命中</small>"]
+    p4__2["方向冷却<br/><small>默认 30s</small>"]
+    p4__3["表达式求值<br/><small>白名单 AST · 非 eval</small>"]
+    p4__4["默认规则<br/><small>内置种子规则</small>"]
+    p4__5["越权拦截<br/><small>规则按 owner 隔离</small>"]
+  end
+  subgraph p5["人工介入与恢复"]
+    direction TB
+    p5__0["/runs/{id}/switch<br/><small>人工指定下一段</small>"]
+    p5__1["/resume<br/><small>恢复 human 节点</small>"]
+    p5__2["快照落库<br/><small>跨进程可恢复</small>"]
+    p5__3["前端时间轴<br/><small>节点 / 状态 / 切换</small>"]
+    p5__4["权限校验<br/><small>run 归属 owner</small>"]
+    p5__5["审计<br/><small>谁在何时改了什么</small>"]
+  end
+  classDef default fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px,color:#0F172A
+  classDef slate fill:#F1F5F9,stroke:#CBD5E1,stroke-width:1px,color:#1E293B
+  classDef violet fill:#F5F3FF,stroke:#DDD6FE,stroke-width:1px,color:#5B21B6
+  class p1__0,p1__1,p1__2,p1__3,p1__4,p1__5,p2__0,p2__1,p2__2,p2__3,p2__4,p2__5,p5__0,p5__1,p5__2,p5__3,p5__4,p5__5 violet
+  class p3__0,p3__1,p3__2,p3__3,p3__4,p3__5,p4__0,p4__1,p4__2,p4__3,p4__4,p4__5 slate

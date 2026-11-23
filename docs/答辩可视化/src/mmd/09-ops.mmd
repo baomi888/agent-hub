@@ -1,0 +1,61 @@
+%% 部署与运维：Nginx → Next → uvicorn，三进程 + 监控 + 备份
+flowchart TB
+  subgraph p1["入口链路"]
+    direction TB
+    p1__0["Nginx<br/><small>80 / 443 · server_name</small>"]
+    p1__1["SSE 专用 location<br/><small>proxy_buffering off</small>"]
+    p1__2["上传上限<br/><small>client_max_body_size 100m</small>"]
+    p1__3["长任务超时<br/><small>read / send 600s</small>"]
+    p1__4["Next 3000<br/><small>standalone server</small>"]
+    p1__5["uvicorn 8000<br/><small>127.0.0.1 · 不对外</small>"]
+  end
+  subgraph p2["进程编排 · systemd"]
+    direction TB
+    p2__0["backend.service<br/><small>--workers N · 127.0.0.1</small>"]
+    p2__1["frontend.service<br/><small>npm start · -H 127.0.0.1</small>"]
+    p2__2["worker.service<br/><small>python -m worker.scheduler</small>"]
+    p2__3["重启策略<br/><small>Restart=always · 5s</small>"]
+    p2__4["环境变量<br/><small>config 自己 load_dotenv</small>"]
+    p2__5["日志<br/><small>journald · 轮转</small>"]
+  end
+  subgraph p3["发布与回滚"]
+    direction TB
+    p3__0["start<br/><small>首次安装 + 建库</small>"]
+    p3__1["deploy<br/><small>拉码 · 装依赖 · 构建前端</small>"]
+    p3__2["restart<br/><small>只改 Python 时跳过构建</small>"]
+    p3__3["status / logs<br/><small>进程与日志</small>"]
+    p3__4["standalone<br/><small>免 npm install 449MB</small>"]
+    p3__5["回滚<br/><small>保留上一版构建产物</small>"]
+  end
+  subgraph p4["安全加固"]
+    direction TB
+    p4__0["harden-server.sh<br/><small>SSH / 防火墙 / 权限</small>"]
+    p4__1["fix-s01-ssh.sh<br/><small>专项修复脚本</small>"]
+    p4__2["HTTPS<br/><small>setup-https.sh + certbot</small>"]
+    p4__3["管理员<br/><small>ADMIN_UIDS 优先</small>"]
+    p4__4["密钥<br/><small>.env 仅服务账号可读</small>"]
+    p4__5["回环监听<br/><small>8000 不对公网</small>"]
+  end
+  subgraph p5["监控与告警"]
+    direction TB
+    p5__0["/api/metrics<br/><small>Prometheus 文本 / 快照</small>"]
+    p5__1["业务指标<br/><small>问答量 · 配额拒绝 · 缓存</small>"]
+    p5__2["主机指标<br/><small>CPU / 内存 / 磁盘</small>"]
+    p5__3["alerts.yml<br/><small>阈值规则</small>"]
+    p5__4["probe-health.sh<br/><small>外部探活</small>"]
+    p5__5["资源上限<br/><small>Prometheus 256MB</small>"]
+  end
+  subgraph p6["备份与恢复"]
+    direction TB
+    p6__0["SQLite 热备<br/><small>WAL checkpoint 后拷贝</small>"]
+    p6__1["Chroma 目录<br/><small>整目录快照</small>"]
+    p6__2["上传留档<br/><small>按日增量</small>"]
+    p6__3["保留策略<br/><small>本地 + 远端各一份</small>"]
+    p6__4["恢复演练<br/><small>restore 脚本</small>"]
+    p6__5["容量预估<br/><small>2C2G 磁盘水位告警</small>"]
+  end
+  classDef default fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px,color:#0F172A
+  classDef blue fill:#EFF6FF,stroke:#BFDBFE,stroke-width:1px,color:#1E40AF
+  classDef slate fill:#F1F5F9,stroke:#CBD5E1,stroke-width:1px,color:#1E293B
+  class p1__0,p1__1,p1__2,p1__3,p1__4,p1__5,p2__0,p2__1,p2__2,p2__3,p2__4,p2__5 blue
+  class p3__0,p3__1,p3__2,p3__3,p3__4,p3__5,p4__0,p4__1,p4__2,p4__3,p4__4,p4__5,p5__0,p5__1,p5__2,p5__3,p5__4,p5__5,p6__0,p6__1,p6__2,p6__3,p6__4,p6__5 slate

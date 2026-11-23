@@ -1,0 +1,49 @@
+%% 前端与交互层：Next.js 四屏控制台 + SSE 增量渲染
+flowchart TB
+  subgraph p1["页面路由 · app/"]
+    direction TB
+    p1__0["对话工作台<br/><small>首页 · ChatArea · 侧栏</small>"]
+    p1__1["四屏控制台<br/><small>委托 / 总结 / 打卡 / 设置</small>"]
+    p1__2["知识库页<br/><small>上传 · 文件 · 重建</small>"]
+    p1__3["委托与总结<br/><small>delegate · report</small>"]
+    p1__4["学习专项<br/><small>cet · path 关卡</small>"]
+    p1__5["执行轨迹<br/><small>flow · 混合执行回放</small>"]
+    p1__6["开发者看板<br/><small>dashboard · 用量排行</small>"]
+    p1__7["模板广场<br/><small>templates · 场景模板</small>"]
+  end
+  subgraph p2["组件层 · components/"]
+    direction TB
+    p2__0["ChatArea<br/><small>消息流 · 输入 · 引用角标</small>"]
+    p2__1["Sidebar<br/><small>会话列表 · 新建 / 切换</small>"]
+    p2__2["KnowledgePanel<br/><small>文件清单 · 入库状态</small>"]
+    p2__3["HybridTrace<br/><small>节点时间轴 · 切换提示</small>"]
+    p2__4["FeedbackCard<br/><small>赞踩 · 一键反馈</small>"]
+    p2__5["UsagePanel<br/><small>配额与用量</small>"]
+    p2__6["AuthGate<br/><small>未登录拦截 · 登录态</small>"]
+    p2__7["FilePreviewModal<br/><small>原文片段预览</small>"]
+  end
+  subgraph p3["客户端库 · lib/"]
+    direction TB
+    p3__0["api.ts<br/><small>统一请求 · 错误中文化</small>"]
+    p3__1["sse.ts<br/><small>逐帧解析 · 增量累加</small>"]
+    p3__2["types.ts<br/><small>前后端契约单一来源</small>"]
+    p3__3["useHybridTrace<br/><small>轨迹状态机</small>"]
+    p3__4["geo.ts<br/><small>定位三级降级</small>"]
+    p3__5["errors.ts<br/><small>网络 / 429 / 401 文案</small>"]
+    p3__6["consolePrefs<br/><small>偏好本地存储</small>"]
+    p3__7["chunkProfiles<br/><small>切片参数预设</small>"]
+  end
+  subgraph p4["交互与数据流"]
+    direction TB
+    p4__0["增量渲染<br/><small>token 拼接 · 不整段替换</small>"]
+    p4__1["引用溯源<br/><small>（1） 点击回原文</small>"]
+    p4__2["能力开关<br/><small>use_kb / use_web</small>"]
+    p4__3["图片理解<br/><small>附件上传 → vision</small>"]
+    p4__4["会话隔离<br/><small>sid 级历史与知识库</small>"]
+    p4__5["依据提示<br/><small>弱依据横幅前置</small>"]
+  end
+  classDef default fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px,color:#0F172A
+  classDef green fill:#F0FDF4,stroke:#86EFAC,stroke-width:1px,color:#166534
+  classDef slate fill:#F1F5F9,stroke:#CBD5E1,stroke-width:1px,color:#1E293B
+  class p1__0,p1__1,p1__2,p1__3,p1__4,p1__5,p1__6,p1__7,p2__0,p2__1,p2__2,p2__3,p2__4,p2__5,p2__6,p2__7 green
+  class p3__0,p3__1,p3__2,p3__3,p3__4,p3__5,p3__6,p3__7,p4__0,p4__1,p4__2,p4__3,p4__4,p4__5 slate

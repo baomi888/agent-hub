@@ -1,0 +1,52 @@
+digraph "05-agent" {
+  graph [rankdir=TB, fontname="Microsoft YaHei", bgcolor="#F7F8FA", nodesep=0.28, ranksep=0.38, compound=true];
+  node [shape=box, style="rounded,filled", fontname="Microsoft YaHei", fontsize=11, margin="0.12,0.08", penwidth=1.0];
+  edge [fontname="Microsoft YaHei", fontsize=9, color="#64748B", arrowsize=0.7];
+  subgraph cluster_p1 {
+    label="构建 · agent/builder.py"; fontsize=13; fontcolor="#92400E"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#FDE68A";
+    p1__0 [label="create_agent\nLangChain v1 统一入口", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    p1__1 [label="system prompt\nprompt_store active + 三态库说明", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    p1__2 [label="场景预设\n考研 / 笔记 / 论文", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    p1__3 [label="编译图缓存\nkb×web×场景×激活×版本", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    p1__4 [label="checkpointer=None\n历史由 SQLite 重建", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    p1__5 [label="模型参数\ntemperature 0.1", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+  }
+  subgraph cluster_p2 {
+    label="工具集 · agent/tools.py"; fontsize=13; fontcolor="#92400E"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#FDE68A";
+    p2__0 [label="kb_search\n只读 · 确定性失败不重试", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    p2__1 [label="web_search\n只读 · 可重试 · 写下载白名单", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    p2__2 [label="get_weather\n高德 + Open-Meteo 双源", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    p2__3 [label="download_file\n唯一写操作 · 需审批", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    p2__4 [label="参数 schema\n由 StructuredTool 生成", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    p2__5 [label="降级文案\n无 key / 空库 / 超时都明说", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+  }
+  subgraph cluster_p3 {
+    label="注册表 · core/tool_registry.py"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    p3__0 [label="category\nread / write / compute", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p3__1 [label="defer\n是否延迟发现", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p3__2 [label="retryable\n确定性失败不进重试", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p3__3 [label="needs_approval\n执行前挂起等确认", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p3__4 [label="max_output_chars\n超限落盘回预览", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p3__5 [label="cost_hint\ncheap / normal / expensive", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p3__6 [label="playbook 四问\n何时用 / 不用 / 参数 / 失败", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p3__7 [label="按用户激活\n延迟工具集进程内隔离", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+  subgraph cluster_p4 {
+    label="执行守卫 · core/tool_guard.py"; fontsize=13; fontcolor="#1E293B"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#CBD5E1";
+    p4__0 [label="审批令牌\n同名同参才可确认", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__1 [label="输出截断\n4000 字上限 · 落盘", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__2 [label="确定性失败封禁\n同轮不再重试", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__3 [label="重试策略\n仅 retryable 工具", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__4 [label="写操作串行\n避免并发改外部状态", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+    p4__5 [label="拒绝即回传\n模型看到原因再换路", fillcolor="#F1F5F9", color="#CBD5E1", fontcolor="#1E293B"];
+  }
+  subgraph cluster_p5 {
+    label="调用循环"; fontsize=13; fontcolor="#92400E"; style="rounded,filled"; fillcolor="#FFFFFF"; color="#FDE68A";
+    p5__0 [label="astream 双模式\nupdates + messages", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    p5__1 [label="recursion_limit\n10 步 · 防原地重试", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    p5__2 [label="tool 帧\n发起 / 返回都上屏", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    p5__3 [label="configurable 注入\nowner / kb / 下载许可", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    p5__4 [label="安全边界\n模型参数改不了真实目标", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+    p5__5 [label="失败收敛\n异常 → error 帧，不吞", fillcolor="#FFFBEB", color="#FDE68A", fontcolor="#92400E"];
+  }
+}
