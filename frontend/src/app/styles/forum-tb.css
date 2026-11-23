@@ -2037,3 +2037,121 @@
     border-radius: var(--radius-md);
   }
 }
+
+/* ==========================================================
+   论坛互动体系（2026-11-23）：点赞 / 收藏 / 通知铃铛
+   ========================================================== */
+
+/* 点赞/收藏按钮的"已点"态：金色实心。默认跟其它 tb-act 一致。 */
+.tb-act[aria-pressed="true"] { color: var(--accent-ink); }
+.tb-act[aria-pressed="true"]:hover { color: var(--accent-ink); }
+.tb-act:disabled { opacity: 0.55; cursor: default; }
+.tb-act:disabled:active { transform: none; }
+
+/* 顶栏通知铃铛 */
+.tb-bell {
+  position: relative;
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.tb-bell:hover { color: var(--accent-ink); border-color: var(--accent-line); }
+.tb-bell-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* 通知面板：顶栏下方的浮层。position:fixed 挂在顶栏下方，
+   不遮住正文 —— 列表照常可滚，点外面（正文）也能继续逛。 */
+.tb-notif {
+  position: fixed;
+  top: 60px;
+  right: 16px;
+  z-index: 60;
+  width: min(360px, calc(100vw - 32px));
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-2);
+}
+.tb-notif-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px 10px;
+  font-size: var(--fs-sm);
+}
+.tb-notif-unread { color: var(--accent-ink); font-size: var(--fs-xs); }
+.tb-notif-empty {
+  padding: 12px 8px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+}
+.tb-notif-list { list-style: none; margin: 0; padding: 0; }
+.tb-notif-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 8px;
+  border-radius: var(--radius-xs);
+  font-size: var(--fs-sm);
+}
+.tb-notif-list li:hover { background: var(--fill-2); }
+.tb-notif-list li.unread { background: var(--accent-soft); }
+.tb-notif-list a {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  gap: 4px;
+  color: inherit;
+  text-decoration: none;
+}
+.tb-notif-actor { flex: none; font-weight: 600; color: var(--ink); }
+.tb-notif-verb {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tb-notif-when { flex: none; color: var(--text-3); font-size: var(--fs-xs); }
+
+/* 详情页互动行：点赞 / 收藏 / 关注，紧跟在标题标签下 */
+.tb-dsocial {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+}
+.tb-dsocial .tb-act {
+  font-size: var(--fs-sm);
+}
+.tb-follow-n {
+  margin-left: 2px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* @ 提醒提示：正文下方的辅助文字，登录用户可见 */
+.tb-mention-hint {
+  margin-left: 8px;
+  color: var(--text-3);
+}

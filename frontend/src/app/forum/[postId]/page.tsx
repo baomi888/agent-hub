@@ -25,6 +25,7 @@ import CornIcon from "@/components/CornIcon";
 import { SkeletonLines } from "@/components/Skeleton";
 import UserAvatar from "@/components/settings/UserAvatar";
 import { api, forumImgUrl } from "@/lib/api";
+import { useAuth } from "@/lib/hooks/useAuth";
 import { fmtWhen } from "@/lib/time";
 import type { BoardPost, ForumDetail } from "@/lib/types";
 
@@ -49,6 +50,14 @@ export default function ForumTopicPage() {
   const router = useRouter();
   const params = useParams<{ postId: string }>();
   const postId = Number(params?.postId ?? 0);
+  const auth = useAuth();
+
+  // ---- 互动（点赞 / 收藏 / 关注）----
+  /** 本条帖的即时互动态。初始来自 data.topic（带计数），点按钮后原地覆盖 */
+  const [like, setLike] = useState({ liked: false, count: 0 });
+  const [fav, setFav] = useState({ favorited: false, count: 0 });
+  const [follow, setFollow] = useState({ following: false, count: 0 });
+  const [socBusy, setSocBusy] = useState(false);
 
   const [data, setData] = useState<ForumDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -103,7 +112,33 @@ export default function ForumTopicPage() {
     setLoading(true);
     setErr("");
     try {
-      setData(await api.getForumTopic(postId));
+      const d = await api.getForumTopic(postId);
+      setData(d);
+      // 同步互动态：计数来自 topic，liked/favorited/following 从 social 接口补
+      // （详情接口的 topic 只带计数，不带"我"的状态）。
+      if (d.topic) {
+        setLike((s) => ({ ...s, count: d.topic.likes ?? 0 }));
+        setFav((s) => ({ ...s, count: d.topic.favorites ?? 0 }));
+        void (async () => {
+          try {
+            const soc = await api.forumTopicSocial(postId);
+            setLike((s) => ({ ...s, liked: soc.liked, count: soc.likes ?? s.count }));
+            setFav((s) => ({ ...s, favorited: soc.favorited, count: soc.favorites ?? s.count }));
+          } catch {
+            // social 拉不到只影响"我"的初始态，计数已经在上面的 topic 里了
+          }
+          // 关注态：作者是登录用户才拉（匿名不可关注）
+          const uid = d.topic.author.uid;
+          if (uid && !uid.startsWith("anon:")) {
+            try {
+              const f = await api.forumUserSocial(uid);
+              setFollow(f);
+            } catch {
+              // 关注态拉不到不影响阅读
+            }
+          }
+        })();
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : "话题加载失败");
     } finally {
@@ -115,6 +150,47 @@ export default function ForumTopicPage() {
     const t = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(t);
   }, [load]);
+
+  /** 点赞/收藏/关注切换。未登录 → 跳登录页。 */
+  const toggleLike = async () => {
+    if (!auth.me) return router.push("/login");
+    if (socBusy) return;
+    setSocBusy(true);
+    try {
+      const r = await api.likeForumTopic(postId);
+      setLike({ liked: r.liked, count: r.count });
+    } catch {
+      /* 静默 */
+    } finally {
+      setSocBusy(false);
+    }
+  };
+  const toggleFav = async () => {
+    if (!auth.me) return router.push("/login");
+    if (socBusy) return;
+    setSocBusy(true);
+    try {
+      const r = await api.favoriteForumTopic(postId);
+      setFav({ favorited: r.favorited, count: r.count });
+    } catch {
+      /* 静默 */
+    } finally {
+      setSocBusy(false);
+    }
+  };
+  const toggleFollow = async (followee: string) => {
+    if (!auth.me) return router.push("/login");
+    if (socBusy) return;
+    setSocBusy(true);
+    try {
+      const r = await api.followUser(followee);
+      setFollow(r);
+    } catch {
+      /* 静默 */
+    } finally {
+      setSocBusy(false);
+    }
+  };
 
   const startReply = (p: BoardPost) => {
     // 自己的楼层也能回复：发完想起漏了一句、隔天来补结果，都是真实需求。
@@ -418,6 +494,49 @@ export default function ForumTopicPage() {
                   </span>
                 )}
               </div>
+
+              {/* 互动行（2026-11-23）：点赞 / 收藏 / 关注。未登录点 → 跳登录。
+                  关注只对"登录用户作者"显示（匿名帖没有稳定身份，不能关注）。 */}
+              {!gone && (
+                <div className="tb-dsocial">
+                  <button
+                    type="button"
+                    className={`tb-act${like.liked ? " on" : ""}`}
+                    aria-pressed={like.liked}
+                    disabled={socBusy}
+                    onClick={() => void toggleLike()}
+                  >
+                    <svg viewBox="0 0 24 24" fill={like.liked ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden="true">
+                      <path d="M12 20.5S4 15.5 4 9.9A4.4 4.4 0 0 1 8.4 5.5c1.5 0 2.9.8 3.6 2a4.3 4.3 0 0 1 3.6-2A4.4 4.4 0 0 1 20 9.9c0 5.6-8 10.6-8 10.6z" />
+                    </svg>
+                    {like.count > 0 ? like.count : "赞"}
+                  </button>
+                  <button
+                    type="button"
+                    className={`tb-act${fav.favorited ? " on" : ""}`}
+                    aria-pressed={fav.favorited}
+                    disabled={socBusy}
+                    onClick={() => void toggleFav()}
+                  >
+                    <CornIcon name="star" className="h-3.5 w-3.5" />
+                    {fav.count > 0 ? fav.count : "收藏"}
+                  </button>
+                  {topic.author.uid &&
+                    !topic.author.uid.startsWith("anon:") &&
+                    topic.author.uid !== auth.me?.user.id && (
+                      <button
+                        type="button"
+                        className={`tb-act${follow.following ? " on" : ""}`}
+                        aria-pressed={follow.following}
+                        disabled={socBusy}
+                        onClick={() => void toggleFollow(topic.author.uid!)}
+                      >
+                        {follow.following ? "已关注" : "关注"}
+                        {follow.count > 0 && <span className="tb-follow-n">{follow.count}</span>}
+                      </button>
+                    )}
+                </div>
+              )}
             </div>
 
             {gone ? (

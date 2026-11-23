@@ -342,8 +342,14 @@ def purge_user(uid: str) -> int:
     与 `kb_board.purge_kb` 同一个理由：展示对象已经不在了，留一堆没人能看见的
     行只是垃圾。区别是这里按人删 —— 一个人注销了，他开的楼跟着消失，
     别人在楼里的回复也一起走（楼没了开头那句，剩下的就是断章取义）。
+
+    ★ 2026-11-23：互动痕迹（点赞/收藏/关注/通知）一起清，见 forum_social.purge_user。
+    否则注销后他点过的赞、收藏过的帖、关注的关系全变成孤儿行。
     """
+    from core import forum_social  # 延迟导入，避免 forum ←→ forum_social 互相依赖
+
     kb_board._ensure()  # noqa: SLF001
+    forum_social.purge_user(uid)
     with store._get_conn() as conn:  # noqa: SLF001
         roots = [
             int(r[0])
