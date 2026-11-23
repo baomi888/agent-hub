@@ -134,6 +134,8 @@ export interface BoardPost {
     avatar: string;
     /** 管理员：名字前挂金色「管理员」标 */
     admin: boolean;
+    /** 作者 uid（2026-11-23，供「关注」按钮用；匿名帖带 anon: 前缀） */
+    uid?: string;
   };
   /** 是不是自己写的（前端据此高亮） */
   mine: boolean;
@@ -2028,6 +2030,18 @@ export interface ForumTopic {
   /** 楼里最后一次活动的时间；没回复时等于 at */
   last_at: number;
   reply_n: number;
+  /** 点赞数（2026-11-23 互动体系） */
+  likes: number;
+  /** 收藏数（2026-11-23 互动体系） */
+  favorites: number;
+  /**
+   * 当前浏览者是否已点赞（2026-11-23）。
+   * 列表接口不带（免登录读），只有详情/social 接口或前端点过按钮后才有。
+   * 可选是为了让列表与详情共用这一个类型。
+   */
+  liked?: boolean;
+  /** 当前浏览者是否已收藏。同 liked 的可选语义。 */
+  favorited?: boolean;
   mine: boolean;
   /**
    * 先发后审的两种状态。
@@ -2044,7 +2058,7 @@ export interface ForumTopic {
   appeal_at: number;
   /** 被举报次数。列表里不显示，管理台用它排序 */
   report_n: number;
-  author: { name: string; avatar: string; admin: boolean };
+  author: { name: string; avatar: string; admin: boolean; uid?: string };
   /** 来源知识库；不挂库的话题为 null */
   kb: { id: string; name: string; official: boolean } | null;
   /**

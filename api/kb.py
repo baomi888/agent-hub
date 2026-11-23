@@ -1403,7 +1403,10 @@ def _board_authors(posts: list[dict]) -> dict[str, dict]:
     out: dict[str, dict] = {}
     for p in posts:
         u = users.get(p["user_id"]) or {}
-        name = (u.get("nickname") or "").strip() or (u.get("username") or "").strip()
+        # ★ 2026-11-23：论坛名 = 知穗用户名（登录名），不是昵称。
+        #   用户在智能体端的名字和论坛里的名字一致，@ 也按这个名字解析。
+        #   username 有 COLLATE NOCASE 唯一索引，天然可 @；昵称仍只作个人资料展示。
+        name = (u.get("username") or "").strip() or (u.get("nickname") or "").strip()
         # 匿名帖在 users 表里查不到。昵称由 uid 派生（同一台设备永远同名），
         # 否则所有匿名帖都会署「已注销用户」—— 那读起来像这个人的账号被删了。
         if not name and anon.is_anon(p["user_id"]):
@@ -1415,6 +1418,9 @@ def _board_authors(posts: list[dict]) -> dict[str, dict]:
             "avatar": u.get("avatar") or "",
             # 查不到用户时一律 False：一个已经注销的号不该还顶着金标说话
             "admin": bool(admin and u),
+            # ★ 2026-11-23：带上 uid 供「关注」按钮用。匿名帖（anon:xxx）也带上，
+            #   前端据此判断"这个人能不能关注"（匿名没有稳定身份，不给关注入口）。
+            "uid": p["user_id"],
         }
     return out
 
@@ -1438,6 +1444,7 @@ def _post_view(
             "name": a.get("name") or "已注销用户",
             "avatar": a.get("avatar") or "",
             "admin": bool(a.get("admin")),
+            "uid": a.get("uid") or "",
         },
         "mine": post["user_id"] == uid,
         # 作者能删自己的，库主能删自己库里的，管理员都能删。

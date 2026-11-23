@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import tempfile
 
 from fastapi import (
@@ -40,7 +41,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from api.kb import _board_authors, _post_view
-from core import anon, forum, kb_board, quota, upload
+from core import account, anon, forum, forum_social, kb_board, quota, upload
 from core.auth import _is_secure_request, current_user_id, get_current_user
 from kb import pipelines
 from service import forum_image
@@ -175,14 +176,23 @@ def _kb_briefs(rows: list[dict]) -> dict[str, dict]:
     return out
 
 
-def _topic_view(row: dict, authors: dict[str, dict], uid: str, libs: dict[str, dict]) -> dict:
+def _topic_view(
+    row: dict,
+    authors: dict[str, dict],
+    uid: str,
+    libs: dict[str, dict],
+    social: dict[str, dict] | None = None,
+) -> dict:
     a = authors.get(row["user_id"]) or {}
     # 楼中楼预览：最后一条可见回复。`excerpt_of` 顺手做掉换行和连续空白，
     # 否则多行回复在列表卡里会撑出一个大洞。
     last_body = (row.get("last_body") or "").strip()
     last_uid = row.get("last_uid") or ""
+    pid = int(row["id"])
+    # 点赞/收藏计数（social 由调用方批量查好，避免 N+1；没传则给 0）
+    soc = (social or {}).get(pid, {})
     return {
-        "id": int(row["id"]),
+        "id": pid,
         "title": forum.title_of(row),
         "excerpt": forum.excerpt_of(row),
         "cat": row["cat"],
@@ -190,6 +200,8 @@ def _topic_view(row: dict, authors: dict[str, dict], uid: str, libs: dict[str, d
         "at": int(row["created_at"]),
         "last_at": int(row["last_at"]),
         "reply_n": int(row["reply_n"]),
+        "likes": int(soc.get("likes", 0)),
+        "favorites": int(soc.get("favorites", 0)),
         "mine": row["user_id"] == uid,
         # 对外只暴露 live / removed 两种。库里的正常态是空串 —— 那个值
         # 不该漏到前端，否则每处判断都要同时考虑 "" 和 "live" 是同一件事。
@@ -217,9 +229,22 @@ def _topic_view(row: dict, authors: dict[str, dict], uid: str, libs: dict[str, d
             "name": a.get("name") or "已注销用户",
             "avatar": a.get("avatar") or "",
             "admin": bool(a.get("admin")),
+            "uid": a.get("uid") or "",
         },
         "kb": libs.get(row["kb_id"]),
     }
+
+
+def _social_counts(rows: list[dict]) -> dict[int, dict]:
+    """一批帖子的点赞/收藏计数（{post_id: {likes, favorites}}）。
+
+    列表/详情页要显示这两个数字。单独抽出来批量查，而不是逐条 count ——
+    一页 20 条逐条查就是 40 次往返，这里两条 GROUP BY 就齐了。
+    """
+    ids = [int(r["id"]) for r in rows if r.get("id")]
+    likes = forum_social.count_likes_batch(ids)
+    favs = forum_social.count_favorites_batch(ids)
+    return {pid: {"likes": likes.get(pid, 0), "favorites": favs.get(pid, 0)} for pid in ids}
 
 
 async def _authors_with_last(rows: list[dict]) -> dict[str, dict]:
@@ -327,9 +352,10 @@ async def list_topics(
     all_rows = [*pinned_rows, *rows]
     authors = await _authors_with_last(all_rows) if all_rows else {}
     libs = await asyncio.to_thread(_kb_briefs, all_rows)
+    social = _social_counts(all_rows)
     return {
-        "posts": [_topic_view(r, authors, uid, libs) for r in rows],
-        "pinned": [_topic_view(r, authors, uid, libs) for r in pinned_rows],
+        "posts": [_topic_view(r, authors, uid, libs, social) for r in rows],
+        "pinned": [_topic_view(r, authors, uid, libs, social) for r in pinned_rows],
         "has_more": bool(has_more) and sort == "new",
     }
 
@@ -378,8 +404,9 @@ async def get_topic(post_id: int, uid: str = Depends(anon_uid)) -> dict:
         p["id"]: (authors.get(p["user_id"]) or {}).get("name") or "已注销用户" for p in flat
     }
     floor = _post_view(_as_post(row), authors, names, uid, owner, admin)
+    social = _social_counts([row])
     return {
-        "topic": _topic_view(row, authors, uid, libs),
+        "topic": _topic_view(row, authors, uid, libs, social),
         "body": row["body"],
         "posts": [floor, *[_post_view(p, authors, names, uid, owner, admin) for p in kids]],
         "stickers": list(kb_board.STICKERS),
@@ -448,6 +475,8 @@ async def create_topic(req: TopicIn, uid: str = Depends(anon_uid)) -> dict:
     row = await asyncio.to_thread(forum.get_topic, post["id"])
     authors = await _authors_with_last([post])
     libs = await asyncio.to_thread(_kb_briefs, [row]) if row else {}
+    # @ 解析：正文里 @ 了登录用户 → 发 mention 通知（匿名发帖则跳过）
+    await _resolve_mentions(body, uid, post["id"])
     return {"topic": _topic_view(row, authors, uid, libs) if row else None}
 
 
@@ -586,6 +615,12 @@ async def add_reply(
         p["id"]: (authors.get(p["user_id"]) or {}).get("name") or "已注销用户" for p in kids
     }
     mine = next((p for p in kids if p["id"] == post["id"]), post)
+    # @ 解析（登录用户回复时） + 回复通知：回帖通知楼主（reply 类型）
+    await _resolve_mentions(body, uid, post_id)
+    if not anon.is_anon(uid) and topic["user_id"] != uid:
+        await asyncio.to_thread(
+            forum_social.notify, topic["user_id"], "reply", uid, post_id
+        )
     return {
         "post": _post_view(mine, authors, names, uid, owner, admin),
         "reply_n": len(kids),
@@ -745,3 +780,167 @@ async def mod_review(
     authors = await _authors_with_last([row])
     libs = await asyncio.to_thread(_kb_briefs, [row])
     return {"topic": _topic_view(row, authors, admin, libs)}
+
+
+# ============================================================
+# 互动体系（2026-11-23）：点赞 / 收藏 / 关注 / 通知 / @
+#
+# 身份口径：**读**免登录（anon_uid，可能是匿名），**写**必须登录
+# （get_current_user）。看帖、看点赞数不需要账号；点赞、收藏、关注、@ 需要。
+# 帖子可以是匿名帖（发帖仍免登录），但互动的人一定是登录用户 —— 两者不冲突。
+#
+# 所有"写"端点返回最新的 `{liked/favorited/following, count}`，
+# 前端据此原地更新，不用再拉一遍列表。
+# ============================================================
+
+
+class MentionIn(BaseModel):
+    mentions: list[str] = Field(
+        default_factory=list,
+        description="被 @ 的 username 列表（发帖/回复时一起解析）",
+    )
+
+
+@router.post("/topics/{post_id}/like")
+async def like_topic(post_id: int, uid: str = Depends(get_current_user)) -> dict:
+    """点赞 / 取消点赞（toggle）。"""
+    try:
+        state = await asyncio.to_thread(forum_social.like, post_id, uid)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    # 点赞要通知作者。作者是这条帖的 user_id；自己赞自己由 notify 内部跳过。
+    target = await _post_owner(post_id)
+    if target and state["liked"]:
+        await asyncio.to_thread(
+            forum_social.notify, target, "like", uid, post_id
+        )
+    return state
+
+
+@router.post("/topics/{post_id}/favorite")
+async def favorite_topic(post_id: int, uid: str = Depends(get_current_user)) -> dict:
+    """收藏 / 取消收藏（toggle）。"""
+    state = await asyncio.to_thread(forum_social.favorite, post_id, uid)
+    target = await _post_owner(post_id)
+    if target and state["favorited"]:
+        await asyncio.to_thread(
+            forum_social.notify, target, "favorite", uid, post_id
+        )
+    return state
+
+
+@router.post("/users/{followee}/follow")
+async def follow_user(
+    followee: str, uid: str = Depends(get_current_user)
+) -> dict:
+    """关注 / 取关（toggle）。followee 是对方的 uid。"""
+    # 只允许关注登录用户：匿名没有稳定身份，关注了换设备就断，没有意义。
+    if anon.is_anon(followee):
+        raise HTTPException(status_code=400, detail="对方不是登录用户，不能关注")
+    if followee == uid:
+        raise HTTPException(status_code=400, detail="不能关注自己")
+    try:
+        state = await asyncio.to_thread(forum_social.follow, uid, followee)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if state["following"]:
+        await asyncio.to_thread(forum_social.notify, followee, "follow", uid)
+    return state
+
+
+@router.get("/users/{uid}/social")
+async def user_social(uid: str, me: str = Depends(anon_uid)) -> dict:
+    """某人的关注状态（当前登录者视角）。me 是当前浏览者（可能匿名）。"""
+    state = await asyncio.to_thread(forum_social.follow_state, me, uid)
+    return state
+
+
+@router.get("/topics/{post_id}/social")
+async def topic_social(post_id: int, me: str = Depends(anon_uid)) -> dict:
+    """一条帖的点赞/收藏状态（当前浏览者视角，未登录也能看计数）。"""
+    like_s, fav_s = await asyncio.gather(
+        asyncio.to_thread(forum_social.like_state, post_id, me),
+        asyncio.to_thread(forum_social.favorite_state, post_id, me),
+    )
+    return {
+        "liked": like_s["liked"],
+        "likes": like_s["count"],
+        "favorited": fav_s["favorited"],
+        "favorites": fav_s["count"],
+    }
+
+
+@router.get("/me/favorites")
+async def my_favorites(uid: str = Depends(get_current_user)) -> dict:
+    """我收藏的帖子 id 列表。"""
+    ids = await asyncio.to_thread(forum_social.list_favorites, uid)
+    return {"post_ids": ids}
+
+
+@router.get("/notifications")
+async def notifications(uid: str = Depends(get_current_user)) -> dict:
+    """我的通知列表 + 未读数。"""
+    data = await asyncio.to_thread(forum_social.list_notifications, uid)
+    # actor 名批量补上：通知里要显示"谁"赞/收藏/关注/回复/@ 了你。
+    actors = await asyncio.to_thread(
+        account.get_users, [i["actor_uid"] for i in data["items"]]
+    )
+    for it in data["items"]:
+        u = actors.get(it["actor_uid"]) or {}
+        # 论坛名 = 用户名（见 _board_authors 的同一约定）
+        it["actor_name"] = (u.get("username") or "").strip() or "已注销用户"
+    return data
+
+
+@router.post("/notifications/read")
+async def mark_notifications_read(
+    body: dict, uid: str = Depends(get_current_user)
+) -> dict:
+    """标已读。body 里 `before_id` 可空（空 = 全部标读）。"""
+    n = await asyncio.to_thread(
+        forum_social.mark_read, uid, body.get("before_id")
+    )
+    return {"read": n, "unread": forum_social.unread_count(uid)}
+
+
+@router.get("/notifications/unread")
+async def notifications_unread(uid: str = Depends(get_current_user)) -> dict:
+    return {"unread": await asyncio.to_thread(forum_social.unread_count, uid)}
+
+
+async def _post_owner(post_id: int) -> str | None:
+    """一条帖的作者 uid（用于发通知）。不存在或已删返回 None。"""
+    row = await asyncio.to_thread(forum.get_topic, post_id)
+    return row["user_id"] if row else None
+
+
+# 正文里 @用户名 的正则。用户名规则（core/account 的 check_username）：
+# 中文/字母/数字/下划线，长度 2~20。这里放宽成"到空白或标点就停"的一段，
+# 最终以"能查到真实用户"为准 —— 查不到就不是一次有效的 @，不报错也不通知。
+_MENTION_RE = re.compile(r"@([^\s@，。！？、：；""''（）()【】]{1,20})")
+
+
+async def _resolve_mentions(body: str, actor_uid: str, post_id: int) -> None:
+    """解析正文里的 @用户名，给被 @ 的登录用户发 mention 通知。
+
+    - 只对**登录用户**生效：匿名发帖/回复里的 @ 只在正文里显示，
+      不生成通知（通知需要登录身份才有意义，且匿名没法被反 @）。
+    - 查不到的用户名静默跳过：@ 一个不存在的名字不是错误。
+    - 去重：同一帖里 @ 同一个人只通知一次。
+    - 自己 @ 自己由 forum_social.notify 内部跳过。
+    """
+    if not body or anon.is_anon(actor_uid):
+        return
+    seen: set[str] = set()
+    for m in _MENTION_RE.findall(body or ""):
+        name = m.strip()
+        if not name or name in seen:
+            continue
+        u = await asyncio.to_thread(account.get_user_by_username, name)
+        if u and u["id"] != actor_uid:
+            seen.add(name)
+            await asyncio.to_thread(
+                forum_social.notify, u["id"], "mention", actor_uid, post_id
+            )
+
+

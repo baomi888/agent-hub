@@ -130,6 +130,24 @@ const avatarOf = (name: string) => {
  *  因为卡里还有板块按钮，覆盖层会把它盖住。 */
 const topicHref = (id: number) => `/forum/${id}`;
 
+/** 通知类型 → 动词文案（"张三 赞了你的帖" / "李四 关注了你"）。 */
+function notifVerb(kind: string): string {
+  switch (kind) {
+    case "like":
+      return "赞了你的帖";
+    case "favorite":
+      return "收藏了你的帖";
+    case "follow":
+      return "关注了你";
+    case "mention":
+      return "在帖子里提到了你";
+    case "reply":
+      return "回复了你的帖";
+    default:
+      return "提到了你";
+  }
+}
+
 export default function ForumPage() {
   const router = useRouter();
   const auth = useAuth();
@@ -215,6 +233,24 @@ export default function ForumPage() {
   /** 已处理过的行 → 行内说明。刷新弹层后这些行会自然消失（reviewed_at 已写） */
   const [admDone, setAdmDone] = useState<Record<number, string>>({});
 
+  // ---- 互动（点赞 / 收藏 / 通知）----
+  /**
+   * 每条的点赞/收藏即时态：{liked, likes, favorited, favorites}。
+   * 列表接口只带计数，不带"我赞没赞"（那个要登录态，而列表是免登录读的）。
+   * 所以初始态只填计数，"我"的状态在登录后、或点了按钮后才知道 ——
+   * 点按钮时后端返回最新 {liked, count}，据此原地更新。
+   */
+  const [socMap, setSocMap] = useState<Record<number, ForumTopic>>({});
+  /** 正在切换点赞/收藏的帖子 id（防连点 + 显示忙碌） */
+  const [socBusy, setSocBusy] = useState<number>(0);
+  /** 通知面板 */
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifs, setNotifs] = useState<{
+    items: { id: number; kind: string; actor_name: string; post_id: number | null; read: boolean; at: number }[];
+    unread: number;
+  }>({ items: [], unread: 0 });
+  const [notifBusy, setNotifBusy] = useState(false);
+
   const rootRef = useRef<HTMLDivElement | null>(null);
   /** 手机上的板块条是否已滚到最右 —— 决定右边那条渐隐遮罩要不要留着 */
   const [chipEnd, setChipEnd] = useState(false);
@@ -247,6 +283,76 @@ export default function ForumPage() {
       setLoading(false);
     }
   }, [cat, sort, dq]);
+
+  /**
+   * 点赞/收藏切换。未登录 → 跳登录页；已登录 → 调后端 toggle 并原地更新。
+   * 两个操作共用一个函数：它们只差一个 api 调用和要更新的字段，拆开是复制粘贴。
+   */
+  const toggleSocial = useCallback(
+    async (id: number, kind: "like" | "favorite") => {
+      if (!auth.me) {
+        // 互动要登录（2026-11-23）：未登录引导去登录页
+        router.push("/login");
+        return;
+      }
+      if (socBusy) return;
+      setSocBusy(id);
+      try {
+        if (kind === "like") {
+          const r = await api.likeForumTopic(id);
+          setSocMap((m) => ({
+            ...m,
+            [id]: { ...(m[id] ?? ({} as ForumTopic)), liked: r.liked, likes: r.count },
+          }));
+        } else {
+          const r = await api.favoriteForumTopic(id);
+          setSocMap((m) => ({
+            ...m,
+            [id]: { ...(m[id] ?? ({} as ForumTopic)), favorited: r.favorited, favorites: r.count },
+          }));
+        }
+      } catch {
+        // 失败静默：状态没变，用户下次点再试。弹错误反而打断"顺手点一下"。
+      } finally {
+        setSocBusy(0);
+      }
+    },
+    [auth.me, socBusy, router],
+  );
+
+  /** 拉通知列表。未登录不拉（接口要登录）。 */
+  const loadNotifs = useCallback(async () => {
+    if (!auth.me || notifBusy) return;
+    setNotifBusy(true);
+    try {
+      const r = await api.listNotifications();
+      setNotifs(r);
+    } catch {
+      // 静默：通知是辅助，拉不到就不显示角标
+    } finally {
+      setNotifBusy(false);
+    }
+  }, [auth.me, notifBusy]);
+
+  const openNotifs = useCallback(async () => {
+    setNotifOpen((v) => !v);
+    if (!notifOpen) {
+      await loadNotifs();
+      // 打开即标已读（到当前最新一条），下次打开角标消失
+      if (notifs.unread > 0) {
+        const latest = notifs.items[0];
+        if (latest) await api.markNotificationsRead(latest.id);
+        setNotifs((n) => ({ ...n, unread: 0, items: n.items.map((i) => ({ ...i, read: true })) }));
+      }
+    }
+  }, [notifOpen, loadNotifs, notifs]);
+
+  // 登录态变化时刷新通知角标（登录后第一次要拉一次未读数）。
+  // 放宏任务里发起，避免在 effect 体里同步 setState（同文件里 load 的处理）。
+  useEffect(() => {
+    const t = window.setTimeout(() => void loadNotifs(), 0);
+    return () => window.clearTimeout(t);
+  }, [auth.me, loadNotifs]);
 
   // 首屏：板块清单 + 热帖栏。两者互不依赖，失败也不该拖垮主列表。
   useEffect(() => {
@@ -653,6 +759,32 @@ export default function ForumPage() {
             {/* 0 条不写「0 条回复」：那等于用一行字宣布"这里什么都没有" */}
             {t.reply_n > 0 ? `${t.reply_n} 条回复` : "回复"}
           </Link>
+          {/* 点赞 / 收藏（2026-11-23 互动体系）。未登录点 → 跳登录页。
+              socMap 里可能覆盖了后端最新值（点过按钮），没覆盖时用列表带的计数。 */}
+          <button
+            type="button"
+            className={`tb-act${(socMap[t.id]?.liked ?? false) ? " on" : ""}`}
+            onClick={() => void toggleSocial(t.id, "like")}
+            aria-pressed={socMap[t.id]?.liked ?? false}
+            disabled={socBusy === t.id}
+            title="点赞"
+          >
+            <svg viewBox="0 0 24 24" fill={socMap[t.id]?.liked ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden="true">
+              <path d="M12 20.5S4 15.5 4 9.9A4.4 4.4 0 0 1 8.4 5.5c1.5 0 2.9.8 3.6 2a4.3 4.3 0 0 1 3.6-2A4.4 4.4 0 0 1 20 9.9c0 5.6-8 10.6-8 10.6z" />
+            </svg>
+            {(socMap[t.id]?.likes ?? t.likes) > 0 ? socMap[t.id]?.likes ?? t.likes : "赞"}
+          </button>
+          <button
+            type="button"
+            className={`tb-act${(socMap[t.id]?.favorited ?? false) ? " on" : ""}`}
+            onClick={() => void toggleSocial(t.id, "favorite")}
+            aria-pressed={socMap[t.id]?.favorited ?? false}
+            disabled={socBusy === t.id}
+            title="收藏"
+          >
+            <CornIcon name="star" className="h-3.5 w-3.5" />
+            {(socMap[t.id]?.favorites ?? t.favorites) > 0 ? socMap[t.id]?.favorites ?? t.favorites : "收藏"}
+          </button>
           {t.mine && (
             <button type="button" className="tb-act" onClick={() => void openMine()}>
               我发的
@@ -723,6 +855,20 @@ export default function ForumPage() {
           </div>
 
           <div className="tb-top-acts">
+            {/* 通知铃铛（2026-11-23）。未登录不显示 —— 通知是登录用户的能力。
+                登录后才拉未读数，红点提示有新的赞/收藏/关注/回复/@。 */}
+            {auth.me && (
+              <button
+                type="button"
+                className={`tb-bell${notifs.unread > 0 ? " has-dot" : ""}`}
+                onClick={() => void openNotifs()}
+                aria-label={notifs.unread > 0 ? `通知，${notifs.unread} 条未读` : "通知"}
+                aria-expanded={notifOpen}
+              >
+                <CornIcon name="bell" className="h-4 w-4" />
+                {notifs.unread > 0 && <span className="tb-bell-dot" aria-hidden="true" />}
+              </button>
+            )}
             <button type="button" className="tb-new" onClick={openCompose}>
               <CornIcon name="plus" className="h-4 w-4" />
               发帖
@@ -730,6 +876,34 @@ export default function ForumPage() {
           </div>
         </div>
       </header>
+
+      {/* 通知面板：挂在顶栏下方，点击铃铛开关。简单抽屉，不遮挡正文（列表照常可滚）。 */}
+      {notifOpen && (
+        <div className="tb-notif" role="dialog" aria-label="通知">
+          <div className="tb-notif-h">
+            <b>通知</b>
+            {notifs.unread > 0 && <span className="tb-notif-unread">{notifs.unread} 条未读</span>}
+          </div>
+          {notifs.items.length === 0 ? (
+            <p className="tb-notif-empty">还没有通知。别人赞你、收藏你、回复你，或者 @ 你时，会出现在这里。</p>
+          ) : (
+            <ul className="tb-notif-list">
+              {notifs.items.map((n) => (
+                <li key={n.id} className={n.read ? "" : "unread"}>
+                  <Link
+                    href={n.post_id ? topicHref(n.post_id) : "/forum"}
+                    onClick={() => setNotifOpen(false)}
+                  >
+                    <span className="tb-notif-actor">{n.actor_name}</span>
+                    <span className="tb-notif-verb">{notifVerb(n.kind)}</span>
+                  </Link>
+                  <span className="tb-notif-when">{fmtWhen(n.at)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       <div className="tb-wrap">
         {/* ---------- 左：板块 ---------- */}
@@ -1033,6 +1207,9 @@ export default function ForumPage() {
                 />
                 <p className="tb-tip">
                   {cBody.length}/{BODY_MAX}
+                  {/* @ 提醒（2026-11-23）：正文里写 @用户名（对方的知穗用户名），
+                      会通知到对方。仅登录用户生效 —— 匿名发帖的 @ 只在正文里显示。 */}
+                  {auth.me && <span className="tb-mention-hint">@用户名 可以提醒对方</span>}
                 </p>
               </div>
 

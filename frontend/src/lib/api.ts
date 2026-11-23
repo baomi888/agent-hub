@@ -522,6 +522,57 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ action, reason }),
     }),
+  // ---------- 论坛互动（2026-11-23） ----------
+  /** 点赞/取消点赞（toggle）。返回最新 {liked, count} */
+  likeForumTopic: (id: number) =>
+    request<{ liked: boolean; count: number }>(`/api/forum/topics/${id}/like`, {
+      method: "POST",
+    }),
+  /** 收藏/取消收藏（toggle）。返回最新 {favorited, count} */
+  favoriteForumTopic: (id: number) =>
+    request<{ favorited: boolean; count: number }>(
+      `/api/forum/topics/${id}/favorite`,
+      { method: "POST" },
+    ),
+  /** 关注/取关（toggle）。followee 是对方 uid */
+  followUser: (followee: string) =>
+    request<{ following: boolean; count: number }>(
+      `/api/forum/users/${encodeURIComponent(followee)}/follow`,
+      { method: "POST" },
+    ),
+  /** 某人的关注状态（当前浏览者视角） */
+  forumUserSocial: (uid: string) =>
+    request<{ following: boolean; count: number }>(
+      `/api/forum/users/${encodeURIComponent(uid)}/social`,
+    ),
+  /** 一条帖的点赞/收藏状态（当前浏览者视角） */
+  forumTopicSocial: (id: number) =>
+    request<{
+      liked: boolean;
+      likes: number;
+      favorited: boolean;
+      favorites: number;
+    }>(`/api/forum/topics/${id}/social`),
+  /** 我的通知列表 + 未读数 */
+  listNotifications: () =>
+    request<{
+      items: {
+        id: number;
+        kind: string;
+        actor_uid: string;
+        actor_name: string;
+        post_id: number | null;
+        read: boolean;
+        at: number;
+      }[];
+      unread: number;
+    }>("/api/forum/notifications"),
+  /** 标已读。before_id 空 = 全部 */
+  markNotificationsRead: (beforeId?: number) =>
+    request<{ read: number; unread: number }>("/api/forum/notifications/read", {
+      method: "POST",
+      body: JSON.stringify({ before_id: beforeId ?? null }),
+    }),
   // ---------- 公开库收藏 ----------
   //
   // 用 PUT/DELETE 而不是一个 toggle：toggle 在网络重试时会翻来覆去，
