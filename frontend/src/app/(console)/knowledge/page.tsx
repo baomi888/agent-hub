@@ -366,7 +366,10 @@ export default function KnowledgePage() {
   }, [preview]);
 
   const files: KbFile[] = active?.files ?? [];
-  const exts = defaults?.supported_extensions ?? [".pdf", ".md", ".txt"];
+  // 后端接口给出权威白名单；接口暂不可用时也别退化成只让传三种格式
+  const exts = defaults?.supported_extensions ?? [
+    ".pdf", ".md", ".txt", ".docx", ".doc", ".csv", ".json", ".jsonl", ".xlsx", ".pptx",
+  ];
 
   return (
     <PageShell

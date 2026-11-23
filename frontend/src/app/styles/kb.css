@@ -259,14 +259,23 @@
 
 /* 聊天附件 */
 .attach-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-8);
   padding: 0 0 10px;
   border-bottom: 1px solid var(--line);
   margin-bottom: 10px;
 }
-/* 附件能力边界：后端当前不消费附件，必须当场说清楚，否则用户以为图片被理解了 */
+/* ★ 豆包式：附件多了就让这一块自己滚，绝不把下面的输入行/发送键顶出视口。
+   上限 2.5 行左右；普通用户最多 9 个附件，管理员不限时也不会撑破一屏。 */
+.attach-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  max-height: 96px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  padding-right: 2px;
+}
+/* 附件能力边界：图片与文档都会参与解析，这里说清楚解析方式 */
 .attach-note {
   display: flex;
   align-items: center;

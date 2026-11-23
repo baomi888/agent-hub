@@ -482,7 +482,7 @@ export default function KnowledgePanel({
                 ref={fileRef}
                 type="file"
                 multiple
-                accept=".txt,.md,.pdf"
+                accept=".txt,.md,.pdf,.doc,.docx,.csv,.json,.jsonl,.xlsx,.pptx"
                 onChange={(e) => onFileChange(e.target.files)}
                 className="hidden"
               />
@@ -503,12 +503,13 @@ export default function KnowledgePanel({
                 <span className="text-fs-xs text-faint">
                   {busy
                     ? "正在解析文档、生成向量，这一步较慢，请勿重复点击或关闭页面"
-                    : "支持 TXT / Markdown / PDF，可多选"}
+                    : "支持 PDF / Word / Markdown / TXT / CSV / Excel / PPT，可多选"}
                 </span>
               </button>
 
               {selectedFiles.length > 0 && (
-                <div className="flex flex-col gap-1">
+                // 文件多了让列表自己滚：下面的「上传到…」按钮必须始终可见
+                <div className="flex max-h-40 flex-col gap-1 overflow-y-auto overscroll-contain pr-1">
                   {selectedFiles.map((f, i) => (
                     <div key={i} className="flex items-center gap-1.5 rounded-lg border border-line bg-bg px-2 py-1.5 text-xs text-muted">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3 shrink-0 text-ink">

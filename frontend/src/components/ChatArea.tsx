@@ -185,6 +185,11 @@ interface Props {
   /** ★ 2026-11-18：额度不再进对话区 —— 顶栏胶囊已拆，见设置页的「今日额度」。
   /** 当前用户 id：新手引导条的「已关闭」状态按人存，换人登录要重新看到 */
   userId?: string | null;
+  /**
+   * 单次附件份数上限；undefined = 不限（管理员）。
+   * 选文件时就在前端拦，避免用户挑完一堆才吃后端 400。
+   */
+  maxAttachments?: number;
 }
 
 export default function ChatArea({
@@ -221,6 +226,7 @@ export default function ChatArea({
   onSaveCity,
   sessionId = null,
   userId = null,
+  maxAttachments,
   resumeSession = null,
   onResumeSession,
 }: Props) {
@@ -229,6 +235,15 @@ export default function ChatArea({
   // 「自己填」展开：想直接敲数字的少数人才会点
   const [advancedTopK, setAdvancedTopK] = useState(false);
   const [pending, setPending] = useState<ChatAttachment[]>([]);
+  /**
+   * pending 的同步镜像。setPending 的 updater 里不能做副作用（StrictMode 会跑两遍，
+   * toast 会弹两次），所以把「改列表」收敛到 applyPending：先改 ref，再给 React 拷贝。
+   */
+  const pendingRef = useRef<ChatAttachment[]>([]);
+  const applyPending = (next: ChatAttachment[]) => {
+    pendingRef.current = next;
+    setPending(next);
+  };
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const attachRef = useRef<HTMLInputElement>(null);
@@ -321,6 +336,8 @@ export default function ChatArea({
 
   const pendingImageCount = pending.filter((a) => a.type.startsWith("image/")).length;
   const pendingOtherCount = pending.length - pendingImageCount;
+  // 有上限时显示 "3/9"，管理员不限则只显示张数
+  const attachCap = maxAttachments ? `/${maxAttachments}` : "";
 
   // capValue 是受控 props（页面层持有）：它要进请求体，住在这里就发不出去。
   // 输入框下面那行提示跟着它变 —— 这是四档模式条下架后用户唯一能看到的
@@ -828,31 +845,37 @@ export default function ChatArea({
     el.scrollTo({ top: target, behavior: "smooth" });
   }, []);
 
-  const addFiles = (files: FileList | File[]) => {    const arr = Array.from(files);
+  const addFiles = (files: FileList | File[]) => {
+    const arr = Array.from(files);
     if (arr.length === 0) return;
-    setPending((prev) => {
-      const next = [...prev];
-      for (const f of arr) {
-        if (next.some((a) => a.name === f.name && a.size === f.size)) continue;
-        next.push({
-          id: aid(),
-          name: f.name,
-          type: f.type || "application/octet-stream",
-          size: f.size,
-          url: URL.createObjectURL(f),
-          file: f,
-        });
+    const next = [...pendingRef.current];
+    let overflow = 0;
+    for (const f of arr) {
+      // 先去重再看上限：满额时重选同一批不该被算成「多出来的」
+      if (next.some((a) => a.name === f.name && a.size === f.size)) continue;
+      if (maxAttachments !== undefined && next.length >= maxAttachments) {
+        overflow += 1;
+        continue;
       }
-      return next;
-    });
+      next.push({
+        id: aid(),
+        name: f.name,
+        type: f.type || "application/octet-stream",
+        size: f.size,
+        url: URL.createObjectURL(f),
+        file: f,
+      });
+    }
+    if (overflow > 0) {
+      onNotice?.("info", `一次最多上传 ${maxAttachments} 个附件，多出来的 ${overflow} 个没有加上`);
+    }
+    applyPending(next);
   };
 
   const removeAttachment = (id: string) => {
-    setPending((prev) => {
-      const t = prev.find((a) => a.id === id);
-      if (t) URL.revokeObjectURL(t.url);
-      return prev.filter((a) => a.id !== id);
-    });
+    const t = pendingRef.current.find((a) => a.id === id);
+    if (t) URL.revokeObjectURL(t.url);
+    applyPending(pendingRef.current.filter((a) => a.id !== id));
   };
 
   const pushHistory = (q: string) => {
@@ -900,7 +923,7 @@ export default function ChatArea({
     if ((!q && pending.length === 0) || sending) return;
     const atts = pending;
     setInput("");
-    setPending([]);
+    applyPending([]);
     pushHistory(q);
     histIdxRef.current = -1;
     draftRef.current = "";
@@ -1381,6 +1404,8 @@ export default function ChatArea({
 
         {pending.length > 0 && (
           <div className="attach-strip">
+            {/* 豆包式：附件自己内部滚动，输入行和发送键永远留在视口里 */}
+            <div className="attach-items">
             {pending.map((a) => (
               <div key={a.id} className="attach-item">
                 {a.type.startsWith("image/") ? (
@@ -1410,14 +1435,15 @@ export default function ChatArea({
                 </button>
               </div>
             ))}
+            </div>
             <p className="attach-note">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <circle cx="12" cy="12" r="9" />
                 <path d="M12 16v-4M12 8h.01" />
               </svg>
               {pendingOtherCount > 0
-                ? `仅图片会参与回答（${pendingImageCount} 张）；其余 ${pendingOtherCount} 个文件暂不支持解析`
-                : `${pendingImageCount} 张图片将上传，由视觉模型结合问题一起分析`}
+                ? `${pendingImageCount}${attachCap} 张图片 + ${pendingOtherCount} 个文档将一起解析（提取文字与图片）`
+                : `${pendingImageCount}${attachCap} 张图片将上传，由视觉模型结合问题一起分析`}
             </p>
           </div>
         )}
@@ -1519,8 +1545,8 @@ export default function ChatArea({
           </button>
           <button
             onClick={() => attachRef.current?.click()}
-            title="上传附件（图片会由视觉模型分析）"
-            aria-label="上传附件，图片会由视觉模型分析"
+            title="上传图片或文档（PDF / Word / Markdown 等，会提取文字和图片一起分析）"
+            aria-label="上传图片或文档，提取文字和图片一起分析"
             className="attach"
           >
             {/* 加号：与「+ 新建对话 / + 我的文件」同一套进料语义，替代原回形针 */}
@@ -1532,9 +1558,9 @@ export default function ChatArea({
             ref={attachRef}
             type="file"
             multiple
-            // 后端只有视觉模型会消费附件，非图片格式上传了也不会参与回答，
-            // 与其让用户选完才发现没用，不如在选择器层面就只放行图片
-            accept="image/*"
+            // 与后端 api/chat.py 的支持格式对齐：图片 + 常见文档。
+            // 内容由后端抽取文字/图片后交给 DeepSeek 视觉模型分析。
+            accept="image/*,.pdf,.doc,.docx,.md,.txt,.csv,.json,.jsonl,.xls,.xlsx,.ppt,.pptx,.rtf"
             className="hidden"
             onChange={(e) => {
               const fs = e.target.files;
@@ -1577,10 +1603,8 @@ export default function ChatArea({
                   setInput("");
                 } else if (pending.length > 0) {
                   e.preventDefault();
-                  setPending((prev) => {
-                    prev.forEach((a) => URL.revokeObjectURL(a.url));
-                    return [];
-                  });
+                  pendingRef.current.forEach((a) => URL.revokeObjectURL(a.url));
+                  applyPending([]);
                 }
                 return;
               }

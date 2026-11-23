@@ -30,6 +30,7 @@ import { AuthLoading } from "@/components/boot/BootSplash";
 import type { UiMessage } from "@/components/chat/types";
 import type { Grounding, RefSource, ToolEvent, WebSource, IssuedApproval, ToolApprovalRequest } from "@/lib/types";
 import { isPlanRequest } from "@/components/chat/plan";
+import { MAX_ATTACHMENTS } from "@/components/chat/constants";
 import { useHybridTrace } from "@/lib/useHybridTrace";
 import { createTypewriter, type Typewriter } from "@/lib/typewriter";
 import { humanizeStatus } from "@/lib/chatStatus";
@@ -1096,6 +1097,8 @@ export default function Home() {
           onSaveCity={saveCity}
           sessionId={activeSid}
           userId={authedId}
+          // 管理员不限份数；普通用户 9 个，超出的在选择时就提示
+          maxAttachments={auth.me?.is_admin ? undefined : MAX_ATTACHMENTS}
         />
       </div>
 

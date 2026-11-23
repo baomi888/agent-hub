@@ -7,6 +7,10 @@ import type { CornIconName } from "@/components/CornIcon";
 // 输入区上方的两枚开关（检索 / 智能联网）直接表达。留在这里只会让
 // 「哪些地方还在讲四档」变得看不出来。
 
+// 单次对话附件上限，与 api/chat.py 的 MAX_CHAT_FILES 对齐。
+// 管理员不受这个数约束：页面层按 me.is_admin 传 undefined 表示不限。
+export const MAX_ATTACHMENTS = 9;
+
 // ============ 首屏主操作区：两组、六个「真去一个地方」的入口 ============
 //
 // ★ 2026-11-15 重排（用户要求）。删掉的是两样东西：
