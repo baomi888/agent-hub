@@ -256,16 +256,25 @@ export function railPrimary(): NavItem[] {
   return NAV.filter((it) => set.has(it.href));
 }
 
+/** 侧栏底部（账号块右侧）的入口：只放设置，且不再进「更多」 */
+export const RAIL_FOOT_HREF = "/settings";
+
 /**
  * 「更多」浮层里的项：NAV 里除主入口之外的全部（顺序沿用 NAV）。
  *
  * 沿用 `adminOnly` / `desktopOnly` 语义 —— 普通用户不该看到 /dashboard、/flow，
  * 窄屏（手机抽屉）也不该出现只能在电脑上编辑 JSON 的工作流。
  * 这两个标记是共享清单的既有契约，不要在这里另写一份过滤规则。
+ *
+ * ★ 2026-11-23：`/settings` 从这个浮层里拿掉 —— 它挪到了侧栏底部
+ *   （账号块右侧那颗齿轮）。同一个入口出现在两处，用户会以为是两件事。
  */
 export function railMore(isAdmin: boolean | undefined, narrow: boolean): NavItem[] {
   const primary = new Set<string>(RAIL_PRIMARY_HREFS);
   return visibleNav(isAdmin).filter(
-    (it) => !primary.has(it.href) && !(narrow && it.desktopOnly),
+    (it) =>
+      !primary.has(it.href) &&
+      it.href !== RAIL_FOOT_HREF &&
+      !(narrow && it.desktopOnly),
   );
 }

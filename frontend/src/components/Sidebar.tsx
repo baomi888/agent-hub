@@ -65,7 +65,6 @@ interface Props {
 
   /** 打开「用量与反馈」看板（P2）。不传则账号块不可点 */
   onOpenUsage?: () => void;
-  onLogout?: () => void;
 }
 
 const toMs = (ts: number) => (ts < 1e12 ? ts * 1000 : ts);
@@ -115,7 +114,6 @@ export default function Sidebar({
   displayName,
   avatar,
   onOpenUsage,
-  onLogout,
   isAdmin = false,
   collapsed = false,
   onToggleCollapsed,
@@ -651,15 +649,18 @@ export default function Sidebar({
                 </div>
               )}
             </div>
-            {onLogout && (
-              <button
-                onClick={onLogout}
-                className="sb-quit shrink-0 rounded-xs border border-line px-1.5 py-0.5 text-fs-xs text-muted transition hover:bg-fill-2 hover:text-ink"
-                title="退出登录"
-              >
-                退出
-              </button>
-            )}
+            {/* 设置：这个角落原来放的是「退出」（2026-11-23 用户要求对调）。
+                退出登录统一收在「设置 → 账号管理」，那边本来就有；
+                侧栏这个最顺手的位置改放最常用的"去设置"。
+                ★ 既然是链接，就不需要 onLogout 了 —— 退出只有一个入口。 */}
+            <Link
+              href={SETTINGS_HREF}
+              className="sb-set shrink-0 rounded-xs border border-line px-1.5 py-0.5 text-muted transition hover:bg-fill-2 hover:text-ink"
+              title="设置"
+              aria-label="设置"
+            >
+              <NavIcon name="settings" className="h-4 w-4" />
+            </Link>
           </div>
         )}
       </div>

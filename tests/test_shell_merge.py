@@ -251,10 +251,13 @@ def test_sidebar_online_status_removed():
     assert "deepseek-chat" not in code, "侧栏又出现了 deepseek-chat 在线状态"
     assert "在线 ·" not in code, "侧栏又出现了「在线 ·」状态文案"
     assert 'className="status"' not in code, "侧栏的 .status 状态行样式钩子还在"
-    # 反证配套：相邻结构仍完整（我的反馈、账号看板入口、退出按钮）
+    # 反证配套：相邻结构仍完整（我的反馈、账号看板入口、设置）
     assert "MyFeedbackLink" in code, "连「我的反馈」入口一起删了 —— 删过头"
     assert "onOpenUsage" in code, "连账号名看板入口一起删了 —— 看板没入口了"
-    assert "onLogout" in code, "连退出按钮一起删了 —— 用户没法登出"
+    # ★ 2026-11-23：这个位置从「退出」换成了「设置」，退出登录只留在设置页。
+    assert "sb-set" in code, "侧栏底部没有设置入口 —— 用户只能翻「更多」"
+    assert "退出" not in code, "侧栏又出现了退出按钮：退出应当只在 设置 → 账号管理"
+    assert "退出登录" in _code(SETTINGS), "设置页里没有退出登录 —— 那就真的没地方退了"
     # 侧栏底部不再有字号档位 / 深色开关（2026-11-22 用户要求）
     assert "fs-picker" not in code, "侧栏又出现了字号档位控件"
     assert "theme-chip" not in code, "侧栏又出现了深色模式开关"

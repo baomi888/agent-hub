@@ -132,7 +132,6 @@ const Rail = memo(function Rail({
   avatar,
   isAdmin,
   onOpenUsage,
-  onLogout,
   onCloseRail,
 }: {
   overlay: boolean;
@@ -145,7 +144,6 @@ const Rail = memo(function Rail({
   avatar?: string;
   isAdmin?: boolean;
   onOpenUsage: () => void;
-  onLogout: () => void;
   /** 窄屏抽屉里点完会话/新建后收起（宽屏下是空操作） */
   onCloseRail: () => void;
 }) {
@@ -181,7 +179,6 @@ const Rail = memo(function Rail({
       avatar={avatar}
       isAdmin={isAdmin}
       onOpenUsage={onOpenUsage}
-      onLogout={onLogout}
       overlay={overlay}
       open={open}
       collapsed={collapsed}
@@ -236,9 +233,8 @@ export default function ConsoleLayout({ children }: { children: ReactNode }) {
   const closeSidebar = useCallback(() => setSidebarPref(false), []);
   const openSidebar = useCallback(() => setSidebarPref(true), []);
   const openUsage = useCallback(() => setUsageOpen(true), []);
-  const onLogout = useCallback(() => {
-    void auth.logout();
-  }, [auth]);
+  // 退出登录不在这里了（2026-11-23）：入口统一在「设置 → 账号管理」，
+  // 侧栏角落那颗按钮换成了「设置」。少一条路径就少一次"两处状态不同步"。
 
   // 规范化的当前路径：去掉尾斜杠，查询串不参与比较
   const here = pathname.replace(/\/+$/, "") || "/";
@@ -291,7 +287,6 @@ export default function ConsoleLayout({ children }: { children: ReactNode }) {
       avatar={auth.me.user.avatar}
       isAdmin={auth.me.is_admin}
       onOpenUsage={openUsage}
-      onLogout={onLogout}
       onCloseRail={closeSidebar}
     />
   );

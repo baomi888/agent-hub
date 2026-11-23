@@ -1104,8 +1104,7 @@ button.kb-chip-unbound:hover {
 .side-left.is-collapsed .search,
 .side-left.is-collapsed nav[aria-label="会话列表"],
 .side-left.is-collapsed .rail-foot .sb-myfb,
-.side-left.is-collapsed .rail-foot .sb-acct-name,
-.side-left.is-collapsed .rail-foot .sb-quit {
+.side-left.is-collapsed .rail-foot .sb-acct-name {
   display: none;
 }
 .side-left.is-collapsed .rail-item,
@@ -1124,7 +1123,9 @@ button.kb-chip-unbound:hover {
   border-top-color: var(--line);
 }
 .side-left.is-collapsed .rail-foot .sb-acct {
-  justify-content: center;
+  /* 头像 + 设置齿轮：48px 宽度里并排放不下（24+8+26），竖排就够了 */
+  flex-direction: column;
+  gap: 6px;
   padding-left: 0;
   padding-right: 0;
 }
