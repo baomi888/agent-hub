@@ -190,7 +190,13 @@ export default function Sidebar({
       const max = Math.max(200, window.innerHeight - margin * 2);
       const estH = Math.min(max, more.length * 36 + 16);
       const top = Math.min(Math.max(margin, br.top), window.innerHeight - estH - margin);
-      setMorePos({ top: Math.round(top), left: Math.round(rr.right + 8), max });
+      // ★ 横向也必须夹视口：390 宽的手机上抽屉右缘是 276，直接 +8 会让
+      // 184px 宽的浮层从 284 排到 468 —— 最后几个字被切在屏幕外。
+      // 用浮层的实际宽度（min-width 184 + padding/border，取 200 保守值）
+      // 反推最大 left，窄屏就贴右边缘留 12px 呼吸位。
+      const popW = 200;
+      const left = Math.max(margin, Math.min(rr.right + 8, window.innerWidth - popW - margin));
+      setMorePos({ top: Math.round(top), left: Math.round(left), max });
     }
     setMoreOpen(true);
   }, [moreOpen, more.length, containerRef]);

@@ -936,3 +936,25 @@ def test_gpa_table_anchors_its_sr_only_label():
     assert "position: relative" in rule, (
         "GPA 表格没有定位基准：表头那个 sr-only 会把文档撑高，整页能被程序滚动"
     )
+
+
+def test_rail_more_popover_clamps_horizontal_position():
+    """「更多」浮层不能横向溢出视口（390 宽手机上曾把最后几个字切在屏外）。
+
+    浮层 portal 到 body、position:fixed，左缘只按抽屉右缘 +8 算的话：
+    390 宽时 284 + 184 = 468，右侧 78px 直接跑出屏幕。
+    这里钉住代码里必须同时用 window.innerWidth 反推 left 上限，
+    并且 CSS 的 min-width 仍与那个估算宽度一致（否则估算值会悄悄失效）。
+    """
+    src = _strip_comments(_read(SIDEBAR_TSX))
+    assert "window.innerWidth - popW - margin" in src, (
+        "浮层横向没有夹视口：窄屏上「更多」会被切掉一截"
+    )
+    assert "Math.max(margin, Math.min(rr.right + 8" in src, (
+        "浮层 left 没有下限保护：极窄屏会被推到负坐标"
+    )
+    css = _strip_comments(_read(COMPONENTS_CSS))
+    rule = _css_rule(css, ".rail-more")
+    assert "min-width: 184px" in rule, (
+        "浮层宽度变了：Sidebar.tsx 里的 popW=200 估算需要同步重算"
+    )

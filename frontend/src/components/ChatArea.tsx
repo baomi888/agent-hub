@@ -966,7 +966,7 @@ export default function ChatArea({
     [sessionId, onNotice]
   );
   // 从引用角标跳到全文预览：引用块只给文件名，kb 用当前会话绑定的那个
-  const openPreviewFile = useCallback((source: string) => setPreviewFile(source), []);
+  const openPreviewFile = useCallback((source: string) => setPreviewFile(source), [setPreviewFile]);
 
   /**
    * 只有真会走检索的模式才提示"检索词会被怎么理解"。
