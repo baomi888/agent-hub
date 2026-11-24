@@ -54,6 +54,7 @@ export default function BootOverlay({ mode = "boot", visible = true, onHidden }:
   const sproutSize = Math.max(20, Math.min(36, width * 0.065));
 
   const fade = useRef(new Animated.Value(1)).current;
+  const contentFade = useRef(new Animated.Value(1)).current;
   const logoIn = useRef(new Animated.Value(0)).current;
   const lineIn = useRef(new Animated.Value(0)).current;
   const statusIn = useRef(new Animated.Value(0)).current;
@@ -62,11 +63,17 @@ export default function BootOverlay({ mode = "boot", visible = true, onHidden }:
   const bob = useRef(new Animated.Value(0)).current;
   const sway = useRef(new Animated.Value(0)).current;
   const sweep = useRef(new Animated.Value(0)).current;
+  const glow = useRef(new Animated.Value(0)).current;
   const chars = useRef(
     Array.from({ length: 8 }, () => new Animated.Value(0)),
   ).current;
 
   const loops = useRef<Animated.CompositeAnimation[]>([]);
+  const onHiddenRef = useRef(onHidden);
+
+  useEffect(() => {
+    onHiddenRef.current = onHidden;
+  }, [onHidden]);
 
   useEffect(() => {
     const auth = mode === "auth";
@@ -162,9 +169,26 @@ export default function BootOverlay({ mode = "boot", visible = true, onHidden }:
         }),
       ]),
     );
-    loops.current = [bobLoop, swayLoop];
+    const glowLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(glow, {
+          toValue: 1,
+          duration: 1900,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(glow, {
+          toValue: 0,
+          duration: 1900,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loops.current = [bobLoop, swayLoop, glowLoop];
     bobLoop.start();
     swayLoop.start();
+    glowLoop.start();
 
     if (auth) {
       const sweepLoop = Animated.loop(
@@ -183,19 +207,27 @@ export default function BootOverlay({ mode = "boot", visible = true, onHidden }:
       loops.current.forEach((l) => l.stop());
       loops.current = [];
     };
-  }, [mode, chars, logoIn, lineIn, statusIn, sproutIn, underlineIn, bob, sway, sweep]);
+  }, [mode, chars, logoIn, lineIn, statusIn, sproutIn, underlineIn, bob, sway, sweep, glow]);
 
   useEffect(() => {
     if (visible) return;
-    Animated.timing(fade, {
-      toValue: 0,
-      duration: 320,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished) onHidden?.();
+    Animated.sequence([
+      Animated.timing(contentFade, {
+        toValue: 0,
+        duration: 190,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(fade, {
+        toValue: 0,
+        duration: 150,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (finished) onHiddenRef.current?.();
     });
-  }, [visible, fade, onHidden]);
+  }, [visible, contentFade, fade]);
 
   const charY = useMemo(
     () => chars.map((v) => v.interpolate({ inputRange: [0, 1], outputRange: [6, 0] })),
@@ -209,6 +241,7 @@ export default function BootOverlay({ mode = "boot", visible = true, onHidden }:
     inputRange: [0, 1],
     outputRange: [-lineWidth * 0.35, lineWidth * 1.08],
   });
+  const glowOpacity = glow.interpolate({ inputRange: [0, 1], outputRange: [0.76, 1] });
 
   const text = mode === "auth" ? "正在确认登录状态" : "正在打开知穗";
 
@@ -219,7 +252,8 @@ export default function BootOverlay({ mode = "boot", visible = true, onHidden }:
       accessibilityElementsHidden={mode === "boot"}
       importantForAccessibility={mode === "boot" ? "no-hide-descendants" : "auto"}
     >
-      <Image
+      <Animated.View style={[StyleSheet.absoluteFill, { opacity: contentFade }]}>
+      <Animated.Image
         source={
           dark
             ? require("./assets/boot-glow-dark.png")
@@ -231,6 +265,7 @@ export default function BootOverlay({ mode = "boot", visible = true, onHidden }:
           height: width * 1.7,
           top: -width * 0.55,
           left: -width * 0.35,
+          opacity: glowOpacity,
         }}
         resizeMode="cover"
         pointerEvents="none"
@@ -382,6 +417,7 @@ export default function BootOverlay({ mode = "boot", visible = true, onHidden }:
           {text}
         </Animated.Text>
       </View>
+      </Animated.View>
     </Animated.View>
   );
 }
@@ -404,9 +440,11 @@ const styles = StyleSheet.create({
   logoTile: {
     alignItems: "center",
     justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(61,47,26,0.10)",
     shadowColor: "#503C1E",
     shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.18,
+    shadowOpacity: 0.2,
     shadowRadius: 26,
     elevation: 10,
   },
@@ -445,9 +483,13 @@ const styles = StyleSheet.create({
   },
   line: {
     width: "100%",
-    height: 3,
+    height: 2,
     borderRadius: 3,
     overflow: "hidden",
+    shadowColor: "#C8892A",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
   },
   lineFill: {
     position: "absolute",

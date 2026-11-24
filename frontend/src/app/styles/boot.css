@@ -16,8 +16,20 @@
   color: var(--ink);
   background-color: var(--bg);
   background-image:
-    radial-gradient(ellipse 78% 56% at 50% 18%, rgba(255, 250, 236, 0.88), transparent 68%),
-    radial-gradient(ellipse 58% 44% at 50% 42%, rgba(200, 137, 42, 0.055), transparent 70%);
+    radial-gradient(ellipse 72% 48% at 50% 14%, rgba(255, 252, 241, 0.96), transparent 70%),
+    radial-gradient(ellipse 58% 42% at 50% 46%, rgba(200, 137, 42, 0.075), transparent 72%),
+    linear-gradient(180deg, rgba(255, 252, 241, 0.24), transparent 64%);
+}
+
+.zs-boot-splash::before,
+.zs-boot-auth::before {
+  content: "";
+  position: absolute;
+  inset: -24%;
+  pointer-events: none;
+  background: radial-gradient(ellipse 30% 18% at 50% 46%, rgba(255, 252, 241, 0.36), transparent 74%);
+  opacity: 0;
+  animation: zs-boot-ambient 3.4s ease-in-out 0.15s infinite;
 }
 
 .zs-boot-auth {
@@ -38,12 +50,18 @@
 .dark .zs-boot-auth {
   background-color: var(--bg);
   background-image:
-    radial-gradient(ellipse 72% 52% at 50% 18%, rgba(255, 238, 202, 0.09), transparent 68%),
-    radial-gradient(ellipse 54% 42% at 50% 42%, rgba(200, 137, 42, 0.10), transparent 72%);
+    radial-gradient(ellipse 72% 52% at 50% 18%, rgba(255, 238, 202, 0.12), transparent 68%),
+    radial-gradient(ellipse 54% 42% at 50% 42%, rgba(200, 137, 42, 0.13), transparent 72%),
+    linear-gradient(180deg, rgba(255, 238, 202, 0.03), transparent 64%);
+}
+
+.dark .zs-boot-splash::before,
+.dark .zs-boot-auth::before {
+  background: radial-gradient(ellipse 30% 18% at 50% 46%, rgba(224, 160, 58, 0.14), transparent 74%);
 }
 
 .zs-boot-splash {
-  transition: opacity 0.34s ease, visibility 0.34s ease;
+  transition: opacity 0.18s ease 0.14s, visibility 0.18s ease 0.14s;
   /* 兜底放行：这层是 fixed + z-index 9999 的不透明纸面，正常由 JS 在 2.08s
      摘掉。脚本没跑起来（hydration 报错、被拦）时它会把整站永久挡住 —— 所以
      再挂一条纯 CSS 的保险，5s 后自己让开。动画只在延迟结束后生效，不碰正常的
@@ -81,11 +99,19 @@
   min-height: 100%;
   padding: 0 24px;
   transform: translateY(-1vh);
+  transition: opacity 0.14s ease, transform 0.18s ease;
+  will-change: opacity, transform;
+}
+
+.zs-boot-splash.is-leaving .zs-boot-scene {
+  opacity: 0;
+  transform: translateY(calc(-1vh - 5px)) scale(0.99);
 }
 
 /* 纸面上的 logo 底座：圆角比例与 icon-512 一致（--r-icon 随尺寸缩放）。
    底色用 --tile-paper 而不是 --step-1：深色纸面下这块也要是浅的。 */
 .zs-boot-logo-tile {
+  position: relative;
   width: clamp(96px, 18.5vw, 270px);
   aspect-ratio: 1;
   display: grid;
@@ -96,7 +122,22 @@
   background: var(--tile-paper);
   box-shadow: 0 14px 38px rgba(80, 60, 30, 0.16);
   opacity: 0;
-  animation: zs-boot-logo-in 0.56s cubic-bezier(0.2, 0.8, 0.2, 1) 0.82s both;
+  will-change: transform, opacity;
+  animation:
+    zs-boot-logo-in 0.56s cubic-bezier(0.2, 0.8, 0.2, 1) 0.82s both,
+    zs-boot-logo-breathe 3.8s ease-in-out 1.6s infinite;
+}
+
+.zs-boot-logo-tile::before {
+  content: "";
+  position: absolute;
+  inset: -14%;
+  z-index: -1;
+  border-radius: inherit;
+  background: radial-gradient(ellipse, rgba(200, 137, 42, 0.15), transparent 70%);
+  opacity: 0;
+  transform: scale(0.88);
+  animation: zs-boot-halo 3.8s ease-in-out 1.6s infinite;
 }
 
 .zs-boot-mascot {
@@ -110,6 +151,10 @@
 .dark .zs-boot-logo-tile {
   border-color: rgba(255, 255, 255, 0.08);
   box-shadow: 0 18px 42px rgba(0, 0, 0, 0.38);
+}
+
+.dark .zs-boot-logo-tile::before {
+  background: radial-gradient(ellipse, rgba(224, 160, 58, 0.2), transparent 70%);
 }
 
 .dark .zs-boot-logo-tile .mascot {
@@ -150,7 +195,8 @@
   font-size: clamp(28px, 6.3vw, 84px);
   font-weight: 500;
   line-height: 1.16;
-  letter-spacing: 0.035em;
+  letter-spacing: 0.025em;
+  text-rendering: geometricPrecision;
   white-space: nowrap;
 }
 
@@ -215,7 +261,7 @@
 .zs-boot-line {
   position: relative;
   width: 100%;
-  height: 3px;
+  height: 2px;
   overflow: hidden;
   border-radius: var(--r-pill);
   background: var(--line);
@@ -230,7 +276,8 @@
   background: var(--accent);
   transform: scaleX(0);
   transform-origin: center;
-  animation: zs-boot-line-grow 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) 1.04s both;
+  box-shadow: 0 0 10px rgba(200, 137, 42, 0.28);
+  animation: zs-boot-line-grow 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) 1.04s both;
 }
 
 .zs-boot-line-sweep {
@@ -254,6 +301,17 @@
   transform-origin: 50% 100%;
   opacity: 0;
   animation: zs-boot-sprout-in 0.42s cubic-bezier(0.2, 0.8, 0.2, 1) 1.36s both;
+}
+
+.zs-boot-sprout::before {
+  content: "";
+  position: absolute;
+  inset: 26% 18% 8%;
+  border-radius: 50%;
+  background: rgba(200, 137, 42, 0.2);
+  filter: blur(7px);
+  opacity: 0;
+  animation: zs-boot-sprout-glow 2.8s ease-in-out 1.9s infinite;
 }
 
 .zs-boot-sprout-inner {
@@ -322,6 +380,40 @@
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes zs-boot-logo-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.012);
+  }
+}
+
+@keyframes zs-boot-halo {
+  0%,
+  100% {
+    opacity: 0.08;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.06);
+  }
+}
+
+@keyframes zs-boot-ambient {
+  0%,
+  100% {
+    opacity: 0.18;
+    transform: scale(0.94);
+  }
+  50% {
+    opacity: 0.62;
+    transform: scale(1.08);
   }
 }
 
@@ -395,14 +487,30 @@
   }
 }
 
+@keyframes zs-boot-sprout-glow {
+  0%,
+  100% {
+    opacity: 0;
+    transform: scale(0.82);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(1.06);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .zs-boot-char,
   .zs-boot-logo-tile,
+  .zs-boot-logo-tile::before,
+  .zs-boot-splash::before,
+  .zs-boot-auth::before,
   .zs-boot-brand::after,
   .zs-boot-line,
   .zs-boot-line-fill,
   .zs-boot-line-sweep,
   .zs-boot-sprout,
+  .zs-boot-sprout::before,
   .zs-boot-sprout-inner,
   .zs-boot-status,
   .zs-boot-mascot {
@@ -418,5 +526,8 @@
     transition: none;
     /* 上面那条兜底动画不能一起关掉：它和"动画克制"无关，是页面坏掉时的逃生口 */
     animation-duration: 1ms;
+  }
+  .zs-boot-splash.is-leaving .zs-boot-scene {
+    transition: none;
   }
 }
