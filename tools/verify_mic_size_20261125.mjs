@@ -4,6 +4,7 @@ const TOKEN = process.argv[2];
 if (!TOKEN) { console.error("需要本地测试 token"); process.exit(2); }
 const PORT = Number(process.env.BAOMI_CDP_PORT || 9352);
 const BASE = process.env.BAOMI_BASE || "http://127.0.0.1:3100";
+const DOMAIN = new URL(BASE).hostname;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 import { writeFileSync } from "node:fs";
 
@@ -44,7 +45,7 @@ await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, devi
 await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "light" }] });
 await send("Network.enable");
 await send("Network.setCookie", {
-  name: "baomi_session", value: TOKEN, domain: "127.0.0.1", path: "/",
+  name: "baomi_session", value: TOKEN, domain: DOMAIN, path: "/",
 });
 // 麦克风按钮按 capabilities 门控，patch 掉能力探测避免依赖本地密钥配置
 await send("Page.addScriptToEvaluateOnNewDocument", {
