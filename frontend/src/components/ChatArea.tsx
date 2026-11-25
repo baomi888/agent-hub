@@ -26,6 +26,7 @@ import FeedbackModal from "./feedback/FeedbackModal";
 import type { ChatAttachment, UiMessage } from "./chat/types";
 import ScreenshotCropper, { type CropRect } from "./chat/ScreenshotCropper";
 import FilePreviewModal from "./FilePreviewModal";
+import AttachmentPreviewModal from "./chat/AttachmentPreviewModal";
 import { useVoiceInput } from "./reminders/useVoiceInput";
 import {
   clearRecentImages,
@@ -384,6 +385,8 @@ export default function ChatArea({
   const tailRef = useRef<HTMLDivElement | null>(null);
   // 从引用角标打开的全文预览（文件名来自 RefSource，kb 用当前会话绑定的）
   const [previewFile, setPreviewFile] = useState<string | null>(null);
+  /** 待发送 / 已发消息里的附件：点开走本地图片放大或后端临时抽正文 */
+  const [previewAttachment, setPreviewAttachment] = useState<ChatAttachment | null>(null);
   // 今天条到底有没有出现（由 TodayStrip 回填）。推送入口靠它决定要不要渲染 ——
   // 详见 chat/PushNudge.tsx 顶部：两个东西的人群是同一批，位置也就该在一起。
   const [todayHasAny, setTodayHasAny] = useState(false);
@@ -1554,6 +1557,7 @@ export default function ChatArea({
                         onFeedback={handleFeedback}
                         onRetry={onRetry}
                         onPreviewFile={boundKb ? openPreviewFile : undefined}
+                        onPreviewAttachment={setPreviewAttachment}
                         onDeleteTurn={onDeleteTurn}
                         onSediment={onSediment}
                         onKbSaved={onKbSaved}
@@ -1736,21 +1740,30 @@ export default function ChatArea({
             <div className="attach-items">
             {pending.map((a) => (
               <div key={a.id} className="attach-item">
-                {a.type.startsWith("image/") ? (
-                  // 用户上传图的动态 URL（blob / 上传地址）：next/image 要配
-                  // remotePatterns + 已知宽高，聊天缩略图场景改了反而布局跳动。
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={a.url} alt={a.name} />
-                ) : (
-                  <span className="attach-file-badge">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round">
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                      <path d="M14 2v6h6" />
-                      <path d="M8 13h8M8 17h5" />
-                    </svg>
-                  </span>
-                )}
-                <span className="max-w-[150px] truncate">{a.name}</span>
+                {/* 豆包/DeepSeek 式：点缩略图或文件名就预览，删除是独立按钮，不嵌套 button */}
+                <button
+                  type="button"
+                  className="attach-preview-trigger"
+                  title={`预览：${a.name}`}
+                  aria-label={`预览附件：${a.name}`}
+                  onClick={() => setPreviewAttachment(a)}
+                >
+                  {a.type.startsWith("image/") ? (
+                    // 用户上传图的动态 URL（blob / 上传地址）：next/image 要配
+                    // remotePatterns + 已知宽高，聊天缩略图场景改了反而布局跳动。
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={a.url} alt="" />
+                  ) : (
+                    <span className="attach-file-badge">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <path d="M14 2v6h6" />
+                        <path d="M8 13h8M8 17h5" />
+                      </svg>
+                    </span>
+                  )}
+                  <span className="max-w-[150px] truncate">{a.name}</span>
+                </button>
                 <button
                   onClick={() => removeAttachment(a.id)}
                   title="移除附件"
@@ -2212,18 +2225,26 @@ export default function ChatArea({
               <div className="attach-sheet-preview-row" aria-label="待发送附件">
                 {pending.map((a) => (
                   <div className="attach-sheet-preview" key={a.id}>
-                    {a.type.startsWith("image/") ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={a.url} alt={a.name} />
-                    ) : (
-                      <span className="attach-sheet-file">
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                          <path d="M14 2v6h6M8 13h8M8 17h5" />
-                        </svg>
-                        <b>{a.name}</b>
-                      </span>
-                    )}
+                    <button
+                      type="button"
+                      className="attach-sheet-preview-open"
+                      title={`预览：${a.name}`}
+                      aria-label={`预览附件：${a.name}`}
+                      onClick={() => setPreviewAttachment(a)}
+                    >
+                      {a.type.startsWith("image/") ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={a.url} alt="" />
+                      ) : (
+                        <span className="attach-sheet-file">
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <path d="M14 2v6h6M8 13h8M8 17h5" />
+                          </svg>
+                          <b>{a.name}</b>
+                        </span>
+                      )}
+                    </button>
                     <button
                       type="button"
                       className="attach-sheet-remove"
@@ -2327,6 +2348,13 @@ export default function ChatArea({
           kbId={boundKb}
           name={previewFile}
           onClose={() => setPreviewFile(null)}
+        />
+      )}
+
+      {previewAttachment && (
+        <AttachmentPreviewModal
+          attachment={previewAttachment}
+          onClose={() => setPreviewAttachment(null)}
         />
       )}
 

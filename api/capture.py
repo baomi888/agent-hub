@@ -27,6 +27,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import tempfile
 import uuid
 
 import websockets
@@ -34,8 +36,9 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, WebSock
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from core import asr, asr_stream, auth, capture_parse, config, llm_gate, quota, timeutil
+from core import asr, asr_stream, auth, capture_parse, config, doc_extract, llm_gate, quota, timeutil
 from core.auth import get_current_user
+from kb.rag_core import SUPPORTED_EXT
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
@@ -116,6 +119,63 @@ class Capabilities(BaseModel):
 @router.get("/capabilities")
 async def get_capabilities() -> dict:
     return {"voice": config.ASR_ENABLED, "stream": asr_stream.enabled()}
+
+
+# ===== 上传附件的在线预览 =====
+# 图片走前端 blob URL 直接放大，不需要后端；Office / PDF / 纯文本才调这里。
+# 只做临时解析：文件读完就删，不进资料库、不占用户配额、不写任何表。
+PREVIEW_MAX_BYTES = 20 * 1024 * 1024
+# 解析 PDF/docx 有 CPU 开销，但不能沿用 parse 的 8 次/分（点几下预览就撞限流）
+PREVIEW_PER_MINUTE = 30
+
+
+@router.post("/preview")
+async def post_preview(
+    file: UploadFile = File(...),  # noqa: B008 -- FastAPI 依赖注入惯例
+    uid: str = Depends(get_current_user),
+) -> dict:
+    """点附件时抽正文给用户看；返回 {filename, text, images, truncated}。"""
+    # 文件名来自浏览器，只取最后一段：防止带路径穿越的怪名字进临时文件
+    name = os.path.basename((file.filename or "").replace("\\", "/")) or "附件"
+    ext = os.path.splitext(name)[1].lower()
+    if ext not in SUPPORTED_EXT:
+        supported = " / ".join(e.lstrip(".").upper() for e in SUPPORTED_EXT)
+        raise HTTPException(
+            status_code=400,
+            detail=f"这类文件没法在线预览，请下载后查看（支持 {supported}）",
+        )
+
+    # 多读 1 字节判超限，避免先整份读进内存再发现太大
+    raw = await file.read(PREVIEW_MAX_BYTES + 1)
+    if not raw:
+        raise HTTPException(status_code=400, detail="文件是空的，没法预览")
+    if len(raw) > PREVIEW_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="文件超过 20MB 在线预览上限，请下载后查看")
+    await asyncio.to_thread(quota.hit, f"preview:{uid}", PREVIEW_PER_MINUTE)
+
+    def _extract() -> dict:
+        # 与聊天附件共用 doc_extract 的抽取口径（docx/xlsx/pptx 都是 stdlib zip+xml）。
+        # ★ Windows 上 NamedTemporaryFile(delete=True) 句柄没关时别的 open 会 PermissionError，
+        #   所以先写盘并关闭，再解析，最后 finally 删除；Linux 线上同一份代码也稳妥。
+        fd, path = tempfile.mkstemp(suffix=ext)
+        try:
+            with os.fdopen(fd, "wb") as out:
+                out.write(raw)
+            extracted = doc_extract.extract_attachments([{"filename": name, "path": path}])
+            item = extracted.files[0] if extracted.files else None
+            return {
+                "filename": name,
+                "text": item.text if item else "",
+                "images": item.images if item else [],
+                "truncated": bool(item and item.truncated),
+            }
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+    return await asyncio.to_thread(_extract)
 
 
 @router.post("/transcribe")

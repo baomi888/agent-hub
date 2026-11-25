@@ -47,7 +47,7 @@ import type { MeOut, UserOut, Template, ApplyTemplateResult, UsageSummary } from
 import type { ProfileSnapshot, TagTaxonomy, TemplateRecommend } from "./types";
 import type { TodaySnapshot } from "./types";
 import type { MailState, PushStatus, PushSubscribeBody, PushTestResult } from "./types";
-import type { CaptureParseResult } from "./types";
+import type { AttachmentPreviewData, CaptureParseResult } from "./types";
 import type { RemindPref } from "./types";
 import type { EnhanceResult } from "./types";
 import type {
@@ -1508,6 +1508,17 @@ export const api = {
      *  `stream` 只表示支不支持**边说边出字**：它为 false 时麦克风照样要显示，
      *  内部退回一句话识别。把它当成语音总开关会让"少配一个 APPID"看起来像坏了。 */
     capabilities: () => request<{ voice: boolean; stream: boolean }>("/api/capture/capabilities"),
+    /** 点附件预览正文：临时解析，不写资料库。图片不走这里（直接用 blob URL 放大）。 */
+    previewAttachment: (file: File) => {
+      const form = new FormData();
+      form.append("file", file, file.name);
+      return request<AttachmentPreviewData>(
+        "/api/capture/preview",
+        // FormData 的 Content-Type 必须留给浏览器加 boundary
+        { method: "POST", body: form, headers: {} },
+        { timeoutMs: 30000 }
+      );
+    },
     transcribe: (wav: Blob) => {
       const form = new FormData();
       form.append("file", wav, "voice.wav");

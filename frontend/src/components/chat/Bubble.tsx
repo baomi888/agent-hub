@@ -4,7 +4,7 @@
 // memo 优化：流式回答时每个 token 都会更新 messages 数组，
 // 已完成的旧消息对象引用不变，跳过重渲染，避免长对话越答越卡
 import { memo, useMemo, useState } from "react";
-import type { UiMessage } from "./types";
+import type { ChatAttachment, UiMessage } from "./types";
 import { TOOL_META, toolLabel } from "./constants";
 import { parseRefs, renderContent, renderMarkdown } from "./content";
 import { stripPhantomCitations } from "@/lib/citations";
@@ -29,6 +29,7 @@ const Bubble = memo(function Bubble({
   onCopyFail,
   onFeedback,
   onPreviewFile,
+  onPreviewAttachment,
   onDeleteTurn,
   onSediment,
   onKbSaved,
@@ -46,6 +47,8 @@ const Bubble = memo(function Bubble({
   onFeedback?: (msgDbId: number, rating: "up" | "down", comment?: string) => void;
   /** 打开该文件全文预览（未绑定资料库时不传，入口就不显示） */
   onPreviewFile?: (source: string) => void;
+  /** 点开用户消息里的附件预览（图片放大 / 文档抽正文） */
+  onPreviewAttachment?: (a: ChatAttachment) => void;
   /** 删除该消息及其所在的一轮对话 */
   onDeleteTurn?: (msgDbId: number) => void;
   /**
@@ -112,22 +115,38 @@ const Bubble = memo(function Bubble({
         <div className="max-w-[85%] sm:max-w-[75%]">
           {m.attachments && m.attachments.length > 0 && (
             <div className="msg-attachments">
-              {m.attachments.map((a) =>
-                a.type.startsWith("image/") ? (
-                  // 同 ChatArea：用户上传图动态 URL，next/image 收益为负。
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img key={a.id} src={a.url} alt={a.name} className="msg-img" />
-                ) : (
-                  <div key={a.id} className="msg-file">
+              {m.attachments.map((a) => {
+                // 同 ChatArea：用户上传图动态 URL，next/image 收益为负。
+                // eslint-disable-next-line @next/next/no-img-element
+                const img = <img src={a.url} alt={a.name} className="msg-img" />;
+                const file = (
+                  <>
                     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round">
                       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                       <path d="M14 2v6h6" />
                       <path d="M8 13h8M8 17h5" />
                     </svg>
                     <span className="max-w-[180px] truncate">{a.name}</span>
-                  </div>
-                )
-              )}
+                  </>
+                );
+                if (!onPreviewAttachment) {
+                  return <div key={a.id} className={a.type.startsWith("image/") ? "msg-img-wrap" : "msg-file"}>
+                    {a.type.startsWith("image/") ? img : file}
+                  </div>;
+                }
+                return (
+                  <button
+                    key={a.id}
+                    type="button"
+                    className={a.type.startsWith("image/") ? "msg-img-btn" : "msg-file msg-file-btn"}
+                    title={`预览：${a.name}`}
+                    aria-label={`预览附件：${a.name}`}
+                    onClick={() => onPreviewAttachment(a)}
+                  >
+                    {a.type.startsWith("image/") ? img : file}
+                  </button>
+                );
+              })}
             </div>
           )}
           {m.content && (

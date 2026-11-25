@@ -409,6 +409,14 @@ export interface FilePreview {
   content: string;
 }
 
+/** 待发送附件的临时预览：后端只抽正文，不写资料库（图片由前端 blob URL 直接放大） */
+export interface AttachmentPreviewData {
+  filename: string;
+  text: string;
+  images: string[];
+  truncated: boolean;
+}
+
 // 工具调用（SSE tool 事件）
 export interface ToolEvent {
   name: string;
