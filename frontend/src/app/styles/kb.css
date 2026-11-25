@@ -1213,3 +1213,255 @@
   }
 }
 
+/* ============ 截图框选（2026-11-25） ============
+   浏览器只能给整帧，框选在我们自己的全屏层里做。portal 到 body，
+   避开对话区的 transform / overflow 裁切（代码块全屏踩过）。 */
+.shot-crop-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 94;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(61, 47, 26, 0.42);
+}
+
+.shot-crop-card {
+  width: min(1080px, 96vw);
+  max-height: calc(100dvh - 32px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-2);
+}
+
+.shot-crop-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px 10px;
+}
+
+.shot-crop-head h2 {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.shot-crop-head p {
+  margin: 4px 0 0;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.shot-crop-close {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.shot-crop-close svg {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+}
+
+.shot-crop-stage {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 14px;
+  overflow: hidden;
+  background: var(--step-0);
+}
+
+/* 这块 div 的尺寸就是图片显示尺寸：框选坐标以它为原点，
+   确认时按 width / 显示宽 换算回原始像素。 */
+.shot-crop-image-box {
+  position: relative;
+  touch-action: none;
+  user-select: none;
+  cursor: crosshair;
+  box-shadow: 0 3px 18px rgba(61, 47, 26, 0.22);
+}
+
+.shot-crop-image-box img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.shot-crop-selection {
+  position: absolute;
+  border: 2px solid var(--accent);
+  background: var(--accent-tint);
+  box-shadow: 0 0 0 1px rgba(61, 47, 26, 0.18);
+  pointer-events: none;
+}
+
+.shot-crop-size {
+  position: absolute;
+  left: -2px;
+  top: 100%;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.shot-crop-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+}
+
+.shot-crop-tip {
+  flex: 1 1 160px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.shot-crop-ghost,
+.shot-crop-primary {
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.shot-crop-ghost {
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--text-2);
+}
+
+.shot-crop-primary {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.shot-crop-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 700px) {
+  .shot-crop-mask {
+    padding: 8px;
+  }
+  .shot-crop-actions .shot-crop-tip {
+    order: -1;
+    flex-basis: 100%;
+  }
+}
+
+/* ============ 聊天框语音输入 ============
+   麦克风与发送键同高同圆，收起键盘再申请权限（手机上提示条不能被盖住）。 */
+.voice-mic {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.voice-mic svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.voice-mic:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.voice-mic.recording {
+  border-color: var(--red-solid);
+  background: var(--red-solid);
+  color: #fff;
+}
+
+.voice-mic:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.voice-mic-stop {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.voice-live-strip {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 8px 11px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+}
+
+.voice-live-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--red-solid);
+  animation: voice-live-pulse 1.1s ease-in-out infinite;
+}
+
+.voice-live-text {
+  min-width: 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+
+@keyframes voice-live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+

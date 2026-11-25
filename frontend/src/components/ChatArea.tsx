@@ -24,7 +24,9 @@ import TurnOutline from "./chat/TurnOutline";
 import QueryEnhance from "./chat/QueryEnhance";
 import FeedbackModal from "./feedback/FeedbackModal";
 import type { ChatAttachment, UiMessage } from "./chat/types";
+import ScreenshotCropper, { type CropRect } from "./chat/ScreenshotCropper";
 import FilePreviewModal from "./FilePreviewModal";
+import { useVoiceInput } from "./reminders/useVoiceInput";
 import {
   clearRecentImages,
   loadRecentImages,
@@ -288,6 +290,52 @@ export default function ChatArea({
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
+  /**
+   * 截图框选。getDisplayMedia 只能拿到整帧，所以先把整帧存在 ref 里，
+   * 把 dataURL 交给框选层；确认时从同一张 canvas 裁，不再解码第二遍。
+   */
+  const [shotSource, setShotSource] = useState<{ url: string; width: number; height: number } | null>(null);
+  const shotCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  /**
+   * 语音输入。后端没配密钥就不渲染麦克风 —— 按钮摆着点下去说「还没做」
+   * 比根本没有更糟。stream 只是「边说边出字」的增强，缺 APPID 时自动降级。
+   */
+  const [voiceOn, setVoiceOn] = useState(false);
+  const [streamOn, setStreamOn] = useState(false);
+  const [voiceLive, setVoiceLive] = useState("");
+  useEffect(() => {
+    let alive = true;
+    api.capture
+      .capabilities()
+      .then((c) => {
+        if (!alive) return;
+        setVoiceOn(Boolean(c.voice));
+        setStreamOn(Boolean(c.stream));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const voice = useVoiceInput({
+    streaming: streamOn,
+    onText: (said) => {
+      const text = said.trim();
+      if (!text) return;
+      // 追加而不是覆盖：先打了一半再用说的，不该把打过的字吞掉
+      setInput((prev) => (prev.trim() ? `${prev.replace(/\s+$/, "")} ${text}` : text));
+      setVoiceLive("");
+    },
+    onError: (msg) => {
+      setVoiceLive("");
+      onNotice?.("error", msg);
+    },
+    onFrame: (frame) => {
+      if (frame.type === "partial" || frame.type === "segment") setVoiceLive(frame.text);
+      if (frame.type === "done") setVoiceLive("");
+    },
+  });
   /**
    * 「最近使用」图片（方案 A）：用户选过的图片存本地 IndexedDB，
    * 点「+」第一屏直接铺出来勾选，不用每次都走系统弹窗。
@@ -1008,11 +1056,10 @@ export default function ChatArea({
     }
     let stream: MediaStream | null = null;
     try {
-      stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: false,
-        preferCurrentTab: true,
-      } as DisplayMediaStreamOptions & { preferCurrentTab: boolean });
+      // ★ 不传 preferCurrentTab：传了会把浏览器选择器锁死在当前标签页，
+      // 别的软件窗口和整个屏幕都选不到（用户反馈「只能截平台自己的内容」）。
+      // 留空约束，让 Edge/Chrome 自己列出「标签页 / 窗口 / 整个屏幕」三种。
+      stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
       const video = document.createElement("video");
       video.srcObject = stream;
       video.muted = true;
@@ -1032,10 +1079,13 @@ export default function ChatArea({
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("canvas_context_failed");
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const blob = await canvasToBlob(canvas, "image/png");
-      const file = new File([blob], captureFileName("截图", "png"), { type: "image/png" });
-      addFiles([file]);
-      onNotice?.("success", "截图已添加，可继续补充问题后发送");
+      // 先停共享再弹框选层：否则浏览器顶部的「正在共享」条会压在框选层上面。
+      shotCanvasRef.current = canvas;
+      setShotSource({
+        url: canvas.toDataURL("image/png"),
+        width: canvas.width,
+        height: canvas.height,
+      });
     } catch (error) {
       const name = error instanceof DOMException ? error.name : "";
       if (name !== "NotAllowedError" && name !== "AbortError") {
@@ -1043,6 +1093,32 @@ export default function ChatArea({
       }
     } finally {
       stopMediaStream(stream);
+    }
+  };
+
+  const closeScreenshot = () => {
+    shotCanvasRef.current = null;
+    setShotSource(null);
+  };
+
+  const confirmScreenshot = async (rect: CropRect) => {
+    const source = shotCanvasRef.current;
+    if (!source) return;
+    const out = document.createElement("canvas");
+    out.width = Math.max(1, Math.min(rect.w, source.width - rect.x));
+    out.height = Math.max(1, Math.min(rect.h, source.height - rect.y));
+    const ctx = out.getContext("2d");
+    if (!ctx) return;
+    ctx.drawImage(source, rect.x, rect.y, out.width, out.height, 0, 0, out.width, out.height);
+    try {
+      const blob = await canvasToBlob(out, "image/png");
+      const file = new File([blob], captureFileName("截图", "png"), { type: "image/png" });
+      addFiles([file]);
+      onNotice?.("success", "截图已添加，可继续补充问题后发送");
+    } catch {
+      onNotice?.("error", "截取画面失败，请重试或改用上传图片");
+    } finally {
+      closeScreenshot();
     }
   };
 
@@ -1771,6 +1847,21 @@ export default function ChatArea({
           </div>
         )}
 
+        {(voice.phase !== "idle" || voiceLive) && (
+          <div className="voice-live-strip" role="status" aria-live="polite">
+            <span className="voice-live-dot" aria-hidden="true" />
+            <span className="voice-live-text">
+              {voiceLive
+                ? voiceLive
+                : voice.phase === "recording"
+                  ? `正在听… ${voice.seconds} 秒，说完点旁边的方块`
+                  : voice.phase === "finishing"
+                    ? "正在收尾…"
+                    : "正在转成文字…"}
+            </span>
+          </div>
+        )}
+
         <div className="input-row">
           <button
             onClick={onToggleGeo}
@@ -1859,7 +1950,7 @@ export default function ChatArea({
                   </span>
                   <span>
                     <strong>截图提问</strong>
-                    <small>选择标签页后截取一帧</small>
+                    <small>选窗口或整屏，再框选一块</small>
                   </span>
                 </button>
               </div>
@@ -1967,6 +2058,48 @@ export default function ChatArea({
             aria-label="输入问题"
             className="composer-input max-h-40 flex-1 resize-none bg-transparent text-msg leading-relaxed text-text outline-none placeholder:text-faint"
           />
+          {voiceOn ? (
+            <button
+              type="button"
+              className={`voice-mic ${voice.phase === "recording" ? "recording" : ""}`}
+              data-rec={voice.phase === "recording" ? "1" : undefined}
+              title={
+                voice.phase === "recording"
+                  ? "停止录音并转成文字"
+                  : voice.phase === "transcribing" || voice.phase === "finishing"
+                    ? "正在听写"
+                    : "用说的代替打字"
+              }
+              aria-label={
+                voice.phase === "recording"
+                  ? "停止录音"
+                  : voice.phase === "transcribing" || voice.phase === "finishing"
+                    ? "正在听写"
+                    : "用说的代替打字"
+              }
+              aria-busy={voice.phase === "transcribing" || voice.phase === "finishing"}
+              disabled={voice.phase === "transcribing" || voice.phase === "finishing"}
+              onClick={() => {
+                if (voice.phase === "recording") {
+                  void voice.stop();
+                  return;
+                }
+                // 手机键盘会盖住「正在听」那条提示，申请麦克风前先收起
+                inputRef.current?.blur();
+                setVoiceLive("");
+                void voice.start();
+              }}
+            >
+              {voice.phase === "recording" ? (
+                <span className="voice-mic-stop" aria-hidden="true" />
+              ) : (
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="9" y="3" width="6" height="11" rx="3" />
+                  <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M9 21h6" />
+                </svg>
+              )}
+            </button>
+          ) : null}
           {sending || playing ? (
             <button
               onClick={onStop}
@@ -2177,6 +2310,16 @@ export default function ChatArea({
             </footer>
           </div>
         </div>
+      )}
+
+      {shotSource && (
+        <ScreenshotCropper
+          imageUrl={shotSource.url}
+          width={shotSource.width}
+          height={shotSource.height}
+          onCancel={closeScreenshot}
+          onConfirm={(rect) => void confirmScreenshot(rect)}
+        />
       )}
 
       {previewFile && boundKb && (

@@ -135,3 +135,82 @@ def test_recent_grid_css_is_mobile_only_with_touch_targets():
     item = re.search(r"\.attach-sheet-recent-item\s*\{([\s\S]*?)\n  \}", css)
     assert item, "最近图片项缺样式"
     assert "60px" in item.group(1), "最近图片缩略图低于触控基准"
+
+
+# ==================== 截图框选 + 聊天语音输入（2026-11-25 用户反馈） ====================
+# 用户两条反馈：① 电脑端截图只能截我们自己的平台、不能选区域；
+# ② 要加一个语音识别模块。两条都基于已有的浏览器/后端能力，守卫按「数据 + 逻辑」双层。
+
+CROPPER_TSX = SRC / "components" / "chat" / "ScreenshotCropper.tsx"
+
+
+def test_screenshot_can_pick_window_and_then_crop_region():
+    src = _strip_comments(_read(CHATAREA))
+    # ★ 逻辑断言：preferCurrentTab 会把选择器锁在当前标签页，这正是用户说的
+    #   「截不到平台以外」。不能只断言 getDisplayMedia 存在（原来也有）。
+    assert "getDisplayMedia({ video: true, audio: false })" in src, (
+        "截图没有放开 displaySurface 选择，仍可能锁在当前标签页"
+    )
+    assert "preferCurrentTab" not in src, "preferCurrentTab 还在：又锁回当前标签页了"
+    # 数据链路：整帧存 canvas → dataURL 给框选层 → 确认时按框裁切 → addFiles
+    assert "shotCanvasRef" in src and "canvas.toDataURL" in src, "整帧画面没有交给框选层"
+    assert "<ScreenshotCropper" in src and "confirmScreenshot" in src, "框选结果没接回附件链路"
+    assert "ctx.drawImage(source, rect.x, rect.y" in src, "确认时没有按选区裁切原始像素"
+    assert "addFiles([file])" in src, "裁剪结果没有走 addFiles（会绕开 9 个上限和去重）"
+
+
+def test_cropper_uses_portal_pointer_drag_and_source_scale():
+    src = _strip_comments(_read(CROPPER_TSX))
+    assert "createPortal(" in src and "document.body" in src, "框选层没有 portal 到 body，会被抽屉 transform 裁掉"
+    # 三个指针事件缺一不可：down 起点 / move 跟随 / up 定框
+    for handler in ("onPointerDown", "onPointerMove", "onPointerUp"):
+        assert handler in src, f"框选缺 {handler}"
+    assert "setPointerCapture" in src, "拖出图片边界后选区会丢"
+    # ★ 换算逻辑：显示坐标必须乘比例才是源图像素（只验有按钮会漏掉错位）
+    assert "display.scale" in src and "Math.round(box.x * display.scale)" in src, (
+        "选区没有换算回原始像素，裁出来位置会偏"
+    )
+    assert "box.w >= 6" in src and "box.h >= 6" in src, "误触的小框也会变成一张空图"
+    assert "整张使用" in src and "用这一块" in src, "缺整张/选区两个出口"
+
+
+def test_cropper_css_is_above_camera_and_has_no_scroll():
+    css = _strip_comments(_read(KB_CSS))
+    mask = re.search(r"\.shot-crop-mask\s*\{([\s\S]*?)\n\}", css)
+    assert mask, "框选遮罩没有样式"
+    z = re.search(r"z-index:\s*(\d+)", mask.group(1))
+    assert z and int(z.group(1)) >= 90, "框选遮罩层级低于拍照弹窗，会被压住"
+    box = re.search(r"\.shot-crop-image-box\s*\{([\s\S]*?)\n\}", css)
+    assert box and "touch-action: none" in box.group(1), "拖拽选区时页面会跟着滚"
+
+
+def test_chat_voice_input_reuses_backend_asr_with_fallback():
+    # ★ 用原文：JSX 的 accept="image/*" 会被注释剥离正则当成块注释起点，
+    #   一路吃到语音按钮（本文件上面那条守卫踩过，别再用 stripped src）。
+    src = _read(CHATAREA)
+    assert "useVoiceInput" in src, "聊天框没有接语音识别 hook"
+    assert "api.capture" in src and ".capabilities()" in src, "没有先问后端是否配了 ASR 密钥"
+    gate = src.index("{voiceOn ? (")
+    mic = src.index("voice-mic")
+    assert gate < mic < gate + 1500, (
+        "麦克风没有按 capabilities 门控：没配密钥时会渲染点了没反应的按钮"
+    )
+    # 结果是「追加」而不是覆盖，且走流式帧显示中间文本
+    assert "setInput((prev)" in src and "onText:" in src, "转写结果没有追加到输入框"
+    assert "onFrame:" in src and 'frame.type === "partial"' in src, "流式没有边说边出字"
+    assert "voice.stop()" in src and "voice.start()" in src, "麦克风没有开始/停止闭环"
+    # 提醒抽屉的 hook 必须保留两条路（流式 + 一句话降级），不能复制出第二套
+    # 同样用原文：`${proto}//${host}` 里的 `//` 会被注释剥离正则吃掉整行
+    hook = _read(SRC / "components" / "reminders" / "useVoiceInput.ts")
+    assert "/api/capture/ws" in hook and "api.capture.transcribe" in hook, (
+        "语音只有一条路：缺 APPID 时没法降级成一句话识别"
+    )
+
+
+def test_voice_mic_and_live_strip_css():
+    css = _strip_comments(_read(KB_CSS))
+    mic = re.search(r"\.voice-mic\s*\{([\s\S]*?)\n\}", css)
+    assert mic, "麦克风按钮没有样式"
+    assert "width: 40px" in mic.group(1) and "height: 40px" in mic.group(1), "麦克风与发送键不同高"
+    assert ".voice-mic.recording" in css and ".voice-mic-stop" in css, "录音中/停止态没有视觉区分"
+    assert ".voice-live-strip" in css and "voice-live-pulse" in css, "边说边出字没有展示层"
