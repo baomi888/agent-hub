@@ -212,5 +212,20 @@ def test_voice_mic_and_live_strip_css():
     mic = re.search(r"\.voice-mic\s*\{([\s\S]*?)\n\}", css)
     assert mic, "麦克风按钮没有样式"
     assert "width: 40px" in mic.group(1) and "height: 40px" in mic.group(1), "麦克风与发送键不同高"
+    # 手机档发送键在 chat.css 里缩到 32，麦克风必须同步缩，
+    # 否则截图里会出现「麦克风大一圈、发送小一圈」的错位。
+    mobile = re.search(r"@media \(max-width: 560px\)\s*\{[\s\S]*?\.voice-mic\s*\{([\s\S]*?)\n  \}", css)
+    assert mobile, "麦克风没有跟随手机档发送键的 560 断点"
+    assert "width: 32px" in mobile.group(1) and "height: 32px" in mobile.group(1), (
+        "手机端麦克风与 32px 发送键不同高"
+    )
+    mobile_svg = re.search(r"@media \(max-width: 560px\)\s*\{[\s\S]*?\.voice-mic svg\s*\{([\s\S]*?)\n  \}", css)
+    assert mobile_svg and "width: 14px" in mobile_svg.group(1), "手机端麦克风图标没跟发送键同步缩小"
     assert ".voice-mic.recording" in css and ".voice-mic-stop" in css, "录音中/停止态没有视觉区分"
     assert ".voice-live-strip" in css and "voice-live-pulse" in css, "边说边出字没有展示层"
+    # 视觉缩到 32 后热区仍要补到 44（硬约束 39），但不能横扩：
+    # 麦克风和发送中间只有 8px gap，两边都整圈扩会重叠。
+    touch = _strip_comments(_read(SRC / "app" / "styles" / "touch.css"))
+    hit = re.search(r"\.voice-mic::before\s*\{([\s\S]*?)\n  \}", touch)
+    assert hit and "inset: -6px 0" in hit.group(1), "麦克风触控热区没补到 44 或会与发送键重叠"
+    assert re.search(r"\n  \.voice-mic,\n", touch), "麦克风没有 position:relative，热区伪元素会跑位"

@@ -1431,6 +1431,24 @@
   background: currentColor;
 }
 
+/* 手机档：发送键在 chat.css 的 560 断点里是 32px，麦克风必须跟着缩，
+   否则两个圆形按钮一高一低（截图里麦克风 40、发送 32，视觉上差了一圈）。
+   图标同步 19 → 14，跟 .send svg 同尺寸；热区在 touch.css 里补回 44。 */
+@media (max-width: 560px) {
+  .voice-mic {
+    width: 32px;
+    height: 32px;
+  }
+  .voice-mic svg {
+    width: 14px;
+    height: 14px;
+  }
+  .voice-mic-stop {
+    width: 10px;
+    height: 10px;
+  }
+}
+
 .voice-live-strip {
   display: flex;
   align-items: flex-start;

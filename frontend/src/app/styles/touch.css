@@ -39,6 +39,7 @@
   .attach,
   .geo-btn,
   .send,
+  .voice-mic,
   .kb-manage,
   .theme-chip,
   .push-nudge .pn-x,
@@ -156,6 +157,14 @@
     content: "";
     position: absolute;
     inset: -6px;
+  }
+
+  /* 麦克风与发送并排、中间只有 8px gap：两边都整圈扩会重叠 4px。
+     跟随发送缩到 32 后只扩纵向（垂直 44），横向保持原尺寸不抢点击。 */
+  .voice-mic::before {
+    content: "";
+    position: absolute;
+    inset: -6px 0;
   }
 
   /* 26×56 的对话目录页签：本身已过 44，不再横向外扩
