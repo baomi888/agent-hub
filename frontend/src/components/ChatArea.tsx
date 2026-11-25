@@ -25,6 +25,12 @@ import QueryEnhance from "./chat/QueryEnhance";
 import FeedbackModal from "./feedback/FeedbackModal";
 import type { ChatAttachment, UiMessage } from "./chat/types";
 import FilePreviewModal from "./FilePreviewModal";
+import {
+  clearRecentImages,
+  loadRecentImages,
+  saveRecentImages,
+  type RecentImage,
+} from "@/lib/recentImages";
 
 // 兼容导出：page.tsx 仍从 "@/components/ChatArea" 引入这些符号
 export type { UiMessage, ChatAttachment } from "./chat/types";
@@ -282,6 +288,13 @@ export default function ChatArea({
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
+  /**
+   * 「最近使用」图片（方案 A）：用户选过的图片存本地 IndexedDB，
+   * 点「+」第一屏直接铺出来勾选，不用每次都走系统弹窗。
+   * recentUrlMap 管理 objectURL 生命周期，面板关闭/卸载时统一 revoke。
+   */
+  const [recentImages, setRecentImages] = useState<Array<RecentImage & { url: string }>>([]);
+  const recentUrlMap = useRef<Map<string, string>>(new Map());
   // 输入历史：↑/↓ 在历史里前后翻，Esc 清空输入框
   // 本地历史用惰性初始值读，不在 effect 里 setState（会触发 react-hooks/set-state-in-effect）
   const [history, setHistory] = useState<string[]>(() => {
@@ -356,6 +369,39 @@ export default function ChatArea({
     if (!prefill) return;
     inputRef.current?.focus();
   }, [prefill]);
+
+  // 面板打开时才读本地缓存（点「+」的瞬间铺出最近图片）；关闭即释放 objectURL。
+  // 用 cancelled 守卫异步回填，避免打开→关闭→再打开时旧请求覆盖新结果。
+  useEffect(() => {
+    if (!attachMenuOpen) {
+      recentUrlMap.current.forEach((url) => URL.revokeObjectURL(url));
+      recentUrlMap.current.clear();
+      return;
+    }
+    let cancelled = false;
+    void loadRecentImages().then((rows) => {
+      if (cancelled) return;
+      setRecentImages(
+        rows.map((r) => {
+          const url = URL.createObjectURL(r.blob);
+          recentUrlMap.current.set(r.id, url);
+          return { ...r, url };
+        }),
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [attachMenuOpen]);
+
+  // 卸载兜底：组件销毁时把还活着的 objectURL 全放掉
+  useEffect(
+    () => () => {
+      recentUrlMap.current.forEach((url) => URL.revokeObjectURL(url));
+      recentUrlMap.current.clear();
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!attachMenuOpen) return;
@@ -932,6 +978,12 @@ export default function ChatArea({
       onNotice?.("info", `一次最多上传 ${maxAttachments} 个附件，多出来的 ${overflow} 个没有加上`);
     }
     applyPending(next);
+    // 图片存进「最近使用」缓存（非阻塞、失败静默），下次点「+」可直接勾选。
+    // 只对真正加进去的图片做缓存：被去重/超限挡掉的不该占据最近列表。
+    const addedImages = arr.filter(
+      (f) => f.type.startsWith("image/") && next.some((a) => a.name === f.name && a.size === f.size),
+    );
+    if (addedImages.length > 0) void saveRecentImages(addedImages);
   };
 
   const chooseAttachments = (ref: RefObject<HTMLInputElement | null>) => {
@@ -1058,6 +1110,24 @@ export default function ChatArea({
     const t = pendingRef.current.find((a) => a.id === id);
     if (t) URL.revokeObjectURL(t.url);
     applyPending(pendingRef.current.filter((a) => a.id !== id));
+  };
+
+  // 点「最近使用」里的图：把缓存的 blob 还原成 File 走同一条 addFiles 链路
+  // （复用去重 + 上限 + 提示逻辑），避免另起一套状态导致行为分叉。
+  const pickRecentImage = (r: RecentImage & { url: string }) => {
+    const file = new File([r.blob], r.name, { type: r.type });
+    addFiles([file]);
+    URL.revokeObjectURL(r.url);
+    recentUrlMap.current.delete(r.id);
+  };
+
+  const clearRecent = () => {
+    void clearRecentImages().then(() => {
+      recentUrlMap.current.forEach((url) => URL.revokeObjectURL(url));
+      recentUrlMap.current.clear();
+      setRecentImages([]);
+      onNotice?.("info", "最近使用已清空");
+    });
   };
 
   const pushHistory = (q: string) => {
@@ -1965,7 +2035,9 @@ export default function ChatArea({
                 <p>
                   {pending.length > 0
                     ? `已选择 ${pending.length}${attachCap} 个附件`
-                    : "图片会先预览，可左右滑动查看"}
+                    : recentImages.length > 0
+                      ? "点最近图片直接添加，或选新图片"
+                      : "图片会先预览，可左右滑动查看"}
                 </p>
               </div>
               <button
@@ -1979,6 +2051,29 @@ export default function ChatArea({
                 </svg>
               </button>
             </header>
+
+            {recentImages.length > 0 && (
+              <div className="attach-sheet-recent" aria-label="最近使用的图片">
+                <div className="attach-sheet-recent-head">
+                  <b>最近使用</b>
+                  <button type="button" onClick={clearRecent}>清空</button>
+                </div>
+                <div className="attach-sheet-recent-row">
+                  {recentImages.map((r) => (
+                    <button
+                      type="button"
+                      className="attach-sheet-recent-item"
+                      key={r.id}
+                      aria-label={`选用最近图片：${r.name}`}
+                      onClick={() => pickRecentImage(r)}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={r.url} alt="" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {pending.length > 0 ? (
               <div className="attach-sheet-preview-row" aria-label="待发送附件">

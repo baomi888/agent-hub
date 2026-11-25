@@ -82,3 +82,56 @@ def test_css_sheet_is_mobile_only_with_safe_touch_targets():
     # 触控目标 >=44px（硬约束 39）：菜单项与动作按钮都要量到
     assert "min-height: 54px" in css, "浮层菜单项低于 44px 触控基准"
     assert "min-height: 88px" in css, "手机面板动作按钮低于 44px 触控基准"
+
+
+# ==================== 方案 A：最近使用图片网格（2026-11-25 用户确认） ====================
+# 用户诉求：「点+就能有预览的一部分图片供选择」。网页读不到整本相册（沙箱），
+# 但用户选过的图片能缓存下来复用 —— 这是纯网页最接近 App 相册网格的形态。
+# 三条必须同时在：缓存模块（IndexedDB）+ 面板第一屏网格 + 点选走同一条 addFiles。
+
+RECENT_TS = SRC / "lib" / "recentImages.ts"
+
+
+def test_recent_images_module_exists_and_bounded():
+    """缓存模块要用 IndexedDB、有数量上限、失败静默降级、可清空。"""
+    src = _strip_comments(_read(RECENT_TS))
+    assert "indexedDB.open" in src, "最近图片没有用 IndexedDB 落盘"
+    assert "MAX_ITEMS" in src and "excess" in src, "缓存没有数量上限：IndexedDB 会无限膨胀"
+    # 失败降级：openDb 的 onerror 返回 null，调用方判空后 return（不能抛到主流程）
+    assert src.count("resolve(null)") >= 2, "IndexedDB 失败没有静默降级"
+    # 可清空（隐私：用户能一键删除本地缓存）
+    assert "export async function clearRecentImages" in src, "缓存没有清空入口"
+
+
+def test_mobile_sheet_shows_recent_grid_before_actions():
+    """手机面板第一屏铺最近图片，点选走 addFiles（不另起状态分叉）。"""
+    src = _strip_comments(_read(CHATAREA))
+    # 面板里必须有最近区块，且在「待发送预览」之前（第一屏就能看到）
+    assert "attach-sheet-recent" in src, "手机面板没有最近使用区块"
+    assert src.count("attach-sheet-recent-item") >= 1, "最近图片没有可点选的缩略图按钮"
+    recent_pos = src.index("className=\"attach-sheet-recent\"")
+    preview_pos = src.index("className=\"attach-sheet-preview-row\"")
+    assert recent_pos < preview_pos, "最近图片区块不在待发送预览之前：第一屏看不到"
+    # 点选走 addFiles 同一条链路（去重/上限/提示复用）
+    assert "pickRecentImage" in src and "addFiles([file])" in src, (
+        "最近图片没有走 addFiles：会绕开 9 个上限和去重"
+    )
+    # objectURL 生命周期：打开读缓存建 URL、关闭/卸载 revoke，否则内存泄漏
+    assert src.count("URL.revokeObjectURL") >= 3, "objectURL 回收点不足（关闭/清空/选图）"
+    # 缓存写入只在 addFiles 里、且非阻塞
+    assert "saveRecentImages" in src and "void saveRecentImages" in src, (
+        "选过的图片没有写进最近缓存"
+    )
+    # 清理按钮接到 clearRecent
+    assert "onClick={clearRecent}" in src, "最近图片没有清空按钮"
+
+
+def test_recent_grid_css_is_mobile_only_with_touch_targets():
+    css = _strip_comments(_read(KB_CSS))
+    m = re.search(r"@media \(max-width: 899px\)\s*\{[\s\S]*?\.attach-sheet-recent-row\s*\{([\s\S]*?)\n  \}", css)
+    assert m, "最近图片网格没有放进手机媒体查询"
+    assert "overflow-x: auto" in m.group(1), "最近图片横排不能滑动"
+    # 缩略图 60px >= 44px 触控基准（硬约束 39）
+    item = re.search(r"\.attach-sheet-recent-item\s*\{([\s\S]*?)\n  \}", css)
+    assert item, "最近图片项缺样式"
+    assert "60px" in item.group(1), "最近图片缩略图低于触控基准"

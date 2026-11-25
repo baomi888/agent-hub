@@ -616,6 +616,89 @@
     stroke-linecap: round;
   }
 
+  .attach-sheet-recent {
+    padding: 0 1px 11px;
+    margin-bottom: 2px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .attach-sheet-recent-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 1px 8px;
+  }
+
+  .attach-sheet-recent-head b {
+    color: var(--ink);
+    font-size: var(--fs-sm);
+    font-weight: 560;
+    line-height: var(--lh-tight);
+  }
+
+  .attach-sheet-recent-head button {
+    min-height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--card-bg);
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    cursor: pointer;
+  }
+
+  .attach-sheet-recent-head button:hover,
+  .attach-sheet-recent-head button:focus-visible {
+    border-color: var(--accent);
+    color: var(--accent-ink);
+    outline: none;
+  }
+
+  .attach-sheet-recent-row {
+    display: flex;
+    gap: 8px;
+    padding: 1px 1px 3px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x proximity;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .attach-sheet-recent-row::-webkit-scrollbar {
+    display: none;
+  }
+
+  .attach-sheet-recent-item {
+    position: relative;
+    width: 60px;
+    height: 60px;
+    flex: 0 0 60px;
+    padding: 0;
+    overflow: hidden;
+    scroll-snap-align: start;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--card-bg);
+    cursor: pointer;
+    transition: var(--t-color);
+  }
+
+  .attach-sheet-recent-item:hover,
+  .attach-sheet-recent-item:focus-visible {
+    border-color: var(--accent);
+    outline: none;
+  }
+
+  .attach-sheet-recent-item img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+  }
+
   .attach-sheet-preview-row {
     display: flex;
     gap: 9px;
