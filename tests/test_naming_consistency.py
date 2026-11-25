@@ -61,8 +61,13 @@ def _code(path: Path) -> str:
 #  · lib/chatStatus.ts 的 `re:` 行：那些正则匹配的是**后端 status 帧的原文**，
 #    后端还在发「正在检索知识库(bk_xxx)」。改了正则就一条都匹配不上，
 #    界面上那行状态会永远停在上一条。要改先改后端。
+#  · components/chat/legacyBlocks.ts 的 SRC_NAME：同样匹配**后端历史消息里的
+#    标签原文**（core/data_boundary.py 打的是【资料开始·知识库】）。改了字面量
+#    旧消息里那些块就再也剥不掉，正是 c93e283 要修的那个 bug 复活。
+#    注意 SOURCE_LABEL 的显示文案已按纪律改成「资料库」，这里只豁免正则。
 _ALLOWED_LINES = {
     "lib/chatStatus.ts": re.compile(r"\bre:\s*/"),
+    "components/chat/legacyBlocks.ts": re.compile(r"^const SRC_NAME\s*="),
 }
 
 # 允许的整体词：**「公开知识库」与「官方知识库」两个，只有这两个**。

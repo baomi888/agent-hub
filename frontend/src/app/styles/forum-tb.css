@@ -1169,8 +1169,6 @@
   border-top: 1px solid var(--line);
 }
 
-/* .tb-comp-note（发布按钮左边那段署名/公开说明）已随文案一起移除，2026-11-23 */
-
 .tb-comp-tip {
   margin: 10px 0 0;
   color: var(--red-ink);

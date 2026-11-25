@@ -169,7 +169,13 @@ def test_rag_stream_event_sequence(client):
         "run_id",
         "plan_topic",
         "truncated",
+        # 2026-11-23 c93e283：模型复述的【资料开始·X】块由后端剥离，
+        # 干净正文进 done.answer、剥出的块随 done.blocks 发前端渲染成折叠条。
+        # 这是**契约变更**：前端 Bubble 依赖它（!m.streaming && <BlocksTrace>），
+        # 所以守卫同步放宽集合，并单独断言取值，不是把契约测试改成摆设。
+        "blocks",
     }
+    assert isinstance(done["blocks"], list)  # 无资料块时也必须给空列表，不能是 null
     assert done["truncated"] is False  # 这个假 LLM 不带 finish_reason=length
     assert done["answer"] == "你好呀"
     assert done["mode"] == "rag"

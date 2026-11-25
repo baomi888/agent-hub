@@ -5,7 +5,7 @@
 //
 // 2026-09 重构：消息类型/常量/正文渲染/计划卡片/Bubble/Field 拆到 ./chat/*，
 // 本文件只保留主组件（顶栏 + 欢迎页 + 消息区 + 输入区）。
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import Link from "next/link";
 import MascotLogo from "./chat/MascotLogo";
 import CornIcon from "./CornIcon";
@@ -31,6 +31,32 @@ export type { UiMessage, ChatAttachment } from "./chat/types";
 export { stripPlanHint } from "./chat/plan";
 
 const aid = () => Math.random().toString(36).slice(2, 10);
+
+const stopMediaStream = (stream: MediaStream | null) => {
+  stream?.getTracks().forEach((track) => track.stop());
+};
+
+const canvasToBlob = (
+  canvas: HTMLCanvasElement,
+  type: string,
+  quality?: number
+): Promise<Blob> =>
+  new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error("canvas_to_blob_failed"))),
+      type,
+      quality
+    );
+  });
+
+const captureFileName = (prefix: string, ext: string) => {
+  const now = new Date();
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const stamp =
+    `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
+    `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  return `${prefix}-${stamp}.${ext}`;
+};
 
 /**
  * 回答顶边与视口顶部之间留的空隙。
@@ -247,6 +273,15 @@ export default function ChatArea({
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const attachRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null);
+  const cameraPickerRef = useRef<HTMLInputElement>(null);
+  const attachButtonRef = useRef<HTMLButtonElement>(null);
+  const desktopAttachRef = useRef<HTMLDivElement>(null);
+  const mobileAttachRef = useRef<HTMLDivElement>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
   // 输入历史：↑/↓ 在历史里前后翻，Esc 清空输入框
   // 本地历史用惰性初始值读，不在 effect 里 setState（会触发 react-hooks/set-state-in-effect）
   const [history, setHistory] = useState<string[]>(() => {
@@ -322,6 +357,27 @@ export default function ChatArea({
     inputRef.current?.focus();
   }, [prefill]);
 
+  useEffect(() => {
+    if (!attachMenuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setAttachMenuOpen(false);
+      requestAnimationFrame(() => attachButtonRef.current?.focus());
+    };
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (desktopAttachRef.current?.contains(target)) return;
+      if (mobileAttachRef.current?.contains(target)) return;
+      setAttachMenuOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [attachMenuOpen]);
+
   // 按时段问候：SSR 与水合各算一次可能跨过整点，首帧用安全默认值，挂载后再校准
   const [greeting, setGreeting] = useState("你好呀");
   useEffect(() => {
@@ -338,6 +394,12 @@ export default function ChatArea({
   const pendingOtherCount = pending.length - pendingImageCount;
   // 有上限时显示 "3/9"，管理员不限则只显示张数
   const attachCap = maxAttachments ? `/${maxAttachments}` : "";
+  const attachNote =
+    pendingImageCount > 0 && pendingOtherCount > 0
+      ? `${pendingImageCount}${attachCap} 张图片 + ${pendingOtherCount} 个文档将一起解析`
+      : pendingImageCount > 0
+        ? `${pendingImageCount}${attachCap} 张图片将上传，由视觉模型结合问题一起分析`
+        : `${pendingOtherCount} 个文件将提取文字和图片内容`;
 
   // capValue 是受控 props（页面层持有）：它要进请求体，住在这里就发不出去。
   // 输入框下面那行提示跟着它变 —— 这是四档模式条下架后用户唯一能看到的
@@ -870,6 +932,126 @@ export default function ChatArea({
       onNotice?.("info", `一次最多上传 ${maxAttachments} 个附件，多出来的 ${overflow} 个没有加上`);
     }
     applyPending(next);
+  };
+
+  const chooseAttachments = (ref: RefObject<HTMLInputElement | null>) => {
+    setAttachMenuOpen(false);
+    ref.current?.click();
+  };
+
+  const openCamera = () => {
+    setAttachMenuOpen(false);
+    if (window.matchMedia("(max-width: 899px)").matches) {
+      cameraPickerRef.current?.click();
+      return;
+    }
+    setCameraOpen(true);
+  };
+
+  const captureScreenshot = async () => {
+    setAttachMenuOpen(false);
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      onNotice?.("info", "当前浏览器不支持截图提问，请改用上传图片");
+      return;
+    }
+    let stream: MediaStream | null = null;
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: false,
+        preferCurrentTab: true,
+      } as DisplayMediaStreamOptions & { preferCurrentTab: boolean });
+      const video = document.createElement("video");
+      video.srcObject = stream;
+      video.muted = true;
+      video.playsInline = true;
+      await video.play();
+      if (video.videoWidth === 0 || video.videoHeight === 0) {
+        await new Promise<void>((resolve) => {
+          video.addEventListener("loadedmetadata", () => resolve(), { once: true });
+        });
+      }
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const longest = Math.max(video.videoWidth, video.videoHeight);
+      const scale = longest > 2400 ? 2400 / longest : 1;
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+      canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("canvas_context_failed");
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const blob = await canvasToBlob(canvas, "image/png");
+      const file = new File([blob], captureFileName("截图", "png"), { type: "image/png" });
+      addFiles([file]);
+      onNotice?.("success", "截图已添加，可继续补充问题后发送");
+    } catch (error) {
+      const name = error instanceof DOMException ? error.name : "";
+      if (name !== "NotAllowedError" && name !== "AbortError") {
+        onNotice?.("error", "截取画面失败，请重试或改用上传图片");
+      }
+    } finally {
+      stopMediaStream(stream);
+    }
+  };
+
+  useEffect(() => {
+    if (!cameraOpen) return;
+    let cancelled = false;
+    const open = async () => {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCameraOpen(false);
+        onNotice?.("info", "当前浏览器无法打开相机，请改为上传图片");
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user" },
+          audio: false,
+        });
+        if (cancelled) {
+          stopMediaStream(stream);
+          return;
+        }
+        cameraStreamRef.current = stream;
+        if (cameraVideoRef.current) {
+          cameraVideoRef.current.srcObject = stream;
+          await cameraVideoRef.current.play();
+        }
+      } catch {
+        if (cancelled) return;
+        setCameraOpen(false);
+        onNotice?.("info", "无法打开相机，请检查浏览器权限或直接上传图片");
+      }
+    };
+    void open();
+    return () => {
+      cancelled = true;
+      stopMediaStream(cameraStreamRef.current);
+      cameraStreamRef.current = null;
+    };
+  }, [cameraOpen, onNotice]);
+
+  const captureCameraPhoto = async () => {
+    const video = cameraVideoRef.current;
+    if (!video || video.videoWidth === 0 || video.videoHeight === 0) {
+      onNotice?.("info", "相机画面还没准备好，请稍等再拍");
+      return;
+    }
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("canvas_context_failed");
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const blob = await canvasToBlob(canvas, "image/jpeg", 0.9);
+      const file = new File([blob], captureFileName("拍照", "jpg"), { type: "image/jpeg" });
+      addFiles([file]);
+      setCameraOpen(false);
+      onNotice?.("success", "照片已添加，可继续补充问题后发送");
+    } catch {
+      onNotice?.("error", "拍照失败，请重试或改为上传图片");
+    }
   };
 
   const removeAttachment = (id: string) => {
@@ -1441,9 +1623,7 @@ export default function ChatArea({
                 <circle cx="12" cy="12" r="9" />
                 <path d="M12 16v-4M12 8h.01" />
               </svg>
-              {pendingOtherCount > 0
-                ? `${pendingImageCount}${attachCap} 张图片 + ${pendingOtherCount} 个文档将一起解析（提取文字与图片）`
-                : `${pendingImageCount}${attachCap} 张图片将上传，由视觉模型结合问题一起分析`}
+              {attachNote}
             </p>
           </div>
         )}
@@ -1543,17 +1723,78 @@ export default function ChatArea({
               <circle cx="12" cy="10" r="2.6" />
             </svg>
           </button>
-          <button
-            onClick={() => attachRef.current?.click()}
-            title="上传图片或文档（PDF / Word / Markdown 等，会提取文字和图片一起分析）"
-            aria-label="上传图片或文档，提取文字和图片一起分析"
-            className="attach"
-          >
-            {/* 加号：与「+ 新建对话 / + 我的文件」同一套进料语义，替代原回形针 */}
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-          </button>
+          <div className="attach-anchor" ref={desktopAttachRef}>
+            <button
+              ref={attachButtonRef}
+              type="button"
+              onClick={() => setAttachMenuOpen((open) => !open)}
+              title="添加图片、文件或截图"
+              aria-label="添加图片、文件或截图"
+              aria-haspopup="menu"
+              aria-expanded={attachMenuOpen}
+              className={`attach ${attachMenuOpen ? "open" : ""}`}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+            {attachMenuOpen && (
+              <div className="attach-popover" role="menu" aria-label="添加内容">
+                <p className="attach-menu-label">添加</p>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => chooseAttachments(attachRef)}
+                  className="attach-menu-item"
+                >
+                  <span className="attach-menu-icon">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M12 16V4M7 9l5-5 5 5" />
+                      <path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4" />
+                    </svg>
+                  </span>
+                  <span>
+                    <strong>上传文件或图片</strong>
+                    <small>PDF、Word、表格和图片</small>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={openCamera}
+                  className="attach-menu-item"
+                >
+                  <span className="attach-menu-icon">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M4 7h3l1.5-2h7L17 7h3v12H4z" />
+                      <circle cx="12" cy="13" r="3.5" />
+                    </svg>
+                  </span>
+                  <span>
+                    <strong>拍照</strong>
+                    <small>用当前设备的相机</small>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => void captureScreenshot()}
+                  className="attach-menu-item"
+                >
+                  <span className="attach-menu-icon">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M8 4H4v4M16 4h4v4M20 16v4h-4M8 20H4v-4" />
+                      <path d="M7 12h10" />
+                    </svg>
+                  </span>
+                  <span>
+                    <strong>截图提问</strong>
+                    <small>选择标签页后截取一帧</small>
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
           <input
             ref={attachRef}
             type="file"
@@ -1566,6 +1807,34 @@ export default function ChatArea({
               const fs = e.target.files;
               if (fs && fs.length > 0) addFiles(fs);
               if (attachRef.current) attachRef.current.value = "";
+            }}
+          />
+          <input
+            ref={galleryRef}
+            type="file"
+            accept="image/*"
+            multiple
+            aria-hidden="true"
+            tabIndex={-1}
+            className="hidden"
+            onChange={(e) => {
+              const fs = e.target.files;
+              if (fs && fs.length > 0) addFiles(fs);
+              if (galleryRef.current) galleryRef.current.value = "";
+            }}
+          />
+          <input
+            ref={cameraPickerRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            aria-hidden="true"
+            tabIndex={-1}
+            className="hidden"
+            onChange={(e) => {
+              const fs = e.target.files;
+              if (fs && fs.length > 0) addFiles(fs);
+              if (cameraPickerRef.current) cameraPickerRef.current.value = "";
             }}
           />
           <textarea
@@ -1673,6 +1942,147 @@ export default function ChatArea({
           </span>
         </div>
       </div>
+
+      {attachMenuOpen && (
+        <>
+          <button
+            type="button"
+            className="attach-sheet-backdrop"
+            aria-label="关闭添加内容"
+            onClick={() => setAttachMenuOpen(false)}
+          />
+          <section
+            ref={mobileAttachRef}
+            className="attach-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="attach-sheet-title"
+          >
+            <span className="attach-sheet-grab" aria-hidden="true" />
+            <header className="attach-sheet-head">
+              <div>
+                <h2 id="attach-sheet-title">添加到对话</h2>
+                <p>
+                  {pending.length > 0
+                    ? `已选择 ${pending.length}${attachCap} 个附件`
+                    : "图片会先预览，可左右滑动查看"}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="attach-sheet-close"
+                aria-label="关闭"
+                onClick={() => setAttachMenuOpen(false)}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+            </header>
+
+            {pending.length > 0 ? (
+              <div className="attach-sheet-preview-row" aria-label="待发送附件">
+                {pending.map((a) => (
+                  <div className="attach-sheet-preview" key={a.id}>
+                    {a.type.startsWith("image/") ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={a.url} alt={a.name} />
+                    ) : (
+                      <span className="attach-sheet-file">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                          <path d="M14 2v6h6M8 13h8M8 17h5" />
+                        </svg>
+                        <b>{a.name}</b>
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      className="attach-sheet-remove"
+                      aria-label={`移除附件：${a.name}`}
+                      onClick={() => removeAttachment(a.id)}
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M6 6l12 12M18 6L6 18" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="attach-sheet-empty">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="3" y="5" width="18" height="14" rx="2" />
+                  <circle cx="8.5" cy="10" r="1.5" />
+                  <path d="M5 17l5-5 3.5 3.5 2-2L19 17" />
+                </svg>
+                <span>选一张图片或文件开始</span>
+              </div>
+            )}
+
+            <div className="attach-sheet-actions">
+              <button type="button" onClick={openCamera}>
+                <span>
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 7h3l1.5-2h7L17 7h3v12H4z" />
+                    <circle cx="12" cy="13" r="3.5" />
+                  </svg>
+                </span>
+                <b>拍照</b>
+              </button>
+              <button type="button" onClick={() => chooseAttachments(galleryRef)}>
+                <span>
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <rect x="3" y="5" width="18" height="14" rx="2" />
+                    <circle cx="8.5" cy="10" r="1.5" />
+                    <path d="M5 17l5-5 3.5 3.5 2-2L19 17" />
+                  </svg>
+                </span>
+                <b>相册</b>
+              </button>
+              <button type="button" onClick={() => chooseAttachments(attachRef)}>
+                <span>
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <path d="M14 2v6h6" />
+                  </svg>
+                </span>
+                <b>文件</b>
+              </button>
+            </div>
+          </section>
+        </>
+      )}
+
+      {cameraOpen && (
+        <div className="camera-capture-mask" role="dialog" aria-modal="true" aria-labelledby="camera-capture-title">
+          <div className="camera-capture-card">
+            <header>
+              <div>
+                <h2 id="camera-capture-title">拍照添加</h2>
+                <p>调整好画面后拍下这一帧</p>
+              </div>
+              <button type="button" aria-label="关闭拍照" onClick={() => setCameraOpen(false)}>
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+            </header>
+            <div className="camera-capture-view">
+              <video ref={cameraVideoRef} muted playsInline />
+            </div>
+            <footer>
+              <button type="button" className="camera-capture-cancel" onClick={() => setCameraOpen(false)}>
+                取消
+              </button>
+              <button type="button" className="camera-capture-shutter" onClick={() => void captureCameraPhoto()}>
+                <span aria-hidden="true" />
+                拍下
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
 
       {previewFile && boundKb && (
         <FilePreviewModal

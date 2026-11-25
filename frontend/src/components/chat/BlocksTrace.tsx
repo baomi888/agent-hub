@@ -17,7 +17,7 @@ import CornIcon from "@/components/CornIcon";
 import type { RetrievedBlock } from "./types";
 
 const SOURCE_LABEL: Record<string, string> = {
-  kb: "知识库",
+  kb: "资料库",
   web: "联网",
   upload: "你上传的文件",
 };
