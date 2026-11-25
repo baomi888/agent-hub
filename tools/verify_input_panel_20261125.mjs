@@ -40,6 +40,17 @@ const check = (name, ok, detail = "") => {
   results.push({ name, ok, detail });
   console.log(ok ? "PASS" : "FAIL", name, detail);
 };
+// ★ 线上有 codex 新加的启动闪屏（"知穗，越来越懂你"），固定 sleep 会
+//   在动画未结束时取 DOM，拿到 0/7 的假失败。轮询到输入框出现再继续。
+const waitForChat = async (ms = 20000) => {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    const ok = await ev(`!!document.querySelector("textarea")`);
+    if (ok === true) return true;
+    await sleep(500);
+  }
+  return false;
+};
 
 await send("Page.enable"); await send("Runtime.enable"); await send("Network.enable");
 await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
@@ -63,7 +74,7 @@ const dismissPopups = async () => {
 };
 await dismissPopups();
 await send("Page.navigate", { url: BASE + "/" });
-await sleep(3500);
+await waitForChat();
 await dismissPopups();
 
 // ============ A. CapToggles 仍在 + 输入框可交互 ============
@@ -134,7 +145,7 @@ await shot("input_panel_mobile_items.png");
 await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
 await send("Emulation.setTouchEmulationEnabled", { enabled: false });
 await send("Page.navigate", { url: BASE + "/" });
-await sleep(4000);
+await waitForChat();
 await dismissPopups();
 await ev(`document.querySelector("button.attach")?.click()`);
 await sleep(400);
