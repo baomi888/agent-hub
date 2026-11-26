@@ -920,8 +920,9 @@ button.kb-chip-unbound:hover {
      触摸设备没有 hover → 那个按钮永远 opacity-0，用户实际遇到的是
      「手机能删对话，但改不了名」。左滑是侧栏唯一已被发现的手势，
      全部操作都挂它下面，不再发明新手势。
-   ★ 宽度 192 必须与 Sidebar.tsx 的 SWIPE_W 一致：不一致会停在
-     差几像素的位置，露出半截按钮或压住按钮。
+   ★ 宽度 144 = 48×3，必须与 Sidebar.tsx 的 SWIPE_W 一致：不一致会停在
+     差几像素的位置，露出半截按钮或压住按钮。原来 192（64×3）在 264px
+     宽的手机抽屉里占掉 73%，展开后标题几乎被盖光（2026-11-26 用户反馈）。
    ★★ 交互定稿：操作区从右侧「滑入覆盖」，**文字行不动**。
      最初做的是把 .session 整体左移 128px 露出按钮 —— 真机截图发现行宽只有
      226px，推开 128 后短标题会被整条推出可视区，那一行变成空白，
@@ -939,12 +940,25 @@ button.kb-chip-unbound:hover {
   margin: 0; /* 原来的上下 margin 移到 wrap 上，避免露底 */
 }
 .session-swipe-wrap + .session-swipe-wrap { margin-top: 2px; }
+/* ★ 展开时给标题留出操作区的位置（2026-11-26 用户截图反馈）。
+   操作区 z-index:1 盖在文字层右侧 144px 上，文字层若不主动收窄，
+   标题会钻到按钮底下 —— 用户看到的是「整个会话列表被遮住」。
+   148 = 144 操作区 + 4px 呼吸缝；左侧 26px 仍留给选中竖条。 */
+.session-swipe-wrap.is-swiped .session {
+  padding-right: 148px;
+}
+/* 桌面 hover 按钮组在手机上 opacity:0 但仍占标题宽度；展开后 148px
+   避让再叠上这 80px，标题会被挤成空白（2026-11-26 真机截图）。
+   展开态操作区已提供置顶/改名/删除，这组直接收起，把宽度还给标题。 */
+.session-swipe-wrap.is-swiped .session-hover-acts {
+  display: none;
+}
 .session-swipe-wrap .session-swipe-acts {
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
-  width: 192px;
+  width: 144px;
   display: flex;
   /* 收起 = 整体推到行外面，由 wrap 的 overflow:hidden 裁掉；
      不用 opacity 是因为拖动时要跟手，淡入会闪。 */

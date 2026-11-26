@@ -144,10 +144,13 @@ export default function Sidebar({
   // 当前路由：模块格要能标出"我在哪一页"（2026-11-22）。
   // 之前 .side-entry[aria-current="page"] 的样式早就写好了，但没人设过这个属性。
   const here = usePathname() ?? "/";
-  const swipeTouch = useRef<{ id: string; x0: number; y0: number; el: HTMLElement | null; horizontal: boolean | null } | null>(null);
+  const swipeTouch = useRef<{ id: string; x0: number; y0: number; dx: number; el: HTMLElement | null; horizontal: boolean | null } | null>(null);
   /** 最近一次横滑结束的时间：用来吞掉浏览器跟着补发的那一下 click */
   const lastSwipeAt = useRef(0);
-  const SWIPE_W = 192; // 与 .session-swipe-acts 宽度一致（置顶 64 + 改名 64 + 删除 64）
+  // 三格各 48px。原来 64px×3=192，在 264px 宽的手机抽屉里占掉 73%，
+  // 展开后标题几乎整条被按钮盖住（2026-11-26 用户截图反馈）。48 仍满足
+  // 44px 触控基准（硬约束 39），且给标题留出约 120px 可读区。
+  const SWIPE_W = 144; // 与 .session-swipe-acts 宽度一致（48 × 3）
 
 
   const startEdit = (c: Conversation) => {
@@ -524,7 +527,71 @@ export default function Sidebar({
               const active = c.id === activeSid;
               const swiped = swipedId === c.id;
               return (
-                <div key={c.id} className="session-swipe-wrap">
+                <div
+                  key={c.id}
+                  className={`session-swipe-wrap${swiped ? " is-swiped" : ""}`}
+                  onTouchStart={(e) => {
+                    const t = e.touches[0];
+                    swipeTouch.current = {
+                      id: c.id,
+                      x0: t.clientX,
+                      y0: t.clientY,
+                      dx: 0,
+                      // ★ 手势挂在 wrap（同时包含文字层和操作区）上，不是只挂
+                      //   .session：操作区展开时会盖住标题右侧，若手势只在文字层，
+                      //   从按钮上右滑的事件根本进不来 —— 用户表现就是
+                      //   「左滑能开，右滑收不回去」（2026-11-26 真机反馈）。
+                      el: e.currentTarget.querySelector(".session-swipe-acts") ?? null,
+                      horizontal: null,
+                    };
+                    if (swipedId && swipedId !== c.id) setSwipedId(null);
+                  }}
+                  onTouchMove={(e) => {
+                    const st = swipeTouch.current;
+                    if (!st || st.id !== c.id || !st.el) return;
+                    const t = e.touches[0];
+                    const dx = t.clientX - st.x0;
+                    const dy = t.clientY - st.y0;
+                    if (st.horizontal === null) {
+                      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+                      st.horizontal = Math.abs(dx) > Math.abs(dy);
+                      if (!st.horizontal) {
+                        swipeTouch.current = null;
+                        return;
+                      }
+                    }
+                    if (!st.horizontal) return;
+                    st.dx = dx;
+                    // 位移量 off 仍是 0 → -SWIPE_W；操作区从「推到行外」走到「贴住右缘」
+                    const base = swiped ? -SWIPE_W : 0;
+                    const off = Math.max(-SWIPE_W, Math.min(0, base + dx));
+                    st.el.style.transition = "none";
+                    st.el.style.transform = `translateX(${SWIPE_W + off}px)`;
+                  }}
+                  onTouchEnd={() => {
+                    const st = swipeTouch.current;
+                    if (!st || st.id !== c.id || !st.el) return;
+                    st.el.style.transition = "";
+                    st.el.style.transform = "";
+                    swipeTouch.current = null;
+                    // 横向滑动过就记个时间点：onClick 会在 320ms 内忽略补发的 click
+                    if (st.horizontal) lastSwipeAt.current = Date.now();
+                    // 展开 / 收起按方向各用各的阈值。旧版拿 transform 落点统一判断，
+                    // 展开态右滑要满 96px 才收起，拇指小幅回扫会被判成「继续展开」，
+                    // 用户表现就是右滑收不回去（2026-11-26 真机反馈）。
+                    if (swiped) setSwipedId(st.dx > 40 ? null : c.id);
+                    else setSwipedId(st.dx <= -SWIPE_W / 3 ? c.id : null);
+                  }}
+                  onTouchCancel={() => {
+                    // 手势被系统中断（来电/通知/浏览器边缘返回手势）时不会触发 touchend，
+                    // 内联 transform 会留在半滑状态把这一行卡住 —— 这里强制复位。
+                    const st = swipeTouch.current;
+                    if (!st || st.id !== c.id || !st.el) return;
+                    st.el.style.transition = "";
+                    st.el.style.transform = "";
+                    swipeTouch.current = null;
+                  }}
+                >
                   {/* 底层操作区：左滑后露出「置顶 / 改名 / 删除」。
                       ★ 手机上原来只有删除：改名入口挂在 group-hover 上，触摸设备没有
                       hover，那个按钮永远是 opacity-0 —— 表现就是「手机改不了对话名」
@@ -556,7 +623,7 @@ export default function Sidebar({
                       tabIndex={swiped ? 0 : -1}
                       onClick={(e) => {
                         e.stopPropagation();
-                        // 先收滑出再进编辑，否则 input 会带着 -192px 位移出现
+                        // 先收滑出再进编辑，否则 input 会带着 -144px 位移出现
                         setSwipedId(null);
                         startEdit(c);
                       }}
@@ -605,66 +672,6 @@ export default function Sidebar({
                     }
                   }}
                   className={`session group ${active ? "active" : ""}`}
-                  onTouchStart={(e) => {
-                    const t = e.touches[0];
-                    swipeTouch.current = {
-                      id: c.id,
-                      x0: t.clientX,
-                      y0: t.clientY,
-                      // ★ 手势操作的是**操作区**，不是文字行：行要保持不动，
-                      //   否则 226px 的行宽被推开 128px 后标题整条跑出视口，
-                      //   用户看不到自己在删哪一行（2026-11-04 真机截图发现）。
-                      // 操作区是 .session 的**兄弟节点**（wrap 的子元素），不是子节点，
-                      // 用 currentTarget.querySelector 永远取不到 → 手势整段静默失效。
-                      el: e.currentTarget.parentElement?.querySelector(".session-swipe-acts") ?? null,
-                      horizontal: null,
-                    };
-                    if (swipedId && swipedId !== c.id) setSwipedId(null);
-                  }}
-                  onTouchMove={(e) => {
-                    const st = swipeTouch.current;
-                    if (!st || st.id !== c.id || !st.el) return;
-                    const t = e.touches[0];
-                    const dx = t.clientX - st.x0;
-                    const dy = t.clientY - st.y0;
-                    if (st.horizontal === null) {
-                      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
-                      st.horizontal = Math.abs(dx) > Math.abs(dy);
-                      if (!st.horizontal) {
-                        swipeTouch.current = null;
-                        return;
-                      }
-                    }
-                    if (!st.horizontal) return;
-                    // 位移量 off 仍是 0 → -SWIPE_W；操作区从「推到行外」走到「贴住右缘」
-                    const base = swiped ? -SWIPE_W : 0;
-                    const off = Math.max(-SWIPE_W, Math.min(0, base + dx));
-                    st.el.style.transition = "none";
-                    st.el.style.transform = `translateX(${SWIPE_W + off}px)`;
-                  }}
-                  onTouchEnd={() => {
-                    const st = swipeTouch.current;
-                    if (!st || st.id !== c.id || !st.el) return;
-                    const m = /translateX\((-?[\d.]+)px\)/.exec(st.el.style.transform);
-                    const x = m ? parseFloat(m[1]) : SWIPE_W;
-                    st.el.style.transition = "";
-                    st.el.style.transform = "";
-                    swipeTouch.current = null;
-                    // 横向滑动过就记个时间点：onClick 会在 320ms 内忽略补发的 click
-                    if (st.horizontal) lastSwipeAt.current = Date.now();
-                    // 滑过 1/3 阈值就吸附展开；几乎没动则视作点按回收
-                    if (x < SWIPE_W - SWIPE_W / 3) setSwipedId(c.id);
-                    else if (swiped) setSwipedId(null);
-                  }}
-                  onTouchCancel={() => {
-                    // 手势被系统中断（来电/通知/浏览器边缘返回手势）时不会触发 touchend，
-                    // 内联 transform 会留在半滑状态把这一行卡住 —— 这里强制复位。
-                    const st = swipeTouch.current;
-                    if (!st || st.id !== c.id || !st.el) return;
-                    st.el.style.transition = "";
-                    st.el.style.transform = "";
-                    swipeTouch.current = null;
-                  }}
                 >
                   {editingId === c.id ? (
                     <input
@@ -691,7 +698,7 @@ export default function Sidebar({
                         {/* hover 才出现的小图标：桌面用。手机没有 hover —— 这里必须
                             pointer-events-none，否则按钮虽然看不见却仍然可点，
                             手指盲点在标题右侧会莫名进入编辑态。手机的入口走左滑。 */}
-                        <span className="pointer-events-none flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
+                        <span className="session-hover-acts pointer-events-none flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
                           <button
                             title={c.pinned ? "取消置顶" : "置顶"}
                             aria-label={`${c.pinned ? "取消置顶" : "置顶"}会话：${c.title}`}

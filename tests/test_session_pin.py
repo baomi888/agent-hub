@@ -143,10 +143,44 @@ class TestFrontendWiring:
         assert m, "SWIPE_W 找不到"
         width = re.search(r"\.session-swipe-wrap \.session-swipe-acts\s*\{[^}]*?width:\s*(\d+)px", css, re.S)
         assert width, "操作区宽度没定义"
-        assert int(m.group(1)) == int(width.group(1)) == 192, (
-            "三格操作区宽度必须 192，且 JS 与 CSS 一致，否则滑不到底"
+        assert int(m.group(1)) == int(width.group(1)) == 144, (
+            "三格操作区宽度必须 144（48×3，手机抽屉里不遮标题），且 JS 与 CSS 一致"
         )
         assert ".session-swipe-btn.is-pin" in css, "置顶按钮没有配色"
+
+    def test_swipe_gesture_on_wrap_and_title_yields(self):
+        """2026-11-26 用户反馈：左滑后列表被遮、右滑收不回去。三条都要钉住：
+        ① 手势挂在 wrap（含操作区）而不是文字层；② 展开时标题主动避让；
+        ③ 每格 48px 仍满足 44px 触控基准。"""
+        src = _read(SIDEBAR)
+        css = _read(COMPONENTS_CSS)
+        assert 'className={`session-swipe-wrap${swiped ? " is-swiped" : ""}`}' in src, (
+            "wrap 没有展开态类名，标题无法避让"
+        )
+        assert 'e.currentTarget.querySelector(".session-swipe-acts")' in src, (
+            "手势要从 wrap 直接查操作区；从 .session 的 parentElement 取说明手势还挂在文字层"
+        )
+        assert "parentElement?.querySelector" not in src, "旧的手势挂载写法还在"
+        # 文字层（role=button 那一行）不应再挂 touch：操作区展开后那片区域事件进不来
+        btn = re.search(r'role="button"[\s\S]{0,1400}?className=\{`session group', src)
+        assert btn and "onTouchStart" not in btn.group(0), (
+            "手势还挂在文字层，从展开的操作区上右滑收不到事件"
+        )
+        for h in ("onTouchStart", "onTouchMove", "onTouchEnd", "onTouchCancel"):
+            assert h in src, f"缺手势 {h}"
+        yield_rule = re.search(r"\.session-swipe-wrap\.is-swiped \.session\s*\{([^}]*)\}", css)
+        assert yield_rule, "展开态没有给标题留位置，按钮会盖住标题"
+        assert re.search(r"padding-right:\s*148px", yield_rule.group(1)), (
+            "标题避让必须覆盖 144px 操作区 + 4px 缝隙"
+        )
+        assert re.search(r"\.session-swipe-wrap\.is-swiped \.session-hover-acts\s*\{[^}]*display:\s*none", css), (
+            "桌面 hover 按钮组在展开态没隐藏：它透明但仍占宽，会把标题挤成空白"
+        )
+        assert 'className="session-hover-acts pointer-events-none' in src, (
+            "悬停按钮组没有语义类名，展开态无法只针对它隐藏"
+        )
+        w = re.search(r"\.session-swipe-wrap \.session-swipe-acts\s*\{[^}]*?width:\s*(\d+)px", css, re.S)
+        assert w and int(w.group(1)) / 3 >= 44, "单格宽度低于 44px 触控基准"
 
     def test_hook_api_and_provider_wired(self):
         assert "pinSession" in _read(API_TS), "API 客户端没有置顶请求"

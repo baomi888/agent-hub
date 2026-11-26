@@ -142,7 +142,7 @@ const swipe = await ev(`(() => {
   const acts = r && r.parentElement.querySelector(".session-swipe-acts");
   return acts ? { width: Math.round(acts.getBoundingClientRect().width), buttons: acts.querySelectorAll("button").length, labels: Array.from(acts.querySelectorAll("button")).map(b => b.getAttribute("aria-label") || "") } : null;
 })()`);
-check("手机左滑区三按钮且宽192", swipe?.width === 192 && swipe?.buttons === 3, JSON.stringify(swipe));
+check("手机左滑区三按钮且宽144", swipe?.width === 144 && swipe?.buttons === 3, JSON.stringify(swipe));
 check("左滑区含置顶入口", (swipe?.labels || []).some((l) => l.includes("置顶会话")), JSON.stringify(swipe?.labels));
 
 const clickedMobile = await ev(`(() => { const r = ${findRow(oldTitle)}; const b = r && r.parentElement.querySelector('.session-swipe-btn.is-pin'); if (!b) return false; b.click(); return true; })()`);
