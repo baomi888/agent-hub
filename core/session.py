@@ -446,6 +446,15 @@ def _init_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_conv_owner ON conversations(owner_id, updated_at DESC)"
         )
 
+        # 迁移（2026-11-26 会话置顶）：老库补 pinned 列，默认 0 = 未置顶。
+        # 用统一助手而不是裸 ALTER：`CREATE TABLE IF NOT EXISTS` 对老库不生效，
+        # 新库又已经在建表时带列，两条路径都会走到这里，必须幂等。
+        _add_missing_columns(conn, "conversations", {"pinned": "INTEGER NOT NULL DEFAULT 0"})
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_conv_pin "
+            "ON conversations(owner_id, pinned DESC, updated_at DESC)"
+        )
+
         # 迁移（P0-2 上下文压缩）：老库补三个字段。
         #   compressed_summary     当前压缩块（含 [COMPRESSED-n] 分段标记）
         #   compressed_summary_prev 上一版压缩块（L1 安全阀回退用；方案文档指出
@@ -504,22 +513,30 @@ def get_conversation(owner: str, sid: str) -> dict | None:
     """
     with _get_conn() as conn:
         row = conn.execute(
-            "SELECT id, title, kb_id, created_at, updated_at FROM conversations "
+            "SELECT id, title, kb_id, created_at, updated_at, pinned FROM conversations "
             "WHERE id = ? AND owner_id = ?",
             (sid, owner),
         ).fetchone()
-        return dict(row) if row else None
+        # SQLite 没有布尔类型，取出来是 0/1。API 契约必须是真布尔值，
+        # 否则前端 `c.pinned ? ...` 虽然 1 也能用，但 JSON 契约会漂。
+        return {**dict(row), "pinned": bool(row["pinned"])} if row else None
 
 
 def list_conversations(owner: str) -> list[dict]:
-    """列出该用户的会话（按 updated_at 倒序）。老数据 owner_id 为 NULL，不会混进来。"""
+    """列出该用户的会话（置顶优先，其次按 updated_at 倒序）。
+
+    老数据 owner_id 为 NULL，不会混进来。SQL 的排序口径就是前端分组的唯一依据
+    —— 前端只做「置顶 / 今天 / 昨天 / 近 7 天 / 更早」的分桶，不再二次排序。
+    """
     with _get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, title, kb_id, created_at, updated_at FROM conversations "
-            "WHERE owner_id = ? ORDER BY updated_at DESC",
+            "SELECT id, title, kb_id, created_at, updated_at, pinned FROM conversations "
+            # 同一秒内连建两条会话时 updated_at 相同，SQLite 不保证并列顺序，
+            # 实测会按插入顺序返回 —— 新会话反而排在旧会话下面。rowid 兜底。
+            "WHERE owner_id = ? ORDER BY pinned DESC, updated_at DESC, rowid DESC",
             (owner,),
         ).fetchall()
-        return [dict(r) for r in rows]
+        return [{**dict(r), "pinned": bool(r["pinned"])} for r in rows]
 
 
 def rename_conversation(owner: str, sid: str, title: str) -> bool:
@@ -529,6 +546,21 @@ def rename_conversation(owner: str, sid: str, title: str) -> bool:
         cur = conn.execute(
             "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ? AND owner_id = ?",
             (title, now, sid, owner),
+        )
+        return cur.rowcount > 0
+
+
+def set_pinned(owner: str, sid: str, pinned: bool) -> bool:
+    """置顶 / 取消置顶，返回是否命中该用户的会话。
+
+    刻意**不更新 updated_at**：置顶是"我把它钉在墙上"，不是"我刚聊过它"。
+    那样会同时污染「今天」分组和最近聊天的排序，置顶一取消就跳回顶部，
+    比没有置顶还乱。
+    """
+    with _get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE conversations SET pinned = ? WHERE id = ? AND owner_id = ?",
+            (1 if pinned else 0, sid, owner),
         )
         return cur.rowcount > 0
 

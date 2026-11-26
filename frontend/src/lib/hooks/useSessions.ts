@@ -181,6 +181,23 @@ export function useSessions(showToast: ShowToast) {
     }
   };
 
+  /** 置顶 / 取消置顶：先改本地再发请求，失败了回滚并说明，避免点了像没反应 */
+  const togglePin = async (sid: string, pinned: boolean) => {
+    const prev = sessions.find((c) => c.id === sid);
+    if (!prev || prev.pinned === pinned) return;
+    setSessions((list) => list.map((c) => (c.id === sid ? { ...c, pinned } : c)));
+    try {
+      const conv = await api.pinSession(sid, pinned);
+      // 后端是唯一排序口径；回填结果保证 pinned / updated_at 与它一致
+      setSessions((list) => list.map((c) => (c.id === sid ? conv : c)));
+      showToast("success", pinned ? "已置顶会话" : "已取消置顶");
+    } catch (e) {
+      console.error(e);
+      setSessions((list) => list.map((c) => (c.id === sid ? prev : c)));
+      showToast("error", pinned ? "置顶失败，请稍后重试" : "取消置顶失败，请稍后重试");
+    }
+  };
+
   const deleteSession = async (sid: string) => {
     try {
       await api.deleteSession(sid);
@@ -246,6 +263,7 @@ export function useSessions(showToast: ShowToast) {
     createSession,
     selectSession,
     renameSession,
+    togglePin,
     deleteSession,
     deleteTurn,
     reloadSessions,

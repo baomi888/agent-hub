@@ -171,6 +171,7 @@ const Rail = memo(function Rail({
       onSelect={onSelect}
       onCreate={onCreate}
       onRename={rail.renameSession}
+      onTogglePin={rail.togglePin}
       onDelete={rail.deleteSession}
       kbNameMap={rail.kbNames}
       loading={rail.loading}

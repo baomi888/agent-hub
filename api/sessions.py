@@ -6,7 +6,7 @@ from __future__ import annotations
   POST   /api/sessions/          新建会话
   GET    /api/sessions/          列出所有会话
   GET    /api/sessions/{sid}/    查看会话详情 + 消息历史
-  PATCH  /api/sessions/{sid}/    重命名 / 绑定知识库
+  PATCH  /api/sessions/{sid}/    重命名 / 绑定知识库 / 置顶
   DELETE /api/sessions/{sid}/    删除会话
 """
 
@@ -30,6 +30,7 @@ class SessionCreate(BaseModel):
 class SessionUpdate(BaseModel):
     title: str | None = None
     kb_id: str | None = None  # None = 解绑
+    pinned: bool | None = None  # 置顶 / 取消置顶（False 也要显式生效）
 
 
 class MessageDeleteResponse(BaseModel):
@@ -84,6 +85,8 @@ def update(sid: str, body: SessionUpdate, uid: str = Depends(get_current_user)):
     if body.kb_id is not None or "kb_id" in body.model_fields_set:
         # 允许显式传 None 来解绑
         store.bind_kb(uid, sid, body.kb_id)
+    if body.pinned is not None:
+        store.set_pinned(uid, sid, body.pinned)
 
     return store.get_conversation(uid, sid)
 

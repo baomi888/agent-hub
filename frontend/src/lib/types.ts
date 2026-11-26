@@ -6,6 +6,8 @@ export interface Conversation {
   kb_id: string | null;
   created_at: number;
   updated_at: number;
+  /** 置顶会话排在列表最前，且不会被聊天更新挤进「今天」分组 */
+  pinned: boolean;
 }
 
 // 知识库内的单个文件（后端 kb_files.json 落盘，重启不丢）

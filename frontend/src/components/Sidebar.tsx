@@ -26,6 +26,8 @@ interface Props {
   onSelect: (sid: string) => void;
   onCreate: () => void;
   onRename: (sid: string, title: string) => void;
+  /** 置顶 / 取消置顶（传入目标状态，不是简单 toggle，便于乐观更新） */
+  onTogglePin?: (sid: string, pinned: boolean) => void;
   onDelete: (sid: string) => void;
   kbNameMap?: Record<string, string>;
   /** ★ 2026-11-22：下面这四个入参仍然接收（调用方 page.tsx 不用改），
@@ -84,17 +86,23 @@ function groupSessions(list: Conversation[]) {
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const day = 24 * 3600 * 1000;
   const buckets: { label: string; items: Conversation[] }[] = [
+    { label: "置顶", items: [] },
     { label: "今天", items: [] },
     { label: "昨天", items: [] },
     { label: "近 7 天", items: [] },
     { label: "更早", items: [] },
   ];
   for (const c of list) {
+    // 置顶优先：钉住的会话只进「置顶」，不再按时间重复出现在「今天」等分组里
+    if (c.pinned) {
+      buckets[0].items.push(c);
+      continue;
+    }
     const t = toMs(c.updated_at || c.created_at || 0);
-    if (t >= startOfToday) buckets[0].items.push(c);
-    else if (t >= startOfToday - day) buckets[1].items.push(c);
-    else if (t >= startOfToday - 7 * day) buckets[2].items.push(c);
-    else buckets[3].items.push(c);
+    if (t >= startOfToday) buckets[1].items.push(c);
+    else if (t >= startOfToday - day) buckets[2].items.push(c);
+    else if (t >= startOfToday - 7 * day) buckets[3].items.push(c);
+    else buckets[4].items.push(c);
   }
   return buckets.filter((b) => b.items.length > 0);
 }
@@ -105,6 +113,7 @@ export default function Sidebar({
   onSelect,
   onCreate,
   onRename,
+  onTogglePin,
   onDelete,
   kbNameMap,
   // dark / onToggleDark / fontScale / onFontScaleChange 不再解构 —— 底部不渲染了。
@@ -138,7 +147,7 @@ export default function Sidebar({
   const swipeTouch = useRef<{ id: string; x0: number; y0: number; el: HTMLElement | null; horizontal: boolean | null } | null>(null);
   /** 最近一次横滑结束的时间：用来吞掉浏览器跟着补发的那一下 click */
   const lastSwipeAt = useRef(0);
-  const SWIPE_W = 128; // 与 .session-swipe-acts 宽度一致（改名 64 + 删除 64）
+  const SWIPE_W = 192; // 与 .session-swipe-acts 宽度一致（置顶 64 + 改名 64 + 删除 64）
 
 
   const startEdit = (c: Conversation) => {
@@ -516,12 +525,30 @@ export default function Sidebar({
               const swiped = swipedId === c.id;
               return (
                 <div key={c.id} className="session-swipe-wrap">
-                  {/* 底层操作区：左滑后露出「改名 / 删除」。
+                  {/* 底层操作区：左滑后露出「置顶 / 改名 / 删除」。
                       ★ 手机上原来只有删除：改名入口挂在 group-hover 上，触摸设备没有
                       hover，那个按钮永远是 opacity-0 —— 表现就是「手机改不了对话名」
                       （2026-11-04 用户反馈）。左滑是本页唯一已被用户发现的手势，
-                      两个操作都挂在它下面，比再造一个手势更好记。 */}
+                      所有行操作都挂在它下面，比再造一个手势更好记。 */}
                   <div className={`session-swipe-acts${swiped ? " open" : ""}`}>
+                    <button
+                      type="button"
+                      className="session-swipe-btn is-pin"
+                      aria-label={`${c.pinned ? "取消置顶" : "置顶"}会话：${c.title}`}
+                      tabIndex={swiped ? 0 : -1}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onTogglePin?.(c.id, !c.pinned);
+                        // 置顶后行会换组，滑出的操作区必须立刻收回，
+                        // 否则它会留在原地悬在上一组会话上
+                        setSwipedId(null);
+                      }}
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M9 3h6l-1 6 4 3v2H6v-2l4-3-1-6zM12 14v7" />
+                      </svg>
+                      {c.pinned ? "取消" : "置顶"}
+                    </button>
                     <button
                       type="button"
                       className="session-swipe-btn is-rename"
@@ -529,7 +556,7 @@ export default function Sidebar({
                       tabIndex={swiped ? 0 : -1}
                       onClick={(e) => {
                         e.stopPropagation();
-                        // 先收滑出再进编辑，否则 input 会带着 -128px 位移出现
+                        // 先收滑出再进编辑，否则 input 会带着 -192px 位移出现
                         setSwipedId(null);
                         startEdit(c);
                       }}
@@ -653,11 +680,31 @@ export default function Sidebar({
                   ) : (
                     <>
                       <div className="flex items-center justify-between gap-2">
-                        <span className="session-name">{c.title}</span>
+                        <span className="session-name">
+                          {c.pinned && (
+                            <svg className="session-pin-mark" viewBox="0 0 24 24" aria-label="已置顶" aria-hidden="true">
+                              <path d="M9 3h6l-1 6 4 3v2H6v-2l4-3-1-6zM12 14v7" />
+                            </svg>
+                          )}
+                          {c.title}
+                        </span>
                         {/* hover 才出现的小图标：桌面用。手机没有 hover —— 这里必须
                             pointer-events-none，否则按钮虽然看不见却仍然可点，
                             手指盲点在标题右侧会莫名进入编辑态。手机的入口走左滑。 */}
                         <span className="pointer-events-none flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
+                          <button
+                            title={c.pinned ? "取消置顶" : "置顶"}
+                            aria-label={`${c.pinned ? "取消置顶" : "置顶"}会话：${c.title}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onTogglePin?.(c.id, !c.pinned);
+                            }}
+                            className={`rounded p-0.5 transition-colors hover:bg-fill-2 ${c.pinned ? "text-accent" : "text-faint hover:text-accent"}`}
+                          >
+                            <svg viewBox="0 0 24 24" fill={c.pinned ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8" className="h-3.5 w-3.5">
+                              <path d="M9 3h6l-1 6 4 3v2H6v-2l4-3-1-6zM12 14v7" />
+                            </svg>
+                          </button>
                           <button
                             title="重命名"
                             aria-label={`重命名会话：${c.title}`}

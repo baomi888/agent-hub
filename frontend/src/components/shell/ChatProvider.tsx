@@ -40,6 +40,7 @@ export interface RailStore {
   selectSession: SessionsStore["selectSession"];
   createSession: SessionsStore["createSession"];
   renameSession: SessionsStore["renameSession"];
+  togglePin: SessionsStore["togglePin"];
   deleteSession: SessionsStore["deleteSession"];
   reloadSessions: SessionsStore["reloadSessions"];
   kbNames: Record<string, string>;
@@ -82,6 +83,7 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
       selectSession: sessionsStore.selectSession,
       createSession: sessionsStore.createSession,
       renameSession: sessionsStore.renameSession,
+      togglePin: sessionsStore.togglePin,
       deleteSession: sessionsStore.deleteSession,
       reloadSessions: sessionsStore.reloadSessions,
       kbNames,
@@ -95,6 +97,7 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
       sessionsStore.selectSession,
       sessionsStore.createSession,
       sessionsStore.renameSession,
+      sessionsStore.togglePin,
       sessionsStore.deleteSession,
       sessionsStore.reloadSessions,
       kbNames,

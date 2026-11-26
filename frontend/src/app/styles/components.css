@@ -385,6 +385,17 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* 置顶标记：标题前的小图钉，不额外占一行，长标题由 .session-name 自己省略 */
+.session-pin-mark {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+  vertical-align: -1px;
+  stroke: var(--accent);
+  fill: var(--accent);
+  flex: none;
+}
 .session.active .session-name {
   font-family: var(--font-serif);
   font-weight: 700;
@@ -901,15 +912,15 @@ button.kb-chip-unbound:hover {
   }
 }
 
-/* ============ 侧栏会话：手机左滑操作（改名 / 删除） ============
+/* ============ 侧栏会话：手机左滑操作（置顶 / 改名 / 删除） ============
    结构：wrap(relative,overflow:hidden) > [操作区(绝对定位) + .session(文字层)]
    touch-action: pan-y 让浏览器只管竖向滚动，横向手势归我们
 
    ★ 2026-11-04：这里原来只放了删除。改名的入口是 hover 才显示的小铅笔，
      触摸设备没有 hover → 那个按钮永远 opacity-0，用户实际遇到的是
      「手机能删对话，但改不了名」。左滑是侧栏唯一已被发现的手势，
-     两个操作都挂它下面，不再发明新手势。
-   ★ 宽度 128 必须与 Sidebar.tsx 的 SWIPE_W 一致：不一致会停在
+     全部操作都挂它下面，不再发明新手势。
+   ★ 宽度 192 必须与 Sidebar.tsx 的 SWIPE_W 一致：不一致会停在
      差几像素的位置，露出半截按钮或压住按钮。
    ★★ 交互定稿：操作区从右侧「滑入覆盖」，**文字行不动**。
      最初做的是把 .session 整体左移 128px 露出按钮 —— 真机截图发现行宽只有
@@ -933,7 +944,7 @@ button.kb-chip-unbound:hover {
   top: 0;
   right: 0;
   bottom: 0;
-  width: 128px;
+  width: 192px;
   display: flex;
   /* 收起 = 整体推到行外面，由 wrap 的 overflow:hidden 裁掉；
      不用 opacity 是因为拖动时要跟手，淡入会闪。 */
@@ -972,6 +983,11 @@ button.kb-chip-unbound:hover {
   stroke-width: 1.8;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+/* 置顶用浅金底 + 金墨字：与「已置顶」的标题图钉同色，取消置顶一眼能认出来 */
+.session-swipe-wrap .session-swipe-btn.is-pin {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 /* 改名用深棕墨底 + 纸色字：这对变量在暗色主题下正好反转（--ink 变浅、--bg 变深），
    两边对比度都够。金色实底配白字只有 2.7:1，字读不清，所以不用金色。 */

@@ -351,6 +351,11 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ kb_id }),
     }),
+  pinSession: (sid: string, pinned: boolean) =>
+    request<Conversation>(`/api/sessions/${sid}/`, {
+      method: "PATCH",
+      body: JSON.stringify({ pinned }),
+    }),
   deleteSession: (sid: string) =>
     request<{ ok: boolean }>(`/api/sessions/${sid}/`, { method: "DELETE" }),
   deleteMessageTurn: (sid: string, msgId: number) =>
