@@ -78,6 +78,24 @@ const newTitle = "置顶探针-新-" + suffix;
 const older = await post(oldTitle);
 const newer = await post(newTitle);
 const list = async () => (await (await apiFetch("/api/sessions/")).json()).sessions;
+// 线上冷启动比本地慢：启动页可能**在 textarea 出现之后才挂上**。
+// 先等输入区，再等启动页退场，最后才认会话列表 —— 顺序反了会在空壳上开点。
+const waitApp = async () => {
+  await waitFor(`document.querySelector("textarea")`, 30000);
+  await sleep(800);
+  await waitFor(`!document.querySelector(".zs-boot-splash")`, 20000);
+  await ev(`document.querySelectorAll(".guide-skip,.announce-close,.tb-notice-x,.modal-close").forEach(b => b.click())`);
+  await sleep(700);
+  return waitFor(`document.querySelectorAll(".session").length >= 2`, 25000);
+};
+const waitPin = async (sid, pinned) => {
+  const until = Date.now() + 12000;
+  while (Date.now() < until) {
+    if ((await list()).find((s) => s.id === sid)?.pinned === pinned) return true;
+    await sleep(300);
+  }
+  return false;
+};
 const before = await list();
 check("两条测试会话已建且新会话在前",
   before.findIndex((s) => s.id === newer.id) < before.findIndex((s) => s.id === older.id));
@@ -85,17 +103,16 @@ check("两条测试会话已建且新会话在前",
 // ---------- 桌面 ----------
 await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
 await send("Page.navigate", { url: BASE + "/" });
-check("桌面会话列表加载", await waitFor(`document.querySelectorAll(".session").length >= 2`, 25000));
-await waitFor(`!document.querySelector(".zs-boot-splash")`, 15000);
-await ev(`document.querySelectorAll(".guide-skip,.announce-close,.tb-notice-x,.modal-close").forEach(b => b.click())`);
-await sleep(600);
+check("桌面会话列表加载", await waitApp());
 
 const findRow = (title) => `Array.from(document.querySelectorAll(".session")).find(e => e.textContent.includes(${JSON.stringify(title)}))`;
 const desktopBtn = await ev(`(() => { const r = ${findRow(oldTitle)}; const b = r && r.querySelector('button[aria-label^="置顶会话"]'); return !!b; })()`);
 check("桌面 hover 区有置顶按钮", desktopBtn === true);
 
 const activeBefore = await ev(`document.querySelector('.session[aria-current="true"]')?.textContent || ""`);
-await ev(`(() => { const r = ${findRow(oldTitle)}; r.querySelector('button[aria-label^="置顶会话"]').click(); return true; })()`);
+const clickedDesktop = await ev(`(() => { const r = ${findRow(oldTitle)}; const b = r && r.querySelector('button[aria-label^="置顶会话"]'); if (!b) return false; b.click(); return true; })()`);
+check("桌面置顶按钮点击成功", clickedDesktop === true);
+await waitPin(older.id, true);
 await waitFor(`Array.from(document.querySelectorAll(".group-head")).some(h => h.textContent.includes("置顶"))`, 10000);
 const afterPin = await list();
 const row = afterPin.find((s) => s.id === older.id);
@@ -112,17 +129,14 @@ const activeAfter = await ev(`document.querySelector('.session[aria-current="tru
 check("点置顶没有误切会话", activeBefore === activeAfter, `${activeBefore} => ${activeAfter}`);
 await shot("shots/session_pin_desktop.png");
 
-await ev(`(() => { const h = Array.from(document.querySelectorAll(".group-head")).find(x => x.textContent.includes("置顶")); const r = h && Array.from(h.parentElement.querySelectorAll(".session")).find(e => e.textContent.includes(${JSON.stringify(oldTitle)})); r.querySelector('button[aria-label^="取消置顶会话"]').click(); return true; })()`);
-await waitFor(`!Array.from(document.querySelectorAll(".group-head")).some(h => h.textContent.includes("置顶"))`, 10000);
-check("取消置顶后端落库 false", (await list()).find((s) => s.id === older.id)?.pinned === false);
+const clickedUnpin = await ev(`(() => { const h = Array.from(document.querySelectorAll(".group-head")).find(x => x.textContent.includes("置顶")); const r = h && Array.from(h.parentElement.querySelectorAll(".session")).find(e => e.textContent.includes(${JSON.stringify(oldTitle)})); const b = r && r.querySelector('button[aria-label^="取消置顶会话"]'); if (!b) return false; b.click(); return true; })()`);
+check("桌面取消置顶按钮点击成功", clickedUnpin === true);
+check("取消置顶后端落库 false", await waitPin(older.id, false));
 
 // ---------- 手机 ----------
 await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
 await send("Page.navigate", { url: BASE + "/" });
-check("手机会话列表加载", await waitFor(`document.querySelectorAll(".session").length >= 2`, 25000));
-await waitFor(`!document.querySelector(".zs-boot-splash")`, 15000);
-await ev(`document.querySelectorAll(".guide-skip,.announce-close,.tb-notice-x,.modal-close").forEach(b => b.click())`);
-await sleep(600);
+check("手机会话列表加载", await waitApp());
 const swipe = await ev(`(() => {
   const r = ${findRow(oldTitle)};
   const acts = r && r.parentElement.querySelector(".session-swipe-acts");
@@ -131,9 +145,10 @@ const swipe = await ev(`(() => {
 check("手机左滑区三按钮且宽192", swipe?.width === 192 && swipe?.buttons === 3, JSON.stringify(swipe));
 check("左滑区含置顶入口", (swipe?.labels || []).some((l) => l.includes("置顶会话")), JSON.stringify(swipe?.labels));
 
-await ev(`(() => { const r = ${findRow(oldTitle)}; r.parentElement.querySelector('.session-swipe-btn.is-pin').click(); return true; })()`);
+const clickedMobile = await ev(`(() => { const r = ${findRow(oldTitle)}; const b = r && r.parentElement.querySelector('.session-swipe-btn.is-pin'); if (!b) return false; b.click(); return true; })()`);
+check("手机左滑置顶按钮点击成功", clickedMobile === true);
+check("手机点击后后端落库 pinned=true", await waitPin(older.id, true));
 await waitFor(`Array.from(document.querySelectorAll(".group-head")).some(h => h.textContent.includes("置顶"))`, 10000);
-check("手机点击后后端落库 pinned=true", (await list()).find((s) => s.id === older.id)?.pinned === true);
 check("手机置顶分组含目标会话", await ev(`(() => {
   const h = Array.from(document.querySelectorAll(".group-head")).find(x => x.textContent.includes("置顶"));
   return !!(h && Array.from(h.parentElement.querySelectorAll(".session")).some(e => e.textContent.includes(${JSON.stringify(oldTitle)})));
