@@ -23,7 +23,7 @@ import uuid
 
 from core import config
 from core import session as _session
-from core.auth import hash_password, verify_password
+from core.auth import has_usable_password, hash_password, verify_password
 from core.session import _get_conn
 
 # 用户名规则：字母/数字/下划线/点/连字符/中日韩文字，3~32 位
@@ -84,6 +84,7 @@ def _public(row) -> dict:
         # 空串 = 没设过，前端回落到 username / 首字母头像
         "nickname": row.get("nickname") or "",
         "avatar": row.get("avatar") or "",
+        "has_password": has_usable_password(row.get("password_hash") or ""),
         "created_at": row["created_at"],
         "last_login_at": row["last_login_at"],
         # 只给"还能改几次"这个结果，不给原始计数：用户需要知道还剩多少，
@@ -362,6 +363,11 @@ def delete_user(uid: str, reason: str = "") -> bool:
             (uid, row["username"], int(time.time()), (reason or "")[:200]),
         )
         conn.execute("DELETE FROM users WHERE id = ?", (uid,))
+        # 删账号必须同时清关联与在途授权；解绑则只删除关联，不删除 users。
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        for table in ("external_identities", "external_auth_flows", "security_emails"):
+            if table in tables:
+                conn.execute(f"DELETE FROM {table} WHERE user_id=?", (uid,))
     return True
 
 
@@ -452,6 +458,10 @@ def login(username: str, password: str) -> tuple[dict | None, str]:
     lock_until = int(row.get("lock_until") or 0)
     if lock_until > now:
         return None, LOGIN_LOCKED
+
+    if not has_usable_password(row["password_hash"]):
+        # 没有可验证的密码；错误尝试不能把仅微信登录的账号撞进密码锁定。
+        return None, LOGIN_BAD_PASSWORD
 
     if not verify_password(password, row["password_hash"]):
         _record_login_failure(row["id"])
@@ -688,6 +698,8 @@ def change_password(uid: str, old_password: str, new_password: str) -> str | Non
     row = get_user(uid)
     if not row:
         return "账号不存在"
+    if not has_usable_password(row["password_hash"]):
+        return "尚未设置密码，请先绑定安全邮箱，再通过邮箱验证设置密码"
     if int(row.get("lock_until") or 0) > int(time.time()):
         return "账号已被锁定，请稍后再试"
     if not verify_password(old_password, row["password_hash"]):

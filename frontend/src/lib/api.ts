@@ -865,7 +865,21 @@ export const api = {
   },
 
   // ---------- 登录 ----------
-  authConfig: () => request<{ allow_signup: boolean; require_email: boolean; email_ready: boolean }>("/api/auth/config/"),
+  authConfig: () => request<{ allow_signup: boolean; require_email: boolean; email_ready: boolean; wechat_enabled?: boolean; alipay_enabled?: boolean }>("/api/auth/config/"),
+  wechat: {
+    start: (action: "login" | "bind" | "unlink" = "login") =>
+      request<{ authorize_url: string }>("/api/auth/wechat/start", {
+        method: "POST", body: JSON.stringify({ action }),
+      }),
+    status: () => request<{ enabled: boolean; bound: boolean }>("/api/auth/wechat/status"),
+  },
+  alipay: {
+    start: (action: "login" | "bind" | "unlink" = "login") =>
+      request<{ authorize_url: string }>("/api/auth/alipay/start", {
+        method: "POST", body: JSON.stringify({ action }),
+      }),
+    status: () => request<{ enabled: boolean; bound: boolean }>("/api/auth/alipay/status"),
+  },
   login: async (username: string, password: string) => {
     const u = await request<UserOut>("/api/auth/login/", {
       method: "POST",

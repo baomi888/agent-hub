@@ -36,6 +36,7 @@ from core.auth import (
     decode_claims,
     extract_token,
     get_current_user,
+    has_usable_password,
     set_session_cookie,
 )
 from core.security_email import SecurityEmailService
@@ -69,6 +70,7 @@ class RegisterCredentials(Credentials):
 class UserOut(BaseModel):
     id: str
     username: str
+    has_password: bool = True
     # 显示名。空串 = 没设过，前端回落到 username。
     # 默认空串而不是必填：老前端拿到多出来的字段不会崩，新前端拿到老后端的
     # 响应（没有这个字段）也有确定的回落值。
@@ -188,6 +190,7 @@ def _user_out(row: dict, token: str | None = None) -> UserOut:
     return UserOut(
         id=row["id"],
         username=row["username"],
+        has_password=row.get("has_password", has_usable_password(row.get("password_hash") or "")),
         nickname=row.get("nickname") or "",
         avatar=row.get("avatar") or "",
         name_changes_left=_name_changes_left(row),
@@ -223,12 +226,15 @@ def _issue_session(user: dict, request: Request, response: Response) -> UserOut:
     响应体里的 token 默认关闭（AUTH_RETURN_TOKEN=0）：给了 JS 就等于把
     XSS 的收益从"偷不到"变成"直接拿走 7 天会话"。
     """
-    # af 必须带上当前水位：不带（=0）的话，改过密码的用户下次登录拿到的令牌
-    # 一落地就被"af < 水位"判成失效 —— 表现为登录成功却立刻被踢回登录页。
+    # 第三方账号事务返回核验时的版本。即使随后发生解绑或改密，这次登录
+    # 也只能拿到旧版本的会话。仅返回公开用户字段的入口沿用查库取版本。
+    version = user.get("token_valid_after")
+    if version is None:
+        version = account.get_token_valid_after(user["id"])
     token = create_token(
         user["id"],
         username=user["username"],
-        auth_version=account.get_token_valid_after(user["id"]),
+        auth_version=version,
     )
     set_session_cookie(response, token, request)
     return _user_out(user, token=token if config.AUTH_RETURN_TOKEN else None)
@@ -240,9 +246,13 @@ def _issue_session(user: dict, request: Request, response: Response) -> UserOut:
 @router.get("/config/")
 def auth_config() -> dict:
     """前端登录页要用的开关：这站还开不开自助注册。"""
-    from core import security_mail
+    from core import alipay, security_mail, wechat
 
-    return {"allow_signup": config.ALLOW_SIGNUP, "require_email": True, "email_ready": security_mail.status()["ready"]}
+    return {
+        "allow_signup": config.ALLOW_SIGNUP, "require_email": True,
+        "email_ready": security_mail.status()["ready"], "wechat_enabled": wechat.enabled(),
+        "alipay_enabled": alipay.enabled(),
+    }
 
 
 @router.post("/register/", response_model=UserOut)
@@ -414,6 +424,9 @@ async def upload_avatar(
     try:
         tmp = await avatar_store.save_upload(file)
         new_avatar = await asyncio.to_thread(avatar_store.store, tmp)
+        from core.account_deletion import record_upload
+
+        await asyncio.to_thread(record_upload, uid, "avatar", new_avatar[len(avatar_store.IMG_PREFIX):])
     except avatar_store.AvatarError as e:
         # 中文、可操作、不含堆栈：这类错误的读者是用户，不是开发者
         _reject(str(e))
