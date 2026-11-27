@@ -1,21 +1,19 @@
 "use client";
 
-// 支付宝授权跳转引导层。
+// 支付宝移动端授权：点一下就进支付宝，不再让用户点第二次。
 //
-// 为什么需要它：支付宝规定授权链接必须在支付宝 App 内打开，外部浏览器 /
-// App 内置 WebView 打开会提示「请在支付宝客户端打开链接」，授权根本走不下去。
-// 所以移动端不能用 window.location.assign 直接跳授权页，得先给一道引导：
-//   1) 主按钮用 alipays:// 协议唤起支付宝 App（官方 scheme，appId=20000067）
-//   2) 唤起失败/没装支付宝时，同一授权链接的二维码 + 复制按钮兜底
-// PC 端不需要这层（点开就是扫码页），由调用方直接 window.location.assign。
+// 为什么必须唤起：支付宝规定授权链接要在支付宝 App 内打开，外部浏览器 /
+// WebView 打开只会提示「请在支付宝客户端打开链接」，授权走不下去。官方给的
+// 办法是 alipays:// 协议（appId=20000067 = 支付宝内打开网页）。
 //
-// 这里用二维码而不是纯文字链接：支付宝「扫一扫」本就能打开授权链接，
-// 是最可靠的兜底路径 —— 不依赖 scheme 唤起，也不依赖剪贴板权限。
+// 为什么还要这一层（而不是直接 location.assign 完事）：
+//   1) 唤起可能失败（没装支付宝、被浏览器拦、iOS 在手势之外触发会被静默丢弃），
+//      需要二维码兜底，否则用户点了按钮就再无下文；
+//   2) 授权在支付宝内置 WebView 里完成，登录态若种在那里，切回原应用仍是未登录。
+//      所以要在这里轮询 /poll，把结果领回原应用就地种会话 —— 在哪点就在哪用。
 //
-// 授权在支付宝 App 内完成，回调也发生在它的内置 WebView；登录态若种在那里，
-// 用户切回原应用仍是未登录。所以这层同时在后台轮询 /poll：授权一落定，
-// 就用发起时签发的 state 把结果领回原应用并就地种上会话 —— 在哪里发起，
-// 就在哪里登录进去。
+// 交互约定：正常路径不出任何弹窗，只有一句「正在打开支付宝…」的轻提示；
+// 只有 1.7 秒后页面还没被切走（说明唤起没成功）才升级成带二维码的兜底卡片。
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import QRCode from "qrcode";
@@ -23,7 +21,7 @@ import { api } from "@/lib/api";
 import BrandIcon from "./settings/BrandIcon";
 
 interface Props {
-  /** 授权链接；非空时显示引导层 */
+  /** 授权链接；非空时接管唤起与轮询 */
   url: string | null;
   onClose: () => void;
   /** 场景说明：登录 / 绑定 / 解绑 */
@@ -32,7 +30,7 @@ interface Props {
   onDone?: (action: string) => void;
 }
 
-/** 移动端（PWA / 安卓 App / 手机浏览器）走唤起引导；PC 直接跳授权页 */
+/** 移动端（PWA / 安卓 App / 手机浏览器）走唤起；PC 直接跳授权页 */
 export function isMobile(): boolean {
   if (typeof navigator === "undefined") return false;
   return /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(navigator.userAgent);
@@ -41,6 +39,19 @@ export function isMobile(): boolean {
 /** 支付宝官方唤起协议：在支付宝 App 内打开指定链接 */
 function alipaysUrl(url: string): string {
   return "alipays://platformapi/startapp?appId=20000067&url=" + encodeURIComponent(url);
+}
+
+/**
+ * 立刻唤起支付宝。要在点击处理器（用户手势栈）里调用，iOS 才肯放行自定义 scheme。
+ * 拿授权链接得先请求后端，await 之后手势已失效，所以调用方拿到链接后要马上调它，
+ * 剩下的重试与兜底交给 AlipayLaunchOverlay。
+ */
+export function launchAlipay(url: string) {
+  try {
+    window.location.href = alipaysUrl(url);
+  } catch {
+    /* 唤起失败由引导层兜底，这里不打断流程 */
+  }
 }
 
 /** 二维码矩阵 → SVG rect 列表（白底深码，兼容支付宝扫一扫） */
@@ -73,6 +84,49 @@ function QrCode({ url, size = 176 }: { url: string; size?: number }) {
     </svg>
   );
 }
+
+/** 唤起等待中：一句轻提示，不拦截点击、不遮挡页面 */
+const hintStyle: React.CSSProperties = {
+  position: "fixed",
+  left: "50%",
+  bottom: "calc(72px + env(safe-area-inset-bottom, 0px))",
+  transform: "translateX(-50%)",
+  zIndex: 1000,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 10,
+  padding: "10px 18px",
+  borderRadius: 999,
+  background: "rgba(28,24,16,0.86)",
+  color: "#F6F0DC",
+  fontSize: 13,
+  lineHeight: 1.4,
+  whiteSpace: "nowrap",
+  pointerEvents: "none",
+  boxShadow: "0 8px 24px rgba(0,0,0,0.22)",
+};
+const spinStyle: React.CSSProperties = {
+  width: 14,
+  height: 14,
+  borderRadius: "50%",
+  border: "2px solid rgba(246,240,220,0.32)",
+  borderTopColor: "#F6F0DC",
+  animation: "zs-oauth-spin 0.9s linear infinite",
+};
+/** 提示条上的出口：能取消，但只有这么一小块可点 */
+const hintCancelStyle: React.CSSProperties = {
+  pointerEvents: "auto",
+  margin: 0,
+  padding: "2px 0 2px 6px",
+  border: 0,
+  background: "transparent",
+  color: "inherit",
+  font: "inherit",
+  fontSize: 12,
+  opacity: 0.72,
+  textDecoration: "underline",
+  cursor: "pointer",
+};
 
 const dialogStyle: React.CSSProperties = {
   position: "fixed",
@@ -116,9 +170,11 @@ interface CardProps {
 }
 
 function LaunchCard({ url, onClose, label, onDone }: CardProps) {
-  const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("waiting");
-  const [pollError, setPollError] = useState("");
+  const [fallback, setFallback] = useState(false);
+  const [returned, setReturned] = useState(false);
+  const [failText, setFailText] = useState("");
+  const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const doneRef = useRef(onDone);
   const closeRef = useRef(onClose);
   useEffect(() => {
@@ -126,21 +182,55 @@ function LaunchCard({ url, onClose, label, onDone }: CardProps) {
     closeRef.current = onClose;
   }, [onDone, onClose]);
 
-  // 每 1.5 秒领一次结果，最多约 5 分钟；pending 继续，落定即停。
-  // 只依赖 url：换一次授权链接（重新发起）才会重启轮询。
-  useEffect(() => {
-    let state = "";
+  const state = useMemo(() => {
     try {
-      state = new URL(url).searchParams.get("state") || "";
+      return new URL(url).searchParams.get("state") || "";
     } catch {
-      /* 授权链接异常，交给后端 poll 报错 */
+      return "";
     }
+  }, [url]);
+
+  // 唤起：调用方在点击时已经试过一次（手势内才行）。这里补一次重试，
+  // 并判断「有没有真的切走」——没切走才出兜底，正常路径全程无弹窗。
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    let left = document.visibilityState === "hidden";
+    const onVis = () => {
+      if (document.visibilityState === "hidden") left = true;
+      // 切回来时说明授权已经走完，提示语改成「正在确认」，别让人以为还在跳转。
+      else setReturned(true);
+    };
+    document.addEventListener("visibilitychange", onVis);
+    const retry = window.setTimeout(() => {
+      if (!left && document.visibilityState === "visible") launchAlipay(url);
+    }, 700);
+    const giveUp = window.setTimeout(() => {
+      if (!left && document.visibilityState === "visible") setFallback(true);
+    }, 1700);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.clearTimeout(retry);
+      window.clearTimeout(giveUp);
+    };
+  }, [url]);
+
+  // 轮询领回结果：切回应用（visibilitychange / focus）时立刻领一次，
+  // 不必再等下一个轮询周期。pending 继续，落定即停。
+  useEffect(() => {
     if (!state) return;
     let alive = true;
-    let timer = 0;
     let attempts = 0;
+    let inFlight = false;
+    let timer = 0;
+    const stop = () => {
+      if (timer) {
+        window.clearTimeout(timer);
+        timer = 0;
+      }
+    };
     const tick = async () => {
-      if (!alive) return;
+      if (!alive || inFlight) return;
+      inFlight = true;
       attempts += 1;
       try {
         const result = await api.alipay.poll(state);
@@ -148,28 +238,39 @@ function LaunchCard({ url, onClose, label, onDone }: CardProps) {
         if (result.status === "ok") {
           setPhase("ok");
           doneRef.current?.(result.action || "login");
-          // 登录态已就地生效，稍候自动收起弹窗回到原界面。
+          // 登录态已就地生效，收个尾就把界面还给用户。
           timer = window.setTimeout(() => {
             if (alive) closeRef.current();
-          }, 900);
+          }, 700);
           return;
         }
         if (result.status === "failed") {
           setPhase("failed");
-          setPollError(FAIL_TEXT[result.reason || ""] || "授权未完成，请重新发起");
+          setFailText(FAIL_TEXT[result.reason || ""] || "授权未完成，请重新发起");
           return;
         }
       } catch {
-        // 网络抖动：下一次继续，不打断用户授权。
+        // 网络抖动：下一轮继续，不打断用户授权。
+      } finally {
+        inFlight = false;
       }
-      if (alive && attempts < 200) timer = window.setTimeout(tick, 1500);
+      if (alive && attempts < 300) timer = window.setTimeout(tick, 1200);
     };
-    timer = window.setTimeout(tick, 1500);
+    const wake = () => {
+      if (!alive || inFlight || document.visibilityState !== "visible") return;
+      stop();
+      void tick();
+    };
+    document.addEventListener("visibilitychange", wake);
+    window.addEventListener("focus", wake);
+    timer = window.setTimeout(tick, 700);
     return () => {
       alive = false;
-      window.clearTimeout(timer);
+      stop();
+      document.removeEventListener("visibilitychange", wake);
+      window.removeEventListener("focus", wake);
     };
-  }, [url]);
+  }, [state]);
 
   const copied = copiedUrl === url;
 
@@ -182,38 +283,68 @@ function LaunchCard({ url, onClose, label, onDone }: CardProps) {
     }
   }
 
-  if (phase !== "waiting") {
-    const ok = phase === "ok";
+  if (phase === "ok") {
     return createPortal(
       <div style={dialogStyle} role="presentation">
         <div style={cardStyle} role="dialog" aria-modal="true" aria-label={`支付宝${label}结果`}>
           <div style={{ display: "inline-flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
             <BrandIcon brand="alipay" size={24} />
-            <strong style={{ fontSize: 18 }}>{ok ? "授权成功" : "授权未完成"}</strong>
+            <strong style={{ fontSize: 18 }}>授权成功</strong>
           </div>
-          <p style={{ fontSize: 14, lineHeight: 1.6, color: "var(--text-2, #5A4C33)", margin: "14px 0" }}>
-            {ok ? "正在返回，请稍候…" : pollError}
+          <p style={{ fontSize: 14, lineHeight: 1.6, color: "var(--text-2, #5A4C33)", margin: "14px 0 0" }}>
+            正在进入…
           </p>
-          {!ok && (
-            <button type="button" className="btn btn-ghost btn-sm" style={{ width: "100%", minHeight: 40 }} onClick={onClose}>
-              关闭
-            </button>
-          )}
         </div>
       </div>,
       document.body,
     );
   }
 
+  if (phase === "failed") {
+    return createPortal(
+      <div style={dialogStyle} role="presentation">
+        <div style={cardStyle} role="dialog" aria-modal="true" aria-label={`支付宝${label}结果`}>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+            <BrandIcon brand="alipay" size={24} />
+            <strong style={{ fontSize: 18 }}>授权未完成</strong>
+          </div>
+          <p style={{ fontSize: 14, lineHeight: 1.6, color: "var(--text-2, #5A4C33)", margin: "14px 0" }}>
+            {failText}
+          </p>
+          <button type="button" className="btn btn-ghost btn-sm" style={{ width: "100%", minHeight: 40 }} onClick={onClose}>
+            关闭
+          </button>
+        </div>
+      </div>,
+      document.body,
+    );
+  }
+
+  if (!fallback) {
+    // 正常路径：只在角落给一句提示，不出弹窗、不拦点击。
+    return createPortal(
+      <div style={hintStyle} role="status" aria-live="polite">
+        <span style={spinStyle} />
+        <span>{returned ? "正在确认授权…" : "正在打开支付宝…"}</span>
+        <button type="button" style={hintCancelStyle} onClick={onClose}>
+          取消
+        </button>
+        <style>{"@keyframes zs-oauth-spin{to{transform:rotate(360deg)}}"}</style>
+      </div>,
+      document.body,
+    );
+  }
+
+  // 唤起没成功（没装支付宝 / 被浏览器拦）：二维码 + 复制兜底。
   return createPortal(
     <div style={dialogStyle} role="presentation" onClick={onClose}>
       <div style={cardStyle} role="dialog" aria-modal="true" aria-label={`支付宝${label}`} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "inline-flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
           <BrandIcon brand="alipay" size={24} />
-          <strong style={{ fontSize: 18 }}>支付宝{label}</strong>
+          <strong style={{ fontSize: 18 }}>用支付宝继续{label}</strong>
         </div>
         <p style={{ fontSize: 13, lineHeight: 1.6, color: "var(--text-2, #5A4C33)", margin: "8px 0 16px" }}>
-          请在支付宝 App 内完成授权。点下方按钮打开支付宝；若没有自动跳转，可用支付宝扫一扫扫描二维码。授权完成后会自动返回本页面。
+          没能自动打开支付宝。点下方按钮再试一次，或用支付宝扫一扫下面的二维码。完成后会自动回到这里。
         </p>
         <a
           href={alipaysUrl(url)}

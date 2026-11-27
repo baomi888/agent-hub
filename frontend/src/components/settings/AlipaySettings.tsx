@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
-import AlipayLaunchOverlay, { isMobile } from "@/components/AlipayLaunchOverlay";
+import AlipayLaunchOverlay, { isMobile, launchAlipay } from "@/components/AlipayLaunchOverlay";
 import BrandIcon from "./BrandIcon";
 
 export default function AlipaySettings() {
@@ -39,7 +39,9 @@ export default function AlipaySettings() {
       // 移动端走 alipays 唤起：state 自携带 browser+uid，回调无本站 cookie 也能完成。
       const result = await api.alipay.start(action, mobile);
       if (mobile) {
+        // 点一下直接进支付宝：不再先弹一个「打开支付宝」的引导层。
         setLaunchUrl(result.authorize_url);
+        launchAlipay(result.authorize_url);
         setBusy(false);
       } else {
         window.location.assign(result.authorize_url);

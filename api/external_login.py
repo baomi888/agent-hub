@@ -8,7 +8,7 @@ from typing import Literal, Protocol
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import PlainTextResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict
 
 from api.auth import _client_ip, _issue_session
@@ -40,6 +40,55 @@ def _decode_state(combined: str) -> tuple[str, str, str]:
     browser = combined[_SLICE_STATE : _SLICE_STATE + _SLICE_BROWSER]
     uid_field = combined[_SLICE_STATE + _SLICE_BROWSER :]
     return state, browser, "" if uid_field == _EMPTY_UID else uid_field
+
+
+# App 内授权回调的落地页：授权一完成就让支付宝把网页关掉，用户不必看到
+# 任何「站点页面」。会话不在这里签发（这个 WebView 没有原应用的 cookie），
+# 结果已写进交接表，原应用轮询即可领走，所以这里只负责尽快退出。
+# AlipayJSBridge 由支付宝在 startapp 打开的网页中注入，closeWebview 是官方
+# 关闭当前网页的能力；非 startapp 场景 bridge 缺失，退化为一行极短提示。
+_APP_PAGE = """<!doctype html>
+<html lang="zh-CN"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title></title>
+<style>
+html,body{margin:0;height:100%}
+body{display:flex;align-items:center;justify-content:center;background:#FDFBF4;color:#6B6250;
+font:15px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+@media (prefers-color-scheme:dark){body{background:#16150F;color:#A79C82}}
+p{margin:0;padding:0 24px;text-align:center}
+</style></head>
+<body><p id="t"></p>
+<script>
+(function(){
+  var failed=__FAILED__;
+  var tip=document.getElementById("t");
+  var closed=false;
+  function closeWebview(){
+    try{
+      if(window.AlipayJSBridge&&typeof window.AlipayJSBridge.call==="function"){
+        window.AlipayJSBridge.call("closeWebview");
+        closed=true;
+      }
+    }catch(e){}
+  }
+  if(window.AlipayJSBridge){closeWebview();}
+  else{document.addEventListener("AlipayJSBridgeReady",closeWebview,false);}
+  // bridge 没注入或关闭被忽略时，给一句极短提示，不让用户停在白屏上
+  setTimeout(function(){
+    if(!closed){tip.textContent=failed?"授权未完成，请返回应用重试":"已登录，请返回应用继续";}
+  },1200);
+})();
+</script></body></html>"""
+
+
+def _app_page(*, failed: bool) -> HTMLResponse:
+    return HTMLResponse(
+        _APP_PAGE.replace("__FAILED__", "true" if failed else "false"),
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+    )
 
 
 class WebsiteAdapter(Protocol):
@@ -125,6 +174,13 @@ def website_login_router(
         failure_page = f"/login?{provider}_result=failed"
         app_flow = False
         handoff_state = ""
+
+        def fail(code: str) -> Response:
+            """App 内失败同样走极简页，不把用户丢到登录页上。"""
+            if app_flow and handoff_state:
+                return _app_page(failed=True)
+            return RedirectResponse(f"{failure_page}&reason={code}", status_code=303)
+
         try:
             if not adapter.enabled():
                 raise ExternalAuthError("not_configured", f"{label}登录尚未配置完成", 503)
@@ -173,7 +229,8 @@ def website_login_router(
                 external_accounts.put_handoff(
                     state_value, provider=provider, action=action, user_id=user["id"]
                 )
-                response = PlainTextResponse("授权成功，请返回应用继续。")
+                # 落地页只负责关掉支付宝里的网页，不留「站点页面」。
+                response = _app_page(failed=False)
             else:
                 success_url = "/"
                 if action != "login":
@@ -187,21 +244,21 @@ def website_login_router(
                     handoff_state, provider=provider, action="login",
                     result="failed", reason=exc.code,
                 )
-            response = RedirectResponse(f"{failure_page}&reason={exc.code}", status_code=303)
+            response = fail(exc.code)
         except (quota.RateLimited, quota.QuotaExceeded):
             if app_flow and handoff_state:
                 external_accounts.put_handoff(
                     handoff_state, provider=provider, action="login",
                     result="failed", reason="rate_limited",
                 )
-            response = RedirectResponse(f"{failure_page}&reason=rate_limited", status_code=303)
+            response = fail("rate_limited")
         except sqlite3.Error:
             if app_flow and handoff_state:
                 external_accounts.put_handoff(
                     handoff_state, provider=provider, action="login",
                     result="failed", reason="service_unavailable",
                 )
-            response = RedirectResponse(f"{failure_page}&reason=service_unavailable", status_code=303)
+            response = fail("service_unavailable")
         response.headers["Cache-Control"] = "no-store"
         response.headers["Referrer-Policy"] = "no-referrer"
         return response

@@ -366,8 +366,11 @@ def test_app_flow_callback_without_cookie_completes_login(alienv):
     state = begin_app(cli)
     cli.cookies.clear()  # 模拟跳到支付宝 App 后丢失本站 cookie
     result = finish(cli, state)
-    # 结果不再种进支付宝 WebView，而是暂存供原应用轮询领走。
-    assert result.status_code == 200 and "请返回应用" in result.text
+    # 结果不再种进支付宝 WebView，而是暂存供原应用轮询领走；
+    # 落地页只负责自动关掉支付宝里的网页，不留「站点页面」。
+    assert result.status_code == 200
+    assert "closeWebview" in result.text
+    assert "已登录，请返回应用" in result.text
     assert len(calls) == 2
 
 
@@ -387,8 +390,11 @@ def test_app_flow_bind_without_cookie_and_account_switch_rejected(alienv):
     cli.cookies.delete("baomi_session")
     sign_in(cli, "owner2")
     result = finish(cli, state2)
-    assert "reason=flow_invalid" in result.headers["location"]
+    # App 内失败也走极简页而不是把用户丢到登录页，所以这里是 200 无 location；
+    # 真正的判据是「没放行」——支付宝接口没被再调、交接表登记成 flow_invalid。
+    assert result.status_code == 200 and "location" not in result.headers
     assert len(calls) == 2
+    assert _poll(cli, state2).json() == {"status": "failed", "reason": "flow_invalid"}
 
 
 def _poll(cli, state):
