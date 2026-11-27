@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
-import AlipayLaunchOverlay, { isMobile, launchAlipay } from "@/components/AlipayLaunchOverlay";
+import AlipayLaunchOverlay, { appTargetOf, isMobile, launchAlipay } from "@/components/AlipayLaunchOverlay";
 import BrandIcon from "./BrandIcon";
 
 export default function AlipaySettings() {
@@ -37,7 +37,8 @@ export default function AlipaySettings() {
     try {
       const mobile = isMobile();
       // 移动端走 alipays 唤起：state 自携带 browser+uid，回调无本站 cookie 也能完成。
-      const result = await api.alipay.start(action, mobile);
+      // 第三个参数区分原生包 / PWA，后端据此决定回调页跳 zhisui:// 还是 intent://。
+      const result = await api.alipay.start(action, mobile, mobile ? appTargetOf() : undefined);
       if (mobile) {
         // 点一下直接进支付宝：不再先弹一个「打开支付宝」的引导层。
         setLaunchUrl(result.authorize_url);

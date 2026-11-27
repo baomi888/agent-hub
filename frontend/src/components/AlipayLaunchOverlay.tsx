@@ -36,6 +36,19 @@ export function isMobile(): boolean {
   return /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(navigator.userAgent);
 }
 
+/**
+ * 发起端形态，随 start 一起交给后端，决定授权回调那张落地页怎么把用户送回来：
+ *   apk —— 原生装机包。壳在 WebView 里注入了 `__zhisuiApp`，且 AndroidManifest
+ *          注册了 `zhisui` scheme + MainActivity singleTask，所以回调页跳
+ *          `zhisui://` 能把 App 拉回前台、复用原来的 Activity（页面不重建）。
+ *   pwa —— 桌面快捷方式或手机浏览器，没有自有 scheme，只能 intent + closeWebview。
+ * 只影响落地页的出口，不参与任何安全判断。
+ */
+export function appTargetOf(): "apk" | "pwa" {
+  if (typeof window === "undefined") return "pwa";
+  return (window as unknown as { __zhisuiApp?: boolean }).__zhisuiApp === true ? "apk" : "pwa";
+}
+
 /** 支付宝官方唤起协议：在支付宝 App 内打开指定链接 */
 function alipaysUrl(url: string): string {
   return "alipays://platformapi/startapp?appId=20000067&url=" + encodeURIComponent(url);
@@ -261,12 +274,23 @@ function LaunchCard({ url, onClose, label, onDone }: CardProps) {
       stop();
       void tick();
     };
+    // 原生壳（APK）收到 zhisui:// 深链后会 dispatch 这个事件 —— 它比
+    // visibilitychange 更早也更可靠：有些机型从支付宝切回来不派发可见性变化，
+    // 而深链是确定的「授权走完了」。PWA/浏览器里这个事件永远不会出现。
+    // visibilitychange 要等可见性真的翻过来才领；深链是确定信号，不等。
+    const onDeepLink = () => {
+      if (!alive || inFlight) return;
+      stop();
+      void tick();
+    };
+    window.addEventListener("zhisui:oauth-return", onDeepLink);
     document.addEventListener("visibilitychange", wake);
     window.addEventListener("focus", wake);
     timer = window.setTimeout(tick, 700);
     return () => {
       alive = false;
       stop();
+      window.removeEventListener("zhisui:oauth-return", onDeepLink);
       document.removeEventListener("visibilitychange", wake);
       window.removeEventListener("focus", wake);
     };

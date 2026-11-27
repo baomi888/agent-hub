@@ -9,7 +9,7 @@
 // 先登录后到设置页手动绑定 —— 这两句话直接写在按钮下方，省得用户猜。
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import AlipayLaunchOverlay, { isMobile, launchAlipay } from "./AlipayLaunchOverlay";
+import AlipayLaunchOverlay, { appTargetOf, isMobile, launchAlipay } from "./AlipayLaunchOverlay";
 
 type Provider = "alipay" | "wechat";
 
@@ -69,7 +69,9 @@ export default function OAuthLoginButtons() {
     setError("");
     try {
       const mobile = isMobile();
-      const result = provider === "alipay" ? await api.alipay.start("login", mobile) : await api.wechat.start("login", mobile);
+      // 第三个参数告诉后端发起端是原生包还是 PWA，决定回调落地页的出口。
+      const target = mobile ? appTargetOf() : undefined;
+      const result = provider === "alipay" ? await api.alipay.start("login", mobile, target) : await api.wechat.start("login", mobile, target);
       // 移动端支付宝：授权链接必须在支付宝 App 内打开，点一下就直接唤起，
       // 只有唤起失败才由引导层给二维码兜底。
       if (provider === "alipay" && mobile) {

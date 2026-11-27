@@ -46,12 +46,15 @@ def _decode_state(combined: str) -> tuple[str, str, str]:
 # 任何「站点页面」。会话不在这里签发（这个 WebView 没有原应用的 cookie），
 # 结果已写进交接表，原应用轮询即可领走，所以这里只负责尽快退出。
 #
-# 退出方式分两条：
-#   Android —— 先用 intent:// 把 https://<host><target> 交给系统处理。PWA 装到
-#     桌面时系统里存在 WebAPK，能处理这个域名，于是用户选一次就真的回到应用；
-#     随后再 closeWebview 把支付宝里的网页收掉（intent 若被拦，这步就是兜底）。
-#   iOS —— 系统不允许从 WebView 跳到别的 App 的 https 链接，且 PWA 没有自己的
-#     scheme，所以只能 closeWebview 关掉网页，用户按返回键回到原应用。
+# 退出方式按发起端形态分三条（client 由 start 时记录在流程行上，不参与安全校验）：
+#   apk  —— 原生装机包（Expo 壳）在 AndroidManifest 里注册了 `zhisui` scheme、
+#     MainActivity 是 singleTask，所以 `zhisui://` 能把 App 拉回前台并复用原来的
+#     Activity（WebView 还停在设置页，不会重建成首页）。这是唯一真正「回到原处」
+#     的一条，PWA 做不到 —— WebAPK 没有自有 scheme。
+#   pwa  —— 装到桌面的 WebAPK。Android 用 intent:// 把 https 交回系统，进了
+#     WebAPK 就算回去；随后 closeWebview 收掉支付宝里的页面。iOS 的 PWA 没有
+#     scheme，只能 closeWebview，用户按返回键回原应用。
+#   web  —— 老流程/PC 兜底，行为与 pwa 一致。
 _APP_PAGE = """<!doctype html>
 <html lang="zh-CN"><head>
 <meta charset="utf-8">
@@ -60,18 +63,28 @@ _APP_PAGE = """<!doctype html>
 <title></title>
 <style>
 html,body{margin:0;height:100%}
-body{display:flex;align-items:center;justify-content:center;background:#FDFBF4;color:#6B6250;
+body{display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:center;
+background:#FDFBF4;color:#6B6250;
 font:15px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
 @media (prefers-color-scheme:dark){body{background:#16150F;color:#A79C82}}
 p{margin:0;padding:0 24px;text-align:center}
+#b{display:none;margin-top:2px;border:0;border-radius:999px;padding:11px 26px;
+background:#1677FF;color:#fff;font:inherit;font-size:15px;font-weight:600}
 </style></head>
-<body><p id="t"></p>
+<body><p id="t"></p><button type="button" id="b">返回知穗</button>
 <script>
 (function(){
   var failed=__FAILED__;
+  var client=__CLIENT__;
+  var state=__STATE__;
   var path=__TARGET__;
   var tip=document.getElementById("t");
+  var btn=document.getElementById("b");
   var closed=false;
+  var left=false;
+  document.addEventListener("visibilitychange",function(){
+    if(document.visibilityState==="hidden") left=true;
+  },false);
   function closeWebview(){
     try{
       if(window.AlipayJSBridge&&typeof window.AlipayJSBridge.call==="function"){
@@ -81,7 +94,15 @@ p{margin:0;padding:0 24px;text-align:center}
     }catch(e){}
   }
   function backToApp(){
-    // Android：把原地址交回系统，装有 PWA 的手机会在"打开方式"里列出应用。
+    // 原生包：自有 scheme 直达。singleTask 会复用原 Activity，页面状态不丢。
+    if(client==="apk"&&state){
+      try{
+        location.href="zhisui://oauth/alipay?state="+encodeURIComponent(state)
+          +"&r="+(failed?"fail":"ok");
+        return true;
+      }catch(e){return false;}
+    }
+    // PWA：把原地址交回系统，装有 WebAPK 的手机会在"打开方式"里列出应用。
     try{
       var host=location.hostname;
       var fallback="https://"+host+path;
@@ -91,26 +112,42 @@ p{margin:0;padding:0 24px;text-align:center}
       return true;
     }catch(e){return false;}
   }
-  if(/Android/i.test(navigator.userAgent)){
+  btn.addEventListener("click",function(){backToApp();},false);
+  if(client==="apk"){
     backToApp();
-    // 无论有没有跳走，都把支付宝里的网页收掉，别留在返回栈里。
+    // 真的跳走了才去收支付宝里那张空页面；没跳走就留着，按钮还能点。
+    setTimeout(function(){if(left) closeWebview();},2500);
+  }else if(/Android/i.test(navigator.userAgent)){
+    backToApp();
     setTimeout(closeWebview,1200);
   }else if(window.AlipayJSBridge){
     closeWebview();
   }else{
     document.addEventListener("AlipayJSBridgeReady",closeWebview,false);
   }
-  // bridge 没注入或关闭被忽略时，给一句极短提示，不让用户停在白屏上
+  // 1.5 秒后还停在这一页：原生包给出可点的出口，其余场景给一句短提示。
   setTimeout(function(){
-    if(!closed){tip.textContent=failed?"授权未完成，请返回应用重试":"已登录，请返回应用继续";}
-  },1800);
+    if(left) return;
+    if(client==="apk"){
+      btn.style.display="inline-block";
+      tip.textContent=failed?"授权未完成，请返回应用重试":"已登录，请返回应用继续";
+    }else if(!closed){
+      tip.textContent=failed?"授权未完成，请返回应用重试":"已登录，请返回应用继续";
+    }
+  },1500);
 })();
 </script></body></html>"""
 
 
-def _app_page(*, failed: bool, target: str = "/") -> HTMLResponse:
+def _app_page(*, failed: bool, target: str = "/", client: str = "web", state: str = "") -> HTMLResponse:
+    client = client if client in ("web", "pwa", "apk") else "web"
+    # state 只在原生包这一条路上有用（拼进 zhisui:// 深链）。PWA/网页的落地页
+    # 拿不到也用不上，干脆不写进 HTML —— 少一处把授权凭证暴露在页面源码里。
+    state = state if (client == "apk" and _NONCE.fullmatch(state)) else ""
     return HTMLResponse(
         _APP_PAGE.replace("__FAILED__", "true" if failed else "false")
+        .replace("__CLIENT__", '"' + client + '"')
+        .replace("__STATE__", '"' + state + '"')
         .replace("__TARGET__", '"' + target.replace('"', "") + '"'),
         headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
     )
@@ -128,6 +165,10 @@ class StartBody(BaseModel):
     # 支付宝/微信 App 内唤起授权时，回调脱离本站浏览器、cookie 带不过去。
     # 移动端显式开启后把 browser+uid 编进 state 自携带；PC 不传，走原 cookie 校验。
     app_flow: bool = False
+    # 发起端形态，只决定回调落地页怎么把用户送回去，不参与安全校验：
+    #   apk —— 原生装机包，注册了 zhisui scheme，能真正回到原来的 Activity；
+    #   pwa —— 桌面快捷方式 / 手机浏览器，只能 intent + closeWebview。
+    app_target: Literal["pwa", "apk"] | None = None
 
 
 def _current_uid(request: Request) -> str:
@@ -171,7 +212,10 @@ def website_login_router(
             browser = request.cookies.get(browser_cookie, "")
             if not _NONCE.fullmatch(browser):
                 browser = secrets.token_urlsafe(32)
-            state = external_accounts.begin_flow(browser, app_id(), body.action, uid, provider=provider)
+            client = body.app_target if (body.app_flow and body.app_target) else "web"
+            state = external_accounts.begin_flow(
+                browser, app_id(), body.action, uid, provider=provider, client=client
+            )
         except quota.RateLimited as exc:
             raise HTTPException(429, str(exc)) from None
         except ExternalAuthError as exc:
@@ -199,11 +243,17 @@ def website_login_router(
         failure_page = f"/login?{provider}_result=failed"
         app_flow = False
         handoff_state = ""
+        client = "web"
 
         def fail(code: str) -> Response:
             """App 内失败同样走极简页，不把用户丢到登录页上。"""
             if app_flow and handoff_state:
-                return _app_page(failed=True, target=failure_page.split("?")[0])
+                return _app_page(
+                    failed=True,
+                    target=failure_page.split("?")[0],
+                    client=client,
+                    state=handoff_state,
+                )
             return RedirectResponse(f"{failure_page}&reason={code}", status_code=303)
 
         try:
@@ -235,6 +285,8 @@ def website_login_router(
                 raise ExternalAuthError("flow_invalid", "账号已切换，请重新发起")
             flow = external_accounts.consume_flow(state_value, browser, app, uid, provider=provider)
             action = flow["action"]
+            # 发起端形态随流程行返回：apk 的回调页要跳 zhisui:// 才能真正回到原应用。
+            client = flow.get("client") or "web"
             if action != "login":
                 failure_page = f"/settings?{provider}_result=failed"
             # 用户取消可能只带回 state。此时仍应结束本次流程并回到发起页面。
@@ -258,6 +310,8 @@ def website_login_router(
                 response = _app_page(
                     failed=False,
                     target="/settings" if action != "login" else "/",
+                    client=client,
+                    state=handoff_state,
                 )
             else:
                 success_url = "/"

@@ -39,7 +39,10 @@ CREATE INDEX IF NOT EXISTS idx_external_user ON external_identities(user_id);
 CREATE TABLE IF NOT EXISTS external_auth_flows (
     digest TEXT PRIMARY KEY, browser_digest TEXT NOT NULL, app_id TEXT NOT NULL,
     action TEXT NOT NULL, user_id TEXT NOT NULL, auth_version INTEGER NOT NULL,
-    expires INTEGER NOT NULL, provider TEXT NOT NULL DEFAULT 'wechat'
+    expires INTEGER NOT NULL, provider TEXT NOT NULL DEFAULT 'wechat',
+    -- 发起端的形态：web / pwa / apk。只影响回调落地页怎么把用户送回去，
+    -- 不参与安全校验 —— 所以放在流程行上而不是编进 state。
+    client TEXT NOT NULL DEFAULT 'web'
 );
 -- App 唤起授权的结果交接：回调发生在支付宝 App 内置 WebView，会话 Cookie
 -- 只落在那个 WebView 里。这里把结果暂存，由原应用轮询领走并在自己的环境
@@ -56,12 +59,17 @@ def ensure_tables() -> None:
     account._ensure_tables()
     with session._get_conn() as db:
         db.executescript(_SCHEMA)
-        if not any(row[1] == "provider" for row in db.execute("PRAGMA table_info(external_auth_flows)")):
-            # 旧版本只有微信流程。升级保留有效 state，并明确补成微信来源。
-            # 写锁内复查，避免两个进程同时 ALTER；不改动现有账号和绑定。
+        columns = {row[1] for row in db.execute("PRAGMA table_info(external_auth_flows)")}
+        if "provider" not in columns or "client" not in columns:
+            # 旧版本缺列：provider 是微信时代遗留（补成 wechat），client 是这次
+            # 新增的发起端形态（补成 web，落地页行为与升级前一致）。
+            # 两列共用一次写锁，锁内复查，避免两个进程同时 ALTER。
             db.execute("BEGIN IMMEDIATE")
-            if not any(row[1] == "provider" for row in db.execute("PRAGMA table_info(external_auth_flows)")):
+            columns = {row[1] for row in db.execute("PRAGMA table_info(external_auth_flows)")}
+            if "provider" not in columns:
                 db.execute("ALTER TABLE external_auth_flows ADD COLUMN provider TEXT NOT NULL DEFAULT 'wechat'")
+            if "client" not in columns:
+                db.execute("ALTER TABLE external_auth_flows ADD COLUMN client TEXT NOT NULL DEFAULT 'web'")
 
 
 @contextmanager
@@ -94,10 +102,14 @@ def _user(db, uid: str, version: int | None = None):
     return user
 
 
-def begin_flow(browser: str, app_id: str, action: str, uid: str = "", *, provider: str) -> str:
+def begin_flow(
+    browser: str, app_id: str, action: str, uid: str = "", *, provider: str, client: str = "web"
+) -> str:
     _provider_settings(provider)
     if action not in ("login", "bind", "unlink") or (action != "login" and not uid):
         raise ExternalAuthError("flow_invalid", "请登录后再操作")
+    if client not in ("web", "pwa", "apk"):
+        client = "web"
     state = secrets.token_urlsafe(32)
     now = int(time.time())
     with transaction() as db:
@@ -105,8 +117,9 @@ def begin_flow(browser: str, app_id: str, action: str, uid: str = "", *, provide
         db.execute("DELETE FROM external_auth_flows WHERE expires<=?", (now,))
         db.execute(
             "INSERT INTO external_auth_flows "
-            "(digest,browser_digest,app_id,action,user_id,auth_version,expires,provider) VALUES (?,?,?,?,?,?,?,?)",
-            (_digest(state), _digest(browser), app_id, action, uid, version, now + 600, provider),
+            "(digest,browser_digest,app_id,action,user_id,auth_version,expires,provider,client) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (_digest(state), _digest(browser), app_id, action, uid, version, now + 600, provider, client),
         )
     return state
 

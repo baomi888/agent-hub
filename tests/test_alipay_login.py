@@ -446,3 +446,72 @@ def test_app_flow_poll_rejects_foreign_browser(alienv):
     cli.cookies.clear()
     assert _poll(cli, state).status_code == 403
 
+
+def begin_app_target(cli, target, action="login"):
+    """带发起端形态的 App 内唤起。"""
+    result = cli.post(
+        "/api/auth/alipay/start",
+        json={"action": action, "app_flow": True, "app_target": target},
+    )
+    assert result.status_code == 200, result.text
+    return parse_qs(urlsplit(result.json()["authorize_url"]).query)["state"][0]
+
+
+def test_app_target_apk_deep_links_back_to_native_shell(alienv):
+    """原生包：落地页必须跳 zhisui:// 并自带 state，才能回到原来的 Activity。
+
+    AndroidManifest 里 MainActivity 是 singleTask，所以这条深链复用原 Activity，
+    WebView 还停在设置页 —— 这是 PWA 做不到的部分（WebAPK 没有自有 scheme）。
+    """
+    cli, calls, _, _ = alienv
+    combined = begin_app_target(cli, "apk")
+    cli.cookies.clear()  # 模拟跳到支付宝 App 后丢失本站 cookie
+    result = finish(cli, combined)
+    assert result.status_code == 200
+    assert 'var client="apk"' in result.text
+    # 开关是 client，出口是 zhisui://，并且 state 随深链回传（页面据此去 /poll）
+    assert 'if(client==="apk"&&state)' in result.text
+    assert '"zhisui://oauth/alipay?state="' in result.text
+    # 带的是内层 43 字符 state（browser/uid 已在服务端解码用完），不是 118 的合体
+    inner = combined[:43]
+    assert f'var state="{inner}"' in result.text
+    assert f'var state="{combined}"' not in result.text
+    # 结果照样进交接表，原应用才领得到
+    assert len(calls) == 2
+
+
+def test_app_target_pwa_keeps_intent_and_hides_state(alienv):
+    """PWA：没有自有 scheme，仍走 intent + closeWebview；state 不写进页面源码。"""
+    cli, calls, _, _ = alienv
+    state = begin_app_target(cli, "pwa")
+    cli.cookies.clear()
+    result = finish(cli, state)
+    assert result.status_code == 200
+    assert 'var client="pwa"' in result.text
+    assert "intent://" in result.text
+    assert 'var state=""' in result.text, "PWA 落地页不该携带授权 state"
+    assert f'var state="{state}"' not in result.text
+
+
+def test_app_target_rejects_unknown_client(alienv):
+    """只接受 pwa/apk。编造的形态直接 422，不进流程表。"""
+    cli, *_ = alienv
+    result = cli.post(
+        "/api/auth/alipay/start",
+        json={"action": "login", "app_flow": True, "app_target": "ios"},
+    )
+    assert result.status_code == 422
+
+
+def test_app_target_ignored_without_app_flow(alienv):
+    """PC 流程（app_flow=False）即使带了 app_target 也不该被当成 App 回调。"""
+    cli, calls, _, _ = alienv
+    result = cli.post("/api/auth/alipay/start", json={"action": "login", "app_target": "apk"})
+    assert result.status_code == 200
+    state = parse_qs(urlsplit(result.json()["authorize_url"]).query)["state"][0]
+    # PC 不编码 state：长度仍是 43，回调走 cookie + 303 跳转
+    assert len(state) == 43
+    done = finish(cli, state)
+    assert done.status_code == 303
+    assert done.headers["location"] == "/"
+
