@@ -366,7 +366,8 @@ def test_app_flow_callback_without_cookie_completes_login(alienv):
     state = begin_app(cli)
     cli.cookies.clear()  # 模拟跳到支付宝 App 后丢失本站 cookie
     result = finish(cli, state)
-    assert result.headers["location"] == "/"
+    # 结果不再种进支付宝 WebView，而是暂存供原应用轮询领走。
+    assert result.status_code == 200 and "请返回应用" in result.text
     assert len(calls) == 2
 
 
@@ -377,7 +378,7 @@ def test_app_flow_bind_without_cookie_and_account_switch_rejected(alienv):
     state = begin_app(cli, "bind")
     cli.cookies.clear()
     # 无登录态：凭 state 自带 uid 完成绑定
-    assert finish(cli, state).headers["location"] == "/settings?alipay_result=bound"
+    assert finish(cli, state).status_code == 200
     assert len(calls) == 2
 
     # 换号后回调：带 B 的登录态点 A 发起的 state，必须拒绝
@@ -388,3 +389,51 @@ def test_app_flow_bind_without_cookie_and_account_switch_rejected(alienv):
     result = finish(cli, state2)
     assert "reason=flow_invalid" in result.headers["location"]
     assert len(calls) == 2
+
+
+def _poll(cli, state):
+    return cli.get("/api/auth/alipay/poll", params={"state": state}, follow_redirects=False)
+
+
+def test_app_flow_poll_delivers_session_to_origin_browser(alienv):
+    """核心场景：支付宝里授权成功后，原浏览器轮询领回登录态并完成登录。"""
+    cli, calls, _, _ = alienv
+    state = begin_app(cli)  # 原浏览器种下 browser nonce
+    origin_cookies = dict(cli.cookies)
+
+    # 支付宝 WebView 里完成授权（无本站 cookie）
+    cli.cookies.clear()
+    assert finish(cli, state).status_code == 200
+
+    # 切回原浏览器：只带 browser nonce，没有会话 cookie
+    cli.cookies.clear()
+    for k, v in origin_cookies.items():
+        cli.cookies.set(k, v)
+    assert cli.get("/api/auth/me/", follow_redirects=False).status_code == 401
+
+    result = _poll(cli, state)
+    assert result.status_code == 200, result.text
+    assert result.json()["status"] == "ok"
+    assert result.json()["action"] == "login"
+    # 会话已就地种上，原浏览器进入登录态
+    assert cli.get("/api/auth/me/", follow_redirects=False).status_code == 200
+
+    # 一次性：再次轮询拿不到，不能重复兑换
+    assert _poll(cli, state).json()["status"] == "pending"
+
+
+def test_app_flow_poll_rejects_foreign_browser(alienv):
+    """别的浏览器拿到 state 也不能领走登录态（必须持有发起时的 browser nonce）。"""
+    cli, calls, _, _ = alienv
+    state = begin_app(cli)
+    cli.cookies.clear()
+    assert finish(cli, state).status_code == 200
+
+    # 伪造一个 nonce：相当于另一个浏览器拿着偷来的 state 来领
+    cli.cookies.set("zhisui_alipay_browser", "x" * 43)
+    rejected = _poll(cli, state)
+    assert rejected.status_code == 403
+    # 结果仍留在服务端，直到真正的发起方来领
+    cli.cookies.clear()
+    assert _poll(cli, state).status_code == 403
+

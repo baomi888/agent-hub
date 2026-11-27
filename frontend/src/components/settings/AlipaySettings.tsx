@@ -68,6 +68,17 @@ export default function AlipaySettings() {
       {notice && <p className="hint" role="status">{notice}</p>}
     </div>
     </section>
-    <AlipayLaunchOverlay url={launchUrl} onClose={() => setLaunchUrl(null)} label={state?.bound ? "解绑" : "绑定"} />
+    <AlipayLaunchOverlay
+      url={launchUrl}
+      onClose={() => setLaunchUrl(null)}
+      label={state?.bound ? "解绑" : "绑定"}
+      onDone={(action) => {
+        // 结果已领回、会话已就地在原应用重签：刷新绑定状态与身份。
+        api.alipay.status().then(result => setState(result)).catch(() => {});
+        void auth.refresh();
+        const outcome = action === "unlink" ? "unlinked" : "bound";
+        setNotice(outcome === "unlinked" ? "支付宝已解绑，本站账号和数据仍保留。" : "支付宝已绑定");
+      }}
+    />
   </>;
 }

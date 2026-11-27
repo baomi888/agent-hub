@@ -12,7 +12,7 @@ from fastapi.responses import PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict
 
 from api.auth import _client_ip, _issue_session
-from core import config, external_accounts, quota
+from core import account, config, external_accounts, quota
 from core.auth import _is_secure_request, get_current_user
 from core.external_identity import ExternalAuthError, ExternalIdentity
 
@@ -123,6 +123,8 @@ def website_login_router(
         if allow_callback_probe and not request.url.query:
             return PlainTextResponse("ok", headers={"Cache-Control": "no-store"})
         failure_page = f"/login?{provider}_result=failed"
+        app_flow = False
+        handoff_state = ""
         try:
             if not adapter.enabled():
                 raise ExternalAuthError("not_configured", f"{label}登录尚未配置完成", 503)
@@ -134,10 +136,12 @@ def website_login_router(
             # 兼容旧流程：解不出来时回退到 cookie + 登录态，保证已发出的授权不被打断。
             try:
                 state_value, browser, uid = _decode_state(states[0])
+                app_flow = True
             except ExternalAuthError:
                 state_value = states[0]
                 browser = request.cookies.get(browser_cookie, "")
                 uid = _current_uid(request)
+            handoff_state = state_value
             if not _NONCE.fullmatch(state_value) or not _NONCE.fullmatch(browser):
                 raise ExternalAuthError("flow_invalid", "授权流程已失效")
             app = app_id()
@@ -162,21 +166,73 @@ def website_login_router(
                 quota.consume_key(f"signup:ip:{ip}", "signup_ip", config.SIGNUP_IP_PER_DAY)
                 quota.consume_key("signup:global", "signup_global", config.SIGNUP_GLOBAL_PER_DAY)
             user = external_accounts.complete(identity, flow)
-            success_url = "/"
-            if action != "login":
-                result = "bound" if action == "bind" else "unlinked"
-                success_url = f"/settings?{provider}_result={result}"
-            response = RedirectResponse(success_url, status_code=303)
-            _issue_session(user, request, response)
+            if app_flow:
+                # 回调发生在支付宝内置 WebView：登录态若种在这里，用户切回
+                # 原应用仍是未登录。改为把结果暂存，由原应用轮询领走并就地
+                # 签发会话 —— 在哪里发起，就在哪里登录进去。
+                external_accounts.put_handoff(
+                    state_value, provider=provider, action=action, user_id=user["id"]
+                )
+                response = PlainTextResponse("授权成功，请返回应用继续。")
+            else:
+                success_url = "/"
+                if action != "login":
+                    result = "bound" if action == "bind" else "unlinked"
+                    success_url = f"/settings?{provider}_result={result}"
+                response = RedirectResponse(success_url, status_code=303)
+                _issue_session(user, request, response)
         except ExternalAuthError as exc:
+            if app_flow and handoff_state:
+                external_accounts.put_handoff(
+                    handoff_state, provider=provider, action="login",
+                    result="failed", reason=exc.code,
+                )
             response = RedirectResponse(f"{failure_page}&reason={exc.code}", status_code=303)
         except (quota.RateLimited, quota.QuotaExceeded):
+            if app_flow and handoff_state:
+                external_accounts.put_handoff(
+                    handoff_state, provider=provider, action="login",
+                    result="failed", reason="rate_limited",
+                )
             response = RedirectResponse(f"{failure_page}&reason=rate_limited", status_code=303)
         except sqlite3.Error:
+            if app_flow and handoff_state:
+                external_accounts.put_handoff(
+                    handoff_state, provider=provider, action="login",
+                    result="failed", reason="service_unavailable",
+                )
             response = RedirectResponse(f"{failure_page}&reason=service_unavailable", status_code=303)
         response.headers["Cache-Control"] = "no-store"
         response.headers["Referrer-Policy"] = "no-referrer"
         return response
+
+    @router.get("/poll")
+    def poll(request: Request, response: Response, state: str = ""):
+        """App 内授权完成后，原应用轮询领回结果并就地种上会话。
+
+        凭证是 start 时签发的 state（原样回传）而不是支付宝给的 auth_code，
+        因为 auth_code 只有回调那一次拿得到。领取是一次性的：拿到后交接记录
+        即删除，别人拿到同一 state 也不能二次兑换。
+        """
+        try:
+            state_value, browser, _ = _decode_state(state)
+        except ExternalAuthError:
+            raise HTTPException(400, "轮询参数无效") from None
+        # 必须和发起方同一个浏览器 nonce：支付宝 WebView 里没有这个 cookie，
+        # 所以只有真正发起授权的那台设备能领走登录态。
+        if not secrets.compare_digest(request.cookies.get(browser_cookie, ""), browser):
+            raise HTTPException(403, "授权流程不属于当前浏览器")
+        record = external_accounts.take_handoff(state_value, provider=provider)
+        if record is None:
+            return {"status": "pending"}
+        response.headers["Cache-Control"] = "no-store"
+        if record["result"] != "ok":
+            return {"status": "failed", "reason": record["reason"]}
+        user = account.get_user(record["user_id"])
+        if not user:
+            return {"status": "failed", "reason": "account_unavailable"}
+        _issue_session(user, request, response)
+        return {"status": "ok", "action": record["action"]}
 
     @router.get("/status")
     def status(uid: str = Depends(get_current_user)):

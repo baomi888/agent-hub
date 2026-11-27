@@ -831,6 +831,16 @@ export const api = {
         method: "POST", body: JSON.stringify({ action, app_flow }),
       }),
     status: () => request<{ enabled: boolean; bound: boolean }>("/api/auth/alipay/status"),
+    /** App 内授权完成后，原应用轮询领回结果；成功时后端已就地种上会话。 */
+    poll: async (state: string) => {
+      const result = await request<{
+        status: "pending" | "ok" | "failed";
+        action?: string;
+        reason?: string;
+      }>(`/api/auth/alipay/poll?state=${encodeURIComponent(state)}`);
+      if (result.status === "ok") notifyAuthorized();
+      return result;
+    },
   },
   login: async (username: string, password: string) => {
     const u = await request<UserOut>("/api/auth/login/", {

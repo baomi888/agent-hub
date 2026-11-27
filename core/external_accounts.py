@@ -41,6 +41,14 @@ CREATE TABLE IF NOT EXISTS external_auth_flows (
     action TEXT NOT NULL, user_id TEXT NOT NULL, auth_version INTEGER NOT NULL,
     expires INTEGER NOT NULL, provider TEXT NOT NULL DEFAULT 'wechat'
 );
+-- App 唤起授权的结果交接：回调发生在支付宝 App 内置 WebView，会话 Cookie
+-- 只落在那个 WebView 里。这里把结果暂存，由原应用轮询领走并在自己的环境
+-- 里签发会话，实现“在哪里发起登录，就在哪里登录进去”。一次领取即删除。
+CREATE TABLE IF NOT EXISTS external_auth_handoffs (
+    digest TEXT PRIMARY KEY, user_id TEXT NOT NULL DEFAULT '',
+    action TEXT NOT NULL, result TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '',
+    provider TEXT NOT NULL, created_at INTEGER NOT NULL, expires INTEGER NOT NULL
+);
 """
 
 
@@ -101,6 +109,51 @@ def begin_flow(browser: str, app_id: str, action: str, uid: str = "", *, provide
             (_digest(state), _digest(browser), app_id, action, uid, version, now + 600, provider),
         )
     return state
+
+
+def put_handoff(
+    state: str,
+    *,
+    provider: str,
+    action: str,
+    user_id: str = "",
+    result: str = "ok",
+    reason: str = "",
+    ttl: int = 300,
+) -> None:
+    """登记一次 App 唤起授权的结果，供原应用轮询领走。
+
+    只在回调成功/失败落定后调用，state 用未编码的真实 state，digest 作主键；
+    用户从未领取也会在 ttl 后自然失效。
+    """
+    _provider_settings(provider)
+    now = int(time.time())
+    with transaction() as db:
+        db.execute("DELETE FROM external_auth_handoffs WHERE expires<=?", (now,))
+        db.execute(
+            "INSERT OR REPLACE INTO external_auth_handoffs "
+            "(digest,user_id,action,result,reason,provider,created_at,expires) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (
+                _digest(state), user_id, action, result, reason,
+                provider, now, now + ttl,
+            ),
+        )
+
+
+def take_handoff(state: str, *, provider: str) -> dict | None:
+    """原子领取并删除交接结果；没有或过期返回 None。"""
+    _provider_settings(provider)
+    now = int(time.time())
+    with transaction() as db:
+        row = db.execute(
+            "SELECT * FROM external_auth_handoffs WHERE digest=? AND provider=?",
+            (_digest(state), provider),
+        ).fetchone()
+        if not row or row["expires"] <= now:
+            return None
+        db.execute("DELETE FROM external_auth_handoffs WHERE digest=?", (row["digest"],))
+        return dict(row)
 
 
 def consume_flow(state: str, browser: str, app_id: str, current_uid: str, *, provider: str) -> dict:
