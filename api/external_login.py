@@ -18,6 +18,29 @@ from core.external_identity import ExternalAuthError, ExternalIdentity
 
 _NONCE = re.compile(r"[A-Za-z0-9_-]{32,128}")
 
+# state 自包含编码：跳到支付宝 App 授权后，回调发生在支付宝内置 WebView，
+# 本站的浏览器 cookie 和登录态都带不过去。把 browser nonce 与发起绑定的 uid
+# 一起编进 state 由支付宝原样回传，回调时拆回来核验，既不依赖 cookie 也不
+# 削弱 CSRF（state 仍是一次性、随机、600 秒过期）。
+# token_urlsafe(32) 固定 43 字符，uuid4().hex 固定 32 字符，按定长切片。
+_SLICE_STATE = 43
+_SLICE_BROWSER = 43
+_EMPTY_UID = "_" * 32  # hex 不含下划线，绝不会与真实 uid 撞
+_COMBINED_LEN = _SLICE_STATE + _SLICE_BROWSER + 32
+
+
+def _encode_state(state: str, browser: str, uid: str) -> str:
+    return state + browser + (uid or _EMPTY_UID)
+
+
+def _decode_state(combined: str) -> tuple[str, str, str]:
+    if len(combined) != _COMBINED_LEN or not _NONCE.fullmatch(combined):
+        raise ExternalAuthError("flow_invalid", "授权流程已失效")
+    state = combined[:_SLICE_STATE]
+    browser = combined[_SLICE_STATE : _SLICE_STATE + _SLICE_BROWSER]
+    uid_field = combined[_SLICE_STATE + _SLICE_BROWSER :]
+    return state, browser, "" if uid_field == _EMPTY_UID else uid_field
+
 
 class WebsiteAdapter(Protocol):
     def enabled(self) -> bool: ...
@@ -28,6 +51,9 @@ class WebsiteAdapter(Protocol):
 class StartBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     action: Literal["login", "bind", "unlink"] = "login"
+    # 支付宝/微信 App 内唤起授权时，回调脱离本站浏览器、cookie 带不过去。
+    # 移动端显式开启后把 browser+uid 编进 state 自携带；PC 不传，走原 cookie 校验。
+    app_flow: bool = False
 
 
 def _current_uid(request: Request) -> str:
@@ -86,7 +112,10 @@ def website_login_router(
             path=f"/api/auth/{provider}",
         )
         response.headers["Cache-Control"] = "no-store"
-        return {"authorize_url": adapter.authorize_url(state)}
+        # App 唤起场景把 browser 与 uid 编进 state 一起回传：回调时本站
+        # cookie 不在，靠 state 自带的信息核验。PC 不开启，保持 cookie 绑定。
+        authorize_state = _encode_state(state, browser, uid) if body.app_flow else state
+        return {"authorize_url": adapter.authorize_url(authorize_state)}
 
     @router.get("/callback")
     def callback(request: Request):
@@ -99,13 +128,27 @@ def website_login_router(
                 raise ExternalAuthError("not_configured", f"{label}登录尚未配置完成", 503)
             query = request.query_params
             states, codes = query.getlist("state"), query.getlist(code_param)
-            browser = request.cookies.get(browser_cookie, "")
-            if len(states) != 1 or not _NONCE.fullmatch(states[0]) or not _NONCE.fullmatch(browser) or len(codes) > 1:
+            if len(states) != 1 or len(codes) > 1:
+                raise ExternalAuthError("flow_invalid", "授权流程已失效")
+            # 优先从 state 解出自带凭证（支付宝 App 内回调场景，无本站 cookie）。
+            # 兼容旧流程：解不出来时回退到 cookie + 登录态，保证已发出的授权不被打断。
+            try:
+                state_value, browser, uid = _decode_state(states[0])
+            except ExternalAuthError:
+                state_value = states[0]
+                browser = request.cookies.get(browser_cookie, "")
+                uid = _current_uid(request)
+            if not _NONCE.fullmatch(state_value) or not _NONCE.fullmatch(browser):
                 raise ExternalAuthError("flow_invalid", "授权流程已失效")
             app = app_id()
             if callback_app_param and callback_app_param in query and query.getlist(callback_app_param) != [app]:
                 raise ExternalAuthError("flow_invalid", "授权应用不匹配")
-            flow = external_accounts.consume_flow(states[0], browser, app, _current_uid(request), provider=provider)
+            # 换号攻击防护：回调方带着本站登录态时，必须和 flow 发起人一致。
+            # 支付宝 App 内没有本站登录态（uid 为空），此时信任 state 自带的 uid。
+            current_uid = _current_uid(request)
+            if current_uid and uid and current_uid != uid:
+                raise ExternalAuthError("flow_invalid", "账号已切换，请重新发起")
+            flow = external_accounts.consume_flow(state_value, browser, app, uid, provider=provider)
             action = flow["action"]
             if action != "login":
                 failure_page = f"/settings?{provider}_result=failed"

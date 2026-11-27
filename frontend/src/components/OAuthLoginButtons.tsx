@@ -9,6 +9,7 @@
 // 先登录后到设置页手动绑定 —— 这两句话直接写在按钮下方，省得用户猜。
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import AlipayLaunchOverlay, { isMobile } from "./AlipayLaunchOverlay";
 
 type Provider = "alipay" | "wechat";
 
@@ -41,6 +42,7 @@ export default function OAuthLoginButtons() {
   const [enabled, setEnabled] = useState<Provider[]>([]);
   const [busy, setBusy] = useState<Provider | null>(null);
   const [error, setError] = useState("");
+  const [launchUrl, setLaunchUrl] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -66,8 +68,15 @@ export default function OAuthLoginButtons() {
     setBusy(provider);
     setError("");
     try {
-      const result = provider === "alipay" ? await api.alipay.start() : await api.wechat.start();
-      window.location.assign(result.authorize_url);
+      const mobile = isMobile();
+      const result = provider === "alipay" ? await api.alipay.start("login", mobile) : await api.wechat.start("login", mobile);
+      // 移动端支付宝：授权链接必须在支付宝 App 内打开，用引导层唤起 + 二维码兜底。
+      if (provider === "alipay" && mobile) {
+        setLaunchUrl(result.authorize_url);
+        setBusy(null);
+      } else {
+        window.location.assign(result.authorize_url);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "暂时无法发起授权登录");
       setBusy(null);
@@ -102,6 +111,7 @@ export default function OAuthLoginButtons() {
           {error}
         </p>
       )}
+      <AlipayLaunchOverlay url={launchUrl} onClose={() => setLaunchUrl(null)} label="登录" />
     </div>
   );
 }

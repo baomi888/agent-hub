@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
+import AlipayLaunchOverlay, { isMobile } from "@/components/AlipayLaunchOverlay";
 import BrandIcon from "./BrandIcon";
 
 export default function AlipaySettings() {
@@ -12,6 +13,7 @@ export default function AlipaySettings() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [launchUrl, setLaunchUrl] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
     api.alipay.status().then(result => {
@@ -33,14 +35,22 @@ export default function AlipaySettings() {
     if (action === "unlink" && !window.confirm("仅解除支付宝关联，不删除本站账号或数据。请用已绑定支付宝扫码确认解绑。")) return;
     setBusy(true); setError(""); setNotice("");
     try {
-      const result = await api.alipay.start(action);
-      window.location.assign(result.authorize_url);
+      const mobile = isMobile();
+      // 移动端走 alipays 唤起：state 自携带 browser+uid，回调无本站 cookie 也能完成。
+      const result = await api.alipay.start(action, mobile);
+      if (mobile) {
+        setLaunchUrl(result.authorize_url);
+        setBusy(false);
+      } else {
+        window.location.assign(result.authorize_url);
+      }
     } catch (error) {
       setError(error instanceof Error ? error.message : "操作失败，请重试"); setBusy(false);
     }
   }
 
-  return <section>
+  return <>
+    <section>
     <p className="sec-label">支付宝登录</p>
     <div className="card card-pad">
       <div className="card-head"><span className="card-title" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><BrandIcon brand="alipay" />支付宝账号</span>
@@ -57,5 +67,7 @@ export default function AlipaySettings() {
       {error && <p className="acct-err" role="alert">{error}</p>}
       {notice && <p className="hint" role="status">{notice}</p>}
     </div>
-  </section>;
+    </section>
+    <AlipayLaunchOverlay url={launchUrl} onClose={() => setLaunchUrl(null)} label={state?.bound ? "解绑" : "绑定"} />
+  </>;
 }

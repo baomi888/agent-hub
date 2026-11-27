@@ -349,3 +349,42 @@ def test_full_account_purge_removes_alipay_binding_and_next_login_registers_new_
     cli.cookies.clear()
     assert finish(cli, begin(cli)).headers["location"] == "/"
     assert cli.get("/api/auth/me/").json()["user"]["id"] != uid
+
+
+def begin_app(cli, action="login"):
+    """App 内唤起：请求 state 自带 browser+uid，回调不依赖本站 cookie。"""
+    result = cli.post("/api/auth/alipay/start", json={"action": action, "app_flow": True})
+    assert result.status_code == 200, result.text
+    state = parse_qs(urlsplit(result.json()["authorize_url"]).query)["state"][0]
+    assert len(state) == 118
+    return state
+
+
+def test_app_flow_callback_without_cookie_completes_login(alienv):
+    """支付宝 App 内回调没有本站 cookie，凭自包含 state 仍应完成登录。"""
+    cli, calls, _, _ = alienv
+    state = begin_app(cli)
+    cli.cookies.clear()  # 模拟跳到支付宝 App 后丢失本站 cookie
+    result = finish(cli, state)
+    assert result.headers["location"] == "/"
+    assert len(calls) == 2
+
+
+def test_app_flow_bind_without_cookie_and_account_switch_rejected(alienv):
+    """App 绑定：无 cookie 可完成；但若回调方带另一账号登录态，必须拒绝。"""
+    cli, calls, _, _ = alienv
+    sign_in(cli, "owner")
+    state = begin_app(cli, "bind")
+    cli.cookies.clear()
+    # 无登录态：凭 state 自带 uid 完成绑定
+    assert finish(cli, state).headers["location"] == "/settings?alipay_result=bound"
+    assert len(calls) == 2
+
+    # 换号后回调：带 B 的登录态点 A 发起的 state，必须拒绝
+    sign_in(cli, "attacker")
+    state2 = begin_app(cli, "bind")
+    cli.cookies.delete("baomi_session")
+    sign_in(cli, "owner2")
+    result = finish(cli, state2)
+    assert "reason=flow_invalid" in result.headers["location"]
+    assert len(calls) == 2
