@@ -688,6 +688,9 @@ async def upload_attachments(
         # 分块写盘：以前是 await f.read() 整份读进内存再判大小，
         # 1GB 的附件在 2G 内存的机器上等判出来时进程已经被 OOM killer 带走了
         size = await upload.save_stream(f, path, MAX_CHAT_UPLOAD_MB * 1024 * 1024)
+        from core.account_deletion import record_upload
+
+        await asyncio.to_thread(record_upload, uid, "chat", safe_name)
         results.append(
             {
                 "filename": f.filename,

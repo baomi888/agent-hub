@@ -490,6 +490,9 @@ async def upload_image(
         if os.path.getsize(tmp) == 0:
             raise forum_image.ImageError("这个文件是空的，换一张试试")
         info = await asyncio.to_thread(forum_image.store, tmp, file.filename or "")
+        from core.account_deletion import record_upload
+
+        await asyncio.to_thread(record_upload, uid, "forum", info["hash"])
     except forum_image.ImageError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     finally:
