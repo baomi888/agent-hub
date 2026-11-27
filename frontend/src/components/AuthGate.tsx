@@ -11,8 +11,7 @@ import MascotLogo from "./chat/MascotLogo";
 import EmailCodeLoginFields from "./EmailCodeLoginFields";
 import RegistrationEmailFields from "./RegistrationEmailFields";
 import PasswordInput from "./PasswordInput";
-import WeChatLoginButton from "./WeChatLoginButton";
-import AlipayLoginButton from "./AlipayLoginButton";
+import OAuthLoginButtons from "./OAuthLoginButtons";
 import type { RegistrationEmail } from "@/lib/types";
 
 interface Props {
@@ -183,8 +182,7 @@ export default function AuthGate({ allowSignup, checking, backHref, onLogin, onR
         </form>
         )}
 
-        <WeChatLoginButton />
-        <AlipayLoginButton />
+        <OAuthLoginButtons />
 
         {/* 注册前的安装入口。
             为什么放在这一屏：大多数人第一次是从别人发的链接或搜索结果进来，
