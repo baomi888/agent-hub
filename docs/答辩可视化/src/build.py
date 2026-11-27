@@ -7,10 +7,9 @@ import html
 import pathlib
 import sys
 
-from playwright.sync_api import sync_playwright
-
 import dz
 from diagram_overview import build as build_overview
+from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PNG_DIR = ROOT / "png"

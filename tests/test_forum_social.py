@@ -9,10 +9,8 @@
 
 from __future__ import annotations
 
-import re
-
+from api.forum import _MENTION_RE
 from core import forum_social
-from api.forum import _MENTION_RE, _resolve_mentions
 
 
 def _reset() -> None:
@@ -45,7 +43,7 @@ def test_follow_rejects_self():
     _reset()
     try:
         forum_social.follow("u1", "u1")
-        assert False, "自己关注自己应当抛 ValueError"
+        raise AssertionError("自己关注自己应当抛 ValueError")
     except ValueError as e:
         assert "自己" in str(e)
 
@@ -69,7 +67,7 @@ def test_notify_skips_self_and_invalid_kind():
     # 非法 kind
     try:
         forum_social.notify("u2", "bogus", "u1")
-        assert False
+        raise AssertionError("非法 kind 应当抛 ValueError")
     except ValueError:
         pass
 

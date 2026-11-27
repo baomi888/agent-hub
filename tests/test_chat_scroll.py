@@ -70,7 +70,8 @@ def test_switching_conversations_lands_instantly():
     """切会话 / 回到对话那一下必须直接落位，而不是"滚过去"。"""
     src = _code()
     m = re.search(
-        r"const sessionChanged = sessionId !== prevSessionRef\.current;(.{0,1400}?)\}, \[sessionId, firstId, messages, settleScroll\]\)",
+        r"const sessionChanged = sessionId !== prevSessionRef\.current;"
+        r"(.{0,1400}?)\}, \[sessionId, firstId, messages, settleScroll\]\)",
         src,
         re.S,
     )
@@ -307,7 +308,9 @@ def test_user_takeover_comes_from_input_events():
     body = src[src.index("const takeOver"): src.index("const scrollToBottom")]
     assert "stickRef.current = false" in body, "takeOver 没有关掉跟随"
     assert "addEventListener(\"keydown\"" in body, "翻页键不算接管"
-    container = src[src.index('className="chat-scroll'):]
+    # 原来是 container = src[src.index('className="chat-scroll'):] 但变量未使用：
+    # 保留它隐含的「容器类名必须存在」检查，改成显式断言，强度不降。
+    assert 'className="chat-scroll' in src, "聊天滚动容器的类名没了"
     assert "onWheel={takeOver}" in src, "滚轮没接到 takeOver"
     assert "onPointerDown=" in src, "触摸 / 拖拽没接到 takeOver"
 

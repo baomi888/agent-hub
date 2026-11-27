@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """两条路径的帧序列金标准：rag / llm。
 
 与 ``test_baseline_chat_stream.py`` 的分工
@@ -21,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # golden_stream
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from golden_stream import assert_golden, frames_of  # noqa: E402
 from langchain_core.documents import Document  # noqa: E402
 
 import api.chat as chat  # noqa: E402
@@ -29,7 +29,6 @@ import core.session as session  # noqa: E402
 import kb.rag_core as rc  # noqa: E402
 import main as m  # noqa: E402
 from core.auth import get_current_user  # noqa: E402
-from golden_stream import assert_golden, frames_of  # noqa: E402
 
 OWNER = "u_golden"
 SID = "conv_golden"
@@ -48,7 +47,9 @@ class _FakePipe:
     def retrieve_with_score(self, query, top_k, owner=None):
         return DOCS
 
-    format_refs = staticmethod(rc.RagPipeline.format_refs)
+    # 2026-11-26：原先还有一行 `format_refs = staticmethod(rc.RagPipeline.format_refs)`，
+    # 但生产侧只有 `_format_refs`（全仓无 `format_refs` 调用），该行让整个文件在收集阶段
+    # 就 AttributeError，测试从未真正跑过。删掉重复别名。
     _format_refs = staticmethod(rc.RagPipeline._format_refs)
     build_sources = staticmethod(rc.RagPipeline.build_sources)
 

@@ -85,7 +85,11 @@ def _plan_row(row: dict, now: int) -> dict | None:
     if recurrence is None:
         # interval 等不支持循环的规则：降级一次性，把原规则写进备注
         every = row.get("every_minutes")
-        tags.append(f"原提醒每 {every} 分钟循环，迁移后改为一次性" if every else "原提醒规则不支持循环，迁移后改为一次性")
+        tags.append(
+            f"原提醒每 {every} 分钟循环，迁移后改为一次性"
+            if every
+            else "原提醒规则不支持循环，迁移后改为一次性"
+        )
         recurrence = "none"
     if recurrence == "weekly":
         weekday = int(row.get("weekday") if row.get("weekday") is not None else 0)

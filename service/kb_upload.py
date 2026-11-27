@@ -22,7 +22,8 @@ import logging
 import os
 import time
 
-from core import config, quota, scheduler as sched
+from core import quota
+from core import scheduler as sched
 from kb import pipelines
 
 _log = logging.getLogger(__name__)

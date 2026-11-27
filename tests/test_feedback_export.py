@@ -27,8 +27,8 @@ from __future__ import annotations
 import io
 import json
 import re
-import zipfile
 import xml.etree.ElementTree as ET
+import zipfile
 from urllib.parse import unquote
 
 import pytest
@@ -261,7 +261,7 @@ def test_bad_date_range_returns_400(client, query):
 
 def test_grouped_by_status_with_continuous_numbering(client):
     uid = _login(client, ADMIN_NAME)
-    a = _mk(uid, "甲", cat="ui", content="待处理的那条")
+    _mk(uid, "甲", cat="ui", content="待处理的那条")
     b = _mk(uid, "乙", cat="feature", content="已处理的那条")
     user_feedback.set_status(b, "done")
 

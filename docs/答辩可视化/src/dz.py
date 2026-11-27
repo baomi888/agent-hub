@@ -326,9 +326,10 @@ def draw_node(n: Node) -> str:
         f'rx="{rx}" fill="{t["fill"]}" stroke="{t["stroke"]}" stroke-width="1"/>'
     )
     left = n.x + 14
-    badge = ""
     if n.badge:
-        badge = (
+        # 2026-11-26：原先把角标算进局部变量 badge 却从未拼进返回值，角标一直没被画出来。
+        # 这里改为直接累加到 body，与下面 left 右移 18px 的排版意图一致。
+        body += (
             f'<circle cx="{n.x + 17:.1f}" cy="{n.y + 17:.1f}" r="9" fill="{t["strong"]}" opacity="0.12"/>'
             + _text_lines(n.x + 17, n.y + 21, [n.badge], 10.5, t["strong"], 700, anchor="middle")
         )
@@ -400,7 +401,7 @@ def draw_edge(e: Edge, d: Diagram) -> str:
     if e.label:
         fs = 10.5
         lines = wrap(e.label, 190, fs, 2)
-        bw = max(text_w(l, fs) for l in lines) + 14
+        bw = max(text_w(ln, fs) for ln in lines) + 14
         bh = 17 * len(lines) + 4
         lx = mx if e.way is None else mx
         ly = my - bh / 2 if not e.way else my - bh - 2
@@ -414,7 +415,7 @@ def draw_edge(e: Edge, d: Diagram) -> str:
 
 def draw_legend(d: Diagram, y: float) -> str:
     x = 40
-    out = [f'<g opacity="0.95">']
+    out = ['<g opacity="0.95">']
     items = [
         ("solid", "调用 / 数据流", "#15803D"),
         ("dashed", "异步 / 事件 / 降级", "#94A3B8"),
@@ -534,7 +535,7 @@ def svg_head(d: Diagram) -> str:
 
 def svg_title(d: Diagram) -> str:
     out = [
-        f'<rect x="40" y="30" width="4" height="40" rx="2" fill="#22C55E"/>',
+        '<rect x="40" y="30" width="4" height="40" rx="2" fill="#22C55E"/>',
         _text_lines(56, 46, [d.kicker], 11.5, "#15803D", 700),
         _text_lines(56, 82, [d.title], 27, INK, 700),
     ]

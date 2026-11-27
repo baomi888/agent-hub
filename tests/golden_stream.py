@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """金标准帧快照（characterization test）：录制与比对。
 
 它不判断「行为对不对」，只判断「行为有没有变」。
