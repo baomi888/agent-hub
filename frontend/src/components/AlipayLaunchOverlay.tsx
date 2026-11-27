@@ -19,6 +19,7 @@ import { createPortal } from "react-dom";
 import QRCode from "qrcode";
 import { api } from "@/lib/api";
 import BrandIcon from "./settings/BrandIcon";
+import { markOAuthCard } from "./OAuthDeepLinkBridge";
 
 interface Props {
   /** 授权链接；非空时接管唤起与轮询 */
@@ -194,6 +195,13 @@ function LaunchCard({ url, onClose, label, onDone }: CardProps) {
     doneRef.current = onDone;
     closeRef.current = onClose;
   }, [onDone, onClose]);
+
+  // 卡片在场时结果由卡片自己领（它还要收尾弹窗、刷新绑定状态），
+  // 全局深链桥会让路 —— 交接结果是一次性的，两边抢会有一边永远 pending。
+  useEffect(() => {
+    markOAuthCard(true);
+    return () => markOAuthCard(false);
+  }, []);
 
   const state = useMemo(() => {
     try {
