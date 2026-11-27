@@ -244,6 +244,61 @@ class TestTickKeepsTheChain:
         assert rebuilt["enabled"] == 1, "下一节课没有被重建，提醒链断了"
         assert int(rebuilt["next_fire_at"]) > int(row["next_fire_at"])
 
+    def test_due_minute_is_not_pushed_to_next_week(self, fresh_db, monkeypatch):
+        """★ 到点那一分钟，课表提醒必须留在原地等着派发。
+
+        2026-11 线上「连续三周不响」的根因就在这里：sync 排在 due_owners 前面，
+        用 `fire_ts <= ts` 把正好到点的课当成「已过去」重排到下一周，于是
+        due_owners 永远捞不到它。表现是排期一直在、updated_at 恰好停在它
+        本该响的那一刻，但 reminder_fires 里从来没有它。
+        """
+        from service import reminder_tick
+
+        _put()
+        cr.set_prefs("u1", enabled=True)
+        cr.sync("u1")
+        row = _rows()[0]
+        fire_at = int(row["next_fire_at"])
+        assert int(row["enabled"]) == 1
+
+        # worker 在 fire_at 那一分钟（晚 3 秒）跑这一轮
+        planned = fire_at + 3
+        monkeypatch.setattr(timeutil, "now_ts", lambda: planned)
+        subjects = reminder_tick.due_subjects(reminder_tick.JOB_KEY, planned)
+
+        assert "u1" in subjects, "到点了却没进 due_subjects —— 派发链拿不到人"
+        still = [r for r in _rows() if r["id"] == row["id"]][0]
+        assert int(still["next_fire_at"]) == fire_at, "到点的行被 sync 推到了下一周"
+        assert int(still["enabled"]) == 1, "还没派发就被停用了"
+
+    def test_late_within_window_still_due(self, fresh_db, monkeypatch):
+        """迟到 10 分钟（仍在 15 分钟窗口内）照样要能派发。"""
+        from service import reminder_tick
+
+        _put()
+        cr.set_prefs("u1", enabled=True)
+        cr.sync("u1")
+        fire_at = int(_rows()[0]["next_fire_at"])
+
+        planned = fire_at + 10 * 60
+        monkeypatch.setattr(timeutil, "now_ts", lambda: planned)
+        assert "u1" in reminder_tick.due_subjects(reminder_tick.JOB_KEY, planned)
+        assert int(_rows()[0]["next_fire_at"]) == fire_at
+
+    def test_too_late_is_skipped_not_fired(self, fresh_db, monkeypatch):
+        """迟到超过 15 分钟就不补发了 —— 反证：保护不是无条件把所有行钉死。"""
+        from service import reminder_tick
+
+        _put()
+        cr.set_prefs("u1", enabled=True)
+        cr.sync("u1")
+        fire_at = int(_rows()[0]["next_fire_at"])
+
+        planned = fire_at + (reminder_core.MAX_LAG_SECONDS + 60)
+        monkeypatch.setattr(timeutil, "now_ts", lambda: planned)
+        assert "u1" not in reminder_tick.due_subjects(reminder_tick.JOB_KEY, planned)
+        assert int(_rows()[0]["next_fire_at"]) > fire_at, "迟到太久应该直接排下一次"
+
     def test_disabled_owner_is_not_synced_back(self, fresh_db, monkeypatch):
         """关掉之后 tick 不能又把它建回来 —— 否则「关不掉」。"""
         from service import reminder_tick

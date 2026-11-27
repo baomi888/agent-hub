@@ -39,7 +39,7 @@ from collections.abc import Iterable
 from datetime import datetime, timedelta
 from typing import Any
 
-from core import session, timeutil
+from core import reminder_core, session, timeutil
 
 logger = logging.getLogger(__name__)
 
@@ -354,11 +354,34 @@ def sync(owner_id: str, now: int | None = None) -> dict[str, Any]:
                 "enabled": row["enabled"],
             }
 
+        # ★ 到点保护：已经落进派发窗口（[ts-lag, ts]）的行不能重排到下一周。
+        #
+        # `due_subjects` 的顺序是 sync_all → catch_up → due_owners，sync 跑在最前。
+        # 旧版 `next_occurrences` 用 `fire_ts <= ts` 判「已过去」，于是到点那一分钟
+        # sync 就把 `next_fire_at` 从 ts 改写成下周同一时刻；紧接着的 due_owners
+        # 查 `next_fire_at <= ts` 就再也捞不到它 —— 排期一直在、updated_at 恰好
+        # 停在它本该响的那一刻，但 reminder_fires 里永远没有它。2026-11 线上
+        # 「连续三周不响」就是这个：worker 每分钟都跑，课却在到点时被自己推走。
+        #
+        # 窗口与 reminder_core 的到期判定取同一个常量，避免两边各自漂移。
+        lag = int(reminder_core.MAX_LAG_SECONDS)
+        pending = {
+            rid
+            for rid, old in existing.items()
+            if int(old["enabled"] or 0) == 1
+            and old["next_fire_at"] is not None
+            and ts - lag <= int(old["next_fire_at"]) <= ts
+        }
+
         keep: set[str] = set()
         written = 0
         for item in items:
             rid = _reminder_id(str(owner_id), item["course_id"])
             keep.add(rid)
+            if rid in pending:
+                # 这门课正等着这一轮派发，别覆盖它的 next_fire_at。
+                # 派发后 advance() 会把 once 行停用，下一轮 sync 自然重建下一次。
+                continue
             title = _title(item)
             old = existing.get(rid)
             # 值没变 → 不写。这条判断是「每分钟全量同步」能不能承受的关键。
