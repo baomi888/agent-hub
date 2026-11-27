@@ -367,9 +367,12 @@ def test_app_flow_callback_without_cookie_completes_login(alienv):
     cli.cookies.clear()  # 模拟跳到支付宝 App 后丢失本站 cookie
     result = finish(cli, state)
     # 结果不再种进支付宝 WebView，而是暂存供原应用轮询领走；
-    # 落地页只负责自动关掉支付宝里的网页，不留「站点页面」。
+    # 落地页只负责退出支付宝里的网页：Android 先试 intent 交回系统，
+    # 再 closeWebview 收尾；不留「站点页面」。
     assert result.status_code == 200
     assert "closeWebview" in result.text
+    assert "intent://" in result.text
+    assert 'var path="/"' in result.text
     assert "已登录，请返回应用" in result.text
     assert len(calls) == 2
 

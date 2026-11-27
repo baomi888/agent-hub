@@ -42,11 +42,16 @@ def _decode_state(combined: str) -> tuple[str, str, str]:
     return state, browser, "" if uid_field == _EMPTY_UID else uid_field
 
 
-# App 内授权回调的落地页：授权一完成就让支付宝把网页关掉，用户不必看到
+# App 内授权回调的落地页：授权一完成就退出支付宝里的网页，用户不必看到
 # 任何「站点页面」。会话不在这里签发（这个 WebView 没有原应用的 cookie），
 # 结果已写进交接表，原应用轮询即可领走，所以这里只负责尽快退出。
-# AlipayJSBridge 由支付宝在 startapp 打开的网页中注入，closeWebview 是官方
-# 关闭当前网页的能力；非 startapp 场景 bridge 缺失，退化为一行极短提示。
+#
+# 退出方式分两条：
+#   Android —— 先用 intent:// 把 https://<host><target> 交给系统处理。PWA 装到
+#     桌面时系统里存在 WebAPK，能处理这个域名，于是用户选一次就真的回到应用；
+#     随后再 closeWebview 把支付宝里的网页收掉（intent 若被拦，这步就是兜底）。
+#   iOS —— 系统不允许从 WebView 跳到别的 App 的 https 链接，且 PWA 没有自己的
+#     scheme，所以只能 closeWebview 关掉网页，用户按返回键回到原应用。
 _APP_PAGE = """<!doctype html>
 <html lang="zh-CN"><head>
 <meta charset="utf-8">
@@ -64,6 +69,7 @@ p{margin:0;padding:0 24px;text-align:center}
 <script>
 (function(){
   var failed=__FAILED__;
+  var path=__TARGET__;
   var tip=document.getElementById("t");
   var closed=false;
   function closeWebview(){
@@ -74,19 +80,38 @@ p{margin:0;padding:0 24px;text-align:center}
       }
     }catch(e){}
   }
-  if(window.AlipayJSBridge){closeWebview();}
-  else{document.addEventListener("AlipayJSBridgeReady",closeWebview,false);}
+  function backToApp(){
+    // Android：把原地址交回系统，装有 PWA 的手机会在"打开方式"里列出应用。
+    try{
+      var host=location.hostname;
+      var fallback="https://"+host+path;
+      var intent="intent://"+host+path+"#Intent;scheme=https;S.browser_fallback_url="
+        +encodeURIComponent(fallback)+";end";
+      location.href=intent;
+      return true;
+    }catch(e){return false;}
+  }
+  if(/Android/i.test(navigator.userAgent)){
+    backToApp();
+    // 无论有没有跳走，都把支付宝里的网页收掉，别留在返回栈里。
+    setTimeout(closeWebview,1200);
+  }else if(window.AlipayJSBridge){
+    closeWebview();
+  }else{
+    document.addEventListener("AlipayJSBridgeReady",closeWebview,false);
+  }
   // bridge 没注入或关闭被忽略时，给一句极短提示，不让用户停在白屏上
   setTimeout(function(){
     if(!closed){tip.textContent=failed?"授权未完成，请返回应用重试":"已登录，请返回应用继续";}
-  },1200);
+  },1800);
 })();
 </script></body></html>"""
 
 
-def _app_page(*, failed: bool) -> HTMLResponse:
+def _app_page(*, failed: bool, target: str = "/") -> HTMLResponse:
     return HTMLResponse(
-        _APP_PAGE.replace("__FAILED__", "true" if failed else "false"),
+        _APP_PAGE.replace("__FAILED__", "true" if failed else "false")
+        .replace("__TARGET__", '"' + target.replace('"', "") + '"'),
         headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
     )
 
@@ -178,7 +203,7 @@ def website_login_router(
         def fail(code: str) -> Response:
             """App 内失败同样走极简页，不把用户丢到登录页上。"""
             if app_flow and handoff_state:
-                return _app_page(failed=True)
+                return _app_page(failed=True, target=failure_page.split("?")[0])
             return RedirectResponse(f"{failure_page}&reason={code}", status_code=303)
 
         try:
@@ -229,8 +254,11 @@ def website_login_router(
                 external_accounts.put_handoff(
                     state_value, provider=provider, action=action, user_id=user["id"]
                 )
-                # 落地页只负责关掉支付宝里的网页，不留「站点页面」。
-                response = _app_page(failed=False)
+                # 落地页只负责退出支付宝里的网页，不留「站点页面」。
+                response = _app_page(
+                    failed=False,
+                    target="/settings" if action != "login" else "/",
+                )
             else:
                 success_url = "/"
                 if action != "login":
