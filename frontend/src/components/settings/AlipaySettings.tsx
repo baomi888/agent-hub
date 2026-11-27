@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
+import BrandIcon from "./BrandIcon";
 
 export default function AlipaySettings() {
   const auth = useAuth();
@@ -42,7 +43,7 @@ export default function AlipaySettings() {
   return <section>
     <p className="sec-label">支付宝登录</p>
     <div className="card card-pad">
-      <div className="card-head"><span className="card-title">支付宝账号</span>
+      <div className="card-head"><span className="card-title" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><BrandIcon brand="alipay" />支付宝账号</span>
         <span className="meta">{state ? state.bound ? "已绑定" : "未绑定" : "读取中…"}</span></div>
       <p className="hint" style={{ marginTop: 8 }}>解绑保留本站账号和数据，必须先设置本站密码。更换支付宝时，先用原支付宝确认解绑，再绑定新支付宝。</p>
       {auth.me?.user.has_password === false && <p className="hint" style={{ marginTop: 8 }}>

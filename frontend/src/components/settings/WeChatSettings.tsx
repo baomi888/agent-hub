@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/useAuth";
+import BrandIcon from "./BrandIcon";
 
 export default function WeChatSettings() {
   const auth = useAuth();
@@ -42,17 +43,17 @@ export default function WeChatSettings() {
   return <section>
     <p className="sec-label">微信登录</p>
     <div className="card card-pad">
-      <div className="card-head"><span className="card-title">微信账号</span>
+      <div className="card-head"><span className="card-title" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><BrandIcon brand="wechat" />微信账号</span>
         <span className="meta">{state ? state.bound ? "已绑定" : "未绑定" : "读取中…"}</span></div>
-      <p className="hint" style={{ marginTop: 8 }}>解绑保留本站账号和数据，必须先设置本站密码。更换微信时，先用原微信确认解绑，再绑定新微信。</p>
-      {auth.me?.user.has_password === false && <p className="hint" style={{ marginTop: 8 }}>
+      {state?.enabled && <p className="hint" style={{ marginTop: 8 }}>解绑保留本站账号和数据，必须先设置本站密码。更换微信时，先用原微信确认解绑，再绑定新微信。</p>}
+      {state?.enabled && auth.me?.user.has_password === false && <p className="hint" style={{ marginTop: 8 }}>
         尚未设置本站密码。先绑定上方安全邮箱，再<Link className="auth-tlink" href="/reset-password">通过邮箱验证设置密码</Link>。
       </p>}
       {state?.enabled && <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 12 }}
         disabled={busy || (state.bound && auth.me?.user.has_password === false)} onClick={() => void start(state.bound ? "unlink" : "bind")}>
         {busy ? "正在打开微信授权…" : state.bound ? "解绑微信" : "绑定微信"}
       </button>}
-      {state && !state.enabled && <p className="hint">微信登录暂未开放。</p>}
+      {state && !state.enabled && <p className="hint">微信绑定尚未上线，敬请期待。</p>}
       {error && <p className="acct-err" role="alert">{error}</p>}
       {notice && <p className="hint" role="status">{notice}</p>}
     </div>
