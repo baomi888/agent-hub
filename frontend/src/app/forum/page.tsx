@@ -55,15 +55,10 @@ const IMG_MAX = 9;
  */
 const NOTICE_KEY = "baomi:forum-notice-closed";
 
-/**
- * 两种排序，没有「还没解决」。
- *
- * 这个论坛是拿来讨论和分享的，不是答疑系统 —— 没有"提问—解决"的闭环，
- * 挂一个"未解决"筛选只会让人以为该有人来认领这些问题。
- */
 const SORTS: { key: ForumSort; label: string }[] = [
   { key: "new", label: "最新回复" },
   { key: "hot", label: "最热" },
+  { key: "unresolved", label: "待解决" },
 ];
 
 /**
@@ -179,6 +174,7 @@ export default function ForumPage() {
   const [sort, setSort] = useState<ForumSort>("new");
   /** 当前板块，空串 = 全部 */
   const [cat, setCat] = useState("");
+  const [tag, setTag] = useState("");
   /**
    * 搜索框的字与真正发出去的字分开。
    * 直接绑一个 q 的话每敲一个字就是一次请求，中文输入法拼一个词要发四五次，
@@ -194,8 +190,10 @@ export default function ForumPage() {
   const [compOpen, setCompOpen] = useState(false);
   const [cTitle, setCTitle] = useState("");
   const [cBody, setCBody] = useState("");
+  const [cPreview, setCPreview] = useState(false);
   const [cCat, setCCat] = useState("");
   const [cKb, setCKb] = useState("");
+  const [cTags, setCTags] = useState("");
   const [kbs, setKbs] = useState<PublicKbInfo[]>([]);
   const [sending, setSending] = useState(false);
   const [cTip, setCTip] = useState("");
@@ -272,6 +270,8 @@ export default function ForumPage() {
         cat: cat || undefined,
         sort,
         q: dq || undefined,
+        tag: tag || undefined,
+        solved: sort === "unresolved" ? false : undefined,
         limit: 20,
       });
       setTopics(r.posts);
@@ -282,7 +282,7 @@ export default function ForumPage() {
     } finally {
       setLoading(false);
     }
-  }, [cat, sort, dq]);
+  }, [cat, sort, dq, tag]);
 
   /**
    * 点赞/收藏切换。未登录 → 跳登录页；已登录 → 调后端 toggle 并原地更新。
@@ -437,6 +437,8 @@ export default function ForumPage() {
         cat: cat || undefined,
         sort,
         q: dq || undefined,
+        tag: tag || undefined,
+        solved: sort === "unresolved" ? false : undefined,
         before: last.id,
         limit: 20,
       });
@@ -533,11 +535,14 @@ export default function ForumPage() {
         cat: cCat,
         ...(cKb ? { kb_id: cKb } : {}),
         ...(imgs.length ? { images: imgs.map((i) => i.hash) } : {}),
+        ...(cTags.trim() ? { tags: cTags.split(/[，,\s]+/).map((x) => x.trim()).filter(Boolean).slice(0, 5) } : {}),
       });
       setCompOpen(false);
       setCTitle("");
       setCBody("");
+      setCPreview(false);
       setCKb("");
+      setCTags("");
       setImgs([]);
       setImgTip("");
       if (r.topic) {
@@ -640,6 +645,9 @@ export default function ForumPage() {
   const catName = cat ? (cats.find((c) => c.key === cat)?.label ?? "") : "";
   /** 右栏只留"真的有人在聊"的：热榜排序在 0 回复时等于最新，和中间那栏重复 */
   const hotLive = hot.filter((t) => t.reply_n > 0);
+  const quickTags = Array.from(
+    new Set([...pinned, ...topics, ...hot].flatMap((t) => t.tags || [])),
+  ).slice(0, 8);
   /** 顶部横幅用的那一条。关过一次就不再挡视线 */
   const notice = pinned[0] && String(pinned[0].id) !== closedNotice ? pinned[0] : null;
   /**
@@ -718,6 +726,9 @@ export default function ForumPage() {
               </button>
               <span>·</span>
               <span>{fmtWhen(t.at)}</span>
+              {t.cat === "ask" && (
+                <span className={"tb-solved-badge" + (t.solved ? " done" : "")}>{t.solved ? "已解决" : "待解决"}</span>
+              )}
             </div>
           </div>
         </div>
@@ -725,6 +736,12 @@ export default function ForumPage() {
         <h3 className="tb-title">
           <Link href={topicHref(t.id)}>{t.title}</Link>
         </h3>
+
+        {t.tags?.length > 0 && (
+          <div className="tb-post-tags" aria-label="话题标签">
+            {t.tags.map((item) => <button key={item} type="button" onClick={() => setTag(item)}>#{item}</button>)}
+          </div>
+        )}
 
         {t.excerpt && <p className="tb-text">{t.excerpt}</p>}
 
@@ -1031,6 +1048,22 @@ export default function ForumPage() {
                 之间隔着半个屏，窄屏上看着像飘在空里的孤字 */}
             <span className="tb-sort-stat">今日新增 {fmtNum(stat.today)} 条</span>
           </div>
+          {quickTags.length > 0 && (
+            <div className="tb-quick-tags" aria-label="快速标签筛选">
+              <span>标签</span>
+              {quickTags.map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  className={tag === item ? "on" : ""}
+                  aria-pressed={tag === item}
+                  onClick={() => setTag((current) => (current === item ? "" : item))}
+                >
+                  #{item}
+                </button>
+              ))}
+            </div>
+          )}
 
           {loading && <SkeletonCards rows={3} label="正在加载话题" />}
 
@@ -1205,20 +1238,29 @@ export default function ForumPage() {
               </div>
 
               <div className="tb-field">
-                <label className="tb-label" htmlFor="tb-body">
-                  正文
-                </label>
-                <textarea
-                  id="tb-body"
-                  className="tb-input tb-area"
-                  value={cBody}
-                  maxLength={BODY_MAX}
-                  placeholder="背景、你试过什么、卡在哪一步。写得越具体，越可能有人接话。"
-                  onChange={(e) => {
-                    setCBody(e.target.value);
-                    if (cTip) setCTip("");
-                  }}
-                />
+                <div className="tb-label-row">
+                  <label className="tb-label" htmlFor="tb-body">正文</label>
+                  <button type="button" className="tb-preview-toggle" onClick={() => setCPreview((v) => !v)} aria-pressed={cPreview}>
+                    {cPreview ? "继续编辑" : "预览"}
+                  </button>
+                </div>
+                {cPreview ? (
+                  <div className="tb-compose-preview" aria-label="正文预览">
+                    {cBody.trim() ? cBody : "还没有写正文"}
+                  </div>
+                ) : (
+                  <textarea
+                    id="tb-body"
+                    className="tb-input tb-area"
+                    value={cBody}
+                    maxLength={BODY_MAX}
+                    placeholder="背景、你试过什么、卡在哪一步。写得越具体，越可能有人接话。"
+                    onChange={(e) => {
+                      setCBody(e.target.value);
+                      if (cTip) setCTip("");
+                    }}
+                  />
+                )}
                 <p className="tb-tip">
                   {cBody.length}/{BODY_MAX}
                   {/* @ 提醒（2026-11-23）：正文里写 @用户名（对方的知穗用户名），
@@ -1312,6 +1354,19 @@ export default function ForumPage() {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              <div className="tb-field">
+                <label className="tb-label" htmlFor="tb-tags">标签</label>
+                <input
+                  id="tb-tags"
+                  className="tb-input"
+                  value={cTags}
+                  maxLength={120}
+                  placeholder="用空格分开，例如 六级 听力 复习"
+                  onChange={(e) => setCTags(e.target.value)}
+                />
+                <p className="tb-tip">最多 5 个标签，方便别人找到这条话题。</p>
               </div>
 
               {/* 未登录时 /api/kb/public 是 401，库清单拿不到 —— 这个下拉会只剩

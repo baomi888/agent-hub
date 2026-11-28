@@ -170,7 +170,7 @@ def _now() -> int:
 
 # 两条帖子的公共列。多一个字段要改两处 SQL 时，漏一处就是运行期 KeyError，
 # 所以拼成常量。
-_POST_COLS = "id, kb_id, user_id, title, cat, solved, body, created_at, root_id, reply_to_id"
+_POST_COLS = "id, kb_id, user_id, title, cat, solved, tags, body, created_at, root_id, reply_to_id"
 
 
 def _row_to_post(r) -> dict:
@@ -180,6 +180,7 @@ def _row_to_post(r) -> dict:
         "title": r["title"] or "",
         "cat": r["cat"] or "",
         "solved": bool(r["solved"]),
+        "tags": [x for x in (r["tags"] or "").split(",") if x],
         "body": r["body"],
         "at": int(r["created_at"]),
         "root_id": int(r["root_id"] or 0),
@@ -313,6 +314,7 @@ def add_post(
     limit: int = MAX_LEN,
     images: str = "",
     allow_empty: bool = False,
+    tags: str = "",
 ) -> dict:
     """写一条留言或一条回复。正文合法性由 API 层先校验（这里只兜一次空值）。
 
@@ -368,8 +370,8 @@ def add_post(
     with store._get_conn() as conn:  # noqa: SLF001
         cur = conn.execute(
             "INSERT INTO kb_posts "
-            "(kb_id, user_id, body, created_at, root_id, reply_to_id, title, cat, images) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(kb_id, user_id, body, created_at, root_id, reply_to_id, title, cat, images, tags) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 kb_id,
                 uid,
@@ -380,6 +382,7 @@ def add_post(
                 clean_title,
                 clean_cat,
                 clean_images,
+                (tags or "").strip() if not reply_id else "",
             ),
         )
         pid = int(cur.lastrowid or 0)
@@ -389,11 +392,23 @@ def add_post(
         "title": clean_title,
         "cat": clean_cat,
         "solved": False,
+        "tags": [x for x in (tags or "").split(",") if x],
         "body": text,
         "at": now,
         "root_id": root_id,
         "reply_to_id": reply_id,
     }
+
+
+def set_solved(post_id: int, solved: bool) -> bool:
+    """设置论坛顶层话题的求助状态。调用方负责权限与板块校验。"""
+    _ensure()
+    with store._get_conn() as conn:  # noqa: SLF001
+        cur = conn.execute(
+            "UPDATE kb_posts SET solved = ? WHERE id = ? AND root_id = 0 AND deleted_at IS NULL",
+            (1 if solved else 0, int(post_id)),
+        )
+        return bool(cur.rowcount)
 
 
 def get_post(post_id: int) -> dict | None:

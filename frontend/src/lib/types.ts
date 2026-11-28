@@ -2000,7 +2000,7 @@ export interface CaptureParseResult {
 // ============================================================
 
 /** 两种排序。`hot` 不支持翻页（后端按分数排序，游标会失效） */
-export type ForumSort = "new" | "hot";
+export type ForumSort = "new" | "hot" | "unresolved";
 
 export interface ForumCat {
   key: string;
@@ -2037,6 +2037,8 @@ export interface ForumTopic {
   excerpt: string;
   cat: string;
   cat_label: string;
+  solved: boolean;
+  tags: string[];
   /** 发布时间（Unix 秒） */
   at: number;
   /** 楼里最后一次活动的时间；没回复时等于 at */
@@ -2054,6 +2056,7 @@ export interface ForumTopic {
   liked?: boolean;
   /** 当前浏览者是否已收藏。同 liked 的可选语义。 */
   favorited?: boolean;
+  followed?: boolean;
   mine: boolean;
   /**
    * 先发后审的两种状态。
@@ -2164,6 +2167,8 @@ export interface ForumDetail {
   reason: string;
   /** 还能不能点申诉（作者且没申诉过） */
   can_appeal: boolean;
+  following_topic?: boolean;
+  topic_followers?: number;
 }
 
 /** 注册邮箱的短期证明，仅保存在当前表单内存中。 */

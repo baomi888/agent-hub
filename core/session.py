@@ -124,7 +124,7 @@ def _add_missing_columns(conn, table: str, columns: dict[str, str]) -> None:
 # —— 两处各抄一份，迟早抄漏一个。
 #
 #   root_id / reply_to_id  2026-11-13 楼中楼
-#   title / cat / solved   2026-11-14 论坛中心
+#   title / cat / solved / tags   2026-11-14 论坛中心
 #     · cat 非空才进论坛列表。库内留言（cat 为空）仍然只出现在库详情页的留言板里
 #       —— 自动把「说一句」的留言搬进论坛，标题只能靠截正文猜，板块也只能靠猜，
 #       那是把垃圾往首页搬，不是聚合。
@@ -144,6 +144,7 @@ _KB_POST_ADD_COLUMNS: dict[str, str] = {
     "title": "TEXT NOT NULL DEFAULT ''",
     "cat": "TEXT NOT NULL DEFAULT ''",
     "solved": "INTEGER NOT NULL DEFAULT 0",
+    "tags": "TEXT NOT NULL DEFAULT ''",
     "status": "TEXT NOT NULL DEFAULT ''",
     "removed_reason": "TEXT NOT NULL DEFAULT ''",
     "removed_by": "TEXT NOT NULL DEFAULT ''",

@@ -11,8 +11,8 @@
      做成无限树的话手机缩进三次就没正文宽度了。
   4. **权限**：只有作者 / 所属库的库主 / 管理员能删。
   5. **排序与筛选**：`hot` 按回复数、`q` 命中标题或正文。
-  6. **没有「已解决」**：论坛只用于讨论分享，`sort=unsolved` 与 PATCH 端点都已下线，
-     传进来必须被拒（422 / 405），而不是被悄悄当成 `new` 处理。
+  6. **求助帖的解决闭环**：`ask` 话题可以按待解决筛选，并由楼主标记解决；
+     其他板块不能伪装成答疑帖。
 
 不启真 chroma：库的归属与公开状态用 monkeypatch 顶掉，只测论坛自己的读写。
 """
@@ -451,22 +451,24 @@ def test_pinned_list_keeps_two_at_most(env, client, kb):
     assert [p["title"] for p in d["pinned"]] == ["公告 2", "公告 1"]
 
 
-# ==================== ⑦ 「已解决」已下线 ====================
+# ==================== ⑦ 求助帖解决闭环 ====================
 
 
-def test_solved_feature_is_gone(env, client, kb):
-    """「已解决」整套下线：排序值被拒、PATCH 端点不存在、响应里没有这两个字段。
-
-    只删前端的按钮是不够的 —— 只要 PATCH 还在，老前端缓存或别人写个脚本
-    照样能改标记，列表里就会冒出前端不认识的状态，而且没有入口能改回来。
-    """
+def test_solved_feature_for_ask_topics(env, client, kb):
+    """求助帖可筛选、可由楼主切换解决状态，普通讨论帖不提供该语义。"""
     _as(client, "alice")
-    t = _topic(client, "随便聊聊")
+    t = _topic(client, "高数这道题怎么做", cat="ask")
 
-    assert client.get("/api/forum/topics", params={"sort": "unsolved"}).status_code == 422
-    assert client.patch(f"/api/forum/topics/{t['id']}", json={"solved": True}).status_code == 405
+    unresolved = client.get("/api/forum/topics", params={"sort": "unresolved"})
+    assert unresolved.status_code == 200
+    assert unresolved.json()["posts"][0]["solved"] is False
+
+    marked = client.patch(f"/api/forum/topics/{t['id']}", json={"solved": True})
+    assert marked.status_code == 200
+    assert marked.json()["topic"]["solved"] is True
 
     d = client.get(f"/api/forum/topics/{t['id']}").json()
-    assert "can_solve" not in d
-    assert "solved" not in d["topic"]
-    assert "solved" not in client.get("/api/forum/topics").json()["posts"][0]
+    assert d["topic"]["solved"] is True
+
+    ordinary = _topic(client, "随便聊聊", cat="exp")
+    assert client.patch(f"/api/forum/topics/{ordinary['id']}", json={"solved": True}).status_code == 400

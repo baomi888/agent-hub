@@ -14,8 +14,6 @@
  *   3. **下架之后这一页仍然打得开**：链接可能已经被转发到班级群，
  *      点进来是 404 比"已下架"伤害更大。作者能看到原因并申诉，别人只看到下架。
  *
- * ★ 没有「已解决」这套：论坛只用来讨论和分享，不是答疑系统。真做了这个标记，
- *   一半帖子会永远挂在"未解决"上，另一半会被误标成"解决了"因而没人再回。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -57,6 +55,8 @@ export default function ForumTopicPage() {
   const [like, setLike] = useState({ liked: false, count: 0 });
   const [fav, setFav] = useState({ favorited: false, count: 0 });
   const [follow, setFollow] = useState({ following: false, count: 0 });
+  const [topicFollow, setTopicFollow] = useState({ following: false, count: 0 });
+  const [solving, setSolving] = useState(false);
   const [socBusy, setSocBusy] = useState(false);
 
   const [data, setData] = useState<ForumDetail | null>(null);
@@ -124,6 +124,7 @@ export default function ForumTopicPage() {
             const soc = await api.forumTopicSocial(postId);
             setLike((s) => ({ ...s, liked: soc.liked, count: soc.likes ?? s.count }));
             setFav((s) => ({ ...s, favorited: soc.favorited, count: soc.favorites ?? s.count }));
+            setTopicFollow({ following: soc.following_topic, count: soc.followers });
           } catch {
             // social 拉不到只影响"我"的初始态，计数已经在上面的 topic 里了
           }
@@ -189,6 +190,32 @@ export default function ForumTopicPage() {
       /* 静默 */
     } finally {
       setSocBusy(false);
+    }
+  };
+
+  const toggleTopicFollow = async () => {
+    if (!auth.me) return router.push("/login");
+    if (socBusy) return;
+    setSocBusy(true);
+    try {
+      setTopicFollow(await api.followForumTopic(postId));
+    } catch {
+      /* 静默 */
+    } finally {
+      setSocBusy(false);
+    }
+  };
+
+  const toggleSolved = async () => {
+    if (!topic || solving) return;
+    setSolving(true);
+    try {
+      const r = await api.solveForumTopic(postId, !topic.solved);
+      setData((current) => current ? { ...current, topic: r.topic } : current);
+    } catch (e) {
+      setTip(e instanceof Error ? e.message : "状态更新失败");
+    } finally {
+      setSolving(false);
     }
   };
 
@@ -472,6 +499,10 @@ export default function ForumTopicPage() {
                     那比不能点更让人困惑。要做就得让列表页接 searchParams，
                     属于另一件事，不在这一批里塞 */}
                 <span className="tb-tag">{topic.cat_label}</span>
+                {topic.cat === "ask" && (
+                  <span className={"tb-solved-badge" + (topic.solved ? " done" : "")}>{topic.solved ? "已解决" : "待解决"}</span>
+                )}
+                {topic.tags?.map((item) => <span className="tb-tag soft" key={item}>#{item}</span>)}
                 {topic.kb && (
                   <Link
                     className="tb-bar-inline"
@@ -535,6 +566,14 @@ export default function ForumTopicPage() {
                         {follow.count > 0 && <span className="tb-follow-n">{follow.count}</span>}
                       </button>
                     )}
+                  {topic.cat === "ask" && (topic.mine || Boolean(auth.me?.is_admin)) && (
+                    <button type="button" className={"tb-act" + (topic.solved ? " on" : "")} disabled={solving} onClick={() => void toggleSolved()}>
+                      {topic.solved ? "改为待解决" : "标记已解决"}
+                    </button>
+                  )}
+                  <button type="button" className={"tb-act" + (topicFollow.following ? " on" : "")} disabled={socBusy} onClick={() => void toggleTopicFollow()} aria-pressed={topicFollow.following}>
+                    {topicFollow.following ? "已关注话题" : "关注话题"}{topicFollow.count > 0 && <span className="tb-follow-n">{topicFollow.count}</span>}
+                  </button>
                 </div>
               )}
             </div>

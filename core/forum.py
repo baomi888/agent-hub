@@ -145,7 +145,7 @@ _LAST_REPLY = (
 )
 
 _LIST_COLS = (
-    "p.id, p.kb_id, p.user_id, p.title, p.cat, p.body, p.created_at, "
+    "p.id, p.kb_id, p.user_id, p.title, p.cat, p.solved, p.tags, p.body, p.created_at, "
     "p.root_id, p.reply_to_id, "
     "COALESCE(p.status, '') AS status, "
     "COALESCE(p.removed_reason, '') AS removed_reason, "
@@ -162,10 +162,10 @@ _LIST_COLS = (
 # `hot` 用**分数**排序，分数一变游标就失效 —— 所以只给首屏，不假装能翻页
 # （`has_more` 恒为 False）。热榜本来也就是看个 Top 20。
 #
-# 没有 `unsolved`：这个论坛是讨论与分享，没有"提问—解决"的闭环。
 _ORDERS = {
     "new": "p.id DESC",
     "hot": "reply_n DESC, last_at DESC, p.id DESC",
+    "unresolved": "p.solved ASC, p.id DESC",
 }
 
 
@@ -179,7 +179,12 @@ def _visible() -> str:
     return "AND COALESCE(p.status, '') != 'removed'"
 
 
-def _base_where(cat: str | None, q: str = "") -> tuple[str, list[object]]:
+def _base_where(
+    cat: str | None,
+    q: str = "",
+    solved: bool | None = None,
+    tag: str = "",
+) -> tuple[str, list[object]]:
     """论坛列表的公共 WHERE：顶层帖、没删、有板块、没下架。
 
     `cat != ''` 这一条是**论坛与留言板的分界线**，不能省。
@@ -198,6 +203,12 @@ def _base_where(cat: str | None, q: str = "") -> tuple[str, list[object]]:
         # 换不来任何可感知的收益。
         sql += " AND (p.title LIKE ? OR p.body LIKE ?)"
         args.extend([f"%{q}%", f"%{q}%"])
+    if solved is not None:
+        sql += " AND COALESCE(p.solved, 0) = ?"
+        args.append(1 if solved else 0)
+    if tag:
+        sql += " AND (',' || COALESCE(p.tags, '') || ',') LIKE ?"
+        args.append(f"%,{tag},%")
     return sql, args
 
 
@@ -208,6 +219,8 @@ def list_topics(
     limit: int = PAGE,
     q: str = "",
     exclude: list[int] | None = None,
+    solved: bool | None = None,
+    tag: str = "",
 ) -> tuple[list[dict], bool]:
     """一页话题，返回 `(rows, has_more)`。
 
@@ -222,7 +235,7 @@ def list_topics(
     limit = max(1, min(int(limit or PAGE), 50))
     sort = sort if sort in _ORDERS else "new"
 
-    where, args = _base_where(cat, (q or "").strip())
+    where, args = _base_where(cat, (q or "").strip(), solved, (tag or "").strip())
     # 游标只对时间序有效。热榜传了 before 也忽略 —— 悄悄按错误语义翻页，
     # 比干脆不支持更难查。
     if before and sort == "new":

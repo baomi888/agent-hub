@@ -59,6 +59,15 @@ def _ensure() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_ffav_uid ON forum_favorites(uid, at DESC);
 
+            -- 关注话题：与关注作者分开，用户可以只跟进一条求助帖。
+            CREATE TABLE IF NOT EXISTS forum_topic_follows (
+                post_id INTEGER NOT NULL,
+                uid     TEXT NOT NULL,
+                at      INTEGER NOT NULL,
+                PRIMARY KEY (post_id, uid)
+            );
+            CREATE INDEX IF NOT EXISTS idx_ftfollow_uid ON forum_topic_follows(uid, at DESC);
+
             -- 关注：A 关注 B。follower=发起者，followee=被关注的人。
             -- 被关注者可能是匿名（anon:xxx）吗？匿名没有稳定身份，关注它
             -- 换设备就断了，所以这里只允许关注登录用户；匿名帖的作者
@@ -243,6 +252,43 @@ def list_favorites(uid: str, limit: int = 50) -> list[int]:
     return [int(r[0]) for r in rows]
 
 
+def follow_topic(post_id: int, uid: str) -> dict:
+    """关注/取消关注一条话题，返回 `{following, count}`。"""
+    _ensure()
+    with store._get_conn() as conn:  # noqa: SLF001
+        cur = conn.execute(
+            "DELETE FROM forum_topic_follows WHERE post_id = ? AND uid = ?",
+            (int(post_id), uid),
+        )
+        following = False
+        if cur.rowcount == 0:
+            conn.execute(
+                "INSERT INTO forum_topic_follows (post_id, uid, at) VALUES (?, ?, ?)",
+                (int(post_id), uid, _now()),
+            )
+            following = True
+        n = conn.execute(
+            "SELECT COUNT(*) FROM forum_topic_follows WHERE post_id = ?", (int(post_id),)
+        ).fetchone()[0]
+    return {"following": following, "count": int(n)}
+
+
+def topic_follow_state(post_id: int, uid: str | None) -> dict:
+    _ensure()
+    with store._get_conn() as conn:  # noqa: SLF001
+        following = bool(
+            uid
+            and conn.execute(
+                "SELECT 1 FROM forum_topic_follows WHERE post_id = ? AND uid = ?",
+                (int(post_id), uid),
+            ).fetchone()
+        )
+        n = conn.execute(
+            "SELECT COUNT(*) FROM forum_topic_follows WHERE post_id = ?", (int(post_id),)
+        ).fetchone()[0]
+    return {"following": following, "count": int(n)}
+
+
 # ============================================================
 # 关注
 # ============================================================
@@ -384,6 +430,7 @@ def purge_user(uid: str) -> None:
     with store._get_conn() as conn:  # noqa: SLF001
         conn.execute("DELETE FROM forum_likes WHERE uid = ?", (uid,))
         conn.execute("DELETE FROM forum_favorites WHERE uid = ?", (uid,))
+        conn.execute("DELETE FROM forum_topic_follows WHERE uid = ?", (uid,))
         conn.execute(
             "DELETE FROM user_follows WHERE follower = ? OR followee = ?", (uid, uid)
         )
@@ -399,6 +446,7 @@ def purge_post(post_id: int) -> None:
     with store._get_conn() as conn:  # noqa: SLF001
         conn.execute("DELETE FROM forum_likes WHERE post_id = ?", (int(post_id),))
         conn.execute("DELETE FROM forum_favorites WHERE post_id = ?", (int(post_id),))
+        conn.execute("DELETE FROM forum_topic_follows WHERE post_id = ?", (int(post_id),))
         conn.execute(
             "DELETE FROM notifications WHERE post_id = ?", (int(post_id),)
         )

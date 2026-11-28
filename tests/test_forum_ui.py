@@ -444,19 +444,16 @@ def test_compose_does_not_preselect_a_board_i_cannot_post_to():
     assert "postable" in seg, "默认选板块时没检查这个板块我能不能发"
 
 
-def test_solved_feature_leaves_no_trace_in_the_ui():
-    """「已解决」在界面上必须一处都不剩。
-
-    这类功能下线最容易漏的是中间那层：页面上的按钮删了，`api.ts` 里的封装还在，
-    下一个人照着 `setForumSolved` 去写页面，就把后端已经删掉的端点又调起来了。
-    """
-    assert '"unsolved"' not in _read(FORUM_PAGE), "排序里还留着「还没解决」"
-    assert "fm-tag ok" not in _read(FORUM_PAGE), "列表里还留着「已解决」标签"
-    assert "setForumSolved" not in _read(FORUM_DETAIL), "详情页还在调标记接口"
-    assert "can_solve" not in _read(FORUM_DETAIL), "详情页还依赖 can_solve 字段"
-    assert "setForumSolved" not in _read(SRC / "lib" / "api.ts"), "api.ts 里还留着接口封装"
-    # `fm-solve` 那条原来是查 forum.css 的；文件已删，改成"任何皮肤里都不许有"
-    assert not re.search(r"\.fm-solve", _read(FORUM_TB)), "forum-tb.css 里还留着已解决按钮样式"
+def test_solved_feature_is_visible_in_the_ui():
+    """求助帖的解决状态、筛选入口和详情操作必须保持在同一套 UI 中。"""
+    page = _read(FORUM_PAGE)
+    detail = _read(FORUM_DETAIL)
+    api = _read(SRC / "lib" / "api.ts")
+    assert '"unresolved"' in page
+    assert "tb-solved-badge" in page
+    assert "tb-solved-badge" in detail
+    assert "solveForumTopic" in api
+    assert "followForumTopic" in api
 
 
 # ---------------------------------------------------------------------------

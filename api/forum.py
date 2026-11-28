@@ -69,6 +69,11 @@ class TopicIn(BaseModel):
         default_factory=list,
         description="配图哈希列表，最多 9 张。先调 POST /api/forum/upload 拿哈希",
     )
+    tags: list[str] = Field(default_factory=list, description="话题标签，最多 5 个")
+
+
+class SolveIn(BaseModel):
+    solved: bool = Field(..., description="是否标记为已解决")
 
 
 class ReplyIn(BaseModel):
@@ -197,6 +202,8 @@ def _topic_view(
         "excerpt": forum.excerpt_of(row),
         "cat": row["cat"],
         "cat_label": forum.CAT_LABEL.get(row["cat"], ""),
+        "solved": bool(row.get("solved") or 0),
+        "tags": [x for x in (row.get("tags") or "").split(",") if x],
         "at": int(row["created_at"]),
         "last_at": int(row["last_at"]),
         "reply_n": int(row["reply_n"]),
@@ -317,10 +324,12 @@ async def get_cats(uid: str = Depends(anon_uid)) -> dict:
 @router.get("/topics")
 async def list_topics(
     cat: str | None = Query(None, description="板块 key，不传 = 全部"),
-    sort: str = Query("new", pattern="^(new|hot)$"),
+    sort: str = Query("new", pattern="^(new|hot|unresolved)$"),
     before: int | None = Query(None, ge=1, description="上一页最后一条的 id（仅 sort=new）"),
     limit: int = Query(forum.PAGE, ge=1, le=50),
     q: str = Query("", max_length=60, description="标题或正文关键词"),
+    solved: bool | None = Query(None, description="按是否解决筛选"),
+    tag: str = Query("", max_length=24, description="按标签筛选"),
     uid: str = Depends(anon_uid),
 ) -> dict:
     """话题列表。
@@ -348,6 +357,8 @@ async def list_topics(
         limit,
         q,
         [r["id"] for r in pinned_rows],
+        solved,
+        tag,
     )
     all_rows = [*pinned_rows, *rows]
     authors = await _authors_with_last(all_rows) if all_rows else {}
@@ -420,6 +431,26 @@ async def get_topic(post_id: int, uid: str = Depends(anon_uid)) -> dict:
     }
 
 
+@router.patch("/topics/{post_id}")
+async def update_topic(post_id: int, req: SolveIn, uid: str = Depends(anon_uid)) -> dict:
+    """求助帖的已解决状态，只允许楼主或管理员修改。"""
+    row = await asyncio.to_thread(forum.get_topic, post_id)
+    if not row or row.get("deleted_at") or not row.get("cat"):
+        raise HTTPException(status_code=404, detail="这个话题不存在")
+    if row["cat"] != "ask":
+        raise HTTPException(status_code=400, detail="只有课程答疑可以标记解决")
+    if row["user_id"] != uid and not await asyncio.to_thread(_is_admin, uid):
+        raise HTTPException(status_code=403, detail="只有发帖人可以修改状态")
+    ok = await asyncio.to_thread(kb_board.set_solved, post_id, req.solved)
+    if not ok:
+        raise HTTPException(status_code=404, detail="这个话题不存在")
+    row = await asyncio.to_thread(forum.get_topic, post_id)
+    authors = await _authors_with_last([row])
+    libs = await asyncio.to_thread(_kb_briefs, [row])
+    social = _social_counts([row])
+    return {"topic": _topic_view(row, authors, uid, libs, social)}
+
+
 @router.post("/topics")
 async def create_topic(req: TopicIn, uid: str = Depends(anon_uid)) -> dict:
     """发一个话题。板块必填、标题必填，正文可以只有一句。"""
@@ -452,6 +483,12 @@ async def create_topic(req: TopicIn, uid: str = Depends(anon_uid)) -> dict:
             raise HTTPException(status_code=404, detail="这个知识库不存在或没有公开")
 
     imgs = await asyncio.to_thread(_clean_images, req.images or [])
+    tags: list[str] = []
+    for raw in req.tags or []:
+        value = " ".join(str(raw or "").split()).strip().lstrip("#")[:24]
+        if value and value not in tags:
+            tags.append(value)
+    tags = tags[:5]
 
     try:
         post = await asyncio.to_thread(
@@ -465,6 +502,7 @@ async def create_topic(req: TopicIn, uid: str = Depends(anon_uid)) -> dict:
             kb_board.TOPIC_LEN,
             forum_image.dump(imgs),
             True,  # allow_empty：论坛帖可以只有标题
+            ",".join(tags),
         )
     except kb_board.TooFast as e:
         detail = f"发得太快了，{e.wait} 秒后再试" if e.wait else "这一小时发得有点多，歇一会儿再来"
@@ -832,6 +870,15 @@ async def favorite_topic(post_id: int, uid: str = Depends(get_current_user)) -> 
     return state
 
 
+@router.post("/topics/{post_id}/follow")
+async def follow_topic(post_id: int, uid: str = Depends(get_current_user)) -> dict:
+    """关注/取消关注一个话题。"""
+    row = await asyncio.to_thread(forum.get_topic, post_id)
+    if not row or row.get("deleted_at") or not row.get("cat"):
+        raise HTTPException(status_code=404, detail="这个话题不存在")
+    return await asyncio.to_thread(forum_social.follow_topic, post_id, uid)
+
+
 @router.post("/users/{followee}/follow")
 async def follow_user(
     followee: str, uid: str = Depends(get_current_user)
@@ -861,15 +908,18 @@ async def user_social(uid: str, me: str = Depends(anon_uid)) -> dict:
 @router.get("/topics/{post_id}/social")
 async def topic_social(post_id: int, me: str = Depends(anon_uid)) -> dict:
     """一条帖的点赞/收藏状态（当前浏览者视角，未登录也能看计数）。"""
-    like_s, fav_s = await asyncio.gather(
+    like_s, fav_s, topic_f = await asyncio.gather(
         asyncio.to_thread(forum_social.like_state, post_id, me),
         asyncio.to_thread(forum_social.favorite_state, post_id, me),
+        asyncio.to_thread(forum_social.topic_follow_state, post_id, me),
     )
     return {
         "liked": like_s["liked"],
         "likes": like_s["count"],
         "favorited": fav_s["favorited"],
         "favorites": fav_s["count"],
+        "following_topic": topic_f["following"],
+        "followers": topic_f["count"],
     }
 
 

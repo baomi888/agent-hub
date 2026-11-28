@@ -440,6 +440,8 @@ export const api = {
     before?: number;
     limit?: number;
     q?: string;
+    solved?: boolean;
+    tag?: string;
   } = {}) => {
     const q = new URLSearchParams();
     if (p.cat) q.set("cat", p.cat);
@@ -447,6 +449,8 @@ export const api = {
     if (p.before) q.set("before", String(p.before));
     if (p.limit) q.set("limit", String(p.limit));
     if (p.q) q.set("q", p.q);
+    if (p.solved !== undefined) q.set("solved", String(p.solved));
+    if (p.tag) q.set("tag", p.tag);
     const qs = q.toString();
     return request<ForumTopicPage>("/api/forum/topics" + (qs ? `?${qs}` : ""));
   },
@@ -457,6 +461,7 @@ export const api = {
     cat: string;
     kb_id?: string;
     images?: string[];
+    tags?: string[];
   }) =>
     request<{ topic: ForumTopic | null }>("/api/forum/topics", {
       method: "POST",
@@ -539,6 +544,17 @@ export const api = {
       `/api/forum/topics/${id}/favorite`,
       { method: "POST" },
     ),
+  /** 关注/取消关注一条话题 */
+  followForumTopic: (id: number) =>
+    request<{ following: boolean; count: number }>(`/api/forum/topics/${id}/follow`, {
+      method: "POST",
+    }),
+  /** 求助帖标记/取消已解决 */
+  solveForumTopic: (id: number, solved: boolean) =>
+    request<{ topic: ForumTopic }>(`/api/forum/topics/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ solved }),
+    }),
   /** 关注/取关（toggle）。followee 是对方 uid */
   followUser: (followee: string) =>
     request<{ following: boolean; count: number }>(
@@ -557,6 +573,8 @@ export const api = {
       likes: number;
       favorited: boolean;
       favorites: number;
+      following_topic: boolean;
+      followers: number;
     }>(`/api/forum/topics/${id}/social`),
   /** 我的通知列表 + 未读数 */
   listNotifications: () =>
