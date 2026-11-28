@@ -239,11 +239,12 @@ def test_overview_matches_raw_sql(env, client):
 
 
 def test_expected_errors_are_not_failures(env, client):
-    """401（未登录探测）与 /api/report 的 404（今天还没总结）都不算失败。
+    """401（未登录探测）、/api/report 的 404（今天还没总结）、扫描器陌生路径 404
+    都不算失败。
 
     内测第一天实测：178 条 401 + 17 条报告空态把成功率压到 90.7%、
-    把"出过错"榜刷满 /api/auth/me。两者都是预期行为——但 500、普通 404、
-    注册 400 照旧算失败，不能一刀切"4xx 都不算"。
+    把"出过错"榜刷满 /api/auth/me。两者都是预期行为——但 500、已注册路由的
+    404、注册 400 照旧算失败，不能一刀切"4xx 都不算"。
     """
     now = int(time.time())
     _seed_calls(
@@ -253,18 +254,23 @@ def test_expected_errors_are_not_failures(env, client):
             (now, "/api/auth/me/", "GET", 401, 5, None),
             (now, "/api/report/today", "GET", 404, 8, "u1"),
             (now, "/api/report/{date}", "GET", 404, 8, "u1"),
+            # 扫描器噪音：未注册路径的 404（2026-11-28 口径）
+            (now, "/api/wallet/getUsdt", "GET", 404, 3, None),
+            (now, "/api/xin1.php", "GET", 404, 3, None),
+            (now, "/api/config", "GET", 404, 3, None),
             (now, "/api/a/", "GET", 200, 100, "u1"),
             (now, "/api/a/", "GET", 500, 300, "u1"),
-            (now, "/api/b/", "GET", 404, 20, "u1"),
+            # 已注册路由的 404：资源不存在，是真失败
+            (now, "/api/sessions/{sid}", "GET", 404, 20, "u1"),
         ]
     )
     _login(client, ADMIN_NAME)
     d = client.get("/api/admin/overview?days=7").json()
 
-    # 5 条预期（3 个 401 + 2 个报告空态）都不进 failed
-    assert d["calls"]["expected"] == 5
-    assert d["calls"]["failed"] == 2  # 500 + 普通 404
-    # 分母 = 8 - 5 = 3，分子 ok 只有 1 条 200
+    # 8 条预期（3 个 401 + 2 个报告空态 + 3 条扫描噪音）都不进 failed
+    assert d["calls"]["expected"] == 8
+    assert d["calls"]["failed"] == 2  # 500 + 已注册路由的 404
+    # 分母 = 11 - 8 = 3，分子 ok 只有 1 条 200
     assert d["calls"]["success_rate"] == pytest.approx(1 / 3, abs=1e-4)
 
     s = client.get("/api/admin/overview?days=7").json()["series"]
@@ -275,6 +281,8 @@ def test_expected_errors_are_not_failures(env, client):
     paths = [i["path"] for i in fail["items"]]
     assert "/api/auth/me/" not in paths, "全 401 的接口不该进'出过错'榜"
     assert "/api/report/today" not in paths, "报告空态不该进'出过错'榜"
+    assert "/api/wallet/getUsdt" not in paths, "扫描噪音不该进'出过错'榜"
+    assert "/api/xin1.php" not in paths, "扫描噪音不该进'出过错'榜"
     assert fail["items"][0]["path"] == "/api/a/"
 
 
@@ -307,6 +315,38 @@ def test_failures_explain_reason(env, client):
     assert "服务端异常" in by_path["/api/kb/"]["hint"]
     # 聚合榜：按 (路径, 状态) 计数，最上面就是"哪类错最多"
     assert d["top"] and "calls" in d["top"][0]
+
+
+def test_scanner_noise_404_is_ignorable(env, client):
+    """未注册路径的 404 = 外部扫描器字典探测：进可忽略栏、不进 top、给出人话。
+
+    2026-11-28 凌晨一台扫描器用 173 个字典路径把"出过错"榜刷满（失败率 42%），
+    才立的这条口径。判据 = is_known（test_every_route_has_chinese_label 保证
+    已注册路由必然命中），所以已注册路由的 404 仍留在 need_attention。
+    """
+    now = int(time.time())
+    _seed_calls(
+        [
+            (now, "/api/wallet/getUsdt", "GET", 404, 3, None),
+            (now, "/api/xin1.php", "GET", 404, 3, None),
+            (now, "/api/UnionChannel.aspx", "GET", 404, 3, None),
+            # 已注册路由的 404（资源不存在）不是噪音
+            (now, "/api/sessions/{sid}", "GET", 404, 20, "u1"),
+        ]
+    )
+    _login(client, ADMIN_NAME)
+    d = client.get("/api/admin/failures?days=7").json()
+
+    ign = {x["path"] for x in d["ignorable"]}
+    need = {x["path"] for x in d["need_attention"]}
+    assert ign == {"/api/wallet/getUsdt", "/api/xin1.php", "/api/UnionChannel.aspx"}
+    assert need == {"/api/sessions/{sid}"}
+    assert "扫描" in [x for x in d["ignorable"] if x["path"] == "/api/xin1.php"][0]["hint"]
+
+    # top 聚合榜里不出现噪音路径
+    top_paths = {x["path"] for x in d["top"]}
+    assert "/api/wallet/getUsdt" not in top_paths
+    assert "/api/sessions/{sid}" in top_paths
 
 
 def test_users_total_is_snapshot_new_is_ranged(env, client):

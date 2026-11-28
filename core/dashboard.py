@@ -31,6 +31,33 @@ _FAILED_SQL = "(status >= 400 AND status != 401 AND NOT (status = 404 AND path L
 _EXPECTED_SQL = f"(status >= 400 AND NOT {_FAILED_SQL})"
 
 
+def _is_scanner_noise(status: int, method: str, path: str) -> bool:
+    """404 且路径不是任何已注册路由 → 外部扫描器的字典探测。
+
+    判据为什么可靠：api_call_logs 里**匹配到路由**的请求存的是路由模板
+    （`/api/sessions/{sid}`），没匹配到的才退化成 normalize_path 兜底；
+    而 `tests/test_dashboard.py::test_every_route_has_chinese_label` 保证
+    每个已注册路由都在 api_labels 表里 —— 于是「is_known=False 的 404」
+    恰好等价于「没碰到我们任何接口的请求」。2026-11-28 凌晨一台扫描器
+    用 173 个字典路径（/api/xin1.php、/api/wallet/getUsdt 这类）把看板
+    「出过错」榜刷满、失败率顶到 42%，才加了这条口径。
+
+    只对 404 生效：4xx/5xx 若来自已注册路由，模板一定 is_known；反之
+    未注册路径不可能产生非 404 响应（Starlette 对未匹配一律 404）。
+    """
+    return status == 404 and not api_labels.is_known(method, path)
+
+
+def _noise_total(conn, start: int, end_excl: int) -> int:
+    """区间内扫描噪音的总条数（给总览/趋势的 failed→expected 挪账用）。"""
+    rows = conn.execute(
+        "SELECT path, method, COUNT(*) AS n FROM api_call_logs "
+        "WHERE ts >= ? AND ts < ? AND status = 404 GROUP BY path, method",
+        (start, end_excl),
+    ).fetchall()
+    return sum(int(r["n"]) for r in rows if _is_scanner_noise(404, str(r["method"]), str(r["path"])))
+
+
 def explain_status(status: int, path: str = "", method: str = "") -> tuple[str, bool]:
     """把一条失败翻成人话：返回 (原因, 是否可忽略)。
 
@@ -42,6 +69,8 @@ def explain_status(status: int, path: str = "", method: str = "") -> tuple[str, 
         return "未登录：打开页面时的身份探测，属于预期行为", True
     if status == 404 and p.startswith("/api/report/"):
         return "今天还没跑完一轮对话，总结尚未生成（空态）", True
+    if status == 404 and _is_scanner_noise(status, method, p):
+        return "陌生路径：外部扫描器的字典探测，不是本系统的接口，已被正确挡下", True
     if status == 400 and "auth/register" in p:
         return "注册参数不合格：用户名 3~32 字符、密码 6~128 位", False
     if status == 409 and "auth/register" in p:
@@ -101,17 +130,20 @@ def _call_stats(start: int, end_excl: int) -> dict:
             "FROM api_call_logs WHERE ts >= ? AND ts < ?",
             (start, end_excl),
         ).fetchone()
+        # 扫描噪音在 SQL 口径里算"失败"，这里挪到 expected：_is_scanner_noise
+        # 需要 api_labels 查表，SQL 里表达不了（2026-11-28 加）
+        noise = _noise_total(conn, start, end_excl)
     total = int(row["total"] or 0)
     ok = int(row["ok"] or 0)
-    expected = int(row["expected"] or 0)
+    expected = int(row["expected"] or 0) + noise
     denom = total - expected
     return {
         "total": total,
         "ok": ok,
-        # expected = 401 未登录探测 + 报告空态 404。可忽略，但要说出来，
-        # 否则"总数 ≠ ok + failed"会让人以为数字对不上
+        # expected = 401 未登录探测 + 报告空态 404 + 扫描器陌生路径 404。
+        # 可忽略，但要说出来，否则"总数 ≠ ok + failed"会让人以为数字对不上
         "expected": expected,
-        "failed": int(row["failed"] or 0),
+        "failed": int(row["failed"] or 0) - noise,
         # 分母为 0 时返回 None（前端显示 —），不返回 0.0 假装算出个 0%
         "success_rate": round(ok / denom, 4) if denom else None,
         "avg_ms": int(row["avg_ms"] or 0),
@@ -167,7 +199,9 @@ def _series(day_list: list[str]) -> list[dict]:
                 "FROM api_call_logs WHERE ts >= ? AND ts < ?",
                 (s, e),
             ).fetchone()
-            out.append({"day": day, "calls": int(row["n"] or 0), "failed": int(row["bad"] or 0)})
+            # 与 _call_stats 同款挪账：扫描噪音不算失败（2026-11-28）
+            noise = _noise_total(conn, s, e)
+            out.append({"day": day, "calls": int(row["n"] or 0), "failed": int(row["bad"] or 0) - noise})
     return out
 
 
@@ -222,17 +256,31 @@ def api_ranking(days: int = 7, limit: int = 20, sort: str = "calls") -> dict:
     from core import session as store
 
     with store._get_conn() as conn:  # noqa: SLF001
+        # sort=fail 时超取 4 倍再过滤扫描噪音：未注册路径的 404 全是外部
+        # 扫描探测（见 _is_scanner_noise），不该占"哪里在报错"的榜位；
+        # 噪音组数可能远超 limit，不过滤会把真故障挤出前 20（2026-11-28 实测）。
+        # 过滤条件是"失败全部为 404"而非"路径未注册"：合成数据/异常情况下
+        # 未注册路径若带 5xx，仍要留在榜上（5xx 永远值得看）。
+        fetch = limit * 4 if sort == "fail" else limit
         rows = conn.execute(
             "SELECT path, method, COUNT(*) AS calls, "
             f"       COALESCE(SUM({_FAILED_SQL}), 0) AS failed, "
+            "       COALESCE(SUM(status = 404), 0) AS f404, "
             "       CAST(COALESCE(AVG(dur_ms), 0) AS INTEGER) AS avg_ms, "
             "       COALESCE(MAX(dur_ms), 0) AS max_ms "
             "FROM api_call_logs WHERE ts >= ? AND ts < ? "
             "GROUP BY path, method "
             f"{having}"
             f"ORDER BY {order} LIMIT ?",
-            (r["start"], r["end_exclusive"], limit),
+            (r["start"], r["end_exclusive"], fetch),
         ).fetchall()
+        if sort == "fail":
+            rows = [
+                x
+                for x in rows
+                if api_labels.is_known(str(x["method"]), str(x["path"]))
+                or int(x["f404"] or 0) < int(x["failed"] or 0)
+            ][:limit]
         total_paths = conn.execute(
             "SELECT COUNT(*) FROM (SELECT 1 FROM api_call_logs "
             "WHERE ts >= ? AND ts < ? GROUP BY path, method)",
@@ -286,12 +334,18 @@ def failures(days: int = 7, limit: int = 20) -> dict:
             "ORDER BY ts DESC, rowid DESC LIMIT ?",
             (r["start"], r["end_exclusive"], limit),
         ).fetchall()
-        agg = conn.execute(
-            "SELECT path, method, status, COUNT(*) AS n FROM api_call_logs "
-            "WHERE ts >= ? AND ts < ? AND status >= 400 "
-            "GROUP BY path, method, status ORDER BY n DESC LIMIT ?",
-            (r["start"], r["end_exclusive"], limit),
-        ).fetchall()
+        agg = [
+            x
+            for x in conn.execute(
+                "SELECT path, method, status, COUNT(*) AS n FROM api_call_logs "
+                "WHERE ts >= ? AND ts < ? AND status >= 400 "
+                "GROUP BY path, method, status ORDER BY n DESC LIMIT ?",
+                (r["start"], r["end_exclusive"], limit * 4),
+            ).fetchall()
+            # top 回答"哪类错最多、要修哪一个"——扫描噪音不是我们的接口，
+            # 没有可修的对象，留在榜里只会把真问题挤出前 20（2026-11-28）
+            if not _is_scanner_noise(int(x["status"]), str(x["method"]), str(x["path"]))
+        ][:limit]
 
     def item(row, with_ts: bool) -> dict:
         path, method, status = str(row["path"]), str(row["method"]), int(row["status"])
