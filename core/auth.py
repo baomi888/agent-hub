@@ -42,6 +42,15 @@ _KEYLEN = 32
 # ==================== 口令散列 ====================
 
 
+def make_unusable_password() -> str:
+    """第三方账号尚未设置本地密码；不是空密码或可猜的默认密码。"""
+    return "!" + secrets.token_urlsafe(32)
+
+
+def has_usable_password(stored: str) -> bool:
+    return bool(stored and stored.startswith("pbkdf2_sha256$"))
+
+
 def hash_password(password: str) -> str:
     """生成口令散列串：pbkdf2_sha256$<轮数>$<盐>$<摘要>（全部 base64，方便落库）。"""
     rounds = config.AUTH_PBKDF2_ROUNDS
@@ -352,6 +361,8 @@ def current_user_id(request: Request) -> str:
     from core import account  # 延迟导入：account 反过来 import 本模块的口令函数
 
     row = account.get_user(uid)
+    if row is not None and row.get("status") != account.STATUS_ENABLE:
+        raise HTTPException(status_code=403, detail="账号已停用")
     # 账号已被删除（清理测试号 / 用户注销）：墓碑表里有行就直接 401。
     # 不拦的话，下面 auth_version 会按「库中无此人也当 0」处理，签名合法的旧 cookie
     # 会一路放行 —— 删了号还能建会话、写 usage，看板把它算成活跃用户。

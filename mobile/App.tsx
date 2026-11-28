@@ -74,6 +74,8 @@ function hostOf(url: string): string {
 function AppInner() {
   const webRef = useRef<RawWebView>(null);
   const canGoBack = useRef(false);
+  const loadedRef = useRef(false);
+  const pendingDeepLink = useRef<string | null>(null);
 
   const [firstLoad, setFirstLoad] = useState(true);
   const [failed, setFailed] = useState(false);
@@ -149,6 +151,42 @@ function AppInner() {
     setReloadKey((k) => k + 1);
   }, []);
 
+  /* 深链：支付宝授权完成后，服务端那张落地页会跳
+   *   zhisui://oauth/alipay?state=<state>&r=ok
+   * AndroidManifest 里 MainActivity 是 singleTask，所以这条深链会把 App 拉回
+   * 前台并**复用原来的 Activity** —— WebView 还停在设置页，不会重建成首页。
+   * 壳这一层的活只有一件：告诉页面「回来了」，让它的 /poll 立刻领结果。
+   *
+   * 为什么不能只靠 visibilitychange：部分机型从支付宝切回来不派发可见性变化，
+   * 而深链是确定的信号。两套都留着，谁先到都能领（poll 幂等，重复也无害）。
+   *
+   * 冷启动（App 被系统回收后再由深链拉起）时 WebView 还没加载完，事件会丢，
+   * 所以先存下来，等 onLoadEnd 后再注入两次（第一次可能早于 React hydrate）。
+   */
+  const dispatchDeepLink = useCallback((url: string) => {
+    const script =
+      `window.dispatchEvent(new CustomEvent("zhisui:oauth-return",{detail:${JSON.stringify(url)}}));true;`;
+    webRef.current?.injectJavaScript(script);
+  }, []);
+
+  useEffect(() => {
+    const onUrl = (event: { url: string }) => {
+      if (!event.url.startsWith("zhisui://")) return;
+      if (!loadedRef.current) {
+        pendingDeepLink.current = event.url;
+        return;
+      }
+      dispatchDeepLink(event.url);
+    };
+    const sub = Linking.addEventListener("url", onUrl);
+    Linking.getInitialURL()
+      .then((url) => {
+        if (url && url.startsWith("zhisui://")) pendingDeepLink.current = url;
+      })
+      .catch(() => {});
+    return () => sub.remove();
+  }, [dispatchDeepLink]);
+
   const showBoot = !failed && (firstLoad || !minBootDone);
 
   return (
@@ -174,8 +212,20 @@ function AppInner() {
            需要在 app.json 的 infoPlist 里声明用途，否则**不是报错，是直接闪退**。 */
         allowFileAccess
         allowsInlineMediaPlayback
-        onLoadStart={() => setFailed(false)}
-        onLoadEnd={() => setFirstLoad(false)}
+        onLoadStart={() => {
+          loadedRef.current = false;
+          setFailed(false);
+        }}
+        onLoadEnd={() => {
+          setFirstLoad(false);
+          loadedRef.current = true;
+          // 冷启动时深链比页面先到：等文档加载完再注入，补两次以跨过 hydrate。
+          const pending = pendingDeepLink.current;
+          if (!pending) return;
+          pendingDeepLink.current = null;
+          setTimeout(() => dispatchDeepLink(pending), 600);
+          setTimeout(() => dispatchDeepLink(pending), 2000);
+        }}
         onError={() => {
           setFirstLoad(false);
           setFailed(true);
@@ -194,6 +244,9 @@ function AppInner() {
         onMessage={onMessage}
         onShouldStartLoadWithRequest={(req) => {
           const { url } = req;
+          // 自己的深链只由系统 intent 进来，绝不该在 WebView 里当页面加载；
+          // 交回 Linking 会造成「自己唤起自己」的循环。
+          if (url.startsWith("zhisui://")) return false;
           // tel: / mailto: / itms-apps: 之类，WebView 打不开，交给系统
           if (!/^https?:/i.test(url)) {
             Linking.openURL(url).catch(() => {});

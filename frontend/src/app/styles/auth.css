@@ -211,6 +211,63 @@
   background: #D39428;
 }
 
+/* ---------- 第三方登录（支付宝 / 微信）----------
+   主流登录页的收尾：一条「或使用以下方式」分隔线 + 平级的品牌按钮。
+   按钮沿用 44px 触控基准（和主按钮同一只手的落点），只描边不填色，
+   不跟 48px 的金色主按钮抢注意力；图标用品牌色，文字走主题墨色，
+   深浅两套都靠已有变量，不写死背景。 */
+.auth-oauth {
+  margin-top: var(--space-5);
+}
+.auth-oauth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: var(--space-3);
+}
+.auth-oauth-divider::before,
+.auth-oauth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.auth-oauth-divider span {
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.auth-oauth-row {
+  display: flex;
+  gap: 12px;
+}
+.auth-oauth-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md, 10px);
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.auth-oauth-btn:hover:not(:disabled) {
+  background: var(--fill-2, var(--step-1));
+  border-color: var(--text-3);
+}
+.auth-oauth-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.auth-oauth-btn svg {
+  flex: none;
+}
 /* ---------- 注册前的安装入口 ----------
    登录门后面是空的，装到桌面这件事只能在这一屏说清楚。做成整行链接：
    一行小字没人点，整行才像下载页的入口。层级压在登录按钮之下 ——

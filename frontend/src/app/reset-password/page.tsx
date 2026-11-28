@@ -53,7 +53,7 @@ export default function ResetPasswordPage() {
     finally{setBusy(false);}
   }
   return <div className="auth-stage"><div className="auth-card">
-    <h1 className="auth-name" style={{marginBottom:24}}>找回密码</h1>
+    <h1 className="auth-name" style={{marginBottom:24}}>设置或找回密码</h1>
     <form className="auth-form" onSubmit={event=>{
       event.preventDefault();
       if(grant)void reset();else if(requestId)void verify();else void send();
@@ -79,7 +79,7 @@ export default function ResetPasswordPage() {
           autoComplete="new-password" minLength={8} maxLength={128} required disabled={busy} />
         <PasswordInput label="再次输入新密码" value={confirm} onChange={event=>{setConfirm(event.target.value);setError("");}}
           autoComplete="new-password" minLength={8} maxLength={128} required disabled={busy} />
-        <button type="submit" className="btn-new auth-submit" disabled={busy}>重置密码</button>
+        <button type="submit" className="btn-new auth-submit" disabled={busy}>保存新密码</button>
       </>}
       {notice && <p className="hint" role="status">{notice}</p>}
       {error && <p className="acct-err" role="alert">{error}</p>}

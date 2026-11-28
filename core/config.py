@@ -216,6 +216,20 @@ _AUTH_SECRET_FILE = os.path.join(DATA_DIR, ".auth_secret")
 AUTH_TTL_DAYS = int(os.getenv("AUTH_TTL_DAYS", "7"))
 # 是否开放自助注册。演示期默认开着；正式用建议关掉并改成邀请码
 ALLOW_SIGNUP = os.getenv("ALLOW_SIGNUP", "1").strip().lower() in ("1", "true", "yes")
+
+# PC 网站微信登录；普通注册仍沿用邮箱验证，不放宽现有入口。
+WECHAT_LOGIN_ENABLED = os.getenv("WECHAT_LOGIN_ENABLED", "0").strip().lower() in ("1", "true", "yes")
+WECHAT_APP_ID = os.getenv("WECHAT_APP_ID", "").strip()
+WECHAT_APP_SECRET = os.getenv("WECHAT_APP_SECRET", "").strip()
+WECHAT_REDIRECT_URI = os.getenv("WECHAT_REDIRECT_URI", "").strip()
+# 支付宝网站登录；密钥只配置本地文件路径，默认关闭。
+ALIPAY_LOGIN_ENABLED = os.getenv("ALIPAY_LOGIN_ENABLED", "0").strip().lower() in ("1", "true", "yes")
+ALIPAY_APP_ID = os.getenv("ALIPAY_APP_ID", "").strip()
+ALIPAY_APP_PRIVATE_KEY_FILE = os.getenv("ALIPAY_APP_PRIVATE_KEY_FILE", "").strip()
+ALIPAY_PUBLIC_KEY_FILE = os.getenv("ALIPAY_PUBLIC_KEY_FILE", "").strip()
+ALIPAY_REDIRECT_URI = os.getenv("ALIPAY_REDIRECT_URI", "https://myzhisui.cn/api/auth/alipay/callback").strip()
+# 固定使用应用实际开放的字段，禁止在登录时自动回退另一种身份标识。
+ALIPAY_SUBJECT_FIELD = os.getenv("ALIPAY_SUBJECT_FIELD", "open_id").strip()
 # 口令散列轮数（PBKDF2-SHA256）。机器好可以调高，反之别低于 10 万
 AUTH_PBKDF2_ROUNDS = int(os.getenv("AUTH_PBKDF2_ROUNDS", "200000"))
 

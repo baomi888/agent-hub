@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse
 
 from api.admin import router as admin_router
 from api.agent import router as agent_router
+from api.alipay_login import router as alipay_login_router
 from api.auth import router as auth_router
 from api.calendar import router as calendar_router
 from api.campus import router as campus_router
@@ -64,6 +65,7 @@ from api.templates import router as templates_router
 from api.today import router as today_router
 from api.usage import router as usage_router
 from api.user_feedback import router as user_feedback_router
+from api.wechat_login import router as wechat_login_router
 from core import account, apilog, config, llm_gate, quota, reminder_core, verify_tag
 from core import router as route_engine
 from kb import pipelines
@@ -226,6 +228,8 @@ app.include_router(registration_router, prefix="/api/auth", tags=["注册邮箱�
 app.include_router(password_reset_router, prefix="/api/auth", tags=["邮箱找回密码"])
 app.include_router(email_login_router, prefix="/api/auth", tags=["邮箱验证码登录"])
 app.include_router(security_email_router, prefix="/api/auth", tags=["账号安全"])
+app.include_router(wechat_login_router, prefix="/api/auth", tags=["微信网站登录"])
+app.include_router(alipay_login_router, prefix="/api/auth", tags=["支付宝网站登录"])
 # Agent 编排的元数据端点（工具清单 / 延迟发现）：只读代码里的 TOOL_META，不执行工具
 app.include_router(agent_router, prefix="/api/agent", tags=["Agent 编排"])
 # 建库建议的确认/忽略必须在 kb_router **之前**挂：kb_router 里有 /{kb_id}/xxx

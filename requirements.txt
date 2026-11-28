@@ -76,3 +76,6 @@ pillow>=10.0,<13
 # 那轮记一条 handler_missing —— 提醒是增强功能，不该拖垮调度进程。
 # 依赖链会自动带上 cryptography / http-ece / py-vapid。
 pywebpush>=2.0,<3
+
+# 支付宝官方 SDK：复用 RSA2 签名、同步响应验签和 OpenAPI 请求模型。
+alipay-sdk-python>=3.7.1467,<4

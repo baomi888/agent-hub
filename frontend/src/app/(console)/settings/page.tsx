@@ -22,6 +22,8 @@ import InstallAppRow from "@/components/settings/InstallAppRow";
 import PasswordDialog from "@/components/settings/PasswordDialog";
 import ReminderQuick from "@/components/settings/ReminderQuick";
 import SecurityEmailSettings from "@/components/settings/SecurityEmailSettings";
+import WeChatSettings from "@/components/settings/WeChatSettings";
+import AlipaySettings from "@/components/settings/AlipaySettings";
 import UsernameDialog from "@/components/settings/UsernameDialog";
 import UserAvatar from "@/components/settings/UserAvatar";
 import TagPicker from "@/components/profile/TagPicker";
@@ -231,7 +233,7 @@ export default function SettingsPage() {
                 句子的前半「密码、昵称、头像都能在这里改」是把卡里的字段念一遍，
                 2026-11-14 已删，只留布局看不见的那条规则。 */}
             <p className="hint" style={{ marginTop: 10 }}>
-              改登录名要先验证一次密码。
+              {auth.me?.user.has_password === false ? "先绑定安全邮箱并设置密码，即可修改登录名。" : "改登录名要先验证一次密码。"}
             </p>
             {/* 首次进平台那张上手说明只弹一次。入口放账号下面而不是另起一块：
                 它属于"我这个账号的事"，和改密码 / 退出登录同一类。 */}
@@ -248,6 +250,8 @@ export default function SettingsPage() {
           </section>
 
           <SecurityEmailSettings key={authedId ?? "none"} />
+          <WeChatSettings key={`wechat-${authedId ?? "none"}`} />
+          <AlipaySettings key={`alipay-${authedId ?? "none"}`} />
 
           {/* 兴趣方向：30 条定稿词表（core/tag_taxonomy.py）。
               放在账号下面、外观上面 —— 它是"我是谁"的一部分，不是外观偏好。
@@ -775,6 +779,7 @@ function AccountCard({ onLogout }: { onLogout: () => Promise<void> }) {
             type="button"
             className="acct-link"
             onClick={() => setNameOpen(true)}
+            disabled={me?.user.has_password === false}
             title="改登录名（要输密码，有次数上限）"
           >
             改
@@ -790,7 +795,7 @@ function AccountCard({ onLogout }: { onLogout: () => Promise<void> }) {
 
       <div className="acct-actions">
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPwdOpen(true)}>
-          修改密码
+          {me?.user.has_password === false ? "设置密码" : "修改密码"}
         </button>
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => void onLogout()}>
           退出登录

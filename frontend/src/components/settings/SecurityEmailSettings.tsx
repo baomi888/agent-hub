@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import DialogShell from "./DialogShell";
+import BrandIcon from "./BrandIcon";
 
 type State = Awaited<ReturnType<typeof api.securityEmail.state>>;
 type Purpose = Parameters<typeof api.securityEmail.send>[0];
@@ -114,7 +115,7 @@ export default function SecurityEmailSettings() {
   return <section id="account-security">
     <p className="sec-label">账号安全</p>
     <div className="card card-pad">
-      <div className="card-head"><span className="card-title">安全邮箱</span>
+      <div className="card-head"><span className="card-title" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><BrandIcon brand="qqmail" />安全邮箱</span>
         <span className="meta">{state?.bound ? state.masked_email : state ? "未绑定" : error ? "暂不可用" : "读取中…"}</span></div>
       <p className="hint" style={{ marginTop: 8 }}>
         {state?.bound ? "换绑需要验证旧邮箱和新邮箱，不能直接解绑唯一的安全邮箱。" : "绑定已验证的邮箱，为后续密码找回做好准备。"}

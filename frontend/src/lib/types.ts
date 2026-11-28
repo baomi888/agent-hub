@@ -475,6 +475,8 @@ export interface QuotaInfo {
 
 // 与后端 api/auth.py 的 UserOut / MeOut 对齐
 export interface UserOut {
+  /** false 表示尚未设置本站密码；微信登录仍可用。 */
+  has_password?: boolean;
   id: string;
   username: string;
   /**

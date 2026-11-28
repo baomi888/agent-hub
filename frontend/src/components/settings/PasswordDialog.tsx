@@ -10,7 +10,9 @@
 //   3. **成功态单独一屏**，不直接关窗：用户需要一眼确认"确实改成了"，
 //      而不是"我点了一下，窗没了，到底成没成？"
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/hooks/useAuth";
 import DialogShell from "./DialogShell";
 
 interface Props {
@@ -66,6 +68,7 @@ function pwdHint(pwd: string): { text: string; weak: boolean } | null {
 }
 
 export default function PasswordDialog({ open, onClose }: Props) {
+  const auth = useAuth();
   const [oldPwd, setOldPwd] = useState("");
   const [newPwd, setNewPwd] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -117,6 +120,14 @@ export default function PasswordDialog({ open, onClose }: Props) {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (auth.me?.user.has_password === false) {
+    return <DialogShell open={open} title="设置密码" onClose={onClose}
+      footer={<button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>关闭</button>}>
+      <p className="hint">当前账号尚未设置密码。请先在账号安全中绑定邮箱，再验证邮箱设置密码。</p>
+      <Link href="/reset-password" className="btn btn-primary btn-sm" style={{ marginTop: 16 }}>验证邮箱并设置密码</Link>
+    </DialogShell>;
   }
 
   if (done) {

@@ -627,6 +627,40 @@ def delete_kb(owner: str, kb_id: str) -> bool:
     return True
 
 
+def purge_account_kb(owner: str, kb_id: str) -> None:
+    """停机注销专用：严格报告清理失败，允许按持久化清单重试。
+
+    不复用 RagPipeline.delete() 的静默容错；没有已加载的 pipeline 也要删磁盘库。
+    调用者必须先停止 API / worker，跨进程 JSON 写入不能只靠本进程 RLock 保护。
+    """
+    from pathlib import Path
+
+    from core.account_deletion import _read_registry, _remove
+    from kb.rag_core import _cache_invalidate
+
+    if not _SAFE_ID_RE.fullmatch(kb_id):
+        raise ValueError("资料库标识不合法")
+    with _REGISTRY_LOCK:
+        registries = {name: _read_registry(name) for name in ("owners", "names", "files", "public")}
+        actual = registries["owners"].get(kb_id)
+        if actual is not None and actual != owner:
+            raise ValueError("不能清理其他用户的资料库")
+        client = chroma_client()
+        if kb_id in {c.name if hasattr(c, "name") else str(c) for c in client.list_collections()}:
+            client.delete_collection(kb_id)  # 不吞掉磁盘错误；失败后保留清理任务。
+        _cache_invalidate(kb_id)
+        _remove(Path(config.DATA_DIR) / "kb_sources", kb_id, directory=True)
+        paths = {"owners": _owners_path, "names": _names_path, "files": _files_path, "public": _public_path}
+        for name, values in registries.items():
+            values.pop(kb_id, None)
+            _atomic_write_json(paths[name](), values)
+        _PIPELINES.pop(kb_id, None)
+        _KB_FILES.pop(kb_id, None)
+        _KB_NAMES.pop(kb_id, None)
+        _KB_OWNERS.pop(kb_id, None)
+        _KB_PUBLIC.pop(kb_id, None)
+
+
 def list_all(owner: str) -> list[dict]:
     """列出**该用户**的知识库状态（归属表 + 磁盘扫描）。
 

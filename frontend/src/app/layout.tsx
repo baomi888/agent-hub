@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import BootSplash from "@/components/boot/BootSplash";
 import PwaRegister from "@/components/PwaRegister";
+import OAuthDeepLinkBridge from "@/components/OAuthDeepLinkBridge";
 // KaTeX 的字体与排版样式必须在 globals.css 之前：globals 里我们对
 // .math-inline / .math-block 的微调要能盖住它的默认值。
 import "katex/dist/katex.min.css";
@@ -131,6 +132,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         {children}
         <BootSplash />
         <PwaRegister />
+        {/* APK 深链回跳的全局接收端：冷启动时引导卡不在，靠它把授权结果领回来。 */}
+        <OAuthDeepLinkBridge />
         {/* InstallBanner 不在这里：它必须挂在"已登录的首页"里面（app/page.tsx）。
             挂在根布局会先出现在登录门上 —— 详见组件头部注释。 */}
         <div className="grain" aria-hidden="true" />
