@@ -289,6 +289,20 @@ def topic_follow_state(post_id: int, uid: str | None) -> dict:
     return {"following": following, "count": int(n)}
 
 
+def topic_followers(post_id: int) -> list[str]:
+    """关注这条话题的所有人。
+
+    原本只有「关注/取关/读状态」三个入口读写这张表 —— 关注了却永远收不到通知，
+    等于摆了个数字。回复时要靠这个把关注者捞出来一起发通知。
+    """
+    _ensure()
+    with store._get_conn() as conn:  # noqa: SLF001
+        rows = conn.execute(
+            "SELECT uid FROM forum_topic_follows WHERE post_id = ?", (int(post_id),)
+        ).fetchall()
+    return [str(r[0]) for r in rows]
+
+
 # ============================================================
 # 关注
 # ============================================================

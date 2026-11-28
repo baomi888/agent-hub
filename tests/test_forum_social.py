@@ -19,7 +19,13 @@ def _reset() -> None:
 
     forum_social._ensure()
     with store._get_conn() as conn:  # noqa: SLF001
-        for t in ("forum_likes", "forum_favorites", "user_follows", "notifications"):
+        for t in (
+            "forum_likes",
+            "forum_favorites",
+            "user_follows",
+            "notifications",
+            "forum_topic_follows",
+        ):
             conn.execute(f"DELETE FROM {t}")
 
 
@@ -55,6 +61,29 @@ def test_follow_toggle_and_follower_count():
     assert forum_social.follow("u1", "u2")["following"] is False
     assert forum_social.follow_state("u1", "u2")["following"] is False
     assert forum_social.follow_state("u1", "u2")["count"] == 1
+
+
+def test_topic_follow_toggle_and_followers():
+    """关注话题：toggle 语义、人数独立累计、能捞出关注者名单。"""
+    _reset()
+    assert forum_social.follow_topic(9, "u1") == {"following": True, "count": 1}
+    assert forum_social.follow_topic(9, "u2") == {"following": True, "count": 2}
+    assert sorted(forum_social.topic_followers(9)) == ["u1", "u2"]
+    # 再点一次是取消，不是又加一条
+    assert forum_social.follow_topic(9, "u1") == {"following": False, "count": 1}
+    assert forum_social.topic_followers(9) == ["u2"]
+    assert forum_social.topic_follow_state(9, "u1") == {"following": False, "count": 1}
+
+
+def test_topic_follow_is_purged_with_user_and_post():
+    """删号/删帖要把关注关系一起清掉，否则会留下指向空气的行。"""
+    _reset()
+    forum_social.follow_topic(11, "u1")
+    forum_social.follow_topic(11, "u2")
+    forum_social.purge_user("u1")
+    assert forum_social.topic_followers(11) == ["u2"]
+    forum_social.purge_post(11)
+    assert forum_social.topic_followers(11) == []
 
 
 def test_notify_skips_self_and_invalid_kind():

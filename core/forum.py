@@ -207,8 +207,12 @@ def _base_where(
         sql += " AND COALESCE(p.solved, 0) = ?"
         args.append(1 if solved else 0)
     if tag:
-        sql += " AND (',' || COALESCE(p.tags, '') || ',') LIKE ?"
-        args.append(f"%,{tag},%")
+        # 标签用逗号拼接存一列，匹配时两头补逗号，避免 "cat" 命中 "category"。
+        # 但 tag 是用户输入：里面的 % 和 _ 是 LIKE 的通配符，不转义的话
+        # 搜一个 "%" 就等于把带标签的帖子全捞出来，筛选语义就废了。
+        safe = tag.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        sql += " AND (',' || COALESCE(p.tags, '') || ',') LIKE ? ESCAPE '\\'"
+        args.append(f"%,{safe},%")
     return sql, args
 
 
@@ -266,7 +270,10 @@ def list_topics(
     with store._get_conn() as conn:  # noqa: SLF001
         rows = conn.execute(sql, args).fetchall()
 
-    has_more = len(rows) > limit
+    # 只有时间序能翻页：游标是 `p.id < before`，热榜按分数、待解决按 solved 分组，
+    # 拿 id 当游标会跨组乱序。这里必须显式收口 —— 否则前端拿到 has_more=True
+    # 会带着 before 一直请求，每次返回同一页，列表就无限重复下去。
+    has_more = len(rows) > limit and sort == "new"
     return [dict(r) for r in rows[:limit]], has_more
 
 

@@ -472,3 +472,60 @@ def test_solved_feature_for_ask_topics(env, client, kb):
 
     ordinary = _topic(client, "随便聊聊", cat="exp")
     assert client.patch(f"/api/forum/topics/{ordinary['id']}", json={"solved": True}).status_code == 400
+
+
+def test_followed_topic_notifies_followers_on_reply(env, client, kb):
+    """关注话题的人，在别人回帖时必须收到通知 —— 否则「关注」只是个数。
+
+    锁的是 2026-11-28 补上的缺口：表建了、按钮能点、人数会涨，但回帖那条链
+    原来只通知楼主，关注者永远收不到，功能等于摆设。
+    """
+    _as(client, "alice")
+    t = _topic(client, "这道积分题怎么算", cat="ask")
+
+    _as(client, "bob")
+    assert client.post(f"/api/forum/topics/{t['id']}/follow").json()["following"] is True
+
+    _as(client, "carol")
+    assert (
+        client.post(
+            f"/api/forum/topics/{t['id']}/replies", json={"body": "换元试试"}
+        ).status_code
+        == 200
+    )
+
+    # 关注者收到 reply 通知
+    _as(client, "bob")
+    items = client.get("/api/forum/notifications").json()["items"]
+    assert [i["kind"] for i in items if i["post_id"] == t["id"]] == ["reply"]
+
+    # 回帖人自己不该收到
+    _as(client, "carol")
+    items = client.get("/api/forum/notifications").json()["items"]
+    assert [i for i in items if i["post_id"] == t["id"]] == []
+
+    # 楼主也关注自己的帖时，一条回复只能产生一条通知（关注者集合要去重）
+    _as(client, "alice")
+    assert client.post(f"/api/forum/topics/{t['id']}/follow").json()["following"] is True
+    _as(client, "carol")
+    client.post(f"/api/forum/topics/{t['id']}/replies", json={"body": "再补一句"})
+    _as(client, "alice")
+    items = client.get("/api/forum/notifications").json()["items"]
+    assert len([i for i in items if i["post_id"] == t["id"]]) == 2
+
+
+def test_unresolved_sort_does_not_offer_pagination(env, client, kb):
+    """待解决排序按 solved 分组，id 游标跨组会乱 —— 不能对外宣称还有下一页。
+
+    宣称了前端就会带着 before 一直要，每次拿回同一批，列表无限重复。
+    """
+    _as(client, "alice")
+    for i in range(3):
+        _topic(client, f"问题{i}", cat="ask")
+    d = client.get(
+        "/api/forum/topics", params={"sort": "unresolved", "limit": 1}
+    ).json()
+    assert d["has_more"] is False
+    # 时间序仍然可以翻页
+    d2 = client.get("/api/forum/topics", params={"sort": "new", "limit": 1}).json()
+    assert d2["has_more"] is True

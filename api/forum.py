@@ -485,7 +485,10 @@ async def create_topic(req: TopicIn, uid: str = Depends(anon_uid)) -> dict:
     imgs = await asyncio.to_thread(_clean_images, req.images or [])
     tags: list[str] = []
     for raw in req.tags or []:
-        value = " ".join(str(raw or "").split()).strip().lstrip("#")[:24]
+        # 库里的标签是用逗号拼成一列存的，标签本身带逗号就会被读成两个。
+        # 发帖框已经按逗号分好词了，这里再兜一次（直接调接口的人不受前端约束）。
+        flat = str(raw or "").replace(",", " ").replace("，", " ")
+        value = " ".join(flat.split()).strip().lstrip("#")[:24]
         if value and value not in tags:
             tags.append(value)
     tags = tags[:5]
@@ -656,12 +659,18 @@ async def add_reply(
         p["id"]: (authors.get(p["user_id"]) or {}).get("name") or "已注销用户" for p in kids
     }
     mine = next((p for p in kids if p["id"] == post["id"]), post)
-    # @ 解析（登录用户回复时） + 回复通知：回帖通知楼主（reply 类型）
+    # @ 解析（登录用户回复时） + 回复通知：回帖通知楼主，也通知关注了这条话题的人。
+    # 关注列表里可能是楼主自己，也可能是正在回复的这个人 —— 用 set 去重，
+    # notify 内部也会跳过「自己给自己发」。
     await _resolve_mentions(body, uid, post_id)
-    if not anon.is_anon(uid) and topic["user_id"] != uid:
-        await asyncio.to_thread(
-            forum_social.notify, topic["user_id"], "reply", uid, post_id
-        )
+    if not anon.is_anon(uid):
+        watchers = set(await asyncio.to_thread(forum_social.topic_followers, post_id))
+        watchers.add(topic["user_id"])
+        watchers.discard(uid)
+        for target in watchers:
+            await asyncio.to_thread(
+                forum_social.notify, target, "reply", uid, post_id
+            )
     return {
         "post": _post_view(mine, authors, names, uid, owner, admin),
         "reply_n": len(kids),

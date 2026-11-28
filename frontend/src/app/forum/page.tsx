@@ -645,8 +645,13 @@ export default function ForumPage() {
   const catName = cat ? (cats.find((c) => c.key === cat)?.label ?? "") : "";
   /** 右栏只留"真的有人在聊"的：热榜排序在 0 回复时等于最新，和中间那栏重复 */
   const hotLive = hot.filter((t) => t.reply_n > 0);
+  // 正在筛选的那个标签永远排第一：筛选后列表可能只剩同一标签的帖子，
+  // 万一一条都没带标签，整行就会消失 —— 用户被锁在筛选态里，只能刷新才出来。
   const quickTags = Array.from(
-    new Set([...pinned, ...topics, ...hot].flatMap((t) => t.tags || [])),
+    new Set([
+      ...(tag ? [tag] : []),
+      ...[...pinned, ...topics, ...hot].flatMap((t) => t.tags || []),
+    ]),
   ).slice(0, 8);
   /** 顶部横幅用的那一条。关过一次就不再挡视线 */
   const notice = pinned[0] && String(pinned[0].id) !== closedNotice ? pinned[0] : null;
